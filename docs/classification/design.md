@@ -897,3 +897,314 @@ SecretFlow 适配器通过 `privacy/data_adapters.py` 的 `to_records/from_recor
 | CMMI | 软件过程成熟度（1-5 级） | 审核流程标准化、证据驱动 |
 | 等保/GDPR/SOC2 | 合规性要求 | 内置合规模板 + Zero-Knowledge 扫描 |
 
+## 14. 工业化评分卡改进版：证据驱动准入模型
+
+本章是第 13 章的对照学习版，不替代其架构覆盖清单。第 13 章适合说明“模块计划具备哪些能力”；本章用于回答“在指定版本、指定环境和指定时间内，是否有可复现证据证明这些能力满足上线要求”。
+
+### 14.1 第 13 章与第 14 章的对照
+
+| 对比项 | 第 13 章：能力导向评分 | 第 14 章：证据驱动准入 | 学习重点 |
+|---|---|---|---|
+| 评分对象 | 代码模块及其设计能力 | 一个可定位的发布候选版本 | 评分必须绑定 commit、镜像或制品版本 |
+| 评分依据 | 实现描述与审核人员判断 | 自动化测试、压测、扫描、运行记录和人工复核证据 | 区分“已实现”“已验证”“可运营” |
+| 指标目标 | 例如 RT、吞吐量的期望值 | 明确数据集、样本量、分位数、运行环境和阈值 | 没有测量方法的目标不能作为得分依据 |
+| 安全判断 | 功能与设计检查项 | 机密数据泄露门禁优先于加权得分 | 安全底线不能被平均分抵消 |
+| 发布结论 | 分数区间结论 | 门禁结论 + 分数 + 风险接受记录 | 先判断能否发布，再评价成熟度 |
+| 改进闭环 | 给出建议 | 缺口有责任人、完成日期、复验命令和证据链接 | 建议必须可追踪、可关闭 |
+
+### 14.2 评分前提与证据包
+
+一次评审只针对一个不可变的发布候选版本。评审记录至少应包含以下元数据：
+
+| 字段 | 要求 | 示例 |
+|---|---|---|
+| `release_id` | Git commit SHA 或不可变镜像摘要 | `git:abc1234` |
+| `rule_set_version` | 本次启用的规则集版本 | `1.2.0` |
+| `profile_digest` | 生效 YAML profile 的 SHA-256 摘要 | `sha256:...` |
+| `environment` | CPU/GPU、内存、Python 与依赖版本 | `CPU 8C/16G, Python 3.11` |
+| `dataset_id` | 脱敏或合成评测集标识及版本 | `classification-golden-v3` |
+| `executed_at` | 带时区的执行时间 | `2026-07-25T10:00:00+08:00` |
+
+证据包必须可由评审者重新执行，且不得包含原始敏感字段值。建议采用如下目录结构：
+
+```text
+artifacts/classification/<release_id>/
+  manifest.json
+  unit-test.xml
+  coverage.xml
+  benchmark.json
+  security-scan.json
+  observability-check.json
+  review-sample.jsonl
+```
+
+`manifest.json` 记录命令、退出码、工具版本、输入摘要与产物摘要。测试与基准数据使用合成数据、已获授权的脱敏数据，或仅保存不可逆摘要；不得将生产样本复制进制品。
+
+### 14.3 先决门禁：任一失败即不可发布
+
+下列项目是发布门禁，不参与加权平均。这样可避免“其他项目高分”掩盖安全或正确性缺陷。
+
+| 门禁 | 通过条件 | 最低证据 | 失败处置 |
+|---|---|---|---|
+| 敏感数据泄露 | 日志、指标、trace、异常和导出制品均未包含原始测试敏感值 | 注入 canary PII 的端到端扫描报告 | 阻断发布，修复后重新全量扫描 |
+| 规则集可追溯 | 每个结果可关联 `rule_set_version`、参数来源和时间戳 | API/REST/gRPC 契约测试及审计样本 | 阻断发布 |
+| 核心正确性 | Golden set 不得出现 L5 漏报；其他标签满足约定阈值 | 版本化 golden test 报告 | 阻断发布或经风险负责人书面接受 |
+| 依赖与代码安全 | 不存在未豁免的高危或严重漏洞；密钥扫描通过 | SCA、SAST、secret scan 报告 | 阻断发布 |
+| 可恢复运行 | 可选 ML 依赖、模型或模型推理失败时，服务仍可启动并按文档降级 | 启动/降级集成测试 | 阻断发布 |
+| 接口兼容 | REST、gRPC、Pydantic 契约与发布说明一致 | 契约测试、proto 兼容性检查 | 阻断发布 |
+
+对于“经风险接受”的例外，必须记录风险说明、影响范围、补偿控制、审批人和失效日期。例外到期后自动恢复为阻断项。
+
+### 14.4 可执行加权评分
+
+通过全部门禁后，再计算成熟度分数。每项得分范围为 0~10，权重总和为 100%。
+
+$$
+S = 0.20F + 0.15P + 0.20R + 0.15Sec + 0.15M + 0.15E
+$$
+
+其中 $F$ 为功能质量、$P$ 为性能、$R$ 为可靠性、$Sec$ 为安全运营质量、$M$ 为可维护性、$E$ 为工程化质量。每个维度的评分取其子项加权平均；缺少证据的子项记为 0 分，不允许按“未评估”排除。
+
+| 维度 | 权重 | 10 分证据 | 7 分证据 | 0 分情形 |
+|---|---:|---|---|---|
+| 功能质量 $F$ | 20% | 版本化 golden set 覆盖字段/记录/表、模板、复合规则、人工覆盖；核心标签 precision/recall 均达到发布阈值 | 主路径及主要负例已验证，但少数模板或边界用例未覆盖 | 无 golden set、结果不可重复，或核心分类错误 |
+| 性能 $P$ | 15% | 固定环境下分别报告规则、NER、LLM 路径的 p50/p95/p99、吞吐和资源峰值，连续 3 次均达标 | 有 p95 与吞吐报告，样本或资源指标不完整 | 只有设计目标，没有压测结果，或超时/资源失控 |
+| 可靠性 $R$ | 20% | 故障注入覆盖模型不可用、超时、SQLite 锁、任务满载；恢复和数据一致性均验证 | 降级与并发主路径验证，故障注入覆盖不足 | 单点失败导致进程退出、任务丢失或错误结果 |
+| 安全运营质量 $Sec$ | 15% | 通过泄露 canary、输入边界、导出掩码、鉴权/TLS 与漏洞扫描；高风险发现闭环 | 已覆盖主要安全控制，仍有已登记的中风险缺口 | 敏感数据进入日志/指标，或存在未处理严重漏洞 |
+| 可维护性 $M$ | 15% | 类型、lint、覆盖率、复杂度和重复率均有自动门禁；变更说明和测试映射完整 | 静态检查和主要测试通过，量化门槛不完整 | 无自动检查或关键逻辑无法安全修改 |
+| 工程化质量 $E$ | 15% | CI 可从干净环境生成相同制品；SLO 仪表盘、告警和 runbook 均经演练验证 | CI 与指标存在，告警或运行手册未演练 | 手工发布、无制品追踪或生产故障不可诊断 |
+
+### 14.5 指标的测量合同
+
+第 13 章中的“< 5ms”“> 10000 行/s”等目标，只有满足下列测量合同才可用于评分：
+
+| 指标 | 测量合同 | 建议发布阈值 |
+|---|---|---|
+| 规则字段分类延迟 | 预热后，固定字段分布，至少 10,000 次；报告 p50/p95/p99 与 CPU 峰值 | p95 <= 5ms，p99 <= 10ms |
+| 向量化表分类吞吐 | 固定列数、行数、空值比例，排除数据加载时间；至少运行 3 次取最差值 | >= 10,000 行/s，且与标量结果一致 |
+| NER 延迟 | 固定模型、输入长度分桶、冷热启动分开报告 | 业务设定 p95；超过阈值必须降级或排队 |
+| LLM 超时率 | 统计成功、超时、降级和错误，按输入类型分组 | 超时率低于约定 SLO；任何超时不得阻塞请求线程 |
+| 异步任务可靠性 | 满载、重启、TTL 清理后核对任务终态与结果可读性 | 不丢失已受理任务；超限返回确定性错误 |
+| 分类准确性 | 仅使用有标注的版本化 golden set；分别统计 L5 漏报和总体 precision/recall | L5 漏报为 0；其他阈值由业务风险负责人签署 |
+
+所有延迟数据均应说明是否包含序列化、网络、模型加载与 I/O。不能把不同路径的结果合并为单一平均值，因为平均值会掩盖长尾和模型冷启动问题。
+
+### 14.6 SLO、告警与运行处置
+
+指标存在不等于可运营。每项关键指标应定义 SLI、SLO、告警阈值和明确的处理动作。
+
+| SLI | SLO 示例 | 告警条件 | 首要处置 |
+|---|---|---|---|
+| 规则分类可用率 | 30 天内 >= 99.9% | 5 分钟错误率 > 1% | 检查 profile/规则集加载，回滚最近规则版本 |
+| LLM 降级率 | 24 小时内 < 5% | 15 分钟内 > 10% | 检查模型服务与资源，必要时关闭 LLM 并转人工复核 |
+| LLM p95 延迟 | 1 小时内 <= 业务阈值 | 连续 3 个窗口超阈值 | 限流、排队或扩大超时外的计算资源；禁止无边界重试 |
+| 复核队列积压 | 95% 条目在约定时限内处理 | 队列大小或条目年龄超阈值 | 扩充复核容量、收紧触发条件、升级风险负责人 |
+| 影子差异率 | 新旧规则差异在批准范围内 | 差异率超过基线或出现 L5 差异 | 禁止切换规则集，抽样分析并补充 golden set |
+
+错误预算耗尽时，应暂停扩大流量或切换新的规则集，优先修复稳定性问题；该行为比继续累积功能变更更符合生产风险控制。
+
+### 14.7 发布评审输出模板
+
+```text
+发布候选：<release_id>
+规则集：<rule_set_version>
+评测集：<dataset_id>（仅合成/脱敏数据）
+环境：<environment>
+
+门禁：
+  [PASS/FAIL] 敏感数据泄露 canary
+  [PASS/FAIL] 审计可追溯性
+  [PASS/FAIL] Golden set 核心正确性
+  [PASS/FAIL] 安全扫描
+  [PASS/FAIL] 降级与恢复
+  [PASS/FAIL] 接口契约
+
+成熟度评分：
+  功能质量 F：__/10，证据：<artifact>
+  性能 P：__/10，证据：<artifact>
+  可靠性 R：__/10，证据：<artifact>
+  安全运营 Sec：__/10，证据：<artifact>
+  可维护性 M：__/10，证据：<artifact>
+  工程化 E：__/10，证据：<artifact>
+  加权总分 S：__/10
+
+结论：可发布 / 不可发布 / 限制发布
+限制与风险接受：<issue 或 无>
+复验负责人及日期：<owner, due date>
+```
+
+### 14.8 从第 13 章迁移到第 14 章的最小行动清单
+
+1. 为当前规则、模板和复合规则建立版本化 golden set，并在 CI 中执行。
+2. 将性能“目标”改为可重复的 benchmark 命令和 JSON 结果，记录 p95/p99、吞吐和资源使用。
+3. 使用 canary PII 编写日志、指标、trace 和导出制品的泄露回归测试。
+4. 为 ML 不可用、推理超时、任务池满载和持久化异常增加故障注入测试。
+5. 为每个 Prometheus 指标补齐 SLI/SLO、告警阈值、负责人和 runbook，并至少演练一次。
+6. 在发布记录中保存制品摘要、评分、门禁结果和任何带失效日期的风险接受。
+
+完成上述清单后，第 13 章提供的能力视图仍可用于架构评审，而第 14 章可以作为持续交付、发布准入和生产复盘的统一判定标准。
+
+## 15. 工业化评分卡落地版：风险加权、证据时效与可执行示例
+
+第 13 章回答“模块应具备什么能力”，第 14 章回答“如何用证据证明能力达标”。本章解决三者仍未覆盖的问题：**不同数据敏感度的模块是否应该用同一把尺子评分**、**证据会不会过期**、**评分卡如何直接落到本仓库现有的命令和测试文件上而不是抽象描述**。本章给出可以直接对照第 13、14 章阅读的第三个版本。
+
+### 15.1 三章对照表
+
+| 对比项 | 第 13 章 | 第 14 章 | 第 15 章 |
+|---|---|---|---|
+| 核心问题 | 能力是否设计到位 | 能力是否有证据、能否发布 | 评分是否随风险和时间正确调整，能否自动生成 |
+| 权重分配 | 固定权重，不区分模块风险 | 固定权重 + 发布门禁 | 按模块处理的最高敏感度等级动态调整权重 |
+| 证据有效期 | 未定义 | 定义了证据包，但未定义过期规则 | 明确证据新鲜度窗口与过期降级规则 |
+| 责任归属 | 未定义 | 隐含在“风险负责人签署” | 显式 RACI 矩阵，逐维度指定 Owner/Approver |
+| 可执行性 | 需要人工从文档理解并评分 | 提供人工评审输出模板 | 提供机器可读 schema，直接绑定 `make test-cov` 等现有命令 |
+| 示例 | 单文件定性示例（`classification_llm.py`） | 空白模板 | 使用本仓库真实测试文件路径填充的完整可执行示例 |
+
+### 15.2 风险加权：按数据敏感度调整评分权重
+
+第 13、14 章对所有文件使用同一套权重（功能 20%、性能 15%、可靠性 20%、安全 15%、可维护性 15%、工程化 15%）。但 `classification_llm.py` 处理基因组/生物特征等 L5 数据，`classification_utils.py` 主要处理模板配置，二者风险量级不同，用同一权重会低估高风险模块的安全短板。
+
+**风险等级判定**：取该文件/模块在正常路径中可能接触到的 `SensitivityLevel` 上界。
+
+| 模块风险等级 | 判定依据 | 示例模块 |
+|---|---|---|
+| 高（涉及 L5） | 直接处理基因组、生物特征或多字段组合升级结果 | `classification_llm.py`、`classification_composite.py`、`classification_rule_engine.py` |
+| 中（涉及 L4） | 处理身份证、病史等高风险字段但不直接处理基因组 | `classification_ner.py`、`classification_async.py` |
+| 低（≤ L3） | 仅处理配置、模板、聚合结果，不直接接触原始敏感字段 | `classification_utils.py`（模板定义部分）、`classification_models.py` |
+
+**权重调整规则**：高风险模块的安全运营（$Sec$）与可靠性（$R$）权重上浮，功能与工程化权重相应下调，权重总和仍为 100%。
+
+| 维度 | 低风险权重 | 中风险权重 | 高风险权重 |
+|---|---:|---:|---:|
+| 功能质量 $F$ | 25% | 20% | 15% |
+| 性能 $P$ | 15% | 15% | 10% |
+| 可靠性 $R$ | 15% | 20% | 25% |
+| 安全运营 $Sec$ | 10% | 15% | 25% |
+| 可维护性 $M$ | 20% | 15% | 12.5% |
+| 工程化 $E$ | 15% | 15% | 12.5% |
+
+高风险模块额外要求：第 14.3 节的"敏感数据泄露"门禁必须由安全负责人复核证据原文（而非仅看报告结论），且 golden set 中 L5 用例占比不得低于 15%。
+
+### 15.3 证据时效：评分会过期
+
+第 14 章要求证据可复现，但未规定证据的有效期。规则集、模型权重、依赖版本、攻击面都会随时间变化，陈旧证据会产生虚假的信心。
+
+| 证据类型 | 建议新鲜度窗口 | 过期后处理 |
+|---|---|---|
+| Golden set 正确性报告 | 90 天，或 `rule_set_version` 变更后立即失效 | 重新运行，评分暂降为该维度 5 折直至复验 |
+| 性能基准（p95/p99/吞吐） | 90 天，或依赖库/模型/硬件规格变更后立即失效 | 同上 |
+| 安全扫描（SCA/SAST/secret scan） | 30 天，或 CVE 库更新后建议重新扫描 | 超期视为门禁未通过 |
+| 泄露 canary 回归 | 每次涉及日志、指标、导出逻辑的改动都需重新运行 | 未重新运行则该 PR 不得合并 |
+| SLO 演练/告警演练 | 180 天 | 到期前重新演练一次，否则运营维度 $E$ 降级 |
+
+评分记录必须包含 `evidence_generated_at` 与 `expires_at` 字段。展示评分时应同时展示证据年龄，避免"评分很高但证据是一年前的"这种误导。
+
+### 15.4 机器可读评分卡与本仓库工具链的映射
+
+第 14 章的评审输出是人工填写的文本模板。为便于持续集成中自动生成，评分卡应有机器可读结构，并直接对应本仓库现有命令产出的制品。
+
+```yaml
+# scorecard.schema.yaml（示意结构，非仓库中已存在的文件）
+release_id: git:<commit_sha>
+module: privacy_local_agent/privacy/classification_llm.py
+risk_tier: high        # low | medium | high，参见 15.2
+rule_set_version: "1.2.0"
+evidence:
+  functional:
+    source: pytest tests/classification/test_classification_llm.py
+    artifact: artifacts/classification/<release_id>/unit-test.xml
+    generated_at: 2026-07-25T02:00:00Z
+  performance:
+    source: python tests/benchmark_classification.py
+    artifact: artifacts/classification/<release_id>/benchmark.json
+    generated_at: 2026-07-25T02:10:00Z
+  reliability:
+    source: pytest tests/classification/test_classification_async.py -m slow
+    artifact: artifacts/classification/<release_id>/reliability.xml
+    generated_at: 2026-07-25T02:20:00Z
+  security:
+    source: pytest tests/classification/test_classification_zk.py
+    artifact: artifacts/classification/<release_id>/security-scan.json
+    generated_at: 2026-07-25T02:30:00Z
+  maintainability:
+    source: make lint typecheck test-cov
+    artifact: artifacts/classification/<release_id>/coverage.xml
+    generated_at: 2026-07-25T02:40:00Z
+  engineering:
+    source: CI pipeline run + Grafana 告警演练记录
+    artifact: artifacts/classification/<release_id>/observability-check.json
+    generated_at: 2026-07-25T02:50:00Z
+scores: { functional: null, performance: null, reliability: null, security: null, maintainability: null, engineering: null }
+```
+
+**与现有命令的映射关系**：
+
+| 评分子项 | 对应仓库命令 | 产出制品 |
+|---|---|---|
+| 可维护性：Lint | `make lint` | ruff 报告（退出码 + 违规列表） |
+| 可维护性：类型检查 | `make typecheck` | mypy 报告 |
+| 功能质量：单元测试 | `make test` 或 `make test-unit` | pytest 结果（JUnit XML，需加 `--junitxml`） |
+| 可维护性：覆盖率 | `make test-cov` / `make cover-html` | `coverage.xml` / HTML 报告 |
+| 性能 | `python tests/benchmark_classification.py` | 基准耗时/吞吐 JSON |
+
+评分脚本应读取上述制品自动计算子项得分并写入 `scores` 字段；人工只需要复核而不是从零打分，减少主观偏差。
+
+### 15.5 角色签署矩阵（RACI）
+
+| 维度 | Responsible（执行） | Accountable（签署） | Consulted（咨询） | Informed（知会） |
+|---|---|---|---|---|
+| 功能质量 $F$ | 模块开发者 | 分类模块 Tech Lead | 测试负责人 | 产品/合规 |
+| 性能 $P$ | 模块开发者 | SRE Owner | 容量规划负责人 | Tech Lead |
+| 可靠性 $R$ | 模块开发者 | SRE Owner | Tech Lead | 值班团队 |
+| 安全运营 $Sec$ | 安全测试执行人 | 安全负责人（Security Owner） | 隐私合规负责人 | Tech Lead、产品 |
+| 可维护性 $M$ | 模块开发者 | Tech Lead | Reviewer | 团队全员 |
+| 工程化 $E$ | 平台/DevOps 负责人 | SRE Owner | Tech Lead | 值班团队 |
+| 一票否决门禁（14.3） | 安全测试执行人 | 安全负责人 | 法务/合规（如涉及 GDPR 等） | 全体干系人 |
+
+未指定 Accountable 角色签字的评分不得作为发布依据；Accountable 角色对该维度评分的准确性负责，而非仅“盖章通过”。
+
+### 15.6 可执行示例：填充真实文件路径的评审记录
+
+以下示例使用本仓库真实存在的测试文件与命令，用于演示如何填写第 14.7 节模板；示例中的分数为**演示用途**，不代表当前代码的真实评审结论，实际评分必须由 15.4/15.5 中规定的角色基于真实执行结果签署。
+
+```text
+发布候选：git:<待填写 commit sha>
+模块：privacy_local_agent/privacy/classification_llm.py
+风险等级：高（涉及 L5 基因组/生物特征相关分类结果）
+规则集：<从 ClassificationParams.rule_set_version 读取>
+评测集：<待建立的版本化 golden set，尚不存在，需按 14.8/15.7 清单创建>
+
+门禁：
+  [ ] 敏感数据泄露 canary            证据来源：tests/classification/test_classification_zk.py（需扩展 canary 用例）
+  [ ] 审计可追溯性                   证据来源：tests/classification/test_classification_rest.py + AuditInfo 字段校验
+  [ ] Golden set 核心正确性          证据来源：待建立（当前 tests/classification/test_classification_llm.py 覆盖行为但非版本化 golden set）
+  [ ] 安全扫描                       证据来源：待接入 SCA/SAST（当前仓库未见对应 CI 步骤）
+  [ ] 降级与恢复                     证据来源：tests/classification/test_classification_llm.py 中 NoOp 回退用例
+  [ ] 接口契约                       证据来源：tests/classification/test_classification_grpc.py + test_classification_rest.py
+
+成熟度评分（风险等级=高，权重见 15.2）：
+  功能质量 F（15%）：__/10，证据：tests/classification/test_classification_llm.py
+  性能 P（10%）：__/10，证据：tests/benchmark_classification.py 输出
+  可靠性 R（25%）：__/10，证据：test_classification_async.py + LLM 超时/降级用例
+  安全运营 Sec（25%）：__/10，证据：test_classification_zk.py + review 导出脱敏用例
+  可维护性 M（12.5%）：__/10，证据：make lint / make typecheck / make test-cov
+  工程化 E（12.5%）：__/10，证据：Prometheus 指标定义 + Grafana 告警（若已配置）
+  加权总分 S：__/10
+
+结论：暂不可评级（缺少版本化 golden set 与安全扫描证据，需先完成 15.7 清单第 1、3 项）
+限制与风险接受：无（尚未进入发布评审阶段）
+复验负责人及日期：<按 15.5 RACI 指定 Accountable 角色，并填写日期>
+```
+
+该示例刻意保留未完成项，用于说明"评分卡应先暴露证据缺口，而不是被空白格默认为满分或默认为通过"。
+
+### 15.7 从第 14 章到第 15 章的最小行动清单
+
+1. 按 15.2 为 `privacy_local_agent/privacy/` 下每个分类相关模块标注风险等级，并采用对应权重表。
+2. 在评分记录中加入 `evidence_generated_at`/`expires_at`，对超期证据自动降级而非沿用旧分数。
+3. 定义 15.4 中的 `scorecard.schema.yaml`（或等价 JSON Schema），并编写脚本从 `make test-cov`、`make lint`、`make typecheck`、`tests/benchmark_classification.py` 的输出中自动抽取子项得分。
+4. 落实 15.5 RACI 矩阵，确保每个维度都有明确的 Accountable 角色，并将其记录在评审模板中。
+5. 建立版本化 golden set（当前仓库尚未提供，是 15.6 示例中标记为"待建立"的最大缺口），并接入 CI。
+6. 补齐 SCA/SAST/secret scan 等安全扫描到 CI 流程中（当前仓库测试聚焦功能行为，未见专门的依赖漏洞扫描步骤）。
+
+完成以上清单后，三章可以按顺序对照使用：第 13 章看能力设计，第 14 章看证据与门禁流程，第 15 章看风险加权、证据时效和可落地的自动化实现。
+

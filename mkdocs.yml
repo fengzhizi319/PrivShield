@@ -113,6 +113,7 @@ nav:
     - 分类概览（规则引擎）:
       - 概览: classification/README.md
       - 三层漏斗架构: classification/design.md
+      - 工业化评审文档: classification/industrialization_review.md
       - API 参考: classification/api_reference.md
       - 使用示例: classification/examples.md
       - 性能基准: classification/performance.md
