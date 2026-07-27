@@ -72,9 +72,11 @@ def default_params(primitive: str) -> dict[str, Any]:
             "enable_small_ner": False,
             "enable_llm": False,
             "icd10_l4_intervals": [
-                {"start": "B20", "end": "B24"},
-                {"start": "F20", "end": "F29"},
-                {"start": "C00", "end": "C97"},
+                {"start": "B20", "end": "B24"},   # HIV 相关诊断编码区间
+                {"start": "A50", "end": "A53"},   # 梅毒（先天性/早期/晚期）
+                {"start": "A54", "end": "A64"},   # 其他性传播疾病（淋病、衣原体等）
+                {"start": "F20", "end": "F29"},   # 精神分裂症等重型精神疾病区间
+                {"start": "C00", "end": "C97"},   # 恶性肿瘤编码区间
             ],
             "genomic_keywords": [
                 "brca1",

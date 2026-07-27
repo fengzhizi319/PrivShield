@@ -556,11 +556,13 @@ class ClassificationParams(BaseModel):
     icd10_l4_intervals: list[dict[str, str]] = Field(
         default_factory=lambda: [
             {"start": "B20", "end": "B24"},   # HIV 相关诊断编码区间
-            {"start": "F20", "end": "F29"},   # 精神分裂症等精神疾病区间
+            {"start": "A50", "end": "A53"},   # 梅毒（先天性/早期/晚期）
+            {"start": "A54", "end": "A64"},   # 其他性传播疾病（淋病、衣原体等）
+            {"start": "F20", "end": "F29"},   # 精神分裂症等重型精神疾病区间
             {"start": "C00", "end": "C97"},   # 恶性肿瘤编码区间
         ],
         alias="icd10L4Intervals",
-    )  # ICD-10 编码中属于 L4（高敏感）的区间列表
+    )  # ICD-10 编码中属于 L4（高敏感）的区间列表（含 HIV、性病、重型精神病、恶性肿瘤）
     genomic_keywords: list[str] = Field(
         default_factory=lambda: [
             "brca1",      # 乳腺癌易感基因 1

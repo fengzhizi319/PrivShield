@@ -183,9 +183,9 @@ def _resolve_classification_params(
     to produce the final classification parameters.
 
     参数优先级（从低到高）：
-    1. Pydantic 模型默认值（ClassificationParams 字段 default）
+    1. Pydantic 模型默认值 / 内置 default_params（ClassificationParams 字段 default）
     2. YAML profile 配置文件
-    3. 合规模板默认值（仅填充未设置的 key）
+    3. 合规模板默认值（覆盖默认值和 profile，代表特定合规标准的参数）
     4. 请求级参数（最高优先级，覆盖一切）
 
     执行步骤 / Execution Steps:
@@ -218,7 +218,9 @@ def _resolve_classification_params(
             params.update(profile_params)
             source = "profile"  # 更新来源标识
 
-    # Step 2: 激活合规模板默认值（仅填充未设置的 key，不覆盖已有值）
+    # Step 2: 激活合规模板默认值
+    # 优先级：模板默认值 > 内置默认值/YAML profile，但 < 请求级参数
+    # 模板代表特定合规标准的参数覆盖，应能覆盖内置默认值和通用 profile 配置
     template_name = None
     # 优先从请求参数中获取模板名
     if request_params and request_params.get("template"):
@@ -227,12 +229,10 @@ def _resolve_classification_params(
     elif params.get("template"):
         template_name = params.get("template")
     if template_name:
-        # 获取模板默认参数（如 JR/T 0197、GB/T 35273、GDPR）
+        # 获取模板默认参数（如 JR/T 0197、GB/T 35273、GDPR、DB51/T 2989）
         template_defaults = get_template_params(template_name)
-        # 模板默认值仅应用于尚未设置的 key（不覆盖 profile 或请求参数）
-        for key, value in template_defaults.items():
-            if key not in params:
-                params[key] = value
+        # 模板参数覆盖内置默认值和 profile 配置（请求参数在 Step 3 中仍具有最高优先级）
+        params.update(template_defaults)
 
     # Step 3: 应用请求级参数覆盖（最高优先级）
     if request_params:

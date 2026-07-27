@@ -402,7 +402,7 @@ class DefaultRuleEngine(RuleEngine):
             # 默认 ICD-10 编码为 L3（一般医疗信息）
             level = SensitivityLevel.L3
             category = "MEDICAL_ICD10_GENERAL"
-            # 遍历配置的 L4 敏感区间（HIV/精神疾病/恶性肿瘤）
+            # 遍历配置的 L4 敏感区间（HIV/性病/精神疾病/恶性肿瘤）
             for interval in params.icd10_l4_intervals:
                 start = interval.get("start", "")  # 区间起始编码
                 end = interval.get("end", "")      # 区间结束编码
@@ -412,9 +412,11 @@ class DefaultRuleEngine(RuleEngine):
                     level = SensitivityLevel.L4
                     # 根据区间首字母确定具体疾病类别
                     if start.upper().startswith("B"):
-                        category = "MEDICAL_ICD10_HIV"          # B20-B24: HIV 相关
+                        category = "MEDICAL_ICD10_HIV"          # B20-B24: HIV/艾滋病
+                    elif start.upper().startswith("A"):
+                        category = "MEDICAL_ICD10_STD"          # A50-A64: 性传播疾病
                     elif start.upper().startswith("F"):
-                        category = "MEDICAL_ICD10_PSYCHIATRIC"  # F20-F29: 精神疾病
+                        category = "MEDICAL_ICD10_PSYCHIATRIC"  # F20-F29: 重型精神病
                     elif start.upper().startswith("C"):
                         category = "MEDICAL_ICD10_CANCER"       # C00-C97: 恶性肿瘤
                     break  # 命中第一个匹配区间即停止
@@ -539,6 +541,7 @@ class DefaultRuleEngine(RuleEngine):
         - JR/T 0197（金融行业标准）：银行卡号、交易、资产等字段 → L4
         - GB/T 35273（个人信息安全规范）：邮箱、地址、轨迹等字段 → L3
         - GDPR（欧盟通用数据保护条例）：生物特征、健康、种族等特殊类别 → L4
+        - DB51/T 2989（四川省健康医疗大数据指南）：生物识别、金融账户、未成年人 → L3
 
         Args:
             norm_name: 规范化后的字段名 / Normalized field name.
@@ -612,6 +615,77 @@ class DefaultRuleEngine(RuleEngine):
                     rule_id="RULE_ID_GDPR_001",             # GDPR 规则
                 )
             )
+
+        # DB51/T 2989—2023 四川省健康医疗大数据应用指南模板
+        if template == "sc_health_db51":
+            # 第3级：生物识别信息（指纹、声纹、掌纹、耳廓、虹膜、面部识别特征）
+            if any(
+                kw in norm_name
+                for kw in ("fingerprint", "voiceprint", "palmprint", "ear", "iris", "face", "biometric")
+            ):
+                tags.append(
+                    SecurityTag(
+                        level=SensitivityLevel.L3,           # 敏感：生物识别信息
+                        category="PII_BIOMETRIC",           # 类别：生物识别
+                        source_engine="RULE",
+                        rule_id="RULE_ID_DB51_001",         # DB51/T 2989 规则
+                    )
+                )
+                CLASSIFICATION_RULE_HITS_TOTAL.labels(rule_id="RULE_ID_DB51_001").inc()
+
+            # 第3级：金融账户信息（支付卡号、微信/支付宝等）——指南定为 L3（非 L4）
+            if any(
+                kw in norm_name
+                for kw in ("bankcard", "alipay", "wechatpay", "thirdpay", "支付")
+            ):
+                tags.append(
+                    SecurityTag(
+                        level=SensitivityLevel.L3,           # 敏感：金融账户（指南第3级）
+                        category="FINANCE_ACCOUNT",         # 类别：金融账户
+                        source_engine="RULE",
+                        rule_id="RULE_ID_DB51_002",         # DB51/T 2989 规则
+                    )
+                )
+                CLASSIFICATION_RULE_HITS_TOTAL.labels(rule_id="RULE_ID_DB51_002").inc()
+
+            # 第3级：未成年人信息（不满十四周岁）
+            if any(kw in norm_name for kw in ("minor", "child", "未成年", "儿童")):
+                tags.append(
+                    SecurityTag(
+                        level=SensitivityLevel.L3,           # 敏感：未成年人信息
+                        category="PII_MINOR",               # 类别：未成年人
+                        source_engine="RULE",
+                        rule_id="RULE_ID_DB51_003",         # DB51/T 2989 规则
+                    )
+                )
+                CLASSIFICATION_RULE_HITS_TOTAL.labels(rule_id="RULE_ID_DB51_003").inc()
+
+            # 第3级：个人行踪轨迹
+            if any(kw in norm_name for kw in ("location", "trajectory", "轨迹")):
+                tags.append(
+                    SecurityTag(
+                        level=SensitivityLevel.L3,           # 敏感：行踪轨迹
+                        category="PII_CONTACT_LOCATION",    # 类别：位置轨迹
+                        source_engine="RULE",
+                        rule_id="RULE_ID_DB51_004",         # DB51/T 2989 规则
+                    )
+                )
+                CLASSIFICATION_RULE_HITS_TOTAL.labels(rule_id="RULE_ID_DB51_004").inc()
+
+            # 第4级：敏感病种字段名（艾滋病、性病、重型精神病）
+            if any(
+                kw in norm_name
+                for kw in ("hiv", "aids", "std", "syphilis", "gonorrhea", "psychiatric", "schizophrenia")
+            ):
+                tags.append(
+                    SecurityTag(
+                        level=SensitivityLevel.L4,           # 高敏感：敏感病种
+                        category="MEDICAL_SENSITIVE_DISEASE",  # 类别：敏感病种
+                        source_engine="RULE",
+                        rule_id="RULE_ID_DB51_005",         # DB51/T 2989 规则
+                    )
+                )
+                CLASSIFICATION_RULE_HITS_TOTAL.labels(rule_id="RULE_ID_DB51_005").inc()
 
         # 返回本模板规则命中的所有标签
         return tags

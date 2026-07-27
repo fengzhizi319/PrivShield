@@ -236,6 +236,50 @@ _JRT0197_FIELD_PATTERNS = [
     "balance",      # 余额
 ]
 
+# DB51/T 2989—2023《四川省健康医疗大数据应用指南》字段模式
+# 第3级：敏感个人信息（生物识别、特定身份、金融账户、行踪轨迹、未成年人）
+_SC_HEALTH_DB51_L3_FIELD_PATTERNS = [
+    # 生物识别信息（指南第3级明确列举）
+    "fingerprint",  # 指纹
+    "voiceprint",   # 声纹
+    "palmprint",    # 掌纹
+    "ear",          # 耳廓
+    "iris",         # 虹膜
+    "face",         # 面部识别特征
+    "biometric",    # 生物识别（通用）
+    # 特定身份信息
+    "name",         # 姓名
+    "birthday",     # 出生日期
+    "id_card",      # 身份证件号码
+    "address",      # 住址
+    "phone",        # 电话号码
+    "email",        # 电子邮箱
+    # 金融账户信息（指南第3级，非 L4）
+    "bankcard",     # 支付卡号
+    "alipay",       # 支付宝
+    "wechatpay",    # 微信支付
+    "thirdpay",     # 第三方支付
+    # 个人行踪轨迹
+    "location",     # 位置
+    "trajectory",   # 轨迹
+    "轨迹",         # 行踪轨迹（中文）
+    # 未成年人信息（不满十四周岁）
+    "minor",        # 未成年人标识
+    "child",        # 儿童
+    "age",          # 年龄（用于判断是否<14岁）
+]
+
+# DB51/T 2989 第4级：敏感病种字段模式
+_SC_HEALTH_DB51_L4_FIELD_PATTERNS = [
+    "hiv",          # 艾滋病
+    "aids",         # 艾滋病
+    "std",          # 性病
+    "syphilis",     # 梅毒
+    "gonorrhea",    # 淋病
+    "psychiatric",  # 精神病
+    "schizophrenia",  # 精神分裂症
+]
+
 # 合规模板参数字典：模板名 → 参数覆盖值
 # 当 ClassificationParams.template 指定某个模板时，
 # 系统会从此字典获取对应的参数覆盖值
@@ -289,9 +333,35 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         # ICD-10 L4 区间（与默认相同）
         "icd10_l4_intervals": [
             {"start": "B20", "end": "B24"},   # HIV 相关
+            {"start": "A50", "end": "A53"},   # 梅毒
+            {"start": "A54", "end": "A64"},   # 其他性病
             {"start": "F20", "end": "F29"},   # 精神疾病
             {"start": "C00", "end": "C97"},   # 恶性肿瘤
         ],
+    },
+    # DB51/T 2989—2023 四川省健康医疗大数据应用指南模板
+    "sc_health_db51": {
+        "version": "sc_health_db51-1.0.0",  # 模板版本号
+        "default_level": "L3",               # 默认敏感度等级（含敏感个人信息）
+        # 扩展基因关键字，增加四川省指南特有的敏感字段
+        "genomic_keywords": [
+            "brca1", "brca2", "tp53", "rs", "snp", "cnv", "genome", "genomic",
+            "gene", "mutation", "variant",
+            # 第5级：个人遗传信息（指南明确列举）
+            "genetic", "chromosome", "embryo", "thalassemia",  # 基因/染色体/胚胎/地中海贫血
+            "proteomics", "metabolomics", "omics",  # 蛋白质组/代谢组/多组学
+            "targeted",  # 分子靶向药物
+        ],
+        # ICD-10 L4 敏感病种区间（指南第4级：艾滋病、性病、重型精神病）
+        "icd10_l4_intervals": [
+            {"start": "B20", "end": "B24"},   # HIV/艾滋病
+            {"start": "A50", "end": "A53"},   # 梅毒（先天性/早期/晚期）
+            {"start": "A54", "end": "A64"},   # 其他性传播疾病（淋病、衣原体等）
+            {"start": "F20", "end": "F29"},   # 精神分裂症等重型精神病
+            {"start": "F30", "end": "F39"},   # 心境障碍（含躁狂发作）
+        ],
+        # 注意：四川省指南将金融账户信息定为第3级（非 L4）
+        # 此模板下金融字段由规则引擎单独处理为 L3
     },
 }
 

@@ -475,6 +475,62 @@ class VectorizedRuleEngine(RuleEngine):
                 rule_id="RULE_ID_GDPR_001",
             )
 
+        # DB51/T 2989—2023 四川省健康医疗大数据应用指南模板
+        if template == "sc_health_db51":
+            # 第3级：生物识别信息 → 全列 L3
+            if any(
+                kw in norm_name
+                for kw in ("fingerprint", "voiceprint", "palmprint", "ear", "iris", "face", "biometric")
+            ):
+                self._add_all(
+                    tags,
+                    level=SensitivityLevel.L3,
+                    category="PII_BIOMETRIC",
+                    rule_id="RULE_ID_DB51_001",
+                )
+
+            # 第3级：金融账户信息（指南定为 L3，非 L4）→ 全列 L3
+            if any(
+                kw in norm_name
+                for kw in ("bankcard", "alipay", "wechatpay", "thirdpay", "支付")
+            ):
+                self._add_all(
+                    tags,
+                    level=SensitivityLevel.L3,
+                    category="FINANCE_ACCOUNT",
+                    rule_id="RULE_ID_DB51_002",
+                )
+
+            # 第3级：未成年人信息 → 全列 L3
+            if any(kw in norm_name for kw in ("minor", "child", "未成年", "儿童")):
+                self._add_all(
+                    tags,
+                    level=SensitivityLevel.L3,
+                    category="PII_MINOR",
+                    rule_id="RULE_ID_DB51_003",
+                )
+
+            # 第3级：个人行踪轨迹 → 全列 L3
+            if any(kw in norm_name for kw in ("location", "trajectory", "轨迹")):
+                self._add_all(
+                    tags,
+                    level=SensitivityLevel.L3,
+                    category="PII_CONTACT_LOCATION",
+                    rule_id="RULE_ID_DB51_004",
+                )
+
+            # 第4级：敏感病种字段名 → 全列 L4
+            if any(
+                kw in norm_name
+                for kw in ("hiv", "aids", "std", "syphilis", "gonorrhea", "psychiatric", "schizophrenia")
+            ):
+                self._add_all(
+                    tags,
+                    level=SensitivityLevel.L4,
+                    category="MEDICAL_SENSITIVE_DISEASE",
+                    rule_id="RULE_ID_DB51_005",
+                )
+
     def _add_all(
         self,
         tags: list[list[SecurityTag]],
