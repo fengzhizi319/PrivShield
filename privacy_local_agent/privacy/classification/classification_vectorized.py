@@ -48,6 +48,7 @@ from .classification_models import ClassificationParams, SecurityTag, Sensitivit
 # 从标量规则引擎导入共享的工具函数和基类
 from .classification_rule_engine import (
     RuleEngine,                        # 规则引擎基类
+    _get_business_category,            # 业务分类映射
     _id_card_checksum,                 # 身份证号校验
     _in_icd10_interval,                # ICD-10 区间判断
     _normalize_field_name,             # 字段名规范化
@@ -381,6 +382,12 @@ class VectorizedRuleEngine(RuleEngine):
                 category="OPERATIONAL_STAT",
                 rule_id="RULE_ID_L2_001",
             )
+
+        # 应用业务分类映射：根据 DB51/T 2989—2023 第 5.2.1 节将技术类别映射到 5 大业务类别
+        for row_tags in tags:
+            for tag in row_tags:
+                if tag.business_category is None:
+                    tag.business_category = _get_business_category(tag.category)
 
         # 每行去重：以 (level, category) 为键去除重复标签
         result = [_unique_tags(row_tags) for row_tags in tags]

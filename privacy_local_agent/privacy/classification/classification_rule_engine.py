@@ -39,6 +39,7 @@ from ...observability.logging_config import get_logger
 from ...observability.metrics import CLASSIFICATION_RULE_HITS_TOTAL
 # 从数据模型模块导入核心类型
 from .classification_models import (
+    BusinessCategory,      # 业务分类枚举（DB51/T 2989 5.2.1 节 5 大类别）
     ClassificationParams,  # 分类参数模型（含规则配置、模板、阈值等）
     RuleEngineABC,         # 规则引擎抽象基类
     SecurityTag,           # 安全标签模型（单次规则命中的描述）
@@ -62,6 +63,67 @@ _ID_CARD_CHARS = ["1", "0", "X", "9", "8", "7", "6", "5", "4", "3", "2"]
 
 # 上海医保卡号 9 位数字校验权重因子（前 8 位参与计算）
 _SH_MEDICAL_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1]
+
+# ---------------------------------------------------------------------------
+# 业务分类映射 / Business Category Mapping (DB51/T 2989—2023 5.2.1)
+# 将技术分类类别（category）映射到 5 大业务类别（business_category）
+# ---------------------------------------------------------------------------
+
+# 技术类别 → 业务类别映射字典
+# 根据 DB51/T 2989—2023 第 5.2.1 节定义的 5 大业务类别：
+# - PERSONAL_BASIC: 个人基本信息数据（能够识别特定自然人的数据）
+# - MEDICAL_TREATMENT: 诊疗信息数据（患者在医疗服务过程中产生的数据）
+# - FEE_BILLING: 费用信息数据（与医疗服务费用相关的数据）
+# - PUBLIC_HEALTH: 公共卫生信息数据（疾病控制、监督执法等公共事业数据）
+# - MANAGEMENT: 管理信息数据（反映机构运营管理状况的数据）
+_CATEGORY_TO_BUSINESS: dict[str, BusinessCategory] = {
+    # === 个人基本信息数据：能够识别特定自然人的数据 ===
+    "PII_ID_CARD": BusinessCategory.PERSONAL_BASIC,           # 身份证号
+    "PII_MOBILE": BusinessCategory.PERSONAL_BASIC,            # 手机号
+    "PII_MEDICAL_CARD": BusinessCategory.PERSONAL_BASIC,      # 医保卡号
+    "PII_CONTACT_LOCATION": BusinessCategory.PERSONAL_BASIC,  # 联系方式与位置
+    "PII_BIOMETRIC": BusinessCategory.PERSONAL_BASIC,         # 生物识别信息
+    "PII_MINOR": BusinessCategory.PERSONAL_BASIC,             # 未成年人信息
+    # === 诊疗信息数据：患者在医疗服务过程中产生的数据 ===
+    "MEDICAL_ICD10_GENERAL": BusinessCategory.MEDICAL_TREATMENT,      # 一般 ICD-10 诊断
+    "MEDICAL_ICD10_HIV": BusinessCategory.MEDICAL_TREATMENT,          # HIV/艾滋病诊断
+    "MEDICAL_ICD10_STD": BusinessCategory.MEDICAL_TREATMENT,          # 性传播疾病诊断
+    "MEDICAL_ICD10_PSYCHIATRIC": BusinessCategory.MEDICAL_TREATMENT,  # 精神疾病诊断
+    "MEDICAL_ICD10_CANCER": BusinessCategory.MEDICAL_TREATMENT,       # 恶性肿瘤诊断
+    "MEDICAL_SENSITIVE_DISEASE": BusinessCategory.MEDICAL_TREATMENT,  # 敏感病种（字段名规则）
+    "GENOMIC_BRCA_TP53": BusinessCategory.MEDICAL_TREATMENT,          # BRCA/TP53 基因
+    "GENOMIC_VARIANT": BusinessCategory.MEDICAL_TREATMENT,            # 基因组变异
+    "GENOMIC_HINT": BusinessCategory.MEDICAL_TREATMENT,               # 基因组提示
+    "GENOMIC_FILE": BusinessCategory.MEDICAL_TREATMENT,               # 基因组文件格式
+    "GENOMIC_BAM": BusinessCategory.MEDICAL_TREATMENT,                # BAM 文件
+    "GENOMIC_VCF": BusinessCategory.MEDICAL_TREATMENT,                # VCF 文件
+    "GENOMIC_FASTQ": BusinessCategory.MEDICAL_TREATMENT,              # FASTQ 文件
+    "GENOMIC_SEQUENCE": BusinessCategory.MEDICAL_TREATMENT,           # 碱基序列
+    # === 费用信息数据：与医疗服务费用相关的数据 ===
+    "FINANCE_ACCOUNT": BusinessCategory.FEE_BILLING,           # 金融账户（四川标准 L3）
+    "FINANCE_ACCOUNT_JRT": BusinessCategory.FEE_BILLING,       # 金融账户（JR/T 0197 L4）
+    # === 管理信息数据：反映机构运营管理状况的数据 ===
+    "OPERATIONAL": BusinessCategory.MANAGEMENT,                # 运营字段
+    "OPERATIONAL_STAT": BusinessCategory.MANAGEMENT,           # 运营统计字段
+    "PUBLIC_REPORT": BusinessCategory.MANAGEMENT,              # 公开报告
+    # === GDPR 特殊类别（映射到诊疗信息，因多为健康相关） ===
+    "GDPR_SPECIAL_CATEGORY": BusinessCategory.MEDICAL_TREATMENT,
+}
+
+
+def _get_business_category(category: str) -> BusinessCategory | None:
+    """根据技术类别获取业务分类 / Get Business Category from Technical Category.
+
+    根据 DB51/T 2989—2023 第 5.2.1 节定义的 5 大业务类别，
+    将技术分类类别（如 PII_ID_CARD、MEDICAL_ICD10_HIV）映射到业务类别。
+
+    Args:
+        category: 技术分类类别字符串 / Technical category string.
+
+    Returns:
+        对应的业务分类枚举；未找到映射时返回 None / Business category or None.
+    """
+    return _CATEGORY_TO_BUSINESS.get(category)
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +590,11 @@ class DefaultRuleEngine(RuleEngine):
             )
             CLASSIFICATION_RULE_HITS_TOTAL.labels(rule_id="RULE_ID_L2_001").inc()
 
-        # ===== Step 6: 去重并返回 =====
+        # ===== Step 6: 应用业务分类映射并去重返回 =====
+        # 根据 DB51/T 2989—2023 第 5.2.1 节，将技术类别映射到 5 大业务类别
+        for tag in tags:
+            if tag.business_category is None:
+                tag.business_category = _get_business_category(tag.category)
         # 以 (level, category) 为键去重，避免同一规则重复标记
         return _unique_tags(tags)
 
@@ -691,5 +757,11 @@ class DefaultRuleEngine(RuleEngine):
         return tags
 
 
-# 模块公开接口声明：仅导出规则引擎类和去重工具函数
-__all__ = ["DefaultRuleEngine", "RuleEngine", "_unique_tags"]
+# 模块公开接口声明：导出规则引擎类、去重工具函数和业务分类映射
+__all__ = [
+    "DefaultRuleEngine",
+    "RuleEngine",
+    "_unique_tags",
+    "_get_business_category",
+    "_CATEGORY_TO_BUSINESS",
+]

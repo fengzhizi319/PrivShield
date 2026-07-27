@@ -60,6 +60,23 @@ class EngineLayer(str, Enum):
     L3_LLM = "L3_LLM"             # 第三层：本地大语言模型（Qwen2-VL 多模态分类）
 
 
+class BusinessCategory(str, Enum):
+    """业务分类枚举（DB51/T 2989—2023 第 5.2.1 节）。
+
+    四川省健康医疗大数据应用指南将健康医疗数据分为 5 大业务类别，
+    用于标识数据字段所属的业务领域，与敏感度等级（L1~L5）正交。
+
+    Business category enum per DB51/T 2989—2023 Section 5.2.1.
+    Classifies health data fields into 5 business domains, orthogonal to sensitivity level.
+    """
+
+    PERSONAL_BASIC = "PERSONAL_BASIC"        # 个人基本信息数据：能够识别特定自然人的数据
+    MEDICAL_TREATMENT = "MEDICAL_TREATMENT"  # 诊疗信息数据：患者在医疗服务过程中产生的数据
+    FEE_BILLING = "FEE_BILLING"              # 费用信息数据：与医疗服务费用相关的数据
+    PUBLIC_HEALTH = "PUBLIC_HEALTH"          # 公共卫生信息数据：疾病控制、监督执法等公共事业数据
+    MANAGEMENT = "MANAGEMENT"                # 管理信息数据：反映机构运营管理状况的数据
+
+
 # 敏感度等级排序映射表，用于比较不同等级的高低。
 # 数值越大表示敏感度越高，供 max_level() 函数使用。
 _LEVEL_ORDER = {
@@ -128,12 +145,13 @@ class SecurityTag(BaseModel):
     每次规则/NER/LLM 命中都会产出一个 SecurityTag，记录：
     - 命中了什么等级（level）
     - 属于什么类别（category，如 PHONE_NUMBER、ICD10）
+    - 业务分类（business_category，如 PERSONAL_BASIC、MEDICAL_TREATMENT）
     - 置信度（confidence）
     - 来源引擎（source_engine）
     - 触发的规则 ID（rule_id）
 
     Security tag representing a single classification hit with level, category,
-    confidence, source engine, rule id, version and human-review flag.
+    business category, confidence, source engine, rule id, version and human-review flag.
     """
 
     # 允许通过 Python 字段名或 JSON 别名（camelCase）两种方式赋值
@@ -141,6 +159,9 @@ class SecurityTag(BaseModel):
 
     level: SensitivityLevel  # 该标签对应的敏感度等级（L1~L5）
     category: str  # 分类类别标识（如 "PHONE_NUMBER"、"ID_CARD"、"ICD10"）
+    business_category: BusinessCategory | None = Field(
+        default=None, alias="businessCategory"
+    )  # 业务分类（DB51/T 2989 5.2.1 节 5 大类别），None 表示未映射
     confidence: float = Field(ge=0.0, le=1.0, default=1.0)  # 置信度 [0,1]，规则引擎默认 1.0
     source_engine: str = Field(default="RULE", alias="sourceEngine")  # 来源引擎标识
     rule_id: str = Field(default="", alias="ruleId")  # 触发的规则 ID（用于审计追踪）
