@@ -16,6 +16,7 @@
 10. [扩展点](#10-扩展点)
 11. [测试策略](#11-测试策略)
 12. [相关文档](#12-相关文档)
+13. [术语表](#13-术语表)
 
 ## 1. 概述与设计目标
 
@@ -76,6 +77,179 @@ graph TD
 | 运营统计 | `turnover_rate`、`device_usage`、`inventory` | L2 |
 
 所有规则命中标签默认 `confidence=1.0`、`source_engine=RULE`、`engine_layer=L1_RULE`。标签按 `(level, category)` 去重并保留首次出现顺序。`VectorizedRuleEngine` 使用 pandas Series 批量匹配，语义必须与标量引擎一致；缺少 pandas 时回退到 `DefaultRuleEngine`。
+
+#### 2.2.1 evaluate 详细算法
+
+`DefaultRuleEngine.evaluate(field_name, value, params)` 是 Layer-1 的核心入口，算法流程如下：
+
+```mermaid
+graph TD
+    A[输入规范化] --> B[Step 1: 基因组字段名规则]
+    B --> C[Step 2: PII 值规则]
+    C --> D[Step 3: 基因组文件内容检测]
+    D --> E[Step 4: 合规模板扩展规则]
+    E --> F[Step 5: 白名单/运营字段降级]
+    F --> G[Step 6: 标签去重]
+    G --> H[返回 SecurityTag 列表]
+```
+
+**输入规范化**
+
+| 操作 | 算法 | 示例 |
+|---|---|---|
+| 字段名归一化 | `lower()` + 移除 `_` 和空格 | `"Phone_Number"` → `"phonenumber"` |
+| 字段值字符串化 | `str(value)`，None → `""` | `None` → `""` |
+| 字段值归一化 | 同字段名归一化（用于值内关键词检测） | `"RS12345"` → `"rs12345"` |
+
+**字段名规范化策略**
+
+规则引擎采用「格式归一化 + 双轨识别」策略处理不同命名风格的字段：
+
+*归一化算法：*
+
+```python
+def _normalize_field_name(name: str) -> str:
+    return str(name).lower().replace("_", "").replace(" ", "")
+```
+
+归一化消除的是**格式差异**（大小写、分隔符），而非**语义差异**：
+
+| 原始字段名 | 归一化结果 | 说明 |
+|---|---|---|
+| `id_card` | `idcard` | 下划线移除 |
+| `ID_Card` | `idcard` | 大小写折叠 |
+| `idCard` | `idcard` | camelCase 折叠 |
+| `ID Card` | `idcard` | 空格移除 |
+| `phone_number` | `phonenumber` | 同上 |
+| `Phone Number` | `phonenumber` | 同上 |
+| `身份证` | `身份证` | 中文保持不变 |
+| `id` | `id` | 缩写保持不变 |
+
+*双轨识别机制：*
+
+对于 PII 类数据（身份证、手机号、医保卡），规则引擎**不依赖字段名**，而是通过**字段值的格式校验**识别：
+
+```mermaid
+graph LR
+    A["字段: 身份证 / id_card / id"] --> B{值校验}
+    B -->|"110101199001011237"| C["18位 + 校验码通过 → PII_ID_CARD"]
+    B -->|"张三"| D["校验失败 → 不命中"]
+```
+
+| 数据类型 | 识别方式 | 字段名是否影响 | 示例 |
+|---|---|---|---|
+| 身份证号 | 值校验（18位格式 + GB 11643 校验码） | 否 | 无论字段名为 `id`、`身份证`、`id_card`，只要值合法即命中 |
+| 手机号 | 值正则（`^1[3-9]\d{9}$`） | 否 | 无论字段名为 `tel`、`电话`、`mobile`，只要值合法即命中 |
+| 医保卡号 | 值校验（9位 + 校验和） | 否 | 同上 |
+| ICD-10 | 值格式解析 | 否 | 同上 |
+| 基因组字段 | 字段名关键词子串匹配 | **是** | `brca1_status`、`gene_marker` 通过字段名命中 |
+| 金融/模板字段 | 字段名关键词子串匹配 | **是** | `bank_card`、`email` 通过字段名命中 |
+| 白名单/运营字段 | 字段名关键词子串匹配 | **是** | 可配置 |
+
+设计理由：PII 数据具有强格式特征（固定长度、校验码），值校验的精确度远高于字段名猜测；而基因组、金融等领域字段无统一值格式，需依赖字段名语义。
+
+*复合规则中的同义词处理：*
+
+复合规则引擎（`CompositeRuleEngine`）使用**正则表达式**匹配归一化后的字段名，可在模式内枚举同义词：
+
+```python
+# COMP_001 的 field_patterns 示例
+field_patterns=[
+    r"^name$",                      # 精确匹配 name
+    r"id_card|idcard|identity",     # 枚举身份证的同义表达
+    r"mobile|phone|cell",           # 枚举手机号的同义表达
+]
+```
+
+匹配流程：先将字段名归一化（`id_card` → `idcard`），再用正则 `search` 匹配。因此 `id_card`、`idcard`、`identity_number` 均可被 `r"id_card|idcard|identity"` 命中。
+
+*当前限制与扩展方式：*
+
+| 限制 | 说明 | 应对方式 |
+|---|---|---|
+| 中文别名 | `身份证` 不会自动映射到 `idcard` | PII 通过值校验兜底；字段名规则需显式添加中文关键词 |
+| 缩写 | `id` 不会扩展为 `idcard` | 值校验兜底；或在 `public_field_whitelist`/`operational_field_patterns` 中配置 |
+| 新同义词 | 新业务字段名不在内置关键词中 | 通过 YAML profile 或请求参数动态配置白名单/模式列表 |
+
+**Step 1：基因组字段名规则**
+
+按优先级顺序匹配归一化字段名 `norm_name`：
+
+| 规则 ID | 匹配条件 | 类别 | 等级 |
+|---|---|---|---|
+| `RULE_ID_G_001` | `norm_name` 包含 `brca1`/`brca2`/`tp53` | `GENOMIC_BRCA_TP53` | L5 |
+| `RULE_ID_G_002` | `norm_name` 或 `norm_value` 匹配 `rs\d+`，或 `norm_name` 包含 `snp`/`cnv`/`genome`/`genomic` | `GENOMIC_VARIANT` | L5 |
+| `RULE_ID_G_003` | `norm_name` 包含 `gene`/`mutation`/`variant` | `GENOMIC_HINT` | L5 |
+| `RULE_ID_G_004` | `norm_name` 包含 `bam`/`vcf`/`fastq` | `GENOMIC_FILE` | L5 |
+
+**Step 2：PII 值规则**
+
+对字段值字符串 `str_value` 执行格式校验：
+
+| 规则 ID | 算法 | 类别 | 等级 |
+|---|---|---|---|
+| `RULE_ID_001` | 身份证号校验（见下文） | `PII_ID_CARD` | L3 |
+| `RULE_ID_002` | 正则 `^1[3-9]\d{9}$` | `PII_MOBILE` | L3 |
+| `RULE_ID_003` | 上海医保卡校验（见下文） | `PII_MEDICAL_CARD` | L3 |
+| `RULE_ID_004` | ICD-10 解析 + 区间判定（见下文） | `MEDICAL_ICD10_*` | L3/L4 |
+
+*身份证号校验算法（GB 11643-1999）：*
+
+1. 长度必须为 18 字符。
+2. 正则验证格式：`^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$`。
+3. 计算加权和：`sum = Σ digit[i] × weight[i]`，权重因子为 `[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2]`。
+4. 校验码 = `"10X98765432"[sum % 11]`。
+5. 比较第 18 位与校验码（大小写不敏感）。
+
+*上海医保卡校验算法：*
+
+1. 必须为 9 位纯数字。
+2. 计算前 8 位加权和：`sum = Σ digit[i] × weight[i]`，权重因子为 `[7,9,10,5,8,4,2,1]`。
+3. 校验码 = `(10 - sum % 10) % 10`。
+4. 比较第 9 位与校验码。
+
+*ICD-10 编码解析与区间判定：*
+
+1. 正则解析：`^([A-Z])(\d{2})(?:\.\d{0,2})?$`，提取 `(letter, number)` 元组。
+2. 默认等级 L3，类别 `MEDICAL_ICD10_GENERAL`。
+3. 遍历 `params.icd10_l4_intervals`（默认含 B20-B24、F20-F29、C00-C97），使用元组字典序比较 `start <= code <= end`。
+4. 命中敏感区间时升级为 L4，类别按首字母映射：`B` → `MEDICAL_ICD10_HIV`，`F` → `MEDICAL_ICD10_PSYCHIATRIC`，`C` → `MEDICAL_ICD10_CANCER`。
+
+**Step 3：基因组文件内容检测**
+
+对 `str_value` 执行文件头特征匹配：
+
+| 规则 ID | 匹配条件 | 类别 | 等级 |
+|---|---|---|---|
+| `RULE_ID_G_010` | 以 `BAM\x01` 或 `@SQ` 开头 | `GENOMIC_BAM` | L5 |
+| `RULE_ID_G_011` | 以 `##fileformat=VCF` 开头 | `GENOMIC_VCF` | L5 |
+| `RULE_ID_G_012` | 以 `@` 开头且含 SRA 编号（SRR/ERR/DRR），或第 3 行为 `+` | `GENOMIC_FASTQ` | L5 |
+| `RULE_ID_G_013` | 正则 `[ATCGNatcgn]{50,}` 命中（连续 ≥50 碱基字符） | `GENOMIC_SEQUENCE` | L5 |
+
+**Step 4：合规模板扩展规则**
+
+当 `params.template` 非空时，根据模板名追加字段名匹配：
+
+| 模板 | 匹配关键词 | 类别 | 等级 | 规则 ID |
+|---|---|---|---|---|
+| `jrt0197` | `bankcard`/`cardno`/`credit`/`transaction`/`asset`/`balance`/`account` | `FINANCE_ACCOUNT` | L4 | `RULE_ID_JRT_001` |
+| `gbt35273`/`gdpr` | `email`/`address`/`location`/`轨迹` | `PII_CONTACT_LOCATION` | L3 | `RULE_ID_GBT_001` |
+| `gdpr` | `biometric`/`fingerprint`/`face`/`health`/`genetic`/`race`/`ethnicity`/`political`/`religion`/`sexual` | `GDPR_SPECIAL_CATEGORY` | L4 | `RULE_ID_GDPR_001` |
+
+**Step 5：白名单与运营字段降级**
+
+| 规则 ID | 匹配条件 | 类别 | 等级 |
+|---|---|---|---|
+| `RULE_ID_L1_001` | `norm_name` 包含 `params.public_field_whitelist` 中任一项（归一化后） | `PUBLIC_REPORT` | L1 |
+| `RULE_ID_L2_001` | `norm_name` 包含 `params.operational_field_patterns` 中任一项（归一化后） | `OPERATIONAL_STAT` | L2 |
+
+**Step 6：标签去重**
+
+以 `(level.value, category)` 为去重键，保留首次出现的标签，维持原始顺序。确保同一字段不被同一规则重复标记。
+
+**可观测性**
+
+每条规则命中时递增 Prometheus Counter `privacy_classification_rule_hits_total{rule_id=<ID>}`，用于监控规则有效性和命中率分析。
 
 ### 2.3 Layer 2 Small-NER
 
@@ -415,3 +589,64 @@ manual_override > request params > YAML profile > template defaults > default
 | [industrialization_review.md](industrialization_review.md) | 工业化评审、发布门禁和评分卡 |
 | [ops.md](ops.md) | 分类模块运行与配置 |
 | [prd.md](prd.md) | 分类模块需求 |
+
+## 13. 术语表
+
+### 隐私与数据安全
+
+| 术语 | 全称 | 说明 |
+|---|---|---|
+| PII | Personally Identifiable Information | 个人可识别信息。指能够单独或与其他信息组合后直接识别特定自然人的数据，如身份证号、手机号、姓名+地址组合等。本系统中 PII 类数据默认定级为 L3。 |
+| 敏感度等级 | Sensitivity Level | 本系统定义的 L1~L5 五级数据敏感度体系：L1（公开）→ L2（内部）→ L3（敏感）→ L4（高敏感）→ L5（极敏感）。等级越高，数据泄露风险越大，所需保护措施越严格。 |
+| 脱敏 | Data Masking | 对敏感数据进行变形处理（如部分遮盖、替换、加密），使其在保留业务可用性的同时降低隐私泄露风险。 |
+| 差分隐私 | Differential Privacy (DP) | 一种数学化的隐私保护框架，通过在查询结果中注入可控噪声（如 Laplace/Gaussian 噪声），确保单条记录的加入或移除不会显著改变输出分布。核心参数为隐私预算 ε（epsilon）。 |
+| K-匿名 | K-Anonymity | 一种数据发布隐私模型，要求发布数据中每条记录在准标识符（如年龄、邮编）维度上至少与 K-1 条其他记录不可区分，从而防止重标识攻击。 |
+| 隐私预算 | Privacy Budget (ε/δ) | 差分隐私中量化隐私损耗的参数。ε 越小隐私保护越强但数据效用越低；δ 为松弛参数，允许极小概率的隐私泄露。预算随查询消耗，耗尽后拒绝新查询。 |
+| 零知识保护 | Zero-Knowledge Protection | 本系统的日志/指标设计原则：访问日志不记录请求/响应体，错误日志对输入执行脱敏（redact），Prometheus 指标只使用等级、规则 ID 等匿名标签，确保可观测性基础设施不泄露原始数据。 |
+
+### 分类引擎与模型
+
+| 术语 | 全称 | 说明 |
+|---|---|---|
+| NER | Named Entity Recognition | 命名实体识别。从非结构化文本中定位并分类预定义类别的实体（如疾病名、药物名、基因名）。本系统 Layer-2 使用小型 NER 模型识别医疗领域实体。 |
+| LLM | Large Language Model | 大语言模型。基于 Transformer 架构的大规模预训练语言模型，具备通用文本理解和生成能力。本系统 Layer-3 使用本地部署的 LLM 处理复杂分类任务。 |
+| VLM | Vision Language Model | 视觉语言模型。能同时理解图像和文本的多模态模型。本系统使用 Qwen2-VL 处理医疗图片、手写病历等视觉输入。 |
+| BIO 标签 | Begin-Inside-Outside Tagging | 序列标注中的一种编码方案。B-（Begin）标记实体起始 token，I-（Inside）标记实体内部 token，O（Outside）标记非实体 token。用于将 NER 模型的逐 token 输出解析为完整实体边界。 |
+| ONNX | Open Neural Network Exchange | 开放神经网络交换格式。一种跨框架的模型序列化标准，本系统 Layer-2 优先使用 ONNX Runtime 推理以获得最佳 CPU 性能。 |
+| 三层漏斗 | Three-Layer Funnel | 本系统的核心分类架构：Layer-1 规则引擎（快速、确定性）→ Layer-2 Small-NER（中等复杂度）→ Layer-3 LLM/VLM（最高精度），逐层递进、按需触发，兼顾性能与准确率。 |
+| 复合规则 | Composite Rule | 上下文感知的组合敏感规则。单字段可能仅为 L3，但当同一记录中多个字段组合出现时（如姓名+身份证+手机号），整体升级为更高敏感等级（如 L5）。 |
+| 影子模式 | Shadow Mode | 一种无风险的规则验证机制。新规则集与生产规则集并行执行，新规则的结果仅记录不生效，用于对比验证新规则的准确性和稳定性后再正式切换。 |
+
+### 医疗与基因组
+
+| 术语 | 全称 | 说明 |
+|---|---|---|
+| ICD-10 | International Classification of Diseases, 10th Revision | 国际疾病分类第十版。WHO 制定的标准化疾病编码系统，格式为字母+两位数字+可选亚目（如 `B20`=HIV、`C78`=肺恶性肿瘤）。本系统对敏感区间（HIV/精神疾病/恶性肿瘤）的 ICD-10 编码升级为 L4。 |
+| BAM | Binary Alignment Map | 二进制比对映射文件。存储基因组测序 reads 与参考基因组比对结果的标准格式，包含个体基因信息，本系统定级为 L5。 |
+| VCF | Variant Call Format | 变异检测格式文件。存储基因组变异位点（SNP、Indel 等）的标准文本格式，以 `##fileformat=VCF` 头部标识。 |
+| FASTQ | — | 基因组测序原始数据格式。每条 read 占四行（@标识符、碱基序列、+分隔符、质量值），是测序仪输出的最原始数据格式。 |
+| SNP | Single Nucleotide Polymorphism | 单核苷酸多态性。基因组中单个碱基位置的变异，是最常见的遗传变异类型。通常以 `rs` + 数字编号（如 `rs12345`）。 |
+| CNV | Copy Number Variation | 拷贝数变异。基因组中较大片段（通常 >1kb）的重复或缺失，与多种疾病相关。 |
+| BRCA1/BRCA2 | Breast Cancer gene 1/2 | 乳腺癌易感基因。其突变显著增加乳腺癌和卵巢癌风险，属于高敏感基因信息，本系统定级为 L5。 |
+| TP53 | Tumor Protein P53 | 肿瘤蛋白 P53 基因。最重要的抑癌基因之一，突变与多种恶性肿瘤相关，本系统定级为 L5。 |
+| SRA | Sequence Read Archive | 序列读取档案。NCBI 维护的公共基因组测序数据库，登录号前缀为 SRR/ERR/DRR，本系统用其识别 FASTQ 文件来源。 |
+
+### 合规标准
+
+| 术语 | 全称 | 说明 |
+|---|---|---|
+| GB 11643-1999 | 公民身份号码 | 中国国家标准，规定 18 位公民身份号码的编码规则，包括 6 位地区码 + 8 位出生日期 + 3 位顺序码 + 1 位加权模 11 校验码。本系统据此实现身份证号值校验。 |
+| GB/T 35273 | 信息安全技术 个人信息安全规范 | 中国推荐性国家标准，定义个人信息的分类、安全要求和处理规范。本系统作为合规模板之一，激活后扩展邮箱、地址、轨迹等字段的识别规则。 |
+| JR/T 0197 | 金融数据安全 数据安全分级指南 | 中国金融行业行业标准，定义金融数据的分级分类要求。本系统作为合规模板之一，激活后扩展银行卡、交易、资产等金融字段的识别规则。 |
+| GDPR | General Data Protection Regulation | 欧盟通用数据保护条例。全球最严格的个人数据保护法规之一，定义了「特殊类别数据」（生物特征、健康、种族、政治观点等）需加强保护。本系统作为合规模板之一。 |
+
+### 系统与工程
+
+| 术语 | 全称 | 说明 |
+|---|---|---|
+| gRPC | Google Remote Procedure Call | Google 开源的高性能 RPC 框架，基于 HTTP/2 和 Protocol Buffers 序列化。本系统同时提供 REST 和 gRPC 两种服务接口。 |
+| REST | Representational State Transfer | 表述性状态转移。一种基于 HTTP 的 API 设计风格，本系统使用 FastAPI 框架实现 REST 接口。 |
+| Pydantic | — | Python 数据验证库。本系统使用 Pydantic v2 定义所有请求/响应模型，作为输入校验的第一道防线。 |
+| Prometheus | — | 开源监控和告警系统。本系统通过 `/metrics` 端点暴露分类规则命中率、延迟等指标，供 Prometheus 采集。 |
+| 置信度 | Confidence | 分类结果的可信程度，取值范围 [0, 1]。规则引擎命中为 1.0（确定性），NER 取模型 softmax 概率，LLM 取模型输出的自评分数。置信度低于阈值时触发更高层引擎复核。 |
+| SecurityTag | 安全标签 | 本系统的分类输出原子单元，包含敏感等级（level）、类别（category）、来源引擎（source_engine）、规则 ID（rule_id）、置信度（confidence）和是否需人工复核（needs_human_review）等字段。 |

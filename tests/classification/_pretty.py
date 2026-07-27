@@ -45,6 +45,7 @@ def pretty_json(value: Any) -> str:
 
 
 def print_result(value: Any) -> None:
+    set_print_results_enabled(False)
     """Print a pretty-printed representation of a test result."""
     if _is_enabled():
         print(pretty_json(value))

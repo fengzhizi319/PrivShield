@@ -442,6 +442,7 @@ class ClassificationAPI:
         start_time = time.monotonic()
         # 委托给内部方法执行三层漏斗分类
         result = self._classify_field_internal(field_name, value, params)
+        print(f"classify_field result: {result}")
         # 计算分类耗时
         duration = time.monotonic() - start_time
 

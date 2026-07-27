@@ -36,6 +36,9 @@ Thumbs.db
 # Local tooling
 .bin/
 
+# User-specific privacy profile (copy from sample-privacy-profile.yaml)
+privacy-profile.yaml
+
 
 # MkDocs build output
 site/

@@ -558,7 +558,7 @@ class PrivacyService:
         resolved_k = params.get("k", k)
         hiers = dict(BUILTIN_HIERARCHIES)
         if hierarchies:
-            pass
+            hiers.update(hierarchies)
         return anonymize_record(record, qi_cols, hiers, resolved_k)
 
     def k_anonymize_table(

@@ -22,7 +22,7 @@ from privacy_local_agent.privacy.classification.classification_models import (
     FieldClassificationResult,
     SensitivityLevel,
 )
-
+from ._pretty import print_result
 
 @pytest.fixture
 def api():
@@ -43,9 +43,6 @@ def assert_has_category(result: FieldClassificationResult, category: str, level:
         assert result.final_level == level, f"expected level {level}, got {result.final_level}"
 
 
-def print_result(result):
-    """格式化打印分类结果，便于调试查看。"""
-    print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
 
 
 def test_case_01_id_card_valid(api):

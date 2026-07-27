@@ -279,7 +279,9 @@ def get_resolver(profile_path: str | None = None) -> ParameterResolver:
         ParameterResolver 实例 / ParameterResolver instance.
     """
     path = profile_path or os.environ.get("PRIVACY_PROFILE", "privacy-profile.yaml")
+
     abs_path = os.path.abspath(path)
+    print(f"Using profile abs_path: {abs_path}")
     if abs_path not in _resolver_cache:
         _resolver_cache[abs_path] = ParameterResolver(abs_path)
     return _resolver_cache[abs_path]
