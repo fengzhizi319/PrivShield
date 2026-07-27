@@ -16,8 +16,10 @@ sys.modules["torch"] = MagicMock()
 
 
 # 如果运行测试的环境没安装 Pillow，自动跳过这些多模态测试用例
+Image = None
 try:
-    from PIL import Image
+    from PIL import Image as PILImage
+    Image = PILImage
     HAS_PILLOW = True
 except ImportError:
     HAS_PILLOW = False
@@ -26,6 +28,8 @@ except ImportError:
 # check so that heavy ML modules are stubbed/optional handling is applied.
 from privacy_local_agent.privacy.classification.classification_llm import Qwen2VLClassifier  # noqa: E402
 from privacy_local_agent.privacy.classification.classification_models import SensitivityLevel  # noqa: E402
+
+from ._pretty import print_result
 
 
 @pytest.mark.skipif(not HAS_PILLOW, reason="需要 Pillow 库来测试图像加载与解码")
@@ -98,6 +102,7 @@ def test_classify_success(mock_lazy_init):
     res = classifier.classify("测试病历", SensitivityLevel.L3, 0.5)
 
     assert res is not None
+    print_result(res)
     assert res["final_level"] == "L4"
     assert res["confidence"] == 0.95
     assert res["sub_category"] == "MEDICAL_HIV"
@@ -140,6 +145,7 @@ def test_classify_handwritten_medical_note(mock_lazy_init):
     res = classifier.classify(handwritten_input, SensitivityLevel.L1, 0.1)
 
     assert res is not None
+    print_result(res)
     assert res["final_level"] == "L3"
     assert res["confidence"] == 0.90
     assert "手写" in res["reasoning"]
@@ -175,6 +181,7 @@ def test_classify_printed_structured_report(mock_lazy_init):
     res = classifier.classify(printed_table_input, SensitivityLevel.L1, 0.1)
 
     assert res is not None
+    print_result(res)
     assert res["final_level"] == "L3"
     assert res["confidence"] == 0.94
     assert "印刷体" in res["reasoning"]

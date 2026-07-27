@@ -9,7 +9,9 @@ adapters, table aggregation and JSON input adaptation.
 """
 
 import os
+import json
 import tempfile
+from typing import Optional
 
 import pytest
 import yaml
@@ -33,7 +35,7 @@ def api():
 # ---------------------------------------------------------------------------
 
 
-def assert_has_category(result: FieldClassificationResult, category: str, level: SensitivityLevel = None):
+def assert_has_category(result: FieldClassificationResult, category: str, level: Optional[SensitivityLevel] = None):
     """断言字段结果包含指定 category 的标签，并可选择校验等级。"""
     categories = [t.category for t in result.tags]
     assert category in categories, f"expected category {category} in {categories}"
@@ -41,111 +43,134 @@ def assert_has_category(result: FieldClassificationResult, category: str, level:
         assert result.final_level == level, f"expected level {level}, got {result.final_level}"
 
 
+def print_result(result):
+    """格式化打印分类结果，便于调试查看。"""
+    print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+
+
 def test_case_01_id_card_valid(api):
     """中国大陆身份证号命中 PII_ID_CARD，等级 L3。"""
     result = api.classify_field("id_card", "110101199001011237")
+    print_result(result)
     assert_has_category(result, "PII_ID_CARD", SensitivityLevel.L3)
 
 
 def test_case_02_id_card_invalid_checksum(api):
     """身份证校验和失败时不应命中 PII_ID_CARD，回退到 default_level。"""
     result = api.classify_field("id_card", "110101199001011234")
+    print_result(result)
     assert "PII_ID_CARD" not in [t.category for t in result.tags]
 
 
 def test_case_03_mobile_valid(api):
     """中国大陆手机号命中 PII_MOBILE，等级 L3。"""
     result = api.classify_field("mobile", "13800138000")
+    print_result(result)
     assert_has_category(result, "PII_MOBILE", SensitivityLevel.L3)
 
 
 def test_case_04_mobile_invalid(api):
     """非法手机号不应命中 PII_MOBILE。"""
     result = api.classify_field("mobile", "12800138000")
+    print_result(result)
     assert "PII_MOBILE" not in [t.category for t in result.tags]
 
 
 def test_case_05_shanghai_medical_card(api):
     """上海医保卡号命中 PII_MEDICAL_CARD，等级 L3。"""
     result = api.classify_field("medical_card", "123456789")
+    print_result(result)
     assert_has_category(result, "PII_MEDICAL_CARD", SensitivityLevel.L3)
 
 
 def test_case_06_icd10_hiv(api):
     """ICD-10 B21.1 命中 HIV，等级 L4。"""
     result = api.classify_field("diagnosis", "B21.1")
+    print_result(result)
     assert_has_category(result, "MEDICAL_ICD10_HIV", SensitivityLevel.L4)
 
 
 def test_case_07_icd10_psychiatric(api):
     """ICD-10 F25 命中精神疾病，等级 L4。"""
     result = api.classify_field("diagnosis", "F25")
+    print_result(result)
     assert_has_category(result, "MEDICAL_ICD10_PSYCHIATRIC", SensitivityLevel.L4)
 
 
 def test_case_08_icd10_cancer(api):
     """ICD-10 C78.0 命中癌症，等级 L4。"""
     result = api.classify_field("diagnosis", "C78.0")
+    print_result(result)
     assert_has_category(result, "MEDICAL_ICD10_CANCER", SensitivityLevel.L4)
 
 
 def test_case_09_icd10_general(api):
     """ICD-10 J18.9 命中普通疾病，等级 L3。"""
     result = api.classify_field("diagnosis", "J18.9")
+    print_result(result)
     assert_has_category(result, "MEDICAL_ICD10_GENERAL", SensitivityLevel.L3)
 
 
 def test_case_10_genomic_brca_tp53(api):
     """字段名含 brca1 命中 GENOMIC_BRCA_TP53，等级 L5。"""
     result = api.classify_field("brca1_status", "positive")
+    print_result(result)
     assert_has_category(result, "GENOMIC_BRCA_TP53", SensitivityLevel.L5)
 
 
 def test_case_11_genomic_variant(api):
     """rs 编号命中 GENOMIC_VARIANT，等级 L5。"""
     result = api.classify_field("rs_number", "rs12345")
+    print_result(result)
     assert_has_category(result, "GENOMIC_VARIANT", SensitivityLevel.L5)
 
 
 def test_case_12_genomic_bam_magic(api):
     """BAM 魔数命中 GENOMIC_BAM，等级 L5。"""
     result = api.classify_field("file_content", "BAM\x01header")
+    print_result(result)
     assert_has_category(result, "GENOMIC_BAM", SensitivityLevel.L5)
 
 
 def test_case_13_genomic_vcf(api):
     """VCF 文件头命中 GENOMIC_VCF，等级 L5。"""
     result = api.classify_field("file_content", "##fileformat=VCFv4.2")
+    print_result(result)
     assert_has_category(result, "GENOMIC_VCF", SensitivityLevel.L5)
 
 
 def test_case_14_genomic_bam_header(api):
     """SAM/BAM @SQ 头部命中 GENOMIC_BAM，等级 L5。"""
     result = api.classify_field("file_content", "@SQ SN:chr1 LN:1000")
+    print_result(result)
     assert_has_category(result, "GENOMIC_BAM", SensitivityLevel.L5)
 
 
 def test_case_15_genomic_sequence(api):
     """长基因序列命中 GENOMIC_SEQUENCE，等级 L5。"""
     result = api.classify_field("sequence", "ATCG" * 20)
+    print_result(result)
     assert_has_category(result, "GENOMIC_SEQUENCE", SensitivityLevel.L5)
 
 
 def test_case_16_public_report(api):
     """公开报表字段命中 PUBLIC_REPORT，等级 L1。"""
     result = api.classify_field("public_report", "2023 annual summary")
+    print_result(result)
     assert_has_category(result, "PUBLIC_REPORT", SensitivityLevel.L1)
 
 
 def test_case_17_operational_stat(api):
     """运营统计字段命中 OPERATIONAL_STAT，等级 L2。"""
     result = api.classify_field("turnover_rate", "0.85")
+    print_result(result)
     assert_has_category(result, "OPERATIONAL_STAT", SensitivityLevel.L2)
 
 
 def test_case_18_name_fallback(api):
     """普通姓名字段不应命中高敏感规则。"""
     result = api.classify_field("name", "Alice", params={"default_level": "L1"})
+    print_result(result)
     high_categories = {"PII_ID_CARD", "PII_MOBILE", "PII_MEDICAL_CARD", "MEDICAL_ICD10_HIV",
                        "MEDICAL_ICD10_PSYCHIATRIC", "MEDICAL_ICD10_CANCER", "GENOMIC_BRCA_TP53",
                        "GENOMIC_VARIANT", "GENOMIC_BAM", "GENOMIC_VCF", "GENOMIC_FASTQ",
@@ -162,6 +187,7 @@ def test_case_19_record_aggregation(api):
         "diagnosis": "B21.1",
     }
     result = api.classify_record(record)
+    print_result(result)
     assert result.final_level == SensitivityLevel.L4
     assert any(t.category == "MEDICAL_ICD10_HIV" for t in result.aggregated_tags)
 
@@ -173,6 +199,7 @@ def test_case_20_table_aggregation(api):
         {"id_card": "110101199001011237", "brca1_status": "positive", "diagnosis": "C78.0"},
     ]
     result = api.classify_table(schema, rows)
+    print_result(result)
     assert result.final_level == SensitivityLevel.L5
     categories = {t.category for t in result.aggregated_tags}
     assert "PII_ID_CARD" in categories
@@ -188,6 +215,7 @@ def test_case_20_table_aggregation(api):
 def test_parameter_source_request(api):
     """请求参数覆盖 default_level。"""
     result = api.classify_field("foo", "bar", params={"default_level": "L2"})
+    print_result(result)
     assert result.final_level == SensitivityLevel.L2
 
 
@@ -207,9 +235,11 @@ def test_yaml_profile_override():
     try:
         api = ClassificationAPI(profile_path=path)
         result = api.classify_field("unknown", "value")
+        print_result(result)
         assert result.final_level == SensitivityLevel.L2
 
         result2 = api.classify_field("open_data", "x")
+        print_result(result2)
         assert any(t.category == "PUBLIC_REPORT" for t in result2.tags)
     finally:
         os.unlink(path)
@@ -223,7 +253,15 @@ def test_manual_override():
         "110101199001011237",
         params={"manual_override": {"id_card": "L1"}},
     )
+    print_result(result)
     assert result.final_level == SensitivityLevel.L1
+
+
+def test_print_result_fixture_example(api, enable_classification_print_results):
+    """示例：通过 fixture 局部开启格式化打印。"""
+    result = api.classify_field("mobile", "13800138000")
+    print_result(result)
+    assert_has_category(result, "PII_MOBILE", SensitivityLevel.L3)
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +272,7 @@ def test_manual_override():
 def test_classify_json_record(api):
     """classify_json 解析字典并按记录分类。"""
     result = api.classify_json('{"id_card": "110101199001011237", "mobile": "13800138000"}')
+    print_result(result)
     assert result.record_result is not None
     assert result.record_result.final_level == SensitivityLevel.L3
 
@@ -242,6 +281,7 @@ def test_classify_json_table(api):
     """classify_json 解析列表并按表分类。"""
     data = [{"id_card": "110101199001011237"}, {"brca1_status": "positive"}]
     result = api.classify_json(data)
+    print_result(result)
     assert result.table_result is not None
     assert result.table_result.final_level == SensitivityLevel.L5
 
@@ -253,6 +293,7 @@ def test_classify_sql_result(api):
         {"diagnosis": "B21.1"},
     ]
     result = api.classify_sql_result(result_set)
+    print_result(result)
     assert result.table_result is not None
     assert result.table_result.final_level == SensitivityLevel.L4
 
@@ -262,6 +303,7 @@ def test_classify_dataframe(api):
     pd = pytest.importorskip("pandas")
     df = pd.DataFrame({"id_card": ["110101199001011237"], "brca1_status": ["positive"]})
     result = api.classify_dataframe(df)
+    print_result(result)
     assert result.table_result is not None
     assert result.table_result.final_level == SensitivityLevel.L5
 
@@ -271,6 +313,7 @@ def test_classify_arrow(api):
     pa = pytest.importorskip("pyarrow")
     table = pa.table({"id_card": ["110101199001011237"], "diagnosis": ["B21.1"]})
     result = api.classify_arrow(table)
+    print_result(result)
     assert result.table_result is not None
     assert result.table_result.final_level == SensitivityLevel.L4
 
@@ -283,6 +326,7 @@ def test_classify_arrow(api):
 def test_field_result_structure(api):
     """字段结果包含规范要求的字段且 confidence 在 [0,1]。"""
     result = api.classify_field("mobile", "13800138000")
+    print_result(result)
     assert result.field_name == "mobile"
     assert result.final_level == SensitivityLevel.L3
     assert 0.0 <= result.confidence <= 1.0
@@ -292,6 +336,7 @@ def test_field_result_structure(api):
 def test_audit_info(api):
     """ClassificationResult 携带审计信息。"""
     result = api.classify_json('{"mobile": "13800138000"}')
+    print_result(result)
     assert result.audit_info.version == "1.0.0"
     assert result.audit_info.parameter_source in {"default", "profile", "request", "manual"}
     assert result.audit_info.timestamp

@@ -22,6 +22,8 @@ import pytest
 from privacy_local_agent.privacy.classification import ClassificationAPI
 from privacy_local_agent.privacy.classification.classification_models import SensitivityLevel
 
+from ._pretty import print_result
+
 
 @pytest.fixture
 def api():
@@ -40,6 +42,7 @@ def test_composite_pii_combo_upgrades_to_l5(api):
         "mobile": "13800138000",
     }
     result = api.classify_record(record)
+    print_result(result)
     assert result.final_level == SensitivityLevel.L5
     assert any(t.category == "COMPOSITE_PII_COMBO" for t in result.aggregated_tags)
 
@@ -54,6 +57,7 @@ def test_composite_not_triggered_with_two_fields(api):
         "mobile": "13800138000",
     }
     result = api.classify_record(record)
+    print_result(result)
     assert result.final_level.value < "L5"
     assert not any(t.source_engine == "COMPOSITE" for t in result.aggregated_tags)
 
@@ -68,6 +72,7 @@ def test_composite_medical_genomic_combo(api):
         "gene_marker": "BRCA1",
     }
     result = api.classify_record(record)
+    print_result(result)
     assert result.final_level == SensitivityLevel.L5
     assert any(t.category == "COMPOSITE_MEDICAL_GENOMIC" for t in result.aggregated_tags)
 
@@ -94,6 +99,7 @@ def test_custom_composite_rule(api):
         ]
     }
     result = api.classify_record(record, params=params)
+    print_result(result)
     assert result.final_level == SensitivityLevel.L4
     assert any(t.category == "COMPOSITE_NAME_EMAIL" for t in result.aggregated_tags)
 
@@ -109,6 +115,7 @@ def test_composite_tag_needs_review_when_l5(api):
         "mobile": "13800138000",
     }
     result = api.classify_record(record)
+    print_result(result)
     composite_tags = [t for t in result.aggregated_tags if t.source_engine == "COMPOSITE"]
     assert composite_tags
     assert composite_tags[0].needs_human_review is True

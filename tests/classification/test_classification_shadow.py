@@ -17,6 +17,8 @@ import pytest
 
 from privacy_local_agent.privacy.classification import ClassificationAPI
 
+from ._pretty import print_result
+
 
 @pytest.fixture
 def api():
@@ -33,6 +35,7 @@ def test_rule_set_version_in_audit(api):
         [{"mobile": "13800138000"}],
         params={"ruleSetVersion": "2.0.0"},
     )
+    print_result(result)
     assert result.audit_info.rule_set_version == "2.0.0"
 
 
@@ -51,6 +54,7 @@ def test_shadow_mode_detects_diff(api):
             "shadowVersion": "1.0.0",
         },
     )
+    print_result(result)
     # 当前版本与影子版本相同，不应有差异
     assert result.shadow_diff == []
 
@@ -71,6 +75,7 @@ def test_shadow_mode_with_manual_override_diff(api):
             "manualOverride": {"mobile": "L5"},
         },
     )
+    print_result(result)
     # 手动覆盖同时应用于当前和影子版本（因为在 params 中）
     # 此处仅验证影子路径被执行并返回列表
     assert result.shadow_diff is not None

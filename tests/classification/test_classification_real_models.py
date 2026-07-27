@@ -57,6 +57,8 @@ def _load_real_module(name: str):
 _torch = _load_real_module("torch")
 _transformers = _load_real_module("transformers")
 
+from ._pretty import print_result
+
 # torch 是否被其它测试模块在 sys.modules 中污染为 MagicMock
 _TORCH_MOCKED = "torch" in sys.modules and not isinstance(
     getattr(sys.modules["torch"], "__file__", None), str
@@ -160,6 +162,7 @@ def test_llm_real_classify_text(qwen_classifier):
     res = qwen_classifier.classify(text, SensitivityLevel.L1, 0.1)
 
     assert res is not None, "LLM 应真实返回定级结果（不降级）"
+    print_result(res)
     assert res.get("final_level") in {"L1", "L2", "L3", "L4", "L5"}
     assert 0.0 <= float(res.get("confidence", 0.0)) <= 1.0
 
@@ -190,6 +193,7 @@ def test_llm_real_classify_image(qwen_classifier, filename, expected_levels):
     res = qwen_classifier.classify(data_uri, SensitivityLevel.L1, 0.1)
 
     assert res is not None, f"LLM 应对图片 {filename} 真实返回定级结果（不降级）"
+    print_result(res)
     assert res.get("final_level") in expected_levels, (
         f"{filename} 预期等级范围 {expected_levels}，实际 {res.get('final_level')}"
     )
@@ -227,5 +231,6 @@ def test_classification_api_image_funnel_not_degraded(qwen_classifier):
         "medical_image", data_uri, {"enable_llm": True, "enable_small_ner": False}
     )
 
+    print_result(result)
     assert result.engine_layer == EngineLayer.L3_LLM, "图片病例应由真实 LLM 层定级（不降级）"
     assert result.final_level.value in {"L3", "L4", "L5"}, "HIV 检验报告应为中高敏感等级"

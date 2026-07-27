@@ -24,6 +24,8 @@ import pytest
 from privacy_local_agent.privacy.classification import ClassificationAPI
 from privacy_local_agent.privacy.classification.classification_models import SensitivityLevel
 
+from ._pretty import print_result
+
 
 @pytest.fixture
 def api():
@@ -41,6 +43,7 @@ def test_jrt0197_finance_field(api):
         "6222021234567890123",
         params={"template": "jrt0197"},
     )
+    print_result(result)
     assert result.final_level == SensitivityLevel.L4
     assert any(t.category == "FINANCE_ACCOUNT" for t in result.tags)
 
@@ -55,6 +58,7 @@ def test_gbt35273_email_field(api):
         "user@example.com",
         params={"template": "gbt35273"},
     )
+    print_result(result)
     assert result.final_level == SensitivityLevel.L3
     assert any(t.category == "PII_CONTACT_LOCATION" for t in result.tags)
 
@@ -69,6 +73,7 @@ def test_gdpr_special_category(api):
         "...",
         params={"template": "gdpr"},
     )
+    print_result(result)
     assert result.final_level == SensitivityLevel.L4
     assert any(t.category == "GDPR_SPECIAL_CATEGORY" for t in result.tags)
 
@@ -84,6 +89,7 @@ def test_template_default_level_does_not_override_existing_rule(api):
         "110101199001011237",
         params={"template": "gbt35273"},
     )
+    print_result(result)
     assert result.final_level == SensitivityLevel.L3
 
 
@@ -98,6 +104,7 @@ def test_template_request_overrides_profile(api):
         "democrat",
         params={"template": "gdpr"},
     )
+    print_result(result)
     assert result.final_level == SensitivityLevel.L4
 
 

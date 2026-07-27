@@ -31,6 +31,8 @@ from privacy_local_agent.privacy.classification.classification_utils import (
     should_log_value,
 )
 
+from ._pretty import print_result
+
 
 @pytest.fixture
 def api():
@@ -84,6 +86,7 @@ def test_return_field_values_false():
         "110101199001011237",
         params={"returnFieldValues": False},
     )
+    print_result(result)
     assert result.field_value is None
 
 

@@ -31,6 +31,8 @@ from privacy_local_agent.privacy.classification.classification_vectorized import
     VectorizedRuleEngine,
 )
 
+from ._pretty import print_result
+
 
 @pytest.fixture
 def params():
@@ -107,6 +109,9 @@ def test_classify_table_vectorized_consistency():
 
     result_default = api_default.classify_table(schema, rows)
     result_vector = api_vector.classify_table(schema, rows)
+
+    print_result(result_default)
+    print_result(result_vector)
 
     assert result_default.final_level == result_vector.final_level
     assert {str(t) for t in result_default.aggregated_tags} == {

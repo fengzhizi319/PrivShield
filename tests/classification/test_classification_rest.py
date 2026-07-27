@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from privacy_local_agent.main import app
 
+from ._pretty import print_result
+
 # 复用同一个 TestClient 实例，避免重复创建应用
 client = TestClient(app)
 
@@ -23,6 +25,7 @@ def test_classify_field():
     )
     assert response.status_code == 200
     result = response.json()["result"]
+    print_result(result)
     assert result["finalLevel"] == "L3"
     assert any(t["category"] == "PII_ID_CARD" for t in result["tags"])
 
@@ -42,6 +45,7 @@ def test_classify_record():
     )
     assert response.status_code == 200
     result = response.json()["result"]
+    print_result(result)
     assert result["finalLevel"] == "L4"
 
 
@@ -63,5 +67,6 @@ def test_classify_table():
     )
     assert response.status_code == 200
     result = response.json()["result"]
+    print_result(result)
     assert result["finalLevel"] == "L5"
     assert result["schema"] == ["id_card", "brca1_status", "diagnosis"]

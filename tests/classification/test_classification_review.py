@@ -24,6 +24,8 @@ import pytest
 from privacy_local_agent.privacy.classification import ClassificationAPI
 from privacy_local_agent.privacy.classification.classification_review import ReviewStore
 
+from ._pretty import print_result
+
 
 @pytest.fixture
 def api():
@@ -46,6 +48,7 @@ def test_review_entries_collected_for_genomic_hint(api):
         schema=["name", "id_card", "mobile"],
         rows=[{"name": "张三", "id_card": "110101199001011237", "mobile": "13800138000"}],
     )
+    print_result(result2)
     assert result2.review_entries
     entry = result2.review_entries[0]
     assert entry.status.value == "PENDING"
@@ -60,6 +63,7 @@ def test_confirm_review_and_export(api):
         schema=["name", "id_card", "mobile"],
         rows=[{"name": "张三", "id_card": "110101199001011237", "mobile": "13800138000"}],
     )
+    print_result(result)
     entry = result.review_entries[0]
     # 确认复核：修正等级为 L5
     confirmed = api.confirm_review(
@@ -88,6 +92,7 @@ def test_export_csv(api):
         schema=["name", "id_card", "mobile"],
         rows=[{"name": "张三", "id_card": "110101199001011237", "mobile": "13800138000"}],
     )
+    print_result(result)
     review_id = result.review_entries[0].review_id
     api.confirm_review(review_id, corrected_level="L5")
     csv_data = api.export_reviews(format="csv", mask_input=False)
@@ -118,6 +123,7 @@ def test_review_store_sqlite_persistence(tmp_path):
         schema=["name", "id_card", "mobile"],
         rows=[{"name": "张三", "id_card": "110101199001011237", "mobile": "13800138000"}],
     )
+    print_result(result)
     review_id = result.review_entries[0].review_id
 
     # 模拟进程重启：使用新的 ReviewStore 实例读取同一数据库
