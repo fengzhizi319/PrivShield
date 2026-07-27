@@ -212,8 +212,18 @@ field_patterns=[
 
 1. 正则解析：`^([A-Z])(\d{2})(?:\.\d{0,2})?$`，提取 `(letter, number)` 元组。
 2. 默认等级 L3，类别 `MEDICAL_ICD10_GENERAL`。
-3. 遍历 `params.icd10_l4_intervals`（默认含 B20-B24、F20-F29、C00-C97），使用元组字典序比较 `start <= code <= end`。
-4. 命中敏感区间时升级为 L4，类别按首字母映射：`B` → `MEDICAL_ICD10_HIV`，`F` → `MEDICAL_ICD10_PSYCHIATRIC`，`C` → `MEDICAL_ICD10_CANCER`。
+3. 遍历 `params.icd10_l4_intervals`（默认含 B20-B24、A50-A53、A54-A64、F20-F29、C00-C97），使用元组字典序比较 `start <= code <= end`。
+4. 命中敏感区间时升级为 L4，类别按首字母映射：`B` → `MEDICAL_ICD10_HIV`，`A` → `MEDICAL_ICD10_STD`，`F` → `MEDICAL_ICD10_PSYCHIATRIC`，`C` → `MEDICAL_ICD10_CANCER`。
+
+默认 ICD-10 L4 敏感区间（对齐 DB51/T 2989—2023）：
+
+| 区间 | 疾病类别 | 说明 |
+|---|---|---|
+| B20-B24 | HIV/艾滋病 | 人类免疫缺陷病毒感染 |
+| A50-A53 | 梅毒 | 先天性/早期/晚期梅毒 |
+| A54-A64 | 其他性病 | 淋病、衣原体感染等性传播疾病 |
+| F20-F29 | 精神分裂症 | 重型精神疾病 |
+| C00-C97 | 恶性肿瘤 | 各类癌症编码区间 |
 
 **Step 3：基因组文件内容检测**
 
@@ -235,6 +245,17 @@ field_patterns=[
 | `jrt0197` | `bankcard`/`cardno`/`credit`/`transaction`/`asset`/`balance`/`account` | `FINANCE_ACCOUNT` | L4 | `RULE_ID_JRT_001` |
 | `gbt35273`/`gdpr` | `email`/`address`/`location`/`轨迹` | `PII_CONTACT_LOCATION` | L3 | `RULE_ID_GBT_001` |
 | `gdpr` | `biometric`/`fingerprint`/`face`/`health`/`genetic`/`race`/`ethnicity`/`political`/`religion`/`sexual` | `GDPR_SPECIAL_CATEGORY` | L4 | `RULE_ID_GDPR_001` |
+| `sc_health_db51` | `fingerprint`/`voiceprint`/`palmprint`/`ear`/`iris`/`face`/`biometric` | `PII_BIOMETRIC` | L3 | `RULE_ID_DB51_001` |
+| `sc_health_db51` | `bankcard`/`alipay`/`wechatpay`/`thirdpay`/`支付` | `FINANCE_ACCOUNT` | L3 | `RULE_ID_DB51_002` |
+| `sc_health_db51` | `minor`/`child`/`未成年`/`儿童` | `PII_MINOR` | L3 | `RULE_ID_DB51_003` |
+| `sc_health_db51` | `location`/`trajectory`/`轨迹` | `PII_CONTACT_LOCATION` | L3 | `RULE_ID_DB51_004` |
+| `sc_health_db51` | `hiv`/`aids`/`std`/`syphilis`/`gonorrhea`/`psychiatric`/`schizophrenia` | `MEDICAL_SENSITIVE_DISEASE` | L4 | `RULE_ID_DB51_005` |
+
+**DB51/T 2989—2023 四川省健康医疗大数据应用指南说明：**
+
+- 金融账户信息（支付卡号、微信/支付宝等）在四川标准中定为**第 3 级**（敏感），而非 JR/T 0197 的第 4 级。
+- 未成年人信息（不满十四周岁）需特殊保护，字段名含 `minor`/`child`/`未成年`/`儿童` 时标记为 L3。
+- 敏感病种字段（艾滋病、性病、重型精神病）通过字段名关键词识别，升级为 L4。
 
 **Step 5：白名单与运营字段降级**
 
@@ -243,9 +264,19 @@ field_patterns=[
 | `RULE_ID_L1_001` | `norm_name` 包含 `params.public_field_whitelist` 中任一项（归一化后） | `PUBLIC_REPORT` | L1 |
 | `RULE_ID_L2_001` | `norm_name` 包含 `params.operational_field_patterns` 中任一项（归一化后） | `OPERATIONAL_STAT` | L2 |
 
-**Step 6：标签去重**
+**Step 6：业务分类映射与标签去重**
 
-以 `(level.value, category)` 为去重键，保留首次出现的标签，维持原始顺序。确保同一字段不被同一规则重复标记。
+根据 DB51/T 2989—2023 第 5.2.1 节，将技术类别（`category`）映射到 5 大业务类别（`business_category`）：
+
+| 业务类别 | 枚举值 | 包含的技术类别 |
+|---|---|---|
+| 个人基本信息数据 | `PERSONAL_BASIC` | `PII_ID_CARD`、`PII_MOBILE`、`PII_MEDICAL_CARD`、`PII_CONTACT_LOCATION`、`PII_BIOMETRIC`、`PII_MINOR` |
+| 诊疗信息数据 | `MEDICAL_TREATMENT` | `MEDICAL_ICD10_*`、`MEDICAL_SENSITIVE_DISEASE`、`GENOMIC_*`、`GDPR_SPECIAL_CATEGORY` |
+| 费用信息数据 | `FEE_BILLING` | `FINANCE_ACCOUNT`、`FINANCE_ACCOUNT_JRT` |
+| 管理信息数据 | `MANAGEMENT` | `OPERATIONAL`、`OPERATIONAL_STAT`、`PUBLIC_REPORT` |
+| 公共卫生信息数据 | `PUBLIC_HEALTH` | （预留，当前无直接映射） |
+
+映射完成后，以 `(level.value, category)` 为去重键，保留首次出现的标签，维持原始顺序。确保同一字段不被同一规则重复标记。
 
 **可观测性**
 
@@ -423,7 +454,8 @@ graph TD
 
 - `SensitivityLevel`：L1~L5。
 - `EngineLayer`：L1_RULE / L2_SMALL_NER / L3_LLM。
-- `SecurityTag`：单个分类标签。
+- `BusinessCategory`：业务分类枚举（DB51/T 2989 5.2.1 节 5 大类别）。
+- `SecurityTag`：单个分类标签（含业务分类字段）。
 - `FieldClassificationResult`：字段级结果。
 - `RecordClassificationResult`：记录级聚合结果。
 - `TableClassificationResult`：表级结果、复核条目和影子差异。
@@ -432,7 +464,20 @@ graph TD
 - `ClassificationJob` / `ClassificationJobResult`：异步任务模型。
 - `ReviewEntry`：人工复核条目。
 
-### 5.1 结果字段
+### 5.1 SecurityTag 字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `level` | `SensitivityLevel` | 敏感度等级（L1~L5） |
+| `category` | `str` | 技术分类类别（如 `PII_ID_CARD`、`MEDICAL_ICD10_HIV`） |
+| `business_category` | `BusinessCategory \| None` | 业务分类（DB51/T 2989 5.2.1 节），None 表示未映射 |
+| `confidence` | `float` | 置信度 [0,1]，规则引擎默认 1.0 |
+| `source_engine` | `str` | 来源引擎（RULE/SMALL_NER/LLM/COMPOSITE） |
+| `rule_id` | `str` | 触发的规则 ID |
+| `version` | `str` | 标签版本号 |
+| `needs_human_review` | `bool` | 是否需人工复核 |
+
+### 5.2 结果字段
 
 | 字段 | 说明 |
 |---|---|
@@ -445,7 +490,7 @@ graph TD
 | `needs_human_review` | 是否需要复核 |
 | `reasoning` | 规则命中或模型推理说明 |
 
-### 5.2 审计信息
+### 5.3 审计信息
 
 `AuditInfo` 至少包含：
 
@@ -480,21 +525,31 @@ SecretFlow 适配器通过 `privacy/data_adapters.py` 的 `to_records` / `from_r
 
 | 模板 | 场景 | 主要扩展 |
 |---|---|---|
-| `jrt0197` | 金融数据 | 银行卡、交易账号、资产、征信 |
+| `jrt0197` | 金融数据 | 银行卡、交易账号、资产、征信（L4） |
 | `gbt35273` | 通用个人信息 | 姓名、身份证、手机号、住址、轨迹 |
 | `gdpr` | 欧盟个人数据 | 生物识别、健康、基因、种族、政治观点 |
+| `sc_health_db51` | 四川省健康医疗大数据 | 生物识别、金融账户（L3）、未成年人、敏感病种 |
 
-模板默认值只填充未设置的参数，不覆盖请求级参数。
+模板默认值覆盖内置默认值和 YAML profile 配置，但请求级参数仍具有最高优先级。
 
 ## 7. 版本化、参数与影子模式
 
 ### 7.1 参数优先级
 
 ```text
-manual_override > request params > YAML profile > template defaults > default
+manual_override > request params > template defaults > YAML profile > default
 ```
 
-`ParameterResolver` 加载 YAML profile，`ClassificationAPI` 合并各层参数并通过 Pydantic `model_validate` 校验。关键参数包括：
+`ParameterResolver` 加载 YAML profile，`ClassificationAPI` 合并各层参数并通过 Pydantic `model_validate` 校验。
+
+**参数合并顺序（从低到高）：**
+
+1. Pydantic 模型默认值 / 内置 `default_params`
+2. YAML profile 配置文件
+3. 合规模板默认值（覆盖默认值和 profile，代表特定合规标准的参数）
+4. 请求级参数（最高优先级，覆盖一切）
+
+关键参数包括：
 
 | 参数 | 默认值 | 作用 |
 |---|---|---|
@@ -639,6 +694,7 @@ manual_override > request params > YAML profile > template defaults > default
 | GB/T 35273 | 信息安全技术 个人信息安全规范 | 中国推荐性国家标准，定义个人信息的分类、安全要求和处理规范。本系统作为合规模板之一，激活后扩展邮箱、地址、轨迹等字段的识别规则。 |
 | JR/T 0197 | 金融数据安全 数据安全分级指南 | 中国金融行业行业标准，定义金融数据的分级分类要求。本系统作为合规模板之一，激活后扩展银行卡、交易、资产等金融字段的识别规则。 |
 | GDPR | General Data Protection Regulation | 欧盟通用数据保护条例。全球最严格的个人数据保护法规之一，定义了「特殊类别数据」（生物特征、健康、种族、政治观点等）需加强保护。本系统作为合规模板之一。 |
+| DB51/T 2989—2023 | 四川省健康医疗大数据应用指南 | 四川省地方标准，定义健康医疗大数据的分级分类要求。将数据分为 5 级（第 1~5 级）和 5 大业务类别（个人基本信息、诊疗信息、费用信息、公共卫生信息、管理信息）。本系统作为合规模板 `sc_health_db51`，并将金融账户定为第 3 级（而非 JR/T 0197 的第 4 级）。 |
 
 ### 系统与工程
 
@@ -649,4 +705,5 @@ manual_override > request params > YAML profile > template defaults > default
 | Pydantic | — | Python 数据验证库。本系统使用 Pydantic v2 定义所有请求/响应模型，作为输入校验的第一道防线。 |
 | Prometheus | — | 开源监控和告警系统。本系统通过 `/metrics` 端点暴露分类规则命中率、延迟等指标，供 Prometheus 采集。 |
 | 置信度 | Confidence | 分类结果的可信程度，取值范围 [0, 1]。规则引擎命中为 1.0（确定性），NER 取模型 softmax 概率，LLM 取模型输出的自评分数。置信度低于阈值时触发更高层引擎复核。 |
-| SecurityTag | 安全标签 | 本系统的分类输出原子单元，包含敏感等级（level）、类别（category）、来源引擎（source_engine）、规则 ID（rule_id）、置信度（confidence）和是否需人工复核（needs_human_review）等字段。 |
+| SecurityTag | 安全标签 | 本系统的分类输出原子单元，包含敏感等级（level）、类别（category）、业务分类（business_category）、来源引擎（source_engine）、规则 ID（rule_id）、置信度（confidence）和是否需人工复核（needs_human_review）等字段。 |
+| BusinessCategory | 业务分类 | 根据 DB51/T 2989—2023 第 5.2.1 节定义的 5 大业务类别：个人基本信息（PERSONAL_BASIC）、诊疗信息（MEDICAL_TREATMENT）、费用信息（FEE_BILLING）、公共卫生信息（PUBLIC_HEALTH）、管理信息（MANAGEMENT）。与技术类别（category）和敏感度等级（level）正交。 |
