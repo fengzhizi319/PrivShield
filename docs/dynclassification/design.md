@@ -120,7 +120,7 @@ flowchart TD
     Engine --> Composer
     Composer --> Output["标准化分类结果 (ClassificationResult)"]
 ```
-
+![img.png](img.png)
 ### 4.2 核心组件职责
 
 | 组件 | 职责 | 对应新模块 |
