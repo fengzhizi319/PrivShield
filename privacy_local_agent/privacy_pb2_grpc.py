@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import privacy_pb2 as privacy__pb2
+from . import privacy_pb2 as privacy__pb2
 
 GRPC_GENERATED_VERSION = '1.82.1'
 GRPC_VERSION = grpc.__version__
