@@ -25,6 +25,13 @@ from .rule_schema import DowngradeRuleDef, MatcherDef, RuleDef, RuleProfile
 logger = get_logger(__name__)
 
 
+from ..observability.metrics import (
+    DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL,
+    DYNCLASSIFICATION_OPERATOR_ERRORS_TOTAL,
+    DYNCLASSIFICATION_RULE_HITS_TOTAL,
+)
+
+
 class ConfigurableRuleEngine:
     """通用可配置规则引擎。
 
@@ -146,6 +153,12 @@ class ConfigurableRuleEngine:
         if not matched:
             return None
 
+        DYNCLASSIFICATION_RULE_HITS_TOTAL.labels(
+            rule_id=rule.id,
+            domain=self.domain or "default",
+            standard=self.standard_id or "default",
+        ).inc()
+
         # 确定最终等级和类别（支持 ICD-10 动态等级）
         level = rule.level
         category = rule.category
@@ -168,15 +181,28 @@ class ConfigurableRuleEngine:
         try:
             op_func = OperatorRegistry.get(matcher.operator)
         except KeyError:
+            DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL.labels(
+                operator=matcher.operator, result="miss"
+            ).inc()
             return False
 
         target_value = field_name if matcher.target == "field_name" else str_value
         if target_value is None or target_value == "":
+            DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL.labels(
+                operator=matcher.operator, result="miss"
+            ).inc()
             return False
 
         try:
-            return op_func(target_value, matcher.params)
+            res = bool(op_func(target_value, matcher.params))
+            DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL.labels(
+                operator=matcher.operator, result="hit" if res else "miss"
+            ).inc()
+            return res
         except Exception as exc:
+            DYNCLASSIFICATION_OPERATOR_ERRORS_TOTAL.labels(
+                operator=matcher.operator, rule_id=""
+            ).inc()
             logger.warning(
                 "operator_execution_failed",
                 extra={

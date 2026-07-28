@@ -7,13 +7,18 @@
 
 from __future__ import annotations
 
+import os
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
-
+from ..observability.metrics import (
+    DYNCLASSIFICATION_ENGINE_LOAD_DURATION,
+    DYNCLASSIFICATION_PROFILE_CACHE_SIZE,
+)
 from .composite import CompositeRuleEngine
 from .engine import ConfigurableRuleEngine
 from .models import DomainTaxonomy
@@ -36,13 +41,24 @@ class ProfileLoader:
         rules_dir: 规则配置根目录。
     """
 
-    def __init__(self, rules_dir: str | Path = "rules"):
+    def __init__(self, rules_dir: str | Path | None = None):
         """初始化 Profile 加载器。
 
         Args:
-            rules_dir: 规则配置根目录路径。
+            rules_dir: 规则配置根目录路径。未指定时读取 PRIVACY_DYNCLASSIFICATION_RULES_DIR 环境变量，默认为 "rules"。
         """
-        self.rules_dir = Path(rules_dir)
+        env_rules_dir = os.environ.get("PRIVACY_DYNCLASSIFICATION_RULES_DIR", "rules")
+        target_dir = rules_dir if rules_dir is not None else env_rules_dir
+        self.rules_dir = Path(target_dir)
+
+        self.hot_reload_enabled = (
+            os.environ.get("PRIVACY_DYNCLASSIFICATION_HOT_RELOAD", "true").lower() == "true"
+        )
+        self.reload_interval_seconds = float(
+            os.environ.get("PRIVACY_DYNCLASSIFICATION_RELOAD_INTERVAL", "0")
+        )
+        self._last_check_time = 0.0
+
         self._lock = threading.RLock()
         self._taxonomy_cache: dict[str, DomainTaxonomy] = {}
         self._profile_cache: dict[str, RuleProfile] = {}
@@ -51,17 +67,25 @@ class ProfileLoader:
         self._composite_cache: dict[str, CompositeRuleEngine] = {}
         self._file_mtimes: dict[Path, float] = {}
 
-    def check_and_reload(self) -> bool:
+    def check_and_reload(self, force: bool = False) -> bool:
         """检查 rules_dir 目录下的 YAML 文件修改时间，若有变动则自动重载。
+
+        Args:
+            force: 是否忽略 reload_interval_seconds 检查并强制检测 mtime。
 
         Returns:
             bool - 是否触发了重载。
         """
-        if not self.rules_dir.exists():
+        if not self.hot_reload_enabled or not self.rules_dir.exists():
             return False
 
-        changed = False
+        now = time.time()
         with self._lock:
+            if not force and self.reload_interval_seconds > 0 and self._last_check_time > 0 and (now - self._last_check_time) < self.reload_interval_seconds:
+                return False
+            self._last_check_time = now
+
+            changed = False
             for yaml_file in self.rules_dir.glob("**/*.yaml"):
                 mtime = yaml_file.stat().st_mtime
                 if yaml_file not in self._file_mtimes or self._file_mtimes[yaml_file] != mtime:
@@ -152,8 +176,15 @@ class ProfileLoader:
         """
         cache_key = f"{domain or 'default'}:{standard or 'default'}"
         if cache_key not in self._engine_cache:
+            start_t = time.perf_counter()
             engine = self._build_engine(domain, standard)
+            duration = time.perf_counter() - start_t
+            DYNCLASSIFICATION_ENGINE_LOAD_DURATION.labels(
+                domain=domain or "default",
+                standard=standard or "default",
+            ).observe(duration)
             self._engine_cache[cache_key] = engine
+            DYNCLASSIFICATION_PROFILE_CACHE_SIZE.set(len(self._engine_cache))
         return self._engine_cache[cache_key]
 
     def get_composite_engine(
@@ -313,6 +344,7 @@ class ProfileLoader:
         self._standard_cache.clear()
         self._engine_cache.clear()
         self._composite_cache.clear()
+        DYNCLASSIFICATION_PROFILE_CACHE_SIZE.set(0)
 
     # ------------------------------------------------------------------
     # 发现方法 / Discovery Methods

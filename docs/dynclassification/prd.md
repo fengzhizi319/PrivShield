@@ -34,7 +34,7 @@
 | DYN-OP-2 | 算子注册表 | 提供 `OperatorRegistry` 单例，支持使用 Python 装饰器（`@OperatorRegistry.register`）注册自定义匹配算子。 | P0 |
 | DYN-ENG-1 | 通用规则引擎 | 提供 `ConfigurableRuleEngine`，根据转入的 `DomainTaxonomy` 和 `RuleProfile` 动态求值，不包含任何硬编码领域逻辑。 | P0 |
 | DYN-LOAD-1 | Profile 加载与缓存 | 提供 `ProfileLoader` 支持配置文件加载、对象解析校验与 LRU 缓存调度。 | P0 |
-| DYN-LOAD-2 | 规则热重载 | 提供 REST API（`POST /v1/classification/profiles/reload`）及定时轮询触发规则缓存失效与重载。 | P1 |
+| DYN-LOAD-2 | 规则热重载 | 提供 REST API（`POST /v1/dynclassification/profiles/reload`）及定时轮询触发规则缓存失效与重载。 | P1 |
 | DYN-COMPAT-1 | 模板向下兼容 | 旧参数 `params.template` 能够自动转换映射至 `params.standard`，确保现有客户端不破坏。 | P0 |
 | DYN-COMPAT-2 | 影子模式对比 | 提供影子模式（Shadow Mode），支持新旧引擎并行执行并对输出 Tag 差异进行审计警告，方便平滑迁移。 | P1 |
 | DYN-METRICS-1 | 可观测性监控 | 暴露规则命中计数、算子调用频率、引擎加载耗时等 Prometheus 指标及结构化日志。 | P1 |
@@ -44,14 +44,14 @@
 ## 4. 接口契约与验收标准
 
 ### 4.1 REST / HTTP 接口验收标准
-1. **POST `/v1/classification/eval`**：
-   - 当请求体传入 `"params": {"domain": "finance", "standard": "jrt0197"}` 时，引擎应成功调用金融标准规则集并返回对应 `C1~C4` 级别的 `SecurityTag`。
-   - 当请求传入旧参数 `"params": {"template": "sc_health_db51"}` 时，引擎应自动映射为 `standard="sc_health_db51"` 并正常返回结果。
+1. **POST `/v1/dynclassification/eval`**：
+   - 当请求体传入 `{"domain": "finance", "standard": "jrt0197"}` 时，引擎应成功调用金融标准规则集并返回对应 `C1~C4` 级别的 `SecurityTag`。
+   - 当请求传入旧参数 `"template": "sc_health_db51"` 时，引擎应自动映射为 `standard="sc_health_db51"` 并正常返回结果。
 
-2. **POST `/v1/classification/profiles/reload`**：
+2. **POST `/v1/dynclassification/profiles/reload`**：
    - 触发热重载后，响应应返回成功与重新载入的 Profile 数量，后续请求应立即使用更新后的 YAML 配置。
 
-3. **GET `/v1/classification/standards` 与 `/v1/classification/operators`**：
+3. **GET `/v1/dynclassification/standards` 与 `/v1/dynclassification/operators`**：
    - 应能列出当前环境中已注册的所有有效标准清单及匹配算子列表。
 
 ### 4.2 性能与稳定性验收标准

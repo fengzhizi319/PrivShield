@@ -409,6 +409,55 @@ class PrivacyServicer(
         res_json = json.dumps(res, default=str)
         return privacy_pb2.DPGroupByResponse(result_json=res_json)
 
+    def DynClassify(self, request, context):
+        """动态分类求值 gRPC 方法。"""
+        from .dynclassification import DynClassificationService
+
+        if not hasattr(self, "_dyn_service") or self._dyn_service is None:
+            self._dyn_service = DynClassificationService()
+
+        self._dyn_service.loader.check_and_reload()
+        field_name = request.field_name
+        value = request.field_value
+        domain = request.domain or None
+        standard = request.standard or None
+
+        result = self._dyn_service.classify_field(
+            field_name=field_name,
+            value=value,
+            domain=domain,
+            standard=standard,
+        )
+
+        tags_proto = []
+        max_level = ""
+        audit_timestamp = ""
+        engine_layer = "L1_RULE"
+
+        if result.field_result:
+            max_level = result.field_result.final_level or ""
+            for tag in result.field_result.tags:
+                tags_proto.append(
+                    privacy_pb2.DynSecurityTagProto(
+                        level=tag.level,
+                        category=tag.category,
+                        rule_id=tag.rule_id,
+                        source_engine=tag.source_engine,
+                        domain=tag.domain,
+                        standard_id=tag.standard_id,
+                    )
+                )
+
+        if result.audit_info:
+            audit_timestamp = result.audit_info.timestamp or ""
+
+        return privacy_pb2.DynClassificationResponse(
+            tags=tags_proto,
+            max_level=max_level,
+            audit_timestamp=audit_timestamp,
+            engine_layer=engine_layer,
+        )
+
 
 # 为所有公共 RPC 方法统一包装异常映射，避免直接返回 UNKNOWN 状态码
 for _name in dir(PrivacyServicer):

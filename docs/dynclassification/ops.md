@@ -59,7 +59,7 @@ flowchart LR
 在使用 kubectl 更新 ConfigMap 或修改本地配置文件后，可通过 HTTP API 即时生效：
 
 ```bash
-curl -X POST http://<POD_IP>:8079/v1/classification/profiles/reload
+curl -X POST http://<POD_IP>:8079/v1/dynclassification/profiles/reload
 ```
 
 ---
@@ -112,5 +112,5 @@ groups:
 - **现象**：日志提示某个算子无法实例化。
 - **原因**：YAML 配置文件中写错了 `operator` 名称，或自定义算子尚未被 `@OperatorRegistry.register` 注册。
 - **排查步骤**：
-  1. 调用 `GET /v1/classification/operators` 接口确认当前已注册的所有算子列表。
+  1. 调用 `GET /v1/dynclassification/operators` 接口确认当前已注册的所有算子列表。
   2. 修正规则 YAML 文件中的算子名称或补全 Python 算子注册逻辑。

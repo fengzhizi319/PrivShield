@@ -6,7 +6,7 @@
 
 ## 1. Python SDK 参考
 
-### 1.1 `taxonomy.py` - 元数据模型
+### 1.1 `models.py` - 元数据模型
 
 #### `SensitivityLevelDef`
 动态敏感度等级定义模型。
@@ -82,14 +82,20 @@ class OperatorRegistry:
 | `regex` | 正则表达式匹配算子 | `pattern` (str): 正则匹配表达式 |
 | `keyword_contains` | 归一化子串包含匹配 | `keywords` (list[str]): 关键词列表 |
 | `prefix_match` | 前缀匹配 | `prefixes` (list[str]): 前缀字符串列表 |
+| `suffix_match` | 后缀匹配 | `suffixes` (list[str]): 后缀字符串列表 |
 | `id_card_checksum` | GB 11643 身份证校验码算子 | 无 |
 | `medical_card_checksum` | 医保卡号算法算子 | 无 |
 | `luhn_checksum` | 银行卡 Luhn 算法校验算子 | `min_length`, `max_length` |
 | `icd10_range` | ICD-10 编码区间及级别提升判定 | `default_level`, `upgrade_level`, `intervals` |
+| `length_range` | 字符串长度区间匹配算子 | `min_length`, `max_length` |
+| `exact_match` | 精确匹配算子 | `values` (list[str]) |
+| `ip_address` | IP 地址正则匹配算子 | 无 |
+| `mac_address` | MAC 地址匹配算子 | 无 |
+| `chinese_name` | 中文姓名校验匹配算子 | 无 |
 
 ---
 
-### 1.3 `configurable_engine.py` - 通用规则引擎
+### 1.3 `engine.py` - 通用规则引擎
 
 #### `ConfigurableRuleEngine`
 
@@ -129,19 +135,16 @@ class ProfileLoader:
 ## 2. REST API 接口定义
 
 ### 2.1 动态分类求值接口
-- **Endpoint**: `POST /v1/classification/eval`
+- **Endpoint**: `POST /v1/dynclassification/eval`
 - **Content-Type**: `application/json`
 
 #### 请求体格式
 ```json
 {
-  "field_name": "user_id_card",
+  "fieldName": "user_id_card",
   "value": "510104199003072345",
-  "params": {
-    "domain": "general-pii",
-    "standard": "gbt35273",
-    "extra_rules": []
-  }
+  "domain": "general-pii",
+  "standard": "gbt35273"
 }
 ```
 
@@ -152,16 +155,16 @@ class ProfileLoader:
     {
       "level": "L3",
       "category": "PERSONAL_BASIC",
-      "rule_id": "RULE_PII_IDCARD",
-      "source_engine": "RULE",
+      "ruleId": "RULE_PII_IDCARD",
+      "sourceEngine": "RULE",
       "domain": "general-pii",
-      "standard_id": "gbt35273"
+      "standardId": "gbt35273"
     }
   ],
-  "max_level": "L3",
+  "maxLevel": "L3",
   "audit": {
     "timestamp": "2026-07-28T10:00:00Z",
-    "engine_layer": "L1_RULE"
+    "engineLayer": "L1_RULE"
   }
 }
 ```
@@ -169,21 +172,20 @@ class ProfileLoader:
 ---
 
 ### 2.2 规则配置热加载接口
-- **Endpoint**: `POST /v1/classification/profiles/reload`
+- **Endpoint**: `POST /v1/dynclassification/profiles/reload`
 
 #### 响应体格式
 ```json
 {
   "status": "ok",
-  "message": "Classification profiles and engines reloaded successfully",
-  "timestamp": "2026-07-28T10:05:00Z"
+  "message": "Classification profiles and engines reloaded successfully"
 }
 ```
 
 ---
 
 ### 2.3 获取可用的标准列表
-- **Endpoint**: `GET /v1/classification/standards`
+- **Endpoint**: `GET /v1/dynclassification/standards`
 
 #### 响应体格式
 ```json
@@ -208,7 +210,7 @@ class ProfileLoader:
 ---
 
 ### 2.4 获取可用匹配算子列表
-- **Endpoint**: `GET /v1/classification/operators`
+- **Endpoint**: `GET /v1/dynclassification/operators`
 
 #### 响应体格式
 ```json
@@ -217,11 +219,16 @@ class ProfileLoader:
     "regex",
     "keyword_contains",
     "prefix_match",
+    "suffix_match",
     "id_card_checksum",
     "medical_card_checksum",
     "luhn_checksum",
     "icd10_range",
-    "plate_number"
+    "length_range",
+    "exact_match",
+    "ip_address",
+    "mac_address",
+    "chinese_name"
   ]
 }
 ```
@@ -230,18 +237,17 @@ class ProfileLoader:
 
 ## 3. gRPC 协议声明
 
-在 `proto/privacy.proto` 中扩充动态分类请求的字段定义：
+在 `proto/privacy.proto` 中定义动态分类请求与响应结构：
 
 ```protobuf
-message ClassificationRequest {
+message DynClassificationRequest {
   string field_name = 1;
   string field_value = 2;
   string domain = 3;
   string standard = 4;
-  map<string, string> extra_params = 5;
 }
 
-message TagMessage {
+message DynSecurityTagProto {
   string level = 1;
   string category = 2;
   string rule_id = 3;
@@ -250,8 +256,16 @@ message TagMessage {
   string standard_id = 6;
 }
 
-message ClassificationResponse {
-  repeated TagMessage tags = 1;
+message DynClassificationResponse {
+  repeated DynSecurityTagProto tags = 1;
   string max_level = 2;
+  string audit_timestamp = 3;
+  string engine_layer = 4;
 }
 ```
+
+gRPC RPC 方法：
+```protobuf
+rpc DynClassify (DynClassificationRequest) returns (DynClassificationResponse);
+```
+

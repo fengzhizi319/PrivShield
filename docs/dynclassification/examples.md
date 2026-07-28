@@ -121,14 +121,12 @@ print("nev_plate_number" in OperatorRegistry.list_operators())  # True
 ### 3.1 HTTP curl 请求：评估字段
 
 ```bash
-curl -X POST http://127.0.0.1:8079/v1/classification/eval \
+curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval \
   -H "Content-Type: application/json" \
   -d '{
-    "field_name": "patient_icd10",
+    "fieldName": "patient_icd10",
     "value": "B20.0",
-    "params": {
-      "standard": "sc_health_db51"
-    }
+    "standard": "sc_health_db51"
   }'
 ```
 
@@ -139,13 +137,13 @@ curl -X POST http://127.0.0.1:8079/v1/classification/eval \
     {
       "level": "L4",
       "category": "MEDICAL_ICD10_HIV",
-      "rule_id": "RULE_MED_ICD10",
-      "source_engine": "RULE",
+      "ruleId": "RULE_MED_ICD10",
+      "sourceEngine": "RULE",
       "domain": "medical",
-      "standard_id": "sc_health_db51"
+      "standardId": "sc_health_db51"
     }
   ],
-  "max_level": "L4"
+  "maxLevel": "L4"
 }
 ```
 
@@ -156,15 +154,14 @@ curl -X POST http://127.0.0.1:8079/v1/classification/eval \
 在更新了 `rules/` 目录下的 YAML 配置文件后，发起重载 HTTP 请求：
 
 ```bash
-curl -X POST http://127.0.0.1:8079/v1/classification/profiles/reload
+curl -X POST http://127.0.0.1:8079/v1/dynclassification/profiles/reload
 ```
 
 #### 预期响应：
 ```json
 {
   "status": "ok",
-  "message": "Classification profiles and engines reloaded successfully",
-  "timestamp": "2026-07-28T10:30:00Z"
+  "message": "Classification profiles and engines reloaded successfully"
 }
 ```
 

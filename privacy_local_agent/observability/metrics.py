@@ -199,6 +199,37 @@ CLASSIFICATION_VECTORIZED_BATCH_SIZE = Histogram(
     buckets=[1, 10, 50, 100, 500, 1000, 5000, 10000, 50000],
 )
 
+# Dynamic classification metrics (动态分类分级可观测性)
+DYNCLASSIFICATION_RULE_HITS_TOTAL = Counter(
+    "classification_rule_hits_total",
+    "Total number of dynamic classification rule hits.",
+    ["rule_id", "domain", "standard"],
+)
+
+DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL = Counter(
+    "classification_operator_calls_total",
+    "Total number of dynamic classification operator calls.",
+    ["operator", "result"],
+)
+
+DYNCLASSIFICATION_ENGINE_LOAD_DURATION = Histogram(
+    "classification_engine_load_duration_seconds",
+    "Dynamic classification engine load duration in seconds.",
+    ["domain", "standard"],
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
+
+DYNCLASSIFICATION_PROFILE_CACHE_SIZE = Gauge(
+    "classification_profile_cache_size",
+    "Number of cached dynamic classification engine instances.",
+)
+
+DYNCLASSIFICATION_OPERATOR_ERRORS_TOTAL = Counter(
+    "classification_operator_errors_total",
+    "Total number of dynamic classification operator errors.",
+    ["operator", "rule_id"],
+)
+
 # Profile parameter resolution counter.
 PROFILE_RESOLVE_TOTAL = Counter(
     "privacy_profile_resolve_total",

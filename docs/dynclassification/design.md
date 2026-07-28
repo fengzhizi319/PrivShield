@@ -1181,11 +1181,11 @@ rules/                              # 规则配置根目录
 
 | 接口 | 方法 | 说明 |
 |---|---|---|
-| `/v1/classification/standards` | GET | 列出所有可用标准 |
-| `/v1/classification/domains` | GET | 列出所有可用领域包 |
-| `/v1/classification/operators` | GET | 列出所有已注册算子 |
-| `/v1/classification/profiles/reload` | POST | 热加载规则配置 |
-| `/v1/classification/validate` | POST | 校验规则 YAML 合法性 |
+| `/v1/dynclassification/standards` | GET | 列出所有可用标准 |
+| `/v1/dynclassification/domains` | GET | 列出所有可用领域包 |
+| `/v1/dynclassification/operators` | GET | 列出所有已注册算子 |
+| `/v1/dynclassification/profiles/reload` | POST | 热加载规则配置 |
+| `/v1/dynclassification/validate` | POST | 校验规则 YAML 合法性 |
 
 ### 12.3 响应格式扩展
 
@@ -1283,7 +1283,7 @@ volumes:
 | 方式 | 触发条件 | 说明 |
 |---|---|---|
 | 定时轮询 | `reloadIntervalSeconds` | 检测文件 mtime 变化 |
-| API 触发 | `POST /v1/classification/profiles/reload` | 管理员手动触发 |
+| API 触发 | `POST /v1/dynclassification/profiles/reload` | 管理员手动触发 |
 | 文件监听 | inotify / watchdog | 生产环境推荐 |
 
 ### 15.3 规则版本管理
