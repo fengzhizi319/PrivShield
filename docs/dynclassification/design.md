@@ -1280,11 +1280,50 @@ volumes:
 
 ### 15.2 热加载机制
 
-| 方式 | 触发条件 | 说明 |
+`privacy-local-agent` 实现了基于文件系统修改时间（`mtime`）比对与延迟缓存失效（Lazy Invalidation）的平滑热加载机制。
+
+#### 15.2.1 配置控制参数
+
+热加载行为由以下环境变量和构造参数控制：
+
+| 参数 / 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| 定时轮询 | `reloadIntervalSeconds` | 检测文件 mtime 变化 |
-| API 触发 | `POST /v1/dynclassification/profiles/reload` | 管理员手动触发 |
-| 文件监听 | inotify / watchdog | 生产环境推荐 |
+| `PRIVACY_DYNCLASSIFICATION_HOT_RELOAD` | `true` | 是否启用热重载文件变动监测 |
+| `PRIVACY_DYNCLASSIFICATION_RELOAD_INTERVAL` | `0` (秒) | 两次文件变动检测之间的最小时间间隔（秒），用于高并发场景的 IO 节流 |
+| `PRIVACY_DYNCLASSIFICATION_RULES_DIR` | `"rules"` | 规则配置根目录路径 |
+
+#### 15.2.2 核心执行流程 (`ProfileLoader.check_and_reload`)
+
+在 REST 路由与 gRPC 服务的请求入口阶段，系统会自动触发 `svc.loader.check_and_reload()`：
+
+```mermaid
+graph TD
+    A[收到分类请求 / 触发 check_and_reload] --> B{hot_reload_enabled 为 True & rules_dir 存在?}
+    B -- 否 --> C[跳过检测，返回 False]
+    B -- 是 --> D{获取 RLock & 校验检查时间间隔}
+    D -- "(now - last_check) < reload_interval" --> C
+    D -- 达到检测间隔时间 --> E[递归扫描 rules_dir/**/*.yaml]
+    E --> F{比对 yaml_file.stat().st_mtime 与 _file_mtimes}
+    F -- 发现新文件或 mtime 改变 --> G[更新 _file_mtimes，设置 changed = True]
+    F -- 文件无变化 --> H{changed == True?}
+    G --> H
+    H -- 是 --> I[调用 invalidate_cache 清空全部缓存]
+    H -- 否 --> J[结束检测, 返回 False]
+    I --> K[更新 Prometheus 监控指标，返回 True]
+```
+
+#### 15.2.3 关键逻辑说明
+
+1. **并发安全锁（`threading.RLock`）**：采用可重入锁保护，避免在并发请求场景下多个线程同时扫描目录或清空缓存导致数据不一致。
+2. **IO 节流与冷却期（`reload_interval_seconds`）**：在极高并发场景下，通过配置检查间隔，避免每个请求均触发 `stat()` 系统调用，降低 OS IO 损耗。
+3. **`mtime` 戳比对**：
+   - 扫描 `rules_dir` 下全部 `taxonomies/*.yaml`、`domains/*.yaml` 与 `standards/*.yaml`；
+   - 记录 `yaml_file.stat().st_mtime` 到内部字典 `_file_mtimes`；
+   - 一旦发现新增文件或已有文件时间戳发生改变，记录变动标记 `changed = True`。
+4. **全量缓存清空与延迟按需构建（Lazy Invalidation & Re-building）**：
+   - 当 `changed == True` 时，执行 `invalidate_cache()` 清空 `_taxonomy_cache`、`_profile_cache`、`_standard_cache`、`_engine_cache` 与 `_composite_cache`；
+   - 同时将 Prometheus 指标 `DYNCLASSIFICATION_PROFILE_CACHE_SIZE` 重置为 `0`；
+   - 清空缓存后，后续的分类请求在调用 `get_engine()` 或 `load_profile()` 时，会重新读取最新 YAML 配置，反序列化 Pydantic 模型并构建新的引擎实例，从而在无需重启 Python 进程的前提下完成零停机平滑更新。
 
 ### 15.3 规则版本管理
 

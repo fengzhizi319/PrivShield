@@ -108,12 +108,15 @@ def regex_matcher(value: Any, params: dict[str, Any]) -> bool:
     params:
         pattern: str - 正则表达式模式
     """
+    # value 不是字符串或为空？
     if not isinstance(value, str) or not value:
         return False
+    # pattern 为空？
     pattern = params.get("pattern", "")
     if not pattern:
         return False
     try:
+        # 执行正则搜索
         return bool(re.search(pattern, value))
     except re.error:
         return False
@@ -190,21 +193,31 @@ def icd10_range_matcher(value: Any, params: dict[str, Any]) -> bool:
         upgrade_level: str - 升级等级（命中敏感区间时）
         intervals: list[dict] - 敏感区间列表 [{start, end, category}]
     """
+    # Step 1: Normalize the raw input into a canonical ICD-10 tuple (letter, number).
+    # e.g. "A51.2" -> ("A", 51); returns None if the value is not a valid ICD-10 code.
     icd = _normalize_icd10(str(value) if value else "")
+    # Early exit: not a recognizable ICD-10 code, so this operator does not apply.
     if not icd:
         return False
 
+    # Step 2: Retrieve the list of sensitive intervals from rule params.
+    # Each interval is a dict like {"start": "A50", "end": "A53", "category": "SEXUAL_DISEASE"}.
     intervals = params.get("intervals", [])
+    # Step 3: Iterate over intervals to check if the code falls within any sensitive range.
     for interval in intervals:
+        # Extract the closed-interval boundaries [start, end] for comparison.
         start = interval.get("start", "")
         end = interval.get("end", "")
+        # _in_icd10_interval performs tuple comparison: start_norm <= icd <= end_norm.
         if _in_icd10_interval(icd, start, end):
-            # 命中敏感区间：回写升级信息
+            # Hit a sensitive interval: write back the upgraded level and matched category
+            # so the downstream engine can assign a higher sensitivity grade (e.g. L4).
             params["_hit_level"] = params.get("upgrade_level", "L4")
             params["_hit_category"] = interval.get("category", "")
             return True
 
-    # 未命中敏感区间：使用默认等级
+    # Step 4: Code is a valid ICD-10 but did NOT fall into any sensitive interval.
+    # Assign the default (lower) sensitivity level and a generic medical category.
     params["_hit_level"] = params.get("default_level", "L3")
     params["_hit_category"] = "MEDICAL_ICD10_GENERAL"
     return True
