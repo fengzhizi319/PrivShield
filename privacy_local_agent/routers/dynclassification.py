@@ -2,6 +2,7 @@
 
 暴露动态分类分级相关的 HTTP API 入口：
 - POST /v1/dynclassification/eval              : 单字段/批次动态分类分级
+- POST /v1/dynclassification/dry_run           : 规则预演（样本数据集命中分布）
 - POST /v1/dynclassification/profiles/reload   : 热加载重载规则缓存
 - POST /v1/dynclassification/generate_profile  : 从标准 Markdown 文档一键生成配置
 - GET  /v1/dynclassification/standards         : 列出所有可用标准
@@ -41,6 +42,14 @@ class DynEvalRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class DryRunRequest(BaseModel):
+    sample_data: list[dict[str, Any]] = Field(description="样本记录列表")
+    domain: Optional[str] = Field(default=None, description="领域标识")
+    standard: Optional[str] = Field(default=None, description="标准标识")
+
+    model_config = {"populate_by_name": True}
+
+
 class GenerateProfileRequest(BaseModel):
     doc_path: str = Field(description="标准 Markdown 文档文件路径", alias="docPath")
 
@@ -58,6 +67,23 @@ def evaluate_field(req: DynEvalRequest):
         standard=req.standard,
     )
     return resp.model_dump(by_alias=True, exclude_none=True)
+
+
+@router.post("/dry_run", summary="规则预演：对样本数据集执行命中分布分析")
+def dry_run(req: DryRunRequest):
+    svc = get_service()
+    svc.loader.check_and_reload()
+    if not req.sample_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sample_data 不能为空",
+        )
+    result = svc.dry_run(
+        sample_data=req.sample_data,
+        domain=req.domain,
+        standard=req.standard,
+    )
+    return result
 
 
 @router.post("/profiles/reload", summary="手动触发规则配置热加载")

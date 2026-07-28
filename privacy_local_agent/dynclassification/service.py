@@ -273,6 +273,81 @@ class DynClassificationService:
         return ClassificationResponse(table_result=table_result, audit_info=audit)
 
     # ------------------------------------------------------------------
+    # Dry-Run 预演 / Dry-Run Preview
+    # ------------------------------------------------------------------
+
+    def dry_run(
+        self,
+        sample_data: list[dict[str, Any]],
+        domain: Optional[str] = None,
+        standard: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """对样本数据集执行规则预演，返回命中分布与等级分布。
+
+        用于在规则正式生效前验证其命中行为是否符合预期，
+        避免误配规则造成生产数据过度脱敏或漏判。
+
+        Args:
+            sample_data: 样本记录列表，每条为 {field_name: value} 字典。
+            domain: 领域标识。
+            standard: 标准标识。
+
+        Returns:
+            包含 level_distribution、category_distribution、hit_details、
+            summary 等统计信息的字典。
+        """
+        from collections import Counter
+
+        level_counter: Counter = Counter()
+        category_counter: Counter = Counter()
+        hit_details: list[dict[str, Any]] = []
+        total_fields = 0
+        total_hits = 0
+
+        for row_idx, record in enumerate(sample_data):
+            for field_name, value in record.items():
+                total_fields += 1
+                resp = self.classify_field(
+                    field_name=field_name,
+                    value=value,
+                    domain=domain,
+                    standard=standard,
+                )
+                if resp.field_result and resp.field_result.tags:
+                    total_hits += 1
+                    level_counter[resp.field_result.final_level] += 1
+                    for tag in resp.field_result.tags:
+                        category_counter[tag.category] += 1
+                    hit_details.append({
+                        "row": row_idx,
+                        "field_name": field_name,
+                        "value": str(value)[:100],  # 截断保护
+                        "level": resp.field_result.final_level,
+                        "rules": [t.rule_id for t in resp.field_result.tags],
+                    })
+
+        # 未命中字段使用默认等级
+        engine = self.loader.get_engine(domain=domain, standard=standard)
+        miss_count = total_fields - total_hits
+        if miss_count > 0:
+            level_counter[engine.taxonomy.default_level] += miss_count
+
+        return {
+            "summary": {
+                "total_records": len(sample_data),
+                "total_fields": total_fields,
+                "total_hits": total_hits,
+                "hit_rate": round(total_hits / max(total_fields, 1), 4),
+                "domain": engine.domain,
+                "standard_id": engine.standard_id,
+                "rules_evaluated": engine.rule_count,
+            },
+            "level_distribution": dict(level_counter.most_common()),
+            "category_distribution": dict(category_counter.most_common()),
+            "hit_details": hit_details[:200],  # 限制返回条数
+        }
+
+    # ------------------------------------------------------------------
     # 管理接口 / Management APIs
     # ------------------------------------------------------------------
 

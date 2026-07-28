@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from ..classification_routes import classification_service
+from .legacy_classification import classification_service
 from ..deps import MAX_UPLOAD_BYTES, SECURITY_DEPS, handle_request_exception, service
 from ..security.auth import require_permission
 

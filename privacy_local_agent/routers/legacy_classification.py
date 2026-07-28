@@ -1,7 +1,9 @@
-"""数据分类 REST 路由模块。
+"""旧版数据分类 REST 路由模块（Legacy Classification Router）。
 
 基于 FastAPI APIRouter 提供字段级、记录级、表级数据分类的 HTTP 接口，
 与处理原语（masking/dp/k-anonymity/qol）在代码层面完全分离。
+
+注意：此模块为旧版三层漏斗引擎的兼容路由，新业务请使用 dynclassification 路由。
 """
 
 import os
@@ -10,9 +12,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .classification_service import ClassificationService
-from .security.auth import get_current_identity, require_permission
-from .security.ratelimit import rate_limit_dependency
+from ..classification_service import ClassificationService
+from ..security.auth import get_current_identity, require_permission
+from ..security.ratelimit import rate_limit_dependency
 
 # 从环境变量读取配置文件路径，便于在不同部署环境间切换
 PROFILE_PATH = os.environ.get("PRIVACY_PROFILE", "privacy-profile.yaml")

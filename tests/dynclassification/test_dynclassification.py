@@ -462,3 +462,25 @@ class TestDynClassificationService:
         assert audit.domain != ""
         assert audit.rules_evaluated > 0
         assert audit.duration_ms >= 0
+
+    def test_dry_run(self, service):
+        """Dry-Run 预演应返回命中分布统计。"""
+        sample = [
+            {"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"},
+            {"email": "test@example.com", "age": "30"},
+        ]
+        result = service.dry_run(sample)
+        assert result["summary"]["total_records"] == 2
+        assert result["summary"]["total_fields"] == 5
+        assert result["summary"]["total_hits"] >= 1
+        assert 0 < result["summary"]["hit_rate"] <= 1.0
+        assert isinstance(result["level_distribution"], dict)
+        assert isinstance(result["category_distribution"], dict)
+        assert isinstance(result["hit_details"], list)
+
+    def test_dry_run_empty(self, service):
+        """空样本 Dry-Run 应返回零命中。"""
+        result = service.dry_run([])
+        assert result["summary"]["total_records"] == 0
+        assert result["summary"]["total_hits"] == 0
+        assert result["summary"]["hit_rate"] == 0.0

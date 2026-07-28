@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .classification_routes import classification_router
+from .routers.legacy_classification import classification_router
 from .deps import (
     service,  # 重新导出，保持 ``from privacy_local_agent.main import service`` 可用
 )
