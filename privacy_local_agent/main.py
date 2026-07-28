@@ -26,7 +26,7 @@ from .observability.logging_config import configure_logging
 from .observability.metrics import make_asgi_app
 from .observability.middleware import ObservabilityMiddleware
 from .observability.tracing import init_tracing
-from .routers import budget, dp, file, health, kano, ldp, mask, profile, qol
+from .routers import budget, dp, dynclassification, file, health, kano, ldp, mask, profile, qol
 
 
 @asynccontextmanager
@@ -77,6 +77,7 @@ app.mount("/metrics", make_asgi_app())
 
 # 挂载数据分类路由；分类路由自身已声明认证、限速与权限依赖
 app.include_router(classification_router)
+app.include_router(dynclassification.router)
 
 # 挂载按域拆分的子路由（健康检查 / 脱敏 / DP / LDP / K-匿名 / QoL / 预算 / 推荐 / 文件处理）。
 app.include_router(health.router)
@@ -88,6 +89,7 @@ app.include_router(qol.router)
 app.include_router(budget.router)
 app.include_router(profile.router)
 app.include_router(file.router)
+
 
 
 if __name__ == "__main__":

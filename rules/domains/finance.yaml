@@ -1,0 +1,63 @@
+# 金融行业分类规则 (JR/T 0197-2020)
+domain: "finance"
+version: "1.0.0"
+description: "金融行业分类规则 (JR/T 0197-2020)"
+
+rules:
+  # --- 金融账户字段名 ---
+  - id: "RULE_FIN_ACCOUNT"
+    name: "金融账户字段"
+    category: "FINANCIAL_ACCOUNT"
+    level: "C4"
+    priority: 100
+    matchers:
+      - target: "field_name"
+        operator: "keyword_contains"
+        params:
+          keywords: ["bankcard", "cardno", "credit", "transaction",
+                     "asset", "balance", "account", "bank_card"]
+
+  # --- 银行卡号值校验 ---
+  - id: "RULE_FIN_CARD_VALUE"
+    name: "银行卡号值校验"
+    category: "FINANCIAL_ACCOUNT"
+    level: "C4"
+    priority: 100
+    matchers:
+      - target: "field_value"
+        operator: "luhn_checksum"
+        params:
+          min_length: 16
+          max_length: 19
+
+  # --- 金融交易字段名 ---
+  - id: "RULE_FIN_TRANSACTION"
+    name: "金融交易字段"
+    category: "FINANCIAL_TRANSACTION"
+    level: "C3"
+    priority: 80
+    matchers:
+      - target: "field_name"
+        operator: "keyword_contains"
+        params:
+          keywords: ["transfer", "payment", "withdraw", "deposit", "loan"]
+
+  # --- 个人金融信息字段名 ---
+  - id: "RULE_FIN_PERSONAL"
+    name: "个人金融信息字段"
+    category: "PERSONAL_FINANCIAL"
+    level: "C3"
+    priority: 60
+    matchers:
+      - target: "field_name"
+        operator: "keyword_contains"
+        params:
+          keywords: ["income", "salary", "tax", "insurance", "fund"]
+
+composite_rules:
+  - id: "COMP_FIN_001"
+    name: "金融账户组合"
+    field_patterns: ["bank_card|bankcard|card_no|account|credit|transaction"]
+    min_matches: 1
+    target_level: "C4"
+    category: "COMPOSITE_FINANCE_COMBO"

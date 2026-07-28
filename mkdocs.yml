@@ -136,6 +136,14 @@ nav:
       - 运维指南: classification_ner/ops.md
       - 需求文档: classification_ner/prd.md
       - 测试指南: classification_ner/testing.md
+    - 动态分类分级（多标准适配）:
+      - 概览: dynclassification/README.md
+      - 架构设计: dynclassification/design.md
+      - API 参考: dynclassification/api_reference.md
+      - 使用示例: dynclassification/examples.md
+      - 运维指南: dynclassification/ops.md
+      - 需求文档: dynclassification/prd.md
+      - 测试指南: dynclassification/testing.md
 
   - 基础设施:
     - 网关与负载均衡:
