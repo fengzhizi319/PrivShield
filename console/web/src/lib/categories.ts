@@ -22,6 +22,7 @@ export const CATEGORY_ORDER = [
   'K-Anonymity',
   'Query Obfuscation',
   'Classification',
+  'DynamicClassification',
   'Budget',
   'Profile',
 ] as const;
@@ -75,6 +76,12 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
     accent: 'from-rose-400 to-pink-500',
     desc: '数据分类（规则 / NER / LLM）',
   },
+  DynamicClassification: {
+    icon: 'sparkles',
+    chip: 'bg-purple-50 text-purple-600',
+    accent: 'from-purple-400 to-indigo-500',
+    desc: '声明式通用动态分类分级与自动配置',
+  },
   Budget: {
     icon: 'wallet',
     chip: 'bg-lime-50 text-lime-600',
@@ -88,6 +95,7 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
     desc: '隐私参数推荐',
   },
 };
+
 
 /** 未在元数据中声明的分类使用的兜底配置。 */
 export const FALLBACK_META: CategoryMeta = {

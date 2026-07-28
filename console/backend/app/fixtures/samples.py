@@ -497,23 +497,25 @@ SAMPLES: list[EndpointSample] = [
         backend="both",
     ),
 
-    # Budget & Profile
-    EndpointSample("GET", "/v1/privacy/budget", "Budget", "Budget", "查询剩余隐私预算", backend="rest"),
+    # Dynamic Classification
     EndpointSample(
-        "POST", "/v1/privacy/profile/recommend", "Recommend Params", "Profile",
-        "自动推荐隐私参数",
-        body={
-            "namespace": "demo-recommend",
-            "values": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
-            "rows": [
-                {"age": "30", "zip": "100000", "gender": "F"},
-                {"age": "31", "zip": "100001", "gender": "M"},
-            ],
-            "qi_cols": ["age", "zip", "gender"],
-        },
+        "POST", "/v1/dynclassification/eval", "Dynamic Classification Eval", "DynamicClassification",
+        "声明式动态分类分级评估",
+        body={"fieldName": "mobile_phone", "value": "13800138000", "domain": "general-pii"},
         backend="both",
     ),
+    EndpointSample(
+        "POST", "/v1/dynclassification/generate_profile", "Auto Generate Profiles", "DynamicClassification",
+        "从标准 Markdown 文档生成 YAML 配置",
+        body={"docPath": "docs/standard/四川省健康医疗大数据应用指南.md"},
+        backend="both",
+    ),
+    EndpointSample("GET", "/v1/dynclassification/standards", "List Standards", "DynamicClassification", "列出所有分类分级标准", backend="both"),
+    EndpointSample("GET", "/v1/dynclassification/domains", "List Domains", "DynamicClassification", "列出所有领域匹配包", backend="both"),
+    EndpointSample("GET", "/v1/dynclassification/operators", "List Operators", "DynamicClassification", "列出所有已注册匹配算子", backend="both"),
+    EndpointSample("POST", "/v1/dynclassification/validate", "Validate Rule Profiles", "DynamicClassification", "校验 YAML 配置合法性", backend="both"),
 ]
+
 # fmt: on
 
 

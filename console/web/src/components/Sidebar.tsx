@@ -27,7 +27,12 @@ interface SidebarProps {
   onLbTest?: () => void;
   /** 当前是否处于负载均衡测试视图 */
   lbTestActive?: boolean;
+  /** 进入动态分类分级 */
+  onDynClassify?: () => void;
+  /** 当前是否处于动态分类分级视图 */
+  dynClassifyActive?: boolean;
 }
+
 
 /** method 徽章配色。 */
 function methodBadge(method: string): string {
@@ -51,7 +56,21 @@ function groupSamples(samples: EndpointSample[]): Map<string, EndpointSample[]> 
   return grouped;
 }
 
-export default function Sidebar({ samples, selected, onSelect, onHome, onBatch, batchActive = false, onFileTest, fileTestActive = false, onLbTest, lbTestActive = false }: SidebarProps) {
+export default function Sidebar({
+  samples,
+  selected,
+  onSelect,
+  onHome,
+  onBatch,
+  batchActive = false,
+  onFileTest,
+  fileTestActive = false,
+  onLbTest,
+  lbTestActive = false,
+  onDynClassify,
+  dynClassifyActive = false,
+}: SidebarProps) {
+
   const [query, setQuery] = useState('');
   // 默认全部折叠，避免首页侧边栏过长；用户点击分组头展开。
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -166,7 +185,7 @@ export default function Sidebar({ samples, selected, onSelect, onHome, onBatch, 
         <button
           onClick={onLbTest}
           className={[
-            'mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
             lbTestActive
               ? 'bg-indigo-50 font-medium text-indigo-700'
               : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
@@ -177,6 +196,22 @@ export default function Sidebar({ samples, selected, onSelect, onHome, onBatch, 
           </span>
           负载均衡
         </button>
+        {/* 动态分类分级入口 */}
+        <button
+          onClick={onDynClassify}
+          className={[
+            'mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+            dynClassifyActive
+              ? 'bg-purple-50 font-medium text-purple-700'
+              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+          ].join(' ')}
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded bg-purple-100 text-purple-600">
+            <Icon name="sparkles" className="h-3 w-3" />
+          </span>
+          通用动态分类分级
+        </button>
+
         {visibleCategories.length === 0 && (
           <div className="px-3 py-8 text-center text-sm text-gray-400">
             未找到匹配的接口

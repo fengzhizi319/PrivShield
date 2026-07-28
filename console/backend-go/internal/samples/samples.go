@@ -234,5 +234,34 @@ func List() []models.EndpointSample {
 			Description: "自动推荐隐私参数",
 			Body: raw(`{"namespace":"demo-recommend","values":[1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],"rows":[{"fields":{"age":"30","zip":"100000","gender":"F"}},{"fields":{"age":"31","zip":"100001","gender":"M"}}],"qi_cols":["age","zip","gender"]}`), Backend: "grpc",
 		},
+
+		// Dynamic Classification
+		{
+			Method: "POST", Path: "/v1/dynclassification/eval", Label: "Dynamic Eval", Category: "DynamicClassification",
+			Description: "声明式动态分类分级评估",
+			Body: raw(`{"fieldName":"mobile_phone","value":"13800138000","domain":"general-pii"}`), Backend: "both",
+		},
+		{
+			Method: "POST", Path: "/v1/dynclassification/generate_profile", Label: "Auto Generate Profiles", Category: "DynamicClassification",
+			Description: "从标准 Markdown 文档自动提取生成 YAML 配置",
+			Body: raw(`{"docPath":"docs/standard/四川省健康医疗大数据应用指南.md"}`), Backend: "both",
+		},
+		{
+			Method: "GET", Path: "/v1/dynclassification/standards", Label: "List Standards", Category: "DynamicClassification",
+			Description: "列出所有分类分级标准", Body: raw(`{}`), Backend: "both",
+		},
+		{
+			Method: "GET", Path: "/v1/dynclassification/domains", Label: "List Domains", Category: "DynamicClassification",
+			Description: "列出所有领域匹配包", Body: raw(`{}`), Backend: "both",
+		},
+		{
+			Method: "GET", Path: "/v1/dynclassification/operators", Label: "List Operators", Category: "DynamicClassification",
+			Description: "列出所有已注册匹配算子", Body: raw(`{}`), Backend: "both",
+		},
+		{
+			Method: "POST", Path: "/v1/dynclassification/validate", Label: "Validate Profiles", Category: "DynamicClassification",
+			Description: "校验规则 YAML 配置合法性", Body: raw(`{}`), Backend: "both",
+		},
 	}
 }
+

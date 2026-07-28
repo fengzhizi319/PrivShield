@@ -19,17 +19,20 @@ import EndpointView from '@/components/EndpointView';
 import BatchTest from '@/components/BatchTest';
 import FileTest from '@/components/FileTest';
 import LbTest from '@/components/LbTest';
+import DynClassificationPanel from '@/components/DynClassificationPanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { type BackendOption, DEFAULT_BACKEND } from '@/components/BackendSelector';
 import { Icon } from '@/components/icons';
 
-/** 主区域视图：总览 / 单端点测试 / 批量测试 / 文件处理 / 负载均衡。 */
+/** 主区域视图：总览 / 单端点测试 / 批量测试 / 文件处理 / 负载均衡 / 动态分类分级。 */
 type View =
   | { type: 'overview' }
   | { type: 'endpoint'; sample: EndpointSample }
   | { type: 'batch' }
   | { type: 'filetest' }
-  | { type: 'lbtest' };
+  | { type: 'lbtest' }
+  | { type: 'dynclassification' };
+
 
 export default function App() {
   /** 全部端点示例（来自 /api/samples） */
@@ -121,6 +124,8 @@ export default function App() {
               fileTestActive={view.type === 'filetest'}
               onLbTest={() => setView({ type: 'lbtest' })}
               lbTestActive={view.type === 'lbtest'}
+              onDynClassify={() => setView({ type: 'dynclassification' })}
+              dynClassifyActive={view.type === 'dynclassification'}
             />
             <main className="flex-1 overflow-hidden">
               {/* ErrorBoundary 包裹主区域：单个视图组件崩溃时展示降级界面，
@@ -141,11 +146,14 @@ export default function App() {
                   <FileTest />
                 ) : view.type === 'lbtest' ? (
                   <LbTest agentUrl={health?.agent_url} />
+                ) : view.type === 'dynclassification' ? (
+                  <DynClassificationPanel />
                 ) : (
                   <Overview samples={samples} onSelect={openEndpoint} />
                 )}
               </ErrorBoundary>
             </main>
+
           </>
         )}
       </div>

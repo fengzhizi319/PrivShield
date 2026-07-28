@@ -22,8 +22,10 @@
 package handlers
 
 import (
+	"bytes"
 	// encoding/json：用于 JSON 序列化/反序列化（params 解析、RecordEntry 转换）
 	"encoding/json"
+
 	// fmt：用于格式化错误信息与日志消息
 	"fmt"
 	// io：用于读取上传文件内容（io.ReadAll）
@@ -337,6 +339,12 @@ func (s *Server) Proxy(c *gin.Context) {
 	// 这里忽略 req.Method，由 mapper 根据 path 决定 gRPC 调用语义。
 	// 记录调用开始时间，用于计算 gRPC 调用耗时
 	start := time.Now()
+	// 拦截并转发动态分类分级 /v1/dynclassification/* REST 请求
+	if strings.HasPrefix(req.Path, "/v1/dynclassification/") {
+		s.proxyRest(c, start, req)
+		return
+	}
+
 	// 核心调用：mapper 根据 req.Path 查找对应的 handler，
 	// handler 负责解析 body、构造 protobuf 请求、调用 gRPC、转换响应
 	data, err := s.mapper.Dispatch(c.Request.Context(), s.client.Raw(), req.Path, req.Body)
@@ -344,9 +352,11 @@ func (s *Server) Proxy(c *gin.Context) {
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
-		// gRPC 调用失败时根据错误类型决定 HTTP 状态码：
-		//   - 上游不可达（连接拒绝/超时/DNS 失败）→ 502 Bad Gateway
-		//   - 其他错误（参数错误/业务错误）→ 400 Bad Request
+		// gRPC 调用失败时尝试回退到 REST 转发
+		if strings.Contains(err.Error(), "unsupported gRPC path") {
+			s.proxyRest(c, start, req)
+			return
+		}
 		status := http.StatusBadRequest
 		if isUnavailable(err) {
 			status = http.StatusBadGateway // 上游连接类错误返回 502
@@ -364,6 +374,68 @@ func (s *Server) Proxy(c *gin.Context) {
 		Protocol:   agentProtocol, // "gRPC"，标识与 agent 通信的协议
 	})
 }
+
+// proxyRest 辅助函数：通过 HTTP 将 REST 请求透明代理到 Agent REST 服务
+func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequest) {
+	restHost := os.Getenv("PRIVACY_REST_HOST")
+	if restHost == "" {
+		restHost = s.cfg.AgentGRPCHost
+	}
+
+	restPort := os.Getenv("PRIVACY_REST_PORT")
+	if restPort == "" {
+		restPort = "8079"
+	}
+
+	method := strings.ToUpper(req.Method)
+	if method == "" {
+		method = "POST"
+	}
+	url := fmt.Sprintf("http://%s:%s%s", restHost, restPort, req.Path)
+
+	var reqBodyReader io.Reader
+	if len(req.Body) > 0 {
+		reqBodyReader = bytes.NewReader(req.Body)
+	}
+
+	httpReq, err := http.NewRequestWithContext(c.Request.Context(), method, url, reqBodyReader)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if s.cfg.AgentAPIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	duration := time.Since(start).Milliseconds()
+
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"detail": fmt.Sprintf("Agent REST HTTP error: %v", err), "status": 502})
+		return
+	}
+	defer resp.Body.Close()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+	var respData any
+	_ = json.Unmarshal(respBytes, &respData)
+
+	if resp.StatusCode >= 400 {
+		c.JSON(resp.StatusCode, gin.H{"detail": string(respBytes), "status": resp.StatusCode})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.ProxyResponse{
+		Status:     http.StatusOK,
+		DurationMs: duration,
+		Data:       respData,
+		Via:        "go-rest-proxy",
+		Protocol:   "REST",
+	})
+}
+
 
 // Batch 逐个转发一组请求并汇总成功/失败统计。
 //

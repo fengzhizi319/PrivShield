@@ -133,3 +133,28 @@ def test_proxy_upstream_error(client: TestClient, mock_agent_client: AsyncMock) 
     assert response.status_code == 422
     body = response.json()
     assert body["detail"] == "invalid field"
+
+
+def test_proxy_dynclassification(client: TestClient, mock_agent_client: AsyncMock) -> None:
+    """测试 /api/proxy 代理转发 /v1/dynclassification/eval 动态分类请求。"""
+    mock_agent_client.return_value = {
+        "fieldResult": {"fieldName": "mobile_phone", "finalLevel": "L3"},
+        "auditInfo": {"domain": "general-pii"},
+    }
+
+    response = client.post(
+        "/api/proxy",
+        json={
+            "method": "POST",
+            "path": "/v1/dynclassification/eval",
+            "body": {"fieldName": "mobile_phone", "value": "13800138000", "domain": "general-pii"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == 200
+    assert body["data"]["fieldResult"]["finalLevel"] == "L3"
+    assert body["via"] == "python-rest"
+    assert body["protocol"] == "REST"
+
