@@ -7,8 +7,9 @@
 #   - Python REST (8080)：经 Python FastAPI 代理调用 agent REST 接口；
 #   - Go gRPC    (8081)：经 Go 代理把请求转换为 gRPC 调用 agent。
 #
-# 用法：./console/start-all.sh [--rebuild]
+# 用法：./console/start-all.sh [--rebuild] [--force]
 #   --rebuild  强制重新编译前端、后端与 agent（即使构建产物已存在）
+#   --force    端口占用时自动终止占用进程（非交互模式，适用于 CI/CD）
 
 set -euo pipefail
 
@@ -16,9 +17,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 REBUILD=false
+FORCE=false
 for arg in "$@"; do
     case "$arg" in
         --rebuild) REBUILD=true ;;
+        --force) FORCE=true ;;
     esac
 done
 
@@ -75,6 +78,19 @@ finally:
 
     echo "占用端口 $port 的进程 PID：$pids"
     echo ""
+
+    # --force 模式：非交互环境下自动终止占用进程
+    if [[ "$FORCE" == true ]]; then
+        echo "--force 模式：自动终止占用进程"
+        for pid in $pids; do
+            echo "  → kill -9 $pid"
+            kill -9 "$pid" 2>/dev/null || true
+        done
+        sleep 1
+        echo "✅ 端口 $port 已释放"
+        return 0
+    fi
+
     read -rp "是否自动终止上述进程以释放端口？[y/N] " answer
     case "$answer" in
         [yY]|[yY][eE][sS])

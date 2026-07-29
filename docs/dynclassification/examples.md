@@ -48,7 +48,7 @@ print("最终定级:", resp.field_result.final_level)  # 输出: L5
 ### 1.1 加载 Profile 并评估单个字段
 
 ```python
-from privacy_local_agent.privacy.classification.profile_loader import ProfileLoader
+from privacy_local_agent.dynclassification.profile_loader import ProfileLoader
 
 # 初始化加载器（指向规则 YAML 目录）
 loader = ProfileLoader(rules_dir="rules")
@@ -56,8 +56,8 @@ loader = ProfileLoader(rules_dir="rules")
 # 1. 加载金融标准规则引擎 (JR/T 0197)
 finance_engine = loader.get_engine(standard="jrt0197")
 
-# 2. 评估字段
-tags = finance_engine.evaluate(
+# 2. 评估字段（返回元组: final_tags, suppressed_tags）
+tags, suppressed = finance_engine.evaluate(
     field_name="bank_card_number",
     value="6222021001123456789"
 )

@@ -263,25 +263,28 @@ class OperatorRegistry:
 
 ### 4.3 ICD-10 算子特殊机制
 
-`icd10_range` 算子通过 params 回写实现动态等级：
+`icd10_range` 算子返回元组实现动态等级：
 
 ```python
-# 命中敏感区间 → 回写升级等级
-params["_hit_level"] = params.get("upgrade_level", "L4")
-params["_hit_category"] = interval.get("category", "")
+# 算子返回元组 (is_hit, level, category)
+# 命中敏感区间 → 返回升级等级
+return True, params.get("upgrade_level", "L4"), interval.get("category", "")
 
 # 未命中敏感区间但为合法 ICD-10 → 使用默认等级
-params["_hit_level"] = params.get("default_level", "L3")
-params["_hit_category"] = "MEDICAL_ICD10_GENERAL"
+return True, params.get("default_level", "L3"), "MEDICAL_ICD10_GENERAL"
+
+# 非法 ICD-10 编码 → 未命中
+return False, "", ""
 ```
 
-引擎在 `_evaluate_rule()` 中读取回写值覆盖规则默认等级：
+引擎在 `_evaluate_rule()` 中解析元组返回值覆盖规则默认等级：
 
 ```python
-if "_hit_level" in hit_params:
-    level = hit_params["_hit_level"]
-if "_hit_category" in hit_params and hit_params["_hit_category"]:
-    category = hit_params["_hit_category"]
+if matcher.operator == "icd10_range":
+    is_hit, level, category = raw_result
+    if is_hit:
+        dynamic_level = level
+        dynamic_category = category
 ```
 
 ---

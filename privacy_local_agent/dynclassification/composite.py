@@ -64,13 +64,16 @@ class CompositeRuleEngine:
 
         # Pre-compile regex patterns for each rule to avoid repeated compilation
         # during batch evaluation (performance optimization for hot path).
+        # Patterns are compiled with word boundaries baked in for consistent matching.
         self._compiled_patterns: dict[str, list[re.Pattern]] = {}
         for rule in self.rules:
             compiled_list: list[re.Pattern] = []
             for pattern in rule.field_patterns:
                 try:
-                    # Compile with IGNORECASE for case-insensitive field name matching.
-                    compiled_list.append(re.compile(pattern, re.IGNORECASE))
+                    # Compile with word boundaries and IGNORECASE for consistent matching.
+                    # Word boundaries prevent partial matches like 'gene' in 'general_note'.
+                    bounded_pattern = r"\b" + pattern + r"\b"
+                    compiled_list.append(re.compile(bounded_pattern, re.IGNORECASE))
                 except re.error as e:
                     logger.error(f"Invalid regex pattern in composite rule '{rule.id}': '{pattern}'. Error: {e}")
                     pass
@@ -113,8 +116,8 @@ class CompositeRuleEngine:
             for compiled in compiled_patterns:
                 # For each pattern, check if ANY field in the record matches it.
                 for norm_name, original_name in norm_fields.items():
-                    # Use word boundaries to avoid partial matches like 'gene' in 'general_note'
-                    if re.search(r"\b" + compiled.pattern + r"\b", norm_name, re.IGNORECASE):
+                    # Use the pre-compiled pattern directly (word boundaries already included).
+                    if compiled.search(norm_name):
                         # Pattern matched a field: increment counter and record the field name.
                         matched += 1
                         matched_names.append(original_name)

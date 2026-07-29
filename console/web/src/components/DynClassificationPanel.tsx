@@ -238,7 +238,9 @@ export default function DynClassificationPanel() {
                     <div className="text-right">
                       <span className="text-xs text-gray-500">置信度 / 需人工复核</span>
                       <div className="mt-1 text-sm font-semibold text-gray-800">
-                        {evalResult.fieldResult?.confidence * 100}%
+                        {evalResult.fieldResult?.confidence != null
+                          ? `${Math.round(evalResult.fieldResult.confidence * 100)}%`
+                          : 'N/A'}
                       </div>
                     </div>
                   </div>

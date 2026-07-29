@@ -90,6 +90,14 @@ class ConfidencePolicy(BaseModel):
         alias="enableLlm",
         description="是否显式启用 LLM 层",
     )
+    # NER trigger threshold: invoke NER when current level rank <= this value.
+    # Default 3 means NER triggers when field is classified at rank 3 or below.
+    # For C1~C4 systems (4 levels), set to 2 to limit NER to C1/C2 only.
+    ner_trigger_max_rank: int = Field(
+        default=3, ge=0,
+        alias="nerTriggerMaxRank",
+        description="NER 触发阈值：当前等级 rank <= 此值时触发 NER（默认 3）",
+    )
 
 
 # ===========================================================================
@@ -146,7 +154,7 @@ class DomainTaxonomy(BaseModel):
     支持通过 confidence_policy 节配置置信度策略。
     """
 
-    # Allow extra fields (e.g. confidence_policy) from YAML to be preserved.
+    # Allow extra fields from YAML to be preserved (forward compatibility).
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     # Domain identifier (e.g. 'healthcare', 'finance', 'gov').
@@ -168,6 +176,27 @@ class DomainTaxonomy(BaseModel):
     )
     # Fallback level ID used when no rule hits a field (safe default).
     default_level: str = Field(default="L3", description="无规则命中时的默认等级 ID")
+    # Explicit confidence policy configuration (loaded from taxonomy YAML).
+    confidence_policy: Optional[ConfidencePolicy] = Field(
+        default=None, description="置信度策略配置（冲突衰减 + LLM 仲裁触发条件）"
+    )
+    # NER entity-to-level mapping for multi-standard support.
+    # Keys are entity labels (e.g. "GENOMIC_HINT"), values are level IDs.
+    ner_entity_mapping: Optional[dict[str, str]] = Field(
+        default=None, description="NER 实体类型→等级 ID 映射（支持多标准体系）"
+    )
+    # NER sensitive keywords: entities containing these keywords are upgraded
+    # to the second-highest level. Configurable per taxonomy/domain.
+    ner_sensitive_keywords: Optional[list[str]] = Field(
+        default=None,
+        description="NER 敏感关键词列表（命中时升级为次高等级），默认内置医疗敏感病种",
+    )
+    # LLM arbitration prompt template. Supports placeholders:
+    # {field_name}, {value}, {domain}, {standard_id}, {conflict_desc}, {levels_desc}
+    llm_arbitration_prompt_template: Optional[str] = Field(
+        default=None,
+        description="LLM 仲裁 prompt 模板（支持占位符），None 时使用内置默认模板",
+    )
 
     def max_level(self, *level_ids: str) -> str:
         """返回等级集合中 rank 最高的等级 ID。

@@ -12,9 +12,9 @@
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `PRIVACY_DYNCLASSIFICATION_RULES_DIR` | `/etc/privacy-agent/rules` | 动态规则配置根目录 |
+| `PRIVACY_DYNCLASSIFICATION_RULES_DIR` | `rules` | 动态规则配置根目录 |
 | `PRIVACY_DYNCLASSIFICATION_HOT_RELOAD` | `true` | 是否开启配置热重载功能 |
-| `PRIVACY_DYNCLASSIFICATION_RELOAD_INTERVAL` | `60` | 配置文件 mtime 变更自动检测间隔（秒） |
+| `PRIVACY_DYNCLASSIFICATION_RELOAD_INTERVAL` | `0` | 配置文件 mtime 变更自动检测最小间隔（秒，0=无节流） |
 
 ---
 
@@ -104,7 +104,7 @@ groups:
 - **排查步骤**：
   1. 使用内置校验脚本检查 YAML：
      ```bash
-     PYTHONPATH=. python -m privacy_local_agent.privacy.classification.validate_rules /etc/privacy-agent/rules
+     PYTHONPATH=. python -m privacy_local_agent.dynclassification validate /etc/privacy-agent/rules
      ```
   2. 修复配置文件语法与语义错误后重新 reload。
 

@@ -1246,29 +1246,29 @@ ICD-10 规则需要动态返回等级（一般编码 L3，敏感区间 L4），�
 
 ```python
 @OperatorRegistry.register("icd10_range")
-def icd10_range_matcher(value: Any, params: dict[str, Any]) -> bool:
+def icd10_range_matcher(value: Any, params: dict[str, Any]) -> Tuple[bool, str, str]:
     """ICD-10 编码区间判定算子。
 
-    返回值仅为 bool（是否命中），但通过 params["_result"] 回写详细结果，
-    供引擎读取动态等级和类别。
+    返回一个元组 (is_hit, level, category)：
+    - is_hit: 是否为合法 ICD-10 编码
+    - level: 动态等级（敏感区间返回 upgrade_level，否则返回 default_level）
+    - category: 动态类别（敏感区间返回配置的 category，否则返回 MEDICAL_ICD10_GENERAL）
     """
-    from .classification_rule_engine import _normalize_icd10, _in_icd10_interval
     icd = _normalize_icd10(str(value) if value else "")
     if not icd:
-        return False
+        return False, "", ""
 
     intervals = params.get("intervals", [])
     for interval in intervals:
         if _in_icd10_interval(icd, interval["start"], interval["end"]):
-            # 命中敏感区间：回写升级信息
-            params["_hit_level"] = params.get("upgrade_level", "L4")
-            params["_hit_category"] = interval.get("category", "")
-            return True
+            # 命中敏感区间：返回升级等级和类别
+            level = params.get("upgrade_level", "L4")
+            category = interval.get("category", "")
+            return True, level, category
 
     # 未命中敏感区间：使用默认等级
-    params["_hit_level"] = params.get("default_level", "L3")
-    params["_hit_category"] = "MEDICAL_ICD10_GENERAL"
-    return True
+    level = params.get("default_level", "L3")
+    return True, level, "MEDICAL_ICD10_GENERAL"
 ```
 
 ## 9. Profile 管理与上下文调度

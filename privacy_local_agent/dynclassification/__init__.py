@@ -37,7 +37,7 @@ from .models import (
 # --- Import NER adapter for Layer-2 entity extraction ---
 from .ner_adapter import NerAdapter
 # --- Import operator registry and protocol for plugin-style matcher management ---
-from .operator_registry import MatcherOperator, OperatorRegistry
+from .operator_registry import MatcherOperator, OperatorRegistry, OperatorResult, normalize_result
 # --- Import profile loader responsible for YAML loading, caching and hot-reload ---
 from .profile_loader import ProfileLoader
 # --- Import declarative rule schema models (matchers, rules, profiles, standards) ---
@@ -72,6 +72,8 @@ __all__ = [
     # Operator plugin registry
     "OperatorRegistry",
     "MatcherOperator",
+    "OperatorResult",
+    "normalize_result",
     # Data models
     "DomainTaxonomy",
     "SensitivityLevelDef",

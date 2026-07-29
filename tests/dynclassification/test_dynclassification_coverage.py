@@ -191,7 +191,7 @@ class TestEngineAndServiceCoverage:
         )
 
         buggy_engine = ConfigurableRuleEngine(taxonomy, [profile])
-        tags = buggy_engine.evaluate("field", "value")
+        tags, _suppressed = buggy_engine.evaluate("field", "value")
 
         assert len(tags) == 0  # 异常安全捕获
         assert "operator_execution_failed" in caplog.text

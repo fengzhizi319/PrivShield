@@ -143,7 +143,7 @@ class TestRuleOverridesAndExtraRules:
         loader._standard_cache["custom_std"] = std_def
 
         engine = loader.get_engine(standard="custom_std")
-        tags = engine.evaluate("bank_card_no", "6222021001123456789")
+        tags, _suppressed = engine.evaluate("bank_card_no", "6222021001123456789")
         assert len(tags) == 1
         assert tags[0].level == "L3"  # 成功从 L4 覆盖升级为 L3
 
@@ -180,7 +180,7 @@ class TestDowngradeRules:
         engine = ConfigurableRuleEngine(taxonomy, [profile])
 
         # 匹配降级关键词 "inventory"
-        tags = engine.evaluate("device_inventory_count", None)
+        tags, _suppressed = engine.evaluate("device_inventory_count", None)
         assert len(tags) == 1
         assert tags[0].level == "L2"
         assert tags[0].category == "MGMT"

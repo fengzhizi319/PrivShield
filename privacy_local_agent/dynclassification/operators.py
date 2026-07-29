@@ -26,7 +26,7 @@ import re
 from typing import Any, Tuple
 
 # Import the registry to register all built-in operators via decorators
-from .operator_registry import OperatorRegistry
+from .operator_registry import OperatorRegistry, OperatorResult
 
 
 # ===========================================================================
@@ -196,20 +196,30 @@ def keyword_contains_matcher(value: Any, params: dict[str, Any]) -> bool:
 
     params:
         keywords: list[str] - 关键词列表
-        use_word_boundaries: bool - 是否使用单词边界（\b）进行匹配（默认 True）
+        use_word_boundaries: bool - 是否使用单词边界（\b）进行匹配（默认 False，纯子串匹配）。
+            注意：启用单词边界时，对原始值（仅小写化）进行正则匹配，
+            而非对归一化后的字符串（已去除分隔符）进行匹配。
     """
-    norm = str(value).lower().replace("_", "").replace(" ", "")
     keywords = params.get("keywords", [])
-    use_word_boundaries = params.get("use_word_boundaries", True)
+    use_word_boundaries = params.get("use_word_boundaries", False)
 
     if use_word_boundaries:
+        # 单词边界模式：对原始值仅做小写化，保留分隔符以使 \b 生效
+        raw_lower = str(value).lower() if value else ""
+        if not raw_lower:
+            return False
         for kw in keywords:
             if kw:
-                pattern = r"\b" + re.escape(kw.lower().replace("_", "").replace(" ", "")) + r"\b"
-                if re.search(pattern, norm):
+                # 对关键词也仅做小写化（保留原始形态以正确构建正则）
+                pattern = r"\b" + re.escape(kw.lower()) + r"\b"
+                if re.search(pattern, raw_lower):
                     return True
         return False
     else:
+        # 纯子串模式：归一化后匹配（去下划线/空格）
+        norm = str(value).lower().replace("_", "").replace(" ", "") if value else ""
+        if not norm:
+            return False
         return any(kw.lower().replace("_", "").replace(" ", "") in norm for kw in keywords if kw)
 
 
@@ -273,11 +283,11 @@ def medical_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
 
 
 @OperatorRegistry.register("icd10_range")
-def icd10_range_matcher(value: Any, params: dict[str, Any]) -> Tuple[bool, str, str]:
+def icd10_range_matcher(value: Any, params: dict[str, Any]) -> OperatorResult:
     """ICD-10 编码区间判定算子。
 
     判断值是否为合法 ICD-10 编码，并检查是否落在敏感区间内。
-    返回一个元组 (is_hit, level, category)。
+    返回 OperatorResult，携带动态等级和类别信息。
 
     params:
         default_level: str - 默认等级（未命中敏感区间时）
@@ -286,7 +296,7 @@ def icd10_range_matcher(value: Any, params: dict[str, Any]) -> Tuple[bool, str, 
     """
     icd = _normalize_icd10(str(value) if value else "")
     if not icd:
-        return False, "", ""
+        return OperatorResult(hit=False)
 
     intervals = params.get("intervals", [])
     for interval in intervals:
@@ -295,11 +305,11 @@ def icd10_range_matcher(value: Any, params: dict[str, Any]) -> Tuple[bool, str, 
         if _in_icd10_interval(icd, start, end):
             level = params.get("upgrade_level", "L4")
             category = interval.get("category", "")
-            return True, level, category
+            return OperatorResult(hit=True, level=level, category=category)
 
     level = params.get("default_level", "L3")
     category = "MEDICAL_ICD10_GENERAL"
-    return True, level, category
+    return OperatorResult(hit=True, level=level, category=category)
 
 
 @OperatorRegistry.register("luhn_checksum")

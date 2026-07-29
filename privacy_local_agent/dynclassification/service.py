@@ -69,6 +69,8 @@ class DynClassificationService:
         self._ner_adapter: NerAdapter | None = None
         # Lazy-initialized LLM adapter (shared across all requests).
         self._llm_adapter: LlmAdapter | None = None
+        # Funnel instance cache: keyed by engine cache key ("domain:standard").
+        self._funnel_cache: dict[str, ClassificationFunnel] = {}
 
     # ------------------------------------------------------------------
     # 字段级分类 / Field-level Classification
@@ -378,6 +380,8 @@ class DynClassificationService:
     def reload(self) -> None:
         """热加载：清除缓存，下次请求时重新加载配置。"""
         self.loader.invalidate_cache()
+        # 同时清除 funnel 缓存（引擎重建后 funnel 也需重建）
+        self._funnel_cache.clear()
 
     def generate_profile_from_doc(self, doc_path: str | Path) -> dict[str, str]:
         """从标准 Markdown 文档自动抽取并生成 YAML 配置文件，并重新载入引擎缓存。
@@ -421,19 +425,11 @@ class DynClassificationService:
         return engine.taxonomy.max_level(*levels)
 
     def _build_funnel(self, engine: ConfigurableRuleEngine) -> ClassificationFunnel:
-        """构建三层漏斗编排器。
+        """构建三层漏斗编排器（带缓存）。
 
         根据引擎的 taxonomy 中配置的 confidence_policy 构建漏斗，
         并按需初始化 NER/LLM 适配器（lazy-load，全局单例）。
-
-        执行流程:
-        ┌─────────────────────────────────────────────────────────────┐
-        │  _build_funnel(engine)                                       │
-        │    1. 从 taxonomy 提取 confidence_policy 配置              │
-        │    2. 如果 enable_ner=true → 初始化 NerAdapter (单例)     │
-        │    3. 如果 enable_llm/arbitration=true → 初始化 LlmAdapter │
-        │    4. 构建 ClassificationFunnel 实例                        │
-        └─────────────────────────────────────────────────────────────┘
+        Funnel 实例按 engine 的 domain:standard 键缓存，避免高频创建。
 
         Args:
             engine: 当前请求对应的规则引擎实例。
@@ -441,6 +437,12 @@ class DynClassificationService:
         Returns:
             配置完成的三层漏斗编排器。
         """
+        # 缓存键：与 ProfileLoader 的 engine 缓存键一致
+        cache_key = f"{engine.domain}:{engine.standard_id}"
+        cached = self._funnel_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         # 从 taxonomy 获取置信度策略配置
         policy = self._get_confidence_policy(engine)
 
@@ -458,19 +460,21 @@ class DynClassificationService:
                 self._llm_adapter = LlmAdapter()
             llm_adapter = self._llm_adapter
 
-        return ClassificationFunnel(
+        funnel = ClassificationFunnel(
             engine=engine,
             taxonomy=engine.taxonomy,
             confidence_policy=policy,
             ner_adapter=ner_adapter,
             llm_adapter=llm_adapter,
         )
+        self._funnel_cache[cache_key] = funnel
+        return funnel
 
     def _get_confidence_policy(self, engine: ConfigurableRuleEngine) -> ConfidencePolicy:
         """从引擎的 taxonomy 中提取置信度策略配置。
 
-        如果 taxonomy YAML 中配置了 confidence_policy 节，则解析为
-        ConfidencePolicy 模型；否则使用默认策略。
+        优先使用 DomainTaxonomy.confidence_policy 显式字段；
+        若为 None，回退到 model_extra 中的 confidence_policy dict（向后兼容）。
 
         Args:
             engine: 规则引擎实例。
@@ -478,14 +482,13 @@ class DynClassificationService:
         Returns:
             ConfidencePolicy 实例。
         """
-        # taxonomy 是 DomainTaxonomy 模型，检查是否有 confidence_policy 属性
-        # 通过 profile_loader 加载的原始 YAML 数据中可能包含 confidence_policy
         taxonomy = engine.taxonomy
-        # 尝试从 taxonomy 的 model_extra 或显式字段获取
-        policy_data = getattr(taxonomy, "confidence_policy", None)
-        if policy_data is None and hasattr(taxonomy, "model_extra") and taxonomy.model_extra:
+        # 优先使用显式字段（Pydantic 已自动校验）
+        if taxonomy.confidence_policy is not None:
+            return taxonomy.confidence_policy
+        # 向后兼容：从 model_extra 中获取 dict 并手动构造
+        if hasattr(taxonomy, "model_extra") and taxonomy.model_extra:
             policy_data = taxonomy.model_extra.get("confidence_policy")
-
-        if policy_data and isinstance(policy_data, dict):
-            return ConfidencePolicy(**policy_data)
+            if policy_data and isinstance(policy_data, dict):
+                return ConfidencePolicy(**policy_data)
         return ConfidencePolicy()

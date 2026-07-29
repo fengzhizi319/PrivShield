@@ -408,7 +408,7 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(httpReq)
 	duration := time.Since(start).Milliseconds()
 
@@ -435,7 +435,6 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 		Protocol:   "REST",
 	})
 }
-
 
 // Batch 逐个转发一组请求并汇总成功/失败统计。
 //

@@ -106,8 +106,12 @@ class ConfigurableRuleEngine:
 
     def evaluate(
         self, field_name: str, value: Any, context: dict[str, Any] | None = None
-    ) -> list[SecurityTag]:
-        """评估单个字段，返回命中的 SecurityTag 标签列表。"""
+    ) -> tuple[list[SecurityTag], list[SecurityTag]]:
+        """评估单个字段，返回 (final_tags, suppressed_tags) 元组。
+        
+        final_tags: 最终生效的安全标签列表
+        suppressed_tags: 被降级规则压制的标签列表（用于审计）
+        """
 ```
 
 ---
@@ -151,20 +155,34 @@ class ProfileLoader:
 #### 响应体格式
 ```json
 {
-  "tags": [
-    {
-      "level": "L3",
-      "category": "PERSONAL_BASIC",
-      "ruleId": "RULE_PII_IDCARD",
-      "sourceEngine": "RULE",
-      "domain": "general-pii",
-      "standardId": "gbt35273"
-    }
-  ],
-  "maxLevel": "L3",
-  "audit": {
-    "timestamp": "2026-07-28T10:00:00Z",
-    "engineLayer": "L1_RULE"
+  "fieldResult": {
+    "fieldName": "user_id_card",
+    "fieldValue": "510104199003072345",
+    "tags": [
+      {
+        "level": "L3",
+        "category": "PERSONAL_BASIC",
+        "confidence": 1.0,
+        "sourceEngine": "RULE",
+        "ruleId": "RULE_PII_IDCARD",
+        "domain": "general-pii",
+        "standardId": "gbt35273",
+        "matchTarget": "field_value"
+      }
+    ],
+    "finalLevel": "L3",
+    "confidence": 1.0,
+    "needsHumanReview": false,
+    "engineLayer": "L1_RULE",
+    "reasoning": "命中规则: RULE_PII_IDCARD"
+  },
+  "auditInfo": {
+    "domain": "general-pii",
+    "standardId": "gbt35273",
+    "ruleSetVersion": "1.0.0",
+    "rulesEvaluated": 12,
+    "rulesHit": 1,
+    "durationMs": 0.235
   }
 }
 ```
@@ -261,6 +279,8 @@ message DynClassificationResponse {
   string max_level = 2;
   string audit_timestamp = 3;
   string engine_layer = 4;
+  double confidence = 5;
+  bool needs_human_review = 6;
 }
 ```
 

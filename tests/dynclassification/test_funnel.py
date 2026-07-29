@@ -138,7 +138,7 @@ class TestLayer1Basic:
         """无规则命中时返回默认等级 L3。"""
         policy = ConfidencePolicy()
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy)
-        result = funnel.classify_field("unknown_field", "some_value")
+        result, _suppressed = funnel.classify_field("unknown_field", "some_value")
 
         assert result.final_level == "L3"
         assert result.confidence == 0.0
@@ -150,7 +150,7 @@ class TestLayer1Basic:
         policy = ConfidencePolicy()
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy)
         # "report" 关键词命中普通规则
-        result = funnel.classify_field("annual_report", "data")
+        result, _suppressed = funnel.classify_field("annual_report", "data")
 
         assert result.final_level == "L3"
         assert result.confidence == 1.0
@@ -171,7 +171,7 @@ class TestConfidenceDecay:
         policy = ConfidencePolicy(conflict_confidence=0.7, conflict_needs_review=True)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy)
         # "turnover_rate_report" 同时包含 "report"(普通) 和 "turnover_rate"(降级)
-        result = funnel.classify_field("turnover_rate_report", "data")
+        result, _suppressed = funnel.classify_field("turnover_rate_report", "data")
 
         assert result.has_conflict
         assert result.confidence == 0.7
@@ -184,7 +184,7 @@ class TestConfidenceDecay:
         """自定义冲突置信度。"""
         policy = ConfidencePolicy(conflict_confidence=0.5)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy)
-        result = funnel.classify_field("turnover_rate_report", "data")
+        result, _suppressed = funnel.classify_field("turnover_rate_report", "data")
 
         assert result.confidence == 0.5
 
@@ -193,7 +193,7 @@ class TestConfidenceDecay:
         policy = ConfidencePolicy(conflict_confidence=0.7)
         funnel = ClassificationFunnel(engine_override, taxonomy, policy)
         # "turnover_rate_report": override 压制 L3 普通标签，只剩 L2 降级标签
-        result = funnel.classify_field("turnover_rate_report", "data")
+        result, _suppressed = funnel.classify_field("turnover_rate_report", "data")
 
         # override 成功压制 → 无冲突
         assert not result.has_conflict
@@ -204,7 +204,7 @@ class TestConfidenceDecay:
         """配置 conflict_needs_review=false 时不标记复核。"""
         policy = ConfidencePolicy(conflict_needs_review=False)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy)
-        result = funnel.classify_field("turnover_rate_report", "data")
+        result, _suppressed = funnel.classify_field("turnover_rate_report", "data")
 
         assert result.has_conflict
         assert not result.needs_human_review
@@ -228,7 +228,7 @@ class TestNerLayer:
 
         policy = ConfidencePolicy(enable_ner=True)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, ner_adapter=mock_ner)
-        result = funnel.classify_field("diagnosis", "患者高血压")
+        result, _suppressed = funnel.classify_field("diagnosis", "患者高血压")
 
         # NER 应该追加了一个 L3 标签
         ner_tags = [t for t in result.tags if t.source_engine == "SMALL_NER"]
@@ -246,7 +246,7 @@ class TestNerLayer:
 
         policy = ConfidencePolicy(enable_ner=True)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, ner_adapter=mock_ner)
-        result = funnel.classify_field("diagnosis", "HIV感染")
+        result, _suppressed = funnel.classify_field("diagnosis", "HIV感染")
 
         ner_tags = [t for t in result.tags if t.source_engine == "SMALL_NER"]
         assert ner_tags[0].level == "L4"
@@ -282,7 +282,7 @@ class TestLlmArbitration:
 
         policy = ConfidencePolicy(enable_llm_arbitration=True)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, llm_adapter=mock_llm)
-        result = funnel.classify_field("turnover_rate_report", "0.85")
+        result, _suppressed = funnel.classify_field("turnover_rate_report", "0.85")
 
         assert result.has_conflict
         assert result.engine_layer == EngineLayer.L3_LLM
@@ -300,7 +300,7 @@ class TestLlmArbitration:
 
         policy = ConfidencePolicy(enable_llm_arbitration=True, conflict_confidence=0.7)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, llm_adapter=mock_llm)
-        result = funnel.classify_field("turnover_rate_report", "0.85")
+        result, _suppressed = funnel.classify_field("turnover_rate_report", "0.85")
 
         assert result.has_conflict
         assert result.confidence == 0.7
@@ -315,7 +315,7 @@ class TestLlmArbitration:
 
         policy = ConfidencePolicy(enable_llm_arbitration=True, conflict_confidence=0.6)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, llm_adapter=mock_llm)
-        result = funnel.classify_field("turnover_rate_report", "0.85")
+        result, _suppressed = funnel.classify_field("turnover_rate_report", "0.85")
 
         assert result.confidence == 0.6
         assert result.needs_human_review
@@ -333,7 +333,7 @@ class TestLlmArbitration:
         # 使用一个不命中任何规则的字段，使 confidence=0.0 < threshold
         policy = ConfidencePolicy(enable_llm=True, llm_confidence_threshold=0.6)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, llm_adapter=mock_llm)
-        result = funnel.classify_field("unknown_field", "some text")
+        result, _suppressed = funnel.classify_field("unknown_field", "some text")
 
         # confidence=0.0 < 0.6 → 触发 LLM
         assert result.engine_layer == EngineLayer.L3_LLM
@@ -352,7 +352,7 @@ class TestFunnelResultStructure:
         """结果包含所有必要字段。"""
         policy = ConfidencePolicy()
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy)
-        result = funnel.classify_field("annual_report", "data")
+        result, _suppressed = funnel.classify_field("annual_report", "data")
 
         assert isinstance(result, FunnelResult)
         assert isinstance(result.tags, list)

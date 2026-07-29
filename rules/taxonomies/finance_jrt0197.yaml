@@ -47,3 +47,29 @@ categories:
     name: "组合金融敏感信息"
 
 default_level: "C3"
+
+# 置信度策略配置
+confidence_policy:
+  conflict_confidence: 0.7
+  conflict_needs_review: true
+  enable_llm_arbitration: false
+  llm_confidence_threshold: 0.6
+  enable_ner: false
+  enable_llm: false
+  ner_trigger_max_rank: 2        # C1~C4 体系：仅 C1/C2 时触发 NER
+
+# NER 实体→等级映射（金融领域）
+ner_entity_mapping:
+  GENOMIC_HINT: "C4"
+  MEDICAL_DISEASE: "C3"
+  MEDICATION: "C3"
+  SURGERY: "C3"
+  BODY_PART: "C2"
+
+# 金融领域敏感关键词（NER 命中时升级为 C4）
+ner_sensitive_keywords:
+  - "洗钱"
+  - "恐怖融资"
+  - "内幕交易"
+  - "欺诈"
+  - "非法集资"

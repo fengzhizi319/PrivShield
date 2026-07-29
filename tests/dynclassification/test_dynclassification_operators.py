@@ -2,7 +2,7 @@
 
 import pytest
 from typing import Any
-from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
+from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry, OperatorResult
 from privacy_local_agent.dynclassification import operators  # noqa: F401
 
 
@@ -99,9 +99,11 @@ class TestICD10RangeOperator:
             ]
         }
         # B20.0 落在 B20-B24 敏感区间，应提升至 L4
-        assert op("B20.0", params) is True
-        assert params["_hit_level"] == "L4"
-        assert params["_hit_category"] == "MEDICAL_ICD10_HIV"
+        result = op("B20.0", params)
+        assert isinstance(result, OperatorResult)
+        assert result.hit is True
+        assert result.level == "L4"
+        assert result.category == "MEDICAL_ICD10_HIV"
 
     def test_icd10_general_code(self):
         op = OperatorRegistry.get("icd10_range")
@@ -113,14 +115,19 @@ class TestICD10RangeOperator:
             ]
         }
         # J00 (普通感冒) 不在敏感区间，使用默认 L3
-        assert op("J00", params) is True
-        assert params["_hit_level"] == "L3"
+        result = op("J00", params)
+        assert result.hit is True
+        assert result.level == "L3"
+        assert result.category == "MEDICAL_ICD10_GENERAL"
 
     def test_invalid_icd10_code(self):
         op = OperatorRegistry.get("icd10_range")
-        assert op("INVALID_ICD_123", {}) is False
-        assert op("", {}) is False
-        assert op(None, {}) is False
+        result = op("INVALID_ICD_123", {})
+        assert result.hit is False
+        result2 = op("", {})
+        assert result2.hit is False
+        result3 = op(None, {})
+        assert result3.hit is False
 
 
 class TestLuhnChecksumOperator:

@@ -1,7 +1,7 @@
 """算子注册表 / Operator Registry.
 
 提供匹配算子的统一注册、查找和管理机制。
-所有算子必须实现 MatcherOperator 协议签名：(value, params) -> bool。
+所有算子必须实现 MatcherOperator 协议签名：(value, params) -> bool | OperatorResult。
 
 支持两种注册方式：
 1. 装饰器注册：@OperatorRegistry.register("算子名")
@@ -12,7 +12,50 @@ from __future__ import annotations
 
 # threading.Lock is used to protect write paths (register/clear) from race conditions
 import threading
-from typing import Any, Callable, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Callable, Protocol, Union, runtime_checkable
+
+
+# ===========================================================================
+# 算子统一返回类型 / Unified Operator Result
+# ===========================================================================
+
+
+@dataclass(slots=True)
+class OperatorResult:
+    """算子统一返回结果。
+
+    所有算子可返回 bool（简单命中/未命中）或 OperatorResult（携带动态等级/类别）。
+    引擎通过 normalize_result() 统一处理两种返回类型。
+
+    Attributes:
+        hit: 是否命中。
+        level: 动态等级（None 时使用规则定义的 level）。
+        category: 动态类别（None 时使用规则定义的 category）。
+    """
+
+    hit: bool
+    level: str | None = None
+    category: str | None = None
+
+
+def normalize_result(raw: Any) -> OperatorResult:
+    """将算子原始返回值归一化为 OperatorResult。
+
+    支持两种输入：
+    - bool: 转为 OperatorResult(hit=bool_val)
+    - OperatorResult: 直接返回
+    - tuple (向后兼容): (hit, level, category) → OperatorResult
+    """
+    if isinstance(raw, OperatorResult):
+        return raw
+    if isinstance(raw, tuple):
+        # 向后兼容旧版 icd10_range 返回 (bool, str, str) 元组
+        hit = bool(raw[0]) if len(raw) > 0 else False
+        level = raw[1] if len(raw) > 1 and raw[1] else None
+        category = raw[2] if len(raw) > 2 and raw[2] else None
+        return OperatorResult(hit=hit, level=level, category=category)
+    return OperatorResult(hit=bool(raw))
 
 
 # @runtime_checkable enables isinstance() checks against this Protocol at runtime,
@@ -24,12 +67,12 @@ class MatcherOperator(Protocol):
     所有算子必须实现此签名：接收待匹配值和参数字典，返回是否命中。
     算子必须是无状态纯函数，不持有实例变量，不产生副作用。
 
-    签名: (value: Any, params: dict[str, Any]) -> bool
+    签名: (value: Any, params: dict[str, Any]) -> bool | OperatorResult
     """
 
     # Protocol method signature: any callable matching this shape is a valid operator.
     # The ellipsis (...) indicates this is a structural type, not an implementation.
-    def __call__(self, value: Any, params: dict[str, Any]) -> bool: ...
+    def __call__(self, value: Any, params: dict[str, Any]) -> Union[bool, OperatorResult]: ...
 
 
 class OperatorRegistry:
@@ -131,4 +174,25 @@ class OperatorRegistry:
         """
         with cls._lock:
             cls._operators.clear()
+
+    @classmethod
+    def snapshot(cls) -> dict[str, MatcherOperator]:
+        """获取当前算子注册表的快照（用于测试隔离）。
+
+        Returns:
+            当前 _operators 字典的浅拷贝。
+        """
+        with cls._lock:
+            return dict(cls._operators)
+
+    @classmethod
+    def restore(cls, snapshot: dict[str, MatcherOperator]) -> None:
+        """从快照恢复算子注册表（用于测试隔离）。
+
+        Args:
+            snapshot: 之前通过 snapshot() 获取的算子映射。
+        """
+        with cls._lock:
+            cls._operators.clear()
+            cls._operators.update(snapshot)
 

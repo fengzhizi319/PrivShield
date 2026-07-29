@@ -12,16 +12,41 @@ from typing import Any
 
 
 class SensitivityLevel(str, Enum):
-    """敏感度等级枚举（L1~L5）。
+    """敏感度等级枚举（支持多套分级体系）。
 
     继承 str 使得枚举值可直接序列化为 JSON 字符串。
+    支持:
+    - L1~L5: 通用/医疗行业分级
+    - C1~C4: 金融行业分级 (JR/T 0197)
     """
 
+    # 通用/医疗行业分级
     L1 = "L1"  # 公开数据
     L2 = "L2"  # 内部数据
     L3 = "L3"  # 敏感数据
     L4 = "L4"  # 高敏感数据
     L5 = "L5"  # 极敏感数据
+
+    # 金融行业分级 (JR/T 0197)
+    C1 = "C1"  # 第1级：不敏感数据
+    C2 = "C2"  # 第2级：低敏感数据
+    C3 = "C3"  # 第3级：敏感数据
+    C4 = "C4"  # 第4级：高敏感数据
+
+    @classmethod
+    def from_string(cls, level: str) -> "SensitivityLevel":
+        """从字符串解析等级，未知等级回退到 L3。
+
+        Args:
+            level: 等级字符串（如 "L3", "C4"）。
+
+        Returns:
+            对应的枚举值，未知等级回退到 L3。
+        """
+        try:
+            return cls(level)
+        except ValueError:
+            return cls.L3
 
 
 class SmallNerEngine(ABC):

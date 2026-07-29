@@ -429,6 +429,8 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
 
         if result.field_result:
             max_level = result.field_result.final_level or ""
+            # 读取实际的 engine_layer，而非硬编码 L1_RULE
+            engine_layer = result.field_result.engine_layer or "L1_RULE"
             for tag in result.field_result.tags:
                 tags_proto.append(
                     privacy_pb2.DynSecurityTagProto(

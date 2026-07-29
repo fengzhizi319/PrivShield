@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -24,14 +26,19 @@ from ..dynclassification.validator import validate_rules_dir
 
 router = APIRouter(prefix="/v1/dynclassification", tags=["Dynamic Classification"])
 
-# 实例化通用单例 service
+# 实例化通用单例 service（线程安全懒初始化）
 _service: Optional[DynClassificationService] = None
+_service_lock = threading.Lock()
 
 
 def get_service() -> DynClassificationService:
     global _service
     if _service is None:
-        _service = DynClassificationService(rules_dir="rules")
+        with _service_lock:
+            # Double-checked locking: 避免每次请求都加锁
+            if _service is None:
+                rules_dir = os.environ.get("PRIVACY_DYNCLASSIFICATION_RULES_DIR", "rules")
+                _service = DynClassificationService(rules_dir=rules_dir)
     return _service
 
 

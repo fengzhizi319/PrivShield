@@ -26,7 +26,7 @@ graph TD
 
 ```python
 import pytest
-from privacy_local_agent.privacy.classification.operator_registry import OperatorRegistry
+from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
 
 def test_operator_registry_register_and_get():
     @OperatorRegistry.register("test_dummy_op")
@@ -49,9 +49,9 @@ def test_operator_not_found():
 ### 2.2 `ConfigurableRuleEngine` 评估引擎测试
 
 ```python
-from privacy_local_agent.privacy.classification.taxonomy import DomainTaxonomy, SensitivityLevelDef, CategoryDef
-from privacy_local_agent.privacy.classification.rule_schema import RuleProfile, RuleDef, MatcherDef
-from privacy_local_agent.privacy.classification.configurable_engine import ConfigurableRuleEngine
+from privacy_local_agent.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef
+from privacy_local_agent.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
+from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
 
 def test_configurable_engine_evaluation():
     taxonomy = DomainTaxonomy(
@@ -79,15 +79,15 @@ def test_configurable_engine_evaluation():
 
     engine = ConfigurableRuleEngine(taxonomy, [profile])
 
-    # 测试手机号匹配
-    tags = engine.evaluate("mobile_number", "13800138000")
+    # 测试手机号匹配（注意 evaluate 返回元组）
+    tags, suppressed = engine.evaluate("mobile_number", "13800138000")
     assert len(tags) == 1
     assert tags[0].level == "L3"
     assert tags[0].category == "PII"
     assert tags[0].rule_id == "RULE_PHONE"
 
     # 测试未命中
-    no_tags = engine.evaluate("mobile_number", "not_a_phone")
+    no_tags, _ = engine.evaluate("mobile_number", "not_a_phone")
     assert len(no_tags) == 0
 ```
 
@@ -110,8 +110,8 @@ PYTHONPATH=. python -m pytest tests/test_dynclassification_schema.py -v
 from pathlib import Path
 import yaml
 import pytest
-from privacy_local_agent.privacy.classification.taxonomy import DomainTaxonomy
-from privacy_local_agent.privacy.classification.rule_schema import RuleProfile, StandardDef
+from privacy_local_agent.dynclassification.models import DomainTaxonomy
+from privacy_local_agent.dynclassification.rule_schema import RuleProfile, StandardDef
 
 RULES_DIR = Path("rules")
 
@@ -139,6 +139,6 @@ def test_validate_standards(yaml_file):
 ## 4. 运行全套单元测试
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
-PYTHONPATH=. pytest tests/test_classification*.py -v
+cd /Users/charles/Documents/code/sfwork/privacy-local-agent
+PYTHONPATH=. pytest tests/dynclassification/ -v
 ```

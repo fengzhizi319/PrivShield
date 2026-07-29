@@ -165,10 +165,11 @@ class ClassificationFunnel:
 
         # ===== Step 3: Layer-2 NER 实体识别（可选） =====
         if self.policy.enable_ner and self.ner is not None:
-            # 触发条件: 无标签 或 当前最高等级 rank <= 3（中低敏感度时才需 NER 辅助）
+            # 触发条件: 无标签 或 当前最高等级 rank <= 配置阈值（中低敏感度时才需 NER 辅助）
             current_level = self._resolve_level(tags)
             current_rank = self.taxonomy.get_level_rank(current_level)
-            if not tags or current_rank <= 3:
+            ner_trigger_rank = self.policy.ner_trigger_max_rank
+            if not tags or current_rank <= ner_trigger_rank:
                 ner_tags = self._run_ner(str_value)
                 if ner_tags:
                     tags.extend(ner_tags)
@@ -274,7 +275,10 @@ class ClassificationFunnel:
     def _run_ner(self, text: str) -> list[SecurityTag]:
         """执行 NER 实体提取并映射为 SecurityTag。
 
-        实体类型到等级的映射:
+        实体类型到等级的映射优先从 taxonomy.ner_entity_mapping 配置读取，
+        若未配置则使用默认映射（L3/L4/L5）。
+
+        默认映射:
         - GENOMIC_HINT → L5 (极敏感, 需人工复核)
         - MEDICAL_DISEASE + 敏感关键词 → L4
         - MEDICAL_DISEASE (普通) → L3
@@ -287,18 +291,42 @@ class ClassificationFunnel:
         if not entities:
             return []
 
+        # 从 taxonomy 获取可配置的实体→等级映射
+        entity_mapping = self.taxonomy.ner_entity_mapping or {}
+        # 默认等级回退值
+        default_level = self.taxonomy.default_level
+        # 从 taxonomy levels 中推断高/中/低等级
+        sorted_levels = sorted(self.taxonomy.levels.values(), key=lambda l: l.rank)
+        level_ids = [l.id for l in sorted_levels]
+        # 动态推断: 最高等级、次高等级、中间等级
+        highest_level = level_ids[-1] if level_ids else "L5"
+        second_highest = level_ids[-2] if len(level_ids) >= 2 else highest_level
+        mid_level = level_ids[len(level_ids) // 2] if level_ids else default_level
+
         tags: list[SecurityTag] = []
-        # 敏感疾病关键词: 命中时升级为 L4
-        sensitive_keywords = ["hiv", "精神分裂", "艾滋", "梅毒", "肿瘤", "癌症", "白血病", "抑郁症"]
+        # 敏感疾病关键词: 命中时升级为次高等级
+        # 优先从 taxonomy 配置读取，否则使用内置默认值
+        sensitive_keywords = self.taxonomy.ner_sensitive_keywords or [
+            "hiv", "精神分裂", "艾滋", "梅毒", "肿瘤", "癌症", "白血病", "抑郁症"
+        ]
 
         for ent in entities:
             label = ent.get("label", "")
             ent_text = str(ent.get("text", "")).lower()
             conf = float(ent.get("confidence", 0.8))
 
-            if label == "GENOMIC_HINT":
+            # 优先使用配置化映射
+            if label in entity_mapping:
+                mapped_level = entity_mapping[label]
                 tags.append(SecurityTag(
-                    level="L5", category="GENOMIC_HINT", confidence=conf,
+                    level=mapped_level, category=label, confidence=conf,
+                    source_engine="SMALL_NER", rule_id=f"NER_{label}",
+                    domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
+                    needs_human_review=(mapped_level == highest_level),
+                ))
+            elif label == "GENOMIC_HINT":
+                tags.append(SecurityTag(
+                    level=highest_level, category="GENOMIC_HINT", confidence=conf,
                     source_engine="SMALL_NER", rule_id="NER_GENE_001",
                     domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
                     needs_human_review=True,
@@ -306,19 +334,19 @@ class ClassificationFunnel:
             elif label == "MEDICAL_DISEASE":
                 if any(kw in ent_text for kw in sensitive_keywords):
                     tags.append(SecurityTag(
-                        level="L4", category="MEDICAL_SENSITIVE_DISEASE", confidence=conf,
+                        level=second_highest, category="MEDICAL_SENSITIVE_DISEASE", confidence=conf,
                         source_engine="SMALL_NER", rule_id="NER_DIS_SENSITIVE",
                         domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
                     ))
                 else:
                     tags.append(SecurityTag(
-                        level="L3", category="MEDICAL_DISEASE", confidence=conf,
+                        level=mid_level, category="MEDICAL_DISEASE", confidence=conf,
                         source_engine="SMALL_NER", rule_id="NER_DIS_NORMAL",
                         domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
                     ))
             elif label in ("MEDICATION", "SURGERY", "BODY_PART"):
                 tags.append(SecurityTag(
-                    level="L3", category=label, confidence=conf,
+                    level=mid_level, category=label, confidence=conf,
                     source_engine="SMALL_NER", rule_id=f"NER_{label}",
                     domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
                 ))

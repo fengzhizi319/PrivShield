@@ -22,7 +22,7 @@ from ..observability.logging_config import get_logger
 # decorators, ensuring all built-in operators are available before engine evaluation.
 from . import operators  # noqa: F401 - Ensure built-in operators are registered
 from .models import DomainTaxonomy, SecurityTag
-from .operator_registry import OperatorRegistry
+from .operator_registry import OperatorRegistry, OperatorResult, normalize_result
 from .rule_schema import DowngradeRuleDef, MatcherDef, RuleDef, RuleProfile
 
 logger = get_logger(__name__)
@@ -220,7 +220,8 @@ class ConfigurableRuleEngine:
         Algorithm:
         1. Execute each matcher in the rule and collect boolean results.
         2. Apply match_logic (AND/OR) to determine if the rule fires.
-        3. If fired, resolve dynamic level/category (ICD-10 support) and build tag.
+        3. If fired, resolve dynamic level/category (via OperatorResult) and build tag.
+        4. Track the actual hit matcher's target for accurate match_target.
         """
         if not rule.matchers:
             return None
@@ -228,20 +229,22 @@ class ConfigurableRuleEngine:
         results: list[bool] = []
         dynamic_level: str | None = None
         dynamic_category: str | None = None
+        # Track the target of the first actually-hit matcher for accurate match_target.
+        hit_target: str = "field_name"
 
         for matcher in rule.matchers:
-            raw_result = self._execute_matcher(matcher, field_name, str_value)
-            
-            is_hit = False
-            if matcher.operator == "icd10_range":
-                is_hit, level, category = raw_result
-                if is_hit:
-                    dynamic_level = level
-                    dynamic_category = category
-            else:
-                is_hit = bool(raw_result)
-            
+            op_result = self._execute_matcher(matcher, field_name, str_value)
+            is_hit = op_result.hit
             results.append(is_hit)
+
+            # Capture dynamic level/category from OperatorResult if provided.
+            if is_hit and op_result.level is not None:
+                dynamic_level = op_result.level
+                dynamic_category = op_result.category
+
+            # Record the first hit matcher's target for match_target determination.
+            if is_hit and hit_target == "field_name":
+                hit_target = matcher.target
 
         if rule.match_logic.upper() == "OR":
             matched = any(results)
@@ -260,9 +263,15 @@ class ConfigurableRuleEngine:
         level = dynamic_level if dynamic_level is not None else rule.level
         category = dynamic_category if dynamic_category is not None else rule.category
 
-        match_target = "field_value" if any(
-            m.target == "field_value" for m in rule.matchers
-        ) else "field_name"
+        # Use the actual hit matcher's target instead of inferring from rule definition.
+        # For AND logic, if any matcher targets field_value, the rule is value-driven.
+        # For OR logic, use the first hit matcher's target.
+        if rule.match_logic.upper() == "AND":
+            match_target = "field_value" if any(
+                m.target == "field_value" for m in rule.matchers
+            ) else "field_name"
+        else:
+            match_target = hit_target
 
         return SecurityTag(
             level=level,
@@ -274,14 +283,14 @@ class ConfigurableRuleEngine:
             match_target=match_target,
         )
 
-    def _execute_matcher(self, matcher: MatcherDef, field_name: str, str_value: str) -> Any:
-        """执行单个匹配器，返回原始结果。
+    def _execute_matcher(self, matcher: MatcherDef, field_name: str, str_value: str) -> OperatorResult:
+        """执行单个匹配器，返回归一化的 OperatorResult。
 
         Steps:
         1. Look up the operator function from the registry.
         2. Determine target value (field_name or str_value based on matcher.target).
-        3. Execute the operator and record metrics.
-        4. Handle exceptions gracefully (fail-safe: return a "miss" value).
+        3. Execute the operator, normalize result, and record metrics.
+        4. Handle exceptions gracefully (fail-safe: return a "miss" result).
         """
         try:
             op_func = OperatorRegistry.get(matcher.operator)
@@ -289,23 +298,22 @@ class ConfigurableRuleEngine:
             DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL.labels(
                 operator=matcher.operator, result="miss"
             ).inc()
-            return (False, "", "") if matcher.operator == "icd10_range" else False
+            return OperatorResult(hit=False)
 
         target_value = field_name if matcher.target == "field_name" else str_value
         if target_value is None or target_value == "":
             DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL.labels(
                 operator=matcher.operator, result="miss"
             ).inc()
-            return (False, "", "") if matcher.operator == "icd10_range" else False
+            return OperatorResult(hit=False)
 
         try:
-            res = op_func(target_value, matcher.params)
-            
-            is_hit = res[0] if matcher.operator == "icd10_range" else bool(res)
+            raw = op_func(target_value, matcher.params)
+            op_result = normalize_result(raw)
             DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL.labels(
-                operator=matcher.operator, result="hit" if is_hit else "miss"
+                operator=matcher.operator, result="hit" if op_result.hit else "miss"
             ).inc()
-            return res
+            return op_result
         except Exception as exc:
             DYNCLASSIFICATION_OPERATOR_ERRORS_TOTAL.labels(
                 operator=matcher.operator, rule_id=""
@@ -318,7 +326,7 @@ class ConfigurableRuleEngine:
                     "error": str(exc),
                 },
             )
-            return (False, "", "") if matcher.operator == "icd10_range" else False
+            return OperatorResult(hit=False)
 
     def _evaluate_downgrade(self, field_name: str) -> list[SecurityTag]:
         """执行降级规则。
@@ -393,6 +401,10 @@ class ConfigurableRuleEngine:
         min_cap_rank = min(cap_ranks)
 
         # Step 2.5: 合并所有 override 规则的 suppress_rules 白名单。
+        # 语义约定：
+        #   - 所有 override 规则都有白名单 → 取并集，仅压制白名单内的规则
+        #   - 任一 override 规则无白名单（suppress_rules=[]）→ 全局压制（压制所有符合条件的规则）
+        # 这确保“无限制”的降级规则不会被其他有白名单的规则意外约束。
         suppress_whitelist: set[str] = set()
         has_whitelist = False
         for tag in override_tags:
@@ -401,6 +413,7 @@ class ConfigurableRuleEngine:
                 has_whitelist = True
                 suppress_whitelist.update(rule_def.suppress_rules)
             elif rule_def and not rule_def.suppress_rules:
+                # 任一无白名单规则 → 全局压制，跳出循环
                 has_whitelist = False
                 suppress_whitelist.clear()
                 break

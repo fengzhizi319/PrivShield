@@ -109,9 +109,9 @@ class LlmAdapter:
 
         try:
             # 旧模块的 classify 接口接受 SensitivityLevel 枚举，
-            # 这里做字符串到枚举的适配转换。
+            # 这里做字符串到枚举的适配转换（支持 L1~L5 和 C1~C4）。
             from .base import SensitivityLevel
-            level_enum = SensitivityLevel(upstream_level)
+            level_enum = SensitivityLevel.from_string(upstream_level)
             result = self._classifier.classify(text, level_enum, upstream_confidence)
             return result
         except Exception as e:
@@ -169,23 +169,37 @@ class LlmAdapter:
             for t in conflict_tags
         )
 
-        arbitration_text = (
-            f"[仲裁请求] 以下字段的规则评估出现冲突，请裁定最终等级。\n"
-            f"字段名: {field_name}\n"
-            f"字段值: {value}\n"
-            f"领域: {taxonomy.domain}\n"
-            f"标准: {taxonomy.standard_id}\n\n"
-            f"冲突信息:\n{conflict_desc}\n\n"
-            f"等级定义:\n{levels_desc}\n\n"
-            f"请输出 JSON: {{\"final_level\": \"等级ID\", \"confidence\": 0.0~1.0, "
-            f"\"reasoning\": \"裁定理由\"}}"
-        )
+        # 优先使用 taxonomy 中配置的自定义 prompt 模板
+        prompt_template = taxonomy.llm_arbitration_prompt_template
+        if prompt_template:
+            # 支持占位符: {field_name}, {value}, {domain}, {standard_id}, {conflict_desc}, {levels_desc}
+            arbitration_text = prompt_template.format(
+                field_name=field_name,
+                value=value,
+                domain=taxonomy.domain,
+                standard_id=taxonomy.standard_id,
+                conflict_desc=conflict_desc,
+                levels_desc=levels_desc,
+            )
+        else:
+            # 内置默认模板
+            arbitration_text = (
+                f"[仲裁请求] 以下字段的规则评估出现冲突，请裁定最终等级。\n"
+                f"字段名: {field_name}\n"
+                f"字段值: {value}\n"
+                f"领域: {taxonomy.domain}\n"
+                f"标准: {taxonomy.standard_id}\n\n"
+                f"冲突信息:\n{conflict_desc}\n\n"
+                f"等级定义:\n{levels_desc}\n\n"
+                f"请输出 JSON: {{\"final_level\": \"等级ID\", \"confidence\": 0.0~1.0, "
+                f"\"reasoning\": \"裁定理由\"}}"
+            )
 
         try:
             from .base import SensitivityLevel
-            # 使用当前最高等级作为 upstream_level
+            # 使用当前最高等级作为 upstream_level（支持 L1~L5 和 C1~C4）
             current_max = taxonomy.max_level(*(t.level for t in conflict_tags))
-            level_enum = SensitivityLevel(current_max) if current_max in ("L1", "L2", "L3", "L4", "L5") else SensitivityLevel.L3
+            level_enum = SensitivityLevel.from_string(current_max)
             result = self._classifier.classify(arbitration_text, level_enum, 0.5)
             return result
         except Exception as e:

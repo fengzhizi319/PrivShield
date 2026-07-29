@@ -117,11 +117,11 @@ confidence_policy:
 class ClassificationFunnel:
     """三层漏斗编排器。"""
 
-    def __init__(self, engine, taxonomy, confidence_policy, ner_engine=None, llm_classifier=None):
+    def __init__(self, engine, taxonomy, confidence_policy=None, ner_adapter=None, llm_adapter=None):
         ...
 
-    def classify_field(self, field_name, value) -> FunnelResult:
-        """执行三层漏斗分类。"""
+    def classify_field(self, field_name, value) -> Tuple[FunnelResult, list[SecurityTag]]:
+        """执行三层漏斗分类，返回 (FunnelResult, suppressed_tags)。"""
         ...
 ```
 
