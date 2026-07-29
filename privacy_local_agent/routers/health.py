@@ -1,4 +1,4 @@
-"""健康检查与探针路由（health / livez / readyz / readyz/llm）。"""
+"""健康检查与探针路由（health / livez / readyz）。"""
 
 import os
 
@@ -49,17 +49,4 @@ def readyz():
         except sqlite3.Error as e:
             raise HTTPException(status_code=503, detail=f"Database check failed: {e}") from e
 
-    return {"status": "ready", "llm_ready": service.classification_api.is_llm_ready()}
-
-
-@router.get("/readyz/llm", dependencies=_HEALTH_DEPS)
-def readyz_llm():
-    """LLM 分类器就绪探针接口。
-
-    供 K8s 等编排工具单独探测本地大模型是否已完成预热。
-    若未启用 LLM、使用 NoOp 分类器或模型已加载成功，均返回 200；
-    若模型正在预热或初始化失败，则返回 503。
-    """
-    if service.classification_api.is_llm_ready():
-        return {"status": "ready", "llm_ready": True}
-    raise HTTPException(status_code=503, detail="LLM classifier not ready")
+    return {"status": "ready"}

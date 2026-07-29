@@ -44,7 +44,7 @@ from ..observability.metrics import (
     CLASSIFICATION_NER_TOTAL,
 )
 # 导入 Small-NER 引擎抽象基类
-from .classification_models import SmallNerEngine
+from .base import SmallNerEngine
 
 # 创建模块级结构化日志器
 logger = get_logger(__name__)

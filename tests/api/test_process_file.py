@@ -69,24 +69,6 @@ def test_process_file_k_anonymize_csv():
     assert {r["disease"] for r in body["result"]} == {"A", "B", "C", "D"}
 
 
-def test_process_file_classify_json():
-    """上传 JSON 记录数组执行整表分类，应返回表分类结果字典。"""
-    records = [
-        {"email": "alice@example.com", "phone": "13800138000"},
-        {"email": "bob@example.com", "phone": "13900139000"},
-    ]
-    resp = client.post(
-        "/v1/privacy/process_file",
-        files={"file": ("data.json", json.dumps(records).encode("utf-8"), "application/json")},
-        data={"operation": "classify_table", "params": "{}"},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["operation"] == "classify_table"
-    assert body["rows_in"] == 2
-    assert isinstance(body["result"], dict)
-
-
 def test_process_file_unsupported_operation():
     """不支持的操作类型应返回 400。"""
     resp = client.post(

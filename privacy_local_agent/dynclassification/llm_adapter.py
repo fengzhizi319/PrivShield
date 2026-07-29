@@ -74,7 +74,7 @@ class LlmAdapter:
         self._initialized = True
 
         try:
-            from .classification_llm import Qwen2VLClassifier
+            from .llm_engines import Qwen2VLClassifier
             self._classifier = Qwen2VLClassifier(model_path=self._model_path)
             logger.info("llm_adapter_initialized", extra={"model_path": self._model_path})
         except Exception as e:
@@ -110,7 +110,7 @@ class LlmAdapter:
         try:
             # 旧模块的 classify 接口接受 SensitivityLevel 枚举，
             # 这里做字符串到枚举的适配转换。
-            from .classification_models import SensitivityLevel
+            from .base import SensitivityLevel
             level_enum = SensitivityLevel(upstream_level)
             result = self._classifier.classify(text, level_enum, upstream_confidence)
             return result
@@ -182,7 +182,7 @@ class LlmAdapter:
         )
 
         try:
-            from .classification_models import SensitivityLevel
+            from .base import SensitivityLevel
             # 使用当前最高等级作为 upstream_level
             current_max = taxonomy.max_level(*(t.level for t in conflict_tags))
             level_enum = SensitivityLevel(current_max) if current_max in ("L1", "L2", "L3", "L4", "L5") else SensitivityLevel.L3

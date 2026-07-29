@@ -2,12 +2,10 @@
 
 基于 grpcio 与自动生成的 protobuf stub 实现 PrivacyService 的 gRPC 接口，
 暴露与 REST 模块相对应的处理原语能力：脱敏、哈希、差分隐私、K-匿名、查询混淆与健康检查。
-数据分类 gRPC 方法已在 classification_grpc.py 中实现，通过多重继承组合到 PrivacyServicer。
 
 gRPC service entrypoint. Implements the protobuf-defined PrivacyService interface
 using generated stubs and the shared PrivacyService business layer for processing
-primitives. Data classification RPCs are implemented in classification_grpc.py and
-composed into PrivacyServicer via multiple inheritance.
+primitives.
 """
 
 import os
@@ -16,7 +14,6 @@ from concurrent import futures
 import grpc
 
 from . import privacy_pb2, privacy_pb2_grpc
-from .classification_grpc import ClassificationGrpcServicer
 from .observability.logging_config import configure_logging, get_logger
 from .observability.middleware import GrpcObservabilityInterceptor
 from .observability.tracing import init_tracing
@@ -52,14 +49,11 @@ def _grpc_error_mapper(fn):
     return wrapper
 
 
-class PrivacyServicer(
-    ClassificationGrpcServicer, privacy_pb2_grpc.PrivacyServiceServicer
-):
+class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
     """PrivacyService gRPC 服务实现。
 
     将 protobuf 请求转换为 PrivacyService 业务方法调用，
     并将结果封装为 protobuf 响应返回给客户端。
-    分类相关方法通过继承 ClassificationGrpcServicer 提供。
 
     Attributes:
         service: 共享的 PrivacyService 业务实例。
@@ -69,7 +63,6 @@ class PrivacyServicer(
         """初始化 gRPC servicer，创建 PrivacyService 实例并复用它。"""
         self.service = PrivacyService(profile_path=PROFILE_PATH, namespace=NAMESPACE)
         self._service_cache = {NAMESPACE: self.service}
-        ClassificationGrpcServicer.__init__(self)
 
     def Mask(self, request, context):
         """单字段脱敏 gRPC 方法。"""

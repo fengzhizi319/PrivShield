@@ -3,9 +3,6 @@
 提供声明式、可配置的数据分类分级引擎，支持多领域、多行业标准。
 核心设计思想：标准配置化、规则声明化、算子插件化、执行上下文动态化。
 
-本模块同时包含旧版三层分类漏斗引擎（ClassificationAPI），
-原 privacy/classification/ 子包已合并至此。
-
 Usage:
     from privacy_local_agent.dynclassification import DynClassificationService
 
@@ -55,14 +52,6 @@ from .rule_schema import (
 # --- Import the high-level service entry point ---
 from .service import DynClassificationService
 
-# --- Legacy classification engine (migrated from privacy/classification/) ---
-from .classification import ClassificationAPI  # noqa: F401
-from .classification_models import (  # noqa: F401
-    ClassificationParams,
-    EngineLayer as LegacyEngineLayer,
-    SensitivityLevel,
-)
-
 # --- Public API surface: controls what is exported via `from dynclassification import *` ---
 __all__ = [
     # Service entry point
@@ -102,9 +91,4 @@ __all__ = [
     "CompositeRuleDef",
     "RuleProfile",
     "StandardDef",
-    # Legacy classification engine
-    "ClassificationAPI",
-    "ClassificationParams",
-    "LegacyEngineLayer",
-    "SensitivityLevel",
 ]

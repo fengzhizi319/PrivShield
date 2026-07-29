@@ -5,14 +5,13 @@ from typing import Any, cast
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from .legacy_classification import classification_service
 from ..deps import MAX_UPLOAD_BYTES, SECURITY_DEPS, handle_request_exception, service
 from ..security.auth import require_permission
 
 router = APIRouter()
 
-# 文件处理支持的操作类型：DataFrame 脱敏 / K-匿名 / 整表分类。
-_FILE_OPERATIONS = {"mask_dataframe", "k_anonymize", "classify_table"}
+# 文件处理支持的操作类型：DataFrame 脱敏 / K-匿名。
+_FILE_OPERATIONS = {"mask_dataframe", "k_anonymize"}
 
 
 def _parse_upload_to_records(content: bytes, filename: str) -> list[dict[str, Any]]:
@@ -65,19 +64,18 @@ async def process_file(
 ):
     """数据文件隐私处理接口。
 
-    接收上传的 CSV/JSON 数据文件，按 ``operation`` 对其内容执行 DataFrame 脱敏、
-    K-匿名或整表分类，返回处理后的记录。
+    接收上传的 CSV/JSON 数据文件，按 ``operation`` 对其内容执行 DataFrame 脱敏或
+    K-匿名，返回处理后的记录。
 
     表单字段：
         - ``file``：CSV/JSON 数据文件；
-        - ``operation``：操作类型，``mask_dataframe`` / ``k_anonymize`` / ``classify_table``；
+        - ``operation``：操作类型，``mask_dataframe`` / ``k_anonymize``；
         - ``params``：操作参数 JSON 字符串，例如
           ``{"columns": ["email"], "context": ""}``（脱敏）、
-          ``{"qi_cols": ["age", "zip"], "k": 2, "max_depth": 10}``（K-匿名）、
-          ``{"params": {}}``（分类）。
+          ``{"qi_cols": ["age", "zip"], "k": 2, "max_depth": 10}``（K-匿名）。
 
     Returns:
-        ``{"operation", "rows_in", "rows_out", "result"}``；分类时 ``result`` 为表分类结果字典。
+        ``{"operation", "rows_in", "rows_out", "result"}``。
     """
     if operation not in _FILE_OPERATIONS:
         raise HTTPException(
@@ -111,7 +109,7 @@ async def process_file(
                 df, columns=options.get("columns"), context=options.get("context", "")
             )
             result: Any = result_df.to_dict(orient="records")
-        elif operation == "k_anonymize":
+        else:  # k_anonymize
             qi_cols = options.get("qi_cols")
             if not qi_cols:
                 raise ValueError("k_anonymize 操作需提供 qi_cols 参数")
@@ -123,13 +121,6 @@ async def process_file(
                 max_depth=int(options.get("max_depth", 10)),
             )
             result = result_df.to_dict(orient="records")
-        else:  # classify_table
-            schema = options.get("schema")
-            if not schema:
-                schema = list(records[0].keys()) if records else []
-            result = classification_service.classify_table(
-                schema, records, options.get("params", {})
-            )
     except HTTPException:
         raise
     except Exception as exc:

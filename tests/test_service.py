@@ -11,7 +11,6 @@ import pytest
 import yaml
 
 from privacy_local_agent.privacy.budget import BudgetAccountant, BudgetRegistry
-from privacy_local_agent.dynclassification.classification import ClassificationAPI
 from privacy_local_agent.privacy.dp import DPApi, LocalDPApi
 from privacy_local_agent.privacy.profile import ParameterResolver
 from privacy_local_agent.service import PrivacyService
@@ -69,7 +68,6 @@ class TestInitialization:
         assert isinstance(svc.resolver, ParameterResolver)
         assert isinstance(svc.registry, BudgetRegistry)
         assert isinstance(svc.dp_api, DPApi)
-        assert isinstance(svc.classification_api, ClassificationAPI)
         assert isinstance(svc.local_dp_api, LocalDPApi)
         assert svc.namespace == "default"
 
@@ -470,44 +468,6 @@ class TestBudgetManagement:
         service.dp_count([1, 2, 3], {"epsilon": 1.0})
         after = service.budget_remaining()
         assert after["epsilon"] < before["epsilon"]
-
-
-# ---------------------------------------------------------------------------
-# 分类（Classification）委托测试
-# ---------------------------------------------------------------------------
-
-
-class TestClassification:
-    """PrivacyService 分类方法委托测试。"""
-
-    def test_classify_field(self, service):
-        """单字段分类。"""
-        result = service.classify_field("patient_name", "张三")
-        assert isinstance(result, dict)
-        assert "finalLevel" in result
-        assert result["fieldName"] == "patient_name"
-
-    def test_classify_record(self, service):
-        """单条记录分类。"""
-        record = {"patient_name": "张三", "diagnosis": "高血压"}
-        result = service.classify_record(record)
-        assert isinstance(result, dict)
-
-    def test_classify_table(self, service):
-        """整张表分类。"""
-        schema = ["name", "age", "diagnosis"]
-        rows = [
-            {"name": "张三", "age": "45", "diagnosis": "高血压"},
-            {"name": "李四", "age": "32", "diagnosis": "糖尿病"},
-        ]
-        result = service.classify_table(schema, rows)
-        assert isinstance(result, dict)
-
-    def test_classify_json(self, service):
-        """JSON 输入分类。"""
-        json_input = {"patient_id": "P001", "icd10_code": "C34"}
-        result = service.classify_json(json_input)
-        assert isinstance(result, dict)
 
 
 # ---------------------------------------------------------------------------

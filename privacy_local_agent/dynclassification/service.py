@@ -80,23 +80,20 @@ class DynClassificationService:
         value: Any = None,
         domain: Optional[str] = None,
         standard: Optional[str] = None,
-        shadow_mode: bool = False,
     ) -> ClassificationResponse:
         """对单个字段进行分类。
 
         Execution flow:
         1. Obtain (or build from cache) the rule engine for the given domain/standard.
         2. Evaluate the field against all rules to produce security tags.
-        3. Optionally run shadow mode comparison with legacy engine.
-        4. Resolve final level (highest rank among tags).
-        5. Package results with audit info.
+        3. Resolve final level (highest rank among tags).
+        4. Package results with audit info.
 
         Args:
             field_name: 字段名。
             value: 字段值。
             domain: 领域标识（可选）。
             standard: 标准标识（可选，优先于 domain）。
-            shadow_mode: 是否开启影子模式（对比新旧引擎输出差异）。
 
         Returns:
             ClassificationResponse 包含字段分类结果和审计信息。
@@ -114,30 +111,7 @@ class DynClassificationService:
         funnel_result = funnel.classify_field(field_name, value)
         tags = funnel_result.tags
 
-        # Step 3: Shadow mode - compare with legacy engine output (zero-risk online A/B).
-        if shadow_mode:
-            try:
-                from .classification import ClassificationAPI
-                legacy_api = ClassificationAPI()
-                legacy_resp = legacy_api.classify_field(field_name, value)
-                legacy_level = str(legacy_resp.final_level)
-                if legacy_level != funnel_result.final_level:
-                    from ..observability.logging_config import get_logger
-                    _logger = get_logger(__name__)
-                    _logger.warning(
-                        "dynclassification_shadow_mismatch",
-                        extra={
-                            "field_name": field_name,
-                            "legacy_level": legacy_level,
-                            "new_level": funnel_result.final_level,
-                            "domain": domain,
-                            "standard": standard,
-                        },
-                    )
-            except Exception:
-                pass
-
-        # Step 4: Use funnel result directly (level, confidence, layer already resolved).
+        # Step 3: Use funnel result directly (level, confidence, layer already resolved).
         final_level = funnel_result.final_level
 
         # Calculate execution duration in milliseconds.

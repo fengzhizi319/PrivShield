@@ -98,16 +98,6 @@ def test_external_token_forbidden_dp(auth_enabled):
     assert response.status_code == 403
 
 
-def test_external_token_forbidden_classification(auth_enabled):
-    """外部服务 token 越权访问分类接口返回 403。"""
-    response = client.post(
-        "/v1/privacy/classify/field",
-        json={"field_name": "id_card", "value": "110101199001011237", "params": {}},
-        headers={"Authorization": f"Bearer {EXTERNAL_TOKEN}"},
-    )
-    assert response.status_code == 403
-
-
 def test_health_exempt_by_default(auth_enabled):
     """默认配置下健康检查不受认证限制。"""
     response = client.get("/health")

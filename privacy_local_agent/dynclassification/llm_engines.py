@@ -63,9 +63,9 @@ from ..observability.metrics import (
     CLASSIFICATION_LLM_TOTAL,
 )
 # 导入 LLM 分类器抽象基类和敏感度等级枚举
-from .classification_models import LlmClassifier, SensitivityLevel
+from .base import LlmClassifier, SensitivityLevel
 # 导入日志脱敏工具函数（对敏感路径/值进行掩码处理后再记录日志）
-from .classification_utils import redact
+from .utils import redact
 
 # 创建模块级结构化日志器，用于记录 LLM 分类器相关事件
 logger = get_logger(__name__)

@@ -12,7 +12,6 @@ resolving parameters from profile/config.
 from typing import Any, cast
 
 from .privacy.budget import BudgetRegistry, default_registry
-from .dynclassification.classification import ClassificationAPI
 from .privacy.dp import DPApi, DPResult, LocalDPApi
 from .privacy.kano import BUILTIN_HIERARCHIES, KAnonymityRecordResult, anonymize_record
 from .privacy.kano_table import KAnonymityResult, k_anonymize_dataframe, k_anonymize_table
@@ -32,14 +31,13 @@ from .privacy.qol import obfuscate_query, obfuscate_query_batch
 class PrivacyService:
     """隐私计算统一服务类。
 
-    持有 ParameterResolver（用于解析各原语参数）、DPApi（差分隐私预算管理）与 ClassificationAPI。
+    持有 ParameterResolver（用于解析各原语参数）、DPApi（差分隐私预算管理）。
     所有 REST/gRPC handler 均委托给本类的实例方法，便于复用与单元测试。
 
     Attributes:
         resolver: 参数解析器，从 profile 与请求中解析并校验参数。
         namespace: 当前隐私命名空间，用于隔离预算。
         dp_api: 差分隐私 API 实例。
-        classification_api: 数据分类 API 实例。
     """
 
     def __init__(
@@ -71,7 +69,6 @@ class PrivacyService:
             delta_total=delta_total,
             window_seconds=window_seconds,
         )
-        self.classification_api = ClassificationAPI(resolver=self.resolver)
         self.local_dp_api = LocalDPApi()
 
     def mask(self, field_name: str, value: str, context: str = "") -> str | MaskingResult:
@@ -744,62 +741,3 @@ class PrivacyService:
             当前命名空间下 epsilon 与 delta 的剩余量字典。
         """
         return self.registry.get_or_create(self.namespace).remaining()
-
-    def classify_field(
-        self, field_name: str, value: Any, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """对单个字段进行分类。"""
-        return self.classification_api.classify_field(
-            field_name, value, params
-        ).model_dump(by_alias=True)
-
-    def classify_record(
-        self, record: dict[str, Any], params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """对单条记录进行分类。"""
-        return self.classification_api.classify_record(record, params).model_dump(
-            by_alias=True
-        )
-
-    def classify_table(
-        self,
-        schema: list[str],
-        rows: list[dict[str, Any]],
-        params: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """对整张表进行分类。"""
-        return self.classification_api.classify_table(schema, rows, params).model_dump(
-            by_alias=True
-        )
-
-    def classify_json(
-        self, json_input: Any, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """解析 JSON 字符串或字典并分类。"""
-        return self.classification_api.classify_json(json_input, params).model_dump(
-            by_alias=True
-        )
-
-    def classify_dataframe(
-        self, df: Any, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """对 pandas DataFrame 进行分类。"""
-        return self.classification_api.classify_dataframe(df, params).model_dump(
-            by_alias=True
-        )
-
-    def classify_arrow(
-        self, table: Any, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """对 pyarrow Table 进行分类。"""
-        return self.classification_api.classify_arrow(table, params).model_dump(
-            by_alias=True
-        )
-
-    def classify_sql_result(
-        self, result_set: list[dict[str, Any]], params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """对 SQL 结果集进行分类。"""
-        return self.classification_api.classify_sql_result(result_set, params).model_dump(
-            by_alias=True
-        )

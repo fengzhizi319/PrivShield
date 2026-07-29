@@ -72,7 +72,7 @@ class NerAdapter:
 
         # 尝试 1: ONNX Runtime 引擎
         try:
-            from .classification_ner import ONNXSmallNerEngine
+            from .ner_engines import ONNXSmallNerEngine
             engine = ONNXSmallNerEngine(
                 model_path=self._model_path,
                 vocab_path=self._vocab_path,
@@ -87,7 +87,7 @@ class NerAdapter:
 
         # 尝试 2: ModelScope 引擎
         try:
-            from .classification_ner import ModelScopeSmallNerEngine
+            from .ner_engines import ModelScopeSmallNerEngine
             engine = ModelScopeSmallNerEngine()
             self._engine = engine
             logger.info("ner_adapter_initialized", extra={"backend": "modelscope"})

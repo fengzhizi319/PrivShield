@@ -64,13 +64,6 @@ def test_check_and_reload_mtime_monitoring(tmp_path):
     assert loader.check_and_reload() is True
 
 
-def test_shadow_mode_execution():
-    """测试影子模式无风险对比输出"""
-    service = DynClassificationService(rules_dir="rules")
-    resp = service.classify_field("user_mobile", "13800138000", domain="general-pii", shadow_mode=True)
-    assert resp.field_result is not None
-
-
 def test_rest_router_endpoints(tmp_path):
     """测试 FastAPI 挂载的 REST 端点完整通告"""
     # 1. 动态评估 REST API
