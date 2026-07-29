@@ -492,3 +492,25 @@ class TestLlmClassifyPromptTemplate:
         assert SensitivityLevel.from_string("C3") == SensitivityLevel.C3
         # 未知值回退到 L3
         assert SensitivityLevel.from_string("UNKNOWN_LEVEL") == SensitivityLevel.L3
+
+    def test_ner_unknown_label_fallback(self, taxonomy, engine_conflict):
+        """未知 NER 实体标签回退到中间等级而非静默丢弃。"""
+        mock_ner = MagicMock(spec=NerAdapter)
+        mock_ner.extract.return_value = [
+            {"label": "CUSTOM_FINANCIAL_RISK", "text": "洗钱风险", "confidence": 0.75}
+        ]
+
+        policy = ConfidencePolicy(enable_ner=True, ner_trigger_max_rank=5)
+        funnel = ClassificationFunnel(
+            engine=engine_conflict,
+            taxonomy=taxonomy,
+            confidence_policy=policy,
+            ner_adapter=mock_ner,
+        )
+        result, _ = funnel.classify_field("some_field", "洗钱风险记录")
+
+        # 未知标签应产生标签（回退到中间等级），而非被丢弃
+        ner_tags = [t for t in result.tags if t.source_engine == "SMALL_NER"]
+        assert len(ner_tags) == 1
+        assert ner_tags[0].category == "CUSTOM_FINANCIAL_RISK"
+        assert ner_tags[0].rule_id == "NER_CUSTOM_FINANCIAL_RISK"

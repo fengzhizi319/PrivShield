@@ -214,7 +214,8 @@ class StandardDocParser:
             levels["L4"] = SensitivityLevelDef(id="L4", name="高敏感数据/第4级", rank=4, description="敏感病种与诊疗数据")
             levels["L5"] = SensitivityLevelDef(id="L5", name="极敏感数据/第5级", rank=5, description="基因与遗传数据")
         # Detect 4-level finance scheme (C1~C4).
-        elif "C1" in self.content or "第四级" in self.content:
+        # 使用更精确的模式避免误匹配（如文档中的章节编号 "C1" 或 "C.1"）
+        elif re.search(r"C[1-4]\s*[级类]", self.content) or "第四级" in self.content or "JR/T 0197" in self.content:
             levels["C1"] = SensitivityLevelDef(id="C1", name="第一级（不敏感）", rank=1, description="公开金融数据")
             levels["C2"] = SensitivityLevelDef(id="C2", name="第二级（低敏感）", rank=2, description="内部使用金融数据")
             levels["C3"] = SensitivityLevelDef(id="C3", name="第三级（敏感）", rank=3, description="个人金融信息")

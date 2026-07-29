@@ -350,5 +350,12 @@ class ClassificationFunnel:
                     source_engine="SMALL_NER", rule_id=f"NER_{label}",
                     domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
                 ))
+            else:
+                # 未知实体标签回退：使用中间等级，避免静默丢弃自定义 NER 标签
+                tags.append(SecurityTag(
+                    level=mid_level, category=label or "UNKNOWN_NER", confidence=conf,
+                    source_engine="SMALL_NER", rule_id=f"NER_{label or 'UNKNOWN'}",
+                    domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
+                ))
 
         return tags

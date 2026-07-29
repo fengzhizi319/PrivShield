@@ -229,15 +229,20 @@ def prefix_matcher(value: Any, params: dict[str, Any]) -> bool:
 
     Checks if the value starts with any of the configured prefixes.
     Useful for matching ICD codes (e.g. prefixes=["A50", "A51"]).
+    默认大小写不敏感（case_insensitive=True），可通过参数关闭。
 
     params:
         prefixes: list[str] - 前缀列表
+        case_insensitive: bool - 是否大小写不敏感（默认 True）
     """
     # Guard: must be a non-empty string.
     if not isinstance(value, str) or not value:
         return False
     prefixes = params.get("prefixes", [])
-    # Return True if value starts with any configured prefix.
+    case_insensitive = params.get("case_insensitive", True)
+    if case_insensitive:
+        v = value.lower()
+        return any(v.startswith(p.lower()) for p in prefixes)
     return any(value.startswith(p) for p in prefixes)
 
 
@@ -246,15 +251,20 @@ def suffix_matcher(value: Any, params: dict[str, Any]) -> bool:
     """后缀匹配算子。
 
     Checks if the value ends with any of the configured suffixes.
+    默认大小写不敏感（case_insensitive=True），可通过参数关闭。
 
     params:
         suffixes: list[str] - 后缀列表
+        case_insensitive: bool - 是否大小写不敏感（默认 True）
     """
     # Guard: must be a non-empty string.
     if not isinstance(value, str) or not value:
         return False
     suffixes = params.get("suffixes", [])
-    # Return True if value ends with any configured suffix.
+    case_insensitive = params.get("case_insensitive", True)
+    if case_insensitive:
+        v = value.lower()
+        return any(v.endswith(s.lower()) for s in suffixes)
     return any(value.endswith(s) for s in suffixes)
 
 
@@ -414,5 +424,21 @@ def chinese_name_matcher(value: Any, params: dict[str, Any]) -> bool:
     if not isinstance(value, str) or not value:
         return False
     # Pattern: exactly 2-4 characters in the CJK Unified Ideographs block.
-    name_pattern = r"^[\u4e00-\u9fa5]{2,4}$"
+    name_pattern = r"^[一-龥]{2,4}$"
     return bool(re.match(name_pattern, value.strip()))
+
+
+@OperatorRegistry.register("email")
+def email_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """电子邮箱地址匹配算子。
+
+    检测值是否符合标准电子邮箱格式（RFC 5322 简化版）。
+    邮箱属于常见 PII 类型，广泛用于个人身份识别。
+
+    params: 无额外参数
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    # RFC 5322 简化版邮箱正则：本地部分@域名部分
+    email_pattern = r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
+    return bool(re.match(email_pattern, value.strip()))

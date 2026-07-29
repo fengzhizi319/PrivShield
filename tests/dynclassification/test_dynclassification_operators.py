@@ -182,3 +182,33 @@ class TestNewOperators:
         assert op("John", {}) is False
         assert op(123, {}) is False
 
+    def test_email_matcher(self):
+        """email 算子检测电子邮箱格式。"""
+        op = OperatorRegistry.get("email")
+        assert op("user@example.com", {}) is True
+        assert op("test.name+tag@sub.domain.org", {}) is True
+        assert op("not_an_email", {}) is False
+        assert op("@missing_local.com", {}) is False
+        assert op("missing_at.com", {}) is False
+        assert op("", {}) is False
+        assert op(123, {}) is False
+
+    def test_prefix_matcher_case_insensitive(self):
+        """prefix_match 默认大小写不敏感。"""
+        op = OperatorRegistry.get("prefix_match")
+        # 默认大小写不敏感
+        assert op("ICD10_CODE", {"prefixes": ["icd"]}) is True
+        assert op("bam_header", {"prefixes": ["BAM"]}) is True
+        # 关闭大小写不敏感
+        assert op("ICD10", {"prefixes": ["icd"], "case_insensitive": False}) is False
+        assert op("icd10", {"prefixes": ["icd"], "case_insensitive": False}) is True
+
+    def test_suffix_matcher_case_insensitive(self):
+        """suffix_match 默认大小写不敏感。"""
+        op = OperatorRegistry.get("suffix_match")
+        # 默认大小写不敏感
+        assert op("DATA.VCF", {"suffixes": [".vcf"]}) is True
+        assert op("file.BAM", {"suffixes": [".bam"]}) is True
+        # 关闭大小写不敏感
+        assert op("DATA.VCF", {"suffixes": [".vcf"], "case_insensitive": False}) is False
+        assert op("data.vcf", {"suffixes": [".vcf"], "case_insensitive": False}) is True
