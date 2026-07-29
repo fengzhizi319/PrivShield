@@ -230,6 +230,12 @@ DYNCLASSIFICATION_OPERATOR_ERRORS_TOTAL = Counter(
     ["operator", "rule_id"],
 )
 
+DYNCLASSIFICATION_OVERRIDE_SUPPRESSED_TOTAL = Counter(
+    "classification_override_suppressed_total",
+    "Total number of normal tags suppressed by override downgrade rules.",
+    ["domain", "suppressed_rule_id"],
+)
+
 # Profile parameter resolution counter.
 PROFILE_RESOLVE_TOTAL = Counter(
     "privacy_profile_resolve_total",

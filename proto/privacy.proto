@@ -487,6 +487,9 @@ message DynSecurityTagProto {
   string source_engine = 4;
   string domain = 5;
   string standard_id = 6;
+  bool is_override = 7;    // 是否为覆盖型降级标签
+  bool is_downgrade = 8;   // 是否由降级规则产生
+  string match_target = 9; // 匹配目标: field_name | field_value
 }
 
 message DynClassificationResponse {

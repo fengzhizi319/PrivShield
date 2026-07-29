@@ -445,6 +445,9 @@ class PrivacyServicer(
                         source_engine=tag.source_engine,
                         domain=tag.domain,
                         standard_id=tag.standard_id,
+                        is_override=tag.is_override,
+                        is_downgrade=tag.is_downgrade,
+                        match_target=tag.match_target,
                     )
                 )
 

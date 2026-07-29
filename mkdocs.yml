@@ -139,6 +139,7 @@ nav:
     - 动态分类分级（多标准适配）:
       - 概览: dynclassification/README.md
       - 架构设计: dynclassification/design.md
+      - 规则解析与执行: dynclassification/rule_parsing_guide.md
       - API 参考: dynclassification/api_reference.md
       - 使用示例: dynclassification/examples.md
       - 运维指南: dynclassification/ops.md

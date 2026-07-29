@@ -30,14 +30,18 @@ from typing import Any, Optional
 
 from .composite import CompositeRuleEngine
 from .engine import ConfigurableRuleEngine
+from .funnel import ClassificationFunnel, FunnelResult
+from .llm_adapter import LlmAdapter
 from .models import (
     AuditInfo,
     ClassificationResponse,
+    ConfidencePolicy,
     FieldClassificationResult,
     RecordClassificationResult,
     SecurityTag,
     TableClassificationResult,
 )
+from .ner_adapter import NerAdapter
 from .operator_registry import OperatorRegistry
 from .profile_loader import ProfileLoader
 
@@ -58,7 +62,13 @@ class DynClassificationService:
         Args:
             rules_dir: 规则配置根目录路径。
         """
+        # Initialize the profile loader which handles YAML loading, caching,
+        # hot-reload detection, and engine instance construction.
         self.loader = ProfileLoader(rules_dir=rules_dir)
+        # Lazy-initialized NER adapter (shared across all requests).
+        self._ner_adapter: NerAdapter | None = None
+        # Lazy-initialized LLM adapter (shared across all requests).
+        self._llm_adapter: LlmAdapter | None = None
 
     # ------------------------------------------------------------------
     # 字段级分类 / Field-level Classification
@@ -74,6 +84,13 @@ class DynClassificationService:
     ) -> ClassificationResponse:
         """对单个字段进行分类。
 
+        Execution flow:
+        1. Obtain (or build from cache) the rule engine for the given domain/standard.
+        2. Evaluate the field against all rules to produce security tags.
+        3. Optionally run shadow mode comparison with legacy engine.
+        4. Resolve final level (highest rank among tags).
+        5. Package results with audit info.
+
         Args:
             field_name: 字段名。
             value: 字段值。
@@ -84,28 +101,35 @@ class DynClassificationService:
         Returns:
             ClassificationResponse 包含字段分类结果和审计信息。
         """
+        # Start high-resolution timer for duration measurement.
         start = time.monotonic()
 
+        # Step 1: Get or construct the rule engine (cached by domain:standard key).
         engine = self.loader.get_engine(domain=domain, standard=standard)
-        tags = engine.evaluate(field_name, value)
 
-        # 影子模式对比（无风险在线比对）
+        # Step 2: Build and execute the 3-layer funnel.
+        # The funnel orchestrates: Layer-1 Rule → Layer-2 NER → Layer-3 LLM
+        # with confidence policy (conflict detection + decay + LLM arbitration).
+        funnel = self._build_funnel(engine)
+        funnel_result = funnel.classify_field(field_name, value)
+        tags = funnel_result.tags
+
+        # Step 3: Shadow mode - compare with legacy engine output (zero-risk online A/B).
         if shadow_mode:
             try:
                 from ..privacy.classification.classification import ClassificationAPI
                 legacy_api = ClassificationAPI()
                 legacy_resp = legacy_api.classify_field(field_name, value)
                 legacy_level = str(legacy_resp.final_level)
-                new_level = self._resolve_final_level(tags, engine)
-                if legacy_level != new_level:
+                if legacy_level != funnel_result.final_level:
                     from ..observability.logging_config import get_logger
-                    logger = get_logger(__name__)
-                    logger.warning(
+                    _logger = get_logger(__name__)
+                    _logger.warning(
                         "dynclassification_shadow_mismatch",
                         extra={
                             "field_name": field_name,
                             "legacy_level": legacy_level,
-                            "new_level": new_level,
+                            "new_level": funnel_result.final_level,
                             "domain": domain,
                             "standard": standard,
                         },
@@ -113,20 +137,26 @@ class DynClassificationService:
             except Exception:
                 pass
 
-        # 确定最终等级
-        final_level = self._resolve_final_level(tags, engine)
+        # Step 4: Use funnel result directly (level, confidence, layer already resolved).
+        final_level = funnel_result.final_level
 
+        # Calculate execution duration in milliseconds.
         duration_ms = (time.monotonic() - start) * 1000
 
+        # Step 5: Build the field-level classification result.
         field_result = FieldClassificationResult(
             field_name=field_name,
             field_value=str(value) if value is not None else None,
             tags=tags,
             final_level=final_level,
-            confidence=1.0 if tags else 0.0,
-            needs_human_review=any(t.needs_human_review for t in tags),
+            confidence=funnel_result.confidence,
+            needs_human_review=funnel_result.needs_human_review,
+            engine_layer=funnel_result.engine_layer,
+            reasoning=funnel_result.reasoning,
+            suppressed_tags=engine.last_suppressed_tags,
         )
 
+        # Build audit metadata for traceability.
         audit = AuditInfo(
             domain=engine.domain,
             standard_id=engine.standard_id,
@@ -152,6 +182,11 @@ class DynClassificationService:
     ) -> ClassificationResponse:
         """对单条记录（多字段）进行分类。
 
+        Execution flow:
+        1. Classify each field individually using the rule engine.
+        2. Run composite rule engine for multi-field combination detection.
+        3. Resolve record-level final level (max of all fields + composite upgrades).
+
         Args:
             record: 记录字典（字段名 → 字段值）。
             record_index: 记录索引。
@@ -163,15 +198,18 @@ class DynClassificationService:
         """
         start = time.monotonic()
 
+        # Obtain both engines: rule engine for field-level, composite for record-level.
         engine = self.loader.get_engine(domain=domain, standard=standard)
         composite_engine = self.loader.get_composite_engine(domain=domain, standard=standard)
 
-        # 逐字段分类
+        # Phase 1: Classify each field independently.
         field_results: dict[str, FieldClassificationResult] = {}
         all_tags: list[SecurityTag] = []
 
         for field_name, value in record.items():
+            # Evaluate all rules against this field.
             tags = engine.evaluate(field_name, value)
+            # Resolve per-field final level.
             final_level = self._resolve_final_level(tags, engine)
             field_results[field_name] = FieldClassificationResult(
                 field_name=field_name,
@@ -180,13 +218,15 @@ class DynClassificationService:
                 final_level=final_level,
                 confidence=1.0 if tags else 0.0,
             )
+            # Accumulate all tags for record-level aggregation.
             all_tags.extend(tags)
 
-        # 复合规则后处理
+        # Phase 2: Composite rule post-processing (multi-field combination detection).
         composite_tags = composite_engine.evaluate(record, field_results)
         all_tags.extend(composite_tags)
 
-        # 确定记录级最终等级
+        # Phase 3: Determine record-level final level.
+        # First resolve from all tags, then apply composite upgrades.
         record_level = self._resolve_final_level(all_tags, engine)
         record_level = composite_engine.apply_to_record_level(
             record_level, composite_tags, engine.taxonomy
@@ -194,6 +234,7 @@ class DynClassificationService:
 
         duration_ms = (time.monotonic() - start) * 1000
 
+        # Build the record-level result.
         record_result = RecordClassificationResult(
             record_index=record_index,
             field_results=field_results,
@@ -203,6 +244,7 @@ class DynClassificationService:
             needs_human_review=any(t.needs_human_review for t in all_tags),
         )
 
+        # Audit: rules_evaluated = rule_count * number_of_fields (each field runs all rules).
         audit = AuditInfo(
             domain=engine.domain,
             standard_id=engine.standard_id,
@@ -227,6 +269,9 @@ class DynClassificationService:
     ) -> ClassificationResponse:
         """对整张表进行分类。
 
+        Iterates all rows, classifies each as a record, then aggregates
+        to determine the table-level sensitivity (max across all records).
+
         Args:
             schema: 列名列表。
             rows: 记录列表。
@@ -241,13 +286,15 @@ class DynClassificationService:
         record_results: list[RecordClassificationResult] = []
         all_tags: list[SecurityTag] = []
 
+        # Classify each row as an independent record.
         for idx, row in enumerate(rows):
             resp = self.classify_record(row, record_index=idx, domain=domain, standard=standard)
             if resp.record_result:
                 record_results.append(resp.record_result)
+                # Accumulate tags from all records for table-level aggregation.
                 all_tags.extend(resp.record_result.aggregated_tags)
 
-        # 确定表级最终等级
+        # Determine table-level final level (highest across all records).
         engine = self.loader.get_engine(domain=domain, standard=standard)
         table_level = self._resolve_final_level(all_tags, engine)
 
@@ -261,6 +308,7 @@ class DynClassificationService:
             confidence=1.0 if all_tags else 0.0,
         )
 
+        # Audit: total evaluations = rules * rows * columns.
         audit = AuditInfo(
             domain=engine.domain,
             standard_id=engine.standard_id,
@@ -296,42 +344,48 @@ class DynClassificationService:
             包含 level_distribution、category_distribution、hit_details、
             summary 等统计信息的字典。
         """
+        # Counter for tallying level and category distributions.
         from collections import Counter
 
-        level_counter: Counter = Counter()
-        category_counter: Counter = Counter()
-        hit_details: list[dict[str, Any]] = []
-        total_fields = 0
-        total_hits = 0
+        level_counter: Counter = Counter()       # level_id -> hit count
+        category_counter: Counter = Counter()    # category_id -> hit count
+        hit_details: list[dict[str, Any]] = []   # Detailed per-field hit records
+        total_fields = 0                          # Total fields evaluated
+        total_hits = 0                            # Fields that produced at least one tag
 
+        # Iterate all sample records and classify each field.
         for row_idx, record in enumerate(sample_data):
             for field_name, value in record.items():
                 total_fields += 1
+                # Run field-level classification.
                 resp = self.classify_field(
                     field_name=field_name,
                     value=value,
                     domain=domain,
                     standard=standard,
                 )
+                # If the field produced tags, record statistics.
                 if resp.field_result and resp.field_result.tags:
                     total_hits += 1
                     level_counter[resp.field_result.final_level] += 1
                     for tag in resp.field_result.tags:
                         category_counter[tag.category] += 1
+                    # Store hit detail (truncate value for safety).
                     hit_details.append({
                         "row": row_idx,
                         "field_name": field_name,
-                        "value": str(value)[:100],  # 截断保护
+                        "value": str(value)[:100],  # Truncate to prevent log bloat
                         "level": resp.field_result.final_level,
                         "rules": [t.rule_id for t in resp.field_result.tags],
                     })
 
-        # 未命中字段使用默认等级
+        # Fields that did NOT hit any rule are counted under the default level.
         engine = self.loader.get_engine(domain=domain, standard=standard)
         miss_count = total_fields - total_hits
         if miss_count > 0:
             level_counter[engine.taxonomy.default_level] += miss_count
 
+        # Assemble the dry-run report.
         return {
             "summary": {
                 "total_records": len(sample_data),
@@ -344,7 +398,7 @@ class DynClassificationService:
             },
             "level_distribution": dict(level_counter.most_common()),
             "category_distribution": dict(category_counter.most_common()),
-            "hit_details": hit_details[:200],  # 限制返回条数
+            "hit_details": hit_details[:200],  # Cap at 200 entries to limit response size
         }
 
     # ------------------------------------------------------------------
@@ -352,15 +406,15 @@ class DynClassificationService:
     # ------------------------------------------------------------------
 
     def list_standards(self) -> list[str]:
-        """列出所有可用标准。"""
+        """列出所有可用标准（扫描 standards/ 目录）。"""
         return self.loader.list_standards()
 
     def list_domains(self) -> list[str]:
-        """列出所有可用领域包。"""
+        """列出所有可用领域包（扫描 domains/ 目录）。"""
         return self.loader.list_domains()
 
     def list_operators(self) -> list[str]:
-        """列出所有已注册算子。"""
+        """列出所有已注册算子（从 OperatorRegistry 查询）。"""
         return OperatorRegistry.list_operators()
 
     def reload(self) -> None:
@@ -370,15 +424,23 @@ class DynClassificationService:
     def generate_profile_from_doc(self, doc_path: str | Path) -> dict[str, str]:
         """从标准 Markdown 文档自动抽取并生成 YAML 配置文件，并重新载入引擎缓存。
 
+        Workflow:
+        1. Parse the Markdown document using StandardDocParser.
+        2. Generate taxonomy/domain/standard YAML files into rules_dir.
+        3. Invalidate cache so next request picks up the new configuration.
+
         Args:
             doc_path: 标准文档路径（如 'docs/standard/四川省健康医疗大数据应用指南.md'）。
 
         Returns:
             生成的 3 个 YAML 文件路径字典。
         """
+        # Lazy import to avoid loading generator module unless needed.
         from .generator import StandardDocParser
         parser = StandardDocParser(doc_path)
+        # Generate the 3 YAML files (taxonomy, domain profile, standard definition).
         generated = parser.generate_files(self.loader.rules_dir)
+        # Invalidate cache to force reload on next classification request.
         self.reload()
         return {k: str(v) for k, v in generated.items()}
 
@@ -388,8 +450,84 @@ class DynClassificationService:
     # ------------------------------------------------------------------
 
     def _resolve_final_level(self, tags: list[SecurityTag], engine: ConfigurableRuleEngine) -> str:
-        """从标签列表中解析最终等级（取最高）。"""
+        """从标签列表中解析最终等级（取最高）。
+
+        Logic: If no tags hit, return the taxonomy's default level.
+        Otherwise, use taxonomy.max_level() to find the highest-rank level.
+        """
+        # No tags means no rules matched -> use configured default level.
         if not tags:
             return engine.taxonomy.default_level
+        # Extract all level IDs from tags and find the maximum by rank.
         levels = [tag.level for tag in tags]
         return engine.taxonomy.max_level(*levels)
+
+    def _build_funnel(self, engine: ConfigurableRuleEngine) -> ClassificationFunnel:
+        """构建三层漏斗编排器。
+
+        根据引擎的 taxonomy 中配置的 confidence_policy 构建漏斗，
+        并按需初始化 NER/LLM 适配器（lazy-load，全局单例）。
+
+        执行流程:
+        ┌─────────────────────────────────────────────────────────────┐
+        │  _build_funnel(engine)                                       │
+        │    1. 从 taxonomy 提取 confidence_policy 配置              │
+        │    2. 如果 enable_ner=true → 初始化 NerAdapter (单例)     │
+        │    3. 如果 enable_llm/arbitration=true → 初始化 LlmAdapter │
+        │    4. 构建 ClassificationFunnel 实例                        │
+        └─────────────────────────────────────────────────────────────┘
+
+        Args:
+            engine: 当前请求对应的规则引擎实例。
+
+        Returns:
+            配置完成的三层漏斗编排器。
+        """
+        # 从 taxonomy 获取置信度策略配置
+        policy = self._get_confidence_policy(engine)
+
+        # 按需初始化 NER 适配器（全局单例，避免重复加载模型）
+        ner_adapter = None
+        if policy.enable_ner:
+            if self._ner_adapter is None:
+                self._ner_adapter = NerAdapter()
+            ner_adapter = self._ner_adapter
+
+        # 按需初始化 LLM 适配器（全局单例）
+        llm_adapter = None
+        if policy.enable_llm or policy.enable_llm_arbitration:
+            if self._llm_adapter is None:
+                self._llm_adapter = LlmAdapter()
+            llm_adapter = self._llm_adapter
+
+        return ClassificationFunnel(
+            engine=engine,
+            taxonomy=engine.taxonomy,
+            confidence_policy=policy,
+            ner_adapter=ner_adapter,
+            llm_adapter=llm_adapter,
+        )
+
+    def _get_confidence_policy(self, engine: ConfigurableRuleEngine) -> ConfidencePolicy:
+        """从引擎的 taxonomy 中提取置信度策略配置。
+
+        如果 taxonomy YAML 中配置了 confidence_policy 节，则解析为
+        ConfidencePolicy 模型；否则使用默认策略。
+
+        Args:
+            engine: 规则引擎实例。
+
+        Returns:
+            ConfidencePolicy 实例。
+        """
+        # taxonomy 是 DomainTaxonomy 模型，检查是否有 confidence_policy 属性
+        # 通过 profile_loader 加载的原始 YAML 数据中可能包含 confidence_policy
+        taxonomy = engine.taxonomy
+        # 尝试从 taxonomy 的 model_extra 或显式字段获取
+        policy_data = getattr(taxonomy, "confidence_policy", None)
+        if policy_data is None and hasattr(taxonomy, "model_extra") and taxonomy.model_extra:
+            policy_data = taxonomy.model_extra.get("confidence_policy")
+
+        if policy_data and isinstance(policy_data, dict):
+            return ConfidencePolicy(**policy_data)
+        return ConfidencePolicy()

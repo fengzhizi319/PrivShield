@@ -8,10 +8,88 @@
 
 from __future__ import annotations
 
+# datetime/timezone for generating UTC timestamps in audit info
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+# Pydantic v2: BaseModel for schema, ConfigDict for model settings, Field for annotations
 from pydantic import BaseModel, ConfigDict, Field
+
+
+# ===========================================================================
+# 引擎层级与置信度策略 / Engine Layer & Confidence Policy
+# ===========================================================================
+
+
+class EngineLayer:
+    """分类引擎层级常量。
+
+    标识分类结果由哪一层引擎产出，用于审计追踪和结果溯源。
+    三层漏斗架构：规则引擎 → Small-NER → LLM，逐层递进。
+    """
+
+    L1_RULE = "L1_RULE"            # 第一层：可配置规则引擎（字段名 + 值模式匹配）
+    L2_SMALL_NER = "L2_SMALL_NER"  # 第二层：小型 NER 模型（ONNX 实体识别）
+    L3_LLM = "L3_LLM"             # 第三层：本地大语言模型（多模态分类/仲裁）
+
+
+class ConfidencePolicy(BaseModel):
+    """置信度策略配置。
+
+    控制规则冲突时的置信度衰减行为和 LLM 仲裁触发条件。
+    从 taxonomy YAML 的 confidence_policy 节加载。
+
+    执行逻辑:
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  规则评估完成后:                                                 │
+    │                                                                  │
+    │  1. 检测冲突: 普通标签 + 降级标签同时存活?                       │
+    │     ├─ 无冲突 → confidence=1.0, needs_review=false              │
+    │     └─ 有冲突 ↓                                                 │
+    │  2. LLM 仲裁可用? (enable_llm_arbitration + LLM 已加载)         │
+    │     ├─ 是 → 调用 LLM 裁定, confidence=LLM输出                   │
+    │     └─ 否 → confidence=conflict_confidence, needs_review=true   │
+    └─────────────────────────────────────────────────────────────────┘
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # Confidence value when rule conflict is detected (normal + downgrade tags coexist).
+    conflict_confidence: float = Field(
+        default=0.7, ge=0.0, le=1.0,
+        alias="conflictConfidence",
+        description="规则冲突时的置信度（默认 0.7）",
+    )
+    # Whether to flag needs_human_review when conflict is detected.
+    conflict_needs_review: bool = Field(
+        default=True,
+        alias="conflictNeedsReview",
+        description="冲突时是否标记人工复核",
+    )
+    # Whether to invoke LLM arbitration when conflict is detected.
+    enable_llm_arbitration: bool = Field(
+        default=False,
+        alias="enableLlmArbitration",
+        description="是否启用 LLM 仲裁（需 ML 镜像）",
+    )
+    # LLM trigger threshold: invoke LLM when confidence falls below this value.
+    llm_confidence_threshold: float = Field(
+        default=0.6, ge=0.0, le=1.0,
+        alias="llmConfidenceThreshold",
+        description="LLM 触发阈值（置信度低于此值时触发）",
+    )
+    # Whether to enable Layer-2 NER entity extraction.
+    enable_ner: bool = Field(
+        default=False,
+        alias="enableNer",
+        description="是否启用 NER 层",
+    )
+    # Whether to explicitly enable Layer-3 LLM (regardless of conflict).
+    enable_llm: bool = Field(
+        default=False,
+        alias="enableLlm",
+        description="是否显式启用 LLM 层",
+    )
 
 
 # ===========================================================================
@@ -26,11 +104,17 @@ class SensitivityLevelDef(BaseModel):
     不同行业可使用不同等级标识（L1~L5 / C1~C4 / 1~4级）。
     """
 
+    # Allow population by both field name and alias for flexible YAML/JSON input.
     model_config = ConfigDict(populate_by_name=True)
 
+    # Unique level identifier string, e.g. 'L1', 'C4', 'LEVEL_3'.
     id: str = Field(description="级别唯一标识，如 'L1', 'C4', 'LEVEL_3'")
+    # Display name shown in UIs and reports, e.g. '高敏感数据'.
     name: str = Field(description="显示名称，如 '高敏感数据'")
+    # Numeric rank for comparison: higher rank = more sensitive.
+    # Used by DomainTaxonomy.max_level() to determine the highest severity.
     rank: int = Field(description="排序权重，数值越大越敏感（用于 max_level 比较）")
+    # Optional human-readable explanation of what this level means.
     description: Optional[str] = Field(default=None, description="等级说明")
 
 
@@ -43,9 +127,14 @@ class CategoryDef(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # Category identifier, e.g. 'PERSONAL_BASIC', 'FINANCIAL_ACCOUNT'.
     id: str = Field(description="分类 ID，如 'PERSONAL_BASIC', 'FINANCIAL_ACCOUNT'")
+    # Display name for the category, e.g. '个人基本信息'.
     name: str = Field(description="分类名称，如 '个人基本信息'")
+    # Parent category ID for building hierarchical tree structures.
+    # None means this is a root-level category.
     parent_id: Optional[str] = Field(default=None, description="父分类 ID，支持多级树结构")
+    # Optional description explaining what data belongs in this category.
     description: Optional[str] = Field(default=None, description="分类说明")
 
 
@@ -54,20 +143,30 @@ class DomainTaxonomy(BaseModel):
 
     一个 Taxonomy 对应一个行业标准的分类分级元数据，
     包含该标准下的所有等级定义和分类目录树。
+    支持通过 confidence_policy 节配置置信度策略。
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    # Allow extra fields (e.g. confidence_policy) from YAML to be preserved.
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
+    # Domain identifier (e.g. 'healthcare', 'finance', 'gov').
     domain: str = Field(description="领域标识，如 'healthcare', 'finance', 'gov'")
+    # Standard code this taxonomy implements (e.g. 'DB51_T_2989', 'JR_T_0197').
     standard_id: str = Field(description="标准编号，如 'DB51_T_2989', 'JR_T_0197'")
+    # Semantic version of this taxonomy definition.
     version: str = Field(default="1.0.0", description="体系版本号")
+    # Optional human-readable description.
     description: Optional[str] = Field(default=None, description="体系说明")
+    # Mapping of level ID -> level definition. Contains all sensitivity levels
+    # defined by this standard (e.g. L1~L5 for healthcare, C1~C4 for finance).
     levels: dict[str, SensitivityLevelDef] = Field(
         default_factory=dict, description="等级 ID → 等级定义的映射"
     )
+    # Mapping of category ID -> category definition. Forms the classification tree.
     categories: dict[str, CategoryDef] = Field(
         default_factory=dict, description="分类 ID → 分类定义的映射"
     )
+    # Fallback level ID used when no rule hits a field (safe default).
     default_level: str = Field(default="L3", description="无规则命中时的默认等级 ID")
 
     def max_level(self, *level_ids: str) -> str:
@@ -79,11 +178,15 @@ class DomainTaxonomy(BaseModel):
         Returns:
             rank 最大的等级 ID；无有效输入时返回 default_level。
         """
+        # Step 1: If no level IDs provided, return the configured default.
         if not level_ids:
             return self.default_level
+        # Step 2: Filter to only IDs that exist in our levels dict (ignore unknown IDs).
         valid = [lid for lid in level_ids if lid in self.levels]
+        # Step 3: If none of the provided IDs are valid, fall back to default.
         if not valid:
             return self.default_level
+        # Step 4: Return the level with the highest rank value (most sensitive).
         return max(valid, key=lambda lid: self.levels[lid].rank)
 
     def get_level_rank(self, level_id: str) -> int:
@@ -95,6 +198,7 @@ class DomainTaxonomy(BaseModel):
         Returns:
             rank 值；未找到时返回 0。
         """
+        # Look up the level in the levels dict; return its rank or 0 if not found.
         if level_id in self.levels:
             return self.levels[level_id].rank
         return 0
@@ -109,13 +213,17 @@ class DomainTaxonomy(BaseModel):
         Returns:
             从根分类到目标分类的 ID 列表。
         """
+        # Build path by walking up the parent_id chain from leaf to root.
         path: list[str] = []
         current: Optional[str] = category_id
+        # Visited set prevents infinite loops if there's a circular parent reference.
         visited: set[str] = set()
+        # Walk up the tree: append current node, then move to its parent.
         while current and current in self.categories and current not in visited:
-            visited.add(current)
-            path.append(current)
-            current = self.categories[current].parent_id
+            visited.add(current)       # Mark as visited to detect cycles
+            path.append(current)       # Collect current category ID
+            current = self.categories[current].parent_id  # Move to parent
+        # Reverse to get root-to-leaf order (we built it leaf-to-root).
         return list(reversed(path))
 
 
@@ -133,31 +241,79 @@ class SecurityTag(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # Sensitivity level ID assigned by the rule hit (e.g. 'L3', 'C4').
     level: str = Field(description="敏感度等级 ID（如 'L3', 'C4'）")
+    # Classification category ID (e.g. 'PII_ID_CARD', 'GENOMIC').
     category: str = Field(description="分类类别 ID（如 'PII_ID_CARD', 'GENOMIC'）")
+    # Confidence score [0.0, 1.0]: rule engine always produces 1.0 (deterministic).
     confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="置信度 [0,1]")
+    # Which engine produced this tag: 'RULE' (configurable engine) or 'COMPOSITE'.
     source_engine: str = Field(default="RULE", alias="sourceEngine", description="来源引擎标识")
+    # The specific rule ID that triggered this tag (for audit/debugging).
     rule_id: str = Field(default="", alias="ruleId", description="触发的规则 ID")
+    # Domain context this tag was generated under.
     domain: str = Field(default="", description="所属领域")
+    # Standard context this tag was generated under.
     standard_id: str = Field(default="", alias="standardId", description="所属标准")
+    # Tag schema version for forward compatibility.
     version: str = Field(default="1.0.0", description="标签版本")
+    # Flag indicating this tag needs human review (e.g. low-confidence ML results).
     needs_human_review: bool = Field(default=False, alias="needsHumanReview", description="是否需人工复核")
+    # Flag indicating this tag was produced by an override-enabled downgrade rule.
+    # When true, this tag has suppression power over lower-rank normal rule tags.
+    is_override: bool = Field(default=False, alias="isOverride", description="是否为覆盖型降级标签")
+    # Flag indicating this tag was produced by a downgrade rule (regardless of override).
+    # Used by the funnel's conflict detection: normal + downgrade coexist = conflict.
+    is_downgrade: bool = Field(default=False, alias="isDowngrade", description="是否由降级规则产生")
+    # Records what the rule matched against: "field_name" or "field_value".
+    # Value-level hits (field_value) are exempt from override suppression because
+    # they represent high-confidence evidence (e.g. checksum validation, regex match).
+    match_target: str = Field(default="field_name", alias="matchTarget", description="匹配目标: field_name | field_value")
 
     def __str__(self) -> str:
+        # Compact string representation: "L3_PII_ID_CARD" format.
         return f"{self.level}_{self.category}"
 
 
 class FieldClassificationResult(BaseModel):
-    """单个字段的分类结果。"""
+    """单个字段的分类结果。
+
+    记录对数据集中某一个字段（列）的完整分类信息，包括：
+    - 所有命中的安全标签列表
+    - 最终裁定的敏感度等级
+    - 产出该结果的引擎层级（三层漏斗中的哪一层）
+    - 置信度（可能因冲突衰减或 LLM 修正）
+    - 推理说明（LLM 层会填充详细推理过程）
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # The field/column name that was classified.
     field_name: str = Field(alias="fieldName", description="字段名称")
+    # Optional sample value of the field (for display/debugging, may be truncated).
     field_value: Optional[str] = Field(default=None, alias="fieldValue", description="字段示例值")
+    # All security tags produced by rules that hit this field.
     tags: list[SecurityTag] = Field(default_factory=list, description="命中的安全标签列表")
+    # Final adjudicated sensitivity level (highest rank among all tags).
     final_level: str = Field(alias="finalLevel", description="最终裁定的敏感度等级")
+    # Aggregate confidence: may be decayed on conflict or corrected by LLM.
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="综合置信度")
+    # Whether any tag in this result requires human review.
     needs_human_review: bool = Field(default=False, alias="needsHumanReview")
+    # Which engine layer produced the final decision (L1_RULE / L2_SMALL_NER / L3_LLM).
+    engine_layer: str = Field(
+        default="L1_RULE", alias="engineLayer",
+        description="产出最终决策的引擎层级",
+    )
+    # Human-readable reasoning explanation (populated by LLM layer or conflict detection).
+    reasoning: str = Field(default="", description="分类推理说明")
+    # Tags that were suppressed by override downgrade rules (for audit trail).
+    # When non-empty, indicates that override suppression occurred and explains
+    # why certain rules did not contribute to the final level.
+    suppressed_tags: list[SecurityTag] = Field(
+        default_factory=list, alias="suppressedTags",
+        description="被 override 压制的标签列表（审计用）",
+    )
 
 
 class RecordClassificationResult(BaseModel):
@@ -165,13 +321,19 @@ class RecordClassificationResult(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # Zero-based index of this record within the batch/table.
     record_index: int = Field(default=0, alias="recordIndex")
+    # Per-field classification results: field_name -> FieldClassificationResult.
     field_results: dict[str, FieldClassificationResult] = Field(
         default_factory=dict, alias="fieldResults"
     )
+    # All tags aggregated from all fields plus composite rules.
     aggregated_tags: list[SecurityTag] = Field(default_factory=list, alias="aggregatedTags")
+    # Record-level final sensitivity level (max of all field levels + composite upgrades).
     final_level: str = Field(alias="finalLevel", description="记录级最终等级")
+    # Aggregate confidence for the entire record.
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Whether any field or composite tag requires human review.
     needs_human_review: bool = Field(default=False, alias="needsHumanReview")
 
 
@@ -180,13 +342,19 @@ class TableClassificationResult(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # Column names (schema) of the table being classified.
     schema_: list[str] = Field(default_factory=list, alias="schema")
+    # Per-record classification results for all rows in the table.
     record_results: list[RecordClassificationResult] = Field(
         default_factory=list, alias="recordResults"
     )
+    # All tags aggregated across all records.
     aggregated_tags: list[SecurityTag] = Field(default_factory=list, alias="aggregatedTags")
+    # Table-level final sensitivity (max across all records).
     final_level: str = Field(alias="finalLevel")
+    # Aggregate confidence for the entire table.
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Whether any record requires human review.
     needs_human_review: bool = Field(default=False, alias="needsHumanReview")
 
 
@@ -195,22 +363,38 @@ class AuditInfo(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # Schema version of this audit info structure.
     version: str = "1.0.0"
+    # Domain context used during classification.
     domain: str = ""
+    # Standard context used during classification.
     standard_id: str = Field(default="", alias="standardId")
+    # ISO 8601 UTC timestamp when the classification was performed.
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Version of the rule set that was used for evaluation.
     rule_set_version: str = Field(default="1.0.0", alias="ruleSetVersion")
+    # Total number of rules evaluated during this request.
     rules_evaluated: int = Field(default=0, alias="rulesEvaluated")
+    # Number of rules that actually produced a hit.
     rules_hit: int = Field(default=0, alias="rulesHit")
+    # Total execution time in milliseconds.
     duration_ms: float = Field(default=0.0, alias="durationMs")
 
 
 class ClassificationResponse(BaseModel):
-    """分类响应包装器。"""
+    """分类响应包装器。
+
+    Wraps exactly one of field_result / record_result / table_result
+    depending on the classification granularity requested.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # Populated for field-level classification requests.
     field_result: Optional[FieldClassificationResult] = Field(default=None, alias="fieldResult")
+    # Populated for record-level classification requests.
     record_result: Optional[RecordClassificationResult] = Field(default=None, alias="recordResult")
+    # Populated for table-level classification requests.
     table_result: Optional[TableClassificationResult] = Field(default=None, alias="tableResult")
+    # Always populated: execution metadata for auditing and debugging.
     audit_info: AuditInfo = Field(default_factory=AuditInfo, alias="auditInfo")

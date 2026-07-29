@@ -28,19 +28,33 @@ class StandardDocParser:
     """
 
     def __init__(self, doc_path: str | Path):
+        # Store the document path and validate existence.
         self.doc_path = Path(doc_path)
         if not self.doc_path.exists():
             raise FileNotFoundError(f"标准文档不存在: {self.doc_path}")
+        # Read entire document content into memory for parsing.
         self.content = self.doc_path.read_text(encoding="utf-8")
 
     def parse(self) -> tuple[DomainTaxonomy, RuleProfile, StandardDef]:
-        """解析文档并生成元数据体系、规则 Profile 和 Standard 组合模型。"""
+        """解析文档并生成元数据体系、规则 Profile 和 Standard 组合模型。
+
+        Pipeline:
+        1. Extract standard identifier and description from document.
+        2. Extract sensitivity levels (L1~L5 or C1~C4) based on document content.
+        3. Extract category tree from domain-specific keywords.
+        4. Generate classification rules from example terms in the document.
+        5. Assemble the three output models.
+        """
+        # Step 1: Extract standard ID (e.g. 'sc_health_db51') and description.
         standard_id = self._extract_standard_id()
         description = self._extract_description()
 
+        # Step 2: Extract sensitivity level definitions from document structure.
         levels = self._extract_levels()
+        # Step 3: Extract category tree from domain keywords found in document.
         categories = self._extract_categories()
 
+        # Step 4: Assemble the DomainTaxonomy model.
         taxonomy = DomainTaxonomy(
             domain=standard_id,
             standard_id=standard_id,
@@ -51,8 +65,10 @@ class StandardDocParser:
             default_level=self._determine_default_level(levels),
         )
 
+        # Step 5: Generate rules and downgrade rules from document examples.
         rules, downgrade_rules = self._generate_rules(standard_id, levels, categories)
 
+        # Assemble the RuleProfile (domain rule pack).
         profile = RuleProfile(
             domain=standard_id,
             version="1.0.0",
@@ -61,6 +77,7 @@ class StandardDocParser:
             downgrade_rules=downgrade_rules,
         )
 
+        # Assemble the StandardDef (standard combination definition).
         standard_def = StandardDef(
             standard_id=standard_id,
             description=description,
@@ -73,6 +90,11 @@ class StandardDocParser:
     def generate_files(self, output_dir: str | Path = "rules") -> dict[str, Path]:
         """解析文档并将自动生成的 3 个 YAML 文件写入 output_dir 对应目录。
 
+        Output structure:
+            output_dir/taxonomies/<standard_id>.yaml
+            output_dir/domains/<standard_id>.yaml
+            output_dir/standards/<standard_id>.yaml
+
         Args:
             output_dir: 规则输出根目录。
 
@@ -80,21 +102,27 @@ class StandardDocParser:
             生成的 YAML 文件路径字典 {'taxonomy': path, 'domain': path, 'standard': path}
         """
         output_dir = Path(output_dir)
+        # Parse the document to get the three model objects.
         taxonomy, profile, standard_def = self.parse()
 
+        # Resolve output subdirectories.
         tax_dir = output_dir / "taxonomies"
         dom_dir = output_dir / "domains"
         std_dir = output_dir / "standards"
 
+        # Create directories if they don't exist (idempotent).
         tax_dir.mkdir(parents=True, exist_ok=True)
         dom_dir.mkdir(parents=True, exist_ok=True)
         std_dir.mkdir(parents=True, exist_ok=True)
 
+        # Determine output file paths.
         tax_path = tax_dir / f"{taxonomy.standard_id}.yaml"
         dom_path = dom_dir / f"{profile.domain}.yaml"
         std_path = std_dir / f"{standard_def.standard_id}.yaml"
 
-        # 写入 YAML
+        # Serialize models to YAML and write to disk.
+        # by_alias=True uses camelCase aliases for JSON/YAML compatibility.
+        # exclude_none=True omits optional fields that are not set.
         tax_path.write_text(
             yaml.safe_dump(taxonomy.model_dump(by_alias=True, exclude_none=True), allow_unicode=True, sort_keys=False),
             encoding="utf-8",
@@ -119,11 +147,19 @@ class StandardDocParser:
     # ------------------------------------------------------------------
 
     def _extract_standard_id(self) -> str:
-        """抽取标准标识符，如 DB51/T 2989 -> sc_health_db51。"""
-        # 尝试正则提取标准编号
+        """抽取标准标识符，如 DB51/T 2989 -> sc_health_db51。
+
+        Strategy:
+        1. Try regex extraction of standard code from document body.
+        2. Map known standard codes to canonical identifiers.
+        3. Fall back to filename-based heuristics.
+        4. Last resort: slugify the filename.
+        """
+        # Attempt to find a standard code pattern in the document.
         match = re.search(r"标准编号[：:]\s*([A-Z0-9_/—\-]+)", self.content)
         if match:
             code = match.group(1).upper()
+            # Map known standard codes to canonical identifiers.
             if "DB51" in code:
                 return "sc_health_db51"
             elif "JR/T" in code or "JRT" in code:
@@ -133,7 +169,7 @@ class StandardDocParser:
             elif "GB/T 43697" in code or "43697" in code:
                 return "gb43697"
 
-        # 根据文件名回退
+        # Fallback: infer from filename keywords.
         name = self.doc_path.stem
         if "四川" in name or "DB51" in name:
             return "sc_health_db51"
@@ -142,36 +178,49 @@ class StandardDocParser:
         elif "广东" in name:
             return "gd_health_db44"
 
-        # 默认使用文件名平滑标识
+        # Last resort: create a URL-safe slug from the filename.
         slug = re.sub(r"[^\w\-]", "_", name).lower()
         return slug or "auto_generated_standard"
 
     def _extract_description(self) -> str:
-        """抽取标准简短描述。"""
+        """抽取标准简短描述。
+
+        Uses the first line (title) and standard code to build a description.
+        """
+        # Extract title from first line (strip Markdown heading markers).
         lines = self.content.strip().split("\n")
         title = lines[0].replace("#", "").strip() if lines else self.doc_path.stem
+        # Try to extract the standard code for inclusion in description.
         match = re.search(r"标准编号[：:]\s*([^\n]+)", self.content)
         code_str = match.group(1).strip() if match else ""
+        # Combine title and code into a formatted description string.
         return f"{title} ({code_str})" if code_str else title
 
     def _extract_levels(self) -> dict[str, SensitivityLevelDef]:
-        """抽取敏感度等级定义字典。"""
+        """抽取敏感度等级定义字典。
+
+        Detection strategy:
+        - If document mentions '第1级' or 'L1' -> use 5-level L1~L5 scheme.
+        - If document mentions 'C1' or '第四级' -> use 4-level C1~C4 scheme.
+        - Otherwise -> default to L1~L5 structure.
+        """
         levels: dict[str, SensitivityLevelDef] = {}
 
-        # 检查是否为 5 级划分（L1~L5 或 第1级~第5级）
+        # Detect 5-level healthcare scheme (L1~L5).
         if "第1级" in self.content or "第 1 级" in self.content or "L1" in self.content:
             levels["L1"] = SensitivityLevelDef(id="L1", name="公开数据/第1级", rank=1, description="低敏感度或经脱敏的数据")
             levels["L2"] = SensitivityLevelDef(id="L2", name="内部数据/第2级", rank=2, description="机构运营生产相关数据")
             levels["L3"] = SensitivityLevelDef(id="L3", name="敏感数据/第3级", rank=3, description="个人标识与身份信息")
             levels["L4"] = SensitivityLevelDef(id="L4", name="高敏感数据/第4级", rank=4, description="敏感病种与诊疗数据")
             levels["L5"] = SensitivityLevelDef(id="L5", name="极敏感数据/第5级", rank=5, description="基因与遗传数据")
+        # Detect 4-level finance scheme (C1~C4).
         elif "C1" in self.content or "第四级" in self.content:
             levels["C1"] = SensitivityLevelDef(id="C1", name="第一级（不敏感）", rank=1, description="公开金融数据")
             levels["C2"] = SensitivityLevelDef(id="C2", name="第二级（低敏感）", rank=2, description="内部使用金融数据")
             levels["C3"] = SensitivityLevelDef(id="C3", name="第三级（敏感）", rank=3, description="个人金融信息")
             levels["C4"] = SensitivityLevelDef(id="C4", name="第四级（高敏感）", rank=4, description="核心金融账户")
         else:
-            # 默认 L1~L5 结构
+            # Default: generic L1~L5 structure.
             levels["L1"] = SensitivityLevelDef(id="L1", name="公开数据", rank=1)
             levels["L2"] = SensitivityLevelDef(id="L2", name="内部数据", rank=2)
             levels["L3"] = SensitivityLevelDef(id="L3", name="敏感数据", rank=3)
@@ -181,10 +230,14 @@ class StandardDocParser:
         return levels
 
     def _extract_categories(self) -> dict[str, CategoryDef]:
-        """抽取分类目录树。"""
+        """抽取分类目录树。
+
+        Scans document content for domain-specific keywords and builds
+        a category tree. Falls back to generic categories if nothing matches.
+        """
         categories: dict[str, CategoryDef] = {}
 
-        # 匹配 5.2.1 数据分类相关条款
+        # Detect healthcare-related categories from document keywords.
         if "个人基本信息" in self.content or "PERSONAL_BASIC" in self.content:
             categories["PERSONAL_BASIC"] = CategoryDef(id="PERSONAL_BASIC", name="个人基本信息数据", description="能够识别特定自然人的数据")
         if "诊疗信息" in self.content or "MEDICAL_TREATMENT" in self.content:
@@ -196,34 +249,43 @@ class StandardDocParser:
         if "管理信息" in self.content or "MANAGEMENT" in self.content:
             categories["MANAGEMENT"] = CategoryDef(id="MANAGEMENT", name="管理信息数据", description="反映机构运营管理状况的数据")
 
-        # 补充特有子分类
+        # Detect specialized sub-categories.
         if "基因" in self.content or "遗传" in self.content:
             categories["GENOMIC"] = CategoryDef(id="GENOMIC", name="基因遗传数据", parent_id="MEDICAL_TREATMENT", description="个人或家族基因/多组学检测数据")
         if "金融账户" in self.content or "银行卡" in self.content:
             categories["FINANCIAL_ACCOUNT"] = CategoryDef(id="FINANCIAL_ACCOUNT", name="金融账户数据", parent_id="PERSONAL_BASIC")
 
+        # Fallback: if no categories detected, use generic defaults.
         if not categories:
-            # 默认分类目录
             categories["GENERAL_PII"] = CategoryDef(id="GENERAL_PII", name="通用个人信息")
             categories["BUSINESS_DATA"] = CategoryDef(id="BUSINESS_DATA", name="业务数据")
 
         return categories
 
     def _determine_default_level(self, levels: dict[str, SensitivityLevelDef]) -> str:
+        """Determine the default level ID for fields that don't match any rule.
+
+        Preference: L3 > C3 > first available level.
+        """
         if "L3" in levels:
             return "L3"
         elif "C3" in levels:
             return "C3"
+        # If neither L3 nor C3 exists, use the first key (lowest rank).
         return list(levels.keys())[0] if levels else "L1"
 
     def _generate_rules(
         self, standard_id: str, levels: dict[str, SensitivityLevelDef], categories: dict[str, CategoryDef]
     ) -> tuple[list[RuleDef], list[DowngradeRuleDef]]:
-        """从标准词条举例提取特征算子并自动构建规则。"""
+        """从标准词条举例提取特征算子并自动构建规则。
+
+        Scans document lines for domain-specific terms and generates
+        appropriate classification rules with matchers.
+        """
         rules: list[RuleDef] = []
         downgrade_rules: list[DowngradeRuleDef] = []
 
-        # 1. 身份证规则 (L3/C3)
+        # Rule 1: ID card detection (L3/C3) - triggered by '身份证' in document.
         if any("身份证" in line or "身份证件" in line for line in self.content.split("\n")):
             rules.append(
                 RuleDef(
@@ -232,15 +294,17 @@ class StandardDocParser:
                     category="PERSONAL_BASIC" if "PERSONAL_BASIC" in categories else list(categories.keys())[0],
                     level="L3" if "L3" in levels else "C3",
                     matchers=[
+                        # Value-based: validate checksum of 18-digit ID card number.
                         MatcherDef(target="field_value", operator="id_card_checksum", params={}),
+                        # Name-based: match field names containing ID-related keywords.
                         MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["idcard", "sfz", "identity", "id_card", "身份证"]}),
                     ],
-                    match_logic="OR",
+                    match_logic="OR",  # Either value or name match is sufficient.
                     priority=90,
                 )
             )
 
-        # 2. 手机/联系电话规则 (L3)
+        # Rule 2: Phone number detection (L3) - triggered by '电话' or '手机'.
         if any("电话" in line or "手机" in line for line in self.content.split("\n")):
             rules.append(
                 RuleDef(
@@ -249,7 +313,9 @@ class StandardDocParser:
                     category="PERSONAL_BASIC" if "PERSONAL_BASIC" in categories else list(categories.keys())[0],
                     level="L3" if "L3" in levels else "C3",
                     matchers=[
+                        # Value-based: China mobile number pattern (1[3-9]XXXXXXXXX).
                         MatcherDef(target="field_value", operator="regex", params={"pattern": r"^1[3-9]\d{9}$"}),
+                        # Name-based: match phone-related field names.
                         MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["mobile", "phone", "cell", "电话", "手机"]}),
                     ],
                     match_logic="OR",
@@ -257,7 +323,7 @@ class StandardDocParser:
                 )
             )
 
-        # 3. 银行卡/金融账户 (C4 或 L3)
+        # Rule 3: Bank card / financial account (C4 or L3).
         if any("金融账户" in line or "支付卡号" in line for line in self.content.split("\n")):
             target_lvl = "C4" if "C4" in levels else "L3"
             rules.append(
@@ -267,7 +333,9 @@ class StandardDocParser:
                     category="FINANCIAL_ACCOUNT" if "FINANCIAL_ACCOUNT" in categories else "PERSONAL_BASIC",
                     level=target_lvl,
                     matchers=[
+                        # Value-based: Luhn checksum validates card number structure.
                         MatcherDef(target="field_value", operator="luhn_checksum", params={"min_length": 13, "max_length": 19}),
+                        # Name-based: match card-related field names.
                         MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["bankcard", "cardno", "card_no", "bank_card", "支付卡号"]}),
                     ],
                     match_logic="OR",
@@ -275,7 +343,7 @@ class StandardDocParser:
                 )
             )
 
-        # 4. 敏感病种检测 (L4)
+        # Rule 4: Sensitive disease detection (L4) - HIV, STD, psychiatric.
         if any("艾滋病" in line or "性病" in line or "精神病" in line for line in self.content.split("\n")):
             rules.append(
                 RuleDef(
@@ -284,6 +352,7 @@ class StandardDocParser:
                     category="MEDICAL_TREATMENT" if "MEDICAL_TREATMENT" in categories else list(categories.keys())[0],
                     level="L4" if "L4" in levels else "L3",
                     matchers=[
+                        # Name-based only: detect sensitive disease keywords in field names.
                         MatcherDef(
                             target="field_name",
                             operator="keyword_contains",
@@ -294,7 +363,7 @@ class StandardDocParser:
                 )
             )
 
-        # 5. 基因与遗传数据 (L5)
+        # Rule 5: Genomic / genetic data detection (L5) - highest sensitivity.
         if any("基因" in line or "染色体" in line or "地中海贫血" in line for line in self.content.split("\n")):
             rules.append(
                 RuleDef(
@@ -303,17 +372,18 @@ class StandardDocParser:
                     category="GENOMIC" if "GENOMIC" in categories else "MEDICAL_TREATMENT",
                     level="L5" if "L5" in levels else "L4",
                     matchers=[
+                        # Name-based: detect genomics-related keywords in field names.
                         MatcherDef(
                             target="field_name",
                             operator="keyword_contains",
                             params={"keywords": ["gene", "genomic", "brca", "tp53", "snp", "cnv", "chromosome", "thalassemia", "基因", "染色体", "地中海贫血"]},
                         )
                     ],
-                    priority=100,
+                    priority=100,  # Highest priority: genomic data is most sensitive.
                 )
             )
 
-        # 6. 默认降级规则 (L2 / L1)
+        # Rule 6: Default downgrade rule for operational/statistical fields (L2/L1).
         downgrade_rules.append(
             DowngradeRuleDef(
                 id=f"DOWN_{standard_id.upper()}_OPS",
@@ -328,16 +398,25 @@ class StandardDocParser:
 
 
 def main():
-    """CLI 工具命令行入口。"""
+    """CLI 工具命令行入口。
+
+    Usage:
+        python -m privacy_local_agent.dynclassification.generator \
+            --doc docs/standard/四川省健康医疗大数据应用指南.md \
+            --output rules
+    """
+    # Configure argument parser for CLI usage.
     parser = argparse.ArgumentParser(description="从分类分级标准 Markdown 文档生成 YAML 配置文件")
     parser.add_argument("--doc", required=True, help="标准 Markdown 文档路径，例如 docs/standard/四川省健康医疗大数据应用指南.md")
     parser.add_argument("--output", default="rules", help="YAML 输出规则根目录，默认 rules/")
 
     args = parser.parse_args()
 
+    # Parse the document and generate YAML files.
     doc_parser = StandardDocParser(args.doc)
     generated = doc_parser.generate_files(args.output)
 
+    # Print success summary.
     print("=== 自动生成 YAML 配置文件成功 ===")
     for key, path in generated.items():
         print(f"[{key.upper()}] -> {path}")

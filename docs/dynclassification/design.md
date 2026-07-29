@@ -8,6 +8,8 @@
 2. [现状问题分析](#2-现状问题分析)
 3. [设计原则](#3-设计原则)
 4. [总体架构](#4-总体架构)
+   - 4.4 [引擎层容错回退](#44-引擎层容错回退engine-layer-fallback)
+   - 4.5 [敏感度降级规则（Downgrade Rules）](#45-敏感度降级规则downgrade-rules)
 5. [数据模型设计：分类体系配置化](#5-数据模型设计分类体系配置化)
 6. [声明式规则 Profile](#6-声明式规则-profile)
 7. [算子插件化与注册表](#7-算子插件化与注册表)
@@ -154,6 +156,113 @@ sequenceDiagram
     S->>S: composite_engine.evaluate(record, tags)
     S-->>C: ClassificationResult
 ```
+
+### 4.4 引擎层容错回退（Engine Layer Fallback）
+
+为了保证分类服务的高可用性和鲁棒性，三层漏斗架构（规则引擎 → Small-NER → LLM）内置了自动容错回退机制。
+
+> **注意**：此处的"降级"指的是**引擎可用性层面的回退**（高层引擎不可用时回退到低层引擎），与 4.5 节描述的**敏感度降级规则（Downgrade Rules）**是完全不同的概念。
+
+- **定义**：当高级别的分类引擎（如 LLM 或 Small-NER）因模型未部署、文件缺失、加载失败或运行时资源不足而不可用时，系统会自动、平滑地回退（fallback）到下一级别的引擎进行处理，从而保证核心分类能力不中断。
+
+- **回退路径**：`L3_LLM` → `L2_SMALL_NER` → `L1_RULE_ENGINE`。
+
+- **实现方式**：系统采用"空对象模式"（No-Op Object Pattern）。在 `ClassificationService` 初始化时，会尝试加载各层引擎。如果某一层引擎加载失败（例如，`torch` 未安装或模型文件不存在），该层将被一个功能接口相同但行为为空的"假"对象（No-Op Classifier）替换。当分类请求流经该层时，这个"假"对象不会执行任何操作，而是直接将请求传递给下一层处理。
+
+- **用户透明性**：整个回退过程对 API 调用者是透明的，服务不会因模型问题而中断或报错。但为了便于调试和监控，系统会在后台日志中明确记录回退事件，并且在最终返回的 `ClassificationResult` 的 `engine_layer` 字段中，会准确标识出**实际执行并产生结果**的引擎层级。例如，即使请求参数指定使用 LLM，如果 LLM 不可用，最终结果的 `engine_layer` 可能会是 `L1_RULE_ENGINE`。
+
+### 4.5 敏感度降级规则（Downgrade Rules）
+
+敏感度降级规则是 `ConfigurableRuleEngine` 中的一种**反向修正机制**，用于解决通用规则对特定字段的"过度分类"问题。
+
+#### 4.5.1 设计动机
+
+在实际业务中，部分字段虽然名称包含某些敏感关键词（如"统计"、"报告"），但其实际含义为机构运营指标或公开数据，不应被判定为高敏感等级。例如：
+
+| 字段名 | 通用规则判定 | 实际语义 | 正确等级 |
+|---|---|---|---|
+| `turnover_rate`（营业额） | L3（敏感数据） | 机构运营统计指标 | L2（内部数据） |
+| `outpatient_visits`（门诊人次） | L3（敏感数据） | 公开运营数据 | L2（内部数据） |
+| `public_report`（公开报告） | L3（敏感数据） | 对外公开信息 | L1（公开数据） |
+| `annual_summary`（年度汇总） | L3（敏感数据） | 对外公开信息 | L1（公开数据） |
+
+降级规则通过在字段名中匹配特定关键词，将这些字段"下调"到合理的低等级。
+
+#### 4.5.2 数据模型
+
+```python
+# privacy_local_agent/dynclassification/rule_schema.py
+
+class DowngradeRuleDef(BaseModel):
+    """敏感度降级规则定义。
+
+    当字段名包含指定关键词时，为该字段附加一个低等级标签，
+    用于修正通用规则可能导致的过度分类。
+    """
+    id: str                           # 规则唯一标识
+    keywords: list[str]               # 触发降级的关键词列表（子串匹配，不区分大小写）
+    level: str                        # 降级目标等级（如 "L1"、"L2"）
+    category: str                     # 降级后归属的业务类别
+    match_target: str = "field_name"  # 匹配目标（默认匹配字段名）
+```
+
+#### 4.5.3 执行流程
+
+降级规则在引擎 `evaluate()` 方法中的执行位置：
+
+```mermaid
+graph TD
+    A["Phase 1: 遍历所有普通规则<br/>（按 priority 降序）"] --> B["Phase 2: 执行降级规则<br/>（所有降级规则均评估）"]
+    B --> C["Phase 3: 按 (level, category) 去重"]
+    C --> D["返回 SecurityTag 列表"]
+```
+
+具体执行逻辑（`_evaluate_downgrade` 方法）：
+
+1. 将字段名归一化（小写 + 去除下划线和空格）
+2. 遍历所有降级规则（**不按优先级排序，全部评估**）
+3. 对每条降级规则，检查归一化后的字段名是否包含其 `keywords` 中的任一关键词
+4. 若命中，生成一个以降级目标等级（如 L1/L2）标记的 `SecurityTag`
+
+#### 4.5.4 与最终等级裁定的关系
+
+降级规则产生的标签**不会覆盖**普通规则产生的高等级标签。最终等级裁定逻辑为：
+
+```
+最终等级 = max(所有命中标签的等级)
+```
+
+因此：
+- 若某字段**仅**被降级规则命中（无普通规则命中），则最终等级为降级规则指定的低等级（如 L2）
+- 若某字段**同时**被普通规则（L4）和降级规则（L2）命中，则最终等级仍为 L4
+
+这意味着降级规则的核心价值在于：**为无其他规则命中的字段提供一个合理的低等级归属**，避免系统默认将其归入较高的默认等级（如 `default_level: L3`）。
+
+#### 4.5.5 YAML 配置示例
+
+```yaml
+# rules/domains/medical.yaml 中的降级规则部分
+downgrade_rules:
+  - id: "RULE_DOWN_PUBLIC"
+    keywords: ["public_report", "annual_summary", "科普"]
+    level: "L1"              # 降级为公开数据
+    category: "PUBLIC_REPORT"
+
+  - id: "RULE_DOWN_OPS"
+    keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次"]
+    level: "L2"              # 降级为内部数据
+    category: "OPERATIONAL_STAT"
+```
+
+#### 4.5.6 与引擎层容错回退的区别
+
+| 维度 | 引擎层容错回退（4.4 节） | 敏感度降级规则（本节） |
+|---|---|---|
+| 作用层面 | 引擎可用性 | 分类结果修正 |
+| 触发条件 | 高层引擎不可用（模型缺失/加载失败） | 字段名包含特定关键词 |
+| 影响对象 | 整个分类流水线 | 单个字段的敏感度等级 |
+| 配置方式 | 代码内置（空对象模式） | YAML 声明式配置 |
+| 对应代码 | `ClassificationService` 初始化 | `ConfigurableRuleEngine._evaluate_downgrade()` |
 
 ## 5. 数据模型设计：分类体系配置化
 
@@ -827,7 +936,7 @@ class ConfigurableRuleEngine:
         2. 对每条规则的 matchers 列表执行算子匹配
         3. 根据 match_logic (AND/OR) 判断是否命中
         4. 命中则生成 SecurityTag
-        5. 执行降级规则
+        5. 执行敏感度降级规则（见 4.5 节）
         6. 去重返回
         """
         tags: list[SecurityTag] = []
@@ -842,7 +951,7 @@ class ConfigurableRuleEngine:
                     rule_id=rule.id,
                 ))
 
-        # 执行降级规则
+        # 执行敏感度降级规则：为可能被过度分类的字段附加低等级标签
         tags.extend(self._evaluate_downgrade(field_name))
 
         return self._unique_tags(tags)
@@ -879,7 +988,11 @@ class ConfigurableRuleEngine:
             return level_id
 
     def _evaluate_downgrade(self, field_name: str) -> list[SecurityTag]:
-        """执行降级规则。"""
+        """执行敏感度降级规则（详见 4.5 节）。
+
+        降级规则为“反向修正”机制：将可能被通用规则过度分类的字段
+        下调到合理的低等级。所有降级规则均被评估，不按优先级排序。
+        """
         tags = []
         norm_name = field_name.lower().replace("_", "").replace(" ", "")
         for rule in self.downgrade_rules:
@@ -1439,6 +1552,8 @@ graph LR
 | Operator Registry | 算子注册表，管理所有可用算子的单例 |
 | Profile Loader | 配置加载器，负责 YAML 解析、缓存和热加载 |
 | ConfigurableRuleEngine | 通用规则引擎，解释执行声明式规则 |
+| Downgrade Rules | 敏感度降级规则，通过字段名关键词匹配将过度分类的字段下调到合理低等级 |
+| Engine Fallback | 引擎层容错回退，高层引擎不可用时自动回退到低层引擎 |
 | Hot Reload | 热加载，运行时重新加载配置无需重启 |
 | Shadow Mode | 影子模式，新旧引擎并行对比结果 |
 
@@ -1450,4 +1565,3 @@ graph LR
 | 分类 PRD | [分类 PRD](../classification/prd.md) | 产品需求 |
 | 分类运维 | [分类运维](../classification/ops.md) | 部署与配置 |
 | 合规模板说明 | [合规模板说明](../classification/design.md) | 现有模板机制 |
-
