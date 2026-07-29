@@ -514,3 +514,48 @@ class TestLlmClassifyPromptTemplate:
         assert len(ner_tags) == 1
         assert ner_tags[0].category == "CUSTOM_FINANCIAL_RISK"
         assert ner_tags[0].rule_id == "NER_CUSTOM_FINANCIAL_RISK"
+
+
+# ===========================================================================
+# Service reload 适配器重置测试
+# ===========================================================================
+
+
+class TestServiceReloadResetsAdapters:
+    """验证 service.reload() 重置 NER/LLM 适配器单例。"""
+
+    def test_reload_clears_ner_and_llm_adapters(self):
+        """热重载后 NER/LLM 适配器被重置为 None。"""
+        from privacy_local_agent.dynclassification import DynClassificationService
+        from privacy_local_agent.dynclassification.ner_adapter import NerAdapter
+        from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
+
+        svc = DynClassificationService(rules_dir="rules")
+        # 模拟已初始化的适配器单例
+        svc._ner_adapter = NerAdapter()
+        svc._llm_adapter = LlmAdapter()
+        svc._funnel_cache["test:key"] = object()  # 模拟缓存
+
+        # 执行 reload
+        svc.reload()
+
+        # 验证适配器和缓存均被重置
+        assert svc._ner_adapter is None
+        assert svc._llm_adapter is None
+        assert len(svc._funnel_cache) == 0
+
+    def test_reload_clears_loader_caches(self):
+        """热重载后 ProfileLoader 缓存被清空。"""
+        from privacy_local_agent.dynclassification import DynClassificationService
+
+        svc = DynClassificationService(rules_dir="rules")
+        # 触发一次分类以填充缓存
+        svc.classify_field("phone_number", "13800138000")
+        assert len(svc.loader._engine_cache) > 0
+
+        # 执行 reload
+        svc.reload()
+
+        # 验证 loader 缓存被清空
+        assert len(svc.loader._engine_cache) == 0
+        assert len(svc.loader._taxonomy_cache) == 0

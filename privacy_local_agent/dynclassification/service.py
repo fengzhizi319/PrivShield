@@ -378,10 +378,17 @@ class DynClassificationService:
         return OperatorRegistry.list_operators()
 
     def reload(self) -> None:
-        """热加载：清除缓存，下次请求时重新加载配置。"""
+        """热加载：清除缓存，下次请求时重新加载配置。
+
+        同时重置 NER/LLM 适配器单例，确保 taxonomy 中的
+        模型路径、标签映射、prompt 模板等配置变更后能生效。
+        """
         self.loader.invalidate_cache()
-        # 同时清除 funnel 缓存（引擎重建后 funnel 也需重建）
+        # 清除 funnel 缓存（引擎重建后 funnel 也需重建）
         self._funnel_cache.clear()
+        # 重置 NER/LLM 适配器（全局单例），使新 taxonomy 配置生效
+        self._ner_adapter = None
+        self._llm_adapter = None
 
     def generate_profile_from_doc(self, doc_path: str | Path) -> dict[str, str]:
         """从标准 Markdown 文档自动抽取并生成 YAML 配置文件，并重新载入引擎缓存。

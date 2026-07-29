@@ -188,7 +188,7 @@ sequenceDiagram
 
 降级规则通过在字段名中匹配特定关键词，将这些字段"下调"到合理的低等级。当启用 `override=true` 时，还能进一步**强制压制**误中的普通规则标签，避免宽泛规则把运营/公开字段错误地拉高等级。
 
-> 说明：上表中的"通用规则判定"示例假设使用子串匹配语义（例如 `keyword_contains` 配置 `use_word_boundaries: false`）。实际命中行为取决于所配置算子及其参数；`keyword_contains` 默认使用单词边界匹配（`use_word_boundaries: true`），如需纯子串匹配请显式关闭。
+> 说明：上表中的“通用规则判定”示例假设使用子串匹配语义。注意：降级规则使用纯子串匹配（`kw in norm_name`），而普通规则的 `keyword_contains` 算子默认使用单词边界匹配（`use_word_boundaries: true`），两者语义不同。
 
 #### 4.5.2 数据模型
 
@@ -217,7 +217,7 @@ class DowngradeRuleDef(BaseModel):
     """
     id: str                           # 规则唯一标识
     name: str = ""                    # 规则名称（人类可读）
-    keywords: list[str]               # 触发降级的关键词列表（默认按单词边界匹配；可配置 use_word_boundaries=false 改为纯子串匹配）
+    keywords: list[str]               # 触发降级的关键词列表（纯子串匹配，无单词边界限制）
     level: str                        # 降级目标等级（如 "L1"、"L2"）
     category: str                     # 降级后归属的业务类别
     match_target: str = "field_name"  # 匹配目标（目前仅支持字段名）
@@ -232,7 +232,7 @@ class DowngradeRuleDef(BaseModel):
 |---|---|---|---|
 | `id` | `str` | — | 规则唯一标识，用于审计和指标。 |
 | `name` | `str` | `""` | 人类可读名称。 |
-| `keywords` | `list[str]` | `[]` | 触发关键词。字段名归一化（小写、去下划线/空格）后，按 `keyword_contains` 算子匹配；默认使用单词边界（`\b`），可配置 `use_word_boundaries: false` 改为纯子串匹配。 |
+| `keywords` | `list[str]` | `[]` | 触发关键词。字段名归一化（小写、去下划线/空格）后，使用**纯子串匹配**（`kw in norm_name`）。注意：降级规则不使用 `keyword_contains` 算子，无单词边界限制。 |
 | `level` | `str` | — | 降级目标等级，如 `L1` / `L2`。 |
 | `category` | `str` | — | 降级后归属的业务类别。 |
 | `match_target` | `str` | `"field_name"` | 匹配目标，当前仅支持字段名。 |
@@ -255,7 +255,7 @@ graph TD
 具体执行逻辑：
 
 1. **Phase 1 — 普通规则评估**：按优先级遍历普通规则，生成 `normal_tags`。
-2. **Phase 2 — 降级规则评估**：字段名归一化后，按 `keyword_contains` 算子对所有降级规则做关键词匹配（默认使用单词边界，可通过 `use_word_boundaries: false` 改为纯子串匹配）；命中的生成 `downgrade_tags`，并标记 `is_downgrade=True`。若规则 `override=true`，则同时标记 `is_override=True`。
+2. **Phase 2 — 降级规则评估**：字段名归一化后，使用纯子串匹配（`kw in norm_name`）对所有降级规则做关键词匹配（注意：降级规则不使用 `keyword_contains` 算子，无单词边界限制）；命中的生成 `downgrade_tags`，并标记 `is_downgrade=True`。若规则 `override=true`，则同时标记 `is_override=True`。
 3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_override_level))`；同时合并所有 `suppress_rules` 白名单。随后从 `normal_tags` 中移除满足以下全部条件的标签：
    - 该标签的 `match_target` 不是 `field_value`（基于字段值的命中不会被 override 压制，避免误删真实敏感内容）；
    - 该标签的 `rank <= cap_rank`；
@@ -1278,98 +1278,87 @@ def icd10_range_matcher(value: Any, params: dict[str, Any]) -> Tuple[bool, str, 
 ```python
 # privacy_local_agent/dynclassification/profile_loader.py
 
+import os
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 import yaml
 
 from .models import DomainTaxonomy
-from .rule_schema import RuleProfile, StandardDef
+from .rule_schema import RuleProfile, StandardDef, CompositeRuleDef
 from .engine import ConfigurableRuleEngine
+from .composite import CompositeRuleEngine
 
 
 class ProfileLoader:
     """Profile 加载器与缓存管理器。
 
     负责从 YAML 文件加载 Taxonomy、RuleProfile、StandardDef，
-    并根据 domain/standard 组合构建 ConfigurableRuleEngine 实例。
-    支持热加载（文件变更检测）和 LRU 缓存。
+    并根据 domain/standard 组合构建 ConfigurableRuleEngine 及 CompositeRuleEngine 实例。
+    支持基于文件 mtime 的热重载（两阶段提交）与线程安全缓存。
     """
 
-    def __init__(self, rules_dir: str | Path = "rules"):
-        self.rules_dir = Path(rules_dir)
+    def __init__(self, rules_dir: str | Path | None = None):
+        # 解析规则目录：显式参数 > 环境变量 > 默认 "rules"
+        env_rules_dir = os.environ.get("PRIVACY_DYNCLASSIFICATION_RULES_DIR", "rules")
+        self.rules_dir = Path(rules_dir if rules_dir is not None else env_rules_dir)
+
+        # 热重载配置
+        self.hot_reload_enabled = (
+            os.environ.get("PRIVACY_DYNCLASSIFICATION_HOT_RELOAD", "true").lower() == "true"
+        )
+        self.reload_interval_seconds = float(
+            os.environ.get("PRIVACY_DYNCLASSIFICATION_RELOAD_INTERVAL", "0")
+        )
+        self._last_check_time = 0.0
+
+        # 可重入锁：保护所有缓存变更和热重载扫描
+        self._lock = threading.RLock()
         self._taxonomy_cache: dict[str, DomainTaxonomy] = {}
         self._profile_cache: dict[str, RuleProfile] = {}
         self._standard_cache: dict[str, StandardDef] = {}
         self._engine_cache: dict[str, ConfigurableRuleEngine] = {}
+        self._composite_cache: dict[str, CompositeRuleEngine] = {}
+        self._file_mtimes: dict[Path, float] = {}
+
+    def check_and_reload(self, force: bool = False) -> bool:
+        """检查文件 mtime 变动，触发两阶段提交热重载。线程安全。"""
+        ...
 
     def load_taxonomy(self, name: str) -> DomainTaxonomy:
-        """加载分类体系定义。"""
-        if name not in self._taxonomy_cache:
-            path = self.rules_dir / "taxonomies" / f"{name}.yaml"
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            self._taxonomy_cache[name] = DomainTaxonomy.model_validate(data)
-        return self._taxonomy_cache[name]
+        """加载分类体系定义（带缓存 + RLock）。"""
+        with self._lock:
+            if name not in self._taxonomy_cache:
+                path = self.rules_dir / "taxonomies" / f"{name}.yaml"
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                self._taxonomy_cache[name] = DomainTaxonomy.model_validate(data)
+            return self._taxonomy_cache[name]
 
-    def load_profile(self, domain: str) -> RuleProfile:
-        """加载领域规则 Profile。"""
-        if domain not in self._profile_cache:
-            path = self.rules_dir / "domains" / f"{domain}.yaml"
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            self._profile_cache[domain] = RuleProfile.model_validate(data)
-        return self._profile_cache[domain]
-
-    def load_standard(self, standard_id: str) -> StandardDef:
-        """加载标准组合定义。"""
-        if standard_id not in self._standard_cache:
-            path = self.rules_dir / "standards" / f"{standard_id}.yaml"
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            self._standard_cache[standard_id] = StandardDef.model_validate(data)
-        return self._standard_cache[standard_id]
-
-    def get_engine(
-        self,
-        domain: Optional[str] = None,
-        standard: Optional[str] = None,
-    ) -> ConfigurableRuleEngine:
-        """获取或构建规则引擎实例。"""
+    def get_engine(self, domain=None, standard=None) -> ConfigurableRuleEngine:
+        """获取或构建规则引擎实例（带 Prometheus 耗时指标）。"""
         cache_key = f"{domain or 'default'}:{standard or 'default'}"
-        if cache_key not in self._engine_cache:
-            engine = self._build_engine(domain, standard)
-            self._engine_cache[cache_key] = engine
-        return self._engine_cache[cache_key]
+        with self._lock:
+            if cache_key not in self._engine_cache:
+                engine = self._build_engine(domain, standard)
+                self._engine_cache[cache_key] = engine
+            return self._engine_cache[cache_key]
 
-    def _build_engine(self, domain: Optional[str], standard: Optional[str]) -> ConfigurableRuleEngine:
-        """根据 domain/standard 构建引擎。"""
-        if standard:
-            std_def = self.load_standard(standard)
-            taxonomy = self.load_taxonomy(std_def.taxonomy)
-            profiles = [self.load_profile(d) for d in std_def.domains]
-            # 应用 extra_rules
-            if std_def.extra_rules:
-                extra_profile = RuleProfile(
-                    domain=f"{standard}_extra",
-                    rules=std_def.extra_rules,
-                )
-                profiles.append(extra_profile)
-        elif domain:
-            taxonomy = self.load_taxonomy("default")
-            profiles = [self.load_profile(domain)]
-        else:
-            # 默认：加载所有通用领域包
-            taxonomy = self.load_taxonomy("default")
-            profiles = [
-                self.load_profile("general-pii"),
-                self.load_profile("medical"),
-            ]
-        return ConfigurableRuleEngine(taxonomy, profiles)
+    def get_composite_engine(self, domain=None, standard=None) -> CompositeRuleEngine:
+        """获取或构建复合规则引擎实例。"""
+        ...
 
     def invalidate_cache(self) -> None:
-        """清除所有缓存（热加载时调用）。"""
-        self._taxonomy_cache.clear()
-        self._profile_cache.clear()
-        self._standard_cache.clear()
-        self._engine_cache.clear()
+        """清空所有缓存（热重载时调用）。"""
+        with self._lock:
+            self._taxonomy_cache.clear()
+            self._profile_cache.clear()
+            self._standard_cache.clear()
+            self._engine_cache.clear()
+            self._composite_cache.clear()
 ```
+
+> 完整实现包含：两阶段提交热重载（`_perform_two_phase_reload`）、规则级属性覆盖（`_apply_rule_overrides`）、Taxonomy 一致性校验（`_validate_profile_taxonomy`）、Prometheus 指标集成、目录发现方法（`list_taxonomies`/`list_domains`/`list_standards`）。详见源码 `profile_loader.py`。
 
 ### 9.2 上下文调度集成
 
