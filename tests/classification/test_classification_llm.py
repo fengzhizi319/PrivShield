@@ -26,8 +26,8 @@ except ImportError:
 
 # The following imports must stay after the torch mock and Pillow availability
 # check so that heavy ML modules are stubbed/optional handling is applied.
-from privacy_local_agent.privacy.classification.classification_llm import Qwen2VLClassifier  # noqa: E402
-from privacy_local_agent.privacy.classification.classification_models import SensitivityLevel  # noqa: E402
+from privacy_local_agent.dynclassification.classification_llm import Qwen2VLClassifier  # noqa: E402
+from privacy_local_agent.dynclassification.classification_models import SensitivityLevel  # noqa: E402
 
 from ._pretty import print_result
 
@@ -76,7 +76,7 @@ def test_detect_image_raw_text():
     assert detected is None
 
 
-@patch("privacy_local_agent.privacy.classification.classification_llm.Qwen2VLClassifier._lazy_init")
+@patch("privacy_local_agent.dynclassification.classification_llm.Qwen2VLClassifier._lazy_init")
 def test_classify_success(mock_lazy_init):
     """模拟大模型成功推理并输出合法 JSON 的场景。"""
     classifier = Qwen2VLClassifier()
@@ -108,7 +108,7 @@ def test_classify_success(mock_lazy_init):
     assert res["sub_category"] == "MEDICAL_HIV"
 
 
-@patch("privacy_local_agent.privacy.classification.classification_llm.Qwen2VLClassifier._lazy_init")
+@patch("privacy_local_agent.dynclassification.classification_llm.Qwen2VLClassifier._lazy_init")
 def test_classify_failure_fallback(mock_lazy_init):
     """测试大模型加载/推理崩溃时的安全防御与降级。"""
     classifier = Qwen2VLClassifier()
@@ -121,7 +121,7 @@ def test_classify_failure_fallback(mock_lazy_init):
     assert res is None
 
 
-@patch("privacy_local_agent.privacy.classification.classification_llm.Qwen2VLClassifier._lazy_init")
+@patch("privacy_local_agent.dynclassification.classification_llm.Qwen2VLClassifier._lazy_init")
 def test_classify_handwritten_medical_note(mock_lazy_init):
     """测试大模型对手写体医疗文本/病历进行 OCR 提取与敏感定级。"""
     classifier = Qwen2VLClassifier()
@@ -152,7 +152,7 @@ def test_classify_handwritten_medical_note(mock_lazy_init):
     assert res["sub_category"] == "MEDICAL_OUTPATIENT"
 
 
-@patch("privacy_local_agent.privacy.classification.classification_llm.Qwen2VLClassifier._lazy_init")
+@patch("privacy_local_agent.dynclassification.classification_llm.Qwen2VLClassifier._lazy_init")
 def test_classify_printed_structured_report(mock_lazy_init):
     """测试大模型对带有结构化排版和表格格式的印刷体医疗报告进行定级评估。"""
     classifier = Qwen2VLClassifier()
@@ -194,7 +194,7 @@ def test_qwen_classifier_not_ready_by_default():
     assert classifier.is_ready is False
 
 
-@patch("privacy_local_agent.privacy.classification.classification_llm.Qwen2VLClassifier._lazy_init")
+@patch("privacy_local_agent.dynclassification.classification_llm.Qwen2VLClassifier._lazy_init")
 def test_qwen_classifier_warmup_success(mock_lazy_init):
     """warmup 成功后 is_ready 返回 True。"""
     classifier = Qwen2VLClassifier()
@@ -208,7 +208,7 @@ def test_qwen_classifier_warmup_success(mock_lazy_init):
     assert classifier.is_ready is True
 
 
-@patch("privacy_local_agent.privacy.classification.classification_llm.Qwen2VLClassifier._lazy_init")
+@patch("privacy_local_agent.dynclassification.classification_llm.Qwen2VLClassifier._lazy_init")
 def test_qwen_classifier_warmup_failure(mock_lazy_init):
     """warmup 失败时返回 False 且 is_ready 保持 False。"""
     mock_lazy_init.side_effect = RuntimeError("CUDA out of memory")

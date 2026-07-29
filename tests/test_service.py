@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from privacy_local_agent.privacy.budget import BudgetAccountant, BudgetRegistry
-from privacy_local_agent.privacy.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
 from privacy_local_agent.privacy.dp import DPApi, LocalDPApi
 from privacy_local_agent.privacy.profile import ParameterResolver
 from privacy_local_agent.service import PrivacyService

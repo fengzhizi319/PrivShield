@@ -42,11 +42,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 # 导入结构化日志工厂函数
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus 指标：
 # - CLASSIFICATION_JOBS_DURATION：异步任务执行耗时直方图（按状态标签）
 # - CLASSIFICATION_JOBS_TOTAL：异步任务状态变更计数器（按状态标签）
-from ...observability.metrics import CLASSIFICATION_JOBS_DURATION, CLASSIFICATION_JOBS_TOTAL
+from ..observability.metrics import CLASSIFICATION_JOBS_DURATION, CLASSIFICATION_JOBS_TOTAL
 # 导入异步任务相关的数据模型：
 # - ClassificationJob：任务状态与结果容器
 # - ClassificationJobResult：任务执行结果包装

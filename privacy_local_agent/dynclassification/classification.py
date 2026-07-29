@@ -42,20 +42,20 @@ from datetime import datetime, timezone
 from typing import Any, Protocol, cast
 
 # 导入结构化日志工厂函数
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus 指标：
 # - CLASSIFICATION_DURATION：分类操作耗时直方图（按操作类型：field/record/table）
 # - CLASSIFICATION_LLM_TOTAL：LLM 调用计数器（按状态：hit/miss）
 # - CLASSIFICATION_NER_TOTAL：NER 调用计数器（按状态：hit/miss）
 # - CLASSIFICATION_TOTAL：分类总次数计数器（按最终等级和决策层）
-from ...observability.metrics import (
+from ..observability.metrics import (
     CLASSIFICATION_DURATION,
     CLASSIFICATION_LLM_TOTAL,
     CLASSIFICATION_NER_TOTAL,
     CLASSIFICATION_TOTAL,
 )
 # 导入参数解析器：从 YAML profile 文件解析分类参数
-from ..profile import ParameterResolver, get_resolver
+from ..privacy.profile import ParameterResolver, get_resolver
 # 导入复合规则引擎和标签应用函数
 from .classification_composite import CompositeRuleEngine, apply_composite_tags
 # 导入所有数据模型和抽象基类

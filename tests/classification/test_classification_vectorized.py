@@ -22,12 +22,12 @@ import time
 import pandas as pd
 import pytest
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
-from privacy_local_agent.privacy.classification.classification_models import (
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification_models import (
     ClassificationParams,
 )
-from privacy_local_agent.privacy.classification.classification_rule_engine import DefaultRuleEngine
-from privacy_local_agent.privacy.classification.classification_vectorized import (
+from privacy_local_agent.dynclassification.classification_rule_engine import DefaultRuleEngine
+from privacy_local_agent.dynclassification.classification_vectorized import (
     VectorizedRuleEngine,
 )
 

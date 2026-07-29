@@ -34,9 +34,9 @@ import re
 from typing import Any
 
 # 导入结构化日志工厂函数，创建模块级日志器
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus Counter 指标，用于统计每条规则的命中次数
-from ...observability.metrics import CLASSIFICATION_RULE_HITS_TOTAL
+from ..observability.metrics import CLASSIFICATION_RULE_HITS_TOTAL
 # 从数据模型模块导入核心类型
 from .classification_models import (
     BusinessCategory,      # 业务分类枚举（DB51/T 2989 5.2.1 节 5 大类别）

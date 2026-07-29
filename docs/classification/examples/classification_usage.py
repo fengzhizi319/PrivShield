@@ -13,7 +13,7 @@
 import json
 import time
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
 
 
 def print_section(title: str) -> None:

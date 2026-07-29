@@ -10,18 +10,18 @@
 │                                                                  │
 │  classify(text, upstream_level, upstream_confidence)             │
 │    │                                                             │
-│    ├─ 首次调用 → _lazy_init()                                   │
-│    │   ├─ 尝试加载 Qwen2VLClassifier                            │
-│    │   └─ 失败 → 标记不可用, 后续返回 None                      │
-│    │                                                             │
-│    └─ 调用底层 classify() → dict | None                         │
+│    ├─ 首次调用 → _lazy_init()                                     │
+│    │   ├─ 尝试加载 Qwen2VLClassifier                              │
+│    │   └─ 失败 → 标记不可用, 后续返回 None                           │
+│    │                                                            │
+│    └─ 调用底层 classify() → dict | None                           │
 │       {"final_level": "L3", "confidence": 0.9, "reasoning": ""} │
-│                                                                  │
-│  arbitrate(field_name, value, conflict_tags, taxonomy)           │
-│    │                                                             │
-│    └─ 构建仲裁专用 prompt → 调用 classify → 返回裁定结果        │
-│       场景: 普通规则 L3 vs 降级规则 L2 冲突时                    │
-│       LLM 根据语义判断字段真实敏感度                             │
+│                                                                 │
+│  arbitrate(field_name, value, conflict_tags, taxonomy)          │
+│    │                                                            │
+│    └─ 构建仲裁专用 prompt → 调用 classify → 返回裁定结果              │
+│       场景: 普通规则 L3 vs 降级规则 L2 冲突时                        │
+│       LLM 根据语义判断字段真实敏感度                                 │
 └─────────────────────────────────────────────────────────────────┘
 
 降级策略:
@@ -74,7 +74,7 @@ class LlmAdapter:
         self._initialized = True
 
         try:
-            from ..privacy.classification.classification_llm import Qwen2VLClassifier
+            from .classification_llm import Qwen2VLClassifier
             self._classifier = Qwen2VLClassifier(model_path=self._model_path)
             logger.info("llm_adapter_initialized", extra={"model_path": self._model_path})
         except Exception as e:
@@ -110,7 +110,7 @@ class LlmAdapter:
         try:
             # 旧模块的 classify 接口接受 SensitivityLevel 枚举，
             # 这里做字符串到枚举的适配转换。
-            from ..privacy.classification.classification_models import SensitivityLevel
+            from .classification_models import SensitivityLevel
             level_enum = SensitivityLevel(upstream_level)
             result = self._classifier.classify(text, level_enum, upstream_confidence)
             return result
@@ -182,7 +182,7 @@ class LlmAdapter:
         )
 
         try:
-            from ..privacy.classification.classification_models import SensitivityLevel
+            from .classification_models import SensitivityLevel
             # 使用当前最高等级作为 upstream_level
             current_max = taxonomy.max_level(*(t.level for t in conflict_tags))
             level_enum = SensitivityLevel(current_max) if current_max in ("L1", "L2", "L3", "L4", "L5") else SensitivityLevel.L3

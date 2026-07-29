@@ -43,9 +43,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 # 导入结构化日志工厂函数
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus 指标：复核队列中待处理条目数量（Gauge）
-from ...observability.metrics import CLASSIFICATION_REVIEW_QUEUE_SIZE
+from ..observability.metrics import CLASSIFICATION_REVIEW_QUEUE_SIZE
 # 导入数据模型：复核条目、复核状态枚举、敏感度等级枚举
 from .classification_models import ReviewEntry, ReviewStatus, SensitivityLevel
 # 导入日志脱敏工具函数（导出时可选对字段值进行掩码处理）

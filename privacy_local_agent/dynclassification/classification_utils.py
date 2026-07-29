@@ -27,9 +27,9 @@ import hashlib
 from typing import TYPE_CHECKING, Any
 
 # 导入结构化日志工厂函数
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入数据适配器，将 SecretFlow 等联邦数据结构转换为标准 dict 记录列表
-from ..data_adapters import to_records
+from ..privacy.data_adapters import to_records
 
 # 仅在类型检查时导入 logging 模块（避免运行时开销）
 if TYPE_CHECKING:

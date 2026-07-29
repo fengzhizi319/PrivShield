@@ -21,8 +21,8 @@ import json
 
 import pytest
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
-from privacy_local_agent.privacy.classification.classification_review import ReviewStore
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification_review import ReviewStore
 
 from ._pretty import print_result
 
@@ -115,7 +115,7 @@ def test_review_store_sqlite_persistence(tmp_path):
 
     Verify SQLite persistence: review records survive process restarts.
     """
-    from privacy_local_agent.privacy.classification.classification_models import ReviewStatus
+    from privacy_local_agent.dynclassification.classification_models import ReviewStatus
 
     db = str(tmp_path / "reviews.db")
     api = ClassificationAPI(review_store=ReviewStore(db_path=db))

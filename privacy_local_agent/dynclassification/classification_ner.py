@@ -35,11 +35,11 @@ import time
 from typing import Any, cast
 
 # 导入结构化日志工厂函数
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus 指标：
 # - CLASSIFICATION_NER_DURATION：NER 推理延迟直方图（按引擎标签）
 # - CLASSIFICATION_NER_TOTAL：NER 调用次数计数器（按状态标签）
-from ...observability.metrics import (
+from ..observability.metrics import (
     CLASSIFICATION_NER_DURATION,
     CLASSIFICATION_NER_TOTAL,
 )

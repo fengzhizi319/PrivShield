@@ -29,9 +29,9 @@ import re
 from typing import Any, ClassVar
 
 # 导入结构化日志工厂函数
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus Counter 指标，用于统计复合规则的命中次数
-from ...observability.metrics import CLASSIFICATION_COMPOSITE_HITS_TOTAL
+from ..observability.metrics import CLASSIFICATION_COMPOSITE_HITS_TOTAL
 # 从数据模型模块导入所需类型
 from .classification_models import (
     CompositeRule,              # 复合规则定义模型

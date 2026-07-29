@@ -117,7 +117,7 @@ class DynClassificationService:
         # Step 3: Shadow mode - compare with legacy engine output (zero-risk online A/B).
         if shadow_mode:
             try:
-                from ..privacy.classification.classification import ClassificationAPI
+                from .classification import ClassificationAPI
                 legacy_api = ClassificationAPI()
                 legacy_resp = legacy_api.classify_field(field_name, value)
                 legacy_level = str(legacy_resp.final_level)

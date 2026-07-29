@@ -27,9 +27,9 @@ try:
 except ImportError:
     HAS_PILLOW = False
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
-from privacy_local_agent.privacy.classification_llm import Qwen2VLClassifier
-from privacy_local_agent.privacy.classification_models import SensitivityLevel
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification_llm import Qwen2VLClassifier
+from privacy_local_agent.dynclassification.classification_models import SensitivityLevel
 
 
 def make_example_image(path: str) -> None:

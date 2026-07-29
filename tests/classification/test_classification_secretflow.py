@@ -13,8 +13,8 @@ Tests for SecretFlow classification adapter using mocks:
 
 import pytest
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
-from privacy_local_agent.privacy.classification.classification_utils import classify_secretflow
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification_utils import classify_secretflow
 
 
 class FakeSecretFlowDataFrame:
@@ -53,7 +53,7 @@ def test_classify_secretflow_dataframe(api, monkeypatch):
         return data._df.to_dict(orient="records")
 
     monkeypatch.setattr(
-        "privacy_local_agent.privacy.classification.classification_utils.to_records",
+        "privacy_local_agent.dynclassification.classification_utils.to_records",
         fake_to_records,
     )
 

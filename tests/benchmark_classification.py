@@ -16,7 +16,7 @@ import numpy as np
 # 将项目根目录添加至 sys.path，保证可以正常导入本地模块
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
 
 
 def benchmark_layer(

@@ -23,8 +23,8 @@ import logging
 
 import pytest
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
-from privacy_local_agent.privacy.classification.classification_utils import (
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification_utils import (
     hash_value,
     mask_record_values,
     redact,

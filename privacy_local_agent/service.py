@@ -12,7 +12,7 @@ resolving parameters from profile/config.
 from typing import Any, cast
 
 from .privacy.budget import BudgetRegistry, default_registry
-from .privacy.classification import ClassificationAPI
+from .dynclassification.classification import ClassificationAPI
 from .privacy.dp import DPApi, DPResult, LocalDPApi
 from .privacy.kano import BUILTIN_HIERARCHIES, KAnonymityRecordResult, anonymize_record
 from .privacy.kano_table import KAnonymityResult, k_anonymize_dataframe, k_anonymize_table

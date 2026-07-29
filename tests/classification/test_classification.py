@@ -16,8 +16,8 @@ from typing import Optional
 import pytest
 import yaml
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
-from privacy_local_agent.privacy.classification.classification_models import (
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification_models import (
     EngineLayer,
     FieldClassificationResult,
     SensitivityLevel,

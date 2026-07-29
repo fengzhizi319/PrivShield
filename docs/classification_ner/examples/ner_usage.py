@@ -29,7 +29,7 @@ def demo_onnx_ner():
     print("=" * 60)
 
     try:
-        from privacy_local_agent.privacy.classification_ner import ONNXSmallNerEngine
+        from privacy_local_agent.dynclassification.classification_ner import ONNXSmallNerEngine
     except ImportError as exc:
         print(f"[-] 无法导入 ONNXSmallNerEngine: {exc}")
         return
@@ -58,7 +58,7 @@ def demo_modelscope_ner():
     print("=" * 60)
 
     try:
-        from privacy_local_agent.privacy.classification_ner import ModelScopeSmallNerEngine
+        from privacy_local_agent.dynclassification.classification_ner import ModelScopeSmallNerEngine
     except ImportError as exc:
         print(f"[-] 无法导入 ModelScopeSmallNerEngine: {exc}")
         return
@@ -84,7 +84,7 @@ def demo_classification_with_ner():
     print("示例 3: ClassificationAPI 启用 Small-NER 定级")
     print("=" * 60)
 
-    from privacy_local_agent.privacy.classification import ClassificationAPI
+    from privacy_local_agent.dynclassification.classification import ClassificationAPI
 
     api = ClassificationAPI()
 

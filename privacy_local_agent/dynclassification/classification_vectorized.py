@@ -33,12 +33,12 @@ import time
 from typing import Any
 
 # 导入结构化日志工厂函数
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus 指标：
 # - CLASSIFICATION_RULE_HITS_TOTAL：规则命中计数
 # - CLASSIFICATION_VECTORIZED_BATCH_SIZE：批量大小直方图
 # - CLASSIFICATION_VECTORIZED_BATCH_TOTAL：批量评估次数计数
-from ...observability.metrics import (
+from ..observability.metrics import (
     CLASSIFICATION_RULE_HITS_TOTAL,
     CLASSIFICATION_VECTORIZED_BATCH_SIZE,
     CLASSIFICATION_VECTORIZED_BATCH_TOTAL,

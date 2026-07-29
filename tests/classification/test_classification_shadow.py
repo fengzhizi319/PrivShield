@@ -15,7 +15,7 @@ Tests for classification rule versioning and shadow mode capabilities:
 
 import pytest
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
 
 from ._pretty import print_result
 

@@ -7,7 +7,7 @@ ClassificationService 作为 REST/gRPC 两种协议的统一分类业务入口�
 from typing import Any
 
 from .observability.metrics import CLASSIFICATION_TEMPLATES_TOTAL, CLASSIFICATION_TOTAL
-from .privacy.classification import ClassificationAPI
+from .dynclassification.classification import ClassificationAPI
 from .privacy.profile import ParameterResolver
 
 

@@ -54,11 +54,11 @@ if TYPE_CHECKING:
     from PIL import Image
 
 # 导入结构化日志工厂函数（支持 JSON 格式日志输出）
-from ...observability.logging_config import get_logger
+from ..observability.logging_config import get_logger
 # 导入 Prometheus 指标：
 # - CLASSIFICATION_LLM_DURATION：LLM 推理延迟直方图（按引擎标签）
 # - CLASSIFICATION_LLM_TOTAL：LLM 调用次数计数器（按状态标签：success/error/timeout/init_failed）
-from ...observability.metrics import (
+from ..observability.metrics import (
     CLASSIFICATION_LLM_DURATION,
     CLASSIFICATION_LLM_TOTAL,
 )

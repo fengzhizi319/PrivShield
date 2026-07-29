@@ -20,8 +20,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from privacy_local_agent.privacy.classification import ClassificationAPI
-from privacy_local_agent.privacy.classification.classification_models import (
+from privacy_local_agent.dynclassification.classification import ClassificationAPI
+from privacy_local_agent.dynclassification.classification_models import (
     EngineLayer,
     LlmClassifier,
     NoOpLlmClassifier,
