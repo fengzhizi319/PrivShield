@@ -12,17 +12,35 @@
 graph TD
     A[测试策略] --> B[1. 单元测试: 算子 / Registry / Engine]
     A --> C[2. YAML Schema 自动校验]
-    A --> D[3. 影子模式: 新旧引擎结果对比]
-    A --> E[4. 性能与基准测试]
+    A --> D[3. 三层漏斗测试: Rule → NER → LLM]
+    A --> E[4. 降级规则 / 复合规则 / 边界测试]
+    A --> F[5. 性能与基准测试]
 ```
 
 ---
 
-## 2. 单元测试代码示例
+## 2. 测试文件结构
 
-在 `tests/test_dynclassification.py` 中增加以下单元测试用例：
+所有测试位于 `tests/dynclassification/` 目录：
 
-### 2.1 `OperatorRegistry` 算子注册与调用测试
+| 文件 | 覆盖范围 |
+|---|---|
+| `test_dynclassification.py` | 核心引擎、OperatorRegistry、ConfigurableRuleEngine、ProfileLoader |
+| `test_dynclassification_operators.py` | 全部匹配算子（regex/keyword_contains/icd10_range 等） |
+| `test_dynclassification_coverage.py` | 服务层集成测试（classify_field/record/table） |
+| `test_dynclassification_coverage_final.py` | 金融标准 C1~C4 端到端、多领域合并 |
+| `test_dynclassification_edge_cases.py` | 边界条件（空值/None/特殊字符/超长输入） |
+| `test_dynclassification_generator.py` | StandardDocParser 文档解析生成器 |
+| `test_dynclassification_grpc_and_metrics.py` | gRPC 接口 + Prometheus 指标 |
+| `test_dynclassification_optimizations.py` | 缓存、热加载、线程安全 |
+| `test_downgrade_override.py` | 降级规则、override 压制、白名单语义 |
+| `test_funnel.py` | 三层漏斗编排（NER/LLM mock、置信度策略、配置化映射） |
+
+---
+
+## 3. 单元测试代码示例
+
+### 3.1 `OperatorRegistry` 算子注册与调用测试
 
 ```python
 import pytest
@@ -46,7 +64,7 @@ def test_operator_not_found():
 
 ---
 
-### 2.2 `ConfigurableRuleEngine` 评估引擎测试
+### 3.2 `ConfigurableRuleEngine` 评估引擎测试
 
 ```python
 from privacy_local_agent.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef
@@ -93,18 +111,34 @@ def test_configurable_engine_evaluation():
 
 ---
 
-## 3. CI 中 YAML 规则 Schema 自动校验
+### 3.3 三层漏斗 NER 配置化测试
+
+```python
+def test_ner_custom_entity_mapping(taxonomy, engine_conflict):
+    """自定义 ner_entity_mapping 配置化映射生效。"""
+    taxonomy.ner_entity_mapping = {"MEDICAL_DISEASE": "L5", "MEDICATION": "L2"}
+    # ... 构建漏斗并验证 NER 实体映射到自定义等级
+
+def test_ner_custom_sensitive_keywords(taxonomy, engine_conflict):
+    """自定义 ner_sensitive_keywords 配置生效。"""
+    taxonomy.ner_sensitive_keywords = ["洗钱", "恐怖融资"]
+    # ... 构建漏斗并验证敏感关键词触发升级
+```
+
+---
+
+## 4. CI 中 YAML 规则 Schema 自动校验
 
 为防止不合法的 YAML 配置被提交合并，在 CI 流水线中增加静态校验步骤：
 
 ### 校验命令
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
-PYTHONPATH=. python -m pytest tests/test_dynclassification_schema.py -v
+cd /Users/charles/Documents/code/sfwork/privacy-local-agent
+PYTHONPATH=. python -m pytest tests/dynclassification/ -v
 ```
 
-### `test_dynclassification_schema.py` 实现示例
+### Schema 校验示例
 
 ```python
 from pathlib import Path
@@ -136,9 +170,11 @@ def test_validate_standards(yaml_file):
 
 ---
 
-## 4. 运行全套单元测试
+## 5. 运行全套单元测试
 
 ```bash
 cd /Users/charles/Documents/code/sfwork/privacy-local-agent
 PYTHONPATH=. pytest tests/dynclassification/ -v
 ```
+
+当前测试统计：**117+ 个测试用例**，覆盖算子、引擎、漏斗、降级、复合、服务层、gRPC、指标、边界等全链路。

@@ -53,13 +53,15 @@ class LlmAdapter:
         _initialized: 是否已尝试过初始化。
     """
 
-    def __init__(self, model_path: str | None = None):
+    def __init__(self, model_path: str | None = None, classify_prompt_template: str | None = None):
         """初始化适配器（不加载模型）。
 
         Args:
             model_path: 模型本地路径（可选，默认 .models/Qwen2-VL-2B-Instruct）。
+            classify_prompt_template: LLM 分类 system prompt 模板（可选，支持占位符）。
         """
         self._model_path = model_path
+        self._classify_prompt_template = classify_prompt_template
         self._classifier: Any = None
         self._available = True
         self._initialized = False
@@ -75,7 +77,10 @@ class LlmAdapter:
 
         try:
             from .llm_engines import Qwen2VLClassifier
-            self._classifier = Qwen2VLClassifier(model_path=self._model_path)
+            self._classifier = Qwen2VLClassifier(
+                model_path=self._model_path,
+                classify_prompt_template=self._classify_prompt_template,
+            )
             logger.info("llm_adapter_initialized", extra={"model_path": self._model_path})
         except Exception as e:
             self._available = False

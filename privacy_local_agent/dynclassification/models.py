@@ -219,6 +219,13 @@ class DomainTaxonomy(BaseModel):
         default=None,
         description="LLM 模型目录路径，None 时使用默认路径",
     )
+    # LLM classification system prompt template.
+    # Supports placeholders: {domain}, {standard_id}, {levels_desc}
+    # When None, uses built-in medical-domain default prompt.
+    llm_classify_prompt_template: Optional[str] = Field(
+        default=None,
+        description="LLM 分类 system prompt 模板（支持占位符 {domain}/{standard_id}/{levels_desc}），None 时使用内置医疗默认 prompt",
+    )
 
     def max_level(self, *level_ids: str) -> str:
         """返回等级集合中 rank 最高的等级 ID。

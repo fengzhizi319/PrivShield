@@ -94,7 +94,7 @@ class Qwen2VLClassifier(LlmClassifier):
     # 可通过环境变量 PRIVACY_VLM_TIMEOUT 覆盖，默认 180 秒。
     _INFERENCE_TIMEOUT = int(os.environ.get("PRIVACY_VLM_TIMEOUT", "180"))
 
-    def __init__(self, model_path: str | None = None):
+    def __init__(self, model_path: str | None = None, classify_prompt_template: str | None = None):
         """初始化分类器 / Initialize Classifier.
 
         仅设置路径和状态标志，不实际加载模型（延迟加载策略）。
@@ -104,6 +104,9 @@ class Qwen2VLClassifier(LlmClassifier):
             model_path: 模型本地路径 / Local model path.
                 如果不指定，默认使用项目根目录下的 .models/Qwen2-VL-2B-Instruct。
                 (Defaults to .models/Qwen2-VL-2B-Instruct under project root)
+            classify_prompt_template: 自定义分类 system prompt 模板 / Custom classification prompt template.
+                支持占位符: {domain}, {standard_id}, {levels_desc}。
+                None 时使用内置医疗领域默认 prompt。
         """
         # 如果未指定模型路径，自动计算默认路径
         if not model_path:
@@ -116,6 +119,8 @@ class Qwen2VLClassifier(LlmClassifier):
 
         # 保存模型路径供后续 _lazy_init 使用
         self.model_path = model_path
+        # 保存自定义分类 prompt 模板（None 时使用内置默认）
+        self._classify_prompt_template = classify_prompt_template
         # 模型实例占位（延迟初始化后赋值）
         self._model: Any = None
         # 处理器实例占位（用于构建模型输入张量）
@@ -497,24 +502,38 @@ class Qwen2VLClassifier(LlmClassifier):
             # 检测并加载多模态图像输入（三级检测策略）
             image = self._detect_image(text)
 
-            # 构建 system prompt：定义角色、评估标准（L1-L5）和输出 JSON 格式
-            system_prompt = (
-                "你是一个医疗数据分类分级领域的资深安全专家。请对输入的医疗数据进行敏感等级评估。\n"
-                "评估标准如下：\n"
-                "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变（如 BRCA1/TP53）或罕见病样本。\n"
-                "- L4 (高风险): 包含精神疾病（如精神分裂）、敏感传染病（如 HIV/AIDS/梅毒）或完整的住院病历。\n"
-                "- L3 (中风险): 包含个人身份信息（PII，如身份证号、手机号）、普通的门诊诊疗记录或常规检验指标数值（如血常规）。\n"  # noqa: E501
-                "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
-                "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感和特征的统计指标。\n\n"
-                "请严格根据上述标准进行定级，并仅输出符合以下 JSON 格式的结构化内容，不要包含额外的解释文字或 ``` 块：\n"  # noqa: E501
-                "{\n"
-                '  "final_level": "L1/L2/L3/L4/L5",\n'
-                '  "sub_category": "分类标签简称",\n'
-                '  "confidence": 0.0到1.0之间的浮点数,\n'
-                '  "reasoning": "定级判别的推理过程说明",\n'
-                '  "needs_human_review": true/false\n'
-                "}"
-            )
+            # 构建 system prompt：定义角色、评估标准和输出 JSON 格式
+            # 优先使用自定义模板（支持 {domain}/{standard_id}/{levels_desc} 占位符）
+            if self._classify_prompt_template:
+                system_prompt = self._classify_prompt_template.format(
+                    domain="medical",
+                    standard_id="DB51_T_2989",
+                    levels_desc=(
+                        "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变或罕见病样本。\n"
+                        "- L4 (高风险): 包含精神疾病、敏感传染病或完整的住院病历。\n"
+                        "- L3 (中风险): 包含个人身份信息（PII）、普通的门诊诊疗记录或常规检验指标数值。\n"
+                        "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
+                        "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感特征的统计指标。"
+                    ),
+                )
+            else:
+                system_prompt = (
+                    "你是一个医疗数据分类分级领域的资深安全专家。请对输入的医疗数据进行敏感等级评估。\n"
+                    "评估标准如下：\n"
+                    "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变（如 BRCA1/TP53）或罕见病样本。\n"
+                    "- L4 (高风险): 包含精神疾病（如精神分裂）、敏感传染病（如 HIV/AIDS/梅毒）或完整的住院病历。\n"
+                    "- L3 (中风险): 包含个人身份信息（PII，如身份证号、手机号）、普通的门诊诊疗记录或常规检验指标数值（如血常规）。\n"  # noqa: E501
+                    "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
+                    "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感和特征的统计指标。\n\n"
+                    "请严格根据上述标准进行定级，并仅输出符合以下 JSON 格式的结构化内容，不要包含额外的解释文字或 ``` 块：\n"  # noqa: E501
+                    "{\n"
+                    '  "final_level": "L1/L2/L3/L4/L5",\n'
+                    '  "sub_category": "分类标签简称",\n'
+                    '  "confidence": 0.0到1.0之间的浮点数,\n'
+                    '  "reasoning": "定级判别的推理过程说明",\n'
+                    '  "needs_human_review": true/false\n'
+                    "}"
+                )
 
             # 构建 user content：根据是否为图片选择不同的输入格式
             user_content = []

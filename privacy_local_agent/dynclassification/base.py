@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class SensitivityLevel(str, Enum):
@@ -35,7 +38,7 @@ class SensitivityLevel(str, Enum):
 
     @classmethod
     def from_string(cls, level: str) -> "SensitivityLevel":
-        """从字符串解析等级，未知等级回退到 L3。
+        """从字符串解析等级，未知等级回退到 L3 并记录警告。
 
         Args:
             level: 等级字符串（如 "L3", "C4"）。
@@ -46,6 +49,12 @@ class SensitivityLevel(str, Enum):
         try:
             return cls(level)
         except ValueError:
+            logger.warning(
+                "Unknown sensitivity level '%s', falling back to L3. "
+                "Valid values: %s",
+                level,
+                [e.value for e in cls],
+            )
             return cls.L3
 
 

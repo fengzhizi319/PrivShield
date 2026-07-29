@@ -464,6 +464,7 @@ class DynClassificationService:
             if self._llm_adapter is None:
                 self._llm_adapter = LlmAdapter(
                     model_path=engine.taxonomy.llm_model_path,
+                    classify_prompt_template=engine.taxonomy.llm_classify_prompt_template,
                 )
             llm_adapter = self._llm_adapter
 

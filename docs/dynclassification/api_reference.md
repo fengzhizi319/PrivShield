@@ -49,6 +49,7 @@ class DomainTaxonomy(BaseModel):
     ner_vocab_path: Optional[str] = None                  # NER 词表文件路径
     llm_model_path: Optional[str] = None                  # LLM 模型目录路径
     llm_arbitration_prompt_template: Optional[str] = None # LLM 仲裁 prompt 模板
+    llm_classify_prompt_template: Optional[str] = None    # LLM 分类 system prompt 模板（支持 {domain}/{standard_id}/{levels_desc}）
 
     def max_level(self, *level_ids: str) -> str:
         """返回给定等级列表中 rank 最高等级的 ID。"""

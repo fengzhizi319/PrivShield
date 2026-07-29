@@ -439,3 +439,56 @@ class TestServiceIntegration:
         assert resp.field_result.engine_layer in (
             EngineLayer.L1_RULE, EngineLayer.L2_SMALL_NER, EngineLayer.L3_LLM
         )
+
+
+# ===========================================================================
+# LLM 分类 prompt 模板配置化测试
+# ===========================================================================
+
+
+class TestLlmClassifyPromptTemplate:
+    """LLM 分类 prompt 模板 YAML 配置化测试。"""
+
+    def test_llm_adapter_accepts_classify_prompt_template(self):
+        """LlmAdapter 接受 classify_prompt_template 参数。"""
+        from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
+
+        template = "你是{domain}领域的安全专家。等级定义：{levels_desc}"
+        adapter = LlmAdapter(model_path="/nonexistent", classify_prompt_template=template)
+        assert adapter._classify_prompt_template == template
+
+    def test_llm_engine_accepts_classify_prompt_template(self):
+        """Qwen2VLClassifier 接受 classify_prompt_template 参数。"""
+        from privacy_local_agent.dynclassification.llm_engines import Qwen2VLClassifier
+
+        template = "你是{domain}领域专家。标准: {standard_id}。{levels_desc}"
+        clf = Qwen2VLClassifier(model_path="/tmp/fake", classify_prompt_template=template)
+        assert clf._classify_prompt_template == template
+
+    def test_taxonomy_llm_classify_prompt_template_field(self):
+        """DomainTaxonomy 支持 llm_classify_prompt_template 字段。"""
+        from privacy_local_agent.dynclassification.models import (
+            CategoryDef,
+            DomainTaxonomy,
+            SensitivityLevelDef,
+        )
+
+        tax = DomainTaxonomy(
+            domain="finance",
+            standard_id="JR_T_0197",
+            levels={"C1": SensitivityLevelDef(id="C1", name="不敏感", rank=1)},
+            categories={"FIN": CategoryDef(id="FIN", name="金融数据")},
+            default_level="C1",
+            llm_classify_prompt_template="你是金融数据安全专家。",
+        )
+        assert tax.llm_classify_prompt_template == "你是金融数据安全专家。"
+
+    def test_sensitivity_level_from_string_warns_on_unknown(self):
+        """未知等级字符串回退到 L3 并记录警告。"""
+        from privacy_local_agent.dynclassification.base import SensitivityLevel
+
+        # 正常值解析
+        assert SensitivityLevel.from_string("L4") == SensitivityLevel.L4
+        assert SensitivityLevel.from_string("C3") == SensitivityLevel.C3
+        # 未知值回退到 L3
+        assert SensitivityLevel.from_string("UNKNOWN_LEVEL") == SensitivityLevel.L3

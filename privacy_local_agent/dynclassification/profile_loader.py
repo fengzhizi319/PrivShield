@@ -159,15 +159,17 @@ class ProfileLoader:
         temp_standard_cache = {}
 
         for yaml_file in current_files:
-            if "taxonomies" in str(yaml_file):
+            # 使用路径组件判断文件所属目录（避免字符串包含误匹配）
+            parts = yaml_file.parts
+            if "taxonomies" in parts:
                 name = yaml_file.stem
                 data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
                 temp_taxonomy_cache[name] = DomainTaxonomy.model_validate(data)
-            elif "domains" in str(yaml_file):
+            elif "domains" in parts:
                 domain = yaml_file.stem
                 data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
                 temp_profile_cache[domain] = RuleProfile.model_validate(data)
-            elif "standards" in str(yaml_file):
+            elif "standards" in parts:
                 standard_id = yaml_file.stem
                 data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
                 temp_standard_cache[standard_id] = StandardDef.model_validate(data)
