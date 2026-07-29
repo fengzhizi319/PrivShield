@@ -49,6 +49,7 @@ rules:
         operator: "keyword_contains"
         params:
           keywords: ["email", "address", "location", "轨迹", "phone", "mobile", "tel"]
+          use_word_boundaries: true
 
   # --- 生物识别信息 ---
   - id: "RULE_PII_BIOMETRIC"
@@ -61,6 +62,7 @@ rules:
         operator: "keyword_contains"
         params:
           keywords: ["fingerprint", "voiceprint", "palmprint", "iris", "face", "biometric"]
+          use_word_boundaries: true
 
   # --- 姓名字段 ---
   - id: "RULE_PII_NAME"
@@ -72,15 +74,15 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["id_card", "idcard", "identity", "身份证", "passport"]
+          keywords: ["idcard", "identity", "身份证", "passport"]
 
 downgrade_rules:
-  - id: "RULE_DOWN_PUBLIC"
+  - id: "general-pii:RULE_DOWN_PUBLIC"
     name: "公开数据降级"
     keywords: ["public_report", "annual_summary", "科普", "公开"]
     level: "L1"
     category: "PUBLIC_REPORT"
-  - id: "RULE_DOWN_OPS"
+  - id: "general-pii:RULE_DOWN_OPS"
     name: "运营统计强制降级"
     # 注意: 关键词必须足够精确，避免压制值级 PII 命中。
     # "统计" 过宽（会匹配 "患者统计" 等含 PII 的字段），已替换为更精确的关键词。
@@ -94,7 +96,7 @@ downgrade_rules:
 composite_rules:
   - id: "COMP_PII_001"
     name: "高敏感个人信息组合"
-    field_patterns: ["^name$", "id_card|idcard|identity", "mobile|phone|cell"]
+    field_patterns: ["name", "idcard|identity", "mobile|phone|cell"]
     min_matches: 3
     target_level: "L5"
     category: "COMPOSITE_PII_COMBO"

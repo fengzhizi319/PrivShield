@@ -8,7 +8,7 @@
 │  ClassificationFunnel.classify_field(field_name, value)                  │
 │                                                                          │
 │  Step 1: Layer-1 规则引擎评估                                           │
-│    tags = engine.evaluate(field_name, value)                             │
+│    tags, suppressed_tags = engine.evaluate(field_name, value)            │
 │    confidence = 1.0 if tags else 0.0                                    │
 │    engine_layer = "L1_RULE"                                             │
 │                                                                          │
@@ -46,7 +46,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Tuple
 
 from ..observability.logging_config import get_logger
 from .engine import ConfigurableRuleEngine
@@ -133,7 +133,7 @@ class ClassificationFunnel:
         self.ner = ner_adapter
         self.llm = llm_adapter
 
-    def classify_field(self, field_name: str, value: Any) -> FunnelResult:
+    def classify_field(self, field_name: str, value: Any) -> Tuple[FunnelResult, list[SecurityTag]]:
         """对单个字段执行三层漏斗分类。
 
         Args:
@@ -141,12 +141,12 @@ class ClassificationFunnel:
             value: 字段值。
 
         Returns:
-            FunnelResult 包含完整的分类决策信息。
+            一个元组 (FunnelResult, suppressed_tags)，包含完整的分类决策信息和被压制的标签列表。
         """
         str_value = str(value) if value is not None else ""
 
         # ===== Step 1: Layer-1 规则引擎评估 =====
-        tags = self.engine.evaluate(field_name, value)
+        tags, suppressed_tags = self.engine.evaluate(field_name, value)
         confidence = 1.0 if tags else 0.0
         engine_layer = EngineLayer.L1_RULE
         reasoning = ""
@@ -246,7 +246,7 @@ class ClassificationFunnel:
         # ===== Step 5: 计算最终等级 =====
         final_level = self._resolve_level(tags)
 
-        return FunnelResult(
+        funnel_result = FunnelResult(
             tags=tags,
             final_level=final_level,
             confidence=confidence,
@@ -255,6 +255,7 @@ class ClassificationFunnel:
             reasoning=reasoning,
             has_conflict=has_conflict,
         )
+        return funnel_result, suppressed_tags
 
     # ------------------------------------------------------------------
     # 内部方法 / Internal Methods

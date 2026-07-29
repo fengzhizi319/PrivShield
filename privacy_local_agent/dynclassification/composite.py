@@ -16,6 +16,9 @@ from typing import Any
 
 from .models import FieldClassificationResult, SecurityTag
 from .rule_schema import CompositeRuleDef
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def _normalize(name: str) -> str:
@@ -23,10 +26,9 @@ def _normalize(name: str) -> str:
 
     Normalization steps:
     1. Convert to lowercase (case-insensitive matching).
-    2. Remove underscores and spaces (e.g. 'user_name' -> 'username').
-    This ensures patterns like 'idcard' match fields named 'id_card', 'IDCard', etc.
+    2. Remove spaces.
     """
-    return str(name).lower().replace("_", "").replace(" ", "")
+    return str(name).lower().replace(" ", "")
 
 
 class CompositeRuleEngine:
@@ -69,8 +71,8 @@ class CompositeRuleEngine:
                 try:
                     # Compile with IGNORECASE for case-insensitive field name matching.
                     compiled_list.append(re.compile(pattern, re.IGNORECASE))
-                except re.error:
-                    # Skip invalid regex patterns silently (logged elsewhere by validator).
+                except re.error as e:
+                    logger.error(f"Invalid regex pattern in composite rule '{rule.id}': '{pattern}'. Error: {e}")
                     pass
             # Map rule ID -> its compiled patterns for O(1) lookup during evaluation.
             self._compiled_patterns[rule.id] = compiled_list
@@ -111,7 +113,8 @@ class CompositeRuleEngine:
             for compiled in compiled_patterns:
                 # For each pattern, check if ANY field in the record matches it.
                 for norm_name, original_name in norm_fields.items():
-                    if compiled.search(norm_name):
+                    # Use word boundaries to avoid partial matches like 'gene' in 'general_note'
+                    if re.search(r"\b" + compiled.pattern + r"\b", norm_name, re.IGNORECASE):
                         # Pattern matched a field: increment counter and record the field name.
                         matched += 1
                         matched_names.append(original_name)

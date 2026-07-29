@@ -173,6 +173,11 @@ class RuleProfile(BaseModel):
     version: str = Field(default="1.0.0", description="版本号")
     # Human-readable description of this domain pack.
     description: str = Field(default="", description="领域包说明")
+    # Optional: specify the default taxonomy this domain should be validated against.
+    # If not provided, falls back to "default" taxonomy.
+    default_taxonomy: Optional[str] = Field(
+        default=None, description="默认关联的分类体系（用于单领域校验）"
+    )
     # Primary classification rules evaluated per-field.
     rules: list[RuleDef] = Field(default_factory=list, description="普通规则列表")
     # Downgrade rules that lower sensitivity for specific field patterns.

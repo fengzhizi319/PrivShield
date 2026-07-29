@@ -16,6 +16,7 @@ rules:
         params:
           keywords: ["bankcard", "cardno", "credit", "transaction",
                      "asset", "balance", "account", "bank_card"]
+          use_word_boundaries: true
 
   # --- 银行卡号值校验 ---
   - id: "RULE_FIN_CARD_VALUE"
@@ -41,6 +42,7 @@ rules:
         operator: "keyword_contains"
         params:
           keywords: ["transfer", "payment", "withdraw", "deposit", "loan"]
+          use_word_boundaries: true
 
   # --- 个人金融信息字段名 ---
   - id: "RULE_FIN_PERSONAL"
@@ -53,11 +55,12 @@ rules:
         operator: "keyword_contains"
         params:
           keywords: ["income", "salary", "tax", "insurance", "fund"]
+          use_word_boundaries: true
 
 composite_rules:
   - id: "COMP_FIN_001"
     name: "金融账户组合"
-    field_patterns: ["bank_card|bankcard|card_no|account|credit|transaction"]
-    min_matches: 1
+    field_patterns: ["bankcard|cardno|account|credit|transaction"]
+    min_matches: 2
     target_level: "C4"
     category: "COMPOSITE_FINANCE_COMBO"

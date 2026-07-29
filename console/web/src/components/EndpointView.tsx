@@ -94,7 +94,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
   /** 记录本次请求到历史（GET 且空请求体时跳过，减少噪音）。 */
   const recordHistory = (status: number) => {
     if (method === 'GET' && !bodyText.trim()) return;
-    setHistory(addHistory({ method: sample.method, path: sample.path, body: bodyText, status }));
+    setHistory(addHistory({ method, path, body: bodyText, status }));
   };
 
   // Cmd/Ctrl+Enter 快捷发送

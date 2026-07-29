@@ -23,7 +23,7 @@ from __future__ import annotations
 
 # re module for regex-based pattern matching operators
 import re
-from typing import Any
+from typing import Any, Tuple
 
 # Import the registry to register all built-in operators via decorators
 from .operator_registry import OperatorRegistry
@@ -196,14 +196,21 @@ def keyword_contains_matcher(value: Any, params: dict[str, Any]) -> bool:
 
     params:
         keywords: list[str] - 关键词列表
+        use_word_boundaries: bool - 是否使用单词边界（\b）进行匹配（默认 True）
     """
-    # Normalize the input value: lowercase + remove underscores and spaces.
     norm = str(value).lower().replace("_", "").replace(" ", "")
-    # Retrieve keyword list from params.
     keywords = params.get("keywords", [])
-    # Check if ANY normalized keyword is a substring of the normalized value.
-    # Each keyword is also normalized for consistent comparison.
-    return any(kw.lower().replace("_", "").replace(" ", "") in norm for kw in keywords if kw)
+    use_word_boundaries = params.get("use_word_boundaries", True)
+
+    if use_word_boundaries:
+        for kw in keywords:
+            if kw:
+                pattern = r"\b" + re.escape(kw.lower().replace("_", "").replace(" ", "")) + r"\b"
+                if re.search(pattern, norm):
+                    return True
+        return False
+    else:
+        return any(kw.lower().replace("_", "").replace(" ", "") in norm for kw in keywords if kw)
 
 
 @OperatorRegistry.register("prefix_match")
@@ -266,45 +273,33 @@ def medical_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
 
 
 @OperatorRegistry.register("icd10_range")
-def icd10_range_matcher(value: Any, params: dict[str, Any]) -> bool:
+def icd10_range_matcher(value: Any, params: dict[str, Any]) -> Tuple[bool, str, str]:
     """ICD-10 编码区间判定算子。
 
     判断值是否为合法 ICD-10 编码，并检查是否落在敏感区间内。
-    通过 params 回写命中详情（_hit_level, _hit_category）供引擎读取。
+    返回一个元组 (is_hit, level, category)。
 
     params:
         default_level: str - 默认等级（未命中敏感区间时）
         upgrade_level: str - 升级等级（命中敏感区间时）
         intervals: list[dict] - 敏感区间列表 [{start, end, category}]
     """
-    # Step 1: Normalize the raw input into a canonical ICD-10 tuple (letter, number).
-    # e.g. "A51.2" -> ("A", 51); returns None if the value is not a valid ICD-10 code.
     icd = _normalize_icd10(str(value) if value else "")
-    # Early exit: not a recognizable ICD-10 code, so this operator does not apply.
     if not icd:
-        return False
+        return False, "", ""
 
-    # Step 2: Retrieve the list of sensitive intervals from rule params.
-    # Each interval is a dict like {"start": "A50", "end": "A53", "category": "SEXUAL_DISEASE"}.
     intervals = params.get("intervals", [])
-    # Step 3: Iterate over intervals to check if the code falls within any sensitive range.
     for interval in intervals:
-        # Extract the closed-interval boundaries [start, end] for comparison.
         start = interval.get("start", "")
         end = interval.get("end", "")
-        # _in_icd10_interval performs tuple comparison: start_norm <= icd <= end_norm.
         if _in_icd10_interval(icd, start, end):
-            # Hit a sensitive interval: write back the upgraded level and matched category
-            # so the downstream engine can assign a higher sensitivity grade (e.g. L4).
-            params["_hit_level"] = params.get("upgrade_level", "L4")
-            params["_hit_category"] = interval.get("category", "")
-            return True
+            level = params.get("upgrade_level", "L4")
+            category = interval.get("category", "")
+            return True, level, category
 
-    # Step 4: Code is a valid ICD-10 but did NOT fall into any sensitive interval.
-    # Assign the default (lower) sensitivity level and a generic medical category.
-    params["_hit_level"] = params.get("default_level", "L3")
-    params["_hit_category"] = "MEDICAL_ICD10_GENERAL"
-    return True
+    level = params.get("default_level", "L3")
+    category = "MEDICAL_ICD10_GENERAL"
+    return True, level, category
 
 
 @OperatorRegistry.register("luhn_checksum")

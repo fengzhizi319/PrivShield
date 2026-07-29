@@ -15,6 +15,7 @@ rules:
         operator: "keyword_contains"
         params:
           keywords: ["brca1", "brca2", "tp53"]
+          use_word_boundaries: true
 
   - id: "RULE_MED_G_002"
     name: "基因组变异指标"
@@ -26,10 +27,11 @@ rules:
         operator: "keyword_contains"
         params:
           keywords: ["snp", "cnv", "genome", "genomic"]
+          use_word_boundaries: true
       - target: "field_value"
         operator: "regex"
         params:
-          pattern: "rs\\d+"
+          pattern: "^rs\\d+$"
     match_logic: "OR"
 
   - id: "RULE_MED_G_003"
@@ -42,6 +44,7 @@ rules:
         operator: "keyword_contains"
         params:
           keywords: ["bam", "vcf", "fastq"]
+          use_word_boundaries: true
 
   # --- 敏感病种字段名规则 ---
   - id: "RULE_MED_DISEASE_001"
@@ -55,6 +58,7 @@ rules:
         params:
           keywords: ["hiv", "aids", "std", "syphilis", "gonorrhea",
                      "psychiatric", "schizophrenia"]
+          use_word_boundaries: true
 
   # --- ICD-10 值规则 ---
   - id: "RULE_MED_ICD10"
@@ -110,12 +114,12 @@ rules:
           pattern: "[ATCGNatcgn]{50,}"
 
 downgrade_rules:
-  - id: "RULE_DOWN_PUBLIC"
+  - id: "medical:RULE_DOWN_PUBLIC"
     name: "公开报告降级"
     keywords: ["public_report", "annual_summary", "科普"]
     level: "L1"
     category: "PUBLIC_REPORT"
-  - id: "RULE_DOWN_OPS"
+  - id: "medical:RULE_DOWN_OPS"
     name: "运营统计强制降级"
     keywords: ["turnover_rate", "device_usage", "inventory"]
     level: "L2"
@@ -126,7 +130,7 @@ downgrade_rules:
 composite_rules:
   - id: "COMP_MED_001"
     name: "医疗基因组合"
-    field_patterns: ["diagnosis|disease|illness", "gene|genomic|mutation|brca|tp53"]
+    field_patterns: ["diagnosis", "disease", "illness", "gene", "genomic", "mutation", "brca", "tp53"]
     min_matches: 2
     target_level: "L5"
     category: "COMPOSITE_MEDICAL_GENOMIC"

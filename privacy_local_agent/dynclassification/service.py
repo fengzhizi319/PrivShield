@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 from .composite import CompositeRuleEngine
 from .engine import ConfigurableRuleEngine
-from .funnel import ClassificationFunnel, FunnelResult
+from .funnel import ClassificationFunnel
 from .llm_adapter import LlmAdapter
 from .models import (
     AuditInfo,
@@ -108,7 +108,7 @@ class DynClassificationService:
         # The funnel orchestrates: Layer-1 Rule → Layer-2 NER → Layer-3 LLM
         # with confidence policy (conflict detection + decay + LLM arbitration).
         funnel = self._build_funnel(engine)
-        funnel_result = funnel.classify_field(field_name, value)
+        funnel_result, suppressed_tags = funnel.classify_field(field_name, value)
         tags = funnel_result.tags
 
         # Step 3: Use funnel result directly (level, confidence, layer already resolved).
@@ -127,7 +127,7 @@ class DynClassificationService:
             needs_human_review=funnel_result.needs_human_review,
             engine_layer=funnel_result.engine_layer,
             reasoning=funnel_result.reasoning,
-            suppressed_tags=engine.last_suppressed_tags,
+            suppressed_tags=suppressed_tags,
         )
 
         # Build audit metadata for traceability.
@@ -157,7 +157,7 @@ class DynClassificationService:
         """对单条记录（多字段）进行分类。
 
         Execution flow:
-        1. Classify each field individually using the rule engine.
+        1. Classify each field individually using the full 3-layer funnel.
         2. Run composite rule engine for multi-field combination detection.
         3. Resolve record-level final level (max of all fields + composite upgrades).
 
@@ -172,35 +172,21 @@ class DynClassificationService:
         """
         start = time.monotonic()
 
-        # Obtain both engines: rule engine for field-level, composite for record-level.
-        engine = self.loader.get_engine(domain=domain, standard=standard)
-        composite_engine = self.loader.get_composite_engine(domain=domain, standard=standard)
-
-        # Phase 1: Classify each field independently.
         field_results: dict[str, FieldClassificationResult] = {}
         all_tags: list[SecurityTag] = []
-
+        
         for field_name, value in record.items():
-            # Evaluate all rules against this field.
-            tags = engine.evaluate(field_name, value)
-            # Resolve per-field final level.
-            final_level = self._resolve_final_level(tags, engine)
-            field_results[field_name] = FieldClassificationResult(
-                field_name=field_name,
-                field_value=str(value) if value is not None else None,
-                tags=tags,
-                final_level=final_level,
-                confidence=1.0 if tags else 0.0,
-            )
-            # Accumulate all tags for record-level aggregation.
-            all_tags.extend(tags)
+            resp = self.classify_field(field_name, value, domain=domain, standard=standard)
+            if resp.field_result:
+                field_results[field_name] = resp.field_result
+                all_tags.extend(resp.field_result.tags)
 
-        # Phase 2: Composite rule post-processing (multi-field combination detection).
+        engine = self.loader.get_engine(domain=domain, standard=standard)
+        composite_engine = self.loader.get_composite_engine(domain=domain, standard=standard)
+        
         composite_tags = composite_engine.evaluate(record, field_results)
         all_tags.extend(composite_tags)
 
-        # Phase 3: Determine record-level final level.
-        # First resolve from all tags, then apply composite upgrades.
         record_level = self._resolve_final_level(all_tags, engine)
         record_level = composite_engine.apply_to_record_level(
             record_level, composite_tags, engine.taxonomy
@@ -208,17 +194,15 @@ class DynClassificationService:
 
         duration_ms = (time.monotonic() - start) * 1000
 
-        # Build the record-level result.
         record_result = RecordClassificationResult(
             record_index=record_index,
             field_results=field_results,
             aggregated_tags=all_tags,
             final_level=record_level,
-            confidence=1.0 if all_tags else 0.0,
-            needs_human_review=any(t.needs_human_review for t in all_tags),
+            confidence=max((fr.confidence for fr in field_results.values()), default=0.0),
+            needs_human_review=any(fr.needs_human_review for fr in field_results.values()),
         )
 
-        # Audit: rules_evaluated = rule_count * number_of_fields (each field runs all rules).
         audit = AuditInfo(
             domain=engine.domain,
             standard_id=engine.standard_id,

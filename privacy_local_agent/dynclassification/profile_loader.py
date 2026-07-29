@@ -19,6 +19,7 @@ from typing import Optional
 import yaml
 
 # Prometheus 监控指标：引擎加载耗时分布 & Profile 缓存中的引擎数量
+from ..observability.logging_config import get_logger
 from ..observability.metrics import (
     DYNCLASSIFICATION_ENGINE_LOAD_DURATION,
     DYNCLASSIFICATION_PROFILE_CACHE_SIZE,
@@ -27,6 +28,8 @@ from .composite import CompositeRuleEngine
 from .engine import ConfigurableRuleEngine
 from .models import DomainTaxonomy
 from .rule_schema import CompositeRuleDef, DowngradeRuleDef, RuleDef, RuleProfile, StandardDef
+
+logger = get_logger(__name__)
 
 
 class ProfileLoader:
@@ -103,13 +106,11 @@ class ProfileLoader:
         Returns:
             bool: 是否检测到文件变动并触发了缓存重载。
         """
-        # Skip if hot-reload is disabled or rules directory doesn't exist.
         if not self.hot_reload_enabled or not self.rules_dir.exists():
             return False
 
         now = time.time()
         with self._lock:
-            # Throttle: skip check if within the configured interval (unless forced).
             if (
                 not force
                 and self.reload_interval_seconds > 0
@@ -117,23 +118,70 @@ class ProfileLoader:
                 and (now - self._last_check_time) < self.reload_interval_seconds
             ):
                 return False
-            # Update last check timestamp.
             self._last_check_time = now
 
-            changed = False
-            # Recursively scan all .yaml files under rules_dir.
-            for yaml_file in self.rules_dir.glob("**/*.yaml"):
-                mtime = yaml_file.stat().st_mtime
-                # Detect new files or modified files by comparing mtime.
-                if yaml_file not in self._file_mtimes or self._file_mtimes[yaml_file] != mtime:
-                    self._file_mtimes[yaml_file] = mtime
-                    changed = True
-
-            # If any file changed, invalidate all caches to force fresh reload.
-            if changed:
+            current_files = set(self.rules_dir.glob("**/*.yaml"))
+            
+            # 1. 检测文件删除
+            if set(self._file_mtimes.keys()) != current_files:
                 self.invalidate_cache()
+                # 更新 mtimes 记录以反映当前文件系统状态
+                self._file_mtimes = {f: f.stat().st_mtime for f in current_files}
+                logger.info("Hot-reload triggered by file addition/deletion.")
+                return True
 
-        return changed
+            # 2. 检测文件修改
+            changed = False
+            for yaml_file in current_files:
+                mtime = yaml_file.stat().st_mtime
+                if self._file_mtimes.get(yaml_file) != mtime:
+                    changed = True
+                    break
+            
+            if changed:
+                logger.info("Hot-reload triggered by file modification.")
+                # 两阶段提交：尝试在不影响现有缓存的情况下加载新配置
+                try:
+                    self._perform_two_phase_reload(current_files)
+                    return True
+                except Exception as e:
+                    logger.error(f"Hot-reload failed: {e}. Keeping old configuration.", exc_info=True)
+                    # 失败时恢复 mtime 以便下次能再次触发重载
+                    self._file_mtimes = {f: f.stat().st_mtime for f in self.rules_dir.glob("**/*.yaml") if f.exists()}
+                    return False
+        return False
+
+    def _perform_two_phase_reload(self, current_files: set[Path]):
+        """两阶段提交热重载。"""
+        # 阶段一：加载到临时缓存
+        temp_taxonomy_cache = {}
+        temp_profile_cache = {}
+        temp_standard_cache = {}
+
+        for yaml_file in current_files:
+            if "taxonomies" in str(yaml_file):
+                name = yaml_file.stem
+                data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+                temp_taxonomy_cache[name] = DomainTaxonomy.model_validate(data)
+            elif "domains" in str(yaml_file):
+                domain = yaml_file.stem
+                data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+                temp_profile_cache[domain] = RuleProfile.model_validate(data)
+            elif "standards" in str(yaml_file):
+                standard_id = yaml_file.stem
+                data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+                temp_standard_cache[standard_id] = StandardDef.model_validate(data)
+
+        # 阶段二：原子替换
+        with self._lock:
+            self._taxonomy_cache = temp_taxonomy_cache
+            self._profile_cache = temp_profile_cache
+            self._standard_cache = temp_standard_cache
+            self._engine_cache.clear()
+            self._composite_cache.clear()
+            self._file_mtimes = {f: f.stat().st_mtime for f in current_files}
+            DYNCLASSIFICATION_PROFILE_CACHE_SIZE.set(0)
+            logger.info("Hot-reload successful. Caches have been updated.")
 
     # ------------------------------------------------------------------
     # 加载方法 / Load Methods
@@ -155,14 +203,12 @@ class ProfileLoader:
             yaml.YAMLError: 当 YAML 文件格式不合法时抛出。
             pydantic.ValidationError: 当配置数据与 DomainTaxonomy Schema 不匹配时抛出。
         """
-        # Check cache first to avoid redundant file I/O and parsing.
-        if name not in self._taxonomy_cache:
-            # Construct file path: rules_dir/taxonomies/<name>.yaml
-            path = self.rules_dir / "taxonomies" / f"{name}.yaml"
-            # Read and parse YAML, then validate against Pydantic schema.
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            self._taxonomy_cache[name] = DomainTaxonomy.model_validate(data)
-        return self._taxonomy_cache[name]
+        with self._lock:
+            if name not in self._taxonomy_cache:
+                path = self.rules_dir / "taxonomies" / f"{name}.yaml"
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                self._taxonomy_cache[name] = DomainTaxonomy.model_validate(data)
+            return self._taxonomy_cache[name]
 
     def load_profile(self, domain: str) -> RuleProfile:
         """加载领域规则 Profile 定义（RuleProfile）。
@@ -180,14 +226,12 @@ class ProfileLoader:
             yaml.YAMLError: 当 YAML 文件格式不合法时抛出。
             pydantic.ValidationError: 当配置数据与 RuleProfile Schema 不匹配时抛出。
         """
-        # Check cache first.
-        if domain not in self._profile_cache:
-            # Construct file path: rules_dir/domains/<domain>.yaml
-            path = self.rules_dir / "domains" / f"{domain}.yaml"
-            # Read, parse, validate, and cache.
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            self._profile_cache[domain] = RuleProfile.model_validate(data)
-        return self._profile_cache[domain]
+        with self._lock:
+            if domain not in self._profile_cache:
+                path = self.rules_dir / "domains" / f"{domain}.yaml"
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                self._profile_cache[domain] = RuleProfile.model_validate(data)
+            return self._profile_cache[domain]
 
     def load_standard(self, standard_id: str) -> StandardDef:
         """加载标准组合定义（StandardDef）。
@@ -205,14 +249,12 @@ class ProfileLoader:
             yaml.YAMLError: 当 YAML 文件格式不合法时抛出。
             pydantic.ValidationError: 当配置数据与 StandardDef Schema 不匹配时抛出。
         """
-        # Check cache first.
-        if standard_id not in self._standard_cache:
-            # Construct file path: rules_dir/standards/<standard_id>.yaml
-            path = self.rules_dir / "standards" / f"{standard_id}.yaml"
-            # Read, parse, validate, and cache.
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            self._standard_cache[standard_id] = StandardDef.model_validate(data)
-        return self._standard_cache[standard_id]
+        with self._lock:
+            if standard_id not in self._standard_cache:
+                path = self.rules_dir / "standards" / f"{standard_id}.yaml"
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                self._standard_cache[standard_id] = StandardDef.model_validate(data)
+            return self._standard_cache[standard_id]
 
     # ------------------------------------------------------------------
     # 引擎构建 / Engine Building
@@ -237,23 +279,19 @@ class ProfileLoader:
         Returns:
             ConfigurableRuleEngine: 构建或从缓存中获取的规则引擎实例。
         """
-        # Build cache key from domain and standard (or 'default' if not specified).
         cache_key = f"{domain or 'default'}:{standard or 'default'}"
-        if cache_key not in self._engine_cache:
-            # Measure engine construction time for Prometheus histogram.
-            start_t = time.perf_counter()
-            engine = self._build_engine(domain, standard)
-            duration = time.perf_counter() - start_t
-            # Record load duration metric (for SLO monitoring).
-            DYNCLASSIFICATION_ENGINE_LOAD_DURATION.labels(
-                domain=domain or "default",
-                standard=standard or "default",
-            ).observe(duration)
-            # Cache the constructed engine for future reuse.
-            self._engine_cache[cache_key] = engine
-            # Update cache size gauge metric.
-            DYNCLASSIFICATION_PROFILE_CACHE_SIZE.set(len(self._engine_cache))
-        return self._engine_cache[cache_key]
+        with self._lock:
+            if cache_key not in self._engine_cache:
+                start_t = time.perf_counter()
+                engine = self._build_engine(domain, standard)
+                duration = time.perf_counter() - start_t
+                DYNCLASSIFICATION_ENGINE_LOAD_DURATION.labels(
+                    domain=domain or "default",
+                    standard=standard or "default",
+                ).observe(duration)
+                self._engine_cache[cache_key] = engine
+                DYNCLASSIFICATION_PROFILE_CACHE_SIZE.set(len(self._engine_cache))
+            return self._engine_cache[cache_key]
 
     def get_composite_engine(
         self,
@@ -271,12 +309,12 @@ class ProfileLoader:
         Returns:
             CompositeRuleEngine: 构建或从缓存中获取的复合规则引擎实例。
         """
-        # Use the same cache key format as the main engine.
         cache_key = f"{domain or 'default'}:{standard or 'default'}"
-        if cache_key not in self._composite_cache:
-            engine = self._build_composite_engine(domain, standard)
-            self._composite_cache[cache_key] = engine
-        return self._composite_cache[cache_key]
+        with self._lock:
+            if cache_key not in self._composite_cache:
+                engine = self._build_composite_engine(domain, standard)
+                self._composite_cache[cache_key] = engine
+            return self._composite_cache[cache_key]
 
     def _build_engine(
         self, domain: Optional[str], standard: Optional[str]
@@ -301,36 +339,34 @@ class ProfileLoader:
         Steps:
         1. Load StandardDef configuration.
         2. Load the referenced DomainTaxonomy.
-        3. Load all domain profiles referenced by the standard.
+        3. Load all domain profiles and validate taxonomy consistency.
         4. Apply rule-level overrides if defined.
         5. Append extra rules as a temporary profile.
         6. Instantiate ConfigurableRuleEngine.
         """
-        # Step 1: Load the standard combination definition.
         std_def = self.load_standard(standard_id)
-        # Step 2: Load the taxonomy referenced by this standard.
         taxonomy = self.load_taxonomy(std_def.taxonomy)
 
-        # Step 3: Load all domain profiles listed in the standard.
-        profiles = [self.load_profile(d) for d in std_def.domains]
+        profiles: list[RuleProfile] = []
+        for d in std_def.domains:
+            profile = self.load_profile(d)
+            self._validate_profile_taxonomy(profile, taxonomy)
+            profiles.append(profile)
 
-        # Step 4: Apply per-rule attribute overrides (e.g. change level/priority).
         if std_def.rule_overrides:
             profiles = self._apply_rule_overrides(profiles, std_def.rule_overrides)
 
-        # Step 5: If standard defines extra rules, wrap them as an additional profile.
         if std_def.extra_rules or std_def.extra_downgrade_rules:
             extra_profile = RuleProfile(
                 domain=f"{standard_id}_extra",
                 rules=std_def.extra_rules,
                 downgrade_rules=std_def.extra_downgrade_rules,
             )
+            self._validate_profile_taxonomy(extra_profile, taxonomy)
             profiles.append(extra_profile)
 
-        # Build a composite domain string for tagging (e.g. "general-pii,medical").
         domain_str = ",".join(std_def.domains) if std_def.domains else standard_id
 
-        # Step 6: Construct and return the engine.
         return ConfigurableRuleEngine(
             taxonomy=taxonomy,
             profiles=profiles,
@@ -341,12 +377,14 @@ class ProfileLoader:
     def _build_engine_from_domain(self, domain: str) -> ConfigurableRuleEngine:
         """内部方法：从单个领域包构建引擎。
 
-        Uses the default taxonomy and a single domain profile.
+        Uses the domain's declared default_taxonomy or falls back to "default".
         """
-        # Load the default taxonomy (shared across single-domain engines).
-        taxonomy = self.load_taxonomy("default")
-        # Load the specific domain profile.
         profile = self.load_profile(domain)
+        taxonomy_name = profile.default_taxonomy or "default"
+        taxonomy = self.load_taxonomy(taxonomy_name)
+        
+        self._validate_profile_taxonomy(profile, taxonomy)
+
         return ConfigurableRuleEngine(
             taxonomy=taxonomy,
             profiles=[profile],
@@ -363,12 +401,12 @@ class ProfileLoader:
         taxonomy = self.load_taxonomy("default")
         profiles: list[RuleProfile] = []
 
-        # Attempt to load common preset domain packs; skip if not configured.
         for domain_name in ["general-pii", "medical"]:
             try:
-                profiles.append(self.load_profile(domain_name))
+                profile = self.load_profile(domain_name)
+                self._validate_profile_taxonomy(profile, taxonomy)
+                profiles.append(profile)
             except FileNotFoundError:
-                # Domain pack not available - skip gracefully.
                 pass
 
         return ConfigurableRuleEngine(
@@ -452,6 +490,27 @@ class ProfileLoader:
             new_profiles.append(new_profile)
         return new_profiles
 
+    def _validate_profile_taxonomy(self, profile: RuleProfile, taxonomy: DomainTaxonomy):
+        """校验领域包中的所有等级 ID 是否都存在于指定的分类体系中。"""
+        all_levels = set(taxonomy.levels.keys())
+
+        def check_level(level_id: str, rule_id: str, field: str):
+            if level_id and level_id not in all_levels:
+                raise ValueError(
+                    f"Taxonomy mismatch: Rule '{rule_id}' in domain '{profile.domain}' "
+                    f"uses level '{level_id}' (from field '{field}') which is not defined in taxonomy '{taxonomy.standard_id}'."
+                )
+
+        for rule in profile.rules:
+            check_level(rule.level, rule.id, "level")
+        
+        for rule in profile.downgrade_rules:
+            check_level(rule.level, rule.id, "level")
+            check_level(rule.max_override_level, rule.id, "max_override_level")
+
+        for rule in profile.composite_rules:
+            check_level(rule.target_level, rule.id, "target_level")
+
     # ------------------------------------------------------------------
     # 缓存管理 / Cache Management
     # ------------------------------------------------------------------
@@ -462,14 +521,13 @@ class ProfileLoader:
         常在热重载触发或手动重新加载规则配置时调用。
         同时重置 Prometheus 的 Profile 缓存大小指标为 0。
         """
-        # Clear all cache layers to force fresh loading on next access.
-        self._taxonomy_cache.clear()
-        self._profile_cache.clear()
-        self._standard_cache.clear()
-        self._engine_cache.clear()
-        self._composite_cache.clear()
-        # Reset Prometheus gauge to reflect empty cache state.
-        DYNCLASSIFICATION_PROFILE_CACHE_SIZE.set(0)
+        with self._lock:
+            self._taxonomy_cache.clear()
+            self._profile_cache.clear()
+            self._standard_cache.clear()
+            self._engine_cache.clear()
+            self._composite_cache.clear()
+            DYNCLASSIFICATION_PROFILE_CACHE_SIZE.set(0)
 
     # ------------------------------------------------------------------
     # 发现方法 / Discovery Methods

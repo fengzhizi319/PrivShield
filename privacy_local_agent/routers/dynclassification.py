@@ -2,6 +2,8 @@
 
 暴露动态分类分级相关的 HTTP API 入口：
 - POST /v1/dynclassification/eval              : 单字段/批次动态分类分级
+- POST /v1/dynclassification/eval_record       : 单记录动态分类分级
+- POST /v1/dynclassification/eval_table        : 表格动态分类分级
 - POST /v1/dynclassification/dry_run           : 规则预演（样本数据集命中分布）
 - POST /v1/dynclassification/profiles/reload   : 热加载重载规则缓存
 - POST /v1/dynclassification/generate_profile  : 从标准 Markdown 文档一键生成配置
@@ -33,9 +35,26 @@ def get_service() -> DynClassificationService:
     return _service
 
 
-class DynEvalRequest(BaseModel):
+class DynEvalFieldRequest(BaseModel):
     field_name: str = Field(description="字段名称", alias="fieldName")
     value: Optional[Any] = Field(default=None, description="字段值")
+    domain: Optional[str] = Field(default=None, description="领域标识")
+    standard: Optional[str] = Field(default=None, description="标准标识")
+
+    model_config = {"populate_by_name": True}
+
+
+class DynEvalRecordRequest(BaseModel):
+    record: dict[str, Any] = Field(description="记录字典")
+    domain: Optional[str] = Field(default=None, description="领域标识")
+    standard: Optional[str] = Field(default=None, description="标准标识")
+
+    model_config = {"populate_by_name": True}
+
+
+class DynEvalTableRequest(BaseModel):
+    schema_: list[str] = Field(description="列名列表", alias="schema")
+    rows: list[dict[str, Any]] = Field(description="记录列表")
     domain: Optional[str] = Field(default=None, description="领域标识")
     standard: Optional[str] = Field(default=None, description="标准标识")
 
@@ -56,13 +75,38 @@ class GenerateProfileRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-@router.post("/eval", summary="动态分类分级评估")
-def evaluate_field(req: DynEvalRequest):
+@router.post("/eval", summary="动态分类分级评估（字段级）")
+def evaluate_field(req: DynEvalFieldRequest):
     svc = get_service()
     svc.loader.check_and_reload()  # 触发轻量级修改检测
     resp = svc.classify_field(
         field_name=req.field_name,
         value=req.value,
+        domain=req.domain,
+        standard=req.standard,
+    )
+    return resp.model_dump(by_alias=True, exclude_none=True)
+
+
+@router.post("/eval_record", summary="动态分类分级评估（记录级）")
+def evaluate_record(req: DynEvalRecordRequest):
+    svc = get_service()
+    svc.loader.check_and_reload()
+    resp = svc.classify_record(
+        record=req.record,
+        domain=req.domain,
+        standard=req.standard,
+    )
+    return resp.model_dump(by_alias=True, exclude_none=True)
+
+
+@router.post("/eval_table", summary="动态分类分级评估（表格级）")
+def evaluate_table(req: DynEvalTableRequest):
+    svc = get_service()
+    svc.loader.check_and_reload()
+    resp = svc.classify_table(
+        schema=req.schema_,
+        rows=req.rows,
         domain=req.domain,
         standard=req.standard,
     )
