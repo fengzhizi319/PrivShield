@@ -12,6 +12,9 @@
 | [examples.md](./examples.md) | Python SDK 与 REST API 代码使用示例 | 接入开发者 |
 | [ops.md](./ops.md) | 运维手册、热加载管理、监控与故障排查 | SRE、运维工程师 |
 | [testing.md](./testing.md) | 测试策略、测试代码示例与 Schema 校验指南 | QA、测试开发工程师 |
+| [three_layer_funnel_design.md](./three_layer_funnel_design.md) | 三层漏斗模型 + 置信度策略设计 | 架构师、后端开发 |
+| [downgrade_override_design.md](./downgrade_override_design.md) | 敏感度降级与 Override 压制规则设计 | 架构师、后端开发 |
+| [rule_parsing_guide.md](./rule_parsing_guide.md) | 规则 YAML 解析与编写指南 | 接入开发者、运维 |
 
 ## 核心设计理念
 

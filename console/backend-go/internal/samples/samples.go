@@ -191,43 +191,6 @@ func List() []models.EndpointSample {
 			Body: raw(`{"queries":["糖尿病患者用药推荐","高血压患者饮食建议"],"num_dummies":3,"domain":"medical"}`), Backend: "grpc",
 		},
 
-		// Classification
-		{
-			Method: "POST", Path: "/v1/privacy/classify/field", Label: "Classify Field", Category: "Classification",
-			Description: "单字段分类（控制台支持一键填入文本 / 图片病例，图片走多模态大模型 OCR 定级）",
-			Body: raw(`{"field_name":"email","value":"alice@example.com","params_json":"{}"}`), Backend: "grpc",
-		},
-		{
-			Method: "POST", Path: "/v1/privacy/classify/record", Label: "Classify Record", Category: "Classification",
-			Description: "单条记录分类",
-			Body: raw(`{"record":{"fields":{"email":"alice@example.com","phone":"13800138000","name":"Alice"}},"params_json":"{}"}`), Backend: "grpc",
-		},
-		{
-			Method: "POST", Path: "/v1/privacy/classify/table", Label: "Classify Table", Category: "Classification",
-			Description: "整张表分类",
-			Body: raw(`{"schema":["email","phone","salary"],"rows":[{"fields":{"email":"alice@example.com","phone":"13800138000","salary":"1000"}},{"fields":{"email":"bob@example.com","phone":"13900139000","salary":"2000"}}],"params_json":"{}"}`), Backend: "grpc",
-		},
-		{
-			Method: "POST", Path: "/v1/privacy/classify/table/async", Label: "Classify Table Async", Category: "Classification",
-			Description: "异步表分类",
-			Body: raw(`{"schema":["email","phone"],"rows":[{"fields":{"email":"alice@example.com","phone":"13800138000"}},{"fields":{"email":"bob@example.com","phone":"13900139000"}}],"params_json":"{}"}`), Backend: "grpc",
-		},
-		{
-			Method: "POST", Path: "/v1/privacy/classify/secretflow", Label: "Classify SecretFlow", Category: "Classification",
-			Description: "SecretFlow 数据结构分类",
-			Body: raw(`{"party":"alice","params_json":"{}","data_json":"{\"schema\":[\"email\",\"phone\"],\"rows\":[{\"email\":\"alice@example.com\",\"phone\":\"13800138000\"}]}"}`), Backend: "grpc",
-		},
-		{
-			Method: "POST", Path: "/v1/privacy/classify/review/confirm", Label: "Confirm Review", Category: "Classification",
-			Description: "确认复核结果（示例 review_id 可能不存在）",
-			Body: raw(`{"review_id":"demo-review-id","corrected_level":"2","reviewer":"tester","comment":"confirmed"}`), Backend: "grpc",
-		},
-		{
-			Method: "POST", Path: "/v1/privacy/classify/review/export", Label: "Export Reviews", Category: "Classification",
-			Description: "导出复核样本",
-			Body: raw(`{"format":"jsonl","mask_input":false}`), Backend: "grpc",
-		},
-
 		// Profile
 		{
 			Method: "POST", Path: "/v1/privacy/profile/recommend", Label: "Recommend Params", Category: "Profile",

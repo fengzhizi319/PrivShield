@@ -4,9 +4,9 @@
 
 ### 1.1 现状
 
-`dynclassification` 模块当前仅有 Layer-1 规则引擎（`ConfigurableRuleEngine`），
-缺乏 NER 实体识别和 LLM 深度推理能力。旧模块 `privacy/classification/` 将被删除，
-其三层漏斗逻辑需迁移至 `dynclassification`。
+`dynclassification` 模块已包含完整的三层漏斗架构（Rule → NER → LLM）。
+旧模块 `privacy/classification/` 已删除，其三层漏斗逻辑已迁移至 `dynclassification`，
+包括 `classification.py`、`classification_models.py`、`classification_ner.py`、`classification_llm.py` 等文件。
 
 ### 1.2 目标
 

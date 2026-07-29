@@ -34,7 +34,6 @@ type testPrivacyServer struct {
 	MaskFunc                func(context.Context, *pb.MaskRequest) (*pb.MaskResponse, error)
 	MaskDataFrameFunc       func(context.Context, *pb.MaskDataFrameRequest) (*pb.MaskDataFrameResponse, error)
 	KAnonymizeDataFrameFunc func(context.Context, *pb.KAnonymizeDataFrameRequest) (*pb.KAnonymizeDataFrameResponse, error)
-	ClassifyTableFunc       func(context.Context, *pb.ClassifyTableRequest) (*pb.ClassifyTableResponse, error)
 }
 
 func (s *testPrivacyServer) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
@@ -63,13 +62,6 @@ func (s *testPrivacyServer) KAnonymizeDataFrame(ctx context.Context, req *pb.KAn
 		return s.KAnonymizeDataFrameFunc(ctx, req)
 	}
 	return s.UnimplementedPrivacyServiceServer.KAnonymizeDataFrame(ctx, req)
-}
-
-func (s *testPrivacyServer) ClassifyTable(ctx context.Context, req *pb.ClassifyTableRequest) (*pb.ClassifyTableResponse, error) {
-	if s.ClassifyTableFunc != nil {
-		return s.ClassifyTableFunc(ctx, req)
-	}
-	return s.UnimplementedPrivacyServiceServer.ClassifyTable(ctx, req)
 }
 
 // setupTestServer 启动内存 gRPC 服务器并创建带路由的 HTTP 测试服务器。
@@ -474,45 +466,6 @@ func TestUploadHandlerMask(t *testing.T) {
 	}
 	if body.Data.Result[0]["email"] != "a***@example.com" {
 		t.Fatalf("unexpected masked result: %+v", body.Data.Result)
-	}
-}
-
-// TestUploadHandlerClassify 验证上传 JSON 执行整表分类。
-func TestUploadHandlerClassify(t *testing.T) {
-	grpcSrv := &testPrivacyServer{
-		ClassifyTableFunc: func(_ context.Context, req *pb.ClassifyTableRequest) (*pb.ClassifyTableResponse, error) {
-			if len(req.Rows) != 2 {
-				t.Fatalf("expected 2 rows, got %d", len(req.Rows))
-			}
-			return &pb.ClassifyTableResponse{ResultJson: `{"table_level":"L2"}`}, nil
-		},
-	}
-	ts, _ := setupTestServer(t, grpcSrv)
-	defer ts.Close()
-
-	jsonData := `[{"email":"alice@example.com"},{"email":"bob@example.com"}]`
-	resp := postUploadMultipart(t, ts.URL+"/api/upload", "data.json", jsonData, "classify_table", "{}")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
-	}
-
-	var body struct {
-		Data struct {
-			Operation string         `json:"operation"`
-			RowsIn    int            `json:"rows_in"`
-			Result    map[string]any `json:"result"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-	if body.Data.Operation != "classify_table" || body.Data.RowsIn != 2 {
-		t.Fatalf("unexpected upload data: %+v", body.Data)
-	}
-	if body.Data.Result["table_level"] != "L2" {
-		t.Fatalf("unexpected classify result: %+v", body.Data.Result)
 	}
 }
 

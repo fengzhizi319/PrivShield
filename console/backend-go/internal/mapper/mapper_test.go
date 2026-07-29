@@ -24,7 +24,6 @@ type fakePrivacyServer struct {
 	DPCountFunc          func(context.Context, *pb.DPRequest) (*pb.DPResponse, error)
 	KAnonymizeRecordFunc func(context.Context, *pb.KAnonymizeRequest) (*pb.KAnonymizeResponse, error)
 	ObfuscateQueryFunc   func(context.Context, *pb.ObfuscateQueryRequest) (*pb.ObfuscateQueryResponse, error)
-	ClassifyFieldFunc    func(context.Context, *pb.ClassifyFieldRequest) (*pb.ClassifyFieldResponse, error)
 }
 
 func (f *fakePrivacyServer) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
@@ -60,13 +59,6 @@ func (f *fakePrivacyServer) ObfuscateQuery(ctx context.Context, req *pb.Obfuscat
 		return f.ObfuscateQueryFunc(ctx, req)
 	}
 	return f.UnimplementedPrivacyServiceServer.ObfuscateQuery(ctx, req)
-}
-
-func (f *fakePrivacyServer) ClassifyField(ctx context.Context, req *pb.ClassifyFieldRequest) (*pb.ClassifyFieldResponse, error) {
-	if f.ClassifyFieldFunc != nil {
-		return f.ClassifyFieldFunc(ctx, req)
-	}
-	return f.UnimplementedPrivacyServiceServer.ClassifyField(ctx, req)
 }
 
 // startBufconnServer 在内存中启动一个 gRPC 服务器并返回对应的客户端连接。
@@ -217,32 +209,4 @@ func TestDispatchObfuscateQuery(t *testing.T) {
 	}
 }
 
-func TestDispatchClassifyField(t *testing.T) {
-	fs := &fakePrivacyServer{
-		ClassifyFieldFunc: func(_ context.Context, req *pb.ClassifyFieldRequest) (*pb.ClassifyFieldResponse, error) {
-			if req.FieldName != "email" {
-				t.Fatalf("unexpected field name: %s", req.FieldName)
-			}
-			return &pb.ClassifyFieldResponse{ResultJson: `{"level":"2","label":"PII","confidence":0.95}`}, nil
-		},
-	}
-	client, cleanup := startBufconnServer(t, fs)
-	defer cleanup()
 
-	body := json.RawMessage(`{"field_name":"email","value":"alice@example.com","params_json":"{}"}`)
-	resp, err := New().Dispatch(context.Background(), client.Raw(), "/v1/privacy/classify/field", body)
-	if err != nil {
-		t.Fatalf("Dispatch classify/field failed: %v", err)
-	}
-	m, ok := resp.(map[string]any)
-	if !ok {
-		t.Fatalf("unexpected classify response type: %T", resp)
-	}
-	inner, ok := m["result_json"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected result_json object, got: %+v", m)
-	}
-	if inner["level"] != "2" || inner["label"] != "PII" {
-		t.Fatalf("unexpected classify response: %+v", inner)
-	}
-}

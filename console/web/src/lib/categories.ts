@@ -21,7 +21,6 @@ export const CATEGORY_ORDER = [
   'LDP',
   'K-Anonymity',
   'Query Obfuscation',
-  'Classification',
   'DynamicClassification',
   'Budget',
   'Profile',
@@ -69,12 +68,6 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
     chip: 'bg-amber-50 text-amber-600',
     accent: 'from-amber-400 to-orange-500',
     desc: '查询混淆 / 假查询注入',
-  },
-  Classification: {
-    icon: 'tag',
-    chip: 'bg-rose-50 text-rose-600',
-    accent: 'from-rose-400 to-pink-500',
-    desc: '数据分类（规则 / NER / LLM）',
   },
   DynamicClassification: {
     icon: 'sparkles',

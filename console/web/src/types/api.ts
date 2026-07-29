@@ -103,7 +103,7 @@ export interface HistoryEntry {
 }
 
 /** 数据文件隐私处理支持的操作类型。 */
-export type FileOperation = 'mask_dataframe' | 'k_anonymize' | 'classify_table';
+export type FileOperation = 'mask_dataframe' | 'k_anonymize';
 
 /** /api/upload 响应中 data 的处理结果。 */
 export interface UploadData {

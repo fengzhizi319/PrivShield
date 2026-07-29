@@ -561,18 +561,17 @@ func (s *Server) Upload(c *gin.Context) {
 		return
 	}
 
-	// 按文件扩展名解析为 records（行数据）+ schema（列名列表）
+	// 按文件扩展名解析为 records（行数据）
 	var records []map[string]string // 每行是一个 map[column_name]value
-	var schema []string             // 列名列表（从文件头自动提取）
 	// 将文件名转为小写，确保扩展名匹配不区分大小写
 	filename := strings.ToLower(header.Filename)
 	switch {
 	case strings.HasSuffix(filename, ".csv"):
 		// CSV 文件：解析表头为 schema，每行解析为 map
-		records, schema, err = fileparse.ParseCSV(content)
+		records, _, err = fileparse.ParseCSV(content)
 	case strings.HasSuffix(filename, ".json"):
 		// JSON 文件：解析为对象数组，键名作为 schema
-		records, schema, err = fileparse.ParseJSON(content)
+		records, _, err = fileparse.ParseJSON(content)
 	default:
 		// 不支持的文件格式时返回 400 错误
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "仅支持 .csv 与 .json 文件", "status": http.StatusBadRequest})
@@ -650,43 +649,10 @@ func (s *Server) Upload(c *gin.Context) {
 		result = recordEntriesToMaps(resp.Data)
 		rowsOut = len(resp.Data) // 输出行数等于响应数据行数
 
-	case "classify_table":
-		// 分类操作：优先使用 params 中指定的 schema，否则使用文件解析出的 schema
-		schemaUse := stringSlice(options, "schema")
-		if len(schemaUse) == 0 {
-			schemaUse = schema // 回退到文件解析出的列名
-		}
-		// 分类参数取 params 内嵌套的 params 字段（与 agent process_file 一致）
-		paramsJSON := "{}"
-		if p, ok := options["params"]; ok {
-			// 将嵌套的 params 对象序列化回 JSON 字符串
-			if b, e := json.Marshal(p); e == nil {
-				paramsJSON = string(b)
-			}
-		}
-		// 调用 ClassifyTable gRPC 方法
-		resp, e := client.ClassifyTable(ctx, &pb.ClassifyTableRequest{
-			Schema:     schemaUse,  // 表结构（列名列表）
-			Rows:       entries,    // 输入数据
-			ParamsJson: paramsJSON, // 分类参数 JSON 字符串
-		})
-		if e != nil {
-			// gRPC 调用失败时转换为 HTTP 错误响应
-			s.writeUpstreamError(c, e)
-			return
-		}
-		// 尝试将结果 JSON 反序列化为通用对象，失败时保留原始 JSON 字符串
-		var parsed any
-		if e := json.Unmarshal([]byte(resp.ResultJson), &parsed); e != nil {
-			parsed = resp.ResultJson // 反序列化失败时保留原始字符串
-		}
-		result = parsed
-		rowsOut = rowsIn // 分类操作不改变行数
-
 	default:
 		// 不支持的操作类型时返回 400 错误，并列出可选操作
 		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("不支持的操作 '%s'，可选: classify_table, k_anonymize, mask_dataframe", operation),
+			"detail": fmt.Sprintf("不支持的操作 '%s'，可选: k_anonymize, mask_dataframe", operation),
 			"status": http.StatusBadRequest,
 		})
 		return

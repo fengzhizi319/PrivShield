@@ -20,7 +20,6 @@
 //   - /v1/privacy/ldp/*           → 本地差分隐私（扰动 + 频率估计）
 //   - /v1/privacy/k_anonymize/*   → K-匿名（记录级/表级/DataFrame 级）
 //   - /v1/privacy/qol/*           → 查询混淆（单条/批量）
-//   - /v1/privacy/classify/*      → 数据分类（字段/记录/表/异步/SecretFlow/复核）
 //   - /v1/privacy/profile/*       → 个性化配置推荐
 package mapper
 
@@ -31,8 +30,6 @@ import (
 	"encoding/json"
 	// fmt：用于格式化错误信息（如 "unsupported gRPC path"）
 	"fmt"
-	// regexp：用于匹配动态路径（如 /v1/privacy/classify/jobs/{job_id}）
-	"regexp"
 
 	// pb：由 proto/privacy.proto 生成的 gRPC 代码，
 	// 包含所有 RPC 方法定义（PrivacyServiceClient）和消息类型（各种 Request/Response）
@@ -60,34 +57,24 @@ type Handler func(ctx context.Context, client pb.PrivacyServiceClient, body json
 type Mapper struct {
 	// handlers：静态路径分发表，存储所有固定路径到 handler 的映射
 	handlers map[string]Handler
-	// jobRE：用于匹配动态路径的正则表达式，
-	// 匹配形如 /v1/privacy/classify/jobs/{job_id} 的路径，
-	// 其中 job_id 为异步分类任务的唯一标识
-	jobRE *regexp.Regexp
 }
 
 // New 创建并返回一个 Mapper 实例，内置所有支持的 REST → gRPC 路径映射。
 //
 // 执行逻辑：
-//  1. 初始化 jobRE 正则，用于匹配异步分类任务的动态路径
-//  2. 构建 handlers 分发表，将每个固定路径绑定到对应的 handler 方法
-//  3. 返回就绪的 Mapper 实例
+//  1. 构建 handlers 分发表，将每个固定路径绑定到对应的 handler 方法
+//  2. 返回就绪的 Mapper 实例
 //
-// 路径分组（共约 40 个端点）：
+// 路径分组（共约 33 个端点）：
 //   - Health（1 个）：健康检查
 //   - Masking（5 个）：单字段脱敏、整条记录脱敏、批量脱敏、DataFrame 脱敏、哈希
 //   - DP（16 个）：count/sum/mean/histogram 及 noisy/chunked/aggregate/vector/adaptive/groupby 变体
 //   - LDP（4 个）：二进制扰动、分类扰动、二进制频率估计、分类直方图估计
 //   - K-Anonymity（3 个）：记录级、表级、DataFrame 级 K-匿名
 //   - Query Obfuscation（2 个）：单条/批量查询混淆
-//   - Classification（7 个）：字段/记录/表/异步表/SecretFlow/复核确认/复核导出
 //   - Profile（1 个）：个性化配置推荐
 func New() *Mapper {
-	m := &Mapper{
-		// 编译动态路径正则：匹配 /v1/privacy/classify/jobs/{任意非斜杠字符}
-		// FindStringSubmatch 返回 [完整匹配, 捕获组(job_id)]
-		jobRE: regexp.MustCompile(`^/v1/privacy/classify/jobs/([^/]+)$`),
-	}
+	m := &Mapper{}
 	// 构建静态路径分发表：每个路径对应一个 handler 方法
 	m.handlers = map[string]Handler{
 		// ── Health ──────────────────────────────────────────────────
@@ -147,16 +134,6 @@ func New() *Mapper {
 		"/v1/privacy/qol/obfuscate":       m.handleObfuscateQuery,      // 单条查询混淆
 		"/v1/privacy/qol/obfuscate/batch": m.handleObfuscateQueryBatch, // 批量查询混淆
 
-		// ── Classification（数据分类）─────────────────────────────
-		// 三层分类漏斗：规则引擎 → 小型 NER → 本地 LLM/VLM
-		"/v1/privacy/classify/field":          m.handleClassifyField,      // 单字段分类
-		"/v1/privacy/classify/record":         m.handleClassifyRecord,     // 整条记录分类
-		"/v1/privacy/classify/table":          m.handleClassifyTable,      // 表级分类（同步）
-		"/v1/privacy/classify/table/async":    m.handleClassifyTableAsync, // 表级分类（异步，返回 job_id）
-		"/v1/privacy/classify/secretflow":     m.handleClassifySecretFlow, // SecretFlow 联邦分类
-		"/v1/privacy/classify/review/confirm": m.handleConfirmReview,      // 人工复核确认
-		"/v1/privacy/classify/review/export":  m.handleExportReviews,      // 复核结果导出
-
 		// ── Profile（个性化配置）────────────────────────────────
 		// 根据数据特征推荐最优隐私参数（epsilon、mechanism 等）
 		"/v1/privacy/profile/recommend": m.handleRecommendParams,
@@ -167,9 +144,8 @@ func New() *Mapper {
 // Dispatch 根据请求路径查找对应的 handler 并调用，是路由分发的核心入口。
 //
 // 执行逻辑：
-//  1. 先在静态分发表 handlers 中查找精确匹配的 path
-//  2. 若未命中，尝试用 jobRE 正则匹配动态路径 /v1/privacy/classify/jobs/{job_id}
-//  3. 若仍未命中，返回 "unsupported gRPC path" 错误
+//  1. 在静态分发表 handlers 中查找精确匹配的 path
+//  2. 若未命中，返回 "unsupported gRPC path" 错误
 //
 // 参数说明：
 //   - ctx：请求上下文，传递给 handler 和 gRPC 调用
@@ -181,16 +157,10 @@ func New() *Mapper {
 //   - any：handler 返回的 JSON 可序列化数据
 //   - error：解析失败或 gRPC 调用失败时的错误
 func (m *Mapper) Dispatch(ctx context.Context, client pb.PrivacyServiceClient, path string, body json.RawMessage) (any, error) {
-	// 第一步：静态路径精确匹配，O(1) 哈希查找
+	// 静态路径精确匹配，O(1) 哈希查找
 	if handler, ok := m.handlers[path]; ok {
 		return handler(ctx, client, body) // 找到则直接调用
 	}
-	// 第二步：动态路径正则匹配（异步分类任务查询）
-	// FindStringSubmatch 返回 ["/v1/privacy/classify/jobs/abc123", "abc123"]
-	if matches := m.jobRE.FindStringSubmatch(path); len(matches) == 2 {
-		// matches[1] 为捕获组，即 job_id
-		return m.handleGetClassificationJob(ctx, client, matches[1])
-	}
-	// 第三步：所有匹配均失败，返回错误
+	// 所有匹配均失败，返回错误
 	return nil, fmt.Errorf("unsupported gRPC path: %s", path)
 }

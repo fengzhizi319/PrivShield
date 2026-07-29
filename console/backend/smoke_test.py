@@ -70,14 +70,6 @@ def main() -> int:
         raw_b64 = sample.get("rawPayloadB64")
         content_type = sample.get("contentType")
 
-        # 需要预存运行时资源的示例在自动化烟雾测试中跳过；
-        # 它们依赖真实 ID，需在 UI 中手动验证。
-        if (
-            sample["method"] == "GET" and sample["path"].startswith("/v1/privacy/classify/jobs/")
-        ) or sample["path"].startswith("/v1/privacy/classify/review/confirm"):
-            print(f"SKIP  {label}")
-            continue
-
         # 发送请求并获取（状态码，响应体）。
         status, data = send(sample["method"], sample["path"], body, raw_b64, content_type)
         if status == 200:

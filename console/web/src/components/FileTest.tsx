@@ -1,7 +1,7 @@
 /**
  * 数据文件隐私处理视图。
  *
- * 用户上传 CSV/JSON 文件，选择操作类型（脱敏 / K-匿名 / 分类），
+ * 用户上传 CSV/JSON 文件，选择操作类型（脱敏 / K-匿名），
  * 按操作动态填写参数，提交后经后端转发到 agent 处理。
  * 右侧上方展示原始响应（复用 ResponsePanel），下方以“原始数据 / 处理结果”
  * 双表并排呈现，并对发生变更的单元格高亮，便于直观对比处理前后的差异。
@@ -18,7 +18,6 @@ import { parseDataFile, type ParsedRecords } from '@/utils/fileParse';
 const OPERATIONS: { value: FileOperation; label: string; hint: string }[] = [
   { value: 'mask_dataframe', label: '数据脱敏', hint: '对指定列做掩码脱敏' },
   { value: 'k_anonymize', label: 'K-匿名', hint: '对准标识符列做 K-匿名泛化' },
-  { value: 'classify_table', label: '数据分类', hint: '对整表做敏感等级分类' },
 ];
 
 /** 把逗号分隔的输入拆分为去空的列名数组。 */
@@ -211,8 +210,6 @@ export default function FileTest() {
         return { columns: splitCols(columns), context };
       case 'k_anonymize':
         return { qi_cols: splitCols(qiCols), k };
-      case 'classify_table':
-        return {};
       default:
         return {};
     }
@@ -279,7 +276,7 @@ export default function FileTest() {
             </span>
             数据文件隐私处理
           </h2>
-          <p className="mt-1 text-xs text-gray-500">上传 CSV/JSON 文件，选择脱敏 / K-匿名 / 分类操作。</p>
+          <p className="mt-1 text-xs text-gray-500">上传 CSV/JSON 文件，选择脱敏 / K-匿名操作。</p>
         </div>
 
         {/* 文件选择 */}
@@ -371,12 +368,6 @@ export default function FileTest() {
           </>
         )}
 
-        {operation === 'classify_table' && (
-          <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-            分类操作无需额外参数，将自动推断表结构并给出敏感等级。
-          </p>
-        )}
-
         <button
           onClick={handleSubmit}
           disabled={loading}
@@ -444,9 +435,7 @@ export default function FileTest() {
               ) : (
                 <div className="flex h-full items-center justify-center px-6 text-center text-xs text-gray-400">
                   {response
-                    ? operation === 'classify_table'
-                      ? '分类结果为非表格结构，请查看上方原始响应 JSON'
-                      : '本次响应未返回记录数组，请查看上方原始响应 JSON'
+                    ? '本次响应未返回记录数组，请查看上方原始响应 JSON'
                     : '处理完成后在此查看结果，变更单元格将高亮显示'}
                 </div>
               )}
