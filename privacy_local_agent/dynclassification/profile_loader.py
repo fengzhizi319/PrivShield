@@ -491,19 +491,25 @@ class ProfileLoader:
         return new_profiles
 
     def _validate_profile_taxonomy(self, profile: RuleProfile, taxonomy: DomainTaxonomy):
-        """校验领域包中的所有等级 ID 是否都存在于指定的分类体系中。"""
+        """校验领域包中的所有等级 ID 是否都存在于指定的分类体系中。
+
+        在标准组合场景下，不同领域包可能使用不同等级体系（例如 general-pii 使用
+        L1~L5，而 finance 使用 C1~C4）。当前实现仅记录警告，不强制抛异常，以避免
+        合法的跨 taxonomy 标准组合无法加载。未来可通过等级映射实现更严格的校验。
+        """
         all_levels = set(taxonomy.levels.keys())
 
         def check_level(level_id: str, rule_id: str, field: str):
             if level_id and level_id not in all_levels:
-                raise ValueError(
-                    f"Taxonomy mismatch: Rule '{rule_id}' in domain '{profile.domain}' "
-                    f"uses level '{level_id}' (from field '{field}') which is not defined in taxonomy '{taxonomy.standard_id}'."
+                logger.warning(
+                    "Taxonomy mismatch: Rule '%s' in domain '%s' uses level '%s' (from field '%s') "
+                    "which is not defined in taxonomy '%s'.",
+                    rule_id, profile.domain, level_id, field, taxonomy.standard_id,
                 )
 
         for rule in profile.rules:
             check_level(rule.level, rule.id, "level")
-        
+
         for rule in profile.downgrade_rules:
             check_level(rule.level, rule.id, "level")
             check_level(rule.max_override_level, rule.id, "max_override_level")

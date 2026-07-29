@@ -69,7 +69,7 @@ def profile_with_broad_rule() -> RuleProfile:
                     MatcherDef(
                         target="field_name",
                         operator="keyword_contains",
-                        params={"keywords": ["report"]},
+                        params={"use_word_boundaries": False, "keywords": ["report"]},
                     )
                 ],
             ),
@@ -84,7 +84,7 @@ def profile_with_broad_rule() -> RuleProfile:
                     MatcherDef(
                         target="field_name",
                         operator="keyword_contains",
-                        params={"keywords": ["genome"]},
+                        params={"use_word_boundaries": False, "keywords": ["genome"]},
                     )
                 ],
             ),
@@ -145,7 +145,7 @@ class TestBackwardCompatibility:
                     id="RULE_A",
                     category="CAT_A",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
             ],
             downgrade_rules=[
@@ -159,7 +159,7 @@ class TestBackwardCompatibility:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("some_data_field", "value")
+        tags, _ = engine.evaluate("some_data_field", "value")
 
         # 两个标签都应存在
         levels = {t.level for t in tags}
@@ -195,7 +195,7 @@ class TestOverrideSuppression:
           - 降级规则 RULE_DOWN_OPS（含 "turnover"）→ L2, override=true, cap=L3
         期望：L3 标签被压制，仅保留 L2 降级标签
         """
-        tags = engine.evaluate("annual_report_turnover", "some_value")
+        tags, _ = engine.evaluate("annual_report_turnover", "some_value")
 
         # L3 标签应被压制
         levels = [t.level for t in tags]
@@ -216,7 +216,7 @@ class TestOverrideSuppression:
           - 降级规则 RULE_DOWN_OPS（含 "turnover"）→ 不命中
         期望：L5 不被压制（超出 cap=L3），L3 也保留（无 override 命中）
         """
-        tags = engine.evaluate("genome_report", "some_value")
+        tags, _ = engine.evaluate("genome_report", "some_value")
 
         levels = [t.level for t in tags]
         assert "L5" in levels, "L5 标签不应被压制（超出覆盖上限）"
@@ -228,7 +228,7 @@ class TestOverrideSuppression:
         场景：字段 "turnover_rate" 仅命中降级规则（无普通规则含 "turnover"）
         期望：降级标签正常产出
         """
-        tags = engine.evaluate("turnover_rate", "15.3")
+        tags, _ = engine.evaluate("turnover_rate", "15.3")
 
         levels = [t.level for t in tags]
         assert "L2" in levels
@@ -249,13 +249,13 @@ class TestOverrideSuppression:
                     id="RULE_L3",
                     category="CAT_L3",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["stats"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["stats"]})],
                 ),
                 RuleDef(
                     id="RULE_L5",
                     category="CAT_L5",
                     level="L5",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["genome"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["genome"]})],
                 ),
             ],
             downgrade_rules=[
@@ -270,7 +270,7 @@ class TestOverrideSuppression:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("genome_stats_field", "value")
+        tags, _ = engine.evaluate("genome_stats_field", "value")
 
         levels = [t.level for t in tags]
         assert "L3" not in levels, "L3 应被压制"
@@ -300,7 +300,7 @@ class TestEdgeCases:
                     id="RULE_L4",
                     category="CAT_L4",
                     level="L4",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
             ],
             downgrade_rules=[
@@ -323,7 +323,7 @@ class TestEdgeCases:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("some_data_field", "value")
+        tags, _ = engine.evaluate("some_data_field", "value")
 
         # 安全保守: min(L3, L4) = L3 → L4 (rank=4) > cap_rank(3) → L4 存活
         levels = [t.level for t in tags]
@@ -338,7 +338,7 @@ class TestEdgeCases:
                     id="RULE_L2",
                     category="CAT_L2",
                     level="L2",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["info"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["info"]})],
                 ),
             ],
             downgrade_rules=[
@@ -353,7 +353,7 @@ class TestEdgeCases:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("some_info_field", "value")
+        tags, _ = engine.evaluate("some_info_field", "value")
 
         # cap=L1 (rank=1)，L2 (rank=2) > cap，不应被压制
         levels = [t.level for t in tags]
@@ -361,7 +361,7 @@ class TestEdgeCases:
 
     def test_is_override_flag_on_tags(self, engine):
         """验证 is_override 标记正确设置在降级标签上。"""
-        tags = engine.evaluate("turnover_rate", "value")
+        tags, _ = engine.evaluate("turnover_rate", "value")
         override_tags = [t for t in tags if t.is_override]
         non_override_tags = [t for t in tags if not t.is_override]
 
@@ -392,13 +392,13 @@ class TestSuppressRulesWhitelist:
                     id="RULE_A",
                     category="CAT_A",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
                 RuleDef(
                     id="RULE_B",
                     category="CAT_B",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
             ],
             downgrade_rules=[
@@ -414,7 +414,7 @@ class TestSuppressRulesWhitelist:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("some_data_field", "value")
+        tags, _ = engine.evaluate("some_data_field", "value")
 
         rule_ids = [t.rule_id for t in tags]
         assert "RULE_A" not in rule_ids, "RULE_A 应被压制（在白名单中）"
@@ -435,13 +435,13 @@ class TestSuppressRulesWhitelist:
                     id="RULE_A",
                     category="CAT_A",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
                 RuleDef(
                     id="RULE_B",
                     category="CAT_B",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
             ],
             downgrade_rules=[
@@ -457,7 +457,7 @@ class TestSuppressRulesWhitelist:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("some_data_field", "value")
+        tags, _ = engine.evaluate("some_data_field", "value")
 
         rule_ids = [t.rule_id for t in tags]
         assert "RULE_A" not in rule_ids, "RULE_A 应被压制"
@@ -477,7 +477,7 @@ class TestSuppressRulesWhitelist:
                     id="RULE_HIGH",
                     category="CAT_HIGH",
                     level="L5",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["genome"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["genome"]})],
                 ),
             ],
             downgrade_rules=[
@@ -493,7 +493,7 @@ class TestSuppressRulesWhitelist:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("genome_data", "value")
+        tags, _ = engine.evaluate("genome_data", "value")
 
         levels = [t.level for t in tags]
         assert "L5" in levels, "L5 不应被压制（rank 超出 cap=L3）"
@@ -527,7 +527,7 @@ class TestSuppressRulesWhitelist:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("contact_info", "13800138000")
+        tags, _ = engine.evaluate("contact_info", "13800138000")
 
         rule_ids = [t.rule_id for t in tags]
         assert "RULE_PHONE" in rule_ids, "值级命中应豁免压制（即使在白名单中）"
@@ -546,19 +546,19 @@ class TestSuppressRulesWhitelist:
                     id="RULE_X",
                     category="CAT_X",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
                 RuleDef(
                     id="RULE_Y",
                     category="CAT_Y",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
                 RuleDef(
                     id="RULE_Z",
                     category="CAT_Z",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
             ],
             downgrade_rules=[
@@ -583,7 +583,7 @@ class TestSuppressRulesWhitelist:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("some_data_field", "value")
+        tags, _ = engine.evaluate("some_data_field", "value")
 
         rule_ids = [t.rule_id for t in tags]
         assert "RULE_X" not in rule_ids, "RULE_X 应被压制（在 DOWN_A 白名单中）"
@@ -604,13 +604,13 @@ class TestSuppressRulesWhitelist:
                     id="RULE_A",
                     category="CAT_A",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
                 RuleDef(
                     id="RULE_B",
                     category="CAT_B",
                     level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
                 ),
             ],
             downgrade_rules=[
@@ -635,7 +635,7 @@ class TestSuppressRulesWhitelist:
             ],
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags = engine.evaluate("some_data_field", "value")
+        tags, _ = engine.evaluate("some_data_field", "value")
 
         rule_ids = [t.rule_id for t in tags]
         # DOWN_ALL 无白名单，不触发 has_whitelist，因此压制所有符合条件的规则

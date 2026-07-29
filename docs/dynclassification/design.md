@@ -173,7 +173,7 @@ sequenceDiagram
 
 ### 4.5 敏感度降级规则（Downgrade Rules）
 
-敏感度降级规则是 `ConfigurableRuleEngine` 中的一种**反向修正机制**，用于解决通用规则对特定字段的"过度分类"问题。
+敏感度降级规则是 `ConfigurableRuleEngine` 中的一种**反向修正机制**，用于解决通用规则对特定字段的"过度分类"问题。当前实现已从单一的"兜底归属"演进为支持**可选的强制覆盖（override）**模式，允许 YAML 通过 `override`、`max_override_level`、`suppress_rules` 三个字段精确控制压制行为。
 
 #### 4.5.1 设计动机
 
@@ -186,7 +186,9 @@ sequenceDiagram
 | `public_report`（公开报告） | L3（敏感数据） | 对外公开信息 | L1（公开数据） |
 | `annual_summary`（年度汇总） | L3（敏感数据） | 对外公开信息 | L1（公开数据） |
 
-降级规则通过在字段名中匹配特定关键词，将这些字段"下调"到合理的低等级。
+降级规则通过在字段名中匹配特定关键词，将这些字段"下调"到合理的低等级。当启用 `override=true` 时，还能进一步**强制压制**误中的普通规则标签，避免宽泛规则把运营/公开字段错误地拉高等级。
+
+> 说明：上表中的"通用规则判定"示例假设使用子串匹配语义（例如 `keyword_contains` 配置 `use_word_boundaries: false`）。实际命中行为取决于所配置算子及其参数；`keyword_contains` 默认使用单词边界匹配（`use_word_boundaries: true`），如需纯子串匹配请显式关闭。
 
 #### 4.5.2 数据模型
 
@@ -194,67 +196,169 @@ sequenceDiagram
 # privacy_local_agent/dynclassification/rule_schema.py
 
 class DowngradeRuleDef(BaseModel):
-    """敏感度降级规则定义。
+    """降级规则定义。
 
-    当字段名包含指定关键词时，为该字段附加一个低等级标签，
-    用于修正通用规则可能导致的过度分类。
+    当字段名匹配指定关键词时，将等级降级到目标等级。
+    典型场景：公开字段降为 L1，运营统计字段降为 L2。
+
+    强制覆盖模式（override=true）：
+        默认情况下，降级规则仅作为"兜底归属"——在无普通规则命中时替代默认等级。
+        当设置 override=true 后，降级规则可强制压制 rank <= max_override_level 的
+        普通规则标签，解决宽泛规则误中运营/公开字段的问题。
+
+        执行流程:
+        ┌──────────────────────────────────────────────────────────────┐
+        │  override=false (默认):                                       │
+        │    降级标签 + 普通标签 → 取 max → 降级无效（仅兜底）          │
+        │                                                              │
+        │  override=true:                                              │
+        │    先移除 rank <= cap 的普通标签 → 再取 max → 降级生效        │
+        └──────────────────────────────────────────────────────────────┘
     """
     id: str                           # 规则唯一标识
-    keywords: list[str]               # 触发降级的关键词列表（子串匹配，不区分大小写）
+    name: str = ""                    # 规则名称（人类可读）
+    keywords: list[str]               # 触发降级的关键词列表（默认按单词边界匹配；可配置 use_word_boundaries=false 改为纯子串匹配）
     level: str                        # 降级目标等级（如 "L1"、"L2"）
     category: str                     # 降级后归属的业务类别
-    match_target: str = "field_name"  # 匹配目标（默认匹配字段名）
+    match_target: str = "field_name"  # 匹配目标（目前仅支持字段名）
+    override: bool = False            # 是否启用强制覆盖（压制普通规则标签）
+    max_override_level: str = ""      # 覆盖等级上限（空=使用 level 字段自身）
+    suppress_rules: list[str] = []     # 压制白名单：仅列出的 rule_id 可被压制（空=压制所有）
 ```
+
+字段说明：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `id` | `str` | — | 规则唯一标识，用于审计和指标。 |
+| `name` | `str` | `""` | 人类可读名称。 |
+| `keywords` | `list[str]` | `[]` | 触发关键词。字段名归一化（小写、去下划线/空格）后，按 `keyword_contains` 算子匹配；默认使用单词边界（`\b`），可配置 `use_word_boundaries: false` 改为纯子串匹配。 |
+| `level` | `str` | — | 降级目标等级，如 `L1` / `L2`。 |
+| `category` | `str` | — | 降级后归属的业务类别。 |
+| `match_target` | `str` | `"field_name"` | 匹配目标，当前仅支持字段名。 |
+| `override` | `bool` | `False` | 是否启用强制覆盖。`false` 为兜底模式，`true` 可压制普通规则。 |
+| `max_override_level` | `str` | `""` | 覆盖等级上限（包含）。空字符串时默认使用 `level` 字段；否则使用此处指定的等级。只有 `rank <= cap_rank` 的普通标签会被移除。 |
+| `suppress_rules` | `list[str]` | `[]` | 精细白名单。仅指定 `rule_id` 的普通规则允许被压制；空列表表示压制所有符合条件的普通规则。 |
 
 #### 4.5.3 执行流程
 
-降级规则在引擎 `evaluate()` 方法中的执行位置：
+降级规则在引擎 `evaluate()` 方法中的执行位置已扩展为四个阶段：
 
 ```mermaid
 graph TD
     A["Phase 1: 遍历所有普通规则<br/>（按 priority 降序）"] --> B["Phase 2: 执行降级规则<br/>（所有降级规则均评估）"]
-    B --> C["Phase 3: 按 (level, category) 去重"]
-    C --> D["返回 SecurityTag 列表"]
+    B --> C["Phase 3: 强制覆盖裁定<br/>（仅 override=true 的降级规则生效）"]
+    C --> D["Phase 4: 合并剩余标签与降级标签<br/>按 (level, category) 去重"]
+    D --> E["返回 (final_tags, suppressed_tags)"]
 ```
 
-具体执行逻辑（`_evaluate_downgrade` 方法）：
+具体执行逻辑：
 
-1. 将字段名归一化（小写 + 去除下划线和空格）
-2. 遍历所有降级规则（**不按优先级排序，全部评估**）
-3. 对每条降级规则，检查归一化后的字段名是否包含其 `keywords` 中的任一关键词
-4. 若命中，生成一个以降级目标等级（如 L1/L2）标记的 `SecurityTag`
+1. **Phase 1 — 普通规则评估**：按优先级遍历普通规则，生成 `normal_tags`。
+2. **Phase 2 — 降级规则评估**：字段名归一化后，按 `keyword_contains` 算子对所有降级规则做关键词匹配（默认使用单词边界，可通过 `use_word_boundaries: false` 改为纯子串匹配）；命中的生成 `downgrade_tags`，并标记 `is_downgrade=True`。若规则 `override=true`，则同时标记 `is_override=True`。
+3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_override_level))`；同时合并所有 `suppress_rules` 白名单。随后从 `normal_tags` 中移除满足以下全部条件的标签：
+   - 该标签的 `match_target` 不是 `field_value`（基于字段值的命中不会被 override 压制，避免误删真实敏感内容）；
+   - 该标签的 `rank <= cap_rank`；
+   - 该标签的 `rule_id` 在 `suppress_rules` 白名单内（或白名单为空）。
+   被移除的标签写入 `suppressed_tags`，用于审计和 Prometheus 指标。
+4. **Phase 4 — 合并与去重**：将剩余普通标签与降级标签合并，按 `(level, category)` 去重，返回 `(final_tags, suppressed_tags)`。
 
-#### 4.5.4 与最终等级裁定的关系
+#### 4.5.4 两种工作模式
 
-降级规则产生的标签**不会覆盖**普通规则产生的高等级标签。最终等级裁定逻辑为：
+降级规则有两种互斥的工作模式，由 `override` 字段控制：
+
+| 模式 | `override` | 行为 | 典型场景 |
+|---|---|---|---|
+| **兜底模式** | `false` | 降级标签与普通标签共存，最终等级取 `max`。因此降级标签仅在无普通规则命中时才真正影响结果。 | 为未命中任何规则的运营/公开字段提供默认低等级，避免落入 `default_level`（如 L3）。 |
+| **强制覆盖模式** | `true` | 先移除 `rank <= cap_rank` 的普通标签（可指定白名单），再取 `max`。降级规则可真正把被误中字段的等级拉低。 | 通用规则过于宽泛（如包含 `report` 就判定为敏感），需要把 `public_report` 等字段强制压回 L1。 |
+
+两种模式的执行流程对比如下：
 
 ```
-最终等级 = max(所有命中标签的等级)
+override=false (默认):
+  normal_tags = [L4, L3]
+  downgrade_tags = [L1]
+  final = max(L4, L3, L1) = L4          # 降级规则仅兜底，不改变高等级结果
+
+override=true, max_override_level="L3":
+  normal_tags = [L4, L3]
+  downgrade_tags = [L1(override)]
+  cap_rank = rank("L3") = 3
+  移除 rank <= 3 的普通标签 → normal_tags = [L4]
+  final = max(L4, L1) = L4              # L4 高于 cap，不被压制
+
+override=true, max_override_level="L4":
+  normal_tags = [L4, L3]
+  downgrade_tags = [L1(override)]
+  cap_rank = rank("L4") = 4
+  移除 rank <= 4 的普通标签 → normal_tags = []
+  final = max(L1) = L1                  # 强制覆盖生效
 ```
 
-因此：
-- 若某字段**仅**被降级规则命中（无普通规则命中），则最终等级为降级规则指定的低等级（如 L2）
-- 若某字段**同时**被普通规则（L4）和降级规则（L2）命中，则最终等级仍为 L4
+#### 4.5.5 `max_override_level` 与 `suppress_rules` 精细控制
 
-这意味着降级规则的核心价值在于：**为无其他规则命中的字段提供一个合理的低等级归属**，避免系统默认将其归入较高的默认等级（如 `default_level: L3`）。
+`max_override_level` 和 `suppress_rules` 共同决定强制覆盖的边界，避免一刀切：
 
-#### 4.5.5 YAML 配置示例
+- **`max_override_level`**：覆盖等级上限（包含）。仅 `rank <= cap_rank` 的普通标签会被移除。例如：
+  - `level="L2"`、`max_override_level=""`：等价于 `cap_rank = rank("L2")`，只压制 L1/L2 的普通标签。
+  - `level="L2"`、`max_override_level="L4"`：允许压制 L1~L4 的普通标签，但保留 L5（如果存在）。
+
+- **`suppress_rules`**：白名单机制。当希望只压制特定宽泛规则，而不影响其他精确规则时使用：
+  - `[]`（默认）：压制所有符合 rank 条件的普通标签。
+  - `["RULE_PII_BROAD_KEYWORD"]`：仅压制该规则产生的标签，其他规则（如身份证校验）产生的标签即使 rank 较低也会保留。
+
+组合逻辑（与 `override=true` 配合）：
+
+```yaml
+downgrade_rules:
+  - id: "RULE_DOWN_PUBLIC"
+    keywords: ["public_report", "annual_summary", "科普"]
+    level: "L1"
+    category: "PUBLIC_REPORT"
+    override: true
+    max_override_level: "L3"      # 只压制 L3 及以下普通标签
+    suppress_rules: []             # 压制所有符合条件的普通规则
+
+  - id: "RULE_DOWN_OPS"
+    keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次"]
+    level: "L2"
+    category: "OPERATIONAL_STAT"
+    override: true
+    max_override_level: ""          # 空=使用 level "L2" 作为 cap
+    suppress_rules: ["RULE_PII_BROAD_KEYWORD"]  # 仅压制该宽泛规则
+```
+
+#### 4.5.6 与最终等级裁定的关系
+
+最终等级裁定由 `ConfigurableRuleEngine` 或上层漏斗在 `_resolve_final_level()` 中完成：
+
+- **兜底模式（`override=false`）**：降级标签与普通标签共同参与 `max_level`，因此降级标签**不会覆盖**高等级普通标签。核心价值是为无普通规则命中的字段提供低等级归属。
+- **强制覆盖模式（`override=true`）**：`rank <= cap_rank` 的普通标签先被移除，再由剩余标签与降级标签取 `max`。因此降级规则可以**真正降低**被误中字段的最终等级。
+- 无论哪种模式，被压制的标签都会作为 `suppressed_tags` 返回，可用于审计、Console 展示和 `DYNCLASSIFICATION_OVERRIDE_SUPPRESSED_TOTAL` 指标监控。
+- 注意：`match_target == "field_value"` 的普通标签（即基于字段真实内容命中的规则，如身份证校验、银行卡号校验）不会被 override 压制，以保证真实敏感内容不被错误降级。
+
+#### 4.5.7 YAML 配置示例
 
 ```yaml
 # rules/domains/medical.yaml 中的降级规则部分
 downgrade_rules:
   - id: "RULE_DOWN_PUBLIC"
+    name: "公开报告降级"
     keywords: ["public_report", "annual_summary", "科普"]
     level: "L1"              # 降级为公开数据
     category: "PUBLIC_REPORT"
+    override: true           # 启用强制覆盖
+    max_override_level: "L3" # 允许压制 L3 及以下的普通标签
 
   - id: "RULE_DOWN_OPS"
+    name: "运营统计降级"
     keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次"]
     level: "L2"              # 降级为内部数据
     category: "OPERATIONAL_STAT"
+    override: false          # 默认兜底模式
 ```
 
-#### 4.5.6 与引擎层容错回退的区别
+#### 4.5.8 与引擎层容错回退的区别
 
 | 维度 | 引擎层容错回退（4.4 节） | 敏感度降级规则（本节） |
 |---|---|---|
@@ -262,7 +366,7 @@ downgrade_rules:
 | 触发条件 | 高层引擎不可用（模型缺失/加载失败） | 字段名包含特定关键词 |
 | 影响对象 | 整个分类流水线 | 单个字段的敏感度等级 |
 | 配置方式 | 代码内置（空对象模式） | YAML 声明式配置 |
-| 对应代码 | `ClassificationService` 初始化 | `ConfigurableRuleEngine._evaluate_downgrade()` |
+| 对应代码 | `ClassificationService` 初始化 | `ConfigurableRuleEngine._evaluate_downgrade()` / `_apply_override_suppression()` |
 
 ## 5. 数据模型设计：分类体系配置化
 
@@ -423,11 +527,15 @@ class RuleDef(BaseModel):
 
 class DowngradeRuleDef(BaseModel):
     """降级规则定义。"""
-    id: str
-    keywords: list[str]
+    id: str                    # 规则唯一标识
+    name: str = ""            # 规则名称（人类可读）
+    keywords: list[str]        # 触发降级的关键词列表
     level: str                 # 降级目标等级
-    category: str
+    category: str              # 降级后归属的业务类别
     match_target: str = "field_name"  # 匹配目标
+    override: bool = False     # 是否启用强制覆盖（压制普通规则标签）
+    max_override_level: str = ""      # 覆盖等级上限（空=使用 level 字段）
+    suppress_rules: list[str] = Field(default_factory=list)  # 压制白名单（空=压制所有）
 
 
 class CompositeRuleDef(BaseModel):
@@ -821,14 +929,29 @@ def regex_matcher(value: Any, params: dict[str, Any]) -> bool:
 
 @OperatorRegistry.register("keyword_contains")
 def keyword_contains_matcher(value: Any, params: dict[str, Any]) -> bool:
-    """关键词子串包含匹配算子。
+    """关键词匹配算子。
 
-    将输入值归一化（小写 + 去下划线/空格）后，
-    检查是否包含 keywords 列表中的任一关键词。
+    将输入值与关键词均归一化（小写 + 去下划线/空格）后匹配。
+    默认使用单词边界（\\b）进行匹配，避免 "report" 误中 "reported"；
+    需要纯子串匹配时可配置 params.use_word_boundaries=false。
+
+    params:
+        keywords: list[str] - 关键词列表
+        use_word_boundaries: bool - 是否使用单词边界（默认 True）
     """
     norm = str(value).lower().replace("_", "").replace(" ", "")
     keywords = params.get("keywords", [])
-    return any(kw in norm for kw in keywords)
+    use_word_boundaries = params.get("use_word_boundaries", True)
+
+    if use_word_boundaries:
+        for kw in keywords:
+            if kw:
+                pattern = r"\b" + re.escape(kw.lower().replace("_", "").replace(" ", "")) + r"\b"
+                if re.search(pattern, norm):
+                    return True
+        return False
+    else:
+        return any(kw.lower().replace("_", "").replace(" ", "") in norm for kw in keywords if kw)
 
 
 @OperatorRegistry.register("prefix_match")
@@ -900,9 +1023,9 @@ def plate_number_matcher(value: Any, params: dict[str, Any]) -> bool:
 ```python
 # privacy_local_agent/dynclassification/engine.py
 
-from typing import Any, Optional
+from typing import Any, Tuple
 from .models import DomainTaxonomy, SecurityTag
-from .rule_schema import RuleProfile, RuleDef, MatcherDef
+from .rule_schema import RuleProfile, RuleDef, MatcherDef, DowngradeRuleDef
 from .operator_registry import OperatorRegistry
 
 
@@ -913,8 +1036,16 @@ class ConfigurableRuleEngine:
     动态执行规则匹配。引擎本身不包含任何领域知识。
     """
 
-    def __init__(self, taxonomy: DomainTaxonomy, profiles: list[RuleProfile]):
+    def __init__(
+        self,
+        taxonomy: DomainTaxonomy,
+        profiles: list[RuleProfile],
+        domain: str = "",
+        standard_id: str = "",
+    ):
         self.taxonomy = taxonomy
+        self.domain = domain
+        self.standard_id = standard_id
         # 合并所有领域包的规则，按 priority 降序排列
         self.rules = self._merge_rules(profiles)
         self.downgrade_rules = self._merge_downgrade_rules(profiles)
@@ -926,51 +1057,82 @@ class ConfigurableRuleEngine:
             all_rules.extend(r for r in profile.rules if r.enabled)
         return sorted(all_rules, key=lambda r: r.priority, reverse=True)
 
+    def _merge_downgrade_rules(
+        self, profiles: list[RuleProfile]
+    ) -> list[DowngradeRuleDef]:
+        """合并多个领域包的降级规则列表。降级规则不按优先级排序。"""
+        all_rules = []
+        for profile in profiles:
+            all_rules.extend(profile.downgrade_rules)
+        return all_rules
+
     def evaluate(
         self, field_name: str, value: Any, context: dict[str, Any] | None = None
-    ) -> list[SecurityTag]:
-        """评估单个字段，返回命中的安全标签列表。
+    ) -> Tuple[list[SecurityTag], list[SecurityTag]]:
+        """评估单个字段，返回 (最终标签, 被压制标签)。
 
         执行流程：
-        1. 遍历所有规则
-        2. 对每条规则的 matchers 列表执行算子匹配
-        3. 根据 match_logic (AND/OR) 判断是否命中
-        4. 命中则生成 SecurityTag
-        5. 执行敏感度降级规则（见 4.5 节）
-        6. 去重返回
+        1. 遍历所有普通规则，生成 normal_tags
+        2. 执行降级规则，生成 downgrade_tags（标记 is_override / is_downgrade）
+        3. 对 override=true 的降级规则执行强制覆盖压制
+        4. 合并剩余标签 + 降级标签，按 (level, category) 去重
         """
-        tags: list[SecurityTag] = []
         str_value = str(value) if value is not None else ""
 
+        # Phase 1: 普通规则评估
+        normal_tags: list[SecurityTag] = []
         for rule in self.rules:
-            if self._evaluate_rule(rule, field_name, str_value):
-                tags.append(SecurityTag(
-                    level=self._resolve_level(rule.level),
-                    category=rule.category,
-                    source_engine="RULE",
-                    rule_id=rule.id,
-                ))
+            tag = self._evaluate_rule(rule, field_name, str_value)
+            if tag is not None:
+                normal_tags.append(tag)
 
-        # 执行敏感度降级规则：为可能被过度分类的字段附加低等级标签
-        tags.extend(self._evaluate_downgrade(field_name))
+        # Phase 2: 降级规则评估
+        downgrade_tags = self._evaluate_downgrade(field_name)
 
-        return self._unique_tags(tags)
+        # Phase 3: 强制覆盖压制（仅 override=true 的降级规则生效）
+        surviving_tags, suppressed_tags = self._apply_override_suppression(
+            normal_tags, downgrade_tags
+        )
 
-    def _evaluate_rule(self, rule: RuleDef, field_name: str, str_value: str) -> bool:
-        """评估单条规则的所有匹配器。"""
+        # Phase 4: 合并 + 去重
+        all_tags = surviving_tags + downgrade_tags
+        return self._unique_tags(all_tags), suppressed_tags
+
+    def _evaluate_rule(
+        self, rule: RuleDef, field_name: str, str_value: str
+    ) -> SecurityTag | None:
+        """评估单条规则，命中则返回 SecurityTag，否则返回 None。"""
         if not rule.matchers:
-            return False
+            return None
 
         results = []
         for matcher in rule.matchers:
             hit = self._execute_matcher(matcher, field_name, str_value)
             results.append(hit)
 
-        if rule.match_logic == "OR":
-            return any(results)
-        return all(results)  # 默认 AND
+        if rule.match_logic.upper() == "OR":
+            matched = any(results)
+        else:
+            matched = all(results)
 
-    def _execute_matcher(self, matcher: MatcherDef, field_name: str, str_value: str) -> bool:
+        if not matched:
+            return None
+
+        return SecurityTag(
+            level=rule.level,
+            category=rule.category,
+            source_engine="RULE",
+            rule_id=rule.id,
+            domain=self.domain,
+            standard_id=self.standard_id,
+            match_target="field_value" if any(
+                m.target == "field_value" for m in rule.matchers
+            ) else "field_name",
+        )
+
+    def _execute_matcher(
+        self, matcher: MatcherDef, field_name: str, str_value: str
+    ) -> bool:
         """执行单个匹配器。"""
         op_func = OperatorRegistry.get(matcher.operator)
         target_value = field_name if matcher.target == "field_name" else str_value
@@ -978,32 +1140,93 @@ class ConfigurableRuleEngine:
             return False
         return op_func(target_value, matcher.params)
 
-    def _resolve_level(self, level_id: str):
-        """将等级 ID 解析为 SensitivityLevel（兼容现有枚举）。"""
-        from .classification_models import SensitivityLevel
-        try:
-            return SensitivityLevel(level_id)
-        except ValueError:
-            # 对于非标准等级（如 C4），返回字符串包装
-            return level_id
-
     def _evaluate_downgrade(self, field_name: str) -> list[SecurityTag]:
-        """执行敏感度降级规则（详见 4.5 节）。
-
-        降级规则为“反向修正”机制：将可能被通用规则过度分类的字段
-        下调到合理的低等级。所有降级规则均被评估，不按优先级排序。
-        """
+        """执行敏感度降级规则（详见 4.5 节）。"""
         tags = []
         norm_name = field_name.lower().replace("_", "").replace(" ", "")
         for rule in self.downgrade_rules:
-            if any(kw in norm_name for kw in rule.keywords):
+            keywords = [kw.lower().replace("_", "").replace(" ", "") for kw in rule.keywords]
+            if any(kw in norm_name for kw in keywords):
                 tags.append(SecurityTag(
-                    level=self._resolve_level(rule.level),
+                    level=rule.level,
                     category=rule.category,
                     source_engine="RULE",
                     rule_id=rule.id,
+                    domain=self.domain,
+                    standard_id=self.standard_id,
+                    is_override=rule.override,
+                    is_downgrade=True,
                 ))
         return tags
+
+    def _apply_override_suppression(
+        self,
+        normal_tags: list[SecurityTag],
+        downgrade_tags: list[SecurityTag],
+    ) -> Tuple[list[SecurityTag], list[SecurityTag]]:
+        """对普通规则标签执行强制覆盖压制。
+
+        返回 (surviving_tags, suppressed_tags)。
+        """
+        override_tags = [t for t in downgrade_tags if t.is_override]
+        if not override_tags:
+            return normal_tags, []
+
+        # 计算所有 override 规则中最低的 cap_rank
+        cap_ranks = []
+        for tag in override_tags:
+            cap_level = self._get_override_cap_level(tag.rule_id, tag.level)
+            cap_rank = self.taxonomy.get_level_rank(cap_level)
+            if cap_rank > 0:
+                cap_ranks.append(cap_rank)
+        if not cap_ranks:
+            return normal_tags, []
+        min_cap_rank = min(cap_ranks)
+
+        # 合并 suppress_rules 白名单
+        suppress_whitelist: set[str] = set()
+        has_whitelist = False
+        for tag in override_tags:
+            rule_def = self._find_downgrade_rule(tag.rule_id)
+            if rule_def and rule_def.suppress_rules:
+                has_whitelist = True
+                suppress_whitelist.update(rule_def.suppress_rules)
+            elif rule_def and not rule_def.suppress_rules:
+                has_whitelist = False
+                suppress_whitelist.clear()
+                break
+
+        # 移除 rank <= cap_rank 的普通标签（field_value 命中除外）
+        surviving_tags = []
+        suppressed_tags = []
+        for tag in normal_tags:
+            if tag.match_target == "field_value":
+                surviving_tags.append(tag)
+                continue
+            tag_rank = self.taxonomy.get_level_rank(tag.level)
+            if tag_rank <= min_cap_rank:
+                if has_whitelist and tag.rule_id not in suppress_whitelist:
+                    surviving_tags.append(tag)
+                    continue
+                suppressed_tags.append(tag)
+            else:
+                surviving_tags.append(tag)
+
+        return surviving_tags, suppressed_tags
+
+    def _get_override_cap_level(self, rule_id: str, fallback_level: str) -> str:
+        """获取降级规则的覆盖等级上限。"""
+        rule = self._find_downgrade_rule(rule_id)
+        if rule:
+            return rule.max_override_level if rule.max_override_level else rule.level
+        return fallback_level
+
+    def _find_downgrade_rule(self, rule_id: str) -> DowngradeRuleDef | None:
+        """根据 rule_id 查找降级规则定义。"""
+        for rule in self.downgrade_rules:
+            if rule.id == rule_id:
+                return rule
+        return None
 
     def _unique_tags(self, tags: list[SecurityTag]) -> list[SecurityTag]:
         """按 (level, category) 去重。"""
@@ -1351,7 +1574,7 @@ rules/                              # 规则配置根目录
 |---|---|
 | `OperatorRegistry` | 注册/获取/未注册异常/动态注册 |
 | 各内置算子 | 正例/反例/边界值/None 输入 |
-| `ConfigurableRuleEngine` | AND/OR 逻辑/空规则/降级规则/去重 |
+| `ConfigurableRuleEngine` | AND/OR 逻辑/空规则/降级规则/override 强制覆盖/去重 |
 | `ProfileLoader` | YAML 加载/缓存命中/文件不存在/热加载 |
 | `DomainTaxonomy` | max_level/category_path/空输入 |
 
@@ -1552,7 +1775,7 @@ graph LR
 | Operator Registry | 算子注册表，管理所有可用算子的单例 |
 | Profile Loader | 配置加载器，负责 YAML 解析、缓存和热加载 |
 | ConfigurableRuleEngine | 通用规则引擎，解释执行声明式规则 |
-| Downgrade Rules | 敏感度降级规则，通过字段名关键词匹配将过度分类的字段下调到合理低等级 |
+| Downgrade Rules | 敏感度降级规则，通过字段名关键词匹配将过度分类的字段下调到合理低等级；支持 `override` 强制覆盖、`max_override_level` 与 `suppress_rules` 精细控制 |
 | Engine Fallback | 引擎层容错回退，高层引擎不可用时自动回退到低层引擎 |
 | Hot Reload | 热加载，运行时重新加载配置无需重启 |
 | Shadow Mode | 影子模式，新旧引擎并行对比结果 |

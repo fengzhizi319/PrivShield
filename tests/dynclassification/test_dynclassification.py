@@ -102,7 +102,7 @@ def simple_profile() -> RuleProfile:
                     MatcherDef(
                         target="field_name",
                         operator="keyword_contains",
-                        params={"keywords": ["brca1", "brca2", "tp53"]},
+                        params={"keywords": ["brca1", "brca2", "tp53"], "use_word_boundaries": False},
                     )
                 ],
             ),
@@ -225,7 +225,7 @@ class TestConfigurableRuleEngine:
             profiles=[simple_profile],
             domain="test",
         )
-        tags = engine.evaluate("phone", "13800138000")
+        tags, _ = engine.evaluate("phone", "13800138000")
         assert len(tags) >= 1
         assert any(t.rule_id == "RULE_PHONE" for t in tags)
 
@@ -236,7 +236,7 @@ class TestConfigurableRuleEngine:
             profiles=[simple_profile],
             domain="test",
         )
-        tags = engine.evaluate("phone", "12345")
+        tags, _ = engine.evaluate("phone", "12345")
         assert not any(t.rule_id == "RULE_PHONE" for t in tags)
 
     def test_id_card_checksum(self, default_taxonomy, simple_profile):
@@ -247,7 +247,7 @@ class TestConfigurableRuleEngine:
             domain="test",
         )
         # 合法身份证号（校验码正确）
-        tags = engine.evaluate("id_card", "110101199001011237")
+        tags, _ = engine.evaluate("id_card", "110101199001011237")
         assert any(t.rule_id == "RULE_IDCARD" for t in tags)
 
     def test_field_name_keyword(self, default_taxonomy, simple_profile):
@@ -257,7 +257,7 @@ class TestConfigurableRuleEngine:
             profiles=[simple_profile],
             domain="test",
         )
-        tags = engine.evaluate("patient_brca1_result", "阳性")
+        tags, _ = engine.evaluate("patient_brca1_result", "阳性")
         assert any(t.level == "L5" and t.rule_id == "RULE_GENOMIC" for t in tags)
 
     def test_priority_ordering(self, default_taxonomy, simple_profile):
@@ -282,11 +282,12 @@ class TestConfigurableRuleEngine:
             ("brca1_status", "positive"),
             ("age", "30"),
         ])
-        assert "phone" in results
-        assert "brca1_status" in results
-        assert len(results["phone"]) >= 1
-        assert len(results["brca1_status"]) >= 1
-        assert len(results["age"]) == 0
+        phone_tags, _ = results["phone"]
+        brca1_tags, _ = results["brca1_status"]
+        age_tags, _ = results["age"]
+        assert len(phone_tags) >= 1
+        assert len(brca1_tags) >= 1
+        assert len(age_tags) == 0
 
 
 # ===========================================================================
@@ -389,7 +390,7 @@ class TestDynClassificationService:
 
     def test_classify_genomic(self, service):
         """基因组字段分类应为 L5。"""
-        resp = service.classify_field("brca1_status", "阳性")
+        resp = service.classify_field("brca1", "阳性")
         assert resp.field_result is not None
         assert resp.field_result.final_level == "L5"
 
@@ -417,7 +418,7 @@ class TestDynClassificationService:
         """记录级分类：三字段组合触发复合规则升级。"""
         record = {
             "name": "张三",
-            "id_card": "110101199001011237",
+            "idcard": "110101199001011237",
             "phone": "13800138000",
         }
         resp = service.classify_record(record)
@@ -428,9 +429,9 @@ class TestDynClassificationService:
         """表级分类。"""
         rows = [
             {"name": "张三", "phone": "13800138000"},
-            {"name": "李四", "brca1_result": "阳性"},
+            {"name": "李四", "brca1": "阳性"},
         ]
-        resp = service.classify_table(["name", "phone", "brca1_result"], rows)
+        resp = service.classify_table(["name", "phone", "brca1"], rows)
         assert resp.table_result is not None
         assert resp.table_result.final_level == "L5"
         assert len(resp.table_result.record_results) == 2
