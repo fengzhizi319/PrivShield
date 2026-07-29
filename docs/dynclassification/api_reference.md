@@ -41,6 +41,14 @@ class DomainTaxonomy(BaseModel):
     levels: dict[str, SensitivityLevelDef]
     categories: dict[str, CategoryDef]
     default_level: str = "L3"
+    confidence_policy: Optional[ConfidencePolicy] = None  # 置信度策略配置
+    ner_entity_mapping: Optional[dict[str, str]] = None   # NER 实体类型→等级 ID 映射
+    ner_sensitive_keywords: Optional[list[str]] = None    # NER 敏感关键词列表
+    ner_label_mapping: Optional[dict[str, str]] = None    # NER 原始标签→标准标签映射
+    ner_model_path: Optional[str] = None                  # NER 模型文件路径
+    ner_vocab_path: Optional[str] = None                  # NER 词表文件路径
+    llm_model_path: Optional[str] = None                  # LLM 模型目录路径
+    llm_arbitration_prompt_template: Optional[str] = None # LLM 仲裁 prompt 模板
 
     def max_level(self, *level_ids: str) -> str:
         """返回给定等级列表中 rank 最高等级的 ID。"""
@@ -80,7 +88,7 @@ class OperatorRegistry:
 | 算子名称 (`operator`) | 描述 | 参数支持 (`params`) |
 |---|---|---|
 | `regex` | 正则表达式匹配算子 | `pattern` (str): 正则匹配表达式 |
-| `keyword_contains` | 归一化子串包含匹配 | `keywords` (list[str]): 关键词列表 |
+| `keyword_contains` | 归一化子串包含匹配 | `keywords` (list[str]): 关键词列表；`use_word_boundaries` (bool): 是否使用单词边界匹配（默认 False） |
 | `prefix_match` | 前缀匹配 | `prefixes` (list[str]): 前缀字符串列表 |
 | `suffix_match` | 后缀匹配 | `suffixes` (list[str]): 后缀字符串列表 |
 | `id_card_checksum` | GB 11643 身份证校验码算子 | 无 |
@@ -101,7 +109,7 @@ class OperatorRegistry:
 
 ```python
 class ConfigurableRuleEngine:
-    def __init__(self, taxonomy: DomainTaxonomy, profiles: list[RuleProfile]):
+    def __init__(self, taxonomy: DomainTaxonomy, profiles: list[RuleProfile], domain: str = "", standard_id: str = ""):
         """根据给定的元数据体系和规则包列表初始化引擎。"""
 
     def evaluate(

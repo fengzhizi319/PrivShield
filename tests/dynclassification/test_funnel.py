@@ -261,6 +261,48 @@ class TestNerLayer:
 
         mock_ner.extract.assert_not_called()
 
+    def test_ner_custom_entity_mapping(self, taxonomy, engine_conflict):
+        """自定义 ner_entity_mapping 配置化映射生效。"""
+        # 配置自定义实体→等级映射
+        taxonomy.ner_entity_mapping = {
+            "MEDICAL_DISEASE": "L5",
+            "MEDICATION": "L2",
+        }
+        mock_ner = MagicMock(spec=NerAdapter)
+        mock_ner.extract.return_value = [
+            {"label": "MEDICAL_DISEASE", "text": "高血压", "confidence": 0.9},
+            {"label": "MEDICATION", "text": "阿司匹林", "confidence": 0.85},
+        ]
+
+        policy = ConfidencePolicy(enable_ner=True)
+        funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, ner_adapter=mock_ner)
+        result, _suppressed = funnel.classify_field("diagnosis", "高血压用阿司匹林")
+
+        ner_tags = [t for t in result.tags if t.source_engine == "SMALL_NER"]
+        assert len(ner_tags) == 2
+        # 自定义映射: MEDICAL_DISEASE → L5, MEDICATION → L2
+        levels = {t.category: t.level for t in ner_tags}
+        assert levels["MEDICAL_DISEASE"] == "L5"
+        assert levels["MEDICATION"] == "L2"
+        assert result.final_level == "L5"
+
+    def test_ner_custom_sensitive_keywords(self, taxonomy, engine_conflict):
+        """自定义 ner_sensitive_keywords 配置生效。"""
+        taxonomy.ner_sensitive_keywords = ["洗钱", "恐怖融资"]
+        mock_ner = MagicMock(spec=NerAdapter)
+        mock_ner.extract.return_value = [
+            {"label": "MEDICAL_DISEASE", "text": "洗钱风险", "confidence": 0.8}
+        ]
+
+        policy = ConfidencePolicy(enable_ner=True)
+        funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, ner_adapter=mock_ner)
+        result, _suppressed = funnel.classify_field("risk_type", "洗钱风险")
+
+        ner_tags = [t for t in result.tags if t.source_engine == "SMALL_NER"]
+        # "洗钱" 命中自定义敏感关键词 → 升级为次高等级 L4
+        assert ner_tags[0].level == "L4"
+        assert ner_tags[0].category == "MEDICAL_SENSITIVE_DISEASE"
+
 
 # ===========================================================================
 # Layer-3: LLM 仲裁测试 (Mock)

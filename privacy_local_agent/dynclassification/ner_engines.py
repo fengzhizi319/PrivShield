@@ -49,6 +49,18 @@ from .base import SmallNerEngine
 # 创建模块级结构化日志器
 logger = get_logger(__name__)
 
+# 内置 NER 原始标签→标准标签映射（CMeEE 医疗 NER 默认）。
+# 可通过 taxonomy YAML 的 ner_label_mapping 字段覆盖。
+DEFAULT_NER_LABEL_MAPPING: dict[str, str] = {
+    "dis": "MEDICAL_DISEASE",   # 疾病
+    "sym": "MEDICAL_DISEASE",   # 症状（归入疾病大类）
+    "mic": "MEDICAL_DISEASE",   # 微生物（归入疾病大类）
+    "dru": "MEDICATION",        # 药物
+    "pro": "SURGERY",           # 手术/操作
+    "bod": "BODY_PART",         # 身体部位
+    "GENE": "GENOMIC_HINT",     # 基因（ModelScope 特有）
+}
+
 
 class SimpleChineseBertTokenizer:
     """纯 Python 实现的轻量级中文 BERT 分词器 / Lightweight Chinese BERT Tokenizer.
@@ -191,7 +203,7 @@ class ONNXSmallNerEngine(SmallNerEngine):
     with lazy-loading and graceful degradation support.
     """
 
-    def __init__(self, model_path: str | None = None, vocab_path: str | None = None):
+    def __init__(self, model_path: str | None = None, vocab_path: str | None = None, label_mapping: dict[str, str] | None = None):
         """初始化 ONNX NER 引擎 / Initialize ONNX NER Engine.
 
         仅设置路径和状态标志，不实际加载模型（延迟加载策略）。
@@ -199,6 +211,7 @@ class ONNXSmallNerEngine(SmallNerEngine):
         Args:
             model_path: ONNX 模型文件路径（默认 .models/raner_cmeee.onnx）。
             vocab_path: vocab.txt 词表文件路径（默认 .models/vocab.txt）。
+            label_mapping: 原始标签→标准标签映射（默认使用 DEFAULT_NER_LABEL_MAPPING）。
         """
         # 计算项目根目录（从当前文件向上两级）
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -208,6 +221,8 @@ class ONNXSmallNerEngine(SmallNerEngine):
         self.model_path = model_path or os.path.join(project_root, ".models", "raner_cmeee.onnx")
         # 设置词表文件路径
         self.vocab_path = vocab_path or os.path.join(project_root, ".models", "vocab.txt")
+        # 原始标签→标准标签映射（可配置，默认使用内置医疗映射）
+        self.label_mapping = label_mapping or DEFAULT_NER_LABEL_MAPPING
         # ONNX 推理会话（延迟初始化）
         self.session: Any | None = None
         # BERT 分词器实例（延迟初始化）
@@ -427,21 +442,11 @@ class ONNXSmallNerEngine(SmallNerEngine):
             # === 步骤6：解析 BIO 标签为实体列表 ===
             entities = self._parse_bio_tags(tokens, label_indices, token_probs)
 
-            # === 步骤7：映射实体标签到统一标准类别 ===
+            # === 步骤7：映射实体标签到统一标准类别（使用可配置映射） ===
             for ent in entities:
                 raw_label = ent["label"]
-                # 疾病/症状/微生物 → 统一为 MEDICAL_DISEASE
-                if raw_label in ("dis", "sym", "mic"):
-                    ent["label"] = "MEDICAL_DISEASE"
-                # 药物 → MEDICATION
-                elif raw_label == "dru":
-                    ent["label"] = "MEDICATION"
-                # 手术/操作 → SURGERY
-                elif raw_label == "pro":
-                    ent["label"] = "SURGERY"
-                # 身体部位 → BODY_PART
-                elif raw_label == "bod":
-                    ent["label"] = "BODY_PART"
+                if raw_label in self.label_mapping:
+                    ent["label"] = self.label_mapping[raw_label]
 
             # 计算推理耗时并记录指标
             duration = time.monotonic() - start_time
@@ -487,16 +492,19 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
     pipeline, with lazy-loading and graceful degradation support.
     """
 
-    def __init__(self, model_id: str = "damo/nlp_raner_named-entity-recognition_chinese-base-cmeee"):
+    def __init__(self, model_id: str = "damo/nlp_raner_named-entity-recognition_chinese-base-cmeee", label_mapping: dict[str, str] | None = None):
         """初始化 ModelScope NER 引擎 / Initialize ModelScope NER Engine.
 
         仅设置模型引用和状态标志，不实际加载模型（延迟加载策略）。
 
         Args:
             model_id: ModelScope 上的模型 ID，默认使用达摩院 RaNER CMeEE 微调模型。
+            label_mapping: 原始标签→标准标签映射（默认使用 DEFAULT_NER_LABEL_MAPPING）。
         """
         # 保存模型 ID（用于从 Hub 下载或标识本地模型）
         self.model_id = model_id
+        # 原始标签→标准标签映射（可配置，默认使用内置医疗映射）
+        self.label_mapping = label_mapping or DEFAULT_NER_LABEL_MAPPING
         # 计算本地模型目录路径（download_ner_model.py 下载的位置）
         # 优先使用本地已下载的模型，避免推理时再次从 Hub 拉取（离线友好）
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -674,18 +682,8 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
                 raw_label = item.get("type", "")  # 原始实体类型
                 span = item.get("span", "")        # 实体文本
 
-                # 映射原始标签到统一标准类别
-                label = raw_label
-                if raw_label in ("dis", "sym", "mic"):
-                    label = "MEDICAL_DISEASE"   # 疾病/症状/微生物
-                elif raw_label == "dru":
-                    label = "MEDICATION"        # 药物
-                elif raw_label == "pro":
-                    label = "SURGERY"           # 手术/操作
-                elif raw_label == "bod":
-                    label = "BODY_PART"         # 身体部位
-                elif raw_label == "GENE":
-                    label = "GENOMIC_HINT"      # 基因（特殊处理）
+                # 映射原始标签到统一标准类别（使用可配置映射）
+                label = self.label_mapping.get(raw_label, raw_label)
 
                 # 构建标准化实体字典
                 entities.append(

@@ -197,6 +197,28 @@ class DomainTaxonomy(BaseModel):
         default=None,
         description="LLM 仲裁 prompt 模板（支持占位符），None 时使用内置默认模板",
     )
+    # NER raw label mapping: maps raw NER engine output labels to standard labels.
+    # E.g. {"dis": "MEDICAL_DISEASE", "dru": "MEDICATION", "pro": "SURGERY"}
+    # When None, uses built-in medical NER label mapping.
+    ner_label_mapping: Optional[dict[str, str]] = Field(
+        default=None,
+        description="NER 原始标签→标准标签映射（如 dis→MEDICAL_DISEASE），None 时使用内置医疗映射",
+    )
+    # NER model file path (ONNX model or ModelScope model directory).
+    ner_model_path: Optional[str] = Field(
+        default=None,
+        description="NER 模型文件路径（ONNX 或 ModelScope 目录），None 时自动检测",
+    )
+    # NER vocabulary file path (for ONNX engine tokenizer).
+    ner_vocab_path: Optional[str] = Field(
+        default=None,
+        description="NER 词表文件路径（ONNX 引擎用），None 时自动检测",
+    )
+    # LLM model directory path (e.g. .models/Qwen2-VL-2B-Instruct).
+    llm_model_path: Optional[str] = Field(
+        default=None,
+        description="LLM 模型目录路径，None 时使用默认路径",
+    )
 
     def max_level(self, *level_ids: str) -> str:
         """返回等级集合中 rank 最高的等级 ID。

@@ -450,14 +450,21 @@ class DynClassificationService:
         ner_adapter = None
         if policy.enable_ner:
             if self._ner_adapter is None:
-                self._ner_adapter = NerAdapter()
+                taxonomy = engine.taxonomy
+                self._ner_adapter = NerAdapter(
+                    model_path=taxonomy.ner_model_path,
+                    vocab_path=taxonomy.ner_vocab_path,
+                    label_mapping=taxonomy.ner_label_mapping,
+                )
             ner_adapter = self._ner_adapter
 
         # 按需初始化 LLM 适配器（全局单例）
         llm_adapter = None
         if policy.enable_llm or policy.enable_llm_arbitration:
             if self._llm_adapter is None:
-                self._llm_adapter = LlmAdapter()
+                self._llm_adapter = LlmAdapter(
+                    model_path=engine.taxonomy.llm_model_path,
+                )
             llm_adapter = self._llm_adapter
 
         funnel = ClassificationFunnel(

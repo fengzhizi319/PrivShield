@@ -3,7 +3,7 @@ import { Icon } from '@/components/icons';
 import { proxyRequest } from '@/api/client';
 
 export default function DynClassificationPanel() {
-  const [tab, setTab] = useState<'eval' | 'generate' | 'info' | 'validate'>('eval');
+  const [tab, setTab] = useState<'eval' | 'record' | 'generate' | 'info' | 'validate'>('eval');
 
   // Eval 状态
   const [fieldName, setFieldName] = useState('mobile_phone');
@@ -28,6 +28,14 @@ export default function DynClassificationPanel() {
   const [valResult, setValResult] = useState<any>(null);
   const [valLoading, setValLoading] = useState(false);
 
+  // Record 状态
+  const [recordJson, setRecordJson] = useState('{"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}');
+  const [recordDomain, setRecordDomain] = useState('general-pii');
+  const [recordStandard, setRecordStandard] = useState('');
+  const [recordResult, setRecordResult] = useState<any>(null);
+  const [recordLoading, setRecordLoading] = useState(false);
+  const [recordError, setRecordError] = useState<string | null>(null);
+
   // 执行评估
   const handleEval = async () => {
     setEvalLoading(true);
@@ -49,6 +57,37 @@ export default function DynClassificationPanel() {
       setEvalError(e.message || '评估失败');
     } finally {
       setEvalLoading(false);
+    }
+  };
+
+  // 执行记录级分类
+  const handleRecordEval = async () => {
+    setRecordLoading(true);
+    setRecordError(null);
+    setRecordResult(null);
+    try {
+      let record: any;
+      try {
+        record = JSON.parse(recordJson);
+      } catch {
+        setRecordError('JSON 格式错误，请检查输入');
+        setRecordLoading(false);
+        return;
+      }
+      const payload: any = { record };
+      if (recordDomain) payload.domain = recordDomain;
+      if (recordStandard) payload.standard = recordStandard;
+
+      const res = await proxyRequest({
+        method: 'POST',
+        path: '/v1/dynclassification/eval_record',
+        body: payload,
+      });
+      setRecordResult(res.data);
+    } catch (e: any) {
+      setRecordError(e.message || '记录级分类失败');
+    } finally {
+      setRecordLoading(false);
     }
   };
 
@@ -128,6 +167,14 @@ export default function DynClassificationPanel() {
             }`}
           >
             字段动态评估 (Eval)
+          </button>
+          <button
+            onClick={() => setTab('record')}
+            className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              tab === 'record' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            记录级分类 (Record)
           </button>
           <button
             onClick={() => setTab('generate')}
@@ -257,7 +304,87 @@ export default function DynClassificationPanel() {
           </div>
         )}
 
-        {/* TAB 2: 自动生成配置 */}
+        {/* TAB 2: 记录级分类 */}
+        {tab === 'record' && (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-4 text-base font-semibold text-gray-800">记录级分类输入</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700">记录 JSON（字段名 → 值）</label>
+                  <textarea
+                    value={recordJson}
+                    onChange={(e) => setRecordJson(e.target.value)}
+                    rows={5}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs focus:border-purple-500 focus:outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700">领域 (domain)</label>
+                    <input
+                      type="text"
+                      value={recordDomain}
+                      onChange={(e) => setRecordDomain(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
+                      placeholder="general-pii / medical"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700">标准 (standard)</label>
+                    <input
+                      type="text"
+                      value={recordStandard}
+                      onChange={(e) => setRecordStandard(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
+                      placeholder="sc_health_db51 / jrt0197"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={handleRecordEval}
+                  disabled={recordLoading}
+                  className="w-full rounded-lg bg-purple-600 py-2.5 text-sm font-semibold text-white shadow-md shadow-purple-100 transition-colors hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {recordLoading ? '分类计算中…' : '执行记录级分类'}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-5 shadow-sm">
+              <h2 className="mb-4 text-base font-semibold text-gray-800">记录级分类结果</h2>
+              {recordError && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{recordError}</div>}
+              {recordResult ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between rounded-lg bg-white p-4 shadow-sm">
+                    <div>
+                      <span className="text-xs text-gray-500">记录级最终等级</span>
+                      <div className="mt-1 text-2xl font-black text-purple-700">
+                        {recordResult.recordResult?.finalLevel || 'N/A'}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs text-gray-500">置信度 / 需人工复核</span>
+                      <div className="mt-1 text-sm font-semibold text-gray-800">
+                        {recordResult.recordResult?.confidence != null
+                          ? `${Math.round(recordResult.recordResult.confidence * 100)}%`
+                          : 'N/A'}
+                        {recordResult.recordResult?.needsHumanReview ? ' ⚠️' : ''}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-900 text-xs text-green-400">
+                    <pre className="max-h-72 overflow-auto p-4">{JSON.stringify(recordResult, null, 2)}</pre>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-48 items-center justify-center text-xs text-gray-400">点击左侧“执行记录级分类”获取结果</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: 自动生成配置 */}
         {tab === 'generate' && (
           <div className="max-w-3xl space-y-6">
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
