@@ -1,7 +1,7 @@
 """三层漏斗编排器 / Three-Layer Classification Funnel.
 
-编排 Layer-1 规则引擎、Layer-2 NER、Layer-3 LLM 的执行顺序和降级逻辑，
-并实现置信度衰减策略（Phase 1）和 LLM 仲裁（Phase 2）。
+编排 Layer-1 规则引擎、Layer-2 NER、Layer-3 LLM 的执行顺序和降级逻辑， / Orchestrates the execution order and fallback logic of Layer-1 Rule Engine, Layer-2 NER, and Layer-3 LLM,
+并实现置信度衰减策略（Phase 1）和 LLM 仲裁（Phase 2）。 / and implements confidence decay policy (Phase 1) and LLM arbitration (Phase 2).
 
 执行流程:
 ┌─────────────────────────────────────────────────────────────────────────┐
