@@ -1,12 +1,12 @@
-"""降级规则强制覆盖能力测试 / Downgrade Override Feature Tests.
+"""降级规则强制覆盖与豁免例外能力测试 / Downgrade Override & Exemption Feature Tests.
 
-覆盖场景：
-- force_suppress=false（默认）：行为与修改前完全一致（向后兼容）
-- force_suppress=true + 普通规则 L3：L3 标签被压制，最终等级为降级目标 L2
-- force_suppress=true + 普通规则 L5：L5 标签不被压制（超出上限），最终等级仍为 L5
-- force_suppress=true + 无普通规则：行为与兜底模式一致
-- 多条覆盖规则同时命中：取最严格的覆盖（最低等级）
-- 向后兼容：无 force_suppress 字段的旧 YAML 正常加载（alias="override" 兼容）
+测试覆盖场景 / Test Scenarios Covered:
+- force_suppress=false（默认）：行为与修改前完全一致，仅做降级兜底（向后兼容） / Default behavior, fallback only
+- force_suppress=true + 普通规则 L3：L3 标签被强行压制，最终等级降为降级目标 L2 / Forced suppression down to L2
+- force_suppress=true + 普通规则 L5：L5 标签不被压制（超出 max_force_suppress_level 上限），最终等级保持 L5 / Out-of-cap levels kept
+- force_suppress=true + 无普通规则命中：行为与兜底模式一致 / Fallback mode when no normal rules match
+- 多条覆盖规则同时命中：取最保守的覆盖上限（最小 max_force_suppress_level） / Take min cap rank for safety
+- exempt_rules (exclude_rules) 豁免例外名单：默认空列表全额压制；列表内的规则 ID/通配符作为例外豁免保留 / Exemption whitelist & wildcards
 """
 
 from __future__ import annotations
@@ -324,7 +324,6 @@ class TestEdgeCases:
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
         tags, _ = engine.evaluate("some_data_field", "value")
-        print( "tags:", tags)
 
         # 安全保守: min(L3, L4) = L3 → L4 (rank=4) > cap_rank(3) → L4 存活
         levels = [t.level for t in tags]
