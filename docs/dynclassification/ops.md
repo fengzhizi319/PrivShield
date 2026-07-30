@@ -114,3 +114,17 @@ groups:
 - **排查步骤**：
   1. 调用 `GET /v1/dynclassification/operators` 接口确认当前已注册的所有算子列表。
   2. 修正规则 YAML 文件中的算子名称或补全 Python 算子注册逻辑。
+
+---
+
+## 5. 降级规则 `force_suppress` 与 `suppress_rules` 最佳实践指南
+
+当在规则 YAML 中使用敏感度降级规则 (`downgrade_rules`) 时：
+
+1. **启用强制覆盖**：设置 `force_suppress: true`。
+2. **显式配置覆盖上限 `max_force_suppress_level`**：
+   - 默认为空时仅擦除 $\le \text{level}$ 的标签。
+   - 若要将更高误报等级（如 L3/L4）强行降级为目标等级（如 L2），**必须显式指定** `max_force_suppress_level: "L3"` 或 `"L4"`。若未显式指定，`validate` 校验时将输出 `[配置提示]` 告警信息。
+3. **使用 `suppress_rules` 进行靶向压制**：
+   - 当遇到多个普通规则命中，且只想擦除宽泛匹配规则、保留精确校验规则时，在 `suppress_rules: ["BROAD_RULE_ID"]` 白名单中明确填入待擦除的规则 ID。
+

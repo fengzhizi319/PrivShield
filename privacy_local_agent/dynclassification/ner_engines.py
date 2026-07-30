@@ -111,15 +111,16 @@ class SimpleChineseBertTokenizer:
     def tokenize(self, text: str) -> list[str]:
         """对中文进行单字/字符级切分 / Tokenize Chinese Text at Character Level.
 
-        分词逻辑：
-        1. 遍历文本中的每个字符
-        2. 如果字符在词表中 → 直接使用
-        3. 如果是字母且小写形式在词表中 → 使用小写形式（大小写折叠）
-        4. 否则 → 替换为 [UNK]
+        分词逻辑 / Tokenization logic:
+        1. 遍历文本中的每个字符 / Iterate over each character in the text
+        2. 如果字符在词表中 → 直接使用 / If character is in vocab → use directly
+        3. 如果是字母且小写形式在词表中 → 使用小写形式（大小写折叠） / If alphabet and lowercase form is in vocab → use lowercase form (case folding)
+        4. 否则 → 替换为 [UNK] / Otherwise → replace with [UNK]
 
-        大小写折叠说明：
+        大小写折叠说明 / Case folding description:
         中文 BERT 词表通常只包含小写英文字母，但医学文本中常出现
         大写缩写（如 HIV、AIDS、BRCA1），折叠为小写可提升识别稳定性。
+        Chinese BERT vocab usually only contains lowercase English letters, but medical texts often contain uppercase abbreviations (e.g., HIV, AIDS, BRCA1). Folding them to lowercase improves recognition stability.
 
         Args:
             text: 待分词的文本 / Text to tokenize.
@@ -235,17 +236,18 @@ class ONNXSmallNerEngine(SmallNerEngine):
     def _lazy_init(self):
         """延迟加载模型 / Lazy-Load ONNX Model.
 
-        首次调用时执行实际的模型加载：
-        1. 检查 onnxruntime 是否可用
-        2. 验证模型文件和词表文件是否存在
-        3. 创建 ONNX InferenceSession
-        4. 初始化 BERT 分词器
+        首次调用时执行实际的模型加载 / Execute actual model loading on the first call:
+        1. 检查 onnxruntime 是否可用 / Check if onnxruntime is available
+        2. 验证模型文件和词表文件是否存在 / Verify if model and vocab files exist
+        3. 创建 ONNX InferenceSession / Create ONNX InferenceSession
+        4. 初始化 BERT 分词器 / Initialize BERT Tokenizer
 
         如果初始化失败，缓存错误并在后续调用中直接抛出（不重复尝试）。
+        If initialization fails, cache the error and throw it directly in subsequent calls (do not retry).
 
         Raises:
-            FileNotFoundError: 模型或词表文件不存在。
-            ImportError: onnxruntime 未安装。
+            FileNotFoundError: 模型或词表文件不存在 / Model or vocab file does not exist.
+            ImportError: onnxruntime 未安装 / onnxruntime is not installed.
         """
         # 已初始化则直接返回（避免重复加载）
         if self._initialized:
@@ -290,24 +292,24 @@ class ONNXSmallNerEngine(SmallNerEngine):
     def _parse_bio_tags(self, tokens: list[str], label_indices: list[int], probs: list[float]) -> list[dict[str, Any]]:
         """解析 BIO 序列标注 / Parse BIO Sequence Labels.
 
-        BIO 标注方案：
-        - B-XXX：实体起始（Begin）
-        - I-XXX：实体内部（Inside）
-        - O：非实体（Outside）
+        BIO 标注方案 / BIO Labeling Scheme:
+        - B-XXX: 实体起始 (Begin)
+        - I-XXX: 实体内部 (Inside)
+        - O: 非实体 (Outside)
 
-        状态机逻辑：
-        - 遇到 B- 标签：开始新实体（如果前一个实体未完成则先保存）
-        - 遇到 I- 标签且类型匹配：合并到当前实体
-        - 遇到 I- 标签但类型不匹配：结束当前实体，丢弃不匹配的 I-
-        - 遇到 O 标签：结束当前实体
+        状态机逻辑 / State Machine Logic:
+        - 遇到 B- 标签：开始新实体（如果前一个实体未完成则先保存） / Encounter B- tag: Start new entity (save previous entity if unfinished)
+        - 遇到 I- 标签且类型匹配：合并到当前实体 / Encounter I- tag and type matches: Merge into current entity
+        - 遇到 I- 标签但类型不匹配：结束当前实体，丢弃不匹配的 I- / Encounter I- tag but type mismatch: End current entity, discard mismatched I-
+        - 遇到 O 标签：结束当前实体 / Encounter O tag: End current entity
 
         Args:
-            tokens: token 序列（含 [CLS]/[SEP]） / Token sequence.
+            tokens: token 序列（含 [CLS]/[SEP]） / Token sequence (including [CLS]/[SEP]).
             label_indices: 每个 token 的预测标签索引 / Predicted label index per token.
             probs: 每个 token 的预测概率 / Prediction probability per token.
 
         Returns:
-            命名实体字典列表，每个字典含 text/label/confidence。
+            命名实体字典列表，每个字典含 text/label/confidence / List of named entity dictionaries, each containing text/label/confidence.
         """
         # CMeEE 标签索引映射表（索引 0 为 O，1-12 为 B/I 标签对）
         label_map = {

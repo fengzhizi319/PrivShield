@@ -152,29 +152,29 @@ class ConfigurableRuleEngine:
             一个元组 (final_tags, suppressed_tags)，分别包含最终生效的标签和被压制的标签 / A tuple (final_tags, suppressed_tags), containing the final effective tags and suppressed tags respectively.
     
         字段评估流程（含强制覆盖） / Field evaluation flow (including forced override):
-        ┌─────────────────────────────────────────────────────────────────┐
-        │  evaluate(field_name, value)                                    │
-        │                                                                 │
-        │  Phase 1: 普通规则评估 / Normal rule evaluation → normal_tags = [L5, L4, L3, ...]           │
-        │  Phase 2: 降级规则评估 / Downgrade rule evaluation → downgrade_tags = [L2, L1, ...]            │
-        │                                                                 │
-        │  Phase 3: 强制覆盖裁定 / Forced override determination (force_suppress=true 的降级规则 / downgrade rules)              │
-        │    ┌─────────────────────────────────────────────────────────┐  │
-        │    │ 对每条 override 降级标签 / For each override downgrade tag:                                  │  │
-        │    │   cap_rank = rank(max_force_suppress_level)                   │  │
-        │    │   从 normal_tags 中移除 rank <= cap_rank 的标签 / Remove tags from normal_tags with rank <= cap_rank            │  │
-        │    │   (被移除标签记入 suppressed_tags 用于审计 / Removed tags are recorded in suppressed_tags for auditing)                  │  │
-        │    └─────────────────────────────────────────────────────────┘  │
-        │                                                                 │
-        │  Phase 4: 合并 / Merge normal_tags + downgrade_tags → 去重 / Deduplicate → return       │
-        └─────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-        ┌─────────────────────────────────────────────────────────────────┐
-        │  _resolve_final_level(tags, engine)                             │
-        │    if not tags → return default_level ("L3")                    │
-        │    else → return max_level(*levels)  ← 取所有标签中最高 / Take the highest among all tags            │
-        └─────────────────────────────────────────────────────────────────┘
+        ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+        │  evaluate(field_name, value)                                                                                       │
+        │                                                                                                                    │
+        │  Phase 1: 普通规则评估 / Normal rule evaluation → normal_tags = [L5, L4, L3, ...]                                     │
+        │  Phase 2: 降级规则评估 / Downgrade rule evaluation → downgrade_tags = [L2, L1, ...]                                   │
+        │                                                                                                                    │
+        │  Phase 3: 强制覆盖裁定 / Forced override determination (force_suppress=true 的降级规则 / downgrade rules)               │
+        │    ┌───────────────────────────────────────────────────────────────────────────────────────────────────────┐        │
+        │    │ 对每条 override 降级标签 / For each override downgrade tag:                                              │        │
+        │    │   cap_rank = rank(max_force_suppress_level)                                                           │        │
+        │    │   从 normal_tags 中移除 rank <= cap_rank 的标签 / Remove tags from normal_tags with rank <= cap_rank     │        │
+        │    │   (被移除标签记入 suppressed_tags 用于审计 / Removed tags are recorded in suppressed_tags for auditing)    │        │
+        │    └───────────────────────────────────────────────────────────────────────────────────────────────────────┘        │
+        │                                                                                                                     │
+        │  Phase 4: 合并 / Merge normal_tags + downgrade_tags → 去重 / Deduplicate → return                                    │
+        └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                   │
+                                                                   ▼
+        ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+        │  _resolve_final_level(tags, engine)                                                                                │
+        │    if not tags → return default_level ("L3")                                                                       │
+        │    else → return max_level(*levels)  ← 取所有标签中最高 / Take the highest among all tags                             │
+        └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
         """
         # Convert value to string once; all operators work on string representation.
         str_value = str(value) if value is not None else ""
@@ -429,15 +429,23 @@ class ConfigurableRuleEngine:
                 suppress_whitelist.clear()
                 break
 
-        # Step 3: Filter out normal tags whose rank <= cap_rank.
+        # Step 3: Filter out normal tags whose rank <= cap_rank. / 过滤并压制 rank <= cap_rank 的普通标签。
+        # 压制 4 重判定条件 / 4 Suppression Conditions:
+        # 1. 不能是值级匹配标签（tag.match_target != 'field_value'，数据值扫描默认豁免保底）
+        # 2. 标签敏感等级 <= 覆盖上限（tag_rank <= min_cap_rank）
+        # 3. 压制白名单匹配（若设置了 suppress_rules 白名单，tag.rule_id 必须在白名单中才被压制，避免一刀切误伤其他规则）
         surviving_tags: list[SecurityTag] = []
         suppressed_tags: list[SecurityTag] = []
         for tag in normal_tags:
+            # 条件 1: 值级命中防护，永远不被降级规则强行压制 / Value-level hits are protected
             if tag.match_target == "field_value":
                 surviving_tags.append(tag)
                 continue
             tag_rank = self.taxonomy.get_level_rank(tag.level)
+            # 条件 2: 确认敏感等级未超出压制上限 / Check level <= cap_rank
             if tag_rank <= min_cap_rank:
+                # 条件 3: suppress_rules 白名单校验 / Whitelist check for suppress_rules
+                # 如果配置了白名单且该规则 ID 不在白名单中，则跳过压制、保留标签 / Skip suppression if not in whitelist
                 if has_whitelist and tag.rule_id not in suppress_whitelist:
                     surviving_tags.append(tag)
                     continue

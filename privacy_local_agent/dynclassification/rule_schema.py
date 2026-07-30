@@ -154,10 +154,11 @@ class DowngradeRuleDef(BaseModel):
     # Fine-grained suppression whitelist: only normal rules whose ID appears here
     # can be suppressed by this override rule.
     # Empty list (default) = suppress ALL eligible normal tags (backward-compatible).
-    # Non-empty = only tags from listed rule IDs are candidates for suppression.
+    # Non-empty =靶向白名单模式，仅列出的规则 ID 产生的标签可被压制（防止误伤其他精确规则）。
     # 细粒度压制白名单：仅此处列出的规则 ID 产生的普通标签可被本覆盖规则压制。
-    # 空列表（默认）= 压制所有符合条件的普通标签（向后兼容）。
-    # 非空 = 仅列出的规则 ID 产生的标签才是压制候选。
+    # 核心用途：避免一刀切压制所有同/低等级标签。例如仅擦除宽泛正则误报，保留精准格式正则标签。
+    # - 空列表（默认）= 压制所有符合条件的普通标签（向后兼容）。 / Empty list (default) = suppress ALL eligible tags.
+    # - 非空 = 仅列出的规则 ID 产生的标签才是压制候选。 / Non-empty = only listed rule IDs can be suppressed.
     suppress_rules: list[str] = Field(
         default_factory=list,
         description="压制白名单: 仅列出的规则 ID 可被压制（空=压制所有符合条件的规则）",
