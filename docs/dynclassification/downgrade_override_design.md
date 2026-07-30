@@ -117,6 +117,7 @@ downgrade_rules:
 | 文件 | 变更类型 | 说明 |
 |---|---|---|
 | `rule_schema.py` | 模型扩展 | `DowngradeRuleDef` 新增 `override`、`max_force_suppress_level` |
+| `validator.py` | 校验提示 | 新增对 `force_suppress=true` 未配置 `max_force_suppress_level` 的配置引导提示 |
 | `models.py` | 模型扩展 | `SecurityTag` 新增 `is_override` |
 | `engine.py` | 逻辑增强 | `evaluate()` 新增 Phase 3 覆盖裁定 |
 | `service.py` | 无需修改 | `_resolve_final_level` 仍取 max，覆盖已在引擎层完成 |
