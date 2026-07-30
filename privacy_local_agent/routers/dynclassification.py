@@ -17,14 +17,37 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
 from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from ..deps import SECURITY_DEPS
 from ..dynclassification import DynClassificationService
 from ..dynclassification.validator import validate_rules_dir
+from ..security.auth import require_permission
 
 router = APIRouter(prefix="/v1/dynclassification", tags=["Dynamic Classification"])
+
+# 文件路径参数校验的基准目录（默认为服务工作目录）。
+# 所有用户提供的文件路径解析后必须位于该目录内，防止路径遍历攻击。
+_PATH_BASE = Path(os.environ.get("PRIVACY_DYNCLASSIFICATION_PATH_BASE", ".")).resolve()
+
+
+def _safe_path(raw: str) -> Path:
+    """校验用户提供的文件路径，确保其位于允许的基准目录内（路径遍历防护）。
+
+    允许相对路径与绝对路径，但解析后必须位于 ``_PATH_BASE`` 之内，
+    否则抛出 400 错误。可拦截形如 ``../../etc/passwd`` 的目录穿越攻击。
+    """
+    candidate = Path(raw).expanduser()
+    resolved = candidate.resolve() if candidate.is_absolute() else (_PATH_BASE / candidate).resolve()
+    if not resolved.is_relative_to(_PATH_BASE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"路径 '{raw}' 超出允许的基准目录",
+        )
+    return resolved
 
 # 实例化通用单例 service（线程安全懒初始化）
 _service: Optional[DynClassificationService] = None
@@ -82,7 +105,11 @@ class GenerateProfileRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-@router.post("/eval", summary="动态分类分级评估（字段级）")
+@router.post(
+    "/eval",
+    summary="动态分类分级评估（字段级）",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def evaluate_field(req: DynEvalFieldRequest):
     svc = get_service()
     svc.loader.check_and_reload()  # 触发轻量级修改检测
@@ -95,7 +122,11 @@ def evaluate_field(req: DynEvalFieldRequest):
     return resp.model_dump(by_alias=True, exclude_none=True)
 
 
-@router.post("/eval_record", summary="动态分类分级评估（记录级）")
+@router.post(
+    "/eval_record",
+    summary="动态分类分级评估（记录级）",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def evaluate_record(req: DynEvalRecordRequest):
     svc = get_service()
     svc.loader.check_and_reload()
@@ -107,7 +138,11 @@ def evaluate_record(req: DynEvalRecordRequest):
     return resp.model_dump(by_alias=True, exclude_none=True)
 
 
-@router.post("/eval_table", summary="动态分类分级评估（表格级）")
+@router.post(
+    "/eval_table",
+    summary="动态分类分级评估（表格级）",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def evaluate_table(req: DynEvalTableRequest):
     svc = get_service()
     svc.loader.check_and_reload()
@@ -120,7 +155,11 @@ def evaluate_table(req: DynEvalTableRequest):
     return resp.model_dump(by_alias=True, exclude_none=True)
 
 
-@router.post("/dry_run", summary="规则预演：对样本数据集执行命中分布分析")
+@router.post(
+    "/dry_run",
+    summary="规则预演：对样本数据集执行命中分布分析",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def dry_run(req: DryRunRequest):
     svc = get_service()
     svc.loader.check_and_reload()
@@ -137,7 +176,11 @@ def dry_run(req: DryRunRequest):
     return result
 
 
-@router.post("/profiles/reload", summary="手动触发规则配置热加载")
+@router.post(
+    "/profiles/reload",
+    summary="手动触发规则配置热加载",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:write")],
+)
 def reload_profiles():
     svc = get_service()
     svc.reload()
@@ -147,11 +190,17 @@ def reload_profiles():
     }
 
 
-@router.post("/generate_profile", summary="从标准 Markdown 文档生成 YAML 配置")
+@router.post(
+    "/generate_profile",
+    summary="从标准 Markdown 文档生成 YAML 配置",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:write")],
+)
 def generate_profile(req: GenerateProfileRequest):
     svc = get_service()
+    # 路径遍历防护：确保 doc_path 位于允许的基准目录内。
+    doc_path = _safe_path(req.doc_path)
     try:
-        generated = svc.generate_profile_from_doc(req.doc_path)
+        generated = svc.generate_profile_from_doc(doc_path)
         return {
             "status": "ok",
             "message": f"Successfully generated profiles from {req.doc_path}",
@@ -164,26 +213,44 @@ def generate_profile(req: GenerateProfileRequest):
         )
 
 
-@router.get("/standards", summary="列出所有可用的分类分级标准")
+@router.get(
+    "/standards",
+    summary="列出所有可用的分类分级标准",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def list_standards():
     svc = get_service()
     return {"standards": svc.list_standards()}
 
 
-@router.get("/domains", summary="列出所有可用的领域规则包")
+@router.get(
+    "/domains",
+    summary="列出所有可用的领域规则包",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def list_domains():
     svc = get_service()
     return {"domains": svc.list_domains()}
 
 
-@router.get("/operators", summary="列出所有已注册的匹配算子")
+@router.get(
+    "/operators",
+    summary="列出所有已注册的匹配算子",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def list_operators():
     svc = get_service()
     return {"operators": svc.list_operators()}
 
 
-@router.post("/validate", summary="校验规则配置 YAML 合法性")
+@router.post(
+    "/validate",
+    summary="校验规则配置 YAML 合法性",
+    dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
+)
 def validate_rules(rules_dir: str = Query(default="rules")):
+    # 路径遍历防护：确保 rules_dir 位于允许的基准目录内。
+    rules_dir = str(_safe_path(rules_dir))
     res = validate_rules_dir(rules_dir)
     return {
         "is_valid": res.is_valid,

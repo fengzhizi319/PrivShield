@@ -380,8 +380,8 @@ class BudgetAccountant:
                         (new_eps, new_delta, self._window_start, self.namespace),
                     )
                     conn.commit()
-                    self.epsilon_spent = eps_spent
-                    self.delta_spent = del_spent
+                    self.epsilon_spent = new_eps
+                    self.delta_spent = new_delta
                     self._update_metrics(eps_total, del_total, new_eps, new_delta)
                     self._audit_logger.log_spend(
                         self.namespace, eps_total, del_total, new_eps, new_delta

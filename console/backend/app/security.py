@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hmac
 import time
 from collections import defaultdict, deque
 from typing import TYPE_CHECKING, cast
@@ -88,7 +89,9 @@ class ConsoleSecurityMiddleware(BaseHTTPMiddleware):
         # API Key 鉴权（配置了才校验）。
         if self._api_key is not None:
             token = _extract_bearer(request.headers.get("authorization"))
-            if token != self._api_key:
+            # 常量时间比较（hmac.compare_digest），避免普通 != 比较的
+            # 短路特性通过响应耗时泄露 API Key 前缀信息（时序攻击防护）。
+            if token is None or not hmac.compare_digest(token, self._api_key):
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "Unauthorized: invalid console api key"},

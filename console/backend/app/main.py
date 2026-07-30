@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
 import random
+import socket
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -420,14 +422,22 @@ async def upload(
     的 ``{operation, rows_in, rows_out, result}`` 包装为 :class:`ProxyResponse`。
     具体的文件解析与隐私算法均由 agent 负责，后端仅做转发与包装。
     """
-    # 一次性读出上传文件的全部字节。
-    content = await file.read()
-    # 上传大小限制：超限返回 413，避免大文件耗尽内存（DoS 防护）。
-    if len(content) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件过大（{len(content)} 字节），上限 {settings.max_upload_bytes} 字节",
-        )
+    # 分块读取并累计校验大小：在读取过程中即时检测超限，
+    # 避免先全量读入内存再校验导致超大文件耗尽内存（DoS 防护）；超限返回 413。
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > settings.max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件过大（超过 {settings.max_upload_bytes} 字节上限）",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
     # 构造 httpx 的 files 映射：(文件名, 内容, Content-Type)，
     # 文件名缺失时兑底为 upload.bin，类型缺失时兑底为通用二进制流。
     files = {
@@ -458,16 +468,55 @@ async def upload(
 _LB_ALLOWED_SCHEMES = ("http", "https")
 
 
+def _is_forbidden_ip(ip_str: str) -> bool:
+    """判断 IP 是否属于禁止探测的私有 / 保留网段（SSRF 防护）。
+
+    覆盖环回（127.0.0.0/8）、RFC1918 私有网段（10/172.16/192.168）、
+    链路本地（169.254.0.0/16，含云元数据端点）、保留、多播与未指定地址。
+    无法解析的 IP 一律视为非法。
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _resolve_host_ips(hostname: str) -> set[str]:
+    """解析 host 的真实 IP 集合（封装 ``socket.getaddrinfo``，便于测试 mock）。
+
+    单独抽出 DNS 解析这一网络 I/O 副作用，使单元测试可通过 patch 本函数
+    隔离真实 DNS（配合 ``httpx.MockTransport`` 假后端）；生产环境则执行
+    真实解析以供后续私有网段校验。
+
+    Raises:
+        ValueError / socket.gaierror: DNS 解析失败或未得到有效 IP。
+    """
+    addr_info = socket.getaddrinfo(hostname, None)
+    if not addr_info:
+        raise ValueError("无法解析到有效 IP")
+    # getaddrinfo 返回 (family, type, proto, canonname, sockaddr)，sockaddr[0] 为 IP。
+    return {info[4][0] for info in addr_info}
+
+
 def _validate_lb_url(url: str) -> None:
-    """校验负载均衡探测目标 URL 的合法性（SSRF 防护）。
+    """校验负载均衡探测目标 URL 的合法性（SSRF 防护及 DNS 解析校验）。
 
     - scheme 必须为 ``http``/``https``；
+    - 不允许包含 Userinfo 凭据欺骗 (@)；
+    - 校验 Host DNS 可解析性 (socket.getaddrinfo)；
     - 配置了 ``LB_ALLOWED_HOSTS`` 白名单时，host 必须命中白名单。
-
-    说明：lb_test 的设计目的就是探测用户指定地址（含本地 ``127.0.0.1``），
-    故**不**屏蔽私有/回环 IP；如需生产收紧，通过 ``LB_ALLOWED_HOSTS`` 白名单约束。
-    非法时抛出 400。
     """
+    if "@" in (url.split("/")[2] if "//" in url else url):
+        raise HTTPException(status_code=400, detail="探测地址不允许包含 Userinfo 授权凭据与 '@' 符号")
+
     parsed = urlparse(url)
     if parsed.scheme not in _LB_ALLOWED_SCHEMES:
         raise HTTPException(
@@ -476,6 +525,27 @@ def _validate_lb_url(url: str) -> None:
         )
     if not parsed.hostname:
         raise HTTPException(status_code=400, detail=f"探测地址缺少 host: {url}")
+
+    # DNS 解析真实 IP 校验（拦截畸形 Domain 避开 URL 解析错位）
+    try:
+        resolved_ips = _resolve_host_ips(parsed.hostname)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"探测地址 host '{parsed.hostname}' DNS 解析失败或非法: {exc}",
+        )
+
+    # SSRF 防护：拒绝解析到私有 / 保留网段的目标，避免被用于探测内网服务
+    # 或云元数据端点（169.254.169.254）。注意：此处为首次解析校验，
+    # 理论上仍存在 DNS rebinding（校验与实际请求两次解析不一致）风险，
+    # 生产环境应配合 LB_ALLOWED_HOSTS 白名单或 DNS 固定（pinning）使用。
+    for ip_str in resolved_ips:
+        if _is_forbidden_ip(ip_str):
+            raise HTTPException(
+                status_code=400,
+                detail=f"探测地址 host '{parsed.hostname}' 解析到私有/保留网段 IP '{ip_str}'，禁止探测",
+            )
+
     allowed = settings.lb_allowed_hosts
     if allowed:
         hosts = {h.strip().lower() for h in allowed.split(",") if h.strip()}
@@ -484,6 +554,7 @@ def _validate_lb_url(url: str) -> None:
                 status_code=400,
                 detail=f"探测地址 host '{parsed.hostname}' 不在白名单内",
             )
+
 
 
 # 负载均衡测试支持的三种分发策略。

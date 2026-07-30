@@ -164,7 +164,12 @@ def age_hierarchy(value: str, level: int) -> str:
     Returns:
         泛化后的年龄表示。
     """
-    age = int(value)
+    # 与 salary_hierarchy 保持一致的容错：非数字输入（脏数据）不应使
+    # 整个 K-匿名管线崩溃，level >= 1 时抑制为 "*"，level 0 时原样返回。
+    try:
+        age = int(float(value))
+    except (ValueError, TypeError):
+        return "*" if level >= 1 else value
     if level == 0:
         return value
     if level == 1:

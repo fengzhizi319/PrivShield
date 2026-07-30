@@ -22,6 +22,10 @@ interface ResponsePanelProps {
  * 不引入第三方库，满足控制台展示需求。
  */
 function highlightJson(json: string): ReactNode[] {
+  // 防御性安全限制：当 JSON 串长度超过 100k 字符时停止正则高亮，改用纯文本渲染，防止 ReDoS
+  if (json.length > 100_000) {
+    return [<span key={0}>{json}</span>];
+  }
   const tokenRegex =
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g;
   const nodes: ReactNode[] = [];
@@ -56,14 +60,16 @@ function highlightJson(json: string): ReactNode[] {
 }
 
 /**
- * 截断响应中超长的 base64 / data URI 字符串，避免图片编码内容擑满屏幕。
+ * 截断响应中超长的 base64 / data URI 字符串，避免图片编码内容填满屏幕。
  *
  * 规则：
  *   - 以 data:image/ 开头的 data URI → 替换为 "[image data, ~N KB]"
- *   - 纯 base64 且长度 > 200 → 替换为 "[base64 data, ~N KB]"
+ *   - 严格的纯 base64（无空格且符合 A-Za-z0-9+/=，长度 > 200）→ 替换为 "[base64 data, ~N KB]"
  *   - 其他超长字符串（> 500）→ 截断前 80 字符 + "…(N chars)"
+ *   - 限制最大递归深度（depth <= 20），防止深度嵌套导致栈溢出 Crash
  */
-function truncateLongStrings(obj: unknown): unknown {
+function truncateLongStrings(obj: unknown, depth = 0): unknown {
+  if (depth > 20) return obj;
   if (typeof obj === 'string') {
     // data URI 图片
     const dataUriMatch = obj.match(/^data:image\/[a-zA-Z]+;base64,/);
@@ -72,8 +78,8 @@ function truncateLongStrings(obj: unknown): unknown {
       const kb = Math.max(1, Math.round((rawLen * 3) / 4 / 1024));
       return `[image data, ~${kb} KB]`;
     }
-    // 纯 base64（超过 200 字符且字符集合法）
-    if (obj.length > 200 && /^[A-Za-z0-9+/=\s]+$/.test(obj.slice(0, 128))) {
+    // 纯 base64（不含空格，连续字符长度 > 200 且符合标准 Base64 字符集）
+    if (obj.length > 200 && !/\s/.test(obj) && /^[A-Za-z0-9+/=]+$/.test(obj.slice(0, 128))) {
       const kb = Math.max(1, Math.round((obj.length * 3) / 4 / 1024));
       return `[base64 data, ~${kb} KB]`;
     }
@@ -84,12 +90,12 @@ function truncateLongStrings(obj: unknown): unknown {
     return obj;
   }
   if (Array.isArray(obj)) {
-    return obj.map(truncateLongStrings);
+    return obj.map((item) => truncateLongStrings(item, depth + 1));
   }
   if (obj !== null && typeof obj === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
-      out[k] = truncateLongStrings(v);
+      out[k] = truncateLongStrings(v, depth + 1);
     }
     return out;
   }

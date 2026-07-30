@@ -585,8 +585,8 @@ class DPApi:
         u = self.rng.random() - 0.5
         # Determine sign of the sample
         sign = -1.0 if u < 0 else 1.0
-        # Apply inverse CDF: X = -b * sign * ln(1 - 2|u|)
-        return -scale * sign * math.log(1 - 2 * abs(u))
+        # Apply inverse CDF: X = -b * sign * ln(1 - 2|u|) with domain safety check
+        return -scale * sign * math.log(max(1e-12, 1.0 - 2.0 * abs(u)))
 
     def _sample_gaussian(self, sigma: float) -> float:
         # 从 N(0, sigma^2) 高斯分布中采样一个随机值
@@ -602,6 +602,11 @@ class DPApi:
             return 0
         # Compute geometric distribution parameter p = 1 - exp(-1/scale)
         p = 1.0 - math.exp(-1.0 / scale)
+        # Guard against floating-point underflow: for very large scale, exp(-1/scale)
+        # rounds to 1.0 making p == 0.0, which would cause log(1-p) == 0 and a
+        # ZeroDivisionError below. Fall back to the continuous Laplace sampler.
+        if p <= 0.0:
+            return int(round(self._sample_laplace(scale)))
         # Sample two independent geometric random variables via inverse CDF
         u1 = self.rng.random()
         u2 = self.rng.random()
@@ -1147,8 +1152,13 @@ class DPApi:
                 clip_upper,
                 mechanism,
             )
-            # Sum all stored (non-zero) entries directly
-            true_sum = float(arr.sum())
+            # Clip stored (explicit) values to [lower, upper] to bound per-element
+            # sensitivity while preserving sparsity. Implicit zeros are structural
+            # and contribute 0 to the sum. Without this clip an out-of-range stored
+            # value would make the true sensitivity unbounded while the noise is
+            # calibrated only for (upper - lower), breaking the DP guarantee.
+            clipped_data = np.clip(arr.data, lower, upper)
+            true_sum = float(clipped_data.sum()) if arr.nnz > 0 else 0.0
         else:
             # Dense path: resolve clip bounds (may infer from data for Laplace)
             lower, upper = self._resolve_clip_bounds(
@@ -1276,12 +1286,14 @@ class DPApi:
         # Guard against divergence: if noisy_count too small, ratio estimate is unstable
         if noisy_count < min_count or noisy_count <= 0.0:
             if return_details:
+                # Only the count sub-query (eps_sub) has been spent at this point;
+                # the sum sub-query was never executed, so report the actual spend.
                 return DPResult(
                     value=0.0,
                     noise_mechanism=mechanism,
                     noise_scale=0.0,
-                    epsilon_spent=epsilon,
-                    delta_spent=delta,
+                    epsilon_spent=eps_sub,
+                    delta_spent=delta_sub,
                     confidence_interval=(0.0, 0.0),
                 )
             return 0.0

@@ -51,9 +51,9 @@ def permission_for_rest_path(path: str) -> str:
         return "privacy:mask"
     if path == "/v1/privacy/hash":
         return "privacy:hash"
-    if path.startswith("/v1/privacy/dp/"):
+    if path.startswith("/v1/privacy/dp/") or path.startswith("/v1/privacy/ldp/"):
         return "privacy:dp"
-    if path == "/v1/privacy/k_anonymize/record":
+    if path.startswith("/v1/privacy/k_anonymize"):
         return "privacy:kano"
     if path == "/v1/privacy/qol/obfuscate":
         return "privacy:qol"
@@ -61,8 +61,18 @@ def permission_for_rest_path(path: str) -> str:
         return "privacy:budget"
     if path == "/v1/privacy/profile/recommend":
         return "privacy:profile"
+    if path == "/v1/privacy/process_file":
+        return "privacy:mask"
     if path.startswith("/v1/privacy/classify/"):
         return "classification:read"
+    if path.startswith("/v1/dynclassification"):
+        # 写操作（热加载 / 生成配置）需要 write 权限，其余为只读。
+        if path in (
+            "/v1/dynclassification/profiles/reload",
+            "/v1/dynclassification/generate_profile",
+        ):
+            return "dynclassification:write"
+        return "dynclassification:read"
     # Conservative default for unknown routes.
     return "*"
 
@@ -74,15 +84,39 @@ def permission_for_grpc_method(method: str) -> str:
     mapping = {
         "Mask": "privacy:mask",
         "MaskRecord": "privacy:mask",
+        "MaskBatch": "privacy:mask",
+        "MaskDataFrame": "privacy:mask",
         "Hash": "privacy:hash",
         "DPCount": "privacy:dp",
         "DPSum": "privacy:dp",
         "DPMean": "privacy:dp",
+        "DPHistogram": "privacy:dp",
+        "DPNoisyCount": "privacy:dp",
+        "DPNoisySum": "privacy:dp",
+        "DPNoisyMean": "privacy:dp",
+        "DPNoisyHistogram": "privacy:dp",
+        "DPChunkedCount": "privacy:dp",
+        "DPChunkedSum": "privacy:dp",
+        "DPChunkedMean": "privacy:dp",
+        "DPChunkedHistogram": "privacy:dp",
+        "DPAggregate": "privacy:dp",
+        "DPVectorSum": "privacy:dp",
+        "DPAdaptiveClip": "privacy:dp",
+        "DPGroupBy": "privacy:dp",
+        # 本地 DP（LDP）扰动与估计复用 privacy:dp 权限，与 REST 路由一致。
+        "PerturbBinaryBatch": "privacy:dp",
+        "PerturbCategoricalBatch": "privacy:dp",
+        "EstimateBinaryFrequency": "privacy:dp",
+        "EstimateCategoricalHistogram": "privacy:dp",
         "KAnonymizeRecord": "privacy:kano",
+        "KAnonymizeTable": "privacy:kano",
+        "KAnonymizeDataFrame": "privacy:kano",
         "ObfuscateQuery": "privacy:qol",
+        "ObfuscateQueryBatch": "privacy:qol",
         "ClassifyField": "classification:read",
         "ClassifyRecord": "classification:read",
         "ClassifyTable": "classification:read",
+        "DynClassify": "dynclassification:read",
         "Health": "health:read",
         "RecommendParams": "privacy:profile",
     }

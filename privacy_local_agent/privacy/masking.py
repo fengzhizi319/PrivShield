@@ -294,6 +294,8 @@ def mask_name(value: str) -> str:
     """
     if len(value) == 0:  # 空串守卫：避免索引越界
         return value
+    if len(value) == 1:  # 单字守卫（如"李"）：替换为 "*"（避免出现 "李**李" 的两次暴露）
+        return "*"
     if len(value) == 2:  # 两字姓名（如"张三"）：保留首字 + "*" → "张*"
         return f"{value[0]}*"
     # 三字及以上（如"张三丰"）：首字 + "**" + 尾字 → "张**丰"

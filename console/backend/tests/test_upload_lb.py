@@ -120,7 +120,9 @@ async def test_run_lb_test_round_robin_distribution() -> None:
         strategy="round_robin",
     )
 
-    resp = await _run_lb_test(req, transport=_mock_transport())
+    # SSRF 加固会真实解析 DNS；单测用 MockTransport 假后端，需 mock DNS 返回公网 IP 隔离网络 I/O。
+    with patch("app.main._resolve_host_ips", return_value={"93.184.216.34"}):
+        resp = await _run_lb_test(req, transport=_mock_transport())
 
     assert resp.strategy == "round_robin"
     assert resp.total == 6
@@ -149,7 +151,9 @@ async def test_run_lb_test_failed_probe() -> None:
         num_requests=3,
         strategy="round_robin",
     )
-    resp = await _run_lb_test(req, transport=httpx.MockTransport(handler))
+    # mock DNS 解析（假后端域名无法真实解析），隔离网络 I/O。
+    with patch("app.main._resolve_host_ips", return_value={"93.184.216.34"}):
+        resp = await _run_lb_test(req, transport=httpx.MockTransport(handler))
 
     assert resp.total == 3
     assert resp.success == 0
@@ -231,13 +235,15 @@ def test_validate_lb_url_allowlist() -> None:
 
     from app.main import settings
 
-    with patch.object(settings, "lb_allowed_hosts", "trusted.local"):
-        # 命中白名单：正常通过（不抛异常）。
-        _validate_lb_url("http://trusted.local:8079")
-        # 未命中白名单：400。
-        with pytest.raises(HTTPException) as excinfo:
-            _validate_lb_url("http://evil.local")
-        assert excinfo.value.status_code == 400
+    # mock DNS 解析返回公网 IP，隔离真实网络 I/O（本用例仅验证白名单逻辑）。
+    with patch("app.main._resolve_host_ips", return_value={"93.184.216.34"}):
+        with patch.object(settings, "lb_allowed_hosts", "trusted.local"):
+            # 命中白名单：正常通过（不抛异常）。
+            _validate_lb_url("http://trusted.local:8079")
+            # 未命中白名单：400。
+            with pytest.raises(HTTPException) as excinfo:
+                _validate_lb_url("http://evil.local")
+            assert excinfo.value.status_code == 400
 
 
 def test_upload_oversized_file_returns_413(client: TestClient, mock_multipart: AsyncMock) -> None:

@@ -12,6 +12,7 @@ per-method permission checks.
 
 from __future__ import annotations
 
+import hmac
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -46,16 +47,33 @@ def _extract_bearer_token(header_value: str | None) -> str | None:
     return None
 
 
+def _constant_time_lookup(keys: dict[str, Any], token: str) -> Any | None:
+    """Constant-time lookup of ``token`` among ``keys`` to mitigate timing attacks.
+
+    A plain ``dict.get`` is a hash-based probe whose timing can correlate with the
+    stored keys, theoretically leaking information about key existence/prefixes.
+    Here every stored key is compared with :func:`hmac.compare_digest` and the loop
+    never short-circuits, so the running time depends only on the number of stored
+    keys, not on the secret contents.
+    """
+    token_bytes = token.encode("utf-8")
+    matched = None
+    for key, value in keys.items():
+        if hmac.compare_digest(key.encode("utf-8"), token_bytes):
+            matched = value
+    return matched
+
+
 def _authenticate_api_key(settings: SecuritySettings, token: str) -> Identity | None:
     """Look up an API key in internal and external key stores.
 
     Internal keys are checked first so an internal token can never be shadowed by an
     external one.
     """
-    internal = settings.internal_keys.get(token)
+    internal = _constant_time_lookup(settings.internal_keys, token)
     if internal:
         return Identity("internal", internal.name, internal.scopes)
-    external = settings.external_keys.get(token)
+    external = _constant_time_lookup(settings.external_keys, token)
     if external:
         return Identity("external", external.name, external.scopes)
     return None

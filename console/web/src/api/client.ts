@@ -65,7 +65,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err));
     }
 
-    return (await res.json()) as T;
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`响应解析 JSON 失败 (HTTP ${res.status}): ${text.slice(0, 100)}`);
+    }
   } catch (e) {
     if ((e as Error).name === 'AbortError') {
       throw new Error(`请求超时（${REQUEST_TIMEOUT_MS / 1000}s），请检查后端是否可达`);

@@ -90,13 +90,22 @@ async def process_file(
     if not isinstance(options, dict):
         raise HTTPException(status_code=400, detail="params 需为 JSON 对象")
 
-    content = await file.read()
-    # 上传大小限制：超限返回 413，避免大文件耗尽内存（DoS 防护）。
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件过大（{len(content)} 字节），上限 {MAX_UPLOAD_BYTES} 字节",
-        )
+    # 分块读取并累计校验大小：在读取过程中即时检测超限，
+    # 避免先全量读入内存再校验导致超大文件耗尽内存（DoS 防护）；超限返回 413。
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件过大（超过 {MAX_UPLOAD_BYTES} 字节上限）",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
     records = _parse_upload_to_records(content, file.filename or "")
     rows_in = len(records)
 

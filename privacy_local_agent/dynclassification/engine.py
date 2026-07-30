@@ -398,6 +398,9 @@ class ConfigurableRuleEngine:
         
         if not cap_ranks:
             return normal_tags, []
+        # 安全保守原则：override 是对“安全优先”的例外豁免（降级），例外应从严解释。
+        # 多条 override 规则同时命中时取最小 cap_rank（最弱压制能力），
+        # 确保高敏感标签（rank > min_cap）不被错误降级而非法逃逸。
         min_cap_rank = min(cap_ranks)
 
         # Step 2.5: 合并所有 override 规则的 suppress_rules 白名单。
@@ -447,6 +450,7 @@ class ConfigurableRuleEngine:
                     "has_whitelist": has_whitelist,
                 },
             )
+
             for tag in suppressed_tags:
                 DYNCLASSIFICATION_OVERRIDE_SUPPRESSED_TOTAL.labels(
                     domain=self.domain or "default",
