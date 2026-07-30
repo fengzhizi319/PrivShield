@@ -13,6 +13,7 @@ import { loadHistory, addHistory, removeHistory, clearHistory } from '@/lib/hist
 import { Icon } from '@/components/icons';
 import ResponsePanel from '@/components/ResponsePanel';
 import HistoryPanel from '@/components/HistoryPanel';
+import { useI18n } from '@/i18n';
 
 interface EndpointViewProps {
   sample: EndpointSample;
@@ -30,6 +31,7 @@ function formatJson(value: unknown): string {
  * 支持 Cmd/Ctrl+Enter 快捷发送、JSON 格式化、cURL 导出与请求历史。
  */
 export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewProps) {
+  const { t } = useI18n();
   const [path, setPath] = useState(sample.path);
   const [method, setMethod] = useState(sample.method);
   const [bodyText, setBodyText] = useState(formatJson(sample.body ?? {}));
@@ -156,7 +158,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
           <button
             onClick={onBack}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-            title="返回总览"
+            title={t('endpoint.back')}
           >
             <Icon name="arrow-left" className="h-4 w-4" />
           </button>
@@ -189,7 +191,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
         {/* 请求编辑器 */}
         <div className="relative flex w-1/2 flex-col border-r border-gray-200 bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">请求体</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t('endpoint.request_body')}</h3>
             <div className="flex items-center gap-0.5">
               <button
                 onClick={handleFormat}
@@ -198,7 +200,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                 title="格式化 / 校验 JSON"
               >
                 <Icon name="code" className="h-3.5 w-3.5" />
-                格式化
+                {t('endpoint.format')}
               </button>
               <button
                 onClick={handleCopyCurl}
@@ -206,7 +208,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                 title="复制 cURL 命令"
               >
                 <Icon name={curlCopied ? 'check' : 'copy'} className="h-3.5 w-3.5" />
-                {curlCopied ? '已复制' : 'cURL'}
+                {curlCopied ? t('endpoint.curl_copied') : 'cURL'}
               </button>
               <button
                 onClick={() => setShowHistory((v) => !v)}
@@ -219,7 +221,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                 title="请求历史"
               >
                 <Icon name="clock" className="h-3.5 w-3.5" />
-                历史
+                {t('endpoint.history')}
               </button>
               <button
                 onClick={handleLoadSample}
@@ -227,7 +229,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                 title="恢复示例请求"
               >
                 <Icon name="refresh" className="h-3.5 w-3.5" />
-                重载示例
+                {t('endpoint.reload_sample')}
               </button>
             </div>
           </div>
@@ -244,7 +246,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                   ? 'bg-gray-50 text-gray-400'
                   : 'bg-gray-50/50 text-gray-800 focus:border-indigo-400 focus:bg-white',
               ].join(' ')}
-              placeholder={method === 'GET' ? 'GET 请求无需请求体' : '{ }'}
+              placeholder={method === 'GET' ? t('endpoint.get_no_body') : '{ }'}
             />
             {sample.contentType && (
               <p className="mt-2 text-[11px] text-gray-400">
@@ -262,7 +264,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
               title="快捷键 Cmd/Ctrl + Enter"
             >
               <Icon name="send" className="h-3.5 w-3.5" />
-              {loading ? '发送中…' : '发送请求'}
+              {loading ? t('endpoint.sending') : t('endpoint.send')}
               <kbd className="ml-1 hidden rounded bg-indigo-500/40 px-1.5 py-0.5 text-[10px] font-normal text-indigo-100 sm:inline">
                 ⌘↵
               </kbd>

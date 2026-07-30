@@ -37,7 +37,8 @@ export type IconName =
   | 'code'
   | 'upload'
   | 'scale'
-  | 'x';
+  | 'x'
+  | 'globe';
 
 const PATHS: Record<IconName, ReactNode> = {
   shield: (
@@ -238,6 +239,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
     </>
   ),
 };

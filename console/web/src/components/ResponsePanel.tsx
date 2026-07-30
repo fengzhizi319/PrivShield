@@ -7,6 +7,7 @@
 import { useState, type ReactNode } from 'react';
 import type { ProxyResponse } from '@/types/api';
 import { Icon } from '@/components/icons';
+import { useI18n } from '@/i18n';
 
 interface ResponsePanelProps {
   response: ProxyResponse | null;
@@ -97,6 +98,7 @@ function truncateLongStrings(obj: unknown): unknown {
 
 /** 复制到剪贴板按钮，复制成功后短暂显示对勾。 */
 function CopyButton({ text }: { text: string }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
     try {
@@ -104,23 +106,24 @@ function CopyButton({ text }: { text: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* 忽略剪贴板不可用 */
+      /* ignore clipboard unavailable */
     }
   };
   return (
     <button
       onClick={handleCopy}
       className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-      title="复制响应"
+      title={t('response.copy')}
     >
       <Icon name={copied ? 'check' : 'copy'} className="h-3.5 w-3.5" />
-      {copied ? '已复制' : '复制'}
+      {copied ? t('response.copied') : t('response.copy')}
     </button>
   );
 }
 
 /** 下载响应 JSON 为文件。 */
 function DownloadButton({ text, path }: { text: string; path: string }) {
+  const { t } = useI18n();
   const handleDownload = () => {
     const blob = new Blob([text], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -135,33 +138,34 @@ function DownloadButton({ text, path }: { text: string; path: string }) {
     <button
       onClick={handleDownload}
       className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-      title="下载响应 JSON"
+      title={t('response.download')}
     >
       <Icon name="download" className="h-3.5 w-3.5" />
-      下载
+      {t('response.download')}
     </button>
   );
 }
 
 export default function ResponsePanel({ response, error, duration, path = 'response' }: ResponsePanelProps) {
-  // 空状态
+  const { t } = useI18n();
+  // Empty state
   if (!response && !error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-300">
         <Icon name="zap" className="h-10 w-10" strokeWidth={1.5} />
-        <p className="text-sm text-gray-400">发送请求后在此查看响应</p>
+        <p className="text-sm text-gray-400">{t('response.empty')}</p>
       </div>
     );
   }
 
-  // 错误状态
+  // Error state
   if (error) {
     return (
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b border-red-100 px-4 py-2.5">
           <span className="inline-flex items-center gap-2 text-sm font-semibold text-red-600">
             <Icon name="alert" className="h-4 w-4" />
-            请求失败
+            {t('response.failed')}
           </span>
           {duration !== null && (
             <span className="text-xs text-gray-400">{duration.toFixed(1)} ms</span>

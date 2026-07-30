@@ -7,6 +7,7 @@ import { useMemo } from 'react';
 import type { EndpointSample } from '@/types/api';
 import { categoryMeta, orderCategories } from '@/lib/categories';
 import { Icon } from '@/components/icons';
+import { useI18n } from '@/i18n';
 
 interface OverviewProps {
   samples: EndpointSample[];
@@ -18,6 +19,7 @@ interface OverviewProps {
  * 相比平铺长列表，提供更清晰的导航入口。
  */
 export default function Overview({ samples, onSelect }: OverviewProps) {
+  const { t } = useI18n();
   const grouped = useMemo(() => {
     const map = new Map<string, EndpointSample[]>();
     for (const s of samples) {
@@ -35,9 +37,9 @@ export default function Overview({ samples, onSelect }: OverviewProps) {
       <div className="mx-auto max-w-5xl px-8 py-10">
         {/* 标题区 */}
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">接口总览</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('overview.title')}</h1>
           <p className="mt-1.5 text-sm text-gray-500">
-            共 {samples.length} 个接口 · {categories.length} 个功能模块，点击卡片开始测试
+            {t('overview.subtitle', samples.length, categories.length)}
           </p>
         </div>
 
@@ -93,12 +95,12 @@ export default function Overview({ samples, onSelect }: OverviewProps) {
                       </li>
                     ))}
                     {list.length > 3 && (
-                      <li className="text-[11px] text-gray-400">+{list.length - 3} 个更多…</li>
+                      <li className="text-[11px] text-gray-400">{t('overview.more', list.length - 3)}</li>
                     )}
                   </ul>
 
                   <div className="mt-auto flex items-center gap-1 pt-3 text-xs font-medium text-indigo-600 opacity-0 transition-opacity group-hover:opacity-100">
-                    进入测试
+                    {t('overview.enter_test')}
                     <Icon name="chevron-right" className="h-3.5 w-3.5" />
                   </div>
                 </div>

@@ -23,6 +23,7 @@ import DynClassificationPanel from '@/components/DynClassificationPanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { type BackendOption, DEFAULT_BACKEND } from '@/components/BackendSelector';
 import { Icon } from '@/components/icons';
+import { useI18n } from '@/i18n';
 
 /** 主区域视图：总览 / 单端点测试 / 批量测试 / 文件处理 / 负载均衡 / 动态分类分级。 */
 type View =
@@ -35,6 +36,7 @@ type View =
 
 
 export default function App() {
+  const { t } = useI18n();
   /** 全部端点示例（来自 /api/samples） */
   const [samples, setSamples] = useState<EndpointSample[]>([]);
   /** 当前主区域视图 */
@@ -92,7 +94,7 @@ export default function App() {
         {loading ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-gray-400">
             <span className="h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-indigo-500" />
-            <p className="text-sm">加载接口列表…</p>
+            <p className="text-sm">{t('app.loading')}</p>
           </div>
         ) : error ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
@@ -100,7 +102,7 @@ export default function App() {
               <Icon name="alert" className="h-6 w-6" />
             </span>
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-800">无法连接后端 {backend.label}</p>
+              <p className="text-sm font-medium text-gray-800">{t('app.connect_failed', backend.label)}</p>
               <p className="mt-1 max-w-md break-words text-xs text-gray-500">{error}</p>
             </div>
             <button
@@ -108,7 +110,7 @@ export default function App() {
               className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
             >
               <Icon name="refresh" className="h-4 w-4" />
-              重试
+              {t('app.retry')}
             </button>
           </div>
         ) : (

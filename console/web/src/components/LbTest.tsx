@@ -9,12 +9,13 @@ import { useEffect, useState } from 'react';
 import type { LbBackend, LbStrategy, LbTestResponse } from '@/types/api';
 import { lbTest } from '@/api/client';
 import { Icon } from '@/components/icons';
+import { useI18n } from '@/i18n';
 
-/** 策略选项的中文标签。 */
-const STRATEGIES: { value: LbStrategy; label: string }[] = [
-  { value: 'round_robin', label: '轮询 (round_robin)' },
-  { value: 'random', label: '随机 (random)' },
-  { value: 'least_connections', label: '最少连接 (least_connections)' },
+/** Strategy option labels (resolved at render time via i18n). */
+const STRATEGY_KEYS: { value: LbStrategy; i18nKey: string }[] = [
+  { value: 'round_robin', i18nKey: 'lb.strategy_round_robin' },
+  { value: 'random', i18nKey: 'lb.strategy_random' },
+  { value: 'least_connections', i18nKey: 'lb.strategy_least_conn' },
 ];
 
 interface LbTestProps {
@@ -23,6 +24,7 @@ interface LbTestProps {
 }
 
 export default function LbTest({ agentUrl }: LbTestProps) {
+  const { t } = useI18n();
   const [backends, setBackends] = useState<LbBackend[]>([
     { name: 'agent-1', url: agentUrl || 'http://127.0.0.1:8079' },
   ]);
@@ -58,7 +60,7 @@ export default function LbTest({ agentUrl }: LbTestProps) {
   const handleRun = async () => {
     const valid = backends.filter((b) => b.url.trim());
     if (valid.length === 0) {
-      setError('请至少填写一个后端地址');
+      setError(t('lb.at_least_one'));
       return;
     }
     setLoading(true);
@@ -95,19 +97,19 @@ export default function LbTest({ agentUrl }: LbTestProps) {
             </span>
             负载均衡测试
           </h2>
-          <p className="mt-1 text-xs text-gray-500">配置多个后端地址，按策略分发探测请求并对比各节点表现。</p>
+          <p className="mt-1 text-xs text-gray-500">{t('lb.subtitle')}</p>
         </div>
 
         {/* 后端列表 */}
         <div>
           <div className="mb-1 flex items-center justify-between">
-            <label className="text-xs font-medium text-gray-600">后端节点</label>
+            <label className="text-xs font-medium text-gray-600">{t('lb.backends')}</label>
             <button
               onClick={addBackend}
               className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-indigo-600 transition-colors hover:bg-indigo-50"
             >
               <Icon name="copy" className="h-3 w-3" />
-              添加节点
+              {t('lb.add_node')}
             </button>
           </div>
           <div className="space-y-2">
@@ -117,7 +119,7 @@ export default function LbTest({ agentUrl }: LbTestProps) {
                   value={b.name}
                   onChange={(e) => updateBackend(idx, { name: e.target.value })}
                   className={`${inputCls} w-24 shrink-0`}
-                  placeholder="名称"
+                  placeholder={t('lb.name_placeholder')}
                 />
                 <input
                   value={b.url}
@@ -140,7 +142,7 @@ export default function LbTest({ agentUrl }: LbTestProps) {
 
         {/* 请求数 */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">探测请求数</label>
+          <label className="mb-1 block text-xs font-medium text-gray-600">{t('lb.num_requests')}</label>
           <input
             type="number"
             min={1}
@@ -153,15 +155,15 @@ export default function LbTest({ agentUrl }: LbTestProps) {
 
         {/* 策略 */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">分发策略</label>
+          <label className="mb-1 block text-xs font-medium text-gray-600">{t('lb.strategy')}</label>
           <select
             value={strategy}
             onChange={(e) => setStrategy(e.target.value as LbStrategy)}
             className={`${inputCls} w-full`}
           >
-            {STRATEGIES.map((s) => (
+            {STRATEGY_KEYS.map((s) => (
               <option key={s.value} value={s.value}>
-                {s.label}
+                {t(s.i18nKey)}
               </option>
             ))}
           </select>
@@ -177,7 +179,7 @@ export default function LbTest({ agentUrl }: LbTestProps) {
           ) : (
             <Icon name="play" className="h-4 w-4" />
           )}
-          {loading ? '测试中…' : '运行测试'}
+          {loading ? '测试中…' : t('lb.run')}
         </button>
       </div>
 
@@ -193,7 +195,7 @@ export default function LbTest({ agentUrl }: LbTestProps) {
         {!result && !error && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-300">
             <Icon name="scale" className="h-10 w-10" strokeWidth={1.5} />
-            <p className="text-sm text-gray-400">运行测试后在此查看各节点分发结果</p>
+            <p className="text-sm text-gray-400">{t('lb.empty_hint')}</p>
           </div>
         )}
 
@@ -201,10 +203,10 @@ export default function LbTest({ agentUrl }: LbTestProps) {
           <div className="space-y-5">
             {/* 汇总卡片 */}
             <div className="grid grid-cols-4 gap-3">
-              <SummaryCard label="总请求" value={result.total} tone="text-gray-800" />
-              <SummaryCard label="成功" value={result.success} tone="text-emerald-600" />
-              <SummaryCard label="失败" value={result.failed} tone="text-red-500" />
-              <SummaryCard label="总耗时" value={`${result.duration_ms.toFixed(1)} ms`} tone="text-indigo-600" />
+              <SummaryCard label={t('lb.total_requests')} value={result.total} tone="text-gray-800" />
+              <SummaryCard label={t('lb.success')} value={result.success} tone="text-emerald-600" />
+              <SummaryCard label={t('lb.failed')} value={result.failed} tone="text-red-500" />
+              <SummaryCard label={t('lb.total_duration')} value={`${result.duration_ms.toFixed(1)} ms`} tone="text-indigo-600" />
             </div>
 
             {/* 分发结果表 */}
@@ -212,12 +214,12 @@ export default function LbTest({ agentUrl }: LbTestProps) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs text-gray-500">
-                    <th className="px-4 py-2 font-medium">节点</th>
-                    <th className="px-4 py-2 font-medium">命中分布</th>
-                    <th className="px-4 py-2 text-right font-medium">命中数</th>
-                    <th className="px-4 py-2 text-right font-medium">成功率</th>
-                    <th className="px-4 py-2 text-right font-medium">平均延迟</th>
-                    <th className="px-4 py-2 text-right font-medium">最小/最大延迟</th>
+                    <th className="px-4 py-2 font-medium">{t('lb.col_node')}</th>
+                    <th className="px-4 py-2 font-medium">{t('lb.col_distribution')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('lb.col_hits')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('lb.col_success_rate')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('lb.col_avg_latency')}</th>
+                    <th className="px-4 py-2 text-right font-medium">{t('lb.col_min_max_latency')}</th>
                   </tr>
                 </thead>
                 <tbody>

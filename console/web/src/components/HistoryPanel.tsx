@@ -6,6 +6,7 @@
 import type { HistoryEntry } from '@/types/api';
 import { formatRelativeTime } from '@/lib/history';
 import { Icon } from '@/components/icons';
+import { useI18n } from '@/i18n';
 
 interface HistoryPanelProps {
   /** 已按当前端点过滤的历史记录 */
@@ -28,13 +29,14 @@ function statusBadge(status: number): string {
  * 点击条目可快速回填请求体，支持单条删除与一键清空。
  */
 export default function HistoryPanel({ entries, onRestore, onDelete, onClear, onClose }: HistoryPanelProps) {
+  const { t } = useI18n();
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-white">
       {/* 面板头 */}
       <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
           <Icon name="clock" className="h-3.5 w-3.5" />
-          请求历史（{entries.length}）
+          {t('history.title', entries.length)}
         </span>
         <div className="flex items-center gap-1">
           {entries.length > 0 && (
@@ -42,13 +44,13 @@ export default function HistoryPanel({ entries, onRestore, onDelete, onClear, on
               onClick={onClear}
               className="rounded-md px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
             >
-              清空
+              {t('history.clear')}
             </button>
           )}
           <button
             onClick={onClose}
             className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-            title="关闭"
+            title={t('history.close')}
           >
             <Icon name="x" className="h-3.5 w-3.5" />
           </button>
@@ -60,7 +62,7 @@ export default function HistoryPanel({ entries, onRestore, onDelete, onClear, on
         {entries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-gray-300">
             <Icon name="clock" className="h-8 w-8" strokeWidth={1.5} />
-            <p className="text-xs text-gray-400">暂无历史记录</p>
+            <p className="text-xs text-gray-400">{t('history.empty')}</p>
           </div>
         ) : (
           <ul className="space-y-1">
@@ -78,7 +80,7 @@ export default function HistoryPanel({ entries, onRestore, onDelete, onClear, on
                     <span className="text-[11px] text-gray-400">{formatRelativeTime(entry.timestamp)}</span>
                   </div>
                   <p className="mt-1 truncate font-mono text-[11px] leading-relaxed text-gray-500">
-                    {entry.body || '(空)'}
+                    {entry.body || t('history.body_empty')}
                   </p>
                 </button>
                 <button

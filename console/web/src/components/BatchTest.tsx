@@ -9,6 +9,7 @@ import type { EndpointSample, BatchResponse } from '@/types/api';
 import { batchRequest } from '@/api/client';
 import { orderCategories } from '@/lib/categories';
 import { Icon } from '@/components/icons';
+import { useI18n } from '@/i18n';
 
 interface BatchTestProps {
   samples: EndpointSample[];
@@ -23,6 +24,7 @@ const ALL = '__all__';
  * 汇总展示成功 / 失败与耗时，便于快速回归验证。
  */
 export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
+  const { t } = useI18n();
   const [category, setCategory] = useState<string>(ALL);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BatchResponse | null>(null);
@@ -75,20 +77,20 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
             批量测试
           </h1>
           <p className="mt-1.5 text-sm text-gray-500">
-            一键顺序调用所选分类下的全部接口，快速回归验证。单个失败不会中断整个批次。
+            {t('batch.subtitle')}
           </p>
         </div>
 
         {/* 控制区 */}
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <label className="flex items-center gap-2 text-sm text-gray-600">
-            测试范围
+            {t('batch.scope')}
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-700 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
             >
-              <option value={ALL}>全部分类（{samples.length} 个接口）</option>
+              <option value={ALL}>{t('batch.all_categories', samples.length)}</option>
               {categories.map((c) => (
                 <option key={c} value={c}>
                   {c}（{samples.filter((s) => s.category === c).length}）
@@ -109,12 +111,12 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
             {running ? (
               <>
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-white" />
-                测试中…
+                {t('batch.running')}
               </>
             ) : (
               <>
                 <Icon name="play" className="h-3.5 w-3.5" />
-                开始测试（{targets.length}）
+                {t('batch.start', targets.length)}
               </>
             )}
           </button>
@@ -143,10 +145,10 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
                 </span>
                 <div className="text-sm">
                   <div className="font-semibold text-gray-800">
-                    {result.failed === 0 ? '全部通过' : `${result.failed} 个失败`}
+                    {result.failed === 0 ? t('batch.all_passed') : t('batch.n_failed', result.failed)}
                   </div>
                   <div className="text-xs text-gray-400">
-                    共 {result.total} · 通过 {result.passed} · 失败 {result.failed}
+                    {t('batch.summary', result.total, result.passed, result.failed)}
                   </div>
                 </div>
               </div>
@@ -157,10 +159,10 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50/60 text-left text-xs uppercase tracking-wide text-gray-400">
-                    <th className="px-4 py-2.5 font-semibold">状态</th>
-                    <th className="px-4 py-2.5 font-semibold">接口</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">耗时</th>
-                    <th className="px-4 py-2.5 font-semibold">信息</th>
+                    <th className="px-4 py-2.5 font-semibold">{t('batch.col_status')}</th>
+                    <th className="px-4 py-2.5 font-semibold">{t('batch.col_endpoint')}</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">{t('batch.col_duration')}</th>
+                    <th className="px-4 py-2.5 font-semibold">{t('batch.col_info')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -220,7 +222,7 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
         {!result && !error && !running && (
           <div className="mt-10 flex flex-col items-center gap-3 text-gray-300">
             <Icon name="zap" className="h-12 w-12" strokeWidth={1.5} />
-            <p className="text-sm text-gray-400">选择范围后点击"开始测试"</p>
+            <p className="text-sm text-gray-400">{t('batch.empty_hint')}</p>
           </div>
         )}
       </div>

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { EndpointSample } from '@/types/api';
 import { categoryMeta, orderCategories } from '@/lib/categories';
 import { Icon } from '@/components/icons';
+import { useI18n } from '@/i18n';
 
 interface SidebarProps {
   samples: EndpointSample[];
@@ -70,6 +71,7 @@ export default function Sidebar({
   onDynClassify,
   dynClassifyActive = false,
 }: SidebarProps) {
+  const { t } = useI18n();
 
   const [query, setQuery] = useState('');
   // 默认全部折叠，避免首页侧边栏过长；用户点击分组头展开。
@@ -128,7 +130,7 @@ export default function Sidebar({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索接口…"
+            placeholder={t('sidebar.search_placeholder')}
             className="w-full rounded-lg border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-sm text-gray-700 placeholder-gray-400 transition-colors focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
           />
         </label>
@@ -149,7 +151,7 @@ export default function Sidebar({
           <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
             <Icon name="inbox" className="h-3 w-3" />
           </span>
-          接口总览
+          {t('sidebar.overview')}
         </button>
         {/* 批量测试入口 */}
         <button
@@ -164,7 +166,7 @@ export default function Sidebar({
           <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
             <Icon name="play" className="h-3 w-3" />
           </span>
-          批量测试
+          {t('sidebar.batch_test')}
         </button>
         {/* 文件处理入口 */}
         <button
@@ -179,7 +181,7 @@ export default function Sidebar({
           <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
             <Icon name="upload" className="h-3 w-3" />
           </span>
-          文件处理
+          {t('sidebar.file_test')}
         </button>
         {/* 负载均衡测试入口 */}
         <button
@@ -194,7 +196,7 @@ export default function Sidebar({
           <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
             <Icon name="scale" className="h-3 w-3" />
           </span>
-          负载均衡
+          {t('sidebar.lb_test')}
         </button>
         {/* 动态分类分级入口 */}
         <button
@@ -209,12 +211,12 @@ export default function Sidebar({
           <span className="flex h-5 w-5 items-center justify-center rounded bg-purple-100 text-purple-600">
             <Icon name="sparkles" className="h-3 w-3" />
           </span>
-          通用动态分类分级
+          {t('sidebar.dyn_classify')}
         </button>
 
         {visibleCategories.length === 0 && (
           <div className="px-3 py-8 text-center text-sm text-gray-400">
-            未找到匹配的接口
+            {t('sidebar.no_match')}
           </div>
         )}
         {visibleCategories.map((category) => {
