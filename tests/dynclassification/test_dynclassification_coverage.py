@@ -53,7 +53,7 @@ class TestOperatorRegistryCoverage:
 
 
 class TestGeneratorCoverage:
-    """generator.py 包含各类多行业标准识别与分支测试"""
+    """standard_doc_generator.py 包含各类多行业标准识别与分支测试"""
 
     def test_parser_file_not_found(self):
         with pytest.raises(FileNotFoundError):
