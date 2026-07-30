@@ -1,10 +1,12 @@
 """标准文档到 YAML 配置自动生成器 / Standard Document YAML Generator.
 
 输入一个 Markdown 格式的分类分级标准文档（如《四川省健康医疗大数据应用指南.md》），
+Input a Markdown formatted classification and grading standard document,
 自动解析文档中的分类树定义、等级划分矩阵与词条举例，并输出对应的：
-1. taxonomies/<standard_id>.yaml - 分类分级元数据定义
-2. domains/<standard_id>.yaml    - 领域匹配规则包
-3. standards/<standard_id>.yaml  - 标准组合定义
+automatically parse the category tree definition, grading matrix, and term examples from the document, and output the corresponding:
+1. taxonomies/<standard_id>.yaml - 分类分级元数据定义 / Classification metadata definition
+2. domains/<standard_id>.yaml    - 领域匹配规则包 / Domain matching rule profile
+3. standards/<standard_id>.yaml  - 标准组合定义 / Standard combination definition
 """
 
 from __future__ import annotations
@@ -21,10 +23,12 @@ from .rule_schema import DowngradeRuleDef, MatcherDef, RuleDef, RuleProfile, Sta
 
 
 class StandardDocParser:
-    """分类分级标准文档解析与 YAML 自动生成器。
+    """分类分级标准文档解析与 YAML 自动生成器 / Classification standard document parser and YAML auto-generator.
 
     支持对符合国标/行标/地方标准格式的 Markdown 文档进行分析，
+    Supports analyzing Markdown documents conforming to national/industry/local standard formats,
     抽取数据分类目录、分级定义及字段模式，自动构建三套 YAML 配置。
+    extracting data categories, level definitions, and field patterns to automatically build three sets of YAML configurations.
     """
 
     def __init__(self, doc_path: str | Path):
@@ -36,14 +40,14 @@ class StandardDocParser:
         self.content = self.doc_path.read_text(encoding="utf-8")
 
     def parse(self) -> tuple[DomainTaxonomy, RuleProfile, StandardDef]:
-        """解析文档并生成元数据体系、规则 Profile 和 Standard 组合模型。
+        """解析文档并生成元数据体系、规则 Profile 和 Standard 组合模型 / Parse document and generate taxonomy, Rule Profile, and Standard definition models.
 
-        Pipeline:
-        1. Extract standard identifier and description from document.
-        2. Extract sensitivity levels (L1~L5 or C1~C4) based on document content.
-        3. Extract category tree from domain-specific keywords.
-        4. Generate classification rules from example terms in the document.
-        5. Assemble the three output models.
+        Pipeline / 处理流程:
+        1. Extract standard identifier and description from document / 从文档中提取标准标识符和描述。
+        2. Extract sensitivity levels (L1~L5 or C1~C4) based on document content / 基于文档内容提取敏感度等级（L1~L5 或 C1~C4）。
+        3. Extract category tree from domain-specific keywords / 从领域特定关键词中提取分类树。
+        4. Generate classification rules from example terms in the document / 从文档中的示例词条生成分类规则。
+        5. Assemble the three output models / 组装三个输出模型。
         """
         # Step 1: Extract standard ID (e.g. 'sc_health_db51') and description.
         standard_id = self._extract_standard_id()
@@ -88,18 +92,18 @@ class StandardDocParser:
         return taxonomy, profile, standard_def
 
     def generate_files(self, output_dir: str | Path = "rules") -> dict[str, Path]:
-        """解析文档并将自动生成的 3 个 YAML 文件写入 output_dir 对应目录。
+        """解析文档并将自动生成的 3 个 YAML 文件写入 output_dir 对应目录 / Parse document and write the 3 auto-generated YAML files to output_dir.
 
-        Output structure:
+        Output structure / 输出结构:
             output_dir/taxonomies/<standard_id>.yaml
             output_dir/domains/<standard_id>.yaml
             output_dir/standards/<standard_id>.yaml
 
         Args:
-            output_dir: 规则输出根目录。
+            output_dir: 规则输出根目录 / Rule output root directory.
 
         Returns:
-            生成的 YAML 文件路径字典 {'taxonomy': path, 'domain': path, 'standard': path}
+            生成的 YAML 文件路径字典 / Dictionary of generated YAML file paths {'taxonomy': path, 'domain': path, 'standard': path}
         """
         output_dir = Path(output_dir)
         # Parse the document to get the three model objects.
@@ -147,13 +151,13 @@ class StandardDocParser:
     # ------------------------------------------------------------------
 
     def _extract_standard_id(self) -> str:
-        """抽取标准标识符，如 DB51/T 2989 -> sc_health_db51。
+        """抽取标准标识符，如 DB51/T 2989 -> sc_health_db51 / Extract standard identifier.
 
-        Strategy:
-        1. Try regex extraction of standard code from document body.
-        2. Map known standard codes to canonical identifiers.
-        3. Fall back to filename-based heuristics.
-        4. Last resort: slugify the filename.
+        Strategy / 策略:
+        1. Try regex extraction of standard code from document body / 尝试从文档正文中正则提取标准代码。
+        2. Map known standard codes to canonical identifiers / 将已知标准代码映射到规范标识符。
+        3. Fall back to filename-based heuristics / 回退到基于文件名的启发式方法。
+        4. Last resort: slugify the filename / 最后手段：将文件名转换为 slug。
         """
         # Attempt to find a standard code pattern in the document.
         match = re.search(r"标准编号[：:]\s*([A-Z0-9_/—\-]+)", self.content)
@@ -183,9 +187,10 @@ class StandardDocParser:
         return slug or "auto_generated_standard"
 
     def _extract_description(self) -> str:
-        """抽取标准简短描述。
+        """抽取标准简短描述 / Extract standard short description.
 
         Uses the first line (title) and standard code to build a description.
+        使用第一行（标题）和标准代码来构建描述。
         """
         # Extract title from first line (strip Markdown heading markers).
         lines = self.content.strip().split("\n")
@@ -197,12 +202,12 @@ class StandardDocParser:
         return f"{title} ({code_str})" if code_str else title
 
     def _extract_levels(self) -> dict[str, SensitivityLevelDef]:
-        """抽取敏感度等级定义字典。
+        """抽取敏感度等级定义字典 / Extract sensitivity level definitions dictionary.
 
-        Detection strategy:
-        - If document mentions '第1级' or 'L1' -> use 5-level L1~L5 scheme.
-        - If document mentions 'C1' or '第四级' -> use 4-level C1~C4 scheme.
-        - Otherwise -> default to L1~L5 structure.
+        Detection strategy / 检测策略:
+        - If document mentions '第1级' or 'L1' -> use 5-level L1~L5 scheme / 如果文档提到 '第1级' 或 'L1' -> 使用 5 级 L1~L5 方案。
+        - If document mentions 'C1' or '第四级' -> use 4-level C1~C4 scheme / 如果文档提到 'C1' 或 '第四级' -> 使用 4 级 C1~C4 方案。
+        - Otherwise -> default to L1~L5 structure / 否则 -> 默认使用 L1~L5 结构。
         """
         levels: dict[str, SensitivityLevelDef] = {}
 
@@ -231,10 +236,11 @@ class StandardDocParser:
         return levels
 
     def _extract_categories(self) -> dict[str, CategoryDef]:
-        """抽取分类目录树。
+        """抽取分类目录树 / Extract category tree.
 
         Scans document content for domain-specific keywords and builds
         a category tree. Falls back to generic categories if nothing matches.
+        扫描文档内容以查找特定领域的关键词并构建分类树。如果没有匹配项，则回退到通用分类。
         """
         categories: dict[str, CategoryDef] = {}
 
@@ -264,9 +270,10 @@ class StandardDocParser:
         return categories
 
     def _determine_default_level(self, levels: dict[str, SensitivityLevelDef]) -> str:
-        """Determine the default level ID for fields that don't match any rule.
+        """Determine the default level ID for fields that don't match any rule / 确定未匹配任何规则的字段的默认等级 ID。
 
         Preference: L3 > C3 > first available level.
+        优先级：L3 > C3 > 第一个可用等级。
         """
         if "L3" in levels:
             return "L3"
@@ -278,10 +285,11 @@ class StandardDocParser:
     def _generate_rules(
         self, standard_id: str, levels: dict[str, SensitivityLevelDef], categories: dict[str, CategoryDef]
     ) -> tuple[list[RuleDef], list[DowngradeRuleDef]]:
-        """从标准词条举例提取特征算子并自动构建规则。
+        """从标准词条举例提取特征算子并自动构建规则 / Extract features from standard term examples and auto-build rules.
 
         Scans document lines for domain-specific terms and generates
         appropriate classification rules with matchers.
+        扫描文档行以查找特定领域的词条，并生成带有匹配器的相应分类规则。
         """
         rules: list[RuleDef] = []
         downgrade_rules: list[DowngradeRuleDef] = []
@@ -399,11 +407,11 @@ class StandardDocParser:
 
 
 def main():
-    """CLI 工具命令行入口。
+    """CLI 工具命令行入口 / CLI tool entry point.
 
     Usage:
-        python -m privacy_local_agent.dynclassification.generator \
-            --doc docs/standard/四川省健康医疗大数据应用指南.md \
+        python -m privacy_local_agent.dynclassification.generator \\
+            --doc docs/standard/四川省健康医疗大数据应用指南.md \\
             --output rules
     """
     # Configure argument parser for CLI usage.

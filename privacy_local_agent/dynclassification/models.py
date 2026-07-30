@@ -1,9 +1,9 @@
 """动态分类分级数据模型 / Dynamic Classification Data Models.
 
-定义分类体系元数据（Taxonomy）、敏感度等级、分类类别、安全标签等核心模型。
-所有模型均为 Pydantic v2 BaseModel，支持 YAML/JSON 序列化与校验。
+定义分类体系元数据（Taxonomy）、敏感度等级、分类类别、安全标签等核心模型。 / Defines core models for taxonomy metadata, sensitivity levels, classification categories, and security tags.
+所有模型均为 Pydantic v2 BaseModel，支持 YAML/JSON 序列化与校验。 / All models are Pydantic v2 BaseModels, supporting YAML/JSON serialization and validation.
 
-本模块完全独立于旧分类引擎（privacy/classification/），无交叉依赖。
+本模块完全独立于旧分类引擎（privacy/classification/），无交叉依赖。 / This module is completely independent of the old classification engine (privacy/classification/) with no cross-dependencies.
 """
 
 from __future__ import annotations
@@ -22,10 +22,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EngineLayer:
-    """分类引擎层级常量。
+    """分类引擎层级常量。 / Classification engine layer constants.
 
-    标识分类结果由哪一层引擎产出，用于审计追踪和结果溯源。
-    三层漏斗架构：规则引擎 → Small-NER → LLM，逐层递进。
+    标识分类结果由哪一层引擎产出，用于审计追踪和结果溯源。 / Identifies which engine layer produced the classification result, for audit trails and result tracing.
+    三层漏斗架构：规则引擎 → Small-NER → LLM，逐层递进。 / 3-layer funnel architecture: Rule Engine → Small-NER → LLM, progressing layer by layer.
     """
 
     L1_RULE = "L1_RULE"            # 第一层：可配置规则引擎（字段名 + 值模式匹配）
@@ -34,21 +34,21 @@ class EngineLayer:
 
 
 class ConfidencePolicy(BaseModel):
-    """置信度策略配置。
+    """置信度策略配置。 / Confidence Policy Configuration.
 
-    控制规则冲突时的置信度衰减行为和 LLM 仲裁触发条件。
-    从 taxonomy YAML 的 confidence_policy 节加载。
+    控制规则冲突时的置信度衰减行为和 LLM 仲裁触发条件。 / Controls confidence decay behavior during rule conflicts and LLM arbitration trigger conditions.
+    从 taxonomy YAML 的 confidence_policy 节加载。 / Loaded from the confidence_policy section of the taxonomy YAML.
 
-    执行逻辑:
+    执行逻辑 / Execution Logic:
     ┌─────────────────────────────────────────────────────────────────┐
-    │  规则评估完成后:                                                 │
+    │  规则评估完成后 / After rule evaluation:                           │
     │                                                                  │
-    │  1. 检测冲突: 普通标签 + 降级标签同时存活?                       │
-    │     ├─ 无冲突 → confidence=1.0, needs_review=false              │
-    │     └─ 有冲突 ↓                                                 │
-    │  2. LLM 仲裁可用? (enable_llm_arbitration + LLM 已加载)         │
-    │     ├─ 是 → 调用 LLM 裁定, confidence=LLM输出                   │
-    │     └─ 否 → confidence=conflict_confidence, needs_review=true   │
+    │  1. 检测冲突: 普通标签 + 降级标签同时存活? / Detect conflict: normal + downgrade tags coexist? │
+    │     ├─ 无冲突 / No conflict → confidence=1.0, needs_review=false │
+    │     └─ 有冲突 / Has conflict ↓                                   │
+    │  2. LLM 仲裁可用? (enable_llm_arbitration + LLM 已加载) / LLM arbitration available? │
+    │     ├─ 是 / Yes → 调用 LLM 裁定 / Invoke LLM, confidence=LLM输出 │
+    │     └─ 否 / No → confidence=conflict_confidence, needs_review=true │
     └─────────────────────────────────────────────────────────────────┘
     """
 
@@ -106,10 +106,10 @@ class ConfidencePolicy(BaseModel):
 
 
 class SensitivityLevelDef(BaseModel):
-    """动态敏感度等级定义。
+    """动态敏感度等级定义。 / Dynamic Sensitivity Level Definition.
 
-    替代硬编码的 SensitivityLevel 枚举，支持任意等级体系。
-    不同行业可使用不同等级标识（L1~L5 / C1~C4 / 1~4级）。
+    替代硬编码的 SensitivityLevel 枚举，支持任意等级体系。 / Replaces hardcoded SensitivityLevel enum, supporting arbitrary level systems.
+    不同行业可使用不同等级标识（L1~L5 / C1~C4 / 1~4级）。 / Different industries can use different level identifiers.
     """
 
     # Allow population by both field name and alias for flexible YAML/JSON input.
@@ -127,10 +127,10 @@ class SensitivityLevelDef(BaseModel):
 
 
 class CategoryDef(BaseModel):
-    """动态分类类别定义。
+    """动态分类类别定义。 / Dynamic Category Definition.
 
-    替代硬编码的 BusinessCategory 枚举，支持多级分类树结构。
-    通过 parent_id 建立父子关系。
+    替代硬编码的 BusinessCategory 枚举，支持多级分类树结构。 / Replaces hardcoded BusinessCategory enum, supporting multi-level category tree structures.
+    通过 parent_id 建立父子关系。 / Establishes parent-child relationships via parent_id.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -147,11 +147,11 @@ class CategoryDef(BaseModel):
 
 
 class DomainTaxonomy(BaseModel):
-    """领域分类体系完整定义。
+    """领域分类体系完整定义。 / Complete Domain Taxonomy Definition.
 
-    一个 Taxonomy 对应一个行业标准的分类分级元数据，
-    包含该标准下的所有等级定义和分类目录树。
-    支持通过 confidence_policy 节配置置信度策略。
+    一个 Taxonomy 对应一个行业标准的分类分级元数据， / A Taxonomy corresponds to an industry standard's classification metadata,
+    包含该标准下的所有等级定义和分类目录树。 / containing all level definitions and category directory trees under that standard.
+    支持通过 confidence_policy 节配置置信度策略。 / Supports configuring confidence policy via the confidence_policy section.
     """
 
     # Allow extra fields from YAML to be preserved (forward compatibility).
@@ -228,13 +228,13 @@ class DomainTaxonomy(BaseModel):
     )
 
     def max_level(self, *level_ids: str) -> str:
-        """返回等级集合中 rank 最高的等级 ID。
+        """返回等级集合中 rank 最高的等级 ID。 / Returns the level ID with the highest rank in the level set.
 
         Args:
-            *level_ids: 一个或多个等级 ID。
+            *level_ids: 一个或多个等级 ID。 / One or more level IDs.
 
         Returns:
-            rank 最大的等级 ID；无有效输入时返回 default_level。
+            rank 最大的等级 ID；无有效输入时返回 default_level。 / The level ID with the highest rank; returns default_level when no valid input is provided.
         """
         # Step 1: If no level IDs provided, return the configured default.
         if not level_ids:
@@ -248,13 +248,13 @@ class DomainTaxonomy(BaseModel):
         return max(valid, key=lambda lid: self.levels[lid].rank)
 
     def get_level_rank(self, level_id: str) -> int:
-        """获取等级的排序权重。
+        """获取等级的排序权重。 / Gets the rank of the level.
 
         Args:
-            level_id: 等级 ID。
+            level_id: 等级 ID。 / Level ID.
 
         Returns:
-            rank 值；未找到时返回 0。
+            rank 值；未找到时返回 0。 / The rank value; returns 0 if not found.
         """
         # Look up the level in the levels dict; return its rank or 0 if not found.
         if level_id in self.levels:
@@ -263,13 +263,13 @@ class DomainTaxonomy(BaseModel):
 
 
     def get_category_path(self, category_id: str) -> list[str]:
-        """获取分类的完整路径（从根到叶）。
+        """获取分类的完整路径（从根到叶）。 / Gets the full path of the category (from root to leaf).
 
         Args:
-            category_id: 分类 ID。
+            category_id: 分类 ID。 / Category ID.
 
         Returns:
-            从根分类到目标分类的 ID 列表。
+            从根分类到目标分类的 ID 列表。 / List of IDs from root category to target category.
         """
         # Build path by walking up the parent_id chain from leaf to root.
         path: list[str] = []
@@ -291,10 +291,10 @@ class DomainTaxonomy(BaseModel):
 
 
 class SecurityTag(BaseModel):
-    """安全标签，描述单次规则命中的分类结果。
+    """安全标签，描述单次规则命中的分类结果。 / Security Tag, describing the classification result of a single rule hit.
 
-    每次规则/算子命中都会产出一个 SecurityTag，记录命中的等级、类别、
-    来源引擎、规则 ID 等审计信息。
+    每次规则/算子命中都会产出一个 SecurityTag，记录命中的等级、类别、 / Every rule/operator hit produces a SecurityTag, recording the hit level, category,
+    来源引擎、规则 ID 等审计信息。 / source engine, rule ID, and other audit information.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -334,14 +334,14 @@ class SecurityTag(BaseModel):
 
 
 class FieldClassificationResult(BaseModel):
-    """单个字段的分类结果。
+    """单个字段的分类结果。 / Single Field Classification Result.
 
-    记录对数据集中某一个字段（列）的完整分类信息，包括：
-    - 所有命中的安全标签列表
-    - 最终裁定的敏感度等级
-    - 产出该结果的引擎层级（三层漏斗中的哪一层）
-    - 置信度（可能因冲突衰减或 LLM 修正）
-    - 推理说明（LLM 层会填充详细推理过程）
+    记录对数据集中某一个字段（列）的完整分类信息，包括： / Records the complete classification info for a specific field (column) in the dataset, including:
+    - 所有命中的安全标签列表 / List of all matched security tags
+    - 最终裁定的敏感度等级 / Final adjudicated sensitivity level
+    - 产出该结果的引擎层级（三层漏斗中的哪一层） / The engine layer that produced this result (which layer in the 3-layer funnel)
+    - 置信度（可能因冲突衰减或 LLM 修正） / Confidence (may be decayed by conflict or corrected by LLM)
+    - 推理说明（LLM 层会填充详细推理过程） / Reasoning (LLM layer will populate detailed reasoning process)
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -375,7 +375,7 @@ class FieldClassificationResult(BaseModel):
 
 
 class RecordClassificationResult(BaseModel):
-    """单条记录（多字段）的分类结果。"""
+    """单条记录（多字段）的分类结果。 / Single Record (Multi-field) Classification Result."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -396,7 +396,7 @@ class RecordClassificationResult(BaseModel):
 
 
 class TableClassificationResult(BaseModel):
-    """整张表/批次的分类结果。"""
+    """整张表/批次的分类结果。 / Entire Table/Batch Classification Result."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -423,7 +423,7 @@ class TableClassificationResult(BaseModel):
 
 
 class AuditInfo(BaseModel):
-    """审计信息，记录分类请求的执行元数据。"""
+    """审计信息，记录分类请求的执行元数据。 / Audit Info, recording execution metadata of classification requests."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -446,10 +446,10 @@ class AuditInfo(BaseModel):
 
 
 class ClassificationResponse(BaseModel):
-    """分类响应包装器。
+    """分类响应包装器。 / Classification Response Wrapper.
 
-    Wraps exactly one of field_result / record_result / table_result
-    depending on the classification granularity requested.
+    Wraps exactly one of field_result / record_result / table_result / 根据请求的分类粒度包装
+    depending on the classification granularity requested. / field_result / record_result / table_result 中的恰好一个。
     """
 
     model_config = ConfigDict(populate_by_name=True)

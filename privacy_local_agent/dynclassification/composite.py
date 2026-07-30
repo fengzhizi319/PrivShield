@@ -2,10 +2,14 @@
 
 用于识别“单字段不敏感、多字段组合后敏感”的上下文场景。
 在单条记录的字段级分类完成后执行，根据字段名组合升级敏感度等级。
+Used to identify context scenarios where "a single field is not sensitive, but sensitive when combined with multiple fields".
+Executed after field-level classification of a single record, upgrading sensitivity level based on field name combinations.
 
-典型场景：
+典型场景 / Typical scenarios:
 - 单独一个 "name" 字段可能只是 L3，但如果同一条记录中同时存在
   "name" + "id_card" + "mobile"，则组合后应升级为 L5。
+  A single "name" field might only be L3, but if "name" + "id_card" + "mobile"
+  exist simultaneously in the same record, the combination should be upgraded to L5.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ logger = get_logger(__name__)
 
 
 def _normalize(name: str) -> str:
-    """规范化字段名用于模式匹配。
+    """规范化字段名用于模式匹配 / Normalize field names for pattern matching.
 
     Normalization steps:
     1. Convert to lowercase (case-insensitive matching).
@@ -32,16 +36,19 @@ def _normalize(name: str) -> str:
 
 
 class CompositeRuleEngine:
-    """复合规则引擎。
+    """复合规则引擎 / Composite Rule Engine.
 
     维护一组复合规则，对单条记录及其字段分类结果进行后处理。
     当记录中的字段名组合满足某条复合规则的 min_matches 阈值时，
     生成对应的 SecurityTag 并升级记录的最终敏感度等级。
+    Maintains a set of composite rules to post-process a single record and its field classification results.
+    When a combination of field names in a record meets the min_matches threshold of a composite rule,
+    generates a corresponding SecurityTag and upgrades the final sensitivity level of the record.
 
     Attributes:
-        rules: 当前生效的复合规则列表。
-        domain: 领域标识。
-        standard_id: 标准标识。
+        rules: 当前生效的复合规则列表 / List of currently active composite rules.
+        domain: 领域标识 / Domain identifier.
+        standard_id: 标准标识 / Standard identifier.
     """
 
     def __init__(
@@ -50,12 +57,12 @@ class CompositeRuleEngine:
         domain: str = "",
         standard_id: str = "",
     ):
-        """初始化复合规则引擎。
+        """初始化复合规则引擎 / Initialize the composite rule engine.
 
         Args:
-            rules: 复合规则列表；None 时使用空列表。
-            domain: 领域标识。
-            standard_id: 标准标识。
+            rules: 复合规则列表；None 时使用空列表 / List of composite rules; uses empty list if None.
+            domain: 领域标识 / Domain identifier.
+            standard_id: 标准标识 / Standard identifier.
         """
         # Store a defensive copy of the rules list to prevent external mutation.
         self.rules = list(rules) if rules else []
@@ -85,7 +92,7 @@ class CompositeRuleEngine:
         record: dict[str, Any],
         field_results: dict[str, FieldClassificationResult] | None = None,
     ) -> list[SecurityTag]:
-        """评估单条记录是否命中复合规则。
+        """评估单条记录是否命中复合规则 / Evaluate if a single record hits composite rules.
 
         Algorithm:
         1. Normalize all field names in the record for pattern matching.
@@ -94,11 +101,11 @@ class CompositeRuleEngine:
         3. If matched count >= rule.min_matches, the rule fires and produces a tag.
 
         Args:
-            record: 原始记录字典（字段名 → 字段值）。
-            field_results: 字段级分类结果（可选，预留扩展）。
+            record: 原始记录字典（字段名 → 字段值） / Original record dictionary (field_name → field_value).
+            field_results: 字段级分类结果（可选，预留扩展） / Field-level classification results (optional, reserved for extension).
 
         Returns:
-            命中的 SecurityTag 列表。
+            命中的 SecurityTag 列表 / List of hit SecurityTags.
         """
         tags: list[SecurityTag] = []
         # Build a normalized-name -> original-name mapping for all fields in the record.
@@ -151,19 +158,19 @@ class CompositeRuleEngine:
         composite_tags: list[SecurityTag],
         taxonomy: Any = None,
     ) -> str:
-        """将复合规则标签应用到记录级等级（取最高）。
+        """将复合规则标签应用到记录级等级（取最高） / Apply composite rule tags to record-level sensitivity (taking the highest).
 
         Logic: The final record level is the maximum of the current level
         and all composite tag levels. This ensures composite rules can only
         UPGRADE sensitivity, never downgrade it.
 
         Args:
-            current_level: 当前记录级等级。
-            composite_tags: 复合规则命中的标签。
-            taxonomy: 分类体系（用于比较等级）。
+            current_level: 当前记录级等级 / Current record-level sensitivity.
+            composite_tags: 复合规则命中的标签 / Hit tags from composite rules.
+            taxonomy: 分类体系（用于比较等级） / Taxonomy (used for level comparison).
 
         Returns:
-            升级后的等级 ID。
+            升级后的等级 ID / Upgraded level ID.
         """
         # If no composite tags fired, the current level remains unchanged.
         if not composite_tags:

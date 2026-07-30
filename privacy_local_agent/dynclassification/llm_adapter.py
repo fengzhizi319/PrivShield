@@ -4,7 +4,12 @@
 采用 lazy-load 策略：仅在首次调用时加载底层 Qwen2-VL 模型，
 避免核心路径引入重量级 ML 依赖（torch/transformers）。
 
-执行逻辑:
+English Description:
+Provides Layer-3 LLM deep classification and arbitration capabilities for the dynclassification three-layer funnel.
+Adopts a lazy-load strategy: only loads the underlying Qwen2-VL model upon the first call,
+avoiding heavy ML dependencies (torch/transformers) in the core path.
+
+执行逻辑 / Execution Logic:
 ┌─────────────────────────────────────────────────────────────────┐
 │  LlmAdapter                                                     │
 │                                                                  │
@@ -24,11 +29,11 @@
 │       LLM 根据语义判断字段真实敏感度                                 │
 └─────────────────────────────────────────────────────────────────┘
 
-降级策略:
-- torch/transformers 未安装 → 标记不可用, 返回 None
-- 模型目录不存在 → 标记不可用, 返回 None
-- 推理超时 (180s) → 返回 None → 上层使用 Phase 1 置信度衰减
-- JSON 解析失败 → 返回 None → 上层使用 Phase 1 置信度衰减
+降级策略 / Degradation Strategy:
+- torch/transformers 未安装 → 标记不可用, 返回 None / torch/transformers not installed -> mark unavailable, return None
+- 模型目录不存在 → 标记不可用, 返回 None / Model dir not found -> mark unavailable, return None
+- 推理超时 (180s) → 返回 None → 上层使用 Phase 1 置信度衰减 / Inference timeout (180s) -> return None -> upper layer uses Phase 1 confidence decay
+- JSON 解析失败 → 返回 None → 上层使用 Phase 1 置信度衰减 / JSON parsing failed -> return None -> upper layer uses Phase 1 confidence decay
 """
 
 from __future__ import annotations
@@ -42,23 +47,25 @@ logger = get_logger(__name__)
 
 
 class LlmAdapter:
-    """LLM 分类器适配器（Layer-3）。
+    """LLM 分类器适配器（Layer-3） / LLM Classifier Adapter (Layer-3).
 
     封装旧模块 privacy/classification/classification_llm.py 的 Qwen2VLClassifier，
     提供 classify() 和 arbitrate() 两个接口供 ClassificationFunnel 调用。
+    Wraps Qwen2VLClassifier from the old privacy/classification/classification_llm.py module,
+    providing classify() and arbitrate() interfaces for ClassificationFunnel.
 
     Attributes:
-        _classifier: 底层 LLM 分类器实例（延迟初始化）。
-        _available: 分类器是否可用。
-        _initialized: 是否已尝试过初始化。
+        _classifier: 底层 LLM 分类器实例（延迟初始化）。 / Underlying LLM classifier instance (lazy initialized).
+        _available: 分类器是否可用。 / Whether the classifier is available.
+        _initialized: 是否已尝试过初始化。 / Whether initialization has been attempted.
     """
 
     def __init__(self, model_path: str | None = None, classify_prompt_template: str | None = None):
-        """初始化适配器（不加载模型）。
+        """初始化适配器（不加载模型） / Initialize the adapter (without loading the model).
 
         Args:
-            model_path: 模型本地路径（可选，默认 .models/Qwen2-VL-2B-Instruct）。
-            classify_prompt_template: LLM 分类 system prompt 模板（可选，支持占位符）。
+            model_path: 模型本地路径（可选，默认 .models/Qwen2-VL-2B-Instruct）。 / Local model path (optional).
+            classify_prompt_template: LLM 分类 system prompt 模板（可选，支持占位符）。 / LLM classification system prompt template (optional).
         """
         self._model_path = model_path
         self._classify_prompt_template = classify_prompt_template
@@ -67,9 +74,10 @@ class LlmAdapter:
         self._initialized = False
 
     def _lazy_init(self) -> None:
-        """延迟初始化 LLM 分类器。
+        """延迟初始化 LLM 分类器 / Lazy initialize LLM classifier.
 
         尝试加载 Qwen2VLClassifier，失败则标记不可用。
+        Attempts to load Qwen2VLClassifier, marks as unavailable if it fails.
         """
         if self._initialized:
             return
@@ -88,25 +96,27 @@ class LlmAdapter:
 
     @property
     def is_available(self) -> bool:
-        """LLM 分类器是否可用（依赖已安装）。"""
+        """LLM 分类器是否可用（依赖已安装）。 / Whether LLM classifier is available (dependencies installed)."""
         self._lazy_init()
         return self._available
 
     def classify(
         self, text: str, upstream_level: str, upstream_confidence: float
     ) -> dict[str, Any] | None:
-        """使用 LLM 对文本进行深度分类。
+        """使用 LLM 对文本进行深度分类 / Perform deep classification on text using LLM.
 
         这是通用的 Layer-3 分类接口，由漏斗在低置信度时触发。
+        This is the general Layer-3 classification interface, triggered by the funnel on low confidence.
 
         Args:
-            text: 待分类文本。
-            upstream_level: 上游引擎给出的等级 ID（如 "L3"）。
-            upstream_confidence: 上游置信度。
+            text: 待分类文本。 / Text to classify.
+            upstream_level: 上游引擎给出的等级 ID（如 "L3"）。 / Level ID provided by upstream engine (e.g., "L3").
+            upstream_confidence: 上游置信度。 / Upstream confidence.
 
         Returns:
             分类结果字典 {"final_level", "confidence", "reasoning", ...}
             或 None（不可用/降级）。
+            Classification result dict or None (unavailable/degraded).
         """
         self._lazy_init()
         if not self._available or self._classifier is None:
@@ -130,12 +140,14 @@ class LlmAdapter:
         conflict_tags: list[SecurityTag],
         taxonomy: DomainTaxonomy,
     ) -> dict[str, Any] | None:
-        """LLM 仲裁：解决规则冲突。
+        """LLM 仲裁：解决规则冲突 / LLM Arbitration: Resolve rule conflicts.
 
         当普通规则和降级规则同时命中（冲突）时，由 LLM 根据字段语义
         裁定最终等级和置信度。
+        When normal rules and downgrade rules hit simultaneously (conflict), LLM determines
+        the final level and confidence based on field semantics.
 
-        执行流程:
+        执行流程 / Execution flow:
         ┌─────────────────────────────────────────────────────────────┐
         │  arbitrate(field_name="Turnover_Rate", value="0.85")        │
         │    │                                                         │
@@ -151,14 +163,15 @@ class LlmAdapter:
         └─────────────────────────────────────────────────────────────┘
 
         Args:
-            field_name: 字段名。
-            value: 字段值。
-            conflict_tags: 冲突的标签列表（包含普通标签和降级标签）。
-            taxonomy: 当前分类体系（用于构建等级说明）。
+            field_name: 字段名。 / Field name.
+            value: 字段值。 / Field value.
+            conflict_tags: 冲突的标签列表（包含普通标签和降级标签）。 / List of conflicting tags.
+            taxonomy: 当前分类体系（用于构建等级说明）。 / Current classification taxonomy.
 
         Returns:
             仲裁结果字典 {"final_level", "confidence", "reasoning"}
             或 None（LLM 不可用/降级）。
+            Arbitration result dict or None (LLM unavailable/degraded).
         """
         self._lazy_init()
         if not self._available or self._classifier is None:

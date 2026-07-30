@@ -1,9 +1,9 @@
 """声明式规则 Profile 数据模型 / Declarative Rule Profile Schema.
 
-定义规则匹配器（Matcher）、规则（Rule）、降级规则、复合规则、
-领域规则包（RuleProfile）和标准组合（StandardDef）的 Pydantic 模型。
+定义规则匹配器（Matcher）、规则（Rule）、降级规则、复合规则、 / Defines models for Matcher, Rule, Downgrade Rule, Composite Rule,
+领域规则包（RuleProfile）和标准组合（StandardDef）的 Pydantic 模型。 / Domain Rule Pack (RuleProfile), and Standard Combination (StandardDef).
 
-所有规则均通过 YAML/JSON 声明式定义，引擎仅负责解释执行。
+所有规则均通过 YAML/JSON 声明式定义，引擎仅负责解释执行。 / All rules are declaratively defined via YAML/JSON, and the engine is only responsible for interpretation and execution.
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class MatcherDef(BaseModel):
-    """单个匹配器定义。
+    """单个匹配器定义。 / Single Matcher Definition.
 
-    描述对字段名或字段值执行何种算子匹配。
-    一个规则可包含多个匹配器，通过 match_logic 决定组合逻辑。
+    描述对字段名或字段值执行何种算子匹配。 / Describes what operator matching to perform on field name or field value.
+    一个规则可包含多个匹配器，通过 match_logic 决定组合逻辑。 / A rule can contain multiple matchers, and the combination logic is determined by match_logic.
     """
 
     # Allow instantiation using both Python field names and JSON/YAML alias names.
@@ -55,9 +55,9 @@ class MatcherDef(BaseModel):
 
 
 class RuleDef(BaseModel):
-    """单条声明式规则定义。
+    """单条声明式规则定义。 / Single Declarative Rule Definition.
 
-    规则是分类引擎的最小执行单元，包含一组匹配器和命中后的标签信息。
+    规则是分类引擎的最小执行单元，包含一组匹配器和命中后的标签信息。 / A rule is the smallest execution unit of the classification engine, containing a set of matchers and label info upon hit.
     """
 
     # Allow both snake_case and camelCase field access.
@@ -94,19 +94,19 @@ class RuleDef(BaseModel):
 
 
 class DowngradeRuleDef(BaseModel):
-    """降级规则定义。
+    """降级规则定义。 / Downgrade Rule Definition.
 
-    当字段名匹配指定关键词时，将等级降级到目标等级。
-    典型场景：公开字段降为 L1，运营统计字段降为 L2。
+    当字段名匹配指定关键词时，将等级降级到目标等级。 / Downgrades the level to the target level when the field name matches specified keywords.
+    典型场景：公开字段降为 L1，运营统计字段降为 L2。 / Typical scenarios: public fields downgraded to L1, operation stat fields downgraded to L2.
 
-    强制覆盖模式（force_suppress=true）：
-        默认情况下，降级规则仅作为"兜底归属"——在无普通规则命中时替代默认等级。
-        当设置 force_suppress=true 后，降级规则可强制压制 rank <= max_force_suppress_level 的
-        普通规则标签，解决宽泛规则误中运营/公开字段的问题。
+    强制覆盖模式（force_suppress=true） / Force Override Mode (force_suppress=true):
+        默认情况下，降级规则仅作为"兜底归属"——在无普通规则命中时替代默认等级。 / By default, downgrade rules only serve as "fallback" - replacing default level when no normal rules hit.
+        当设置 force_suppress=true 后，降级规则可强制压制 rank <= max_force_suppress_level 的 / When force_suppress=true, downgrade rules can forcefully suppress normal rule tags with rank <= max_force_suppress_level,
+        普通规则标签，解决宽泛规则误中运营/公开字段的问题。 / solving the issue of broad rules falsely hitting operation/public fields.
 
-        执行流程:
+        执行流程 / Execution Flow:
         ┌──────────────────────────────────────────────────────────────┐
-        │  force_suppress=false (默认):                                  │
+        │  force_suppress=false (默认/Default):                          │
         │    降级标签 + 普通标签 → 取 max → 降级无效（仅兜底）                 │
         │                                                              │
         │  force_suppress=true:                                        │
@@ -165,10 +165,10 @@ class DowngradeRuleDef(BaseModel):
 
 
 class CompositeRuleDef(BaseModel):
-    """复合规则定义（记录级）。
+    """复合规则定义（记录级）。 / Composite Rule Definition (Record-Level).
 
-    当一条记录中同时有 >= min_matches 个字段匹配指定的字段模式时，
-    将整条记录的敏感度升级为 target_level。
+    当一条记录中同时有 >= min_matches 个字段匹配指定的字段模式时， / When a record has >= min_matches fields matching specified field patterns simultaneously,
+    将整条记录的敏感度升级为 target_level。 / upgrades the sensitivity of the entire record to target_level.
     """
 
     # Allow instantiation using both Python field names and JSON/YAML alias names.
@@ -205,10 +205,10 @@ class CompositeRuleDef(BaseModel):
 
 
 class RuleProfile(BaseModel):
-    """规则 Profile 完整定义（一个领域包）。
+    """规则 Profile 完整定义（一个领域包）。 / Complete Rule Profile Definition (A Domain Pack).
 
-    一个 RuleProfile 对应一个行业领域的全部规则集合，
-    包含普通规则、降级规则和复合规则三类。
+    一个 RuleProfile 对应一个行业领域的全部规则集合， / A RuleProfile corresponds to the entire rule set of an industry domain,
+    包含普通规则、降级规则和复合规则三类。 / containing three types: normal rules, downgrade rules, and composite rules.
     """
 
     # Allow instantiation using both Python field names and JSON/YAML alias names.
@@ -243,10 +243,10 @@ class RuleProfile(BaseModel):
 
 
 class StandardDef(BaseModel):
-    """标准组合定义。
+    """标准组合定义。 / Standard Combination Definition.
 
-    一个标准 = 多个领域包组合 + 参数覆盖 + 规则级覆盖 + 追加规则。
-    例如 sc_health_db51 = general-pii + medical + 四川指南特有规则。
+    一个标准 = 多个领域包组合 + 参数覆盖 + 规则级覆盖 + 追加规则。 / A standard = multiple domain pack combinations + parameter overrides + rule-level overrides + appended rules.
+    例如 sc_health_db51 = general-pii + medical + 四川指南特有规则。 / E.g., sc_health_db51 = general-pii + medical + Sichuan guide-specific rules.
     """
 
     # Allow instantiation using both Python field names and JSON/YAML alias names.
