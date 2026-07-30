@@ -498,11 +498,12 @@ class TestExemptRulesExceptions:
         levels = [t.level for t in tags]
         assert "L5" in levels, "L5 不应被压制（rank 超出 cap=L3）"
 
-    def test_whitelist_field_value_exempt(self, taxonomy):
-        """值级命中匹配默认永远豁免保底保护。
+    def test_value_level_hits_always_protected(self, taxonomy):
+        """值级扫描命中标签受引擎内置机制保底保护，不受强制压制影响。
 
-        场景：RULE_PHONE 使用 field_value 匹配器，
-        期望：值级命中豁免保底保护，不被压制。
+        场景：RULE_PHONE 为基于实际数据值（field_value）匹配出的真实手机号标签，
+        即使降级规则配置了 force_suppress=true 且 exempt_rules=[]（未配置任何显式豁免），
+        期望：值级扫描出来的敏感数据仍受内置机制保护，绝对不被压制擦除。
         """
         profile = RuleProfile(
             domain="value-exempt",
@@ -522,7 +523,7 @@ class TestExemptRulesExceptions:
                     category="OPS",
                     force_suppress=True,
                     max_force_suppress_level="L3",
-                    exempt_rules=[],  # 就算没有配例外
+                    exempt_rules=[],  # 即使未配置任何显式豁免规则 / Even with empty exempt_rules
                 ),
             ],
         )
@@ -530,7 +531,7 @@ class TestExemptRulesExceptions:
         tags, _ = engine.evaluate("contact_info", "13800138000")
 
         rule_ids = [t.rule_id for t in tags]
-        assert "RULE_PHONE" in rule_ids, "值级命中应永远豁免保底保护"
+        assert "RULE_PHONE" in rule_ids, "基于数据采样值(field_value)命中的敏感标签应受内置保底机制保护，绝对不被压制"
 
     def test_multiple_override_rules_exempt_union(self, taxonomy):
         """多条 override 规则的豁免例外名单取并集。
