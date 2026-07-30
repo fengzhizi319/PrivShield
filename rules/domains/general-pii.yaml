@@ -3,6 +3,10 @@ domain: "general-pii"
 version: "1.0.0"
 description: "通用个人信息规则 (GB/T 35273)"
 
+# ==============================================================================
+# 1. 普通分类规则 (rules)
+# 常用字段包含：id, name, category, level, priority, match_logic, matchers
+# ==============================================================================
 rules:
   # --- 身份证 ---
   - id: "RULE_PII_IDCARD"
@@ -10,9 +14,10 @@ rules:
     category: "PERSONAL_BASIC"
     level: "L3"
     priority: 100
+    match_logic: "AND"                     # 匹配逻辑: AND (全部匹配) 或 OR (任意匹配)
     matchers:
-      - target: "field_value"
-        operator: "id_card_checksum"
+      - target: "field_value"              # 匹配目标: field_name (字段名), field_value (数据值), 或 both
+        operator: "id_card_checksum"       # 校验算法算子
         params: {}
 
   # --- 手机号 ---
@@ -21,6 +26,7 @@ rules:
     category: "PERSONAL_BASIC"
     level: "L3"
     priority: 100
+    match_logic: "AND"
     matchers:
       - target: "field_value"
         operator: "regex"
@@ -33,6 +39,7 @@ rules:
     category: "PERSONAL_BASIC"
     level: "L3"
     priority: 100
+    match_logic: "AND"
     matchers:
       - target: "field_value"
         operator: "medical_card_checksum"
@@ -44,6 +51,7 @@ rules:
     category: "PERSONAL_BASIC"
     level: "L3"
     priority: 50
+    match_logic: "AND"
     matchers:
       - target: "field_name"
         operator: "keyword_contains"
@@ -57,6 +65,7 @@ rules:
     category: "PERSONAL_BASIC"
     level: "L3"
     priority: 50
+    match_logic: "AND"
     matchers:
       - target: "field_name"
         operator: "keyword_contains"
@@ -70,32 +79,41 @@ rules:
     category: "PERSONAL_BASIC"
     level: "L3"
     priority: 40
+    match_logic: "AND"
     matchers:
       - target: "field_name"
         operator: "keyword_contains"
         params:
           keywords: ["idcard", "identity", "身份证", "passport"]
+          use_word_boundaries: false
 
+# ==============================================================================
+# 2. 敏感度降级与覆盖规则 (downgrade_rules)
+# 可用字段包含：id, name, keywords, level, category, force_suppress, max_force_suppress_level, exempt_rules
+# ==============================================================================
 downgrade_rules:
   - id: "general-pii:RULE_DOWN_PUBLIC"
     name: "公开数据降级"
     keywords: ["public_report", "annual_summary", "科普", "公开"]
     level: "L1"
     category: "PUBLIC_REPORT"
+    force_suppress: false                 # 是否开启强制压制 (false=仅做兜底降级)
+    max_force_suppress_level: ""          # 压制上限等级 (空=使用 level 字段作为上限)
+    exempt_rules: []                      # 压制豁免例外名单 (空=没有例外全额压制)
+
   - id: "general-pii:RULE_DOWN_OPS"
     name: "运营统计强制降级"
-    # 注意: 关键词必须足够精确，避免压制值级 PII 命中。
-    # "统计" 过宽（会匹配 "患者统计" 等含 PII 的字段），已替换为更精确的关键词。
-    # force_suppress 压制仅影响 match_target=field_name 的标签，值级命中（field_value）永远豁免。
     keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次", "床位统计", "工作量统计"]
     level: "L2"
     category: "OPERATIONAL_STAT"
-    force_suppress: true        # 启用强制覆盖
-    # 【配置提示 / Tip】: 开启 force_suppress: true 时，务必根据需要显式配置 max_force_suppress_level。
-    # 若未指定，默认仅压制 <= level(L2) 的标签。显式配置 max_force_suppress_level: "L3" (或 "L4")
-    # 才能将原本被通用规则误中而标记为 L3/L4 的高敏感标签强制压制并降级为 L2。
-    max_force_suppress_level: "L3"    # 仅压制 L3 及以下（且仅压制字段名命中，值级命中豁免）
+    force_suppress: true                  # 是否开启强制压制 (true=强行压制符合条件的普通规则)
+    max_force_suppress_level: "L3"        # 覆盖上限等级 (可强行将误报的 L3 降为 L2)
+    exempt_rules: []                      # 压制豁免例外名单 (空=按等级全额压制；如需要保护精细校验规则可填写如 ['RULE_PII_IDCARD'])
 
+# ==============================================================================
+# 3. 组合/上下文增强规则 (composite_rules)
+# 可用字段包含：id, name, field_patterns, min_matches, target_level, category, table_name_pattern, boost_level
+# ==============================================================================
 composite_rules:
   - id: "COMP_PII_001"
     name: "高敏感个人信息组合"
@@ -103,3 +121,5 @@ composite_rules:
     min_matches: 3
     target_level: "L5"
     category: "COMPOSITE_PII_COMBO"
+    table_name_pattern: ""                # 表名匹配正则 (空=不限表名)
+    boost_level: ""                       # 提级目标 (空=直接使用 target_level)

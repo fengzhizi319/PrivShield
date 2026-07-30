@@ -3,6 +3,10 @@ domain: "medical"
 version: "1.0.0"
 description: "医疗健康领域分类规则（含基因组、ICD-10、敏感病种）"
 
+# ==============================================================================
+# 1. 普通分类规则 (rules)
+# 常用字段包含：id, name, category, level, priority, match_logic, matchers
+# ==============================================================================
 rules:
   # --- 基因组字段名规则 ---
   - id: "RULE_MED_G_001"
@@ -10,6 +14,7 @@ rules:
     category: "GENOMIC"
     level: "L5"
     priority: 200
+    match_logic: "AND"                     # 匹配逻辑: AND (全部匹配) 或 OR (任意匹配)
     matchers:
       - target: "field_name"
         operator: "keyword_contains"
@@ -22,6 +27,7 @@ rules:
     category: "GENOMIC"
     level: "L5"
     priority: 200
+    match_logic: "OR"                      # 多个 matcher 满足任意一个即可命中
     matchers:
       - target: "field_name"
         operator: "keyword_contains"
@@ -32,13 +38,13 @@ rules:
         operator: "regex"
         params:
           pattern: "^rs\\d+$"
-    match_logic: "OR"
 
   - id: "RULE_MED_G_003"
     name: "基因组文件格式"
     category: "GENOMIC"
     level: "L5"
     priority: 200
+    match_logic: "AND"
     matchers:
       - target: "field_name"
         operator: "keyword_contains"
@@ -52,6 +58,7 @@ rules:
     category: "MEDICAL_TREATMENT"
     level: "L4"
     priority: 150
+    match_logic: "AND"
     matchers:
       - target: "field_name"
         operator: "keyword_contains"
@@ -66,6 +73,7 @@ rules:
     category: "MEDICAL_TREATMENT"
     level: "L3"
     priority: 120
+    match_logic: "AND"
     matchers:
       - target: "field_value"
         operator: "icd10_range"
@@ -85,6 +93,7 @@ rules:
     category: "GENOMIC"
     level: "L5"
     priority: 180
+    match_logic: "AND"
     matchers:
       - target: "field_value"
         operator: "prefix_match"
@@ -96,6 +105,7 @@ rules:
     category: "GENOMIC"
     level: "L5"
     priority: 180
+    match_logic: "AND"
     matchers:
       - target: "field_value"
         operator: "prefix_match"
@@ -107,28 +117,40 @@ rules:
     category: "GENOMIC"
     level: "L5"
     priority: 180
+    match_logic: "AND"
     matchers:
       - target: "field_value"
         operator: "regex"
         params:
           pattern: "[ATCGNatcgn]{50,}"
 
+# ==============================================================================
+# 2. 敏感度降级与覆盖规则 (downgrade_rules)
+# 可用字段包含：id, name, keywords, level, category, force_suppress, max_force_suppress_level, exempt_rules
+# ==============================================================================
 downgrade_rules:
   - id: "medical:RULE_DOWN_PUBLIC"
     name: "公开报告降级"
     keywords: ["public_report", "annual_summary", "科普"]
     level: "L1"
     category: "PUBLIC_REPORT"
+    force_suppress: false                 # 是否开启强制压制擦除
+    max_force_suppress_level: ""          # 压制上限等级 (空=使用规则自身 level 作为上限)
+    exempt_rules: []                      # 压制豁免例外名单 (空=没有例外全额压制)
+
   - id: "medical:RULE_DOWN_OPS"
     name: "运营统计强制降级"
     keywords: ["turnover_rate", "device_usage", "inventory"]
     level: "L2"
     category: "OPERATIONAL_STAT"
-    force_suppress: true        # 启用强制覆盖：可压制误中的普通规则
-    # 【配置提示 / Tip】: 开启 force_suppress: true 时，若需将更高的误报等级（如 L3/L4）强制降为 level(L2)，
-    # 必须显式配置 max_force_suppress_level: "L3" (或 "L4")，否则默认仅压制 <= level 的标签。
-    max_force_suppress_level: "L3"    # 仅能压制 L3 及以下的普通规则标签
+    force_suppress: true                  # 启用强制覆盖: 可压制符合条件的误中普通规则标签
+    max_force_suppress_level: "L3"        # 强行覆盖上限: 可把误标为 L3 的普通规则压制降至 L2
+    exempt_rules: []                      # 压制豁免例外名单 (空=按等级全额压制；如需要保护精细校验规则可填写如 ['RULE_MED_ICD10'])
 
+# ==============================================================================
+# 3. 组合/上下文增强规则 (composite_rules)
+# 可用字段包含：id, name, field_patterns, min_matches, target_level, category, table_name_pattern, boost_level
+# ==============================================================================
 composite_rules:
   - id: "COMP_MED_001"
     name: "医疗基因组合"
@@ -136,3 +158,5 @@ composite_rules:
     min_matches: 2
     target_level: "L5"
     category: "COMPOSITE_MEDICAL_GENOMIC"
+    table_name_pattern: ""                # 表名正则限制 (空=匹配任意表)
+    boost_level: ""                       # 提级配置 (空=直接使用 target_level)
