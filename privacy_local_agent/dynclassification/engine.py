@@ -131,7 +131,7 @@ class ConfigurableRuleEngine:
         1. Convert value to string for uniform operator processing.
         2. Phase 1: Iterate all rules (priority order) and evaluate each.
         3. Phase 2: Evaluate downgrade rules.
-        4. Phase 3: Apply override suppression (override=true downgrade rules
+        4. Phase 3: Apply override suppression (force_suppress=true downgrade rules
            forcibly remove normal tags with rank <= cap).
         5. Phase 4: Merge + deduplicate by (level, category) and return.
     
@@ -150,10 +150,10 @@ class ConfigurableRuleEngine:
         │  Phase 1: 普通规则评估 → normal_tags = [L5, L4, L3, ...]           │
         │  Phase 2: 降级规则评估 → downgrade_tags = [L2, L1, ...]            │
         │                                                                 │
-        │  Phase 3: 强制覆盖裁定 (override=true 的降级规则)                    │
+        │  Phase 3: 强制覆盖裁定 (force_suppress=true 的降级规则)              │
         │    ┌─────────────────────────────────────────────────────────┐  │
         │    │ 对每条 override 降级标签:                                  │  │
-        │    │   cap_rank = rank(max_override_level)                   │  │
+        │    │   cap_rank = rank(max_force_suppress_level)                   │  │
         │    │   从 normal_tags 中移除 rank <= cap_rank 的标签            │  │
         │    │   (被移除标签记入 suppressed_tags 用于审计)                  │  │
         │    └─────────────────────────────────────────────────────────┘  │
@@ -357,7 +357,7 @@ class ConfigurableRuleEngine:
             # Check if any keyword is a substring of the normalized field name.
             if any(kw in norm_name for kw in keywords):
                 # Keyword matched: produce a downgrade tag with the rule's target level.
-                # Mark is_override=True if this rule has override capability enabled.
+                # Mark is_override=True if this rule has force_suppress capability enabled.
                 # Mark is_downgrade=True for all downgrade tags (used by funnel conflict detection).
                 tags.append(
                     SecurityTag(
@@ -367,7 +367,7 @@ class ConfigurableRuleEngine:
                         rule_id=rule.id,
                         domain=self.domain,
                         standard_id=self.standard_id,
-                        is_override=rule.override,
+                        is_override=rule.force_suppress,
                         is_downgrade=True,
                     )
                 )
@@ -464,7 +464,7 @@ class ConfigurableRuleEngine:
         """获取降级规则的覆盖等级上限。"""
         rule = self._find_downgrade_rule(rule_id)
         if rule:
-            return rule.max_override_level if rule.max_override_level else rule.level
+            return rule.max_force_suppress_level if rule.max_force_suppress_level else rule.level
         return fallback_level
 
     def _find_downgrade_rule(self, rule_id: str) -> DowngradeRuleDef | None:

@@ -173,7 +173,7 @@ sequenceDiagram
 
 ### 4.5 敏感度降级规则（Downgrade Rules）
 
-敏感度降级规则是 `ConfigurableRuleEngine` 中的一种**反向修正机制**，用于解决通用规则对特定字段的"过度分类"问题。当前实现已从单一的"兜底归属"演进为支持**可选的强制覆盖（override）**模式，允许 YAML 通过 `override`、`max_override_level`、`suppress_rules` 三个字段精确控制压制行为。
+敏感度降级规则是 `ConfigurableRuleEngine` 中的一种**反向修正机制**，用于解决通用规则对特定字段的"过度分类"问题。当前实现已从单一的"兜底归属"演进为支持**可选的强制覆盖（override）**模式，允许 YAML 通过 `override`、`max_force_suppress_level`、`suppress_rules` 三个字段精确控制压制行为。
 
 #### 4.5.1 设计动机
 
@@ -203,7 +203,7 @@ class DowngradeRuleDef(BaseModel):
 
     强制覆盖模式（override=true）：
         默认情况下，降级规则仅作为"兜底归属"——在无普通规则命中时替代默认等级。
-        当设置 override=true 后，降级规则可强制压制 rank <= max_override_level 的
+        当设置 override=true 后，降级规则可强制压制 rank <= max_force_suppress_level 的
         普通规则标签，解决宽泛规则误中运营/公开字段的问题。
 
         执行流程:
@@ -222,7 +222,7 @@ class DowngradeRuleDef(BaseModel):
     category: str                     # 降级后归属的业务类别
     match_target: str = "field_name"  # 匹配目标（目前仅支持字段名）
     override: bool = False            # 是否启用强制覆盖（压制普通规则标签）
-    max_override_level: str = ""      # 覆盖等级上限（空=使用 level 字段自身）
+    max_force_suppress_level: str = ""      # 覆盖等级上限（空=使用 level 字段自身）
     suppress_rules: list[str] = []     # 压制白名单：仅列出的 rule_id 可被压制（空=压制所有）
 ```
 
@@ -237,7 +237,7 @@ class DowngradeRuleDef(BaseModel):
 | `category` | `str` | — | 降级后归属的业务类别。 |
 | `match_target` | `str` | `"field_name"` | 匹配目标，当前仅支持字段名。 |
 | `override` | `bool` | `False` | 是否启用强制覆盖。`false` 为兜底模式，`true` 可压制普通规则。 |
-| `max_override_level` | `str` | `""` | 覆盖等级上限（包含）。空字符串时默认使用 `level` 字段；否则使用此处指定的等级。只有 `rank <= cap_rank` 的普通标签会被移除。 |
+| `max_force_suppress_level` | `str` | `""` | 覆盖等级上限（包含）。空字符串时默认使用 `level` 字段；否则使用此处指定的等级。只有 `rank <= cap_rank` 的普通标签会被移除。 |
 | `suppress_rules` | `list[str]` | `[]` | 精细白名单。仅指定 `rule_id` 的普通规则允许被压制；空列表表示压制所有符合条件的普通规则。 |
 
 #### 4.5.3 执行流程
@@ -256,7 +256,7 @@ graph TD
 
 1. **Phase 1 — 普通规则评估**：按优先级遍历普通规则，生成 `normal_tags`。
 2. **Phase 2 — 降级规则评估**：字段名归一化后，使用纯子串匹配（`kw in norm_name`）对所有降级规则做关键词匹配（注意：降级规则不使用 `keyword_contains` 算子，无单词边界限制）；命中的生成 `downgrade_tags`，并标记 `is_downgrade=True`。若规则 `override=true`，则同时标记 `is_override=True`。
-3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_override_level))`；同时合并所有 `suppress_rules` 白名单。随后从 `normal_tags` 中移除满足以下全部条件的标签：
+3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_force_suppress_level))`；同时合并所有 `suppress_rules` 白名单。随后从 `normal_tags` 中移除满足以下全部条件的标签：
    - 该标签的 `match_target` 不是 `field_value`（基于字段值的命中不会被 override 压制，避免误删真实敏感内容）；
    - 该标签的 `rank <= cap_rank`；
    - 该标签的 `rule_id` 在 `suppress_rules` 白名单内（或白名单为空）。
@@ -280,14 +280,14 @@ override=false (默认):
   downgrade_tags = [L1]
   final = max(L4, L3, L1) = L4          # 降级规则仅兜底，不改变高等级结果
 
-override=true, max_override_level="L3":
+override=true, max_force_suppress_level="L3":
   normal_tags = [L4, L3]
   downgrade_tags = [L1(override)]
   cap_rank = rank("L3") = 3
   移除 rank <= 3 的普通标签 → normal_tags = [L4]
   final = max(L4, L1) = L4              # L4 高于 cap，不被压制
 
-override=true, max_override_level="L4":
+override=true, max_force_suppress_level="L4":
   normal_tags = [L4, L3]
   downgrade_tags = [L1(override)]
   cap_rank = rank("L4") = 4
@@ -295,19 +295,19 @@ override=true, max_override_level="L4":
   final = max(L1) = L1                  # 强制覆盖生效
 ```
 
-#### 4.5.5 `max_override_level` 与 `suppress_rules` 精细控制
+#### 4.5.5 `max_force_suppress_level` 与 `suppress_rules` 精细控制
 
-`max_override_level` 和 `suppress_rules` 共同决定强制覆盖的边界，避免一刀切：
+`max_force_suppress_level` 和 `suppress_rules` 共同决定强制覆盖的边界，避免一刀切：
 
-- **`max_override_level`**：覆盖等级上限（包含）。仅 `rank <= cap_rank` 的普通标签会被移除。例如：
-  - `level="L2"`、`max_override_level=""`：等价于 `cap_rank = rank("L2")`，只压制 L1/L2 的普通标签。
-  - `level="L2"`、`max_override_level="L4"`：允许压制 L1~L4 的普通标签，但保留 L5（如果存在）。
+- **`max_force_suppress_level`**：覆盖等级上限（包含）。仅 `rank <= cap_rank` 的普通标签会被移除。例如：
+  - `level="L2"`、`max_force_suppress_level=""`：等价于 `cap_rank = rank("L2")`，只压制 L1/L2 的普通标签。
+  - `level="L2"`、`max_force_suppress_level="L4"`：允许压制 L1~L4 的普通标签，但保留 L5（如果存在）。
 
 - **`suppress_rules`**：白名单机制。当希望只压制特定宽泛规则，而不影响其他精确规则时使用：
   - `[]`（默认）：压制所有符合 rank 条件的普通标签。
   - `["RULE_PII_BROAD_KEYWORD"]`：仅压制该规则产生的标签，其他规则（如身份证校验）产生的标签即使 rank 较低也会保留。
 
-组合逻辑（与 `override=true` 配合）：
+组合逻辑（与 `force_suppress=true` 配合）：
 
 ```yaml
 downgrade_rules:
@@ -315,16 +315,16 @@ downgrade_rules:
     keywords: ["public_report", "annual_summary", "科普"]
     level: "L1"
     category: "PUBLIC_REPORT"
-    override: true
-    max_override_level: "L3"      # 只压制 L3 及以下普通标签
+    force_suppress: true
+    max_force_suppress_level: "L3"      # 只压制 L3 及以下普通标签
     suppress_rules: []             # 压制所有符合条件的普通规则
 
   - id: "RULE_DOWN_OPS"
     keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次"]
     level: "L2"
     category: "OPERATIONAL_STAT"
-    override: true
-    max_override_level: ""          # 空=使用 level "L2" 作为 cap
+    force_suppress: true
+    max_force_suppress_level: ""          # 空=使用 level "L2" 作为 cap
     suppress_rules: ["RULE_PII_BROAD_KEYWORD"]  # 仅压制该宽泛规则
 ```
 
@@ -332,8 +332,8 @@ downgrade_rules:
 
 最终等级裁定由 `ConfigurableRuleEngine` 或上层漏斗在 `_resolve_final_level()` 中完成：
 
-- **兜底模式（`override=false`）**：降级标签与普通标签共同参与 `max_level`，因此降级标签**不会覆盖**高等级普通标签。核心价值是为无普通规则命中的字段提供低等级归属。
-- **强制覆盖模式（`override=true`）**：`rank <= cap_rank` 的普通标签先被移除，再由剩余标签与降级标签取 `max`。因此降级规则可以**真正降低**被误中字段的最终等级。
+- **兜底模式（`force_suppress=false`）**：降级标签与普通标签共同参与 `max_level`，因此降级标签**不会覆盖**高等级普通标签。核心价值是为无普通规则命中的字段提供低等级归属。
+- **强制覆盖模式（`force_suppress=true`）**：`rank <= cap_rank` 的普通标签先被移除，再由剩余标签与降级标签取 `max`。因此降级规则可以**真正降低**被误中字段的最终等级。
 - 无论哪种模式，被压制的标签都会作为 `suppressed_tags` 返回，可用于审计、Console 展示和 `DYNCLASSIFICATION_OVERRIDE_SUPPRESSED_TOTAL` 指标监控。
 - 注意：`match_target == "field_value"` 的普通标签（即基于字段真实内容命中的规则，如身份证校验、银行卡号校验）不会被 override 压制，以保证真实敏感内容不被错误降级。
 
@@ -347,15 +347,15 @@ downgrade_rules:
     keywords: ["public_report", "annual_summary", "科普"]
     level: "L1"              # 降级为公开数据
     category: "PUBLIC_REPORT"
-    override: true           # 启用强制覆盖
-    max_override_level: "L3" # 允许压制 L3 及以下的普通标签
+    force_suppress: true   # 启用强制覆盖
+    max_force_suppress_level: "L3" # 允许压制 L3 及以下的普通标签
 
   - id: "RULE_DOWN_OPS"
     name: "运营统计降级"
     keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次"]
     level: "L2"              # 降级为内部数据
     category: "OPERATIONAL_STAT"
-    override: false          # 默认兜底模式
+    force_suppress: false  # 默认兜底模式
 ```
 
 #### 4.5.8 与引擎层容错回退的区别
@@ -534,7 +534,7 @@ class DowngradeRuleDef(BaseModel):
     category: str              # 降级后归属的业务类别
     match_target: str = "field_name"  # 匹配目标
     override: bool = False     # 是否启用强制覆盖（压制普通规则标签）
-    max_override_level: str = ""      # 覆盖等级上限（空=使用 level 字段）
+    max_force_suppress_level: str = ""      # 覆盖等级上限（空=使用 level 字段）
     suppress_rules: list[str] = Field(default_factory=list)  # 压制白名单（空=压制所有）
 
 
@@ -567,7 +567,7 @@ class StandardDef(BaseModel):
     description: str = ""
     taxonomy: str              # 引用的 taxonomy 文件名
     domains: list[str] = Field(default_factory=list)  # 组合的领域包列表
-    overrides: dict[str, Any] = Field(default_factory=dict)  # 参数覆盖
+    global_params: dict[str, Any] = Field(default_factory=dict)  # 全局参数覆盖
     rule_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)  # 规则级覆盖
     extra_rules: list[RuleDef] = Field(default_factory=list)  # 追加规则
 ```
@@ -814,7 +814,7 @@ taxonomy: "default"  # 使用 L1~L5 体系
 domains:
   - "general-pii"
   - "medical"
-overrides:
+global_params:
   default_level: "L3"
 rule_overrides:
   # 四川省指南将金融账户定为 L3（而非通用金融标准的 L4/C4）
@@ -850,7 +850,7 @@ taxonomy: "finance_jrt0197"  # 使用 C1~C4 体系
 domains:
   - "general-pii"
   - "finance"
-overrides:
+global_params:
   default_level: "C3"
 ```
 
@@ -1218,7 +1218,7 @@ class ConfigurableRuleEngine:
         """获取降级规则的覆盖等级上限。"""
         rule = self._find_downgrade_rule(rule_id)
         if rule:
-            return rule.max_override_level if rule.max_override_level else rule.level
+            return rule.max_force_suppress_level if rule.max_force_suppress_level else rule.level
         return fallback_level
 
     def _find_downgrade_rule(self, rule_id: str) -> DowngradeRuleDef | None:
@@ -1708,7 +1708,7 @@ taxonomy: "default"
 domains:
   - "general-pii"
   - "iot-vehicle"
-overrides:
+global_params:
   default_level: "L3"
 ```
 
@@ -1764,7 +1764,7 @@ graph LR
 | Operator Registry | 算子注册表，管理所有可用算子的单例 |
 | Profile Loader | 配置加载器，负责 YAML 解析、缓存和热加载 |
 | ConfigurableRuleEngine | 通用规则引擎，解释执行声明式规则 |
-| Downgrade Rules | 敏感度降级规则，通过字段名关键词匹配将过度分类的字段下调到合理低等级；支持 `override` 强制覆盖、`max_override_level` 与 `suppress_rules` 精细控制 |
+| Downgrade Rules | 敏感度降级规则，通过字段名关键词匹配将过度分类的字段下调到合理低等级；支持 `force_suppress` 强制覆盖、`max_force_suppress_level` 与 `suppress_rules` 精细控制 |
 | Engine Fallback | 引擎层容错回退，高层引擎不可用时自动回退到低层引擎 |
 | Hot Reload | 热加载，运行时重新加载配置无需重启 |
 | Shadow Mode | 影子模式，新旧引擎并行对比结果 |

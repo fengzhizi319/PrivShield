@@ -171,10 +171,10 @@ def _validate_downgrade_rules(
     """校验降级规则的新字段合法性。
 
     检查项:
-    1. max_override_level 在 taxonomy 中存在（拼错如 "L33" 会导致 override 静默失效）
-    2. override=false 却配置了 max_override_level 属于死配置（告警）
+    1. max_force_suppress_level 在 taxonomy 中存在（拼错如 "L33" 会导致 force_suppress 静默失效）
+    2. force_suppress=false 却配置了 max_force_suppress_level 属于死配置（告警）
     3. 降级规则的 level 在 taxonomy 中存在
-    4. 普通规则的 level 在 taxonomy 中存在（rank=0 会被任何 override 压制）
+    4. 普通规则的 level 在 taxonomy 中存在（rank=0 会被任何 force_suppress 规则压制）
     """
     # 尝试获取关联的 taxonomy（可能不存在，此时跳过等级存在性检查）
     taxonomy: DomainTaxonomy | None = None
@@ -184,20 +184,20 @@ def _validate_downgrade_rules(
 
     # 校验降级规则
     for rule in profile.downgrade_rules:
-        # 检查 1: max_override_level 存在性
-        if rule.max_override_level and taxonomy:
-            if rule.max_override_level not in taxonomy.levels:
+        # 检查 1: max_force_suppress_level 存在性
+        if rule.max_force_suppress_level and taxonomy:
+            if rule.max_force_suppress_level not in taxonomy.levels:
                 res.add_error(
                     f"[降级规则等级未找到] 文件 {file_name}, 规则 '{rule.id}': "
-                    f"max_override_level='{rule.max_override_level}' 在 taxonomy 中不存在"
+                    f"max_force_suppress_level='{rule.max_force_suppress_level}' 在 taxonomy 中不存在"
                     f"（可用: {list(taxonomy.levels.keys())}）"
                 )
 
         # 检查 2: 死配置告警
-        if not rule.override and rule.max_override_level:
+        if not rule.force_suppress and rule.max_force_suppress_level:
             res.add_warning(
                 f"[死配置] 文件 {file_name}, 规则 '{rule.id}': "
-                f"override=false 但配置了 max_override_level='{rule.max_override_level}'，该配置不会生效"
+                f"force_suppress=false 但配置了 max_force_suppress_level='{rule.max_force_suppress_level}'，该配置不会生效"
             )
 
         # 检查 3: 降级规则 level 存在性
@@ -209,10 +209,10 @@ def _validate_downgrade_rules(
 
         # 检查 5: suppress_rules 白名单引用的规则 ID 存在性
         if rule.suppress_rules:
-            if not rule.override:
+            if not rule.force_suppress:
                 res.add_warning(
                     f"[死配置] 文件 {file_name}, 规则 '{rule.id}': "
-                    f"override=false 但配置了 suppress_rules，该配置不会生效"
+                    f"force_suppress=false 但配置了 suppress_rules，该配置不会生效"
                 )
             normal_rule_ids = {r.id for r in profile.rules}
             for ref_id in rule.suppress_rules:
@@ -229,7 +229,7 @@ def _validate_downgrade_rules(
                 res.add_error(
                     f"[规则等级未找到] 文件 {file_name}, 规则 '{rule.id}': "
                     f"level='{rule.level}' 在 taxonomy 中不存在"
-                    f"（rank=0 会被任何 override 规则压制）"
+                    f"（rank=0 会被任何 force_suppress 规则压制）"
                 )
 
 

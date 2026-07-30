@@ -49,7 +49,7 @@ class DowngradeRuleDef(BaseModel):
     override: bool = Field(default=False, description="是否启用强制覆盖")
     # 覆盖等级上限：仅能压制 rank <= 此值对应 rank 的普通标签（默认与 level 相同）
     # 为空时默认使用 level 字段的 rank 作为上限
-    max_override_level: str = Field(default="", description="覆盖等级上限（空=使用 level）")
+    max_force_suppress_level: str = Field(default="", description="覆盖等级上限（空=使用 level）")
 ```
 
 ### 2.2 SecurityTag 变更
@@ -109,14 +109,14 @@ downgrade_rules:
     level: "L2"
     category: "OPERATIONAL_STAT"
     override: true              # 启用强制覆盖
-    max_override_level: "L3"    # 仅能压制 L3 及以下的普通规则
+    max_force_suppress_level: "L3"    # 仅能压制 L3 及以下的普通规则
 ```
 
 ## 3. 影响范围
 
 | 文件 | 变更类型 | 说明 |
 |---|---|---|
-| `rule_schema.py` | 模型扩展 | `DowngradeRuleDef` 新增 `override`、`max_override_level` |
+| `rule_schema.py` | 模型扩展 | `DowngradeRuleDef` 新增 `override`、`max_force_suppress_level` |
 | `models.py` | 模型扩展 | `SecurityTag` 新增 `is_override` |
 | `engine.py` | 逻辑增强 | `evaluate()` 新增 Phase 3 覆盖裁定 |
 | `service.py` | 无需修改 | `_resolve_final_level` 仍取 max，覆盖已在引擎层完成 |

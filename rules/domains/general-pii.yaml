@@ -86,12 +86,12 @@ downgrade_rules:
     name: "运营统计强制降级"
     # 注意: 关键词必须足够精确，避免压制值级 PII 命中。
     # "统计" 过宽（会匹配 "患者统计" 等含 PII 的字段），已替换为更精确的关键词。
-    # override 压制仅影响 match_target=field_name 的标签，值级命中（field_value）永远豁免。
+    # force_suppress 压制仅影响 match_target=field_name 的标签，值级命中（field_value）永远豁免。
     keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次", "床位统计", "工作量统计"]
     level: "L2"
     category: "OPERATIONAL_STAT"
-    override: true              # 启用强制覆盖
-    max_override_level: "L3"    # 仅压制 L3 及以下（且仅压制字段名命中，值级命中豁免）
+    force_suppress: true        # 启用强制覆盖
+    max_force_suppress_level: "L3"    # 仅压制 L3 及以下（且仅压制字段名命中，值级命中豁免）
 
 composite_rules:
   - id: "COMP_PII_001"

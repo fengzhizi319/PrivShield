@@ -3,7 +3,7 @@ description: 四川省健康医疗大数据应用指南
 taxonomy: sc_health_db51
 domains:
 - sc_health_db51
-overrides: {}
+global_params: {}
 rule_overrides: {}
 extra_rules: []
 extra_downgrade_rules: []

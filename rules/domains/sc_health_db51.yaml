@@ -127,7 +127,7 @@ downgrade_rules:
   level: L2
   category: MANAGEMENT
   match_target: field_name
-  override: false
-  max_override_level: ''
+  force_suppress: false
+  max_force_suppress_level: ''
   suppress_rules: []
 composite_rules: []

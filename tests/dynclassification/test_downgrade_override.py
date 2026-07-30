@@ -1,12 +1,12 @@
 """降级规则强制覆盖能力测试 / Downgrade Override Feature Tests.
 
 覆盖场景：
-- override=false（默认）：行为与修改前完全一致（向后兼容）
-- override=true + 普通规则 L3：L3 标签被压制，最终等级为降级目标 L2
-- override=true + 普通规则 L5：L5 标签不被压制（超出上限），最终等级仍为 L5
-- override=true + 无普通规则：行为与兜底模式一致
+- force_suppress=false（默认）：行为与修改前完全一致（向后兼容）
+- force_suppress=true + 普通规则 L3：L3 标签被压制，最终等级为降级目标 L2
+- force_suppress=true + 普通规则 L5：L5 标签不被压制（超出上限），最终等级仍为 L5
+- force_suppress=true + 无普通规则：行为与兜底模式一致
 - 多条覆盖规则同时命中：取最严格的覆盖（最低等级）
-- 向后兼容：无 override 字段的旧 YAML 正常加载
+- 向后兼容：无 force_suppress 字段的旧 YAML 正常加载（alias="override" 兼容）
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def profile_with_broad_rule() -> RuleProfile:
     """构造一个包含宽泛关键词规则 + 覆盖型降级规则的 Profile。
 
     模拟场景：宽泛规则匹配关键词 "report" → L3，
-    但运营字段降级规则 override=true 可将其压制到 L2。
+    但运营字段降级规则 force_suppress=true 可将其压制到 L2。
     """
     return RuleProfile(
         domain="test-override",
@@ -97,7 +97,7 @@ def profile_with_broad_rule() -> RuleProfile:
                 keywords=["public_summary"],
                 level="L1",
                 category="PUBLIC_REPORT",
-                override=False,  # 显式标注为 false
+                force_suppress=False,  # 显式标注为 false
             ),
             # 覆盖型降级规则：可压制 L3 及以下的普通规则
             DowngradeRuleDef(
@@ -106,8 +106,8 @@ def profile_with_broad_rule() -> RuleProfile:
                 keywords=["turnover", "device_usage", "annual_report"],
                 level="L2",
                 category="OPERATIONAL_STAT",
-                override=True,
-                max_override_level="L3",  # 仅能压制 L3 及以下
+                force_suppress=True,
+                max_force_suppress_level="L3",  # 仅能压制 L3 及以下
             ),
         ],
     )
@@ -125,12 +125,12 @@ def engine(taxonomy, profile_with_broad_rule) -> ConfigurableRuleEngine:
 
 
 # ===========================================================================
-# 测试：向后兼容（override=false）
+# 测试：向后兼容（force_suppress=false）
 # ===========================================================================
 
 
 class TestBackwardCompatibility:
-    """验证 override=false 时行为与修改前完全一致。"""
+    """验证 force_suppress=false 时行为与修改前完全一致。"""
 
     def test_non_override_downgrade_cannot_suppress(self, taxonomy):
         """非覆盖型降级规则不能压制普通规则标签。
@@ -154,7 +154,7 @@ class TestBackwardCompatibility:
                     keywords=["data"],
                     level="L1",
                     category="PUBLIC",
-                    override=False,  # 非覆盖型
+                    force_suppress=False,  # 非覆盖型
                 ),
             ],
         )
@@ -167,16 +167,16 @@ class TestBackwardCompatibility:
         assert "L1" in levels, "降级标签应存在"
 
     def test_old_yaml_without_override_field(self, taxonomy):
-        """无 override 字段的旧配置应正常加载（默认 false）。"""
-        # 模拟旧 YAML：不传 override 参数
+        """无 force_suppress 字段的旧配置应正常加载（默认 false）。"""
+        # 模拟旧 YAML：不传 force_suppress 参数
         rule = DowngradeRuleDef(
             id="OLD_RULE",
             keywords=["test"],
             level="L2",
             category="OLD_CAT",
         )
-        assert rule.override is False
-        assert rule.max_override_level == ""
+        assert rule.force_suppress is False
+        assert rule.max_force_suppress_level == ""
 
 
 # ===========================================================================
@@ -185,14 +185,14 @@ class TestBackwardCompatibility:
 
 
 class TestOverrideSuppression:
-    """验证 override=true 时的强制覆盖行为。"""
+    """验证 force_suppress=true 时的强制覆盖行为。"""
 
     def test_override_suppresses_l3_normal_tag(self, engine):
         """覆盖型降级规则应压制 L3 普通规则标签。
 
         场景：字段 "annual_report_turnover" 同时命中：
           - 宽泛规则 RULE_BROAD_REPORT（含 "report"）→ L3
-          - 降级规则 RULE_DOWN_OPS（含 "turnover"）→ L2, override=true, cap=L3
+          - 降级规则 RULE_DOWN_OPS（含 "turnover"）→ L2, force_suppress=true, cap=L3
         期望：L3 标签被压制，仅保留 L2 降级标签
         """
         tags, _ = engine.evaluate("annual_report_turnover", "some_value")
@@ -264,8 +264,8 @@ class TestOverrideSuppression:
                     keywords=["stats"],
                     level="L2",
                     category="OPS",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                 ),
             ],
         )
@@ -309,16 +309,16 @@ class TestEdgeCases:
                     keywords=["data"],
                     level="L1",
                     category="PUBLIC",
-                    override=True,
-                    max_override_level="L3",  # cap=L3（保守）
+                    force_suppress=True,
+                    max_force_suppress_level="L3",  # cap=L3（保守）
                 ),
                 DowngradeRuleDef(
                     id="DOWN_B",
                     keywords=["data"],
                     level="L2",
                     category="OPS",
-                    override=True,
-                    max_override_level="L4",  # cap=L4（激进）
+                    force_suppress=True,
+                    max_force_suppress_level="L4",  # cap=L4（激进）
                 ),
             ],
         )
@@ -329,8 +329,8 @@ class TestEdgeCases:
         levels = [t.level for t in tags]
         assert "L4" in levels, "安全保守原则: L4 不应被压制(min_cap=L3)"
 
-    def test_empty_max_override_level_uses_rule_level(self, taxonomy):
-        """max_override_level 为空时，使用规则自身 level 作为 cap。"""
+    def test_empty_max_force_suppress_level_uses_rule_level(self, taxonomy):
+        """max_force_suppress_level 为空时，使用规则自身 level 作为 cap。"""
         profile = RuleProfile(
             domain="fallback",
             rules=[
@@ -347,8 +347,8 @@ class TestEdgeCases:
                     keywords=["info"],
                     level="L1",
                     category="PUBLIC",
-                    override=True,
-                    max_override_level="",  # 空 → 使用 level="L1" 作为 cap
+                    force_suppress=True,
+                    max_force_suppress_level="",  # 空 → 使用 level="L1" 作为 cap
                 ),
             ],
         )
@@ -407,8 +407,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["data"],
                     level="L2",
                     category="OPS",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                     suppress_rules=["RULE_A"],  # 仅压制 RULE_A
                 ),
             ],
@@ -450,8 +450,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["data"],
                     level="L2",
                     category="OPS",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                     suppress_rules=[],  # 空 = 压制所有
                 ),
             ],
@@ -486,8 +486,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["genome"],
                     level="L2",
                     category="OPS",
-                    override=True,
-                    max_override_level="L3",  # cap=L3，不能压制 L5
+                    force_suppress=True,
+                    max_force_suppress_level="L3",  # cap=L3，不能压制 L5
                     suppress_rules=["RULE_HIGH"],  # 白名单包含 RULE_HIGH
                 ),
             ],
@@ -520,8 +520,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["contact"],
                     level="L2",
                     category="OPS",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                     suppress_rules=["RULE_PHONE"],  # 白名单包含 RULE_PHONE
                 ),
             ],
@@ -567,8 +567,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["data"],
                     level="L2",
                     category="OPS_A",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                     suppress_rules=["RULE_X"],
                 ),
                 DowngradeRuleDef(
@@ -576,8 +576,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["data"],
                     level="L2",
                     category="OPS_B",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                     suppress_rules=["RULE_Y"],
                 ),
             ],
@@ -619,8 +619,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["data"],
                     level="L2",
                     category="OPS_A",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                     suppress_rules=["RULE_A"],  # 有白名单
                 ),
                 DowngradeRuleDef(
@@ -628,8 +628,8 @@ class TestSuppressRulesWhitelist:
                     keywords=["data"],
                     level="L2",
                     category="OPS_B",
-                    override=True,
-                    max_override_level="L3",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
                     suppress_rules=[],  # 无白名单 = 压制所有
                 ),
             ],

@@ -124,8 +124,8 @@ downgrade_rules:
     keywords: ["turnover_rate", "device_usage", "inventory"]
     level: "L2"
     category: "OPERATIONAL_STAT"
-    override: true              # 启用强制覆盖：可压制误中的普通规则
-    max_override_level: "L3"    # 仅能压制 L3 及以下的普通规则标签
+    force_suppress: true        # 启用强制覆盖：可压制误中的普通规则
+    max_force_suppress_level: "L3"    # 仅能压制 L3 及以下的普通规则标签
 
 composite_rules:
   - id: "COMP_MED_001"

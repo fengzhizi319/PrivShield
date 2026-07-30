@@ -514,7 +514,7 @@ class ProfileLoader:
 
         for rule in profile.downgrade_rules:
             check_level(rule.level, rule.id, "level")
-            check_level(rule.max_override_level, rule.id, "max_override_level")
+            check_level(rule.max_force_suppress_level, rule.id, "max_force_suppress_level")
 
         for rule in profile.composite_rules:
             check_level(rule.target_level, rule.id, "target_level")

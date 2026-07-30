@@ -7,5 +7,5 @@ domains:
   - "general-pii"
   - "finance"
 
-overrides:
+global_params:
   default_level: "C3"

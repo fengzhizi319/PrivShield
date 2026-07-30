@@ -82,7 +82,7 @@ def profile_with_conflict() -> RuleProfile:
                 keywords=["turnover_rate", "device_usage"],
                 level="L2",
                 category="OPERATIONAL_STAT",
-                override=False,  # 不启用 override → 冲突共存
+                force_suppress=False,  # 不启用 force_suppress → 冲突共存
             ),
         ],
     )
@@ -107,8 +107,8 @@ def profile_with_override() -> RuleProfile:
                 keywords=["turnover_rate"],
                 level="L2",
                 category="OPERATIONAL_STAT",
-                override=True,
-                max_override_level="L3",
+                force_suppress=True,
+                max_force_suppress_level="L3",
             ),
         ],
     )
