@@ -124,3 +124,9 @@ class NoOpLlmClassifier(LlmClassifier):
                 "needs_human_review": True,
             }
         return None
+
+
+# Uppercase acronym aliases following PEP 8 conventions
+SmallNEREngine = SmallNerEngine
+LLMClassifier = LlmClassifier
+

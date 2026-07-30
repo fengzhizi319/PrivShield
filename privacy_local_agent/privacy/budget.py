@@ -91,7 +91,7 @@ class BudgetAuditLogger:
             return signature
 
 
-class PrivacyBudgetExhausted(Exception):  # noqa: N818
+class PrivacyBudgetExhaustedError(Exception):
     """隐私预算已耗尽异常。
 
     当某命名空间下的 epsilon 或 delta 累计消耗超过预设上限时抛出。
@@ -99,6 +99,11 @@ class PrivacyBudgetExhausted(Exception):  # noqa: N818
     """
 
     pass
+
+
+# Deprecated alias for backward compatibility
+PrivacyBudgetExhausted = PrivacyBudgetExhaustedError
+
 
 
 class BudgetAccountant:

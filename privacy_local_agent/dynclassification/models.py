@@ -415,6 +415,12 @@ class TableClassificationResult(BaseModel):
     # Whether any record requires human review.
     needs_human_review: bool = Field(default=False, alias="needsHumanReview")
 
+    @property
+    def columns(self) -> list[str]:
+        """Convenience property for column names (alias for schema_)."""
+        return self.schema_
+
+
 
 class AuditInfo(BaseModel):
     """审计信息，记录分类请求的执行元数据。"""

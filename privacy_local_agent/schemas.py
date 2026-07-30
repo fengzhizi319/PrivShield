@@ -279,3 +279,23 @@ class RecommendRequest(BaseModel):
     values: list[float] | None = None
     rows: list[dict[str, object]] | None = None
     qi_cols: list[str] | None = None
+
+
+# --------------------------------------------------------------------------- #
+# 缩写规范与语义增强别名（保证 PEP 8 专有名词全大写规范与向后兼容）
+# --------------------------------------------------------------------------- #
+
+LDPPerturbBinaryRequest = LdpPerturbBinaryRequest
+LDPPerturbCategoricalRequest = LdpPerturbCategoricalRequest
+LDPEstimateBinaryRequest = LdpEstimateBinaryRequest
+LDPEstimateCategoricalRequest = LdpEstimateCategoricalRequest
+
+QOLRequest = QolRequest
+QOLBatchRequest = QolBatchRequest
+QueryObfuscationRequest = QolRequest
+QueryObfuscationBatchRequest = QolBatchRequest
+
+KAnonymityRequest = KAnonRequest
+KAnonymityTableRequest = KAnonTableRequest
+KAnonymityDataFrameRequest = KAnonDataFrameRequest
+

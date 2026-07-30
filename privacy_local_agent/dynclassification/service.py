@@ -507,3 +507,7 @@ class DynClassificationService:
             if policy_data and isinstance(policy_data, dict):
                 return ConfidencePolicy(**policy_data)
         return ConfidencePolicy()
+
+
+# Standardized class alias following full-name naming conventions
+DynamicClassificationService = DynClassificationService
