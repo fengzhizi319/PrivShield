@@ -1,14 +1,20 @@
 package mapper
 
 import (
+	// context：用于传递 gRPC 调用的上下文
+	// context: passes gRPC call context
 	"context"
+	// encoding/json：用于解析前端 JSON 请求体
+	// encoding/json: parses frontend JSON request body
 	"encoding/json"
 
+	// pb：由 proto 生成的 gRPC 客户端与消息类型
+	// pb: generated gRPC client and message types from proto
 	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"
 )
 
 // ---------------------------------------------------------------------------
-// DP helpers —— 差分隐私公共工具
+// DP helpers —— Differential privacy common utilities / 差分隐私公共工具
 // ---------------------------------------------------------------------------
 
 // dpRequest 从 JSON body 构造通用的 DPRequest protobuf 消息。

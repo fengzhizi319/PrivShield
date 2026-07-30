@@ -1,14 +1,39 @@
 /**
- * Lightweight i18n context: provides zh/en switching without external dependencies.
+ * 轻量级国际化 (i18n) 上下文 / Lightweight Internationalization (i18n) Context
  *
- * Usage:
+ * 自建的中英文切换方案，无外部依赖（不用 react-i18next / react-intl），
+ * 通过 React Context + useState 实现，支持占位符替换与 localStorage 持久化。
+ * Self-built zh/en switching solution with no external dependencies (no react-i18next / react-intl),
+ * implemented via React Context + useState, supports placeholder replacement and localStorage persistence.
+ *
+ * 使用方式 / Usage：
  *   const { t, lang, setLang } = useI18n();
  *   <span>{t('header.health_ok')}</span>
+ *   <span>{t('batch.summary', 10, 8, 2)}</span>  // 占位符 {0},{1},{2}
+ *
+ * 架构设计 / Architecture：
+ *   - I18nProvider 包裹应用根部，提供 lang/setLang/t 三个值；
+ *   - useI18n() Hook 在任意组件中获取翻译函数；
+ *   - 语言偏好保存在 localStorage('console-lang')，刷新后保持。
+ *   - I18nProvider wraps app root, provides lang/setLang/t values;
+ *   - useI18n() Hook retrieves translation function in any component;
+ *   - Language preference persisted in localStorage('console-lang'), survives refresh.
  */
+
+/** 引入 React Context 相关 API / Import React Context related APIs */
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
+/** 支持的语言类型 / Supported language type */
 export type Lang = 'zh' | 'en';
 
+/**
+ * 中文字典 / Chinese Dictionary
+ *
+ * 键为翻译 key（按组件分组的 dot notation），值为中文文本。
+ * 支持 {0}, {1}, ... 占位符，由 t() 函数在运行时替换。
+ * Key is translation key (dot notation grouped by component), value is Chinese text.
+ * Supports {0}, {1}, ... placeholders, replaced at runtime by t() function.
+ */
 const zh: Record<string, string> = {
   // Header
   'header.detecting': '检测中…',
@@ -107,6 +132,12 @@ const zh: Record<string, string> = {
   'app.retry': '重试',
 };
 
+/**
+ * 英文字典 / English Dictionary
+ *
+ * 与中文字典一一对应，键相同，值为英文文本。
+ * Corresponds one-to-one with Chinese dictionary, same keys, English values.
+ */
 const en: Record<string, string> = {
   // Header
   'header.detecting': 'Checking…',
@@ -205,51 +236,100 @@ const en: Record<string, string> = {
   'app.retry': 'Retry',
 };
 
+/** 双语字典映射：语言代码 → 字典 / Bilingual dictionary mapping: language code → dictionary */
 const dictionaries: Record<Lang, Record<string, string>> = { zh, en };
 
+/**
+ * i18n 上下文值接口 / i18n Context Value Interface
+ *
+ * 通过 React Context 向下传递的语言服务能力。
+ * Language service capabilities passed down via React Context.
+ */
 interface I18nContextValue {
+  /** 当前语言 / Current language */
   lang: Lang;
+  /** 切换语言（同时持久化到 localStorage）/ Switch language (also persists to localStorage) */
   setLang: (l: Lang) => void;
-  /** Translate a key with optional positional placeholders {0}, {1}, ... */
+  /** 翻译函数：根据 key 查找当前语言文本，并替换 {0},{1},... 占位符 / Translation function: looks up current language text by key, replaces {0},{1},... placeholders */
   t: (key: string, ...args: (string | number)[]) => string;
 }
 
+/**
+ * 创建 i18n Context（默认值：中文 + 空操作 + 原样返回 key）
+ * Create i18n Context (default: Chinese + noop + return key as-is)
+ */
 const I18nContext = createContext<I18nContextValue>({
-  lang: 'zh',
-  setLang: () => {},
-  t: (key) => key,
+  lang: 'zh',          // 默认中文 / Default Chinese
+  setLang: () => {},   // 空操作（Provider 外调用时无效）/ Noop (ineffective outside Provider)
+  t: (key) => key,     // 原样返回 key（Provider 外调用时的回退）/ Return key as-is (fallback outside Provider)
 });
 
+/**
+ * 获取初始语言偏好 / Get Initial Language Preference
+ *
+ * 优先从 localStorage 读取，无效时默认中文。
+ * Reads from localStorage first, defaults to Chinese when invalid.
+ */
 function getInitialLang(): Lang {
   try {
-    const stored = localStorage.getItem('console-lang');
-    if (stored === 'zh' || stored === 'en') return stored;
-  } catch { /* ignore */ }
-  return 'zh';
+    const stored = localStorage.getItem('console-lang'); // 读取存储 / Read stored value
+    if (stored === 'zh' || stored === 'en') return stored; // 有效值直接返回 / Return valid value directly
+  } catch { /* 忽略 localStorage 不可用（如隐私模式）/ Ignore localStorage unavailable (e.g. private mode) */ }
+  return 'zh'; // 默认中文 / Default Chinese
 }
 
+/**
+ * i18n 提供者组件 / i18n Provider Component
+ *
+ * 包裹应用根部，向下提供 lang/setLang/t 三个值。
+ * Wraps app root, provides lang/setLang/t values downward.
+ *
+ * @param children - 子组件 / Child components
+ */
 export function I18nProvider({ children }: { children: ReactNode }) {
+  /** 语言状态（初始值从 localStorage 读取）/ Language state (initial value read from localStorage) */
   const [lang, setLangState] = useState<Lang>(getInitialLang);
 
+  /**
+   * 切换语言并持久化 / Switch language and persist
+   *
+   * 使用 useCallback 避免每次渲染创建新函数引用。
+   * Uses useCallback to avoid creating new function reference each render.
+   */
   const setLang = useCallback((l: Lang) => {
-    setLangState(l);
-    try { localStorage.setItem('console-lang', l); } catch { /* ignore */ }
+    setLangState(l); // 更新状态 / Update state
+    try { localStorage.setItem('console-lang', l); } catch { /* 忽略存储失败 / Ignore storage failure */ }
   }, []);
 
+  /**
+   * 翻译函数 / Translation Function
+   *
+   * 详细逻辑 / Detailed Logic：
+   *   1. 从当前语言字典中查找 key 对应的文本，未找到时回退为 key 本身；
+   *   2. 遍历 args，将文本中的 {0}, {1}, ... 替换为对应参数值。
+   *   1. Looks up key in current language dictionary, falls back to key itself if not found;
+   *   2. Iterates args, replaces {0}, {1}, ... in text with corresponding argument values.
+   */
   const t = useCallback(
     (key: string, ...args: (string | number)[]) => {
-      let text = dictionaries[lang][key] ?? key;
+      let text = dictionaries[lang][key] ?? key; // 查找翻译，回退为 key / Look up translation, fallback to key
       args.forEach((arg, i) => {
-        text = text.replace(`{${i}}`, String(arg));
+        text = text.replace(`{${i}}`, String(arg)); // 替换占位符 / Replace placeholder
       });
       return text;
     },
-    [lang],
+    [lang], // 仅语言变化时重建 / Rebuild only when language changes
   );
 
+  /* 通过 Context.Provider 向下传递语言服务 / Pass language service down via Context.Provider */
   return <I18nContext.Provider value={{ lang, setLang, t }}>{children}</I18nContext.Provider>;
 }
 
+/**
+ * i18n Hook：在任意组件中获取翻译服务 / i18n Hook: Get translation service in any component
+ *
+ * @returns { lang, setLang, t } 语言状态、切换函数、翻译函数 / Language state, switch function, translation function
+ */
 export function useI18n() {
-  return useContext(I18nContext);
+  return useContext(I18nContext); // 读取最近的 I18nProvider / Read nearest I18nProvider
 }

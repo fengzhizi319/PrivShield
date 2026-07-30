@@ -1,65 +1,109 @@
 /**
- * 数据文件隐私处理视图。
+ * 数据文件隐私处理视图 / Data File Privacy Processing View
  *
  * 用户上传 CSV/JSON 文件，选择操作类型（脱敏 / K-匿名），
  * 按操作动态填写参数，提交后经后端转发到 agent 处理。
  * 右侧上方展示原始响应（复用 ResponsePanel），下方以“原始数据 / 处理结果”
  * 双表并排呈现，并对发生变更的单元格高亮，便于直观对比处理前后的差异。
+ * User uploads CSV/JSON file, selects operation type (masking / K-anonymity),
+ * fills parameters dynamically per operation, submits via backend proxy to agent.
+ * Right top shows raw response (reuses ResponsePanel), bottom shows "original / result"
+ * side-by-side tables with changed cells highlighted for intuitive before/after comparison.
+ *
+ * 详细逻辑 / Detailed Logic：
+ *   1. 左侧配置表单：文件选择 + 示例文件快捷填充 + 操作类型 + 动态参数；
+ *   2. 文件变化时客户端解析为 records+schema（仅用于预览，不影响上传）；
+ *   3. 提交时调用 uploadFile API（multipart/form-data）；
+ *   4. 右侧上方 ResponsePanel 展示原始 JSON，下方双表对比（变更单元格琥珀色高亮）。
  */
+
+/** 引入 React Hooks / Import React Hooks */
 import { useEffect, useMemo, useRef, useState } from 'react';
+/** 引入类型定义 / Import type definitions */
 import type { FileOperation, UploadResponse } from '@/types/api';
+/** 引入文件上传 API / Import file upload API */
 import { uploadFile } from '@/api/client';
+/** 引入响应面板组件 / Import response panel component */
 import ResponsePanel from '@/components/ResponsePanel';
+/** 引入图标组件 / Import icon component */
 import { Icon } from '@/components/icons';
+/** 引入示例文件工具 / Import sample file utilities */
 import { createSampleFile, downloadSampleFile, type SampleFormat } from '@/utils/sampleFile';
+/** 引入文件解析工具 / Import file parsing utility */
 import { parseDataFile, type ParsedRecords } from '@/utils/fileParse';
 
-/** 操作选项的中文标签与说明。 */
+/**
+ * 操作选项元数据 / Operation Option Metadata
+ *
+ * 定义支持的文件处理操作及其标签与说明。
+ * Defines supported file processing operations with labels and hints.
+ */
 const OPERATIONS: { value: FileOperation; label: string; hint: string }[] = [
-  { value: 'mask_dataframe', label: '数据脱敏', hint: '对指定列做掩码脱敏' },
-  { value: 'k_anonymize', label: 'K-匿名', hint: '对准标识符列做 K-匿名泛化' },
+  { value: 'mask_dataframe', label: '数据脱敏', hint: '对指定列做掩码脱敏' },   // Masking / Mask specified columns
+  { value: 'k_anonymize', label: 'K-匿名', hint: '对准标识符列做 K-匿名泛化' }, // K-anonymity / Generalize QI columns
 ];
 
-/** 把逗号分隔的输入拆分为去空的列名数组。 */
+/**
+ * 拆分逗号分隔的列名输入 / Split comma-separated column name input
+ *
+ * 支持中文逗号、英文逗号、空白分隔，去除空项。
+ * Supports Chinese comma, English comma, whitespace separators, removes empty items.
+ *
+ * @param text - 用户输入的列名字符串 / User input column names string
+ * @returns 列名数组 / Column names array
+ */
 function splitCols(text: string): string[] {
   return text
-    .split(/[,，\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .split(/[,，\s]+/)    // 按逗号/空白拆分 / Split by comma/whitespace
+    .map((s) => s.trim()) // 去除首尾空白 / Trim each item
+    .filter(Boolean);     // 移除空项 / Remove empty items
 }
 
-/** 表格预览的最大行数，避免大文件渲染过多 DOM。 */
+/** 表格预览的最大行数，避免大文件渲染过多 DOM / Max preview rows to avoid excessive DOM for large files */
 const MAX_PREVIEW_ROWS = 50;
 
-/** 客户端上传大小上限（与后端 CONSOLE_MAX_UPLOAD_BYTES 默认值保持一致，10MB）。 */
+/** 客户端上传大小上限（10MB，与后端 CONSOLE_MAX_UPLOAD_BYTES 默认值一致）/ Client upload size limit (10MB, matches backend CONSOLE_MAX_UPLOAD_BYTES default) */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-/** 支持的文件扩展名。 */
+/** 支持的文件扩展名 / Supported file extensions */
 export const ACCEPTED_EXTS = ['.csv', '.json'];
 
 /**
- * 客户端预校验文件类型与大小，返回错误提示；合法时返回 null。
+ * 客户端预校验文件类型与大小 / Client-side pre-validation of file type and size
  *
- * 在上传前提前拦截不合规文件，避免无效的大文件 / 错误格式
+ * 在上传前提前拦截不合规文件，避免无效的大文件/错误格式
  * 消耗网络与后端资源（与后端 413/400 校验互为双保险）。
+ * Pre-intercepts non-compliant files before upload, avoiding invalid large files/wrong formats
+ * consuming network and backend resources (dual insurance with backend 413/400 validation).
+ *
+ * @param f - 待校验的文件 / File to validate
+ * @returns 错误提示；合法时返回 null / Error message; null when valid
  */
 export function validateFile(f: File): string | null {
-  const lower = f.name.toLowerCase();
+  const lower = f.name.toLowerCase(); // 文件名转小写 / Lowercase filename
+  // 检查扩展名是否支持 / Check if extension is supported
   if (!ACCEPTED_EXTS.some((ext) => lower.endsWith(ext))) {
     return '仅支持 .csv 与 .json 文件';
   }
+  // 检查文件大小是否超限 / Check if file size exceeds limit
   if (f.size > MAX_UPLOAD_BYTES) {
     return `文件过大（${(f.size / 1024 / 1024).toFixed(1)} MB），上限 ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`;
   }
-  return null;
+  return null; // 校验通过 / Validation passed
 }
 
 /**
- * 通用记录表格：按 schema 列序渲染记录数组。
+ * 通用记录表格组件 / Generic Record Table Component
+ *
+ * 按 schema 列序渲染记录数组。
+ * Renders record array by schema column order.
  *
  * 传入 ``baseline``（原始记录）时，会逐行逐列对比，
  * 将“处理后与原始值不同”的单元格高亮为琥珀色，
  * 从而直观呈现脱敏 / K-匿名等操作带来的变化。
+ * When ``baseline`` (original records) is provided, compares row by row and column by column,
+ * highlighting cells that differ from original in amber color,
+ * intuitively showing changes from masking / K-anonymity operations.
  */
 function DataTable({
   records,
@@ -127,6 +171,12 @@ function DataTable({
   );
 }
 
+/**
+ * 数据文件隐私处理主组件 / Data File Privacy Processing Main Component
+ *
+ * 左侧配置表单（文件/操作/参数），右侧结果展示（响应 + 双表对比）。
+ * Left config form (file/operation/params), right result display (response + dual table comparison).
+ */
 export default function FileTest() {
   const [file, setFile] = useState<File | null>(null);
   const [operation, setOperation] = useState<FileOperation>('mask_dataframe');

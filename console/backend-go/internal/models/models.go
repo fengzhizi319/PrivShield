@@ -1,18 +1,29 @@
+// Package models defines the shared JSON data structures between frontend and Go gRPC proxy backend.
 // Package models 定义前端与 Go gRPC 代理后端之间共享的 JSON 数据结构。
 //
-// 设计原则：
-//   - 所有结构体的 JSON 标签与 Python REST 代理后端完全一致
-//   - 前端可以用同一套 JSON 契约与 Python REST 或 Go gRPC 代理通信
-//   - 结构体仅用于 JSON 序列化/反序列化，不包含业务逻辑
+// Design principles / 设计原则：
+//   - All struct JSON tags are fully consistent with the Python REST proxy backend
+//     所有结构体的 JSON 标签与 Python REST 代理后端完全一致
+//   - Frontend can communicate with either Python REST or Go gRPC proxy using the same JSON contract
+//     前端可以用同一套 JSON 契约与 Python REST 或 Go gRPC 代理通信
+//   - Structs are only for JSON serialization/deserialization, containing no business logic
+//     结构体仅用于 JSON 序列化/反序列化，不包含业务逻辑
 //
-// 结构体清单：
-//   - EndpointSample：端点示例数据（侧边导航展示）
-//   - ProxyRequest / ProxyResponse：单请求代理转发
-//   - ConsoleHealth：健康检查响应
-//   - SamplesResponse：示例列表包装
-//   - BatchRequest / BatchResultItem / BatchResponse：批量测试
-//   - UploadData：文件上传处理结果
-//   - LbBackend / LbTestRequest / LbDistItem / LbTestResponse：负载均衡测试
+// Struct list / 结构体清单：
+//   - EndpointSample: endpoint sample data (sidebar navigation display)
+//     端点示例数据（侧边导航展示）
+//   - ProxyRequest / ProxyResponse: single request proxy forwarding
+//     单请求代理转发
+//   - ConsoleHealth: health check response
+//     健康检查响应
+//   - SamplesResponse: sample list wrapper
+//     示例列表包装
+//   - BatchRequest / BatchResultItem / BatchResponse: batch testing
+//     批量测试
+//   - UploadData: file upload processing result
+//     文件上传处理结果
+//   - LbBackend / LbTestRequest / LbDistItem / LbTestResponse: load-balancing test
+//     负载均衡测试
 package models
 
 import (

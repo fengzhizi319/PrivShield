@@ -1,18 +1,28 @@
 """Privacy 测试控制台的 FastAPI 后端入口。
+FastAPI backend entry point for the Privacy Test Console.
 
-职责概述：
+职责概述 / Responsibility Overview:
     1. 以静态资源形式挂载构建好的 React SPA（``web/dist``），使浏览器
        能够直接通过本后端访问控制台页面；
+       Mounts the built React SPA (``web/dist``) as static assets, enabling browsers
+       to access the console UI directly through this backend;
     2. 作为“代理层”，把前端发来的 ``/api/proxy`` / ``/api/batch`` 请求
        透明转发到运行中的 ``privacy-local-agent`` REST 服务；
+       Acts as a "proxy layer", transparently forwarding ``/api/proxy`` / ``/api/batch``
+       requests from the frontend to the running ``privacy-local-agent`` REST service;
     3. 提供 ``/api/health``（连通性检查）与 ``/api/samples``（示例数据）两个辅助接口。
+       Provides ``/api/health`` (connectivity check) and ``/api/samples`` (sample data) auxiliary endpoints.
 
-设计要点：
+设计要点 / Design Points:
     - 后端本身不实现任何隐私算法，仅负责转发与格式适配，保持轻量；
+      Backend implements no privacy algorithms, only forwarding and format adaptation, staying lightweight;
     - 所有请求/响应均使用 Pydantic v2 模型校验，作为输入安全的第一道防线；
+      All requests/responses use Pydantic v2 model validation as the first line of input security;
     - 静态资源目录不存在时（如仅后端开发场景）应用仍可正常启动，仅提供 API。
+      When static dir is missing (e.g. backend-only dev), the app still starts normally, serving API only.
 
 端点示例数据定义于 :mod:`app.fixtures.samples`。
+Endpoint sample data is defined in :mod:`app.fixtures.samples`.
 """
 
 from __future__ import annotations

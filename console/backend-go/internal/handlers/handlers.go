@@ -1,24 +1,31 @@
+// Package handlers implements the HTTP REST interface layer for the Go gRPC proxy backend.
 // Package handlers 实现 Go gRPC 代理后端的 HTTP REST 接口层。
 //
-// 职责：
-//   - 接收前端 React 控制台的 HTTP/JSON 请求
-//   - 通过 mapper 将 REST 路径映射为对应的 gRPC 调用
-//   - 将 protobuf 响应转换为前端可展示的 JSON 格式
-//   - 可选托管前端静态构建产物，使 Go 后端可独立提供完整 Console UI
+// Responsibilities / 职责：
+//   - Receive HTTP/JSON requests from the frontend React console
+//     接收前端 React 控制台的 HTTP/JSON 请求
+//   - Map REST paths to corresponding gRPC calls via mapper
+//     通过 mapper 将 REST 路径映射为对应的 gRPC 调用
+//   - Convert protobuf responses to JSON format displayable by frontend
+//     将 protobuf 响应转换为前端可展示的 JSON 格式
+//   - Optionally host frontend static build artifacts, enabling Go backend to serve full Console UI
+//     可选托管前端静态构建产物，使 Go 后端可独立提供完整 Console UI
 //
-// 设计目标：
+// Design goal / 设计目标：
 //
+//	Maintain fully consistent JSON contract with the Python REST proxy backend;
+//	frontend only needs to switch base URL to seamlessly switch between backends.
 //	与 Python REST 代理后端保持完全一致的 JSON 契约，
 //	前端只需切换 base URL 即可在两种后端之间无缝切换。
 //
-// 路由清单：
+// Route list / 路由清单：
 //
-//	GET  /api/health   → 健康检查（后端自身 + 上游 agent）
-//	GET  /api/samples  → 返回所有端点的示例 payload
-//	POST /api/proxy    → 单请求代理转发（REST → gRPC）
-//	POST /api/batch    → 批量请求转发
-//	POST /api/upload   → 文件上传 + 隐私处理（脱敏/K-匿名/分类）
-//	POST /api/lb_test  → 负载均衡策略测试
+//	GET  /api/health   → Health check (backend self + upstream agent)
+//	GET  /api/samples  → Return sample payloads for all endpoints
+//	POST /api/proxy    → Single request proxy forwarding (REST → gRPC)
+//	POST /api/batch    → Batch request forwarding
+//	POST /api/upload   → File upload + privacy processing (masking/K-anonymity/classification)
+//	POST /api/lb_test  → Load-balancing strategy test
 package handlers
 
 import (

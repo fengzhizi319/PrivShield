@@ -1,27 +1,50 @@
+/**
+ * 全局样式入口 / Global Styles Entry Point
+ *
+ * 本文件由 main.tsx 引入，包含：
+ * This file is imported by main.tsx and contains:
+ *   1. Tailwind CSS 三层指令（base / components / utilities）；
+ *   2. 全局 body 默认样式（背景色 / 文字色 / 杭锯齿）；
+ *   3. pre 元素换行策略（配合 JSON 响应展示）；
+ *   4. WebKit 滚动条美化（细窄 + 圆角 + 悬停变色）。
+ */
+
+/* Tailwind CSS 三层指令：基础重置 / 组件类 / 工具类 */
+/* Tailwind CSS three layers: base reset / component classes / utility classes */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* 全局 body 样式：浅灰背景 + 深灰文字 + 字体杭锯齿渲染 */
+/* Global body styles: light gray background + dark gray text + font anti-aliasing */
 body {
   @apply bg-gray-50 text-gray-900 antialiased;
 }
 
+/* pre 元素自动换行 + 断词，避免 JSON 响应横向溢出 */
+/* pre elements auto-wrap + break-words to prevent JSON response horizontal overflow */
 pre {
   @apply whitespace-pre-wrap break-words;
 }
 
-/* Minimal scrollbar styling */
+/* WebKit 滚动条美化（Chrome / Safari / Edge）*/
+/* WebKit scrollbar styling (Chrome / Safari / Edge) */
+
+/* 滚动条宽度与高度：8px 细窄风格 / Scrollbar width & height: 8px slim style */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+/* 滚动条轨道背景：浅灰色 / Scrollbar track background: light gray */
 ::-webkit-scrollbar-track {
   background: #f1f5f9;
 }
+/* 滚动条滑块：中灰色 + 4px 圆角 / Scrollbar thumb: medium gray + 4px border-radius */
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 4px;
 }
+/* 滑块悬停状态：深灰色反馈 / Thumb hover state: darker gray feedback */
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }

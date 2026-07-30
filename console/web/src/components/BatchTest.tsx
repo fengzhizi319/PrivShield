@@ -1,68 +1,117 @@
 /**
- * 批量测试视图：一键回归验证。
+ * 批量测试视图：一键回归验证 / Batch Test View: One-click Regression Verification
  *
  * 选择一个分类（或全部），顺序调用其下所有接口，
  * 汇总展示通过率与逐条结果，单个失败不中断整个批次。
+ * Select a category (or all), sequentially invoke all endpoints under it,
+ * summarizes pass rate and per-item results, single failure won't abort the batch.
+ *
+ * 详细逻辑 / Detailed Logic：
+ *   1. 下拉框选择测试范围（全部分类 / 单个分类）；
+ *   2. 点击“开始测试”后调用 batchRequest API（后端顺序执行）；
+ *   3. 结果展示：通过率圆形徽章 + 汇总文字 + 明细表格；
+ *   4. 明细表中点击接口可跳转到单个端点测试视图。
+ *   1. Dropdown selects test scope (all categories / single category);
+ *   2. Click "Start Test" calls batchRequest API (backend executes sequentially);
+ *   3. Results display: pass rate circular badge + summary text + detail table;
+ *   4. Click endpoint in detail table navigates to single endpoint test view.
  */
+
+/** 引入 React Hooks / Import React Hooks */
 import { useMemo, useState } from 'react';
+/** 引入类型定义 / Import type definitions */
 import type { EndpointSample, BatchResponse } from '@/types/api';
+/** 引入批量请求 API / Import batch request API */
 import { batchRequest } from '@/api/client';
+/** 引入分类排序工具 / Import category ordering utility */
 import { orderCategories } from '@/lib/categories';
+/** 引入图标组件 / Import icon component */
 import { Icon } from '@/components/icons';
+/** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
 
+/**
+ * BatchTest 组件属性接口 / BatchTest Component Props Interface
+ */
 interface BatchTestProps {
+  /** 全部端点示例数据 / All endpoint sample data */
   samples: EndpointSample[];
-  /** 从结果跳转到单个端点测试 */
+  /** 从结果跳转到单个端点测试 / Navigate from result to single endpoint test */
   onSelectSample: (sample: EndpointSample) => void;
 }
 
+/** 特殊值：表示“全部分类” / Special value: represents "all categories" */
 const ALL = '__all__';
 
 /**
- * 批量测试视图：选择一个分类（或全部），一键顺序调用其下所有接口，
+ * 批量测试主组件 / Batch Test Main Component
+ *
+ * 选择一个分类（或全部），一键顺序调用其下所有接口，
  * 汇总展示成功 / 失败与耗时，便于快速回归验证。
+ * Select a category (or all), one-click sequential invocation of all endpoints,
+ * summarizes success / failure and duration for quick regression verification.
  */
 export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(); // 获取翻译函数 / Get translation function
+  /** 当前选择的分类（ALL 表示全部）/ Currently selected category (ALL means all) */
   const [category, setCategory] = useState<string>(ALL);
+  /** 测试运行中标记 / Test running flag */
   const [running, setRunning] = useState(false);
+  /** 批量响应结果 / Batch response result */
   const [result, setResult] = useState<BatchResponse | null>(null);
+  /** 错误信息 / Error message */
   const [error, setError] = useState<string | null>(null);
 
+  // 提取并排序所有分类名（useMemo 缓存）/ Extract and sort all category names (useMemo cached)
   const categories = useMemo(
     () => orderCategories([...new Set(samples.map((s) => s.category))]),
     [samples],
   );
 
-  /** path+method → sample 的映射，用于结果展示 label 与跳转。 */
+  /**
+   * path+method → sample 的映射 / path+method → sample mapping
+   *
+   * 用于结果展示时查找 label 与跳转。
+   * Used for looking up label and navigation in result display.
+   */
   const sampleMap = useMemo(() => {
-    const map = new Map<string, EndpointSample>();
-    for (const s of samples) map.set(`${s.method} ${s.path}`, s);
+    const map = new Map<string, EndpointSample>(); // 初始化映射 / Initialize mapping
+    for (const s of samples) map.set(`${s.method} ${s.path}`, s); // 以 "METHOD /path" 为键 / Key by "METHOD /path"
     return map;
   }, [samples]);
 
+  // 根据选择的分类过滤目标端点 / Filter target endpoints by selected category
   const targets = useMemo(
     () => (category === ALL ? samples : samples.filter((s) => s.category === category)),
     [samples, category],
   );
 
+  /**
+   * 执行批量测试 / Execute Batch Test
+   *
+   * 将目标端点映射为 {method, path, body} 数组，
+   * 调用 batchRequest API 由后端顺序执行，单个失败不中断。
+   * Maps target endpoints to {method, path, body} array,
+   * calls batchRequest API for backend sequential execution, single failure won't abort.
+   */
   const handleRun = async () => {
-    setRunning(true);
-    setError(null);
-    setResult(null);
+    setRunning(true);  // 开启加载态 / Enable loading state
+    setError(null);    // 清空错误 / Clear error
+    setResult(null);   // 清空上次结果 / Clear previous result
     try {
+      // 构建批量请求体 / Build batch request body
       const res = await batchRequest(
         targets.map((s) => ({ method: s.method, path: s.path, body: s.body ?? null })),
       );
-      setResult(res);
+      setResult(res);  // 设置结果 / Set result
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message); // 设置错误 / Set error
     } finally {
-      setRunning(false);
+      setRunning(false); // 取消加载态 / Disable loading state
     }
   };
 
+  // 计算通过率百分比 / Calculate pass rate percentage
   const passRate = result && result.total > 0 ? Math.round((result.passed / result.total) * 100) : 0;
 
   return (

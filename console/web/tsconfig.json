@@ -1,25 +1,32 @@
+// TypeScript 编译器配置文件（主项目）
+// TypeScript compiler configuration file (main project)
+//
+// 本文件定义了前端源代码的 TypeScript 编译选项。
+// This file defines TypeScript compilation options for the frontend source code.
+// 注意：Vite 不使用 tsc 编译，仅用于类型检查（noEmit: true）。
+// Note: Vite doesn't use tsc for compilation, only for type checking (noEmit: true).
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
+    "target": "ES2020",              // 编译目标为 ES2020 / Compile target is ES2020
+    "useDefineForClassFields": true, // 使用标准 class field 语义 / Use standard class field semantics
+    "lib": ["ES2020", "DOM", "DOM.Iterable"], // 类型库：ES2020 + 浏览器 DOM / Type libs: ES2020 + browser DOM
+    "module": "ESNext",              // 模块系统为 ESNext / Module system is ESNext
+    "skipLibCheck": true,            // 跳过 .d.ts 类型检查（加速编译）/ Skip .d.ts type checking (faster compilation)
+    "moduleResolution": "bundler",   // 使用 bundler 模式解析模块（Vite 推荐）/ Use bundler mode module resolution (Vite recommended)
+    "allowImportingTsExtensions": true, // 允许导入带 .ts 扩展名的文件 / Allow importing files with .ts extension
+    "resolveJsonModule": true,       // 允许导入 JSON 文件 / Allow importing JSON files
+    "isolatedModules": true,         // 确保每个文件可独立编译（Vite 要求）/ Ensure each file compiles independently (Vite requirement)
+    "noEmit": true,                  // 不输出编译结果（仅类型检查）/ Don't emit output (type checking only)
+    "jsx": "react-jsx",              // 使用 React 17+ 自动 JSX 转换 / Use React 17+ automatic JSX transform
+    "strict": true,                  // 启用所有严格类型检查 / Enable all strict type checking
+    "noUnusedLocals": true,          // 禁止未使用的局部变量 / Disallow unused local variables
+    "noUnusedParameters": true,      // 禁止未使用的函数参数 / Disallow unused function parameters
+    "noFallthroughCasesInSwitch": true, // 禁止 switch 穿透 / Disallow switch fallthrough
+    "baseUrl": ".",                  // 路径解析基准目录 / Base directory for path resolution
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"]               // '@' 路径别名映射到 src/ / '@' path alias maps to src/
     }
   },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["src"],                // 仅编译 src 目录 / Only compile src directory
+  "references": [{ "path": "./tsconfig.node.json" }] // 引用 Node 端配置（vite.config.ts）/ Reference Node-side config (vite.config.ts)
 }

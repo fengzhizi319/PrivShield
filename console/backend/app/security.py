@@ -1,4 +1,5 @@
 """控制台后端可选安全中间件：API Key 鉴权 + 内存限流。
+Optional security middleware for console backend: API Key auth + in-memory rate limiting.
 
 中文说明：
     本模块提供 :class:`ConsoleSecurityMiddleware`，为控制台后端补充两道
@@ -12,6 +13,19 @@
 
     限流采用进程内滑动窗口（deque 记录时间戳），适用于单进程本地场景；
     如需多副本部署的分布式限流，应替换为 Redis 等共享存储后端。
+
+English:
+    This module provides :class:`ConsoleSecurityMiddleware`, adding two optional
+    security layers. Both are **disabled/relaxed by default**, only active when
+    the corresponding env vars are configured:
+
+    - **API Key auth**: When ``CONSOLE_API_KEY`` is set, ``/api/*`` (except health)
+      requires ``Authorization: Bearer <key>``; unset means fully permissive.
+    - **Rate limiting**: ``CONSOLE_RATE_LIMIT`` sets max requests/min/client IP
+      (default 600, 0 disables); exceeding returns 429. Health & CORS exempt.
+
+    Rate limiting uses in-process sliding window (deque of timestamps), suitable
+    for single-process local scenarios; use Redis for distributed deployments.
 """
 
 from __future__ import annotations
@@ -29,7 +43,9 @@ if TYPE_CHECKING:
 
 
 def _extract_bearer(header_value: str | None) -> str | None:
-    """从 Authorization 头中提取 Bearer token，格式不符时返回 None。"""
+    """从 Authorization 头中提取 Bearer token，格式不符时返回 None。
+    Extract Bearer token from Authorization header; returns None if format is invalid.
+    """
     if not header_value:
         return None
     parts = header_value.split()
@@ -40,11 +56,12 @@ def _extract_bearer(header_value: str | None) -> str | None:
 
 class ConsoleSecurityMiddleware(BaseHTTPMiddleware):
     """可选的 API Key 鉴权 + 限流中间件（默认关闭 / 宽松）。
+    Optional API Key auth + rate limiting middleware (disabled/relaxed by default).
 
     Args:
-        app: ASGI 应用（由 Starlette 注入）。
-        api_key: 控制台 API Key；为 ``None`` 时不做鉴权（默认）。
-        rate_limit: 每分钟每 IP 最大请求数；``<= 0`` 时关闭限流。
+        app: ASGI 应用（由 Starlette 注入）/ ASGI app (injected by Starlette).
+        api_key: 控制台 API Key；为 ``None`` 时不做鉴权 / Console API Key; ``None`` skips auth.
+        rate_limit: 每分钟每 IP 最大请求数；``<= 0`` 关闭 / Max req/min/IP; ``<= 0`` disables.
     """
 
     def __init__(self, app, api_key: str | None = None, rate_limit: int = 600) -> None:

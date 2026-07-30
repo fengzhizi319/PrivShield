@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
+# Generate mTLS test certificate chain (CA + server cert + client cert).
 # 生成 mTLS 测试证书链（CA + 服务端证书 + 客户端证书）。
 #
-# 用途：
+# Purpose / 用途：
+#   Generate a set of self-signed test certificates for mTLS mutual authentication
+#   between the Go gRPC proxy (client) and privacy-local-agent (gRPC server),
+#   facilitating local integration testing.
 #   为 Go gRPC 代理（客户端）与 privacy-local-agent（gRPC 服务端）之间的
 #   mTLS 双向认证生成一套自签名测试证书，方便本地联调与集成测试。
 #
-# 生成的文件（默认输出到 console/backend-go/certs/）：
-#   ca.crt / ca.key         受信任根 CA（签发服务端与客户端证书）
-#   server.crt / server.key 服务端证书（Python agent，SAN: localhost/127.0.0.1）
-#   client.crt / client.key 客户端证书（Go 代理，EKU: clientAuth）
+# Generated files (default output: console/backend-go/certs/) / 生成的文件：
+#   ca.crt / ca.key         Trusted root CA (signs server & client certs)
+#                           受信任根 CA（签发服务端与客户端证书）
+#   server.crt / server.key Server cert (Python agent, SAN: localhost/127.0.0.1)
+#                           服务端证书（Python agent，SAN: localhost/127.0.0.1）
+#   client.crt / client.key Client cert (Go proxy, EKU: clientAuth)
+#                           客户端证书（Go 代理，EKU: clientAuth）
 #
-# 用法：
-#   ./scripts/gen-certs.sh [输出目录]
-#   CERT_DAYS=730 ./scripts/gen-certs.sh        # 自定义有效期（默认 365 天）
+# Usage / 用法：
+#   ./scripts/gen-certs.sh [output_dir]
+#   CERT_DAYS=730 ./scripts/gen-certs.sh        # Custom validity (default 365 days)
+#                                                自定义有效期（默认 365 天）
 #
+# WARNING: Generated certs are for testing/dev ONLY. Do NOT use in production or commit to git.
 # 注意：生成的证书仅用于测试/开发，请勿用于生产环境，也不要提交到 git。
 
 set -euo pipefail

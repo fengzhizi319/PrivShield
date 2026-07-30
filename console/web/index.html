@@ -1,13 +1,42 @@
+<!--
+  index.html - Vite + React 单页应用的 HTML 入口文件
+  index.html - HTML entry point for the Vite + React single-page application
+
+  作用 / Purpose:
+    浏览器加载的第一个文件，提供 React 挂载点 (#root) 并引入前端入口脚本。
+    The first file loaded by the browser; provides the React mount point (#root)
+    and imports the frontend entry script.
+
+  构建流程 / Build Flow:
+    开发模式：Vite dev server 直接服务此文件，支持 HMR 热更新。
+    Dev mode: Vite dev server serves this file directly with HMR hot reload.
+    生产模式：vite build 将此文件与打包后的 JS/CSS 一起输出到 dist/。
+    Prod mode: vite build outputs this file along with bundled JS/CSS into dist/.
+-->
 <!doctype html>
+<!-- lang="zh-CN" 声明页面主要语言为中文，辅助屏幕阅读器与搜索引擎 -->
+<!-- lang="zh-CN" declares the primary page language as Chinese, aiding screen readers and search engines -->
 <html lang="zh-CN">
   <head>
+    <!-- 字符编码 UTF-8，支持中英文及特殊字符 -->
+    <!-- UTF-8 character encoding, supports Chinese/English and special characters -->
     <meta charset="UTF-8" />
+    <!-- 网站图标（Vite 默认 SVG 图标），显示在浏览器标签页 -->
+    <!-- Favicon (Vite default SVG icon), displayed on browser tab -->
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- 响应式视口设置：页面宽度跟随设备，初始缩放 1:1 -->
+    <!-- Responsive viewport: page width follows device, initial scale 1:1 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 页面标题：显示在浏览器标签页与书签中 -->
+    <!-- Page title: shown in browser tab and bookmarks -->
     <title>Privacy Local Agent - Test Console</title>
   </head>
   <body>
+    <!-- React 根挂载点：main.tsx 中 ReactDOM.createRoot 会选中此 div 渲染整个组件树 -->
+    <!-- React root mount point: ReactDOM.createRoot in main.tsx selects this div to render the entire component tree -->
     <div id="root"></div>
+    <!-- ES Module 方式加载前端入口脚本（Vite 开发时原生 ESM，生产时打包为优化 bundle） -->
+    <!-- Load frontend entry script as ES Module (native ESM in Vite dev, optimized bundle in production) -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

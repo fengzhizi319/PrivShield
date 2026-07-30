@@ -1,20 +1,29 @@
 package mapper
 
 import (
+	// context：用于传递 gRPC 调用的上下文
+	// context: passes gRPC call context
 	"context"
+	// encoding/json：用于解析前端 JSON 请求体
+	// encoding/json: parses frontend JSON request body
 	"encoding/json"
 
+	// pb：由 proto 生成的 gRPC 客户端与消息类型
+	// pb: generated gRPC client and message types from proto
 	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"
 )
 
 // ---------------------------------------------------------------------------
-// LDP handlers —— 本地差分隐私
+// LDP handlers —— Local Differential Privacy / 本地差分隐私
 //
+// Core difference between LDP and DP: noise is added locally on the client side;
+// the server can never access users' raw data, only performing statistical estimation
+// from perturbed data. Two groups:
 // LDP 与 DP 的核心区别：噪声在客户端本地添加，
 // 服务端永远无法获取用户的原始数据，只能根据扰动后的数据进行统计估计。
 // 分为两组：
-//   - perturb（扰动）：客户端本地加噪
-//   - estimate（估计）：服务端根据扰动数据估计真实分布
+//   - perturb: client-side local noise addition / 客户端本地加噪
+//   - estimate: server-side estimation from perturbed data / 服务端根据扰动数据估计真实分布
 // ---------------------------------------------------------------------------
 
 // handlePerturbBinary 处理 /v1/privacy/ldp/perturb/binary 路径，二进制值本地扰动。

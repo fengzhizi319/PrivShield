@@ -1,23 +1,40 @@
 package mapper
 
 import (
+	// encoding/json：用于 JSON 解析与序列化
+	// encoding/json: JSON parsing and serialization
 	"encoding/json"
+	// fmt：用于格式化错误信息
+	// fmt: formats error messages
 	"fmt"
+	// strings：用于大小写不敏感的参数解析
+	// strings: case-insensitive parameter parsing
 	"strings"
 
+	// protojson：用于将 protobuf 消息序列化为 JSON（保留原始字段名）
+	// protojson: serializes protobuf messages to JSON (preserving original field names)
 	"google.golang.org/protobuf/encoding/protojson"
+	// proto：提供 proto.Message 接口类型（marshalProto 参数）
+	// proto: provides proto.Message interface type (marshalProto parameter)
 	"google.golang.org/protobuf/proto"
 
+	// pb：由 proto/privacy.proto 生成的 gRPC 代码（RecordEntry/DoubleChunk/StringChunk 等消息类型）
+	// pb: generated gRPC code from proto/privacy.proto (RecordEntry/DoubleChunk/StringChunk message types)
 	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"
 )
 
 // ---------------------------------------------------------------------------
-// JSON 辅助函数
+// JSON helper functions / JSON 辅助函数
 //
+// The following functions safely extract various field values from a map[string]any
+// produced by json.Unmarshal. Since Go's json.Unmarshal decodes JSON numbers uniformly
+// as float64, numeric extraction functions must handle float64/int/int64 simultaneously.
+// All functions are "safe extractors": returning default/nil on missing key or type
+// mismatch, never panicking.
 // 以下函数用于从 json.Unmarshal 后的 map[string]any 中安全地提取各类字段值。
 // 由于 Go 的 json.Unmarshal 将 JSON number 统一解码为 float64，
 // 因此数值类提取函数需要同时处理 float64/int/int64 三种类型。
-// 所有函数均为“安全提取”：字段不存在或类型不匹配时返回默认值/nil，不会 panic。
+// 所有函数均为"安全提取"：字段不存在或类型不匹配时返回默认值/nil，不会 panic。
 // ---------------------------------------------------------------------------
 
 // decode 将原始 JSON body 解析为通用的 map[string]any。
@@ -426,7 +443,7 @@ func extractJSONField(v any, field string) any {
 }
 
 // ---------------------------------------------------------------------------
-// 工具函数
+// Utility functions / 工具函数
 // ---------------------------------------------------------------------------
 
 // lower 将字符串转为小写并去除首尾空白。

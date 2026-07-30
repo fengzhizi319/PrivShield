@@ -1,11 +1,17 @@
 """privacy-local-agent 所有 REST 端点的示例请求载荷。
+Sample request payloads for all privacy-local-agent REST endpoints.
 
 示例数据刻意保持**最小化与确定性**：只用于验证连通性、展示合法的
 请求形状。用户可以在 UI 中编辑后再发送。
+Sample data is intentionally **minimal and deterministic**: used only to verify
+connectivity and demonstrate valid request shapes. Users can edit in the UI before sending.
 
 每个示例由 :class:`EndpointSample` 描述，含：请求方法 / 路径 / 展示标签 /
 功能分类 / 描述 / 默认请求体等。``backend`` 字段标识该端点在哪个后端
 可用（``rest`` 仅 Python REST 后端，``both`` 两个后端都支持）。
+Each sample is described by :class:`EndpointSample`, containing: HTTP method / path /
+display label / category / description / default body, etc. The ``backend`` field
+indicates availability (``rest`` = Python REST backend only, ``both`` = both backends).
 """
 
 from __future__ import annotations
@@ -16,38 +22,48 @@ from typing import Any
 
 def _arrow_ipc_payload() -> str:
     """生成一个小型 Arrow IPC 流并返回其 base64 字符串。
+    Generate a small Arrow IPC stream and return its base64 string.
 
     用于 ``/v1/privacy/dp/arrow_ipc`` 端点的示例：该端点要求二进制
     Arrow 流作为输入，这里构造一个 5 行的小表并编码为 base64，
     由前端经 ``rawPayloadB64`` 字段传递、后端解码后转发。
+    Used for the ``/v1/privacy/dp/arrow_ipc`` endpoint sample: this endpoint requires
+    a binary Arrow stream as input. Here we construct a 5-row table encoded as base64,
+    passed by the frontend via ``rawPayloadB64`` field, decoded and forwarded by the backend.
     """
     # 延迟导入 pyarrow：仅在生成 Arrow 示例时才引入重量级依赖。
+    # Lazy-import pyarrow: only pull in the heavyweight dependency when generating Arrow sample.
     import io
 
     import pyarrow as pa
 
     # 构造一个 5 行单列（value）的小表。
+    # Construct a small 5-row single-column (value) table.
     table = pa.table({"value": [1.0, 2.0, 3.0, 4.0, 5.0]})
     # 创建内存缓冲区作为 Arrow IPC 流的写入目标。
+    # Create an in-memory buffer as the write target for the Arrow IPC stream.
     sink = io.BytesIO()
     # 以流式格式写入整张表（with 块结束时自动写入流尾）。
+    # Write the entire table in streaming format (stream footer auto-written on with-block exit).
     with pa.ipc.new_stream(sink, table.schema) as writer:
         writer.write_table(table)
     # 把二进制流编码为 base64 字符串，供前端经 rawPayloadB64 传递。
+    # Encode the binary stream as a base64 string for frontend delivery via rawPayloadB64.
     return base64.b64encode(sink.getvalue()).decode("ascii")
 
 
 class EndpointSample:
     """单个 privacy-local-agent 端点的元数据与示例载荷。
+    Metadata and sample payload for a single privacy-local-agent endpoint.
 
-    属性说明：
-        - ``method`` / ``path``：HTTP 方法与端点路径；
-        - ``label``：UI 中显示的简短名称；
-        - ``category``：功能分类（用于侧边栏分组，如 Masking / DP）；
-        - ``description``：中文功能描述；
-        - ``body``：默认 JSON 请求体（可为空）；
-        - ``content_type`` / ``raw_payload_b64``：二进制载荷场景使用；
-        - ``backend``：可用性标识（``rest`` / ``both``）。
+    属性说明 / Attribute Descriptions：
+        - ``method`` / ``path``：HTTP 方法与端点路径 / HTTP method and endpoint path;
+        - ``label``：UI 中显示的简短名称 / short name displayed in UI;
+        - ``category``：功能分类（用于侧边栏分组，如 Masking / DP）/ category (for sidebar grouping);
+        - ``description``：中文功能描述 / Chinese functional description;
+        - ``body``：默认 JSON 请求体（可为空）/ default JSON request body (nullable);
+        - ``content_type`` / ``raw_payload_b64``：二进制载荷场景使用 / used for binary payload scenarios;
+        - ``backend``：可用性标识（``rest`` / ``both``）/ availability flag.
     """
 
     def __init__(
@@ -63,19 +79,22 @@ class EndpointSample:
         backend: str = "rest",
     ):
         # 逐一保存端点的各项元数据与示例载荷。
-        self.method = method                  # HTTP 方法
-        self.path = path                      # 端点路径
-        self.label = label                    # UI 展示名称
-        self.category = category              # 功能分类（侧边栏分组）
-        self.description = description        # 中文功能描述
-        self.body = body                      # 默认 JSON 请求体
-        self.content_type = content_type      # 二进制载荷的 Content-Type
-        self.raw_payload_b64 = raw_payload_b64  # 二进制载荷的 base64
-        self.backend = backend                # 可用性标识（rest / both）
+        # Store each piece of endpoint metadata and sample payload.
+        self.method = method                  # HTTP 方法 / HTTP method
+        self.path = path                      # 端点路径 / endpoint path
+        self.label = label                    # UI 展示名称 / UI display name
+        self.category = category              # 功能分类（侧边栏分组）/ category (sidebar grouping)
+        self.description = description        # 中文功能描述 / Chinese description
+        self.body = body                      # 默认 JSON 请求体 / default JSON request body
+        self.content_type = content_type      # 二进制载荷的 Content-Type / binary payload Content-Type
+        self.raw_payload_b64 = raw_payload_b64  # 二进制载荷的 base64 / binary payload base64
+        self.backend = backend                # 可用性标识（rest / both）/ availability flag
 
     def to_dict(self) -> dict[str, Any]:
         # 转换为前端可直接消费的字典；注意 contentType / rawPayloadB64
         # 使用驼峰命名（与前端 TypeScript 契约一致）。
+        # Convert to a dict directly consumable by the frontend; note contentType / rawPayloadB64
+        # use camelCase naming (consistent with frontend TypeScript contract).
         return {
             "method": self.method,
             "path": self.path,
@@ -441,16 +460,23 @@ SAMPLES: list[EndpointSample] = [
 
 
 def get_samples() -> list[dict[str, Any]]:
-    """返回所有端点示例（纯字典列表），供 ``/api/samples`` 接口序列化。"""
+    """返回所有端点示例（纯字典列表），供 ``/api/samples`` 接口序列化。
+    Return all endpoint samples (list of dicts) for ``/api/samples`` API serialization.
+    """
     # 把每个 EndpointSample 对象转换为字典。
+    # Convert each EndpointSample object to a dict.
     return [s.to_dict() for s in SAMPLES]
 
 
 def find_sample(path: str) -> dict[str, Any] | None:
-    """按端点路径查找示例，未找到时返回 ``None``。"""
+    """按端点路径查找示例，未找到时返回 ``None``。
+    Look up a sample by endpoint path; return ``None`` if not found.
+    """
     # 线性遍历 SAMPLES，按 path 精确匹配。
+    # Linear scan over SAMPLES, exact match by path.
     for s in SAMPLES:
         if s.path == path:
             return s.to_dict()
     # 未找到匹配的示例。
+    # No matching sample found.
     return None

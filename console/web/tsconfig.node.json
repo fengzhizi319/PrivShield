@@ -1,11 +1,18 @@
+// TypeScript 配置文件（Node 端 / Vite 配置专用）
+// TypeScript configuration file (Node-side / Vite config specific)
+//
+// 本文件专门为 vite.config.ts 提供 TypeScript 编译选项，
+// This file provides TypeScript compilation options specifically for vite.config.ts,
+// 因为 vite.config.ts 运行在 Node.js 环境而非浏览器。
+// because vite.config.ts runs in Node.js environment rather than browser.
 {
   "compilerOptions": {
-    "composite": true,
-    "skipLibCheck": true,
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "allowSyntheticDefaultImports": true,
-    "strict": true
+    "composite": true,              // 启用项目引用（被 tsconfig.json 引用）/ Enable project references (referenced by tsconfig.json)
+    "skipLibCheck": true,           // 跳过 .d.ts 检查 / Skip .d.ts checking
+    "module": "ESNext",             // 模块系统 / Module system
+    "moduleResolution": "bundler",  // bundler 解析模式 / Bundler resolution mode
+    "allowSyntheticDefaultImports": true, // 允许合成默认导入 / Allow synthetic default imports
+    "strict": true                  // 严格模式 / Strict mode
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts"]     // 仅包含 Vite 配置文件 / Only includes Vite config file
 }

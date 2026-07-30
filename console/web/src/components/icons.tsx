@@ -1,8 +1,31 @@
-import type { ReactNode } from 'react';
-
 /**
- * 内联 SVG 图标库（lucide 风格，stroke 渲染）。
- * 不引入额外依赖，保持打包体积轻量。
+ * 内联 SVG 图标库组件 / Inline SVG Icon Library Component
+ *
+ * 采用 lucide 风格的 stroke 渲染图标，不引入任何第三方图标库依赖，
+ * 保持打包体积轻量（全部图标合计约 5KB gzip）。
+ * Uses lucide-style stroke rendering icons without any third-party icon library dependency,
+ * keeping bundle size lightweight (all icons total ~5KB gzip).
+ *
+ * 使用方式 / Usage：
+ *   <Icon name="search" className="h-4 w-4" />
+ *   <Icon name="shield" strokeWidth={1.5} />
+ *
+ * 设计要点 / Design Notes：
+ *   - 全部图标基于 24x24 viewBox，通过 className 控制实际尺寸；
+ *   - 使用 currentColor 继承父元素文字颜色；
+ *   - aria-hidden="true" 避免屏幕阅读器重复播报。
+ *   - All icons based on 24x24 viewBox, actual size controlled via className;
+ *   - Uses currentColor to inherit parent text color;
+ *   - aria-hidden="true" prevents screen reader duplication.
+ */
+
+/** 引入 React 节点类型 / Import React node type */
+import type { ReactNode } from 'react';
+/**
+ * 图标名称联合类型 / Icon Name Union Type
+ *
+ * 枚举本项目使用的全部图标名称，提供类型安全与 IDE 自动补全。
+ * Enumerates all icon names used in this project, providing type safety and IDE auto-completion.
  */
 export type IconName =
   | 'shield'
@@ -40,6 +63,12 @@ export type IconName =
   | 'x'
   | 'globe';
 
+/**
+ * 图标 SVG 路径映射表 / Icon SVG Path Mapping Table
+ *
+ * 键为图标名称，值为对应的 SVG 元素（path/circle/rect/polyline/line）。
+ * Key is icon name, value is corresponding SVG elements (path/circle/rect/polyline/line).
+ */
 const PATHS: Record<IconName, ReactNode> = {
   shield: (
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -250,14 +279,34 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
 };
 
+/**
+ * Icon 组件属性接口 / Icon Component Props Interface
+ */
 interface IconProps {
+  /** 图标名称（必须在 IconName 联合类型中）/ Icon name (must be in IconName union type) */
   name: IconName;
+  /** Tailwind CSS 类名（控制尺寸/颜色）/ Tailwind CSS class (controls size/color) */
   className?: string;
+  /** 线条粗细（默认 2）/ Stroke width (default 2) */
   strokeWidth?: number;
 }
 
+/**
+ * 通用图标组件 / Universal Icon Component
+ *
+ * 根据 name 从 PATHS 映射表中取出对应的 SVG 路径，
+ * 包裹在统一的 <svg> 容器中渲染。
+ * Retrieves corresponding SVG path from PATHS mapping by name,
+ * renders wrapped in a unified <svg> container.
+ *
+ * @param name - 图标名称 / Icon name
+ * @param className - CSS 类名（默认 'w-4 h-4'）/ CSS class (default 'w-4 h-4')
+ * @param strokeWidth - 线条粗细（默认 2）/ Stroke width (default 2)
+ */
 export function Icon({ name, className = 'w-4 h-4', strokeWidth = 2 }: IconProps) {
   return (
+    /* SVG 容器：24x24 视图、无填充、当前颜色描边、圆角端点 */
+    /* SVG container: 24x24 viewBox, no fill, currentColor stroke, round caps */
     <svg
       viewBox="0 0 24 24"
       fill="none"

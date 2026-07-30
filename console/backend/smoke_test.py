@@ -1,18 +1,24 @@
-"""烟雾测试：通过后端代理逐个调用所有示例端点。
+"""Smoke test: invoke all sample endpoints sequentially via the backend proxy.
+烟雾测试：通过后端代理逐个调用所有示例端点。
 
+Prerequisites: backend (8080) and privacy-local-agent must both be running:
 运行前提：后端（8080）与 privacy-local-agent 均已启动：
 
     cd console/backend
     source .venv/bin/activate
     python smoke_test.py
 
-设计说明：
-    - 逐个遍历 :func:`get_samples` 返回的示例，经 ``/api/proxy`` 转发；
-    - 非 200 响应只打印不中断，避免局部环境问题（如缺少 LLM 模型）
-      掩盖其他端点的真实结果；
-    - 需要预存运行时资源的端点（异步任务查询、复核确认）会被跳过，
-      因为它们依赖真实 ID，需在 UI 中手动验证。
-    - 全部通过时退出码为 0，有失败时为 1（便于 CI 集成）。
+Design notes / 设计说明：
+    - Iterates over samples from :func:`get_samples`, forwarding via ``/api/proxy``;
+      逐个遍历 :func:`get_samples` 返回的示例，经 ``/api/proxy`` 转发；
+    - Non-200 responses are printed but don't abort, avoiding partial env issues
+      (e.g. missing LLM model) masking real results from other endpoints;
+      非 200 响应只打印不中断，避免局部环境问题掌盖其他端点的真实结果；
+    - Endpoints requiring pre-existing runtime resources (async job query, review confirm)
+      are skipped as they depend on real IDs and need manual UI verification;
+      需要预存运行时资源的端点会被跳过，因为它们依赖真实 ID；
+    - Exit code 0 when all pass, 1 on any failure (CI-friendly).
+      全部通过时退出码为 0，有失败时为 1（便于 CI 集成）。
 """
 
 from __future__ import annotations

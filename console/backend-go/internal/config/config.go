@@ -1,26 +1,30 @@
+// Package config provides centralized configuration management for the Go gRPC proxy backend.
 // Package config 提供 Go gRPC 代理后端的集中化配置管理。
 //
-// 设计原则：
-//   - 所有配置项均通过环境变量读取，零配置文件依赖
-//   - 每项配置均有合理的本地开发默认值，开箱即用
-//   - 支持通过环境变量快速切换目标 agent 地址、监听端口、认证信息等
+// Design principles / 设计原则：
+//   - All configuration is read from environment variables, zero config-file dependency
+//     所有配置项均通过环境变量读取，零配置文件依赖
+//   - Every field has a sensible local-dev default, ready to use out of the box
+//     每项配置均有合理的本地开发默认值，开箱即用
+//   - Switch target agent address, listen port, auth info via env vars
+//     支持通过环境变量快速切换目标 agent 地址、监听端口、认证信息等
 //
-// 环境变量清单：
+// Environment variables / 环境变量清单：
 //
-//	| 变量名                          | 默认值        | 说明                              |
+//	| Variable                        | Default       | Description                       |
 //	|---------------------------------|---------------|-----------------------------------|
-//	| PRIVACY_AGENT_GRPC_HOST         | 127.0.0.1     | 上游 agent gRPC 主机               |
-//	| PRIVACY_AGENT_GRPC_PORT         | 50051         | 上游 agent gRPC 端口               |
-//	| PRIVACY_AGENT_API_KEY           | (空)          | 可选的 Bearer Token 认证密钥        |
-//	| PRIVACY_CONSOLE_HOST            | 127.0.0.1     | 本代理 HTTP 监听地址               |
-//	| PRIVACY_CONSOLE_PORT            | 8081          | 本代理 HTTP 监听端口               |
-//	| PRIVACY_CONSOLE_STATIC_DIR      | ../web/dist   | 前端构建产物目录，设为空则禁用静态托管 |
-//	| PRIVACY_AGENT_TLS_ENABLED       | false         | 是否启用上游 gRPC 连接的 TLS/mTLS    |
-//	| PRIVACY_AGENT_TLS_CERT_FILE     | (空)          | 客户端证书文件（mTLS 双向认证）       |
-//	| PRIVACY_AGENT_TLS_KEY_FILE      | (空)          | 客户端私钥文件（mTLS 双向认证）       |
-//	| PRIVACY_AGENT_TLS_CA_FILE       | (空)          | 校验服务端证书的 CA 文件，TLS 启用时必填 |
-//	| PRIVACY_AGENT_TLS_SERVER_NAME   | (空)          | 服务端证书主机名覆盖值               |
-//	| PRIVACY_AGENT_TLS_INSECURE_SKIP_VERIFY | false  | 是否跳过服务端证书校验（仅测试）     |
+//	| PRIVACY_AGENT_GRPC_HOST         | 127.0.0.1     | Upstream agent gRPC host           |
+//	| PRIVACY_AGENT_GRPC_PORT         | 50051         | Upstream agent gRPC port           |
+//	| PRIVACY_AGENT_API_KEY           | (empty)       | Optional Bearer Token auth key     |
+//	| PRIVACY_CONSOLE_HOST            | 127.0.0.1     | This proxy's HTTP listen address   |
+//	| PRIVACY_CONSOLE_PORT            | 8081          | This proxy's HTTP listen port      |
+//	| PRIVACY_CONSOLE_STATIC_DIR      | ../web/dist   | Frontend dist dir, empty=disable   |
+//	| PRIVACY_AGENT_TLS_ENABLED       | false         | Enable TLS/mTLS for upstream gRPC  |
+//	| PRIVACY_AGENT_TLS_CERT_FILE     | (empty)       | Client cert file (mTLS)            |
+//	| PRIVACY_AGENT_TLS_KEY_FILE      | (empty)       | Client key file (mTLS)             |
+//	| PRIVACY_AGENT_TLS_CA_FILE       | (empty)       | CA file to verify server cert      |
+//	| PRIVACY_AGENT_TLS_SERVER_NAME   | (empty)       | Server cert hostname override      |
+//	| PRIVACY_AGENT_TLS_INSECURE_SKIP_VERIFY | false  | Skip server cert verify (test only)|
 package config
 
 import (
@@ -32,7 +36,9 @@ import (
 	"strings"
 )
 
+// Config holds all runtime configuration for the Go gRPC proxy server.
 // Config 保存 Go gRPC 代理服务器运行时的所有配置项。
+// Loaded once from env vars via Load(), read-only during runtime.
 // 通过 Load() 从环境变量一次性加载，运行期间只读不修改。
 type Config struct {
 	// AgentGRPCHost：上游 privacy-local-agent gRPC 服务的主机名或 IP 地址。
@@ -114,16 +120,20 @@ type Config struct {
 	LBAllowedHosts string
 }
 
+// Load reads all configuration from environment variables and returns a populated Config.
 // Load 从环境变量读取所有配置项，返回填充完毕的 Config 实例。
 //
-// 执行逻辑：
-//  1. 依次读取各环境变量，不存在则使用默认值
-//  2. 端口号类配置自动解析为 int 类型，解析失败时回退到默认值
-//  3. StaticDistDir 使用 getEnvOptional：显式设为空字符串即禁用静态托管
+// Execution logic / 执行逻辑：
+//  1. Read each env var in sequence; use default if not set
+//     依次读取各环境变量，不存在则使用默认值
+//  2. Port fields are auto-parsed to int; fallback to default on parse failure
+//     端口号类配置自动解析为 int 类型，解析失败时回退到默认值
+//  3. StaticDistDir uses getEnvOptional: explicitly setting empty disables static hosting
+//     StaticDistDir 使用 getEnvOptional：显式设为空字符串即禁用静态托管
 //
-// 典型用法：
+// Typical usage / 典型用法：
 //
-//	cfg := config.Load()  // 在 main 函数启动时调用一次
+//	cfg := config.Load()  // called once at startup in main
 func Load() *Config {
 	return &Config{
 		// 上游 agent gRPC 主机地址，默认 127.0.0.1（本地开发场景）
@@ -161,13 +171,15 @@ func Load() *Config {
 	}
 }
 
+// getEnv reads a string env var; returns defaultValue if unset or empty.
 // getEnv 读取指定环境变量的字符串值，不存在或为空时返回默认值。
 //
-// 执行逻辑：
-//  1. 调用 os.Getenv 获取环境变量值
-//  2. 值非空则直接返回
-//  3. 值为空或变量未设置则返回 defaultValue
+// Logic / 执行逻辑：
+//  1. Call os.Getenv to read the value
+//  2. Return directly if non-empty
+//  3. Return defaultValue if empty or unset
 //
+// Use case: string config fields (hostname, API Key, etc.).
 // 适用场景：字符串类型配置项（主机名、API Key 等）。
 func getEnv(name, defaultValue string) string {
 	// os.Getenv 在变量未设置时返回空字符串，无法区分"未设置"与"显式设为空"
@@ -177,16 +189,20 @@ func getEnv(name, defaultValue string) string {
 	return defaultValue // 环境变量不存在或为空，回退到默认值
 }
 
+// getEnvOptional reads an env var, distinguishing "unset" from "explicitly set to empty".
 // getEnvOptional 读取环境变量，区分"未设置"与"显式设为空字符串"。
 //
-// 与 getEnv 的核心区别：
-//   - getEnv：空字符串等同于未设置，回退到默认值
-//   - getEnvOptional：空字符串是合法值，仅在变量完全未设置时才使用默认值
+// Key difference from getEnv / 与 getEnv 的核心区别：
+//   - getEnv: empty string equals unset, falls back to default
+//     getEnv：空字符串等同于未设置，回退到默认值
+//   - getEnvOptional: empty string is a valid value; only uses default when completely unset
+//     getEnvOptional：空字符串是合法值，仅在变量完全未设置时才使用默认值
 //
+// This enables "set empty to disable" semantics, e.g.:
 // 这样支持"设为空即禁用"的语义，例如：
 //
-//	PRIVACY_CONSOLE_STATIC_DIR=  → 禁用静态文件托管
-//	不设置该变量              → 使用默认值 "../web/dist"
+//	PRIVACY_CONSOLE_STATIC_DIR=  → disable static file hosting / 禁用静态文件托管
+//	var not set                  → use default "../web/dist"   / 使用默认值 "../web/dist"
 func getEnvOptional(name, defaultValue string) string {
 	// os.LookupEnv 返回 (value, exists)，可区分"未设置"与"设为空"
 	if v, ok := os.LookupEnv(name); ok {
@@ -195,14 +211,16 @@ func getEnvOptional(name, defaultValue string) string {
 	return defaultValue // 环境变量完全未设置，使用默认值
 }
 
+// getEnvInt reads an env var and parses it as int; returns default on failure or unset.
 // getEnvInt 读取环境变量并解析为 int 类型，解析失败或不存在时返回默认值。
 //
-// 执行逻辑：
-//  1. 读取环境变量字符串值
-//  2. 为空则返回默认值（快速路径）
-//  3. 调用 strconv.Atoi 尝试解析为整数
-//  4. 解析失败（如非数字字符）则静默回退到默认值，不报错
+// Logic / 执行逻辑：
+//  1. Read the env var string value
+//  2. Return default if empty (fast path)
+//  3. Attempt strconv.Atoi to parse as integer
+//  4. On parse failure (e.g. non-numeric), silently fallback to default
 //
+// Use case: integer config fields like port numbers.
 // 适用场景：端口号等整数类型配置项。
 func getEnvInt(name string, defaultValue int) int {
 	// 读取环境变量原始值
@@ -222,13 +240,15 @@ func getEnvInt(name string, defaultValue int) int {
 	return i
 }
 
+// getEnvBool reads an env var and parses it as bool; returns default if unset or unrecognized.
 // getEnvBool 读取环境变量并解析为 bool 类型，不存在或无法识别时返回默认值。
 //
-// 执行逻辑：
-//  1. 读取环境变量字符串值并转为小写
-//  2. 值为空则返回默认值
-//  3. 值为 "true"/"1"/"yes"/"on" 之一时返回 true，其余一律返回 false
+// Logic / 执行逻辑：
+//  1. Read env var and lowercase it
+//  2. Return default if empty
+//  3. Return true for "true"/"1"/"yes"/"on"; false for everything else
 //
+// Use case: boolean config fields like TLS switches.
 // 适用场景：TLS 开关等布尔类型配置项。
 func getEnvBool(name string, defaultValue bool) bool {
 	// 读取环境变量原始值
@@ -246,18 +266,22 @@ func getEnvBool(name string, defaultValue bool) bool {
 	}
 }
 
+// AgentAddress returns the full gRPC target address for the upstream agent.
 // AgentAddress 拼接并返回上游 agent 的完整 gRPC 目标地址。
 //
-// 返回格式："host:port"，如 "127.0.0.1:50051"。
+// Format: "host:port", e.g. "127.0.0.1:50051".
+// Used as the target parameter for grpc.NewClient().
 // 用于 grpc.NewClient() 的 target 参数。
 func (c *Config) AgentAddress() string {
 	// 将主机名与端口号通过冒号拼接，strconv.Itoa 将 int 端口转为字符串
 	return c.AgentGRPCHost + ":" + strconv.Itoa(c.AgentGRPCPort)
 }
 
+// ConsoleAddress returns the full HTTP listen address for this Go proxy.
 // ConsoleAddress 拼接并返回本 Go 代理的完整 HTTP 监听地址。
 //
-// 返回格式："host:port"，如 "127.0.0.1:8081"。
+// Format: "host:port", e.g. "127.0.0.1:8081".
+// Used as the http.Server.Addr parameter.
 // 用于 http.Server.Addr 参数。
 func (c *Config) ConsoleAddress() string {
 	// 将主机名与端口号通过冒号拼接，strconv.Itoa 将 int 端口转为字符串

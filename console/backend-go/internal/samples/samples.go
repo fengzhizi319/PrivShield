@@ -1,24 +1,35 @@
 // Package samples provides minimal, deterministic request payloads for every
 // gRPC method exposed by privacy-local-agent.
+// Package samples 为 privacy-local-agent 暴露的每个 gRPC 方法提供最小化、确定性的请求负载。
 //
-// 中文说明：
+// These sample payloads directly correspond to gRPC request message structures
+// (rather than REST's params wrapper style). After frontend loads them, the Go
+// backend converts JSON to protobuf messages and invokes the corresponding RPC.
 // 这些示例数据直接对应 gRPC 请求消息的结构（而非 REST 的 params 包装风格）。
 // 前端加载后，Go 后端将 JSON 转换为 protobuf 消息并调用对应 RPC。
 package samples
 
 import (
+	// encoding/json：提供 json.RawMessage 类型，用于延迟解析示例 JSON
+	// encoding/json: provides json.RawMessage for lazy-parsing sample JSON
 	"encoding/json"
 
+	// models：与前端共享的 EndpointSample 结构定义
+	// models: shared EndpointSample struct definition with frontend
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/models"
 )
 
 // raw is a small helper that converts a string literal to json.RawMessage.
+// raw 是一个小工具函数，将字符串字面量转换为 json.RawMessage。
 func raw(s string) json.RawMessage {
 	return json.RawMessage(s)
 }
 
 // List returns all gRPC-supported endpoint samples.
+// List 返回所有 gRPC 支持的端点示例。
 //
+// Note: the following endpoints are only defined in REST, not in gRPC proto,
+// thus not supported by the Go backend:
 // 注意：以下端点仅在 REST 中定义，未包含在 gRPC proto 中，因此不在 Go 后端支持范围内：
 //   - /livez, /readyz, /readyz/llm
 //   - /v1/privacy/dp/arrow_ipc

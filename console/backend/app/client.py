@@ -1,12 +1,19 @@
 """privacy-local-agent REST 接口的 HTTP 代理客户端。
+HTTP proxy client for the privacy-local-agent REST API.
 
 本模块是控制台后端与 agent 通信的唯一出口：
+This module is the sole communication outlet between console backend and agent:
     - 维护一个应用级单例的 ``httpx.AsyncClient`` 连接池，复用 TCP 连接；
+      Maintains an app-level singleton ``httpx.AsyncClient`` connection pool for TCP reuse;
     - 统一处理 JSON / Arrow IPC / 其他二进制三类响应的解析；
+      Uniformly handles parsing of JSON / Arrow IPC / other binary responses;
     - 把下游的网络异常、HTTP 错误状态码转换为 :class:`HTTPException`，
       交由 FastAPI 统一返回给前端。
+      Converts downstream network errors and HTTP error codes to :class:`HTTPException`
+      for unified FastAPI error responses.
 
 全局单例 :data:`agent_client` 在 :mod:`app.main` 的 lifespan 中预热与释放。
+Global singleton :data:`agent_client` is warmed up and released in :mod:`app.main` lifespan.
 """
 
 from __future__ import annotations
@@ -23,9 +30,12 @@ from .config import settings
 
 class PrivacyAgentClient:
     """转发请求到 privacy-local-agent 的轻量异步客户端。
+    Lightweight async client that forwards requests to privacy-local-agent.
 
     设计为应用级单例（见模块底部 :data:`agent_client`），内部懒初始化
+    Designed as app-level singleton (see :data:`agent_client` at module bottom), lazily initializes
     ``httpx.AsyncClient`` 以复用连接池，避免每次请求重建连接的开销。
+    ``httpx.AsyncClient`` to reuse connection pool, avoiding per-request connection overhead.
     """
 
     def __init__(self) -> None:
@@ -238,5 +248,7 @@ class PrivacyAgentClient:
 
 
 # 应用级单例：整个后端共享同一个客户端（连接池），
+# App-level singleton: entire backend shares one client (connection pool),
 # 由 :mod:`app.main` 的 lifespan 负责预热与优雅关闭。
+# warmed up and gracefully closed by :mod:`app.main` lifespan.
 agent_client = PrivacyAgentClient()

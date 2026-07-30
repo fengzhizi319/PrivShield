@@ -1,26 +1,42 @@
+// Package mapper is the core module for REST → gRPC route mapping.
 // Package mapper 是 REST → gRPC 路由映射的核心模块。
 //
-// 职责：
-//   - 维护一张 "REST 路径 → gRPC handler" 的分发表（dispatch table）
-//   - 接收前端发来的 JSON 请求体，解析为对应的 protobuf 消息
-//   - 调用上游 privacy-local-agent 的 gRPC 方法
-//   - 将 protobuf 响应转换为前端可消费的 JSON 数据结构
+// Responsibilities / 职责：
+//   - Maintain a "REST path → gRPC handler" dispatch table
+//     维护一张 "REST 路径 → gRPC handler" 的分发表（dispatch table）
+//   - Receive frontend JSON request body, parse into corresponding protobuf messages
+//     接收前端发来的 JSON 请求体，解析为对应的 protobuf 消息
+//   - Call upstream privacy-local-agent gRPC methods
+//     调用上游 privacy-local-agent 的 gRPC 方法
+//   - Convert protobuf responses to JSON data structures consumable by frontend
+//     将 protobuf 响应转换为前端可消费的 JSON 数据结构
 //
-// 设计原则：
-//  1. 前端使用统一的 JSON 契约（POST /api/proxy）发送请求
-//  2. 本包根据 path 字段识别应调用的 gRPC RPC
-//  3. 将 JSON body 转换为对应的 protobuf 请求消息
-//  4. 调用 gRPC 客户端获取响应
-//  5. 将 protobuf 响应转换为前端可展示的 JSON 数据
+// Design principles / 设计原则：
+//  1. Frontend uses a unified JSON contract (POST /api/proxy) to send requests
+//     前端使用统一的 JSON 契约（POST /api/proxy）发送请求
+//  2. This package identifies the gRPC RPC to call based on the path field
+//     本包根据 path 字段识别应调用的 gRPC RPC
+//  3. Convert JSON body to the corresponding protobuf request message
+//     将 JSON body 转换为对应的 protobuf 请求消息
+//  4. Call the gRPC client to get the response
+//     调用 gRPC 客户端获取响应
+//  5. Convert protobuf response to JSON data displayable by frontend
+//     将 protobuf 响应转换为前端可展示的 JSON 数据
 //
-// 路径分类：
-//   - /v1/privacy/health          → 健康检查
-//   - /v1/privacy/mask*           → 数据脱敏（单字段/整条记录/批量/DataFrame/哈希）
-//   - /v1/privacy/dp/*            → 差分隐私（count/sum/mean/histogram 及变体）
-//   - /v1/privacy/ldp/*           → 本地差分隐私（扰动 + 频率估计）
-//   - /v1/privacy/k_anonymize/*   → K-匿名（记录级/表级/DataFrame 级）
-//   - /v1/privacy/qol/*           → 查询混淆（单条/批量）
-//   - /v1/privacy/profile/*       → 个性化配置推荐
+// Path categories / 路径分类：
+//   - /v1/privacy/health          → Health check / 健康检查
+//   - /v1/privacy/mask*           → Data masking (single/record/batch/DataFrame/hash)
+//     数据脱敏（单字段/整条记录/批量/DataFrame/哈希）
+//   - /v1/privacy/dp/*            → Differential privacy (count/sum/mean/histogram + variants)
+//     差分隐私（count/sum/mean/histogram 及变体）
+//   - /v1/privacy/ldp/*           → Local DP (perturb + frequency estimation)
+//     本地差分隐私（扰动 + 频率估计）
+//   - /v1/privacy/k_anonymize/*   → K-anonymity (record/table/DataFrame level)
+//     K-匿名（记录级/表级/DataFrame 级）
+//   - /v1/privacy/qol/*           → Query obfuscation (single/batch)
+//     查询混淆（单条/批量）
+//   - /v1/privacy/profile/*       → Personalized profile recommendation
+//     个性化配置推荐
 package mapper
 
 import (
@@ -36,22 +52,34 @@ import (
 	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"
 )
 
+// Handler defines the function signature for a single REST path to gRPC call mapping.
 // Handler 定义了单个 REST 路径到 gRPC 调用的映射函数签名。
 //
+// Each path corresponds to one Handler, responsible for:
 // 每个 path 对应一个 Handler，负责：
-//  1. 解析 JSON body 为 Go 变量（通过 decode + getXxx 辅助函数）
-//  2. 构造对应的 protobuf 请求消息
-//  3. 通过 client 调用上游 agent 的 gRPC 方法
-//  4. 将 protobuf 响应转换为前端可消费的 JSON 数据结构（any 类型）
+//  1. Parse JSON body into Go variables (via decode + getXxx helpers)
+//     解析 JSON body 为 Go 变量（通过 decode + getXxx 辅助函数）
+//  2. Construct the corresponding protobuf request message
+//     构造对应的 protobuf 请求消息
+//  3. Call the upstream agent's gRPC method via client
+//     通过 client 调用上游 agent 的 gRPC 方法
+//  4. Convert protobuf response to JSON-consumable data structure (any type)
+//     将 protobuf 响应转换为前端可消费的 JSON 数据结构（any 类型）
 //
-// 参数说明：
-//   - ctx：请求上下文，携带超时/取消/认证元数据，直接传递给 gRPC 调用
-//   - client：上游 agent 的 gRPC 客户端，提供所有 RPC 方法
-//   - body：前端发来的原始 JSON 请求体，由各 handler 自行解析
+// Parameters / 参数说明：
+//   - ctx: request context carrying timeout/cancel/auth metadata, passed to gRPC
+//     请求上下文，携带超时/取消/认证元数据，直接传递给 gRPC 调用
+//   - client: upstream agent gRPC client providing all RPC methods
+//     上游 agent 的 gRPC 客户端，提供所有 RPC 方法
+//   - body: raw JSON request body from frontend, parsed by each handler
+//     前端发来的原始 JSON 请求体，由各 handler 自行解析
 type Handler func(ctx context.Context, client pb.PrivacyServiceClient, body json.RawMessage) (any, error)
 
+// Mapper holds the dispatch table from REST paths to gRPC handlers.
 // Mapper 持有 REST 路径到 gRPC handler 的分发表。
 //
+// The dispatch table is a map[string]Handler; key is the REST path (e.g. "/v1/privacy/mask"),
+// value is the corresponding handler function. Dispatch looks up and invokes by path.
 // 分发表是一个 map[string]Handler，key 为 REST 路径（如 "/v1/privacy/mask"），
 // value 为对应的处理函数。Dispatch 方法根据请求 path 查找 handler 并调用。
 type Mapper struct {
@@ -59,20 +87,28 @@ type Mapper struct {
 	handlers map[string]Handler
 }
 
+// New creates and returns a Mapper instance with all supported REST → gRPC path mappings.
 // New 创建并返回一个 Mapper 实例，内置所有支持的 REST → gRPC 路径映射。
 //
-// 执行逻辑：
-//  1. 构建 handlers 分发表，将每个固定路径绑定到对应的 handler 方法
-//  2. 返回就绪的 Mapper 实例
+// Execution logic / 执行逻辑：
+//  1. Build the handlers dispatch table, binding each fixed path to its handler method
+//     构建 handlers 分发表，将每个固定路径绑定到对应的 handler 方法
+//  2. Return the ready Mapper instance
+//     返回就绪的 Mapper 实例
 //
-// 路径分组（共约 33 个端点）：
-//   - Health（1 个）：健康检查
-//   - Masking（5 个）：单字段脱敏、整条记录脱敏、批量脱敏、DataFrame 脱敏、哈希
-//   - DP（16 个）：count/sum/mean/histogram 及 noisy/chunked/aggregate/vector/adaptive/groupby 变体
-//   - LDP（4 个）：二进制扰动、分类扰动、二进制频率估计、分类直方图估计
-//   - K-Anonymity（3 个）：记录级、表级、DataFrame 级 K-匿名
-//   - Query Obfuscation（2 个）：单条/批量查询混淆
-//   - Profile（1 个）：个性化配置推荐
+// Path groups (~33 endpoints total) / 路径分组（共约 33 个端点）：
+//   - Health (1): health check / 健康检查
+//   - Masking (5): single field, record, batch, DataFrame, hash
+//     单字段脱敏、整条记录脱敏、批量脱敏、DataFrame 脱敏、哈希
+//   - DP (16): count/sum/mean/histogram + noisy/chunked/aggregate/vector/adaptive/groupby
+//   - LDP (4): binary perturb, categorical perturb, binary estimate, categorical histogram
+//     二进制扰动、分类扰动、二进制频率估计、分类直方图估计
+//   - K-Anonymity (3): record, table, DataFrame level
+//     记录级、表级、DataFrame 级 K-匿名
+//   - Query Obfuscation (2): single/batch
+//     单条/批量查询混淆
+//   - Profile (1): personalized parameter recommendation
+//     个性化配置推荐
 func New() *Mapper {
 	m := &Mapper{}
 	// 构建静态路径分发表：每个路径对应一个 handler 方法
@@ -141,21 +177,30 @@ func New() *Mapper {
 	return m
 }
 
+// Dispatch looks up the handler by request path and invokes it; the core routing entry point.
 // Dispatch 根据请求路径查找对应的 handler 并调用，是路由分发的核心入口。
 //
-// 执行逻辑：
-//  1. 在静态分发表 handlers 中查找精确匹配的 path
-//  2. 若未命中，返回 "unsupported gRPC path" 错误
+// Execution logic / 执行逻辑：
+//  1. Look up exact path match in the static dispatch table handlers
+//     在静态分发表 handlers 中查找精确匹配的 path
+//  2. If no match, return "unsupported gRPC path" error
+//     若未命中，返回 "unsupported gRPC path" 错误
 //
-// 参数说明：
-//   - ctx：请求上下文，传递给 handler 和 gRPC 调用
-//   - client：上游 agent 的 gRPC 客户端
-//   - path：前端请求中的目标路径（如 "/v1/privacy/mask"）
-//   - body：前端请求的原始 JSON 请求体
+// Parameters / 参数说明：
+//   - ctx: request context, passed to handler and gRPC call
+//     请求上下文，传递给 handler 和 gRPC 调用
+//   - client: upstream agent gRPC client
+//     上游 agent 的 gRPC 客户端
+//   - path: target path from frontend request (e.g. "/v1/privacy/mask")
+//     前端请求中的目标路径（如 "/v1/privacy/mask"）
+//   - body: raw JSON request body from frontend
+//     前端请求的原始 JSON 请求体
 //
-// 返回值：
-//   - any：handler 返回的 JSON 可序列化数据
-//   - error：解析失败或 gRPC 调用失败时的错误
+// Returns / 返回值：
+//   - any: JSON-serializable data returned by handler
+//     handler 返回的 JSON 可序列化数据
+//   - error: parse failure or gRPC call failure
+//     解析失败或 gRPC 调用失败时的错误
 func (m *Mapper) Dispatch(ctx context.Context, client pb.PrivacyServiceClient, path string, body json.RawMessage) (any, error) {
 	// 静态路径精确匹配，O(1) 哈希查找
 	if handler, ok := m.handlers[path]; ok {

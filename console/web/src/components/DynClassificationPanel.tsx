@@ -1,42 +1,80 @@
+/**
+ * 声明式通用动态分类分级面板 / Declarative Universal Dynamic Classification Panel
+ *
+ * 提供动态分类分级引擎的完整测试界面，包含五个 Tab：
+ * Provides a complete test interface for the dynamic classification engine, with five tabs:
+ *
+ *   1. 字段动态评估 (Eval)：输入字段名/值/领域/标准，获取分类结果；
+ *      Field Dynamic Evaluation: input field name/value/domain/standard, get classification result;
+ *   2. 记录级分类 (Record)：输入整条 JSON 记录，对每个字段做分类；
+ *      Record-level Classification: input full JSON record, classify each field;
+ *   3. 标准文档一键生成配置 (Auto Generate)：从规范文档自动提取分类规则；
+ *      Standard Doc Auto-generate Config: auto-extract classification rules from spec docs;
+ *   4. 标准/领域/算子目录 (Directory)：查询系统已注册的标准、领域、算子；
+ *      Standards/Domains/Operators Directory: query registered standards, domains, operators;
+ *   5. 规则校验 (Validate)：校验当前 YAML 配置的完整性与一致性。
+ *      Rule Validation: validate completeness and consistency of current YAML config.
+ *
+ * 所有请求均通过 proxyRequest 转发到后端 /v1/dynclassification/* 接口。
+ * All requests are forwarded to backend /v1/dynclassification/* endpoints via proxyRequest.
+ */
+
+/** 引入 React 状态 Hook / Import React state Hook */
 import { useState } from 'react';
+/** 引入图标组件 / Import icon component */
 import { Icon } from '@/components/icons';
+/** 引入代理请求 API / Import proxy request API */
 import { proxyRequest } from '@/api/client';
 
+/**
+ * 动态分类分级主组件 / Dynamic Classification Main Component
+ *
+ * 通过 tab 状态切换五个功能面板，每个面板独立维护输入/输出/加载状态。
+ * Switches between five functional panels via tab state, each panel independently maintains input/output/loading state.
+ */
 export default function DynClassificationPanel() {
+  /** 当前活动 Tab / Currently active tab */
   const [tab, setTab] = useState<'eval' | 'record' | 'generate' | 'info' | 'validate'>('eval');
 
-  // Eval 状态
-  const [fieldName, setFieldName] = useState('mobile_phone');
-  const [fieldValue, setFieldValue] = useState('13800138000');
-  const [domain, setDomain] = useState('general-pii');
-  const [standard, setStandard] = useState('');
-  const [evalResult, setEvalResult] = useState<any>(null);
-  const [evalLoading, setEvalLoading] = useState(false);
-  const [evalError, setEvalError] = useState<string | null>(null);
+  /* ====== 字段动态评估 (Eval) 状态 / Field Dynamic Evaluation State ====== */
+  const [fieldName, setFieldName] = useState('mobile_phone');   // 字段名 / Field name
+  const [fieldValue, setFieldValue] = useState('13800138000');  // 字段值 / Field value
+  const [domain, setDomain] = useState('general-pii');          // 领域 / Domain
+  const [standard, setStandard] = useState('');                 // 标准（可选）/ Standard (optional)
+  const [evalResult, setEvalResult] = useState<any>(null);      // 评估结果 / Evaluation result
+  const [evalLoading, setEvalLoading] = useState(false);        // 加载中标记 / Loading flag
+  const [evalError, setEvalError] = useState<string | null>(null); // 错误信息 / Error message
 
-  // Generate 状态
-  const [docPath, setDocPath] = useState('docs/standard/四川省健康医疗大数据应用指南.md');
-  const [genResult, setGenResult] = useState<any>(null);
-  const [genLoading, setGenLoading] = useState(false);
-  const [genError, setGenError] = useState<string | null>(null);
+  /* ====== 标准文档生成配置 (Generate) 状态 / Standard Doc Generate Config State ====== */
+  const [docPath, setDocPath] = useState('docs/standard/四川省健康医疗大数据应用指南.md'); // 文档路径 / Doc path
+  const [genResult, setGenResult] = useState<any>(null);      // 生成结果 / Generation result
+  const [genLoading, setGenLoading] = useState(false);        // 加载中标记 / Loading flag
+  const [genError, setGenError] = useState<string | null>(null); // 错误信息 / Error message
 
-  // Info 状态 (Standards / Domains / Operators)
-  const [infoData, setInfoData] = useState<any>(null);
-  const [infoLoading, setInfoLoading] = useState(false);
+  /* ====== 系统信息查询 (Info) 状态 / System Info Query State ====== */
+  const [infoData, setInfoData] = useState<any>(null);    // 查询结果 / Query result
+  const [infoLoading, setInfoLoading] = useState(false);  // 加载中标记 / Loading flag
 
-  // Validate 状态
-  const [valResult, setValResult] = useState<any>(null);
-  const [valLoading, setValLoading] = useState(false);
+  /* ====== 规则校验 (Validate) 状态 / Rule Validation State ====== */
+  const [valResult, setValResult] = useState<any>(null);    // 校验结果 / Validation result
+  const [valLoading, setValLoading] = useState(false);      // 加载中标记 / Loading flag
 
-  // Record 状态
-  const [recordJson, setRecordJson] = useState('{"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}');
-  const [recordDomain, setRecordDomain] = useState('general-pii');
-  const [recordStandard, setRecordStandard] = useState('');
-  const [recordResult, setRecordResult] = useState<any>(null);
-  const [recordLoading, setRecordLoading] = useState(false);
-  const [recordError, setRecordError] = useState<string | null>(null);
+  /* ====== 记录级分类 (Record) 状态 / Record-level Classification State ====== */
+  const [recordJson, setRecordJson] = useState('{"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}'); // JSON 记录 / JSON record
+  const [recordDomain, setRecordDomain] = useState('general-pii');       // 领域 / Domain
+  const [recordStandard, setRecordStandard] = useState('');              // 标准 / Standard
+  const [recordResult, setRecordResult] = useState<any>(null);           // 分类结果 / Classification result
+  const [recordLoading, setRecordLoading] = useState(false);             // 加载中标记 / Loading flag
+  const [recordError, setRecordError] = useState<string | null>(null);   // 错误信息 / Error message
 
-  // 执行评估
+  /**
+   * 执行字段动态评估 / Execute Field Dynamic Evaluation
+   *
+   * 组装 payload（fieldName/value/domain/standard），
+   * POST 到 /v1/dynclassification/eval 获取分类结果。
+   * Assembles payload (fieldName/value/domain/standard),
+   * POSTs to /v1/dynclassification/eval to get classification result.
+   */
   const handleEval = async () => {
     setEvalLoading(true);
     setEvalError(null);
@@ -60,7 +98,14 @@ export default function DynClassificationPanel() {
     }
   };
 
-  // 执行记录级分类
+  /**
+   * 执行记录级分类 / Execute Record-level Classification
+   *
+   * 解析 JSON 记录，POST 到 /v1/dynclassification/eval_record，
+   * 对记录中每个字段做分类分级。
+   * Parses JSON record, POSTs to /v1/dynclassification/eval_record,
+   * classifies each field in the record.
+   */
   const handleRecordEval = async () => {
     setRecordLoading(true);
     setRecordError(null);
@@ -91,7 +136,14 @@ export default function DynClassificationPanel() {
     }
   };
 
-  // 执行文档生成
+  /**
+   * 执行标准文档自动生成配置 / Execute Standard Doc Auto-generate Config
+   *
+   * POST 到 /v1/dynclassification/generate_profile，
+   * 从规范文档中自动提取分类规则并生成 YAML 配置。
+   * POSTs to /v1/dynclassification/generate_profile,
+   * auto-extracts classification rules from spec doc and generates YAML config.
+   */
   const handleGenerate = async () => {
     setGenLoading(true);
     setGenError(null);
@@ -110,7 +162,14 @@ export default function DynClassificationPanel() {
     }
   };
 
-  // 查询系统信息
+  /**
+   * 查询系统信息（标准/领域/算子）/ Query System Info (Standards/Domains/Operators)
+   *
+   * GET 到 /v1/dynclassification/{type}，获取已注册的目录列表。
+   * GETs /v1/dynclassification/{type}, retrieves registered directory list.
+   *
+   * @param type - 查询类型 / Query type
+   */
   const handleFetchInfo = async (type: 'standards' | 'domains' | 'operators') => {
     setInfoLoading(true);
     try {
@@ -126,7 +185,14 @@ export default function DynClassificationPanel() {
     }
   };
 
-  // 执行校验
+  /**
+   * 执行规则校验 / Execute Rule Validation
+   *
+   * POST 到 /v1/dynclassification/validate，
+   * 校验当前 YAML 配置的完整性与一致性。
+   * POSTs to /v1/dynclassification/validate,
+   * validates completeness and consistency of current YAML config.
+   */
   const handleValidate = async () => {
     setValLoading(true);
     try {

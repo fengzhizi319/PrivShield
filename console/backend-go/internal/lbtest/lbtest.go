@@ -1,41 +1,85 @@
+// Package lbtest implements load-balancing test strategy dispatch and statistics logic.
 // Package lbtest 实现负载均衡测试的策略分发与统计逻辑。
 //
-// 中文说明：
+// The Go backend's /api/lb_test endpoint dispatches probe requests to multiple agent
+// backend addresses configured by the user, using strategies (round_robin / random /
+// least_connections), and aggregates per-node hit counts, success/failure counts,
+// and latency distribution.
 // 控制台 Go 后端的 /api/lb_test 端点把探测请求按策略（round_robin / random /
 // least_connections）分发到用户配置的多个 agent 后端地址，并统计各节点的
-// 命中数、成功/失败数与延迟分布。探测用的 *http.Client 可注入，便于测试时
-// 指向 httptest 起立的假后端。
+// 命中数、成功/失败数与延迟分布。
+// The *http.Client used for probing is injectable, allowing tests to point at
+// httptest-spawned fake backends.
+// 探测用的 *http.Client 可注入，便于测试时指向 httptest 起立的假后端。
 package lbtest
 
 import (
+	// bytes：用于从 JSON body 创建 io.Reader
+	// bytes: creates io.Reader from JSON body
 	"bytes"
+	// context：用于传递请求上下文（超时/取消）
+	// context: passes request context (timeout/cancellation)
 	"context"
+	// encoding/json：用于探测请求体的 JSON 序列化
+	// encoding/json: JSON serialization for probe request body
 	"encoding/json"
+	// fmt：用于格式化错误信息
+	// fmt: formats error messages
 	"fmt"
+	// io：用于丢弃探测响应体（io.Discard）
+	// io: discards probe response body (io.Discard)
 	"io"
+	// math：用于四舍五入延迟统计值
+	// math: rounds latency statistics
 	"math"
+	// math/rand：用于 random 策略的随机数生成
+	// math/rand: random number generation for random strategy
 	"math/rand"
+	// net/http：用于发送 HTTP 探测请求
+	// net/http: sends HTTP probe requests
 	"net/http"
+	// net/url：用于解析和校验探测目标 URL
+	// net/url: parses and validates probe target URLs
 	"net/url"
+	// strings：用于 URL 拼接与 host 比较
+	// strings: URL concatenation and host comparison
 	"strings"
+	// sync：用于并发探测的 WaitGroup 同步
+	// sync: WaitGroup synchronization for concurrent probes
 	"sync"
+	// time：用于计算探测延迟与超时配置
+	// time: calculates probe latency and timeout configuration
 	"time"
 
+	// models：与前端共享的 JSON 数据结构（LbTestRequest/LbTestResponse）
+	// models: shared JSON data structures with frontend (LbTestRequest/LbTestResponse)
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/models"
 )
 
+// Supported dispatch strategy constants.
 // 支持的三种分发策略常量。
 const (
-	StrategyRoundRobin       = "round_robin"
-	StrategyRandom           = "random"
+	// StrategyRoundRobin: sequential rotation, most even distribution
+	// 依次轮询，分发最均匀
+	StrategyRoundRobin = "round_robin"
+	// StrategyRandom: independent random selection per request
+	// 独立随机选择
+	StrategyRandom = "random"
+	// StrategyLeastConnections: always picks the node with fewest hits so far
+	// 每次选当前累计命中最少的节点
 	StrategyLeastConnections = "least_connections"
 )
 
+// ValidateURL validates a load-balancing probe target URL for legitimacy (SSRF protection).
 // ValidateURL 校验负载均衡探测目标 URL 的合法性（SSRF 防护）。
 //
-//   - scheme 必须为 http/https（拦截 file:// / gopher:// 等）；
-//   - allowedHosts 非空时，host 必须命中白名单。
+//   - scheme must be http/https (blocks file:// / gopher:// etc.)
+//     scheme 必须为 http/https（拦截 file:// / gopher:// 等）；
+//   - when allowedHosts is non-empty, host must match the allowlist
+//     allowedHosts 非空时，host 必须命中白名单。
 //
+// Note: lb_test is designed to probe user-specified addresses (including local 127.0.0.1),
+// so private/loopback IPs are not blocked; use allowedHosts allowlist for production hardening.
 // 说明：lb_test 的设计目的就是探测用户指定地址（含本地 127.0.0.1），
 // 故不屏蔽私有/回环 IP；如需生产收紧，通过 allowedHosts 白名单约束。
 func ValidateURL(rawURL string, allowedHosts []string) error {
@@ -61,6 +105,7 @@ func ValidateURL(rawURL string, allowedHosts []string) error {
 	return nil
 }
 
+// ValidateBackends validates all backend node URLs; returns error on first invalid one.
 // ValidateBackends 逐个校验后端节点 URL，任一非法即返回错误。
 func ValidateBackends(backends []models.LbBackend, allowedHosts []string) error {
 	for _, b := range backends {
@@ -71,11 +116,15 @@ func ValidateBackends(backends []models.LbBackend, allowedHosts []string) error 
 	return nil
 }
 
+// PickBackends generates a backend index sequence for n probe requests according to strategy.
 // PickBackends 按策略生成 n 个探测请求对应的后端下标序列。
 //
-//   - round_robin：依次轮询，分发最均匀；
-//   - random：独立随机选择；
-//   - least_connections：每次选当前累计命中最少的节点（同数取下标小者）。
+//   - round_robin: sequential rotation, most even distribution
+//     依次轮询，分发最均匀；
+//   - random: independent random selection
+//     独立随机选择；
+//   - least_connections: always picks the node with fewest cumulative hits (ties go to lower index)
+//     每次选当前累计命中最少的节点（同数取下标小者）。
 func PickBackends(strategy string, n, numBackends int) ([]int, error) {
 	if numBackends <= 0 {
 		return nil, nil
@@ -112,10 +161,15 @@ func PickBackends(strategy string, n, numBackends int) ([]int, error) {
 	}
 }
 
+// Run executes load-balancing probes and aggregates per-node hit and latency statistics.
 // Run 执行负载均衡探测并统计各节点命中与延迟。
 //
+// client is injectable (pass a client pointing at httptest server in tests);
+// nil uses a default client with 10s timeout.
 // client 可注入（测试时传入指向 httptest 服务器的客户端），为 nil 时使用
-// 带 10s 超时的默认客户端。NumRequests/Strategy 缺省时分别取 10/round_robin。
+// 带 10s 超时的默认客户端。
+// NumRequests/Strategy default to 10/round_robin when unset.
+// NumRequests/Strategy 缺省时分别取 10/round_robin。
 func Run(ctx context.Context, req models.LbTestRequest, client *http.Client) (models.LbTestResponse, error) {
 	if len(req.Backends) == 0 {
 		return models.LbTestResponse{}, fmt.Errorf("backends 不能为空")
@@ -227,8 +281,10 @@ func Run(ctx context.Context, req models.LbTestRequest, client *http.Client) (mo
 	}, nil
 }
 
+// probe sends a single probe request to the given url, returns success (status < 400).
 // probe 向指定 url 发送一次探测请求，返回是否成功（状态码 < 400）。
 //
+// Uses POST with JSON body when body is non-empty, otherwise GET.
 // body 非空时用 POST 发送该 JSON 体，否则用 GET。
 func probe(ctx context.Context, client *http.Client, url string, body json.RawMessage) bool {
 	var req *http.Request
@@ -254,6 +310,7 @@ func probe(ctx context.Context, client *http.Client, url string, body json.RawMe
 	return resp.StatusCode < 400
 }
 
+// round2 rounds a float64 to 2 decimal places.
 // round2 把浮点数四舍五入到小数点后两位。
 func round2(f float64) float64 {
 	return math.Round(f*100) / 100
