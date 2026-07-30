@@ -16,6 +16,7 @@ The engine itself contains no domain knowledge and is only responsible for inter
 
 from __future__ import annotations
 
+import fnmatch
 from typing import Any, Tuple
 
 # Structured logger for this module (JSON/text output based on config)
@@ -444,11 +445,16 @@ class ConfigurableRuleEngine:
             tag_rank = self.taxonomy.get_level_rank(tag.level)
             # 条件 2: 确认敏感等级未超出压制上限 / Check level <= cap_rank
             if tag_rank <= min_cap_rank:
-                # 条件 3: suppress_rules 白名单校验 / Whitelist check for suppress_rules
-                # 如果配置了白名单且该规则 ID 不在白名单中，则跳过压制、保留标签 / Skip suppression if not in whitelist
-                if has_whitelist and tag.rule_id not in suppress_whitelist:
-                    surviving_tags.append(tag)
-                    continue
+                # 条件 3: suppress_rules 白名单校验 (支持精确匹配及 fnmatch 通配符，如 'general-pii:*' 或 '*BROAD*')
+                # 如果配置了白名单且该规则 ID 无法匹配白名单中的任何模式，则跳过压制、保留标签
+                if has_whitelist:
+                    matched = any(
+                        p == tag.rule_id or fnmatch.fnmatch(tag.rule_id, p)
+                        for p in suppress_whitelist
+                    )
+                    if not matched:
+                        surviving_tags.append(tag)
+                        continue
                 suppressed_tags.append(tag)
             else:
                 surviving_tags.append(tag)

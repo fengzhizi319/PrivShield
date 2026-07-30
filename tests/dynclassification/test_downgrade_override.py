@@ -324,6 +324,7 @@ class TestEdgeCases:
         )
         engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
         tags, _ = engine.evaluate("some_data_field", "value")
+        print( "tags:", tags)
 
         # 安全保守: min(L3, L4) = L3 → L4 (rank=4) > cap_rank(3) → L4 存活
         levels = [t.level for t in tags]
@@ -641,3 +642,43 @@ class TestSuppressRulesWhitelist:
         # DOWN_ALL 无白名单，不触发 has_whitelist，因此压制所有符合条件的规则
         assert "RULE_A" not in rule_ids, "RULE_A 应被压制"
         assert "RULE_B" not in rule_ids, "RULE_B 应被压制（DOWN_ALL 无白名单限制）"
+
+    def test_suppress_rules_wildcard_matching(self, taxonomy: DomainTaxonomy):
+        """测试 suppress_rules 中的通配符（如 'RULE_BROAD_*' 或 'pkg:*'）匹配能力。"""
+        profile = RuleProfile(
+            domain="test",
+            rules=[
+                RuleDef(
+                    id="pkg:RULE_BROAD_1",
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    level="L3",
+                    category="C1",
+                ),
+                RuleDef(
+                    id="pkg:RULE_EXACT_2",
+                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"keywords": ["data"]})],
+                    level="L3",
+                    category="C2",
+                ),
+            ],
+            downgrade_rules=[
+                DowngradeRuleDef(
+                    id="DOWN_WILD",
+                    keywords=["data"],
+                    level="L2",
+                    category="OPS",
+                    force_suppress=True,
+                    max_force_suppress_level="L3",
+                    suppress_rules=["pkg:RULE_BROAD_*"],  # 使用通配符只压制 BROAD 规则
+                ),
+            ],
+        )
+        engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
+        tags, suppressed = engine.evaluate("my_data_field", "sample")
+
+        surviving_ids = [t.rule_id for t in tags]
+        suppressed_ids = [t.rule_id for t in suppressed]
+
+        assert "pkg:RULE_BROAD_1" in suppressed_ids, "pkg:RULE_BROAD_1 应触发通配符匹配被压制"
+        assert "pkg:RULE_EXACT_2" in surviving_ids, "pkg:RULE_EXACT_2 未匹配通配符，应保留"
+
