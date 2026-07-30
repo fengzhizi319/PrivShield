@@ -360,6 +360,7 @@ class StandardDocParser:
                     name="敏感病种检测",
                     category="MEDICAL_TREATMENT" if "MEDICAL_TREATMENT" in categories else list(categories.keys())[0],
                     level="L4" if "L4" in levels else "L3",
+                    match_logic="AND",
                     matchers=[
                         # Name-based only: detect sensitive disease keywords in field names.
                         MatcherDef(
@@ -380,6 +381,7 @@ class StandardDocParser:
                     name="个人遗传基因数据检测",
                     category="GENOMIC" if "GENOMIC" in categories else "MEDICAL_TREATMENT",
                     level="L5" if "L5" in levels else "L4",
+                    match_logic="AND",
                     matchers=[
                         # Name-based: detect genomics-related keywords in field names.
                         MatcherDef(
@@ -400,6 +402,9 @@ class StandardDocParser:
                 keywords=["turnover", "inventory", "device_usage", "开机次数", "门诊人次", "运行时间"],
                 level="L2" if "L2" in levels else "C2",
                 category="MANAGEMENT" if "MANAGEMENT" in categories else list(categories.keys())[0],
+                force_suppress=False,              # 默认显式标注是否开启强行覆盖
+                max_force_suppress_level="",       # 默认显式标注强行覆盖上限等级 (空=使用自身 level)
+                exempt_rules=[],                   # 默认显式标注压制豁免例外名单 (空=全额压制)
             )
         )
 
