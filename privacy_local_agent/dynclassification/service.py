@@ -405,7 +405,7 @@ class DynClassificationService:
             生成的 3 个 YAML 文件路径字典。
         """
         # Lazy import to avoid loading generator module unless needed.
-        from .generator import StandardDocParser
+        from .standard_doc_generator import StandardDocParser
         parser = StandardDocParser(doc_path)
         # Generate the 3 YAML files (taxonomy, domain profile, standard definition).
         generated = parser.generate_files(self.loader.rules_dir)

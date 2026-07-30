@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from privacy_local_agent.dynclassification.generator import StandardDocParser
+from privacy_local_agent.dynclassification.standard_doc_generator import StandardDocParser
 
 
 @pytest.fixture()
@@ -56,13 +56,11 @@ def test_standard_doc_parser(dummy_markdown_doc: Path, tmp_path: Path):
     assert len(profile.rules) >= 4
     assert len(profile.downgrade_rules) >= 1
 
-    # 检查导出的 downgrade_rules 是否具有全量字段 (包含 exempt_rules, force_suppress, max_force_suppress_level)
     ops_down = profile.downgrade_rules[0]
     assert hasattr(ops_down, "exempt_rules")
     assert hasattr(ops_down, "force_suppress")
     assert hasattr(ops_down, "max_force_suppress_level")
 
-    # 测试生成 YAML 文件落盘
     output_dir = tmp_path / "rules_output"
     generated_files = parser.generate_files(output_dir)
 
@@ -70,7 +68,6 @@ def test_standard_doc_parser(dummy_markdown_doc: Path, tmp_path: Path):
     assert generated_files["taxonomy"].exists()
     assert generated_files["standard"].exists()
 
-    # 验证导出的 YAML 包含全量字段且反序列化正常
     domain_yaml_data = yaml.safe_load(generated_files["domain"].read_text(encoding="utf-8"))
     assert "downgrade_rules" in domain_yaml_data
     down_yaml = domain_yaml_data["downgrade_rules"][0]

@@ -17,7 +17,7 @@ from .engine import ConfigurableRuleEngine
 # --- 导入三层漏斗编排器 (规则 → NER → LLM) / Import the 3-layer funnel orchestrator (Rule → NER → LLM) ---
 from .funnel import ClassificationFunnel, FunnelResult
 # --- 导入用于从 Markdown 自动生成 YAML 配置的标准文档解析器 / Import the standard document parser for auto-generating YAML configs from Markdown ---
-from .generator import StandardDocParser
+from .standard_doc_generator import StandardDocParser
 # --- 导入用于第三层深度分类和仲裁的 LLM 适配器 / Import LLM adapter for Layer-3 deep classification and arbitration ---
 from .llm_adapter import LlmAdapter
 # --- 导入模块中使用的所有 Pydantic 数据模型 / Import all Pydantic data models used across the module ---
