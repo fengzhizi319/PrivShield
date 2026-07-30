@@ -513,6 +513,11 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10, wait_
         options=[
             ("grpc.max_receive_message_length", _max_msg_size),
             ("grpc.max_send_message_length", _max_msg_size),
+            # 允许客户端在无活跃 RPC 时发送 keepalive PING，
+            # 否则服务端会因 "too_many_pings" 发送 GOAWAY/ENHANCE_YOUR_CALM
+            ("grpc.keepalive_permit_without_calls", 1),
+            # 允许客户端最短每 5 秒发送一次 PING（默认 300 秒过于严格）
+            ("grpc.http2.min_ping_interval_without_data", 5),
         ],
     )
     privacy_pb2_grpc.add_PrivacyServiceServicer_to_server(PrivacyServicer(), server)

@@ -92,8 +92,8 @@ func New(cfg *config.Config) (*Client, error) {
 		// 当 Python agent 因 VLM 推理 OOM 等原因崩溃后，keepalive 能在
 		// 数秒内检测到连接断开并触发重连，避免后续请求持续失败。
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                10 * time.Second, // 每 10 秒发送一次心跳
-			Timeout:             5 * time.Second,  // 心跳超时 5 秒后判定连接断开
+			Time:                30 * time.Second, // 每 30 秒发送一次心跳（需 ≥ 服务端 min_ping_interval）
+			Timeout:             10 * time.Second, // 心跳超时 10 秒后判定连接断开
 			PermitWithoutStream: true,             // 无活跃 RPC 时也发送心跳
 		}),
 	)

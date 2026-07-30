@@ -19,7 +19,6 @@ rules:
       - identity
       - id_card
       - 身份证
-      use_word_boundaries: true
   match_logic: OR
   priority: 90
   enabled: true
@@ -42,7 +41,6 @@ rules:
       - cell
       - 电话
       - 手机
-      use_word_boundaries: true
   match_logic: OR
   priority: 80
   enabled: true
@@ -66,7 +64,6 @@ rules:
       - card_no
       - bank_card
       - 支付卡号
-      use_word_boundaries: true
   match_logic: OR
   priority: 85
   enabled: true
@@ -89,7 +86,6 @@ rules:
       - 艾滋病
       - 性病
       - 精神病
-      use_word_boundaries: true
   match_logic: AND
   priority: 95
   enabled: true
@@ -114,7 +110,6 @@ rules:
       - 基因
       - 染色体
       - 地中海贫血
-      use_word_boundaries: true
   match_logic: AND
   priority: 100
   enabled: true
@@ -132,4 +127,7 @@ downgrade_rules:
   level: L2
   category: MANAGEMENT
   match_target: field_name
+  override: false
+  max_override_level: ''
+  suppress_rules: []
 composite_rules: []
