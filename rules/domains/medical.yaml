@@ -125,6 +125,8 @@ downgrade_rules:
     level: "L2"
     category: "OPERATIONAL_STAT"
     force_suppress: true        # 启用强制覆盖：可压制误中的普通规则
+    # 【配置提示 / Tip】: 开启 force_suppress: true 时，若需将更高的误报等级（如 L3/L4）强制降为 level(L2)，
+    # 必须显式配置 max_force_suppress_level: "L3" (或 "L4")，否则默认仅压制 <= level 的标签。
     max_force_suppress_level: "L3"    # 仅能压制 L3 及以下的普通规则标签
 
 composite_rules:

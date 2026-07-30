@@ -91,6 +91,9 @@ downgrade_rules:
     level: "L2"
     category: "OPERATIONAL_STAT"
     force_suppress: true        # 启用强制覆盖
+    # 【配置提示 / Tip】: 开启 force_suppress: true 时，务必根据需要显式配置 max_force_suppress_level。
+    # 若未指定，默认仅压制 <= level(L2) 的标签。显式配置 max_force_suppress_level: "L3" (或 "L4")
+    # 才能将原本被通用规则误中而标记为 L3/L4 的高敏感标签强制压制并降级为 L2。
     max_force_suppress_level: "L3"    # 仅压制 L3 及以下（且仅压制字段名命中，值级命中豁免）
 
 composite_rules:

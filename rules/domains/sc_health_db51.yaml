@@ -128,6 +128,8 @@ downgrade_rules:
   category: MANAGEMENT
   match_target: field_name
   force_suppress: false
+  # 【配置提示 / Tip】: 当将 force_suppress 改为 true 且需将高等级误报(L3/L4/L5)强制压制并降级为 L2 时，
+  # 务必显式配置 max_force_suppress_level（如 'L4' 或 'L5'），否则默认仅能压制 <= L2 的标签。
   max_force_suppress_level: ''
   suppress_rules: []
 composite_rules: []
