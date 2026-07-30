@@ -117,7 +117,7 @@ groups:
 
 ---
 
-## 5. 降级规则 `force_suppress` 与 `suppress_rules` 最佳实践指南
+## 5. 降级规则 `force_suppress` 与 `exempt_rules` 最佳实践指南
 
 当在规则 YAML 中使用敏感度降级规则 (`downgrade_rules`) 时：
 
@@ -125,8 +125,9 @@ groups:
 2. **显式配置覆盖上限 `max_force_suppress_level`**：
    - 默认为空时仅擦除 $\le \text{level}$ 的标签。
    - 若要将更高误报等级（如 L3/L4）强行降级为目标等级（如 L2），**必须显式指定** `max_force_suppress_level: "L3"` 或 `"L4"`。若未显式指定，`validate` 校验时将输出 `[配置提示]` 告警信息。
-3. **使用 `suppress_rules` 进行靶向压制**：
-   - 当遇到多个普通规则命中，且只想擦除宽泛匹配规则、保留精确校验规则时，在 `suppress_rules: ["BROAD_RULE_ID"]` 白名单中明确填入待擦除的规则 ID。
+3. **使用 `exempt_rules` 设置豁免例外名单**：
+   - `exempt_rules: []`（默认为空）：**没有例外！** 所有 $\le \text{max\_force\_suppress\_level}$ 的普通字段名匹配标签全额强制压制擦除（配置最简）。
+   - `exempt_rules: ["RULE_IDCARD_EXACT", "*_EXACT"]`：指定例外规则（支持 `fnmatch` 通配符），列表中的规则**豁免保护、绝对不被压制**。
 
 ---
 
@@ -134,12 +135,12 @@ groups:
 
 在 `ConfigurableRuleEngine` 评估时，一个普通规则标签要被降级规则强行压制（抹掉），必须**同时满足以下 4 个条件**：
 
-1. **非降级标签**：必须是普通规则产出的标签（降级标签自身不会互相压制）。
+1. **非降级标签**：必须是普通规则产出的标签（`is_override=False`，降级标签自身不会互相压制）。
 2. **等级未超限**：普通标签的等级 $\le \text{max\_force\_suppress\_level}$。
 3. **字段名匹配豁免**：默认仅压制字段名（`field_name`）匹配的标签；值级模式（`field_value`）匹配默认豁免保护。
-4. **白名单匹配 (`suppress_rules`)**：
-   - 若 `suppress_rules` 为空 ➔ 通过（所有符合条件的规则均可压制）。
-   - 若 `suppress_rules` 非空 ➔ 普通标签的 `rule_id` 必须在 `suppress_rules` 列表中才会被压制。
+4. **非豁免例外规则 (`exempt_rules`)**：
+   - 若 `exempt_rules` 为空 ➔ **没有例外，通过压制判定**。
+   - 若 `exempt_rules` 非空 ➔ 普通标签的 `rule_id` 不在 `exempt_rules` 例外列表（或通配符）中；若命中例外列表，则豁免保留、不被压制。
 
 #### 💡 综合实战案例演示
 
@@ -155,19 +156,19 @@ downgrade_rules:
     category: "OPERATIONAL_STAT"
     force_suppress: true
     max_force_suppress_level: "L4"
-    suppress_rules: ["RULE_PII_FUZZY_KEYWORD"]
+    exempt_rules: ["RULE_IDCARD_EXACT", "RULE_PHONE_REGEX"] # 仅身份证和精准手机号为例外保护
 ```
 
 **评估时共命中以下 4 个普通规则标签，判定过程如下**：
 
 | 命中标签 ID | 触发条件 / 匹配目标 | 标签等级 | 4 重条件校验判定 | 最终结果 |
 |---|---|---|---|---|
-| **`RULE_PII_FUZZY_KEYWORD`** | 字段名匹配 `mobile` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④在白名单中 ➔ **满足全部 4 条件** | ❌ **被强行压制擦除** |
-| **`RULE_IDCARD_EXACT`** | 字段名匹配 `identity` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④不在白名单中 ➔ **不满足条件 4** | ✅ **豁免保留** |
+| **`RULE_PII_FUZZY_KEYWORD`** | 字段名匹配 `mobile` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④不在豁免名单中 ➔ **满足全部 4 条件** | ❌ **被强行压制擦除** |
+| **`RULE_IDCARD_EXACT`** | 字段名匹配 `identity` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④**在豁免名单中** ➔ **不满足条件 4** | ✅ **豁免保留** |
 | **`RULE_TOP_SECRET_HASH`** | 字段名匹配 `top_secret` (`match_target=field_name`) | `L5` | ①非降级标签 ②L5 $>$ L4 (超出上限) ➔ **不满足条件 2** | ✅ **豁免保留** |
 | **`RULE_PHONE_REGEX`** | 采样数据扫描出真实手机号 (`match_target=field_value`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③是**值级匹配** ➔ **不满足条件 3** | ✅ **豁免保留** |
 
 **最终裁定结果**：
-只有宽泛误报规则 `RULE_PII_FUZZY_KEYWORD` 被成功压制擦除；而精确规则 `RULE_IDCARD_EXACT`、绝密规则 `RULE_TOP_SECRET_HASH` 以及实际扫出手机号数据的 `RULE_PHONE_REGEX` 均被安全保留。
+宽泛误报规则 `RULE_PII_FUZZY_KEYWORD` 被成功压制擦除；而属于豁免例外的精确规则 `RULE_IDCARD_EXACT`、绝密规则 `RULE_TOP_SECRET_HASH` 以及实际扫出手机号数据的 `RULE_PHONE_REGEX` 均被安全保留。
 
 

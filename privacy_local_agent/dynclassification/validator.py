@@ -222,19 +222,20 @@ def _validate_downgrade_rules(
                 f"level='{rule.level}' 在 taxonomy 中不存在"
             )
 
-        # 检查 5: suppress_rules 白名单引用的规则 ID 存在性
-        if rule.suppress_rules:
+        # 检查 5: exempt_rules 豁免例外名单校验
+        if rule.exempt_rules:
             if not rule.force_suppress:
                 res.add_warning(
                     f"[死配置] 文件 {file_name}, 规则 '{rule.id}': "
-                    f"force_suppress=false 但配置了 suppress_rules，该配置不会生效"
+                    f"force_suppress=false 但配置了 exempt_rules/exclude_rules，该配置不会生效"
                 )
             normal_rule_ids = {r.id for r in profile.rules}
-            for ref_id in rule.suppress_rules:
-                if ref_id not in normal_rule_ids:
+            for ref_id in rule.exempt_rules:
+                # 支持通配符，非通配符时检查精确匹配存在性
+                if "*" not in ref_id and "?" not in ref_id and ref_id not in normal_rule_ids:
                     res.add_warning(
-                        f"[压制白名单引用未找到] 文件 {file_name}, 规则 '{rule.id}': "
-                        f"suppress_rules 中引用的 '{ref_id}' 在普通规则中不存在"
+                        f"[豁免名单引用未找到] 文件 {file_name}, 规则 '{rule.id}': "
+                        f"exempt_rules/exclude_rules 中引用的 '{ref_id}' 在普通规则中不存在"
                     )
 
     # 检查 4: 普通规则 level 存在性

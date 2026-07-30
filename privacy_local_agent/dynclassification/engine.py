@@ -412,29 +412,21 @@ class ConfigurableRuleEngine:
         # 确保高敏感标签（rank > min_cap）不被错误降级而非法逃逸。
         min_cap_rank = min(cap_ranks)
 
-        # Step 2.5: 合并所有 override 规则的 suppress_rules 白名单。
-        # 语义约定：
-        #   - 所有 override 规则都有白名单 → 取并集，仅压制白名单内的规则
-        #   - 任一 override 规则无白名单（suppress_rules=[]）→ 全局压制（压制所有符合条件的规则）
-        # 这确保“无限制”的降级规则不会被其他有白名单的规则意外约束。
-        suppress_whitelist: set[str] = set()
-        has_whitelist = False
+        # Step 2.5: 合并所有 override 规则的 exempt_rules 豁免例外名单（取并集）。
+        # 只要在任一命中的 override 规则的 exempt_rules 列表中（或匹配其通配符模式），
+        # 该普通规则 ID 即可获得豁免保护、绝对不被压制。
+        exempt_patterns: set[str] = set()
         for tag in override_tags:
             rule_def = self._find_downgrade_rule(tag.rule_id)
-            if rule_def and rule_def.suppress_rules:
-                has_whitelist = True
-                suppress_whitelist.update(rule_def.suppress_rules)
-            elif rule_def and not rule_def.suppress_rules:
-                # 任一无白名单规则 → 全局压制，跳出循环
-                has_whitelist = False
-                suppress_whitelist.clear()
-                break
+            if rule_def and rule_def.exempt_rules:
+                exempt_patterns.update(rule_def.exempt_rules)
 
         # Step 3: Filter out normal tags whose rank <= cap_rank. / 过滤并压制 rank <= cap_rank 的普通标签。
         # 压制 4 重判定条件 / 4 Suppression Conditions:
-        # 1. 不能是值级匹配标签（tag.match_target != 'field_value'，数据值扫描默认豁免保底）
-        # 2. 标签敏感等级 <= 覆盖上限（tag_rank <= min_cap_rank）
-        # 3. 压制白名单匹配（若设置了 suppress_rules 白名单，tag.rule_id 必须在白名单中才被压制，避免一刀切误伤其他规则）
+        # 1. 非降级标签（is_override=False，降级标签自身不会互相压制）
+        # 2. 不能是值级匹配标签（tag.match_target != 'field_value'，数据值扫描默认豁免保底）
+        # 3. 标签敏感等级 <= 覆盖上限（tag_rank <= min_cap_rank）
+        # 4. 豁免例外校验（如果规则 ID 匹配了 exempt_rules 豁免模式，则属于例外、受保护不被压制）
         surviving_tags: list[SecurityTag] = []
         suppressed_tags: list[SecurityTag] = []
         for tag in normal_tags:
@@ -445,14 +437,14 @@ class ConfigurableRuleEngine:
             tag_rank = self.taxonomy.get_level_rank(tag.level)
             # 条件 2: 确认敏感等级未超出压制上限 / Check level <= cap_rank
             if tag_rank <= min_cap_rank:
-                # 条件 3: suppress_rules 白名单校验 (支持精确匹配及 fnmatch 通配符，如 'general-pii:*' 或 '*BROAD*')
-                # 如果配置了白名单且该规则 ID 无法匹配白名单中的任何模式，则跳过压制、保留标签
-                if has_whitelist:
-                    matched = any(
+                # 条件 3: exempt_rules 豁免例外校验 (支持精确匹配及 fnmatch 通配符，如 'RULE_IDCARD_EXACT' 或 '*_EXACT')
+                # 如果匹配了豁免名单，属于例外受保护，跳过压制、保留标签
+                if exempt_patterns:
+                    is_exempt = any(
                         p == tag.rule_id or fnmatch.fnmatch(tag.rule_id, p)
-                        for p in suppress_whitelist
+                        for p in exempt_patterns
                     )
-                    if not matched:
+                    if is_exempt:
                         surviving_tags.append(tag)
                         continue
                 suppressed_tags.append(tag)
@@ -469,7 +461,7 @@ class ConfigurableRuleEngine:
                     "suppressed_rule_ids": [t.rule_id for t in suppressed_tags],
                     "override_rules": [t.rule_id for t in override_tags],
                     "cap_rank": min_cap_rank,
-                    "has_whitelist": has_whitelist,
+                    "has_exemptions": bool(exempt_patterns),
                 },
             )
 

@@ -256,11 +256,11 @@ graph TD
 
 1. **Phase 1 — 普通规则评估**：按优先级遍历普通规则，生成 `normal_tags`。
 2. **Phase 2 — 降级规则评估**：字段名归一化后，使用纯子串匹配（`kw in norm_name`）对所有降级规则做关键词匹配（注意：降级规则不使用 `keyword_contains` 算子，无单词边界限制）；命中的生成 `downgrade_tags`，并标记 `is_downgrade=True`。若规则 `override=true`，则同时标记 `is_override=True`。
-3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_force_suppress_level))`；同时合并所有 `suppress_rules` 白名单。随后从 `normal_tags` 中移除满足以下**全部 4 个条件**的普通标签：
+3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_force_suppress_level))`；同时合并所有 `exempt_rules`（或 YAML 别名 `exclude_rules`）豁免例外名单。随后从 `normal_tags` 中移除满足以下**全部 4 个条件**的普通标签：
    - **条件 1 (非降级标签)**：必须是普通规则产出的标签（`is_override=False`，降级标签自身不会互相压制）；
    - **条件 2 (等级未超限)**：普通标签的 `rank <= cap_rank`；
    - **条件 3 (字段名匹配豁免)**：普通标签的 `match_target` 不是 `field_value`（基于数据值的扫描匹配永远豁免保护，避免误删真实敏感数据）；
-   - **条件 4 (白名单匹配)**：`suppress_rules` 为空，或普通标签的 `rule_id` 在 `suppress_rules` 白名单内。
+   - **条件 4 (非豁免例外规则)**：普通标签的 `rule_id` 不在 `exempt_rules` 豁免例外名单/通配符中（若在豁免名单中则属于例外、受保护不被压制）。
    被移除的标签写入 `suppressed_tags`，用于审计追踪和 Prometheus 指标 (`classification_override_suppressed_total`)。
 4. **Phase 4 — 合并与去重**：将剩余普通标签与降级标签合并，按 `(level, category)` 去重，返回 `(final_tags, suppressed_tags)`。
 
@@ -305,18 +305,18 @@ override=true, max_force_suppress_level="L4":
   - `level="L2"`、`max_force_suppress_level="L4"`：允许压制 L1~L4 的普通标签（将原本误标为 L3/L4 的误报标签强行压制并降级为 L2），但保留 L5（如果存在）。
   - **静态校验提示**：规则校验器（`validator.py`）会在检测到 `force_suppress=true` 但未指定 `max_force_suppress_level` 时主动输出 `[配置提示]` 告警，提醒配置人员如需压制更高等级误报（如将 L3/L4 强行降级为 L2），应显式指定 `max_force_suppress_level: "L3"` 或 `"L4"`。
 
-- **`suppress_rules`**：白名单机制。当希望只压制特定宽泛规则，而不影响其他精确规则时使用：
-  - `[]`（默认）：压制所有符合 rank 条件的普通标签。
-  - `["RULE_PII_BROAD_KEYWORD"]`：仅压制该规则产生的标签，其他规则（如身份证校验）产生的标签即使 rank 较低也会保留。
+- **`exempt_rules`（别名 `exclude_rules`）**：豁免例外名单（支持 `fnmatch` 通配符）。用于当默认全额压制可能误伤极少数精确检验规则时手写例外：
+  - `[]`（默认）：没有例外，符合 rank 条件的所有普通字段名标签全额压制。
+  - `["RULE_IDCARD_EXACT", "*_EXACT"]`：列表中的规则属于例外，受保护绝对不被压制。
 
 ##### 4 重判定条件与实战示例矩阵
 
-假设对字段 `stat_user_mobile` 进行分类，降级规则配置为：`level="L2"`, `force_suppress=true`, `max_force_suppress_level="L4"`, `suppress_rules=["RULE_PII_FUZZY_KEYWORD"]`：
+假设对字段 `stat_user_mobile` 进行分类，降级规则配置为：`level="L2"`, `force_suppress=true`, `max_force_suppress_level="L4"`, `exempt_rules=["RULE_IDCARD_EXACT", "RULE_PHONE_REGEX"]`：
 
 | 命中标签 ID | 触发模式 / 匹配目标 | 标签等级 | 4 重条件校验判定 | 最终结果 |
 |---|---|---|---|---|
-| **`RULE_PII_FUZZY_KEYWORD`** | 字段名匹配 `mobile` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④在白名单中 ➔ **满足全部 4 条件** | ❌ **被强行压制擦除** |
-| **`RULE_IDCARD_EXACT`** | 字段名匹配 `identity` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④不在白名单中 ➔ **不满足条件 4** | ✅ **豁免保留** |
+| **`RULE_PII_FUZZY_KEYWORD`** | 字段名匹配 `mobile` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④不在豁免名单中 ➔ **满足全部 4 条件** | ❌ **被强行压制擦除** |
+| **`RULE_IDCARD_EXACT`** | 字段名匹配 `identity` (`match_target=field_name`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③字段名匹配 ④**在豁免名单中** ➔ **不满足条件 4** | ✅ **豁免保留** |
 | **`RULE_TOP_SECRET_HASH`** | 字段名匹配 `top_secret` (`match_target=field_name`) | `L5` | ①非降级标签 ②L5 $>$ L4 (超出上限) ➔ **不满足条件 2** | ✅ **豁免保留** |
 | **`RULE_PHONE_REGEX`** | 采样数据扫描出真实手机号 (`match_target=field_value`) | `L3` | ①非降级标签 ②L3 $\le$ L4 ③是**值级匹配** ➔ **不满足条件 3** | ✅ **豁免保留** |
 
@@ -330,7 +330,7 @@ downgrade_rules:
     category: "PUBLIC_REPORT"
     force_suppress: true
     max_force_suppress_level: "L3"      # 只压制 L3 及以下普通标签
-    suppress_rules: []             # 压制所有符合条件的普通规则
+    exempt_rules: []                    # 没有例外，符合条件的普通规则全额压制
 
   - id: "RULE_DOWN_OPS"
     keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次"]
@@ -338,7 +338,8 @@ downgrade_rules:
     category: "OPERATIONAL_STAT"
     force_suppress: true
     max_force_suppress_level: ""          # 空=使用 level "L2" 作为 cap
-    suppress_rules: ["RULE_PII_BROAD_KEYWORD"]  # 仅压制该宽泛规则
+    exempt_rules: ["RULE_IDCARD_EXACT"]   # 保护身份证规则例外，其余全压
+```
 ```
 
 #### 4.5.6 与最终等级裁定的关系

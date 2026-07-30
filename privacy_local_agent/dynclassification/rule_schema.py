@@ -151,17 +151,19 @@ class DowngradeRuleDef(BaseModel):
     # 如 'L3' 表示仅压制 rank <= rank('L3') 的普通标签。
     # 空字符串时默认使用本规则自身的 'level' 字段作为上限。
     max_force_suppress_level: str = Field(default="", description="覆盖等级上限（空=使用 level 字段）")
-    # Fine-grained suppression whitelist: only normal rules whose ID appears here
-    # can be suppressed by this override rule.
-    # Empty list (default) = suppress ALL eligible normal tags (backward-compatible).
-    # Non-empty =靶向白名单模式，仅列出的规则 ID 产生的标签可被压制（防止误伤其他精确规则）。
-    # 细粒度压制白名单：仅此处列出的规则 ID 产生的普通标签可被本覆盖规则压制。
-    # 核心用途：避免一刀切压制所有同/低等级标签。例如仅擦除宽泛正则误报，保留精准格式正则标签。
-    # - 空列表（默认）= 压制所有符合条件的普通标签（向后兼容）。 / Empty list (default) = suppress ALL eligible tags.
-    # - 非空 = 仅列出的规则 ID 产生的标签才是压制候选。 / Non-empty = only listed rule IDs can be suppressed.
-    suppress_rules: list[str] = Field(
+    # Fine-grained suppression exemption list: normal rules whose ID or wildcard pattern
+    # matches any entry in this list are EXEMPT from suppression (protected and preserved).
+    # Empty list (default) = NO exemptions, all eligible normal tags with rank <= max_force_suppress_level are suppressed.
+    # Non-empty = rules listed here (or matching wildcards like '*_EXACT') are EXEMPT and protected from suppression.
+    # 压制豁免例外名单：列表中的规则 ID / 通配符表达式为豁免例外（受保护、绝对不被压制）。
+    # 核心用途：默认按等级全额压制所有误报标签；仅在需要保护极少数精准检验规则（如身份证正则）时手写例外。
+    # - 空列表（默认）= 没有例外，按等级区间全额压制。 / Empty list (default) = NO exemptions, all eligible tags suppressed.
+    # - 非空 = 列表中列出（或匹配通配符）的规则 ID 属于例外，保护保留。 / Non-empty = listed/wildcard rules are EXEMPT.
+    # 注：alias="exclude_rules" 提供 YAML 极简语义别名。
+    exempt_rules: list[str] = Field(
         default_factory=list,
-        description="压制白名单: 仅列出的规则 ID 可被压制（空=压制所有符合条件的规则）",
+        alias="exclude_rules",
+        description="压制豁免例外名单: 列表中的规则 ID / 通配符豁免保护（空=没有例外全额压制）",
     )
 
 

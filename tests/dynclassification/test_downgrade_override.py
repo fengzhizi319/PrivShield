@@ -372,22 +372,22 @@ class TestEdgeCases:
 
 
 # ===========================================================================
-# 测试：suppress_rules 白名单精细控制
+# 测试：exempt_rules 豁免例外名单精细控制
 # ===========================================================================
 
 
-class TestSuppressRulesWhitelist:
-    """验证 suppress_rules 白名单精细控制行为。"""
+class TestExemptRulesExceptions:
+    """验证 exempt_rules (exclude_rules) 豁免例外名单的行为。"""
 
-    def test_whitelist_only_suppresses_listed_rules(self, taxonomy):
-        """白名单非空时，仅压制列出的规则，其他规则豁免。
+    def test_exempt_list_protects_listed_rules(self, taxonomy):
+        """豁免名单非空时，列表中的规则作为例外获得保护，其他规则压制。
 
         场景：字段同时命中 RULE_A(L3) 和 RULE_B(L3)，
-        降级规则 suppress_rules=["RULE_A"] 仅允许压制 RULE_A。
-        期望：RULE_A 被压制，RULE_B 存活。
+        降级规则 exempt_rules=["RULE_B"] 保护 RULE_B 不被压制。
+        期望：RULE_A 被压制，RULE_B 属于例外被豁免保留。
         """
         profile = RuleProfile(
-            domain="whitelist",
+            domain="exempt-list",
             rules=[
                 RuleDef(
                     id="RULE_A",
@@ -404,13 +404,13 @@ class TestSuppressRulesWhitelist:
             ],
             downgrade_rules=[
                 DowngradeRuleDef(
-                    id="DOWN_WL",
+                    id="DOWN_EX",
                     keywords=["data"],
                     level="L2",
                     category="OPS",
                     force_suppress=True,
                     max_force_suppress_level="L3",
-                    suppress_rules=["RULE_A"],  # 仅压制 RULE_A
+                    exempt_rules=["RULE_B"],  # RULE_B 为例外豁免保护
                 ),
             ],
         )
@@ -418,19 +418,19 @@ class TestSuppressRulesWhitelist:
         tags, _ = engine.evaluate("some_data_field", "value")
 
         rule_ids = [t.rule_id for t in tags]
-        assert "RULE_A" not in rule_ids, "RULE_A 应被压制（在白名单中）"
-        assert "RULE_B" in rule_ids, "RULE_B 不应被压制（不在白名单中）"
-        assert "DOWN_WL" in rule_ids, "降级标签应存在"
+        assert "RULE_A" not in rule_ids, "RULE_A 应被压制"
+        assert "RULE_B" in rule_ids, "RULE_B 属于例外名单，应豁免保留"
+        assert "DOWN_EX" in rule_ids, "降级标签应存在"
 
-    def test_empty_whitelist_suppresses_all(self, taxonomy):
-        """白名单为空时（默认），压制所有符合条件的规则（向后兼容）。
+    def test_empty_exempt_list_suppresses_all(self, taxonomy):
+        """豁免名单为空时（默认），没有例外，全额压制所有符合条件的规则。
 
         场景：字段同时命中 RULE_A(L3) 和 RULE_B(L3)，
-        降级规则 suppress_rules=[] 不限制。
+        降级规则 exempt_rules=[]（没有例外）。
         期望：两个规则都被压制。
         """
         profile = RuleProfile(
-            domain="no-whitelist",
+            domain="no-exempt-list",
             rules=[
                 RuleDef(
                     id="RULE_A",
@@ -453,7 +453,7 @@ class TestSuppressRulesWhitelist:
                     category="OPS",
                     force_suppress=True,
                     max_force_suppress_level="L3",
-                    suppress_rules=[],  # 空 = 压制所有
+                    exempt_rules=[],  # 空 = 没有例外全额压制
                 ),
             ],
         )
@@ -489,7 +489,7 @@ class TestSuppressRulesWhitelist:
                     category="OPS",
                     force_suppress=True,
                     max_force_suppress_level="L3",  # cap=L3，不能压制 L5
-                    suppress_rules=["RULE_HIGH"],  # 白名单包含 RULE_HIGH
+                    exempt_rules=[],  # 没有例外，全额压制符合条件的规则
                 ),
             ],
         )
@@ -500,10 +500,10 @@ class TestSuppressRulesWhitelist:
         assert "L5" in levels, "L5 不应被压制（rank 超出 cap=L3）"
 
     def test_whitelist_field_value_exempt(self, taxonomy):
-        """白名单内的规则如果是值级命中，仍然豁免压制。
+        """值级命中匹配默认永远豁免保底保护。
 
-        场景：RULE_PHONE 使用 field_value 匹配器，在白名单中，
-        期望：值级命中豁免优先于白名单，不被压制。
+        场景：RULE_PHONE 使用 field_value 匹配器，
+        期望：值级命中豁免保底保护，不被压制。
         """
         profile = RuleProfile(
             domain="value-exempt",
@@ -523,7 +523,7 @@ class TestSuppressRulesWhitelist:
                     category="OPS",
                     force_suppress=True,
                     max_force_suppress_level="L3",
-                    suppress_rules=["RULE_PHONE"],  # 白名单包含 RULE_PHONE
+                    exempt_rules=[],  # 就算没有配例外
                 ),
             ],
         )
@@ -531,14 +531,14 @@ class TestSuppressRulesWhitelist:
         tags, _ = engine.evaluate("contact_info", "13800138000")
 
         rule_ids = [t.rule_id for t in tags]
-        assert "RULE_PHONE" in rule_ids, "值级命中应豁免压制（即使在白名单中）"
+        assert "RULE_PHONE" in rule_ids, "值级命中应永远豁免保底保护"
 
-    def test_multiple_override_rules_whitelist_union(self, taxonomy):
-        """多条 override 规则的白名单取并集。
+    def test_multiple_override_rules_exempt_union(self, taxonomy):
+        """多条 override 规则的豁免例外名单取并集。
 
-        场景：DOWN_A suppress_rules=["RULE_X"]，DOWN_B suppress_rules=["RULE_Y"]，
+        场景：DOWN_A exempt_rules=["RULE_Z"]，DOWN_B exempt_rules=["RULE_Y"]，
         字段命中 RULE_X + RULE_Y + RULE_Z，
-        期望：RULE_X 和 RULE_Y 被压制，RULE_Z 豁免。
+        期望：RULE_Y 和 RULE_Z 均属于例外名单保护保留，RULE_X 被压制。
         """
         profile = RuleProfile(
             domain="union",
@@ -570,7 +570,7 @@ class TestSuppressRulesWhitelist:
                     category="OPS_A",
                     force_suppress=True,
                     max_force_suppress_level="L3",
-                    suppress_rules=["RULE_X"],
+                    exempt_rules=["RULE_Z"],
                 ),
                 DowngradeRuleDef(
                     id="DOWN_B",
@@ -579,7 +579,7 @@ class TestSuppressRulesWhitelist:
                     category="OPS_B",
                     force_suppress=True,
                     max_force_suppress_level="L3",
-                    suppress_rules=["RULE_Y"],
+                    exempt_rules=["RULE_Y"],
                 ),
             ],
         )
@@ -587,64 +587,12 @@ class TestSuppressRulesWhitelist:
         tags, _ = engine.evaluate("some_data_field", "value")
 
         rule_ids = [t.rule_id for t in tags]
-        assert "RULE_X" not in rule_ids, "RULE_X 应被压制（在 DOWN_A 白名单中）"
-        assert "RULE_Y" not in rule_ids, "RULE_Y 应被压制（在 DOWN_B 白名单中）"
-        assert "RULE_Z" in rule_ids, "RULE_Z 不应被压制（不在任何白名单中）"
+        assert "RULE_X" not in rule_ids, "RULE_X 不在任何豁免名单中，应被压制"
+        assert "RULE_Y" in rule_ids, "RULE_Y 在 DOWN_B 豁免名单中，应保留"
+        assert "RULE_Z" in rule_ids, "RULE_Z 在 DOWN_A 豁免名单中，应保留"
 
-    def test_mixed_whitelist_and_empty(self, taxonomy):
-        """一条有白名单 + 一条无白名单的 override 规则同时命中。
-
-        场景：DOWN_WL suppress_rules=["RULE_A"]，DOWN_ALL suppress_rules=[]，
-        字段命中 RULE_A + RULE_B，
-        期望：DOWN_ALL 无白名单 → 触发全局压制，RULE_A 和 RULE_B 都被压制。
-        """
-        profile = RuleProfile(
-            domain="mixed-wl",
-            rules=[
-                RuleDef(
-                    id="RULE_A",
-                    category="CAT_A",
-                    level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
-                ),
-                RuleDef(
-                    id="RULE_B",
-                    category="CAT_B",
-                    level="L3",
-                    matchers=[MatcherDef(target="field_name", operator="keyword_contains", params={"use_word_boundaries": False, "keywords": ["data"]})],
-                ),
-            ],
-            downgrade_rules=[
-                DowngradeRuleDef(
-                    id="DOWN_WL",
-                    keywords=["data"],
-                    level="L2",
-                    category="OPS_A",
-                    force_suppress=True,
-                    max_force_suppress_level="L3",
-                    suppress_rules=["RULE_A"],  # 有白名单
-                ),
-                DowngradeRuleDef(
-                    id="DOWN_ALL",
-                    keywords=["data"],
-                    level="L2",
-                    category="OPS_B",
-                    force_suppress=True,
-                    max_force_suppress_level="L3",
-                    suppress_rules=[],  # 无白名单 = 压制所有
-                ),
-            ],
-        )
-        engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=[profile])
-        tags, _ = engine.evaluate("some_data_field", "value")
-
-        rule_ids = [t.rule_id for t in tags]
-        # DOWN_ALL 无白名单，不触发 has_whitelist，因此压制所有符合条件的规则
-        assert "RULE_A" not in rule_ids, "RULE_A 应被压制"
-        assert "RULE_B" not in rule_ids, "RULE_B 应被压制（DOWN_ALL 无白名单限制）"
-
-    def test_suppress_rules_wildcard_matching(self, taxonomy: DomainTaxonomy):
-        """测试 suppress_rules 中的通配符（如 'RULE_BROAD_*' 或 'pkg:*'）匹配能力。"""
+    def test_exempt_rules_wildcard_matching(self, taxonomy: DomainTaxonomy):
+        """测试 exempt_rules 中的通配符（如 'pkg:*_EXACT'）豁免保护能力。"""
         profile = RuleProfile(
             domain="test",
             rules=[
@@ -669,7 +617,7 @@ class TestSuppressRulesWhitelist:
                     category="OPS",
                     force_suppress=True,
                     max_force_suppress_level="L3",
-                    suppress_rules=["pkg:RULE_BROAD_*"],  # 使用通配符只压制 BROAD 规则
+                    exempt_rules=["pkg:*_EXACT_2"],  # 使用通配符将 EXACT 规则作为例外保护保留
                 ),
             ],
         )
@@ -679,6 +627,6 @@ class TestSuppressRulesWhitelist:
         surviving_ids = [t.rule_id for t in tags]
         suppressed_ids = [t.rule_id for t in suppressed]
 
-        assert "pkg:RULE_BROAD_1" in suppressed_ids, "pkg:RULE_BROAD_1 应触发通配符匹配被压制"
-        assert "pkg:RULE_EXACT_2" in surviving_ids, "pkg:RULE_EXACT_2 未匹配通配符，应保留"
+        assert "pkg:RULE_BROAD_1" in suppressed_ids, "pkg:RULE_BROAD_1 不在豁免名单中，应被压制"
+        assert "pkg:RULE_EXACT_2" in surviving_ids, "pkg:RULE_EXACT_2 匹配通配符豁免名单，应被保留"
 
