@@ -179,12 +179,15 @@ Key environment variables:
 ## 7. Code Conventions
 
 - Follow **PEP 8**.
+- Keep acronyms in PascalCase uppercase for domain terms (e.g. `DP`, `LDP`, `QOL`, `KAnonymity`, `NER`, `LLM`).
+- Exception classes must end with `Error` or `Exception` (e.g. `PrivacyBudgetExhaustedError`).
 - Use **type hints** on public functions.
 - Use **Pydantic v2** models for request/response schemas.
 - Keep primitives stateless; state lives in `PrivacyService` / `BudgetAccountant`.
 - Lazy-load heavy ML models; never import `torch`/`transformers` at module top level unless unavoidable.
 - Add tests for new primitives and classification rules.
 - Prefer `pathlib.Path` over string paths.
+
 
 ## 8. Adding a New Privacy Primitive
 

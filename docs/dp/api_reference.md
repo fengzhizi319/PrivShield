@@ -721,7 +721,7 @@ repr(accountant)
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `spend` | `spend(epsilon: float, delta: float = 0.0)` | 消耗预算；超支时抛出 `PrivacyBudgetExhausted` |
+| `spend` | `spend(epsilon: float, delta: float = 0.0)` | 消耗预算；超支时抛出 `PrivacyBudgetExhaustedError`（兼容别名 `PrivacyBudgetExhausted`） |
 | `remaining` | `remaining() -> dict[str, float]` | 返回剩余 `{"epsilon": float, "delta": float}` |
 
 ---
@@ -1357,7 +1357,7 @@ REST 侧同理：`values` 字段只包含目标列的样本值；如需指定列
 | `ValueError: sensitivity must be non-negative` | noisify sum/mean 敏感度为负 | 400 | `INVALID_ARGUMENT` |
 | `ValueError: column must be specified when input is a pandas DataFrame` | DataFrame 未指定 `column` | 400 | `INVALID_ARGUMENT` |
 | `TypeError: Unsupported data type for DP values` | 不支持的 `values` 输入类型 | 400 | `INVALID_ARGUMENT` |
-| `PrivacyBudgetExhausted` | 累计预算超过命名空间上限 | 429 | `RESOURCE_EXHAUSTED` |
+| `PrivacyBudgetExhaustedError`（或别名 `PrivacyBudgetExhausted`） | 累计预算超过命名空间上限 | 429 | `RESOURCE_EXHAUSTED` |
 | `ValueError: mechanism must be 'laplace' or 'gaussian'` | mechanism 参数非法 | 400 | `INVALID_ARGUMENT` |
 
 ---
@@ -1810,7 +1810,7 @@ namespace = "clinical_trial_group_a"
 **预算管理**：
 - 每个 namespace 独立追踪 ε/δ 消耗
 - 可通过 `BudgetAccountant.remaining()` 查询剩余额度
-- 超支时抛出 `PrivacyBudgetExhausted` 异常
+- 超支时抛出 `PrivacyBudgetExhaustedError`（或别名 `PrivacyBudgetExhausted`）异常
 
 ---
 

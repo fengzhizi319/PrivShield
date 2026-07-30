@@ -27,9 +27,9 @@ PYTHONPATH=. python -m privacy_local_agent.dynclassification.generator \
 ### 1.2 Python SDK 自动化生成与热重载
 
 ```python
-from privacy_local_agent.dynclassification import DynClassificationService
+from privacy_local_agent.dynclassification import DynamicClassificationService  # 亦可使用 DynClassificationService 简写别名
 
-service = DynClassificationService(rules_dir="rules")
+service = DynamicClassificationService(rules_dir="rules")
 
 # 从标准文档一键生成配置并自动载入引擎缓存
 generated_files = service.generate_profile_from_doc("docs/standard/四川省健康医疗大数据应用指南.md")
