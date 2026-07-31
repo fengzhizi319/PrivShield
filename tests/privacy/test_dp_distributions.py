@@ -1,7 +1,27 @@
-"""KS 统计分布检验：验证 DP 噪声采样的统计学正确性。
+"""KS 统计分布检验：验证 DP 噪声采样的统计学正确性 / KS Distribution Tests for DP Noise Sampling.
 
-使用 scipy.stats.kstest 对 _sample_laplace 和 _sample_gaussian 采样的大量随机数
-进行 Kolmogorov-Smirnov 检验，确保噪声分布在统计意义上符合理论 CDF。
+中文说明：
+本模块使用 Kolmogorov-Smirnov 检验验证差分隐私噪声生成的统计学正确性：
+
+1. KS 检验原理 / KS Test Principle:
+   - 比较经验分布函数 (ECDF) 与理论 CDF 的最大偏差 D
+   - p-value > alpha (0.01) 则不能拒绝“样本来自目标分布”的原假设
+   - 采样 50,000 个点以确保统计功效 (statistical power)
+
+2. 测试覆盖 / Test Coverage:
+   - Laplace(0, scale) 分布：用于满足 (ε,0)-DP 的噪声机制
+   - Gaussian N(0, σ²) 分布：用于满足 (ε,δ)-DP 的噪声机制
+   - Discrete Laplace：用于整数计数的离散化噪声
+   - 端到端噪声校准：验证 count 查询的经验方差符合理论值
+
+3. 数学基础 / Mathematical Foundation:
+   - Laplace(0,b): Var = 2b², b = sensitivity/ε
+   - N(0,σ²): Var = σ², σ = calibrate_analytic_gaussian(ε, δ, sensitivity)
+   - 大数定律：样本均值 → 0（对称分布的期望）
+
+English Description:
+Kolmogorov-Smirnov tests verifying statistical correctness of DP noise sampling,
+covering Laplace, Gaussian, and Discrete Laplace distributions.
 """
 from __future__ import annotations
 
@@ -30,7 +50,12 @@ KS_ALPHA = 0.01  # Significance level for KS test
 
 
 class TestLaplaceDistribution:
-    """验证 Laplace 噪声采样的分布正确性。"""
+    """验证 Laplace 噪声采样的分布正确性 / Laplace Noise Distribution Validation.
+
+    Laplace 机制是满足 (ε,0)-DP 的标准机制，
+    噪声尺度 b = sensitivity / epsilon。
+    概率密度: f(x) = (1/2b) * exp(-|x|/b)
+    """
 
     def test_sample_laplace_ks_test(self):
         """KS 检验：_sample_laplace(scale=1.0) 采样符合 Laplace(0, 1) 分布。"""
@@ -68,7 +93,12 @@ class TestLaplaceDistribution:
 
 
 class TestGaussianDistribution:
-    """验证 Gaussian 噪声采样的分布正确性。"""
+    """验证 Gaussian 噪声采样的分布正确性 / Gaussian Noise Distribution Validation.
+
+    Gaussian 机制满足 (ε,δ)-DP，需要 delta > 0。
+    噪声标准差 σ 通过 Analytic Gaussian 校准得到，
+    比简单的 σ = sensitivity * sqrt(2*ln(1.25/δ)) / ε 更紧。
+    """
 
     def test_sample_gaussian_ks_test(self):
         """KS 检验：_sample_gaussian(sigma=1.0) 采样符合 N(0, 1) 分布。"""
@@ -104,7 +134,12 @@ class TestGaussianDistribution:
 
 
 class TestDiscreteLaplaceDistribution:
-    """验证 Discrete Laplace 噪声采样的基本统计特性。"""
+    """验证 Discrete Laplace 噪声采样的基本统计特性 / Discrete Laplace Properties.
+
+    Discrete Laplace 是连续 Laplace 的整数版本，
+    适用于计数查询（结果必须为整数）。
+    P(X=k) ∝ exp(-|k|/scale), k ∈ ℤ
+    """
 
     def test_discrete_laplace_integer_output(self):
         """Discrete Laplace 输出必须为整数。"""
@@ -142,7 +177,11 @@ class TestDiscreteLaplaceDistribution:
 
 
 class TestCalibratedNoise:
-    """验证端到端查询的噪声校准正确性。"""
+    """验证端到端查询的噪声校准正确性 / End-to-End Noise Calibration Validation.
+
+    通过大量重复查询的经验方差与理论方差对比，
+    验证整个 DP 管线（参数解析 → 敏感度计算 → 噪声注入）的正确性。
+    """
 
     def test_count_noise_scale_laplace(self):
         """count 查询在 Laplace 机制下的噪声 scale 应为 1/epsilon。"""

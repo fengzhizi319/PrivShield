@@ -1,4 +1,36 @@
-"""数据脱敏模块单元测试。"""
+"""数据脱敏模块单元测试 / Data Masking Module Unit Tests.
+
+中文说明：
+本模块全面验证 privacy_local_agent.privacy.masking 模块的所有功能：
+
+1. 单字段脱敏 / Single Field Masking:
+   - 手机号: 保留前3后4，中间 **** / Mobile: keep first 3 & last 4
+   - 身份证: 保留前6后4，中间 ******** / ID card: keep first 6 & last 4
+   - 姓名: 保留首尾，中间 ** / Name: keep first & last char
+   - 邮箱: 用户名首尾 + *** + @域名 / Email: first & last + *** + @domain
+   - 地址: 保留前6字符 + **** / Address: keep first 6 chars
+   - 默认: 保留前3后3，中间 * / Default: keep first 3 & last 3
+
+2. 批量与记录级脱敏 / Batch & Record Masking:
+   - mask_value_batch: 多字段并行脱敏
+   - mask_record: 整条记录自动路由
+   - mask_dataframe: DataFrame/PyArrow/Polars/numpy 多格式支持
+   - chunked_mask_records: 流式分块脱敏
+
+3. 工具函数 / Utility Functions:
+   - hash_value: HMAC-SHA256 确定性哈希
+   - truncate: 字符串截断
+
+4. 输入校验与异常 / Input Validation & Errors:
+   - 空字段名/非字符串值/空盐值/负截断位数 等异常场景
+
+5. 可观测性 / Observability:
+   - Prometheus 计数器递增验证
+
+English Description:
+Comprehensive unit tests for the data masking module covering all field types,
+batch operations, multi-format DataFrame support, utilities, and validation.
+"""
 
 from __future__ import annotations
 

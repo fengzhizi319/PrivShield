@@ -1,4 +1,35 @@
-"""数据集级 K-匿名（Mondrian）算法测试。"""
+"""数据集级 K-匿名（Mondrian）算法测试 / Dataset-Level K-Anonymity (Mondrian) Algorithm Tests.
+
+中文说明：
+本模块全面验证数据集级 K-匿名实现，涵盖以下核心场景：
+
+1. Mondrian 多维递归划分算法 / Mondrian Multi-Dimensional Recursive Partitioning:
+   - 数值型准标识符（QI）泛化为区间 [min-max] / Numeric QI generalization to intervals
+   - 分类型 QI 泛化为集合 {v1,v2} / Categorical QI generalization to sets
+   - 等价组大小保证 >= k / Equivalence class size guarantee >= k
+
+2. 记录级泛化 / Record-Level Generalization:
+   - anonymize_record 单条记录泛化 / Single record generalization
+   - anonymize_records_batch 批量泛化 / Batch record generalization
+   - 自定义泛化层次结构（salary/education）/ Custom hierarchies
+
+3. 输入校验与异常处理 / Input Validation & Error Handling:
+   - k < 2 拒绝 / k < 2 rejection
+   - 空 QI 列拒绝 / Empty QI columns rejection
+   - 数据量不足 k 时拒绝 / Insufficient data rejection
+
+4. 扩展特性 / Extended Features:
+   - Pandas DataFrame 接口 / Pandas DataFrame interface
+   - KAnonymityResult 详情返回 / Detailed result object
+   - PyArrow IPC 元数据导出 / PyArrow metadata export
+   - Prometheus 指标计数 / Prometheus metrics counting
+
+English Description:
+Comprehensive tests for dataset-level K-anonymity using the Mondrian algorithm,
+covering numeric/categorical generalization, equivalence class validation,
+record-level operations, input validation, and extended features (DataFrame,
+PyArrow, Prometheus metrics).
+"""
 
 from __future__ import annotations
 
@@ -22,9 +53,22 @@ from privacy_local_agent.privacy.kano_table import (
 
 
 class TestKAnonymizeTable:
-    """Mondrian 算法单元测试。"""
+    """Mondrian 算法单元测试 / Mondrian Algorithm Unit Tests.
+
+    Mondrian 算法核心思想：
+    1. 选择跨度最大的 QI 维度 / Select dimension with largest span
+    2. 按中位数将数据划分为两半 / Split data at median
+    3. 递归直到每个分区 >= k 条记录 / Recurse until each partition has >= k records
+    4. 对每个等价组内的 QI 值进行泛化 / Generalize QI values within each equivalence class
+    """
 
     def test_numeric_qi_generalizes_to_intervals(self) -> None:
+        """验证数值型 QI 被泛化为区间表示 [min-max]。
+
+        测试数据包含两个自然聚类（25-27 和 55-57），k=3 时
+        Mondrian 应将它们划分为至少 2 个等价组，每组的 age
+        被泛化为区间形式（如 [25-27]）。
+        """
         rows = [
             {"age": 25, "zipcode": "100001", "disease": "A"},
             {"age": 26, "zipcode": "100002", "disease": "B"},
@@ -42,6 +86,11 @@ class TestKAnonymizeTable:
             assert "[" in str(r["age"])
 
     def test_categorical_qi_generalizes_to_set(self) -> None:
+        """验证分类型 QI 被泛化为集合表示 {v1,v2}。
+
+        gender 是典型的分类型 QI，当等价组内包含 M 和 F 时，
+        泛化结果应为 {F,M}（集合表示），而非保留单一值。
+        """
         rows = [
             {"gender": "M", "age": 25, "salary": 5000},
             {"gender": "M", "age": 26, "salary": 6000},
@@ -55,6 +104,11 @@ class TestKAnonymizeTable:
         assert all(v in {"M", "F", "{F,M}", "{M,F}"} for v in gender_values)
 
     def test_each_equivalence_group_size_at_least_k(self) -> None:
+        """验证 K-匿名核心保证：每个等价组至少包含 k 条记录。
+
+        这是 K-匿名的数学定义：对于任意等价类 EC_i，
+        |EC_i| >= k。使用 20 条记录、k=5，至少应形成 4 个等价组。
+        """
         rows = [
             {"age": i, "gender": "M" if i % 2 == 0 else "F"}
             for i in range(20)
@@ -69,17 +123,25 @@ class TestKAnonymizeTable:
         assert all(c >= 5 for c in group_counts.values())
 
     def test_empty_input(self) -> None:
+        """边界条件：空输入应返回空列表，不触发 Mondrian 递归。"""
         assert k_anonymize_table([], ["age"], k=2) == []
 
     def test_input_smaller_than_k_raises(self) -> None:
+        """边界条件：数据量 < k 时无法形成有效等价组，应抛出 ValueError。"""
         with pytest.raises(ValueError, match="at least"):
             k_anonymize_table([{"age": 1}], ["age"], k=2)
 
     def test_missing_qi_cols_raises(self) -> None:
+        """输入校验：指定的 QI 列在数据中不存在时应抛出 ValueError。"""
         with pytest.raises(ValueError, match="not found"):
             k_anonymize_table([{"age": 1}, {"age": 2}], ["gender"], k=2)
 
     def test_k_anonymize_dataframe(self) -> None:
+        """验证 Pandas DataFrame 接口的 K-匿名处理。
+
+        k_anonymize_dataframe 内部将 DataFrame 转为 records 列表，
+        调用 Mondrian 算法后再转回 DataFrame，保持索引和列类型。
+        """
         pd = pytest.importorskip("pandas")
         df = pd.DataFrame(
             {
@@ -94,6 +156,11 @@ class TestKAnonymizeTable:
         assert set(result["disease"]) == {"A", "B", "C", "D", "E", "F"}
 
     def test_k_anonymize_table_records_metric(self) -> None:
+        """验证每次 table 级 K-匿名操作都会递增 Prometheus 计数器。
+
+        指标名：privacy_kano_operations_total{operation="table"}
+        采用 Before/After 差值断言，隔离其他测试的影响。
+        """
         before = REGISTRY.get_sample_value(
             "privacy_kano_operations_total", {"operation": "table"}
         ) or 0.0
@@ -160,9 +227,14 @@ class TestKAnonymizeTable:
 
 
 class TestAnonymizeRecord:
-    """记录级 K-匿名泛化测试。"""
+    """记录级 K-匿名泛化测试 / Record-Level K-Anonymity Generalization Tests.
+
+    与数据集级 Mondrian 不同，记录级泛化使用预定义的层次结构
+    （如 age → [25-30] → [20-40] → *），根据 k 值自动选择泛化层级。
+    """
 
     def test_anonymize_record_basic(self) -> None:
+        """基本记录泛化：QI 列被泛化，非 QI 列保持不变。"""
         record = {"age": "30", "zipcode": "100001", "name": "Alice"}
         result = anonymize_record(record, ["age", "zipcode"], {}, k=10)
         assert isinstance(result, dict)
@@ -198,9 +270,14 @@ class TestAnonymizeRecord:
 
 
 class TestQITypeEnum:
-    """准标识符类型枚举测试。"""
+    """准标识符类型枚举测试 / Quasi-Identifier Type Enum Tests.
+
+    QIType 枚举定义了系统内置支持的准标识符类型，
+    每种类型对应不同的泛化策略（数值区间/前缀截断/集合泛化）。
+    """
 
     def test_qi_type_enum_values(self) -> None:
+        """验证所有内置 QI 类型的枚举值正确。"""
         assert QIType.AGE == "age"
         assert QIType.ZIPCODE == "zipcode"
         assert QIType.GENDER == "gender"
@@ -209,9 +286,17 @@ class TestQITypeEnum:
 
 
 class TestGeneralizationStrategyEnum:
-    """泛化策略枚举测试。"""
+    """泛化策略枚举测试 / Generalization Strategy Enum Tests.
+
+    泛化策略决定了 QI 值如何被抽象化：
+    - INTERVAL: 数值 → 区间 [min-max] / Numeric to interval
+    - SET: 分类 → 集合 {v1,v2} / Categorical to set
+    - SUPPRESSION: 完全抑制为 * / Full suppression
+    - PREFIX: 保留前缀，后缀替换为 * / Prefix retention
+    """
 
     def test_generalization_strategy_enum_values(self) -> None:
+        """验证所有泛化策略枚举值正确。"""
         assert GeneralizationStrategy.INTERVAL == "interval"
         assert GeneralizationStrategy.SET == "set"
         assert GeneralizationStrategy.SUPPRESSION == "suppression"
@@ -219,9 +304,14 @@ class TestGeneralizationStrategyEnum:
 
 
 class TestInputValidationKano:
-    """输入校验测试。"""
+    """输入校验测试 / Input Validation Tests.
+
+    验证 K-匿名模块的防御性编程：对非法参数（k<2、空 QI 列、
+    非字典记录、无效 max_level）及时抛出 ValueError。
+    """
 
     def test_anonymize_record_k_less_than_2_raises(self) -> None:
+        """k < 2 违反 K-匿名定义（至少需要 2 条记录才能形成等价组）。"""
         with pytest.raises(ValueError, match="k must be at least 2"):
             anonymize_record({"age": "25"}, ["age"], {}, k=1)
 
@@ -243,9 +333,15 @@ class TestInputValidationKano:
 
 
 class TestNewHierarchies:
-    """新增泛化层次函数测试。"""
+    """新增泛化层次函数测试 / Custom Hierarchy Function Tests.
+
+    泛化层次定义了从精确值到完全抑制的渐进路径：
+    - salary: 精确值 → 5K区间 → 10K区间 → 50K区间 → *
+    - education: 精确值 → 教育阶段 → *
+    """
 
     def test_salary_hierarchy(self) -> None:
+        """验证薪资泛化层次：level 0=原值, 1=5K区间, 2=10K区间, 3=50K区间, 4=*。"""
         assert salary_hierarchy("15", 0) == "15"
         assert salary_hierarchy("15", 1) == "[15K-20K]"
         assert salary_hierarchy("15", 2) == "[10K-20K]"
@@ -260,9 +356,14 @@ class TestNewHierarchies:
 
 
 class TestAnonymizeRecordsBatch:
-    """批量记录泛化测试。"""
+    """批量记录泛化测试 / Batch Record Generalization Tests.
+
+    anonymize_records_batch 对多条记录应用相同的泛化策略，
+    适用于需要对数据集逐行泛化但又不需要 Mondrian 全局优化的场景。
+    """
 
     def test_anonymize_records_batch_basic(self) -> None:
+        """基本批量泛化：输出长度与输入一致。"""
         records = [
             {"age": "25", "zipcode": "100001"},
             {"age": "30", "zipcode": "100002"},
