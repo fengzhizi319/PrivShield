@@ -203,7 +203,7 @@ class Qwen2VLClassifier(LlmClassifier):
                 # 从本地目录加载预训练模型权重
                 self._model = Qwen2VLForConditionalGeneration.from_pretrained(
                     self.model_path,
-                    dtype=dtype,  # 模型精度
+                    torch_dtype=dtype,  # 模型精度
                     # CUDA/MPS 使用自动设备映射（多层分配到不同设备），CPU 不需要
                     device_map="auto" if device in ("cuda", "mps") else None,
                 )

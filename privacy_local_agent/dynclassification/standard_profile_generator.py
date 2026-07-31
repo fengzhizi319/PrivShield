@@ -21,6 +21,20 @@ from .models import CategoryDef, DomainTaxonomy, SensitivityLevelDef
 from .rule_schema import DowngradeRuleDef, MatcherDef, RuleDef, RuleProfile, StandardDef
 
 
+# 否定/排除语义模式：只要关键词所在语义单元出现这些短语，即视为排除。
+# 注意：像“禁止/严禁/非”这类词表示数据受监管，是正向信号，不放在这里。
+_EXCLUSION_PATTERNS = [
+    "不包括", "不包含", "不含", "不适用", "不适用于", "不属于", "不涉及",
+    "未涉及", "除外", "例外", "例外情况", "仅作", "仅作为", "仅作为示例",
+    "不做", "不做分级",
+]
+
+# 应跳过的非正文章节标题关键词
+_IGNORED_HEADER_KEYWORDS = [
+    "参考文献", "前言", "引言", "起草说明", "规范性引用文件",
+]
+
+
 class StandardProfileGenerator:
     """分类分级标准文档解析与 YAML 规则包自动生成器 / Classification standard document parser and YAML Profile auto-generator.
 
@@ -212,27 +226,27 @@ class StandardProfileGenerator:
         return list(levels.keys())[0] if levels else "L1"
 
     def _is_effective_positive_hit(self, keywords: list[str]) -> bool:
-        """检查文档中是否存在指定关键词的有效正向命中（分句级否定过滤与多章节过滤，降低误报率）。"""
-        exclusion_patterns = [
-            "不包括", "不包含", "不适用", "不涉及", "除外", "不作为", "不适用于", "不属于", "免责",
-            "未涉及", "不含", "非", "禁止", "例外", "仅作", "仅作为示例", "不做"
-        ]
-        
-        ignored_header_keywords = [
-            "参考文献", "前言", "引言", "起草说明", "规范性引用文件"
-        ]
+        """检查文档中是否存在指定关键词的有效正向命中。
 
+        改进点：
+        1. 按中文逗号、分号、句号等标点，以及转折连词（但/但是）拆分长句，
+           避免转折后半句的否定误杀前半句关键词。
+        2. 在每个语义单元内做整段否定判断：只要该单元含有排除/否定短语，
+           单元内所有关键词均视为被否定，解决长距离否定（如“本规范不适用于基因数据”）。
+        3. 把“禁止/严禁”等监管语气词从排除列表中移除，避免把敏感数据要求误判为排除。
+        4. 特殊处理“非+关键词”前缀（如“非基因数据”），避免被单列的“非”误杀。
+        """
         in_ignored_section = False
 
         for line in self.content.split("\n"):
             line_str = line.strip()
             if not line_str:
                 continue
-            
+
             # 检测标题层级，隔离无关章节
             if line_str.startswith("#"):
                 header_title = line_str.lstrip("#").strip()
-                if any(ign_kw in header_title for ign_kw in ignored_header_keywords):
+                if any(ign_kw in header_title for ign_kw in _IGNORED_HEADER_KEYWORDS):
                     in_ignored_section = True
                     continue
                 else:
@@ -241,17 +255,26 @@ class StandardProfileGenerator:
             if in_ignored_section:
                 continue
 
-            # 将本行按句标点打碎为独立分句段，进行精准分句分析
-            sentences = re.split(r"[；;。！!\n]", line_str)
-            for sent in sentences:
-                sent_str = sent.strip()
-                if not sent_str:
+            # 拆分为语义单元：标点 + 常见转折连词
+            segments = re.split(r"[，,；;。！!\n]|但是|但", line_str)
+            for segment in segments:
+                segment = segment.strip()
+                if not segment:
+                    continue
+
+                # 如果该语义单元含有排除/否定短语，则整段视为否定
+                if any(ex in segment for ex in _EXCLUSION_PATTERNS):
                     continue
 
                 for kw in keywords:
-                    if kw in sent_str:
-                        # 分句级否定检查
-                        if any(ex in sent_str for ex in exclusion_patterns):
+                    start = 0
+                    while True:
+                        idx = segment.find(kw, start)
+                        if idx == -1:
+                            break
+                        # 特殊前缀："非身份证" / "非基因数据"
+                        if idx > 0 and segment[idx - 1] == "非":
+                            start = idx + len(kw)
                             continue
                         return True
         return False
@@ -374,10 +397,6 @@ class StandardProfileGenerator:
         )
 
         return rules, downgrade_rules
-
-
-# 保持向后兼容别名
-StandardDocParser = StandardProfileGenerator
 
 
 def main():

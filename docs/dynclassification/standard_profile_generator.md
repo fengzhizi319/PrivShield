@@ -8,7 +8,7 @@
 
 数据分类分级通常需要遵循国家标准（如 GB/T 43697、GB/T 35273）、行业标准（如金融行业 JR/T 0197）或地方标准（如四川省 DB51/T 2989）。手动将文本格式的标准规范翻译为系统可执行的匹配规则 YAML 文件不仅繁琐，而且容易出错。
 
-`standard_profile_generator.py` 提供了 **`StandardProfileGenerator`**（兼别名 `StandardDocParser`）工具类与 CLI 命令行工具，旨在将 Markdown 格式的分类分级标准文档自动解析并转化为 `privacy-local-agent` 动态分类分级引擎所需的三套标准 YAML 配置文件：
+`standard_profile_generator.py` 提供了 **`StandardProfileGenerator`** 工具类与 CLI 命令行工具，旨在将 Markdown 格式的分类分级标准文档自动解析并转化为 `privacy-local-agent` 动态分类分级引擎所需的三套标准 YAML 配置文件：
 
 1. **`taxonomies/<standard_id>.yaml`**：分类树架构与敏感度等级元数据定义 (`DomainTaxonomy`)
 2. **`domains/<standard_id>.yaml`**：匹配规则包与敏感度降级压制规则定义 (`RuleProfile`)
@@ -37,7 +37,7 @@
   2. **映射与 Slug 化**：
      * 匹配 `DB51` ➔ 归一化标识符为 `sc_health_db51`（四川省健康医疗标准）。
      * 匹配 `JR/T` / `JRT` ➔ 归一化标识符为 `jrt0197`（金融行业标准）。
-     * 匹配 `GB/T 35273` ➔ 归一化标识符为 `gbt35273`。
+     * 匹配 `GB/T 35273` ➔ 归一化标识符为 `gb35273`。
      * 匹配 `GB/T 43697` ➔ 归一化标识符为 `gb43697`。
   3. **回退策略**：若正文中无标准编号，解析文档文件名（如包含“四川”、“金融”、“广东”），转换为标准的英文/下划线 slug 标识。
 * **描述抽取**：提取 Markdown 文件的第一行标题以及解析出的标准编号，拼接生成描述文本。
@@ -87,7 +87,7 @@
 
 ```mermaid
 flowchart TD
-    A[输入 Markdown 标准文档] --> B[StandardDocParser 初始化]
+    A[输入 Markdown 标准文档] --> B[StandardProfileGenerator 初始化]
     B --> C[解析文档内容 self.content]
     
     subgraph 抽取与解析阶段
@@ -175,7 +175,7 @@ python -m privacy_local_agent.dynclassification.standard_profile_generator \
 
 ### 4.2 Python SDK 使用示例
 
-你也可以在 Python 代码中导入 `StandardProfileGenerator`（或兼容别名 `StandardDocParser`）并进行灵活整合：
+你也可以在 Python 代码中导入 `StandardProfileGenerator` 并进行灵活整合：
 
 ```python
 from pathlib import Path

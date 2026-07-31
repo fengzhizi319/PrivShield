@@ -3,7 +3,7 @@
 from pathlib import Path
 import pytest
 
-from privacy_local_agent.dynclassification import DynClassificationService, StandardDocParser
+from privacy_local_agent.dynclassification import DynClassificationService, StandardProfileGenerator
 
 
 def test_generate_profiles_from_sichuan_doc(tmp_path):
@@ -11,8 +11,8 @@ def test_generate_profiles_from_sichuan_doc(tmp_path):
     doc_path = Path("docs/standard/四川省健康医疗大数据应用指南.md")
     assert doc_path.exists(), "标准文档文件必须存在"
 
-    # 1. 直接测试 StandardDocParser
-    parser = StandardDocParser(doc_path)
+    # 1. 直接测试 StandardProfileGenerator
+    parser = StandardProfileGenerator(doc_path)
     taxonomy, profile, standard_def = parser.parse()
 
     assert taxonomy.standard_id == "sc_health_db51"

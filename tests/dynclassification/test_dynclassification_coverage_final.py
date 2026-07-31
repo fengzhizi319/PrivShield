@@ -6,7 +6,7 @@ import yaml
 
 from privacy_local_agent.dynclassification.composite import CompositeRuleEngine
 from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
-from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator, StandardDocParser
+from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator
 from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
 from privacy_local_agent.dynclassification.operators import _validate_id_card, _validate_medical_card, _in_icd10_interval
 from privacy_local_agent.dynclassification.profile_loader import ProfileLoader
@@ -52,14 +52,15 @@ class TestUltimateCoverageDetails:
 
     def test_generator_standard_id_variants(self, tmp_path):
         """测试 generator.py 识别多种行标编码 (GB/T 35273, GB/T 43697)"""
+        print("tmp_path=", tmp_path)
         gb35273_md = tmp_path / "gb35273.md"
         gb35273_md.write_text("# 规范\n标准编号：GB/T 35273-2020", encoding="utf-8")
-        assert StandardDocParser(gb35273_md)._extract_standard_id() == "gb35273"
+        assert StandardProfileGenerator(gb35273_md)._extract_standard_id() == "gb35273"
 
 
         gb43697_md = tmp_path / "gb43697.md"
         gb43697_md.write_text("# 规范\n标准编号：GB/T 43697-2024", encoding="utf-8")
-        assert StandardDocParser(gb43697_md)._extract_standard_id() == "gb43697"
+        assert StandardProfileGenerator(gb43697_md)._extract_standard_id() == "gb43697"
 
     def test_profile_loader_apply_rule_overrides(self, tmp_path):
         """测试 ProfileLoader._apply_rule_overrides 覆盖分支"""

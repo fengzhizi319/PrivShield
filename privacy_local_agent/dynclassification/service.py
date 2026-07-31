@@ -394,7 +394,7 @@ class DynClassificationService:
         """从标准 Markdown 文档自动抽取并生成 YAML 配置文件，并重新载入引擎缓存。
 
         Workflow:
-        1. Parse the Markdown document using StandardDocParser.
+        1. Parse the Markdown document using StandardProfileGenerator.
         2. Generate taxonomy/domain/standard YAML files into rules_dir.
         3. Invalidate cache so next request picks up the new configuration.
 

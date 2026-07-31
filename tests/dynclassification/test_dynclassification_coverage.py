@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from privacy_local_agent.dynclassification.standard_profile_generator import StandardDocParser, main as generator_main
+from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator, main as generator_main
 from privacy_local_agent.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef, SecurityTag
 from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
 from privacy_local_agent.dynclassification.profile_loader import ProfileLoader
@@ -57,7 +57,7 @@ class TestGeneratorCoverage:
 
     def test_parser_file_not_found(self):
         with pytest.raises(FileNotFoundError):
-            StandardDocParser("non_existent_doc_12345.md")
+            StandardProfileGenerator("non_existent_doc_12345.md")
 
     def test_finance_doc_parsing(self, tmp_path):
         """测试金融行业 (JR/T 0197) 文本的抽出"""
@@ -70,7 +70,7 @@ class TestGeneratorCoverage:
             encoding="utf-8",
         )
 
-        parser = StandardDocParser(finance_md)
+        parser = StandardProfileGenerator(finance_md)
         taxonomy, profile, std_def = parser.parse()
 
         assert taxonomy.standard_id == "jrt0197"
@@ -89,7 +89,7 @@ class TestGeneratorCoverage:
             encoding="utf-8",
         )
 
-        parser = StandardDocParser(gd_md)
+        parser = StandardProfileGenerator(gd_md)
         taxonomy, _, _ = parser.parse()
         assert taxonomy.standard_id == "gd_health_db44"
 
@@ -103,7 +103,7 @@ class TestGeneratorCoverage:
             encoding="utf-8",
         )
 
-        parser = StandardDocParser(generic_md)
+        parser = StandardProfileGenerator(generic_md)
         taxonomy, _, _ = parser.parse()
         assert taxonomy.standard_id == "custom_industry"
 
