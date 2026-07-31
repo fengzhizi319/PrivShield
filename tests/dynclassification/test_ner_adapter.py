@@ -278,4 +278,49 @@ class TestTensorRTSmallNerEngine:
             assert "text" in ent
             assert "label" in ent
             assert "confidence" in ent
+
+
+class TestCudaNerEngine:
+    """针对 CUDA 硬件加速模式下的 NER 引擎与适配器补充单元测试。"""
+
+    def test_modelscope_cuda_compatibility_check(self):
+        """测试 PyTorch CUDA 兼容性探针函数能正确识别设备与 kernel 执行能力。"""
+        import torch
+
+        is_compatible = ModelScopeSmallNerEngine._is_cuda_compatible(torch)
+        if torch.cuda.is_available():
+            assert is_compatible is True, "PyTorch 已检测到 CUDA 设备， compatibility check 应为 True"
+        else:
+            assert is_compatible is False
+
+    def test_modelscope_cuda_ner_extraction(self):
+        """测试使用 CUDA 设备的 ModelScopeSmallNerEngine 端到端抽取。"""
+        import torch
+
+        if not torch.cuda.is_available():
+            pytest.skip("当前环境未检测到 CUDA 设备，跳过 CUDA NER 测试")
+
+        engine = ModelScopeSmallNerEngine(device="cuda")
+        if not os.path.exists(engine.local_model_dir):
+            pytest.skip("未在 .models/ 找到 raner_cmeee 权重，跳过模型推理测试")
+
+        results = engine.extract("患者确诊为2型糖尿病和冠心病")
+        assert isinstance(results, list)
+        labels = {ent["label"] for ent in results}
+        assert "MEDICAL_DISEASE" in labels
+        texts = {ent["text"] for ent in results}
+        assert "2型糖尿病" in texts or "冠心病" in texts
+
+    def test_ner_adapter_cuda_device_selection(self, monkeypatch):
+        """测试设置 PRIVACY_NER_DEVICE=cuda 时 NerAdapter 可正常识别并优先调用硬件加速。"""
+        import torch
+
+        if not torch.cuda.is_available():
+            pytest.skip("当前环境未检测到 CUDA 设备")
+
+        monkeypatch.setenv("PRIVACY_NER_DEVICE", "cuda")
+        adapter = NerAdapter()
+        assert adapter.is_available is True
+        results = adapter.extract("患者主诉急性腹痛与高热")
+        for ent in results:
             assert ent["confidence"] > 0.0

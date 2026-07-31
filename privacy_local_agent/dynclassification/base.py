@@ -67,6 +67,53 @@ class SmallNerEngine(ABC):
     具体实现包括 ONNXSmallNerEngine 和 ModelScopeSmallNerEngine。 / Implementations include ONNXSmallNerEngine and ModelScopeSmallNerEngine.
     """
 
+    @staticmethod
+    def _preload_nvidia_libs() -> None:
+        """动态寻找并预加载 CUDA/Triton C++ 共享库，更新 LD_LIBRARY_PATH。"""
+        try:
+            import ctypes
+            import os
+            import sys
+
+            lib_dirs = []
+            candidate_files = []
+
+            for s_dir in sys.path:
+                if not s_dir or not os.path.exists(s_dir):
+                    continue
+                for base in ("nvidia", "triton"):
+                    p = os.path.join(s_dir, base)
+                    if os.path.exists(p):
+                        for root, _, files in os.walk(p):
+                            if "lib" in root or "cupti" in root:
+                                if root not in lib_dirs:
+                                    lib_dirs.append(root)
+                            for f in files:
+                                if ".so" in f and any(k in f for k in ("cupti", "cufft", "nvshmem", "cublas", "cudnn", "cuda_runtime")):
+                                    candidate_files.append(os.path.join(root, f))
+
+            if lib_dirs:
+                existing = os.environ.get("LD_LIBRARY_PATH", "")
+                os.environ["LD_LIBRARY_PATH"] = ":".join(lib_dirs) + (":" + existing if existing else "")
+
+            def sort_key(path: str) -> int:
+                if "nvshmem" in path:
+                    return 0
+                if "cufft" in path:
+                    return 1
+                if "cupti" in path:
+                    return 2
+                return 3
+
+            candidate_files.sort(key=sort_key)
+            for lib_path in candidate_files:
+                try:
+                    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     @abstractmethod
     def extract(self, text: str) -> list[dict[str, Any]]:
         """从文本中提取命名实体。 / Extract named entities from text.

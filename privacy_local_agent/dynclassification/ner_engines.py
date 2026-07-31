@@ -494,6 +494,7 @@ class TensorRTSmallNerEngine(ONNXSmallNerEngine):
             raise self._init_error
 
         try:
+            self._preload_nvidia_libs()
             import onnxruntime as ort
 
             if not os.path.exists(self.model_path):
@@ -565,7 +566,12 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
     pipeline, with lazy-loading and graceful degradation support.
     """
 
-    def __init__(self, model_id: str = "damo/nlp_raner_named-entity-recognition_chinese-base-cmeee", label_mapping: dict[str, str] | None = None):
+    def __init__(
+        self,
+        model_id: str = "damo/nlp_raner_named-entity-recognition_chinese-base-cmeee",
+        label_mapping: dict[str, str] | None = None,
+        device: str | None = None,
+    ):
         """初始化 ModelScope NER 引擎 / Initialize ModelScope NER Engine.
 
         仅设置模型引用和状态标志，不实际加载模型（延迟加载策略）。
@@ -573,11 +579,13 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
         Args:
             model_id: ModelScope 上的模型 ID，默认使用达摩院 RaNER CMeEE 微调模型。
             label_mapping: 原始标签→标准标签映射（默认使用 DEFAULT_NER_LABEL_MAPPING）。
+            device: 目标设备 ("cuda", "cpu", "mps" 等)。
         """
         # 保存模型 ID（用于从 Hub 下载或标识本地模型）
         self.model_id = model_id
         # 原始标签→标准标签映射（可配置，默认使用内置医疗映射）
         self.label_mapping = label_mapping or DEFAULT_NER_LABEL_MAPPING
+        self.device = device
         # 计算本地模型目录路径（download_ner_model.py 下载的位置）
         # 优先使用本地已下载的模型，避免推理时再次从 Hub 拉取（离线友好）
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -592,18 +600,55 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
         self._init_error: Exception | None = None
 
     @staticmethod
-    def _is_cuda_compatible(torch: Any) -> bool:
-        """验证当前 PyTorch 是否真能在检测到的 CUDA 设备上执行 kernel。
+    def _preload_nvidia_libs() -> None:
+        """动态寻找并预加载 CUDA/Triton C++ 共享库，更新 LD_LIBRARY_PATH。"""
+        try:
+            import ctypes
+            import sys
 
-        某些 GPU 的算力（compute capability）比当前 PyTorch 构建支持的范围更新
-        （例如 RTX 50 系列的 sm_120 与 PyTorch 2.6+cu124）。此时
-        ``torch.cuda.is_available()`` 仍会返回 True，但真正的 CUDA 运算会抛出
-        ``RuntimeError: no kernel image is available for execution on the device``。
-        本方法执行一次微小的张量运算来确认 CUDA 实际可用，避免后续加载失败。
+            lib_dirs = []
+            candidate_files = []
 
-        Returns:
-            当前 PyTorch 能在 CUDA 上执行 kernel 时返回 True，否则 False。
-        """
+            for s_dir in sys.path:
+                if not s_dir or not os.path.exists(s_dir):
+                    continue
+                for base in ("nvidia", "triton"):
+                    p = os.path.join(s_dir, base)
+                    if os.path.exists(p):
+                        for root, _, files in os.walk(p):
+                            if "lib" in root or "cupti" in root:
+                                if root not in lib_dirs:
+                                    lib_dirs.append(root)
+                            for f in files:
+                                if ".so" in f and any(k in f for k in ("cupti", "cufft", "nvshmem", "cublas", "cudnn", "cuda_runtime")):
+                                    candidate_files.append(os.path.join(root, f))
+
+            if lib_dirs:
+                existing = os.environ.get("LD_LIBRARY_PATH", "")
+                os.environ["LD_LIBRARY_PATH"] = ":".join(lib_dirs) + (":" + existing if existing else "")
+
+            def sort_key(path: str) -> int:
+                if "nvshmem" in path:
+                    return 0
+                if "cufft" in path:
+                    return 1
+                if "cupti" in path:
+                    return 2
+                return 3
+
+            candidate_files.sort(key=sort_key)
+            for lib_path in candidate_files:
+                try:
+                    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    @classmethod
+    def _is_cuda_compatible(cls, torch: Any) -> bool:
+        """验证当前 PyTorch 是否真能在检测到的 CUDA 设备上执行 kernel。"""
+        cls._preload_nvidia_libs()
         if not torch.cuda.is_available():
             return False
         try:
