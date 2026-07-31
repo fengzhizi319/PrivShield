@@ -13,3 +13,9 @@ qwen-vl-utils>=0.0.8
 # ModelScope Small-NER 推理后端（可选，缺失时 NER 层自动降级；datasets 为其运行时依赖）
 modelscope>=1.20.0
 datasets>=4.0.0,<=4.8.4
+# modelscope 在较新版本中未显式声明的传递依赖，直接列出以保证离线/干净环境可加载
+addict>=2.4.0
+sortedcontainers>=2.4.0
+yapf>=0.32.0
+oss2>=2.17.0
+simplejson>=3.3.0

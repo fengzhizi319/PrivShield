@@ -189,15 +189,7 @@ class Qwen2VLClassifier(LlmClassifier):
                     )
 
                 # 检测计算设备，优先级：CUDA GPU > macOS MPS > CPU
-                if torch.cuda.is_available():
-                    # NVIDIA GPU 可用，使用 CUDA 加速
-                    device = "cuda"
-                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                    # macOS Apple Silicon 的 Metal Performance Shaders 可用
-                    device = "mps"
-                else:
-                    # 回退到 CPU 推理（速度较慢但兼容性最好）
-                    device = "cpu"
+                device = self._select_device(torch)
 
                 # 记录模型加载开始的结构化日志
                 logger.info(
@@ -206,12 +198,12 @@ class Qwen2VLClassifier(LlmClassifier):
                 )
 
                 # 选择模型精度：CUDA 使用 FP16 节省显存，CPU/MPS 使用 FP32 保证精度
-                torch_dtype = torch.float16 if device == "cuda" else torch.float32
+                dtype = torch.float16 if device == "cuda" else torch.float32
 
                 # 从本地目录加载预训练模型权重
                 self._model = Qwen2VLForConditionalGeneration.from_pretrained(
                     self.model_path,
-                    torch_dtype=torch_dtype,  # 模型精度
+                    dtype=dtype,  # 模型精度
                     # CUDA/MPS 使用自动设备映射（多层分配到不同设备），CPU 不需要
                     device_map="auto" if device in ("cuda", "mps") else None,
                 )
@@ -271,6 +263,54 @@ class Qwen2VLClassifier(LlmClassifier):
             return True  # 初始化成功
         except Exception:
             return False  # 初始化失败（依赖缺失/模型不存在等）
+
+    @staticmethod
+    def _select_device(torch: Any) -> str:
+        """根据硬件环境选择推理设备 / Select Inference Device.
+
+        选择策略：
+        1. 若存在 NVIDIA GPU 且空闲显存足够加载 Qwen2-VL-2B（FP16 约需 5GB+），
+           则使用 CUDA 并配合 device_map="auto" 自动分配。
+        2. 若 macOS MPS 可用，使用 Apple Silicon GPU。
+        3. 否则回退到 CPU。
+
+        Returns:
+            设备字符串："cuda" / "mps" / "cpu"。
+        """
+        if torch.cuda.is_available():
+            try:
+                total_free = sum(
+                    torch.cuda.mem_get_info(i)[0] for i in range(torch.cuda.device_count())
+                )
+                # Qwen2-VL-2B FP16 权重约 4GB，留 1GB 余量给激活/KV cache
+                min_vram_bytes = 5 * 1024 * 1024 * 1024
+                if total_free >= min_vram_bytes:
+                    logger.info(
+                        "qwen2vl_select_cuda",
+                        extra={
+                            "device_count": torch.cuda.device_count(),
+                            "free_vram_gb": round(total_free / (1024**3), 2),
+                        },
+                    )
+                    return "cuda"
+                logger.info(
+                    "qwen2vl_cuda_vram_insufficient_fallback_cpu",
+                    extra={
+                        "free_vram_gb": round(total_free / (1024**3), 2),
+                        "required_vram_gb": 5,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    "qwen2vl_vram_check_failed_fallback_cpu",
+                    extra={"error": str(e)},
+                )
+            return "cpu"
+
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+
+        return "cpu"
 
     def _detect_image(self, text: str) -> Image.Image | None:
         """检测输入是否为图片 / Detect if Input is an Image.

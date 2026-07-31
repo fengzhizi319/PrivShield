@@ -158,3 +158,46 @@ class TestQwen2VLClassifier:
         invalid_text = "抱歉，由于上下文不足，我无法以 JSON 格式输出结果。"
         parsed = classifier._parse_json_result(invalid_text, SensitivityLevel.L3, 0.5)
         assert parsed is None
+
+    def test_select_device_prefers_cuda_when_vram_sufficient(self):
+        """显存充足时 _select_device 选择 cuda。"""
+        import torch
+
+        mock_torch = MagicMock()
+        mock_torch.cuda = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.device_count.return_value = 1
+        # 10 GB free
+        mock_torch.cuda.mem_get_info.return_value = (10 * 1024**3, 12 * 1024**3)
+        mock_torch.backends = torch.backends
+
+        classifier = Qwen2VLClassifier()
+        assert classifier._select_device(mock_torch) == "cuda"
+
+    def test_select_device_fallback_cpu_when_vram_insufficient(self):
+        """显存不足时 _select_device 回退到 cpu。"""
+        import torch
+
+        mock_torch = MagicMock()
+        mock_torch.cuda = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.device_count.return_value = 1
+        # 2 GB free
+        mock_torch.cuda.mem_get_info.return_value = (2 * 1024**3, 12 * 1024**3)
+        mock_torch.backends = torch.backends
+
+        classifier = Qwen2VLClassifier()
+        assert classifier._select_device(mock_torch) == "cpu"
+
+    def test_select_device_fallback_cpu_when_no_cuda(self):
+        """没有 CUDA 时回退到 cpu/mps。"""
+        import torch
+
+        mock_torch = MagicMock()
+        mock_torch.cuda = MagicMock()
+        mock_torch.cuda.is_available.return_value = False
+        mock_torch.backends = torch.backends
+
+        classifier = Qwen2VLClassifier()
+        device = classifier._select_device(mock_torch)
+        assert device in ("cpu", "mps")
