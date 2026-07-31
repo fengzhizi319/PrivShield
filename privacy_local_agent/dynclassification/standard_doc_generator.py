@@ -101,6 +101,11 @@ class StandardDocParser:
             encoding="utf-8",
         )
 
+        # 生成后反向校验反序列化模型合法性 (Post-generation Schema validation)
+        DomainTaxonomy.model_validate(yaml.safe_load(tax_path.read_text(encoding="utf-8")))
+        RuleProfile.model_validate(yaml.safe_load(dom_path.read_text(encoding="utf-8")))
+        StandardDef.model_validate(yaml.safe_load(std_path.read_text(encoding="utf-8")))
+
         return {
             "taxonomy": tax_path,
             "domain": dom_path,
@@ -121,7 +126,7 @@ class StandardDocParser:
             elif "JR/T" in code or "JRT" in code or "0197" in code:
                 return "jrt0197"
             elif "35273" in code:
-                return "gbt35273"
+                return "gb35273"
             elif "43697" in code:
                 return "gb43697"
 
@@ -131,7 +136,7 @@ class StandardDocParser:
         elif "金融" in name or "JR" in name or "0197" in name:
             return "jrt0197"
         elif "35273" in name:
-            return "gbt35273"
+            return "gb35273"
         elif "43697" in name:
             return "gb43697"
         elif "广东" in name:
@@ -207,11 +212,16 @@ class StandardDocParser:
         return list(levels.keys())[0] if levels else "L1"
 
     def _is_effective_positive_hit(self, keywords: list[str]) -> bool:
-        """检查文档中是否存在指定关键词的有效正向命中（过滤否定语义与排除章节，提高准确率并降低误报率）。"""
+        """检查文档中是否存在指定关键词的有效正向命中（分句级否定过滤与多章节过滤，降低误报率）。"""
         exclusion_patterns = [
-            "不包括", "不包含", "不适用", "不涉及", "除外", "不作为", "不适用于", "不属于", "免责"
+            "不包括", "不包含", "不适用", "不涉及", "除外", "不作为", "不适用于", "不属于", "免责",
+            "未涉及", "不含", "非", "禁止", "例外", "仅作", "仅作为示例", "不做"
         ]
         
+        ignored_header_keywords = [
+            "参考文献", "前言", "引言", "起草说明", "规范性引用文件"
+        ]
+
         in_ignored_section = False
 
         for line in self.content.split("\n"):
@@ -219,23 +229,31 @@ class StandardDocParser:
             if not line_str:
                 continue
             
-            # 检测并跳过可能引发误报的非正文章节（如参考文献、起草单位前言）
-            if line_str.startswith("## 参考文献") or line_str.startswith("## 前言"):
-                in_ignored_section = True
-                continue
-            elif line_str.startswith("## ") and not ("参考文献" in line_str or "前言" in line_str):
-                in_ignored_section = False
+            # 检测标题层级，隔离无关章节
+            if line_str.startswith("#"):
+                header_title = line_str.lstrip("#").strip()
+                if any(ign_kw in header_title for ign_kw in ignored_header_keywords):
+                    in_ignored_section = True
+                    continue
+                else:
+                    in_ignored_section = False
 
             if in_ignored_section:
                 continue
 
-            for kw in keywords:
-                if kw in line_str:
-                    # 检查该关键词所在句子是否含有否定/排除语义
-                    if any(ex in line_str for ex in exclusion_patterns):
-                        # 如果行中包含否定词且紧邻关键词，判定为排除否定，跳过
-                        continue
-                    return True
+            # 将本行按句标点打碎为独立分句段，进行精准分句分析
+            sentences = re.split(r"[；;。！!\n]", line_str)
+            for sent in sentences:
+                sent_str = sent.strip()
+                if not sent_str:
+                    continue
+
+                for kw in keywords:
+                    if kw in sent_str:
+                        # 分句级否定检查
+                        if any(ex in sent_str for ex in exclusion_patterns):
+                            continue
+                        return True
         return False
 
     def _generate_rules(
