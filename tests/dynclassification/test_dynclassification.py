@@ -226,6 +226,7 @@ class TestConfigurableRuleEngine:
             domain="test",
         )
         tags, _ = engine.evaluate("phone", "13800138000")
+        print( tags)
         assert len(tags) >= 1
         assert any(t.rule_id == "RULE_PHONE" for t in tags)
 
@@ -237,6 +238,7 @@ class TestConfigurableRuleEngine:
             domain="test",
         )
         tags, _ = engine.evaluate("phone", "12345")
+        print(tags)
         assert not any(t.rule_id == "RULE_PHONE" for t in tags)
 
     def test_id_card_checksum(self, default_taxonomy, simple_profile):
@@ -259,6 +261,27 @@ class TestConfigurableRuleEngine:
         )
         tags, _ = engine.evaluate("patient_brca1_result", "阳性")
         assert any(t.level == "L5" and t.rule_id == "RULE_GENOMIC" for t in tags)
+
+    def test_engine_lru_cache(self, default_taxonomy, simple_profile):
+        """规则引擎评估 LRU 缓存测试。"""
+        engine = ConfigurableRuleEngine(
+            taxonomy=default_taxonomy,
+            profiles=[simple_profile],
+            domain="test",
+        )
+        engine.clear_cache()
+        # 第一次评估：缓存未命中
+        t1, _ = engine.evaluate("phone", "13800138000")
+        info1 = engine.cache_info()
+        assert info1["hits"] == 0
+        assert info1["misses"] == 1
+
+        # 第二次评估相同字段与值：缓存命中
+        t2, _ = engine.evaluate("phone", "13800138000")
+        info2 = engine.cache_info()
+        assert info2["hits"] == 1
+        assert info2["misses"] == 1
+        assert t1 == t2
 
     def test_priority_ordering(self, default_taxonomy, simple_profile):
         """规则按 priority 降序排列。"""

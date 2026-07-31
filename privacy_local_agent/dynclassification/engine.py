@@ -82,6 +82,26 @@ class ConfigurableRuleEngine:
         self.rules = self._merge_rules(profiles)
         # Merge all profiles' downgrade rules into a flat list.
         self.downgrade_rules = self._merge_downgrade_rules(profiles)
+        # Initialize LRU Evaluation Cache for high-performance repeated field evaluation
+        self._eval_cache: dict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = {}
+        self._eval_cache_max_size: int = 4096
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
+
+    def clear_cache(self) -> None:
+        """清空规则引擎字段评估缓存 / Clear field evaluation cache."""
+        self._eval_cache.clear()
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    def cache_info(self) -> dict[str, int]:
+        """获取评估缓存统计信息 / Get evaluation cache statistics."""
+        return {
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "size": len(self._eval_cache),
+            "max_size": self._eval_cache_max_size,
+        }
 
     def _merge_rules(self, profiles: list[RuleProfile]) -> list[RuleDef]:
         """合并多个领域包的规则列表，按 priority 降序排列 / Merge rule lists from multiple domain packages, sorted descending by priority.
@@ -179,25 +199,40 @@ class ConfigurableRuleEngine:
         """
         # Convert value to string once; all operators work on string representation.
         str_value = str(value) if value is not None else ""
-    
+
+        # Check Evaluation Cache for instant lookup
+        cache_key = (field_name, str_value[:200])
+        if context is None and cache_key in self._eval_cache:
+            self._cache_hits += 1
+            cached_final, cached_suppressed = self._eval_cache[cache_key]
+            return list(cached_final), list(cached_suppressed)
+        self._cache_misses += 1
+
         # Phase 1: Evaluate all normal rules in priority order.
         normal_tags: list[SecurityTag] = []
         for rule in self.rules:
             tag = self._evaluate_rule(rule, field_name, str_value)
             if tag is not None:
                 normal_tags.append(tag)
-    
+
         # Phase 2: Evaluate downgrade rules (produces downgrade tags + override info).
         downgrade_tags = self._evaluate_downgrade(field_name)
-    
+
         # Phase 3: Apply override suppression.
         surviving_tags, suppressed_tags = self._apply_override_suppression(
             normal_tags, downgrade_tags
         )
-    
+
         # Phase 4: Merge all surviving tags and deduplicate.
         all_tags = surviving_tags + downgrade_tags
         final_tags = self._unique_tags(all_tags)
+
+        # Store in Evaluation Cache if no custom context
+        if context is None:
+            if len(self._eval_cache) >= self._eval_cache_max_size:
+                self._eval_cache.clear()
+            self._eval_cache[cache_key] = (list(final_tags), list(suppressed_tags))
+
         return final_tags, suppressed_tags
 
     def evaluate_batch(

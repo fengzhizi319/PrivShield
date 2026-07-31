@@ -1063,6 +1063,17 @@ class ConfigurableRuleEngine:
         # 合并所有领域包的规则，按 priority 降序排列
         self.rules = self._merge_rules(profiles)
         self.downgrade_rules = self._merge_downgrade_rules(profiles)
+        # 初始化高性能评估 LRU 缓存 (_eval_cache)
+        self._eval_cache: dict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = {}
+        self._eval_cache_max_size: int = 4096
+
+    def clear_cache(self) -> None:
+        """清空规则引擎评估缓存。"""
+        self._eval_cache.clear()
+
+    def cache_info(self) -> dict[str, int]:
+        """获取评估缓存命中/未命中统计。"""
+        return {"hits": self._cache_hits, "misses": self._cache_misses, "size": len(self._eval_cache)}
 
     def _merge_rules(self, profiles: list[RuleProfile]) -> list[RuleDef]:
         """合并多个领域包的规则列表。"""
