@@ -15,7 +15,7 @@
 | [three_layer_funnel_design.md](./three_layer_funnel_design.md) | 三层漏斗模型 + 置信度策略设计 | 架构师、后端开发 |
 | [downgrade_override_design.md](./downgrade_override_design.md) | 敏感度降级与 Override 压制规则设计 | 架构师、后端开发 |
 | [rule_parsing_guide.md](./rule_parsing_guide.md) | 规则 YAML 解析与编写指南 | 接入开发者、运维 |
-| [standard_doc_generator.md](./standard_doc_generator.md) | 标准文档自动生成器算法与指南 | 接入开发者、数据合规人员 |
+| [standard_profile_generator.md](./standard_profile_generator.md) | 标准文档规则包生成器算法与指南 | 接入开发者、数据合规人员 |
 
 ## 核心设计理念
 

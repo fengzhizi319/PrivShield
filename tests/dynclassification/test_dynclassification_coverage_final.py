@@ -6,7 +6,7 @@ import yaml
 
 from privacy_local_agent.dynclassification.composite import CompositeRuleEngine
 from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
-from privacy_local_agent.dynclassification.standard_doc_generator import StandardDocParser
+from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator, StandardDocParser
 from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
 from privacy_local_agent.dynclassification.operators import _validate_id_card, _validate_medical_card, _in_icd10_interval
 from privacy_local_agent.dynclassification.profile_loader import ProfileLoader

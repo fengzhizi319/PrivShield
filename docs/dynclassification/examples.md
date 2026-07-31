@@ -12,7 +12,7 @@
 
 ```bash
 cd /home/charles/code/sfwork/privacy-local-agent
-PYTHONPATH=. python -m privacy_local_agent.dynclassification.standard_doc_generator \
+PYTHONPATH=. python -m privacy_local_agent.dynclassification.standard_profile_generator \
   --doc docs/standard/四川省健康医疗大数据应用指南.md \
   --output rules/
 ```

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from privacy_local_agent.dynclassification.standard_doc_generator import StandardDocParser, main as generator_main
+from privacy_local_agent.dynclassification.standard_profile_generator import StandardDocParser, main as generator_main
 from privacy_local_agent.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef, SecurityTag
 from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
 from privacy_local_agent.dynclassification.profile_loader import ProfileLoader

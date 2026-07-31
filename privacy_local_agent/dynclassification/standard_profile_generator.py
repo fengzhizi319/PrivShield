@@ -21,8 +21,8 @@ from .models import CategoryDef, DomainTaxonomy, SensitivityLevelDef
 from .rule_schema import DowngradeRuleDef, MatcherDef, RuleDef, RuleProfile, StandardDef
 
 
-class StandardDocParser:
-    """分类分级标准文档解析与 YAML 自动生成器 / Classification standard document parser and YAML auto-generator.
+class StandardProfileGenerator:
+    """分类分级标准文档解析与 YAML 规则包自动生成器 / Classification standard document parser and YAML Profile auto-generator.
 
     支持对符合国标/行标/地方标准格式的 Markdown 文档进行分析，
     抽取数据分类目录、分级定义及字段模式，自动构建全量字段的三套 YAML 参考规则。
@@ -376,11 +376,15 @@ class StandardDocParser:
         return rules, downgrade_rules
 
 
+# 保持向后兼容别名
+StandardDocParser = StandardProfileGenerator
+
+
 def main():
     """CLI 工具命令行入口 / CLI tool entry point.
 
     Usage:
-        python -m privacy_local_agent.dynclassification.standard_doc_generator \\
+        python -m privacy_local_agent.dynclassification.standard_profile_generator \\
             --doc docs/standard/四川省健康医疗大数据应用指南.md \\
             --output rules
     """
@@ -390,7 +394,7 @@ def main():
 
     args = parser.parse_args()
 
-    doc_parser = StandardDocParser(args.doc)
+    doc_parser = StandardProfileGenerator(args.doc)
     generated = doc_parser.generate_files(args.output)
 
     print("=== 自动生成 YAML 配置文件成功 ===")

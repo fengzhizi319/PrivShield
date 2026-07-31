@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from privacy_local_agent.dynclassification.standard_doc_generator import StandardDocParser
+from privacy_local_agent.dynclassification.standard_profile_generator import StandardDocParser, StandardProfileGenerator
 
 
 @pytest.fixture()

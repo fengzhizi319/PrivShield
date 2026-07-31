@@ -30,7 +30,7 @@ graph TD
 | `test_dynclassification_coverage.py` | 服务层集成测试（classify_field/record/table） |
 | `test_dynclassification_coverage_final.py` | 金融标准 C1~C4 端到端、多领域合并 |
 | `test_dynclassification_edge_cases.py` | 边界条件（空值/None/特殊字符/超长输入） |
-| `test_standard_doc_generator.py` | StandardDocParser 文档解析生成器 |
+| `test_standard_profile_generator.py` | StandardProfileGenerator 文档规则包生成器 |
 | `test_dynclassification_grpc_and_metrics.py` | gRPC 接口 + Prometheus 指标 |
 | `test_dynclassification_optimizations.py` | 缓存、热加载、线程安全 |
 | `test_downgrade_override.py` | 降级规则、override 压制、白名单语义 |

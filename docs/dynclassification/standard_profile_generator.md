@@ -1,6 +1,6 @@
-# 标准文档 YAML 自动生成器 (Standard Doc Generator) 算法与使用指南
+# 标准文档 YAML 规则包自动生成器 (Standard Profile Generator) 算法与指南
 
-本文档详细说明 `privacy_local_agent.dynclassification.standard_doc_generator` 模块的设计思想、算法实现细节、流程架构图以及具体使用示例。
+本文档详细说明 `privacy_local_agent.dynclassification.standard_profile_generator` 模块的设计思想、算法实现细节、流程架构图以及具体使用示例。
 
 ---
 
@@ -8,7 +8,7 @@
 
 数据分类分级通常需要遵循国家标准（如 GB/T 43697、GB/T 35273）、行业标准（如金融行业 JR/T 0197）或地方标准（如四川省 DB51/T 2989）。手动将文本格式的标准规范翻译为系统可执行的匹配规则 YAML 文件不仅繁琐，而且容易出错。
 
-`standard_doc_generator.py` 提供了 **`StandardDocParser`** 工具类与 CLI 命令行工具，旨在将 Markdown 格式的分类分级标准文档自动解析并转化为 `privacy-local-agent` 动态分类分级引擎所需的三套标准 YAML 配置文件：
+`standard_profile_generator.py` 提供了 **`StandardProfileGenerator`**（兼别名 `StandardDocParser`）工具类与 CLI 命令行工具，旨在将 Markdown 格式的分类分级标准文档自动解析并转化为 `privacy-local-agent` 动态分类分级引擎所需的三套标准 YAML 配置文件：
 
 1. **`taxonomies/<standard_id>.yaml`**：分类树架构与敏感度等级元数据定义 (`DomainTaxonomy`)
 2. **`domains/<standard_id>.yaml`**：匹配规则包与敏感度降级压制规则定义 (`RuleProfile`)
@@ -18,7 +18,7 @@
 
 ## 2. 算法细节说明
 
-`StandardDocParser` 采用了基于**正则表达式匹配**、**语义启发式分析（Heuristic Analysis）** 与 **结构化模式提取** 的结合算法，解析流程分为 5 个主要阶段：
+`StandardProfileGenerator` 采用了基于**正则表达式匹配**、**分句语义启发式分析（Heuristic Analysis）** 与 **结构化模式提取** 的结合算法，解析流程分为 5 个主要阶段：
 
 ```
 [Markdown 文档] 
@@ -160,7 +160,7 @@ flowchart TD
 
 ```bash
 # 从四川省健康医疗地方标准 Markdown 生成 YAML 规则包
-python -m privacy_local_agent.dynclassification.standard_doc_generator \
+python -m privacy_local_agent.dynclassification.standard_profile_generator \
     --doc docs/standard/四川省健康医疗大数据应用指南.md \
     --output rules
 ```
@@ -175,15 +175,15 @@ python -m privacy_local_agent.dynclassification.standard_doc_generator \
 
 ### 4.2 Python SDK 使用示例
 
-你也可以在 Python 代码中导入 `StandardDocParser` 并进行灵活整合：
+你也可以在 Python 代码中导入 `StandardProfileGenerator`（或兼容别名 `StandardDocParser`）并进行灵活整合：
 
 ```python
 from pathlib import Path
-from privacy_local_agent.dynclassification.standard_doc_generator import StandardDocParser
+from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator
 
-# 1. 初始化解析器
+# 1. 初始化生成器
 doc_path = "docs/standard/四川省健康医疗大数据应用指南.md"
-parser = StandardDocParser(doc_path)
+parser = StandardProfileGenerator(doc_path)
 
 # 2. 直接获取解析后的 Pydantic 对象
 taxonomy, profile, standard_def = parser.parse()
