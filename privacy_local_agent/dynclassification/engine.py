@@ -245,9 +245,10 @@ class ConfigurableRuleEngine:
         # Store in LRU Evaluation Cache if no custom context
         if context is None:
             with self._cache_lock:
-                if len(self._eval_cache) >= self._eval_cache_max_size:
+                if cache_key not in self._eval_cache and len(self._eval_cache) >= self._eval_cache_max_size:
                     self._eval_cache.popitem(last=False)
                 self._eval_cache[cache_key] = (list(final_tags), list(suppressed_tags))
+                self._eval_cache.move_to_end(cache_key)
 
         return final_tags, suppressed_tags
 
