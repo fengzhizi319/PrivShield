@@ -91,7 +91,16 @@ class ConfigurableRuleEngine:
         if cache_max_size is not None:
             self._eval_cache_max_size = max(1, cache_max_size)
         else:
-            self._eval_cache_max_size = int(os.environ.get("PRIVACY_ENGINE_CACHE_MAX_SIZE", "4096"))
+            raw_env = os.environ.get("PRIVACY_ENGINE_CACHE_MAX_SIZE", "4096")
+            try:
+                parsed_val = int(raw_env)
+                self._eval_cache_max_size = max(1, parsed_val)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Invalid PRIVACY_ENGINE_CACHE_MAX_SIZE '%s', falling back to default 4096.",
+                    raw_env,
+                )
+                self._eval_cache_max_size = 4096
 
         # True LRU Evaluation Cache using OrderedDict: (field_name, str_value[:200]) -> (final_tags, suppressed_tags)
         self._eval_cache: OrderedDict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = OrderedDict()

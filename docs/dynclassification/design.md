@@ -1107,12 +1107,25 @@ class ConfigurableRuleEngine:
         """评估单个字段，返回 (最终标签, 被压制标签)。
 
         执行流程：
-        1. 遍历所有普通规则，生成 normal_tags
-        2. 执行降级规则，生成 downgrade_tags（标记 is_override / is_downgrade）
-        3. 对 override=true 的降级规则执行强制覆盖压制
-        4. 合并剩余标签 + 降级标签，按 (level, category) 去重
+        0. 缓存检查：仅在 context is None 时生效，Key 为 (field_name, str_value[:200])（局限于当前引擎实例）。
+        1. 遍历所有普通规则，生成 normal_tags。
+        2. 执行降级规则，生成 downgrade_tags（标记 is_override / is_downgrade）。
+        3. 对 override=true 的降级规则执行强制覆盖压制。
+        4. 合并剩余标签 + 降级标签，按 (level, category) 去重。
+        5. 缓存写入：无 context 时进行 OrderedDict LRU 淘汰与新结果写入。
         """
         str_value = str(value) if value is not None else ""
+
+        # Step 0: 缓存命中检查 (仅 context is None 时生效)
+        cache_key = (field_name, str_value[:200])
+        if context is None:
+            with self._cache_lock:
+                if cache_key in self._eval_cache:
+                    self._cache_hits += 1
+                    self._eval_cache.move_to_end(cache_key)  # 提升为最新使用
+                    cached_final, cached_suppressed = self._eval_cache[cache_key]
+                    return list(cached_final), list(cached_suppressed)
+                self._cache_misses += 1
 
         # Phase 1: 普通规则评估
         normal_tags: list[SecurityTag] = []
@@ -1131,7 +1144,17 @@ class ConfigurableRuleEngine:
 
         # Phase 4: 合并 + 去重
         all_tags = surviving_tags + downgrade_tags
-        return self._unique_tags(all_tags), suppressed_tags
+        final_tags = self._unique_tags(all_tags)
+
+        # Step 5: 缓存写入与精准 LRU 淘汰
+        if context is None:
+            with self._cache_lock:
+                if cache_key not in self._eval_cache and len(self._eval_cache) >= self._eval_cache_max_size:
+                    self._eval_cache.popitem(last=False)  # 淘汰最久未访问条目
+                self._eval_cache[cache_key] = (list(final_tags), list(suppressed_tags))
+                self._eval_cache.move_to_end(cache_key)
+
+        return final_tags, suppressed_tags
 
     def _evaluate_rule(
         self, rule: RuleDef, field_name: str, str_value: str

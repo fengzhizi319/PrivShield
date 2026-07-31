@@ -330,7 +330,7 @@ class TestConfigurableRuleEngine:
         assert engine.cache_info()["misses"] == 0  # 带有 context 不会计入缓存统计
 
     def test_engine_cache_thread_safety(self, default_taxonomy, simple_profile):
-        """多线程并发评估缓存安全性测试。"""
+        """多线程并发评估缓存安全性与结果一致性测试。"""
         engine = ConfigurableRuleEngine(
             taxonomy=default_taxonomy,
             profiles=[simple_profile],
@@ -338,13 +338,23 @@ class TestConfigurableRuleEngine:
             cache_max_size=50,
         )
         engine.clear_cache()
+
+        # 串行先获取基准预期结果
+        expected_results = {
+            f"field_{i}": engine.evaluate(f"field_{i}", "13800138000")
+            for i in range(10)
+        }
+        engine.clear_cache()
+
+        thread_results = [[] for _ in range(5)]
         errors = []
 
         def worker(thread_id: int):
             try:
                 for i in range(100):
                     key = f"field_{i % 10}"
-                    engine.evaluate(key, "13800138000")
+                    res = engine.evaluate(key, "13800138000")
+                    thread_results[thread_id].append((key, res))
             except Exception as e:
                 errors.append(e)
 
@@ -355,7 +365,24 @@ class TestConfigurableRuleEngine:
             t.join()
 
         assert not errors
-        assert engine.cache_info()["hits"] + engine.cache_info()["misses"] == 500
+        info = engine.cache_info()
+        assert info["hits"] + info["misses"] == 500
+        assert info["hits"] > 400  # 验证高并发高频重复 key 时命中率 > 80%
+
+        # 验证所有线程获得的结果与串行基准结果 100% 完全一致
+        for thread_res in thread_results:
+            for key, res in thread_res:
+                assert res == expected_results[key]
+
+    def test_engine_cache_invalid_env(self, default_taxonomy, simple_profile, monkeypatch):
+        """测试非法的 PRIVACY_ENGINE_CACHE_MAX_SIZE 环境变量自动降级回退。"""
+        monkeypatch.setenv("PRIVACY_ENGINE_CACHE_MAX_SIZE", "invalid_number")
+        engine = ConfigurableRuleEngine(
+            taxonomy=default_taxonomy,
+            profiles=[simple_profile],
+            domain="test",
+        )
+        assert engine.cache_info()["max_size"] == 4096
 
     def test_priority_ordering(self, default_taxonomy, simple_profile):
         """规则按 priority 降序排列。"""
