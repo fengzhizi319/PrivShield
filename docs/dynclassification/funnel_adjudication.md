@@ -57,11 +57,14 @@ if llm_adjudicated_level:
     final_level = llm_adjudicated_level  # 直接使用，不被其他标签覆盖
 ```
 
-### 2.3 设计意图
+### 2.3 设计意图与一致性保障
 
 LLM 仲裁是为了解决规则冲突，如果仲裁结论仍被冲突标签的 `max_level` 覆盖，则仲裁形同虚设。因此 LLM 裁定具有最高优先级。
 
-同时，LLM 裁定标签仍会追加到 `tags` 列表中（`source_engine="LLM"`），用于审计追踪。
+同时：
+1. **审计追踪**：LLM 裁定标签会追加到 `tags` 列表中（`source_engine="LLM"`），用于审计追踪。
+2. **标签一致性**：LLM 仲裁成功后，与裁定等级冲突的普通规则标签会被自动移入 `suppressed_tags` 列表中保存。这确保了外部对 `funnel_result.tags` 二次重算 `_resolve_level` 时，结果与 `final_level` 保持完全对齐。
+3. **复核标记刷新**：当 LLM 仲裁输出高置信度（`confidence >= llm_confidence_threshold`）时，系统会自动清空继承的历史 `needs_human_review` 标记（重置为 `False`），避免产生多余的审核工单。
 
 ---
 
@@ -164,9 +167,12 @@ engine_layer = "L3_LLM"
 
 ## 5. 冲突场景完整决策树
 
+**冲突判定准则（精细化）**：
+只有当普通规则标签与降级标签同时存在，**且两者的最高等级不同**（`normal_max != downgrade_max`）时，才认定为实质规则冲突。若两者算出的敏感度等级相同（如均为 L2），说明目标无矛盾，不判定为冲突，置信度保持不衰减。
+
 ```mermaid
 graph TD
-    A[检测到冲突: 普通标签 + 降级标签共存] --> B{enable_llm_arbitration?}
+    A[检测到冲突: 普通标签 + 降级标签共存 且 等级不一致] --> B{enable_llm_arbitration?}
     B -->|是| C{LLM 可用?}
     C -->|是| D[调用 llm.arbitrate]
     D --> E{返回有效结果?}
@@ -219,6 +225,8 @@ confidence_policy:
 
 | 场景 | 行为 |
 |------|------|
+| 普通规则与降级规则等级一致（如均为 L2） | 不判定为冲突（`has_conflict=False`），置信度保持最大标签取值，不触发衰减 |
+| LLM 仲裁成功 | LLM 裁定等级直接作为 `final_level`；与裁定等级矛盾的规则标签移入 `suppressed_tags`；置信度满足阈值时刷新 `needs_human_review=False` |
 | 所有标签置信度 < min_tag_confidence | 回退到 `taxonomy.default_level` |
 | LLM 返回的 final_level 不在 taxonomy.levels 中 | 忽略 LLM 等级，回退到标签过滤裁决 |
 | LLM 仲裁返回 None | 回退到 Phase 1 置信度衰减 |

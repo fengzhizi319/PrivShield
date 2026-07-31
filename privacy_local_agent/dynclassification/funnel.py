@@ -9,13 +9,13 @@
 │                                                                         │
 │  Step 1: Layer-1 规则引擎评估                                             │
 │    tags, suppressed_tags = engine.evaluate(field_name, value)           │
-│    confidence = 1.0 if tags else 0.0                                    │
+│    confidence = max(tag.confidence for tag in tags) or 0.0              │
 │    engine_layer = "L1_RULE"                                             │
 │                                                                         │
-│  Step 2: 冲突检测                                                         │
-│    has_normal = 存在 source_engine=="RULE" 且 is_override==False 的标签    │
-│    has_downgrade = 存在 is_override==True 的标签                          │
-│    has_conflict = has_normal AND has_downgrade                          │
+│  Step 2: 冲突检测（精细化）                                                 │
+│    normal_rule_tags = 普通规则标签（非降级）                              │
+│    downgrade_tags = 降级标签                                            │
+│    has_conflict = 两者共存 AND max_level(normal) != max_level(downgrade) │
 │                                                                         │
 │  Step 3: Layer-2 NER (可选)                                              │
 │    触发: policy.enable_ner AND (无标签 OR 等级 <= 阈值)                     │
@@ -149,7 +149,9 @@ class ClassificationFunnel:
 
         # ===== Step 1: Layer-1 规则引擎评估 =====
         tags, suppressed_tags = self.engine.evaluate(field_name, value)
-        confidence = 1.0 if tags else 0.0
+        # 取所有命中标签的最大置信度（支持规则自定义 confidence）
+        # Use max confidence from matched tags (supports per-rule custom confidence)
+        confidence = max((t.confidence for t in tags), default=0.0)
         engine_layer = EngineLayer.L1_RULE
         reasoning = ""
         # 记录 L1 是否产出了标签（用于 Step 3 判断 engine_layer 归属）
@@ -159,13 +161,23 @@ class ClassificationFunnel:
             rule_ids = [t.rule_id for t in tags if t.rule_id]
             reasoning = "命中规则: " + ", ".join(rule_ids)
 
-        # ===== Step 2: 冲突检测 =====
-        # 冲突定义: 普通规则标签（非降级）和降级规则标签（is_downgrade）同时存活
-        has_normal = any(
-            t.source_engine == "RULE" and not t.is_downgrade for t in tags
-        )
-        has_downgrade = any(t.is_downgrade for t in tags)
-        has_conflict = has_normal and has_downgrade
+        # ===== Step 2: 冲突检测（精细化） =====
+        # 冲突定义: 普通规则标签和降级标签同时存在，且等级不一致。
+        # 若两者等级相同（如均为 L2），说明无实质矛盾，不判定为冲突。
+        # Conflict = normal tags and downgrade tags coexist WITH different levels.
+        # Same-level coexistence is not a real conflict.
+        normal_rule_tags = [
+            t for t in tags if t.source_engine == "RULE" and not t.is_downgrade
+        ]
+        downgrade_tags = [t for t in tags if t.is_downgrade]
+        has_normal = bool(normal_rule_tags)
+        has_downgrade = bool(downgrade_tags)
+        if has_normal and has_downgrade:
+            normal_max = self.taxonomy.max_level(*(t.level for t in normal_rule_tags))
+            downgrade_max = self.taxonomy.max_level(*(t.level for t in downgrade_tags))
+            has_conflict = normal_max != downgrade_max
+        else:
+            has_conflict = False
 
         # ===== Step 3: Layer-2 NER 实体识别（可选） =====
         if self.policy.enable_ner and self.ner is not None:
@@ -223,6 +235,28 @@ class ClassificationFunnel:
                             domain=self.taxonomy.domain,
                             standard_id=self.taxonomy.standard_id,
                         ))
+                        # 一致性保障: 将与 LLM 裁定等级冲突的普通规则标签
+                        # 移入 suppressed_tags，确保外部对 tags 重算 max_level
+                        # 的结果与 final_level 一致。
+                        # Consistency: suppress normal rule tags whose level conflicts
+                        # with LLM verdict so external re-computation stays consistent.
+                        surviving_tags = []
+                        for t in tags:
+                            if (
+                                t.source_engine == "RULE"
+                                and not t.is_downgrade
+                                and t.level != llm_level
+                            ):
+                                suppressed_tags.append(t)
+                            else:
+                                surviving_tags.append(t)
+                        tags[:] = surviving_tags
+                    # 复核标记刷新: LLM 高置信度仲裁成功时，清除历史复核标记，
+                    # 避免不必要的审核工单。
+                    # Refresh review flag: clear inherited needs_human_review when LLM
+                    # arbitrates with high confidence (>= llm_confidence_threshold).
+                    if confidence >= self.policy.llm_confidence_threshold:
+                        needs_human_review = False
                     logger.info(
                         "funnel_llm_arbitration",
                         extra={"field_name": field_name, "llm_level": llm_level},

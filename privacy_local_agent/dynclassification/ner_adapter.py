@@ -50,17 +50,25 @@ class NerAdapter:
         _initialized: 是否已尝试过初始化 / Whether initialization has been attempted.
     """
 
-    def __init__(self, model_path: str | None = None, vocab_path: str | None = None, label_mapping: dict[str, str] | None = None):
+    def __init__(
+        self,
+        model_path: str | None = None,
+        vocab_path: str | None = None,
+        label_mapping: dict[str, str] | None = None,
+        device: str | None = None,
+    ):
         """初始化适配器（不加载模型） / Initialize adapter (without loading model).
 
         Args:
             model_path: ONNX 模型文件路径（可选，默认自动检测） / ONNX model file path (optional, auto-detect by default).
             vocab_path: 词表文件路径（可选，默认自动检测） / Vocab file path (optional, auto-detect by default).
             label_mapping: 原始标签→标准标签映射（可选，默认使用内置医疗映射） / Raw label to standard label mapping (optional, uses built-in medical mapping by default).
+            device: 目标计算设备（"cuda" / "cpu" / None）。
         """
         self._model_path = model_path
         self._vocab_path = vocab_path
         self._label_mapping = label_mapping
+        self._device = device
         self._engine: Any = None
         self._available = True  # 乐观假设可用，初始化失败后改为 False
         self._initialized = False
@@ -77,13 +85,30 @@ class NerAdapter:
             return
         self._initialized = True
 
-        # 尝试 1: ONNX Runtime 引擎
+        # 尝试 1: TensorRT 引擎（纯 C++ 硬件加速，FP16 模式）
+        try:
+            from .ner_engines import TensorRTSmallNerEngine
+            engine = TensorRTSmallNerEngine(
+                model_path=self._model_path,
+                vocab_path=self._vocab_path,
+                label_mapping=self._label_mapping,
+                device=self._device,
+            )
+            engine._lazy_init()
+            self._engine = engine
+            logger.info("ner_adapter_initialized", extra={"backend": "tensorrt"})
+            return
+        except Exception as e:
+            logger.debug("ner_tensorrt_unavailable", extra={"error": str(e)})
+
+        # 尝试 2: ONNX Runtime 引擎 (CUDA / CPU)
         try:
             from .ner_engines import ONNXSmallNerEngine
             engine = ONNXSmallNerEngine(
                 model_path=self._model_path,
                 vocab_path=self._vocab_path,
                 label_mapping=self._label_mapping,
+                device=self._device,
             )
             # 触发模型加载验证（如果文件不存在会抛出异常）
             engine._lazy_init()
@@ -96,7 +121,10 @@ class NerAdapter:
         # 尝试 2: ModelScope 引擎
         try:
             from .ner_engines import ModelScopeSmallNerEngine
-            engine = ModelScopeSmallNerEngine(label_mapping=self._label_mapping)
+            engine = ModelScopeSmallNerEngine(
+                label_mapping=self._label_mapping,
+                device=self._device,
+            )
             self._engine = engine
             logger.info("ner_adapter_initialized", extra={"backend": "modelscope"})
             return
