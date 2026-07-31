@@ -283,6 +283,80 @@ class TestConfigurableRuleEngine:
         assert info2["misses"] == 1
         assert t1 == t2
 
+    def test_engine_lru_cache_eviction(self, default_taxonomy, simple_profile):
+        """测试真正 LRU 逐出（淘汰最久未访问条目，而非全清空）。"""
+        engine = ConfigurableRuleEngine(
+            taxonomy=default_taxonomy,
+            profiles=[simple_profile],
+            domain="test",
+            cache_max_size=2,  # 设置缓存容量上限为 2
+        )
+        engine.clear_cache()
+
+        # 放入 key1, key2
+        engine.evaluate("k1", "v1")
+        engine.evaluate("k2", "v2")
+        assert engine.cache_info()["size"] == 2
+
+        # 再次访问 k1，提升 k1 为最新使用 (k2 变为最久未使用)
+        engine.evaluate("k1", "v1")
+
+        # 插入 k3，触发逐出 (应该逐出 k2)
+        engine.evaluate("k3", "v3")
+        assert engine.cache_info()["size"] == 2
+
+        # k1 应该依然在缓存中 (hit)
+        h_before = engine.cache_info()["hits"]
+        engine.evaluate("k1", "v1")
+        assert engine.cache_info()["hits"] == h_before + 1
+
+        # k2 应该已被逐出 (miss)
+        m_before = engine.cache_info()["misses"]
+        engine.evaluate("k2", "v2")
+        assert engine.cache_info()["misses"] == m_before + 1
+
+    def test_engine_cache_context_bypass(self, default_taxonomy, simple_profile):
+        """测试当存在 context 时跳过缓存。"""
+        engine = ConfigurableRuleEngine(
+            taxonomy=default_taxonomy,
+            profiles=[simple_profile],
+            domain="test",
+        )
+        engine.clear_cache()
+
+        # 带有 context 时评估
+        t1, _ = engine.evaluate("phone", "13800138000", context={"tenant": "t1"})
+        assert engine.cache_info()["hits"] == 0
+        assert engine.cache_info()["misses"] == 0  # 带有 context 不会计入缓存统计
+
+    def test_engine_cache_thread_safety(self, default_taxonomy, simple_profile):
+        """多线程并发评估缓存安全性测试。"""
+        engine = ConfigurableRuleEngine(
+            taxonomy=default_taxonomy,
+            profiles=[simple_profile],
+            domain="test",
+            cache_max_size=50,
+        )
+        engine.clear_cache()
+        errors = []
+
+        def worker(thread_id: int):
+            try:
+                for i in range(100):
+                    key = f"field_{i % 10}"
+                    engine.evaluate(key, "13800138000")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker, args=(t,)) for t in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        assert engine.cache_info()["hits"] + engine.cache_info()["misses"] == 500
+
     def test_priority_ordering(self, default_taxonomy, simple_profile):
         """规则按 priority 降序排列。"""
         engine = ConfigurableRuleEngine(

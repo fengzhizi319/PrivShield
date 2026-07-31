@@ -1063,17 +1063,27 @@ class ConfigurableRuleEngine:
         # 合并所有领域包的规则，按 priority 降序排列
         self.rules = self._merge_rules(profiles)
         self.downgrade_rules = self._merge_downgrade_rules(profiles)
-        # 初始化高性能评估 LRU 缓存 (_eval_cache)
-        self._eval_cache: dict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = {}
-        self._eval_cache_max_size: int = 4096
+        # 初始化线程安全的 OrderedDict 真实 LRU 评估缓存 (微秒级 O(1) 重复评估匹配)
+        self._cache_lock = threading.Lock()
+        self._eval_cache_max_size = int(os.environ.get("PRIVACY_ENGINE_CACHE_MAX_SIZE", "4096"))
+        self._eval_cache: OrderedDict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = OrderedDict()
 
     def clear_cache(self) -> None:
         """清空规则引擎评估缓存。"""
-        self._eval_cache.clear()
+        with self._cache_lock:
+            self._eval_cache.clear()
+            self._cache_hits = 0
+            self._cache_misses = 0
 
     def cache_info(self) -> dict[str, int]:
-        """获取评估缓存命中/未命中统计。"""
-        return {"hits": self._cache_hits, "misses": self._cache_misses, "size": len(self._eval_cache)}
+        """获取评估缓存命中/未命中及容量统计。"""
+        with self._cache_lock:
+            return {
+                "hits": self._cache_hits,
+                "misses": self._cache_misses,
+                "size": len(self._eval_cache),
+                "max_size": self._eval_cache_max_size,
+            }
 
     def _merge_rules(self, profiles: list[RuleProfile]) -> list[RuleDef]:
         """合并多个领域包的规则列表。"""

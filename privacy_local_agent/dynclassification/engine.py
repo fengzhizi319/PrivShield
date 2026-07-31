@@ -16,7 +16,10 @@ The engine itself contains no domain knowledge and is only responsible for inter
 
 from __future__ import annotations
 
+from collections import OrderedDict
 import fnmatch
+import os
+import threading
 from typing import Any, Tuple
 
 # Structured logger for this module (JSON/text output based on config)
@@ -32,9 +35,6 @@ logger = get_logger(__name__)
 
 
 # Prometheus metrics for monitoring engine behavior in production:
-# - OPERATOR_CALLS_TOTAL: counts every operator invocation (hit/miss)
-# - OPERATOR_ERRORS_TOTAL: counts operator execution failures
-# - RULE_HITS_TOTAL: counts successful rule matches
 from ..observability.metrics import (
     DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL,
     DYNCLASSIFICATION_OPERATOR_ERRORS_TOTAL,
@@ -64,6 +64,7 @@ class ConfigurableRuleEngine:
         profiles: list[RuleProfile],
         domain: str = "",
         standard_id: str = "",
+        cache_max_size: int | None = None,
     ):
         """初始化规则引擎 / Initialize the rule engine.
 
@@ -72,6 +73,7 @@ class ConfigurableRuleEngine:
             profiles: 领域规则包列表（将被合并） / List of domain rule packages (to be merged).
             domain: 领域标识（写入标签） / Domain identifier (written to tags).
             standard_id: 标准标识（写入标签） / Standard identifier (written to tags).
+            cache_max_size: 字段评估 LRU 缓存容量上限（可选，默认读取 PRIVACY_ENGINE_CACHE_MAX_SIZE 环境变量，缺省 4096） / Max capacity for evaluation LRU cache.
         """
         # Store taxonomy for level comparison and default level resolution.
         self.taxonomy = taxonomy
@@ -82,26 +84,36 @@ class ConfigurableRuleEngine:
         self.rules = self._merge_rules(profiles)
         # Merge all profiles' downgrade rules into a flat list.
         self.downgrade_rules = self._merge_downgrade_rules(profiles)
-        # Initialize LRU Evaluation Cache for high-performance repeated field evaluation
-        self._eval_cache: dict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = {}
-        self._eval_cache_max_size: int = 4096
+
+        # Thread lock for thread-safe concurrent evaluation cache mutations
+        self._cache_lock = threading.Lock()
+        # Configurable LRU Evaluation Cache capacity
+        if cache_max_size is not None:
+            self._eval_cache_max_size = max(1, cache_max_size)
+        else:
+            self._eval_cache_max_size = int(os.environ.get("PRIVACY_ENGINE_CACHE_MAX_SIZE", "4096"))
+
+        # True LRU Evaluation Cache using OrderedDict: (field_name, str_value[:200]) -> (final_tags, suppressed_tags)
+        self._eval_cache: OrderedDict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = OrderedDict()
         self._cache_hits: int = 0
         self._cache_misses: int = 0
 
     def clear_cache(self) -> None:
         """清空规则引擎字段评估缓存 / Clear field evaluation cache."""
-        self._eval_cache.clear()
-        self._cache_hits = 0
-        self._cache_misses = 0
+        with self._cache_lock:
+            self._eval_cache.clear()
+            self._cache_hits = 0
+            self._cache_misses = 0
 
     def cache_info(self) -> dict[str, int]:
         """获取评估缓存统计信息 / Get evaluation cache statistics."""
-        return {
-            "hits": self._cache_hits,
-            "misses": self._cache_misses,
-            "size": len(self._eval_cache),
-            "max_size": self._eval_cache_max_size,
-        }
+        with self._cache_lock:
+            return {
+                "hits": self._cache_hits,
+                "misses": self._cache_misses,
+                "size": len(self._eval_cache),
+                "max_size": self._eval_cache_max_size,
+            }
 
     def _merge_rules(self, profiles: list[RuleProfile]) -> list[RuleDef]:
         """合并多个领域包的规则列表，按 priority 降序排列 / Merge rule lists from multiple domain packages, sorted descending by priority.
@@ -202,11 +214,14 @@ class ConfigurableRuleEngine:
 
         # Check Evaluation Cache for instant lookup
         cache_key = (field_name, str_value[:200])
-        if context is None and cache_key in self._eval_cache:
-            self._cache_hits += 1
-            cached_final, cached_suppressed = self._eval_cache[cache_key]
-            return list(cached_final), list(cached_suppressed)
-        self._cache_misses += 1
+        if context is None:
+            with self._cache_lock:
+                if cache_key in self._eval_cache:
+                    self._cache_hits += 1
+                    self._eval_cache.move_to_end(cache_key)
+                    cached_final, cached_suppressed = self._eval_cache[cache_key]
+                    return list(cached_final), list(cached_suppressed)
+                self._cache_misses += 1
 
         # Phase 1: Evaluate all normal rules in priority order.
         normal_tags: list[SecurityTag] = []
@@ -227,11 +242,12 @@ class ConfigurableRuleEngine:
         all_tags = surviving_tags + downgrade_tags
         final_tags = self._unique_tags(all_tags)
 
-        # Store in Evaluation Cache if no custom context
+        # Store in LRU Evaluation Cache if no custom context
         if context is None:
-            if len(self._eval_cache) >= self._eval_cache_max_size:
-                self._eval_cache.clear()
-            self._eval_cache[cache_key] = (list(final_tags), list(suppressed_tags))
+            with self._cache_lock:
+                if len(self._eval_cache) >= self._eval_cache_max_size:
+                    self._eval_cache.popitem(last=False)
+                self._eval_cache[cache_key] = (list(final_tags), list(suppressed_tags))
 
         return final_tags, suppressed_tags
 
