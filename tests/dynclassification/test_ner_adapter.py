@@ -324,3 +324,82 @@ class TestCudaNerEngine:
         results = adapter.extract("患者主诉急性腹痛与高热")
         for ent in results:
             assert ent["confidence"] > 0.0
+
+    def test_compare_pytorch_vs_tensorrt_ner_performance(self):
+        """对比 PyTorch (ModelScope CUDA/CPU) 引擎与 TensorRT (ONNX Runtime) 引擎的推理性能与吞吐量。"""
+        import time
+        import torch
+
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        ms_dir = os.path.join(project_root, ".models", "raner_cmeee")
+        vocab_path = os.path.join(project_root, ".models", "vocab.txt")
+        onnx_path = os.path.join(project_root, ".models", "raner_cmeee.onnx")
+
+        if not (os.path.exists(ms_dir) and os.path.exists(vocab_path)):
+            pytest.skip("未在 .models/ 找到 ModelScope 权重目录或词表，跳过性能对比测试")
+
+        sample_texts = [
+            "患者张三，诊断为2型糖尿病与高血压三级，口服阿司匹林和二甲双胍。",
+            "主诉急性心肌梗死合并心力衰竭，行冠状动脉介入手术治疗。",
+            "右下肺听诊可闻及湿啰音，查体发现双下肢重度水肿，拟行心电图与胸部CT检查。",
+            "既往有慢性乙型肝炎病史10年，静脉滴注头孢曲松钠，禁用青霉素。",
+        ]
+
+        # 1. 测量 PyTorch CUDA (或 CPU) 引擎性能
+        cuda_compatible = ModelScopeSmallNerEngine._is_cuda_compatible(torch)
+        device_cuda = "cuda" if cuda_compatible else "cpu"
+        ms_cuda_engine = ModelScopeSmallNerEngine(device=device_cuda)
+        _ = ms_cuda_engine.extract(sample_texts[0])  # Warmup
+
+        t0 = time.monotonic()
+        ms_count = 0
+        for _ in range(3):
+            for text in sample_texts:
+                _ = ms_cuda_engine.extract(text)
+                ms_count += 1
+        ms_cuda_time = time.monotonic() - t0
+        ms_cuda_lat = (ms_cuda_time / ms_count) * 1000
+        ms_cuda_qps = ms_count / ms_cuda_time
+
+        print(f"\n⚡ [NER 推理性能基准测试 - 共 {ms_count} 次请求]")
+        print(f"  PyTorch CUDA ({device_cuda}) 引擎:  平均延迟 = {ms_cuda_lat:.2f} ms | 吞吐量 = {ms_cuda_qps:.2f} req/s")
+
+        # 2. 若存在 ONNX 模型，测量 TensorRT 引擎性能；否则对比 PyTorch CPU 性能
+        if os.path.exists(onnx_path):
+            trt_engine = TensorRTSmallNerEngine(model_path=onnx_path, vocab_path=vocab_path)
+            _ = trt_engine.extract(sample_texts[0])  # Warmup
+
+            t0 = time.monotonic()
+            trt_count = 0
+            for _ in range(3):
+                for text in sample_texts:
+                    _ = trt_engine.extract(text)
+                    trt_count += 1
+            trt_time = time.monotonic() - t0
+            trt_lat = (trt_time / trt_count) * 1000
+            trt_qps = trt_count / trt_time
+
+            speedup = ms_cuda_lat / max(trt_lat, 0.001)
+            print(f"  TensorRT (C++) 引擎:     平均延迟 = {trt_lat:.2f} ms | 吞吐量 = {trt_qps:.2f} req/s")
+            print(f"  🚀 TensorRT vs PyTorch 加速比: {speedup:.2f}x")
+            assert trt_lat > 0
+            assert trt_lat <= ms_cuda_lat * 2.0
+        else:
+            ms_cpu_engine = ModelScopeSmallNerEngine(device="cpu")
+            _ = ms_cpu_engine.extract(sample_texts[0])  # Warmup
+            t0 = time.monotonic()
+            cpu_count = 0
+            for _ in range(3):
+                for text in sample_texts:
+                    _ = ms_cpu_engine.extract(text)
+                    cpu_count += 1
+            cpu_time = time.monotonic() - t0
+            cpu_lat = (cpu_time / cpu_count) * 1000
+            cpu_qps = cpu_count / cpu_time
+
+            speedup = cpu_lat / max(ms_cuda_lat, 0.001)
+            print(f"  PyTorch CPU 引擎:         平均延迟 = {cpu_lat:.2f} ms | 吞吐量 = {cpu_qps:.2f} req/s")
+            print(f"  🚀 PyTorch CUDA vs CPU 加速比: {speedup:.2f}x")
+            assert ms_cuda_lat > 0
+            assert cpu_lat > 0
