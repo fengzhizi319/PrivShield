@@ -34,11 +34,14 @@ class TestNerAdapter:
         assert adapter._available is True
 
     def test_lazy_init_failure_degradation(self, monkeypatch):
-        """测试当 TensorRT, ONNX 和 ModelScope 均不可用时，适配器能优雅降级且 is_available 为 False。"""
+        """测试当 MLX, TensorRT, ONNX 和 ModelScope 均不可用时，适配器能优雅降级且 is_available 为 False。"""
+        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+
         adapter = NerAdapter(model_path="/non_existent_path/model.onnx")
 
-        # 模拟三个引擎初始化均抛出 Exception
-        with patch.object(TensorRTSmallNerEngine, "_lazy_init", side_effect=RuntimeError("TensorRT not installed")), \
+        # 模拟所有引擎初始化均抛出 Exception
+        with patch.object(MLXSmallNerEngine, "_lazy_init", side_effect=RuntimeError("MLX not available")), \
+             patch.object(TensorRTSmallNerEngine, "_lazy_init", side_effect=RuntimeError("TensorRT not installed")), \
              patch.object(ONNXSmallNerEngine, "_lazy_init", side_effect=RuntimeError("ONNX not installed")), \
              patch.object(ModelScopeSmallNerEngine, "__init__", side_effect=RuntimeError("ModelScope not installed")):
             assert adapter.is_available is False

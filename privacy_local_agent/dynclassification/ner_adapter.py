@@ -77,13 +77,28 @@ class NerAdapter:
         """延迟初始化 NER 引擎 / Lazy initialize NER engine.
 
         尝试顺序 / Attempt order:
-        1. ONNXSmallNerEngine (轻量, 无需 PyTorch / Lightweight, no PyTorch required)
-        2. ModelScopeSmallNerEngine (需 PyTorch + modelscope / Requires PyTorch + modelscope)
-        3. 均失败 → 标记不可用 / All failed → Mark as unavailable
+        0. MLXSmallNerEngine (Apple Silicon Metal GPU, macOS 优先 / macOS Metal GPU preferred)
+        1. TensorRTSmallNerEngine (NVIDIA GPU 硬件加速 / NVIDIA GPU hardware acceleration)
+        2. ONNXSmallNerEngine (轻量, 无需 PyTorch / Lightweight, no PyTorch required)
+        3. ModelScopeSmallNerEngine (需 PyTorch + modelscope / Requires PyTorch + modelscope)
+        4. 均失败 → 标记不可用 / All failed → Mark as unavailable
         """
         if self._initialized:
             return
         self._initialized = True
+
+        # 尝试 0: MLX 引擎（Apple Silicon Metal GPU，macOS 优先）
+        try:
+            from .mlx_ner_engine import MLXSmallNerEngine
+            engine = MLXSmallNerEngine(
+                label_mapping=self._label_mapping,
+            )
+            engine._lazy_init()
+            self._engine = engine
+            logger.info("ner_adapter_initialized", extra={"backend": "mlx_metal"})
+            return
+        except Exception as e:
+            logger.debug("ner_mlx_unavailable", extra={"error": str(e)})
 
         # 尝试 1: TensorRT 引擎（纯 C++ 硬件加速，FP16 模式）
         try:

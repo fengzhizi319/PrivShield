@@ -81,6 +81,7 @@ def _convert_state_dict_to_mlx(
 ) -> dict[str, Any]:
     """将 PyTorch 权重字典转换为 MLX 数组字典。"""
     import mlx.core as mx
+    import torch
 
     dtype_map = {
         "float32": None,
@@ -93,7 +94,11 @@ def _convert_state_dict_to_mlx(
     for key, tensor in state_dict.items():
         import numpy as np
 
-        arr = tensor.detach().cpu().numpy().astype(np.float32)
+        # BFloat16 张量需要先转为 float32 再转 numpy（numpy 不支持 bf16）
+        t = tensor.detach().cpu()
+        if t.dtype == torch.bfloat16:
+            t = t.float()
+        arr = t.numpy().astype(np.float32)
         mlx_weights[key] = mx.array(arr, dtype=target_dtype)
     return mlx_weights
 

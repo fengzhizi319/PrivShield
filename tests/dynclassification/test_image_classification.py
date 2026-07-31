@@ -456,8 +456,21 @@ class TestGenMedicalImagesDetection:
 # =========================================================================== #
 
 
+def _transformers_available() -> bool:
+    """检测 transformers 库是否可用（导入无报错）。"""
+    try:
+        import transformers  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 @pytest.mark.slow
 @pytest.mark.real_models
+@pytest.mark.skipif(
+    not _transformers_available(),
+    reason="图片分类需要 transformers 库（Qwen2-VL 视觉模型回退引擎）",
+)
 class TestRealImageClassification:
     """使用真实 Qwen2-VL 模型对生成病例图片进行端到端分类测试。
 

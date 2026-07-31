@@ -77,19 +77,37 @@ class LlmAdapter:
         self._classify_prompt_template = classify_prompt_template
         self._device = device
         self._classifier: Any = None
+        self._fallback_classifier: Any = None  # PyTorch 回退引擎（支持视觉）
         self._available = True
         self._initialized = False
 
     def _lazy_init(self) -> None:
         """延迟初始化 LLM 分类器 / Lazy initialize LLM classifier.
 
-        尝试加载 Qwen2VLClassifier，失败则标记不可用。
-        Attempts to load Qwen2VLClassifier, marks as unavailable if it fails.
+        尝试顺序 / Attempt order:
+        1. MLXLlmClassifier (Apple Silicon Metal GPU, macOS 优先)
+        2. Qwen2VLClassifier (PyTorch, CUDA/MPS/CPU)
+        失败则标记不可用。
         """
         if self._initialized:
             return
         self._initialized = True
 
+        # 尝试 1: MLX 引擎（Apple Silicon Metal GPU）
+        try:
+            from .mlx_llm_engine import MLXLlmClassifier
+            self._classifier = MLXLlmClassifier(
+                model_dir=self._model_path,
+                classify_prompt_template=self._classify_prompt_template,
+            )
+            self._classifier._lazy_init()
+            logger.info("llm_adapter_initialized", extra={"backend": "mlx_metal", "model_path": self._model_path})
+            # MLX 不支持视觉，延迟初始化 PyTorch 回退引擎
+            return
+        except Exception as e:
+            logger.debug("llm_mlx_unavailable", extra={"error": str(e)})
+
+        # 尝试 2: PyTorch Qwen2VL 引擎
         try:
             from .llm_engines import Qwen2VLClassifier
             self._classifier = Qwen2VLClassifier(
@@ -97,7 +115,7 @@ class LlmAdapter:
                 classify_prompt_template=self._classify_prompt_template,
                 device=self._device,
             )
-            logger.info("llm_adapter_initialized", extra={"model_path": self._model_path})
+            logger.info("llm_adapter_initialized", extra={"backend": "qwen2vl", "model_path": self._model_path})
         except Exception as e:
             self._available = False
             logger.info("llm_adapter_unavailable", extra={"error": str(e)})
@@ -136,9 +154,52 @@ class LlmAdapter:
             from .base import SensitivityLevel
             level_enum = SensitivityLevel.from_string(upstream_level)
             result = self._classifier.classify(text, level_enum, upstream_confidence)
+            # MLX 引擎对图片输入返回 None，尝试回退到 PyTorch 引擎
+            if result is None and self._is_image_input(text):
+                result = self._classify_with_fallback(text, level_enum, upstream_confidence)
             return result
         except Exception as e:
             logger.warning("llm_classify_failed", extra={"error": str(e)})
+            return None
+
+    @staticmethod
+    def _is_image_input(text: str) -> bool:
+        """检测输入是否为图片（三级检测策略）。"""
+        text_stripped = text.strip()
+        # 第 1 级：图片扩展名
+        if any(text_stripped.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp")):
+            return True
+        # 第 2 级：Data URI 格式
+        if text_stripped.startswith("data:image/"):
+            return True
+        # 第 3 级：纯 Base64 图片数据
+        if len(text_stripped) > 100:
+            import re as _re
+            if _re.match(r'^[A-Za-z0-9+/\n\r]+=*$', text_stripped[:200]):
+                if text_stripped.startswith(("iVBOR", "/9j/", "R0lGOD", "UklGR")):
+                    return True
+        return False
+
+    def _classify_with_fallback(
+        self, text: str, level_enum: Any, confidence: float
+    ) -> dict[str, Any] | None:
+        """使用 PyTorch Qwen2VL 回退引擎处理图片输入。"""
+        if self._fallback_classifier is None:
+            try:
+                from .llm_engines import Qwen2VLClassifier
+                self._fallback_classifier = Qwen2VLClassifier(
+                    model_path=self._model_path,
+                    classify_prompt_template=self._classify_prompt_template,
+                    device=self._device,
+                )
+                logger.info("llm_fallback_initialized", extra={"backend": "qwen2vl"})
+            except Exception as e:
+                logger.debug("llm_fallback_unavailable", extra={"error": str(e)})
+                return None
+        try:
+            return self._fallback_classifier.classify(text, level_enum, confidence)
+        except Exception as e:
+            logger.warning("llm_fallback_classify_failed", extra={"error": str(e)})
             return None
 
     def arbitrate(

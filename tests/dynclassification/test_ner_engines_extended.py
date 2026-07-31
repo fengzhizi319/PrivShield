@@ -391,24 +391,30 @@ class TestNerAdapterExtended:
         assert adapter._device == "cpu"
 
     def test_fallback_order_tensorrt_onnx_modelscope(self):
-        """降级顺序应为 TensorRT → ONNX → ModelScope。"""
+        """降级顺序应为 MLX → TensorRT → ONNX → ModelScope。"""
+        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+
         adapter = NerAdapter(model_path="/nonexistent/model.onnx")
         call_order = []
 
-        with patch.object(TensorRTSmallNerEngine, "_lazy_init", side_effect=RuntimeError("no trt")) as trt_init, \
+        with patch.object(MLXSmallNerEngine, "_lazy_init", side_effect=RuntimeError("no mlx")), \
+             patch.object(TensorRTSmallNerEngine, "_lazy_init", side_effect=RuntimeError("no trt")) as trt_init, \
              patch.object(ONNXSmallNerEngine, "_lazy_init", side_effect=RuntimeError("no onnx")) as onnx_init, \
              patch.object(ModelScopeSmallNerEngine, "__init__", side_effect=RuntimeError("no ms")) as ms_init:
             adapter._lazy_init()
 
-        # 三个引擎都应被尝试
+        # 所有引擎都应被尝试
         assert adapter._available is False
 
     def test_onnx_success_skips_modelscope(self):
         """ONNX 引擎成功时不应尝试 ModelScope。"""
+        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+
         adapter = NerAdapter()
         adapter._initialized = False
 
-        with patch.object(TensorRTSmallNerEngine, "_lazy_init", side_effect=RuntimeError("no trt")), \
+        with patch.object(MLXSmallNerEngine, "_lazy_init", side_effect=RuntimeError("no mlx")), \
+             patch.object(TensorRTSmallNerEngine, "_lazy_init", side_effect=RuntimeError("no trt")), \
              patch.object(ONNXSmallNerEngine, "_lazy_init") as onnx_init:
             # ONNX 成功（不抛异常）
             onnx_init.return_value = None

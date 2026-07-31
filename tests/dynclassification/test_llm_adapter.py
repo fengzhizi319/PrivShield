@@ -175,19 +175,19 @@ class TestQwen2VLClassifier:
         assert classifier._select_device(mock_torch) == "cuda"
 
     def test_select_device_fallback_cpu_when_vram_insufficient(self):
-        """显存不足时 _select_device 回退到 cpu。"""
-        import torch
-
+        """显存不足时 _select_device 回退到 cpu（无 MPS 时）。"""
         mock_torch = MagicMock()
         mock_torch.cuda = MagicMock()
         mock_torch.cuda.is_available.return_value = True
         mock_torch.cuda.device_count.return_value = 1
         # 2 GB free
         mock_torch.cuda.mem_get_info.return_value = (2 * 1024**3, 12 * 1024**3)
-        mock_torch.backends = torch.backends
+        # Mock MPS 不可用
+        mock_torch.backends.mps.is_available.return_value = False
 
         classifier = Qwen2VLClassifier()
-        assert classifier._select_device(mock_torch) == "cpu"
+        with patch.object(Qwen2VLClassifier, "_is_cuda_compatible", return_value=True):
+            assert classifier._select_device(mock_torch) == "cpu"
 
     def test_select_device_fallback_cpu_when_no_cuda(self):
         """没有 CUDA 时回退到 cpu/mps。"""
