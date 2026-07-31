@@ -691,8 +691,16 @@ class Qwen2VLClassifier(LlmClassifier):
 
             # 禁用梯度计算（推理模式，节省显存和计算资源）
             with torch.no_grad():
-                # 调用模型 generate 方法，最多生成 512 个新 token
-                generated_ids = self._model.generate(**inputs, max_new_tokens=512)
+                try:
+                    # 调用模型 generate 方法，最多生成 512 个新 token
+                    generated_ids = self._model.generate(**inputs, max_new_tokens=512)
+                except RuntimeError as err:
+                    if "cudnn" in str(err).lower() or "SUBLIBRARY_VERSION_MISMATCH" in str(err):
+                        logger.warning("cuDNN 版本冲突，自动禁用 cuDNN 加速改用 PyTorch 原生 CUDA 卷积...")
+                        torch.backends.cudnn.enabled = False
+                        generated_ids = self._model.generate(**inputs, max_new_tokens=512)
+                    else:
+                        raise
 
             # 裁剪生成结果：去掉输入 prompt 部分，只保留新生成的 token
             generated_ids_trimmed = [

@@ -9,10 +9,12 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 function jsonResponse(data: unknown, status = 200) {
+  const jsonStr = JSON.stringify(data);
   return Promise.resolve({
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : 'Error',
+    text: () => Promise.resolve(jsonStr),
     json: () => Promise.resolve(data),
   });
 }
@@ -83,6 +85,7 @@ describe('client request()', () => {
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
+        text: () => Promise.resolve(''),
         json: () => Promise.reject(new Error('no json')),
       }),
     );

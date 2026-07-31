@@ -138,13 +138,20 @@ nav:
       - 测试指南: classification_ner/testing.md
     - 动态分类分级（多标准适配）:
       - 概览: dynclassification/README.md
+      - 需求文档: dynclassification/prd.md
       - 架构设计: dynclassification/design.md
-      - 规则解析与执行: dynclassification/rule_parsing_guide.md
+      - 三层漏斗设计: dynclassification/three_layer_funnel_design.md
+      - 裁决算法机制: dynclassification/funnel_adjudication.md
+      - 降级与 Override 规则: dynclassification/downgrade_override_design.md
+      - 规则解析与编写: dynclassification/rule_parsing_guide.md
+      - 标准生成器算法: dynclassification/standard_profile_generator.md
+      - CUDA sm120 环境构建: dynclassification/cuda_sm120_setup.md
+      - TensorRT 编译优化 Pipeline: dynclassification/model_optimization_pipeline.md
       - API 参考: dynclassification/api_reference.md
       - 使用示例: dynclassification/examples.md
       - 运维指南: dynclassification/ops.md
-      - 需求文档: dynclassification/prd.md
       - 测试指南: dynclassification/testing.md
+      - 评审修改意见: dynclassification/修改意见.md
 
   - 基础设施:
     - 网关与负载均衡:
