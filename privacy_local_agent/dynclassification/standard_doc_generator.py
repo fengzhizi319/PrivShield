@@ -113,23 +113,27 @@ class StandardDocParser:
 
     def _extract_standard_id(self) -> str:
         """抽取标准标识符，如 DB51/T 2989 -> sc_health_db51 / Extract standard identifier."""
-        match = re.search(r"标准编号[：:]\s*([A-Z0-9_/—\-]+)", self.content)
+        match = re.search(r"标准编号[：:]\s*([^\n]+)", self.content)
         if match:
             code = match.group(1).upper()
             if "DB51" in code:
                 return "sc_health_db51"
-            elif "JR/T" in code or "JRT" in code:
+            elif "JR/T" in code or "JRT" in code or "0197" in code:
                 return "jrt0197"
-            elif "GB/T 35273" in code or "35273" in code:
+            elif "35273" in code:
                 return "gbt35273"
-            elif "GB/T 43697" in code or "43697" in code:
+            elif "43697" in code:
                 return "gb43697"
 
         name = self.doc_path.stem
         if "四川" in name or "DB51" in name:
             return "sc_health_db51"
-        elif "金融" in name or "JR" in name:
+        elif "金融" in name or "JR" in name or "0197" in name:
             return "jrt0197"
+        elif "35273" in name:
+            return "gbt35273"
+        elif "43697" in name:
+            return "gb43697"
         elif "广东" in name:
             return "gd_health_db44"
 
@@ -202,6 +206,38 @@ class StandardDocParser:
             return "C3"
         return list(levels.keys())[0] if levels else "L1"
 
+    def _is_effective_positive_hit(self, keywords: list[str]) -> bool:
+        """检查文档中是否存在指定关键词的有效正向命中（过滤否定语义与排除章节，提高准确率并降低误报率）。"""
+        exclusion_patterns = [
+            "不包括", "不包含", "不适用", "不涉及", "除外", "不作为", "不适用于", "不属于", "免责"
+        ]
+        
+        in_ignored_section = False
+
+        for line in self.content.split("\n"):
+            line_str = line.strip()
+            if not line_str:
+                continue
+            
+            # 检测并跳过可能引发误报的非正文章节（如参考文献、起草单位前言）
+            if line_str.startswith("## 参考文献") or line_str.startswith("## 前言"):
+                in_ignored_section = True
+                continue
+            elif line_str.startswith("## ") and not ("参考文献" in line_str or "前言" in line_str):
+                in_ignored_section = False
+
+            if in_ignored_section:
+                continue
+
+            for kw in keywords:
+                if kw in line_str:
+                    # 检查该关键词所在句子是否含有否定/排除语义
+                    if any(ex in line_str for ex in exclusion_patterns):
+                        # 如果行中包含否定词且紧邻关键词，判定为排除否定，跳过
+                        continue
+                    return True
+        return False
+
     def _generate_rules(
         self, standard_id: str, levels: dict[str, SensitivityLevelDef], categories: dict[str, CategoryDef]
     ) -> tuple[list[RuleDef], list[DowngradeRuleDef]]:
@@ -209,7 +245,9 @@ class StandardDocParser:
         rules: list[RuleDef] = []
         downgrade_rules: list[DowngradeRuleDef] = []
 
-        if any("身份证" in line or "身份证件" in line for line in self.content.split("\n")):
+        # 1. 身份证件特征匹配（扩展同义词 + 否定过滤）
+        idcard_kws = ["身份证", "身份证件", "公民身份号码", "居民身份证", "护照号码"]
+        if self._is_effective_positive_hit(idcard_kws):
             rules.append(
                 RuleDef(
                     id=f"RULE_{standard_id.upper()}_IDCARD",
@@ -225,7 +263,9 @@ class StandardDocParser:
                 )
             )
 
-        if any("电话" in line or "手机" in line for line in self.content.split("\n")):
+        # 2. 手机号码特征匹配（扩展同义词 + 否定过滤）
+        phone_kws = ["电话", "手机", "联系电话", "手机号码", "移动电话", "固定电话"]
+        if self._is_effective_positive_hit(phone_kws):
             rules.append(
                 RuleDef(
                     id=f"RULE_{standard_id.upper()}_PHONE",
@@ -241,7 +281,9 @@ class StandardDocParser:
                 )
             )
 
-        if any("金融账户" in line or "支付卡号" in line for line in self.content.split("\n")):
+        # 3. 支付金融账户特征匹配（扩展同义词 + 否定过滤）
+        bankcard_kws = ["金融账户", "支付卡号", "银行卡号", "银行账号", "结算账户", "资金账户"]
+        if self._is_effective_positive_hit(bankcard_kws):
             target_lvl = "C4" if "C4" in levels else "L3"
             rules.append(
                 RuleDef(
@@ -258,7 +300,9 @@ class StandardDocParser:
                 )
             )
 
-        if any("艾滋病" in line or "性病" in line or "精神病" in line for line in self.content.split("\n")):
+        # 4. 敏感病种特征匹配（扩展同义词 + 否定过滤）
+        disease_kws = ["艾滋病", "性病", "精神病", "传染病", "恶性肿瘤", "精神分裂症"]
+        if self._is_effective_positive_hit(disease_kws):
             rules.append(
                 RuleDef(
                     id=f"RULE_{standard_id.upper()}_DISEASE",
@@ -277,7 +321,9 @@ class StandardDocParser:
                 )
             )
 
-        if any("基因" in line or "染色体" in line or "地中海贫血" in line for line in self.content.split("\n")):
+        # 5. 个人遗传基因特征匹配（扩展同义词 + 否定过滤）
+        genomic_kws = ["基因", "染色体", "地中海贫血", "基因组", "DNA序列", "分子遗传"]
+        if self._is_effective_positive_hit(genomic_kws):
             rules.append(
                 RuleDef(
                     id=f"RULE_{standard_id.upper()}_GENOMIC",

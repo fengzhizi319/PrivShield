@@ -73,3 +73,49 @@ def test_standard_doc_parser(dummy_markdown_doc: Path, tmp_path: Path):
     down_yaml = domain_yaml_data["downgrade_rules"][0]
     assert "override" in down_yaml or "force_suppress" in down_yaml
     assert "exempt_rules" in down_yaml or "exclude_rules" in down_yaml
+
+
+def test_parser_resilience_negation_filter(tmp_path: Path):
+    """测试否定与排除句式过滤，验证误报率控制与代码韧性。"""
+    negation_md = """# 测试排除否定规范
+标准编号：GB/T 99999-2026
+
+## 一、 范围与例外
+- 本规范不适用于个人基因数据及基因组检测信息。
+- 本规范不包含艾滋病诊疗记录。
+
+## 二、 参考文献
+- 包含参考文献中提到的手机与身份证讨论。
+"""
+    doc_path = tmp_path / "negation_test.md"
+    doc_path.write_text(negation_md, encoding="utf-8")
+
+    parser = StandardDocParser(doc_path)
+    _, profile, _ = parser.parse()
+
+    rule_ids = [r.id for r in profile.rules]
+    # 验证: 带有"不适用于/不包含"的否定词不应产生误报规则 (GENOMIC 和 DISEASE)
+    assert not any("GENOMIC" in rid for rid in rule_ids)
+    assert not any("DISEASE" in rid for rid in rule_ids)
+
+
+def test_parser_resilience_synonym_trigger(tmp_path: Path):
+    """测试同义词与多维度词汇识别，验证召回率与代码韧性。"""
+    synonym_md = """# 同义词规范
+标准编号：GB/T 88888-2026
+
+## 正文
+- 包含公民身份号码识别。
+- 包含移动电话与联系电话信息。
+"""
+    doc_path = tmp_path / "synonym_test.md"
+    doc_path.write_text(synonym_md, encoding="utf-8")
+
+    parser = StandardDocParser(doc_path)
+    _, profile, _ = parser.parse()
+
+    rule_ids = [r.id for r in profile.rules]
+    # 验证: 同义词 "公民身份号码" 和 "移动电话" 成功召回规则
+    assert any("IDCARD" in rid for rid in rule_ids)
+    assert any("PHONE" in rid for rid in rule_ids)
+
