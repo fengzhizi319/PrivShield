@@ -19,9 +19,12 @@ rules:
       - target: "field_name"               # 匹配目标: field_name (字段名), field_value (数据值), 或 both
         operator: "keyword_contains"       # 匹配算子: keyword_contains (关键词匹配)
         params:
-          keywords: ["bankcard", "cardno", "credit", "transaction",
-                     "asset", "balance", "account", "bank_card"]
-          use_word_boundaries: true        # 是否启用单词边界分割匹配
+          keywords: [
+            "bankcard", "cardno", "card_no", "credit", "transaction", "asset", "balance", "account",
+            "account_no", "acc_no", "bank_card", "bank_account", "iban", "swift", "passbook",
+            "银行卡", "卡号", "账号", "资产", "余额", "账户", "银行账号", "存折"
+          ]
+          use_word_boundaries: false       # 设为 false 以全面支持中文和连续字串匹配
 
   # --- 银行卡号值校验 ---
   - id: "RULE_FIN_CARD_VALUE"
@@ -48,8 +51,12 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["transfer", "payment", "withdraw", "deposit", "loan"]
-          use_word_boundaries: true
+          keywords: [
+            "transfer", "payment", "pay", "withdraw", "deposit", "loan", "remittance", "billing",
+            "invoice", "order_amt", "trans_amt", "trans_amount", "pay_amt", "转账", "支付",
+            "取款", "存款", "贷款", "汇款", "交易金额", "账单", "扣款", "充值"
+          ]
+          use_word_boundaries: false
 
   # --- 个人金融信息字段名 ---
   - id: "RULE_FIN_PERSONAL"
@@ -62,8 +69,12 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["income", "salary", "tax", "insurance", "fund"]
-          use_word_boundaries: true
+          keywords: [
+            "income", "salary", "wage", "paycheck", "tax", "insurance", "fund", "provident_fund",
+            "pension", "revenue", "bonus", "收入", "工资", "薪资", "税额", "纳税", "保险",
+            "社保", "公积金", "养老金", "奖金", "理财"
+          ]
+          use_word_boundaries: false
 
 # ==============================================================================
 # 2. 敏感度降级与覆盖规则 (downgrade_rules)
@@ -72,7 +83,10 @@ rules:
 downgrade_rules:
   - id: "RULE_FIN_DOWN_STAT"
     name: "金融运营统计强行降级模板示例"
-    keywords: ["fin_stat_summary"]
+    keywords: [
+      "fin_stat_summary", "financial_stat", "stat_summary", "annual_report", "fin_report",
+      "stat_cnt", "财务汇总", "金融统计", "统计月报", "报表", "汇总"
+    ]
     level: "C2"
     category: "FINANCIAL_OPERATIONAL_STAT"
     force_suppress: false                 # 是否开启强制压制擦除普通规则标签 (true/false)

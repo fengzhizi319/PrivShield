@@ -56,8 +56,12 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["email", "address", "location", "轨迹", "phone", "mobile", "tel"]
-          use_word_boundaries: true
+          keywords: [
+            "email", "mail", "address", "addr", "location", "loc", "gps", "coordinate", "position", "轨迹",
+            "phone", "mobile", "tel", "telephone", "cellphone", "call", "dh", "lxfs",
+            "联系电话", "联系方式", "联系地址", "居住地", "家庭住址", "邮编", "zipcode", "postcode"
+          ]
+          use_word_boundaries: false
 
   # --- 生物识别信息 ---
   - id: "RULE_PII_BIOMETRIC"
@@ -70,8 +74,11 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["fingerprint", "voiceprint", "palmprint", "iris", "face", "biometric"]
-          use_word_boundaries: true
+          keywords: [
+            "fingerprint", "voiceprint", "palmprint", "iris", "face", "face_id", "biometric", "dna",
+            "retina", "gait", "指纹", "声纹", "掌纹", "虹膜", "人脸", "人像", "生物识别", "步态"
+          ]
+          use_word_boundaries: false
 
   # --- 姓名字段 ---
   - id: "RULE_PII_NAME"
@@ -84,7 +91,10 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["idcard", "identity", "身份证", "passport"]
+          keywords: [
+            "name", "username", "realname", "fullname", "patient_name", "idcard", "identity",
+            "id_card", "sfz", "身份证", "身份证号", "passport", "护照", "姓名", "真实姓名", "用户姓名"
+          ]
           use_word_boundaries: false
 
 # ==============================================================================
@@ -94,7 +104,7 @@ rules:
 downgrade_rules:
   - id: "general-pii:RULE_DOWN_PUBLIC"
     name: "公开数据降级"
-    keywords: ["public_report", "annual_summary", "科普", "公开"]
+    keywords: ["public_report", "annual_summary", "科普", "公开", "public", "notice", "announcement", "公告", "公示"]
     level: "L1"
     category: "PUBLIC_REPORT"
     force_suppress: false                 # 是否开启强制压制 (false=仅做兜底降级)
@@ -103,7 +113,10 @@ downgrade_rules:
 
   - id: "general-pii:RULE_DOWN_OPS"
     name: "运营统计强制降级"
-    keywords: ["turnover_rate", "device_usage", "inventory", "门诊人次", "床位统计", "工作量统计"]
+    keywords: [
+      "turnover_rate", "device_usage", "inventory", "stat", "statistics", "count", "cnt",
+      "total_cnt", "total_num", "stat_num", "门诊人次", "床位统计", "工作量统计", "周转率", "使用率", "库存", "汇总"
+    ]
     level: "L2"
     category: "OPERATIONAL_STAT"
     force_suppress: true                  # 是否开启强制压制 (true=强行压制符合条件的普通规则)

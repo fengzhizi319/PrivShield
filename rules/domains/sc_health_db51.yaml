@@ -21,7 +21,11 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["idcard", "sfz", "identity", "id_card", "身份证"]
+          keywords: [
+            "idcard", "sfz", "identity", "id_card", "passport", "身份证", "身份证号",
+            "证件号码", "护照", "身份标识"
+          ]
+          use_word_boundaries: false
 
   - id: "RULE_SC_HEALTH_DB51_PHONE"
     name: "手机号码检测"
@@ -37,7 +41,11 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["mobile", "phone", "cell", "电话", "手机"]
+          keywords: [
+            "mobile", "phone", "cell", "cellphone", "telephone", "tel", "dh", "lxfs",
+            "电话", "手机", "联系电话", "手机号码", "联系方式"
+          ]
+          use_word_boundaries: false
 
   - id: "RULE_SC_HEALTH_DB51_BANKCARD"
     name: "支付金融账户检测"
@@ -54,7 +62,11 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["bankcard", "cardno", "card_no", "bank_card", "支付卡号"]
+          keywords: [
+            "bankcard", "cardno", "card_no", "bank_card", "credit_card", "account_no",
+            "银行卡", "卡号", "银行账号", "支付卡号", "结算账号"
+          ]
+          use_word_boundaries: false
 
   - id: "RULE_SC_HEALTH_DB51_DISEASE"
     name: "敏感病种检测"
@@ -66,7 +78,12 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["hiv", "aids", "std", "syphilis", "psychiatric", "schizophrenia", "艾滋病", "性病", "精神病"]
+          keywords: [
+            "hiv", "aids", "std", "syphilis", "gonorrhea", "psychiatric", "schizophrenia",
+            "depression", "cancer", "tumor", "艾滋病", "性病", "梅毒", "淋病", "精神病",
+            "精神分裂", "抑郁症", "癌症", "恶性肿瘤"
+          ]
+          use_word_boundaries: false
 
   - id: "RULE_SC_HEALTH_DB51_GENOMIC"
     name: "个人遗传基因数据检测"
@@ -78,7 +95,11 @@ rules:
       - target: "field_name"
         operator: "keyword_contains"
         params:
-          keywords: ["gene", "genomic", "brca", "tp53", "snp", "cnv", "chromosome", "thalassemia", "基因", "染色体", "地中海贫血"]
+          keywords: [
+            "gene", "genomic", "brca", "tp53", "snp", "cnv", "chromosome", "thalassemia",
+            "mutation", "dna", "rna", "sequence", "基因", "染色体", "地中海贫血", "基因突变", "序列"
+          ]
+          use_word_boundaries: false
 
 # ==============================================================================
 # 2. 敏感度降级与覆盖规则 (downgrade_rules)
@@ -87,7 +108,10 @@ rules:
 downgrade_rules:
   - id: "DOWN_SC_HEALTH_DB51_OPS"
     name: "运营统计指标降级示例"
-    keywords: ["turnover", "inventory", "device_usage", "开机次数", "门诊人次", "运行时间"]
+    keywords: [
+      "turnover", "inventory", "device_usage", "stat", "count", "cnt",
+      "开机次数", "门诊人次", "运行时间", "设备统计", "工作量", "人次统计", "汇总"
+    ]
     level: "L2"
     category: "MANAGEMENT"
     force_suppress: false                 # 是否开启强制压制擦除普通规则标签 (true/false)

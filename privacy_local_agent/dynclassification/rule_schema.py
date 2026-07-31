@@ -1,9 +1,55 @@
 """声明式规则 Profile 数据模型 / Declarative Rule Profile Schema.
 
-定义规则匹配器（Matcher）、规则（Rule）、降级规则、复合规则、 / Defines models for Matcher, Rule, Downgrade Rule, Composite Rule,
-领域规则包（RuleProfile）和标准组合（StandardDef）的 Pydantic 模型。 / Domain Rule Pack (RuleProfile), and Standard Combination (StandardDef).
+本模块定义了动态分类分级系统中所有规则与配置的 Pydantic v2 强类型数据结构契约（Data Schema Contract）。
+包含匹配器（MatcherDef）、单条规则（RuleDef）、降级与压制规则（DowngradeRuleDef）、
+记录级复合规则（CompositeRuleDef）、领域规则包（RuleProfile）以及组合标准（StandardDef）。
 
-所有规则均通过 YAML/JSON 声明式定义，引擎仅负责解释执行。 / All rules are declaratively defined via YAML/JSON, and the engine is only responsible for interpretation and execution.
+===================================================================================
+                       动态分类分级架构与 rule_schema 的位置
+               Dynamic Classification Architecture & rule_schema Role
+===================================================================================
+
+ [ 外部配置源 / External Configurations ]
+   ├── YAML Profiles (rules/domains/*.yaml)     -> 领域规则包 (general-pii, medical, finance...)
+   └── YAML Standards (rules/standards/*.yaml) -> 行业合规标准 (sc_health_db51, jrt0197...)
+                           │
+                           │  YAML 反序列化 & Schema 强类型校验 (Pydantic Validation)
+                           ▼
+ ┌─────────────────────────────────────────────────────────────────────────────────┐
+ │                       ★ rule_schema.py (数据契约层 / Data Schemas)              │
+ │                                                                                 │
+ │  将文本配置转换为 Pydantic v2 内存数据模型:                                      │
+ │   ├── MatcherDef        : 匹配算子元数据 (target: field_name/field_value, op...)  │
+ │   ├── RuleDef           : 字段级分类规则 (id, category, level, matchers...)      │
+ │   ├── DowngradeRuleDef  : 降级/压制规则 (keywords, level, force_suppress...)       │
+ │   ├── CompositeRuleDef  : 记录级组合升级规则 (patterns, min_matches, target_level) │
+ │   ├── RuleProfile       : 领域规则包容器 (domain, rules, downgrade_rules...)     │
+ │   └── StandardDef       : 标准集组合与覆盖 (domains, global_params, overrides)   │
+ └────────────────────────────────────────┬────────────────────────────────────────┘
+                                          │
+                                          │  读取模型构建规则集 (Pass Model Objects)
+                                          ▼
+ [ 规则加载与合并器 / Profile Loader ] (profile_loader.py)
+   ├── 加载 StandardDef 引用的所有领域规则包 (RuleProfile)
+   ├── 执行全局覆盖 (global_params) 与规则级覆盖 (rule_overrides)
+   └── 输出合并后的规则集合 list[RuleDef] / list[DowngradeRuleDef]
+                           │
+                           │  初始化与引擎加载 (Initialize Runtime Engines)
+                           ▼
+ [ 规则评估引擎 / Execution Engines ] (engine.py / composite.py)
+   ├── ConfigurableRuleEngine (评估字段规则 & 执行降级压制)
+   │      │
+   │      ├─► 调度 OperatorRegistry 算子 (regex, keyword_contains, checksum...)
+   │      └─► 计算并输出字段标签 list[SecurityTag]
+   └── CompositeRuleEngine (评估记录级多字段组合升级规则)
+                           │
+                           │  3层分类漏斗调度 (3-Layer Classification Funnel)
+                           ▼
+ [ 3层分类分级漏斗 / Funnel System ] (funnel.py)
+   ├── Layer-1: 规则引擎 (Rule Engine - rule_schema 驱动) ---> 命中直接输出高置信度 Tag
+   ├── Layer-2: 实体识别 (Small-NER Engine) -----------------> 未命中/低置信度时提取数据实体
+   └── Layer-3: 本地大模型 (Local LLM/VLM Adapter) -----------> 疑难/长尾字段做自然语言语义仲裁
+===================================================================================
 """
 
 from __future__ import annotations
