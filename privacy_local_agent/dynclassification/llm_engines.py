@@ -203,7 +203,7 @@ class Qwen2VLClassifier(LlmClassifier):
                 # 从本地目录加载预训练模型权重
                 self._model = Qwen2VLForConditionalGeneration.from_pretrained(
                     self.model_path,
-                    torch_dtype=dtype,  # 模型精度
+                    dtype=dtype,  # 模型精度（transformers 已弃用 torch_dtype）
                     # CUDA/MPS 使用自动设备映射（多层分配到不同设备），CPU 不需要
                     device_map="auto" if device in ("cuda", "mps") else None,
                 )
@@ -265,19 +265,45 @@ class Qwen2VLClassifier(LlmClassifier):
             return False  # 初始化失败（依赖缺失/模型不存在等）
 
     @staticmethod
+    def _is_cuda_compatible(torch: Any) -> bool:
+        """验证当前 PyTorch 是否真能在检测到的 CUDA 设备上执行 kernel。
+
+        某些 GPU 的算力（compute capability）比当前 PyTorch 构建支持的范围更新
+        （例如 RTX 50 系列的 sm_120 与 PyTorch 2.6+cu124）。此时
+        ``torch.cuda.is_available()`` 仍会返回 True，但任何真正的 CUDA 运算都会抛出
+        ``RuntimeError: no kernel image is available for execution on the device``。
+
+        本方法执行一次微小的张量运算来确认 CUDA 不仅“可见”而且“可用”，避免后续
+        模型加载时因不兼容架构而崩溃。
+
+        Returns:
+            当前 PyTorch 能在 CUDA 上执行 kernel 时返回 True，否则 False。
+        """
+        if not torch.cuda.is_available():
+            return False
+        try:
+            # 执行一次需要 CUDA kernel 的微小运算，捕获算力不兼容等真实错误。
+            a = torch.tensor([1.0, 2.0, 3.0], device="cuda")
+            b = torch.tensor([1.0, 1.0, 1.0], device="cuda")
+            _ = (a + b).sum().item()
+            return True
+        except RuntimeError:
+            return False
+
+    @staticmethod
     def _select_device(torch: Any) -> str:
         """根据硬件环境选择推理设备 / Select Inference Device.
 
         选择策略：
-        1. 若存在 NVIDIA GPU 且空闲显存足够加载 Qwen2-VL-2B（FP16 约需 5GB+），
-           则使用 CUDA 并配合 device_map="auto" 自动分配。
+        1. 若存在 NVIDIA GPU、PyTorch 能兼容其算力且空闲显存足够加载 Qwen2-VL-2B
+           （FP16 约需 5GB+），则使用 CUDA 并配合 device_map="auto" 自动分配。
         2. 若 macOS MPS 可用，使用 Apple Silicon GPU。
         3. 否则回退到 CPU。
 
         Returns:
             设备字符串："cuda" / "mps" / "cpu"。
         """
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and Qwen2VLClassifier._is_cuda_compatible(torch):
             try:
                 total_free = sum(
                     torch.cuda.mem_get_info(i)[0] for i in range(torch.cuda.device_count())

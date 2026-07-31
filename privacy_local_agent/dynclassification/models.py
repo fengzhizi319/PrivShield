@@ -98,6 +98,13 @@ class ConfidencePolicy(BaseModel):
         alias="nerTriggerMaxRank",
         description="NER 触发阈值：当前等级 rank <= 此值时触发 NER（默认 3）",
     )
+    # Minimum tag confidence to participate in final level resolution.
+    # Tags below this threshold are preserved for audit but excluded from max_level calculation.
+    min_tag_confidence: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        alias="minTagConfidence",
+        description="参与最终等级裁定的最低标签置信度（低于此值的标签仅作审计记录，不影响等级）",
+    )
 
 
 # ===========================================================================

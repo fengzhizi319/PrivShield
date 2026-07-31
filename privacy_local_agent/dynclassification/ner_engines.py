@@ -520,6 +520,29 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
         # 初始化错误缓存
         self._init_error: Exception | None = None
 
+    @staticmethod
+    def _is_cuda_compatible(torch: Any) -> bool:
+        """验证当前 PyTorch 是否真能在检测到的 CUDA 设备上执行 kernel。
+
+        某些 GPU 的算力（compute capability）比当前 PyTorch 构建支持的范围更新
+        （例如 RTX 50 系列的 sm_120 与 PyTorch 2.6+cu124）。此时
+        ``torch.cuda.is_available()`` 仍会返回 True，但真正的 CUDA 运算会抛出
+        ``RuntimeError: no kernel image is available for execution on the device``。
+        本方法执行一次微小的张量运算来确认 CUDA 实际可用，避免后续加载失败。
+
+        Returns:
+            当前 PyTorch 能在 CUDA 上执行 kernel 时返回 True，否则 False。
+        """
+        if not torch.cuda.is_available():
+            return False
+        try:
+            a = torch.tensor([1.0, 2.0, 3.0], device="cuda")
+            b = torch.tensor([1.0, 1.0, 1.0], device="cuda")
+            _ = (a + b).sum().item()
+            return True
+        except RuntimeError:
+            return False
+
     def _lazy_init(self):
         """延迟加载 ModelScope 管道 / Lazy-Load ModelScope Pipeline.
 
@@ -625,13 +648,22 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
                 "modelscope_ner_pipeline_loading",
                 extra={"model_id": self.model_id, "model_ref": model_ref},
             )
+            # 检测 CUDA 是否真正可用；算力不兼容时强制 CPU，避免初始化崩溃
+            import torch
+
+            device = "cuda" if self._is_cuda_compatible(torch) else "cpu"
+            if device == "cpu":
+                logger.info(
+                    "modelscope_ner_select_cpu",
+                    extra={"reason": "cuda_not_compatible_or_unavailable"},
+                )
             # 创建命名实体识别管道
-            self.pipeline = pipeline(Tasks.named_entity_recognition, model=model_ref)
+            self.pipeline = pipeline(Tasks.named_entity_recognition, model=model_ref, device=device)
             # 标记初始化成功
             self._initialized = True
             logger.info(
                 "modelscope_ner_engine_initialized",
-                extra={"model_id": self.model_id, "engine": "modelscope"},
+                extra={"model_id": self.model_id, "engine": "modelscope", "device": device},
             )
         except Exception as e:
             # 缓存初始化错误

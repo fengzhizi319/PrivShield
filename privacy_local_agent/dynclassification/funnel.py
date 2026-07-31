@@ -5,41 +5,43 @@
 
 执行流程:
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  ClassificationFunnel.classify_field(field_name, value)                  │
-│                                                                          │
-│  Step 1: Layer-1 规则引擎评估                                           │
-│    tags, suppressed_tags = engine.evaluate(field_name, value)            │
+│  ClassificationFunnel.classify_field(field_name, value)                 │
+│                                                                         │
+│  Step 1: Layer-1 规则引擎评估                                             │
+│    tags, suppressed_tags = engine.evaluate(field_name, value)           │
 │    confidence = 1.0 if tags else 0.0                                    │
 │    engine_layer = "L1_RULE"                                             │
-│                                                                          │
-│  Step 2: 冲突检测                                                       │
-│    has_normal = 存在 source_engine=="RULE" 且 is_override==False 的标签  │
-│    has_downgrade = 存在 is_override==True 的标签                         │
-│    has_conflict = has_normal AND has_downgrade                           │
-│                                                                          │
-│  Step 3: Layer-2 NER (可选)                                             │
-│    触发: policy.enable_ner AND (无标签 OR 等级 <= 阈值)                  │
-│    ner_tags = ner_adapter.extract(value)                                 │
-│    → 映射为 SecurityTag, 追加到 tags                                    │
+│                                                                         │
+│  Step 2: 冲突检测                                                         │
+│    has_normal = 存在 source_engine=="RULE" 且 is_override==False 的标签    │
+│    has_downgrade = 存在 is_override==True 的标签                          │
+│    has_conflict = has_normal AND has_downgrade                          │
+│                                                                         │
+│  Step 3: Layer-2 NER (可选)                                              │
+│    触发: policy.enable_ner AND (无标签 OR 等级 <= 阈值)                     │
+│    ner_tags = ner_adapter.extract(value)                                │
+│    → 映射为 SecurityTag, 追加到 tags                                      │
 │    → engine_layer = "L2_SMALL_NER"                                      │
-│                                                                          │
-│  Step 4: 置信度策略 + Layer-3 LLM (可选)                                │
-│    ┌───────────────────────────────────────────────────────────────┐    │
+│                                                                         │
+│  Step 4: 置信度策略 + Layer-3 LLM (可选)                                   │
+│    ┌────────────────────────────────────────────────────────────────┐    │
 │    │  if has_conflict:                                              │    │
 │    │    if policy.enable_llm_arbitration AND llm.is_available:      │    │
-│    │      → LLM 仲裁: 裁定等级 + 修正置信度                       │    │
+│    │      → LLM 仲裁: 裁定等级 + 修正置信度                              │    │
 │    │      → engine_layer = "L3_LLM"                                 │    │
 │    │    else:                                                       │    │
-│    │      → Phase 1 衰减: confidence = policy.conflict_confidence   │    │
+│    │      → Phase 1 衰减: confidence = policy.conflict_confidence    │    │
 │    │      → needs_human_review = policy.conflict_needs_review       │    │
 │    │  elif confidence < policy.llm_confidence_threshold:            │    │
 │    │    if policy.enable_llm AND llm.is_available:                  │    │
-│    │      → LLM 深度分类                                           │    │
+│    │      → LLM 深度分类                                              │    │
 │    │      → engine_layer = "L3_LLM"                                 │    │
-│    └───────────────────────────────────────────────────────────────┘    │
+│    └────────────────────────────────────────────────────────────────┘    │
 │                                                                          │
-│  Step 5: 计算最终等级 + 构造 FunnelResult                               │
-│    final_level = taxonomy.max_level(*tag_levels) or default_level        │
+│  Step 5: 计算最终等级 + 构造 FunnelResult                                   │
+│    - LLM 仲裁成功时直接使用 LLM 裁定等级（不再走 max_level）                  │
+│    - 否则: 排除降级标签 + 过滤低置信度标签后取 max_level                      │
+│    final_level = llm_level or resolve_level(effective_tags)             │
 └─────────────────────────────────────────────────────────────────────────┘
 """
 
@@ -150,6 +152,8 @@ class ClassificationFunnel:
         confidence = 1.0 if tags else 0.0
         engine_layer = EngineLayer.L1_RULE
         reasoning = ""
+        # 记录 L1 是否产出了标签（用于 Step 3 判断 engine_layer 归属）
+        l1_has_tags = bool(tags)
 
         if tags:
             rule_ids = [t.rule_id for t in tags if t.rule_id]
@@ -174,11 +178,21 @@ class ClassificationFunnel:
                 if ner_tags:
                     tags.extend(ner_tags)
                     confidence = max(confidence, max(t.confidence for t in ner_tags))
-                    engine_layer = EngineLayer.L2_SMALL_NER
+                    # 仅当 NER 实际影响了最终决策时才更新 engine_layer 归属:
+                    # - L1 无标签时 NER 提供了首个分类结果 → 归属 L2
+                    # - NER 等级高于 L1 结果 → 归属 L2
+                    # Update engine_layer only when NER actually influences the outcome:
+                    # - L1 produced no tags and NER provides the first classification
+                    # - NER level rank exceeds what L1 determined
+                    ner_level = self._resolve_level(ner_tags)
+                    if not l1_has_tags or self.taxonomy.get_level_rank(ner_level) > current_rank:
+                        engine_layer = EngineLayer.L2_SMALL_NER
                     reasoning += " | NER 实体识别命中"
 
         # ===== Step 4: 置信度策略 + Layer-3 LLM =====
         needs_human_review = any(t.needs_human_review for t in tags)
+        # LLM 裁定等级：非空时 Step 5 直接使用此等级，不再走 max_level
+        llm_adjudicated_level: str = ""
 
         if has_conflict:
             # 场景 A: 规则冲突
@@ -195,10 +209,11 @@ class ClassificationFunnel:
                     confidence = float(llm_result.get("confidence", confidence))
                     reasoning = str(llm_result.get("reasoning", reasoning))
                     engine_layer = EngineLayer.L3_LLM
-                    # LLM 可能修正最终等级（通过返回的 final_level）
+                    # LLM 裁定等级：直接作为最终等级，不被其他标签的 max_level 覆盖
                     llm_level = llm_result.get("final_level", "")
                     if llm_level and llm_level in self.taxonomy.levels:
-                        # 追加一个 LLM 裁定标签
+                        llm_adjudicated_level = llm_level
+                        # 追加一个 LLM 裁定标签（用于审计追踪）
                         tags.append(SecurityTag(
                             level=llm_level,
                             category="LLM_ARBITRATION",
@@ -234,6 +249,7 @@ class ClassificationFunnel:
                     engine_layer = EngineLayer.L3_LLM
                     llm_level = llm_result.get("final_level", "")
                     if llm_level and llm_level in self.taxonomy.levels:
+                        llm_adjudicated_level = llm_level
                         tags.append(SecurityTag(
                             level=llm_level,
                             category="LLM_CLASSIFICATION",
@@ -245,7 +261,13 @@ class ClassificationFunnel:
                         ))
 
         # ===== Step 5: 计算最终等级 =====
-        final_level = self._resolve_level(tags)
+        # 优先级: LLM 裁定等级 > 有效标签 max_level
+        # Priority: LLM adjudicated level > max_level of effective tags
+        if llm_adjudicated_level:
+            # LLM 仲裁/深度分类成功裁定了等级，直接使用，不被其他标签覆盖
+            final_level = llm_adjudicated_level
+        else:
+            final_level = self._resolve_level(tags)
 
         funnel_result = FunnelResult(
             tags=tags,
@@ -265,11 +287,36 @@ class ClassificationFunnel:
     def _resolve_level(self, tags: list[SecurityTag]) -> str:
         """从标签列表中解析最终等级（取最高 rank）。
 
-        无标签时返回 taxonomy 的 default_level。
+        Resolve the final sensitivity level from a list of security tags.
+
+        过滤规则 / Filtering rules:
+        1. 排除置信度低于 min_tag_confidence 的标签：防止低置信度 NER 标签
+           无条件拉高最终等级。/ Tags below min_tag_confidence are excluded to
+           prevent low-confidence NER tags from unconditionally raising the level.
+        2. 当非降级标签存在时，排除降级标签（is_downgrade=True）：
+           降级标签不应上推等级，其压制效果已通过 suppressed_tags 体现。
+           但当 override 已压制所有普通标签、仅剩降级标签时，
+           降级标签代表最终裁定，应参与计算。
+           / Downgrade tags are excluded when normal tags survive (they shouldn't
+           raise the level). But when override has suppressed all normal tags and
+           only downgrade tags remain, they represent the final verdict.
+
+        无有效标签时返回 taxonomy 的 default_level。
+        Returns taxonomy.default_level when no effective tags remain.
         """
         if not tags:
             return self.taxonomy.default_level
-        levels = [t.level for t in tags]
+        # Step 1: 过滤低置信度标签 / Filter low-confidence tags
+        min_conf = self.policy.min_tag_confidence
+        confident_tags = [t for t in tags if t.confidence >= min_conf]
+        if not confident_tags:
+            # 所有标签均低于置信度阈值，回退到默认等级
+            return self.taxonomy.default_level
+        # Step 2: 当非降级标签存在时，排除降级标签
+        # Exclude downgrade tags only when normal (non-downgrade) tags survive
+        normal_tags = [t for t in confident_tags if not t.is_downgrade]
+        effective = normal_tags if normal_tags else confident_tags
+        levels = [t.level for t in effective]
         return self.taxonomy.max_level(*levels)
 
     def _run_ner(self, text: str) -> list[SecurityTag]:
