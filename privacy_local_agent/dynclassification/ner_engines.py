@@ -775,6 +775,12 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
                 )
             # 创建命名实体识别管道
             self.pipeline = pipeline(Tasks.named_entity_recognition, model=model_ref, device=device)
+            # ModelScope 某些版本 pipeline 参数不会自动将权重搬移到 GPU，必须显式调用 model.to(device)
+            if device and device != "cpu" and hasattr(self.pipeline, "model") and hasattr(self.pipeline.model, "to"):
+                try:
+                    self.pipeline.model.to(device)
+                except Exception as e:
+                    logger.warning("modelscope_ner_model_to_device_failed", extra={"device": device, "error": str(e)})
             # 标记初始化成功
             self._initialized = True
             logger.info(
