@@ -38,6 +38,7 @@ avoiding heavy ML dependencies (torch/transformers) in the core path.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from ..observability.logging_config import get_logger
@@ -80,6 +81,7 @@ class LlmAdapter:
         self._fallback_classifier: Any = None  # PyTorch 回退引擎（支持视觉）
         self._available = True
         self._initialized = False
+        self._init_lock = threading.Lock()
 
     def _lazy_init(self) -> None:
         """延迟初始化 LLM 分类器 / Lazy initialize LLM classifier.
@@ -88,37 +90,45 @@ class LlmAdapter:
         1. MLXLlmClassifier (Apple Silicon Metal GPU, macOS 优先)
         2. Qwen2VLClassifier (PyTorch, CUDA/MPS/CPU)
         失败则标记不可用。
+
+        线程安全：使用 Lock + double-check 防止并发请求重复初始化。
         """
         if self._initialized:
             return
-        self._initialized = True
 
-        # 尝试 1: MLX 引擎（Apple Silicon Metal GPU）
-        try:
-            from .mlx_llm_engine import MLXLlmClassifier
-            self._classifier = MLXLlmClassifier(
-                model_dir=self._model_path,
-                classify_prompt_template=self._classify_prompt_template,
-            )
-            self._classifier._lazy_init()
-            logger.info("llm_adapter_initialized", extra={"backend": "mlx_metal", "model_path": self._model_path})
-            # MLX 不支持视觉，延迟初始化 PyTorch 回退引擎
-            return
-        except Exception as e:
-            logger.debug("llm_mlx_unavailable", extra={"error": str(e)})
+        with self._init_lock:
+            if self._initialized:
+                return
 
-        # 尝试 2: PyTorch Qwen2VL 引擎
-        try:
-            from .llm_engines import Qwen2VLClassifier
-            self._classifier = Qwen2VLClassifier(
-                model_path=self._model_path,
-                classify_prompt_template=self._classify_prompt_template,
-                device=self._device,
-            )
-            logger.info("llm_adapter_initialized", extra={"backend": "qwen2vl", "model_path": self._model_path})
-        except Exception as e:
-            self._available = False
-            logger.info("llm_adapter_unavailable", extra={"error": str(e)})
+            # 尝试 1: MLX 引擎（Apple Silicon Metal GPU）
+            try:
+                from .mlx_llm_engine import MLXLlmClassifier
+                self._classifier = MLXLlmClassifier(
+                    model_dir=self._model_path,
+                    classify_prompt_template=self._classify_prompt_template,
+                )
+                self._classifier._lazy_init()
+                logger.info("llm_adapter_initialized", extra={"backend": "mlx_metal", "model_path": self._model_path})
+                self._initialized = True
+                # MLX 不支持视觉，延迟初始化 PyTorch 回退引擎
+                return
+            except Exception as e:
+                logger.debug("llm_mlx_unavailable", extra={"error": str(e)})
+
+            # 尝试 2: PyTorch Qwen2VL 引擎
+            try:
+                from .llm_engines import Qwen2VLClassifier
+                self._classifier = Qwen2VLClassifier(
+                    model_path=self._model_path,
+                    classify_prompt_template=self._classify_prompt_template,
+                    device=self._device,
+                )
+                logger.info("llm_adapter_initialized", extra={"backend": "qwen2vl", "model_path": self._model_path})
+                self._initialized = True
+            except Exception as e:
+                self._available = False
+                self._initialized = True
+                logger.info("llm_adapter_unavailable", extra={"error": str(e)})
 
     @property
     def is_available(self) -> bool:

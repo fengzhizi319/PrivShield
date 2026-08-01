@@ -346,8 +346,13 @@ func (s *Server) Proxy(c *gin.Context) {
 	// 这里忽略 req.Method，由 mapper 根据 path 决定 gRPC 调用语义。
 	// 记录调用开始时间，用于计算 gRPC 调用耗时
 	start := time.Now()
-	// 拦截并转发动态分类分级 /v1/dynclassification/* REST 请求
-	if strings.HasPrefix(req.Path, "/v1/dynclassification/") {
+	// 拦截并转发纯 REST 路径（无 gRPC 对应）：
+	// - /v1/dynclassification/* 动态分类分级
+	// - /v1/ops/* 运维诊断
+	// - /health 健康检查
+	if strings.HasPrefix(req.Path, "/v1/dynclassification/") ||
+		strings.HasPrefix(req.Path, "/v1/ops/") ||
+		req.Path == "/health" {
 		s.proxyRest(c, start, req)
 		return
 	}

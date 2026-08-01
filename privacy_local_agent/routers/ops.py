@@ -30,6 +30,7 @@ import os
 import platform
 import shutil
 import sys
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -186,8 +187,11 @@ def _engine_available(spec: dict[str, Any]) -> tuple[bool, str | None]:
 # ---------------------------------------------------------------------------
 
 # 模块级缓存：探测结果只执行一次（避免重复加载数百 MB 模型）。
+# 使用 Lock 保护，防止并发请求重复初始化（竞态条件）。
 _probe_cache: dict[str, Any] | None = None
 _probe_llm_cache: dict[str, Any] | None = None
+_probe_lock = threading.Lock()
+_probe_llm_lock = threading.Lock()
 
 
 def _probe_ner_engines() -> dict[str, Any]:
@@ -211,68 +215,73 @@ def _probe_ner_engines() -> dict[str, Any]:
     if _probe_cache is not None:
         return _probe_cache
 
-    details: list[dict[str, Any]] = []
-    active: str | None = None
+    with _probe_lock:
+        # Double-check：获取锁后再次检查（另一线程可能已完成初始化）。
+        if _probe_cache is not None:
+            return _probe_cache
 
-    # 尝试 0: MLX（Apple Silicon Metal GPU）
-    try:
-        from ..dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        details: list[dict[str, Any]] = []
+        active: str | None = None
 
-        engine = MLXSmallNerEngine()
-        engine._lazy_init()
-        details.append({"engine": "mlx", "ok": True, "error": None})
-        active = "mlx"
-    except Exception as e:
-        details.append({"engine": "mlx", "ok": False, "error": str(e)})
-
-    # 尝试 1: TensorRT（NVIDIA GPU 硬件加速）
-    if active is None:
+        # 尝试 0: MLX（Apple Silicon Metal GPU）
         try:
-            from ..dynclassification.ner_engines import TensorRTSmallNerEngine
+            from ..dynclassification.mlx_ner_engine import MLXSmallNerEngine
 
-            engine = TensorRTSmallNerEngine()
+            engine = MLXSmallNerEngine()
             engine._lazy_init()
-            details.append({"engine": "tensorrt", "ok": True, "error": None})
-            active = "tensorrt"
+            details.append({"engine": "mlx", "ok": True, "error": None})
+            active = "mlx"
         except Exception as e:
-            details.append({"engine": "tensorrt", "ok": False, "error": str(e)})
-    else:
-        details.append({"engine": "tensorrt", "ok": False, "error": "已由更高优先级引擎激活，跳过"})
+            details.append({"engine": "mlx", "ok": False, "error": str(e)})
 
-    # 尝试 2: ONNX Runtime（轻量推荐）
-    if active is None:
-        try:
-            from ..dynclassification.ner_engines import ONNXSmallNerEngine
+        # 尝试 1: TensorRT（NVIDIA GPU 硬件加速）
+        if active is None:
+            try:
+                from ..dynclassification.ner_engines import TensorRTSmallNerEngine
 
-            engine = ONNXSmallNerEngine()
-            engine._lazy_init()
-            details.append({"engine": "onnx", "ok": True, "error": None})
-            active = "onnx"
-        except Exception as e:
-            details.append({"engine": "onnx", "ok": False, "error": str(e)})
-    else:
-        details.append({"engine": "onnx", "ok": False, "error": "已由更高优先级引擎激活，跳过"})
+                engine = TensorRTSmallNerEngine()
+                engine._lazy_init()
+                details.append({"engine": "tensorrt", "ok": True, "error": None})
+                active = "tensorrt"
+            except Exception as e:
+                details.append({"engine": "tensorrt", "ok": False, "error": str(e)})
+        else:
+            details.append({"engine": "tensorrt", "ok": False, "error": "已由更高优先级引擎激活，跳过"})
 
-    # 尝试 3: ModelScope（需 PyTorch 全家桶）
-    if active is None:
-        try:
-            from ..dynclassification.ner_engines import ModelScopeSmallNerEngine
+        # 尝试 2: ONNX Runtime（轻量推荐）
+        if active is None:
+            try:
+                from ..dynclassification.ner_engines import ONNXSmallNerEngine
 
-            engine = ModelScopeSmallNerEngine()
-            engine._lazy_init()
-            details.append({"engine": "modelscope", "ok": True, "error": None})
-            active = "modelscope"
-        except Exception as e:
-            details.append({"engine": "modelscope", "ok": False, "error": str(e)})
-    else:
-        details.append({"engine": "modelscope", "ok": False, "error": "已由更高优先级引擎激活，跳过"})
+                engine = ONNXSmallNerEngine()
+                engine._lazy_init()
+                details.append({"engine": "onnx", "ok": True, "error": None})
+                active = "onnx"
+            except Exception as e:
+                details.append({"engine": "onnx", "ok": False, "error": str(e)})
+        else:
+            details.append({"engine": "onnx", "ok": False, "error": "已由更高优先级引擎激活，跳过"})
 
-    _probe_cache = {
-        "active_engine": active or "none",
-        "available": active is not None,
-        "details": details,
-    }
-    return _probe_cache
+        # 尝试 3: ModelScope（需 PyTorch 全家桶）
+        if active is None:
+            try:
+                from ..dynclassification.ner_engines import ModelScopeSmallNerEngine
+
+                engine = ModelScopeSmallNerEngine()
+                engine._lazy_init()
+                details.append({"engine": "modelscope", "ok": True, "error": None})
+                active = "modelscope"
+            except Exception as e:
+                details.append({"engine": "modelscope", "ok": False, "error": str(e)})
+        else:
+            details.append({"engine": "modelscope", "ok": False, "error": "已由更高优先级引擎激活，跳过"})
+
+        _probe_cache = {
+            "active_engine": active or "none",
+            "available": active is not None,
+            "details": details,
+        }
+        return _probe_cache
 
 
 def _probe_llm() -> dict[str, Any]:
@@ -285,21 +294,26 @@ def _probe_llm() -> dict[str, Any]:
     if _probe_llm_cache is not None:
         return _probe_llm_cache
 
-    try:
-        from ..dynclassification.llm_adapter import LlmAdapter
+    with _probe_llm_lock:
+        # Double-check：获取锁后再次检查。
+        if _probe_llm_cache is not None:
+            return _probe_llm_cache
 
-        adapter = LlmAdapter()
-        available = adapter.is_available
-        _probe_llm_cache = {
-            "available": available,
-            "error": None if available else "LlmAdapter 初始化失败（依赖或模型不完整）",
-        }
-    except Exception as e:
-        _probe_llm_cache = {
-            "available": False,
-            "error": str(e),
-        }
-    return _probe_llm_cache
+        try:
+            from ..dynclassification.llm_adapter import LlmAdapter
+
+            adapter = LlmAdapter()
+            available = adapter.is_available
+            _probe_llm_cache = {
+                "available": available,
+                "error": None if available else "LlmAdapter 初始化失败（依赖或模型不完整）",
+            }
+        except Exception as e:
+            _probe_llm_cache = {
+                "available": False,
+                "error": str(e),
+            }
+        return _probe_llm_cache
 
 
 def _runtime_ner_engine() -> str | None:

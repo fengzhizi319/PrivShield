@@ -29,6 +29,7 @@ avoiding heavy ML dependencies in the core path.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from ..observability.logging_config import get_logger
@@ -72,6 +73,7 @@ class NerAdapter:
         self._engine: Any = None
         self._available = True  # 乐观假设可用，初始化失败后改为 False
         self._initialized = False
+        self._init_lock = threading.Lock()
 
     def _lazy_init(self) -> None:
         """延迟初始化 NER 引擎 / Lazy initialize NER engine.
@@ -82,73 +84,85 @@ class NerAdapter:
         2. ONNXSmallNerEngine (轻量, 无需 PyTorch / Lightweight, no PyTorch required)
         3. ModelScopeSmallNerEngine (需 PyTorch + modelscope / Requires PyTorch + modelscope)
         4. 均失败 → 标记不可用 / All failed → Mark as unavailable
+
+        线程安全：使用 Lock + double-check 防止并发请求重复初始化。
         """
         if self._initialized:
             return
-        self._initialized = True
 
-        # 尝试 0: MLX 引擎（Apple Silicon Metal GPU，macOS 优先）
-        try:
-            from .mlx_ner_engine import MLXSmallNerEngine
-            engine = MLXSmallNerEngine(
-                label_mapping=self._label_mapping,
-            )
-            engine._lazy_init()
-            self._engine = engine
-            logger.info("ner_adapter_initialized", extra={"backend": "mlx_metal"})
-            return
-        except Exception as e:
-            logger.debug("ner_mlx_unavailable", extra={"error": str(e)})
+        with self._init_lock:
+            if self._initialized:
+                return
 
-        # 尝试 1: TensorRT 引擎（纯 C++ 硬件加速，FP16 模式）
-        try:
-            from .ner_engines import TensorRTSmallNerEngine
-            engine = TensorRTSmallNerEngine(
-                model_path=self._model_path,
-                vocab_path=self._vocab_path,
-                label_mapping=self._label_mapping,
-                device=self._device,
-            )
-            engine._lazy_init()
-            self._engine = engine
-            logger.info("ner_adapter_initialized", extra={"backend": "tensorrt"})
-            return
-        except Exception as e:
-            logger.debug("ner_tensorrt_unavailable", extra={"error": str(e)})
+            # 尝试 0: MLX 引擎（Apple Silicon Metal GPU，macOS 优先）
+            try:
+                from .mlx_ner_engine import MLXSmallNerEngine
+                engine = MLXSmallNerEngine(
+                    label_mapping=self._label_mapping,
+                )
+                engine._lazy_init()
+                self._engine = engine
+                logger.info("ner_adapter_initialized", extra={"backend": "mlx_metal"})
+                self._initialized = True
+                return
+            except Exception as e:
+                logger.debug("ner_mlx_unavailable", extra={"error": str(e)})
 
-        # 尝试 2: ONNX Runtime 引擎 (CUDA / CPU)
-        try:
-            from .ner_engines import ONNXSmallNerEngine
-            engine = ONNXSmallNerEngine(
-                model_path=self._model_path,
-                vocab_path=self._vocab_path,
-                label_mapping=self._label_mapping,
-                device=self._device,
-            )
-            # 触发模型加载验证（如果文件不存在会抛出异常）
-            engine._lazy_init()
-            self._engine = engine
-            logger.info("ner_adapter_initialized", extra={"backend": "onnx"})
-            return
-        except Exception as e:
-            logger.debug("ner_onnx_unavailable", extra={"error": str(e)})
-        
-        # 尝试 2: ModelScope 引擎
-        try:
-            from .ner_engines import ModelScopeSmallNerEngine
-            engine = ModelScopeSmallNerEngine(
-                label_mapping=self._label_mapping,
-                device=self._device,
-            )
-            self._engine = engine
-            logger.info("ner_adapter_initialized", extra={"backend": "modelscope"})
-            return
-        except Exception as e:
-            logger.debug("ner_modelscope_unavailable", extra={"error": str(e)})
+            # 尝试 1: TensorRT 引擎（纯 C++ 硬件加速，FP16 模式）
+            try:
+                from .ner_engines import TensorRTSmallNerEngine
+                engine = TensorRTSmallNerEngine(
+                    model_path=self._model_path,
+                    vocab_path=self._vocab_path,
+                    label_mapping=self._label_mapping,
+                    device=self._device,
+                )
+                engine._lazy_init()
+                self._engine = engine
+                logger.info("ner_adapter_initialized", extra={"backend": "tensorrt"})
+                self._initialized = True
+                return
+            except Exception as e:
+                logger.debug("ner_tensorrt_unavailable", extra={"error": str(e)})
 
-        # 均不可用
-        self._available = False
-        logger.info("ner_adapter_unavailable", extra={"reason": "no backend available"})
+            # 尝试 2: ONNX Runtime 引擎 (CUDA / CPU)
+            try:
+                from .ner_engines import ONNXSmallNerEngine
+                engine = ONNXSmallNerEngine(
+                    model_path=self._model_path,
+                    vocab_path=self._vocab_path,
+                    label_mapping=self._label_mapping,
+                    device=self._device,
+                )
+                # 触发模型加载验证（如果文件不存在会抛出异常）
+                engine._lazy_init()
+                self._engine = engine
+                logger.info("ner_adapter_initialized", extra={"backend": "onnx"})
+                self._initialized = True
+                return
+            except Exception as e:
+                logger.debug("ner_onnx_unavailable", extra={"error": str(e)})
+
+            # 尝试 3: ModelScope 引擎（需 PyTorch + modelscope）
+            try:
+                from .ner_engines import ModelScopeSmallNerEngine
+                engine = ModelScopeSmallNerEngine(
+                    label_mapping=self._label_mapping,
+                    device=self._device,
+                )
+                # 触发模型加载验证（与其他引擎保持一致）
+                engine._lazy_init()
+                self._engine = engine
+                logger.info("ner_adapter_initialized", extra={"backend": "modelscope"})
+                self._initialized = True
+                return
+            except Exception as e:
+                logger.debug("ner_modelscope_unavailable", extra={"error": str(e)})
+
+            # 均不可用
+            self._available = False
+            self._initialized = True
+            logger.info("ner_adapter_unavailable", extra={"reason": "no backend available"})
 
     @property
     def is_available(self) -> bool:
