@@ -14,7 +14,7 @@
  */
 
 /** 导入所有前后端数据契约类型 / Import all frontend-backend data contract types */
-import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse } from '@/types/api';
+import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse, OpsDiagnostics } from '@/types/api';
 
 /** 当前后端基址（空串表示同源，即请求发往当前页面所在的服务器）。 */
 /** Current backend base URL (empty string means same-origin, i.e. requests go to the server hosting the page). */
@@ -259,4 +259,26 @@ export async function lbTest(req: LbTestRequest): Promise<LbTestResponse> {
     headers: { 'Content-Type': 'application/json' }, // JSON 请求体 / JSON request body
     body: JSON.stringify(req), // 序列化请求对象 / Serialize request object
   });
+}
+
+/**
+ * 获取 Agent 运维诊断信息 / Fetch Agent ops diagnostics
+ *
+ * 通过通用代理转发 GET /v1/ops/diagnostics 到 agent，
+ * 返回 NER/LLM 降级链路、依赖安装情况、模型文件与硬件加速状态。
+ * Forwards GET /v1/ops/diagnostics to agent via generic proxy, returns
+ * NER/LLM degradation chain, dependency installation, model files and hardware acceleration status.
+ *
+ * 该端点为 REST 专用：Python 后端直接转发；Go 后端 gRPC 无对应方法时
+ * 会自动回退到 REST 代理（proxyRest），因此两种后端均可使用。
+ * This endpoint is REST-only: Python backend forwards directly; Go backend
+ * automatically falls back to REST proxy when gRPC has no matching method.
+ *
+ * @returns 运维诊断信息（含引擎状态/依赖/模型/硬件）/ Ops diagnostics (engines/deps/models/hardware)
+ */
+export async function fetchDiagnostics(): Promise<OpsDiagnostics> {
+  // 经通用代理转发 GET 请求到 agent 的诊断端点 / Forward GET request to agent diagnostics endpoint via generic proxy
+  const resp = await proxyRequest({ method: 'GET', path: '/v1/ops/diagnostics' });
+  // proxyRequest 返回包装结构，真实诊断数据在 data 字段 / Wrapped response; actual diagnostics in data field
+  return resp.data as OpsDiagnostics;
 }

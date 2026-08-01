@@ -168,3 +168,126 @@ export interface LbTestResponse {
   duration_ms: number;
   distribution: LbDistItem[];
 }
+
+/* ==================== 运维诊断（/v1/ops/diagnostics） ==================== */
+
+/** 单个依赖的安装检测结果。 */
+export interface OpsDependency {
+  name: string;
+  installed: boolean;
+  version: string | null;
+  /** 该依赖的用途说明 */
+  purpose: string;
+  /** 安装命令提示 */
+  install: string;
+}
+
+/** 单个模型文件的存在性检测结果。 */
+export interface OpsModel {
+  name: string;
+  /** 相对项目根的路径 */
+  path: string;
+  exists: boolean;
+  /** 下载命令提示 */
+  download: string;
+  /** 附加诊断备注（如孤儿 .onnx.data 说明）；无则为 null */
+  note: string | null;
+}
+
+/** NER 降级链中的单个引擎。 */
+export interface OpsNerEngine {
+  engine: string;
+  available: boolean;
+  /** 不可用原因（可用时为 null） */
+  reason: string | null;
+  deps: string[];
+  model: string;
+  note: string;
+  /** 动态探测时的实际错误信息（可选） */
+  probe_error?: string;
+}
+
+/** 动态探测单个引擎结果。 */
+export interface OpsProbeDetail {
+  engine: string;
+  ok: boolean;
+  error: string | null;
+}
+
+/** NER 动态探测结果（与 tests/dynclassification 相同的判定方式）。 */
+export interface OpsNerProbe {
+  active_engine: string;
+  available: boolean;
+  details: OpsProbeDetail[];
+}
+
+/** NER 引擎降级链路状态。 */
+export interface OpsNerStatus {
+  /** 当前激活的引擎（自动判断结果），全不可用时为 "none" */
+  active_engine: string;
+  available: boolean;
+  /** 判定来源：runtime（运行时已初始化）/ probe（动态探测） */
+  determined_by: 'runtime' | 'probe';
+  /** 动态探测详情（实际尝试初始化各引擎的结果） */
+  probe: OpsNerProbe;
+  /** 静态推断：当前依赖/模型条件下会激活的引擎 */
+  predicted_engine: string;
+  /** 运行时真实激活引擎（尚无分类请求时为 null） */
+  runtime_engine: string | null;
+  degradation_chain: OpsNerEngine[];
+}
+
+/** LLM 动态探测结果。 */
+export interface OpsLlmProbe {
+  available: boolean;
+  error: string | null;
+}
+
+/** LLM 引擎状态。 */
+export interface OpsLlmStatus {
+  backend: string;
+  available: boolean;
+  /** 判定来源：runtime / probe */
+  determined_by: 'runtime' | 'probe';
+  /** 动态探测结果（实际尝试实例化 LlmAdapter） */
+  probe: OpsLlmProbe;
+  /** 运行时真实可用状态（尚未初始化时为 null） */
+  runtime_available: boolean | null;
+  deps: string[];
+  deps_met: boolean;
+  model: string;
+  model_exists: boolean;
+  reason: string | null;
+  note: string;
+}
+
+/** 硬件加速（CUDA/GPU）状态。 */
+export interface OpsHardware {
+  platform: string;
+  machine: string;
+  nvidia_smi_found: boolean;
+  /** CUDA 是否可用；torch 未加载时为 null */
+  cuda_available: boolean | null;
+  cuda_detail: string;
+}
+
+/** 运维诊断完整响应（Agent GET /v1/ops/diagnostics）。 */
+export interface OpsDiagnostics {
+  status: string;
+  timestamp: string;
+  service: {
+    name: string;
+    namespace: string;
+    python_version: string;
+    project_root: string;
+    rest_port: number;
+    grpc_port: number;
+  };
+  engines: {
+    ner: OpsNerStatus;
+    llm: OpsLlmStatus;
+  };
+  dependencies: OpsDependency[];
+  models: OpsModel[];
+  hardware: OpsHardware;
+}

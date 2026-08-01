@@ -15,7 +15,8 @@
  *   - batch：批量测试 / Batch test；
  *   - filetest：文件处理 / File processing；
  *   - lbtest：负载均衡测试 / Load balancer test；
- *   - dynclassification：动态分类分级 / Dynamic classification。
+ *   - dynclassification：动态分类分级 / Dynamic classification；
+ *   - ops：运维诊断 / Ops diagnostics。
  *
  * 数据流 / Data Flow：启动时并行拉取 samples 与 health；切换后端时重新拉取。
  * On startup, fetch samples & health in parallel; re-fetch when backend switches.
@@ -43,6 +44,8 @@ import FileTest from '@/components/FileTest';
 import LbTest from '@/components/LbTest';
 /** 引入视图组件：动态分类分级面板 / Import view component: dynamic classification panel */
 import DynClassificationPanel from '@/components/DynClassificationPanel';
+/** 引入视图组件：运维诊断面板 / Import view component: ops diagnostics panel */
+import OpsPanel from '@/components/OpsPanel';
 /** 引入错误边界组件：防止单组件崩溃导致整页白屏 / Import error boundary: prevent single component crash from blank page */
 import ErrorBoundary from '@/components/ErrorBoundary';
 /** 引入后端切换器类型与默认值 / Import backend selector type and default value */
@@ -65,7 +68,8 @@ type View =
   | { type: 'batch' }                             // 批量测试 / Batch test
   | { type: 'filetest' }                          // 文件处理 / File processing
   | { type: 'lbtest' }                            // 负载均衡 / Load balancer
-  | { type: 'dynclassification' };                // 动态分类分级 / Dynamic classification
+  | { type: 'dynclassification' }                // 动态分类分级 / Dynamic classification
+  | { type: 'ops' };                             // 运维诊断 / Ops diagnostics
 
 
 /**
@@ -206,6 +210,8 @@ export default function App() {
               lbTestActive={view.type === 'lbtest'}
               onDynClassify={() => setView({ type: 'dynclassification' })}
               dynClassifyActive={view.type === 'dynclassification'}
+              onOps={() => setView({ type: 'ops' })}
+              opsActive={view.type === 'ops'}
             />
             {/* 主区域容器：占据剩余空间，溢出隐藏 / Main area container: fills remaining space, overflow hidden */}
             <main className="flex-1 overflow-hidden">
@@ -230,6 +236,8 @@ export default function App() {
                   <LbTest agentUrl={health?.agent_url} />
                 ) : view.type === 'dynclassification' ? (
                   <DynClassificationPanel />
+                ) : view.type === 'ops' ? (
+                  <OpsPanel health={health} />
                 ) : (
                   <Overview samples={samples} onSelect={openEndpoint} />
                 )}

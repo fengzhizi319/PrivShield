@@ -204,7 +204,7 @@ class ONNXSmallNerEngine(SmallNerEngine):
     with lazy-loading and graceful degradation support.
     """
 
-    def __init__(self, model_path: str | None = None, vocab_path: str | None = None, label_mapping: dict[str, str] | None = None):
+    def __init__(self, model_path: str | None = None, vocab_path: str | None = None, label_mapping: dict[str, str] | None = None, device: str | None = None):
         """初始化 ONNX NER 引擎 / Initialize ONNX NER Engine.
 
         仅设置路径和状态标志，不实际加载模型（延迟加载策略）。
@@ -213,6 +213,8 @@ class ONNXSmallNerEngine(SmallNerEngine):
             model_path: ONNX 模型文件路径（默认 .models/raner_cmeee.onnx）。
             vocab_path: vocab.txt 词表文件路径（默认 .models/vocab.txt）。
             label_mapping: 原始标签→标准标签映射（默认使用 DEFAULT_NER_LABEL_MAPPING）。
+            device: 目标计算设备（"cuda" / "cpu" / None）。影响 ONNX Runtime
+                Execution Provider 选择；None 时自动检测（优先 CUDA）。
         """
         # 计算项目根目录（从当前文件向上两级）
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -224,6 +226,8 @@ class ONNXSmallNerEngine(SmallNerEngine):
         self.vocab_path = vocab_path or os.path.join(project_root, ".models", "vocab.txt")
         # 原始标签→标准标签映射（可配置，默认使用内置医疗映射）
         self.label_mapping = label_mapping or DEFAULT_NER_LABEL_MAPPING
+        # 目标计算设备（影响 Execution Provider 选择）
+        self.device = device
         # ONNX 推理会话（延迟初始化）
         self.session: Any | None = None
         # BERT 分词器实例（延迟初始化）
@@ -269,7 +273,14 @@ class ONNXSmallNerEngine(SmallNerEngine):
                 raise FileNotFoundError(f"未找到本地 vocab 词表文件: {self.vocab_path}")
 
             # 创建 ONNX 推理会话（加载模型到内存）
-            self.session = ort.InferenceSession(self.model_path)
+            # 根据 device 参数选择 Execution Provider
+            providers: list[str] | None = None
+            if self.device == "cpu":
+                providers = ["CPUExecutionProvider"]
+            elif self.device == "cuda":
+                available = ort.get_available_providers()
+                providers = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available]
+            self.session = ort.InferenceSession(self.model_path, providers=providers) if providers else ort.InferenceSession(self.model_path)
             # 初始化纯 Python BERT 分词器
             self.tokenizer = SimpleChineseBertTokenizer(self.vocab_path)
             # 标记初始化成功

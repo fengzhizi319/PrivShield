@@ -57,6 +57,10 @@ interface SidebarProps {
   onDynClassify?: () => void;
   /** 当前是否处于动态分类分级视图 / Whether currently in dynamic classification view */
   dynClassifyActive?: boolean;
+  /** 进入运维诊断 / Enter ops diagnostics */
+  onOps?: () => void;
+  /** 当前是否处于运维诊断视图 / Whether currently in ops diagnostics view */
+  opsActive?: boolean;
 }
 
 
@@ -127,6 +131,8 @@ export default function Sidebar({
   lbTestActive = false,
   onDynClassify,
   dynClassifyActive = false,
+  onOps,
+  opsActive = false,
 }: SidebarProps) {
   const { t } = useI18n(); // 获取翻译函数 / Get translation function
 
@@ -295,11 +301,10 @@ export default function Sidebar({
         </button>
         {/* --- 快捷入口：动态分类分级 / Quick Entry: Dynamic Classification --- */}
         {/* dynClassifyActive 为 true 时以紫色系高亮（区别于其他靛蓝入口）/ Purple highlight when active (distinguished from indigo entries) */}
-        {/* mb-2 与下方分组列表保持间距 / mb-2 keeps spacing from group list below */}
         <button
           onClick={onDynClassify}
           className={[
-            'mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
             dynClassifyActive
               ? 'bg-purple-50 font-medium text-purple-700'
               : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
@@ -310,6 +315,24 @@ export default function Sidebar({
             <Icon name="sparkles" className="h-3 w-3" />
           </span>
           {t('sidebar.dyn_classify')}
+        </button>
+        {/* --- 快捷入口：运维诊断 / Quick Entry: Ops Diagnostics --- */}
+        {/* opsActive 为 true 时以青色系高亮 / Teal highlight when opsActive is true */}
+        {/* mb-2 与下方分组列表保持间距 / mb-2 keeps spacing from group list below */}
+        <button
+          onClick={onOps}
+          className={[
+            'mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+            opsActive
+              ? 'bg-teal-50 font-medium text-teal-700'
+              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+          ].join(' ')}
+        >
+          {/* 青色图标容器，突出运维排障功能 / Teal icon container, highlights ops troubleshooting feature */}
+          <span className="flex h-5 w-5 items-center justify-center rounded bg-teal-100 text-teal-600">
+            <Icon name="activity" className="h-3 w-3" />
+          </span>
+          {t('sidebar.ops')}
         </button>
 
         {/* ====== 搜索无结果提示 / No Search Results Hint ====== */}
