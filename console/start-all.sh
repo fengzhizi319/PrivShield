@@ -55,24 +55,31 @@ AGENT_URL="http://127.0.0.1:8079"      # agent REST 接口 / agent REST API
 PY_CONSOLE_URL="http://127.0.0.1:8080" # Python REST 代理后端 / Python REST proxy backend
 GO_CONSOLE_URL="http://127.0.0.1:8081" # Go gRPC 代理后端 / Go gRPC proxy backend
 
+# ── TCP connect 端口探测（比 bind 更可靠，不会被 SO_REUSEADDR 误导）────
+# 原理：尝试 connect() 到 127.0.0.1:port，连接成功→端口已被占用，连接拒绝→端口空闲
+_is_port_in_use() {
+    local port="$1"
+    python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(0.5)
+try:
+    s.connect(('127.0.0.1', $port))
+    s.close()
+    sys.exit(0)  # 连接成功 → 端口已被占用
+except (ConnectionRefusedError, socket.timeout, OSError):
+    sys.exit(1)  # 连接失败 → 端口空闲
+" 2>/dev/null
+}
+
 # ── 端口占用预检（冲突时自动诊断并提供 kill 选项）────────────────────
 check_port_available() {
     local port="$1"  # 目标端口 / target port
     local name="$2"  # 服务名称 / service name
 
-    # 快速检测端口是否可用（Python socket bind）/ Quick port check (Python socket bind)
-    if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
-        return 0  # 端口可用 / port available
+    # 快速检测端口是否可用（connect 方式，比 bind 更准确）
+    if ! _is_port_in_use "$port"; then
+        return 0
     fi
 
     # 端口被占用 —— 诊断占用进程 / Port occupied — diagnose occupying process
@@ -87,6 +94,11 @@ finally:
         lsof -i :"$port" 2>/dev/null || true
         echo ""
         pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')  # 提取去重 PID / extract deduplicated PIDs
+    elif command -v ss >/dev/null 2>&1; then
+        echo "诊断信息（ss -tlnp | grep $port）："
+        ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" || true
+        echo ""
+        pids=$(ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
     elif command -v fuser >/dev/null 2>&1; then  # 回退 fuser / fallback fuser
         pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
         echo "占用进程 PID：$pids"
@@ -113,7 +125,13 @@ finally:
             kill -9 "$pid" 2>/dev/null || true
         done
         sleep 1
-        echo "✅ 端口 $port 已释放"  # Port $port freed
+        # 再次验证端口已释放（connect 方式）
+        if ! _is_port_in_use "$port"; then
+            echo "✅ 端口 $port 已释放"  # Port $port freed
+        else
+            echo "错误：端口 $port 仍被占用，请手动排查。"
+            exit 1
+        fi
         return 0
     fi
 
@@ -126,18 +144,8 @@ finally:
                 kill -9 "$pid" 2>/dev/null || true
             done
             sleep 1
-            # 再次验证端口已释放 / Re-verify port is freed
-            if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
+            # 再次验证端口已释放（connect 方式）
+            if ! _is_port_in_use "$port"; then
                 echo "✅ 端口 $port 已释放"
             else
                 echo "错误：端口 $port 仍被占用，请手动排查。"
@@ -285,6 +293,51 @@ AGENT_PID=$!  # 获取 PID / get PID
 PIDS+=("$AGENT_PID")
 write_pid "$AGENT_PID_FILE" "$AGENT_PID"
 
+# ── 等待 agent 就绪后再启动两个后端 / Wait for agent before launching backends ──
+# Go 后端依赖 agent gRPC，Python 后端依赖 agent REST，均需 agent 先就绪。
+# Go backend depends on agent gRPC, Python backend depends on agent REST; agent must be ready first.
+
+# 轮询健康检查通用函数 / Generic health-check polling function
+wait_for_service() {
+    local url="$1"   # 健康检查 URL / health check URL
+    local name="$2"  # 服务名 / service name
+    local max_attempts=30  # 最大尝试 / max attempts
+    local attempt=0        # 当前计数 / current count
+    echo -n "等待 $name 就绪"  # Waiting for $name
+    while [[ $attempt -lt $max_attempts ]]; do
+        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then  # HTTP 200 = 就绪 / ready
+            echo " OK"
+            return 0
+        fi
+        echo -n "."  # 进度 / progress
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    echo " 超时"  # Timeout
+    return 1
+}
+
+# 1) 等待 agent REST 就绪 / Wait for agent REST ready
+wait_for_service "$AGENT_URL/health" "privacy_local_agent"
+
+# 2) 等待 agent gRPC 端口接受连接 / Wait for agent gRPC port accepting connections
+echo -n "等待 agent gRPC (127.0.0.1:50051) 就绪"
+for i in $(seq 1 30); do
+    if _is_port_in_use 50051; then
+        echo " OK"
+        break
+    fi
+    echo -n "."
+    sleep 1
+    if [[ $i -eq 30 ]]; then
+        echo " 超时"
+        echo "错误：agent gRPC 未在 30 秒内就绪，请检查 agent 日志。"
+        exit 1
+    fi
+done
+
+# ── agent 就绪后启动两个后端 / Start both backends after agent is ready ──
+
 # 启动 Python REST 代理后端 / Launch Python REST proxy backend
 echo "启动 Python REST 代理后端 (Console: $PY_CONSOLE_URL)..."
 (
@@ -306,30 +359,7 @@ GO_CONSOLE_PID=$!
 PIDS+=("$GO_CONSOLE_PID")
 write_pid "$GO_CONSOLE_PID_FILE" "$GO_CONSOLE_PID"
 
-# 等待服务就绪 / Wait for services to be ready
-# 轮询健康检查接口，最多 30 次，每次 1 秒
-# Poll health endpoints, up to 30 attempts at 1s intervals
-wait_for_service() {
-    local url="$1"   # 健康检查 URL / health check URL
-    local name="$2"  # 服务名 / service name
-    local max_attempts=30  # 最大尝试 / max attempts
-    local attempt=0        # 当前计数 / current count
-    echo -n "等待 $name 就绪"  # Waiting for $name
-    while [[ $attempt -lt $max_attempts ]]; do
-        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then  # HTTP 200 = 就绪 / ready
-            echo " OK"
-            return 0
-        fi
-        echo -n "."  # 进度 / progress
-        sleep 1
-        attempt=$((attempt + 1))
-    done
-    echo " 超时"  # Timeout
-    return 1
-}
-
-# 分别等待三个服务就绪 / Wait for all three services
-wait_for_service "$AGENT_URL/health" "privacy_local_agent"
+# 3) 等待两个后端就绪 / Wait for both backends ready
 wait_for_service "$PY_CONSOLE_URL/api/health" "Python REST 代理后端"
 wait_for_service "$GO_CONSOLE_URL/api/health" "Go gRPC 代理后端"
 

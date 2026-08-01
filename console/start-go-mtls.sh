@@ -46,23 +46,30 @@ GEN_CERTS="$SCRIPT_DIR/backend-go/scripts/gen-certs.sh"  # 证书生成脚本 / 
 CONSOLE_URL="http://127.0.0.1:8081"      # Go 代理 HTTP 地址 / Go proxy HTTP address
 AGENT_GRPC_ADDR="127.0.0.1:50051"        # agent gRPC 地址 / agent gRPC address
 
+# ── TCP connect 端口探测（比 bind 更可靠，不会被 SO_REUSEADDR 误导）────
+# 对于 mTLS 端口同样有效：TCP connect 只检测端口是否在监听，不涉及 TLS 握手
+_is_port_in_use() {
+    local port="$1"
+    python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(0.5)
+try:
+    s.connect(('127.0.0.1', $port))
+    s.close()
+    sys.exit(0)  # 连接成功 → 端口已被占用
+except (ConnectionRefusedError, socket.timeout, OSError):
+    sys.exit(1)  # 连接失败 → 端口空闲
+" 2>/dev/null
+}
+
 # ── 端口占用预检（冲突时自动诊断并提供 kill 选项）────────────────────
 check_port_available() {
     local port="$1"  # 目标端口 / target port
     local name="$2"  # 服务名称 / service name
 
-    # 快速检测端口是否可用 / Quick check if port is available
-    if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
+    # 快速检测端口是否可用（connect 方式，比 bind 更准确）
+    if ! _is_port_in_use "$port"; then
         return 0
     fi
 
@@ -77,6 +84,11 @@ finally:
         lsof -i :"$port" 2>/dev/null || true
         echo ""
         pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')
+    elif command -v ss >/dev/null 2>&1; then
+        echo "诊断信息（ss -tlnp | grep $port）："
+        ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" || true
+        echo ""
+        pids=$(ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
     elif command -v fuser >/dev/null 2>&1; then
         pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
         echo "占用进程 PID：$pids"
@@ -100,18 +112,8 @@ finally:
                 kill -9 "$pid" 2>/dev/null || true
             done
             sleep 1
-            # 再次验证端口已释放
-            if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
+            # 再次验证端口已释放（connect 方式）
+            if ! _is_port_in_use "$port"; then
                 echo "✅ 端口 $port 已释放"
             else
                 echo "错误：端口 $port 仍被占用，请手动排查。"
@@ -199,6 +201,24 @@ AGENT_PID=$!  # 获取 PID / get PID
 PIDS+=("$AGENT_PID")
 echo "$AGENT_PID" > "$AGENT_PID_FILE"  # 写入 PID 文件 / write PID file
 
+# ── 等待 agent gRPC (mTLS) 就绪后再启动 Go 后端 ──────────────────────
+# Go 后端依赖 agent gRPC 连接，必须在 agent gRPC 就绪后启动。
+# TCP connect 对 mTLS 端口同样有效：只检测 TCP 监听状态，不关心 TLS。
+echo -n "等待 agent gRPC mTLS (127.0.0.1:50051) 就绪"
+for i in $(seq 1 30); do
+    if _is_port_in_use 50051; then
+        echo " OK"
+        break
+    fi
+    echo -n "."
+    sleep 1
+    if [[ $i -eq 30 ]]; then
+        echo " 超时"
+        echo "错误：agent gRPC (mTLS) 未在 30 秒内就绪，请检查 agent 日志。"
+        exit 1
+    fi
+done
+
 # 4.2 启动 Go 代理（gRPC 客户端启用 mTLS，出示客户端证书）
 # 4.2 Launch Go proxy (gRPC client enables mTLS, presents client cert)
 echo "启动 Go gRPC 代理后端 (mTLS -> $AGENT_GRPC_ADDR, Console: $CONSOLE_URL)..."
@@ -217,16 +237,26 @@ CONSOLE_PID=$!
 PIDS+=("$CONSOLE_PID")
 echo "$CONSOLE_PID" > "$CONSOLE_PID_FILE"  # 写入 PID 文件 / write PID file
 
-# ── 5. 等待就绪 / Wait for ready ───────────────────────────────────────────
-echo -n "等待 Go 代理就绪"  # Waiting for Go proxy to be ready
-for _ in $(seq 1 30); do  # 最多轮询 30 次 / poll up to 30 times
-    if curl -s -o /dev/null -w "%{http_code}" "$CONSOLE_URL/api/health" | grep -q '^200$'; then
-        echo " OK"
-        break
-    fi
-    echo -n "."  # 进度 / progress
-    sleep 1
-done
+# ── 5. 等待 Go 后端就绪 / Wait for Go backend ready ───────────────────
+wait_for_service() {
+    local url="$1"
+    local name="$2"
+    local max_attempts=30
+    local attempt=0
+    echo -n "等待 $name 就绪"
+    while [[ $attempt -lt $max_attempts ]]; do
+        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then
+            echo " OK"
+            return 0
+        fi
+        echo -n "."
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    echo " 超时"
+    return 1
+}
+wait_for_service "$CONSOLE_URL/api/health" "Go gRPC 代理后端"
 
 # 打印启动信息 / Print startup info
 echo ""

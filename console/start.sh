@@ -60,32 +60,38 @@ BACKEND_VENV="$SCRIPT_DIR/backend/.venv"  # 控制台后端独立虚拟环境 / 
 AGENT_URL="http://127.0.0.1:8079"    # privacy_local_agent REST 接口 / agent REST API
 CONSOLE_URL="http://127.0.0.1:8080"  # 控制台后端（提供 UI + API）/ console backend (serves UI + API)
 
+# ── TCP connect 端口探测（比 bind 更可靠，不会被 SO_REUSEADDR 误导）────
+# 原理：尝试 connect() 到 127.0.0.1:port，连接成功→端口已被占用，连接拒绝→端口空闲
+_is_port_in_use() {
+    local port="$1"
+    python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(0.5)
+try:
+    s.connect(('127.0.0.1', $port))
+    s.close()
+    sys.exit(0)  # 连接成功 → 端口已被占用
+except (ConnectionRefusedError, socket.timeout, OSError):
+    sys.exit(1)  # 连接失败 → 端口空闲
+" 2>/dev/null
+}
+
 # ── 端口占用预检（冲突时自动诊断并提供 kill 选项）────────────────────
 # Port availability pre-check (auto-diagnose and offer kill option on conflict)
 #
 # 参数 / Parameters: $1=端口号/port, $2=服务名/service name
 # 逻辑 / Logic:
-#   1. Python socket 尝试 bind 端口，成功则可用 / Try socket bind; success = available
-#   2. 失败时用 lsof/fuser 诊断占用进程 / On failure, diagnose with lsof/fuser
+#   1. TCP connect 尝试连接端口，连接成功→被占用 / Try connect; success = occupied
+#   2. 占用时用 lsof/ss/fuser 诊断占用进程 / On occupied, diagnose with lsof/ss/fuser
 #   3. 交互式询问是否终止 / Interactively ask whether to kill
 #   4. 终止后再次验证 / Re-verify after kill
 check_port_available() {
     local port="$1"  # 目标端口 / target port
     local name="$2"  # 服务名称 / service name
 
-    # 快速检测端口是否可用（Python socket 尝试绑定）
-    # Quick check if port is available (Python socket bind attempt)
-    if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
+    # 快速检测端口是否可用（connect 方式，比 bind 更准确）
+    if ! _is_port_in_use "$port"; then
         return 0  # 端口可用，直接返回 / port available, return immediately
     fi
 
@@ -102,6 +108,11 @@ finally:
         lsof -i :"$port" 2>/dev/null || true
         echo ""
         pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')  # 提取去重 PID / extract deduplicated PIDs
+    elif command -v ss >/dev/null 2>&1; then
+        echo "诊断信息（ss -tlnp | grep $port）："
+        ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" || true
+        echo ""
+        pids=$(ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
     elif command -v fuser >/dev/null 2>&1; then  # 回退到 fuser / fallback to fuser
         pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
         echo "占用进程 PID：$pids"
@@ -128,18 +139,8 @@ finally:
                 kill -9 "$pid" 2>/dev/null || true
             done
             sleep 1  # 等待 OS 释放端口 / wait for OS to release port
-            # 再次验证端口已释放 / Re-verify port is freed
-            if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
+            # 再次验证端口已释放（connect 方式）
+            if ! _is_port_in_use "$port"; then
                 echo "✅ 端口 $port 已释放"
             else
                 echo "错误：端口 $port 仍被占用，请手动排查。"
@@ -316,7 +317,7 @@ wait_for_service() {
     local attempt=0        # 当前尝试计数 / current attempt counter
     echo -n "等待 $name 就绪"  # Waiting for $name to be ready
     while [[ $attempt -lt $max_attempts ]]; do
-        if curl -s "$url" >/dev/null 2>&1; then  # 尝试访问健康检查接口 / try health endpoint
+        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then  # HTTP 200 = 就绪 / ready
             echo " OK"
             return 0  # 服务就绪 / service ready
         fi

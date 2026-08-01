@@ -39,22 +39,29 @@ AGENT_URL="http://127.0.0.1:8079"    # agent REST 接口 / agent REST API
 CONSOLE_URL="http://127.0.0.1:8081"  # Go gRPC 代理后端 / Go gRPC proxy backend
 
 # ── 端口占用预检（冲突时自动诊断并提供 kill 选项）────────────────────
+# ── TCP connect 端口探测（比 bind 更可靠，不会被 SO_REUSEADDR 误导）────
+# 原理：尝试 connect() 到 127.0.0.1:port，连接成功→端口已被占用，连接拒绝→端口空闲
+_is_port_in_use() {
+    local port="$1"
+    python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(0.5)
+try:
+    s.connect(('127.0.0.1', $port))
+    s.close()
+    sys.exit(0)  # 连接成功 → 端口已被占用
+except (ConnectionRefusedError, socket.timeout, OSError):
+    sys.exit(1)  # 连接失败 → 端口空闲
+" 2>/dev/null
+}
+
 check_port_available() {
     local port="$1"  # 目标端口 / target port
     local name="$2"  # 服务名称 / service name
 
-    # 快速检测端口是否可用 / Quick check if port is available
-    if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
+    # 快速检测端口是否可用（connect 方式，比 bind 更准确）
+    if ! _is_port_in_use "$port"; then
         return 0
     fi
 
@@ -69,6 +76,11 @@ finally:
         lsof -i :"$port" 2>/dev/null || true
         echo ""
         pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')
+    elif command -v ss >/dev/null 2>&1; then
+        echo "诊断信息（ss -tlnp | grep $port）："
+        ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" || true
+        echo ""
+        pids=$(ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
     elif command -v fuser >/dev/null 2>&1; then
         pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
         echo "占用进程 PID：$pids"
@@ -92,18 +104,8 @@ finally:
                 kill -9 "$pid" 2>/dev/null || true
             done
             sleep 1
-            # 再次验证端口已释放
-            if python3 -c "
-import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(('127.0.0.1', $port))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
-" 2>/dev/null; then
+            # 再次验证端口已释放（connect 方式）
+            if ! _is_port_in_use "$port"; then
                 echo "✅ 端口 $port 已释放"
             else
                 echo "错误：端口 $port 仍被占用，请手动排查。"
@@ -225,18 +227,13 @@ AGENT_PID=$!  # 获取 PID / get PID
 PIDS+=("$AGENT_PID")
 write_pid "$AGENT_PID_FILE" "$AGENT_PID"
 
-# 启动 Go gRPC 代理后端 / Launch Go gRPC proxy backend
-echo "启动 Go gRPC 代理后端 (Console: $CONSOLE_URL)..."
-(
-    cd "$SCRIPT_DIR/backend-go"
-    exec ./bin/backend-go  # 运行预编译二进制 / run pre-compiled binary
-) &
-CONSOLE_PID=$!
-PIDS+=("$CONSOLE_PID")
-write_pid "$CONSOLE_PID_FILE" "$CONSOLE_PID"
+# ── 等待 agent REST 与 gRPC 就绪后再启动 Go 后端 ────────────────────────
+# Go 后端依赖 agent gRPC 连接，必须在 agent 完全就绪后启动，
+# 否则 grpc.NewClient 首次 RPC 会得到 "connection refused"。
+# Go backend depends on agent gRPC; must wait for agent to be fully ready,
+# otherwise grpc.NewClient's first RPC gets "connection refused".
 
-# 等待服务就绪 / Wait for services to be ready
-# 轮询健康检查，最多 30 次 / Poll health check, up to 30 attempts
+# 轮询健康检查通用函数 / Generic health-check polling function
 wait_for_service() {
     local url="$1"   # 健康检查 URL / health check URL
     local name="$2"  # 服务名 / service name
@@ -256,8 +253,39 @@ wait_for_service() {
     return 1
 }
 
-# 等待两个服务就绪 / Wait for both services
+# 1) 等待 agent REST 就绪 / Wait for agent REST ready
 wait_for_service "$AGENT_URL/health" "privacy_local_agent"
+
+# 2) 等待 agent gRPC 端口接受连接 / Wait for agent gRPC port accepting connections
+#    虽然 REST 可能先就绪，gRPC 端口绑定可能稍慢（server.add_insecure_port 晚于 uvicorn 启动）。
+#    Although REST may be ready first, gRPC port binding may lag slightly
+#    (server.add_insecure_port happens after uvicorn starts).
+echo -n "等待 agent gRPC (127.0.0.1:50051) 就绪"
+for i in $(seq 1 30); do
+    if _is_port_in_use 50051; then
+        echo " OK"
+        break
+    fi
+    echo -n "."
+    sleep 1
+    if [[ $i -eq 30 ]]; then
+        echo " 超时"
+        echo "错误：agent gRPC 未在 30 秒内就绪，请检查 agent 日志。"
+        exit 1
+    fi
+done
+
+# ── agent 完全就绪后启动 Go 后端 / Start Go backend only after agent is fully ready ──
+echo "启动 Go gRPC 代理后端 (Console: $CONSOLE_URL)..."
+(
+    cd "$SCRIPT_DIR/backend-go"
+    exec ./bin/backend-go  # 运行预编译二进制 / run pre-compiled binary
+) &
+CONSOLE_PID=$!
+PIDS+=("$CONSOLE_PID")
+write_pid "$CONSOLE_PID_FILE" "$CONSOLE_PID"
+
+# 3) 等待 Go 后端就绪 / Wait for Go backend ready
 wait_for_service "$CONSOLE_URL/api/health" "Go gRPC 代理后端"
 
 # 打印启动信息 / Print startup info

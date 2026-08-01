@@ -1112,8 +1112,10 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10, wait_
             # 允许客户端在无活跃 RPC 时发送 keepalive PING，
             # 否则服务端会因 "too_many_pings" 发送 GOAWAY/ENHANCE_YOUR_CALM
             ("grpc.keepalive_permit_without_calls", 1),
-            # 允许客户端最短每 5 秒发送一次 PING（默认 300 秒过于严格）
-            ("grpc.http2.min_ping_interval_without_data", 5),
+            # 允许客户端最短每 20 秒发送一次 PING（Go 客户端每 30 秒发送一次）。
+            # 单位：毫秒。注意 key 为 grpc.http2.min_time_between_pings_ms（C core 映射名），
+            # 而非 grpc.http2.min_ping_interval_without_data（该 key 不存在，会静默忽略）。
+            ("grpc.http2.min_time_between_pings_ms", 20000),
         ],
     )
     # 将 PrivacyServicer 实例注册到 gRPC 服务器
