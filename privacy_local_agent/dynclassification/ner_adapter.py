@@ -29,6 +29,7 @@ avoiding heavy ML dependencies in the core path.
 
 from __future__ import annotations
 
+import sys
 import threading
 from typing import Any
 
@@ -94,19 +95,20 @@ class NerAdapter:
             if self._initialized:
                 return
 
-            # 尝试 0: MLX 引擎（Apple Silicon Metal GPU，macOS 优先）
-            try:
-                from .mlx_ner_engine import MLXSmallNerEngine
-                engine = MLXSmallNerEngine(
-                    label_mapping=self._label_mapping,
-                )
-                engine._lazy_init()
-                self._engine = engine
-                logger.info("ner_adapter_initialized", extra={"backend": "mlx_metal"})
-                self._initialized = True
-                return
-            except Exception as e:
-                logger.debug("ner_mlx_unavailable", extra={"error": str(e)})
+            # 尝试 0: MLX 引擎（Apple Silicon Metal GPU，仅 macOS）
+            if sys.platform == "darwin":
+                try:
+                    from .mlx_ner_engine import MLXSmallNerEngine
+                    engine = MLXSmallNerEngine(
+                        label_mapping=self._label_mapping,
+                    )
+                    engine._lazy_init()
+                    self._engine = engine
+                    logger.info("ner_adapter_initialized", extra={"backend": "mlx_metal"})
+                    self._initialized = True
+                    return
+                except Exception as e:
+                    logger.debug("ner_mlx_unavailable", extra={"error": str(e)})
 
             # 尝试 1: TensorRT 引擎（纯 C++ 硬件加速，FP16 模式）
             try:

@@ -223,16 +223,19 @@ def _probe_ner_engines() -> dict[str, Any]:
         details: list[dict[str, Any]] = []
         active: str | None = None
 
-        # 尝试 0: MLX（Apple Silicon Metal GPU）
-        try:
-            from ..dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        # 尝试 0: MLX（Apple Silicon Metal GPU，仅 macOS）
+        if sys.platform == "darwin":
+            try:
+                from ..dynclassification.mlx_ner_engine import MLXSmallNerEngine
 
-            engine = MLXSmallNerEngine()
-            engine._lazy_init()
-            details.append({"engine": "mlx", "ok": True, "error": None})
-            active = "mlx"
-        except Exception as e:
-            details.append({"engine": "mlx", "ok": False, "error": str(e)})
+                engine = MLXSmallNerEngine()
+                engine._lazy_init()
+                details.append({"engine": "mlx", "ok": True, "error": None})
+                active = "mlx"
+            except Exception as e:
+                details.append({"engine": "mlx", "ok": False, "error": str(e)})
+        else:
+            details.append({"engine": "mlx", "ok": False, "error": "仅 macOS 支持 MLX"})
 
         # 尝试 1: TensorRT（NVIDIA GPU 硬件加速）
         if active is None:

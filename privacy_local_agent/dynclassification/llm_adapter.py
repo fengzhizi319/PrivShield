@@ -38,6 +38,7 @@ avoiding heavy ML dependencies (torch/transformers) in the core path.
 
 from __future__ import annotations
 
+import sys
 import threading
 from typing import Any
 
@@ -100,20 +101,21 @@ class LlmAdapter:
             if self._initialized:
                 return
 
-            # 尝试 1: MLX 引擎（Apple Silicon Metal GPU）
-            try:
-                from .mlx_llm_engine import MLXLlmClassifier
-                self._classifier = MLXLlmClassifier(
-                    model_dir=self._model_path,
-                    classify_prompt_template=self._classify_prompt_template,
-                )
-                self._classifier._lazy_init()
-                logger.info("llm_adapter_initialized", extra={"backend": "mlx_metal", "model_path": self._model_path})
-                self._initialized = True
-                # MLX 不支持视觉，延迟初始化 PyTorch 回退引擎
-                return
-            except Exception as e:
-                logger.debug("llm_mlx_unavailable", extra={"error": str(e)})
+            # 尝试 1: MLX 引擎（Apple Silicon Metal GPU，仅 macOS）
+            if sys.platform == "darwin":
+                try:
+                    from .mlx_llm_engine import MLXLlmClassifier
+                    self._classifier = MLXLlmClassifier(
+                        model_dir=self._model_path,
+                        classify_prompt_template=self._classify_prompt_template,
+                    )
+                    self._classifier._lazy_init()
+                    logger.info("llm_adapter_initialized", extra={"backend": "mlx_metal", "model_path": self._model_path})
+                    self._initialized = True
+                    # MLX 不支持视觉，延迟初始化 PyTorch 回退引擎
+                    return
+                except Exception as e:
+                    logger.debug("llm_mlx_unavailable", extra={"error": str(e)})
 
             # 尝试 2: PyTorch Qwen2VL 引擎
             try:
