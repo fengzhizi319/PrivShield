@@ -144,6 +144,22 @@ elif [[ "$REBUILD" == true ]]; then
     echo "agent 依赖重装完成。"  # Agent deps reinstalled.
 fi
 
+# macOS Apple Silicon 专属提示：mlx 未安装时 NER 无法启用 Metal GPU 加速。
+# macOS Apple Silicon hint: without mlx the NER layer cannot use Metal GPU acceleration.
+# 注意：agent 的引擎探测结果缓存于进程生命周期内，运行中补装 mlx 后
+# 需在控制台“运维诊断”页点击“刷新诊断”重新探测，或重启服务。
+# Note: engine probe results are cached per process; after installing mlx at runtime,
+# click "Refresh" on the Ops Diagnostics page to re-probe, or restart the service.
+if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+    if ! "$AGENT_VENV/bin/python" -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('mlx') else 1)" 2>/dev/null; then
+        echo ""
+        echo "ℹ️  检测到 macOS Apple Silicon，但 agent 虚拟环境未安装 mlx："
+        echo "   NER 将无法使用 Metal GPU 加速（会自动降级到 ONNX/ModelScope）。"
+        echo "   启用方式：source $AGENT_VENV/bin/activate && pip install mlx"
+        echo ""
+    fi
+fi
+
 # Go 后端目录与工具链检查 / Go backend dir and toolchain check
 if [[ ! -d "$SCRIPT_DIR/backend-go" ]]; then
     echo "错误：未找到 Go 后端目录 $SCRIPT_DIR/backend-go"  # Error: Go backend dir not found
@@ -155,14 +171,11 @@ if ! command -v go >/dev/null 2>&1; then
     exit 1
 fi
 
-# 2. 前端构建产物：缺失或 --rebuild 时自动执行 install + build（Go 后端基于该产物提供 Console UI）
-# 2. Frontend artifacts: auto install + build when missing or --rebuild (Go backend serves Console UI from this)
-if [[ "$REBUILD" == true && -d "$SCRIPT_DIR/web/dist" ]]; then
-    echo "--rebuild：删除旧的前端构建产物并重新构建..."  # --rebuild: removing old dist...
-    rm -rf "$SCRIPT_DIR/web/dist"  # 删除 / remove
-fi
-if [[ ! -d "$SCRIPT_DIR/web/dist" ]]; then
-    echo "未找到前端构建产物，自动构建：$SCRIPT_DIR/web/dist"  # Frontend dist not found, auto-building
+# 2. 前端构建产物：缺失、过期（源码比产物新）或 --rebuild 时自动执行 install + build
+# 2. Frontend artifacts: auto install + build when missing, stale (sources newer than dist) or --rebuild
+
+# 执行前端构建（pnpm 优先，npm 回退）/ Run frontend build (prefer pnpm, fallback npm)
+_build_frontend() {
     (
         cd "$SCRIPT_DIR/web"
         if command -v pnpm >/dev/null 2>&1; then
@@ -173,6 +186,43 @@ if [[ ! -d "$SCRIPT_DIR/web/dist" ]]; then
             echo "警告：未找到 pnpm/npm，跳过前端构建。"  # Warning: no pnpm/npm, skipping build
         fi
     )
+}
+
+# 判断前端构建产物是否过期：任一源码文件比 dist/index.html 新则视为过期。
+# Detect stale frontend artifacts: any source file newer than dist/index.html means stale.
+# 覆盖 git pull 后源码更新但 dist 未重编译的场景（find -newer 兼容 BSD/GNU find）。
+# Covers the case where sources changed after git pull but dist was not rebuilt.
+_frontend_is_stale() {
+    local marker="$SCRIPT_DIR/web/dist/index.html"
+    # 构建标记不存在（如上次构建中断）视为过期 / Missing build marker (e.g. interrupted build) → stale
+    [[ -f "$marker" ]] || return 0
+    # 列出比构建标记更新的源码文件，命中任意一个即短路返回（-print -quit）
+    # List source files newer than the marker; short-circuit on first hit
+    local newer
+    newer=$(find \
+        "$SCRIPT_DIR/web/src" \
+        "$SCRIPT_DIR/web/index.html" \
+        "$SCRIPT_DIR/web/package.json" \
+        "$SCRIPT_DIR/web/vite.config.ts" \
+        "$SCRIPT_DIR/web/tailwind.config.js" \
+        "$SCRIPT_DIR/web/postcss.config.js" \
+        "$SCRIPT_DIR/web/tsconfig.json" \
+        "$SCRIPT_DIR/web/tsconfig.node.json" \
+        -newer "$marker" -print -quit 2>/dev/null || true)
+    [[ -n "$newer" ]]
+}
+
+if [[ "$REBUILD" == true && -d "$SCRIPT_DIR/web/dist" ]]; then
+    echo "--rebuild：删除旧的前端构建产物并重新构建..."  # --rebuild: removing old dist...
+    rm -rf "$SCRIPT_DIR/web/dist"  # 删除 / remove
+fi
+if [[ ! -d "$SCRIPT_DIR/web/dist" ]]; then
+    echo "未找到前端构建产物，自动构建：$SCRIPT_DIR/web/dist"  # Frontend dist not found, auto-building
+    _build_frontend
+elif _frontend_is_stale; then
+    echo "检测到前端源码比构建产物更新（可能刚执行过 git pull），自动重新构建前端..."
+    echo "Frontend sources are newer than dist (possibly after git pull), rebuilding..."
+    _build_frontend
 fi
 
 # 3. 预编译 Go gRPC 代理后端二进制，编译失败时提前暴露错误

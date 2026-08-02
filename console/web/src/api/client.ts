@@ -274,11 +274,19 @@ export async function lbTest(req: LbTestRequest): Promise<LbTestResponse> {
  * This endpoint is REST-only: Python backend forwards directly; Go backend
  * automatically falls back to REST proxy when gRPC has no matching method.
  *
+ * @param refresh - 为 true 时附加 ?refresh=true，令 agent 失效引擎探测缓存并
+ *   重新探测（用于服务运行期间补装依赖/模型后刷新结论）；重新探测会加载模型，
+ *   耗时较长，仅用于用户显式点击“刷新诊断”。
+ *   When true, appends ?refresh=true so the agent invalidates its engine probe
+ *   cache and re-probes (used after installing deps/models while the service is running).
  * @returns 运维诊断信息（含引擎状态/依赖/模型/硬件）/ Ops diagnostics (engines/deps/models/hardware)
  */
-export async function fetchDiagnostics(): Promise<OpsDiagnostics> {
+export async function fetchDiagnostics(refresh = false): Promise<OpsDiagnostics> {
   // 经通用代理转发 GET 请求到 agent 的诊断端点 / Forward GET request to agent diagnostics endpoint via generic proxy
-  const resp = await proxyRequest({ method: 'GET', path: '/v1/ops/diagnostics' });
+  // 查询串随 path 一并传递，Python/Go 两种代理后端均原样转发到 agent
+  // Query string travels with path; both Python/Go proxy backends forward it as-is
+  const path = refresh ? '/v1/ops/diagnostics?refresh=true' : '/v1/ops/diagnostics';
+  const resp = await proxyRequest({ method: 'GET', path });
   // proxyRequest 返回包装结构，真实诊断数据在 data 字段 / Wrapped response; actual diagnostics in data field
   return resp.data as OpsDiagnostics;
 }

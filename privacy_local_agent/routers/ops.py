@@ -194,6 +194,20 @@ _probe_lock = threading.Lock()
 _probe_llm_lock = threading.Lock()
 
 
+def _invalidate_probe_cache() -> None:
+    """失效动态探测缓存，使下一次诊断调用重新探测各引擎。
+
+    适用场景：服务运行期间依赖或模型发生变化（如 agent 启动后才补装
+    mlx / 下载模型）。探测结果缓存于进程生命周期内，若不失效，
+    诊断页会持续展示陈旧的“未安装 / 不可用”结论，与实际环境不符。
+    """
+    global _probe_cache, _probe_llm_cache
+    with _probe_lock:
+        _probe_cache = None
+    with _probe_llm_lock:
+        _probe_llm_cache = None
+
+
 def _probe_ner_engines() -> dict[str, Any]:
     """像 tests/dynclassification 一样，实际尝试初始化各 NER 引擎来自动判断。
 
@@ -531,13 +545,20 @@ def _build_hardware() -> dict[str, Any]:
 
 
 @router.get("/diagnostics", dependencies=_OPS_DEPS)
-def diagnostics() -> dict[str, Any]:
+def diagnostics(refresh: bool = False) -> dict[str, Any]:
     """一站式运维诊断接口。
 
     返回服务信息、NER/LLM 降级链路、依赖安装情况、模型文件与硬件加速状态，
-    供控制台"运维诊断"页面渲染，用于快速判断问题出在前端 / 后端 / Agent 哪一层，
+    供控制台“运维诊断”页面渲染，用于快速判断问题出在前端 / 后端 / Agent 哪一层，
     以及 Agent 内部 NER/LLM 降级到了哪一级、缺少哪些驱动与如何安装。
+
+    Args:
+        refresh: 为 True 时先失效引擎探测缓存再重新探测。用于服务运行期间
+            补装依赖（如 mlx）或下载模型后，不重启服务即可刷新诊断结论；
+            重新探测会实际加载模型，耗时较长，仅由用户显式点击“刷新诊断”触发。
     """
+    if refresh:
+        _invalidate_probe_cache()
     dependencies = [
         _dep_info(
             "onnxruntime",

@@ -223,12 +223,19 @@ export default function OpsPanel({ health }: OpsPanelProps) {
 
   /**
    * 拉取诊断数据 / Fetch diagnostics data
+   *
+   * @param refresh - 是否令 agent 失效探测缓存并重新探测各引擎。
+   *   首次加载使用缓存结果（快）；用户点击“刷新诊断”时传 true，
+   *   覆盖服务运行期间补装依赖（如 mlx）后结论陈旧的场景。
+   *   Whether to invalidate agent probe cache and re-probe engines.
+   *   Initial load uses cached results (fast); the explicit "Refresh" click
+   *   passes true to cover deps installed while the service was running.
    */
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      setDiag(await fetchDiagnostics());
+      setDiag(await fetchDiagnostics(refresh));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -260,8 +267,9 @@ export default function OpsPanel({ health }: OpsPanelProps) {
             <p className="mt-1 text-sm text-gray-500">{t('ops.subtitle')}</p>
           </div>
           <button
-            onClick={load}
+            onClick={() => load(true)}
             disabled={loading}
+            title={t('ops.refresh_hint')}
             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-50"
           >
             <Icon name="refresh" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -289,7 +297,7 @@ export default function OpsPanel({ health }: OpsPanelProps) {
             <Icon name="alert" className="h-8 w-8 text-red-500" />
             <p className="max-w-md px-6 text-center text-sm text-red-700">{error}</p>
             <button
-              onClick={load}
+              onClick={() => load()}
               className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
             >
               <Icon name="refresh" className="h-4 w-4" />
