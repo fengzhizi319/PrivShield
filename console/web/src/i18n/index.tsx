@@ -246,10 +246,12 @@ const zh: Record<string, string> = {
   'dyn.info.domains': '领域匹配包 (Domains)',
   'dyn.info.operators': '注册算子库 (Operators)',
   'dyn.info.loading': '加载中…',
+  'dyn.info.error_fallback': '查询系统信息失败',
   // Validate tab
   'dyn.validate.title': '规则 YAML 文件合法性在线校验',
   'dyn.validate.desc': '检测算子未找到错误、语法错误与拼写模糊纠错提示。',
   'dyn.validate.resubmit': '重新校验',
+  'dyn.validate.error_fallback': '规则校验失败',
   // Result views
   'dyn.result.final_level': '最终判定敏感等级',
   'dyn.result.record_final_level': '记录级最终等级',
@@ -536,10 +538,12 @@ const en: Record<string, string> = {
   'dyn.info.domains': 'Domain Packs',
   'dyn.info.operators': 'Registered Operators',
   'dyn.info.loading': 'Loading…',
+  'dyn.info.error_fallback': 'Failed to query system info',
   // Validate tab
   'dyn.validate.title': 'Online Rule YAML Validity Check',
   'dyn.validate.desc': 'Detects operator-not-found errors, syntax errors and fuzzy spell-correction hints.',
   'dyn.validate.resubmit': 'Re-validate',
+  'dyn.validate.error_fallback': 'Rule validation failed',
   // Result views
   'dyn.result.final_level': 'Final Sensitivity Level',
   'dyn.result.record_final_level': 'Record-level Final Level',

@@ -22,7 +22,7 @@ import type { EndpointSample } from '@/types/api';
 /** 引入分类元数据与排序工具 / Import category metadata and ordering utility */
 import { categoryMeta, orderCategories } from '@/lib/categories';
 /** 引入内联 SVG 图标组件 / Import inline SVG icon component */
-import { Icon } from '@/components/icons';
+import { Icon, type IconName } from '@/components/icons';
 /** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
 
@@ -105,6 +105,51 @@ function groupSamples(samples: EndpointSample[]): Map<string, EndpointSample[]> 
     grouped.set(s.category, list);   // 更新 Map / Update Map
   }
   return grouped;
+}
+
+/**
+ * 侧边栏快捷入口按钮 / Sidebar Quick Entry Button
+ *
+ * 抽象六个快捷入口（总览/批量/文件/负载均衡/动态分类/运维）的共性结构，
+ * 通过 activeClass / iconClass 区分配色方案（靛蓝/紫色/青色）。
+ * Abstracts the common structure of six quick entries (overview/batch/file/LB/dyn/ops),
+ * differentiating color schemes (indigo/purple/teal) via activeClass / iconClass.
+ */
+function NavEntry({
+  onClick,
+  active,
+  icon,
+  label,
+  activeClass,
+  iconClass,
+  className = '',
+}: {
+  onClick?: () => void;
+  active: boolean;
+  icon: IconName;
+  label: string;
+  /** 激活态按钮类名 / Active state button classes */
+  activeClass: string;
+  /** 图标容器类名 / Icon container classes */
+  iconClass: string;
+  /** 额外类名（如 mb-2）/ Extra classes (e.g. mb-2) */
+  className?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+        active ? activeClass : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+        className,
+      ].join(' ')}
+    >
+      <span className={`flex h-5 w-5 items-center justify-center rounded ${iconClass}`}>
+        <Icon name={icon} className="h-3 w-3" />
+      </span>
+      {label}
+    </button>
+  );
 }
 
 /**
@@ -233,107 +278,56 @@ export default function Sidebar({
       {/* flex-1 占满剩余高度，overflow-y-auto 内容溢出时纵向滚动 */}
       {/* flex-1 fills remaining height, overflow-y-auto enables vertical scroll on overflow */}
       <nav className="flex-1 overflow-y-auto px-2 py-2">
-        {/* --- 快捷入口：接口总览 / Quick Entry: API Overview --- */}
-        {/* 未选中端点且非批量模式时高亮（靛蓝底色）/ Highlighted when no endpoint selected and not in batch mode (indigo bg) */}
-        <button
+        {/* --- 快捷入口组（数据驱动渲染）/ Quick Entry Group (data-driven rendering) --- */}
+        <NavEntry
           onClick={onHome}
-          className={[
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-            /* 条件高亮：当前无选中且非批量视图 → 靛蓝活跃态 / Conditional highlight: no selection & not batch → indigo active */
-            !selected && !batchActive
-              ? 'bg-indigo-50 font-medium text-indigo-700'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-          ].join(' ')}
-        >
-          {/* 图标容器：灰色圆角方块 / Icon container: gray rounded square */}
-          <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
-            <Icon name="inbox" className="h-3 w-3" />
-          </span>
-          {t('sidebar.overview')}
-        </button>
-        {/* --- 快捷入口：批量测试 / Quick Entry: Batch Test --- */}
-        {/* batchActive 为 true 时高亮 / Highlighted when batchActive is true */}
-        <button
+          active={!selected && !batchActive}
+          icon="inbox"
+          label={t('sidebar.overview')}
+          activeClass="bg-indigo-50 font-medium text-indigo-700"
+          iconClass="bg-gray-100 text-gray-500"
+        />
+        <NavEntry
           onClick={onBatch}
-          className={[
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-            batchActive
-              ? 'bg-indigo-50 font-medium text-indigo-700'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-          ].join(' ')}
-        >
-          <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
-            <Icon name="play" className="h-3 w-3" />
-          </span>
-          {t('sidebar.batch_test')}
-        </button>
-        {/* --- 快捷入口：文件处理 / Quick Entry: File Processing --- */}
-        {/* fileTestActive 为 true 时高亮 / Highlighted when fileTestActive is true */}
-        <button
+          active={batchActive}
+          icon="play"
+          label={t('sidebar.batch_test')}
+          activeClass="bg-indigo-50 font-medium text-indigo-700"
+          iconClass="bg-gray-100 text-gray-500"
+        />
+        <NavEntry
           onClick={onFileTest}
-          className={[
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-            fileTestActive
-              ? 'bg-indigo-50 font-medium text-indigo-700'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-          ].join(' ')}
-        >
-          <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
-            <Icon name="upload" className="h-3 w-3" />
-          </span>
-          {t('sidebar.file_test')}
-        </button>
-        {/* --- 快捷入口：负载均衡测试 / Quick Entry: Load Balancer Test --- */}
-        {/* lbTestActive 为 true 时高亮 / Highlighted when lbTestActive is true */}
-        <button
+          active={fileTestActive}
+          icon="upload"
+          label={t('sidebar.file_test')}
+          activeClass="bg-indigo-50 font-medium text-indigo-700"
+          iconClass="bg-gray-100 text-gray-500"
+        />
+        <NavEntry
           onClick={onLbTest}
-          className={[
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-            lbTestActive
-              ? 'bg-indigo-50 font-medium text-indigo-700'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-          ].join(' ')}
-        >
-          <span className="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-gray-500">
-            <Icon name="scale" className="h-3 w-3" />
-          </span>
-          {t('sidebar.lb_test')}
-        </button>
-        {/* --- 快捷入口：动态分类分级 / Quick Entry: Dynamic Classification --- */}
-        {/* dynClassifyActive 为 true 时以紫色系高亮（区别于其他靛蓝入口）/ Purple highlight when active (distinguished from indigo entries) */}
-        <button
+          active={lbTestActive}
+          icon="scale"
+          label={t('sidebar.lb_test')}
+          activeClass="bg-indigo-50 font-medium text-indigo-700"
+          iconClass="bg-gray-100 text-gray-500"
+        />
+        <NavEntry
           onClick={onDynClassify}
-          className={[
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-            dynClassifyActive
-              ? 'bg-purple-50 font-medium text-purple-700'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-          ].join(' ')}
-        >
-          {/* 紫色图标容器，突出 AI 分类功能 / Purple icon container, highlights AI classification feature */}
-          <span className="flex h-5 w-5 items-center justify-center rounded bg-purple-100 text-purple-600">
-            <Icon name="sparkles" className="h-3 w-3" />
-          </span>
-          {t('sidebar.dyn_classify')}
-        </button>
-        {/* --- 快捷入口：运维诊断 / Quick Entry: Ops Diagnostics --- */}
-        {/* opsActive 为 true 时以青色系高亮 / Teal highlight when opsActive is true */}
-        {/* mb-2 与下方分组列表保持间距 / mb-2 keeps spacing from group list below */}
-        <button
+          active={dynClassifyActive}
+          icon="sparkles"
+          label={t('sidebar.dyn_classify')}
+          activeClass="bg-purple-50 font-medium text-purple-700"
+          iconClass="bg-purple-100 text-purple-600"
+        />
+        <NavEntry
           onClick={onOps}
-          className={[
-            'mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-            opsActive
-              ? 'bg-teal-50 font-medium text-teal-700'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-          ].join(' ')}
-        >
-          {/* 青色图标容器，突出运维排障功能 / Teal icon container, highlights ops troubleshooting feature */}
-          <span className="flex h-5 w-5 items-center justify-center rounded bg-teal-100 text-teal-600">
-            <Icon name="activity" className="h-3 w-3" />
-          </span>
-          {t('sidebar.ops')}
-        </button>
+          active={opsActive}
+          icon="activity"
+          label={t('sidebar.ops')}
+          activeClass="bg-teal-50 font-medium text-teal-700"
+          iconClass="bg-teal-100 text-teal-600"
+          className="mb-2"
+        />
 
         {/* ====== 搜索无结果提示 / No Search Results Hint ====== */}
         {/* 过滤后无可见分类时显示空态提示 / Shows empty state when no visible categories after filtering */}

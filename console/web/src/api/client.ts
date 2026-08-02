@@ -125,12 +125,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // JSON 解析失败：抛出携带状态码与前 100 字符的友好错误
       // JSON parse failed: throw friendly error with status code and first 100 chars
-      throw new Error(`响应解析 JSON 失败 (HTTP ${res.status}): ${text.slice(0, 100)}`);
+      throw new Error(`Response JSON parse failed (HTTP ${res.status}): ${text.slice(0, 100)}`);
     }
   } catch (e) {
-    // 特殊处理 AbortError：转换为中文超时提示 / Special handling for AbortError: convert to Chinese timeout message
+    // 特殊处理 AbortError：转换为超时提示 / Special handling for AbortError: convert to timeout message
     if ((e as Error).name === 'AbortError') {
-      throw new Error(`请求超时（${REQUEST_TIMEOUT_MS / 1000}s），请检查后端是否可达`);
+      throw new Error(`Request timed out (${REQUEST_TIMEOUT_MS / 1000}s), please check backend availability`);
     }
     // 其他错误直接向上抛出 / Other errors re-thrown as-is
     throw e;

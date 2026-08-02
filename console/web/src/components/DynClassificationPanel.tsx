@@ -29,8 +29,6 @@ import { proxyRequest, fetchStandards } from '@/api/client';
 import { useI18n } from '@/i18n';
 /** 引入通用异步动作 Hook / Import generic async action Hook */
 import { useAsyncAction } from '@/hooks/useAsyncAction';
-/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
-import { getErrorMessage } from '@/utils/error';
 /** 引入标准详情类型 / Import standard detail type */
 import type {
   StandardDetail,
@@ -344,12 +342,12 @@ export default function DynClassificationPanel() {
   const genAction = useAsyncAction<GenerateProfileResponse>();
 
   /* ====== 系统信息查询 (Info) 状态 / System Info Query State ====== */
-  const [infoData, setInfoData] = useState<unknown>(null);    // 查询结果 / Query result
-  const [infoLoading, setInfoLoading] = useState(false);  // 加载中标记 / Loading flag
+  /** 系统信息查询异步动作 / System info query async action */
+  const infoAction = useAsyncAction<unknown>();
 
   /* ====== 规则校验 (Validate) 状态 / Rule Validation State ====== */
-  const [valResult, setValResult] = useState<ValidateResponse | null>(null); // 校验结果 / Validation result
-  const [valLoading, setValLoading] = useState(false);      // 加载中标记 / Loading flag
+  /** 规则校验异步动作 / Rule validation async action */
+  const valAction = useAsyncAction<ValidateResponse>();
 
   /* ====== 记录级分类 (Record) 状态 / Record-level Classification State ====== */
   const [recordJson, setRecordJson] = useState('{"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}'); // JSON 记录 / JSON record
@@ -436,20 +434,14 @@ export default function DynClassificationPanel() {
    *
    * @param type - 查询类型 / Query type
    */
-  const handleFetchInfo = async (type: 'standards' | 'domains' | 'operators') => {
-    setInfoLoading(true);
-    try {
+  const handleFetchInfo = (type: 'standards' | 'domains' | 'operators') =>
+    infoAction.run(async () => {
       const res = await proxyRequest({
         method: 'GET',
         path: `/v1/dynclassification/${type}`,
       });
-      setInfoData(res.data);
-    } catch (e) {
-      setInfoData({ error: getErrorMessage(e) });
-    } finally {
-      setInfoLoading(false);
-    }
-  };
+      return res.data;
+    }, t('dyn.info.error_fallback'));
 
   /**
    * 执行规则校验 / Execute Rule Validation
@@ -459,20 +451,14 @@ export default function DynClassificationPanel() {
    * POSTs to /v1/dynclassification/validate,
    * validates completeness and consistency of current YAML config.
    */
-  const handleValidate = async () => {
-    setValLoading(true);
-    try {
+  const handleValidate = () =>
+    valAction.run(async () => {
       const res = await proxyRequest({
         method: 'POST',
         path: '/v1/dynclassification/validate',
       });
-      setValResult(res.data as ValidateResponse);
-    } catch (e) {
-      setValResult({ error: getErrorMessage(e) });
-    } finally {
-      setValLoading(false);
-    }
-  };
+      return res.data as ValidateResponse;
+    }, t('dyn.validate.error_fallback'));
 
   return (
     <div className="flex h-full flex-col bg-white">
@@ -533,9 +519,11 @@ export default function DynClassificationPanel() {
           )}
         </div>
 
-        {/* Tab 导航切换 */}
-        <div className="mt-6 flex border-b border-gray-200">
+        {/* Tab 导航切换（WAI-ARIA tablist 语义）/ Tab navigation (WAI-ARIA tablist semantics) */}
+        <div className="mt-6 flex border-b border-gray-200" role="tablist" aria-label={t('dyn.title')}>
           <button
+            role="tab"
+            aria-selected={tab === 'eval'}
             onClick={() => setTab('eval')}
             className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               tab === 'eval' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -544,6 +532,8 @@ export default function DynClassificationPanel() {
             {t('dyn.tab.eval')}
           </button>
           <button
+            role="tab"
+            aria-selected={tab === 'record'}
             onClick={() => setTab('record')}
             className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               tab === 'record' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -552,6 +542,8 @@ export default function DynClassificationPanel() {
             {t('dyn.tab.record')}
           </button>
           <button
+            role="tab"
+            aria-selected={tab === 'generate'}
             onClick={() => setTab('generate')}
             className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               tab === 'generate' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -560,6 +552,8 @@ export default function DynClassificationPanel() {
             {t('dyn.tab.generate')}
           </button>
           <button
+            role="tab"
+            aria-selected={tab === 'info'}
             onClick={() => {
               setTab('info');
               handleFetchInfo('standards');
@@ -571,6 +565,8 @@ export default function DynClassificationPanel() {
             {t('dyn.tab.info')}
           </button>
           <button
+            role="tab"
+            aria-selected={tab === 'validate'}
             onClick={() => {
               setTab('validate');
               handleValidate();
@@ -776,8 +772,9 @@ export default function DynClassificationPanel() {
                 {t('dyn.info.operators')}
               </button>
             </div>
+            {infoAction.error && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{infoAction.error}</div>}
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-900 p-4 text-xs text-green-400">
-              {infoLoading ? <p>{t('dyn.info.loading')}</p> : <pre>{JSON.stringify(infoData, null, 2)}</pre>}
+              {infoAction.loading ? <p>{t('dyn.info.loading')}</p> : <pre>{JSON.stringify(infoAction.data, null, 2)}</pre>}
             </div>
           </div>
         )}
@@ -793,16 +790,17 @@ export default function DynClassificationPanel() {
                 </div>
                 <button
                   onClick={handleValidate}
-                  disabled={valLoading}
+                  disabled={valAction.loading}
                   className="rounded-lg bg-purple-600 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-700"
                 >
                   {t('dyn.validate.resubmit')}
                 </button>
               </div>
             </div>
-            {valResult && (
+            {valAction.error && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{valAction.error}</div>}
+            {valAction.data && (
               <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-900 p-4 text-xs text-green-400">
-                <pre>{JSON.stringify(valResult, null, 2)}</pre>
+                <pre>{JSON.stringify(valAction.data, null, 2)}</pre>
               </div>
             )}
           </div>

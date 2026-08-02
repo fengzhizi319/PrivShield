@@ -68,7 +68,7 @@ export function useAsyncAction<T>(): AsyncAction<T> {
    * 使用 useCallback 保持引用稳定，避免触发依赖它的副作用重复执行。
    * Uses useCallback to keep a stable reference, avoiding redundant effect re-runs.
    */
-  const run = useCallback(async (fn: () => Promise<T>, fallbackError = '操作失败') => {
+  const run = useCallback(async (fn: () => Promise<T>, fallbackError = 'Operation failed') => {
     setLoading(true);   // 进入加载态 / Enter loading state
     setError(null);     // 清除上一轮错误 / Clear previous error
     setData(null);      // 清除上一轮结果 / Clear previous result

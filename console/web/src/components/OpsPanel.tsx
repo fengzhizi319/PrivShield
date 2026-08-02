@@ -78,6 +78,7 @@ function CommandChip({ cmd }: { cmd: string }) {
         onClick={copy}
         className="shrink-0 text-gray-400 transition-colors hover:text-indigo-600"
         title={t('ops.copy')}
+        aria-label={t('ops.copy')}
       >
         <Icon name={copied ? 'check' : 'copy'} className="h-3 w-3" />
       </button>
