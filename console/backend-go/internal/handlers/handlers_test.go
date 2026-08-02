@@ -853,6 +853,63 @@ func TestProxyRestDynClassification(t *testing.T) {
 	}
 }
 
+// TestProxyRestErrorPassthrough 验证 REST 透明转发的错误契约：
+// 当 agent REST 返回 4xx/5xx 时，Go 后端应透传原始状态码，
+// 并在 detail 中保留上游错误体（前端依赖 {detail} 形状展示错误）。
+func TestProxyRestErrorPassthrough(t *testing.T) {
+	// mock agent REST 后端：对 eval 请求返回 400 + FastAPI 风格的 detail 错误体。
+	mockAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"detail":"invalid standard: unknown"}`))
+	}))
+	defer mockAgent.Close()
+
+	u, err := url.Parse(mockAgent.URL)
+	if err != nil {
+		t.Fatalf("parse mock agent url failed: %v", err)
+	}
+	t.Setenv("PRIVACY_REST_HOST", u.Hostname())
+	t.Setenv("PRIVACY_REST_PORT", u.Port())
+
+	grpcSrv := &testPrivacyServer{}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	reqBody := map[string]any{
+		"method": "POST",
+		"path":   "/v1/dynclassification/eval",
+		"body":   map[string]any{"fieldName": "phone"},
+	}
+	b, _ := json.Marshal(reqBody)
+	resp, err := http.Post(ts.URL+"/api/proxy", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("POST /api/proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 上游 400 状态码应被透传（而非包装为 200 或 502）。
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 400 passthrough, got %d: %s", resp.StatusCode, body)
+	}
+
+	var body struct {
+		Detail string `json:"detail"`
+		Status int    `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error response failed: %v", err)
+	}
+	// detail 应保留上游错误体，status 字段回显透传状态码。
+	if !strings.Contains(body.Detail, "invalid standard") {
+		t.Fatalf("expected detail to preserve upstream error body, got %q", body.Detail)
+	}
+	if body.Status != http.StatusBadRequest {
+		t.Fatalf("expected status field 400, got %d", body.Status)
+	}
+}
+
 // TestLbTestHandlerEmptyBackends 验证 backends 为空时返回 400。
 func TestLbTestHandlerEmptyBackends(t *testing.T) {
 	grpcSrv := &testPrivacyServer{}

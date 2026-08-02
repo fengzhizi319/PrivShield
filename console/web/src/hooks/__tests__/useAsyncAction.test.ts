@@ -44,13 +44,25 @@ describe('useAsyncAction 异步动作 Hook', () => {
     expect(result.current.loading).toBe(false);
   });
 
-  it('非 Error 异常回退到 fallbackError', async () => {
+  it('字符串异常直接作为错误消息（比泛化回退更具信息量）', async () => {
     const { result } = renderHook(() => useAsyncAction<number>());
     await act(async () => {
       await result.current.run(async () => {
-        // 故意抛出非 Error 值以验证回退逻辑 / throw non-Error to verify fallback
+        // 故意抛出字符串以验证 getErrorMessage 原样返回 / throw string to verify verbatim return
         // eslint-disable-next-line no-throw-literal
         throw 'string failure';
+      }, '回退文案');
+    });
+    expect(result.current.error).toBe('string failure');
+  });
+
+  it('无可读消息的异常（对象）回退到 fallbackError', async () => {
+    const { result } = renderHook(() => useAsyncAction<number>());
+    await act(async () => {
+      await result.current.run(async () => {
+        // 抛出无 message 的对象以验证回退逻辑 / throw object without message to verify fallback
+        // eslint-disable-next-line no-throw-literal
+        throw { code: 500 };
       }, '回退文案');
     });
     expect(result.current.error).toBe('回退文案');

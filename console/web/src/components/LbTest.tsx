@@ -31,6 +31,8 @@ import { Icon } from '@/components/icons';
 import ActionButton from '@/components/ActionButton';
 /** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 
 /**
  * 策略选项列表（渲染时通过 i18n 解析标签）/ Strategy option list (labels resolved via i18n at render time)
@@ -127,7 +129,7 @@ export default function LbTest({ agentUrl }: LbTestProps) {
       });
       setResult(resp); // 设置结果 / Set result
     } catch (e) {
-      setError((e as Error).message); // 设置错误 / Set error
+      setError(getErrorMessage(e)); // 设置错误 / Set error
     } finally {
       setLoading(false); // 取消加载态 / Disable loading
     }

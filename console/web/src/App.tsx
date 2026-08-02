@@ -54,6 +54,8 @@ import { type BackendOption, DEFAULT_BACKEND } from '@/components/BackendSelecto
 import { Icon } from '@/components/icons';
 /** 引入国际化 Hook（提供 t() 翻译函数）/ Import i18n Hook (provides t() translation function) */
 import { useI18n } from '@/i18n';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 
 /**
  * 主区域视图判别联合类型 / Main area view discriminated union type
@@ -120,7 +122,7 @@ export default function App() {
       setView({ type: 'overview' });
     } catch (e) {
       // 请求失败：记录错误消息 / Request failed: record error message
-      setError((e as Error).message);
+      setError(getErrorMessage(e));
       setHealth(null);          // 清空健康状态 / Clear health status
       setSamples([]);           // 清空示例列表 / Clear samples list
       setView({ type: 'overview' }); // 重置视图 / Reset view

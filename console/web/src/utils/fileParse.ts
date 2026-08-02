@@ -20,6 +20,9 @@
  * ensuring "original data" and "processed result" tables can be compared row by row and column by column.
  */
 
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
+
 /** 解析后的统一结构：记录数组 + 列名顺序 / Parsed unified structure: records array + column order */
 export interface ParsedRecords {
   /** 每条记录：列名 → 字符串值 / Each record: column name → string value */
@@ -137,7 +140,7 @@ function parseJsonRecords(text: string): ParsedRecords {
   try {
     raw = JSON.parse(text);
   } catch (e) {
-    throw new Error(`JSON 解析失败（需为记录数组）: ${(e as Error).message}`);
+    throw new Error(`JSON 解析失败（需为记录数组）: ${getErrorMessage(e)}`);
   }
   if (!Array.isArray(raw)) {
     throw new Error('JSON 需为记录对象数组');

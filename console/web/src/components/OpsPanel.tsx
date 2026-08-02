@@ -35,6 +35,8 @@ import { fetchDiagnostics } from '@/api/client';
 import { Icon } from '@/components/icons';
 /** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 
 /**
  * OpsPanel 组件属性接口 / OpsPanel Props Interface
@@ -237,7 +239,7 @@ export default function OpsPanel({ health }: OpsPanelProps) {
     try {
       setDiag(await fetchDiagnostics(refresh));
     } catch (e) {
-      setError((e as Error).message);
+      setError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }

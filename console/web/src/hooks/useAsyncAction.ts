@@ -23,6 +23,8 @@
 
 /** 引入 React 状态与记忆 Hook / Import React state & memoization Hooks */
 import { useCallback, useState } from 'react';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 
 /**
  * 异步动作对外暴露的状态与操作。
@@ -74,8 +76,9 @@ export function useAsyncAction<T>(): AsyncAction<T> {
       const result = await fn();
       setData(result);  // 写入成功数据 / Store success data
     } catch (e) {
-      // 优先取 Error.message，否则回退文案 / Prefer Error.message, else fallback text
-      setError(e instanceof Error ? e.message : fallbackError);
+      // 统一经 getErrorMessage 安全提取（Error.message / 字符串 / 回退）
+      // Uniformly extract via getErrorMessage (Error.message / string / fallback)
+      setError(getErrorMessage(e, fallbackError));
     } finally {
       setLoading(false); // 结束加载态 / Exit loading state
     }

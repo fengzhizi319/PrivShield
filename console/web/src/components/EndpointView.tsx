@@ -38,6 +38,8 @@ import ResponsePanel from '@/components/ResponsePanel';
 import HistoryPanel from '@/components/HistoryPanel';
 /** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 
 /**
  * EndpointView 组件属性接口 / EndpointView Component Props Interface
@@ -132,14 +134,14 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
 
     const start = performance.now(); // 记录开始时间戳 / Record start timestamp
     try {
-      let body: Record<string, any> | undefined;
+      let body: Record<string, unknown> | undefined;
       // 非 GET 且请求体非空时解析 JSON / Parse JSON when not GET and body is non-empty
       if (method !== 'GET' && bodyText.trim()) {
         try {
           body = JSON.parse(bodyText); // 解析请求体 / Parse request body
         } catch (e) {
           // JSON 解析失败：提示用户并中止发送 / JSON parse failed: notify user and abort send
-          setError(`请求体 JSON 解析错误：${(e as Error).message}`);
+          setError(t('endpoint.json_parse_error', getErrorMessage(e)));
           setLoading(false);
           return;
         }
@@ -159,7 +161,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
       setDuration(performance.now() - start); // 计算耗时 / Calculate duration
       recordHistory(res.status);             // 记录历史 / Record history
     } catch (e) {
-      setError((e as Error).message);        // 设置错误信息 / Set error message
+      setError(getErrorMessage(e));        // 设置错误信息 / Set error message
       setDuration(performance.now() - start); // 记录失败耗时 / Record failure duration
       recordHistory(0);                      // 状态码 0 表示网络错误 / Status 0 indicates network error
     } finally {
@@ -230,7 +232,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
       setBodyText(JSON.stringify(JSON.parse(bodyText), null, 2)); // 解析+重新格式化 / Parse + re-format
       setError(null); // 格式化成功时清除错误 / Clear error on successful format
     } catch (e) {
-      setError(`JSON 格式错误：${(e as Error).message}`); // 提示解析错误 / Show parse error
+      setError(t('endpoint.json_format_error', getErrorMessage(e))); // 提示解析错误 / Show parse error
     }
   };
 

@@ -35,6 +35,8 @@ import { createSampleFile, downloadSampleFile, type SampleFormat } from '@/utils
 import { parseDataFile, type ParsedRecords } from '@/utils/fileParse';
 /** 引入 i18n Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 
 /**
  * 操作选项元数据 / Operation Option Metadata
@@ -263,7 +265,7 @@ export default function FileTest() {
       .catch((e) => {
         if (!cancelled) {
           setOriginal(null);
-          setParseError((e as Error).message);
+          setParseError(getErrorMessage(e));
         }
       });
     return () => {
@@ -348,7 +350,7 @@ export default function FileTest() {
       const resp = await uploadFile(file, operation, buildParams());
       setResponse(resp);
     } catch (e) {
-      setError((e as Error).message);
+      setError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }

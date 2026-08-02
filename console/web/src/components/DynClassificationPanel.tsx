@@ -29,6 +29,8 @@ import { proxyRequest, fetchStandards } from '@/api/client';
 import { useI18n } from '@/i18n';
 /** 引入通用异步动作 Hook / Import generic async action Hook */
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 /** 引入标准详情类型 / Import standard detail type */
 import type {
   StandardDetail,
@@ -442,8 +444,8 @@ export default function DynClassificationPanel() {
         path: `/v1/dynclassification/${type}`,
       });
       setInfoData(res.data);
-    } catch (e: any) {
-      setInfoData({ error: e.message });
+    } catch (e) {
+      setInfoData({ error: getErrorMessage(e) });
     } finally {
       setInfoLoading(false);
     }
@@ -465,8 +467,8 @@ export default function DynClassificationPanel() {
         path: '/v1/dynclassification/validate',
       });
       setValResult(res.data as ValidateResponse);
-    } catch (e: any) {
-      setValResult({ error: e.message });
+    } catch (e) {
+      setValResult({ error: getErrorMessage(e) });
     } finally {
       setValLoading(false);
     }

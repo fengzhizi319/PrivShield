@@ -31,6 +31,8 @@ import { Icon } from '@/components/icons';
 import ActionButton from '@/components/ActionButton';
 /** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
+/** 引入统一错误消息提取工具 / Import unified error message extraction utility */
+import { getErrorMessage } from '@/utils/error';
 
 /**
  * BatchTest 组件属性接口 / BatchTest Component Props Interface
@@ -107,7 +109,7 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
       );
       setResult(res);  // 设置结果 / Set result
     } catch (e) {
-      setError((e as Error).message); // 设置错误 / Set error
+      setError(getErrorMessage(e)); // 设置错误 / Set error
     } finally {
       setRunning(false); // 取消加载态 / Disable loading state
     }
