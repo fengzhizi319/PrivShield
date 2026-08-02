@@ -25,6 +25,10 @@ import { useEffect, useState } from 'react';
 import { Icon } from '@/components/icons';
 /** 引入代理请求 API / Import proxy request API */
 import { proxyRequest, fetchStandards } from '@/api/client';
+/** 引入国际化 Hook / Import i18n Hook */
+import { useI18n } from '@/i18n';
+/** 引入通用异步动作 Hook / Import generic async action Hook */
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 /** 引入标准详情类型 / Import standard detail type */
 import type {
   StandardDetail,
@@ -58,6 +62,7 @@ function LevelBadge({ levelId, levels }: { levelId: string; levels: StandardLeve
  * Tag card: structured display of a single SecurityTag's key info.
  */
 function TagCard({ tag, levels }: { tag: SecurityTag; levels: StandardLevel[] }) {
+  const { t } = useI18n(); // 读取翻译函数 / read translation function
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
       <div className="flex items-center justify-between gap-2">
@@ -68,11 +73,11 @@ function TagCard({ tag, levels }: { tag: SecurityTag; levels: StandardLevel[] })
         <span className="text-xs font-medium text-gray-500">{Math.round(tag.confidence * 100)}%</span>
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-        {tag.ruleId && <span>规则: <code className="text-gray-700">{tag.ruleId}</code></span>}
-        <span>引擎: {tag.sourceEngine}</span>
-        <span>匹配: {tag.matchTarget}</span>
-        {tag.needsHumanReview && <span className="text-amber-600">⚠️ 需人工复核</span>}
-        {tag.isDowngrade && <span className="text-blue-600">↓ 降级产生</span>}
+        {tag.ruleId && <span>{t('dyn.result.tag.rule')} <code className="text-gray-700">{tag.ruleId}</code></span>}
+        <span>{t('dyn.result.tag.engine')} {tag.sourceEngine}</span>
+        <span>{t('dyn.result.tag.match')} {tag.matchTarget}</span>
+        {tag.needsHumanReview && <span className="text-amber-600">{t('dyn.result.tag.needs_review')}</span>}
+        {tag.isDowngrade && <span className="text-blue-600">{t('dyn.result.tag.downgrade')}</span>}
       </div>
     </div>
   );
@@ -83,14 +88,15 @@ function TagCard({ tag, levels }: { tag: SecurityTag; levels: StandardLevel[] })
  * Audit bar: displays execution metadata of a classification request.
  */
 function AuditBar({ resp }: { resp: ClassificationResponse }) {
+  const { t } = useI18n(); // 读取翻译函数 / read translation function
   const audit = resp.auditInfo;
   if (!audit) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-gray-100 px-3 py-2 text-xs text-gray-500">
-      <span>耗时 <b className="text-gray-700">{audit.durationMs.toFixed(1)} ms</b></span>
-      <span>命中规则 <b className="text-gray-700">{audit.rulesHit}</b> / {audit.rulesEvaluated}</span>
-      {audit.standardId && <span>标准: {audit.standardId}</span>}
-      {audit.domain && <span>领域: {audit.domain}</span>}
+      <span>{t('dyn.result.audit.duration')} <b className="text-gray-700">{audit.durationMs.toFixed(1)} ms</b></span>
+      <span>{t('dyn.result.audit.rules_hit')} <b className="text-gray-700">{audit.rulesHit}</b> / {audit.rulesEvaluated}</span>
+      {audit.standardId && <span>{t('dyn.result.audit.standard')} {audit.standardId}</span>}
+      {audit.domain && <span>{t('dyn.result.audit.domain')} {audit.domain}</span>}
     </div>
   );
 }
@@ -100,9 +106,10 @@ function AuditBar({ resp }: { resp: ClassificationResponse }) {
  * Collapsible raw JSON debug area: collapsed by default, expandable for full response inspection.
  */
 function RawJson({ data }: { data: unknown }) {
+  const { t } = useI18n(); // 读取翻译函数 / read translation function
   return (
     <details className="overflow-hidden rounded-lg border border-gray-200 bg-gray-900 text-xs text-green-400">
-      <summary className="cursor-pointer select-none bg-gray-800 px-4 py-2 text-gray-300">查看原始 JSON (Raw JSON)</summary>
+      <summary className="cursor-pointer select-none bg-gray-800 px-4 py-2 text-gray-300">{t('dyn.result.raw_json')}</summary>
       <pre className="max-h-72 overflow-auto p-4">{JSON.stringify(data, null, 2)}</pre>
     </details>
   );
@@ -118,6 +125,7 @@ function RawJson({ data }: { data: unknown }) {
  * hit-tag card list + audit bar + collapsible raw JSON.
  */
 function EvalResultView({ resp, levels }: { resp: ClassificationResponse; levels: StandardLevel[] }) {
+  const { t } = useI18n(); // 读取翻译函数 / read translation function
   const field = resp.fieldResult;
   if (!field) {
     // 响应不含字段结果时回退到原始 JSON / fall back to raw JSON when no field result present
@@ -134,12 +142,12 @@ function EvalResultView({ resp, levels }: { resp: ClassificationResponse; levels
             {field.finalLevel}
           </span>
           <div>
-            <span className="text-xs text-gray-500">最终判定敏感等级</span>
-            <div className="mt-0.5 text-xs text-gray-500">引擎层: {field.engineLayer}</div>
+            <span className="text-xs text-gray-500">{t('dyn.result.final_level')}</span>
+            <div className="mt-0.5 text-xs text-gray-500">{t('dyn.result.engine_layer', field.engineLayer)}</div>
           </div>
         </div>
         <div className="text-right">
-          <span className="text-xs text-gray-500">置信度{field.needsHumanReview ? ' · 需复核' : ''}</span>
+          <span className="text-xs text-gray-500">{t('dyn.result.confidence')}{field.needsHumanReview ? t('dyn.result.needs_review') : ''}</span>
           <div className="mt-0.5 text-sm font-semibold text-gray-800">
             {Math.round(field.confidence * 100)}%{field.needsHumanReview ? ' ⚠️' : ''}
           </div>
@@ -149,7 +157,7 @@ function EvalResultView({ resp, levels }: { resp: ClassificationResponse; levels
       {/* 推理说明 / Reasoning */}
       {field.reasoning && (
         <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2 text-xs text-purple-800">
-          <span className="font-semibold">推理说明：</span>
+          <span className="font-semibold">{t('dyn.result.reasoning')}</span>
           {field.reasoning}
         </div>
       )}
@@ -157,7 +165,7 @@ function EvalResultView({ resp, levels }: { resp: ClassificationResponse; levels
       {/* 命中标签卡片 / Hit tag cards */}
       {field.tags && field.tags.length > 0 && (
         <div className="space-y-2">
-          <span className="text-xs font-semibold text-gray-600">命中标签 ({field.tags.length})</span>
+          <span className="text-xs font-semibold text-gray-600">{t('dyn.result.hit_tags', field.tags.length)}</span>
           {field.tags.map((tag, i) => (
             <TagCard key={`${tag.ruleId}-${i}`} tag={tag} levels={levels} />
           ))}
@@ -167,7 +175,7 @@ function EvalResultView({ resp, levels }: { resp: ClassificationResponse; levels
       {/* 被抑制标签（如有）/ Suppressed tags (if any) */}
       {field.suppressedTags && field.suppressedTags.length > 0 && (
         <div className="space-y-2 opacity-70">
-          <span className="text-xs font-semibold text-gray-500">被抑制标签 ({field.suppressedTags.length})</span>
+          <span className="text-xs font-semibold text-gray-500">{t('dyn.result.suppressed_tags', field.suppressedTags.length)}</span>
           {field.suppressedTags.map((tag, i) => (
             <TagCard key={`sup-${tag.ruleId}-${i}`} tag={tag} levels={levels} />
           ))}
@@ -191,6 +199,7 @@ function EvalResultView({ resp, levels }: { resp: ClassificationResponse; levels
  * (field/final level/confidence/hit rules) + audit bar + collapsible raw JSON.
  */
 function RecordResultView({ resp, levels }: { resp: ClassificationResponse; levels: StandardLevel[] }) {
+  const { t } = useI18n(); // 读取翻译函数 / read translation function
   const record = resp.recordResult;
   if (!record) {
     return <RawJson data={resp} />;
@@ -208,12 +217,12 @@ function RecordResultView({ resp, levels }: { resp: ClassificationResponse; leve
             {record.finalLevel}
           </span>
           <div>
-            <span className="text-xs text-gray-500">记录级最终等级</span>
-            <div className="mt-0.5 text-xs text-gray-500">字段数: {entries.length}</div>
+            <span className="text-xs text-gray-500">{t('dyn.result.record_final_level')}</span>
+            <div className="mt-0.5 text-xs text-gray-500">{t('dyn.result.field_count', entries.length)}</div>
           </div>
         </div>
         <div className="text-right">
-          <span className="text-xs text-gray-500">置信度{record.needsHumanReview ? ' · 需复核' : ''}</span>
+          <span className="text-xs text-gray-500">{t('dyn.result.confidence')}{record.needsHumanReview ? t('dyn.result.needs_review') : ''}</span>
           <div className="mt-0.5 text-sm font-semibold text-gray-800">
             {Math.round(record.confidence * 100)}%{record.needsHumanReview ? ' ⚠️' : ''}
           </div>
@@ -226,10 +235,10 @@ function RecordResultView({ resp, levels }: { resp: ClassificationResponse; leve
           <table className="w-full text-left text-xs">
             <thead className="bg-gray-50 text-gray-500">
               <tr>
-                <th className="px-3 py-2 font-medium">字段</th>
-                <th className="px-3 py-2 font-medium">等级</th>
-                <th className="px-3 py-2 font-medium">置信度</th>
-                <th className="px-3 py-2 font-medium">命中规则</th>
+                <th className="px-3 py-2 font-medium">{t('dyn.result.table.field')}</th>
+                <th className="px-3 py-2 font-medium">{t('dyn.result.table.level')}</th>
+                <th className="px-3 py-2 font-medium">{t('dyn.result.table.confidence')}</th>
+                <th className="px-3 py-2 font-medium">{t('dyn.result.table.rules')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -264,6 +273,8 @@ function RecordResultView({ resp, levels }: { resp: ClassificationResponse; leve
  * Switches between five functional panels via tab state, each panel independently maintains input/output/loading state.
  */
 export default function DynClassificationPanel() {
+  /** 国际化翻译函数 / i18n translation function */
+  const { t } = useI18n();
   /** 当前活动 Tab / Currently active tab */
   const [tab, setTab] = useState<'eval' | 'record' | 'generate' | 'info' | 'validate'>('eval');
 
@@ -314,25 +325,21 @@ export default function DynClassificationPanel() {
    */
   const handleStandardChange = (id: string) => {
     setCurrentStandard(id);
-    setEvalResult(null);
-    setEvalError(null);
-    setRecordResult(null);
-    setRecordError(null);
+    evalAction.reset();   // 清空字段评估结果 / clear field eval result
+    recordAction.reset(); // 清空记录分类结果 / clear record classification result
   };
 
   /* ====== 字段动态评估 (Eval) 状态 / Field Dynamic Evaluation State ====== */
   const [fieldName, setFieldName] = useState('mobile_phone');   // 字段名 / Field name
   const [fieldValue, setFieldValue] = useState('13800138000');  // 字段值 / Field value
   const [domain, setDomain] = useState('');                     // 领域（可选，标准优先）/ Domain (optional, standard takes precedence)
-  const [evalResult, setEvalResult] = useState<ClassificationResponse | null>(null); // 评估结果 / Evaluation result
-  const [evalLoading, setEvalLoading] = useState(false);        // 加载中标记 / Loading flag
-  const [evalError, setEvalError] = useState<string | null>(null); // 错误信息 / Error message
+  /** 字段评估异步动作（data/loading/error 三态）/ Field eval async action (data/loading/error tri-state) */
+  const evalAction = useAsyncAction<ClassificationResponse>();
 
   /* ====== 标准文档生成配置 (Generate) 状态 / Standard Doc Generate Config State ====== */
   const [docPath, setDocPath] = useState('docs/standard/四川省健康医疗大数据应用指南.md'); // 文档路径 / Doc path
-  const [genResult, setGenResult] = useState<GenerateProfileResponse | null>(null); // 生成结果 / Generation result
-  const [genLoading, setGenLoading] = useState(false);        // 加载中标记 / Loading flag
-  const [genError, setGenError] = useState<string | null>(null); // 错误信息 / Error message
+  /** 配置生成异步动作 / Config generation async action */
+  const genAction = useAsyncAction<GenerateProfileResponse>();
 
   /* ====== 系统信息查询 (Info) 状态 / System Info Query State ====== */
   const [infoData, setInfoData] = useState<unknown>(null);    // 查询结果 / Query result
@@ -345,9 +352,8 @@ export default function DynClassificationPanel() {
   /* ====== 记录级分类 (Record) 状态 / Record-level Classification State ====== */
   const [recordJson, setRecordJson] = useState('{"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}'); // JSON 记录 / JSON record
   const [recordDomain, setRecordDomain] = useState('');                    // 领域（可选）/ Domain (optional)
-  const [recordResult, setRecordResult] = useState<ClassificationResponse | null>(null); // 分类结果 / Classification result
-  const [recordLoading, setRecordLoading] = useState(false);             // 加载中标记 / Loading flag
-  const [recordError, setRecordError] = useState<string | null>(null);   // 错误信息 / Error message
+  /** 记录分类异步动作 / Record classification async action */
+  const recordAction = useAsyncAction<ClassificationResponse>();
 
   /**
    * 执行字段动态评估 / Execute Field Dynamic Evaluation
@@ -357,12 +363,9 @@ export default function DynClassificationPanel() {
    * Assembles payload (fieldName/value/domain/standard),
    * POSTs to /v1/dynclassification/eval to get classification result.
    */
-  const handleEval = async () => {
-    setEvalLoading(true);
-    setEvalError(null);
-    setEvalResult(null);
-    try {
-      const payload: any = { fieldName };
+  const handleEval = () =>
+    evalAction.run(async () => {
+      const payload: Record<string, unknown> = { fieldName };
       if (fieldValue) payload.value = fieldValue;
       if (domain) payload.domain = domain;
       if (currentStandard) payload.standard = currentStandard;
@@ -372,13 +375,8 @@ export default function DynClassificationPanel() {
         path: '/v1/dynclassification/eval',
         body: payload,
       });
-      setEvalResult(res.data as ClassificationResponse);
-    } catch (e: any) {
-      setEvalError(e.message || '评估失败');
-    } finally {
-      setEvalLoading(false);
-    }
-  };
+      return res.data as ClassificationResponse;
+    }, t('dyn.eval.error_fallback'));
 
   /**
    * 执行记录级分类 / Execute Record-level Classification
@@ -388,20 +386,17 @@ export default function DynClassificationPanel() {
    * Parses JSON record, POSTs to /v1/dynclassification/eval_record,
    * classifies each field in the record.
    */
-  const handleRecordEval = async () => {
-    setRecordLoading(true);
-    setRecordError(null);
-    setRecordResult(null);
-    try {
-      let record: any;
+  const handleRecordEval = () =>
+    recordAction.run(async () => {
+      let record: Record<string, unknown>;
       try {
         record = JSON.parse(recordJson);
       } catch {
-        setRecordError('JSON 格式错误，请检查输入');
-        setRecordLoading(false);
-        return;
+        // JSON 解析失败时抛出带 i18n 文案的 Error，由 hook 统一捕获为 error 状态
+        // Throw an i18n Error on parse failure; the hook captures it as error state
+        throw new Error(t('dyn.record.json_error'));
       }
-      const payload: any = { record };
+      const payload: Record<string, unknown> = { record };
       if (recordDomain) payload.domain = recordDomain;
       if (currentStandard) payload.standard = currentStandard;
 
@@ -410,13 +405,8 @@ export default function DynClassificationPanel() {
         path: '/v1/dynclassification/eval_record',
         body: payload,
       });
-      setRecordResult(res.data as ClassificationResponse);
-    } catch (e: any) {
-      setRecordError(e.message || '记录级分类失败');
-    } finally {
-      setRecordLoading(false);
-    }
-  };
+      return res.data as ClassificationResponse;
+    }, t('dyn.record.error_fallback'));
 
   /**
    * 执行标准文档自动生成配置 / Execute Standard Doc Auto-generate Config
@@ -426,23 +416,15 @@ export default function DynClassificationPanel() {
    * POSTs to /v1/dynclassification/generate_profile,
    * auto-extracts classification rules from spec doc and generates YAML config.
    */
-  const handleGenerate = async () => {
-    setGenLoading(true);
-    setGenError(null);
-    setGenResult(null);
-    try {
+  const handleGenerate = () =>
+    genAction.run(async () => {
       const res = await proxyRequest({
         method: 'POST',
         path: '/v1/dynclassification/generate_profile',
         body: { docPath },
       });
-      setGenResult(res.data as GenerateProfileResponse);
-    } catch (e: any) {
-      setGenError(e.message || '生成失败');
-    } finally {
-      setGenLoading(false);
-    }
-  };
+      return res.data as GenerateProfileResponse;
+    }, t('dyn.gen.error_fallback'));
 
   /**
    * 查询系统信息（标准/领域/算子）/ Query System Info (Standards/Domains/Operators)
@@ -499,24 +481,25 @@ export default function DynClassificationPanel() {
             <Icon name="sparkles" className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">声明式通用动态分类分级 (Dynamic Classification)</h1>
+            <h1 className="text-xl font-bold text-gray-900">{t('dyn.title')}</h1>
             <p className="text-xs text-gray-500">
-              支持多领域、多行业标准（Sichuan/GD/Financial等）YAML 配置、开箱即用匹配算子与规范文档自动提取配置生成。
+              {t('dyn.subtitle')}
             </p>
           </div>
         </div>
 
-        {/* 全局标准切换器：切换后所有评估请求携带新标准，agent 侧加载对应 taxonomy 与规则包 */}
+        {/* 全局标准切换器：切换后所有的评估请求携带新标准，agent 侧加载对应 taxonomy 与规则包 */}
         {/* Global standard switcher: after switching, all eval requests carry the new standard */}
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-purple-100 bg-white/70 px-4 py-3">
-          <span className="text-xs font-semibold text-gray-700">当前标准 (Standard)</span>
+          <span className="text-xs font-semibold text-gray-700">{t('dyn.standard.label')}</span>
           <select
             value={currentStandard}
             onChange={(e) => handleStandardChange(e.target.value)}
             disabled={standardsLoading}
+            aria-label={t('dyn.standard.label')}
             className="rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm text-gray-800 focus:border-purple-500 focus:outline-none disabled:opacity-50"
           >
-            <option value="">{standardsLoading ? '加载中…' : '默认（通用规则引擎）'}</option>
+            <option value="">{standardsLoading ? t('dyn.standard.loading') : t('dyn.standard.default')}</option>
             {standards.map((s) => (
               <option key={s.standard_id} value={s.standard_id}>
                 {s.standard_id} — {s.description}
@@ -533,14 +516,17 @@ export default function DynClassificationPanel() {
                   <LevelBadge levelId={lv.id} levels={currentDetail.levels} />
                 </span>
               ))}
-              <span className="text-xs text-gray-400">默认等级: {currentDetail.default_level}</span>
+              <span className="text-xs text-gray-400">{t('dyn.standard.default_level', currentDetail.default_level)}</span>
+              {typeof currentDetail.category_count === 'number' && (
+                <span className="text-xs text-gray-400">{t('dyn.standard.category_count', currentDetail.category_count)}</span>
+              )}
               {typeof currentDetail.rule_count === 'number' && (
-                <span className="text-xs text-gray-400">规则数: {currentDetail.rule_count}</span>
+                <span className="text-xs text-gray-400">{t('dyn.standard.rule_count', currentDetail.rule_count)}</span>
               )}
             </div>
           ) : (
             !standardsLoading && (
-              <span className="text-xs text-gray-400">使用通用规则引擎（未选择标准）</span>
+              <span className="text-xs text-gray-400">{t('dyn.standard.generic_hint')}</span>
             )
           )}
         </div>
@@ -553,7 +539,7 @@ export default function DynClassificationPanel() {
               tab === 'eval' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            字段动态评估 (Eval)
+            {t('dyn.tab.eval')}
           </button>
           <button
             onClick={() => setTab('record')}
@@ -561,7 +547,7 @@ export default function DynClassificationPanel() {
               tab === 'record' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            记录级分类 (Record)
+            {t('dyn.tab.record')}
           </button>
           <button
             onClick={() => setTab('generate')}
@@ -569,7 +555,7 @@ export default function DynClassificationPanel() {
               tab === 'generate' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            标准文档一键生成配置 (Auto Generate)
+            {t('dyn.tab.generate')}
           </button>
           <button
             onClick={() => {
@@ -580,7 +566,7 @@ export default function DynClassificationPanel() {
               tab === 'info' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            标准/领域/算子目录 (Directory)
+            {t('dyn.tab.info')}
           </button>
           <button
             onClick={() => {
@@ -591,7 +577,7 @@ export default function DynClassificationPanel() {
               tab === 'validate' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            规则在线校验 (Validate)
+            {t('dyn.tab.validate')}
           </button>
         </div>
       </div>
@@ -602,10 +588,10 @@ export default function DynClassificationPanel() {
         {tab === 'eval' && (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 text-base font-semibold text-gray-800">评估参数输入</h2>
+              <h2 className="mb-4 text-base font-semibold text-gray-800">{t('dyn.eval.params_title')}</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700">字段名称 (fieldName)</label>
+                  <label className="block text-xs font-medium text-gray-700">{t('dyn.eval.field_name')}</label>
                   <input
                     type="text"
                     value={fieldName}
@@ -615,7 +601,7 @@ export default function DynClassificationPanel() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700">字段数值 (value, 可选)</label>
+                  <label className="block text-xs font-medium text-gray-700">{t('dyn.eval.field_value')}</label>
                   <input
                     type="text"
                     value={fieldValue}
@@ -625,36 +611,43 @@ export default function DynClassificationPanel() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700">领域包 (domain, 可选)</label>
+                  <label className="block text-xs font-medium text-gray-700">{t('dyn.eval.domain')}</label>
                   <input
                     type="text"
+                    list="eval-domain-list"
                     value={domain}
                     onChange={(e) => setDomain(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
-                    placeholder="general-pii / medical"
+                    placeholder={t('dyn.eval.domain_ph')}
                   />
+                  {/* 领域包候选：优先取当前标准的 domains，未选标准时为空（仍可手输）/ Domain candidates from current standard */}
+                  <datalist id="eval-domain-list">
+                    {(currentDetail?.domains ?? []).map((d) => (
+                      <option key={d} value={d} />
+                    ))}
+                  </datalist>
                   <p className="mt-1 text-xs text-gray-400">
-                    分类标准由顶部切换器控制：{currentDetail ? `${currentDetail.standard_id}（${currentDetail.description}）` : '默认通用规则引擎'}
+                    {t('dyn.eval.standard_hint', currentDetail ? `${currentDetail.standard_id}（${currentDetail.description}）` : t('dyn.eval.standard_default'))}
                   </p>
                 </div>
                 <button
                   onClick={handleEval}
-                  disabled={evalLoading}
+                  disabled={evalAction.loading}
                   className="w-full rounded-lg bg-purple-600 py-2.5 text-sm font-semibold text-white shadow-md shadow-purple-100 transition-colors hover:bg-purple-700 disabled:opacity-50"
                 >
-                  {evalLoading ? '评估计算中…' : '执行动态分类评估'}
+                  {evalAction.loading ? t('dyn.eval.submitting') : t('dyn.eval.submit')}
                 </button>
               </div>
             </div>
 
             {/* 评估结果显示 */}
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-5 shadow-sm">
-              <h2 className="mb-4 text-base font-semibold text-gray-800">评估结果</h2>
-              {evalError && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{evalError}</div>}
-              {evalResult ? (
-                <EvalResultView resp={evalResult} levels={currentDetail?.levels ?? []} />
+              <h2 className="mb-4 text-base font-semibold text-gray-800">{t('dyn.eval.result_title')}</h2>
+              {evalAction.error && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{evalAction.error}</div>}
+              {evalAction.data ? (
+                <EvalResultView resp={evalAction.data} levels={currentDetail?.levels ?? []} />
               ) : (
-                <div className="flex h-48 items-center justify-center text-xs text-gray-400">点击左侧“执行动态分类评估”获取求值结果</div>
+                <div className="flex h-48 items-center justify-center text-xs text-gray-400">{t('dyn.eval.empty')}</div>
               )}
             </div>
           </div>
@@ -664,10 +657,10 @@ export default function DynClassificationPanel() {
         {tab === 'record' && (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 text-base font-semibold text-gray-800">记录级分类输入</h2>
+              <h2 className="mb-4 text-base font-semibold text-gray-800">{t('dyn.record.input_title')}</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700">记录 JSON（字段名 → 值）</label>
+                  <label className="block text-xs font-medium text-gray-700">{t('dyn.record.json_label')}</label>
                   <textarea
                     value={recordJson}
                     onChange={(e) => setRecordJson(e.target.value)}
@@ -676,35 +669,42 @@ export default function DynClassificationPanel() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700">领域 (domain, 可选)</label>
+                  <label className="block text-xs font-medium text-gray-700">{t('dyn.record.domain')}</label>
                   <input
                     type="text"
+                    list="record-domain-list"
                     value={recordDomain}
                     onChange={(e) => setRecordDomain(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
-                    placeholder="general-pii / medical"
+                    placeholder={t('dyn.eval.domain_ph')}
                   />
+                  {/* 领域包候选：同字段评估，取当前标准的 domains / Domain candidates same as field eval */}
+                  <datalist id="record-domain-list">
+                    {(currentDetail?.domains ?? []).map((d) => (
+                      <option key={d} value={d} />
+                    ))}
+                  </datalist>
                   <p className="mt-1 text-xs text-gray-400">
-                    分类标准由顶部切换器控制：{currentDetail ? `${currentDetail.standard_id}（${currentDetail.description}）` : '默认通用规则引擎'}
+                    {t('dyn.eval.standard_hint', currentDetail ? `${currentDetail.standard_id}（${currentDetail.description}）` : t('dyn.eval.standard_default'))}
                   </p>
                 </div>
                 <button
                   onClick={handleRecordEval}
-                  disabled={recordLoading}
+                  disabled={recordAction.loading}
                   className="w-full rounded-lg bg-purple-600 py-2.5 text-sm font-semibold text-white shadow-md shadow-purple-100 transition-colors hover:bg-purple-700 disabled:opacity-50"
                 >
-                  {recordLoading ? '分类计算中…' : '执行记录级分类'}
+                  {recordAction.loading ? t('dyn.record.submitting') : t('dyn.record.submit')}
                 </button>
               </div>
             </div>
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-5 shadow-sm">
-              <h2 className="mb-4 text-base font-semibold text-gray-800">记录级分类结果</h2>
-              {recordError && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{recordError}</div>}
-              {recordResult ? (
-                <RecordResultView resp={recordResult} levels={currentDetail?.levels ?? []} />
+              <h2 className="mb-4 text-base font-semibold text-gray-800">{t('dyn.record.result_title')}</h2>
+              {recordAction.error && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{recordAction.error}</div>}
+              {recordAction.data ? (
+                <RecordResultView resp={recordAction.data} levels={currentDetail?.levels ?? []} />
               ) : (
-                <div className="flex h-48 items-center justify-center text-xs text-gray-400">点击左侧“执行记录级分类”获取结果</div>
+                <div className="flex h-48 items-center justify-center text-xs text-gray-400">{t('dyn.record.empty')}</div>
               )}
             </div>
           </div>
@@ -714,13 +714,13 @@ export default function DynClassificationPanel() {
         {tab === 'generate' && (
           <div className="max-w-3xl space-y-6">
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="text-base font-semibold text-gray-800">标准 Markdown 规范文档一键提取 YAML 配置</h2>
+              <h2 className="text-base font-semibold text-gray-800">{t('dyn.gen.title')}</h2>
               <p className="mt-1 text-xs text-gray-500">
-                支持输入符合地方或行业标准的规范文档（如《四川省健康医疗大数据应用指南.md》），自动识别分级矩阵并提取 YAML 配置文件。
+                {t('dyn.gen.desc')}
               </p>
               <div className="mt-4 space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700">文档文件路径 (docPath)</label>
+                  <label className="block text-xs font-medium text-gray-700">{t('dyn.gen.path_label')}</label>
                   <input
                     type="text"
                     value={docPath}
@@ -730,21 +730,21 @@ export default function DynClassificationPanel() {
                 </div>
                 <button
                   onClick={handleGenerate}
-                  disabled={genLoading}
+                  disabled={genAction.loading}
                   className="rounded-lg bg-purple-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-colors hover:bg-purple-700 disabled:opacity-50"
                 >
-                  {genLoading ? '解析抽取中…' : '一键自动生成全套 YAML 配置'}
+                  {genAction.loading ? t('dyn.gen.submitting') : t('dyn.gen.submit')}
                 </button>
               </div>
             </div>
 
-            {genError && <div className="rounded-lg bg-red-50 p-4 text-xs text-red-600">{genError}</div>}
-            {genResult && (
+            {genAction.error && <div className="rounded-lg bg-red-50 p-4 text-xs text-red-600">{genAction.error}</div>}
+            {genAction.data && (
               <div className="rounded-xl border border-green-200 bg-green-50 p-5">
-                <h3 className="text-sm font-bold text-green-800">生成成功！</h3>
-                <p className="mt-1 text-xs text-green-700">{genResult.message}</p>
+                <h3 className="text-sm font-bold text-green-800">{t('dyn.gen.success')}</h3>
+                <p className="mt-1 text-xs text-green-700">{genAction.data.message}</p>
                 <div className="mt-3 overflow-hidden rounded-lg bg-gray-900 p-3 text-xs text-green-400">
-                  <pre>{JSON.stringify(genResult.generated_files, null, 2)}</pre>
+                  <pre>{JSON.stringify(genAction.data.generated_files, null, 2)}</pre>
                 </div>
               </div>
             )}
@@ -759,23 +759,23 @@ export default function DynClassificationPanel() {
                 onClick={() => handleFetchInfo('standards')}
                 className="rounded-lg bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100"
               >
-                可用标准 (Standards)
+                {t('dyn.info.standards')}
               </button>
               <button
                 onClick={() => handleFetchInfo('domains')}
                 className="rounded-lg bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100"
               >
-                领域匹配包 (Domains)
+                {t('dyn.info.domains')}
               </button>
               <button
                 onClick={() => handleFetchInfo('operators')}
                 className="rounded-lg bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100"
               >
-                注册算子库 (Operators)
+                {t('dyn.info.operators')}
               </button>
             </div>
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-900 p-4 text-xs text-green-400">
-              {infoLoading ? <p>加载中…</p> : <pre>{JSON.stringify(infoData, null, 2)}</pre>}
+              {infoLoading ? <p>{t('dyn.info.loading')}</p> : <pre>{JSON.stringify(infoData, null, 2)}</pre>}
             </div>
           </div>
         )}
@@ -786,15 +786,15 @@ export default function DynClassificationPanel() {
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-base font-semibold text-gray-800">规则 YAML 文件合法性在线校验</h2>
-                  <p className="text-xs text-gray-500">检测算子未找到错误、语法错误与拼写模糊纠错提示。</p>
+                  <h2 className="text-base font-semibold text-gray-800">{t('dyn.validate.title')}</h2>
+                  <p className="text-xs text-gray-500">{t('dyn.validate.desc')}</p>
                 </div>
                 <button
                   onClick={handleValidate}
                   disabled={valLoading}
                   className="rounded-lg bg-purple-600 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-700"
                 >
-                  重新校验
+                  {t('dyn.validate.resubmit')}
                 </button>
               </div>
             </div>

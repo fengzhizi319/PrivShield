@@ -114,6 +114,9 @@ class TestStandardsCatalog:
             # 规则总数为非负整数，且已注册标准至少含一条规则
             assert isinstance(detail["rule_count"], int)
             assert detail["rule_count"] > 0
+            # 分类总数为非负整数，且已注册标准的 taxonomy 至少含一个分类
+            assert isinstance(detail["category_count"], int)
+            assert detail["category_count"] > 0
 
     def test_details_sorted_by_standard_id(self, service):
         """详情列表按 standard_id 排序，保证前端渲染顺序稳定。"""

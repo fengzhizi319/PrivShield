@@ -376,8 +376,9 @@ class DynClassificationService:
         """列出所有可用标准的详细信息（含等级体系），供前端标准切换器渲染。
 
         每个标准返回：standard_id、description、taxonomy、domains、
-        default_level、按 rank 升序排列的等级列表（levels）以及
-        该标准组合下的规则总数（rule_count）。
+        default_level、按 rank 升序排列的等级列表（levels）、
+        该标准组合下的规则总数（rule_count）以及引用 taxonomy 下的
+        分类总数（category_count）。
         配置损坏的标准会被跳过（仅记录警告），避免单个坏文件拖垮整个列表。
 
         Returns:
@@ -424,6 +425,9 @@ class DynClassificationService:
                         for lv in sorted(taxonomy.levels.values(), key=lambda x: x.rank)
                     ],
                     "rule_count": rule_count,
+                    # taxonomy 下定义的分类总数，供前端展示标准分类体系规模。
+                    # Total categories defined in the taxonomy, for showing the standard's category scope.
+                    "category_count": len(taxonomy.categories),
                 }
             )
         return details

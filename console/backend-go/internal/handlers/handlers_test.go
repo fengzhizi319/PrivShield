@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -706,6 +707,76 @@ func TestLbTestHandlerInvalidScheme(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid scheme, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxyRestDynClassification 验证 dynclassification 路径走 REST 透明转发：
+// 起一个 mock agent REST 后端，通过 PRIVACY_REST_HOST/PORT 指向它，
+// 确认 /v1/dynclassification/* 请求被透传且返回 Via=go-rest-proxy / Protocol=REST。
+func TestProxyRestDynClassification(t *testing.T) {
+	// mock agent REST 后端：回显 standards 列表，并校验请求确实到达。
+	hit := false
+	mockAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		if r.URL.Path != "/v1/dynclassification/standards" {
+			t.Fatalf("unexpected proxied path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"standards":[{"standard_id":"sc_health_db51","category_count":42}]}`))
+	}))
+	defer mockAgent.Close()
+
+	// 解析 mock 后端地址，拆出 host / port 注入环境变量。
+	u, err := url.Parse(mockAgent.URL)
+	if err != nil {
+		t.Fatalf("parse mock agent url failed: %v", err)
+	}
+	t.Setenv("PRIVACY_REST_HOST", u.Hostname())
+	t.Setenv("PRIVACY_REST_PORT", u.Port())
+
+	grpcSrv := &testPrivacyServer{}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	reqBody := map[string]any{
+		"method": "GET",
+		"path":   "/v1/dynclassification/standards",
+	}
+	b, _ := json.Marshal(reqBody)
+	resp, err := http.Post(ts.URL+"/api/proxy", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("POST /api/proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var body struct {
+		Status   int    `json:"status"`
+		Via      string `json:"via"`
+		Protocol string `json:"protocol"`
+		Data     struct {
+			Standards []struct {
+				StandardID    string `json:"standard_id"`
+				CategoryCount int    `json:"category_count"`
+			} `json:"standards"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	// REST 透明转发的后端身份标识。
+	if body.Via != "go-rest-proxy" || body.Protocol != "REST" {
+		t.Fatalf("expected via=go-rest-proxy protocol=REST, got via=%q protocol=%q", body.Via, body.Protocol)
+	}
+	if !hit {
+		t.Fatalf("expected mock agent REST backend to be hit")
+	}
+	// 上游数据（含新增 category_count 字段）应被原样透传。
+	if len(body.Data.Standards) != 1 || body.Data.Standards[0].StandardID != "sc_health_db51" || body.Data.Standards[0].CategoryCount != 42 {
+		t.Fatalf("unexpected proxied data: %+v", body.Data)
 	}
 }
 

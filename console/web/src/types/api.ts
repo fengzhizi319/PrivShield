@@ -320,6 +320,8 @@ export interface StandardDetail {
   levels: StandardLevel[];
   /** 标准组合下的规则总数（含各领域包普通/降级/复合规则）；后端未提供时为 undefined */
   rule_count?: number;
+  /** 标准引用 taxonomy 下的分类总数；后端未提供时为 undefined */
+  category_count?: number;
 }
 
 /** 标准列表响应（GET /v1/dynclassification/standards）。 */

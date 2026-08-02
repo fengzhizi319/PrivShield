@@ -8,16 +8,41 @@
  *   4. 未选择标准时请求不携带 standard 字段；
  *   5. 标准列表拉取失败时面板降级可用。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import DynClassificationPanel from '../DynClassificationPanel';
 import * as apiClient from '@/api/client';
+import { I18nProvider } from '@/i18n';
 
 // Mock API 客户端模块（面板仅使用 proxyRequest 与 fetchStandards）
 vi.mock('@/api/client', () => ({
   proxyRequest: vi.fn(),
   fetchStandards: vi.fn(),
 }));
+
+/**
+ * 面板渲染助手：用 I18nProvider 包裹（默认 zh），
+ * 使面板内部的 t() 能解析为中文文案（否则无 Provider 时 t() 原样返回 key）。
+ * Panel render helper wrapped with I18nProvider (default zh) so that t()
+ * resolves to Chinese text (without a Provider, t() returns the key as-is).
+ */
+function renderPanel() {
+  return render(
+    <I18nProvider>
+      <DynClassificationPanel />
+    </I18nProvider>,
+  );
+}
+
+/**
+ * 定位顶部标准切换器：domain 输入框因 datalist 同样具备 combobox 语义，
+ * 故需用 aria-label（中英）精确区分标准的 select。
+ * Locate the top standard switcher: the domain input also has combobox
+ * semantics due to its datalist, so we disambiguate via aria-label (zh/en).
+ */
+function standardCombobox() {
+  return screen.getByRole('combobox', { name: /当前标准|Current Standard/ });
+}
 
 /** 三标准详情 mock 数据（与后端 GET /v1/dynclassification/standards 结构一致）。 */
 const mockStandardsResponse = {
@@ -73,11 +98,11 @@ describe('DynClassificationPanel 全局标准切换器', () => {
   });
 
   it('挂载时拉取标准列表并渲染三个标准选项', async () => {
-    render(<DynClassificationPanel />);
+    renderPanel();
 
     await waitFor(() => expect(apiClient.fetchStandards).toHaveBeenCalledTimes(1));
 
-    const select = screen.getByRole('combobox');
+    const select = standardCombobox();
     // 默认选项 + 三个标准选项
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(4);
@@ -88,17 +113,17 @@ describe('DynClassificationPanel 全局标准切换器', () => {
   });
 
   it('初始未选择标准时展示通用引擎提示', async () => {
-    render(<DynClassificationPanel />);
+    renderPanel();
     await waitFor(() =>
       expect(screen.getByText('使用通用规则引擎（未选择标准）')).toBeInTheDocument()
     );
   });
 
   it('切换到广东标准后展示 G1~G4 等级体系与默认等级', async () => {
-    render(<DynClassificationPanel />);
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'gd_health' } });
+    fireEvent.change(standardCombobox(), { target: { value: 'gd_health' } });
 
     // 描述徽章 + 等级 chips + 默认等级
     expect(screen.getByText('广东省健康医疗数据安全分类分级管理技术规范')).toBeInTheDocument();
@@ -114,10 +139,10 @@ describe('DynClassificationPanel 全局标准切换器', () => {
   });
 
   it('切换到四川标准后展示 L1~L5 等级体系', async () => {
-    render(<DynClassificationPanel />);
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'sc_health_db51' } });
+    fireEvent.change(standardCombobox(), { target: { value: 'sc_health_db51' } });
 
     for (const lv of ['L1', 'L2', 'L3', 'L4', 'L5']) {
       expect(screen.getByText(lv)).toBeInTheDocument();
@@ -130,10 +155,10 @@ describe('DynClassificationPanel 全局标准切换器', () => {
       data: { fieldResult: { finalLevel: 'G4', confidence: 0.95 } },
     } as any);
 
-    render(<DynClassificationPanel />);
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'gd_health' } });
+    fireEvent.change(standardCombobox(), { target: { value: 'gd_health' } });
     fireEvent.click(screen.getByText('执行动态分类评估'));
 
     await waitFor(() => expect(apiClient.proxyRequest).toHaveBeenCalledTimes(1));
@@ -149,10 +174,10 @@ describe('DynClassificationPanel 全局标准切换器', () => {
       data: { recordResult: { finalLevel: 'L3' } },
     } as any);
 
-    render(<DynClassificationPanel />);
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'sc_health_db51' } });
+    fireEvent.change(standardCombobox(), { target: { value: 'sc_health_db51' } });
     fireEvent.click(screen.getByText('记录级分类 (Record)'));
     fireEvent.click(screen.getByText('执行记录级分类'));
 
@@ -172,8 +197,8 @@ describe('DynClassificationPanel 全局标准切换器', () => {
       data: { fieldResult: { finalLevel: 'L3' } },
     } as any);
 
-    render(<DynClassificationPanel />);
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
 
     fireEvent.click(screen.getByText('执行动态分类评估'));
 
@@ -185,7 +210,7 @@ describe('DynClassificationPanel 全局标准切换器', () => {
   it('标准列表拉取失败时面板降级可用（仅默认选项）', async () => {
     vi.mocked(apiClient.fetchStandards).mockRejectedValue(new Error('网络错误'));
 
-    render(<DynClassificationPanel />);
+    renderPanel();
 
     await waitFor(() =>
       expect(screen.getByText('使用通用规则引擎（未选择标准）')).toBeInTheDocument()
@@ -246,11 +271,11 @@ describe('DynClassificationPanel 结构化结果展示', () => {
   it('字段评估结果结构化展示：最终等级/推理说明/命中标签/审计信息', async () => {
     vi.mocked(apiClient.proxyRequest).mockResolvedValue({ data: mockFieldResponse } as any);
 
-    render(<DynClassificationPanel />);
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
 
     // 选中广东标准（提供 G1~G4 等级体系供着色）/ select GD standard for level coloring
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'gd_health' } });
+    fireEvent.change(standardCombobox(), { target: { value: 'gd_health' } });
     fireEvent.click(screen.getByText('执行动态分类评估'));
 
     // 最终等级徽章 + 引擎层 / final level badge + engine layer
@@ -311,10 +336,10 @@ describe('DynClassificationPanel 结构化结果展示', () => {
     };
     vi.mocked(apiClient.proxyRequest).mockResolvedValue({ data: recordResponse } as any);
 
-    render(<DynClassificationPanel />);
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'sc_health_db51' } });
+    fireEvent.change(standardCombobox(), { target: { value: 'sc_health_db51' } });
     fireEvent.click(screen.getByText('记录级分类 (Record)'));
     fireEvent.click(screen.getByText('执行记录级分类'));
 
@@ -325,5 +350,38 @@ describe('DynClassificationPanel 结构化结果展示', () => {
     expect(screen.getAllByText('RULE_PII_PHONE').length).toBeGreaterThan(0);
     // 字段数提示 / field count hint
     expect(screen.getByText(/字段数: 2/)).toBeInTheDocument();
+  });
+});
+
+describe('DynClassificationPanel i18n 国际化', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(apiClient.fetchStandards).mockResolvedValue(mockStandardsResponse as any);
+  });
+
+  afterEach(() => {
+    // 清理语言偏好，避免污染其他测试 / clean language preference to avoid leaking
+    localStorage.removeItem('console-lang');
+  });
+
+  it('语言偏好为 en 时渲染英文文案', async () => {
+    localStorage.setItem('console-lang', 'en');
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
+
+    // 标题 / Tab / 按钮均为英文 / title, tab and button are English
+    expect(screen.getByText(/Declarative Dynamic Classification/)).toBeInTheDocument();
+    expect(screen.getByText('Field Evaluation (Eval)')).toBeInTheDocument();
+    expect(screen.getByText('Run Dynamic Evaluation')).toBeInTheDocument();
+    // 标准切换器默认选项为英文 / standard switcher default option in English
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent('Default (Generic Rule Engine)');
+  });
+
+  it('默认（zh）与英文文案互斥：中文环境不出现英文按钮', async () => {
+    renderPanel();
+    await waitFor(() => expect(standardCombobox()).toBeEnabled());
+
+    expect(screen.getByText('执行动态分类评估')).toBeInTheDocument();
+    expect(screen.queryByText('Run Dynamic Evaluation')).not.toBeInTheDocument();
   });
 });
