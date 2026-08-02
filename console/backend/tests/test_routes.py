@@ -99,6 +99,10 @@ def test_samples(client: TestClient) -> None:
     assert "samples" in body
     assert len(body["samples"]) == len(get_samples())
     assert body["samples"][0]["path"]
+    # 跨后端一致性：profile/recommend 与 Go 后端 samples 对齐，
+    # agent 支持且 Go 已提供，Python 端不应缺失。
+    paths = {s["path"] for s in body["samples"]}
+    assert "/v1/privacy/profile/recommend" in paths
 
 
 def test_proxy_json(client: TestClient, mock_agent_client: AsyncMock) -> None:

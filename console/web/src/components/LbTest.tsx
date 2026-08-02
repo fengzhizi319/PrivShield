@@ -27,6 +27,8 @@ import type { LbBackend, LbStrategy, LbTestResponse } from '@/types/api';
 import { lbTest } from '@/api/client';
 /** 引入图标组件 / Import icon component */
 import { Icon } from '@/components/icons';
+/** 引入通用动作按钮 / Import generic action button */
+import ActionButton from '@/components/ActionButton';
 /** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
 
@@ -221,18 +223,14 @@ export default function LbTest({ agentUrl }: LbTestProps) {
           </select>
         </div>
 
-        <button
+        <ActionButton
           onClick={handleRun}
-          disabled={loading}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          loading={loading}
+          icon="play"
+          loadingText={t('lb.running')}
         >
-          {loading ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-          ) : (
-            <Icon name="play" className="h-4 w-4" />
-          )}
-          {loading ? '测试中…' : t('lb.run')}
-        </button>
+          {t('lb.run')}
+        </ActionButton>
       </div>
 
       {/* 右侧：结果 */}

@@ -437,6 +437,23 @@ SAMPLES: list[EndpointSample] = [
         backend="both",
     ),
 
+    # Profile（隐私参数推荐）
+    # 与 Go 后端 samples 对齐：agent REST 契约的 rows 为扁平 dict（非 gRPC 的 fields 包装）。
+    EndpointSample(
+        "POST", "/v1/privacy/profile/recommend", "Recommend Params", "Profile",
+        "自动推荐隐私参数",
+        body={
+            "namespace": "demo-recommend",
+            "values": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+            "rows": [
+                {"age": "30", "zip": "100000", "gender": "F"},
+                {"age": "31", "zip": "100001", "gender": "M"},
+            ],
+            "qi_cols": ["age", "zip", "gender"],
+        },
+        backend="both",
+    ),
+
     # Dynamic Classification
     EndpointSample(
         "POST", "/v1/dynclassification/eval", "Dynamic Classification Eval", "DynamicClassification",

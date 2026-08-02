@@ -27,6 +27,8 @@ import { batchRequest } from '@/api/client';
 import { orderCategories } from '@/lib/categories';
 /** 引入图标组件 / Import icon component */
 import { Icon } from '@/components/icons';
+/** 引入通用动作按钮 / Import generic action button */
+import ActionButton from '@/components/ActionButton';
 /** 引入国际化 Hook / Import i18n Hook */
 import { useI18n } from '@/i18n';
 
@@ -147,28 +149,15 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
               ))}
             </select>
           </label>
-          <button
+          <ActionButton
             onClick={handleRun}
-            disabled={running || targets.length === 0}
-            className={[
-              'inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white shadow-sm transition-colors',
-              running || targets.length === 0
-                ? 'cursor-not-allowed bg-indigo-400'
-                : 'bg-indigo-600 hover:bg-indigo-700',
-            ].join(' ')}
+            loading={running}
+            disabled={targets.length === 0}
+            icon="play"
+            loadingText={t('batch.running')}
           >
-            {running ? (
-              <>
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-white" />
-                {t('batch.running')}
-              </>
-            ) : (
-              <>
-                <Icon name="play" className="h-3.5 w-3.5" />
-                {t('batch.start', targets.length)}
-              </>
-            )}
-          </button>
+            {t('batch.start', targets.length)}
+          </ActionButton>
         </div>
 
         {/* 错误提示 */}

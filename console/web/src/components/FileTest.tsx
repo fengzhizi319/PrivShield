@@ -27,6 +27,8 @@ import { uploadFile } from '@/api/client';
 import ResponsePanel from '@/components/ResponsePanel';
 /** 引入图标组件 / Import icon component */
 import { Icon } from '@/components/icons';
+/** 引入通用动作按钮 / Import generic action button */
+import ActionButton from '@/components/ActionButton';
 /** 引入示例文件工具 / Import sample file utilities */
 import { createSampleFile, downloadSampleFile, type SampleFormat } from '@/utils/sampleFile';
 /** 引入文件解析工具 / Import file parsing utility */
@@ -139,11 +141,11 @@ function DataTable({
   schema,
   baseline = null,
 }: {
-  records: Record<string, any>[];
+  records: Record<string, unknown>[];
   /** 列名顺序；省略时从记录中推导。 */
   schema?: string[];
   /** 对比基准（原始记录），用于高亮变更单元格。 */
-  baseline?: Record<string, any>[] | null;
+  baseline?: Record<string, unknown>[] | null;
 }) {
   const cols = useMemo(() => {
     if (schema && schema.length > 0) return schema;
@@ -272,7 +274,7 @@ export default function FileTest() {
   /** 处理结果中的记录数组（仅当 result 为非空数组时，脱敏 / K-匿名场景）。 */
   const resultRecords = useMemo(() => {
     const r = response?.data?.result;
-    return Array.isArray(r) && r.length > 0 ? (r as Record<string, any>[]) : null;
+    return Array.isArray(r) && r.length > 0 ? (r as Record<string, unknown>[]) : null;
   }, [response]);
 
   /**
@@ -458,18 +460,14 @@ export default function FileTest() {
           </>
         )}
 
-        <button
+        <ActionButton
           onClick={handleSubmit}
-          disabled={loading}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          loading={loading}
+          icon="send"
+          loadingText={t('file.submitting')}
         >
-          {loading ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-          ) : (
-            <Icon name="send" className="h-4 w-4" />
-          )}
-          {loading ? t('file.submitting') : t('file.submit')}
-        </button>
+          {t('file.submit')}
+        </ActionButton>
       </div>
 
       {/* 右侧：上方原始响应，下方“原始数据 / 处理结果”并排对比 */}
