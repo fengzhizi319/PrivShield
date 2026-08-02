@@ -1,14 +1,21 @@
 /**
  * ErrorBoundary 单元测试：验证正常渲染与错误降级行为。
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { ReactNode } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ErrorBoundary from '../ErrorBoundary';
+import { I18nProvider } from '@/i18n';
 
 // 模拟 Icon 组件（避免引入完整图标库）
 vi.mock('@/components/icons', () => ({
   Icon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`} />,
 }));
+
+/** 用 I18nProvider 包裹 ErrorBoundary（类组件经 contextType 读取翻译）。 */
+function renderBoundary(children: ReactNode) {
+  return render(<I18nProvider>{children}</I18nProvider>);
+}
 
 /** 故意在渲染时抛错的组件。 */
 function Bomb({ shouldThrow }: { shouldThrow: boolean }) {
@@ -17,8 +24,12 @@ function Bomb({ shouldThrow }: { shouldThrow: boolean }) {
 }
 
 describe('ErrorBoundary', () => {
+  afterEach(() => {
+    localStorage.removeItem('console-lang');
+  });
+
   it('子组件正常时渲染 children', () => {
-    render(
+    renderBoundary(
       <ErrorBoundary>
         <Bomb shouldThrow={false} />
       </ErrorBoundary>,
@@ -31,7 +42,7 @@ describe('ErrorBoundary', () => {
     // 抑制 React 默认的 console.error 输出
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    render(
+    renderBoundary(
       <ErrorBoundary>
         <Bomb shouldThrow={true} />
       </ErrorBoundary>,
@@ -39,6 +50,22 @@ describe('ErrorBoundary', () => {
 
     expect(screen.getByText('界面渲染出错')).toBeInTheDocument();
     expect(screen.getByText('测试爆炸')).toBeInTheDocument();
+
+    spy.mockRestore();
+  });
+
+  it('英文语言下降级文案为英文', () => {
+    localStorage.setItem('console-lang', 'en');
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    renderBoundary(
+      <ErrorBoundary>
+        <Bomb shouldThrow={true} />
+      </ErrorBoundary>,
+    );
+
+    expect(screen.getByText('UI Render Error')).toBeInTheDocument();
+    expect(screen.getByText('Retry')).toBeInTheDocument();
 
     spy.mockRestore();
   });
@@ -53,7 +80,7 @@ describe('ErrorBoundary', () => {
       return <div data-testid="recovered">已恢复</div>;
     }
 
-    render(
+    renderBoundary(
       <ErrorBoundary>
         <ControlledBomb />
       </ErrorBoundary>,

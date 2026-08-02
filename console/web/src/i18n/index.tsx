@@ -263,6 +263,43 @@ const zh: Record<string, string> = {
   'dyn.result.table.confidence': '置信度',
   'dyn.result.table.rules': '命中规则',
 
+  // FileTest（数据文件隐私处理）
+  'file.title': '数据文件隐私处理',
+  'file.subtitle': '上传 CSV/JSON 文件，选择脱敏 / K-匿名操作。',
+  'file.file_label': '数据文件',
+  'file.selected': '已选择：{0}（{1} KB）',
+  'file.sample_prefix': '示例文件：',
+  'file.sample_fill_title': '填充 {0} 示例文件并直接用于处理',
+  'file.sample_download_title': '下载 {0} 示例文件到本地',
+  'file.op_label': '操作类型',
+  'file.op_mask': '数据脱敏',
+  'file.op_mask_hint': '对指定列做掩码脱敏',
+  'file.op_kano': 'K-匿名',
+  'file.op_kano_hint': '对准标识符列做 K-匿名泛化',
+  'file.mask_cols': '脱敏列（逗号分隔）',
+  'file.mask_context': '上下文（可选）',
+  'file.mask_context_ph': '如：医疗场景',
+  'file.qi_cols': '准标识符列 QI（逗号分隔）',
+  'file.k_value': 'K 值',
+  'file.submitting': '处理中…',
+  'file.submit': '上传并处理',
+  'file.no_file': '请先选择 CSV 或 JSON 文件',
+  'file.err_ext': '仅支持 .csv 与 .json 文件',
+  'file.err_size': '文件过大（{0} MB），上限 {1} MB',
+  'file.original': '原始数据',
+  'file.result': '处理结果',
+  'file.rows_preview': '前 {0} 行 / 共 {1} 行',
+  'file.changed': '已变更',
+  'file.preview_unavailable': '预览不可用：{0}',
+  'file.original_empty': '选择或填充示例文件后，在此预览原始数据',
+  'file.result_no_records': '本次响应未返回记录数组，请查看上方原始响应 JSON',
+  'file.result_empty': '处理完成后在此查看结果，变更单元格将高亮显示',
+
+  // ErrorBoundary（错误边界）
+  'error.title': '界面渲染出错',
+  'error.unknown': '发生未知错误',
+  'error.retry': '重试',
+
   // App
   'app.loading': '加载接口列表…',
   'app.connect_failed': '无法连接后端 {0}',
@@ -504,6 +541,43 @@ const en: Record<string, string> = {
   'dyn.result.table.confidence': 'Confidence',
   'dyn.result.table.rules': 'Hit rules',
 
+  // FileTest (Data File Privacy Processing)
+  'file.title': 'Data File Privacy Processing',
+  'file.subtitle': 'Upload a CSV/JSON file and choose masking / K-anonymity.',
+  'file.file_label': 'Data File',
+  'file.selected': 'Selected: {0} ({1} KB)',
+  'file.sample_prefix': 'Sample files:',
+  'file.sample_fill_title': 'Fill {0} sample file and use it directly',
+  'file.sample_download_title': 'Download {0} sample file locally',
+  'file.op_label': 'Operation Type',
+  'file.op_mask': 'Data Masking',
+  'file.op_mask_hint': 'Mask specified columns',
+  'file.op_kano': 'K-Anonymity',
+  'file.op_kano_hint': 'Generalize quasi-identifier columns',
+  'file.mask_cols': 'Masking columns (comma-separated)',
+  'file.mask_context': 'Context (optional)',
+  'file.mask_context_ph': 'e.g. medical scenario',
+  'file.qi_cols': 'Quasi-identifier columns QI (comma-separated)',
+  'file.k_value': 'K value',
+  'file.submitting': 'Processing…',
+  'file.submit': 'Upload & Process',
+  'file.no_file': 'Please select a CSV or JSON file first',
+  'file.err_ext': 'Only .csv and .json files are supported',
+  'file.err_size': 'File too large ({0} MB), limit {1} MB',
+  'file.original': 'Original Data',
+  'file.result': 'Processed Result',
+  'file.rows_preview': 'First {0} rows / {1} total',
+  'file.changed': 'Changed',
+  'file.preview_unavailable': 'Preview unavailable: {0}',
+  'file.original_empty': 'Select or fill a sample file to preview original data here',
+  'file.result_no_records': 'This response returned no record array; see the raw response JSON above',
+  'file.result_empty': 'View results here after processing; changed cells will be highlighted',
+
+  // ErrorBoundary (Error Boundary)
+  'error.title': 'UI Render Error',
+  'error.unknown': 'An unknown error occurred',
+  'error.retry': 'Retry',
+
   // App
   'app.loading': 'Loading endpoints…',
   'app.connect_failed': 'Cannot connect to backend {0}',
@@ -519,7 +593,7 @@ const dictionaries: Record<Lang, Record<string, string>> = { zh, en };
  * 通过 React Context 向下传递的语言服务能力。
  * Language service capabilities passed down via React Context.
  */
-interface I18nContextValue {
+export interface I18nContextValue {
   /** 当前语言 / Current language */
   lang: Lang;
   /** 切换语言（同时持久化到 localStorage）/ Switch language (also persists to localStorage) */
@@ -531,8 +605,13 @@ interface I18nContextValue {
 /**
  * 创建 i18n Context（默认值：中文 + 空操作 + 原样返回 key）
  * Create i18n Context (default: Chinese + noop + return key as-is)
+ *
+ * 导出 Context 本身，供无法使用 useI18n Hook 的类组件
+ * （如 ErrorBoundary）通过 ``static contextType`` 接入。
+ * The Context itself is exported so class components that cannot use the
+ * useI18n Hook (e.g. ErrorBoundary) can connect via ``static contextType``.
  */
-const I18nContext = createContext<I18nContextValue>({
+export const I18nContext = createContext<I18nContextValue>({
   lang: 'zh',          // 默认中文 / Default Chinese
   setLang: () => {},   // 空操作（Provider 外调用时无效）/ Noop (ineffective outside Provider)
   t: (key) => key,     // 原样返回 key（Provider 外调用时的回退）/ Return key as-is (fallback outside Provider)

@@ -31,16 +31,20 @@ import { Icon } from '@/components/icons';
 import { createSampleFile, downloadSampleFile, type SampleFormat } from '@/utils/sampleFile';
 /** 引入文件解析工具 / Import file parsing utility */
 import { parseDataFile, type ParsedRecords } from '@/utils/fileParse';
+/** 引入 i18n Hook / Import i18n Hook */
+import { useI18n } from '@/i18n';
 
 /**
  * 操作选项元数据 / Operation Option Metadata
  *
- * 定义支持的文件处理操作及其标签与说明。
- * Defines supported file processing operations with labels and hints.
+ * 定义支持的文件处理操作；label/hint 通过 i18n key 在渲染时翻译，
+ * 避免在模块顶层固化某种自然语言。
+ * Defines supported file processing operations; label/hint are translated
+ * at render time via i18n keys, avoiding hard-coding any natural language at module top level.
  */
-const OPERATIONS: { value: FileOperation; label: string; hint: string }[] = [
-  { value: 'mask_dataframe', label: '数据脱敏', hint: '对指定列做掩码脱敏' },   // Masking / Mask specified columns
-  { value: 'k_anonymize', label: 'K-匿名', hint: '对准标识符列做 K-匿名泛化' }, // K-anonymity / Generalize QI columns
+const OPERATIONS: { value: FileOperation; labelKey: string; hintKey: string }[] = [
+  { value: 'mask_dataframe', labelKey: 'file.op_mask', hintKey: 'file.op_mask_hint' }, // 脱敏 / Masking
+  { value: 'k_anonymize', labelKey: 'file.op_kano', hintKey: 'file.op_kano_hint' },    // K-匿名 / K-anonymity
 ];
 
 /**
@@ -69,6 +73,27 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const ACCEPTED_EXTS = ['.csv', '.json'];
 
 /**
+ * 文件校验错误码 / File Validation Error Code
+ *
+ * 与展示解耦：validateFile 仅返回结构化错误码与上下文参数，
+ * 具体文案由调用方通过 i18n 翻译，保证校验逻辑可独立测试。
+ * Decoupled from presentation: validateFile returns only a structured error code
+ * with contextual params; the actual message is translated by the caller via i18n,
+ * keeping validation logic independently testable.
+ */
+export type FileValidationErrorCode = 'unsupported_ext' | 'too_large';
+
+/** 文件校验错误结构 / File validation error structure */
+export interface FileValidationError {
+  /** 错误码 / Error code */
+  code: FileValidationErrorCode;
+  /** too_large 场景：实际大小（MB，保留 1 位小数）/ Actual size (MB, 1 decimal) for too_large */
+  sizeMb?: string;
+  /** too_large 场景：大小上限（MB）/ Size limit (MB) for too_large */
+  limitMb?: number;
+}
+
+/**
  * 客户端预校验文件类型与大小 / Client-side pre-validation of file type and size
  *
  * 在上传前提前拦截不合规文件，避免无效的大文件/错误格式
@@ -77,17 +102,21 @@ export const ACCEPTED_EXTS = ['.csv', '.json'];
  * consuming network and backend resources (dual insurance with backend 413/400 validation).
  *
  * @param f - 待校验的文件 / File to validate
- * @returns 错误提示；合法时返回 null / Error message; null when valid
+ * @returns 结构化错误；合法时返回 null / Structured error; null when valid
  */
-export function validateFile(f: File): string | null {
+export function validateFile(f: File): FileValidationError | null {
   const lower = f.name.toLowerCase(); // 文件名转小写 / Lowercase filename
   // 检查扩展名是否支持 / Check if extension is supported
   if (!ACCEPTED_EXTS.some((ext) => lower.endsWith(ext))) {
-    return '仅支持 .csv 与 .json 文件';
+    return { code: 'unsupported_ext' };
   }
   // 检查文件大小是否超限 / Check if file size exceeds limit
   if (f.size > MAX_UPLOAD_BYTES) {
-    return `文件过大（${(f.size / 1024 / 1024).toFixed(1)} MB），上限 ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`;
+    return {
+      code: 'too_large',
+      sizeMb: (f.size / 1024 / 1024).toFixed(1),
+      limitMb: MAX_UPLOAD_BYTES / 1024 / 1024,
+    };
   }
   return null; // 校验通过 / Validation passed
 }
@@ -178,6 +207,8 @@ function DataTable({
  * Left config form (file/operation/params), right result display (response + dual table comparison).
  */
 export default function FileTest() {
+  /** i18n 翻译函数 / i18n translation function */
+  const { t } = useI18n();
   const [file, setFile] = useState<File | null>(null);
   const [operation, setOperation] = useState<FileOperation>('mask_dataframe');
   // 各操作的参数输入
@@ -197,6 +228,15 @@ export default function FileTest() {
   const [parseError, setParseError] = useState<string | null>(null);
 
   const opMeta = useMemo(() => OPERATIONS.find((o) => o.value === operation)!, [operation]);
+
+  /**
+   * 将结构化校验错误翻译为当前语言的提示文案。
+   * Translate a structured validation error into a message in the current language.
+   */
+  const validationMessage = (err: FileValidationError): string =>
+    err.code === 'unsupported_ext'
+      ? t('file.err_ext')
+      : t('file.err_size', err.sizeMb ?? '', err.limitMb ?? 0);
 
   /**
    * 文件变化时在浏览器端解析为 records + schema，供“原始数据”预览。
@@ -273,7 +313,7 @@ export default function FileTest() {
     if (f) {
       const problem = validateFile(f);
       if (problem) {
-        setError(problem);
+        setError(validationMessage(problem));
         setFile(null);
         e.target.value = '';
         return;
@@ -296,7 +336,7 @@ export default function FileTest() {
 
   const handleSubmit = async () => {
     if (!file) {
-      setError('请先选择 CSV 或 JSON 文件');
+      setError(t('file.no_file'));
       return;
     }
     setLoading(true);
@@ -324,14 +364,14 @@ export default function FileTest() {
             <span className="flex h-6 w-6 items-center justify-center rounded bg-indigo-50 text-indigo-600">
               <Icon name="upload" className="h-3.5 w-3.5" />
             </span>
-            数据文件隐私处理
+            {t('file.title')}
           </h2>
-          <p className="mt-1 text-xs text-gray-500">上传 CSV/JSON 文件，选择脱敏 / K-匿名操作。</p>
+          <p className="mt-1 text-xs text-gray-500">{t('file.subtitle')}</p>
         </div>
 
         {/* 文件选择 */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">数据文件</label>
+          <label className="mb-1 block text-xs font-medium text-gray-600">{t('file.file_label')}</label>
           <input
             ref={fileInputRef}
             type="file"
@@ -341,25 +381,25 @@ export default function FileTest() {
           />
           {file && (
             <p className="mt-1 text-xs text-gray-400">
-              已选择：{file.name}（{(file.size / 1024).toFixed(1)} KB）
+              {t('file.selected', file.name, (file.size / 1024).toFixed(1))}
             </p>
           )}
           {/* 示例文件：免手工准备数据，一键填充或下载 */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-gray-400">示例文件：</span>
+            <span className="text-xs text-gray-400">{t('file.sample_prefix')}</span>
             {(['csv', 'json'] as SampleFormat[]).map((fmt) => (
               <span key={fmt} className="inline-flex items-center overflow-hidden rounded-md border border-indigo-200">
                 <button
                   onClick={() => handleUseSample(fmt)}
                   className="px-2 py-0.5 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50"
-                  title={`填充 ${fmt.toUpperCase()} 示例文件并直接用于处理`}
+                  title={t('file.sample_fill_title', fmt.toUpperCase())}
                 >
                   {fmt.toUpperCase()}
                 </button>
                 <button
                   onClick={() => downloadSampleFile(fmt)}
                   className="border-l border-indigo-200 px-1.5 py-0.5 text-indigo-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
-                  title={`下载 ${fmt.toUpperCase()} 示例文件到本地`}
+                  title={t('file.sample_download_title', fmt.toUpperCase())}
                 >
                   <Icon name="download" className="h-3 w-3" />
                 </button>
@@ -370,7 +410,7 @@ export default function FileTest() {
 
         {/* 操作选择 */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">操作类型</label>
+          <label className="mb-1 block text-xs font-medium text-gray-600">{t('file.op_label')}</label>
           <select
             value={operation}
             onChange={(e) => setOperation(e.target.value as FileOperation)}
@@ -378,23 +418,23 @@ export default function FileTest() {
           >
             {OPERATIONS.map((o) => (
               <option key={o.value} value={o.value}>
-                {o.label}
+                {t(o.labelKey)}
               </option>
             ))}
           </select>
-          <p className="mt-1 text-xs text-gray-400">{opMeta.hint}</p>
+          <p className="mt-1 text-xs text-gray-400">{t(opMeta.hintKey)}</p>
         </div>
 
         {/* 动态参数 */}
         {operation === 'mask_dataframe' && (
           <>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">脱敏列（逗号分隔）</label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">{t('file.mask_cols')}</label>
               <input value={columns} onChange={(e) => setColumns(e.target.value)} className={inputCls} placeholder="email, phone" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">上下文（可选）</label>
-              <input value={context} onChange={(e) => setContext(e.target.value)} className={inputCls} placeholder="如：医疗场景" />
+              <label className="mb-1 block text-xs font-medium text-gray-600">{t('file.mask_context')}</label>
+              <input value={context} onChange={(e) => setContext(e.target.value)} className={inputCls} placeholder={t('file.mask_context_ph')} />
             </div>
           </>
         )}
@@ -402,11 +442,11 @@ export default function FileTest() {
         {operation === 'k_anonymize' && (
           <>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">准标识符列 QI（逗号分隔）</label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">{t('file.qi_cols')}</label>
               <input value={qiCols} onChange={(e) => setQiCols(e.target.value)} className={inputCls} placeholder="age, zip, gender" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">K 值</label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">{t('file.k_value')}</label>
               <input
                 type="number"
                 min={2}
@@ -428,7 +468,7 @@ export default function FileTest() {
           ) : (
             <Icon name="send" className="h-4 w-4" />
           )}
-          {loading ? '处理中…' : '上传并处理'}
+          {loading ? t('file.submitting') : t('file.submit')}
         </button>
       </div>
 
@@ -444,10 +484,10 @@ export default function FileTest() {
           {/* 原始数据 */}
           <section className="flex w-1/2 flex-col overflow-hidden border-r border-gray-200">
             <header className="flex shrink-0 items-center justify-between border-b border-gray-100 bg-gray-50/70 px-4 py-2">
-              <span className="text-xs font-semibold text-gray-600">原始数据</span>
+              <span className="text-xs font-semibold text-gray-600">{t('file.original')}</span>
               {original && (
                 <span className="text-[11px] text-gray-400">
-                  前 {Math.min(original.records.length, MAX_PREVIEW_ROWS)} 行 / 共 {original.records.length} 行
+                  {t('file.rows_preview', Math.min(original.records.length, MAX_PREVIEW_ROWS), original.records.length)}
                 </span>
               )}
             </header>
@@ -456,7 +496,7 @@ export default function FileTest() {
                 <DataTable records={original.records} schema={original.schema} />
               ) : (
                 <div className="flex h-full items-center justify-center px-6 text-center text-xs text-gray-400">
-                  {parseError ? `预览不可用：${parseError}` : '选择或填充示例文件后，在此预览原始数据'}
+                  {parseError ? t('file.preview_unavailable', parseError) : t('file.original_empty')}
                 </div>
               )}
             </div>
@@ -465,17 +505,17 @@ export default function FileTest() {
           {/* 处理结果 */}
           <section className="flex w-1/2 flex-col overflow-hidden">
             <header className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-100 bg-gray-50/70 px-4 py-2">
-              <span className="text-xs font-semibold text-gray-600">处理结果</span>
+              <span className="text-xs font-semibold text-gray-600">{t('file.result')}</span>
               <span className="flex items-center gap-2 text-[11px] text-gray-400">
                 {resultRecords && (
                   <span>
-                    前 {Math.min(resultRecords.length, MAX_PREVIEW_ROWS)} 行 / 共 {resultRecords.length} 行
+                    {t('file.rows_preview', Math.min(resultRecords.length, MAX_PREVIEW_ROWS), resultRecords.length)}
                   </span>
                 )}
                 {/* 差异图例：琥珀色 = 相比原始数据发生变更 */}
                 <span className="inline-flex items-center gap-1">
                   <span className="inline-block h-2.5 w-2.5 rounded-sm border border-amber-300 bg-amber-100" />
-                  已变更
+                  {t('file.changed')}
                 </span>
               </span>
             </header>
@@ -485,8 +525,8 @@ export default function FileTest() {
               ) : (
                 <div className="flex h-full items-center justify-center px-6 text-center text-xs text-gray-400">
                   {response
-                    ? '本次响应未返回记录数组，请查看上方原始响应 JSON'
-                    : '处理完成后在此查看结果，变更单元格将高亮显示'}
+                    ? t('file.result_no_records')
+                    : t('file.result_empty')}
                 </div>
               )}
             </div>

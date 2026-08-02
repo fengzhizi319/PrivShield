@@ -470,6 +470,79 @@ func TestUploadHandlerMask(t *testing.T) {
 	}
 }
 
+// TestUploadHandlerKAnonymize 验证上传 CSV 执行 K-匿名：解析文件 →
+// 构造 gRPC 请求（qi_cols + k）→ 包装返回。
+func TestUploadHandlerKAnonymize(t *testing.T) {
+	grpcSrv := &testPrivacyServer{
+		KAnonymizeDataFrameFunc: func(_ context.Context, req *pb.KAnonymizeDataFrameRequest) (*pb.KAnonymizeDataFrameResponse, error) {
+			if len(req.Data) != 2 {
+				t.Fatalf("expected 2 record entries, got %d", len(req.Data))
+			}
+			if len(req.QiCols) != 2 || req.QiCols[0] != "age" || req.QiCols[1] != "zip" {
+				t.Fatalf("unexpected qi_cols: %v", req.QiCols)
+			}
+			if req.K != 3 {
+				t.Fatalf("expected k=3, got %d", req.K)
+			}
+			// 返回泛化后的记录。
+			return &pb.KAnonymizeDataFrameResponse{
+				Data: []*pb.RecordEntry{
+					{Fields: map[string]string{"age": "20-30", "zip": "100**"}},
+					{Fields: map[string]string{"age": "20-30", "zip": "100**"}},
+				},
+			}, nil
+		},
+	}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	csv := "age,zip\n25,10001\n28,10002\n"
+	resp := postUploadMultipart(t, ts.URL+"/api/upload", "data.csv", csv, "k_anonymize", `{"qi_cols":["age","zip"],"k":3}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var body struct {
+		Status   int    `json:"status"`
+		Via      string `json:"via"`
+		Protocol string `json:"protocol"`
+		Data     struct {
+			Operation string              `json:"operation"`
+			RowsIn    int                 `json:"rows_in"`
+			RowsOut   int                 `json:"rows_out"`
+			Result    []map[string]string `json:"result"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if body.Data.Operation != "k_anonymize" || body.Data.RowsIn != 2 || body.Data.RowsOut != 2 {
+		t.Fatalf("unexpected upload data: %+v", body.Data)
+	}
+	if body.Via != "go-grpc" || body.Protocol != "gRPC" {
+		t.Fatalf("expected via=go-grpc protocol=gRPC, got via=%q protocol=%q", body.Via, body.Protocol)
+	}
+	if body.Data.Result[0]["age"] != "20-30" {
+		t.Fatalf("unexpected generalized result: %+v", body.Data.Result)
+	}
+}
+
+// TestUploadHandlerKAnonymizeMissingQiCols 验证 k_anonymize 操作缺少 qi_cols 参数时返回 400。
+func TestUploadHandlerKAnonymizeMissingQiCols(t *testing.T) {
+	grpcSrv := &testPrivacyServer{}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	csv := "age,zip\n25,10001\n"
+	resp := postUploadMultipart(t, ts.URL+"/api/upload", "data.csv", csv, "k_anonymize", `{"k":3}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 without qi_cols, got %d", resp.StatusCode)
+	}
+}
+
 // TestUploadHandlerUnsupportedFormat 验证不支持的文件格式返回 400。
 func TestUploadHandlerUnsupportedFormat(t *testing.T) {
 	grpcSrv := &testPrivacyServer{}

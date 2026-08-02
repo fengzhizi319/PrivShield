@@ -21,6 +21,8 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 /** 引入内联 SVG 图标组件 / Import inline SVG icon component */
 import { Icon } from '@/components/icons';
+/** 引入 i18n Context（类组件无法使用 useI18n Hook，改经 contextType 接入）/ Import i18n Context (class components cannot use useI18n Hook, connect via contextType) */
+import { I18nContext, type I18nContextValue } from '@/i18n';
 
 /**
  * ErrorBoundary 组件属性 / ErrorBoundary Component Props
@@ -45,6 +47,14 @@ interface ErrorBoundaryState {
  * Wraps the main area; when any view component crashes during render, shows fallback UI instead of blank page.
  */
 export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  /**
+   * 接入 i18n Context，使类组件能通过 ``this.context`` 获取翻译函数。
+   * Connect to the i18n Context so the class component can access the translation
+   * function via ``this.context``.
+   */
+  static contextType = I18nContext;
+  declare context: I18nContextValue;
+
   /** 初始状态：无错误 / Initial state: no error */
   state: ErrorBoundaryState = { error: null };
 
@@ -100,6 +110,8 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
    * - No error: render child component tree normally.
    */
   render(): ReactNode {
+    // 从 i18n Context 取翻译函数 / Get translation function from i18n Context
+    const { t } = this.context;
     // 判断是否捕获到错误 / Check if an error was captured
     if (this.state.error) {
       return (
@@ -111,10 +123,10 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
           </span>
           {/* 错误信息展示区 / Error message display area */}
           <div className="text-center">
-            <p className="text-sm font-medium text-gray-800">界面渲染出错</p>
+            <p className="text-sm font-medium text-gray-800">{t('error.title')}</p>
             {/* 显示具体错误消息（截断过长内容）/ Show specific error message (truncate long content) */}
             <p className="mt-1 max-w-md break-words text-xs text-gray-500">
-              {this.state.error.message || '发生未知错误'}
+              {this.state.error.message || t('error.unknown')}
             </p>
           </div>
           {/* 重试按钮：重置状态后重新渲染子树 / Retry button: reset state and re-render child tree */}
@@ -123,7 +135,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
           >
             <Icon name="refresh" className="h-4 w-4" />
-            重试
+            {t('error.retry')}
           </button>
         </div>
       );

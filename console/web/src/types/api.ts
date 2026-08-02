@@ -17,7 +17,7 @@ export interface EndpointSample {
   /** 中文功能描述 */
   description: string;
   /** 默认 JSON 请求体 */
-  body?: Record<string, any> | null;
+  body?: Record<string, unknown> | null;
   /** 二进制载荷的 Content-Type（如 Arrow IPC） */
   contentType?: string | null;
   /** 二进制载荷的 base64 编码 */
@@ -30,7 +30,7 @@ export interface EndpointSample {
 export interface ProxyRequest {
   method: string;
   path: string;
-  body?: Record<string, any> | null;
+  body?: Record<string, unknown> | null;
   raw_payload_b64?: string | null;
   content_type?: string | null;
 }
@@ -65,7 +65,7 @@ export interface ConsoleHealth {
 export interface BatchRequestItem {
   method: string;
   path: string;
-  body?: Record<string, any> | null;
+  body?: Record<string, unknown> | null;
 }
 
 /** 批量测试：单个结果项。 */
@@ -144,7 +144,7 @@ export interface LbTestRequest {
   /** 探测路径，默认 /health */
   probe_path?: string;
   /** 提供时以 POST 发送该 JSON 体，否则用 GET */
-  probe_body?: Record<string, any> | null;
+  probe_body?: Record<string, unknown> | null;
 }
 
 /** 负载均衡测试：单个节点的统计结果。 */
