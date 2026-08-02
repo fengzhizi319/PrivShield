@@ -24,6 +24,7 @@ CompositeRuleEngine 的调用逻辑，支持字段级、记录级和表级分类
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -44,6 +45,8 @@ from .models import (
 from .ner_adapter import NerAdapter
 from .operator_registry import OperatorRegistry
 from .profile_loader import ProfileLoader
+
+logger = logging.getLogger(__name__)
 
 
 class DynClassificationService:
@@ -368,6 +371,42 @@ class DynClassificationService:
     def list_standards(self) -> list[str]:
         """列出所有可用标准（扫描 standards/ 目录）。"""
         return self.loader.list_standards()
+
+    def list_standards_detail(self) -> list[dict[str, Any]]:
+        """列出所有可用标准的详细信息（含等级体系），供前端标准切换器渲染。
+
+        每个标准返回：standard_id、description、taxonomy、domains、
+        default_level 以及按 rank 升序排列的等级列表（levels）。
+        配置损坏的标准会被跳过（仅记录警告），避免单个坏文件拖垮整个列表。
+
+        Returns:
+            标准详情字典列表（按 standard_id 排序，保证前端顺序稳定）。
+        """
+        details: list[dict[str, Any]] = []
+        for sid in sorted(self.list_standards()):
+            try:
+                std_def = self.loader.load_standard(sid)
+                taxonomy = self.loader.load_taxonomy(std_def.taxonomy)
+            except Exception as exc:  # noqa: BLE001
+                # 单个标准配置损坏不应影响其余标准的可用性。
+                logger.warning(
+                    "Skip broken standard '%s' in list_standards_detail: %s", sid, exc
+                )
+                continue
+            details.append(
+                {
+                    "standard_id": sid,
+                    "description": std_def.description,
+                    "taxonomy": std_def.taxonomy,
+                    "domains": list(std_def.domains),
+                    "default_level": taxonomy.default_level,
+                    "levels": [
+                        {"id": lv.id, "name": lv.name, "rank": lv.rank}
+                        for lv in sorted(taxonomy.levels.values(), key=lambda x: x.rank)
+                    ],
+                }
+            )
+        return details
 
     def list_domains(self) -> list[str]:
         """列出所有可用领域包（扫描 domains/ 目录）。"""

@@ -4,8 +4,8 @@
  * 提供动态分类分级引擎的完整测试界面，包含五个 Tab：
  * Provides a complete test interface for the dynamic classification engine, with five tabs:
  *
- *   1. 字段动态评估 (Eval)：输入字段名/值/领域/标准，获取分类结果；
- *      Field Dynamic Evaluation: input field name/value/domain/standard, get classification result;
+ *   1. 字段动态评估 (Eval)：输入字段名/值/领域，获取分类结果（标准由顶部全局切换器控制）；
+ *      Field Dynamic Evaluation: input field name/value/domain, get classification result (standard via the global switcher);
  *   2. 记录级分类 (Record)：输入整条 JSON 记录，对每个字段做分类；
  *      Record-level Classification: input full JSON record, classify each field;
  *   3. 标准文档一键生成配置 (Auto Generate)：从规范文档自动提取分类规则；
@@ -20,11 +20,13 @@
  */
 
 /** 引入 React 状态 Hook / Import React state Hook */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 /** 引入图标组件 / Import icon component */
 import { Icon } from '@/components/icons';
 /** 引入代理请求 API / Import proxy request API */
-import { proxyRequest } from '@/api/client';
+import { proxyRequest, fetchStandards } from '@/api/client';
+/** 引入标准详情类型 / Import standard detail type */
+import type { StandardDetail } from '@/types/api';
 
 /**
  * 动态分类分级主组件 / Dynamic Classification Main Component
@@ -36,11 +38,63 @@ export default function DynClassificationPanel() {
   /** 当前活动 Tab / Currently active tab */
   const [tab, setTab] = useState<'eval' | 'record' | 'generate' | 'info' | 'validate'>('eval');
 
+  /* ====== 全局标准切换器状态 / Global Standard Switcher State ====== */
+  /** 后端返回的标准详情列表（含等级体系） / Standard details list from backend (incl. level systems) */
+  const [standards, setStandards] = useState<StandardDetail[]>([]);
+  /** 标准列表加载中 / Standards list loading */
+  const [standardsLoading, setStandardsLoading] = useState(true);
+  /** 当前选中的标准 ID（空串 = 默认通用规则引擎） / Currently selected standard ID (empty = default engine) */
+  const [currentStandard, setCurrentStandard] = useState('');
+
+  /**
+   * 面板挂载时拉取后端可用标准列表 / Fetch available standards from backend on mount
+   *
+   * 标准是分类分级的核心上下文：切换后所有评估请求（字段级/记录级）
+   * 均携带新标准 ID，agent 侧随之加载对应的 taxonomy 与规则包，
+   * 实现前端 → 控制台后端 → agent 全链路切换。
+   * Standards are the core context of classification: after switching, all eval
+   * requests carry the new standard ID and the agent loads the corresponding
+   * taxonomy & rule packs, achieving full-chain switching.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetchStandards();
+        if (!cancelled) setStandards(resp.details ?? []);
+      } catch {
+        /* 拉取失败不阻断面板使用，仅标准切换器为空 / Fetch failure doesn't block the panel */
+      } finally {
+        if (!cancelled) setStandardsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** 当前选中标准的详情（未选中时为 null） / Details of the selected standard (null when none) */
+  const currentDetail: StandardDetail | null =
+    standards.find((s) => s.standard_id === currentStandard) ?? null;
+
+  /**
+   * 切换标准 / Switch standard
+   *
+   * 切换后清空已有评估结果，避免展示旧标准下的结论造成误导。
+   * Clears existing eval results after switching to avoid showing stale conclusions.
+   */
+  const handleStandardChange = (id: string) => {
+    setCurrentStandard(id);
+    setEvalResult(null);
+    setEvalError(null);
+    setRecordResult(null);
+    setRecordError(null);
+  };
+
   /* ====== 字段动态评估 (Eval) 状态 / Field Dynamic Evaluation State ====== */
   const [fieldName, setFieldName] = useState('mobile_phone');   // 字段名 / Field name
   const [fieldValue, setFieldValue] = useState('13800138000');  // 字段值 / Field value
-  const [domain, setDomain] = useState('general-pii');          // 领域 / Domain
-  const [standard, setStandard] = useState('');                 // 标准（可选）/ Standard (optional)
+  const [domain, setDomain] = useState('');                     // 领域（可选，标准优先）/ Domain (optional, standard takes precedence)
   const [evalResult, setEvalResult] = useState<any>(null);      // 评估结果 / Evaluation result
   const [evalLoading, setEvalLoading] = useState(false);        // 加载中标记 / Loading flag
   const [evalError, setEvalError] = useState<string | null>(null); // 错误信息 / Error message
@@ -61,8 +115,7 @@ export default function DynClassificationPanel() {
 
   /* ====== 记录级分类 (Record) 状态 / Record-level Classification State ====== */
   const [recordJson, setRecordJson] = useState('{"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}'); // JSON 记录 / JSON record
-  const [recordDomain, setRecordDomain] = useState('general-pii');       // 领域 / Domain
-  const [recordStandard, setRecordStandard] = useState('');              // 标准 / Standard
+  const [recordDomain, setRecordDomain] = useState('');                    // 领域（可选）/ Domain (optional)
   const [recordResult, setRecordResult] = useState<any>(null);           // 分类结果 / Classification result
   const [recordLoading, setRecordLoading] = useState(false);             // 加载中标记 / Loading flag
   const [recordError, setRecordError] = useState<string | null>(null);   // 错误信息 / Error message
@@ -83,7 +136,7 @@ export default function DynClassificationPanel() {
       const payload: any = { fieldName };
       if (fieldValue) payload.value = fieldValue;
       if (domain) payload.domain = domain;
-      if (standard) payload.standard = standard;
+      if (currentStandard) payload.standard = currentStandard;
 
       const res = await proxyRequest({
         method: 'POST',
@@ -121,7 +174,7 @@ export default function DynClassificationPanel() {
       }
       const payload: any = { record };
       if (recordDomain) payload.domain = recordDomain;
-      if (recordStandard) payload.standard = recordStandard;
+      if (currentStandard) payload.standard = currentStandard;
 
       const res = await proxyRequest({
         method: 'POST',
@@ -224,6 +277,46 @@ export default function DynClassificationPanel() {
           </div>
         </div>
 
+        {/* 全局标准切换器：切换后所有评估请求携带新标准，agent 侧加载对应 taxonomy 与规则包 */}
+        {/* Global standard switcher: after switching, all eval requests carry the new standard */}
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-purple-100 bg-white/70 px-4 py-3">
+          <span className="text-xs font-semibold text-gray-700">当前标准 (Standard)</span>
+          <select
+            value={currentStandard}
+            onChange={(e) => handleStandardChange(e.target.value)}
+            disabled={standardsLoading}
+            className="rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-sm text-gray-800 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+          >
+            <option value="">{standardsLoading ? '加载中…' : '默认（通用规则引擎）'}</option>
+            {standards.map((s) => (
+              <option key={s.standard_id} value={s.standard_id}>
+                {s.standard_id} — {s.description}
+              </option>
+            ))}
+          </select>
+          {currentDetail ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-700">
+                {currentDetail.description}
+              </span>
+              {currentDetail.levels.map((lv) => (
+                <span
+                  key={lv.id}
+                  title={lv.name}
+                  className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+                >
+                  {lv.id}
+                </span>
+              ))}
+              <span className="text-xs text-gray-400">默认等级: {currentDetail.default_level}</span>
+            </div>
+          ) : (
+            !standardsLoading && (
+              <span className="text-xs text-gray-400">使用通用规则引擎（未选择标准）</span>
+            )
+          )}
+        </div>
+
         {/* Tab 导航切换 */}
         <div className="mt-6 flex border-b border-gray-200">
           <button
@@ -303,27 +396,18 @@ export default function DynClassificationPanel() {
                     placeholder="e.g. 13800138000, 110101199003072375"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700">领域包 (domain)</label>
-                    <input
-                      type="text"
-                      value={domain}
-                      onChange={(e) => setDomain(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
-                      placeholder="general-pii / medical"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700">特定标准 (standard, 优先)</label>
-                    <input
-                      type="text"
-                      value={standard}
-                      onChange={(e) => setStandard(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
-                      placeholder="sc_health_db51 / jrt0197"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700">领域包 (domain, 可选)</label>
+                  <input
+                    type="text"
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
+                    placeholder="general-pii / medical"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    分类标准由顶部切换器控制：{currentDetail ? `${currentDetail.standard_id}（${currentDetail.description}）` : '默认通用规则引擎'}
+                  </p>
                 </div>
                 <button
                   onClick={handleEval}
@@ -385,27 +469,18 @@ export default function DynClassificationPanel() {
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs focus:border-purple-500 focus:outline-none"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700">领域 (domain)</label>
-                    <input
-                      type="text"
-                      value={recordDomain}
-                      onChange={(e) => setRecordDomain(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
-                      placeholder="general-pii / medical"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700">标准 (standard)</label>
-                    <input
-                      type="text"
-                      value={recordStandard}
-                      onChange={(e) => setRecordStandard(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
-                      placeholder="sc_health_db51 / jrt0197"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700">领域 (domain, 可选)</label>
+                  <input
+                    type="text"
+                    value={recordDomain}
+                    onChange={(e) => setRecordDomain(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
+                    placeholder="general-pii / medical"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    分类标准由顶部切换器控制：{currentDetail ? `${currentDetail.standard_id}（${currentDetail.description}）` : '默认通用规则引擎'}
+                  </p>
                 </div>
                 <button
                   onClick={handleRecordEval}

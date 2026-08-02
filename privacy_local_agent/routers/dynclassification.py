@@ -219,8 +219,19 @@ def generate_profile(req: GenerateProfileRequest):
     dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
 )
 def list_standards():
+    """列出所有可用标准。
+
+    返回结构（向后兼容）：
+    - ``standards``：标准 ID 字符串列表（旧版字段，保持不变）；
+    - ``details``：标准详情列表，每项含 standard_id / description /
+      taxonomy / domains / default_level / levels（按 rank 升序），
+      供前端标准切换器展示“当前标准及其等级体系”。
+    """
     svc = get_service()
-    return {"standards": svc.list_standards()}
+    return {
+        "standards": svc.list_standards(),
+        "details": svc.list_standards_detail(),
+    }
 
 
 @router.get(

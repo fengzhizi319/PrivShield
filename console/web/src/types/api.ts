@@ -291,3 +291,39 @@ export interface OpsDiagnostics {
   models: OpsModel[];
   hardware: OpsHardware;
 }
+
+/* ==================== 动态分类分级标准（/v1/dynclassification/standards） ==================== */
+
+/** 标准等级体系中的单个等级定义。 */
+export interface StandardLevel {
+  /** 等级 ID（如 L3 / C4 / G2） */
+  id: string;
+  /** 等级名称（如「敏感数据/第3级」） */
+  name: string;
+  /** 排序权重（越大越敏感） */
+  rank: number;
+}
+
+/** 单个标准的详细信息（含等级体系，供标准切换器渲染）。 */
+export interface StandardDetail {
+  /** 标准标识（如 sc_health_db51 / jrt0197 / gd_health） */
+  standard_id: string;
+  /** 标准名称描述 */
+  description: string;
+  /** 引用的 taxonomy 名称 */
+  taxonomy: string;
+  /** 组合的领域包列表 */
+  domains: string[];
+  /** 默认等级（未命中任何规则时的兄底等级） */
+  default_level: string;
+  /** 等级体系（按 rank 升序排列） */
+  levels: StandardLevel[];
+}
+
+/** 标准列表响应（GET /v1/dynclassification/standards）。 */
+export interface StandardsResponse {
+  /** 标准 ID 列表（向后兼容字段） */
+  standards: string[];
+  /** 标准详情列表（含等级体系） */
+  details: StandardDetail[];
+}

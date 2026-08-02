@@ -14,7 +14,7 @@
  */
 
 /** 导入所有前后端数据契约类型 / Import all frontend-backend data contract types */
-import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse, OpsDiagnostics } from '@/types/api';
+import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse, OpsDiagnostics, StandardsResponse } from '@/types/api';
 
 /** 当前后端基址（空串表示同源，即请求发往当前页面所在的服务器）。 */
 /** Current backend base URL (empty string means same-origin, i.e. requests go to the server hosting the page). */
@@ -289,4 +289,22 @@ export async function fetchDiagnostics(refresh = false): Promise<OpsDiagnostics>
   const resp = await proxyRequest({ method: 'GET', path });
   // proxyRequest 返回包装结构，真实诊断数据在 data 字段 / Wrapped response; actual diagnostics in data field
   return resp.data as OpsDiagnostics;
+}
+
+/**
+ * 获取所有可用的动态分类分级标准 / Fetch all available dynamic classification standards
+ *
+ * 通过通用代理转发 GET /v1/dynclassification/standards 到 agent，
+ * 返回标准 ID 列表与详情（含等级体系），供动态分类面板的
+ * “当前标准”展示与标准切换器渲染。
+ * Forwards GET /v1/dynclassification/standards to agent via generic proxy;
+ * returns standard IDs and details (incl. level systems) for the standard switcher.
+ *
+ * @returns 标准列表响应（standards + details）/ Standards response (standards + details)
+ */
+export async function fetchStandards(): Promise<StandardsResponse> {
+  // 经通用代理转发 GET 请求到 agent 的标准列表端点 / Forward GET request to agent standards endpoint via generic proxy
+  const resp = await proxyRequest({ method: 'GET', path: '/v1/dynclassification/standards' });
+  // proxyRequest 返回包装结构，真实数据在 data 字段 / Wrapped response; actual data in data field
+  return resp.data as StandardsResponse;
 }
