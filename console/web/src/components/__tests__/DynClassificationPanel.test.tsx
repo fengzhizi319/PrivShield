@@ -196,3 +196,134 @@ describe('DynClassificationPanel 全局标准切换器', () => {
     expect(screen.getByText('执行动态分类评估')).toBeInTheDocument();
   });
 });
+
+/** 字段级分类完整响应 mock（与后端 ClassificationResponse 结构一致）。 */
+const mockFieldResponse = {
+  fieldResult: {
+    fieldName: 'id_card',
+    fieldValue: '110101199003072316',
+    tags: [
+      {
+        level: 'G4',
+        category: 'PERSONAL_ATTRIBUTE',
+        confidence: 1.0,
+        sourceEngine: 'RULE',
+        ruleId: 'RULE_GD_HEALTH_IDCARD',
+        domain: 'gd_health',
+        standardId: 'gd_health',
+        version: '1.0.0',
+        needsHumanReview: false,
+        isOverride: false,
+        isDowngrade: false,
+        matchTarget: 'field_value',
+      },
+    ],
+    finalLevel: 'G4',
+    confidence: 1.0,
+    needsHumanReview: false,
+    engineLayer: 'L1_RULE',
+    reasoning: '命中规则: RULE_GD_HEALTH_IDCARD',
+    suppressedTags: [],
+  },
+  auditInfo: {
+    version: '1.0.0',
+    domain: 'gd_health',
+    standardId: 'gd_health',
+    timestamp: '2026-08-02T15:49:57.618701+00:00',
+    ruleSetVersion: '1.0.0',
+    rulesEvaluated: 17,
+    rulesHit: 2,
+    durationMs: 14.131,
+  },
+};
+
+describe('DynClassificationPanel 结构化结果展示', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(apiClient.fetchStandards).mockResolvedValue(mockStandardsResponse as any);
+  });
+
+  it('字段评估结果结构化展示：最终等级/推理说明/命中标签/审计信息', async () => {
+    vi.mocked(apiClient.proxyRequest).mockResolvedValue({ data: mockFieldResponse } as any);
+
+    render(<DynClassificationPanel />);
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+
+    // 选中广东标准（提供 G1~G4 等级体系供着色）/ select GD standard for level coloring
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'gd_health' } });
+    fireEvent.click(screen.getByText('执行动态分类评估'));
+
+    // 最终等级徽章 + 引擎层 / final level badge + engine layer
+    await waitFor(() => expect(screen.getAllByText('G4').length).toBeGreaterThan(0));
+    expect(screen.getByText(/引擎层: L1_RULE/)).toBeInTheDocument();
+    // 推理说明 / reasoning
+    expect(screen.getAllByText(/命中规则: RULE_GD_HEALTH_IDCARD/).length).toBeGreaterThan(0);
+    // 命中标签卡片：类别 + 规则 ID / tag card: category + rule ID
+    expect(screen.getAllByText('PERSONAL_ATTRIBUTE').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('RULE_GD_HEALTH_IDCARD').length).toBeGreaterThan(0);
+    // 审计信息：命中规则数 / audit: rules hit count
+    expect(screen.getAllByText(/命中规则/).length).toBeGreaterThan(0);
+    // 可折叠原始 JSON / collapsible raw JSON
+    expect(screen.getByText(/查看原始 JSON/)).toBeInTheDocument();
+  });
+
+  it('记录级分类结果以逐字段表格展示', async () => {
+    const recordResponse = {
+      recordResult: {
+        recordIndex: 0,
+        fieldResults: {
+          id_card: {
+            fieldName: 'id_card',
+            tags: [{ ruleId: 'RULE_PII_IDCARD' }],
+            finalLevel: 'L3',
+            confidence: 1.0,
+            needsHumanReview: false,
+            engineLayer: 'L1_RULE',
+            reasoning: '',
+            suppressedTags: [],
+          },
+          phone: {
+            fieldName: 'phone',
+            tags: [{ ruleId: 'RULE_PII_PHONE' }],
+            finalLevel: 'L2',
+            confidence: 0.9,
+            needsHumanReview: false,
+            engineLayer: 'L1_RULE',
+            reasoning: '',
+            suppressedTags: [],
+          },
+        },
+        aggregatedTags: [],
+        finalLevel: 'L3',
+        confidence: 1.0,
+        needsHumanReview: false,
+      },
+      auditInfo: {
+        version: '1.0.0',
+        domain: '',
+        standardId: 'sc_health_db51',
+        timestamp: '2026-08-02T15:49:57.618701+00:00',
+        ruleSetVersion: '1.0.0',
+        rulesEvaluated: 10,
+        rulesHit: 2,
+        durationMs: 8.5,
+      },
+    };
+    vi.mocked(apiClient.proxyRequest).mockResolvedValue({ data: recordResponse } as any);
+
+    render(<DynClassificationPanel />);
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'sc_health_db51' } });
+    fireEvent.click(screen.getByText('记录级分类 (Record)'));
+    fireEvent.click(screen.getByText('执行记录级分类'));
+
+    // 逐字段表格：字段名 + 命中规则 / per-field table: field names + hit rules
+    await waitFor(() => expect(screen.getAllByText('id_card').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('phone').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('RULE_PII_IDCARD').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('RULE_PII_PHONE').length).toBeGreaterThan(0);
+    // 字段数提示 / field count hint
+    expect(screen.getByText(/字段数: 2/)).toBeInTheDocument();
+  });
+});

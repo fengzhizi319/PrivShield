@@ -376,7 +376,8 @@ class DynClassificationService:
         """列出所有可用标准的详细信息（含等级体系），供前端标准切换器渲染。
 
         每个标准返回：standard_id、description、taxonomy、domains、
-        default_level 以及按 rank 升序排列的等级列表（levels）。
+        default_level、按 rank 升序排列的等级列表（levels）以及
+        该标准组合下的规则总数（rule_count）。
         配置损坏的标准会被跳过（仅记录警告），避免单个坏文件拖垮整个列表。
 
         Returns:
@@ -393,6 +394,24 @@ class DynClassificationService:
                     "Skip broken standard '%s' in list_standards_detail: %s", sid, exc
                 )
                 continue
+            # 统计该标准组合下所有领域包的规则总数（普通 + 降级 + 复合）。
+            # Count total rules (normal + downgrade + composite) across the standard's domain packs.
+            # 单个领域包损坏仅跳过计数，不影响标准本身的可用性。
+            rule_count = 0
+            for domain in std_def.domains:
+                try:
+                    profile = self.loader.load_profile(domain)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Skip broken domain '%s' while counting rules for standard '%s': %s",
+                        domain, sid, exc,
+                    )
+                    continue
+                rule_count += (
+                    len(profile.rules)
+                    + len(profile.downgrade_rules)
+                    + len(profile.composite_rules)
+                )
             details.append(
                 {
                     "standard_id": sid,
@@ -404,6 +423,7 @@ class DynClassificationService:
                         {"id": lv.id, "name": lv.name, "rank": lv.rank}
                         for lv in sorted(taxonomy.levels.values(), key=lambda x: x.rank)
                     ],
+                    "rule_count": rule_count,
                 }
             )
         return details

@@ -216,6 +216,11 @@ func List() []models.EndpointSample {
 			Body: raw(`{"fieldName":"mobile_phone","value":"13800138000","domain":"general-pii"}`), Backend: "both",
 		},
 		{
+			Method: "POST", Path: "/v1/dynclassification/eval_record", Label: "Dynamic Eval Record", Category: "DynamicClassification",
+			Description: "记录级动态分类分级（逐字段）",
+			Body: raw(`{"record":{"name":"张三","id_card":"110101199001011237","phone":"13800138000"}}`), Backend: "both",
+		},
+		{
 			Method: "POST", Path: "/v1/dynclassification/generate_profile", Label: "Auto Generate Profiles", Category: "DynamicClassification",
 			Description: "从标准 Markdown 文档自动提取生成 YAML 配置",
 			Body: raw(`{"docPath":"docs/standard/四川省健康医疗大数据应用指南.md"}`), Backend: "both",

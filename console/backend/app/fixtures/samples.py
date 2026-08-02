@@ -445,6 +445,12 @@ SAMPLES: list[EndpointSample] = [
         backend="both",
     ),
     EndpointSample(
+        "POST", "/v1/dynclassification/eval_record", "Dynamic Classification Eval Record", "DynamicClassification",
+        "记录级动态分类分级（逐字段）",
+        body={"record": {"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}},
+        backend="both",
+    ),
+    EndpointSample(
         "POST", "/v1/dynclassification/generate_profile", "Auto Generate Profiles", "DynamicClassification",
         "从标准 Markdown 文档生成 YAML 配置",
         body={"docPath": "docs/standard/四川省健康医疗大数据应用指南.md"},

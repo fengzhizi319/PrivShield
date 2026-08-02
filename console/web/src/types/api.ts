@@ -318,6 +318,8 @@ export interface StandardDetail {
   default_level: string;
   /** 等级体系（按 rank 升序排列） */
   levels: StandardLevel[];
+  /** 标准组合下的规则总数（含各领域包普通/降级/复合规则）；后端未提供时为 undefined */
+  rule_count?: number;
 }
 
 /** 标准列表响应（GET /v1/dynclassification/standards）。 */
@@ -326,4 +328,114 @@ export interface StandardsResponse {
   standards: string[];
   /** 标准详情列表（含等级体系） */
   details: StandardDetail[];
+}
+
+/* ==================== 动态分类分级结果（/v1/dynclassification/eval*） ==================== */
+
+/**
+ * 单个安全标签（命中规则的产出）。
+ * 与后端 ``SecurityTag`` 模型一一对应（camelCase 别名）。
+ */
+export interface SecurityTag {
+  /** 敏感度等级 ID（如 L3 / C4 / G2） */
+  level: string;
+  /** 分类类别 ID（如 PERSONAL_BASIC / FINANCIAL_ACCOUNT） */
+  category: string;
+  /** 置信度 [0,1] */
+  confidence: number;
+  /** 来源引擎标识（RULE / NER / LLM） */
+  sourceEngine: string;
+  /** 触发的规则 ID */
+  ruleId: string;
+  /** 所属领域 */
+  domain: string;
+  /** 所属标准 */
+  standardId: string;
+  /** 标签版本 */
+  version: string;
+  /** 是否需人工复核 */
+  needsHumanReview: boolean;
+  /** 是否为覆盖型降级标签 */
+  isOverride: boolean;
+  /** 是否由降级规则产生 */
+  isDowngrade: boolean;
+  /** 匹配目标: field_name | field_value */
+  matchTarget: string;
+}
+
+/**
+ * 字段级分类结果。与后端 ``FieldClassificationResult`` 对应。
+ */
+export interface FieldClassificationResult {
+  fieldName: string;
+  fieldValue?: string | null;
+  /** 命中的安全标签列表 */
+  tags: SecurityTag[];
+  /** 最终裁定的敏感度等级 */
+  finalLevel: string;
+  /** 综合置信度 [0,1] */
+  confidence: number;
+  needsHumanReview: boolean;
+  /** 产生最终结论的引擎层（L1_RULE / L2_NER / L3_LLM） */
+  engineLayer: string;
+  /** 分类推理说明 */
+  reasoning: string;
+  /** 被降级/抑制的标签列表 */
+  suppressedTags: SecurityTag[];
+}
+
+/**
+ * 记录级分类结果。与后端 ``RecordClassificationResult`` 对应。
+ */
+export interface RecordClassificationResult {
+  recordIndex: number;
+  /** 字段名 → 字段级分类结果 */
+  fieldResults: Record<string, FieldClassificationResult>;
+  /** 记录级聚合标签 */
+  aggregatedTags: SecurityTag[];
+  /** 记录级最终等级 */
+  finalLevel: string;
+  confidence: number;
+  needsHumanReview: boolean;
+}
+
+/**
+ * 审计信息（分类请求的执行元数据）。与后端 ``AuditInfo`` 对应。
+ */
+export interface AuditInfo {
+  version: string;
+  domain: string;
+  standardId: string;
+  timestamp: string;
+  ruleSetVersion: string;
+  /** 本次请求评估的规则总数 */
+  rulesEvaluated: number;
+  /** 实际命中的规则数 */
+  rulesHit: number;
+  /** 执行耗时（毫秒） */
+  durationMs: number;
+}
+
+/**
+ * 分类响应包装器。与后端 ``ClassificationResponse`` 对应：
+ * 按请求粒度恰好填充 fieldResult / recordResult 之一，auditInfo 始终存在。
+ */
+export interface ClassificationResponse {
+  fieldResult?: FieldClassificationResult | null;
+  recordResult?: RecordClassificationResult | null;
+  auditInfo: AuditInfo;
+}
+
+/** 标准文档自动生成配置响应（POST /v1/dynclassification/generate_profile）。 */
+export interface GenerateProfileResponse {
+  message: string;
+  generated_files: Record<string, unknown> | string[];
+}
+
+/** 规则校验响应（POST /v1/dynclassification/validate）。 */
+export interface ValidateResponse {
+  valid?: boolean;
+  errors?: unknown[];
+  warnings?: unknown[];
+  [key: string]: unknown;
 }

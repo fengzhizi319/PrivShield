@@ -26,7 +26,236 @@ import { Icon } from '@/components/icons';
 /** 引入代理请求 API / Import proxy request API */
 import { proxyRequest, fetchStandards } from '@/api/client';
 /** 引入标准详情类型 / Import standard detail type */
-import type { StandardDetail } from '@/types/api';
+import type {
+  StandardDetail,
+  StandardLevel,
+  ClassificationResponse,
+  FieldClassificationResult,
+  SecurityTag,
+  GenerateProfileResponse,
+  ValidateResponse,
+} from '@/types/api';
+/** 引入等级着色工具 / Import level coloring utilities */
+import { levelChipClass, levelSolidClass } from '@/lib/levelColor';
+
+/**
+ * 等级徽章：按等级在体系中的相对位置渐变着色（绿→黄→红）。
+ * Level badge: gradient-colored (green→yellow→red) by the level's relative position in the system.
+ *
+ * @param levelId - 等级 ID（如 L3 / C4 / G2）/ level ID
+ * @param levels - 当前标准的等级体系（为空时回退中性灰）/ level system of current standard
+ */
+function LevelBadge({ levelId, levels }: { levelId: string; levels: StandardLevel[] }) {
+  // 无等级体系上下文时使用中性灰 / fall back to neutral gray without a level system context
+  const color = levels.length > 0 ? levelChipClass(levelId, levels) : 'bg-gray-100 text-gray-600';
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${color}`}>{levelId}</span>
+  );
+}
+
+/**
+ * 命中标签卡片：结构化展示单条 SecurityTag 的关键信息。
+ * Tag card: structured display of a single SecurityTag's key info.
+ */
+function TagCard({ tag, levels }: { tag: SecurityTag; levels: StandardLevel[] }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <LevelBadge levelId={tag.level} levels={levels} />
+          <span className="text-sm font-semibold text-gray-800">{tag.category}</span>
+        </div>
+        <span className="text-xs font-medium text-gray-500">{Math.round(tag.confidence * 100)}%</span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+        {tag.ruleId && <span>规则: <code className="text-gray-700">{tag.ruleId}</code></span>}
+        <span>引擎: {tag.sourceEngine}</span>
+        <span>匹配: {tag.matchTarget}</span>
+        {tag.needsHumanReview && <span className="text-amber-600">⚠️ 需人工复核</span>}
+        {tag.isDowngrade && <span className="text-blue-600">↓ 降级产生</span>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 审计信息条：展示分类请求的执行元数据（耗时/命中规则数/标准/引擎层）。
+ * Audit bar: displays execution metadata of a classification request.
+ */
+function AuditBar({ resp }: { resp: ClassificationResponse }) {
+  const audit = resp.auditInfo;
+  if (!audit) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-gray-100 px-3 py-2 text-xs text-gray-500">
+      <span>耗时 <b className="text-gray-700">{audit.durationMs.toFixed(1)} ms</b></span>
+      <span>命中规则 <b className="text-gray-700">{audit.rulesHit}</b> / {audit.rulesEvaluated}</span>
+      {audit.standardId && <span>标准: {audit.standardId}</span>}
+      {audit.domain && <span>领域: {audit.domain}</span>}
+    </div>
+  );
+}
+
+/**
+ * 可折叠的原始 JSON 调试区：默认收起，供需要查看完整响应的用户展开。
+ * Collapsible raw JSON debug area: collapsed by default, expandable for full response inspection.
+ */
+function RawJson({ data }: { data: unknown }) {
+  return (
+    <details className="overflow-hidden rounded-lg border border-gray-200 bg-gray-900 text-xs text-green-400">
+      <summary className="cursor-pointer select-none bg-gray-800 px-4 py-2 text-gray-300">查看原始 JSON (Raw JSON)</summary>
+      <pre className="max-h-72 overflow-auto p-4">{JSON.stringify(data, null, 2)}</pre>
+    </details>
+  );
+}
+
+/**
+ * 字段级评估结果结构化视图。
+ * Structured view for field-level evaluation results.
+ *
+ * 组成：最终等级大徽章（渐变着色）+ 置信度/引擎层 + 推理说明 +
+ * 命中标签卡片列表 + 审计信息条 + 可折叠原始 JSON。
+ * Composition: large final-level badge (gradient) + confidence/engine layer + reasoning +
+ * hit-tag card list + audit bar + collapsible raw JSON.
+ */
+function EvalResultView({ resp, levels }: { resp: ClassificationResponse; levels: StandardLevel[] }) {
+  const field = resp.fieldResult;
+  if (!field) {
+    // 响应不含字段结果时回退到原始 JSON / fall back to raw JSON when no field result present
+    return <RawJson data={resp} />;
+  }
+  return (
+    <div className="space-y-4">
+      {/* 最终等级 + 置信度 + 引擎层 / Final level + confidence + engine layer */}
+      <div className="flex items-center justify-between rounded-lg bg-white p-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span
+            className={`flex h-14 w-14 items-center justify-center rounded-xl text-2xl font-black ${levelSolidClass(field.finalLevel, levels)}`}
+          >
+            {field.finalLevel}
+          </span>
+          <div>
+            <span className="text-xs text-gray-500">最终判定敏感等级</span>
+            <div className="mt-0.5 text-xs text-gray-500">引擎层: {field.engineLayer}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <span className="text-xs text-gray-500">置信度{field.needsHumanReview ? ' · 需复核' : ''}</span>
+          <div className="mt-0.5 text-sm font-semibold text-gray-800">
+            {Math.round(field.confidence * 100)}%{field.needsHumanReview ? ' ⚠️' : ''}
+          </div>
+        </div>
+      </div>
+
+      {/* 推理说明 / Reasoning */}
+      {field.reasoning && (
+        <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2 text-xs text-purple-800">
+          <span className="font-semibold">推理说明：</span>
+          {field.reasoning}
+        </div>
+      )}
+
+      {/* 命中标签卡片 / Hit tag cards */}
+      {field.tags && field.tags.length > 0 && (
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-gray-600">命中标签 ({field.tags.length})</span>
+          {field.tags.map((tag, i) => (
+            <TagCard key={`${tag.ruleId}-${i}`} tag={tag} levels={levels} />
+          ))}
+        </div>
+      )}
+
+      {/* 被抑制标签（如有）/ Suppressed tags (if any) */}
+      {field.suppressedTags && field.suppressedTags.length > 0 && (
+        <div className="space-y-2 opacity-70">
+          <span className="text-xs font-semibold text-gray-500">被抑制标签 ({field.suppressedTags.length})</span>
+          {field.suppressedTags.map((tag, i) => (
+            <TagCard key={`sup-${tag.ruleId}-${i}`} tag={tag} levels={levels} />
+          ))}
+        </div>
+      )}
+
+      {/* 审计信息 + 原始 JSON / Audit info + raw JSON */}
+      <AuditBar resp={resp} />
+      <RawJson data={resp} />
+    </div>
+  );
+}
+
+/**
+ * 记录级分类结果结构化视图。
+ * Structured view for record-level classification results.
+ *
+ * 组成：记录级最终等级徽章 + 逐字段分类表格（字段名/最终等级/置信度/命中规则）+
+ * 审计信息条 + 可折叠原始 JSON。
+ * Composition: record-level final badge + per-field classification table
+ * (field/final level/confidence/hit rules) + audit bar + collapsible raw JSON.
+ */
+function RecordResultView({ resp, levels }: { resp: ClassificationResponse; levels: StandardLevel[] }) {
+  const record = resp.recordResult;
+  if (!record) {
+    return <RawJson data={resp} />;
+  }
+  // 逐字段结果条目 / per-field result entries
+  const entries: [string, FieldClassificationResult][] = Object.entries(record.fieldResults ?? {});
+  return (
+    <div className="space-y-4">
+      {/* 记录级最终等级 / Record-level final level */}
+      <div className="flex items-center justify-between rounded-lg bg-white p-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span
+            className={`flex h-14 w-14 items-center justify-center rounded-xl text-2xl font-black ${levelSolidClass(record.finalLevel, levels)}`}
+          >
+            {record.finalLevel}
+          </span>
+          <div>
+            <span className="text-xs text-gray-500">记录级最终等级</span>
+            <div className="mt-0.5 text-xs text-gray-500">字段数: {entries.length}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <span className="text-xs text-gray-500">置信度{record.needsHumanReview ? ' · 需复核' : ''}</span>
+          <div className="mt-0.5 text-sm font-semibold text-gray-800">
+            {Math.round(record.confidence * 100)}%{record.needsHumanReview ? ' ⚠️' : ''}
+          </div>
+        </div>
+      </div>
+
+      {/* 逐字段分类表格 / Per-field classification table */}
+      {entries.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-gray-200">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr>
+                <th className="px-3 py-2 font-medium">字段</th>
+                <th className="px-3 py-2 font-medium">等级</th>
+                <th className="px-3 py-2 font-medium">置信度</th>
+                <th className="px-3 py-2 font-medium">命中规则</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {entries.map(([name, fr]) => (
+                <tr key={name} className="bg-white">
+                  <td className="px-3 py-2 font-mono text-gray-800">{name}</td>
+                  <td className="px-3 py-2">
+                    <LevelBadge levelId={fr.finalLevel} levels={levels} />
+                  </td>
+                  <td className="px-3 py-2 text-gray-600">{Math.round(fr.confidence * 100)}%</td>
+                  <td className="px-3 py-2 text-gray-500">
+                    {fr.tags?.map((t) => t.ruleId).filter(Boolean).join(', ') || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 审计信息 + 原始 JSON / Audit info + raw JSON */}
+      <AuditBar resp={resp} />
+      <RawJson data={resp} />
+    </div>
+  );
+}
 
 /**
  * 动态分类分级主组件 / Dynamic Classification Main Component
@@ -95,28 +324,28 @@ export default function DynClassificationPanel() {
   const [fieldName, setFieldName] = useState('mobile_phone');   // 字段名 / Field name
   const [fieldValue, setFieldValue] = useState('13800138000');  // 字段值 / Field value
   const [domain, setDomain] = useState('');                     // 领域（可选，标准优先）/ Domain (optional, standard takes precedence)
-  const [evalResult, setEvalResult] = useState<any>(null);      // 评估结果 / Evaluation result
+  const [evalResult, setEvalResult] = useState<ClassificationResponse | null>(null); // 评估结果 / Evaluation result
   const [evalLoading, setEvalLoading] = useState(false);        // 加载中标记 / Loading flag
   const [evalError, setEvalError] = useState<string | null>(null); // 错误信息 / Error message
 
   /* ====== 标准文档生成配置 (Generate) 状态 / Standard Doc Generate Config State ====== */
   const [docPath, setDocPath] = useState('docs/standard/四川省健康医疗大数据应用指南.md'); // 文档路径 / Doc path
-  const [genResult, setGenResult] = useState<any>(null);      // 生成结果 / Generation result
+  const [genResult, setGenResult] = useState<GenerateProfileResponse | null>(null); // 生成结果 / Generation result
   const [genLoading, setGenLoading] = useState(false);        // 加载中标记 / Loading flag
   const [genError, setGenError] = useState<string | null>(null); // 错误信息 / Error message
 
   /* ====== 系统信息查询 (Info) 状态 / System Info Query State ====== */
-  const [infoData, setInfoData] = useState<any>(null);    // 查询结果 / Query result
+  const [infoData, setInfoData] = useState<unknown>(null);    // 查询结果 / Query result
   const [infoLoading, setInfoLoading] = useState(false);  // 加载中标记 / Loading flag
 
   /* ====== 规则校验 (Validate) 状态 / Rule Validation State ====== */
-  const [valResult, setValResult] = useState<any>(null);    // 校验结果 / Validation result
+  const [valResult, setValResult] = useState<ValidateResponse | null>(null); // 校验结果 / Validation result
   const [valLoading, setValLoading] = useState(false);      // 加载中标记 / Loading flag
 
   /* ====== 记录级分类 (Record) 状态 / Record-level Classification State ====== */
   const [recordJson, setRecordJson] = useState('{"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}'); // JSON 记录 / JSON record
   const [recordDomain, setRecordDomain] = useState('');                    // 领域（可选）/ Domain (optional)
-  const [recordResult, setRecordResult] = useState<any>(null);           // 分类结果 / Classification result
+  const [recordResult, setRecordResult] = useState<ClassificationResponse | null>(null); // 分类结果 / Classification result
   const [recordLoading, setRecordLoading] = useState(false);             // 加载中标记 / Loading flag
   const [recordError, setRecordError] = useState<string | null>(null);   // 错误信息 / Error message
 
@@ -143,7 +372,7 @@ export default function DynClassificationPanel() {
         path: '/v1/dynclassification/eval',
         body: payload,
       });
-      setEvalResult(res.data);
+      setEvalResult(res.data as ClassificationResponse);
     } catch (e: any) {
       setEvalError(e.message || '评估失败');
     } finally {
@@ -181,7 +410,7 @@ export default function DynClassificationPanel() {
         path: '/v1/dynclassification/eval_record',
         body: payload,
       });
-      setRecordResult(res.data);
+      setRecordResult(res.data as ClassificationResponse);
     } catch (e: any) {
       setRecordError(e.message || '记录级分类失败');
     } finally {
@@ -207,7 +436,7 @@ export default function DynClassificationPanel() {
         path: '/v1/dynclassification/generate_profile',
         body: { docPath },
       });
-      setGenResult(res.data);
+      setGenResult(res.data as GenerateProfileResponse);
     } catch (e: any) {
       setGenError(e.message || '生成失败');
     } finally {
@@ -253,7 +482,7 @@ export default function DynClassificationPanel() {
         method: 'POST',
         path: '/v1/dynclassification/validate',
       });
-      setValResult(res.data);
+      setValResult(res.data as ValidateResponse);
     } catch (e: any) {
       setValResult({ error: e.message });
     } finally {
@@ -300,15 +529,14 @@ export default function DynClassificationPanel() {
                 {currentDetail.description}
               </span>
               {currentDetail.levels.map((lv) => (
-                <span
-                  key={lv.id}
-                  title={lv.name}
-                  className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-                >
-                  {lv.id}
+                <span key={lv.id} title={lv.name}>
+                  <LevelBadge levelId={lv.id} levels={currentDetail.levels} />
                 </span>
               ))}
               <span className="text-xs text-gray-400">默认等级: {currentDetail.default_level}</span>
+              {typeof currentDetail.rule_count === 'number' && (
+                <span className="text-xs text-gray-400">规则数: {currentDetail.rule_count}</span>
+              )}
             </div>
           ) : (
             !standardsLoading && (
@@ -424,29 +652,7 @@ export default function DynClassificationPanel() {
               <h2 className="mb-4 text-base font-semibold text-gray-800">评估结果</h2>
               {evalError && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{evalError}</div>}
               {evalResult ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between rounded-lg bg-white p-4 shadow-sm">
-                    <div>
-                      <span className="text-xs text-gray-500">最终判定敏感等级</span>
-                      <div className="mt-1 text-2xl font-black text-purple-700">
-                        {evalResult.fieldResult?.finalLevel || 'L1'}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs text-gray-500">置信度 / 需人工复核</span>
-                      <div className="mt-1 text-sm font-semibold text-gray-800">
-                        {evalResult.fieldResult?.confidence != null
-                          ? `${Math.round(evalResult.fieldResult.confidence * 100)}%`
-                          : 'N/A'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 详细 JSON 结构 */}
-                  <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-900 text-xs text-green-400">
-                    <pre className="max-h-72 overflow-auto p-4">{JSON.stringify(evalResult, null, 2)}</pre>
-                  </div>
-                </div>
+                <EvalResultView resp={evalResult} levels={currentDetail?.levels ?? []} />
               ) : (
                 <div className="flex h-48 items-center justify-center text-xs text-gray-400">点击左侧“执行动态分类评估”获取求值结果</div>
               )}
@@ -496,28 +702,7 @@ export default function DynClassificationPanel() {
               <h2 className="mb-4 text-base font-semibold text-gray-800">记录级分类结果</h2>
               {recordError && <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{recordError}</div>}
               {recordResult ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between rounded-lg bg-white p-4 shadow-sm">
-                    <div>
-                      <span className="text-xs text-gray-500">记录级最终等级</span>
-                      <div className="mt-1 text-2xl font-black text-purple-700">
-                        {recordResult.recordResult?.finalLevel || 'N/A'}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs text-gray-500">置信度 / 需人工复核</span>
-                      <div className="mt-1 text-sm font-semibold text-gray-800">
-                        {recordResult.recordResult?.confidence != null
-                          ? `${Math.round(recordResult.recordResult.confidence * 100)}%`
-                          : 'N/A'}
-                        {recordResult.recordResult?.needsHumanReview ? ' ⚠️' : ''}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-900 text-xs text-green-400">
-                    <pre className="max-h-72 overflow-auto p-4">{JSON.stringify(recordResult, null, 2)}</pre>
-                  </div>
-                </div>
+                <RecordResultView resp={recordResult} levels={currentDetail?.levels ?? []} />
               ) : (
                 <div className="flex h-48 items-center justify-center text-xs text-gray-400">点击左侧“执行记录级分类”获取结果</div>
               )}
@@ -566,7 +751,7 @@ export default function DynClassificationPanel() {
           </div>
         )}
 
-        {/* TAB 3: 目录查询 */}
+        {/* TAB 4: 目录查询 */}
         {tab === 'info' && (
           <div className="space-y-4">
             <div className="flex gap-2">
@@ -595,7 +780,7 @@ export default function DynClassificationPanel() {
           </div>
         )}
 
-        {/* TAB 4: 规则校验 */}
+        {/* TAB 5: 规则校验 */}
         {tab === 'validate' && (
           <div className="space-y-4">
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
