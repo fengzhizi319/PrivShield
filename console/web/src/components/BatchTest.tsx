@@ -127,7 +127,7 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
               <Icon name="play" className="h-4 w-4" />
             </span>
-            批量测试
+            {t('batch.title')}
           </h1>
           <p className="mt-1.5 text-sm text-gray-500">
             {t('batch.subtitle')}
@@ -226,7 +226,7 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
                           <button
                             onClick={() => sample && onSelectSample(sample)}
                             className="group text-left"
-                            title="跳转到该端点"
+                            title={t('batch.goto_endpoint')}
                           >
                             <div className="flex items-center gap-2">
                               <span

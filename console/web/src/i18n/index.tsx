@@ -50,6 +50,7 @@ const zh: Record<string, string> = {
   'sidebar.dyn_classify': '通用动态分类分级',
   'sidebar.ops': '运维诊断',
   'sidebar.no_match': '未找到匹配的接口',
+  'sidebar.python_only': '仅 Python REST 后端支持',
 
   // Overview
   'overview.title': '接口总览',
@@ -70,6 +71,11 @@ const zh: Record<string, string> = {
   'endpoint.json_parse_error': '请求体 JSON 解析错误：{0}',
   'endpoint.json_format_error': 'JSON 格式错误：{0}',
   'endpoint.content_type_hint': 'Content-Type: {0}（二进制载荷由后端处理）',
+  'endpoint.format_title': '格式化 / 校验 JSON',
+  'endpoint.curl_title': '复制 cURL 命令',
+  'endpoint.history_title': '请求历史',
+  'endpoint.reload_title': '恢复示例请求',
+  'endpoint.send_shortcut': '快捷键 Cmd/Ctrl + Enter',
 
   // ResponsePanel
   'response.empty': '发送请求后在此查看响应',
@@ -77,6 +83,8 @@ const zh: Record<string, string> = {
   'response.copy': '复制',
   'response.copied': '已复制',
   'response.download': '下载',
+  'response.via_title': '处理本请求的控制台后端',
+  'response.protocol_title': '后端与 agent 的通信协议',
 
   // BatchTest
   'batch.title': '批量测试',
@@ -93,6 +101,7 @@ const zh: Record<string, string> = {
   'batch.col_duration': '耗时',
   'batch.col_info': '信息',
   'batch.empty_hint': '选择范围后点击"开始测试"',
+  'batch.goto_endpoint': '跳转到该端点',
 
   // HistoryPanel
   'history.title': '请求历史（{0}）',
@@ -100,6 +109,8 @@ const zh: Record<string, string> = {
   'history.close': '关闭',
   'history.empty': '暂无历史记录',
   'history.body_empty': '(空)',
+  'history.fill_title': '点击回填该请求体',
+  'history.delete_title': '删除该记录',
 
   // LbTest
   'lb.title': '负载均衡测试',
@@ -126,6 +137,7 @@ const zh: Record<string, string> = {
   'lb.col_avg_latency': '平均延迟',
   'lb.col_min_max_latency': '最小/最大延迟',
   'lb.at_least_one': '请至少填写一个后端地址',
+  'lb.delete_node': '删除节点',
 
   // OpsPanel（运维诊断）
   'ops.title': '运维诊断',
@@ -328,6 +340,7 @@ const en: Record<string, string> = {
   'sidebar.dyn_classify': 'Dynamic Classification',
   'sidebar.ops': 'Ops Diagnostics',
   'sidebar.no_match': 'No matching endpoints',
+  'sidebar.python_only': 'Only supported by Python REST backend',
 
   // Overview
   'overview.title': 'API Overview',
@@ -348,6 +361,11 @@ const en: Record<string, string> = {
   'endpoint.json_parse_error': 'Request body JSON parse error: {0}',
   'endpoint.json_format_error': 'JSON format error: {0}',
   'endpoint.content_type_hint': 'Content-Type: {0} (binary payload handled by backend)',
+  'endpoint.format_title': 'Format / validate JSON',
+  'endpoint.curl_title': 'Copy cURL command',
+  'endpoint.history_title': 'Request history',
+  'endpoint.reload_title': 'Restore sample request',
+  'endpoint.send_shortcut': 'Shortcut: Cmd/Ctrl + Enter',
 
   // ResponsePanel
   'response.empty': 'Send a request to view the response here',
@@ -355,6 +373,8 @@ const en: Record<string, string> = {
   'response.copy': 'Copy',
   'response.copied': 'Copied',
   'response.download': 'Download',
+  'response.via_title': 'Console backend that handled this request',
+  'response.protocol_title': 'Backend-agent communication protocol',
 
   // BatchTest
   'batch.title': 'Batch Test',
@@ -371,6 +391,7 @@ const en: Record<string, string> = {
   'batch.col_duration': 'Duration',
   'batch.col_info': 'Info',
   'batch.empty_hint': 'Select a scope and click "Start Test"',
+  'batch.goto_endpoint': 'Go to this endpoint',
 
   // HistoryPanel
   'history.title': 'Request History ({0})',
@@ -378,6 +399,8 @@ const en: Record<string, string> = {
   'history.close': 'Close',
   'history.empty': 'No history yet',
   'history.body_empty': '(empty)',
+  'history.fill_title': 'Click to refill this request body',
+  'history.delete_title': 'Delete this record',
 
   // LbTest
   'lb.title': 'Load Balancer Test',
@@ -404,6 +427,7 @@ const en: Record<string, string> = {
   'lb.col_avg_latency': 'Avg Latency',
   'lb.col_min_max_latency': 'Min/Max Latency',
   'lb.at_least_one': 'Please provide at least one backend address',
+  'lb.delete_node': 'Delete node',
 
   // OpsPanel (Operations Diagnostics)
   'ops.title': 'Ops Diagnostics',

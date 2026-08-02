@@ -282,7 +282,7 @@ export default function ResponsePanel({ response, error, duration, path = 'respo
           {via && (
             <span
               className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700"
-              title="处理本请求的控制台后端"
+              title={t('response.via_title')}
             >
               {via}
             </span>
@@ -291,7 +291,7 @@ export default function ResponsePanel({ response, error, duration, path = 'respo
           {protocol && (
             <span
               className="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700"
-              title="后端与 agent 的通信协议"
+              title={t('response.protocol_title')}
             >
               {protocol}
             </span>

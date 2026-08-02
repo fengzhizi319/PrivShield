@@ -413,7 +413,7 @@ export default function Sidebar({
                           {sample.backend === 'rest' && (
                             <span
                               className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-amber-600"
-                              title="仅 Python REST 后端支持"
+                              title={t('sidebar.python_only')}
                             >
                               REST
                             </span>

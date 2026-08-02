@@ -151,7 +151,7 @@ export default function LbTest({ agentUrl }: LbTestProps) {
             <span className="flex h-6 w-6 items-center justify-center rounded bg-indigo-50 text-indigo-600">
               <Icon name="scale" className="h-3.5 w-3.5" />
             </span>
-            负载均衡测试
+            {t('lb.title')}
           </h2>
           <p className="mt-1 text-xs text-gray-500">{t('lb.subtitle')}</p>
         </div>
@@ -187,7 +187,8 @@ export default function LbTest({ agentUrl }: LbTestProps) {
                   onClick={() => removeBackend(idx)}
                   disabled={backends.length <= 1}
                   className="shrink-0 rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="删除节点"
+                  title={t('lb.delete_node')}
+                  aria-label={t('lb.delete_node')}
                 >
                   <Icon name="trash" className="h-3.5 w-3.5" />
                 </button>

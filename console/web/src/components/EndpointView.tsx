@@ -274,6 +274,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
             onClick={onBack}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
             title={t('endpoint.back')}
+            aria-label={t('endpoint.back')}
           >
             <Icon name="arrow-left" className="h-4 w-4" />
           </button>
@@ -320,7 +321,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                 onClick={handleFormat}
                 disabled={method === 'GET'}
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
-                title="格式化 / 校验 JSON"
+                title={t('endpoint.format_title')}
               >
                 <Icon name="code" className="h-3.5 w-3.5" />
                 {t('endpoint.format')}
@@ -329,7 +330,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
               <button
                 onClick={handleCopyCurl}
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                title="复制 cURL 命令"
+                title={t('endpoint.curl_title')}
               >
                 <Icon name={curlCopied ? 'check' : 'copy'} className="h-3.5 w-3.5" />
                 {curlCopied ? t('endpoint.curl_copied') : 'cURL'}
@@ -344,7 +345,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                     ? 'bg-indigo-50 text-indigo-600'
                     : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700',
                 ].join(' ')}
-                title="请求历史"
+                title={t('endpoint.history_title')}
               >
                 <Icon name="clock" className="h-3.5 w-3.5" />
                 {t('endpoint.history')}
@@ -353,7 +354,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
               <button
                 onClick={handleLoadSample}
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                title="恢复示例请求"
+                title={t('endpoint.reload_title')}
               >
                 <Icon name="refresh" className="h-3.5 w-3.5" />
                 {t('endpoint.reload_sample')}
@@ -381,7 +382,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
             {/* 二进制载荷提示：显示 Content-Type / Binary payload hint: shows Content-Type */}
             {sample.contentType && (
               <p className="mt-2 text-[11px] text-gray-400">
-                Content-Type: {sample.contentType}（二进制载荷由后端处理）
+                {t('endpoint.content_type_hint', sample.contentType)}
               </p>
             )}
 
@@ -394,7 +395,7 @@ export default function EndpointView({ sample, onBack, agentUrl }: EndpointViewP
                 /* 加载中降低不透明度+禁止光标 / Loading: reduced opacity + not-allowed cursor */
                 loading ? 'cursor-not-allowed bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700',
               ].join(' ')}
-              title="快捷键 Cmd/Ctrl + Enter"
+              title={t('endpoint.send_shortcut')}
             >
               <Icon name="send" className="h-3.5 w-3.5" />
               {loading ? t('endpoint.sending') : t('endpoint.send')}

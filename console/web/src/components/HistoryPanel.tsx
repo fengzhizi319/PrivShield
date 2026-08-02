@@ -94,6 +94,7 @@ export default function HistoryPanel({ entries, onRestore, onDelete, onClear, on
             onClick={onClose}
             className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
             title={t('history.close')}
+            aria-label={t('history.close')}
           >
             <Icon name="x" className="h-3.5 w-3.5" />
           </button>
@@ -118,7 +119,7 @@ export default function HistoryPanel({ entries, onRestore, onDelete, onClear, on
                 <button
                   onClick={() => onRestore(entry.body)}
                   className="w-full rounded-lg border border-gray-100 bg-gray-50/50 px-3 py-2 pr-9 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50/40"
-                  title="点击回填该请求体"
+                  title={t('history.fill_title')}
                 >
                   <div className="flex items-center gap-2">
                     {/* 状态码徽章（0=ERR/2xx=绿/其他=红）/ Status badge (0=ERR/2xx=green/others=red) */}
@@ -137,7 +138,8 @@ export default function HistoryPanel({ entries, onRestore, onDelete, onClear, on
                 <button
                   onClick={() => onDelete(entry.id)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-                  title="删除该记录"
+                  title={t('history.delete_title')}
+                  aria-label={t('history.delete_title')}
                 >
                   <Icon name="trash" className="h-3.5 w-3.5" />
                 </button>
