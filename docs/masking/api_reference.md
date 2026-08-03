@@ -1,5 +1,32 @@
 # 数据脱敏模块 API 参考
 
+
+## 目录 (Table of Contents)
+
+- [1. Python SDK](#1-python-sdk)
+  - [`mask_value`](#mask_value)
+  - [`mask_record`](#mask_record)
+  - [`mask_value_batch`](#mask_value_batch)
+  - [`mask_dataframe`](#mask_dataframe)
+  - [`hash_value`](#hash_value)
+  - [`truncate`](#truncate)
+- [2. REST API](#2-rest-api)
+  - [POST `/v1/privacy/mask`](#post-v1privacymask)
+  - [POST `/v1/privacy/mask_record`](#post-v1privacymask_record)
+  - [POST `/v1/privacy/mask/batch`](#post-v1privacymaskbatch)
+  - [POST `/v1/privacy/mask/dataframe`](#post-v1privacymaskdataframe)
+  - [POST `/v1/privacy/hash`](#post-v1privacyhash)
+- [3. gRPC API](#3-grpc-api)
+  - [接口列表](#接口列表)
+  - [Python gRPC 客户端示例](#python-grpc-客户端示例)
+  - [gRPC vs REST 选择建议](#grpc-vs-rest-选择建议)
+- [4. 异常与错误码](#4-异常与错误码)
+  - [常见错误类型](#常见错误类型)
+  - [错误处理示例](#错误处理示例)
+  - [最佳实践](#最佳实践)
+
+---
+
 ## 1. Python SDK
 
 ### `mask_value`

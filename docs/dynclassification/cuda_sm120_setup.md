@@ -4,6 +4,28 @@
 
 ---
 
+
+## 目录 (Table of Contents)
+
+- [1. 痛点与背景分析](#1-痛点与背景分析)
+  - [1.1 `sm_120` 算力缺失异常](#11-sm_120-算力缺失异常)
+  - [1.2 解决方案概述](#12-解决方案概述)
+- [2. 步骤一：安装支持 `sm_120` 的 PyTorch Nightly 包](#2-步骤一安装支持-sm_120-的-pytorch-nightly-包)
+- [3. 步骤二：配套依赖库与 C++ 共享库补齐](#3-步骤二配套依赖库与-c-共享库补齐)
+  - [3.1 补充精确版本的 NVIDIA C++ 运行库](#31-补充精确版本的-nvidia-c-运行库)
+  - [3.2 匹配安装 Nightly 版 `torchvision`](#32-匹配安装-nightly-版-torchvision)
+- [4. 关键踩坑点与代码级解决方案 (Critical Pitfalls & Solutions)](#4-关键踩坑点与代码级解决方案-critical-pitfalls-solutions)
+  - [🚨 踩坑 1：`ImportError: libcupti.so.12: cannot open shared object file`](#-踩坑-1importerror-libcuptiso12-cannot-open-shared-object-file)
+  - [🚨 踩坑 2：LLVM 命令行选项冲突崩溃 (`LLVM ERROR: inconsistency in registered CommandLine options ('enable-fs-discriminator')`)](#-踩坑-2llvm-命令行选项冲突崩溃-llvm-error-inconsistency-in-registered-commandline-options-enable-fs-discriminator)
+  - [🚨 踩坑 3：PyTorch CUDA 探针误判](#-踩坑-3pytorch-cuda-探针误判)
+- [5. 端到端功能与性能验证](#5-端到端功能与性能验证)
+  - [5.1 基础 PyTorch CUDA 运算验证](#51-基础-pytorch-cuda-运算验证)
+  - [5.2 ModelScope Small-NER 医疗实体识别 CUDA 推理实测](#52-modelscope-small-ner-医疗实体识别-cuda-推理实测)
+  - [5.3 运行单元测试集](#53-运行单元测试集)
+- [6. 总结](#6-总结)
+
+---
+
 ## 1. 痛点与背景分析
 
 ### 1.1 `sm_120` 算力缺失异常

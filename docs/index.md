@@ -6,6 +6,14 @@ Welcome to the **Privacy Local Agent** documentation.
 
 ---
 
+
+## 目录 (Table of Contents)
+
+- [Capabilities](#capabilities)
+- [Quick Navigation](#quick-navigation)
+
+---
+
 ## Capabilities
 
 | Capability | Status | Description |

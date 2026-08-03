@@ -46,6 +46,8 @@ import LbTest from '@/components/LbTest';
 import DynClassificationPanel from '@/components/DynClassificationPanel';
 /** 引入视图组件：运维诊断面板 / Import view component: ops diagnostics panel */
 import OpsPanel from '@/components/OpsPanel';
+/** 引入视图组件：并发压测面板 / Import view component: concurrency test panel */
+import ConcurrencyTestPanel from '@/components/ConcurrencyTestPanel';
 /** 引入错误边界组件：防止单组件崩溃导致整页白屏 / Import error boundary: prevent single component crash from blank page */
 import ErrorBoundary from '@/components/ErrorBoundary';
 /** 引入后端切换器类型与默认值 / Import backend selector type and default value */
@@ -70,6 +72,7 @@ type View =
   | { type: 'batch' }                             // 批量测试 / Batch test
   | { type: 'filetest' }                          // 文件处理 / File processing
   | { type: 'lbtest' }                            // 负载均衡 / Load balancer
+  | { type: 'concurrency' }                      // 并发压测 / Concurrency test
   | { type: 'dynclassification' }                // 动态分类分级 / Dynamic classification
   | { type: 'ops' };                             // 运维诊断 / Ops diagnostics
 
@@ -210,6 +213,8 @@ export default function App() {
               fileTestActive={view.type === 'filetest'}
               onLbTest={() => setView({ type: 'lbtest' })}
               lbTestActive={view.type === 'lbtest'}
+              onConcurrency={() => setView({ type: 'concurrency' })}
+              concurrencyActive={view.type === 'concurrency'}
               onDynClassify={() => setView({ type: 'dynclassification' })}
               dynClassifyActive={view.type === 'dynclassification'}
               onOps={() => setView({ type: 'ops' })}
@@ -236,6 +241,8 @@ export default function App() {
                   <FileTest />
                 ) : view.type === 'lbtest' ? (
                   <LbTest agentUrl={health?.agent_url} />
+                ) : view.type === 'concurrency' ? (
+                  <ConcurrencyTestPanel agentUrl={health?.agent_url} />
                 ) : view.type === 'dynclassification' ? (
                   <DynClassificationPanel />
                 ) : view.type === 'ops' ? (

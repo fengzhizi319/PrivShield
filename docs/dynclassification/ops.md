@@ -4,6 +4,28 @@
 
 ---
 
+
+## 目录 (Table of Contents)
+
+- [1. 规则配置文件挂载](#1-规则配置文件挂载)
+  - [1.1 环境变量配置](#11-环境变量配置)
+  - [1.2 Kubernetes ConfigMap 与 Helm 部署挂载](#12-kubernetes-configmap-与-helm-部署挂载)
+- [2. 规则更新与热重载流程](#2-规则更新与热重载流程)
+  - [手动触发热重载命令](#手动触发热重载命令)
+- [3. 监控与可观测性](#3-监控与可观测性)
+  - [3.1 Prometheus 指标参考](#31-prometheus-指标参考)
+  - [3.2 Grafana 告警规则建议](#32-grafana-告警规则建议)
+- [5. Layer-2 Small-NER 性能基准与 TensorRT 加速指南](#5-layer-2-small-ner-性能基准与-tensorrt-加速指南)
+  - [5.1 模型与 TensorRT 引擎缓存路径说明](#51-模型与-tensorrt-引擎缓存路径说明)
+  - [5.2 CPU 模式 vs TensorRTSmallNerEngine 性能对比基准测试](#52-cpu-模式-vs-tensorrtsmallnerengine-性能对比基准测试)
+  - [5.3 PyTorch CUDA (Blackwell sm_120 / RTX 50 系列) 配置指南](#53-pytorch-cuda-blackwell-sm_120-rtx-50-系列-配置指南)
+  - [故障 1: YAML 解析校验失败，引擎拒绝载入](#故障-1-yaml-解析校验失败引擎拒绝载入)
+  - [故障 2: 算子未找到异常 (`KeyError: 未找到名为 'xxx' 的匹配算子`)](#故障-2-算子未找到异常-keyerror-未找到名为-xxx-的匹配算子)
+- [5. 降级规则 `force_suppress` 与 `exempt_rules` 最佳实践指南](#5-降级规则-force_suppress-与-exempt_rules-最佳实践指南)
+  - [5.1 强制压制 4 重判定条件与综合实战案例](#51-强制压制-4-重判定条件与综合实战案例)
+
+---
+
 ## 1. 规则配置文件挂载
 
 ### 1.1 环境变量配置
@@ -208,5 +230,4 @@ downgrade_rules:
 
 **最终裁定结果**：
 宽泛误报规则 `RULE_PII_FUZZY_KEYWORD` 被成功压制擦除；而属于豁免例外的精确规则 `RULE_IDCARD_EXACT`、绝密规则 `RULE_TOP_SECRET_HASH` 以及实际扫出手机号数据的 `RULE_PHONE_REGEX` 均被安全保留。
-
 

@@ -2,6 +2,36 @@
 
 > Python 本地隐私保护 Agent，提供 REST + gRPC 双协议 Sidecar 服务，用于无法直接嵌入 Java/Go SDK 的场景，或多语言统一接入。
 
+
+## 目录 (Table of Contents)
+
+- [快速开始](#快速开始)
+  - [本地运行（开发）](#本地运行开发)
+  - [Docker 运行](#docker-运行)
+- [生产安全（可选）](#生产安全可选)
+- [可观测性（可选）](#可观测性可选)
+- [K8s / Helm 部署](#k8s-helm-部署)
+- [网关 / 负载均衡（可选）](#网关-负载均衡可选)
+- [能力概览](#能力概览)
+  - [处理原语 / Processing Primitives](#处理原语-processing-primitives)
+  - [数据分类 / Data Classification](#数据分类-data-classification)
+- [运行测试](#运行测试)
+- [构建与分发](#构建与分发)
+  - [构建 Python 包](#构建-python-包)
+  - [Docker 镜像](#docker-镜像)
+  - [可编辑安装（开发用）](#可编辑安装开发用)
+- [文档](#文档)
+  - [文档书 (Documentation Book)](#文档书-documentation-book)
+  - [处理原语](#处理原语)
+  - [数据分类](#数据分类)
+  - [网关 / 负载均衡](#网关-负载均衡)
+  - [生产安全](#生产安全)
+  - [可观测性](#可观测性)
+  - [K8s / Helm 部署](#k8s-helm-部署)
+  - [其他](#其他)
+
+---
+
 ## 快速开始
 
 ### 本地运行（开发）

@@ -214,6 +214,11 @@ class BudgetAccountant:
         使用 ``threading.local()`` 缓存每线程的数据库连接，避免高并发 QPS
         场景下频繁打开/关闭 SQLite 文件句柄的 CPU/IO 损耗。
 
+        连接创建时自动开启 WAL 模式与相关优化 pragma，以支持多进程并发读写：
+        - ``journal_mode=WAL``：读写不再互斥，写吞吐约 1K~3K TPS；
+        - ``busy_timeout=5000``：遇锁时等待 5 秒而非立即报错；
+        - ``synchronous=NORMAL``：WAL 模式下安全且 faster 的同步级别。
+
         Args:
             db_path: SQLite 数据库文件路径。
 
@@ -221,9 +226,20 @@ class BudgetAccountant:
             当前线程绑定的 sqlite3.Connection 实例。
         """
         conn = getattr(self._thread_local, "conn", None)
-        if conn is None:
+        cached_path = getattr(self._thread_local, "db_path", None)
+        if conn is None or cached_path != db_path:
+            if conn is not None:
+                with contextlib.suppress(Exception):
+                    conn.close()
             conn = sqlite3.connect(db_path, timeout=10.0)
+            # 高并发优化：开启 WAL 模式，读写不再互斥
+            conn.execute("PRAGMA journal_mode=WAL")
+            # 高并发优化：遇锁等待 10 秒，避免 SQLITE_BUSY 立即失败
+            conn.execute("PRAGMA busy_timeout=10000")
+            # 高并发优化：WAL 模式下 NORMAL 已足够安全且更快
+            conn.execute("PRAGMA synchronous=NORMAL")
             self._thread_local.conn = conn
+            self._thread_local.db_path = db_path
         return conn
 
     def _close_db_conn(self) -> None:
@@ -240,6 +256,10 @@ class BudgetAccountant:
         if db_path:
             conn = sqlite3.connect(db_path, timeout=10.0)
             try:
+                # 初始化阶段也开启 WAL 模式，确保数据库文件本身已切换为 WAL 格式
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")
+                conn.execute("PRAGMA synchronous=NORMAL")
                 with conn:
                     conn.execute(
                         "CREATE TABLE IF NOT EXISTS privacy_budgets ("

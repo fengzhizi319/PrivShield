@@ -4,6 +4,16 @@
 
 ---
 
+
+## 目录 (Table of Contents)
+
+- [1. 核心流程](#1-核心流程)
+- [2. 接口设计](#2-接口设计)
+  - [2.1 REST API](#21-rest-api)
+  - [2.2 gRPC API](#22-grpc-api)
+
+---
+
 ## 1. 核心流程
 
 1. **调用参数分析接口**：用户通过 REST API 或 gRPC 传入特定的 `namespace` 及数据（一维数值列表 `values`，或者结构化记录列表 `rows`）。

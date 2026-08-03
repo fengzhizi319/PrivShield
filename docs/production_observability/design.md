@@ -2,6 +2,34 @@
 
 > 对应 PRD: `docs/production_observability/prd.md`
 
+
+## 目录 (Table of Contents)
+
+- [1. 概述](#1-概述)
+- [2. 设计目标](#2-设计目标)
+- [3. 架构设计](#3-架构设计)
+- [4. 日志设计](#4-日志设计)
+  - [4.1 配置](#41-配置)
+  - [4.2 上下文字段](#42-上下文字段)
+  - [4.3 统一 logger 入口](#43-统一-logger-入口)
+- [5. Metrics 设计](#5-metrics-设计)
+  - [5.1 流量监控](#51-流量监控)
+- [6. Tracing 设计](#6-tracing-设计)
+- [7. 接入点](#7-接入点)
+  - [REST (`main.py`)](#rest-mainpy)
+  - [gRPC (`grpc_server.py`)](#grpc-grpc_serverpy)
+  - [统一启动器 (`server.py`)](#统一启动器-serverpy)
+- [8. 与安全层的协同](#8-与安全层的协同)
+- [9. 错误处理](#9-错误处理)
+- [10. 测试策略](#10-测试策略)
+- [11. 工业化评分 / Industrialization Scorecard](#11-工业化评分-industrialization-scorecard)
+  - [11.1 加权评分表](#111-加权评分表)
+  - [11.2 结论](#112-结论)
+  - [11.3 亮点](#113-亮点)
+  - [11.4 改进建议](#114-改进建议)
+
+---
+
 ## 1. 概述
 
 本文档定义 `privacy-local-agent` 可观测性模块的技术架构、设计原理与实现细节。该模块为生产环境提供结构化日志、Prometheus 指标与分布式追踪能力。

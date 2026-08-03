@@ -154,6 +154,9 @@ nav:
       - 评审修改意见: dynclassification/修改意见.md
 
   - 基础设施:
+    - 高并发架构设计 (10k QPS):
+      - 概览: high_concurrency/README.md
+      - 架构设计: high_concurrency/design.md
     - 网关与负载均衡:
       - 概览: gateway_balancer/README.md
       - 架构设计: gateway_balancer/design.md

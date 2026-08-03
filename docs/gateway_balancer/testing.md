@@ -1,5 +1,23 @@
 # 代理转发与负载均衡网关测试报告 (Testing Report)
 
+
+## 目录 (Table of Contents)
+
+- [1. 测试目的与策略](#1-测试目的与策略)
+  - [1.1 测试目的](#11-测试目的)
+  - [1.2 测试策略](#12-测试策略)
+- [2. 测试用例说明](#2-测试用例说明)
+  - [2.1 负载均衡算法策略测试 (`test_load_balancer_strategies`)](#21-负载均衡算法策略测试-test_load_balancer_strategies)
+  - [2.2 HTTP (REST) 代理转发测试 (`test_http_proxy_forwarding`)](#22-http-rest-代理转发测试-test_http_proxy_forwarding)
+  - [2.3 gRPC 代理转发测试 (`test_grpc_proxy_forwarding`)](#23-grpc-代理转发测试-test_grpc_proxy_forwarding)
+  - [2.4 动态自注册与销毁 API 测试 (`test_dynamic_registration`)](#24-动态自注册与销毁-api-测试-test_dynamic_registration)
+  - [2.5 HTTP 代理自适应重试与被动检测测试 (`test_http_retry_and_passive_failover`)](#25-http-代理自适应重试与被动检测测试-test_http_retry_and_passive_failover)
+  - [2.6 gRPC 代理自适应重试与被动检测测试 (`test_grpc_retry_and_passive_failover`)](#26-grpc-代理自适应重试与被动检测测试-test_grpc_retry_and_passive_failover)
+- [3. 测试执行与结果](#3-测试执行与结果)
+  - [3.1 运行输出](#31-运行输出)
+
+---
+
 ## 1. 测试目的与策略
 
 ### 1.1 测试目的
@@ -91,4 +109,3 @@ tests/test_gateway.py ......                                             [100%]
 - 网关 HTTP 通配代理对于各路由的 Request/Response 转发均正常，且具备 503 容错能力。
 - 网关 gRPC 协程转发链路完全畅通，反射和异常处理工作符合设计预期。
 - 新增的**自注册API**、**HTTP自适应重试**与**gRPC被动健康检测**全部测试通过，保障了网关的高可靠与零停机横向扩容。
-

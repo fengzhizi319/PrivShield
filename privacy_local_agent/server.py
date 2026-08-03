@@ -3,6 +3,10 @@
 负责将 FastAPI REST 服务与 gRPC 服务分别运行，并捕获关闭信号（SIGTERM/SIGINT），
 确保在途请求得到处理后安全干净地退出整个进程。
 
+支持两种启动模式：
+- 单进程模式（默认）：常规启动，适合开发调试；
+- 多进程模式（通过 launcher.py）：SO_REUSEPORT 共享端口，适合高并发生产部署。
+
 Unified launcher with graceful shutdown for REST and gRPC servers.
 Captures termination signals, stops both servers with a grace period, and joins threads.
 """
@@ -25,6 +29,26 @@ REST_HOST = os.environ.get("PRIVACY_REST_HOST", "0.0.0.0")
 REST_PORT = int(os.environ.get("PRIVACY_REST_PORT", "8079"))
 GRPC_HOST = os.environ.get("PRIVACY_GRPC_HOST", "0.0.0.0")
 GRPC_PORT = int(os.environ.get("PRIVACY_GRPC_PORT", "50051"))
+# 高并发优化：gRPC 线程池大小可通过环境变量配置
+GRPC_MAX_WORKERS = int(os.environ.get("PRIVACY_GRPC_MAX_WORKERS", "64"))
+
+# ---------------------------------------------------------------------------
+# 高并发优化：uvloop + httptools 自动检测
+# ---------------------------------------------------------------------------
+# uvloop 基于 libuv 的高性能事件循环，配合 httptools 可显著提升 REST 吞吐。
+# 若未安装则回退到 asyncio 默认事件循环 + 标准 HTTP 解析器。
+_UVICORN_LOOP_KWARG: dict = {}
+try:
+    import uvloop  # noqa: F401
+    _UVICORN_LOOP_KWARG["loop"] = "uvloop"
+except ImportError:
+    pass
+
+try:
+    import httptools  # noqa: F401
+    _UVICORN_LOOP_KWARG["http"] = "httptools"
+except ImportError:
+    pass
 
 
 def main():
@@ -65,11 +89,19 @@ def main():
 
     # 1. 配置 REST 隐式启动
     ssl_kwargs = uvicorn_ssl_kwargs(get_security_settings())
+    # 高并发优化：自动使用 uvloop + httptools（若已安装）
     config = uvicorn.Config(
         app,
         host=args.rest_host,
         port=args.rest_port,
         log_level="info",
+        # 高并发优化：限制最大并发连接数，防止过载 OOM
+        limit_concurrency=int(os.environ.get("PRIVACY_LIMIT_CONCURRENCY", "10000")),
+        # 高并发优化：worker 最大处理请求数，防止内存泄漏
+        limit_max_requests=int(os.environ.get("PRIVACY_LIMIT_MAX_REQUESTS", "100000")),
+        # 高并发优化：keep-alive 超时，减少空闲连接占用
+        timeout_keep_alive=int(os.environ.get("PRIVACY_TIMEOUT_KEEP_ALIVE", "30")),
+        **_UVICORN_LOOP_KWARG,
         **ssl_kwargs,
     )
     rest_server = uvicorn.Server(config)
@@ -83,7 +115,13 @@ def main():
     rest_thread.start()
 
     # 3. 启动 gRPC 服务（非阻塞模式，使其返回 server 对象）
-    grpc_server = grpc_serve(host=args.grpc_host, port=args.grpc_port, wait_for_termination=False)
+    # 高并发优化：线程池大小可通过 PRIVACY_GRPC_MAX_WORKERS 环境变量配置
+    grpc_server = grpc_serve(
+        host=args.grpc_host,
+        port=args.grpc_port,
+        max_workers=GRPC_MAX_WORKERS,
+        wait_for_termination=False,
+    )
 
     # 4. 信号处理逻辑
     shutdown_event = threading.Event()

@@ -25,6 +25,8 @@ CompositeRuleEngine 的调用逻辑，支持字段级、记录级和表级分类
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -47,6 +49,33 @@ from .operator_registry import OperatorRegistry
 from .profile_loader import ProfileLoader
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# fork-after-warmup 预加载适配器注册表 / Preloaded adapter registry (COW)
+# ---------------------------------------------------------------------------
+# 高并发优化：launcher.py 的 --warmup 模式在主进程 fork 前加载 ML 模型，
+# 并把加载好的 adapter 实例注册到此处。fork 后子进程（worker）首次需要
+# NER/LLM 适配器时优先复用注册表中的实例——模型权重内存页在主进程 fork
+# 时已驻留，子进程直接继承（Copy-on-Write 共享只读页），避免 N 份模型
+# 内存翻倍，也省去重新读盘 + 重新构建模型的开销。
+#
+# 注意：注册表是 fork 前填充的，子进程各自持有独立副本，互不影响；
+# 适配器内部使用锁保护初始化，fork 时锁未被持有，可安全复用。
+_preloaded_adapters: dict[str, Any] = {}
+_preloaded_lock = threading.Lock()
+
+
+def register_preloaded_adapter(kind: str, adapter: Any) -> None:
+    """注册一个 fork 前预加载的适配器实例（launcher --warmup 使用）。"""
+    with _preloaded_lock:
+        _preloaded_adapters[kind] = adapter
+
+
+def consume_preloaded_adapter(kind: str) -> Any | None:
+    """获取 fork 前预加载的适配器实例；未注册时返回 None。"""
+    with _preloaded_lock:
+        return _preloaded_adapters.get(kind)
 
 
 class DynClassificationService:
@@ -74,6 +103,15 @@ class DynClassificationService:
         self._llm_adapter: LlmAdapter | None = None
         # Funnel instance cache: keyed by engine cache key ("domain:standard").
         self._funnel_cache: dict[str, ClassificationFunnel] = {}
+        cache_size = int(os.environ.get("PRIVACY_CLASSIFICATION_CACHE_SIZE", "10000"))
+        from ..privacy.high_concurrency import HighConcurrencyLRUCache
+        self._classification_cache = HighConcurrencyLRUCache[tuple[str, str, str, str], ClassificationResponse](
+            capacity=cache_size
+        )
+
+    def clear_cache(self) -> None:
+        """清空分类缓存（规则重载或配置更新时调用）。"""
+        self._classification_cache.clear()
 
     # ------------------------------------------------------------------
     # 字段级分类 / Field-level Classification
@@ -89,10 +127,10 @@ class DynClassificationService:
         """对单个字段进行分类。
 
         Execution flow:
-        1. Obtain (or build from cache) the rule engine for the given domain/standard.
-        2. Evaluate the field against all rules to produce security tags.
-        3. Resolve final level (highest rank among tags).
-        4. Package results with audit info.
+        1. Check high-concurrency LRU cache for identical (domain, standard, field_name, value).
+        2. Obtain (or build from cache) the rule engine for the given domain/standard.
+        3. Evaluate the field against all rules/NER/LLM funnel to produce security tags.
+        4. Resolve final level and package results with audit info.
 
         Args:
             field_name: 字段名。
@@ -105,6 +143,22 @@ class DynClassificationService:
         """
         # Start high-resolution timer for duration measurement.
         start = time.monotonic()
+
+        # Step 0: 高并发 LRU 缓存查找
+        cache_key = (domain or "", standard or "", field_name, str(value) if value is not None else "")
+        cached_resp = self._classification_cache.get(cache_key)
+        if cached_resp is not None:
+            duration_ms = (time.monotonic() - start) * 1000
+            # 构造新的 response 保持独立的执行耗时审计
+            audit = AuditInfo(
+                domain=cached_resp.audit_info.domain,
+                standard_id=cached_resp.audit_info.standard_id,
+                rule_set_version=cached_resp.audit_info.rule_set_version,
+                rules_evaluated=cached_resp.audit_info.rules_evaluated,
+                rules_hit=cached_resp.audit_info.rules_hit,
+                duration_ms=round(duration_ms, 3),
+            )
+            return ClassificationResponse(field_result=cached_resp.field_result, audit_info=audit)
 
         # Step 1: Get or construct the rule engine (cached by domain:standard key).
         engine = self.loader.get_engine(domain=domain, standard=standard)
@@ -145,7 +199,10 @@ class DynClassificationService:
             duration_ms=round(duration_ms, 3),
         )
 
-        return ClassificationResponse(field_result=field_result, audit_info=audit)
+        response = ClassificationResponse(field_result=field_result, audit_info=audit)
+        # 写入高并发 LRU 缓存
+        self._classification_cache.put(cache_key, response)
+        return response
 
 
     # ------------------------------------------------------------------
@@ -249,13 +306,26 @@ class DynClassificationService:
         record_results: list[RecordClassificationResult] = []
         all_tags: list[SecurityTag] = []
 
-        # Classify each row as an independent record.
-        for idx, row in enumerate(rows):
-            resp = self.classify_record(row, record_index=idx, domain=domain, standard=standard)
-            if resp.record_result:
-                record_results.append(resp.record_result)
-                # Accumulate tags from all records for table-level aggregation.
-                all_tags.extend(resp.record_result.aggregated_tags)
+        # Classify rows (parallelize using ThreadPoolExecutor when rows count > 16)
+        if len(rows) > 16:
+            import concurrent.futures
+            max_workers = min(16, os.cpu_count() or 4)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(self.classify_record, row, idx, domain, standard)
+                    for idx, row in enumerate(rows)
+                ]
+                for fut in futures:
+                    resp = fut.result()
+                    if resp.record_result:
+                        record_results.append(resp.record_result)
+                        all_tags.extend(resp.record_result.aggregated_tags)
+        else:
+            for idx, row in enumerate(rows):
+                resp = self.classify_record(row, record_index=idx, domain=domain, standard=standard)
+                if resp.record_result:
+                    record_results.append(resp.record_result)
+                    all_tags.extend(resp.record_result.aggregated_tags)
 
         # Determine table-level final level (highest across all records).
         engine = self.loader.get_engine(domain=domain, standard=standard)
@@ -521,21 +591,33 @@ class DynClassificationService:
         if policy.enable_ner:
             if self._ner_adapter is None:
                 taxonomy = engine.taxonomy
-                self._ner_adapter = NerAdapter(
-                    model_path=taxonomy.ner_model_path,
-                    vocab_path=taxonomy.ner_vocab_path,
-                    label_mapping=taxonomy.ner_label_mapping,
-                )
+                # fork-after-warmup：优先复用主进程预加载的适配器（COW 共享模型页）
+                preloaded = consume_preloaded_adapter("ner")
+                if preloaded is not None and preloaded._model_path == taxonomy.ner_model_path:
+                    self._ner_adapter = preloaded
+                    logger.info("ner_adapter_reused_preloaded")
+                else:
+                    self._ner_adapter = NerAdapter(
+                        model_path=taxonomy.ner_model_path,
+                        vocab_path=taxonomy.ner_vocab_path,
+                        label_mapping=taxonomy.ner_label_mapping,
+                    )
             ner_adapter = self._ner_adapter
 
         # 按需初始化 LLM 适配器（全局单例）
         llm_adapter = None
         if policy.enable_llm or policy.enable_llm_arbitration:
             if self._llm_adapter is None:
-                self._llm_adapter = LlmAdapter(
-                    model_path=engine.taxonomy.llm_model_path,
-                    classify_prompt_template=engine.taxonomy.llm_classify_prompt_template,
-                )
+                # fork-after-warmup：优先复用主进程预加载的适配器（COW 共享模型页）
+                preloaded = consume_preloaded_adapter("llm")
+                if preloaded is not None and preloaded._model_path == engine.taxonomy.llm_model_path:
+                    self._llm_adapter = preloaded
+                    logger.info("llm_adapter_reused_preloaded")
+                else:
+                    self._llm_adapter = LlmAdapter(
+                        model_path=engine.taxonomy.llm_model_path,
+                        classify_prompt_template=engine.taxonomy.llm_classify_prompt_template,
+                    )
             llm_adapter = self._llm_adapter
 
         funnel = ClassificationFunnel(

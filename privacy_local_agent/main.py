@@ -15,6 +15,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 
 from .deps import (
     service,  # 重新导出，保持 ``from privacy_local_agent.main import service`` 可用
@@ -57,6 +58,10 @@ async def lifespan(app: FastAPI):
 
 # FastAPI 应用实例；title 用于 OpenAPI 文档，lifespan 用于生命周期钩子
 app = FastAPI(title="SecretFlow Local Privacy Agent", lifespan=lifespan)
+
+# 高并发优化：GZip 响应压缩，减少大响应体的网络传输开销
+# minimum_size=1000 表示仅压缩 >= 1KB 的响应，避免小响应压缩后反而变大
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 注册可观测性中间件：request_id 透传、访问日志、Prometheus metrics。
 # 注意：/metrics 本身会被中间件排除，避免自引用。

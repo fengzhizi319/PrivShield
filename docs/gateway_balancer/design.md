@@ -1,5 +1,34 @@
 # 代理转发与负载均衡网关设计文档
 
+
+## 目录 (Table of Contents)
+
+- [1. 概述](#1-概述)
+- [2. 设计目标](#2-设计目标)
+- [3. 系统架构](#3-系统架构)
+- [4. 核心模块设计](#4-核心模块设计)
+  - [4.1 BackendNode](#41-backendnode)
+  - [4.2 LoadBalancer](#42-loadbalancer)
+  - [4.3 HTTP 代理模块 (`http_proxy.py`)](#43-http-代理模块-http_proxypy)
+  - [4.4 gRPC 代理模块 (`grpc_proxy.py`)](#44-grpc-代理模块-grpc_proxypy)
+- [5. 负载均衡算法](#5-负载均衡算法)
+  - [5.1 轮询（Round-Robin）](#51-轮询round-robin)
+  - [5.2 随机选择（Random）](#52-随机选择random)
+  - [5.3 最小连接数（Least Connections）](#53-最小连接数least-connections)
+- [6. 健康检查与自愈](#6-健康检查与自愈)
+- [7. 错误处理与容错](#7-错误处理与容错)
+- [8. 分布式隐私预算记账](#8-分布式隐私预算记账)
+- [9. 配置方式](#9-配置方式)
+- [10. 非功能设计](#10-非功能设计)
+- [11. 测试策略](#11-测试策略)
+- [12. 工业化评分 / Industrialization Scorecard](#12-工业化评分-industrialization-scorecard)
+  - [12.1 加权评分表](#121-加权评分表)
+  - [12.2 结论](#122-结论)
+  - [12.3 亮点](#123-亮点)
+  - [12.4 改进建议（必须修复）](#124-改进建议必须修复)
+
+---
+
 ## 1. 概述
 
 本文档定义 `privacy-local-agent` 代理转发与负载均衡网关（API Gateway & Load Balancer）的技术架构、算法原理与实现细节。该网关作为统一的请求入口，将 REST 与 gRPC 流量分发到后端多个健康的工作节点，实现水平扩展与高可用。

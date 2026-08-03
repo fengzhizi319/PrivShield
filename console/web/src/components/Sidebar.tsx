@@ -53,6 +53,10 @@ interface SidebarProps {
   onLbTest?: () => void;
   /** 当前是否处于负载均衡测试视图 / Whether currently in LB test view */
   lbTestActive?: boolean;
+  /** 进入并发压测 / Enter concurrency test */
+  onConcurrency?: () => void;
+  /** 当前是否处于并发压测视图 / Whether currently in concurrency test view */
+  concurrencyActive?: boolean;
   /** 进入动态分类分级 / Enter dynamic classification */
   onDynClassify?: () => void;
   /** 当前是否处于动态分类分级视图 / Whether currently in dynamic classification view */
@@ -174,6 +178,8 @@ export default function Sidebar({
   fileTestActive = false,
   onLbTest,
   lbTestActive = false,
+  onConcurrency,
+  concurrencyActive = false,
   onDynClassify,
   dynClassifyActive = false,
   onOps,
@@ -310,6 +316,14 @@ export default function Sidebar({
           label={t('sidebar.lb_test')}
           activeClass="bg-indigo-50 font-medium text-indigo-700"
           iconClass="bg-gray-100 text-gray-500"
+        />
+        <NavEntry
+          onClick={onConcurrency}
+          active={concurrencyActive}
+          icon="activity"
+          label={t('sidebar.concurrency_test')}
+          activeClass="bg-orange-50 font-medium text-orange-700"
+          iconClass="bg-orange-100 text-orange-600"
         />
         <NavEntry
           onClick={onDynClassify}

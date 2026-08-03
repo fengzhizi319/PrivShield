@@ -1,5 +1,45 @@
 # 差分隐私模块使用示例
 
+
+## 目录 (Table of Contents)
+
+- [1. 概述](#1-概述)
+- [2. Python SDK 示例](#2-python-sdk-示例)
+  - [2.1 计数查询（Count）](#21-计数查询count)
+  - [2.2 求和查询（Sum）](#22-求和查询sum)
+  - [2.3 均值查询（Mean）](#23-均值查询mean)
+  - [2.4 直方图查询（Histogram）](#24-直方图查询histogram)
+  - [2.4 Gaussian 机制示例](#24-gaussian-机制示例)
+  - [2.5 DataFrame 与 SecretFlow 输入示例](#25-dataframe-与-secretflow-输入示例)
+  - [2.6 Noisify 接口示例（Spark/SQL/DuckDB 工作流）](#26-noisify-接口示例sparksqlduckdb-工作流)
+  - [2.7 Chunked 流式聚合示例](#27-chunked-流式聚合示例)
+  - [2.8 预算管理示例](#28-预算管理示例)
+- [3. REST API 示例](#3-rest-api-示例)
+  - [3.1 Count](#31-count)
+  - [3.2 Sum with Clipping](#32-sum-with-clipping)
+  - [3.3 Mean with Gaussian](#33-mean-with-gaussian)
+  - [3.4 Histogram](#34-histogram)
+  - [3.5 Noisify via REST](#35-noisify-via-rest)
+  - [3.6 Chunked via REST](#36-chunked-via-rest)
+  - [3.7 Local DP via REST](#37-local-dp-via-rest)
+- [4. 本地差分隐私示例](#4-本地差分隐私示例)
+  - [4.1 二值随机响应](#41-二值随机响应)
+  - [4.2 类别型随机响应与本地直方图](#42-类别型随机响应与本地直方图)
+  - [4.3 运行完整示例](#43-运行完整示例)
+- [5. 最佳实践](#5-最佳实践)
+- [6. 高级特性示例](#6-高级特性示例)
+  - [6.1 自适应截断（Adaptive Clipping）](#61-自适应截断adaptive-clipping)
+  - [6.2 表格级 DP 聚合（dp_aggregate）](#62-表格级-dp-聚合dp_aggregate)
+  - [6.3 DP-SGD 平均梯度（vector_mean）](#63-dp-sgd-平均梯度vector_mean)
+  - [6.4 Tau-Thresholding Group-By](#64-tau-thresholding-group-by)
+  - [6.5 分布式累加器（Accumulator）](#65-分布式累加器accumulator)
+  - [6.6 Rényi DP 会计](#66-rényi-dp-会计)
+  - [6.7 User-Level DP (用户级贡献绑定)](#67-user-level-dp-用户级贡献绑定)
+  - [6.8 Discrete Laplace 整数加噪与 PyArrow Metadata 导出](#68-discrete-laplace-整数加噪与-pyarrow-metadata-导出)
+- [7. 常见错误](#7-常见错误)
+
+---
+
 ## 1. 概述
 
 本文档提供 `privacy_local_agent.privacy.dp.DPApi` 与 REST API 的典型使用示例，帮助开发者快速上手 count、sum、mean 三种差分隐私聚合。

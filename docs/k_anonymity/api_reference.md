@@ -1,5 +1,37 @@
 # K-匿名模块 API 参考
 
+
+## 目录 (Table of Contents)
+
+- [1. Python SDK](#1-python-sdk)
+  - [`k_anonymize_table`](#k_anonymize_table)
+  - [`k_anonymize_dataframe`](#k_anonymize_dataframe)
+  - [`anonymize_record`](#anonymize_record)
+  - [`BUILTIN_HIERARCHIES`](#builtin_hierarchies)
+- [2. REST API](#2-rest-api)
+  - [POST `/v1/privacy/k_anonymize/record`](#post-v1privacyk_anonymizerecord)
+  - [POST `/v1/privacy/k_anonymize/table`](#post-v1privacyk_anonymizetable)
+- [3. gRPC API](#3-grpc-api)
+  - [方法列表](#方法列表)
+  - [`KAnonymizeRequest` 字段](#kanonymizerequest-字段)
+  - [`KAnonymizeResponse` 字段](#kanonymizeresponse-字段)
+  - [`KAnonymizeTableRequest` 字段](#kanonymizetablerequest-字段)
+  - [`KAnonymizeTableResponse` 字段](#kanonymizetableresponse-字段)
+  - [`KAnonymizeDataFrameRequest` 字段](#kanonymizedataframerequest-字段)
+  - [`KAnonymizeDataFrameResponse` 字段](#kanonymizedataframeresponse-字段)
+  - [`RecordEntry` 字段](#recordentry-字段)
+- [4. 异常与错误码](#4-异常与错误码)
+- [5. 使用场景与参数建议](#5-使用场景与参数建议)
+  - [5.1 典型应用场景](#51-典型应用场景)
+  - [5.2 参数选择指南](#52-参数选择指南)
+  - [5.3 性能优化建议](#53-性能优化建议)
+  - [5.4 安全注意事项](#54-安全注意事项)
+  - [5.5 故障排查速查表](#55-故障排查速查表)
+  - [5.6 与其他隐私技术的对比](#56-与其他隐私技术的对比)
+- [6. 最佳实践总结](#6-最佳实践总结)
+
+---
+
 ## 1. Python SDK
 
 ### `k_anonymize_table`

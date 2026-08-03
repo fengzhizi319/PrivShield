@@ -1045,7 +1045,7 @@ for _name in dir(PrivacyServicer):
         setattr(PrivacyServicer, _name, _grpc_error_mapper(_attr))
 
 
-def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10, wait_for_termination: bool = True):
+def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = None, wait_for_termination: bool = True):
     """启动 gRPC 服务器。
 
     使用 ThreadPoolExecutor 作为工作线程池，注册 PrivacyServicer，
@@ -1059,7 +1059,8 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10, wait_
     Args:
         host: gRPC 服务监听主机，默认 0.0.0.0。
         port: gRPC 服务监听端口，默认 50051。
-        max_workers: 线程池最大工作线程数，默认 10。
+        max_workers: 线程池最大工作线程数，默认从环境变量 PRIVACY_GRPC_MAX_WORKERS
+            读取，未设置时回退到 64（高并发优化）。
         wait_for_termination: 是否阻塞等待服务器终止，默认 True。
 
     Returns:
@@ -1081,6 +1082,10 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10, wait_
             os.environ.get("PRIVACY_SERVICE_NAME", "privacy-local-agent"),  # 回退到项目变量
         ),
     )
+
+    # 高并发优化：max_workers 支持环境变量配置，默认 64
+    if max_workers is None:
+        max_workers = int(os.environ.get("PRIVACY_GRPC_MAX_WORKERS", "64"))
 
     # ── 步骤 2：构建拦截器链 / Step 2: Build interceptor chain ──
     # 读取安全配置（TLS/认证/限流开关与参数）
@@ -1116,6 +1121,8 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10, wait_
             # 单位：毫秒。注意 key 为 grpc.http2.min_time_between_pings_ms（C core 映射名），
             # 而非 grpc.http2.min_ping_interval_without_data（该 key 不存在，会静默忽略）。
             ("grpc.http2.min_time_between_pings_ms", 20000),
+            # 允许多进程绑定同一 gRPC 端口（SO_REUSEPORT）
+            ("grpc.so_reuseport", 1),
         ],
     )
     # 将 PrivacyServicer 实例注册到 gRPC 服务器
@@ -1125,11 +1132,15 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10, wait_
     if settings.tls_enabled:
         # TLS/mTLS 模式：加载证书与私钥构建 ServerCredentials
         creds = grpc_server_credentials(settings)
-        server.add_secure_port(f"{host}:{port}", creds)  # 安全端口
+        bound_port = server.add_secure_port(f"{host}:{port}", creds)  # 安全端口
+        if bound_port == 0:
+            raise RuntimeError(f"Failed to bind gRPC secure port on {host}:{port}")
         print(f"gRPC server started on {host}:{port} (TLS/mTLS)")
     else:
         # 本地开发模式，使用非安全端口；生产环境建议启用 TLS/mTLS
-        server.add_insecure_port(f"{host}:{port}")  # 非安全端口
+        bound_port = server.add_insecure_port(f"{host}:{port}")  # 非安全端口
+        if bound_port == 0:
+            raise RuntimeError(f"Failed to bind gRPC port on {host}:{port}")
         print(f"gRPC server started on {host}:{port}")
 
     # ── 步骤 5：启动服务 / Step 5: Start server ──

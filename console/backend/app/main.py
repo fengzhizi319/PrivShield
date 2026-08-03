@@ -719,6 +719,134 @@ async def lb_test(req: LbTestRequest):
     return await _run_lb_test(req)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# 并发压测端点 / Concurrency Test Endpoint
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class ConcurrencyTestRequest(BaseModel):
+    """并发压测端点 ``POST /api/concurrency_test`` 的请求体。
+
+    指定目标 agent 路径、并发数与请求总数，后端以 asyncio.gather 并发发出
+    并统计延迟分布、成功率与吞吐量。
+    """
+
+    path: str = Field(default="/v1/privacy/mask", description="目标 agent 路径")
+    method: str = Field(default="POST", description="HTTP 方法")
+    body: dict[str, Any] | None = Field(default=None, description="请求体")
+    concurrency: int = Field(default=50, ge=1, le=500, description="同时并发数")
+    total_requests: int = Field(default=200, ge=1, le=5000, description="总请求数")
+
+
+class ConcurrencyTestResponse(BaseModel):
+    """并发压测结果汇总。"""
+
+    total: int
+    success: int
+    failed: int
+    duration_ms: float
+    qps: float
+    avg_latency_ms: float
+    min_latency_ms: float
+    max_latency_ms: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    p99_latency_ms: float
+
+
+async def _run_concurrency_test(req: ConcurrencyTestRequest) -> ConcurrencyTestResponse:
+    """执行并发压测并收集延迟统计。"""
+    latencies: list[float] = []
+    success_count = 0
+    failed_count = 0
+    lock = asyncio.Lock()
+
+    async def single_request() -> None:
+        nonlocal success_count, failed_count
+        start = time.perf_counter()
+        ok = False
+        try:
+            await agent_client.request(
+                method=req.method.upper(),
+                path=req.path,
+                body=req.body,
+            )
+            ok = True
+        except Exception:
+            ok = False
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        async with lock:
+            latencies.append(elapsed_ms)
+            if ok:
+                success_count += 1
+            else:
+                failed_count += 1
+
+    overall_start = time.perf_counter()
+    # 分批并发控制：每批 concurrency 个请求
+    semaphore = asyncio.Semaphore(req.concurrency)
+
+    async def bounded_request() -> None:
+        async with semaphore:
+            await single_request()
+
+    await asyncio.gather(*(bounded_request() for _ in range(req.total_requests)))
+    total_ms = (time.perf_counter() - overall_start) * 1000
+
+    # 计算延迟统计
+    latencies.sort()
+    n = len(latencies)
+    if n == 0:
+        return ConcurrencyTestResponse(
+            total=req.total_requests,
+            success=0,
+            failed=req.total_requests,
+            duration_ms=round(total_ms, 2),
+            qps=0.0,
+            avg_latency_ms=0.0,
+            min_latency_ms=0.0,
+            max_latency_ms=0.0,
+            p50_latency_ms=0.0,
+            p95_latency_ms=0.0,
+            p99_latency_ms=0.0,
+        )
+
+    def percentile(p: float) -> float:
+        if n == 1:
+            return latencies[0]
+        k = (n - 1) * (p / 100.0)
+        f = int(k)
+        c = min(f + 1, n - 1)
+        if f == c:
+            return latencies[f]
+        return latencies[f] * (c - k) + latencies[c] * (k - f)
+
+    qps = success_count / (total_ms / 1000.0) if total_ms > 0 else 0.0
+
+    return ConcurrencyTestResponse(
+        total=req.total_requests,
+        success=success_count,
+        failed=failed_count,
+        duration_ms=round(total_ms, 2),
+        qps=round(qps, 2),
+        avg_latency_ms=round(sum(latencies) / n, 2),
+        min_latency_ms=round(latencies[0], 2),
+        max_latency_ms=round(latencies[-1], 2),
+        p50_latency_ms=round(percentile(50), 2),
+        p95_latency_ms=round(percentile(95), 2),
+        p99_latency_ms=round(percentile(99), 2),
+    )
+
+
+@app.post("/api/concurrency_test")
+async def concurrency_test(req: ConcurrencyTestRequest):
+    """并发压测：以指定并发度向 agent 发送请求并统计延迟分布与吞吐量。
+
+    用于前端“并发测试”面板，验证 agent 在高并发下的性能表现。
+    """
+    return await _run_concurrency_test(req)
+
+
 # 静态 SPA 托管：把构建好的前端挂载到根路径。
 # 采用“/assets 静态目录 + 其余路径回退 index.html”的经典 SPA 方案：
 #   - ``/assets/*`` 直接返回带哈希的 JS/CSS 等构建产物（强缓存友好）；

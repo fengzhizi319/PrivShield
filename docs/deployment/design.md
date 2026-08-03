@@ -1,5 +1,33 @@
 # 部署设计文档
 
+
+## 目录 (Table of Contents)
+
+- [1. 概述](#1-概述)
+- [2. 设计目标](#2-设计目标)
+- [3. 架构选型](#3-架构选型)
+- [4. Helm Chart 结构](#4-helm-chart-结构)
+  - [4.1 关键 values 说明](#41-关键-values-说明)
+  - [4.2 Deployment 环境变量](#42-deployment-环境变量)
+  - [4.3 探针配置](#43-探针配置)
+- [5. core/ml 镜像分层](#5-coreml-镜像分层)
+- [6. 安全设计](#6-安全设计)
+- [7. 可观测性设计](#7-可观测性设计)
+- [8. 部署流程](#8-部署流程)
+- [9. 测试策略](#9-测试策略)
+- [10. 滚动更新与回滚策略 / Rolling Update & Rollback Strategy](#10-滚动更新与回滚策略-rolling-update-rollback-strategy)
+  - [10.1 滚动更新策略](#101-滚动更新策略)
+  - [10.2 回滚方案 / Rollback Plan](#102-回滚方案-rollback-plan)
+  - [10.3 蓝绿部署（可选）/ Blue-Green Deployment (Optional)](#103-蓝绿部署可选-blue-green-deployment-optional)
+  - [10.4 金丝雀发布（可选）/ Canary Release (Optional)](#104-金丝雀发布可选-canary-release-optional)
+- [11. 工业化评分 / Industrialization Scorecard](#11-工业化评分-industrialization-scorecard)
+  - [11.1 加权评分表](#111-加权评分表)
+  - [11.2 结论](#112-结论)
+  - [11.3 亮点](#113-亮点)
+  - [11.4 改进建议](#114-改进建议)
+
+---
+
 ## 1. 概述
 
 本文档定义 `privacy-local-agent` 的部署架构、交付形式与配置管理策略。通过 Helm Chart、原生 K8s manifests 与 Docker Compose 三种形式，覆盖从本地联调到 Kubernetes 生产部署的完整场景。

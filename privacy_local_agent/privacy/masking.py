@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import base64  # base64 编解码，用于 HMAC 摘要的可读化输出
 import contextlib  # 提供 suppress 等上下文管理工具，用于优雅地忽略预期异常
+import functools
 import hashlib  # 提供 SHA-256 等哈希算法，供 HMAC 使用
 import hmac  # HMAC 消息认证码实现，用于加盐哈希
 from dataclasses import dataclass, field  # dataclass 装饰器，自动生成 __init__/__repr__ 等
@@ -222,6 +223,7 @@ class MaskingResult:
 # === 字段类型推断 / Field Type Inference ===
 
 
+@functools.lru_cache(maxsize=2048)
 def guess_field_type(field_name: str) -> str:
     """根据字段名猜测敏感字段类型 / Infer Sensitive Field Type from Field Name.
 

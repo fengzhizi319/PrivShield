@@ -1,5 +1,28 @@
 # 查询混淆模块 API 参考
 
+
+## 目录 (Table of Contents)
+
+- [1. Python SDK](#1-python-sdk)
+  - [`obfuscate_query`](#obfuscate_query)
+  - [`obfuscate_query_batch`](#obfuscate_query_batch)
+- [2. REST API](#2-rest-api)
+  - [POST `/v1/privacy/qol/obfuscate`](#post-v1privacyqolobfuscate)
+  - [POST `/v1/privacy/qol/obfuscate/batch`](#post-v1privacyqolobfuscatebatch)
+- [3. gRPC API](#3-grpc-api)
+  - [`ObfuscateQueryRequest` 字段](#obfuscatequeryrequest-字段)
+  - [`ObfuscateQueryBatchRequest` 字段](#obfuscatequerybatchrequest-字段)
+- [4. 使用场景与参数建议](#4-使用场景与参数建议)
+  - [4.1 典型应用场景](#41-典型应用场景)
+  - [4.2 参数选择指南](#42-参数选择指南)
+  - [4.3 性能优化建议](#43-性能优化建议)
+  - [4.4 安全注意事项](#44-安全注意事项)
+  - [4.5 故障排查速查表](#45-故障排查速查表)
+  - [4.6 与其他隐私技术的对比](#46-与其他隐私技术的对比)
+- [5. 最佳实践总结](#5-最佳实践总结)
+
+---
+
 ## 1. Python SDK
 
 ### `obfuscate_query`

@@ -4,6 +4,27 @@
 
 ---
 
+
+## 目录 (Table of Contents)
+
+- [优化方案一：自适应重试与被动健康检测 (Adaptive Retries & Passive Health Checking)](#优化方案一自适应重试与被动健康检测-adaptive-retries-passive-health-checking)
+  - [1. 当前设计痛点](#1-当前设计痛点)
+  - [2. 优化设计](#2-优化设计)
+- [优化方案二：动态节点自注册 API (Dynamic Node Self-Registration)](#优化方案二动态节点自注册-api-dynamic-node-self-registration)
+  - [1. 当前设计痛点](#1-当前设计痛点)
+  - [2. 优化设计](#2-优化设计)
+- [接口设计与交互序列 (Sequence Diagram)](#接口设计与交互序列-sequence-diagram)
+  - [动态自注册与注销流程](#动态自注册与注销流程)
+  - [自适应重试流程 (以 HTTP 转发为例)](#自适应重试流程-以-http-转发为例)
+- [优化方案三：连接池复用与 Keep-Alive 调优 (Connection Pool Reuse & Keep-Alive Tuning)](#优化方案三连接池复用与-keep-alive-调优-connection-pool-reuse-keep-alive-tuning)
+  - [1. 当前设计痛点](#1-当前设计痛点)
+  - [2. 优化设计](#2-优化设计)
+- [优化方案四：基于 SQLite 的分布式共享隐私预算记账 (Distributed Shared Budget Accountant via SQLite)](#优化方案四基于-sqlite-的分布式共享隐私预算记账-distributed-shared-budget-accountant-via-sqlite)
+  - [1. 当前设计痛点](#1-当前设计痛点)
+  - [2. 优化设计](#2-优化设计)
+
+---
+
 ## 优化方案一：自适应重试与被动健康检测 (Adaptive Retries & Passive Health Checking)
 
 ### 1. 当前设计痛点
@@ -113,4 +134,3 @@ sequenceDiagram
   - 在 `spend(epsilon, delta)` 操作中，开启 `BEGIN IMMEDIATE` 独占性事务。
   - 读取当前 `spent` 消耗值并验证，若超出 `total` 限制则立即抛出 `PrivacyBudgetExhausted` 并回滚事务。
   - 验证通过则就地 `UPDATE` 写入，并 `COMMIT` 提交，完美防范并发条件下的超扣（Race Condition）。
-

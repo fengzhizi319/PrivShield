@@ -14,7 +14,7 @@
  */
 
 /** 导入所有前后端数据契约类型 / Import all frontend-backend data contract types */
-import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse, OpsDiagnostics, StandardsResponse } from '@/types/api';
+import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse, OpsDiagnostics, StandardsResponse, ConcurrencyTestRequest, ConcurrencyTestResponse } from '@/types/api';
 
 /** 当前后端基址（空串表示同源，即请求发往当前页面所在的服务器）。 */
 /** Current backend base URL (empty string means same-origin, i.e. requests go to the server hosting the page). */
@@ -307,4 +307,19 @@ export async function fetchStandards(): Promise<StandardsResponse> {
   const resp = await proxyRequest({ method: 'GET', path: '/v1/dynclassification/standards' });
   // proxyRequest 返回包装结构，真实数据在 data 字段 / Wrapped response; actual data in data field
   return resp.data as StandardsResponse;
+}
+
+/**
+ * 并发压测：以指定并发度向 agent 发送请求并统计延迟分布与吞吐量。
+ * Concurrency test: send requests to agent at specified concurrency and collect latency/throughput statistics.
+ *
+ * @param req - 并发压测请求（路径/并发数/总请求数）/ Concurrency test request
+ * @returns 压测结果汇总（QPS/延迟分布/成功率）/ Test result summary
+ */
+export async function concurrencyTest(req: ConcurrencyTestRequest): Promise<ConcurrencyTestResponse> {
+  return request<ConcurrencyTestResponse>('/api/concurrency_test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
 }

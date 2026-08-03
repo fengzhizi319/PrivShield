@@ -4,6 +4,23 @@
 
 ---
 
+
+## 目录 (Table of Contents)
+
+- [1. Python SDK 参考](#1-python-sdk-参考)
+  - [1.1 `models.py` - 元数据模型](#11-modelspy---元数据模型)
+  - [1.2 `operator_registry.py` - 算子注册表](#12-operator_registrypy---算子注册表)
+  - [1.3 `engine.py` - 通用规则引擎](#13-enginepy---通用规则引擎)
+  - [1.4 `profile_loader.py` - 配置加载与管理](#14-profile_loaderpy---配置加载与管理)
+- [2. REST API 接口定义](#2-rest-api-接口定义)
+  - [2.1 动态分类求值接口](#21-动态分类求值接口)
+  - [2.2 规则配置热加载接口](#22-规则配置热加载接口)
+  - [2.3 获取可用的标准列表](#23-获取可用的标准列表)
+  - [2.4 获取可用匹配算子列表](#24-获取可用匹配算子列表)
+- [3. gRPC 协议声明](#3-grpc-协议声明)
+
+---
+
 ## 1. Python SDK 参考
 
 ### 1.1 `models.py` - 元数据模型
@@ -297,4 +314,3 @@ gRPC RPC 方法：
 ```protobuf
 rpc DynClassify (DynClassificationRequest) returns (DynClassificationResponse);
 ```
-

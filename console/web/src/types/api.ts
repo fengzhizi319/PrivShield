@@ -441,3 +441,42 @@ export interface ValidateResponse {
   warnings?: unknown[];
   [key: string]: unknown;
 }
+
+/* ==================== 并发压测（/api/concurrency_test） ==================== */
+
+/** 并发压测请求体。 */
+export interface ConcurrencyTestRequest {
+  /** 目标 agent 路径 */
+  path: string;
+  /** HTTP 方法 */
+  method: string;
+  /** 请求体 */
+  body?: Record<string, unknown> | null;
+  /** 同时并发数 */
+  concurrency: number;
+  /** 总请求数 */
+  total_requests: number;
+}
+
+/** 并发压测结果汇总。 */
+export interface ConcurrencyTestResponse {
+  total: number;
+  success: number;
+  failed: number;
+  /** 总耗时（毫秒） */
+  duration_ms: number;
+  /** 吞吐量（QPS） */
+  qps: number;
+  /** 平均延迟（毫秒） */
+  avg_latency_ms: number;
+  /** 最小延迟（毫秒） */
+  min_latency_ms: number;
+  /** 最大延迟（毫秒） */
+  max_latency_ms: number;
+  /** P50 延迟（毫秒） */
+  p50_latency_ms: number;
+  /** P95 延迟（毫秒） */
+  p95_latency_ms: number;
+  /** P99 延迟（毫秒） */
+  p99_latency_ms: number;
+}

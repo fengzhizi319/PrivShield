@@ -1,5 +1,43 @@
 # 差分隐私运维手册
 
+
+## 目录 (Table of Contents)
+
+- [1. 调用示例](#1-调用示例)
+  - [Laplace count](#laplace-count)
+  - [Gaussian sum with clipping](#gaussian-sum-with-clipping)
+  - [Mean with low-count threshold](#mean-with-low-count-threshold)
+  - [Histogram](#histogram)
+  - [Noisify sum](#noisify-sum)
+  - [Chunked sum](#chunked-sum)
+  - [Local DP perturbation (binary)](#local-dp-perturbation-binary)
+  - [Local DP perturbation (categorical)](#local-dp-perturbation-categorical)
+  - [Local DP estimation](#local-dp-estimation)
+- [2. 环境变量](#2-环境变量)
+- [3. 参数建议](#3-参数建议)
+- [4. 故障排查决策树](#4-故障排查决策树)
+  - [4.1 请求错误（HTTP 4xx）](#41-请求错误http-4xx)
+  - [4.2 预算耗尽](#42-预算耗尽)
+  - [4.3 结果异常](#43-结果异常)
+  - [4.4 连接与部署问题](#44-连接与部署问题)
+- [5. 安全注意事项](#5-安全注意事项)
+- [6. 流量监控](#6-流量监控)
+- [7. 高级特性运维指南](#7-高级特性运维指南)
+  - [7.1 adaptive_clip 运维](#71-adaptive_clip-运维)
+  - [7.2 dp_aggregate 运维](#72-dp_aggregate-运维)
+  - [7.3 vector_sum / vector_mean 运维](#73-vector_sum-vector_mean-运维)
+  - [7.4 dp_groupby 运维](#74-dp_groupby-运维)
+  - [7.5 Accumulator 运维](#75-accumulator-运维)
+  - [7.6 RDPAccountant 运维](#76-rdpaccountant-运维)
+- [8. 性能调优指南](#8-性能调优指南)
+  - [8.1 吞吐量基准与优化](#81-吞吐量基准与优化)
+  - [8.2 内存占用优化](#82-内存占用优化)
+  - [8.3 延迟优化](#83-延迟优化)
+  - [8.4 预算消耗优化](#84-预算消耗优化)
+  - [8.5 生产环境推荐配置](#85-生产环境推荐配置)
+
+---
+
 ## 1. 调用示例
 
 ### Laplace count

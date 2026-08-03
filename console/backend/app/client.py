@@ -55,6 +55,7 @@ class PrivacyAgentClient:
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
                 timeout=60.0,
+                limits=httpx.Limits(max_connections=1000, max_keepalive_connections=200),
                 # 不跟随重定向：避免重定向被用于绕过限制 / 放大 SSRF。
                 follow_redirects=False,
                 # 不读取环境变量 / macOS 系统代理配置：
@@ -126,6 +127,9 @@ class PrivacyAgentClient:
         """
         # 获取（必要时重建）底层连接池客户端。
         client = await self._get_client()
+        # 确保 path 以 / 开头
+        if not path.startswith("/"):
+            path = "/" + path
         # 拼接完整目标 URL（base_url + path）。
         url = f"{self.base_url}{path}"
         # 构造请求头（可能携带 Bearer 认证）。

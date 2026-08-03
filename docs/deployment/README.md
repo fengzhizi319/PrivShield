@@ -2,6 +2,15 @@
 
 本目录包含 `privacy-local-agent` 部署模块的全套 SDLC 文档，覆盖 Helm Chart、原生 Kubernetes manifests 与 Docker Compose 三种交付形式。
 
+
+## 目录 (Table of Contents)
+
+- [文档清单](#文档清单)
+- [快速开始](#快速开始)
+- [运行示例](#运行示例)
+
+---
+
 ## 文档清单
 
 | 文档 | 说明 | 目标读者 |

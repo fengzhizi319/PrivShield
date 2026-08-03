@@ -2,6 +2,37 @@
 
 > Scope: P0 — TLS/mTLS、认证鉴权、速率限制。
 
+
+## 目录 (Table of Contents)
+
+- [1. 概述](#1-概述)
+- [2. 设计目标](#2-设计目标)
+- [3. 威胁模型与缓解措施](#3-威胁模型与缓解措施)
+- [4. 总体架构](#4-总体架构)
+- [5. 模块设计](#5-模块设计)
+  - [5.1 `security/config.py`](#51-securityconfigpy)
+  - [5.2 `security/tls.py`](#52-securitytlspy)
+  - [5.3 `security/identity.py`](#53-securityidentitypy)
+  - [5.4 `security/auth.py`](#54-securityauthpy)
+  - [5.5 `security/ratelimit.py`](#55-securityratelimitpy)
+- [6. REST 与 gRPC 集成](#6-rest-与-grpc-集成)
+  - [REST (`main.py`)](#rest-mainpy)
+  - [gRPC (`grpc_server.py`)](#grpc-grpc_serverpy)
+  - [统一启动器 (`server.py`)](#统一启动器-serverpy)
+- [7. 部署约定](#7-部署约定)
+  - [7.1 证书管理](#71-证书管理)
+  - [7.2 K8s 探针](#72-k8s-探针)
+  - [7.3 多副本限速](#73-多副本限速)
+- [8. 错误码](#8-错误码)
+- [9. 测试策略](#9-测试策略)
+- [10. 工业化评分 / Industrialization Scorecard](#10-工业化评分-industrialization-scorecard)
+  - [10.1 加权评分表](#101-加权评分表)
+  - [10.2 结论](#102-结论)
+  - [10.3 亮点](#103-亮点)
+  - [10.4 改进建议](#104-改进建议)
+
+---
+
 ## 1. 概述
 
 本文档定义 `privacy-local-agent` 生产安全模块的技术架构、设计原理与实现细节。该模块为 REST 与 gRPC 双协议提供可选的传输安全、身份认证、权限鉴权与速率限制能力。

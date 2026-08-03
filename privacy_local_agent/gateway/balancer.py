@@ -11,6 +11,7 @@ and a per-node circuit breaker for fault isolation.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import random
 import threading
 import time
@@ -104,7 +105,8 @@ class BackendNode:
         """
         self.http_url = http_url.rstrip("/")
         self.grpc_address = grpc_address
-        self.weight = weight
+        self.weight = max(1, weight)
+        self.current_weight = 0  # 动态平滑加权轮询权重
         self.is_healthy = True
         self.active_connections = 0
         self.circuit_breaker = CircuitBreaker()
@@ -118,6 +120,15 @@ class BackendNode:
             self._grpc_channel = grpc.aio.insecure_channel(self.grpc_address)
             self._grpc_stub = privacy_pb2_grpc.PrivacyServiceStub(self._grpc_channel)
         return self._grpc_stub
+
+    @contextlib.asynccontextmanager
+    async def track_connection(self):
+        """自动追踪活跃连接数上下文管理器（最小连接数调度使用）。"""
+        self.active_connections += 1
+        try:
+            yield self
+        finally:
+            self.active_connections = max(0, self.active_connections - 1)
 
     async def close(self) -> None:
         """关闭 gRPC 连接通道 / Close gRPC channel."""
@@ -135,23 +146,21 @@ class BackendNode:
 class LoadBalancer:
     """负载均衡调度器。
 
-    支持对健康后端的轮询、随机、最小连接数等分发策略。
+    支持对健康后端的平滑加权轮询、加权随机、最小连接数等分发策略。
 
-    Load-balancer scheduler supporting round-robin, random, and
-    least-connections strategies over healthy backend nodes.
+    Load-balancer scheduler supporting smooth weighted round-robin,
+    weighted random, and least-connections strategies over healthy backend nodes.
     """
 
     def __init__(self, strategy: str = "round_robin"):
         """初始化负载均衡器 / Initialize load balancer.
 
         Args:
-            strategy: 负载均衡策略 ("round_robin", "random", "least_connections")。
+            strategy: 负载均衡策略 ("round_robin", "weighted_round_robin", "random", "weighted_random", "least_connections")。
         """
         self.strategy = strategy.lower()
         self.nodes: list[BackendNode] = []
         self.rr_index = 0
-        # 节点池的增删由 modify_lock（线程锁）保护；select_node 运行于单一
-        # asyncio 事件循环内，rr_index 的读改写无需额外 asyncio 锁。
         self.modify_lock = threading.Lock()
 
     def add_node(self, http_url: str, grpc_address: str, weight: int = 1) -> None:
@@ -161,7 +170,7 @@ class LoadBalancer:
             for node in self.nodes:
                 if node.http_url == clean_url and node.grpc_address == grpc_address:
                     node.is_healthy = True
-                    node.weight = weight
+                    node.weight = max(1, weight)
                     node.active_connections = 0
                     node.circuit_breaker.record_success()
                     logger.info(
@@ -216,11 +225,24 @@ class LoadBalancer:
         if not healthy:
             return None
 
-        if self.strategy == "random":
-            return random.choice(healthy)
+        if self.strategy in ("random", "weighted_random"):
+            weights = [n.weight for n in healthy]
+            return random.choices(healthy, weights=weights, k=1)[0]
 
         elif self.strategy == "least_connections":
             return min(healthy, key=lambda n: n.active_connections)
+
+        elif self.strategy == "weighted_round_robin":
+            # Smooth Weighted Round-Robin (Nginx Algorithm)
+            total_weight = sum(n.weight for n in healthy)
+            best_node: BackendNode | None = None
+            for node in healthy:
+                node.current_weight += node.weight
+                if best_node is None or node.current_weight > best_node.current_weight:
+                    best_node = node
+            if best_node is not None:
+                best_node.current_weight -= total_weight
+            return best_node
 
         else:  # round_robin
             node = healthy[self.rr_index % len(healthy)]
