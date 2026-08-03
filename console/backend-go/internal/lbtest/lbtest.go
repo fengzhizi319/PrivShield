@@ -123,8 +123,8 @@ func ValidateBackends(backends []models.LbBackend, allowedHosts []string) error 
 //     依次轮询，分发最均匀；
 //   - random: independent random selection
 //     独立随机选择；
-//   - least_connections: always picks the node with fewest cumulative hits (ties go to lower index)
-//     每次选当前累计命中最少的节点（同数取下标小者）。
+//   - least_connections: picks the node with the fewest active probes
+//     每次选择当前活动探测数最少的节点。
 func PickBackends(strategy string, n, numBackends int) ([]int, error) {
 	if numBackends <= 0 {
 		return nil, nil
@@ -190,9 +190,13 @@ func Run(ctx context.Context, req models.LbTestRequest, client *http.Client) (mo
 		}
 	}
 
-	seq, err := PickBackends(req.Strategy, req.NumRequests, len(req.Backends))
-	if err != nil {
-		return models.LbTestResponse{}, err
+	var seq []int
+	if req.Strategy != StrategyLeastConnections {
+		var err error
+		seq, err = PickBackends(req.Strategy, req.NumRequests, len(req.Backends))
+		if err != nil {
+			return models.LbTestResponse{}, err
+		}
 	}
 	probePath := req.ProbePath
 	if probePath == "" {
@@ -208,7 +212,9 @@ func Run(ctx context.Context, req models.LbTestRequest, client *http.Client) (mo
 	overallStart := time.Now()
 	results := make([]probeResult, len(seq))
 	var wg sync.WaitGroup
-	for i, idx := range seq {
+	active := make([]int, len(req.Backends))
+	var pickMu sync.Mutex
+	launch := func(i, idx int) {
 		wg.Add(1)
 		go func(i, idx int) {
 			defer wg.Done()
@@ -222,6 +228,36 @@ func Run(ctx context.Context, req models.LbTestRequest, client *http.Client) (mo
 				ok:      ok,
 			}
 		}(i, idx)
+	}
+	if req.Strategy == StrategyLeastConnections {
+		results = make([]probeResult, req.NumRequests)
+		for i := 0; i < req.NumRequests; i++ {
+			pickMu.Lock()
+			idx := 0
+			for j := 1; j < len(active); j++ {
+				if active[j] < active[idx] {
+					idx = j
+				}
+			}
+			active[idx]++
+			pickMu.Unlock()
+			wg.Add(1)
+			go func(i, idx int) {
+				defer wg.Done()
+				backend := req.Backends[idx]
+				url := strings.TrimRight(backend.URL, "/") + probePath
+				start := time.Now()
+				ok := probe(ctx, client, url, req.ProbeBody)
+				results[i] = probeResult{idx: idx, latency: float64(time.Since(start).Microseconds()) / 1000.0, ok: ok}
+				pickMu.Lock()
+				active[idx]--
+				pickMu.Unlock()
+			}(i, idx)
+		}
+	} else {
+		for i, idx := range seq {
+			launch(i, idx)
+		}
 	}
 	wg.Wait()
 	totalMs := float64(time.Since(overallStart).Microseconds()) / 1000.0

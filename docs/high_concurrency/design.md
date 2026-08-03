@@ -1522,23 +1522,23 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 针对侧车系统不仅包含 DP，还涵盖 3-Layer 分类分级（Classification）、数据脱敏（Masking）、K-匿名（K-Anonymity）等全套功能的特点，以下为系统中实装的全功能高并发架构组件与细化实现：
 
-### 12.1 分类分级 (Classification) 高并发 LRU 缓存与并行扫描
+### 14.1 分类分级 (Classification) 高并发 LRU 缓存与并行扫描
 
-#### 12.1.1 字段级分类 LRU 缓存 (`HighConcurrencyLRUCache`)
+#### 14.1.1 字段级分类 LRU 缓存 (`HighConcurrencyLRUCache`)
 - **设计思路**：在高并发日志流分析与数据扫描中，包含大量重复的属性字段名与值（如 `phone`, `user_id`, `email` 等）。在 `DynClassificationService` 中集成线程安全的 `HighConcurrencyLRUCache`。
 - **配置与性能**：通过 `PRIVACY_CLASSIFICATION_CACHE_SIZE` 环境变量设置（默认 10,000 容量）。相同字段分类请求命中缓存后在 `<0.005ms` 内直接返回结果，相比运行全套 3-Layer 漏斗提升 **100x+ QPS**。
 
-#### 12.1.2 表级记录并行评估 (`ThreadPoolExecutor`)
+#### 14.1.2 表级记录并行评估 (`ThreadPoolExecutor`)
 - **设计思路**：在 `classify_table` 扫描海量行记录 (`rows`) 时，当记录数大于 16 行时自动启用 `ThreadPoolExecutor` 并行评估各行数据，结合 LRU 缓存避免单线程 CPU 串行瓶颈。
 
-### 12.2 数据脱敏 (Masking) 敏感类型推断缓存
+### 14.2 数据脱敏 (Masking) 敏感类型推断缓存
 - 在 `privacy/masking.py` 中为敏感类型推断 `guess_field_type` 引入 `@functools.lru_cache(maxsize=2048)`，消除海量脱敏记录处理时重复的字符串小写与关键字正则匹配开销。
 
-### 12.3 异步动态批处理器 (`AsyncDynamicBatcher`) 与限流防护 (`ConcurrencyThrottle`)
+### 14.3 异步动态批处理器 (`AsyncDynamicBatcher`) 与限流防护 (`ConcurrencyThrottle`)
 - **`AsyncDynamicBatcher`**：针对 CPU/GPU 密集型的 Layer-2 Small-NER (ONNX) 或 Layer-3 LLM 推理，在 `2ms` 微秒级时间窗口内自动打包散乱并发请求为 Batch，极大提升批处理吞吐量。
 - **`ConcurrencyThrottle`**：为模型推理提供信号量并发度管控，防止高并发突发冲击引发内存 OOM。
 
-### 12.4 差分隐私 (DP) 批量扣减异常契约与分位数算法优化
+### 14.4 差分隐私 (DP) 批量扣减异常契约与分位数算法优化
 - **`BatchedBudgetSpend`**：在 `_SpendFuture.result()` 中保持原始 `PrivacyBudgetExhaustedError` 异常对象的传递，保障领域异常契约一致。
 - **控制台分位数插值**：`console/backend` 压测端点采用双向线性插值算法（Linear Interpolation），使并发压测出的 P50 / P95 / P99 表现更加精确平滑。
 

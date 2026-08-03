@@ -359,7 +359,7 @@ func (s *Server) Proxy(c *gin.Context) {
 
 	// 核心调用：mapper 根据 req.Path 查找对应的 handler，
 	// handler 负责解析 body、构造 protobuf 请求、调用 gRPC、转换响应
-	data, err := s.mapper.Dispatch(c.Request.Context(), s.client.Raw(), req.Path, req.Body)
+	data, err := s.mapper.Dispatch(s.client.WithAuth(c.Request.Context()), s.client.Raw(), req.Path, req.Body)
 	// 计算 gRPC 调用耗时（毫秒）
 	duration := time.Since(start).Milliseconds()
 
@@ -478,7 +478,7 @@ func (s *Server) Batch(c *gin.Context) {
 		// 记录单个请求的开始时间
 		start := time.Now()
 		// 通过 mapper 转发到上游 agent 的对应 gRPC 方法
-		data, err := s.mapper.Dispatch(c.Request.Context(), s.client.Raw(), item.Path, item.Body)
+		data, err := s.mapper.Dispatch(s.client.WithAuth(c.Request.Context()), s.client.Raw(), item.Path, item.Body)
 		// 计算单个请求耗时（毫秒）
 		duration := time.Since(start).Milliseconds()
 
@@ -609,7 +609,7 @@ func (s *Server) Upload(c *gin.Context) {
 	// 获取底层 gRPC 客户端，用于直接调用 RPC 方法
 	client := s.client.Raw()
 	// 使用请求的 context，支持客户端取消操作
-	ctx := c.Request.Context()
+	ctx := s.client.WithAuth(c.Request.Context())
 
 	// 记录操作开始时间，用于计算总耗时
 	start := time.Now()

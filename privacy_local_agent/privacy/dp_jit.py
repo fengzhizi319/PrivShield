@@ -72,10 +72,13 @@ def laplace_noise_batch(
     # NumPy 向量化实现（即使无 Numba 也足够快）
     # Laplace 分布 = 两个独立 Exponential 之差
     u = np.random.random(size=values.shape) - 0.5
-    # 避免 log(0)
+    # 避免 log(0)：u 为 0 时用极小值替代
     nonzero = np.where(u == 0.0, 1e-300, u)
     signs = np.sign(nonzero)
-    noise = -scale * signs * np.log(1.0 - 2.0 * np.abs(nonzero))
+    # 当 random() 恰好返回 0.0 时 u=-0.5，1-2|u|=0，log(0) 会产生
+    # ±inf 噪声；对 log 参数做下限钳制，保证噪声始终为有限值。
+    log_arg = np.maximum(1.0 - 2.0 * np.abs(nonzero), 1e-300)
+    noise = -scale * signs * np.log(log_arg)
     return values + noise
 
 

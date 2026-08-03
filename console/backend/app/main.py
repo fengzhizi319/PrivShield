@@ -478,20 +478,24 @@ async def upload(
 _LB_ALLOWED_SCHEMES = ("http", "https")
 
 
-def _is_forbidden_ip(ip_str: str) -> bool:
+def _is_forbidden_ip(ip_str: str, *, allow_loopback: bool = True) -> bool:
     """判断 IP 是否属于禁止探测的私有 / 保留网段（SSRF 防护）。
 
-    覆盖环回（127.0.0.0/8）、RFC1918 私有网段（10/172.16/192.168）、
-    链路本地（169.254.0.0/16，含云元数据端点）、保留、多播与未指定地址。
-    无法解析的 IP 一律视为非法。
+    覆盖 RFC1918 私有网段（10/172.16/192.168）、链路本地（169.254.0.0/16，
+    含云元数据端点）、保留、多播与未指定地址。无法解析的 IP 一律视为非法。
+
+    环回地址（127.0.0.0/8、::1）默认放行：本控制台主要用于探测本机
+    Agent（如 127.0.0.1:8079），若需完全禁止可传 ``allow_loopback=False``。
     """
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return True
+    # 环回地址单独判断（其同样满足 is_private，需先于私有网段分支处理）
+    if ip.is_loopback:
+        return not allow_loopback
     return (
         ip.is_private
-        or ip.is_loopback
         or ip.is_link_local
         or ip.is_reserved
         or ip.is_multicast
@@ -549,21 +553,25 @@ def _validate_lb_url(url: str) -> None:
     # 或云元数据端点（169.254.169.254）。注意：此处为首次解析校验，
     # 理论上仍存在 DNS rebinding（校验与实际请求两次解析不一致）风险，
     # 生产环境应配合 LB_ALLOWED_HOSTS 白名单或 DNS 固定（pinning）使用。
-    for ip_str in resolved_ips:
-        if _is_forbidden_ip(ip_str):
-            raise HTTPException(
-                status_code=400,
-                detail=f"探测地址 host '{parsed.hostname}' 解析到私有/保留网段 IP '{ip_str}'，禁止探测",
-            )
-
+    # 例外：命中 LB_ALLOWED_HOSTS 白名单（运维显式授权）或开启
+    # LB_ALLOW_PRIVATE_IPS 时跳过私有网段校验；环回地址默认放行，
+    # 保证本地控制台开箱即可探测 127.0.0.1 上的 Agent。
     allowed = settings.lb_allowed_hosts
-    if allowed:
-        hosts = {h.strip().lower() for h in allowed.split(",") if h.strip()}
-        if parsed.hostname.lower() not in hosts:
-            raise HTTPException(
-                status_code=400,
-                detail=f"探测地址 host '{parsed.hostname}' 不在白名单内",
-            )
+    hosts = {h.strip().lower() for h in allowed.split(",") if h.strip()} if allowed else set()
+    whitelisted = parsed.hostname.lower() in hosts
+    if not whitelisted and not settings.lb_allow_private_ips:
+        for ip_str in resolved_ips:
+            if _is_forbidden_ip(ip_str):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"探测地址 host '{parsed.hostname}' 解析到私有/保留网段 IP '{ip_str}'，禁止探测",
+                )
+
+    if allowed and not whitelisted:
+        raise HTTPException(
+            status_code=400,
+            detail=f"探测地址 host '{parsed.hostname}' 不在白名单内",
+        )
 
 
 
@@ -761,6 +769,9 @@ async def _run_concurrency_test(req: ConcurrencyTestRequest) -> ConcurrencyTestR
     failed_count = 0
     lock = asyncio.Lock()
 
+    next_request = 0
+    index_lock = asyncio.Lock()
+
     async def single_request() -> None:
         nonlocal success_count, failed_count
         start = time.perf_counter()
@@ -782,15 +793,19 @@ async def _run_concurrency_test(req: ConcurrencyTestRequest) -> ConcurrencyTestR
             else:
                 failed_count += 1
 
-    overall_start = time.perf_counter()
-    # 分批并发控制：每批 concurrency 个请求
-    semaphore = asyncio.Semaphore(req.concurrency)
-
-    async def bounded_request() -> None:
-        async with semaphore:
+    async def worker() -> None:
+        nonlocal next_request
+        while True:
+            async with index_lock:
+                if next_request >= req.total_requests:
+                    return
+                next_request += 1
             await single_request()
 
-    await asyncio.gather(*(bounded_request() for _ in range(req.total_requests)))
+    overall_start = time.perf_counter()
+    # 固定 worker 数量消费请求编号，避免 total_requests 较大时创建等量任务对象。
+    worker_count = min(req.concurrency, req.total_requests)
+    await asyncio.gather(*(worker() for _ in range(worker_count)))
     total_ms = (time.perf_counter() - overall_start) * 1000
 
     # 计算延迟统计
@@ -821,7 +836,8 @@ async def _run_concurrency_test(req: ConcurrencyTestRequest) -> ConcurrencyTestR
             return latencies[f]
         return latencies[f] * (c - k) + latencies[c] * (k - f)
 
-    qps = success_count / (total_ms / 1000.0) if total_ms > 0 else 0.0
+    # qps 表示总完成吞吐量；成功率单独由 success/total 表示。
+    qps = req.total_requests / (total_ms / 1000.0) if total_ms > 0 else 0.0
 
     return ConcurrencyTestResponse(
         total=req.total_requests,

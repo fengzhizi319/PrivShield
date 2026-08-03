@@ -23,7 +23,6 @@ from privacy_local_agent import privacy_pb2, privacy_pb2_grpc
 from privacy_local_agent.observability.logging_config import get_logger
 from privacy_local_agent.observability.metrics import (
     GATEWAY_HEALTHY_NODES,
-    GATEWAY_RETRIES_TOTAL,
 )
 
 logger = get_logger(__name__)
@@ -55,25 +54,29 @@ class CircuitBreaker:
         self._failure_count = 0
         self._state = "closed"
         self._opened_at: float = 0.0
+        self._lock = threading.Lock()
 
     @property
     def state(self) -> str:
         """Return current state, transitioning open → half_open if timeout elapsed."""
-        if self._state == "open" and (time.monotonic() - self._opened_at) >= self.recovery_timeout:
-            self._state = "half_open"
-        return self._state
+        with self._lock:
+            if self._state == "open" and (time.monotonic() - self._opened_at) >= self.recovery_timeout:
+                self._state = "half_open"
+            return self._state
 
     def record_success(self) -> None:
         """Record a successful call; reset breaker to closed."""
-        self._failure_count = 0
-        self._state = "closed"
+        with self._lock:
+            self._failure_count = 0
+            self._state = "closed"
 
     def record_failure(self) -> None:
         """Record a failed call; open breaker if threshold reached."""
-        self._failure_count += 1
-        if self._failure_count >= self.failure_threshold:
-            self._state = "open"
-            self._opened_at = time.monotonic()
+        with self._lock:
+            self._failure_count += 1
+            if self._failure_count >= self.failure_threshold:
+                self._state = "open"
+                self._opened_at = time.monotonic()
 
     def allow_request(self) -> bool:
         """Return True if the breaker allows a request through."""
@@ -108,10 +111,12 @@ class BackendNode:
         self.weight = max(1, weight)
         self.current_weight = 0  # 动态平滑加权轮询权重
         self.is_healthy = True
+        self.passive_unhealthy_until = 0.0
         self.active_connections = 0
         self.circuit_breaker = CircuitBreaker()
         self._grpc_channel: grpc.aio.Channel | None = None
         self._grpc_stub: privacy_pb2_grpc.PrivacyServiceStub | None = None
+        self._connection_lock = asyncio.Lock()
 
     @property
     def grpc_stub(self) -> privacy_pb2_grpc.PrivacyServiceStub:
@@ -124,11 +129,13 @@ class BackendNode:
     @contextlib.asynccontextmanager
     async def track_connection(self):
         """自动追踪活跃连接数上下文管理器（最小连接数调度使用）。"""
-        self.active_connections += 1
+        async with self._connection_lock:
+            self.active_connections += 1
         try:
             yield self
         finally:
-            self.active_connections = max(0, self.active_connections - 1)
+            async with self._connection_lock:
+                self.active_connections = max(0, self.active_connections - 1)
 
     async def close(self) -> None:
         """关闭 gRPC 连接通道 / Close gRPC channel."""
@@ -162,6 +169,7 @@ class LoadBalancer:
         self.nodes: list[BackendNode] = []
         self.rr_index = 0
         self.modify_lock = threading.Lock()
+        self._selection_lock = asyncio.Lock()
 
     def add_node(self, http_url: str, grpc_address: str, weight: int = 1) -> None:
         """添加工作节点到地址池 / Add worker node to pool (thread-safe, dedup)."""
@@ -170,6 +178,7 @@ class LoadBalancer:
             for node in self.nodes:
                 if node.http_url == clean_url and node.grpc_address == grpc_address:
                     node.is_healthy = True
+                    node.passive_unhealthy_until = 0.0
                     node.weight = max(1, weight)
                     node.active_connections = 0
                     node.circuit_breaker.record_success()
@@ -177,6 +186,8 @@ class LoadBalancer:
                         "Updated existing backend node",
                         extra={"http_url": http_url, "grpc_address": grpc_address},
                     )
+                    # 节点被重新标记为健康，同步刷新健康节点数指标
+                    self._update_healthy_gauge()
                     return
 
             node = BackendNode(http_url, grpc_address, weight)
@@ -195,7 +206,19 @@ class LoadBalancer:
             removed = False
             for node in self.nodes:
                 if node.http_url == clean_url and node.grpc_address == grpc_address:
-                    asyncio.create_task(node.close())  # noqa: RUF006
+                    # 尽力关闭该节点的 gRPC 通道：
+                    # - 存在运行中的事件循环（如 REST 注销路由）时调度异步关闭；
+                    # - 同步上下文（脚本/测试）中没有运行中的循环，
+                    #   create_task 会抛 RuntimeError，此时用独立循环完成关闭。
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    if loop is not None:
+                        loop.create_task(node.close())  # noqa: RUF006
+                    else:
+                        with contextlib.suppress(Exception):
+                            asyncio.run(node.close())
                     removed = True
                 else:
                     new_nodes.append(node)
@@ -212,7 +235,9 @@ class LoadBalancer:
         return [
             node
             for node in self.nodes
-            if node.is_healthy and node.circuit_breaker.allow_request()
+            if node.is_healthy
+            and time.monotonic() >= node.passive_unhealthy_until
+            and node.circuit_breaker.allow_request()
         ]
 
     async def select_node(self) -> BackendNode | None:
@@ -221,33 +246,34 @@ class LoadBalancer:
         Returns:
             若有可用节点返回 BackendNode，否则返回 None。
         """
-        healthy = self.get_healthy_nodes()
-        if not healthy:
-            return None
+        async with self._selection_lock:
+            healthy = self.get_healthy_nodes()
+            if not healthy:
+                return None
 
-        if self.strategy in ("random", "weighted_random"):
-            weights = [n.weight for n in healthy]
-            return random.choices(healthy, weights=weights, k=1)[0]
+            if self.strategy in ("random", "weighted_random"):
+                weights = [n.weight for n in healthy]
+                return random.choices(healthy, weights=weights, k=1)[0]
 
-        elif self.strategy == "least_connections":
-            return min(healthy, key=lambda n: n.active_connections)
+            elif self.strategy == "least_connections":
+                return min(healthy, key=lambda n: n.active_connections)
 
-        elif self.strategy == "weighted_round_robin":
-            # Smooth Weighted Round-Robin (Nginx Algorithm)
-            total_weight = sum(n.weight for n in healthy)
-            best_node: BackendNode | None = None
-            for node in healthy:
-                node.current_weight += node.weight
-                if best_node is None or node.current_weight > best_node.current_weight:
-                    best_node = node
-            if best_node is not None:
-                best_node.current_weight -= total_weight
-            return best_node
+            elif self.strategy == "weighted_round_robin":
+                # Smooth Weighted Round-Robin (Nginx Algorithm)
+                total_weight = sum(n.weight for n in healthy)
+                best_node: BackendNode | None = None
+                for node in healthy:
+                    node.current_weight += node.weight
+                    if best_node is None or node.current_weight > best_node.current_weight:
+                        best_node = node
+                if best_node is not None:
+                    best_node.current_weight -= total_weight
+                return best_node
 
-        else:  # round_robin
-            node = healthy[self.rr_index % len(healthy)]
-            self.rr_index = (self.rr_index + 1) % len(healthy)
-            return node
+            else:  # round_robin
+                node = healthy[self.rr_index % len(healthy)]
+                self.rr_index = (self.rr_index + 1) % len(healthy)
+                return node
 
     async def close_all(self) -> None:
         """关闭所有后端的 gRPC 通道 / Close all backend gRPC channels."""
@@ -310,7 +336,8 @@ async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0) -> No
 
                 # 3. 状态决策与更替
                 was_healthy = node.is_healthy
-                node.is_healthy = http_ok and grpc_ok
+                passive_cooldown = time.monotonic() < node.passive_unhealthy_until
+                node.is_healthy = http_ok and grpc_ok and not passive_cooldown
 
                 # Update circuit breaker based on health result
                 if node.is_healthy:

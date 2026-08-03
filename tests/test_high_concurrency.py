@@ -291,7 +291,8 @@ class TestDpJit:
         import numpy as np
         from privacy_local_agent.privacy.dp_jit import gaussian_noise_batch
 
-        values = np.zeros(100)
+        # 大样本使均值标准误降至 sigma/sqrt(n)，消除小样本下均值断言的偶发失败
+        values = np.zeros(5000)
         result = gaussian_noise_batch(values, sensitivity=1.0, epsilon=1.0, delta=1e-5)
         assert result.shape == values.shape
         # 均值应接近 0（噪声均值为 0）
@@ -364,6 +365,15 @@ class TestDpJit:
         """验证 HAS_NUMBA 标志存在且为 bool。"""
         from privacy_local_agent.privacy.dp_jit import HAS_NUMBA
         assert isinstance(HAS_NUMBA, bool)
+
+    def test_laplace_noise_batch_no_infinite_values(self):
+        """大样本采样下不得出现 ±inf（log(0) 边界已钳制）。"""
+        import numpy as np
+        from privacy_local_agent.privacy.dp_jit import laplace_noise_batch
+
+        # 大样本提高命中极小概率区间的机会，验证边界钳制有效
+        result = laplace_noise_batch(np.zeros(20000), sensitivity=1.0, epsilon=1.0)
+        assert np.isfinite(result).all()
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +466,52 @@ class TestNoisePool:
 
         # 所有线程都应成功获取 10 个样本
         assert all(r == 10 for r in results)
+
+
+# ---------------------------------------------------------------------------
+# ConcurrencyThrottle 测试 / ConcurrencyThrottle tests
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrencyThrottle:
+    """并发限流器回归测试。"""
+
+    def test_timeout_acquire_does_not_over_release(self):
+        """超时未获取到信号量时不得 release，避免容量越限。"""
+        import asyncio
+
+        from privacy_local_agent.privacy.high_concurrency import ConcurrencyThrottle
+
+        async def run():
+            throttle = ConcurrencyThrottle(max_concurrency=1)
+            # 占住唯一名额后，第二次获取应超时
+            async with throttle.acquire():
+                with pytest.raises(asyncio.TimeoutError):
+                    async with throttle.acquire(timeout=0.05):
+                        pass
+            # 超时路径未获取到信号量，不应 release；容量必须仍为 1
+            assert throttle._semaphore._value == 1
+            # 后续仍可正常获取与释放，容量不漂移
+            async with throttle.acquire():
+                assert throttle._semaphore._value == 0
+            assert throttle._semaphore._value == 1
+
+        asyncio.run(run())
+
+    def test_acquire_release_roundtrip(self):
+        """正常获取/释放路径容量守恒。"""
+        import asyncio
+
+        from privacy_local_agent.privacy.high_concurrency import ConcurrencyThrottle
+
+        async def run():
+            throttle = ConcurrencyThrottle(max_concurrency=2)
+            for _ in range(5):
+                async with throttle.acquire(timeout=1.0):
+                    pass
+            assert throttle._semaphore._value == 2
+
+        asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------

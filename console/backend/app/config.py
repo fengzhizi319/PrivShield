@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=10 * 1024 * 1024, alias="CONSOLE_MAX_UPLOAD_BYTES")
     # 负载均衡探测 host 白名单（逗号分隔）/ LB probe host allowlist (comma-separated)
     lb_allowed_hosts: str | None = Field(default=None, alias="LB_ALLOWED_HOSTS")
+    # 负载均衡探测是否允许除回环外的私有/保留网段 IP（默认仅允许回环）
+    # Whether LB probes may target private/reserved IPs beyond loopback
+    # (loopback is always allowed by default since the console targets local agents)
+    lb_allow_private_ips: bool = Field(default=False, alias="LB_ALLOW_PRIVATE_IPS")
 
     model_config = SettingsConfigDict(
         env_file=".env",

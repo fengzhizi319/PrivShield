@@ -188,6 +188,10 @@ async def async_main(
     finally:
         # 优雅清理资源
         health_task.cancel()
+        # 等待健康检查任务真正退出，避免事件循环关闭时
+        # 出现 "Task was destroyed but it is pending" 警告。
+        with contextlib.suppress(asyncio.CancelledError):
+            await health_task
         await grpc_server.stop(grace=1.0)
         await balancer.close_all()
         logger.info("Gateway services safely stopped.")

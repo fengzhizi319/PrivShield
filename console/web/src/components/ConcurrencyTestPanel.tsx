@@ -20,21 +20,44 @@ import { Icon } from '@/components/icons';
 import { useI18n } from '@/i18n';
 import { getErrorMessage } from '@/utils/error';
 
-/** 预设的 agent 路径选项 / Preset agent path options */
-const PRESET_PATHS = [
-  { path: '/v1/privacy/mask', method: 'POST', label: 'Mask PII' },
-  { path: '/v1/privacy/dp_count', method: 'POST', label: 'DP Count' },
-  { path: '/v1/privacy/dp_sum', method: 'POST', label: 'DP Sum' },
-  { path: '/v1/privacy/hash', method: 'POST', label: 'Hash' },
-  { path: '/health', method: 'GET', label: 'Health Check' },
-];
-
 /** 默认请求体（mask 接口）/ Default request body (mask endpoint) */
 const DEFAULT_MASK_BODY = {
   field_name: 'phone',
   value: '13812345678',
   context: 'user_profile',
 };
+
+/**
+ * 预设路径及对应的默认请求体 / Preset paths with matching default bodies
+ *
+ * 每个 POST 预设必须携带与后端 Pydantic 模型匹配的请求体，
+ * 否则压测会全部 422：
+ * - mask: MaskRequest { field_name, value, context }
+ * - dp_count / dp_sum: DPRequest { values, params }（sum 需 clip 边界）
+ * - hash: HashRequest { value, salt }
+ */
+const PRESET_PATHS = [
+  { path: '/v1/privacy/mask', method: 'POST', label: 'Mask PII', body: DEFAULT_MASK_BODY },
+  {
+    path: '/v1/privacy/dp_count',
+    method: 'POST',
+    label: 'DP Count',
+    body: { values: [1, 2, 3, 4, 5], params: { epsilon: 1.0 } },
+  },
+  {
+    path: '/v1/privacy/dp_sum',
+    method: 'POST',
+    label: 'DP Sum',
+    body: { values: [1, 2, 3, 4, 5], params: { epsilon: 1.0, clip_lower: 0, clip_upper: 10 } },
+  },
+  {
+    path: '/v1/privacy/hash',
+    method: 'POST',
+    label: 'Hash',
+    body: { value: '13812345678', salt: 'test-salt' },
+  },
+  { path: '/health', method: 'GET', label: 'Health Check', body: null },
+];
 
 /**
  * ConcurrencyTestPanel 组件属性接口 / Props Interface
@@ -68,14 +91,11 @@ export default function ConcurrencyTestPanel({ agentUrl }: ConcurrencyTestPanelP
   const [error, setError] = useState<string | null>(null);
 
   /** 选择预设路径 / Select preset path */
-  const selectPreset = (preset: typeof PRESET_PATHS[number]) => {
+  const selectPreset = (preset: (typeof PRESET_PATHS)[number]) => {
     setPath(preset.path);
     setMethod(preset.method);
-    if (preset.method === 'GET') {
-      setBodyText('');
-    } else if (!bodyText || bodyText.trim() === '') {
-      setBodyText(JSON.stringify(DEFAULT_MASK_BODY, null, 2));
-    }
+    // 始终同步为该预设匹配的默认请求体，避免残留其他接口的 body 导致 422
+    setBodyText(preset.method === 'GET' || !preset.body ? '' : JSON.stringify(preset.body, null, 2));
   };
 
   /** 执行并发压测 / Execute concurrency test */

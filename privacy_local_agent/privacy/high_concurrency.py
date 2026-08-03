@@ -524,13 +524,21 @@ class ConcurrencyThrottle:
 
     @contextlib.asynccontextmanager
     async def acquire(self, timeout: float | None = None):
-        """获取并发信号量，超过限额可抛出 TimeoutError。"""
+        """获取并发信号量，超过限额可抛出 TimeoutError。
+
+        注意：只有真正获取到信号量后才允许 release。若 ``wait_for``
+        超时抛出 TimeoutError 时仍无条件 release，会使信号量容量不断
+        变大（越限），限流器逐渐失效。
+        """
+        acquired = False
         try:
             if timeout is not None:
                 await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
             else:
                 await self._semaphore.acquire()
+            acquired = True
             yield
         finally:
-            self._semaphore.release()
+            if acquired:
+                self._semaphore.release()
 

@@ -289,6 +289,61 @@ def test_validate_lb_url_allowlist() -> None:
             assert excinfo.value.status_code == 400
 
 
+def test_validate_lb_url_loopback_allowed_by_default() -> None:
+    """环回地址默认放行：本地控制台开箱即可探测 127.0.0.1 上的 Agent。
+    Loopback addresses are allowed by default so the local console can probe 127.0.0.1 agents.
+    """
+    from app.main import settings
+
+    with patch("app.main._resolve_host_ips", return_value={"127.0.0.1"}):
+        with patch.object(settings, "lb_allowed_hosts", ""):
+            _validate_lb_url("http://127.0.0.1:8079")  # 不应抛出
+
+
+def test_validate_lb_url_private_ip_blocked() -> None:
+    """RFC1918 私有网段与云元数据端点默认仍被拦截（SSRF 防护）。
+    RFC1918 private ranges and cloud metadata endpoint remain blocked by default (SSRF).
+    """
+    from fastapi import HTTPException
+
+    from app.main import settings
+
+    with patch.object(settings, "lb_allowed_hosts", ""):
+        with patch.object(settings, "lb_allow_private_ips", False):
+            with patch("app.main._resolve_host_ips", return_value={"10.0.0.5"}):
+                with pytest.raises(HTTPException) as excinfo:
+                    _validate_lb_url("http://internal.corp:8079")
+                assert excinfo.value.status_code == 400
+            with patch("app.main._resolve_host_ips", return_value={"169.254.169.254"}):
+                with pytest.raises(HTTPException) as excinfo:
+                    _validate_lb_url("http://metadata.test")
+                assert excinfo.value.status_code == 400
+
+
+def test_validate_lb_url_allow_private_ips_flag() -> None:
+    """开启 LB_ALLOW_PRIVATE_IPS 后私有网段可探测（内网部署场景）。
+    With LB_ALLOW_PRIVATE_IPS enabled, private ranges become probeable (intranet deployments).
+    """
+    from app.main import settings
+
+    with patch("app.main._resolve_host_ips", return_value={"192.168.1.10"}):
+        with patch.object(settings, "lb_allowed_hosts", ""):
+            with patch.object(settings, "lb_allow_private_ips", True):
+                _validate_lb_url("http://192.168.1.10:8079")  # 不应抛出
+
+
+def test_validate_lb_url_allowlist_bypasses_private_check() -> None:
+    """命中 LB_ALLOWED_HOSTS 白名单时跳过私有网段校验（运维显式授权）。
+    Hosts matching LB_ALLOWED_HOSTS bypass the private-range check (explicit operator approval).
+    """
+    from app.main import settings
+
+    with patch("app.main._resolve_host_ips", return_value={"10.0.0.5"}):
+        with patch.object(settings, "lb_allowed_hosts", "agent.internal"):
+            with patch.object(settings, "lb_allow_private_ips", False):
+                _validate_lb_url("http://agent.internal:8079")  # 不应抛出
+
+
 def test_upload_oversized_file_returns_413(client: TestClient, mock_multipart: AsyncMock) -> None:
     """上传超过大小上限的文件应返回 413，且不转发到 agent。
     Uploading a file exceeding size limit should return 413 without forwarding to agent.

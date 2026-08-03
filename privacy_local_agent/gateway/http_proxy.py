@@ -13,11 +13,12 @@ Prometheus metrics instrumentation.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from privacy_local_agent.observability.logging_config import get_logger
@@ -45,6 +46,12 @@ EXCLUDE_HEADERS = {
     "content-length",
     "host",
 }
+
+# 响应方向额外需要剔除的头。
+# httpx 在读取 ``resp.content`` 时会自动解压 gzip/deflate/br 等编码，
+# 若把 ``content-encoding`` 原样透传给客户端，客户端会对已解压的
+# 明文再次尝试解压，导致响应解析失败。
+RESPONSE_EXCLUDE_HEADERS = EXCLUDE_HEADERS | {"content-encoding"}
 
 
 class RegisterRequest(BaseModel):
@@ -85,10 +92,17 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
         await app.state.http_client.aclose()
 
     app = FastAPI(title="SecretFlow Local Privacy Agent REST Gateway", lifespan=lifespan)
+    gateway_api_key = os.environ.get("GATEWAY_API_KEY", "")
+
+    def require_management_auth(authorization: str | None) -> None:
+        """Protect topology mutation endpoints when an operator key is configured."""
+        if gateway_api_key and authorization != f"Bearer {gateway_api_key}":
+            raise HTTPException(status_code=401, detail="Unauthorized gateway management request")
 
     @app.post("/v1/gateway/register")
-    async def register_node(req: RegisterRequest):
+    async def register_node(req: RegisterRequest, authorization: str | None = Header(default=None)):
         """动态注册工作节点 / Register a worker node to the pool."""
+        require_management_auth(authorization)
         balancer.add_node(req.http_url, req.grpc_address, req.weight)
         logger.info(
             "Node registered via API",
@@ -97,8 +111,9 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
         return {"status": "registered"}
 
     @app.post("/v1/gateway/deregister")
-    async def deregister_node(req: DeregisterRequest):
+    async def deregister_node(req: DeregisterRequest, authorization: str | None = Header(default=None)):
         """注销工作节点 / Deregister a worker node from the pool."""
+        require_management_auth(authorization)
         balancer.remove_node(req.http_url, req.grpc_address)
         logger.info(
             "Node deregistered via API",
@@ -113,8 +128,10 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
         代理并转发所有 HTTP 方法的请求，支持故障重试、被动健康检测、
         熔断器保护与 Prometheus 延迟/计数指标采集。
         """
-        max_retries = 3
         method = request.method
+        # 非幂等请求仅在 ConnectError（TCP 连接未建立，请求尚未到达后端）时
+        # 允许故障转移；超时或响应读取失败可能已经产生副作用，不重复发送。
+        max_retries = 3
         query_params = request.query_params
         start_time = time.perf_counter()
 
@@ -166,17 +183,16 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                 request.app.state.http_client = client
                 request.app.state.http_client_loop = current_loop
 
-            # 增加节点活跃连接计数
-            node.active_connections += 1
             url = f"{node.http_url}/{path}"
             try:
-                resp = await client.request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=query_params,
-                    content=body,
-                )
+                async with node.track_connection():
+                    resp = await client.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        params=query_params,
+                        content=body,
+                    )
 
                 # 记录成功指标
                 duration = time.perf_counter() - start_time
@@ -184,12 +200,18 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                     protocol="http", method=method, status=str(resp.status_code)
                 ).inc()
                 GATEWAY_LATENCY.labels(protocol="http").observe(duration)
-                node.circuit_breaker.record_success()
+                # 后端 5xx 表明节点服务能力异常，计入熔断器失败统计；
+                # 4xx 属于客户端请求问题：既不算节点故障，也不算节点恢复，
+                # 因此不惩罚节点，也不重置已有的失败统计。
+                if resp.status_code >= 500:
+                    node.circuit_breaker.record_failure()
+                elif resp.status_code < 400:
+                    node.circuit_breaker.record_success()
 
                 # 构建并清洗响应 headers
                 resp_headers = {}
                 for k, v in resp.headers.items():
-                    if k.lower() not in EXCLUDE_HEADERS:
+                    if k.lower() not in RESPONSE_EXCLUDE_HEADERS:
                         resp_headers[k] = v
 
                 return Response(
@@ -199,6 +221,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                 )
             except Exception as exc:
                 last_exception = exc
+                retry_allowed = method in {"GET", "HEAD", "OPTIONS"} or isinstance(exc, httpx.ConnectError)
                 node.circuit_breaker.record_failure()
                 GATEWAY_RETRIES_TOTAL.labels(protocol="http", reason="connection_error").inc()
                 logger.warning(
@@ -213,9 +236,10 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                 )
                 # 被动健康检查更新：立即将该节点置为不健康
                 node.is_healthy = False
+                node.passive_unhealthy_until = time.monotonic() + 5.0
+                if not retry_allowed:
+                    break
 
-            finally:
-                node.active_connections -= 1
 
         # 若重试全部耗尽
         duration = time.perf_counter() - start_time

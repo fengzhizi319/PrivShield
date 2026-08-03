@@ -23,6 +23,7 @@ let API_BASE = '';
 /** 请求超时时间（毫秒），超过此时间将中断请求并抛出超时错误。 */
 /** Request timeout in milliseconds; exceeding this will abort the request and throw a timeout error. */
 const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_IDEMPOTENT_RETRIES = 2;
 
 /**
  * 可选控制台 API Key。默认从构建期环境变量 ``VITE_CONSOLE_API_KEY`` 读取，
@@ -96,48 +97,53 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   // 解构出 headers 与其余配置（method/body 等）/ Destructure headers from rest of config
   const { headers, ...rest } = init;
-  // 创建 AbortController 用于超时中断 / Create AbortController for timeout abort
-  const controller = new AbortController();
-  // 设置超时定时器，到期后调用 abort() 中断请求 / Set timeout timer, calls abort() when expired
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    // 发送 fetch 请求：拼接基址 + 路径，合并头与 signal / Send fetch: concat base + path, merge headers & signal
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...rest,
-      headers: buildHeaders(headers as Record<string, string> | undefined),
-      signal: controller.signal, // 绑定中断信号 / Bind abort signal
-    });
-
-    // 非 2xx 响应统一抛出携带 detail 的 Error / Non-2xx responses throw Error with detail
-    if (!res.ok) {
-      // 尝试解析 JSON 错误体，失败则回退到 statusText / Try parsing JSON error body, fallback to statusText
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      // 提取 detail 字段作为错误消息 / Extract detail field as error message
-      throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err));
-    }
-
-    // 先读取原始文本，再尝试 JSON 解析（便于错误时展示原始内容）
-    // Read raw text first, then try JSON parse (helps show raw content on error)
-    const text = await res.text();
+  const method = (rest.method ?? 'GET').toString().toUpperCase();
+  const retryableMethod = ['GET', 'HEAD', 'OPTIONS'].includes(method);
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= (retryableMethod ? MAX_IDEMPOTENT_RETRIES : 0); attempt += 1) {
+    // 创建 AbortController 用于超时中断 / Create AbortController for timeout abort
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      // 解析 JSON 并返回类型化结果 / Parse JSON and return typed result
-      return JSON.parse(text) as T;
-    } catch {
-      // JSON 解析失败：抛出携带状态码与前 100 字符的友好错误
-      // JSON parse failed: throw friendly error with status code and first 100 chars
-      throw new Error(`Response JSON parse failed (HTTP ${res.status}): ${text.slice(0, 100)}`);
+      // 发送 fetch 请求：拼接基址 + 路径，合并头与 signal / Send fetch: concat base + path, merge headers & signal
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...rest,
+        headers: buildHeaders(headers as Record<string, string> | undefined),
+        signal: controller.signal, // 绑定中断信号 / Bind abort signal
+      });
+
+      // 非 2xx 响应统一抛出携带 detail 的 Error / Non-2xx responses throw Error with detail
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        const error = new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err)) as Error & { status?: number };
+        error.status = res.status;
+        if (![502, 503, 504].includes(res.status) || attempt >= MAX_IDEMPOTENT_RETRIES) throw error;
+        lastError = error;
+      } else {
+        // 先读取原始文本，再尝试 JSON 解析（便于错误时展示原始内容）
+        const text = await res.text();
+        try {
+          return JSON.parse(text) as T;
+        } catch {
+          throw new Error(`Response JSON parse failed (HTTP ${res.status}): ${text.slice(0, 100)}`);
+        }
+      }
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') {
+        throw new Error(`Request timed out (${REQUEST_TIMEOUT_MS / 1000}s), please check backend availability`);
+      }
+      lastError = e;
+      const status = (e as Error & { status?: number }).status;
+      if (!retryableMethod || attempt >= MAX_IDEMPOTENT_RETRIES || (status !== undefined && ![502, 503, 504].includes(status))) {
+        throw e;
+      }
+    } finally {
+      clearTimeout(timer);
     }
-  } catch (e) {
-    // 特殊处理 AbortError：转换为超时提示 / Special handling for AbortError: convert to timeout message
-    if ((e as Error).name === 'AbortError') {
-      throw new Error(`Request timed out (${REQUEST_TIMEOUT_MS / 1000}s), please check backend availability`);
-    }
-    // 其他错误直接向上抛出 / Other errors re-thrown as-is
-    throw e;
-  } finally {
-    // 无论成功失败都清除超时定时器，避免内存泄漏 / Always clear timeout timer to prevent memory leak
-    clearTimeout(timer);
+    await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
   }
+
+  throw lastError instanceof Error ? lastError : new Error('Request failed');
 }
 
 /**

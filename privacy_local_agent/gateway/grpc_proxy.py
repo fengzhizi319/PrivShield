@@ -107,16 +107,16 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
                 )
 
             assert node is not None
-            node.active_connections += 1
             try:
-                stub_method = getattr(node.grpc_stub, method_name)
-                # 提取客户端请求中携带的元数据并转发
-                metadata = None
-                if hasattr(context, "invocation_metadata") and callable(context.invocation_metadata):
-                    metadata = context.invocation_metadata()
+                async with node.track_connection():
+                    stub_method = getattr(node.grpc_stub, method_name)
+                    # 提取客户端请求中携带的元数据并转发
+                    metadata = None
+                    if hasattr(context, "invocation_metadata") and callable(context.invocation_metadata):
+                        metadata = context.invocation_metadata()
 
-                call = stub_method(request, timeout=30.0, metadata=metadata)
-                response = await call
+                    call = stub_method(request, timeout=30.0, metadata=metadata)
+                    response = await call
 
                 # 将后端的响应头与响应尾元数据透传给客户端
                 try:
@@ -166,6 +166,7 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
                         },
                     )
                     node.is_healthy = False
+                    node.passive_unhealthy_until = time.monotonic() + 5.0
                 else:
                     # 正常的业务级/参数类错误，无需重试，直接透传
                     duration = time.perf_counter() - start_time
@@ -190,8 +191,7 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
                     },
                 )
                 node.is_healthy = False
-            finally:
-                node.active_connections -= 1
+                node.passive_unhealthy_until = time.monotonic() + 5.0
 
         # 若全部重试机会已耗尽
         duration = time.perf_counter() - start_time
