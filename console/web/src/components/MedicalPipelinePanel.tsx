@@ -252,6 +252,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                         {Object.entries(row).map(([col, val]) => {
                           const isPii = ['name', 'id_card_no', 'registered_address', 'disability_cert_no', 'medical_insurance_no'].includes(col);
                           const isMaskedMed = val.includes('[L5-') || val.includes('[L4-');
+                          const isImageCase = val.includes('data/samples/') || val.includes('sanitized_') || val.endsWith('.png') || val.endsWith('.jpg');
                           return (
                             <td key={col} className="px-3 py-2 whitespace-nowrap">
                               {isPii ? (
@@ -261,6 +262,11 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                               ) : isMaskedMed ? (
                                 <span className="rounded bg-purple-50 px-2 py-0.5 text-purple-700 border border-purple-200 font-medium">
                                   {val}
+                                </span>
+                              ) : isImageCase ? (
+                                <span className="rounded bg-indigo-50 px-2 py-0.5 text-indigo-700 border border-indigo-200 font-medium flex items-center gap-1">
+                                  <span>🖼️ 图像病例脱敏:</span>
+                                  <span className="font-mono text-xs">{val}</span>
                                 </span>
                               ) : (
                                 <span className="text-gray-700">{val}</span>

@@ -316,9 +316,16 @@ def generate_record(index: int, is_image_case: bool = False, severity: str = "L3
     else:
         present = random.choice(PRESENT_ILLNESS_L3)
 
-    # 图片病例追加图片描述
+    # 图片病例追加实际图片路径与 PACS 标注
     if is_image_case:
-        present += "【附影像资料：CT/MRI图片已存档于PACS系统，影像编号IMG-" + f"{random.randint(100000,999999)}" + "】"
+        img_paths = [
+            "data/samples/syphilis_case.png",
+            "data/samples/hiv_report.jpg",
+            "data/samples/blood_routine.jpg",
+            "data/samples/xray_chest.png",
+        ]
+        chosen_img = random.choice(img_paths)
+        present += f" 【附PACS病例图片资料：{chosen_img}】"
 
     past = random.choice(PAST_HISTORIES)
     if is_smoking == "是":
@@ -426,7 +433,7 @@ def main():
 
     print(f"✅ 已生成 {len(records)} 条医疗记录 → {output_path.resolve()}")
     print(f"   字段数: {len(CSV_FIELDS)}")
-    print(f"   图片病例: {sum(1 for r in records if 'PACS' in r['present_illness'])} 条")
+    print(f"   图片病例: {sum(1 for r in records if 'data/samples/' in r['present_illness'])} 条")
 
 
 if __name__ == "__main__":

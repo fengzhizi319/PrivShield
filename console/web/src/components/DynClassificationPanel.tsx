@@ -627,6 +627,43 @@ export default function DynClassificationPanel() {
                   <p className="mt-1 text-xs text-gray-400">
                     {t('dyn.eval.standard_hint', currentDetail ? `${currentDetail.standard_id}（${currentDetail.description}）` : t('dyn.eval.standard_default'))}
                   </p>
+                  {/* 快捷填入预设样本 */}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-gray-500 font-medium">快速预设:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFieldName("case_image");
+                        setFieldValue("data/samples/syphilis_case.png");
+                        setDomain("medical");
+                      }}
+                      className="rounded bg-purple-50 px-2 py-1 text-xs text-purple-700 hover:bg-purple-100 border border-purple-200"
+                    >
+                      📷 梅毒图像病例 (syphilis_case.png)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFieldName("hiv_report_image");
+                        setFieldValue("data/samples/hiv_report.jpg");
+                        setDomain("medical");
+                      }}
+                      className="rounded bg-purple-50 px-2 py-1 text-xs text-purple-700 hover:bg-purple-100 border border-purple-200"
+                    >
+                      🖼️ HIV检验报告图片 (hiv_report.jpg)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFieldName("blood_routine_image");
+                        setFieldValue("data/samples/blood_routine.jpg");
+                        setDomain("medical");
+                      }}
+                      className="rounded bg-purple-50 px-2 py-1 text-xs text-purple-700 hover:bg-purple-100 border border-purple-200"
+                    >
+                      🩸 血常规异常图片 (blood_routine.jpg)
+                    </button>
+                  </div>
                 </div>
                 <button
                   onClick={handleEval}

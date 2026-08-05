@@ -143,9 +143,9 @@ def test_generated_data_contains_l4_and_l5_content() -> None:
 
 
 def test_generated_data_contains_image_cases() -> None:
-    """验证生成数据中至少 3 条包含图片病例标记 (PACS)。"""
+    """验证生成数据中至少 3 条包含图片病例标记 (PACS / samples)。"""
     records = generate_dataset(20)
-    image_count = sum(1 for r in records if "PACS" in r.get("present_illness", ""))
+    image_count = sum(1 for r in records if "PACS" in r.get("present_illness", "") or "data/samples/" in r.get("present_illness", ""))
     assert image_count >= 3, f"图片病例数量不足: {image_count}"
 
 
