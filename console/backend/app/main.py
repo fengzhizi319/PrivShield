@@ -28,6 +28,7 @@ Endpoint sample data is defined in :mod:`app.fixtures.samples`.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import base64
 import ipaddress
 import random
@@ -865,6 +866,28 @@ async def concurrency_test(req: ConcurrencyTestRequest):
     用于前端“并发测试”面板，验证 agent 在高并发下的性能表现。
     """
     return await _run_concurrency_test(req)
+
+
+@app.post("/api/medical_pipeline")
+async def medical_pipeline(req: dict[str, Any]):
+    """医疗敏感数据全流程治理代理端点：分类分级与 L4/L5 数据脱敏。
+
+    若未指定 records，自动从本地 samples/data1.csv 读取 20 条医疗示例数据进行处理。
+    """
+    records = req.get("records")
+    if not records:
+        import csv
+        sample_path = Path(__file__).resolve().parent.parent / "samples" / "data1.csv"
+        records = []
+        if sample_path.exists():
+            with open(sample_path, encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                records = list(reader)
+    return await agent_client.request(
+        method="POST",
+        path="/v1/medical/process",
+        body={"records": records},
+    )
 
 
 # 静态 SPA 托管：把构建好的前端挂载到根路径。

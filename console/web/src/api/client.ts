@@ -14,7 +14,7 @@
  */
 
 /** 导入所有前后端数据契约类型 / Import all frontend-backend data contract types */
-import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse, OpsDiagnostics, StandardsResponse, ConcurrencyTestRequest, ConcurrencyTestResponse } from '@/types/api';
+import type { ProxyRequest, ProxyResponse, ConsoleHealth, EndpointSample, BatchRequestItem, BatchResponse, FileOperation, UploadResponse, LbTestRequest, LbTestResponse, OpsDiagnostics, StandardsResponse, ConcurrencyTestRequest, ConcurrencyTestResponse, MedicalPipelineRequest, MedicalPipelineResponse } from '@/types/api';
 
 /** 当前后端基址（空串表示同源，即请求发往当前页面所在的服务器）。 */
 /** Current backend base URL (empty string means same-origin, i.e. requests go to the server hosting the page). */
@@ -324,6 +324,18 @@ export async function fetchStandards(): Promise<StandardsResponse> {
  */
 export async function concurrencyTest(req: ConcurrencyTestRequest): Promise<ConcurrencyTestResponse> {
   return request<ConcurrencyTestResponse>('/api/concurrency_test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * 医疗敏感数据全流程治理：对医疗记录或 data1.csv 执行分类分级与 L4/L5 抹平脱敏。
+ * Medical privacy pipeline: classifies & desensitizes medical records or data1.csv.
+ */
+export async function runMedicalPipeline(req: MedicalPipelineRequest = {}): Promise<MedicalPipelineResponse> {
+  return request<MedicalPipelineResponse>('/api/medical_pipeline', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),

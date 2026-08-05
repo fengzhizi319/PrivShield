@@ -480,3 +480,42 @@ export interface ConcurrencyTestResponse {
   /** P99 延迟（毫秒） */
   p99_latency_ms: number;
 }
+
+/* ==================== 医疗数据全流程治理（/api/medical_pipeline） ==================== */
+
+export interface MedicalFieldClassification {
+  field_name: string;
+  level: string;
+  security_tag: string;
+  description: string;
+  rule_matched: string;
+}
+
+export interface MedicalRecordReport {
+  record_index: number;
+  max_level: string;
+  pii_fields_detected: string[];
+  high_sensitivity_detected: string[];
+  field_details: MedicalFieldClassification[];
+}
+
+export interface MedicalPipelineSummary {
+  total_records: number;
+  l5_records_count: number;
+  l4_records_count: number;
+  l3_records_count: number;
+  l1_l2_records_count: number;
+  sanitized_pii_fields_per_record: number;
+  guarantee_no_l4_l5_raw_data: boolean;
+  duration_ms: number;
+}
+
+export interface MedicalPipelineResponse {
+  classification_report: MedicalRecordReport[];
+  sanitized_data: Record<string, string>[];
+  summary: MedicalPipelineSummary;
+}
+
+export interface MedicalPipelineRequest {
+  records?: Record<string, string>[];
+}

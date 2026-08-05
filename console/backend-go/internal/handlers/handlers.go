@@ -94,6 +94,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.POST("/api/upload", s.Upload)
 	r.POST("/api/lb_test", s.LbTest)
 	r.POST("/api/concurrency_test", s.ConcurrencyTest)
+	r.POST("/api/medical_pipeline", s.MedicalPipeline)
 	s.registerStatic(r)
 }
 
@@ -1075,6 +1076,37 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// MedicalPipeline 医疗敏感数据全流程治理代理端点：分类分级与 L4/L5 数据脱敏。
+func (s *Server) MedicalPipeline(c *gin.Context) {
+	var body struct {
+		Records []map[string]string `json:"records"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
+	records := body.Records
+	if len(records) == 0 {
+		samplePath := filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", "data1.csv")
+		if _, err := os.Stat(samplePath); err != nil {
+			samplePath = "internal/samples/data1.csv"
+		}
+		if data, err := os.ReadFile(samplePath); err == nil {
+			if parsed, _, err := fileparse.ParseCSV(data); err == nil && len(parsed) > 0 {
+				records = parsed
+			}
+		}
+	}
+
+	start := time.Now()
+	proxyReq := models.ProxyRequest{
+		Method: "POST",
+		Path:   "/v1/medical/process",
+	}
+	reqBytes, _ := json.Marshal(map[string]any{"records": records})
+	proxyReq.Body = reqBytes
+
+	s.proxyRest(c, start, proxyReq)
 }
 
 // splitHosts 把逗号分隔的 host 白名单字符串拆分为去除空白后的切片；

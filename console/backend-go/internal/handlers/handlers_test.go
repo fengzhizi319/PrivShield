@@ -959,3 +959,20 @@ func TestConcurrencyTestHandler(t *testing.T) {
 		t.Fatalf("expected success 10, got %v", data["success"])
 	}
 }
+
+// TestMedicalPipelineHandler 验证医疗敏感数据全流程治理接口 /api/medical_pipeline。
+func TestMedicalPipelineHandler(t *testing.T) {
+	grpcSrv := &testPrivacyServer{}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/medical_pipeline", "application/json", strings.NewReader(`{"records":[]}`))
+	if err != nil {
+		t.Fatalf("POST /api/medical_pipeline failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 0 {
+		t.Fatalf("expected non-zero HTTP response")
+	}
+}

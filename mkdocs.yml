@@ -140,6 +140,7 @@ nav:
       - 概览: dynclassification/README.md
       - 需求文档: dynclassification/prd.md
       - 架构设计: dynclassification/design.md
+      - 医疗数据流水线设计: dynclassification/medical_data_pipeline_design.md
       - 三层漏斗设计: dynclassification/three_layer_funnel_design.md
       - 裁决算法机制: dynclassification/funnel_adjudication.md
       - 降级与 Override 规则: dynclassification/downgrade_override_design.md

@@ -65,6 +65,10 @@ interface SidebarProps {
   onOps?: () => void;
   /** 当前是否处于运维诊断视图 / Whether currently in ops diagnostics view */
   opsActive?: boolean;
+  /** 进入医疗敏感数据治理 / Enter medical pipeline */
+  onMedicalPipeline?: () => void;
+  /** 当前是否处于医疗敏感数据治理视图 / Whether currently in medical pipeline view */
+  medicalActive?: boolean;
 }
 
 
@@ -184,6 +188,8 @@ export default function Sidebar({
   dynClassifyActive = false,
   onOps,
   opsActive = false,
+  onMedicalPipeline,
+  medicalActive = false,
 }: SidebarProps) {
   const { t } = useI18n(); // 获取翻译函数 / Get translation function
 
@@ -338,6 +344,14 @@ export default function Sidebar({
           active={opsActive}
           icon="activity"
           label={t('sidebar.ops')}
+          activeClass="bg-indigo-50 font-medium text-indigo-700"
+          iconClass="bg-gray-100 text-gray-500"
+        />
+        <NavEntry
+          onClick={onMedicalPipeline}
+          active={medicalActive}
+          icon="shield"
+          label="医疗敏感数据治理"
           activeClass="bg-teal-50 font-medium text-teal-700"
           iconClass="bg-teal-100 text-teal-600"
           className="mb-2"

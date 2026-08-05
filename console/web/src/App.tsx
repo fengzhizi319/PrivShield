@@ -48,6 +48,8 @@ import DynClassificationPanel from '@/components/DynClassificationPanel';
 import OpsPanel from '@/components/OpsPanel';
 /** 引入视图组件：并发压测面板 / Import view component: concurrency test panel */
 import ConcurrencyTestPanel from '@/components/ConcurrencyTestPanel';
+/** 引入视图组件：医疗敏感数据治理面板 / Import view component: medical privacy pipeline panel */
+import MedicalPipelinePanel from '@/components/MedicalPipelinePanel';
 /** 引入错误边界组件：防止单组件崩溃导致整页白屏 / Import error boundary: prevent single component crash from blank page */
 import ErrorBoundary from '@/components/ErrorBoundary';
 /** 引入后端切换器类型与默认值 / Import backend selector type and default value */
@@ -74,6 +76,7 @@ type View =
   | { type: 'lbtest' }                            // 负载均衡 / Load balancer
   | { type: 'concurrency' }                      // 并发压测 / Concurrency test
   | { type: 'dynclassification' }                // 动态分类分级 / Dynamic classification
+  | { type: 'medical' }                          // 医疗敏感数据治理 / Medical privacy pipeline
   | { type: 'ops' };                             // 运维诊断 / Ops diagnostics
 
 
@@ -219,6 +222,8 @@ export default function App() {
               dynClassifyActive={view.type === 'dynclassification'}
               onOps={() => setView({ type: 'ops' })}
               opsActive={view.type === 'ops'}
+              onMedicalPipeline={() => setView({ type: 'medical' })}
+              medicalActive={view.type === 'medical'}
             />
             {/* 主区域容器：占据剩余空间，溢出隐藏 / Main area container: fills remaining space, overflow hidden */}
             <main className="flex-1 overflow-hidden">
@@ -245,6 +250,8 @@ export default function App() {
                   <ConcurrencyTestPanel agentUrl={health?.agent_url} />
                 ) : view.type === 'dynclassification' ? (
                   <DynClassificationPanel />
+                ) : view.type === 'medical' ? (
+                  <MedicalPipelinePanel agentUrl={health?.agent_url} />
                 ) : view.type === 'ops' ? (
                   <OpsPanel health={health} />
                 ) : (

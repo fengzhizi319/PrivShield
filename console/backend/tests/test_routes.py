@@ -191,3 +191,16 @@ def test_proxy_dynclassification(client: TestClient, mock_agent_client: AsyncMoc
     assert body["via"] == "python-rest"
     assert body["protocol"] == "REST"
 
+
+def test_medical_pipeline_route(client: TestClient, mock_agent_client: AsyncMock) -> None:
+    """测试 /api/medical_pipeline 转发到 agent /v1/medical/process。"""
+    mock_agent_client.return_value = {
+        "classification_report": [],
+        "sanitized_data": [],
+        "summary": {"total_records": 0},
+    }
+
+    response = client.post("/api/medical_pipeline", json={"records": []})
+    assert response.status_code == 200
+    mock_agent_client.assert_called_once()
+

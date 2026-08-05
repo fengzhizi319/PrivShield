@@ -734,6 +734,23 @@ class PrivacyService:
 
         return recommendations
 
+    def process_medical_data(self, records: list[dict[str, str]]) -> dict[str, Any]:
+        """对医疗数据集执行分类分级与 L4/L5 敏感数据强抹平脱敏。
+        
+        Args:
+            records: 包含 27 个医疗/身份字段的数据记录列表。
+
+        Returns:
+            包含 classification_report、sanitized_data 与 summary 的双输出结构。
+        """
+        from .medical_pipeline.pipeline import process_medical_dataset, MedicalPipelineResult
+        res: MedicalPipelineResult = process_medical_dataset(records)
+        return {
+            "classification_report": res.classification_report,
+            "sanitized_data": res.sanitized_data,
+            "summary": res.summary,
+        }
+
     def budget_remaining(self) -> dict[str, float]:
         """查询当前命名空间下剩余隐私预算。
 
