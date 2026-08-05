@@ -118,7 +118,7 @@ class PipelineService:
         standard: str | None = None,
         mask_l4: bool = True,
         mask_l5: bool = True,
-        encoding: str = "utf-8",
+        encoding: str = "utf-8-sig",
     ) -> PipelineResult:
         """从 CSV 文件读取数据并执行流水线。
 

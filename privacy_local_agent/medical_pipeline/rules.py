@@ -27,8 +27,12 @@ L5_TERMS_MAP: dict[str, list[str]] = {
     ],
 }
 
-# L4 高风险病史与诊断词汇映射组（肿瘤、传染病、严重器官硬化）
+# L4 高风险病史与诊断词汇映射组（肿瘤、性病/传染病、严重器官损害）
 L4_TERMS_MAP: dict[str, list[str]] = {
+    "STD_VENEREAL": [
+        "梅毒", "苍白密螺旋体", "TPPA阳性", "TPPA", "RPR阳性", "RPR", "淋病", "淋球菌", "尖锐湿疣",
+        "生殖器疱疹", "软下疳", "性病", "性传播疾病", "不洁性接触史", "硬下疳", "人乳头瘤病毒高危型"
+    ],
     "MALIGNANT_NEOPLASM": [
         "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "奥希替尼", "EGFR基因检测", "EGFR突变"
     ],
@@ -40,25 +44,30 @@ L4_TERMS_MAP: dict[str, list[str]] = {
     ],
 }
 
-# 文本脱敏正则表达式生成器
-def _compile_term_patterns(terms_dict: dict[str, list[str]]) -> list[tuple[re.Pattern, str]]:
-    compiled = []
-    for category, terms in terms_dict.items():
-        sorted_terms = sorted(terms, key=len, reverse=True)
-        escaped_terms = [re.escape(t) for t in sorted_terms]
-        pattern_str = "|".join(escaped_terms)
-        pattern = re.compile(pattern_str, re.IGNORECASE)
-        replacement = f"[L5-HIGH-RISK-MEDICAL-MASKED]" if "L5" in str(terms_dict) else "[L4-SENSITIVE-MEDICAL-MASKED]"
-        compiled.append((pattern, replacement))
-    return compiled
+# 替换标签映射：使用抽象类别代码，避免替换文本中泄露原始敏感词
+# 例如不使用 [L5-HIV_AIDS-...] 而用 [L5-IMMUNODEFICIENCY-...]，防止替换后仍含 "HIV"
+_L5_REPLACEMENT_MAP: dict[str, str] = {
+    "HIV_AIDS": "IMMUNODEFICIENCY",
+    "PSYCHIATRIC_DISORDER": "PSYCHIATRIC_DISORDER",
+    "GENETIC_DEFECT": "GENETIC_DEFECT",
+}
 
+_L4_REPLACEMENT_MAP: dict[str, str] = {
+    "STD_VENEREAL": "STD_VENEREAL",
+    "MALIGNANT_NEOPLASM": "MALIGNANT_NEOPLASM",
+    "HEPATITIS_VIRUS": "HEPATITIS_VIRUS",
+    "SEVERE_ORGAN_DAMAGE": "SEVERE_ORGAN_DAMAGE",
+}
 
+# 文本脱敏正则表达式：按类别编译 L5/L4 术语为正则，长词优先匹配
 L5_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile("|".join([re.escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE), f"[L5-{cat}-SENSITIVE-MASKED]")
+    (re.compile("|".join([re.escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE),
+     f"[L5-{_L5_REPLACEMENT_MAP.get(cat, cat)}-SENSITIVE-MASKED]")
     for cat, terms in L5_TERMS_MAP.items()
 ]
 
 L4_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile("|".join([re.escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE), f"[L4-{cat}-SENSITIVE-MASKED]")
+    (re.compile("|".join([re.escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE),
+     f"[L4-{_L4_REPLACEMENT_MAP.get(cat, cat)}-SENSITIVE-MASKED]")
     for cat, terms in L4_TERMS_MAP.items()
 ]

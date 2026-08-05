@@ -1,15 +1,18 @@
 """脱敏处理封装器 / Masking & Sanitization Wrapper.
 
 封装 privacy/masking 原语与 L4/L5 降级逻辑，对字段进行脱敏处理。
+L4/L5 敏感词库统一从 medical_pipeline.rules 导入，避免重复维护。
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from ..privacy.masking import FieldType, mask_record, mask_value
 from .models import MaskingDetail, RecordClassificationDetail
+
+# 从 medical_pipeline 统一导入 L4/L5 敏感词库（单一事实来源）
+from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
 
 
 # 字段名到 FieldType 自动推断映射
@@ -21,15 +24,11 @@ FIELD_TYPE_MAP: dict[str, FieldType] = {
     "medical_insurance_no": FieldType.ID_CARD,
 }
 
-# L4/L5 级高敏感术语匹配正则与替换文案
-L4_L5_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"HIV|艾滋|获得性免疫缺陷", re.IGNORECASE), "[L5-IMMUNODEFICIENCY-SENSITIVE-MASKED]"),
-    (re.compile(r"精神分裂症|双相情感障碍|重度抑郁症", re.IGNORECASE), "[L5-PSYCHIATRIC_DISORDER-SENSITIVE-MASKED]"),
-    (re.compile(r"亨廷顿舞蹈病|渐冻症|肌萎缩侧索硬化|白血病", re.IGNORECASE), "[L5-GENETIC_SEVERE-SENSITIVE-MASKED]"),
-    (re.compile(r"恶性肿瘤|肺癌|胃癌|肝癌|结肠癌|乳腺癌", re.IGNORECASE), "[L4-MALIGNANT_NEOPLASM-SENSITIVE-MASKED]"),
-    (re.compile(r"乙型病毒性肝炎|乙肝|丙型肝炎|丙肝", re.IGNORECASE), "[L4-HEPATITIS-SENSITIVE-MASKED]"),
-    (re.compile(r"冠状动脉粥样硬化性心脏病|冠心病|心肌梗死", re.IGNORECASE), "[L4-CORONARY_HEART-SENSITIVE-MASKED]"),
-]
+# 需要强制进行 L4/L5 敏感词扫描的临床文本字段（不论分级结果如何）
+CLINICAL_TEXT_FIELDS = frozenset({
+    "diagnosis_name", "present_illness", "past_history",
+    "progress_note", "family_history", "chief_complaint",
+})
 
 
 def mask_records(
@@ -92,14 +91,20 @@ def mask_records(
                     str_val = mval  # 更新用于后续处理
 
             # 2. 对 L4/L5 级敏感数据进行高敏词汇强剥离
-            if (orig_level == "L5" and mask_l5) or (orig_level == "L4" and mask_l4) or fname in (
-                "diagnosis_name", "present_illness", "past_history", "progress_note", "family_history"
-            ):
+            #    使用统一词库（medical_pipeline.rules）中的 L5_PATTERNS + L4_PATTERNS
+            if (orig_level in ("L4", "L5") and (mask_l4 or mask_l5)) or fname in CLINICAL_TEXT_FIELDS:
                 cur_val = masked_rec[fname]
                 new_val = cur_val
-                for pattern, replacement in L4_L5_PATTERNS:
-                    if pattern.search(new_val):
-                        new_val = pattern.sub(replacement, new_val)
+                # L5 优先替换（更高级别）
+                if mask_l5:
+                    for pattern, replacement in L5_PATTERNS:
+                        if pattern.search(new_val):
+                            new_val = pattern.sub(replacement, new_val)
+                # L4 替换
+                if mask_l4:
+                    for pattern, replacement in L4_PATTERNS:
+                        if pattern.search(new_val):
+                            new_val = pattern.sub(replacement, new_val)
 
                 if new_val != cur_val:
                     masked_rec[fname] = new_val

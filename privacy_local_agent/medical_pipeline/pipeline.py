@@ -59,30 +59,50 @@ class MedicalPrivacyPipeline:
                 description=f"个人身份标识信息 ({key})",
                 rule_matched=f"PII_RULE_{PII_FIELD_RULES[key]}",
             )
-            
-        # 2. 病史文本中识别 L5 特高风险
-        for pat, replacement in L5_PATTERNS:
-            if pat.search(val_str):
-                return FieldClassification(
-                    field_name=key,
-                    level="L5",
-                    security_tag="HIGH_RISK_MEDICAL_L5",
-                    description="极高风险病史/诊断信息 (L5: 重度精神障碍/HIV/重大遗传缺陷)",
-                    rule_matched="MEDICAL_L5_STRICT_RULE",
-                )
 
-        # 3. 病史文本中识别 L4 高风险
-        for pat, replacement in L4_PATTERNS:
-            if pat.search(val_str):
-                return FieldClassification(
-                    field_name=key,
-                    level="L4",
-                    security_tag="HIGH_RISK_MEDICAL_L4",
-                    description="高风险病史/诊断信息 (L4: 恶性肿瘤/烈性传染病/重度衰竭)",
-                    rule_matched="MEDICAL_L4_STRICT_RULE",
-                )
+        # 2. 病史文本中扫描所有 L5/L4 术语，取最高命中等级
+        #    修复: 原先仅返回首个匹配，现遍历全部规则以确保最高等级被捕获
+        detected_level: str | None = None
+        detected_category: str | None = None
 
-        # 4. 其他普通临床与评估字段
+        for pat, _replacement in L5_PATTERNS:
+            if pat.search(val_str):
+                detected_level = "L5"
+                # 从替换标签中提取类别名 (如 [L5-HIV_AIDS-SENSITIVE-MASKED] → HIV_AIDS)
+                tag = _replacement.strip("[]")
+                parts = tag.split("-")
+                if len(parts) >= 2:
+                    detected_category = parts[1]
+                break  # L5 已是最高级，无需继续
+
+        if detected_level is None:
+            for pat, _replacement in L4_PATTERNS:
+                if pat.search(val_str):
+                    detected_level = "L4"
+                    tag = _replacement.strip("[]")
+                    parts = tag.split("-")
+                    if len(parts) >= 2:
+                        detected_category = parts[1]
+                    break  # 已找到 L4
+
+        if detected_level == "L5":
+            return FieldClassification(
+                field_name=key,
+                level="L5",
+                security_tag="HIGH_RISK_MEDICAL_L5",
+                description="极高风险病史/诊断信息 (L5: 重度精神障碍/HIV/重大遗传缺陷)",
+                rule_matched="MEDICAL_L5_STRICT_RULE",
+            )
+        if detected_level == "L4":
+            return FieldClassification(
+                field_name=key,
+                level="L4",
+                security_tag="HIGH_RISK_MEDICAL_L4",
+                description="高风险病史/诊断信息 (L4: 恶性肿瘤/烈性传染病/重度衰竭)",
+                rule_matched="MEDICAL_L4_STRICT_RULE",
+            )
+
+        # 3. 其他普通临床与评估字段
         if key in ["chief_complaint", "past_history", "family_history", "allergic_history"]:
             return FieldClassification(
                 field_name=key,
@@ -124,12 +144,12 @@ class MedicalPrivacyPipeline:
         """根据字段敏感类型执行脱敏与剥离。"""
         val_str = str(val or "")
         
-        # 身份 PII 字段脱敏
+        # 身份 PII 字段脱敏：使用实际字段名调用 mask_value，确保 guess_field_type 正确推断
         if key in PII_FIELD_RULES:
             if key == "id_card_no":
-                return mask_value("id_card", val_str)
+                return mask_value("id_card_no", val_str)
             elif key == "name":
-                return mask_value("chinese_name", val_str)
+                return mask_value("name", val_str)
             elif key == "registered_address":
                 return mask_value("address", val_str)
             elif key in ["disability_cert_no", "medical_insurance_no"]:

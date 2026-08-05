@@ -154,3 +154,61 @@ class MedicalPrivacyPipeline:
 2. 包含 L4/L5 级诊断与病史的数据记录经 Pipeline 处理后，`sanitized_data` 中绝对不包含原始 L4/L5 敏感字符串。
 3. PII 字段（姓名、身份证、医保证、残疾证）脱敏后符合掩码规范。
 4. 双重输出（分级报告与脱敏数据）格式与结构完全符合 JSON 契约。
+5. 替换标签中不包含原始敏感词汇（如 HIV、乙肝等）。
+6. 批量身份证校验码 (GB 11643-1999) 100% 通过率。
+7. 混合 L4+L5 文本的完整剥离验证。
+8. `pipeline/masker.py` 与 `medical_pipeline/rules.py` 词库一致性验证。
+
+---
+
+## 5. 代码质量改进记录 (Code Quality Improvements)
+
+### 5.1 已修复的漏洞与缺陷
+
+| 编号 | 问题 | 修复内容 | 影响文件 |
+|---|---|---|---|
+| Q-1 | `rules.py` 中 `_compile_term_patterns` 是死代码，且用 `"L5" in str(terms_dict)` 判断级别不可靠 | 删除死代码 | `medical_pipeline/rules.py` |
+| Q-2 | `sanitize_field` 传入 `"chinese_name"` 但 `guess_field_type` 不识别 | 改用实际字段名 `"name"` | `medical_pipeline/pipeline.py` |
+| Q-3 | `_classify_field` 只返回首个匹配等级，可能遗漏混合风险 | 重写扫描逻辑，确保 L5 优先于 L4 | `medical_pipeline/pipeline.py` |
+| Q-4 | `pipeline/masker.py` 维护独立的 L4/L5 词库，与 `medical_pipeline/rules.py` 不同步 | 统一从 `medical_pipeline.rules` 导入 | `pipeline/masker.py` |
+| Q-5 | CSV 生成用 `utf-8-sig`（含 BOM），读取用 `utf-8`，首列名可能带 `\ufeff` | 统一默认 `utf-8-sig` 编码 | `pipeline/service.py` |
+| Q-6 | L5 替换标签 `[L5-HIV_AIDS-...]` 中包含原始敏感词 "HIV" | 引入抽象类别映射，替换为 `[L5-IMMUNODEFICIENCY-...]` | `medical_pipeline/rules.py` |
+| Q-7 | `masker.py` 中 L4/L5 剥离条件硬编码字段名，与分级结果脱钩 | 提取 `CLINICAL_TEXT_FIELDS` 常量，逻辑更清晰 | `pipeline/masker.py` |
+
+---
+
+## 6. 性病及 L4 级疾病脱敏方案与 3-Layer 智能切除演进
+
+### 6.1 现有脱敏机制 (规则与词表抽取)
+
+当前在 `medical_pipeline/rules.py` 与 `pipeline/masker.py` 中，对性病（梅毒、淋病、尖锐湿疣、生殖器疱疹、软下疳等）、恶性肿瘤及乙肝等 L4 级疾病采用以下治理路径：
+
+1. **特定词表与正则精准匹配 (Layer 1 Rule)**：在 `L4_TERMS_MAP` 中建立 `STD_VENEREAL` 专项高敏感字典（涵盖疾病全称、俗称、缩写及实验室检查指标如 `TPPA`、`RPR`、`苍白密螺旋体`）。
+2. **范畴化标签替换与强剥离**：将文本中匹配到的性病描述替换为抽象安全标签（如 `[L4-STD_VENEREAL-SENSITIVE-MASKED]`），或直接删除该字段/整段文本，确保输出数据不含任何原始高危词汇。
+
+### 6.2 引入 Small-NER 与 Local LLM 智能切除的优势分析
+
+传统基于 Layer 1 静态正则/词表的脱敏方式在复杂非结构化临床病历（如主诉、现病史、病程记录）中存在局限。**调用 Small-NER (Layer 2) 与 Local LLM (Layer 3) 直接智能切除/抹平关于性病及 L4 疾病的描述，效果显著更好**：
+
+```mermaid
+flowchart LR
+    Text[原始非结构化病历文本] --> L1[Layer 1: Rule Engine\n快速匹配已知硬编码病名]
+    Text --> L2[Layer 2: Small-NER Engine\n精准识别 DISEASE/STD 实体起止 Span]
+    Text --> L3[Layer 3: Local LLM / VLM\n理解上下文，智能抹平/重构病历]
+    L1 & L2 & L3 --> Redact[1. 范畴化标签遮蔽\n2. 无缝文本智能切除 (零痕迹)]
+```
+
+#### 1. 突破静态词表的局限性 (Beyond Static Dictionaries)
+医生在书写非结构化病历时，性病或高敏疾病往往采用隐晦描述、口语化表达或化验指标组合（如：“*患者自述外阴溃疡伴硬下疳，梅毒螺旋体特异抗体试验阳性*” 或 “*曾有不洁接触史，RPR 1:8 (+)*”）。静态词表难以穷举所有组合，而 **Small-NER (Layer 2)** 与 **Local LLM (Layer 3)** 拥有强大的上下文泛化与泛实体抽取能力，可精准抓取隐藏的性病相关实体。
+
+#### 2. Small-NER (Layer 2) 精准 Span 实体切除
+通过训练/微调针对医疗 ENTITY 的 Small-NER 引擎，能够准确识别性病及 L4 疾病实体的字符起始索引 `[start_idx, end_idx]`，直接在字符级别精准切除该实体，而无需将整段文字粗暴替换为 `[MASKED]`，最大程度保留了非敏感临床记录的可用性。
+
+#### 3. Local LLM / VLM (Layer 3) 上下文理解与流畅重构
+Local LLM (如 Qwen2-VL) 具备深层文本生成与指令遵循能力。通过 Prompt 指令：“*请重构以下病历，完全抹平/剔除其中涉及性病 (如梅毒/淋病)、传染病及高敏感病史的诊断与症状描写，保持其余非敏感临床诊断的自然通顺*”。LLM 能够智能切除性病段落并平滑连接上下文，实现高保真度与高合规性的完美平衡。
+
+### 6.3 3-Layer (Rule → NER → LLM) 协同治理最佳实践
+
+1. **Layer 1 (Rule)**：极低延迟与极低开销，兜底已知明确性病关键词及身份证/姓名等 PII 脱敏。
+2. **Layer 2 (Small-NER)**：毫秒级推断，识别非结构化临床病历中的病名/症状 Span 进行定点切除。
+3. **Layer 3 (Local LLM)**：在复合病历或复杂语义场景下触发，执行上下文重构与完全无缝切除。

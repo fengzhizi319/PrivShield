@@ -10,6 +10,7 @@ from privacy_local_agent.medical_pipeline.pipeline import (
     MedicalPrivacyPipeline,
     process_medical_dataset,
 )
+from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from generate_medical_data import gen_id_card, generate_dataset
@@ -98,7 +99,7 @@ def test_data1_csv_file_pipeline_execution() -> None:
     assert csv_path.exists()
     
     records = []
-    with open(csv_path, encoding="utf-8") as f:
+    with open(csv_path, encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
             records.append(row)
@@ -108,3 +109,98 @@ def test_data1_csv_file_pipeline_execution() -> None:
     assert res.summary["total_records"] == 20
     assert res.summary["l5_records_count"] > 0
     assert res.summary["l4_records_count"] > 0
+
+
+# === 增强测试：身份证批量校验、L4/L5 覆盖、图片病例、脱敏格式、替换标签泄露 ===
+
+
+def test_batch_id_card_checksum_validation() -> None:
+    """批量生成 50 个身份证号，全部必须通过 GB 11643-1999 MOD 11-2 校验。"""
+    weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+    checksum_map = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2']
+    for _ in range(50):
+        id_card = gen_id_card()
+        assert len(id_card) == 18, f"身份证号长度不为 18 位: {id_card}"
+        total = sum(int(id_card[i]) * weights[i] for i in range(17))
+        expected = checksum_map[total % 11]
+        assert id_card[-1].upper() == expected, f"校验码不匹配: {id_card}"
+
+
+def test_generated_data_contains_l4_and_l5_content() -> None:
+    """验证生成的数据中确实包含 L4 和 L5 级病史内容。
+    
+    使用固定种子保证可重复性，因为诊断与病史的组合是随机的。
+    """
+    import random
+    random.seed(2026)  # 固定种子，确保可重复
+    records = generate_dataset(20)
+    pipeline = MedicalPrivacyPipeline()
+    result = pipeline.process_records(records)
+    # 分级报告应包含 L4 和 L5 级记录
+    levels = {r["max_level"] for r in result.classification_report}
+    assert "L5" in levels, "生成数据中缺少 L5 级记录"
+    assert "L4" in levels, "生成数据中缺少 L4 级记录"
+
+
+def test_generated_data_contains_image_cases() -> None:
+    """验证生成数据中至少 3 条包含图片病例标记 (PACS)。"""
+    records = generate_dataset(20)
+    image_count = sum(1 for r in records if "PACS" in r.get("present_illness", ""))
+    assert image_count >= 3, f"图片病例数量不足: {image_count}"
+
+
+def test_sanitize_text_strips_all_l4_l5_terms() -> None:
+    """验证 sanitize_text 方法能剥离单条文本中的所有 L4/L5 术语。"""
+    pipeline = MedicalPrivacyPipeline()
+    # 混合 L5 (HIV) + L4 (恶性肿瘤) 的文本
+    mixed_text = "患者HIV抗体阳性，同时确诊为恶性肿瘤，建议进一步检查。"
+    sanitized = pipeline.sanitize_text(mixed_text)
+    assert "HIV" not in sanitized
+    assert "艾滋" not in sanitized
+    assert "恶性肿瘤" not in sanitized
+    assert "[L5-" in sanitized  # L5 替换标记存在
+    assert "[L4-" in sanitized  # L4 替换标记存在
+
+
+def test_replacement_tags_do_not_leak_sensitive_terms() -> None:
+    """验证 L4/L5 替换标签中不包含原始敏感词汇（如 HIV、乙肝等）。"""
+    leaked_terms = ["HIV", "艾滋", "精神分裂", "亨廷顿", "恶性肿瘤", "胃癌", "乙肝", "丙肝"]
+    for _pat, replacement in L5_PATTERNS + L4_PATTERNS:
+        for term in leaked_terms:
+            assert term not in replacement, (
+                f"替换标签 '{replacement}' 中泄露了敏感词 '{term}'"
+            )
+
+
+def test_pii_masking_format_id_card() -> None:
+    """验证身份证号脱敏后保留前 6 后 4，中间为 8 个 *。"""
+    records = [{"name": "张三", "id_card_no": "110101199003071234"}]
+    res = process_medical_dataset(records)
+    masked_id = res.sanitized_data[0]["id_card_no"]
+    assert masked_id.startswith("110101"), f"身份证前 6 位应保留: {masked_id}"
+    assert "********" in masked_id, f"身份证中间应为 8 个 *: {masked_id}"
+
+
+def test_pii_masking_format_name() -> None:
+    """验证姓名脱敏后首字保留、其余用 * 替代。"""
+    records = [{"name": "张三丰", "id_card_no": "110101199003071234"}]
+    res = process_medical_dataset(records)
+    masked_name = res.sanitized_data[0]["name"]
+    assert masked_name.startswith("张"), f"姓名首字应保留: {masked_name}"
+    assert "*" in masked_name, f"姓名中间应含 *: {masked_name}"
+    assert masked_name != "张三丰", "姓名不应为原始值"
+
+
+def test_empty_records_handling() -> None:
+    """验证空记录列表的处理不报错。"""
+    res = process_medical_dataset([])
+    assert res.summary["total_records"] == 0
+    assert len(res.classification_report) == 0
+    assert len(res.sanitized_data) == 0
+
+
+def test_unified_patterns_importable_from_pipeline_masker() -> None:
+    """验证 pipeline/masker.py 能正确导入统一的 L4/L5 词库。"""
+    from privacy_local_agent.pipeline.masker import L4_PATTERNS as MP_L4, L5_PATTERNS as MP_L5
+    assert len(MP_L4) == len(L4_PATTERNS)
+    assert len(MP_L5) == len(L5_PATTERNS)
