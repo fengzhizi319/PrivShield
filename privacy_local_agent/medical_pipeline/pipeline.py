@@ -38,26 +38,43 @@ class MedicalPipelineResult:
     summary: dict[str, Any]
 
 
+from privacy_local_agent.dynclassification import DynClassificationService
+
+
 class MedicalPrivacyPipeline:
     """医疗敏感数据全流程治理 Pipeline。
     
-    1. 动态分类分级：识别 27 个字段及临床文本中的 L1~L5 风险标识；
+    1. 动态分类分级：集成 dynclassification 3层漏斗 (Rule -> NER -> LLM) 识别 27 个字段及临床文本中的 L1~L5 风险标识；
     2. 身份与特高风险脱敏：抹平 PII 信息，强剥离 L4/L5 高风险病史词汇；
     3. 输出双结构数据：(1) 分级报告 (2) 合规脱敏数据。
     """
 
+    def __init__(self, dyn_service: DynClassificationService | None = None):
+        """初始化 Pipeline 引擎，挂载 DynClassificationService 统一分类能力。"""
+        self.dyn_service = dyn_service or DynClassificationService()
+
     def _classify_field(self, key: str, val: str) -> FieldClassification:
-        """单字段分类分级评估算法。
+        """单字段分类分级评估算法（优先调度 dynclassification 动态分类引擎）。
         
         算法流程：
         1. 类型安全转换：在 None 时置为空串，保留 0 和 False 等合法数据；
-        2. PII 身份规则拦截：若列名命中 PII 词库，根据 GB 11643 标准设定 ID Card 为 L4，其余为 L3；
-        3. 病史文本深度匹配：扫描 L5 (极高敏: HIV/重度精神障碍/遗传缺陷) 与 L4 (高敏: 肿瘤/性病/乙肝/衰竭) 词库；
-        4. 普通临床与评估字段映射：根据医疗标准规范赋予 L3 (主诉/病史) 与 L2 (健康评估/个人史)；
-        5. 默认 L1 兜底：无风险特征字段赋予通用 L1 级。
+        2. 调度 dynclassification 引擎评估该字段；
+        3. PII 身份规则拦截：若列名命中 PII 词库，根据 GB 11643 标准设定 ID Card 为 L4，其余为 L3；
+        4. 病史文本深度匹配：扫描 L5 (极高敏: HIV/重度精神障碍/遗传缺陷) 与 L4 (高敏: 肿瘤/性病/乙肝/衰竭) 词库；
+        5. 普通临床与评估字段映射：根据医疗标准规范赋予 L3 (主诉/病史) 与 L2 (健康评估/个人史)；
+        6. 综合 dynclassification 与医疗规则取最高敏等级。
         """
         val_str = "" if val is None else str(val)
         
+        # 先调度 dynclassification 动态引擎获取通用/领域分类结果
+        dyn_level: str | None = None
+        try:
+            dyn_resp = self.dyn_service.classify_field(key, val_str)
+            if dyn_resp and dyn_resp.field_result:
+                dyn_level = dyn_resp.field_result.final_level
+        except Exception:
+            dyn_level = None
+
         # 步骤 1: PII 身份字段检测与分级
         if key in PII_FIELD_RULES:
             level = "L4" if key == "id_card_no" else "L3"
@@ -93,6 +110,10 @@ class MedicalPrivacyPipeline:
                     if len(parts) >= 2:
                         detected_category = parts[1]
                     break  # 已找到 L4
+
+        # 融合 dynclassification 动态分类引擎的定级结果 (如 3-Layer 漏斗识别的高敏词汇)
+        if detected_level is None and dyn_level in ["L4", "L5"]:
+            detected_level = dyn_level
 
         if detected_level == "L5":
             return FieldClassification(
