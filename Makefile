@@ -150,14 +150,29 @@ dev-go:
 dev-python:
 	./console/scripts/dev-start.sh
 
+dev-all:
+	./console/scripts/dev-start-all.sh
+
+dev-go-mtls:
+	./console/scripts/dev-start-go-mtls.sh
+
 prod-go:
 	./console/scripts/prod-start-go.sh
 
 prod-python:
 	./console/scripts/prod-start.sh
 
+prod-all:
+	./console/scripts/prod-start-all.sh
+
+prod-go-mtls:
+	./console/scripts/prod-start-go-mtls.sh
+
 stop:
 	./console/scripts/dev-stop.sh
+
+prod-stop:
+	./console/scripts/prod-stop.sh
 
 # ── Other ────────────────────────────────────────────────────
 

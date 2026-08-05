@@ -335,8 +335,11 @@ Address these before any hardened production deployment.
 | Build ml image | `make docker-ml` |
 | Run Dev Console (Go + Vite HMR) | `./console/scripts/dev-start-go.sh` |
 | Run Dev Console (Python + Vite HMR) | `./console/scripts/dev-start.sh` |
+| Run Dev Console (Dual Backend + Vite) | `./console/scripts/dev-start-all.sh` |
+| Run Dev Console (Go mTLS + Vite) | `./console/scripts/dev-start-go-mtls.sh` |
 | Run Prod Console (Go + Static) | `./console/scripts/prod-start-go.sh` |
 | Run Prod Console (Python + Static) | `./console/scripts/prod-start.sh` |
+| Run Prod Console (Dual Backend + Static) | `./console/scripts/prod-start-all.sh` |
 | Stop Dev Console | `./console/scripts/dev-stop.sh` |
 | Stop Prod Console | `./console/scripts/prod-stop.sh` |
 | Run REST + gRPC | `python -m privacy_local_agent.server` |
