@@ -201,3 +201,55 @@ class TestQwen2VLClassifier:
         classifier = Qwen2VLClassifier()
         device = classifier._select_device(mock_torch)
         assert device in ("cpu", "mps")
+
+    def test_classify_with_single_pass_sanitize(self):
+        """测试 LlmAdapter.classify 开启 sanitize=True 时的单次融合脱敏转发出参。"""
+        adapter = LlmAdapter()
+        mock_classifier = MagicMock()
+        mock_classifier.classify.return_value = {
+            "final_level": "L4",
+            "confidence": 0.95,
+            "reasoning": "识别为一期梅毒与RPR阳性描述",
+            "sanitized_text": "患者自述外阴溃疡，已给予抗感染治疗",
+        }
+
+        adapter._classifier = mock_classifier
+        adapter._initialized = True
+        adapter._available = True
+
+        result = adapter.classify("患者自述外阴溃疡，RPR 1:16阳性", "L4", 0.8, sanitize=True)
+        assert result is not None
+        assert result["final_level"] == "L4"
+        assert "sanitized_text" in result
+        assert "RPR" not in result["sanitized_text"]
+        mock_classifier.classify.assert_called_once()
+        assert mock_classifier.classify.call_args.kwargs.get("sanitize") is True
+
+    def test_dynclassification_service_batch_100_records(self):
+        """测试 DynClassificationService 对 100 条扩充模拟记录执行批量分类评测。"""
+        import csv
+        from pathlib import Path
+        from privacy_local_agent.dynclassification import DynClassificationService
+
+        csv_path = Path("data/data1.csv")
+        if not csv_path.exists():
+            pytest.skip("data/data1.csv 不存在，跳过批量评测")
+
+        service = DynClassificationService()
+        records = []
+        with open(csv_path, encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                records.append(row)
+
+        assert len(records) == 100
+        # 对 100 条数据执行批量分类评测 (指定 jrt0197 标准)
+        high_risk_count = 0
+        for idx, rec in enumerate(records):
+            resp = service.classify_record(rec, record_index=idx, standard="jrt0197")
+            assert resp.record_result is not None
+            if resp.record_result.final_level in ["L3", "L4", "L5", "C3", "C4"]:
+                high_risk_count += 1
+
+        # 扩充数据集中包含 30% L4 与 20% L5，断言识别出的高敏记录大于 0
+        assert high_risk_count > 0
