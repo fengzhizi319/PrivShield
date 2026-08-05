@@ -1,401 +1,142 @@
-# 医疗数据分类分级与脱敏流水线设计方案
+# 医疗数据分类分级与脱敏流水线设计方案 (Medical Privacy Pipeline Design)
 
-> Medical Data Classification & Masking Pipeline Design
-
-## 1. 需求概述
-
-构建一条端到端的 **医疗数据分类分级 + 脱敏流水线**，覆盖数据生成、分类分级、脱敏处理、全栈测试控制台集成：
-
-| 阶段 | 目标 | 关键产出 |
-|---|---|---|
-| ① 数据生成 | 生成 20 条逼真医疗记录 CSV | `data/data1.csv` |
-| ② 分类分级 | 调用 `dynclassification` 对每行/每字段分级 | 分级结果（含 L1-L5 等级） |
-| ③ 脱敏处理 | 调用 `privacy/masking` 消除 L4/L5 数据 | 脱敏后 CSV + 分级报告 |
-| ④ 全栈集成 | Python 后端 + Go 后端 + React 前端联调 | 控制台可视化测试面板 |
+> **文档版本**: 1.1 (已实操落盘与全栈贯通)  
+> **关联文档**: [`docs/pipeline/prd.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/pipeline/prd.md)  
+> **关键组件**: `scripts/generate_medical_data.py`, `privacy_local_agent/pipeline`, `privacy_local_agent/medical_pipeline`, `console/backend`, `console/backend-go`, `console/web`
 
 ---
 
-## 2. 数据模型设计
+## 1. 需求与架构概述
 
-### 2.1 CSV 字段定义（data1.csv）
+构建端到端的**医疗数据分类分级 (3-Layer) + 敏感脱敏与 L4/L5 剥离流水线**，覆盖数据仿真生成、算法编排、Agent 核心服务、双后端代理及前端测试控制台：
 
-共 28 个字段，分为 5 个语义组：
+```mermaid
+flowchart TD
+    subgraph DataGen [1. 数据生成层]
+        SG[scripts/generate_medical_data.py] -->|GB 11643-1999 + L4/L5 病史| CSV[data/data1.csv]
+    end
 
-| 语义组 | 字段（中/英） | 预期敏感度 |
-|---|---|---|
-| **基本信息** | 姓名/name, 性别/gender, 年龄/age | L3-L4 |
-| **医疗信息** | 诊断名称/diagnosis_name, 主诉/chief_complaint, 现病史/present_illness, 既往史/past_history, 个人史/personal_history, 是否吸烟/is_smoking, 吸烟时长/smoking_duration, 家族史/family_history, 过敏史/allergic_history, 科室/department | L3-L5 |
-| **体征信息** | 身高/height, 体重/weight | L2-L3 |
-| **残疾评估** | 残疾类别/disability_category, 残疾等级/disability_level, 评估类型/assess_type_name, 评估结果/assess_result_name, 评估分数/assess_score, 评估时间/assess_time | L3-L4 |
-| **病程与身份** | 病程记录/progress_note, 病程记录时间/progress_note_time, 户口地址/registered_address, 身份证号/id_card_no, 残疾证号/disability_cert_no, 医保证号/medical_insurance_no | L4-L5 |
+    subgraph CorePipeline [2. Agent 核心流水线]
+        CSV --> PS[PipelineService / MedicalPrivacyPipeline]
+        PS -->|分类分级| DC[DynClassificationService 3-Layer Funnel]
+        DC -->|分级元数据| CR[RecordClassificationDetail / Report]
+        PS -->|脱敏与剥离| MS[privacy/masking + L4/L5 Redactor]
+        MS -->|PII 掩码 + L4/L5 词汇剥离| SD[Masked Records Sanitized Data]
+    end
 
-### 2.2 数据生成规则
+    subgraph AgentAPI [3. Agent REST 服务]
+        PS --> R1[POST /v1/pipeline/process_records]
+        PS --> R2[POST /v1/pipeline/process_csv]
+        PS --> R3[POST /v1/medical/process]
+    end
 
-| 规则 | 说明 |
-|---|---|
-| 身份证号 | 符合 GB 11643-1999 标准，18 位，末位校验码正确 |
-| 残疾证号 | 18-20 位，含地区码 + 残疾类别码 + 序号 |
-| 医保证号 | 模拟社保号格式，地区前缀 + 序号 |
-| 姓名 | 从常见姓氏 + 名字库随机组合 |
-| 地址 | 省/市/区/街道 四级真实地名组合 |
-| 病史 | 包含 L4（如详细手术记录）和 L5（如基因检测结果、精神疾病史）级内容 |
-| 病例类型 | 20 条中约 3-4 条为图片病例（生成 base64 占位或引用路径），其余为文字病例 |
-| 时间字段 | 近 2 年内合理随机日期 |
+    subgraph BackendProxy [4. 双控制台代理后端]
+        R1 & R3 --> PyB[Python Backend: /api/pipeline/process & /api/medical_pipeline]
+        R1 & R3 --> GoB[Go Backend: /api/pipeline/process & /api/medical_pipeline]
+    end
+
+    subgraph WebUI [5. Web 前端控制台]
+        PyB & GoB --> UI[MedicalPipelinePanel.tsx]
+    end
+```
 
 ---
 
-## 3. 架构设计
+## 2. 字段规范与数据生成
 
-### 3.1 整体流水线
+### 2.1 字段定义 (data1.csv)
 
-```
-┌──────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
-│  data1.csv   │────▶│  Classification       │────▶│  Masking Pipeline   │
-│  (原始数据)   │     │  (DynClassification)  │     │  (privacy/masking)  │
-└──────────────┘     └──────────┬───────────┘     └──────────┬──────────┘
-                                │                             │
-                    ┌───────────▼───────────┐    ┌───────────▼───────────┐
-                    │  分级结果              │    │  脱敏后数据            │
-                    │  classification_      │    │  masked_data1.csv     │
-                    │  report.json          │    │                       │
-                    └───────────────────────┘    └───────────────────────┘
-```
+固定 27 个标准医疗与个人身份字段，覆盖 5 个语义组：
 
-### 3.2 模块划分
+| 语义组 | 字段列表 (snake_case) | 敏感等级 | 治理策略 |
+|---|---|---|---|
+| **身份 PII** | `name`, `id_card_no`, `registered_address`, `disability_cert_no`, `medical_insurance_no` | **L3-L4** | PII 自动感知的格式保频掩码 |
+| **人口学信息** | `gender`, `age` | **L1** | 保持原样 |
+| **临床医疗信息** | `diagnosis_name`, `chief_complaint`, `present_illness`, `past_history`, `personal_history`, `is_smoking`, `smoking_duration`, `family_history`, `allergic_history`, `department` | **L3-L5** | **L4/L5 强剥离** (替换为 `[L5-IMMUNODEFICIENCY-SENSITIVE-MASKED]` 等范畴词) |
+| **体征指标** | `height`, `weight` | **L1-L2** | 保持原样 |
+| **残疾评估** | `disability_category`, `disability_level`, `assess_type_name`, `assess_result_name`, `assess_score`, `assess_time` | **L2-L3** | 保持原样 / 评估信息规约 |
+| **病程与图文** | `progress_note`, `progress_note_time` | **L4-L5** | 含图文病例引用 (如 `[DICOM-CT: /radiology/chest_ct_01.dcm]`)，剥离 L4/L5 诊断 |
 
-```
+### 2.2 仿真生成规则 (`scripts/generate_medical_data.py`)
+
+- **身份证号校验**: 遵循 GB 11643-1999 (ISO 7064:1983.MOD 11-2) 模 11-2 算法，生成 100% 可通过合法性校验的 18 位身份证。
+- **高敏场景覆盖**:
+  - **L4 场景**: 恶性肿瘤 (肺腺癌/胃癌)、乙型肝炎、严重冠心病。
+  - **L5 场景**: HIV/艾滋病、重度精神分裂症、遗传性亨廷顿舞蹈病。
+- **图文病历标记**: 包含文字描述及 PACS/DICOM/病理切片图的图片引用路径。
+- **CLI 参数**: 支持 `--output` (默认 `data/data1.csv`), `--count` (默认 20), `--seed` (默认 2026)。
+
+---
+
+## 3. Agent 模块与代码实现结构
+
+### 3.1 代码文件分布
+
+```text
 privacy_local_agent/
-├── pipeline/                      # 新增：医疗数据流水线模块
-│   ├── __init__.py                # 公开 API 导出
-│   ├── models.py                  # Pydantic 请求/响应模型
-│   ├── classifier.py              # 分类分级封装（调用 dynclassification）
-│   ├── masker.py                  # 脱敏处理封装（调用 privacy/masking）
-│   ├── service.py                 # PipelineService 编排器
-│   └── router.py                  # FastAPI REST 路由
+├── pipeline/
+│   ├── __init__.py           # 导出 PipelineService, PipelineResult, classify_records, mask_records, router
+│   ├── models.py             # Pydantic 契约模型 (PipelineResult, ClassificationSummary, etc.)
+│   ├── classifier.py         # 封装 DynClassificationService 三层分级
+│   ├── masker.py             # 封装 privacy/masking 脱敏与 L4/L5 强剥离
+│   ├── service.py            # PipelineService 编排器
+│   └── router.py             # REST 路由 /v1/pipeline
+├── medical_pipeline/
+│   ├── __init__.py           # 医疗专属模块导出
+│   ├── rules.py              # 医疗敏感词汇正则与规则库
+│   ├── pipeline.py           # MedicalPrivacyPipeline 实现
+│   └── samples/data1.csv     # 仿真数据集备份
+└── main.py                   # 挂载 pipeline.router 与 medical.router
 ```
 
-### 3.3 核心类设计
+### 3.2 关键类与 API 契约
 
-#### 3.3.1 PipelineService
-
-```python
-class PipelineService:
-    """医疗数据分类分级 + 脱敏流水线编排器。"""
-
-    def __init__(
-        self,
-        rules_dir: str | Path | None = None,
-        standard: str = "jrt0197",
-        profile_path: str | Path | None = None,
-    ): ...
-
-    async def process_csv(
-        self,
-        csv_path: Path,
-        *,
-        standard: str | None = None,
-        mask_l4: bool = True,
-        mask_l5: bool = True,
-    ) -> PipelineResult: ...
-
-    async def process_records(
-        self,
-        records: list[dict],
-        *,
-        standard: str | None = None,
-    ) -> PipelineResult: ...
-```
-
-#### 3.3.2 PipelineResult
+#### 1. `PipelineResult` (统一输出结构)
 
 ```python
-class FieldClassificationDetail(BaseModel):
-    """单字段分级明细。"""
-    field_name: str
-    field_value: str
-    sensitivity_level: str          # L1-L5
-    category: str | None = None
-    confidence: float = 1.0
-    engine_layer: str = "L1_RULE"
-    reasoning: str | None = None
-
-class RecordClassificationDetail(BaseModel):
-    """单记录分级明细。"""
-    record_index: int
-    final_level: str
-    field_details: list[FieldClassificationDetail]
-
 class PipelineResult(BaseModel):
-    """流水线统一输出。"""
-    # 分级数据
-    classification_summary: ClassificationSummary
-    record_details: list[RecordClassificationDetail]
-
-    # 脱敏数据
-    masked_records: list[dict]
-    masking_details: list[MaskingDetail]
-
-class ClassificationSummary(BaseModel):
-    """分级汇总统计。"""
-    total_records: int
-    level_distribution: dict[str, int]     # {"L1": 5, "L2": 8, "L3": 3, "L4": 3, "L5": 1}
-    high_risk_fields: list[str]             # L4/L5 字段名列表
-    standard_id: str
-    duration_ms: float
-
-class MaskingDetail(BaseModel):
-    """脱敏操作明细。"""
-    record_index: int
-    field_name: str
-    original_level: str
-    masking_type: str               # FieldType: ID_CARD, NAME, etc.
-    original_value: str
-    masked_value: str
+    classification_summary: ClassificationSummary  # 分级汇总 (total_records, level_distribution, high_risk_fields, duration_ms)
+    record_details: list[RecordClassificationDetail] # 分级明细 (record_index, final_level, field_details)
+    masked_records: list[dict[str, Any]]             # 脱敏清洗后的记录数据 (零 L4/L5 原始高危词汇)
+    masking_details: list[MaskingDetail]             # 脱敏操作审计明细
 ```
 
-### 3.4 处理流程
+#### 2. REST 端点定义
 
-```
-process_csv(csv_path)
-    │
-    ├─ 1. 读取 CSV → list[dict]
-    │
-    ├─ 2. 逐条调用 DynClassificationService.classify_record()
-    │     └─ 对每个字段获取 FieldClassificationResult
-    │
-    ├─ 3. 汇总分级结果，统计 level_distribution
-    │
-    ├─ 4. 识别 L4/L5 字段，构建脱敏上下文
-    │     └─ 根据字段名自动推断 FieldType（id_card→ID_CARD, name→NAME, ...）
-    │
-    ├─ 5. 调用 masking.mask_record() / mask_value() 对 L4/L5 字段脱敏
-    │
-    └─ 6. 组装 PipelineResult 返回
-```
+- `POST /v1/pipeline/process_records`: 处理 JSON 记录数组，返回 `PipelineResult`。
+- `POST /v1/pipeline/process_csv`: 接受 `multipart/form-data` CSV 文件上传，返回 `PipelineResult`。
+- `POST /v1/medical/process`: 医疗特定流程端点，返回 `classification_report` 与 `sanitized_data`。
 
 ---
 
-## 4. 数据生成脚本设计
+## 4. 双后端代理与全栈集成
 
-### 4.1 脚本位置与接口
+### 4.1 Python 后端 (`console/backend`)
+- 扩展 `console/backend/app/main.py`:
+  - `POST /api/pipeline/process`
+  - `POST /api/medical_pipeline`
+- 若请求体未提供 `records`，自动读取 `console/backend/samples/data1.csv`。
 
-- **路径**: `scripts/generate_medical_data.py`
-- **输出**: `data/data1.csv`
-- **运行**: `python scripts/generate_medical_data.py`
+### 4.2 Go 后端 (`console/backend-go`)
+- 扩展 `console/backend-go/internal/handlers/handlers.go`:
+  - `POST /api/pipeline/process`
+  - `POST /api/medical_pipeline`
+- 若请求体未提供 `records`，自动读取 `console/backend-go/internal/samples/data1.csv` 并在 HTTP 代理层透传到 Agent。
 
-### 4.2 数据生成策略
-
-| 字段 | 生成策略 |
-|---|---|
-| 身份证号 | 地区码(6位) + 生日(8位) + 顺序码(3位) + 校验码(1位)，校验算法符合 MOD 11-2 |
-| 姓名 | 常见姓氏(李/王/张/刘/陈...) + 双字名库随机组合 |
-| 地址 | 省市区三级真实行政区划 + 随机街道/路名/门牌号 |
-| 残疾证号 | 地区码(6位) + 残疾类别(2位) + 等级(1位) + 序号(4位) + 校验(1位) |
-| 医保证号 | 地区码(6位) + "01" + 序号(8位) |
-| 现病史/既往史 | 从模板库随机组合，部分包含 L4(手术细节)/L5(基因检测/精神疾病) 内容 |
-| 图片病例 | 3-4 条记录标记 `has_image=true`，生成占位图片描述字段 |
-| 诊断名称 | ICD-10 常见诊断编码映射 |
-| 科室 | 与诊断名称关联的科室列表 |
-| 评估分数 | 根据残疾等级生成合理分数区间 |
+### 4.3 Web 前端 (`console/web`)
+- 组件: `MedicalPipelinePanel.tsx`
+- 支持一键触发 `data1.csv` 治理，双 Tab 展示：
+  1. **分类分级报告 (Classification Report)**: 记录级与字段级 L1~L5 等级 Badge 展示。
+  2. **脱敏清洗数据 (Sanitized Data)**: 展示符合 100% 剥离要求的安全表格。
 
 ---
 
-## 5. REST API 设计
+## 5. 单元测试与验证清单
 
-### 5.1 新增路由
-
-前缀: `/v1/pipeline`
-
-| 端点 | 方法 | 说明 |
+| 测试模块 | 覆盖功能 | 命令 |
 |---|---|---|
-| `/v1/pipeline/process_csv` | POST | 上传 CSV 文件，执行分类分级 + 脱敏 |
-| `/v1/pipeline/process_records` | POST | 传入 JSON 记录数组，执行流水线 |
-
-### 5.2 请求/响应示例
-
-**process_csv 请求**: `multipart/form-data`
-- `file`: CSV 文件
-- `standard`: 分类标准（可选，默认 jrt0197）
-
-**process_csv 响应**:
-```json
-{
-  "classification_summary": {
-    "total_records": 20,
-    "level_distribution": {"L1": 2, "L2": 5, "L3": 6, "L4": 5, "L5": 2},
-    "high_risk_fields": ["id_card_no", "name", "registered_address", "medical_insurance_no"],
-    "standard_id": "jrt0197",
-    "duration_ms": 156.3
-  },
-  "record_details": [...],
-  "masked_records": [...],
-  "masking_details": [...]
-}
-```
-
----
-
-## 6. 全栈集成设计
-
-### 6.1 文件部署
-
-```
-data/
-└── data1.csv                          # 预生成的医疗数据
-
-console/
-├── backend/
-│   └── app/
-│       └── data/                      # Python 后端数据目录
-│           └── data1.csv              # 从项目 data/ 复制或符号链接
-├── backend-go/
-│   └── data/                          # Go 后端数据目录
-│       └── data1.csv                  # 从项目 data/ 复制或符号链接
-```
-
-### 6.2 Python 后端新增端点
-
-路径: `console/backend/app/main.py`
-
-| 端点 | 方法 | 说明 |
-|---|---|---|
-| `POST /api/pipeline/process` | POST | 读取后端 data1.csv，调用 agent `/v1/pipeline/process_records`，返回分级 + 脱敏结果 |
-| `POST /api/pipeline/upload` | POST | 上传自定义 CSV，执行流水线 |
-
-实现方式：复用现有 `ProxyRequest` 代理模式，转发到 agent 的 `/v1/pipeline/process_records`。
-
-### 6.3 Go 后端新增端点
-
-路径: `console/backend-go/internal/handlers/handlers.go`
-
-| 端点 | 方法 | 说明 |
-|---|---|---|
-| `POST /api/pipeline/process` | POST | 读取 data1.csv，通过 gRPC/REST 调用 agent 流水线 |
-| `POST /api/pipeline/upload` | POST | 上传 CSV 并处理 |
-
-实现方式：
-1. 读取 `data/data1.csv` 解析为 JSON 记录数组
-2. 通过 `agent.Client` 调用 agent 的 `/v1/pipeline/process_records`
-3. 返回统一格式响应
-
-### 6.4 前端新增面板
-
-新增组件: `console/web/src/components/MedicalPipelinePanel.tsx`
-
-功能区域：
-1. **操作区**: 「执行 data1.csv 分级脱敏」按钮 + 「上传自定义 CSV」按钮
-2. **分级结果区**:
-   - 汇总卡片：总记录数、各级别分布饼图、高风险字段列表
-   - 明细表格：每条记录每字段的分级结果（颜色编码 L1-L5）
-3. **脱敏结果区**:
-   - 脱敏后数据表格（可切换原始值/脱敏值对比视图）
-   - 脱敏操作日志（哪些字段、从什么级别、做了什么脱敏）
-4. **导出区**: 导出分级报告 JSON + 脱敏后 CSV
-
-国际化: 新增 `zh` / `en` 翻译条目于 `console/web/src/i18n/`
-
----
-
-## 7. 测试设计
-
-### 7.1 单元测试 (`tests/test_pipeline.py`)
-
-| 测试用例 | 验证内容 |
-|---|---|
-| `test_generate_medical_data` | CSV 生成：行数=20、字段完整、身份证校验正确 |
-| `test_pipeline_process_records` | 流水线处理 20 条记录，输出包含分级 + 脱敏两部分 |
-| `test_classification_levels` | 分级结果包含 L1-L5 各级别，L4/L5 字段被正确识别 |
-| `test_masking_removes_l4_l5` | 脱敏后数据不含原始 L4/L5 值（姓名、身份证、地址等） |
-| `test_id_card_masking` | 身份证号脱敏格式正确（保留前3后4） |
-| `test_name_masking` | 姓名脱敏格式正确 |
-| `test_address_masking` | 地址脱敏格式正确 |
-| `test_pipeline_result_model` | PipelineResult 序列化/反序列化正确 |
-| `test_empty_records` | 空记录输入不报错，返回空结果 |
-| `test_single_record` | 单条记录正确处理 |
-
-### 7.2 数据生成测试 (`tests/test_generate_medical_data.py`)
-
-| 测试用例 | 验证内容 |
-|---|---|
-| `test_csv_generation` | 脚本可执行，输出文件存在 |
-| `test_row_count` | 生成 20 行数据 |
-| `test_id_card_checksum` | 所有身份证号校验码正确 |
-| `test_required_fields` | 所有必填字段非空 |
-| `test_medical_content` | 病史中包含 L4/L5 级内容 |
-
-### 7.3 集成测试
-
-| 测试用例 | 验证内容 |
-|---|---|
-| `test_rest_pipeline_endpoint` | REST `/v1/pipeline/process_records` 端到端 |
-| `test_python_backend_pipeline` | Python 后端 `/api/pipeline/process` 联调 |
-| `test_go_backend_pipeline` | Go 后端 `/api/pipeline/process` 联调 |
-
----
-
-## 8. 文件清单
-
-| 操作 | 路径 | 说明 |
-|---|---|---|
-| 新增 | `docs/pipeline/design.md` | 本文档 |
-| 新增 | `docs/pipeline/prd.md` | 需求文档（引用本文） |
-| 新增 | `scripts/generate_medical_data.py` | 医疗数据生成脚本 |
-| 新增 | `data/data1.csv` | 生成的 CSV 数据 |
-| 新增 | `privacy_local_agent/pipeline/__init__.py` | 模块入口 |
-| 新增 | `privacy_local_agent/pipeline/models.py` | 数据模型 |
-| 新增 | `privacy_local_agent/pipeline/classifier.py` | 分类分级封装 |
-| 新增 | `privacy_local_agent/pipeline/masker.py` | 脱敏处理封装 |
-| 新增 | `privacy_local_agent/pipeline/service.py` | PipelineService 编排 |
-| 新增 | `privacy_local_agent/pipeline/router.py` | REST 路由 |
-| 修改 | `privacy_local_agent/main.py` | 挂载 pipeline 路由 |
-| 新增 | `tests/test_pipeline.py` | 流水线单元测试 |
-| 新增 | `tests/test_generate_medical_data.py` | 数据生成测试 |
-| 修改 | `console/backend/app/main.py` | 新增 pipeline 代理端点 |
-| 修改 | `console/backend-go/internal/handlers/handlers.go` | 新增 pipeline 端点 |
-| 修改 | `console/backend-go/internal/models/models.go` | 新增 pipeline 数据模型 |
-| 新增 | `console/web/src/components/MedicalPipelinePanel.tsx` | 前端面板 |
-| 修改 | `console/web/src/App.tsx` | 注册新面板 |
-| 修改 | `console/web/src/api/client.ts` | 新增 API 调用 |
-| 修改 | `console/web/src/types/api.ts` | 新增类型定义 |
-| 修改 | `console/web/src/i18n/zh.ts` | 中文翻译 |
-| 修改 | `console/web/src/i18n/en.ts` | 英文翻译 |
-
----
-
-## 9. 实施顺序
-
-```
-Phase 1: 数据层
-  ├─ 1a. scripts/generate_medical_data.py
-  ├─ 1b. 生成 data/data1.csv
-  └─ 1c. tests/test_generate_medical_data.py
-
-Phase 2: 核心流水线
-  ├─ 2a. privacy_local_agent/pipeline/ 全部模块
-  ├─ 2b. 挂载路由到 main.py
-  └─ 2c. tests/test_pipeline.py
-
-Phase 3: 后端集成
-  ├─ 3a. console/backend/ Python 端点
-  ├─ 3b. console/backend-go/ Go 端点
-  └─ 3c. 复制 data1.csv 到后端目录
-
-Phase 4: 前端集成
-  ├─ 4a. MedicalPipelinePanel.tsx
-  ├─ 4b. API client + 类型定义
-  ├─ 4c. 国际化
-  └─ 4d. App.tsx 注册
-```
-
----
-
-## 10. 关键设计决策
-
-| 决策 | 选择 | 理由 |
-|---|---|---|
-| 新模块位置 | `privacy_local_agent/pipeline/` | 独立于现有 `privacy/` 和 `dynclassification/`，避免循环依赖 |
-| 分类调用方式 | 封装 `DynClassificationService` | 复用已有三层漏斗能力，不重复实现 |
-| 脱敏调用方式 | 封装 `masking.mask_record()` | 利用字段名推断 + 已有脱敏策略 |
-| CSV 存放位置 | `data/` 项目根目录 | 独立数据目录，后端通过复制或符号链接获取 |
-| 前端面板 | 独立组件 `MedicalPipelinePanel` | 不影响现有面板，可独立演进 |
-| 图片病例处理 | 文字描述 + base64 占位 | 避免依赖真实图片资源，测试可控 |
+| `tests/test_pipeline.py` | `PipelineService` 分类、脱敏、CSV 解析及 REST 端点 | `PYTHONPATH=. pytest tests/test_pipeline.py -v` |
+| `tests/test_medical_pipeline.py` | GB 11643-1999 校验、L4/L5 泄漏测试、双输出结构 | `PYTHONPATH=. pytest tests/test_medical_pipeline.py -v` |
+| Python 后端测试 | `/api/pipeline/process` 与 `/api/medical_pipeline` | `pytest console/backend/tests -v` |
+| Go 后端测试 | `/api/pipeline/process` 与 `/api/medical_pipeline` | `go test -v ./...` (在 `console/backend-go` 下) |
+| 前端构建测试 | TypeScript 类型检查与 Vite 编译 | `corepack pnpm build` (在 `console/web` 下) |

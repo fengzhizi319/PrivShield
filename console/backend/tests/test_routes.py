@@ -204,3 +204,17 @@ def test_medical_pipeline_route(client: TestClient, mock_agent_client: AsyncMock
     assert response.status_code == 200
     mock_agent_client.assert_called_once()
 
+
+def test_pipeline_process_route(client: TestClient, mock_agent_client: AsyncMock) -> None:
+    """测试 /api/pipeline/process 转发到 agent /v1/pipeline/process_records。"""
+    mock_agent_client.return_value = {
+        "classification_summary": {"total_records": 0},
+        "record_details": [],
+        "masked_records": [],
+        "masking_details": [],
+    }
+
+    response = client.post("/api/pipeline/process", json={"records": []})
+    assert response.status_code == 200
+    mock_agent_client.assert_called()
+

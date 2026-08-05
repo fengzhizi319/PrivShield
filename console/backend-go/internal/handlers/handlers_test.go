@@ -976,3 +976,20 @@ func TestMedicalPipelineHandler(t *testing.T) {
 		t.Fatalf("expected non-zero HTTP response")
 	}
 }
+
+// TestPipelineProcessHandler 验证通用分类分级与脱敏流水线接口 /api/pipeline/process。
+func TestPipelineProcessHandler(t *testing.T) {
+	grpcSrv := &testPrivacyServer{}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/pipeline/process", "application/json", strings.NewReader(`{"records":[]}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/process failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 0 {
+		t.Fatalf("expected non-zero HTTP response")
+	}
+}

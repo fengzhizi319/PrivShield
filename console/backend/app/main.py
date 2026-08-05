@@ -890,6 +890,30 @@ async def medical_pipeline(req: dict[str, Any]):
     )
 
 
+@app.post("/api/pipeline/process")
+async def pipeline_process(req: dict[str, Any]):
+    """通用分类分级与脱敏流水线代理端点。"""
+    records = req.get("records")
+    if not records:
+        import csv
+        sample_path = Path(__file__).resolve().parent.parent / "samples" / "data1.csv"
+        records = []
+        if sample_path.exists():
+            with open(sample_path, encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                records = list(reader)
+    return await agent_client.request(
+        method="POST",
+        path="/v1/pipeline/process_records",
+        body={
+            "records": records,
+            "standard": req.get("standard", "jrt0197"),
+            "mask_l4": req.get("mask_l4", True),
+            "mask_l5": req.get("mask_l5", True),
+        },
+    )
+
+
 # 静态 SPA 托管：把构建好的前端挂载到根路径。
 # 采用“/assets 静态目录 + 其余路径回退 index.html”的经典 SPA 方案：
 #   - ``/assets/*`` 直接返回带哈希的 JS/CSS 等构建产物（强缓存友好）；

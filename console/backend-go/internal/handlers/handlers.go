@@ -95,6 +95,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.POST("/api/lb_test", s.LbTest)
 	r.POST("/api/concurrency_test", s.ConcurrencyTest)
 	r.POST("/api/medical_pipeline", s.MedicalPipeline)
+	r.POST("/api/pipeline/process", s.PipelineProcess)
 	s.registerStatic(r)
 }
 
@@ -1104,6 +1105,58 @@ func (s *Server) MedicalPipeline(c *gin.Context) {
 		Path:   "/v1/medical/process",
 	}
 	reqBytes, _ := json.Marshal(map[string]any{"records": records})
+	proxyReq.Body = reqBytes
+
+	s.proxyRest(c, start, proxyReq)
+}
+
+// PipelineProcess 通用分类分级与脱敏流水线代理端点。
+func (s *Server) PipelineProcess(c *gin.Context) {
+	var body struct {
+		Records  []map[string]string `json:"records"`
+		Standard string              `json:"standard"`
+		MaskL4   *bool               `json:"mask_l4"`
+		MaskL5   *bool               `json:"mask_l5"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
+	records := body.Records
+	if len(records) == 0 {
+		samplePath := filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", "data1.csv")
+		if _, err := os.Stat(samplePath); err != nil {
+			samplePath = "internal/samples/data1.csv"
+		}
+		if data, err := os.ReadFile(samplePath); err == nil {
+			if parsed, _, err := fileparse.ParseCSV(data); err == nil && len(parsed) > 0 {
+				records = parsed
+			}
+		}
+	}
+
+	standard := body.Standard
+	if standard == "" {
+		standard = "jrt0197"
+	}
+	maskL4 := true
+	if body.MaskL4 != nil {
+		maskL4 = *body.MaskL4
+	}
+	maskL5 := true
+	if body.MaskL5 != nil {
+		maskL5 = *body.MaskL5
+	}
+
+	start := time.Now()
+	proxyReq := models.ProxyRequest{
+		Method: "POST",
+		Path:   "/v1/pipeline/process_records",
+	}
+	reqBytes, _ := json.Marshal(map[string]any{
+		"records":  records,
+		"standard": standard,
+		"mask_l4":  maskL4,
+		"mask_l5":  maskL5,
+	})
 	proxyReq.Body = reqBytes
 
 	s.proxyRest(c, start, proxyReq)

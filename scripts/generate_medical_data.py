@@ -397,7 +397,11 @@ def main():
     parser = argparse.ArgumentParser(description="生成模拟医疗数据 CSV")
     parser.add_argument("--output", default="data/data1.csv", help="输出文件路径")
     parser.add_argument("--count", type=int, default=20, help="生成记录数")
+    parser.add_argument("--seed", type=int, default=2026, help="随机种子")
     args = parser.parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -26,7 +26,7 @@ from .deps import (
 from .observability.logging_config import configure_logging
 from .observability.metrics import make_asgi_app
 from .observability.middleware import ObservabilityMiddleware
-from .observability.tracing import init_tracing
+from .pipeline import router as pipeline_router
 from .routers import budget, dp, dynclassification, file, health, kano, ldp, mask, medical, ops, profile, qol
 
 
@@ -105,6 +105,7 @@ app.include_router(profile.router)
 app.include_router(file.router)
 app.include_router(ops.router)
 app.include_router(medical.router)
+app.include_router(pipeline_router)
 
 
 

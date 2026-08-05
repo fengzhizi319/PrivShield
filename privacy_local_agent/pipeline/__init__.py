@@ -10,6 +10,8 @@ Public API:
     PipelineResult   — 统一输出模型
 """
 
+from .classifier import classify_records
+from .masker import mask_records
 from .models import (
     ClassificationSummary,
     FieldClassificationDetail,
@@ -17,6 +19,7 @@ from .models import (
     PipelineResult,
     RecordClassificationDetail,
 )
+from .router import router
 from .service import PipelineService
 
 __all__ = [
@@ -26,4 +29,7 @@ __all__ = [
     "FieldClassificationDetail",
     "RecordClassificationDetail",
     "MaskingDetail",
+    "classify_records",
+    "mask_records",
+    "router",
 ]
