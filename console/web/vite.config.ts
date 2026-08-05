@@ -37,7 +37,7 @@ export default defineConfig({
       // 开发模式下将 /api 前缀的请求代理到 Python 控制台后端
       // In dev mode, proxy /api-prefixed requests to the Python console backend
       '/api': {
-        target: 'http://127.0.0.1:8080',  // 代理目标 / Proxy target
+        target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8081',  // 代理目标（优先环境变量，默认 Go 后端 8081）
         changeOrigin: true,               // 修改 Origin 头以匹配目标 / Modify Origin header to match target
       },
     },
