@@ -187,6 +187,7 @@ nav:
     # 部署部分单独列出，避免把安全、可观测性和安装参数混在一起。
     - 安全 TLS/Auth/Rate Limit:
       - 概览: production_security/README.md
+      - 安全要求与编码规范: production_security/security_requirements.md
       - 架构设计: production_security/design.md
       - API 参考: production_security/api_reference.md
       - 使用示例: production_security/examples.md

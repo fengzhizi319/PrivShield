@@ -13,6 +13,7 @@ Prometheus metrics instrumentation.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import os
 import time
 from contextlib import asynccontextmanager
@@ -96,13 +97,17 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
 
     def require_management_auth(authorization: str | None) -> None:
         """Protect topology mutation endpoints when an operator key is configured."""
-        if gateway_api_key and authorization != f"Bearer {gateway_api_key}":
-            raise HTTPException(status_code=401, detail="Unauthorized gateway management request")
+        if gateway_api_key:
+            expected = f"Bearer {gateway_api_key}"
+            if not authorization or not hmac.compare_digest(authorization.encode("utf-8"), expected.encode("utf-8")):
+                raise HTTPException(status_code=401, detail="Unauthorized gateway management request")
 
     @app.post("/v1/gateway/register")
     async def register_node(req: RegisterRequest, authorization: str | None = Header(default=None)):
         """动态注册工作节点 / Register a worker node to the pool."""
         require_management_auth(authorization)
+        if not (req.http_url.startswith("http://") or req.http_url.startswith("https://")):
+            raise HTTPException(status_code=400, detail="Invalid http_url scheme, must be http:// or https://")
         balancer.add_node(req.http_url, req.grpc_address, req.weight)
         logger.info(
             "Node registered via API",

@@ -144,3 +144,48 @@ def test_backend_5xx_records_circuit_breaker_failure(patched_client):
     resp404 = client.get("/v1/unknown")
     assert resp404.status_code == 404
     assert node.circuit_breaker._failure_count == 1
+
+
+def test_register_node_invalid_scheme_rejected():
+    """注册节点的 http_url 必须校验 Scheme，非 http/https 返回 400。"""
+    balancer = LoadBalancer(strategy="round_robin")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    resp = client.post(
+        "/v1/gateway/register",
+        json={"http_url": "ftp://malicious-node.test", "grpc_address": "127.0.0.1:50051"},
+    )
+    assert resp.status_code == 400
+    assert "Invalid http_url scheme" in resp.json()["detail"]
+
+
+def test_register_node_auth_constant_time(monkeypatch):
+    """验证管理接口配置 GATEWAY_API_KEY 时的鉴权保护。"""
+    monkeypatch.setenv("GATEWAY_API_KEY", "secret-token-123")
+    balancer = LoadBalancer(strategy="round_robin")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    # 未提供 Token -> 401
+    resp_no_token = client.post(
+        "/v1/gateway/register",
+        json={"http_url": "http://node-b.test", "grpc_address": "127.0.0.1:50051"},
+    )
+    assert resp_no_token.status_code == 401
+
+    # 提供错误 Token -> 401
+    resp_wrong_token = client.post(
+        "/v1/gateway/register",
+        headers={"Authorization": "Bearer wrong-token"},
+        json={"http_url": "http://node-b.test", "grpc_address": "127.0.0.1:50051"},
+    )
+    assert resp_wrong_token.status_code == 401
+
+    # 提供正确 Token -> 200
+    resp_correct = client.post(
+        "/v1/gateway/register",
+        headers={"Authorization": "Bearer secret-token-123"},
+        json={"http_url": "http://node-b.test", "grpc_address": "127.0.0.1:50051"},
+    )
+    assert resp_correct.status_code == 200
+    assert resp_correct.json() == {"status": "registered"}
+

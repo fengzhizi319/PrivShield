@@ -16,6 +16,7 @@
 
 | 文档 | 说明 | 目标读者 |
 |---|---|---|
+| [security_requirements.md](./security_requirements.md) | 技术栈常见漏洞总结与安全编码规范 | 全体开发人员、安全审计员 |
 | [prd.md](./prd.md) | 产品需求文档 | 产品经理、项目经理 |
 | [design.md](./design.md) | 技术架构、威胁模型与实现细节 | 安全架构师、后端开发 |
 | [api_reference.md](./api_reference.md) | 环境变量、配置项与 TLS/Auth/RateLimit 接口参考 | 接入开发者、SRE |

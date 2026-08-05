@@ -113,3 +113,13 @@ def test_health_requires_auth_when_configured(auth_enabled, monkeypatch):
 
     response = client.get("/health", headers={"Authorization": f"Bearer {INTERNAL_TOKEN}"})
     assert response.status_code == 200
+
+
+def test_security_headers_present():
+    """验证 REST 响应中包含通用的安全响应头。"""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.headers.get("X-Content-Type-Options") == "nosniff"
+    assert response.headers.get("X-Frame-Options") == "DENY"
+    assert response.headers.get("X-XSS-Protection") == "1; mode=block"
+

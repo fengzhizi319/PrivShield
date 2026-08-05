@@ -16,6 +16,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from .deps import (
     service,  # 重新导出，保持 ``from privacy_local_agent.main import service`` 可用
@@ -25,6 +28,20 @@ from .observability.metrics import make_asgi_app
 from .observability.middleware import ObservabilityMiddleware
 from .observability.tracing import init_tracing
 from .routers import budget, dp, dynclassification, file, health, kano, ldp, mask, ops, profile, qol
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """安全响应头中间件 / Security response headers middleware.
+
+    自动为所有 HTTP 响应注入通用安全响应头，防范 MIME 嗅探、点击劫持与跨站脚本攻击。
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response: Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
 
 
 @asynccontextmanager
@@ -58,6 +75,9 @@ async def lifespan(app: FastAPI):
 
 # FastAPI 应用实例；title 用于 OpenAPI 文档，lifespan 用于生命周期钩子
 app = FastAPI(title="SecretFlow Local Privacy Agent", lifespan=lifespan)
+
+# 安全响应头中间件
+app.add_middleware(SecurityHeadersMiddleware)
 
 # 高并发优化：GZip 响应压缩，减少大响应体的网络传输开销
 # minimum_size=1000 表示仅压缩 >= 1KB 的响应，避免小响应压缩后反而变大

@@ -30,6 +30,7 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/subtle"
 	// encoding/json：用于 JSON 序列化/反序列化（params 解析、RecordEntry 转换）
 	"encoding/json"
 
@@ -890,7 +891,8 @@ func securityMiddleware(apiKey string, rateLimit int) gin.HandlerFunc {
 		}
 		// API Key 鉴权（配置了才校验）。
 		if apiKey != "" {
-			if extractBearer(c.GetHeader("Authorization")) != apiKey {
+			token := extractBearer(c.GetHeader("Authorization"))
+			if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"detail": "Unauthorized: invalid console api key"})
 				return
 			}
