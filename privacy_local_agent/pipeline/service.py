@@ -1,11 +1,15 @@
 """流水线服务编排器 / Pipeline Service Orchestrator.
 
 串联 DynClassificationService 分类分级与 privacy/masking 脱敏，输出 PipelineResult。
+支持 CSV、JSON、JSONL、Excel(XLSX/XLS)、Parquet、SQLite 等多种数据源格式与数据库导入导出。
 """
 
 from __future__ import annotations
 
 import csv
+import json
+import os
+import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -111,27 +115,87 @@ class PipelineService:
             masking_details=mask_details,
         )
 
+    def process_single_record(
+        self,
+        record: dict[str, Any],
+        *,
+        standard: str | None = None,
+        mask_l4: bool = True,
+        mask_l5: bool = True,
+    ) -> PipelineResult:
+        """处理单条病例记录字典。"""
+        return self.process_records(
+            records=[record],
+            standard=standard,
+            mask_l4=mask_l4,
+            mask_l5=mask_l5,
+        )
+
+    def save_masked_file(
+        self,
+        masked_records: list[dict[str, Any]],
+        output_path: str | Path,
+        *,
+        encoding: str = "utf-8-sig",
+        table_name: str = "masked_data",
+    ) -> Path:
+        """将脱敏记录保存到本地文件或数据库（支持 .csv, .json, .jsonl, .xlsx, .parquet, .db/.sqlite）。"""
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        ext = out_p.suffix.lower()
+
+        if not masked_records:
+            if ext == ".csv":
+                out_p.write_text("", encoding=encoding)
+            return out_p
+
+        if ext == ".csv":
+            fieldnames = list(masked_records[0].keys())
+            with open(out_p, "w", newline="", encoding=encoding) as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(masked_records)
+        elif ext == ".json":
+            out_p.write_text(json.dumps(masked_records, ensure_ascii=False, indent=2), encoding="utf-8")
+        elif ext == ".jsonl":
+            lines = [json.dumps(r, ensure_ascii=False) for r in masked_records]
+            out_p.write_text("\n".join(lines), encoding="utf-8")
+        elif ext in (".xlsx", ".xls", ".parquet"):
+            import pandas as pd
+            df = pd.DataFrame(masked_records)
+            if ext == ".parquet":
+                df.to_parquet(out_p, index=False)
+            else:
+                df.to_excel(out_p, index=False)
+        elif ext in (".db", ".sqlite", ".sqlite3"):
+            import pandas as pd
+            df = pd.DataFrame(masked_records)
+            conn = sqlite3.connect(out_p)
+            try:
+                df.to_sql(table_name, conn, if_exists="replace", index=False)
+            finally:
+                conn.close()
+        else:
+            # 默认作为 CSV 写入
+            fieldnames = list(masked_records[0].keys())
+            with open(out_p, "w", newline="", encoding=encoding) as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(masked_records)
+
+        return out_p
+
     def process_csv(
         self,
         csv_path: str | Path,
         *,
+        output_path: str | Path | None = None,
         standard: str | None = None,
         mask_l4: bool = True,
         mask_l5: bool = True,
         encoding: str = "utf-8-sig",
     ) -> PipelineResult:
-        """从 CSV 文件读取数据并执行流水线。
-
-        Args:
-            csv_path: CSV 文件路径。
-            standard: 分类标准。
-            mask_l4: 是否掩码 L4 级数据。
-            mask_l5: 是否掩码 L5 级数据。
-            encoding: 文件编码。
-
-        Returns:
-            PipelineResult 处理结果。
-        """
+        """从 CSV 文件读取数据并执行流水线，可保存到 output_path。"""
         path = Path(csv_path)
         if not path.is_file():
             raise FileNotFoundError(f"CSV file not found: {path}")
@@ -142,9 +206,167 @@ class PipelineService:
             for row in reader:
                 records.append(dict(row))
 
-        return self.process_records(
+        res = self.process_records(
             records=records,
             standard=standard,
             mask_l4=mask_l4,
             mask_l5=mask_l5,
         )
+
+        if output_path:
+            self.save_masked_file(res.masked_records, output_path, encoding=encoding)
+
+        return res
+
+    def process_json(
+        self,
+        json_path: str | Path,
+        *,
+        output_path: str | Path | None = None,
+        standard: str | None = None,
+        mask_l4: bool = True,
+        mask_l5: bool = True,
+    ) -> PipelineResult:
+        """处理 JSON 或 JSONL 文件。"""
+        path = Path(json_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"JSON file not found: {path}")
+
+        content = path.read_text(encoding="utf-8").strip()
+        records: list[dict[str, Any]] = []
+        if path.suffix.lower() == ".jsonl":
+            for line in content.splitlines():
+                if line.strip():
+                    records.append(json.loads(line.strip()))
+        else:
+            data = json.loads(content)
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                records = [data]
+
+        res = self.process_records(records=records, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        if output_path:
+            self.save_masked_file(res.masked_records, output_path)
+        return res
+
+    def process_excel(
+        self,
+        excel_path: str | Path,
+        *,
+        sheet_name: str | int = 0,
+        output_path: str | Path | None = None,
+        standard: str | None = None,
+        mask_l4: bool = True,
+        mask_l5: bool = True,
+    ) -> PipelineResult:
+        """处理 Excel (.xlsx, .xls) 文件。"""
+        import pandas as pd
+        path = Path(excel_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"Excel file not found: {path}")
+
+        df = pd.read_excel(path, sheet_name=sheet_name)
+        records = df.fillna("").to_dict(orient="records")
+        res = self.process_records(records=records, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        if output_path:
+            self.save_masked_file(res.masked_records, output_path)
+        return res
+
+    def process_parquet(
+        self,
+        parquet_path: str | Path,
+        *,
+        output_path: str | Path | None = None,
+        standard: str | None = None,
+        mask_l4: bool = True,
+        mask_l5: bool = True,
+    ) -> PipelineResult:
+        """处理 Parquet (.parquet) 文件。"""
+        import pandas as pd
+        path = Path(parquet_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"Parquet file not found: {path}")
+
+        df = pd.read_parquet(path)
+        records = df.fillna("").to_dict(orient="records")
+        res = self.process_records(records=records, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        if output_path:
+            self.save_masked_file(res.masked_records, output_path)
+        return res
+
+    def process_sqlite(
+        self,
+        db_path: str | Path,
+        query_or_table: str = "SELECT * FROM data",
+        *,
+        output_path: str | Path | None = None,
+        output_table: str | None = None,
+        standard: str | None = None,
+        mask_l4: bool = True,
+        mask_l5: bool = True,
+    ) -> PipelineResult:
+        """处理 SQLite (.db, .sqlite) 数据库查询或表数据。"""
+        path = Path(db_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"SQLite DB not found: {path}")
+
+        sql = query_or_table if "SELECT" in query_or_table.upper() else f"SELECT * FROM {query_or_table}"
+        conn = sqlite3.connect(path)
+        try:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            records = [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+        res = self.process_records(records=records, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        if output_path:
+            self.save_masked_file(res.masked_records, output_path, table_name=output_table or "masked_data")
+        elif output_table:
+            import pandas as pd
+            df = pd.DataFrame(res.masked_records)
+            c = sqlite3.connect(path)
+            try:
+                df.to_sql(output_table, c, if_exists="replace", index=False)
+            finally:
+                c.close()
+
+        return res
+
+    def process_file(
+        self,
+        file_path: str | Path,
+        *,
+        output_path: str | Path | None = None,
+        standard: str | None = None,
+        mask_l4: bool = True,
+        mask_l5: bool = True,
+        encoding: str = "utf-8-sig",
+    ) -> PipelineResult:
+        """多态通用文件入口：根据文件后缀自动调度对应加载器。
+
+        支持后缀:
+        - CSV: .csv
+        - JSON / JSONL: .json, .jsonl
+        - Excel: .xlsx, .xls
+        - Parquet: .parquet
+        - SQLite 数据库: .db, .sqlite, .sqlite3
+        """
+        path = Path(file_path)
+        ext = path.suffix.lower()
+
+        if ext == ".csv":
+            return self.process_csv(path, output_path=output_path, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5, encoding=encoding)
+        elif ext in (".json", ".jsonl"):
+            return self.process_json(path, output_path=output_path, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        elif ext in (".xlsx", ".xls"):
+            return self.process_excel(path, output_path=output_path, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        elif ext == ".parquet":
+            return self.process_parquet(path, output_path=output_path, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        elif ext in (".db", ".sqlite", ".sqlite3"):
+            return self.process_sqlite(path, output_path=output_path, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5)
+        else:
+            return self.process_csv(path, output_path=output_path, standard=standard, mask_l4=mask_l4, mask_l5=mask_l5, encoding=encoding)

@@ -15,6 +15,16 @@ from privacy_local_agent.privacy.masking import mask_value
 
 from .rules import L4_PATTERNS, L5_PATTERNS, PII_FIELD_RULES
 
+IMAGE_FAILURE = IMAGE_REDACTION_FAILURE
+
+
+def _mask_string(field_name: str, value: str) -> str:
+    """调用 masking 并稳定返回字符串，屏蔽其可选详情返回类型。"""
+    result = mask_value(field_name, value, return_details=False)
+    if isinstance(result, str):
+        return result
+    return result.value
+
 
 @dataclass
 class FieldClassification:
@@ -67,21 +77,19 @@ class MedicalPrivacyPipeline:
 
         应用 L4/L5 词库替换，并对中高敏感度字段应用 PII 掩码。
         """
-        from privacy_local_agent.privacy.masking import mask_value
-
         # 先应用 L5 替换，再应用 L4 替换
-        s_text = text
+        sanitized_text: str = text
         for pat, replacement in L5_PATTERNS:
-            s_text = pat.sub(replacement, s_text)
+            sanitized_text = pat.sub(replacement, sanitized_text)
         for pat, replacement in L4_PATTERNS:
-            s_text = pat.sub(replacement, s_text)
+            sanitized_text = pat.sub(replacement, sanitized_text)
 
-        # 对中高敏感度字段应用 PII 掩码
-        if final_level in ["L3", "L4", "L5", "C4", "C5"]:
-            masked = mask_value(field_name, s_text, return_details=False)
-            s_text = masked if isinstance(masked, str) else masked.value
+        # 仅对明确的个人信息字段应用 PII 掩码；临床文本已经通过上面的
+        # L4/L5 抽象标签完成抹平，不能再用默认策略遮盖标签本身。
+        if field_name in PII_FIELD_RULES:
+            return _mask_string(field_name, sanitized_text)
 
-        return s_text
+        return sanitized_text
 
     def _classify_field(self, key: str, val: str) -> FieldClassification:
         """单字段分类分级评估算法（优先调度 dynclassification 动态分类引擎）。
@@ -215,14 +223,11 @@ class MedicalPrivacyPipeline:
     def _mask_pii_value(self, key: str, val_str: str) -> str:
         """PII 身份字段统一脱敏（提取公共逻辑，避免重复代码）。"""
         if key == "id_card_no":
-            masked = mask_value("id_card_no", val_str, return_details=False)
-            return masked if isinstance(masked, str) else masked.value
+            return _mask_string("id_card_no", val_str)
         if key == "name":
-            masked = mask_value("name", val_str, return_details=False)
-            return masked if isinstance(masked, str) else masked.value
+            return _mask_string("name", val_str)
         if key == "registered_address":
-            masked = mask_value("address", val_str, return_details=False)
-            return masked if isinstance(masked, str) else masked.value
+            return _mask_string("address", val_str)
         if key in ["disability_cert_no", "medical_insurance_no"]:
             if len(val_str) > 6:
                 return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
@@ -261,7 +266,7 @@ class MedicalPrivacyPipeline:
                 from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
                 return sanitize_image_input(val_str)
             except Exception:
-                return IMAGE_REDACTION_FAILURE
+                return IMAGE_FAILURE
 
         # 1. 优先复用 _classify_field 中 dyn_service 已计算的 sanitized_value
         cache_key = (key, val_str)

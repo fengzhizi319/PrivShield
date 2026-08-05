@@ -73,8 +73,9 @@ def sanitize_image_input(
 
     # 1. 尝试从文件路径或 Base64 安全加载并立即分离文件句柄
     if file_path_obj is not None and os.path.exists(file_path_obj):
+        input_path = file_path_obj
         try:
-            with Image.open(file_path_obj) as raw_img:
+            with Image.open(input_path) as raw_img:
                 img = raw_img.convert("RGB")
         except Exception as e:
             logger.warning("无法打开图片文件，拒绝输出未脱敏图像: %s", e)
