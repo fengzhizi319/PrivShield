@@ -221,8 +221,11 @@ class ConfigurableRuleEngine:
         # Convert value to string once; all operators work on string representation.
         str_value = str(value) if value is not None else ""
 
-        # Check Evaluation Cache for instant lookup
-        cache_key = (field_name, str_value[:200])
+        # Check Evaluation Cache for instant lookup (use hash for long text to avoid prefix collisions)
+        cache_key = (
+            field_name,
+            str_value if len(str_value) <= 200 else (len(str_value), hash(str_value)),
+        )
         if context is None:
             with self._cache_lock:
                 if cache_key in self._eval_cache:

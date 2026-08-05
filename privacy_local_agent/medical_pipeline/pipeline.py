@@ -157,8 +157,13 @@ class MedicalPrivacyPipeline:
                     return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
                 return "****"
 
-        # 临床文本字段剥离 L4/L5 敏感术语
-        if key in ["diagnosis_name", "chief_complaint", "present_illness", "past_history", "family_history", "progress_note"]:
+        # 临床文本字段或任何判定包含 L4/L5 敏感词汇的字段，强制执行 L4/L5 术语剥离
+        clinical_keys = {
+            "diagnosis_name", "chief_complaint", "present_illness",
+            "past_history", "personal_history", "family_history",
+            "allergic_history", "progress_note",
+        }
+        if key in clinical_keys or self._classify_field(key, val_str).level in ["L4", "L5"]:
             return self.sanitize_text(val_str)
 
         return val_str
