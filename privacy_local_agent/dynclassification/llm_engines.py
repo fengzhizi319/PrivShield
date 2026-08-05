@@ -467,35 +467,13 @@ class Qwen2VLClassifier(LlmClassifier):
         return None
 
     def classify(
-        self, text: str, upstream_level: SensitivityLevel, upstream_confidence: float
+        self,
+        text: str,
+        upstream_level: SensitivityLevel,
+        upstream_confidence: float,
+        sanitize: bool = False,
     ) -> dict[str, Any] | None:
-        """使用本地 Qwen2-VL 大模型对输入进行分类 / Classify Input via Local Qwen2-VL LLM.
-
-        这是 LlmClassifier 抽象基类的核心接口实现。
-        由 ClassificationAPI._classify_field_internal() 在 Layer-3 阶段调用。
-
-        执行步骤 / Execution Steps:
-        1. 延迟初始化模型（若尚未加载）。
-           (Lazy-initialize model if not yet loaded)
-        2. 将实际推理提交到专用线程池并设置超时，防止推理卡死阻塞 gRPC 线程。
-           (Submit inference to a dedicated thread pool with timeout)
-        3. 检测并加载多模态图像输入。
-           (Detect and load multimodal image input)
-        4. 构建 system/user prompt 并调用模型生成。
-           (Build system/user prompt and invoke model generation)
-        5. 解析生成文本中的 JSON 结构。
-           (Parse JSON structure from generated text)
-
-        Args:
-            text: 待分类文本或图片路径 / Text or image path to classify.
-            upstream_level: 上游引擎给出的敏感度等级 / Upstream sensitivity level.
-            upstream_confidence: 上游引擎置信度 / Upstream confidence score.
-
-        Returns:
-            分类结果字典（含 final_level/confidence/reasoning）或 None（降级）。
-            (Classification result dict or None for degradation)
-        """
-        # 尝试延迟初始化模型
+        """使用本地 Qwen2-VL 大模型对输入进行分类与单次融合脱敏。"""
         try:
             self._lazy_init()
         except Exception:

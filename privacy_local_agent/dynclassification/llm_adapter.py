@@ -240,34 +240,23 @@ class LlmAdapter:
             _LLM_INFER_SEMAPHORE.release()
 
     def classify(
-        self, text: str, upstream_level: str, upstream_confidence: float
+        self,
+        text: str,
+        upstream_level: str = "L1",
+        upstream_confidence: float = 1.0,
+        sanitize: bool = False,
     ) -> dict[str, Any] | None:
-        """使用 LLM 对文本进行深度分类 / Perform deep classification on text using LLM.
-
-        这是通用的 Layer-3 分类接口，由漏斗在低置信度时触发。
-        This is the general Layer-3 classification interface, triggered by the funnel on low confidence.
-
-        Args:
-            text: 待分类文本。 / Text to classify.
-            upstream_level: 上游引擎给出的等级 ID（如 "L3"）。 / Level ID provided by upstream engine (e.g., "L3").
-            upstream_confidence: 上游置信度。 / Upstream confidence.
-
-        Returns:
-            分类结果字典 {"final_level", "confidence", "reasoning", ...}
-            或 None（不可用/降级）。
-            Classification result dict or None (unavailable/degraded).
-        """
+        """调用 Layer-3 LLM 进行深度分类与单次融合脱敏。"""
         self._lazy_init()
         if not self._available or self._classifier is None:
             return None
 
         def _do_classify() -> dict[str, Any] | None:
-            # 旧模块的 classify 接口接受 SensitivityLevel 枚举，
-            # 这里做字符串到枚举的适配转换（支持 L1~L5 和 C1~C4）。
             from .base import SensitivityLevel
             level_enum = SensitivityLevel.from_string(upstream_level)
-            result = self._classifier.classify(text, level_enum, upstream_confidence)
-            # MLX 引擎对图片输入返回 None，尝试回退到 PyTorch 引擎
+            result = self._classifier.classify(
+                text, level_enum, upstream_confidence, sanitize=sanitize
+            )
             if result is None and self._is_image_input(text):
                 result = self._classify_with_fallback(text, level_enum, upstream_confidence)
             return result
