@@ -227,10 +227,11 @@ fi
 if [[ ! -d "$SCRIPT_DIR/web/dist" ]]; then
     echo "未找到前端构建产物，自动构建：$SCRIPT_DIR/web/dist"  # Frontend dist not found, auto-building
     _build_frontend
-elif _frontend_is_stale; then
-    echo "检测到前端源码比构建产物更新（可能刚执行过 git pull），自动重新构建前端..."
-    echo "Frontend sources are newer than dist (possibly after git pull), rebuilding..."
+elif [[ "$REBUILD" == true ]]; then
+    echo "强制重新构建前端..."
     _build_frontend
+elif _frontend_is_stale; then
+    echo "ℹ️  提示：检测到前端源码比静态产物新。如需重新打包 UI 请加 --rebuild 参数，或在 console/web 运行 pnpm dev。"
 fi
 
 # 3. 预编译 Go gRPC 代理后端二进制，编译失败时提前暴露错误

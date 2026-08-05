@@ -94,20 +94,26 @@ func New(cfg *config.Config) (*Client, error) {
 		target,
 		// 使用构造好的传输凭证：非安全或 TLS/mTLS
 		grpc.WithTransportCredentials(creds),
-		// 配置自动重试策略：对 UNAVAILABLE（连接被重置、agent 崩溃/重启等瞬时故障）
-		// 自动重试，最大 4 次尝试（1 次原始调用 + 3 次重试），指数退避（0.1s → 0.2s → 0.4s）。
-		// 当 agent 因 OOM 崩溃或重启导致 TCP 连接被 RST（connection reset by peer）时，
-		// 客户端透明重试，前端感知不到偶发断连。
-		// Configure automatic retry: transparently retries UNAVAILABLE (connection reset,
-		// agent crash/restart) up to 4 attempts with exponential backoff, so transient
-		// disconnects caused by agent OOM/restart are invisible to the frontend.
+		// 配置自动重试 + 等待就绪策略：覆盖 agent 崩溃/重启的完整故障窗口。
+		// 1) waitForReady=true：连接不可用（dial connection refused，如 agent 重启中）时
+		//    RPC 不立即失败，而是等待连接恢复后自动发送，前端无需手动重试；
+		// 2) retryPolicy：已建立的连接上收到 UNAVAILABLE（如 connection reset by peer）
+		//    时自动重试，最大 6 次尝试（1 次原始调用 + 5 次重试），指数退避
+		//    1s → 2s → 4s → 8s → 8s（总重试窗口约 31 秒，覆盖 agent 重启耗时）。
+		// Configure retry + wait-for-ready to cover the full agent crash/restart window:
+		// 1) waitForReady=true: RPC waits for the connection to recover instead of
+		//    failing immediately when dialing is refused (agent restarting);
+		// 2) retryPolicy: retries UNAVAILABLE (e.g. connection reset by peer) on
+		//    established connections up to 6 attempts with backoff 1s→2s→4s→8s→8s
+		//    (≈31s total window, covering the agent restart duration).
 		grpc.WithDefaultServiceConfig(`{
   "methodConfig": [{
     "name": [{"service": "privacy.local.PrivacyService"}],
+    "waitForReady": true,
     "retryPolicy": {
-      "MaxAttempts": 4,
-      "InitialBackoff": "0.1s",
-      "MaxBackoff": "1s",
+      "MaxAttempts": 6,
+      "InitialBackoff": "1s",
+      "MaxBackoff": "8s",
       "BackoffMultiplier": 2.0,
       "RetryableStatusCodes": ["UNAVAILABLE"]
     }

@@ -270,9 +270,11 @@ func corsMiddleware() gin.HandlerFunc {
 func (s *Server) Health(c *gin.Context) {
 	// 记录请求开始时间，用于计算 Health RPC 调用耗时
 	start := time.Now()
-	// 使用独立 5 秒超时的 Context 访问上游 gRPC，
-	// 避免前端快速频繁点击连发切断 HTTP 请求时，c.Request.Context() 被取消导致 gRPC Health 连带报错。
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 使用独立 30 秒超时的 Context 访问上游 gRPC：
+	// - 避免前端快速频繁点击连发切断 HTTP 请求时，c.Request.Context() 被取消导致 gRPC Health 连带报错；
+	// - 30 秒与客户端 waitForReady + 重试窗口匹配，agent 崩溃/重启期间（约 10~30 秒）
+	//   健康检查会等待连接恢复而不是立即失败，agent 起来后自动返回 ok。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// 通过 gRPC 客户端调用上游 agent 的 Health RPC
@@ -365,8 +367,12 @@ func (s *Server) Proxy(c *gin.Context) {
 	}
 
 	// 核心调用：mapper 根据 req.Path 查找对应的 handler，
-	// handler 负责解析 body、构造 protobuf 请求、调用 gRPC、转换响应
-	data, err := s.mapper.Dispatch(s.client.WithAuth(c.Request.Context()), s.client.Raw(), req.Path, req.Body)
+	// handler 负责解析 body、构造 protobuf 请求、调用 gRPC、转换响应。
+	// 使用 grpcCallTimeout 超时包裹：waitForReady 开启后，若 agent 重启中请求会
+	// 等待连接恢复后自动发送，超时兜底避免无限挂起。
+	ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
+	defer cancel()
+	data, err := s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), req.Path, req.Body)
 	// 计算 gRPC 调用耗时（毫秒）
 	duration := time.Since(start).Milliseconds()
 
@@ -484,8 +490,11 @@ func (s *Server) Batch(c *gin.Context) {
 		method := strings.ToUpper(item.Method)
 		// 记录单个请求的开始时间
 		start := time.Now()
-		// 通过 mapper 转发到上游 agent 的对应 gRPC 方法
-		data, err := s.mapper.Dispatch(s.client.WithAuth(c.Request.Context()), s.client.Raw(), item.Path, item.Body)
+		// 通过 mapper 转发到上游 agent 的对应 gRPC 方法。
+		// 使用 grpcCallTimeout 超时包裹：agent 重启期间请求等待连接恢复而非立即失败。
+		ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
+		data, err := s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), item.Path, item.Body)
+		cancel()
 		// 计算单个请求耗时（毫秒）
 		duration := time.Since(start).Milliseconds()
 
@@ -724,6 +733,20 @@ func (s *Server) LbTest(c *gin.Context) {
 	}
 	// 返回测试结果 JSON
 	c.JSON(http.StatusOK, resp)
+}
+
+// grpcCallTimeout 返回单次 gRPC 调用的超时时间。
+//
+// 默认 60 秒；可用环境变量 PRIVACY_GRPC_CALL_TIMEOUT 覆盖（Go duration 格式，如 "30s"）。
+// 作用：waitForReady 开启后，agent 重启期间 RPC 会等待连接恢复，该超时提供兜底，
+// 避免连接长期不可用时请求无限挂起。
+func (s *Server) grpcCallTimeout() time.Duration {
+	if v := os.Getenv("PRIVACY_GRPC_CALL_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 60 * time.Second
 }
 
 // writeUpstreamError 将 gRPC 上游错误转换为 HTTP JSON 响应。
