@@ -172,10 +172,30 @@ class MedicalPrivacyPipeline:
         return sanitized
 
     def sanitize_field(self, key: str, val: str) -> str:
-        """根据字段敏感类型执行脱敏与剥离。"""
+        """调用 DynClassificationService 3-Layer 漏斗进行字段智能抹平脱敏。"""
         val_str = "" if val is None else str(val)
         
-        # 身份 PII 字段脱敏：使用实际字段名调用 mask_value，确保 guess_field_type 正确推断
+        # 1. 优先调用 dynclassification 统一智能抹平接口
+        try:
+            resp = self.dyn_service.classify_field(key, val_str, domain="medical", sanitize=True)
+            if resp and resp.field_result and resp.field_result.sanitized_value is not None:
+                # 若针对 PII 字段，保持强 PII 掩码规则
+                if key in PII_FIELD_RULES:
+                    if key == "id_card_no":
+                        return mask_value("id_card_no", val_str)
+                    elif key == "name":
+                        return mask_value("name", val_str)
+                    elif key == "registered_address":
+                        return mask_value("address", val_str)
+                    elif key in ["disability_cert_no", "medical_insurance_no"]:
+                        if len(val_str) > 6:
+                            return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
+                        return "****"
+                return resp.field_result.sanitized_value
+        except Exception:
+            pass
+
+        # 2. 备用平滑降级：在 dynclassification 未可用的情况下走文本强剥离
         if key in PII_FIELD_RULES:
             if key == "id_card_no":
                 return mask_value("id_card_no", val_str)
@@ -188,7 +208,6 @@ class MedicalPrivacyPipeline:
                     return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
                 return "****"
 
-        # 临床文本字段或任何判定包含 L4/L5 敏感词汇的字段，强制执行 L4/L5 术语剥离
         clinical_keys = {
             "diagnosis_name", "chief_complaint", "present_illness",
             "past_history", "personal_history", "family_history",
