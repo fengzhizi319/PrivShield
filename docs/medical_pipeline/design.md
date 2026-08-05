@@ -212,3 +212,35 @@ Local LLM (如 Qwen2-VL) 具备深层文本生成与指令遵循能力。通过 
 1. **Layer 1 (Rule)**：极低延迟与极低开销，兜底已知明确性病关键词及身份证/姓名等 PII 脱敏。
 2. **Layer 2 (Small-NER)**：毫秒级推断，识别非结构化临床病历中的病名/症状 Span 进行定点切除。
 3. **Layer 3 (Local LLM)**：在复合病历或复杂语义场景下触发，执行上下文重构与完全无缝切除。
+
+---
+
+### 6.4 单次 Prompt 联合推断与接口重定义优化 (Single-Pass Joint Classification & Sanitization)
+
+#### 1. 传统两次调用的性能瓶颈
+若将“分类分级”与“文本脱敏”拆分为两个独立阶段分别调用 LLM/VLM：
+- **阶段 1**：LLM 评估文本敏感等级（如判断是否为 L4/L5）。
+- **阶段 2**：若等级 > L3，再次调用 LLM 执行文本抹平/切除重构。
+
+单次大模型推理通常耗时 1.5~3.0 秒。两次串行调用将使接口延迟翻倍达 3~6 秒，显存与计算资源开销增加 100%，极易造成高并发下的 OOM 或超时。
+
+#### 2. 接口重定义与单次 Prompt 融合架构
+重新定义 API 接口与Prompt 模板，支持传入控制参数 `sanitize: bool = True`：
+
+```mermaid
+flowchart TD
+    Req[输入病历文本/记录 + sanitize=True] --> SinglePrompt[单次 Prompt 联合指令模板]
+    SinglePrompt --> LLM[Local LLM / VLM 单次推断]
+    LLM --> JSON[单次输出 JSON Payload]
+    JSON -->|包含| Level[final_level: L4]
+    JSON -->|包含| Tags[security_tags: STD_VENEREAL]
+    JSON -->|包含| Sanitized[sanitized_text: 智能抹平/切除后文本]
+```
+
+**融合 Prompt 指令范例**：
+> *"请评估以下临床病历文本的敏感等级 (L1~L5) 与安全标签。**若评定级别 > L3 (如 L4 或 L5) 且 sanitize=true**，请在同一响应中同时给出抹平切除性病/重症描述后的 sanitized_text；若级别 <= L3，则 sanitized_text 保持原文。请统一以 JSON 格式输出：`{"final_level": "...", "reasoning": "...", "sanitized_text": "..."}`。"*
+
+#### 3. 性能收益
+- **响应延迟降低 50%**：单次推断完成判定与重构脱敏。
+- **显存与计算开销降低 50%**：仅需一次 Context 加载与 KV Cache 计算。
+- **接口扩展性**：设置 `sanitize=False` 时，只进行分类分级计算，彻底切断不必要的脱敏开销。

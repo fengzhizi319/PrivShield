@@ -163,8 +163,15 @@ class MedicalPrivacyPipeline:
 
         return val_str
 
-    def process_records(self, records: list[dict[str, str]]) -> MedicalPipelineResult:
-        """处理医疗数据集记录并生成双输出。"""
+    def process_records(
+        self, records: list[dict[str, str]], sanitize: bool = True
+    ) -> MedicalPipelineResult:
+        """处理医疗数据集记录并生成双输出。
+        
+        Args:
+            records: 输入医疗记录列表。
+            sanitize: 是否进行高敏与 PII 脱敏（默认 True）。若为 True，在单次推断/循环中同时完成分级与脱敏。
+        """
         start_time = time.perf_counter()
         
         reports: list[dict[str, Any]] = []
@@ -185,7 +192,8 @@ class MedicalPrivacyPipeline:
             level_rank = {"L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5}
             
             for key, val in rec.items():
-                fc = self._classify_field(key, str(val or ""))
+                val_str = str(val or "")
+                fc = self._classify_field(key, val_str)
                 field_classifications.append(fc)
                 
                 if fc.security_tag == "PII_IDENTITY":
@@ -196,8 +204,11 @@ class MedicalPrivacyPipeline:
                 if level_rank[fc.level] > level_rank[max_level]:
                     max_level = fc.level
                     
-                # 脱敏处理
-                sanitized_rec[key] = self.sanitize_field(key, str(val or ""))
+                # 单次联合推断/脱敏处理：当 sanitize=True 时进行脱敏，否则保留原值
+                if sanitize:
+                    sanitized_rec[key] = self.sanitize_field(key, val_str)
+                else:
+                    sanitized_rec[key] = val_str
                 
             if max_level == "L5":
                 l5_count += 1
@@ -224,8 +235,8 @@ class MedicalPrivacyPipeline:
             "l4_records_count": l4_count,
             "l3_records_count": l3_count,
             "l1_l2_records_count": len(records) - l5_count - l4_count - l3_count,
-            "sanitized_pii_fields_per_record": len(PII_FIELD_RULES),
-            "guarantee_no_l4_l5_raw_data": True,
+            "sanitized_pii_fields_per_record": len(PII_FIELD_RULES) if sanitize else 0,
+            "guarantee_no_l4_l5_raw_data": sanitize,
             "duration_ms": round(elapsed_ms, 2),
         }
         
@@ -236,7 +247,8 @@ class MedicalPrivacyPipeline:
         )
 
 
-def process_medical_dataset(records: list[dict[str, str]]) -> MedicalPipelineResult:
+def process_medical_dataset(
+    records: list[dict[str, str]], sanitize: bool = True
+) -> MedicalPipelineResult:
     """高层入口：处理医疗数据集并返回分类分级报告与脱敏清洗数据。"""
-    pipeline = MedicalPrivacyPipeline()
-    return pipeline.process_records(records)
+    return MedicalPrivacyPipeline().process_records(records, sanitize=sanitize)
