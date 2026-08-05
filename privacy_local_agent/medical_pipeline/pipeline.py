@@ -8,6 +8,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from privacy_local_agent.dynclassification import DynClassificationService
 from privacy_local_agent.privacy.masking import mask_value
 
 from .rules import L4_PATTERNS, L5_PATTERNS, PII_FIELD_RULES
@@ -38,9 +39,6 @@ class MedicalPipelineResult:
     summary: dict[str, Any]
 
 
-from privacy_local_agent.dynclassification import DynClassificationService
-
-
 class MedicalPrivacyPipeline:
     """医疗敏感数据全流程治理 Pipeline。
     
@@ -52,6 +50,9 @@ class MedicalPrivacyPipeline:
     def __init__(self, dyn_service: DynClassificationService | None = None):
         """初始化 Pipeline 引擎，挂载 DynClassificationService 统一分类能力。"""
         self.dyn_service = dyn_service or DynClassificationService()
+        # 缓存 _classify_field 中 dyn_service 计算的 sanitized_value，供 _sanitize_field 复用，
+        # 避免同一字段被三层漏斗分类两次（性能优化）。
+        self._sanitized_cache: dict[tuple[str, str], str] = {}
 
     def _classify_field(self, key: str, val: str) -> FieldClassification:
         """单字段分类分级评估算法（优先调度 dynclassification 动态分类引擎）。
@@ -67,11 +68,18 @@ class MedicalPrivacyPipeline:
         val_str = "" if val is None else str(val)
         
         # 先调度 dynclassification 动态引擎获取通用/领域分类结果
+        # 优化: 同时请求 sanitize=True，将 sanitized_value 缓存供 _sanitize_field 复用
         dyn_level: str | None = None
         try:
-            dyn_resp = self.dyn_service.classify_field(key, val_str)
+            dyn_resp = self.dyn_service.classify_field(key, val_str, sanitize=True)
             if dyn_resp and dyn_resp.field_result:
                 dyn_level = dyn_resp.field_result.final_level
+                # 缓存 dyn_service 智能抹平结果，避免 _sanitize_field 重复调用
+                if (
+                    dyn_resp.field_result.sanitized_value is not None
+                    and dyn_resp.field_result.sanitized_value != val_str
+                ):
+                    self._sanitized_cache[(key, val_str)] = dyn_resp.field_result.sanitized_value
         except Exception:
             dyn_level = None
 
@@ -171,43 +179,68 @@ class MedicalPrivacyPipeline:
             sanitized = pat.sub(replacement, sanitized)
         return sanitized
 
+    def _mask_pii_value(self, key: str, val_str: str) -> str:
+        """PII 身份字段统一脱敏（提取公共逻辑，避免重复代码）。"""
+        if key == "id_card_no":
+            return mask_value("id_card_no", val_str)
+        if key == "name":
+            return mask_value("name", val_str)
+        if key == "registered_address":
+            return mask_value("address", val_str)
+        if key in ["disability_cert_no", "medical_insurance_no"]:
+            if len(val_str) > 6:
+                return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
+            return "****"
+        return val_str
+
     def sanitize_field(self, key: str, val: str) -> str:
-        """调用 DynClassificationService 3-Layer 漏斗进行字段智能抹平脱敏。"""
+        """字段智能抹平脱敏（公开 API，向后兼容）。
+
+        注意：在 process_records 循环中使用 _sanitize_field 代替，
+        因为 _sanitize_field 可复用 _classify_field 的缓存，避免重复调用 dyn_service。
+        """
+        # 公开 API 需要先执行分类以填充缓存
+        self._classify_field(key, val)
+        return self._sanitize_field(key, val)
+
+    def _sanitize_field(self, key: str, val: str) -> str:
+        """字段智能抹平脱敏（供 process_records 内部使用）。
+
+        优先复用 _classify_field 中 dyn_service 已计算的 sanitized_value（避免二次调用），
+        对 PII 字段保持强掩码规则，对图像病例调用图像打码模块。
+        """
         val_str = "" if val is None else str(val)
-        
-        # 1. 优先调用 dynclassification 统一智能抹平接口
-        try:
-            resp = self.dyn_service.classify_field(key, val_str, domain="medical", sanitize=True)
-            if resp and resp.field_result and resp.field_result.sanitized_value is not None:
-                # 若针对 PII 字段，保持强 PII 掩码规则
-                if key in PII_FIELD_RULES:
-                    if key == "id_card_no":
-                        return mask_value("id_card_no", val_str)
-                    elif key == "name":
-                        return mask_value("name", val_str)
-                    elif key == "registered_address":
-                        return mask_value("address", val_str)
-                    elif key in ["disability_cert_no", "medical_insurance_no"]:
-                        if len(val_str) > 6:
-                            return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
-                        return "****"
-                return resp.field_result.sanitized_value
-        except Exception:
-            pass
 
-        # 2. 备用平滑降级：在 dynclassification 未可用的情况下走文本强剥离
+        # 0. 图像病例检测：文件路径或 Base64 Data URI → 调用图像打码
+        val_stripped = val_str.strip()
+        is_image = (
+            len(val_stripped) < 512
+            and any(
+                val_stripped.lower().endswith(ext)
+                for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom")
+            )
+        ) or val_stripped.lower().startswith("data:image/")
+        if is_image:
+            try:
+                from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
+                return sanitize_image_input(val_str)
+            except Exception:
+                pass  # 降级到下方文本处理
+
+        # 1. 优先复用 _classify_field 中 dyn_service 已计算的 sanitized_value
+        cache_key = (key, val_str)
+        if cache_key in self._sanitized_cache:
+            cached = self._sanitized_cache.pop(cache_key)
+            # PII 字段保持强掩码规则（dyn_service 的 sanitize 可能不够强）
+            if key in PII_FIELD_RULES:
+                return self._mask_pii_value(key, val_str)
+            return cached
+
+        # 2. PII 字段始终使用强掩码
         if key in PII_FIELD_RULES:
-            if key == "id_card_no":
-                return mask_value("id_card_no", val_str)
-            elif key == "name":
-                return mask_value("name", val_str)
-            elif key == "registered_address":
-                return mask_value("address", val_str)
-            elif key in ["disability_cert_no", "medical_insurance_no"]:
-                if len(val_str) > 6:
-                    return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
-                return "****"
+            return self._mask_pii_value(key, val_str)
 
+        # 3. 备用降级：文本强剥离 L4/L5 术语
         clinical_keys = {
             "diagnosis_name", "chief_complaint", "present_illness",
             "past_history", "personal_history", "family_history",
@@ -265,9 +298,9 @@ class MedicalPrivacyPipeline:
                 if fc_rank > max_rank:
                     max_level = fc.level
                     
-                # 单次联合推断/脱敏处理：当 sanitize=True 时进行脱敏，否则保留原值
+                # 使用 _sanitize_field 复用 _classify_field 的 dyn_service 结果（单次调用优化）
                 if sanitize:
-                    sanitized_rec[key] = self.sanitize_field(key, val_str)
+                    sanitized_rec[key] = self._sanitize_field(key, val_str)
                 else:
                     sanitized_rec[key] = val_str
                 

@@ -656,47 +656,47 @@ class Qwen2VLClassifier(LlmClassifier):
             inputs = self._processor(
                 text=[text_prompt], images=image_inputs, padding=True, return_tensors="pt"
             )
-
             # 将所有输入张量移动到模型所在设备（CUDA/MPS/CPU）
             inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
 
             # 执行模型推理生成
             import torch
 
-            # 禁用梯度计算（推理模式，节省显存和计算资源）
-            with torch.no_grad():
-                try:
-                    # 调用模型 generate 方法，最多生成 512 个新 token
-                    generated_ids = self._model.generate(**inputs, max_new_tokens=512)
-                except RuntimeError as err:
-                    if "cudnn" in str(err).lower() or "SUBLIBRARY_VERSION_MISMATCH" in str(err):
-                        logger.warning("cuDNN 版本冲突，自动禁用 cuDNN 加速改用 PyTorch 原生 CUDA 卷积...")
-                        torch.backends.cudnn.enabled = False
+            generated_ids = None
+            try:
+                # 禁用梯度计算（推理模式，节省显存和计算资源）
+                with torch.no_grad():
+                    try:
                         generated_ids = self._model.generate(**inputs, max_new_tokens=512)
-                    else:
-                        raise
+                    except RuntimeError as err:
+                        if "cudnn" in str(err).lower() or "SUBLIBRARY_VERSION_MISMATCH" in str(err):
+                            logger.warning("cuDNN 版本冲突，自动禁用 cuDNN 加速改用 PyTorch 原生 CUDA 卷积...")
+                            torch.backends.cudnn.enabled = False
+                            generated_ids = self._model.generate(**inputs, max_new_tokens=512)
+                        else:
+                            raise
 
-            # 裁剪生成结果：去掉输入 prompt 部分，只保留新生成的 token
-            generated_ids_trimmed = [
-                out_ids[len(in_ids) :]  # 从输入长度之后开始截取
-                for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
-            ]
-            # 将生成的 token ID 解码为人类可读文本
-            output_text = self._processor.batch_decode(
-                generated_ids_trimmed,
-                skip_special_tokens=True,  # 跳过特殊 token（如 </s>）
-                clean_up_tokenization_spaces=False,  # 保留原始空格格式
-            )[0]  # 取第一个（也是唯一一个）结果
+                # 裁剪生成结果：去掉输入 prompt 部分，只保留新生成的 token
+                generated_ids_trimmed = [
+                    out_ids[len(in_ids) :]
+                    for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
+                ]
+                output_text = self._processor.batch_decode(
+                    generated_ids_trimmed,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
+                )[0]
 
-            # 从生成文本中提取 JSON 结构化分类结果
-            result = self._parse_json_result(output_text, upstream_level, upstream_confidence)
-
-            # 递增成功状态计数器
-            CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
-            return result
+                result = self._parse_json_result(output_text, upstream_level, upstream_confidence)
+                CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
+                return result
+            finally:
+                # 显式释放临时张量与 CUDA 显存缓存（防 CUDA VRAM OOM 积累）
+                del inputs, generated_ids
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         except Exception as e:
-            # 推理过程中任何异常都捕获并降级
             CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
             logger.error(
                 "llm_classify_inner_error",
