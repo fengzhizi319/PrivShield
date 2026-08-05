@@ -29,7 +29,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .composite import CompositeRuleEngine
 from .engine import ConfigurableRuleEngine
@@ -88,17 +88,26 @@ class DynClassificationService:
         loader: Profile 加载器。
     """
 
-    def __init__(self, rules_dir: str | Path = "rules"):
+    def __init__(
+        self,
+        rules_dir: str | Path = "rules",
+        text_sanitizer: Callable[[str, str, str], str] | None = None,
+    ):
         """初始化服务。
 
         Args:
             rules_dir: 规则配置根目录路径。
+            text_sanitizer: 可选的文本脱敏回调函数，签名为
+                (field_name, text, final_level) -> sanitized_text。
+                用于解耦领域特定脱敏逻辑（如医疗 L4/L5 词库替换），
+                避免 dynclassification 反向依赖领域模块。
         """
         # Initialize the profile loader which handles YAML loading, caching,
         # hot-reload detection, and engine instance construction.
         self.loader = ProfileLoader(rules_dir=rules_dir)
         # Lazy-initialized NER adapter (shared across all requests).
         self._ner_adapter: NerAdapter | None = None
+        self._service_lock = threading.Lock()
         # Lazy-initialized LLM adapter (shared across all requests).
         self._llm_adapter: LlmAdapter | None = None
         # Funnel instance cache: keyed by engine cache key ("domain:standard").
@@ -108,23 +117,118 @@ class DynClassificationService:
         self._classification_cache = HighConcurrencyLRUCache[tuple[str, str, str, str, bool], ClassificationResponse](
             capacity=cache_size
         )
+        # 可插拔文本脱敏回调（由领域模块注入，解耦反向依赖）
+        self._text_sanitizer = text_sanitizer
 
     def _build_funnel(self, engine: ConfigurableRuleEngine) -> ClassificationFunnel:
-        """构建分类漏斗实例。"""
+        """线程安全地构建分类漏斗实例。"""
         cache_key = f"{engine.domain}:{engine.standard_id}"
-        if cache_key not in self._funnel_cache:
-            self._funnel_cache[cache_key] = ClassificationFunnel(
-                engine=engine,
-                ner_adapter=self._ner_adapter or consume_preloaded_adapter("ner"),
-                llm_adapter=self._llm_adapter or consume_preloaded_adapter("llm"),
-            )
-        return self._funnel_cache[cache_key]
+        with self._service_lock:
+            if cache_key not in self._funnel_cache:
+                self._funnel_cache[cache_key] = ClassificationFunnel(
+                    engine=engine,
+                    ner_adapter=self._ner_adapter or consume_preloaded_adapter("ner"),
+                    llm_adapter=self._llm_adapter or consume_preloaded_adapter("llm"),
+                )
+            return self._funnel_cache[cache_key]
 
     def _resolve_final_level(self, tags: list[SecurityTag], engine: ConfigurableRuleEngine) -> str:
         """根据所有命中标签解析最终等级。"""
         if not tags:
             return "L0"
         return max((tag.level for tag in tags), key=lambda l: engine.taxonomy.level_rank.get(l, 0))
+
+    def _is_image_input(self, val_str: str) -> bool:
+        """判断输入是否为图像（文件路径或 Base64 Data URI）。"""
+        stripped = val_str.strip()
+        return (
+            len(stripped) < 512
+            and any(
+                stripped.lower().endswith(ext)
+                for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom")
+            )
+        ) or stripped.lower().startswith("data:image/")
+
+    def _compute_sanitized_value(
+        self, field_name: str, val_str: str, field_result: FieldClassificationResult
+    ) -> FieldClassificationResult:
+        """计算 sanitized_value 并返回新的 FieldClassificationResult 副本（线程安全）。
+
+        优先使用漏斗已计算的 sanitized_value，其次使用图像打码，最后使用可插拔文本脱敏回调。
+        """
+        # 优先使用漏斗已计算的 sanitized_value（如场景 C 图像自动触发 LLM）
+        if getattr(field_result, "sanitized_value", None):
+            return field_result
+
+        # 创建副本以避免修改缓存对象
+        new_result = field_result.model_copy(deep=True)
+
+        if self._is_image_input(val_str):
+            from .image_redaction import sanitize_image_input
+            new_result.sanitized_value = sanitize_image_input(val_str)
+        elif self._text_sanitizer is not None:
+            # 使用领域模块注入的文本脱敏回调（解耦反向依赖）
+            new_result.sanitized_value = self._text_sanitizer(
+                field_name, val_str, field_result.final_level
+            )
+        else:
+            # 向后兼容：尝试使用医疗领域规则进行文本脱敏
+            new_result.sanitized_value = self._fallback_text_sanitizer(
+                field_name, val_str, field_result.final_level
+            )
+
+        return new_result
+
+    def _get_sanitized_value_from_funnel(
+        self,
+        field_name: str,
+        val_str: str,
+        funnel_result: Any,
+        final_level: str,
+    ) -> str:
+        """从漏斗结果或文本脱敏回调中获取 sanitized_value。"""
+        # 优先使用漏斗已计算的 sanitized_value
+        if getattr(funnel_result, "sanitized_value", None):
+            return funnel_result.sanitized_value
+
+        # 图像输入：调用图像打码
+        if self._is_image_input(val_str):
+            from .image_redaction import sanitize_image_input
+            return sanitize_image_input(val_str)
+
+        # 文本输入：使用可插拔文本脱敏回调
+        if self._text_sanitizer is not None:
+            return self._text_sanitizer(field_name, val_str, final_level)
+
+        # 向后兼容：尝试使用医疗领域规则进行文本脱敏
+        return self._fallback_text_sanitizer(field_name, val_str, final_level)
+
+    def _fallback_text_sanitizer(
+        self, field_name: str, text: str, final_level: str
+    ) -> str:
+        """向后兼容的文本脱敏器：尝试使用医疗领域规则。
+
+        若医疗模块不可用，返回原文本。
+        """
+        try:
+            from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
+            from ..privacy.masking import mask_value
+
+            # 先应用 L5 替换，再应用 L4 替换
+            s_text = text
+            for pat, replacement in L5_PATTERNS:
+                s_text = pat.sub(replacement, s_text)
+            for pat, replacement in L4_PATTERNS:
+                s_text = pat.sub(replacement, s_text)
+
+            # 对中高敏感度字段应用 PII 掩码
+            if final_level in ["L3", "L4", "L5", "C4", "C5"]:
+                s_text = mask_value(field_name, s_text)
+
+            return s_text
+        except Exception:
+            # 医疗模块不可用，返回原文本
+            return text
 
     def clear_cache(self) -> None:
         """清空分类缓存（规则重载或配置更新时调用）。"""
@@ -170,26 +274,11 @@ class DynClassificationService:
         cache_key = (domain or "", standard or "", field_name, val_key, sanitize)
         cached_resp = self._classification_cache.get(cache_key)
         if cached_resp is not None:
-            if sanitize and cached_resp.field_result.sanitized_value is None:
+            # 线程安全：创建副本后再修改 sanitized_value，避免直接修改缓存对象
+            field_result = cached_resp.field_result
+            if sanitize and field_result.sanitized_value is None:
                 val_str = str(value) if value is not None else ""
-                from .image_redaction import sanitize_image_input
-                is_image = (
-                    len(val_str.strip()) < 512
-                    and any(val_str.strip().lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom"))
-                ) or val_str.strip().lower().startswith("data:image/")
-                if is_image:
-                    cached_resp.field_result.sanitized_value = sanitize_image_input(val_str)
-                else:
-                    from privacy_local_agent.privacy.masking import mask_value
-                    from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
-                    s_text = val_str
-                    for pat, replacement in L4_PATTERNS:
-                        s_text = pat.sub(replacement, s_text)
-                    for pat, replacement in L5_PATTERNS:
-                        s_text = pat.sub(replacement, s_text)
-                    if cached_resp.field_result.final_level in ["L3", "L4", "L5", "C4", "C5"]:
-                        s_text = mask_value(field_name, s_text)
-                    cached_resp.field_result.sanitized_value = s_text
+                field_result = self._compute_sanitized_value(field_name, val_str, field_result)
 
             duration_ms = (time.monotonic() - start) * 1000
             # 构造新的 response 保持独立的执行耗时审计
@@ -201,7 +290,7 @@ class DynClassificationService:
                 rules_hit=cached_resp.audit_info.rules_hit,
                 duration_ms=round(duration_ms, 3),
             )
-            return ClassificationResponse(field_result=cached_resp.field_result, audit_info=audit)
+            return ClassificationResponse(field_result=field_result, audit_info=audit)
 
         # Step 1: Get or construct the rule engine (cached by domain:standard key).
         engine = self.loader.get_engine(domain=domain, standard=standard)
@@ -220,29 +309,7 @@ class DynClassificationService:
         sanitized_val: str | None = None
         if sanitize:
             val_str = str(value) if value is not None else ""
-            from .image_redaction import sanitize_image_input
-            # 判断入参是否为图片病例 (本地文件路径或 Base64 Data URI)
-            is_image = (
-                len(val_str.strip()) < 512
-                and any(val_str.strip().lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom"))
-            ) or val_str.strip().lower().startswith("data:image/")
-            
-            if is_image:
-                # 图片病例脱敏：执行图像盲区打码，返回相同格式的图像出参 (新文件路径或 Base64 Data URI)
-                sanitized_val = sanitize_image_input(val_str)
-            elif getattr(funnel_result, "sanitized_value", None):
-                sanitized_val = funnel_result.sanitized_value
-            else:
-                from privacy_local_agent.privacy.masking import mask_value
-                from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
-                s_text = val_str
-                for pat, replacement in L4_PATTERNS:
-                    s_text = pat.sub(replacement, s_text)
-                for pat, replacement in L5_PATTERNS:
-                    s_text = pat.sub(replacement, s_text)
-                if final_level in ["L3", "L4", "L5", "C4", "C5"]:
-                    s_text = mask_value(field_name, s_text)
-                sanitized_val = s_text
+            sanitized_val = self._get_sanitized_value_from_funnel(field_name, val_str, funnel_result, final_level)
 
         # Calculate execution duration in milliseconds.
         duration_ms = (time.monotonic() - start) * 1000

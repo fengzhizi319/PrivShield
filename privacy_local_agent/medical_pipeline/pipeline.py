@@ -4,6 +4,7 @@ Core implementation of Medical Data Classification & Desensitization Pipeline.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -49,10 +50,36 @@ class MedicalPrivacyPipeline:
 
     def __init__(self, dyn_service: DynClassificationService | None = None):
         """初始化 Pipeline 引擎，挂载 DynClassificationService 统一分类能力。"""
-        self.dyn_service = dyn_service or DynClassificationService()
+        if dyn_service is None:
+            # 创建 DynClassificationService 并注入医疗领域文本脱敏回调
+            # 解耦 dynclassification 对 medical_pipeline 的反向依赖
+            dyn_service = DynClassificationService(text_sanitizer=self._medical_text_sanitizer)
+        self.dyn_service = dyn_service
+        self._lock = threading.Lock()
         # 缓存 _classify_field 中 dyn_service 计算的 sanitized_value，供 _sanitize_field 复用，
         # 避免同一字段被三层漏斗分类两次（性能优化）。
         self._sanitized_cache: dict[tuple[str, str], str] = {}
+
+    @staticmethod
+    def _medical_text_sanitizer(field_name: str, text: str, final_level: str) -> str:
+        """医疗领域文本脱敏回调（注入到 DynClassificationService）。
+
+        应用 L4/L5 词库替换，并对中高敏感度字段应用 PII 掩码。
+        """
+        from privacy_local_agent.privacy.masking import mask_value
+
+        # 先应用 L5 替换，再应用 L4 替换
+        s_text = text
+        for pat, replacement in L5_PATTERNS:
+            s_text = pat.sub(replacement, s_text)
+        for pat, replacement in L4_PATTERNS:
+            s_text = pat.sub(replacement, s_text)
+
+        # 对中高敏感度字段应用 PII 掩码
+        if final_level in ["L3", "L4", "L5", "C4", "C5"]:
+            s_text = mask_value(field_name, s_text)
+
+        return s_text
 
     def _classify_field(self, key: str, val: str) -> FieldClassification:
         """单字段分类分级评估算法（优先调度 dynclassification 动态分类引擎）。
@@ -79,7 +106,8 @@ class MedicalPrivacyPipeline:
                     dyn_resp.field_result.sanitized_value is not None
                     and dyn_resp.field_result.sanitized_value != val_str
                 ):
-                    self._sanitized_cache[(key, val_str)] = dyn_resp.field_result.sanitized_value
+                    with self._lock:
+                        self._sanitized_cache[(key, val_str)] = dyn_resp.field_result.sanitized_value
         except Exception:
             dyn_level = None
 
@@ -229,8 +257,12 @@ class MedicalPrivacyPipeline:
 
         # 1. 优先复用 _classify_field 中 dyn_service 已计算的 sanitized_value
         cache_key = (key, val_str)
-        if cache_key in self._sanitized_cache:
-            cached = self._sanitized_cache.pop(cache_key)
+        cached: str | None = None
+        with self._lock:
+            if cache_key in self._sanitized_cache:
+                cached = self._sanitized_cache.pop(cache_key)
+
+        if cached is not None:
             # PII 字段保持强掩码规则（dyn_service 的 sanitize 可能不够强）
             if key in PII_FIELD_RULES:
                 return self._mask_pii_value(key, val_str)

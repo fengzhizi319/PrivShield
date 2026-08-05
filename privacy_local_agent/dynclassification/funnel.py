@@ -326,6 +326,16 @@ class ClassificationFunnel:
         else:
             final_level = self._resolve_level(tags)
 
+        # ===== Step 6: 计算智能抹平 sanitized_value =====
+        # 当输入为图像时，自动调用图像打码模块生成脱敏后的图像
+        sanitized_value = ""
+        if self._is_image_field_or_value(field_name, value):
+            try:
+                from .image_redaction import sanitize_image_input
+                sanitized_value = sanitize_image_input(str_value)
+            except Exception as e:
+                logger.warning(f"图像打码失败: {e}")
+
         funnel_result = FunnelResult(
             tags=tags,
             final_level=final_level,
@@ -334,6 +344,7 @@ class ClassificationFunnel:
             needs_human_review=needs_human_review,
             reasoning=reasoning,
             has_conflict=has_conflict,
+            sanitized_value=sanitized_value,
         )
         return funnel_result, suppressed_tags
 
