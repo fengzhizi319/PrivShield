@@ -10,6 +10,7 @@ from __future__ import annotations
 
 # datetime/timezone for generating UTC timestamps in audit info
 from datetime import datetime, timezone
+import os
 from typing import Any, Optional
 
 # Pydantic v2: BaseModel for schema, ConfigDict for model settings, Field for annotations
@@ -34,33 +35,23 @@ class EngineLayer:
 
 
 class ConfidencePolicy(BaseModel):
-    """置信度策略配置。 / Confidence Policy Configuration.
+    """置信度衰减与 LLM 触发策略配置。 / Confidence Decay & LLM Trigger Policy Configuration.
 
-    控制规则冲突时的置信度衰减行为和 LLM 仲裁触发条件。 / Controls confidence decay behavior during rule conflicts and LLM arbitration trigger conditions.
-    从 taxonomy YAML 的 confidence_policy 节加载。 / Loaded from the confidence_policy section of the taxonomy YAML.
-
-    执行逻辑 / Execution Logic:
-    ┌─────────────────────────────────────────────────────────────────┐
-    │  规则评估完成后 / After rule evaluation:                           │
-    │                                                                  │
-    │  1. 检测冲突: 普通标签 + 降级标签同时存活? / Detect conflict: normal + downgrade tags coexist? │
-    │     ├─ 无冲突 / No conflict → confidence=1.0, needs_review=false │
-    │     └─ 有冲突 / Has conflict ↓                                   │
-    │  2. LLM 仲裁可用? (enable_llm_arbitration + LLM 已加载) / LLM arbitration available? │
-    │     ├─ 是 / Yes → 调用 LLM 裁定 / Invoke LLM, confidence=LLM输出 │
-    │     └─ 否 / No → confidence=conflict_confidence, needs_review=true │
-    └─────────────────────────────────────────────────────────────────┘
+    定义多层引擎之间的冲突判定规则、置信度衰减系数、 / Defines conflict detection rules between multi-layer engines, confidence decay coefficients,
+    以及触发 Layer-2 NER 和 Layer-3 LLM 的置信度阈值。 / and confidence thresholds for triggering Layer-2 NER and Layer-3 LLM.
+    支持从环境变量进行全局运维配置控制。
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # Confidence value when rule conflict is detected (normal + downgrade tags coexist).
+    # Confidence score assigned when a normal rule and downgrade rule conflict,
+    # and LLM arbitration is disabled or unavailable.
     conflict_confidence: float = Field(
-        default=0.7, ge=0.0, le=1.0,
+        default=0.5, ge=0.0, le=1.0,
         alias="conflictConfidence",
-        description="规则冲突时的置信度（默认 0.7）",
+        description="冲突时的降级置信度",
     )
-    # Whether to flag needs_human_review when conflict is detected.
+    # Whether to flag for human review when conflict occurs.
     conflict_needs_review: bool = Field(
         default=True,
         alias="conflictNeedsReview",
@@ -68,27 +59,34 @@ class ConfidencePolicy(BaseModel):
     )
     # Whether to invoke LLM arbitration when conflict is detected.
     enable_llm_arbitration: bool = Field(
-        default=False,
+        default_factory=lambda: os.environ.get("PRIVACY_LLM_ENABLE_ARBITRATION", "false").lower() == "true",
         alias="enableLlmArbitration",
-        description="是否启用 LLM 仲裁（需 ML 镜像）",
+        description="是否启用 LLM 仲裁（需 ML 镜像，支持 PRIVACY_LLM_ENABLE_ARBITRATION 环境变量）",
     )
     # LLM trigger threshold: invoke LLM when confidence falls below this value.
     llm_confidence_threshold: float = Field(
-        default=0.6, ge=0.0, le=1.0,
+        default_factory=lambda: float(os.environ.get("PRIVACY_LLM_CONFIDENCE_THRESHOLD", "0.6")),
+        ge=0.0, le=1.0,
         alias="llmConfidenceThreshold",
-        description="LLM 触发阈值（置信度低于此值时触发）",
+        description="LLM 触发阈值（置信度低于此值时触发，默认 0.6，支持 PRIVACY_LLM_CONFIDENCE_THRESHOLD 环境变量）",
     )
     # Whether to enable Layer-2 NER entity extraction.
     enable_ner: bool = Field(
-        default=False,
+        default_factory=lambda: os.environ.get("PRIVACY_NER_ENABLE", "false").lower() == "true",
         alias="enableNer",
         description="是否启用 NER 层",
     )
     # Whether to explicitly enable Layer-3 LLM (regardless of conflict).
     enable_llm: bool = Field(
-        default=False,
+        default_factory=lambda: os.environ.get("PRIVACY_LLM_ENABLE", "false").lower() == "true",
         alias="enableLlm",
         description="是否显式启用 LLM 层",
+    )
+    # Whether to automatically trigger Layer-3 Multimodal LLM when image/DICOM is detected.
+    auto_llm_on_image: bool = Field(
+        default_factory=lambda: os.environ.get("PRIVACY_LLM_AUTO_ON_IMAGE", "true").lower() == "true",
+        alias="autoLlmOnImage",
+        description="检测到图片病例或图像字段时是否自动强制触发多模态 LLM 层（默认 true）",
     )
     # NER trigger threshold: invoke NER when current level rank <= this value.
     # Default 3 means NER triggers when field is classified at rank 3 or below.

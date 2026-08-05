@@ -272,6 +272,27 @@ class ClassificationFunnel:
                 needs_human_review = self.policy.conflict_needs_review
                 reasoning += " | 规则冲突(置信度衰减)"
 
+        elif self._is_image_field_or_value(field_name, value) and self.policy.auto_llm_on_image and self.llm is not None and self.llm.is_available:
+            # 场景 C: 运维优化动态识别：包含图像/图片病例时，自动强制触发 Layer-3 多模态 LLM 视觉深度分析
+            current_level = self._resolve_level(tags)
+            llm_result = self.llm.classify(str_value, current_level, confidence)
+            if llm_result:
+                confidence = float(llm_result.get("confidence", confidence))
+                reasoning = "【多模态视觉识别】" + str(llm_result.get("reasoning", reasoning))
+                engine_layer = EngineLayer.L3_LLM
+                llm_level = llm_result.get("final_level", "")
+                if llm_level and llm_level in self.taxonomy.levels:
+                    llm_adjudicated_level = llm_level
+                    tags.append(SecurityTag(
+                        level=llm_level,
+                        category="MULTIMODAL_IMAGE_ANALYSIS",
+                        confidence=confidence,
+                        source_engine="LLM",
+                        rule_id="LLM_MULTIMODAL_IMAGE",
+                        domain=self.taxonomy.domain,
+                        standard_id=self.taxonomy.standard_id,
+                    ))
+
         elif confidence < self.policy.llm_confidence_threshold:
             # 场景 B: 低置信度兜底（无冲突但置信度不足）
             if self.policy.enable_llm and self.llm is not None and self.llm.is_available:
@@ -313,6 +334,26 @@ class ClassificationFunnel:
             has_conflict=has_conflict,
         )
         return funnel_result, suppressed_tags
+
+    def _is_image_field_or_value(self, field_name: str, value: Any) -> bool:
+        """运维智能识别算法：判断字段是否包含图像/图片病例/DICOM医学影像。"""
+        if value is None:
+            return False
+        val_str = str(value).strip()
+        val_lower = val_str.lower()
+        # 1. 常见图像文件扩展名检测
+        if any(val_lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom", ".tiff")):
+            return True
+        # 2. Base64 图像编码
+        if val_lower.startswith("data:image/") or val_lower.startswith("image:"):
+            return True
+        # 3. 字段名称包含图像/影像语义标识
+        field_lower = field_name.lower()
+        image_keywords = ("image", "photo", "pic", "picture", "dicom", "xray", "ct_scan", "mri", "切片", "病例图片", "影像")
+        if any(k in field_lower for k in image_keywords):
+            if len(val_str) > 3 and not val_str.startswith("http://") and not val_str.startswith("https://"):
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # 内部方法 / Internal Methods
