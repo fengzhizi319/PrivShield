@@ -302,26 +302,36 @@ class ConfigurableRuleEngine:
         results: list[bool] = []
         dynamic_level: str | None = None
         dynamic_category: str | None = None
-        # Track the target of the first actually-hit matcher for accurate match_target.
+        # 记录首个实际命中的匹配器 target（用于精确标注 match_target 归属）
         hit_target: str = "field_name"
+
+        is_or_logic = rule.match_logic.upper() == "OR"
 
         for matcher in rule.matchers:
             op_result = self._execute_matcher(matcher, field_name, str_value)
             is_hit = op_result.hit
             results.append(is_hit)
 
-            # Capture dynamic level/category from OperatorResult if provided.
+            # 命中时捕获由算子返回的动态等级/类别 (如 ICD-10 动态匹配)
             if is_hit and op_result.level is not None:
                 dynamic_level = op_result.level
                 dynamic_category = op_result.category
 
-            # Record the first hit matcher's target for match_target determination.
+            # 记录首个命中算子的 target 目标 (field_name 或 field_value)
             if is_hit and hit_target == "field_name":
                 hit_target = matcher.target
 
-        if rule.match_logic.upper() == "OR":
+            # 算法短路优化 (Short-Circuit Optimization):
+            # 1. OR 逻辑下：只要有一个算子命中 (is_hit=True)，可立即短路成立；
+            # 2. AND 逻辑下：只要有一个算子未命中 (is_hit=False)，可立即短路失败，跳过后续冗余正则计算。
+            if is_or_logic and is_hit:
+                break
+            elif not is_or_logic and not is_hit:
+                break
+
+        if is_or_logic:
             matched = any(results)
-        else:  # AND (default)
+        else:  # AND (默认)
             matched = all(results)
 
         if not matched:

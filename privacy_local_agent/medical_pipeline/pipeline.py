@@ -47,9 +47,18 @@ class MedicalPrivacyPipeline:
     """
 
     def _classify_field(self, key: str, val: str) -> FieldClassification:
+        """单字段分类分级评估算法。
+        
+        算法流程：
+        1. 类型安全转换：在 None 时置为空串，保留 0 和 False 等合法数据；
+        2. PII 身份规则拦截：若列名命中 PII 词库，根据 GB 11643 标准设定 ID Card 为 L4，其余为 L3；
+        3. 病史文本深度匹配：扫描 L5 (极高敏: HIV/重度精神障碍/遗传缺陷) 与 L4 (高敏: 肿瘤/性病/乙肝/衰竭) 词库；
+        4. 普通临床与评估字段映射：根据医疗标准规范赋予 L3 (主诉/病史) 与 L2 (健康评估/个人史)；
+        5. 默认 L1 兜底：无风险特征字段赋予通用 L1 级。
+        """
         val_str = "" if val is None else str(val)
         
-        # 1. PII 身份字段检测
+        # 步骤 1: PII 身份字段检测与分级
         if key in PII_FIELD_RULES:
             level = "L4" if key == "id_card_no" else "L3"
             return FieldClassification(
@@ -60,20 +69,20 @@ class MedicalPrivacyPipeline:
                 rule_matched=f"PII_RULE_{PII_FIELD_RULES[key]}",
             )
 
-        # 2. 病史文本中扫描所有 L5/L4 术语，取最高命中等级
-        #    修复: 原先仅返回首个匹配，现遍历全部规则以确保最高等级被捕获
+        # 步骤 2: 病史文本中扫描所有 L5/L4 术语，取最高命中等级
+        # 特别优化: 先扫描 L5，命中立即中断 (L5 已是最高级)；未命中再扫描 L4
         detected_level: str | None = None
         detected_category: str | None = None
 
         for pat, _replacement in L5_PATTERNS:
             if pat.search(val_str):
                 detected_level = "L5"
-                # 从替换标签中提取类别名 (如 [L5-HIV_AIDS-SENSITIVE-MASKED] → HIV_AIDS)
+                # 从替换标签中提取类别代码 (如 [L5-IMMUNODEFICIENCY-SENSITIVE-MASKED] → IMMUNODEFICIENCY)
                 tag = _replacement.strip("[]")
                 parts = tag.split("-")
                 if len(parts) >= 2:
                     detected_category = parts[1]
-                break  # L5 已是最高级，无需继续
+                break  # L5 已是最高级，中断循环
 
         if detected_level is None:
             for pat, _replacement in L4_PATTERNS:
@@ -98,11 +107,11 @@ class MedicalPrivacyPipeline:
                 field_name=key,
                 level="L4",
                 security_tag="HIGH_RISK_MEDICAL_L4",
-                description="高风险病史/诊断信息 (L4: 恶性肿瘤/烈性传染病/重度衰竭)",
+                description="高风险病史/诊断信息 (L4: 恶性肿瘤/性病传染病/重度衰竭)",
                 rule_matched="MEDICAL_L4_STRICT_RULE",
             )
 
-        # 3. 其他普通临床与评估字段
+        # 步骤 3: 其他普通临床与评估字段映射
         if key in ["chief_complaint", "past_history", "family_history", "allergic_history"]:
             return FieldClassification(
                 field_name=key,
@@ -121,6 +130,7 @@ class MedicalPrivacyPipeline:
                 rule_matched="ASSESSMENT_RULE",
             )
 
+        # 步骤 4: 通用 L1 级兜底
         return FieldClassification(
             field_name=key,
             level="L1",
