@@ -388,8 +388,8 @@ set -e
 echo "[watchdog] agent 已退出 (PID $AGENT_PID, exit code $wait_rc)，开始自动拉起监督..."
 while [[ "$STOPPING" != "true" ]]; do
     # 重新拉起 agent / Relaunch the agent
-    echo "[watchdog] 5 秒后自动重启 agent..."
-    sleep 5
+    echo "[watchdog] 1 秒后自动重启 agent..."
+    sleep 1
     if [[ "$STOPPING" == "true" ]]; then
         break
     fi

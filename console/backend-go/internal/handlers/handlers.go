@@ -30,6 +30,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	// encoding/json：用于 JSON 序列化/反序列化（params 解析、RecordEntry 转换）
 	"encoding/json"
@@ -269,8 +270,13 @@ func corsMiddleware() gin.HandlerFunc {
 func (s *Server) Health(c *gin.Context) {
 	// 记录请求开始时间，用于计算 Health RPC 调用耗时
 	start := time.Now()
+	// 使用独立 5 秒超时的 Context 访问上游 gRPC，
+	// 避免前端快速频繁点击连发切断 HTTP 请求时，c.Request.Context() 被取消导致 gRPC Health 连带报错。
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	// 通过 gRPC 客户端调用上游 agent 的 Health RPC
-	resp, err := s.client.Health(c.Request.Context())
+	resp, err := s.client.Health(ctx)
 	// 计算调用耗时（毫秒）
 	latency := time.Since(start).Milliseconds()
 
