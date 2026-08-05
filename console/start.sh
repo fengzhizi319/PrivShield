@@ -206,28 +206,52 @@ elif [[ "$REBUILD" == true ]]; then
     echo "后端依赖重装完成。"  # Backend deps reinstalled.
 fi
 
-# 3. 前端构建产物：缺失或 --rebuild 时自动执行 install + build
-# 3. Frontend build artifacts: auto install + build when missing or --rebuild
-# 前端依赖优先使用 pnpm，其次回退到 npm；如果两者都不存在，则仅保留 API 模式，
-# Prefers pnpm, falls back to npm; if neither exists, stays in API-only mode,
-# 这样即使本机没有完整 Node 环境，也能继续调试后端。
-# so backend debugging continues even without a full Node environment.
+_build_frontend() {
+    (
+        cd "$SCRIPT_DIR/web"
+        if command -v pnpm >/dev/null 2>&1; then
+            if [[ -d "node_modules" ]] && pnpm build 2>/dev/null; then
+                return 0
+            fi
+            (pnpm install --prefer-offline 2>/dev/null || pnpm install) && pnpm build
+        elif command -v npm >/dev/null 2>&1; then
+            if [[ -d "node_modules" ]] && npm run build 2>/dev/null; then
+                return 0
+            fi
+            npm install && npm run build
+        else
+            echo "警告：未找到 pnpm/npm，跳过前端构建，控制台将以 API 模式运行。"
+        fi
+    )
+}
+
+_frontend_is_stale() {
+    local marker="$SCRIPT_DIR/web/dist/index.html"
+    [[ -f "$marker" ]] || return 0
+    local newer
+    newer=$(find \
+        "$SCRIPT_DIR/web/src" \
+        "$SCRIPT_DIR/web/index.html" \
+        "$SCRIPT_DIR/web/package.json" \
+        "$SCRIPT_DIR/web/vite.config.ts" \
+        "$SCRIPT_DIR/web/tailwind.config.js" \
+        "$SCRIPT_DIR/web/postcss.config.js" \
+        "$SCRIPT_DIR/web/tsconfig.json" \
+        "$SCRIPT_DIR/web/tsconfig.node.json" \
+        -newer "$marker" -print -quit 2>/dev/null || true)
+    [[ -n "$newer" ]]
+}
+
 if [[ "$REBUILD" == true && -d "$SCRIPT_DIR/web/dist" ]]; then
     echo "--rebuild：删除旧的前端构建产物并重新构建..."  # --rebuild: removing old frontend dist and rebuilding...
     rm -rf "$SCRIPT_DIR/web/dist"  # 删除旧产物 / remove old artifacts
 fi
 if [[ ! -d "$SCRIPT_DIR/web/dist" ]]; then
     echo "未找到前端构建产物，自动构建：$SCRIPT_DIR/web/dist"  # Frontend dist not found, auto-building
-    (
-        cd "$SCRIPT_DIR/web"
-        if command -v pnpm >/dev/null 2>&1; then
-            pnpm install && pnpm build  # 优先 pnpm / prefer pnpm
-        elif command -v npm >/dev/null 2>&1; then
-            npm install && npm run build  # 回退 npm / fallback to npm
-        else
-            echo "警告：未找到 pnpm/npm，跳过前端构建，控制台将以 API 模式运行。"  # Warning: pnpm/npm not found, skipping frontend build
-        fi
-    )
+    _build_frontend
+elif _frontend_is_stale; then
+    echo "检测到前端源码比构建产物更新（可能刚执行过 git pull），自动重新构建前端..."
+    _build_frontend
 fi
 
 if [[ ! -d "$SCRIPT_DIR/web/dist" ]]; then

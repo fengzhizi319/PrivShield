@@ -38,6 +38,7 @@ avoiding heavy ML dependencies (torch/transformers) in the core path.
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from typing import Any
@@ -46,6 +47,30 @@ from ..observability.logging_config import get_logger
 from .models import DomainTaxonomy, SecurityTag
 
 logger = get_logger(__name__)
+
+# ─── 进程级 LLM 推理并发与内存保护 / Process-wide LLM inference guardrails ───
+# 单实例 classifier 内部虽有互斥锁（推理已串行化），但进程内可能存在多个模型实例
+# （主分类器 + 视觉回退引擎 + 多个命名空间/域的服务实例），并发推理叠加会推高内存，
+# 最终触发 OOM 崩溃 —— 表现为 Go 客户端收到 connection reset by peer。
+# 这里用模块级信号量限制整个进程的 LLM 推理并发数（所有 LlmAdapter 实例共享）。
+# A single classifier instance serializes its own inference, but a process may hold
+# multiple model instances (primary + vision fallback + per-namespace services);
+# concurrent inference across instances piles up memory and can trigger OOM crashes
+# (surfacing as connection reset by peer in the Go client). This module-level semaphore
+# caps total LLM inference concurrency across the entire process (shared by all adapters).
+_LLM_INFER_SEMAPHORE = threading.Semaphore(
+    max(1, int(os.environ.get("PRIVACY_LLM_MAX_CONCURRENCY", "1")))
+)
+
+# 信号量排队等待超时（秒）：并发请求超过上限时，等待超时后直接降级跳过 LLM 层，
+# 避免请求在信号量队列中无限堆积导致 gRPC 工作线程耗尽。
+# Queue wait timeout (seconds): when concurrency is saturated, requests waiting longer
+# than this timeout degrade by skipping the LLM layer instead of exhausting gRPC workers.
+_LLM_SEMAPHORE_WAIT_SECONDS = float(os.environ.get("PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS", "30"))
+
+# 推理前可用内存阈值（MB）：低于该阈值时跳过 LLM 层触发降级，防止 OOM 崩溃。
+# Available-memory threshold (MB): below this, the LLM layer is skipped to prevent OOM.
+_LLM_MIN_FREE_MEM_MB = float(os.environ.get("PRIVACY_LLM_MIN_FREE_MEM_MB", "512"))
 
 
 class LlmAdapter:
@@ -138,6 +163,82 @@ class LlmAdapter:
         self._lazy_init()
         return self._available
 
+    @staticmethod
+    def _check_memory_available() -> bool:
+        """推理前检查系统可用内存是否充足，不足时跳过 LLM 层降级。
+
+        Check available system memory before inference; skip the LLM layer when low.
+
+        优先使用 psutil（若已安装）；否则解析 /proc/meminfo（Linux/WSL）。
+        非 Linux 平台或读取失败时放行（不误伤），仅在有把握时拦截。
+        Prefers psutil when installed; otherwise parses /proc/meminfo (Linux/WSL).
+        Platforms without readable memory info are allowed through (no false positives).
+
+        Returns:
+            True = 内存充足可推理；False = 可用内存低于阈值，应降级跳过 LLM。
+            True = enough memory for inference; False = below threshold, degrade.
+        """
+        available_mb: float | None = None
+        try:
+            # 优先使用 psutil（跨平台、准确） / Prefer psutil (cross-platform, accurate)
+            import psutil
+            available_mb = psutil.virtual_memory().available / (1024 * 1024)
+        except ImportError:
+            # 无 psutil 时解析 /proc/meminfo（Linux/WSL） / Fallback to /proc/meminfo
+            try:
+                with open("/proc/meminfo", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("MemAvailable:"):
+                            available_mb = int(line.split()[1]) / 1024  # kB → MB
+                            break
+            except OSError:
+                return True  # 非 Linux 或无法读取 → 放行 / non-Linux or unreadable → allow
+        if available_mb is None:
+            return True  # 未找到可用内存信息 → 放行 / no memory info found → allow
+        if available_mb < _LLM_MIN_FREE_MEM_MB:
+            logger.warning(
+                "llm_skip_low_memory",
+                extra={
+                    "available_mb": round(available_mb, 1),
+                    "threshold_mb": _LLM_MIN_FREE_MEM_MB,
+                },
+            )
+            return False
+        return True
+
+    def _infer(self, infer_fn) -> dict[str, Any] | None:
+        """在信号量保护下执行推理（含内存预检）。
+
+        Run inference guarded by the process-wide semaphore (with memory pre-check).
+
+        执行顺序 / Order:
+        1. 内存预检：低于阈值直接降级，返回 None / Memory pre-check: degrade when low
+        2. 获取信号量（带超时）：饱和时等待，超时降级 / Acquire semaphore (timeout): degrade on timeout
+        3. 执行推理 / Run inference
+        4. 释放信号量（finally 保证） / Release semaphore (guaranteed by finally)
+
+        Args:
+            infer_fn: 实际执行推理的可调用对象（无参）。 / Callable that runs the actual inference.
+
+        Returns:
+            推理结果字典或 None（内存不足/等待超时/推理异常）。
+            Inference result dict or None (low memory / wait timeout / inference error).
+        """
+        # 内存预检：不足时跳过 LLM 层，直接走降级路径
+        if not self._check_memory_available():
+            return None
+        # 带超时获取信号量：避免请求无限堆积在队列中
+        if not _LLM_INFER_SEMAPHORE.acquire(timeout=_LLM_SEMAPHORE_WAIT_SECONDS):
+            logger.warning(
+                "llm_semaphore_timeout",
+                extra={"wait_seconds": _LLM_SEMAPHORE_WAIT_SECONDS},
+            )
+            return None
+        try:
+            return infer_fn()
+        finally:
+            _LLM_INFER_SEMAPHORE.release()
+
     def classify(
         self, text: str, upstream_level: str, upstream_confidence: float
     ) -> dict[str, Any] | None:
@@ -160,7 +261,7 @@ class LlmAdapter:
         if not self._available or self._classifier is None:
             return None
 
-        try:
+        def _do_classify() -> dict[str, Any] | None:
             # 旧模块的 classify 接口接受 SensitivityLevel 枚举，
             # 这里做字符串到枚举的适配转换（支持 L1~L5 和 C1~C4）。
             from .base import SensitivityLevel
@@ -170,6 +271,9 @@ class LlmAdapter:
             if result is None and self._is_image_input(text):
                 result = self._classify_with_fallback(text, level_enum, upstream_confidence)
             return result
+
+        try:
+            return self._infer(_do_classify)
         except Exception as e:
             logger.warning("llm_classify_failed", extra={"error": str(e)})
             return None
@@ -294,13 +398,16 @@ class LlmAdapter:
                 f"\"reasoning\": \"裁定理由\"}}"
             )
 
-        try:
+        def _do_arbitrate() -> dict[str, Any] | None:
             from .base import SensitivityLevel
             # 使用当前最高等级作为 upstream_level（支持 L1~L5 和 C1~C4）
             current_max = taxonomy.max_level(*(t.level for t in conflict_tags))
             level_enum = SensitivityLevel.from_string(current_max)
             result = self._classifier.classify(arbitration_text, level_enum, 0.5)
             return result
+
+        try:
+            return self._infer(_do_arbitrate)
         except Exception as e:
             logger.warning("llm_arbitrate_failed", extra={"error": str(e)})
             return None

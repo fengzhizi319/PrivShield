@@ -1117,10 +1117,12 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = No
             # 允许客户端在无活跃 RPC 时发送 keepalive PING，
             # 否则服务端会因 "too_many_pings" 发送 GOAWAY/ENHANCE_YOUR_CALM
             ("grpc.keepalive_permit_without_calls", 1),
-            # 允许客户端最短每 20 秒发送一次 PING（Go 客户端每 30 秒发送一次）。
-            # 单位：毫秒。注意 key 为 grpc.http2.min_time_between_pings_ms（C core 映射名），
-            # 而非 grpc.http2.min_ping_interval_without_data（该 key 不存在，会静默忽略）。
-            ("grpc.http2.min_time_between_pings_ms", 20000),
+            # 允许客户端最短每 5 秒发送一次 PING（高高频并发防护）
+            ("grpc.http2.min_time_between_pings_ms", 5000),
+            # 无数据交互时允许无限制次数发送 PING
+            ("grpc.http2.max_pings_without_data", 0),
+            # 禁用 PING 频率超限强制断开连接惩罚 (0 表示静默忽略过多 PING 而不断开 TCP)
+            ("grpc.http2.max_ping_strikes", 0),
             # 允许多进程绑定同一 gRPC 端口（SO_REUSEPORT）
             ("grpc.so_reuseport", 1),
         ],

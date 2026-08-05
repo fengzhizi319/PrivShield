@@ -175,6 +175,9 @@ Key environment variables:
 | `PRIVACY_ASYNC_MAX_WORKERS` | `4` | Thread pool size for async classification jobs |
 | `PRIVACY_ASYNC_JOB_TTL_SECONDS` | `3600` | TTL for async classification jobs |
 | `PRIVACY_ASYNC_MAX_JOBS` | `1000` | Max concurrent async classification jobs |
+| `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | Process-wide LLM inference concurrency cap (semaphore, prevents OOM) |
+| `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | `30` | Max seconds a request waits for the LLM inference slot before degrading |
+| `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | Skip LLM layer when available memory falls below this threshold (MB) |
 
 ## 7. Code Conventions
 

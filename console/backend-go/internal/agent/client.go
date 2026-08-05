@@ -94,6 +94,25 @@ func New(cfg *config.Config) (*Client, error) {
 		target,
 		// 使用构造好的传输凭证：非安全或 TLS/mTLS
 		grpc.WithTransportCredentials(creds),
+		// 配置自动重试策略：对 UNAVAILABLE（连接被重置、agent 崩溃/重启等瞬时故障）
+		// 自动重试，最大 4 次尝试（1 次原始调用 + 3 次重试），指数退避（0.1s → 0.2s → 0.4s）。
+		// 当 agent 因 OOM 崩溃或重启导致 TCP 连接被 RST（connection reset by peer）时，
+		// 客户端透明重试，前端感知不到偶发断连。
+		// Configure automatic retry: transparently retries UNAVAILABLE (connection reset,
+		// agent crash/restart) up to 4 attempts with exponential backoff, so transient
+		// disconnects caused by agent OOM/restart are invisible to the frontend.
+		grpc.WithDefaultServiceConfig(`{
+  "methodConfig": [{
+    "name": [{"service": "privacy.local.PrivacyService"}],
+    "retryPolicy": {
+      "MaxAttempts": 4,
+      "InitialBackoff": "0.1s",
+      "MaxBackoff": "1s",
+      "BackoffMultiplier": 2.0,
+      "RetryableStatusCodes": ["UNAVAILABLE"]
+    }
+  }]
+}`),
 		// 设置单次 RPC 调用最大接收与发送消息大小为 64 MiB（64 * 2^20 字节）。
 		// 默认值为 4 MiB，base64 编码的图片或大表分类场景可能超出默认限制，
 		// 导致服务端重置 HTTP/2 连接（表现为 connection reset by peer）。

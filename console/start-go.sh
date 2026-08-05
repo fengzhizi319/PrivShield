@@ -179,9 +179,17 @@ _build_frontend() {
     (
         cd "$SCRIPT_DIR/web"
         if command -v pnpm >/dev/null 2>&1; then
-            pnpm install && pnpm build  # 优先 pnpm / prefer pnpm
+            # 若已存在 node_modules，优先直接 build，避免网络波动/无网环境下连线 npm 仓库失败
+            if [[ -d "node_modules" ]] && pnpm build 2>/dev/null; then
+                return 0
+            fi
+            # 否则执行 install（优先从离线缓存读取）并构建
+            (pnpm install --prefer-offline 2>/dev/null || pnpm install) && pnpm build
         elif command -v npm >/dev/null 2>&1; then
-            npm install && npm run build  # 回退 npm / fallback npm
+            if [[ -d "node_modules" ]] && npm run build 2>/dev/null; then
+                return 0
+            fi
+            npm install && npm run build
         else
             echo "警告：未找到 pnpm/npm，跳过前端构建。"  # Warning: no pnpm/npm, skipping build
         fi
@@ -246,7 +254,12 @@ write_pid() {
 
 # 清理子进程 / Cleanup child processes
 PIDS=()  # PID 数组 / PID array
+# 停止标志：为 true 时 watchdog 不再自动拉起 agent（区分用户主动停止 vs 崩溃）
+# Stop flag: when true the watchdog stops auto-restarting the agent
+# (distinguishes intentional shutdown from crash).
+STOPPING=false
 cleanup() {
+    STOPPING=true  # 标记正在停止，禁止 watchdog 重启 / mark stopping to block watchdog restart
     echo ""
     echo "正在停止服务..."  # Stopping services...
     for pid in "${PIDS[@]}"; do
@@ -263,19 +276,23 @@ check_port_available 8079 "privacy_local_agent REST"   # agent REST
 check_port_available 50051 "privacy_local_agent gRPC"  # agent gRPC
 check_port_available 8081 "Go gRPC 代理后端"  # Go gRPC proxy
 
-# 启动 privacy_local_agent
-# Launch privacy_local_agent
+# 启动 privacy_local_agent（watchdog 崩溃重启时复用）
+# Launch privacy_local_agent (reused by watchdog for crash restart)
 # 默认会同时启动 REST (8079) 和 gRPC (50051)，Go 后端通过 gRPC 调用 agent
 # By default starts both REST (8079) and gRPC (50051); Go backend calls agent via gRPC
-echo "启动 privacy_local_agent (REST: $AGENT_URL, gRPC: 127.0.0.1:50051)..."
-(
-    source "$AGENT_VENV/bin/activate"  # 激活 agent venv / activate agent venv
-    cd "$PROJECT_ROOT"
-    exec python -m privacy_local_agent.server  # 启动服务 / start server
-) &
-AGENT_PID=$!  # 获取 PID / get PID
-PIDS+=("$AGENT_PID")
-write_pid "$AGENT_PID_FILE" "$AGENT_PID"
+launch_agent() {
+    echo "启动 privacy_local_agent (REST: $AGENT_URL, gRPC: 127.0.0.1:50051)..."
+    (
+        source "$AGENT_VENV/bin/activate"  # 激活 agent venv / activate agent venv
+        cd "$PROJECT_ROOT"
+        exec python -m privacy_local_agent.server  # 启动服务 / start server
+    ) &
+    AGENT_PID=$!  # 获取 PID / get PID
+    PIDS[0]="$AGENT_PID"  # 更新 PID 数组首位，cleanup 时能停止最新 agent
+    write_pid "$AGENT_PID_FILE" "$AGENT_PID"
+}
+
+launch_agent
 
 # ── 等待 agent REST 与 gRPC 就绪后再启动 Go 后端 ────────────────────────
 # Go 后端依赖 agent gRPC 连接，必须在 agent 完全就绪后启动，
@@ -354,5 +371,41 @@ fi
 echo "按 Ctrl+C 停止所有服务"  # Press Ctrl+C to stop all services
 echo "======================================"
 
-# 保持脚本运行 / Keep script running
-wait
+# ── Agent 崩溃自动拉起 watchdog / Watchdog: auto-restart agent on crash ──────────
+# 当 agent 因 OOM/崩溃退出时，Go 后端 gRPC 连接会被重置（connection reset by peer），
+# 客户端 keepalive + 重试策略可透明恢复；watchdog 负责在数秒内重新拉起 agent，
+# 缩短故障窗口，避免需要人工重启。
+# When the agent exits due to OOM/crash, the Go backend's gRPC connection gets reset;
+# client keepalive + retry policy recover transparently, while this watchdog relaunches
+# the agent within seconds to minimize the failure window without manual intervention.
+
+# 等待 agent 退出（阻塞），返回退出码 / Block until agent exits, capture exit code
+set +e  # 临时关闭 set -e：agent 崩溃退出码非零不应终止脚本
+wait "$AGENT_PID" 2>/dev/null
+wait_rc=$?
+set -e
+
+echo "[watchdog] agent 已退出 (PID $AGENT_PID, exit code $wait_rc)，开始自动拉起监督..."
+while [[ "$STOPPING" != "true" ]]; do
+    # 重新拉起 agent / Relaunch the agent
+    echo "[watchdog] 5 秒后自动重启 agent..."
+    sleep 5
+    if [[ "$STOPPING" == "true" ]]; then
+        break
+    fi
+    launch_agent
+    # 等待重启后的 agent 就绪（REST 健康检查通过即视为就绪）
+    if ! wait_for_service "$AGENT_URL/health" "重启后的 privacy_local_agent"; then
+        echo "[watchdog] 警告：agent 重启后未在 30 秒内就绪，继续监督。"
+    fi
+    # 阻塞等待 agent 再次退出（wait 同时回收僵尸进程）
+    set +e
+    wait "$AGENT_PID" 2>/dev/null
+    wait_rc=$?
+    set -e
+    if [[ "$STOPPING" == "true" ]]; then
+        break
+    fi
+    echo "[watchdog] agent 再次退出 (PID $AGENT_PID, exit code $wait_rc)"
+done
+echo "[watchdog] 监督循环已退出。"
