@@ -333,9 +333,12 @@ Address these before any hardened production deployment.
 | Helm template | `make helm-template` |
 | Build core image | `make docker-core` |
 | Build ml image | `make docker-ml` |
-| Run test console | `./console/start.sh` |
-| Run Go gRPC console | `./console/start-go.sh` |
-| Run Go gRPC console (mTLS) | `./console/start-go-mtls.sh` |
+| Run Dev Console (Go + Vite HMR) | `./console/scripts/dev-start-go.sh` |
+| Run Dev Console (Python + Vite HMR) | `./console/scripts/dev-start.sh` |
+| Run Prod Console (Go + Static) | `./console/scripts/prod-start-go.sh` |
+| Run Prod Console (Python + Static) | `./console/scripts/prod-start.sh` |
+| Stop Dev Console | `./console/scripts/dev-stop.sh` |
+| Stop Prod Console | `./console/scripts/prod-stop.sh` |
 | Run REST + gRPC | `python -m privacy_local_agent.server` |
 | Run test console backend | `cd console/backend && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |

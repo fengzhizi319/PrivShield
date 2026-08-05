@@ -142,6 +142,23 @@ docs-build:
 docs-clean:
 	rm -rf site/
 
+# ── Console Launchers ────────────────────────────────────────
+
+dev-go:
+	./console/scripts/dev-start-go.sh
+
+dev-python:
+	./console/scripts/dev-start.sh
+
+prod-go:
+	./console/scripts/prod-start-go.sh
+
+prod-python:
+	./console/scripts/prod-start.sh
+
+stop:
+	./console/scripts/dev-stop.sh
+
 # ── Other ────────────────────────────────────────────────────
 
 clean:
