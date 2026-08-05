@@ -403,16 +403,17 @@ class Qwen2VLClassifier(LlmClassifier):
         # 尝试导入 PIL 库（未安装时返回 None，退化为纯文本处理）
         try:
             from PIL import Image
+            Image.MAX_IMAGE_PIXELS = 25_000_000
         except ImportError:
             return None
 
         # 去除首尾空白字符
         text_stripped = text.strip()
+        img: Optional[Image.Image] = None
 
         # === 第 1 级检测：本地图片文件路径 ===
-        # 条件：长度 < 512（路径不会太长）+ 以图片扩展名结尾 + 文件实际存在
         if (
-            len(text_stripped) < 512  # 路径长度通常有限
+            len(text_stripped) < 512
             and any(
                 text_stripped.lower().endswith(ext)
                 for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -421,49 +422,44 @@ class Qwen2VLClassifier(LlmClassifier):
             and os.path.isfile(text_stripped)
         ):
             try:
-                # 使用 PIL 打开本地图片文件
-                return Image.open(text_stripped)
+                with Image.open(text_stripped) as raw_img:
+                    img = raw_img.convert("RGB")
             except Exception as e:
-                # 文件存在但无法解析为图片（损坏/格式不支持）
                 logger.warning(
                     "llm_image_load_failed",
                     extra={"path": redact(text_stripped), "error": str(e)},
                 )
 
         # === 第 2 级检测：Data URI 格式的 Base64 图片 ===
-        # 匹配格式：data:image/png;base64,iVBORw0KGgoAAA...
-        data_uri_match = re.match(r"^data:image\/[a-zA-Z]+;base64,(.+)$", text_stripped)
-        if data_uri_match:
-            try:
-                # 提取 Base64 编码部分（去掉 data:image/xxx;base64, 前缀）
-                base64_data = data_uri_match.group(1)
-                # 解码 Base64 为原始字节
-                image_bytes = base64.b64decode(base64_data)
-                # 将字节流包装为文件对象并用 PIL 打开
-                return Image.open(BytesIO(image_bytes))
-            except Exception as e:
-                # Base64 解码失败或数据不是有效图片
-                logger.warning(
-                    "llm_base64_decode_failed",
-                    extra={"error": str(e)},
-                )
+        elif re.match(r"^data:image\/[a-zA-Z]+;base64,(.+)$", text_stripped):
+            data_uri_match = re.match(r"^data:image\/[a-zA-Z]+;base64,(.+)$", text_stripped)
+            if data_uri_match:
+                try:
+                    base64_data = data_uri_match.group(1)
+                    image_bytes = base64.b64decode(base64_data)
+                    with Image.open(BytesIO(image_bytes)) as raw_img:
+                        img = raw_img.convert("RGB")
+                except Exception as e:
+                    logger.warning(
+                        "llm_base64_decode_failed",
+                        extra={"error": str(e)},
+                    )
 
         # === 第 3 级检测：纯 Base64 数据（无 Data URI 前缀）===
-        # 条件：长度 > 100（排除短文本）且不以 http 开头（排除 URL）
-        if len(text_stripped) > 100 and not text_stripped.startswith("http"):
+        elif len(text_stripped) > 100 and not text_stripped.startswith("http"):
             try:
-                # 使用 validate=True 严格校验 Base64 字符集
                 image_bytes = base64.b64decode(text_stripped, validate=True)
-                # 尝试将解码后的字节解析为图片
-                return Image.open(BytesIO(image_bytes))
-            except Exception as e:
-                # 不是有效的 Base64 图片数据（可能是普通长文本），使用 debug 级别日志
-                logger.debug(
-                    "llm_direct_base64_decode_failed",
-                    extra={"error": str(e)},
-                )
+                with Image.open(BytesIO(image_bytes)) as raw_img:
+                    img = raw_img.convert("RGB")
+            except Exception:
+                pass
 
-        # 三级检测均未命中，输入为纯文本
+        if img is not None:
+            # 高分辨率大图防 OOM 自动缩放下采样 (Max 2048x2048)
+            if img.width > 2048 or img.height > 2048:
+                img.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+            return img
+
         return None
 
     def classify(

@@ -164,8 +164,10 @@ class DynClassificationService:
         # Start high-resolution timer for duration measurement.
         start = time.monotonic()
 
-        # Step 0: 高并发 LRU 缓存查找
-        cache_key = (domain or "", standard or "", field_name, str(value) if value is not None else "", sanitize)
+        # Step 0: 高并发 LRU 缓存查找（防超长 Base64 内存暴涨）
+        val_str_raw = str(value) if value is not None else ""
+        val_key = val_str_raw if len(val_str_raw) <= 200 else (len(val_str_raw), val_str_raw[:100], hash(val_str_raw))
+        cache_key = (domain or "", standard or "", field_name, val_key, sanitize)
         cached_resp = self._classification_cache.get(cache_key)
         if cached_resp is not None:
             if sanitize and cached_resp.field_result.sanitized_value is None:
