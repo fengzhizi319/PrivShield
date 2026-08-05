@@ -204,3 +204,35 @@ def test_unified_patterns_importable_from_pipeline_masker() -> None:
     from privacy_local_agent.pipeline.masker import L4_PATTERNS as MP_L4, L5_PATTERNS as MP_L5
     assert len(MP_L4) == len(L4_PATTERNS)
     assert len(MP_L5) == len(L5_PATTERNS)
+
+
+def test_unknown_field_l4_l5_text_is_removed() -> None:
+    """未知字段名不能绕过医疗 L4/L5 文本门禁。"""
+    raw = "扩展字段：患者 HIV 感染，同时存在恶性肿瘤。"
+    result = process_medical_dataset([{"custom_note": raw}])
+    sanitized = result.sanitized_data[0]["custom_note"]
+
+    assert "HIV" not in sanitized
+    assert "恶性肿瘤" not in sanitized
+    assert sanitized != raw
+    assert result.summary["guarantee_no_l4_l5_raw_data"] is True
+
+
+def test_failed_image_redaction_never_returns_original_value() -> None:
+    """不存在或损坏图片必须 fail closed，不能把原路径当作脱敏结果。"""
+    raw_path = "/tmp/medical-private-case.png"
+    result = process_medical_dataset([{"case_image": raw_path}])
+
+    assert result.sanitized_data[0]["case_image"] == "[IMAGE-REDACTION-FAILED]"
+    assert result.sanitized_data[0]["case_image"] != raw_path
+    assert result.summary["redaction_failures"] == 1
+    assert result.summary["guarantee_no_l4_l5_raw_data"] is False
+
+
+def test_sanitize_false_does_not_claim_a_safety_guarantee() -> None:
+    """仅分类、不脱敏时不得报告已满足无高敏原文保证。"""
+    result = process_medical_dataset([{"present_illness": "HIV 感染"}], sanitize=False)
+
+    assert result.sanitized_data[0]["present_illness"] == "HIV 感染"
+    assert result.summary["guarantee_no_l4_l5_raw_data"] is False
+

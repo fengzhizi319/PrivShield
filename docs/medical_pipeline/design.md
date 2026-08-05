@@ -11,15 +11,16 @@
 在医疗健康数据开放与合规共享场景中，电子病历 (EMR)、残疾人评估记录及医保结算数据包含高度敏感的个人身份标识信息 (PII，如身份证号、医保证号) 以及极高风险的医疗病史信息（如 L4 级的恶性肿瘤/传染病病史、L5 级的重度精神障碍/遗传缺陷/HIV 感染等）。
 
 本设计方案旨在构建一个完整的**医疗数据合规治理 Pipeline**：
-1. **数据模拟生成 (`scripts/generate_medical_data.py`)**：自动生成 20 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、图片病例引用以及 L4/L5 级敏感病史的高仿真 `data1.csv`。
+1. **数据模拟生成 (`scripts/generate_medical_data.py`)**：自动生成 100 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、图片病例引用（包含血常规、梅毒病例、HIV 报告、胸片等真实图片文件路径）以及 L4/L5 级敏感病史的高仿真 `data1.csv`。
 2. **算法处理核心 (`privacy_local_agent/medical_pipeline/`)**：
-   - 接入 `dynclassification` 规则与 Funnel 引擎，完成 27 个字段及文本内容的 L1~L5 分级标注。
-   - 接入 `privacy/masking` 脱敏原语，对 PII 及 L4/L5 级高敏感诊断与病历执行强脱敏与范畴化替换，强制保障输出数据中**绝对不包含任何 L4/L5 级原始敏感内容**。
+   - 彻底与 `dynclassification` 统一合并：直接调用 `DynClassificationService.classify_field(..., sanitize=True)` 3 层漏斗 (Rule -> Small-NER -> Qwen2-VL) 完成 27 个字段及文本/图片病例的 L1~L5 风险分级标注。
+   - **智能抹平与格式对称**：对 PII 及 L4/L5 级高敏感诊断执行自动抹平，对文本输出抹平文本，对图片输出遮罩打码后的新图片路径，强制保障输出数据中**绝对不包含任何 L4/L5 级原始敏感内容**。
+   - **多线程安全与缓存复用**：`MedicalPrivacyPipeline` 内部挂载 `self._lock = threading.Lock()` 保护 `_sanitized_cache` 读写，避免并发数据竞态。
    - **双重结果输出**：输出 (1) 分级报告数据 (`classification_report`) 和 (2) 脱敏后符合安全合规要求的清洗数据 (`sanitized_data`)。
 3. **代理后端与前端全链路集成**：
-   - 将 `data1.csv` 放置于 Go/Python 控制台后端样例目录。
+   - 将 100 条 `data1.csv` 放置于 Go/Python 控制台后端及 `medical_pipeline/samples/` 样例目录。
    - 在 Python 后端与 Go 后端实现对应的测试代理与 gRPC/REST 通信。
-   - 在 Web 前端控制台增加“医疗数据治理 (Medical Pipeline)”独立功能面板，实现 Front-to-End 跑通。
+   - 在 Web 前端控制台增加“医疗数据治理 (Medical Pipeline)”与预置图片病例测试面板，实现 Front-to-End 跑通。
 
 ---
 

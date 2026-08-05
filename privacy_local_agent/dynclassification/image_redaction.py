@@ -9,10 +9,13 @@ from io import BytesIO
 import os
 from pathlib import Path
 from typing import Optional
+import tempfile
 
 from ..observability.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+IMAGE_REDACTION_FAILURE = "[IMAGE-REDACTION-FAILED]"
 
 
 def _cleanup_old_sanitized_images(output_dir: Path, max_files: int = 200) -> None:
@@ -51,28 +54,31 @@ def sanitize_image_input(
         # 设置 DecompressionBomb 像素上限保护
         Image.MAX_IMAGE_PIXELS = 25_000_000
     except ImportError:
-        logger.warning("PIL (Pillow) 未安装，无法执行图像病例盲区打码脱敏，退回原值")
-        return val_str
+        logger.warning("PIL (Pillow) 未安装，拒绝输出未脱敏图像")
+        return IMAGE_REDACTION_FAILURE
 
     val_stripped = val_str.strip()
     is_data_uri = val_stripped.lower().startswith("data:image/")
+    is_image_marker = val_stripped.lower().startswith("image:")
     is_file_path = (
         len(val_stripped) < 512
-        and any(val_stripped.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom"))
+        and any(
+            val_stripped.lower().endswith(ext)
+            for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dcm", ".dicom")
+        )
     )
 
     img: Optional[Image.Image] = None
-    file_path_obj: Optional[Path] = None
+    file_path_obj: Optional[Path] = Path(val_stripped) if is_file_path else None
 
     # 1. 尝试从文件路径或 Base64 安全加载并立即分离文件句柄
-    if is_file_path and os.path.exists(val_stripped):
-        file_path_obj = Path(val_stripped)
+    if file_path_obj is not None and os.path.exists(file_path_obj):
         try:
             with Image.open(file_path_obj) as raw_img:
                 img = raw_img.convert("RGB")
         except Exception as e:
-            logger.warning(f"无法打开图片文件 '{val_stripped}': {e}")
-            return val_str
+            logger.warning("无法打开图片文件，拒绝输出未脱敏图像: %s", e)
+            return IMAGE_REDACTION_FAILURE
     elif is_data_uri:
         try:
             parts = val_stripped.split(",", 1)
@@ -81,11 +87,12 @@ def sanitize_image_input(
                 with Image.open(BytesIO(img_bytes)) as raw_img:
                     img = raw_img.convert("RGB")
         except Exception as e:
-            logger.warning(f"无法解码 Base64 图像: {e}")
-            return val_str
+            logger.warning("无法解码 Base64 图像，拒绝输出未脱敏图像: %s", e)
+            return IMAGE_REDACTION_FAILURE
 
     if img is None:
-        return val_str
+        # 只要输入看起来是图片，就不能把未知格式当普通文本返回。
+        return IMAGE_REDACTION_FAILURE if is_file_path or is_data_uri or is_image_marker else val_str
 
     # 2. 超高分辨率内存与显存保护 (OOM Prevention)
     # 若图像分辨率超 2048x2048，自动高质量下采样缩放
@@ -122,14 +129,26 @@ def sanitize_image_input(
         _cleanup_old_sanitized_images(out_dir, max_files=200)
 
         out_file = out_dir / f"sanitized_{file_path_obj.name}"
+        if out_file.is_symlink():
+            img.close()
+            logger.warning("拒绝覆盖符号链接形式的图片输出: %s", out_file.name)
+            return IMAGE_REDACTION_FAILURE
         fmt = file_path_obj.suffix.lstrip(".").upper()
         if fmt == "JPG":
             fmt = "JPEG"
         if not fmt:
             fmt = "PNG"
-        img.save(out_file, format=fmt)
-        img.close()
-        return str(out_file)
+        # 在同一目录创建临时文件并原子替换，避免并发请求读到半成品。
+        fd, tmp_name = tempfile.mkstemp(prefix=".sanitized_", suffix=out_file.suffix, dir=out_dir)
+        os.close(fd)
+        tmp_file = Path(tmp_name)
+        try:
+            img.save(tmp_file, format=fmt)
+            tmp_file.replace(out_file)
+            return str(out_file)
+        finally:
+            img.close()
+            tmp_file.unlink(missing_ok=True)
     elif is_data_uri:
         buf = BytesIO()
         img.save(buf, format="PNG")

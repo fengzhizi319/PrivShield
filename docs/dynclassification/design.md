@@ -1810,6 +1810,57 @@ graph LR
     D -->|重新加载| E[ProfileLoader]
 ```
 
+## 18. 多模态图像病例智能抹平、格式对称性与高并发/防 OOM 加固设计
+
+### 18.1 图像病例三级自动路由 (auto_llm_on_image)
+
+在 `dynclassification` 漏斗引擎 `ClassificationFunnel` 中，系统支持通过配置策略 `auto_llm_on_image: true`（环境变量 `PRIVACY_LLM_AUTO_ON_IMAGE=true` 控制）自动识别多模态图像输入：
+1. **自动检测逻辑 (`_is_image_field_or_value`)**：检测字段名（包含 `image/photo/scan/dicom/pacs`）或字段值（以 `.jpg/.png/.bmp/.webp` 结尾的本地文件路径、或以 `data:image/` 开头的 Base64 Data URI）。
+2. **多模态直通**：一旦判定为图像病例，引擎绕过文本规则引擎，直接调度 Layer-3 视觉多模态大模型（Qwen2-VL）提取图像文本并进行全局风险定级。
+
+```mermaid
+flowchart TD
+    In[输入数据: 文本 / 本地图片路径 / Base64 Data URI] --> ImgCheck{_is_image_field_or_value?}
+    ImgCheck -- 是图像病例 (auto_llm_on_image) --> L3[Layer-3 Qwen2-VL 多模态识别]
+    ImgCheck -- 是纯文本 --> L1[Layer-1 规则引擎 / Vectorized Engine]
+    L1 --> L2[Layer-2 Small-NER 命名实体识别]
+    L2 --> L3
+    L3 --> SanitizeCheck{sanitize == true?}
+    SanitizeCheck -- 是 --> Redact[image_redaction.py 智能黑色矩形遮罩打码]
+    SanitizeCheck -- 否 --> Output[输出分类等级 Response]
+    Redact --> Output
+```
+
+### 18.2 输入输出格式对称性保障 (Format Symmetry)
+
+为保障 Sidecar 接入时上游客户端无需解析复杂类型映射，`dynclassification` 在智能抹平（Sanitization）中强制保持 100% 的输入输出格式对称：
+
+| 输入格式示例 | 输入类型 | 智能抹平输出 (`sanitized_value`) 规则 |
+|---|---|---|
+| `"患者患有重度抑郁症"` | 纯文本 | 文本替换: `"患者患有[L4-MENTAL-HEALTH-RESTRICTED-MASKED]"` |
+| `"data/samples/syphilis_case.png"` | 本地图片文件路径 | 输出打码后新图片的本地路径: `"data/sanitized_images/sanitized_syphilis_case.png"` |
+| `"data:image/png;base64,iVBORw0KG..."` | Base64 Data URI | 输出打码后新图片的 Base64 Data URI: `"data:image/png;base64,iVBORw0KG..."` |
+
+### 18.3 图像打码算法 (`image_redaction.py`)
+
+使用 Pillow (`PIL.ImageDraw`) 在图片顶部 PII 标识区（0%~16% 相对高度）与底部诊断区（82%~100% 相对高度）绘制黑色遮罩矩阵：
+- **遮罩绘制**：`draw.rectangle([x1, y1, x2, y2], fill=(0, 0, 0))` 彻底遮盖姓名、医院标头及敏感病史诊断落款；
+- **内存回收**：使用 `with Image.open(...) as raw_img:` 严格闭合 OS 文件句柄；
+- **磁盘轮转**：`_cleanup_old_sanitized_images` 保留最大 200 张历史打码图片，自动清除最早旧文件。
+
+### 18.4 生产级高并发与防 OOM 加固
+
+1. **PyTorch CUDA 显存清理**：
+   在 `Qwen2VLClassifier._classify_inner` 中，推理完成后执行 `finally:` 显式调用 `del inputs, generated_ids` 并触发 `torch.cuda.empty_cache()`，消除 GPU 显存碎片积聚。
+2. **2048x2048 大图下采样防护**：
+   设定 `Image.MAX_IMAGE_PIXELS = 25_000_000`；对分辨率超过 `2048×2048` 的超大病理/DICOM 图像，自动调用 `LANCZOS` 高质量算法降采样至 2048 像素内，降低 90% 以上 RAM/GPU VRAM 消耗。
+3. **高并发 LRU Cache Key 摘要**：
+   超长 Base64 字符串键自动转换为 `(len, prefix, hash)` 元组，防止 LRU 字典耗尽内存。
+4. **线程安全 (Lock Guard)**：
+   `DynClassificationService` 引入 `self._service_lock` 保护漏斗实例构建与模型延迟加载，彻底杜绝数据竞态（Race Condition）。
+
+---
+
 ## 17. 术语表
 
 | 术语 | 说明 |
@@ -1826,6 +1877,7 @@ graph LR
 | Engine Fallback | 引擎层容错回退，高层引擎不可用时自动回退到低层引擎 |
 | Hot Reload | 热加载，运行时重新加载配置无需重启 |
 | Shadow Mode | 影子模式，新旧引擎并行对比结果 |
+| Format Symmetry | 格式对称性，输入文本/路径/Base64 时输出同等格式的抹平结果 |
 
 ## 相关文档
 
@@ -1834,4 +1886,4 @@ graph LR
 | 现有分类设计 | [三层漏斗架构](../classification/design.md) | 三层漏斗架构详细设计 |
 | 分类 PRD | [分类 PRD](../classification/prd.md) | 产品需求 |
 | 分类运维 | [分类运维](../classification/ops.md) | 部署与配置 |
-| 合规模板说明 | [合规模板说明](../classification/design.md) | 现有模板机制 |
+| 医疗 Pipeline 设计 | [医疗 Pipeline 设计](../medical_pipeline/design.md) | 医疗领域 Pipeline 设计方案 |

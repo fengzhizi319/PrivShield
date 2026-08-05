@@ -178,6 +178,9 @@ Key environment variables:
 | `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | Process-wide LLM inference concurrency cap (semaphore, prevents OOM) |
 | `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | `30` | Max seconds a request waits for the LLM inference slot before degrading |
 | `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | Skip LLM layer when available memory falls below this threshold (MB) |
+| `PRIVACY_LLM_AUTO_ON_IMAGE` | `true` | Automatically route image inputs (file paths, Data URIs) to Layer-3 VLM |
+| `PRIVACY_LLM_CONFIDENCE_THRESHOLD` | `0.75` | Minimum confidence threshold for Layer-3 arbitration |
+| `PRIVACY_LLM_ENABLE_ARBITRATION` | `true` | Enable Layer-3 LLM arbitration on low confidence or uncertainty |
 
 ## 7. Code Conventions
 

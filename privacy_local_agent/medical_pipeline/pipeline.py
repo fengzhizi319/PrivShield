@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from privacy_local_agent.dynclassification import DynClassificationService
+from privacy_local_agent.dynclassification.image_redaction import IMAGE_REDACTION_FAILURE
 from privacy_local_agent.privacy.masking import mask_value
 
 from .rules import L4_PATTERNS, L5_PATTERNS, PII_FIELD_RULES
@@ -77,7 +78,8 @@ class MedicalPrivacyPipeline:
 
         # 对中高敏感度字段应用 PII 掩码
         if final_level in ["L3", "L4", "L5", "C4", "C5"]:
-            s_text = mask_value(field_name, s_text)
+            masked = mask_value(field_name, s_text, return_details=False)
+            s_text = masked if isinstance(masked, str) else masked.value
 
         return s_text
 
@@ -102,12 +104,10 @@ class MedicalPrivacyPipeline:
             if dyn_resp and dyn_resp.field_result:
                 dyn_level = dyn_resp.field_result.final_level
                 # 缓存 dyn_service 智能抹平结果，避免 _sanitize_field 重复调用
-                if (
-                    dyn_resp.field_result.sanitized_value is not None
-                    and dyn_resp.field_result.sanitized_value != val_str
-                ):
+                sanitized_value = dyn_resp.field_result.sanitized_value
+                if isinstance(sanitized_value, str) and sanitized_value != val_str:
                     with self._lock:
-                        self._sanitized_cache[(key, val_str)] = dyn_resp.field_result.sanitized_value
+                        self._sanitized_cache[(key, val_str)] = sanitized_value
         except Exception:
             dyn_level = None
 
@@ -207,14 +207,22 @@ class MedicalPrivacyPipeline:
             sanitized = pat.sub(replacement, sanitized)
         return sanitized
 
+    @staticmethod
+    def _contains_high_risk_text(text: str) -> bool:
+        """判断文本是否仍包含未抹平的 L4/L5 术语。"""
+        return any(pattern.search(text) for pattern, _replacement in L4_PATTERNS + L5_PATTERNS)
+
     def _mask_pii_value(self, key: str, val_str: str) -> str:
         """PII 身份字段统一脱敏（提取公共逻辑，避免重复代码）。"""
         if key == "id_card_no":
-            return mask_value("id_card_no", val_str)
+            masked = mask_value("id_card_no", val_str, return_details=False)
+            return masked if isinstance(masked, str) else masked.value
         if key == "name":
-            return mask_value("name", val_str)
+            masked = mask_value("name", val_str, return_details=False)
+            return masked if isinstance(masked, str) else masked.value
         if key == "registered_address":
-            return mask_value("address", val_str)
+            masked = mask_value("address", val_str, return_details=False)
+            return masked if isinstance(masked, str) else masked.value
         if key in ["disability_cert_no", "medical_insurance_no"]:
             if len(val_str) > 6:
                 return val_str[:4] + "*" * (len(val_str) - 6) + val_str[-2:]
@@ -245,15 +253,15 @@ class MedicalPrivacyPipeline:
             len(val_stripped) < 512
             and any(
                 val_stripped.lower().endswith(ext)
-                for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom")
+                for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dcm", ".dicom")
             )
-        ) or val_stripped.lower().startswith("data:image/")
+        ) or val_stripped.lower().startswith(("data:image/", "image:"))
         if is_image:
             try:
                 from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
                 return sanitize_image_input(val_str)
             except Exception:
-                pass  # 降级到下方文本处理
+                return IMAGE_REDACTION_FAILURE
 
         # 1. 优先复用 _classify_field 中 dyn_service 已计算的 sanitized_value
         cache_key = (key, val_str)
@@ -278,7 +286,12 @@ class MedicalPrivacyPipeline:
             "past_history", "personal_history", "family_history",
             "allergic_history", "progress_note",
         }
-        if key in clinical_keys or self._classify_field(key, val_str).level in ["L4", "L5"]:
+        # 不依赖字段名：未知字段中的高敏医疗文本同样必须被抹平。
+        if (
+            key in clinical_keys
+            or self._contains_high_risk_text(val_str)
+            or self._classify_field(key, val_str).level in ["L4", "L5"]
+        ):
             return self.sanitize_text(val_str)
 
         return val_str
@@ -300,7 +313,8 @@ class MedicalPrivacyPipeline:
         l5_count = 0
         l4_count = 0
         l3_count = 0
-        
+        redaction_failures = 0
+
         for idx, rec in enumerate(records, start=1):
             field_classifications: list[FieldClassification] = []
             sanitized_rec: dict[str, str] = {}
@@ -333,6 +347,11 @@ class MedicalPrivacyPipeline:
                 # 使用 _sanitize_field 复用 _classify_field 的 dyn_service 结果（单次调用优化）
                 if sanitize:
                     sanitized_rec[key] = self._sanitize_field(key, val_str)
+                    if sanitized_rec[key] == "[IMAGE-REDACTION-FAILED]":
+                        redaction_failures += 1
+                    elif self._contains_high_risk_text(sanitized_rec[key]):
+                        # 最终门禁：任何漏网的高敏文本整体删除，不能返回部分原文。
+                        sanitized_rec[key] = "[L4-L5-DATA-REMOVED]"
                 else:
                     sanitized_rec[key] = val_str
                 
@@ -362,7 +381,8 @@ class MedicalPrivacyPipeline:
             "l3_records_count": l3_count,
             "l1_l2_records_count": len(records) - l5_count - l4_count - l3_count,
             "sanitized_pii_fields_per_record": len(PII_FIELD_RULES) if sanitize else 0,
-            "guarantee_no_l4_l5_raw_data": sanitize,
+            "redaction_failures": redaction_failures,
+            "guarantee_no_l4_l5_raw_data": bool(sanitize and redaction_failures == 0),
             "duration_ms": round(elapsed_ms, 2),
         }
         
