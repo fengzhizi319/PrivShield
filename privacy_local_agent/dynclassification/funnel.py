@@ -90,6 +90,8 @@ class FunnelResult:
     needs_human_review: bool = False
     # Human-readable reasoning explanation.
     reasoning: str = ""
+    # Smart sanitized/masked value.
+    sanitized_value: str = ""
     # Whether a rule conflict was detected (normal + downgrade coexist).
     has_conflict: bool = False
 

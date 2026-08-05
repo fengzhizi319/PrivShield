@@ -547,3 +547,77 @@ class TestRealImageClassification:
         assert result is not None, "真实模型对 Base64 图片分类返回 None"
         assert "final_level" in result
         assert "confidence" in result
+
+
+# =========================================================================== #
+# L4/L5 敏感图片病例智能打码与出入参格式对称性测试
+# =========================================================================== #
+
+
+class TestImageRedactionAndSymmetry:
+    """测试带 L4/L5 敏感疾病的图片病例智能打码遮盖及出入参格式对称性。"""
+
+    def test_image_file_path_redaction_returns_sanitized_file_path(self, tmp_path):
+        """测试图片文件路径入参时，脱敏输出同格式的新图片文件路径。"""
+        from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
+        from privacy_local_agent.dynclassification import DynClassificationService
+
+        # 1. 构造一个包含 L4 性病/肿瘤图像病例的临时图片
+        img_bytes = _make_test_image(text="一期梅毒与RPR阳性诊断图片")
+        img_file = tmp_path / "syphilis_case.png"
+        img_file.write_bytes(img_bytes)
+
+        # 2. 执行图像盲区打码抹平
+        out_path_str = sanitize_image_input(str(img_file), output_dir=tmp_path / "out")
+        out_path = Path(out_path_str)
+
+        # 3. 校验出参格式为文件路径，且新文件存在
+        assert out_path.exists()
+        assert out_path.suffix == ".png"
+        assert "sanitized_syphilis_case.png" in out_path.name
+
+        # 4. 通过 DynClassificationService 测试集成
+        service = DynClassificationService()
+        resp = service.classify_field("case_image", str(img_file), sanitize=True)
+        assert resp.field_result is not None
+        assert resp.field_result.sanitized_value is not None
+        assert Path(resp.field_result.sanitized_value).exists()
+
+    def test_base64_image_redaction_returns_base64_data_uri(self):
+        """测试 Base64 Data URI 图片入参时，脱敏输出同格式的 Base64 Data URI。"""
+        from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
+        from privacy_local_agent.dynclassification import DynClassificationService
+
+        # 1. 构造 Base64 Data URI
+        img_bytes = _make_jpeg_image()
+        b64_data = base64.b64encode(img_bytes).decode("utf-8")
+        data_uri = f"data:image/jpeg;base64,{b64_data}"
+
+        # 2. 执行图像抹平
+        out_data_uri = sanitize_image_input(data_uri)
+
+        # 3. 校验出参格式与入参保持一致 (Data URI 字符串)
+        assert out_data_uri.startswith("data:image/png;base64,")
+        assert len(out_data_uri) > 50
+
+        # 4. 通过 DynClassificationService 测试集成
+        service = DynClassificationService()
+        resp = service.classify_field("hiv_case_image", data_uri, sanitize=True)
+        assert resp.field_result is not None
+        assert resp.field_result.sanitized_value is not None
+        assert resp.field_result.sanitized_value.startswith("data:image/")
+
+    def test_text_case_input_returns_sanitized_text_symmetry(self):
+        """测试纯文本病例入参时，脱敏输出同格式的文本病例。"""
+        from privacy_local_agent.dynclassification import DynClassificationService
+
+        service = DynClassificationService()
+        raw_text = "患者自述外阴溃疡，RPR 1:16 阳性，确诊一期梅毒。"
+        resp = service.classify_field("present_illness", raw_text, sanitize=True)
+
+        assert resp.field_result is not None
+        assert resp.field_result.sanitized_value is not None
+        # 校验出参为文本字符串且删除了性病高敏词
+        assert isinstance(resp.field_result.sanitized_value, str)
+        assert "梅毒" not in resp.field_result.sanitized_value
+

@@ -168,6 +168,27 @@ class DynClassificationService:
         cache_key = (domain or "", standard or "", field_name, str(value) if value is not None else "", sanitize)
         cached_resp = self._classification_cache.get(cache_key)
         if cached_resp is not None:
+            if sanitize and cached_resp.field_result.sanitized_value is None:
+                val_str = str(value) if value is not None else ""
+                from .image_redaction import sanitize_image_input
+                is_image = (
+                    len(val_str.strip()) < 512
+                    and any(val_str.strip().lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom"))
+                ) or val_str.strip().lower().startswith("data:image/")
+                if is_image:
+                    cached_resp.field_result.sanitized_value = sanitize_image_input(val_str)
+                else:
+                    from privacy_local_agent.privacy.masking import mask_value
+                    from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
+                    s_text = val_str
+                    for pat, replacement in L4_PATTERNS:
+                        s_text = pat.sub(replacement, s_text)
+                    for pat, replacement in L5_PATTERNS:
+                        s_text = pat.sub(replacement, s_text)
+                    if cached_resp.field_result.final_level in ["L3", "L4", "L5", "C4", "C5"]:
+                        s_text = mask_value(field_name, s_text)
+                    cached_resp.field_result.sanitized_value = s_text
+
             duration_ms = (time.monotonic() - start) * 1000
             # 构造新的 response 保持独立的执行耗时审计
             audit = AuditInfo(
@@ -197,13 +218,29 @@ class DynClassificationService:
         sanitized_val: str | None = None
         if sanitize:
             val_str = str(value) if value is not None else ""
-            if funnel_result.sanitized_value:
+            from .image_redaction import sanitize_image_input
+            # 判断入参是否为图片病例 (本地文件路径或 Base64 Data URI)
+            is_image = (
+                len(val_str.strip()) < 512
+                and any(val_str.strip().lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom"))
+            ) or val_str.strip().lower().startswith("data:image/")
+            
+            if is_image:
+                # 图片病例脱敏：执行图像盲区打码，返回相同格式的图像出参 (新文件路径或 Base64 Data URI)
+                sanitized_val = sanitize_image_input(val_str)
+            elif getattr(funnel_result, "sanitized_value", None):
                 sanitized_val = funnel_result.sanitized_value
-            elif final_level in ["L4", "L5", "C4", "C5"]:
-                from privacy_local_agent.privacy.masking import mask_value
-                sanitized_val = mask_value(field_name, val_str)
             else:
-                sanitized_val = val_str
+                from privacy_local_agent.privacy.masking import mask_value
+                from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
+                s_text = val_str
+                for pat, replacement in L4_PATTERNS:
+                    s_text = pat.sub(replacement, s_text)
+                for pat, replacement in L5_PATTERNS:
+                    s_text = pat.sub(replacement, s_text)
+                if final_level in ["L3", "L4", "L5", "C4", "C5"]:
+                    s_text = mask_value(field_name, s_text)
+                sanitized_val = s_text
 
         # Calculate execution duration in milliseconds.
         duration_ms = (time.monotonic() - start) * 1000
@@ -218,6 +255,7 @@ class DynClassificationService:
             needs_human_review=funnel_result.needs_human_review,
             engine_layer=funnel_result.engine_layer,
             reasoning=funnel_result.reasoning,
+            sanitized_value=sanitized_val,
             suppressed_tags=suppressed_tags,
         )
 
