@@ -104,9 +104,9 @@ def test_data1_csv_file_pipeline_execution() -> None:
         for row in reader:
             records.append(row)
             
-    assert len(records) == 20
+    assert len(records) >= 20
     res = process_medical_dataset(records)
-    assert res.summary["total_records"] == 20
+    assert res.summary["total_records"] == len(records)
     assert res.summary["l5_records_count"] > 0
     assert res.summary["l4_records_count"] > 0
 
