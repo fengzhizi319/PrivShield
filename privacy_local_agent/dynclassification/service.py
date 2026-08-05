@@ -105,9 +105,26 @@ class DynClassificationService:
         self._funnel_cache: dict[str, ClassificationFunnel] = {}
         cache_size = int(os.environ.get("PRIVACY_CLASSIFICATION_CACHE_SIZE", "10000"))
         from ..privacy.high_concurrency import HighConcurrencyLRUCache
-        self._classification_cache = HighConcurrencyLRUCache[tuple[str, str, str, str], ClassificationResponse](
+        self._classification_cache = HighConcurrencyLRUCache[tuple[str, str, str, str, bool], ClassificationResponse](
             capacity=cache_size
         )
+
+    def _build_funnel(self, engine: ConfigurableRuleEngine) -> ClassificationFunnel:
+        """构建分类漏斗实例。"""
+        cache_key = f"{engine.domain}:{engine.standard_id}"
+        if cache_key not in self._funnel_cache:
+            self._funnel_cache[cache_key] = ClassificationFunnel(
+                engine=engine,
+                ner_adapter=self._ner_adapter or consume_preloaded_adapter("ner"),
+                llm_adapter=self._llm_adapter or consume_preloaded_adapter("llm"),
+            )
+        return self._funnel_cache[cache_key]
+
+    def _resolve_final_level(self, tags: list[SecurityTag], engine: ConfigurableRuleEngine) -> str:
+        """根据所有命中标签解析最终等级。"""
+        if not tags:
+            return "L0"
+        return max((tag.level for tag in tags), key=lambda l: engine.taxonomy.level_rank.get(l, 0))
 
     def clear_cache(self) -> None:
         """清空分类缓存（规则重载或配置更新时调用）。"""
@@ -120,23 +137,26 @@ class DynClassificationService:
     def classify_field(
         self,
         field_name: str,
-        value: Any = None,
+        value: Any,
         domain: Optional[str] = None,
         standard: Optional[str] = None,
+        sanitize: bool = False,
     ) -> ClassificationResponse:
-        """对单个字段进行分类。
+        """对单个字段进行分类与智能抹平脱敏。
 
         Execution flow:
         1. Check high-concurrency LRU cache for identical (domain, standard, field_name, value).
         2. Obtain (or build from cache) the rule engine for the given domain/standard.
         3. Evaluate the field against all rules/NER/LLM funnel to produce security tags.
         4. Resolve final level and package results with audit info.
+        5. If sanitize=True, compute smart sanitized_value via masking/LLM.
 
         Args:
             field_name: 字段名。
             value: 字段值。
             domain: 领域标识（可选）。
             standard: 标准标识（可选，优先于 domain）。
+            sanitize: 是否计算并生成智能抹平/脱敏后的字段值（默认 False）。
 
         Returns:
             ClassificationResponse 包含字段分类结果和审计信息。
@@ -145,7 +165,7 @@ class DynClassificationService:
         start = time.monotonic()
 
         # Step 0: 高并发 LRU 缓存查找
-        cache_key = (domain or "", standard or "", field_name, str(value) if value is not None else "")
+        cache_key = (domain or "", standard or "", field_name, str(value) if value is not None else "", sanitize)
         cached_resp = self._classification_cache.get(cache_key)
         if cached_resp is not None:
             duration_ms = (time.monotonic() - start) * 1000
@@ -172,6 +192,18 @@ class DynClassificationService:
 
         # Step 3: Use funnel result directly (level, confidence, layer already resolved).
         final_level = funnel_result.final_level
+
+        # Compute smart sanitized_value if requested
+        sanitized_val: str | None = None
+        if sanitize:
+            val_str = str(value) if value is not None else ""
+            if funnel_result.sanitized_value:
+                sanitized_val = funnel_result.sanitized_value
+            elif final_level in ["L4", "L5", "C4", "C5"]:
+                from privacy_local_agent.privacy.masking import mask_value
+                sanitized_val = mask_value(field_name, val_str)
+            else:
+                sanitized_val = val_str
 
         # Calculate execution duration in milliseconds.
         duration_ms = (time.monotonic() - start) * 1000
@@ -215,11 +247,12 @@ class DynClassificationService:
         record_index: int = 0,
         domain: Optional[str] = None,
         standard: Optional[str] = None,
+        sanitize: bool = False,
     ) -> ClassificationResponse:
-        """对单条记录（多字段）进行分类。
+        """对单条记录（多字段）进行分类与智能抹平脱敏。
 
         Execution flow:
-        1. Classify each field individually using the full 3-layer funnel.
+        1. Classify each field individually using the full 3-layer funnel (with sanitize parameter).
         2. Run composite rule engine for multi-field combination detection.
         3. Resolve record-level final level (max of all fields + composite upgrades).
 
@@ -228,6 +261,7 @@ class DynClassificationService:
             record_index: 记录索引。
             domain: 领域标识。
             standard: 标准标识。
+            sanitize: 是否进行高敏与 PII 脱敏抹平（默认 False）。
 
         Returns:
             ClassificationResponse 包含记录分类结果和审计信息。
@@ -238,7 +272,7 @@ class DynClassificationService:
         all_tags: list[SecurityTag] = []
         
         for field_name, value in record.items():
-            resp = self.classify_field(field_name, value, domain=domain, standard=standard)
+            resp = self.classify_field(field_name, value, domain=domain, standard=standard, sanitize=sanitize)
             if resp.field_result:
                 field_results[field_name] = resp.field_result
                 all_tags.extend(resp.field_result.tags)

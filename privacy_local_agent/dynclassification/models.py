@@ -372,6 +372,11 @@ class FieldClassificationResult(BaseModel):
     )
     # Human-readable reasoning explanation (populated by LLM layer or conflict detection).
     reasoning: str = Field(default="", description="分类推理说明")
+    # Smart sanitized/masked value produced when sanitize=True.
+    sanitized_value: Optional[str] = Field(
+        default=None, alias="sanitizedValue",
+        description="智能抹平/脱敏后的字段值（当 sanitize=True 时填充）",
+    )
     # Tags that were suppressed by override downgrade rules (for audit trail).
     # When non-empty, indicates that override suppression occurred and explains
     # why certain rules did not contribute to the final level.
