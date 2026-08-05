@@ -52,18 +52,24 @@ class PrivacyAgentClient:
         客户端未创建或已关闭时重建，保证连接池有效。
         """
         if self._client is None or self._client.is_closed:
-            # SSL / TLS 校验配置：
-            # 优先使用配置的 CA 文件，未配置时若 verify_ssl 为 False 则关闭校验 (用于测试自签名证书)
+            import os
+
+            # SSL / TLS 校验配置（兼容 PRIVACY_AGENT_TLS_INSECURE_SKIP_VERIFY 与 PRIVACY_AGENT_TLS_CA_FILE）
+            ca_file = settings.privacy_agent_ca_file or os.getenv("PRIVACY_AGENT_TLS_CA_FILE")
+            cert_file = settings.privacy_agent_cert_file or os.getenv("PRIVACY_AGENT_TLS_CERT_FILE")
+            key_file = settings.privacy_agent_key_file or os.getenv("PRIVACY_AGENT_TLS_KEY_FILE")
+            skip_verify_env = os.getenv("PRIVACY_AGENT_TLS_INSECURE_SKIP_VERIFY", "").lower() in ("true", "1", "yes", "on")
+
             verify_opt: bool | str = True
-            if settings.privacy_agent_ca_file:
-                verify_opt = settings.privacy_agent_ca_file
-            elif not settings.privacy_agent_verify_ssl:
+            if ca_file:
+                verify_opt = ca_file
+            elif skip_verify_env or not settings.privacy_agent_verify_ssl:
                 verify_opt = False
 
             # mTLS 客户端双向认证证书与私钥对 (如果配置)
             cert_opt: tuple[str, str] | None = None
-            if settings.privacy_agent_cert_file and settings.privacy_agent_key_file:
-                cert_opt = (settings.privacy_agent_cert_file, settings.privacy_agent_key_file)
+            if cert_file and key_file:
+                cert_opt = (cert_file, key_file)
 
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,

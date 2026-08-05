@@ -994,7 +994,7 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 			defer wg.Done()
 			for range jobs {
 				start := time.Now()
-				ctx, cancel := context.WithTimeout(s.client.WithAuth(c.Request.Context()), 30*time.Second)
+				ctx, cancel := context.WithTimeout(s.client.WithAuth(context.Background()), 30*time.Second)
 				_, err := s.mapper.Dispatch(ctx, s.client.Raw(), req.Path, req.Body)
 				cancel()
 				elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
@@ -1052,7 +1052,7 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 		if f == cIdx {
 			return latencies[f]
 		}
-		return latencies[f]*float64(cIdx-f) + latencies[cIdx]*(k-float64(f))
+		return latencies[f]*(float64(cIdx)-k) + latencies[cIdx]*(k-float64(f))
 	}
 
 	qps := 0.0
