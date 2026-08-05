@@ -491,6 +491,9 @@ def _is_forbidden_ip(ip_str: str, *, allow_loopback: bool = True) -> bool:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return True
+    # 若为 IPv4 映射的 IPv6 地址（::ffff:x.x.x.x），提取真实的 IPv4 地址解包判别
+    if getattr(ip, "ipv4_mapped", None):
+        ip = ip.ipv4_mapped
     # 环回地址单独判断（其同样满足 is_private，需先于私有网段分支处理）
     if ip.is_loopback:
         return not allow_loopback
@@ -528,7 +531,8 @@ def _validate_lb_url(url: str) -> None:
     - 校验 Host DNS 可解析性 (socket.getaddrinfo)；
     - 配置了 ``LB_ALLOWED_HOSTS`` 白名单时，host 必须命中白名单。
     """
-    if "@" in (url.split("/")[2] if "//" in url else url):
+    parsed = urlparse(url)
+    if parsed.username or parsed.password or ("@" in (parsed.netloc or "")):
         raise HTTPException(status_code=400, detail="探测地址不允许包含 Userinfo 授权凭据与 '@' 符号")
 
     parsed = urlparse(url)

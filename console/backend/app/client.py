@@ -39,12 +39,18 @@ class PrivacyAgentClient:
     """
 
     def __init__(self) -> None:
-        # agent REST 基地址（去掉尾部斜杠，便于拼接 path）
-        self.base_url = settings.privacy_agent_url.rstrip("/")
-        # 可选的认证 API Key（agent 开启 auth 时才需要）
-        self.api_key = settings.privacy_agent_api_key
         # 懒初始化的异步 HTTP 客户端（连接池）
         self._client: httpx.AsyncClient | None = None
+
+    @property
+    def base_url(self) -> str:
+        """动态获取 agent REST 基地址（去掉尾部斜杠），支持配置热更新。"""
+        return settings.privacy_agent_url.rstrip("/")
+
+    @property
+    def api_key(self) -> str | None:
+        """动态获取 agent 认证 API Key，支持配置热更新。"""
+        return settings.privacy_agent_api_key
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取（必要时创建）底层 ``httpx.AsyncClient``。

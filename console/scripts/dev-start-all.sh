@@ -161,7 +161,6 @@ check_port_available 8080 "Python REST 代理后端"
 check_port_available 8081 "Go gRPC 代理后端"
 check_port_available 5173 "Vite 前端开发服务器"
 
-echo "启动 privacy_local_agent (REST: $AGENT_URL, gRPC: 127.0.0.1:50051)..."
 launch_agent() {
     local agent_log="$PROJECT_ROOT/.logs/agent_all.log"
     mkdir -p "$PROJECT_ROOT/.logs"

@@ -87,6 +87,10 @@ class ConsoleSecurityMiddleware(BaseHTTPMiddleware):
         # 清除 60 秒窗口外的旧记录。
         while window and now - window[0] > 60.0:
             window.popleft()
+        if not window and ip in self._hits:
+            # 清理无有效记录的空 IP 键，避免无界内存泄露。
+            del self._hits[ip]
+            window = self._hits[ip]
         if len(window) >= self._rate_limit:
             return True
         window.append(now)

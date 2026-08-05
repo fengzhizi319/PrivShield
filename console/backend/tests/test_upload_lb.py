@@ -361,3 +361,21 @@ def test_upload_oversized_file_returns_413(client: TestClient, mock_multipart: A
     # 超限请求不应转发到 agent。
     # Oversized requests should not be forwarded to agent.
     mock_multipart.assert_not_called()
+
+
+def test_ipv4_mapped_ipv6_is_forbidden() -> None:
+    """验证 IPv4 映射的 IPv6 地址（::ffff:192.168.1.1）会被 _is_forbidden_ip 拦截。"""
+    from app.main import _is_forbidden_ip
+
+    assert _is_forbidden_ip("::ffff:192.168.1.1") is True
+    assert _is_forbidden_ip("::ffff:169.254.169.254") is True
+
+
+def test_validate_lb_url_query_with_at_symbol() -> None:
+    """验证 Query 参数中带有 @ 符号（如 ?email=user@example.com）不触发 Userinfo 误杀。"""
+    from app.main import _validate_lb_url, settings
+
+    with patch("app.main._resolve_host_ips", return_value={"93.184.216.34"}):
+        with patch.object(settings, "lb_allowed_hosts", ""):
+            # 不应抛出异常
+            _validate_lb_url("http://example.com:8079/probe?email=test@example.com")
