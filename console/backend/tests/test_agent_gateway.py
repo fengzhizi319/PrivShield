@@ -57,3 +57,26 @@ def test_proxy_bad_gateway_fallback(client: TestClient, mock_agent_client: Async
     assert response.status_code == 502
     body = response.json()
     assert body["detail"] == "Agent process unreachable"
+
+
+@pytest.mark.anyio
+async def test_client_tls_configuration() -> None:
+    """验证 PrivacyAgentClient 在 PRIVACY_AGENT_VERIFY_SSL/CA/CERT 配置下的 httpx 参数组装。"""
+    from app.client import PrivacyAgentClient
+    from app.config import settings
+
+    agent_cli = PrivacyAgentClient()
+
+    with patch.object(settings, "privacy_agent_verify_ssl", False), \
+         patch.object(settings, "privacy_agent_ca_file", None), \
+         patch("httpx.AsyncClient") as mock_httpx_cls:
+
+        mock_instance = AsyncMock()
+        mock_instance.is_closed = False
+        mock_httpx_cls.return_value = mock_instance
+
+        client = await agent_cli._get_client()
+        assert client is mock_instance
+        mock_httpx_cls.assert_called_once()
+        _, kwargs = mock_httpx_cls.call_args
+        assert kwargs["verify"] is False

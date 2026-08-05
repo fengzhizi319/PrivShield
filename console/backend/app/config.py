@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     # (loopback is always allowed by default since the console targets local agents)
     lb_allow_private_ips: bool = Field(default=False, alias="LB_ALLOW_PRIVATE_IPS")
 
+    # ── 上游 Agent TLS / mTLS 配置（对齐 Go 后端的 TLS 功能）────────────────
+    # TLS / mTLS config for upstream Agent (aligned with Go backend capability)
+    # 是否校验 Agent 的 SSL 证书（False 表示跳过校验，用于自签名测试证书）
+    privacy_agent_verify_ssl: bool = Field(default=True, alias="PRIVACY_AGENT_VERIFY_SSL")
+    # 校验 Agent 服务端证书的 CA 证书路径（可选）
+    privacy_agent_ca_file: str | None = Field(default=None, alias="PRIVACY_AGENT_CA_FILE")
+    # 本代理作为客户端的 SSL 证书路径（mTLS 双向认证用）
+    privacy_agent_cert_file: str | None = Field(default=None, alias="PRIVACY_AGENT_CERT_FILE")
+    # 本代理作为客户端的 SSL 私钥路径（mTLS 双向认证用）
+    privacy_agent_key_file: str | None = Field(default=None, alias="PRIVACY_AGENT_KEY_FILE")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

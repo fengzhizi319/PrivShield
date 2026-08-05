@@ -128,8 +128,17 @@ _build_frontend() {
     (
         cd "$CONSOLE_DIR/web"
         if command -v pnpm >/dev/null 2>&1; then
-            pnpm install && pnpm build
+            # 若已存在 node_modules，优先直接 build，避免网络波动/无网环境下连线 npm 仓库失败
+            if [[ -d "node_modules" ]] && pnpm build 2>/dev/null; then
+                return 0
+            fi
+            # 否则执行 install（优先从离线缓存读取）并构建
+            (pnpm install --prefer-offline 2>/dev/null || pnpm install) && pnpm build
         elif command -v npm >/dev/null 2>&1; then
+            # 若已存在 node_modules，优先直接 build，避免网络波动/无网环境下连线 npm 仓库失败
+            if [[ -d "node_modules" ]] && npm run build 2>/dev/null; then
+                return 0
+            fi
             npm install && npm run build
         else
             echo "警告：未找到 pnpm/npm，跳过前端打包。"
@@ -155,7 +164,9 @@ write_pid() {
 }
 
 PIDS=()
+STOPPING=false
 cleanup() {
+    STOPPING=true
     echo ""
     echo "正在停止【生产模式】所有服务..."
     for pid in "${PIDS[@]}"; do
@@ -170,15 +181,21 @@ trap cleanup INT TERM EXIT
 check_port_available 8079 "privacy_local_agent REST"
 check_port_available 8080 "Python REST 代理后端"
 
-echo "启动 privacy_local_agent (REST: $AGENT_URL)..."
-(
-    source "$AGENT_VENV/bin/activate"
-    cd "$PROJECT_ROOT"
-    exec python -m privacy_local_agent.server
-) &
-AGENT_PID=$!
-PIDS+=("$AGENT_PID")
-write_pid "$AGENT_PID_FILE" "$AGENT_PID"
+launch_agent() {
+    local agent_log="$PROJECT_ROOT/.logs/agent_py.log"
+    mkdir -p "$PROJECT_ROOT/.logs"
+    echo "启动 privacy_local_agent (REST: $AGENT_URL)，日志: $agent_log..."
+    (
+        source "$AGENT_VENV/bin/activate"
+        cd "$PROJECT_ROOT"
+        # 日志持久化到 .logs/agent_py.log，agent 崩溃/重启后可回溯根因
+        exec python -m privacy_local_agent.server >> "$agent_log" 2>&1
+    ) &
+    AGENT_PID=$!
+    PIDS[0]="$AGENT_PID"
+    write_pid "$AGENT_PID_FILE" "$AGENT_PID"
+}
+launch_agent
 
 echo "启动测试控制台后端 (Console UI + API: $CONSOLE_URL)..."
 (
@@ -222,4 +239,24 @@ echo "────────────────────────�
 echo "  按 Ctrl+C 停止所有服务"
 echo "======================================================================"
 
-wait
+# Watchdog 守护 agent
+set +e
+wait "$AGENT_PID" 2>/dev/null
+wait_rc=$?
+set -e
+
+while [[ "$STOPPING" != "true" ]]; do
+    echo "[watchdog] agent 已退出 (PID $AGENT_PID, exit code $wait_rc)，1 秒后自动重启..."
+    sleep 1
+    if [[ "$STOPPING" == "true" ]]; then
+        break
+    fi
+    launch_agent
+    if ! wait_for_service "$AGENT_URL/health" "重启后的 privacy_local_agent"; then
+        echo "[watchdog] 警告：agent 重启后未在 30 秒内就绪（REST）。"
+    fi
+    set +e
+    wait "$AGENT_PID" 2>/dev/null
+    wait_rc=$?
+    set -e
+done

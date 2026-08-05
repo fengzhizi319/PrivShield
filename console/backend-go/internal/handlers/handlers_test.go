@@ -925,3 +925,37 @@ func TestLbTestHandlerEmptyBackends(t *testing.T) {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
+
+// TestConcurrencyTestHandler 验证并发压测接口 /api/concurrency_test。
+func TestConcurrencyTestHandler(t *testing.T) {
+	grpcSrv := &testPrivacyServer{
+		MaskFunc: func(ctx context.Context, req *pb.MaskRequest) (*pb.MaskResponse, error) {
+			return &pb.MaskResponse{Result: "****"}, nil
+		},
+	}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	reqBody := `{"path":"/v1/privacy/mask","method":"POST","concurrency":5,"total_requests":10}`
+	resp, err := http.Post(ts.URL+"/api/concurrency_test", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /api/concurrency_test failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var data map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+
+	if int(data["total"].(float64)) != 10 {
+		t.Fatalf("expected total 10, got %v", data["total"])
+	}
+	if int(data["success"].(float64)) != 10 {
+		t.Fatalf("expected success 10, got %v", data["success"])
+	}
+}

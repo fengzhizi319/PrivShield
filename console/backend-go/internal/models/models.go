@@ -265,3 +265,27 @@ type LbTestResponse struct {
 	// Distribution：各节点的统计结果列表，按 Backends 顺序排列
 	Distribution []LbDistItem `json:"distribution"`
 }
+
+// ConcurrencyTestRequest 是 POST /api/concurrency_test 的请求体。
+type ConcurrencyTestRequest struct {
+	Path          string          `json:"path"`
+	Method        string          `json:"method"`
+	Body          json.RawMessage `json:"body,omitempty"`
+	Concurrency   int             `json:"concurrency"`
+	TotalRequests int             `json:"total_requests"`
+}
+
+// ConcurrencyTestResponse 是 POST /api/concurrency_test 的响应。
+type ConcurrencyTestResponse struct {
+	Total        int     `json:"total"`
+	Success      int     `json:"success"`
+	Failed       int     `json:"failed"`
+	DurationMs   float64 `json:"duration_ms"`
+	Qps          float64 `json:"qps"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	MinLatencyMs float64 `json:"min_latency_ms"`
+	MaxLatencyMs float64 `json:"max_latency_ms"`
+	P50LatencyMs float64 `json:"p50_latency_ms"`
+	P95LatencyMs float64 `json:"p95_latency_ms"`
+	P99LatencyMs float64 `json:"p99_latency_ms"`
+}

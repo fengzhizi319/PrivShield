@@ -11,8 +11,13 @@ CONSOLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 AGENT_PID_FILE="$CONSOLE_DIR/.pids/agent.pid"
 AGENT_GO_PID_FILE="$CONSOLE_DIR/.pids/agent-go.pid"
+AGENT_ALL_PID_FILE="$CONSOLE_DIR/.pids/agent-all.pid"
+AGENT_GO_MTLS_PID_FILE="$CONSOLE_DIR/.pids/agent-go-mtls.pid"
 CONSOLE_PID_FILE="$CONSOLE_DIR/.pids/console.pid"
 CONSOLE_GO_PID_FILE="$CONSOLE_DIR/.pids/console-go.pid"
+CONSOLE_ALL_PID_FILE="$CONSOLE_DIR/.pids/console-all.pid"
+CONSOLE_GO_ALL_PID_FILE="$CONSOLE_DIR/.pids/console-go-all.pid"
+CONSOLE_GO_MTLS_PID_FILE="$CONSOLE_DIR/.pids/console-go-mtls.pid"
 
 kill_by_pid_file() {
     local file="$1"
@@ -52,8 +57,13 @@ kill_by_port() {
 
 echo "正在停止【生产模式】控制台所有服务..."
 
+kill_by_pid_file "$CONSOLE_GO_MTLS_PID_FILE" "Go gRPC 代理后端 (mTLS)"
+kill_by_pid_file "$CONSOLE_GO_ALL_PID_FILE" "Go gRPC 代理后端 (all)"
 kill_by_pid_file "$CONSOLE_GO_PID_FILE" "Go gRPC 代理后端"
+kill_by_pid_file "$CONSOLE_ALL_PID_FILE" "Python REST 代理后端 (all)"
 kill_by_pid_file "$CONSOLE_PID_FILE" "Python REST 代理后端"
+kill_by_pid_file "$AGENT_GO_MTLS_PID_FILE" "privacy_local_agent (mTLS)"
+kill_by_pid_file "$AGENT_ALL_PID_FILE" "privacy_local_agent (all)"
 kill_by_pid_file "$AGENT_GO_PID_FILE" "privacy_local_agent (gRPC)"
 kill_by_pid_file "$AGENT_PID_FILE" "privacy_local_agent (REST)"
 

@@ -24,6 +24,7 @@ CERT_DIR="$CONSOLE_DIR/backend-go/certs"
 GEN_CERTS="$CONSOLE_DIR/backend-go/scripts/gen-certs.sh"
 
 CONSOLE_URL="http://127.0.0.1:8081"
+AGENT_URL="http://127.0.0.1:8079"
 AGENT_GRPC_ADDR="127.0.0.1:50051"
 
 _is_port_in_use() {
@@ -119,13 +120,22 @@ if ! command -v go >/dev/null 2>&1; then
     exit 1
 fi
 
-# 4. 前端打包
+# 2. 前端打包
 _build_frontend() {
     (
         cd "$CONSOLE_DIR/web"
         if command -v pnpm >/dev/null 2>&1; then
-            pnpm install && pnpm build
+            # 若已存在 node_modules，优先直接 build，避免网络波动/无网环境下连线 npm 仓库失败
+            if [[ -d "node_modules" ]] && pnpm build 2>/dev/null; then
+                return 0
+            fi
+            # 否则执行 install（优先从离线缓存读取）并构建
+            (pnpm install --prefer-offline 2>/dev/null || pnpm install) && pnpm build
         elif command -v npm >/dev/null 2>&1; then
+            # 若已存在 node_modules，优先直接 build，避免网络波动/无网环境下连线 npm 仓库失败
+            if [[ -d "node_modules" ]] && npm run build 2>/dev/null; then
+                return 0
+            fi
             npm install && npm run build
         else
             echo "警告：未找到 pnpm/npm，跳过前端打包。"
@@ -155,7 +165,9 @@ write_pid() {
 }
 
 PIDS=()
+STOPPING=false
 cleanup() {
+    STOPPING=true
     echo ""
     echo "正在停止【生产模式 mTLS】所有服务..."
     for pid in "${PIDS[@]}"; do
@@ -171,20 +183,48 @@ check_port_available 8079 "privacy_local_agent REST"
 check_port_available 50051 "privacy_local_agent gRPC (mTLS)"
 check_port_available 8081 "Go gRPC 代理后端"
 
-echo "启动 privacy_local_agent (gRPC mTLS: $AGENT_GRPC_ADDR, client_auth=require)..."
-(
-    source "$AGENT_VENV/bin/activate"
-    cd "$PROJECT_ROOT"
-    export PRIVACY_TLS_ENABLED=true
-    export PRIVACY_TLS_CERT_FILE="$CERT_DIR/server.crt"
-    export PRIVACY_TLS_KEY_FILE="$CERT_DIR/server.key"
-    export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
-    export PRIVACY_TLS_CLIENT_AUTH=require
-    exec python -m privacy_local_agent.server
-) &
-AGENT_PID=$!
-PIDS+=("$AGENT_PID")
-write_pid "$AGENT_PID_FILE" "$AGENT_PID"
+launch_agent() {
+    local agent_log="$PROJECT_ROOT/.logs/agent_go_mtls.log"
+    mkdir -p "$PROJECT_ROOT/.logs"
+    echo "启动 privacy_local_agent (gRPC mTLS: $AGENT_GRPC_ADDR, client_auth=require)，日志: $agent_log..."
+    (
+        source "$AGENT_VENV/bin/activate"
+        cd "$PROJECT_ROOT"
+        export PRIVACY_TLS_ENABLED=true
+        export PRIVACY_TLS_CERT_FILE="$CERT_DIR/server.crt"
+        export PRIVACY_TLS_KEY_FILE="$CERT_DIR/server.key"
+        export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
+        export PRIVACY_TLS_CLIENT_AUTH=require
+        # 日志持久化到 .logs/agent_go_mtls.log，agent 崩溃/重启后可回溯根因
+        exec python -m privacy_local_agent.server >> "$agent_log" 2>&1
+    ) &
+    AGENT_PID=$!
+    PIDS[0]="$AGENT_PID"
+    write_pid "$AGENT_PID_FILE" "$AGENT_PID"
+}
+launch_agent
+
+wait_for_service() {
+    local url="$1"
+    local name="$2"
+    local max_attempts=30
+    local attempt=0
+    echo -n "等待 $name 就绪"
+    while [[ $attempt -lt $max_attempts ]]; do
+        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then
+            echo " OK"
+            return 0
+        fi
+        echo -n "."
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    echo " 超时"
+    return 1
+}
+
+# mTLS 模式下 REST 端口同样需要等待就绪
+wait_for_service "$AGENT_URL/health" "privacy_local_agent" 2>/dev/null || true
 
 echo -n "等待 agent gRPC mTLS (127.0.0.1:50051) 就绪"
 for i in $(seq 1 30); do
@@ -214,24 +254,6 @@ CONSOLE_PID=$!
 PIDS+=("$CONSOLE_PID")
 write_pid "$CONSOLE_PID_FILE" "$CONSOLE_PID"
 
-wait_for_service() {
-    local url="$1"
-    local name="$2"
-    local max_attempts=30
-    local attempt=0
-    echo -n "等待 $name 就绪"
-    while [[ $attempt -lt $max_attempts ]]; do
-        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then
-            echo " OK"
-            return 0
-        fi
-        echo -n "."
-        sleep 1
-        attempt=$((attempt + 1))
-    done
-    echo " 超时"
-    return 1
-}
 wait_for_service "$CONSOLE_URL/api/health" "Go gRPC 代理后端"
 
 echo ""
@@ -244,4 +266,36 @@ echo "────────────────────────�
 echo "  按 Ctrl+C 停止所有服务"
 echo "======================================================================"
 
-wait
+# Watchdog 守护 agent
+set +e
+wait "$AGENT_PID" 2>/dev/null
+wait_rc=$?
+set -e
+
+while [[ "$STOPPING" != "true" ]]; do
+    echo "[watchdog] agent 已退出 (PID $AGENT_PID, exit code $wait_rc)，1 秒后自动重启..."
+    sleep 1
+    if [[ "$STOPPING" == "true" ]]; then
+        break
+    fi
+    launch_agent
+    # mTLS 模式下 REST 健康检查可能因证书问题失败，静默忽略
+    wait_for_service "$AGENT_URL/health" "重启后的 privacy_local_agent" 2>/dev/null || true
+    # 等待 gRPC 端口就绪
+    echo -n "等待重启后的 agent gRPC (127.0.0.1:50051) 就绪"
+    for i in $(seq 1 30); do
+        if _is_port_in_use 50051; then
+            echo " OK"
+            break
+        fi
+        echo -n "."
+        sleep 1
+        if [[ $i -eq 30 ]]; then
+            echo " 超时"
+        fi
+    done
+    set +e
+    wait "$AGENT_PID" 2>/dev/null
+    wait_rc=$?
+    set -e
+done

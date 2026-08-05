@@ -52,10 +52,25 @@ class PrivacyAgentClient:
         客户端未创建或已关闭时重建，保证连接池有效。
         """
         if self._client is None or self._client.is_closed:
+            # SSL / TLS 校验配置：
+            # 优先使用配置的 CA 文件，未配置时若 verify_ssl 为 False 则关闭校验 (用于测试自签名证书)
+            verify_opt: bool | str = True
+            if settings.privacy_agent_ca_file:
+                verify_opt = settings.privacy_agent_ca_file
+            elif not settings.privacy_agent_verify_ssl:
+                verify_opt = False
+
+            # mTLS 客户端双向认证证书与私钥对 (如果配置)
+            cert_opt: tuple[str, str] | None = None
+            if settings.privacy_agent_cert_file and settings.privacy_agent_key_file:
+                cert_opt = (settings.privacy_agent_cert_file, settings.privacy_agent_key_file)
+
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
                 timeout=60.0,
                 limits=httpx.Limits(max_connections=1000, max_keepalive_connections=200),
+                verify=verify_opt,
+                cert=cert_opt,
                 # 不跟随重定向：避免重定向被用于绕过限制 / 放大 SSRF。
                 follow_redirects=False,
                 # 不读取环境变量 / macOS 系统代理配置：

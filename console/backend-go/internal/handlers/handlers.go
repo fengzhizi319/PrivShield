@@ -34,44 +34,27 @@ import (
 	"crypto/subtle"
 	// encoding/json：用于 JSON 序列化/反序列化（params 解析、RecordEntry 转换）
 	"encoding/json"
-
-	// fmt：用于格式化错误信息与日志消息
 	"fmt"
-	// io：用于读取上传文件内容（io.ReadAll）
 	"io"
-	// log：标准库日志，用于启动信息与静态文件托管状态输出
 	"log"
-	// net/http：HTTP 状态码常量（http.StatusOK、http.StatusBadRequest 等）
+	"math"
 	"net/http"
-	// os：用于文件系统操作（检查静态目录是否存在）
 	"os"
-	// path/filepath：用于跨平台路径拼接（dist 目录、index.html、assets 目录）
 	"path/filepath"
-	// strings：用于字符串前缀/后缀判断、大小写转换
+	"sort"
 	"strings"
-	// sync：限流中间件的互斥锁（保护进程内请求计数 map）
 	"sync"
-	// time：用于计算请求耗时（duration_ms）
 	"time"
 
-	// gin：高性能 HTTP Web 框架，提供路由、中间件、JSON 响应等能力
 	"github.com/gin-gonic/gin"
 
-	// agent：gRPC 客户端封装，提供到上游 agent 的连接与 RPC 调用能力
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/agent"
-	// config：运行时配置（监听地址、agent 地址、静态目录等）
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/config"
-	// fileparse：文件解析工具，支持 CSV/JSON 格式的数据文件解析
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/fileparse"
-	// lbtest：负载均衡测试模块，实现 round_robin/random/least_connections 等策略
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/lbtest"
-	// mapper：REST → gRPC 路由映射核心模块，根据 path 分发到对应的 gRPC 方法
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/mapper"
-	// models：与前端共享的 JSON 数据结构定义（请求/响应模型）
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/models"
-	// samples：内置的示例 payload 集合，供前端 /api/samples 接口使用
 	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/samples"
-	// pb：由 proto/privacy.proto 生成的 gRPC 代码，包含所有 RPC 方法与消息类型
 	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"
 )
 
@@ -87,64 +70,30 @@ const (
 )
 
 // Server 聚合 HTTP 处理器所需的全部依赖。
-//
-// 所有 handler 方法（Health/Proxy/Batch 等）均绑定到 Server 实例，
-// 通过其字段访问 gRPC 客户端、路由映射器与运行时配置。
 type Server struct {
-	// client：到上游 privacy-local-agent 的 gRPC 客户端封装，
-	// 提供 Raw() 获取底层 RPC 客户端、WithAuth() 附加认证元数据等方法
 	client *agent.Client
-	// mapper：REST → gRPC 路由映射器，根据请求 path 查找并调用对应的 gRPC 方法
 	mapper *mapper.Mapper
-	// cfg：运行时配置，包含 agent 地址、监听地址、静态文件目录等
-	cfg *config.Config
+	cfg    *config.Config
 }
 
-// New 根据 gRPC 客户端与配置创建 Server 实例。
-//
-// 执行逻辑：
-//  1. 保存 agent.Client 引用，供所有 handler 调用上游 RPC
-//  2. 创建 mapper.Mapper 实例，内置所有 REST → gRPC 路径映射规则
-//  3. 保存配置引用，供健康检查、静态托管等使用
 func New(client *agent.Client, cfg *config.Config) *Server {
 	return &Server{
-		client: client,       // gRPC 客户端，用于调用上游 agent 的所有 RPC 方法
-		mapper: mapper.New(), // REST → gRPC 路由映射器，内置全部路径处理规则
-		cfg:    cfg,          // 运行时配置，包含地址、端口、API Key 等
+		client: client,
+		mapper: mapper.New(),
+		cfg:    cfg,
 	}
 }
 
-// RegisterRoutes 将所有 API 路由挂载到 Gin 引擎上。
-//
-// 路由注册顺序：
-//  1. 全局 CORS 中间件（允许跨域，便于 Vite 开发服务器调用）
-//  2. 健康检查接口
-//  3. 示例数据接口
-//  4. 单请求代理转发接口
-//  5. 批量请求转发接口
-//  6. 文件上传接口
-//  7. 负载均衡测试接口
-//  8. 静态文件托管（可选，取决于 dist 目录是否存在）
 func (s *Server) RegisterRoutes(r *gin.Engine) {
-	// 注册全局 CORS 中间件，允许任意来源的跨域请求
 	r.Use(corsMiddleware())
-	// 可选安全中间件（API Key 鉴权 + 限流）：默认关闭 / 宽松，
-	// 仅在配置了 CONSOLE_API_KEY / CONSOLE_RATE_LIMIT 时生效。
 	r.Use(securityMiddleware(s.cfg.ConsoleAPIKey, s.cfg.ConsoleRateLimit))
-	// GET /api/health：健康检查，返回后端自身状态与上游 agent 连通性
 	r.GET("/api/health", s.Health)
-	// GET /api/samples：返回所有端点的示例 payload，供前端请求编辑器使用
 	r.GET("/api/samples", s.Samples)
-	// POST /api/proxy：单请求代理转发，前端将 REST 请求体发送到该接口，
-	// 由 mapper 根据 path 字段分发到对应的 gRPC 方法
 	r.POST("/api/proxy", s.Proxy)
-	// POST /api/batch：批量请求转发，逐个执行一组请求并汇总成功/失败统计
 	r.POST("/api/batch", s.Batch)
-	// POST /api/upload：文件上传 + 隐私处理（支持 CSV/JSON 格式的脱敏/K-匿名/分类）
 	r.POST("/api/upload", s.Upload)
-	// POST /api/lb_test：负载均衡策略测试，按指定策略向多个后端节点分发探测请求
 	r.POST("/api/lb_test", s.LbTest)
-	// 挂载前端静态构建产物（SPA），使 Go 后端可独立提供完整 Console UI
+	r.POST("/api/concurrency_test", s.ConcurrencyTest)
 	s.registerStatic(r)
 }
 
@@ -402,9 +351,12 @@ func (s *Server) Proxy(c *gin.Context) {
 
 // proxyRest 辅助函数：通过 HTTP 将 REST 请求透明代理到 Agent REST 服务
 func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequest) {
+	// REST 与 gRPC 是 agent 的两个独立服务，主机/端口可能不同，
+	// 因此 REST 回退默认值使用 agent REST 默认地址（127.0.0.1:8079），
+	// 而非 gRPC 主机（AgentGRPCHost），避免配置不一致时路由到错误地址。
 	restHost := os.Getenv("PRIVACY_REST_HOST")
 	if restHost == "" {
-		restHost = s.cfg.AgentGRPCHost
+		restHost = "127.0.0.1"
 	}
 
 	restPort := os.Getenv("PRIVACY_REST_PORT")
@@ -911,6 +863,35 @@ func securityMiddleware(apiKey string, rateLimit int) gin.HandlerFunc {
 	// 限流状态：每个客户端 IP 的请求时间戳列表（60 秒滑动窗口）。
 	var mu sync.Mutex
 	hits := make(map[string][]time.Time)
+
+	// 后台 goroutine 定期清理过期 IP 条目，防止长期运行时 map 无限增长（内存泄漏）。
+	// 每 5 分钟扫描一次，删除 60 秒内无请求的 IP 记录。
+	if rateLimit > 0 {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				mu.Lock()
+				cutoff := time.Now().Add(-60 * time.Second)
+				for ip, window := range hits {
+					// 过滤掉 60 秒内的记录；若过滤后为空则删除该 IP 条目
+					kept := window[:0]
+					for _, t := range window {
+						if t.After(cutoff) {
+							kept = append(kept, t)
+						}
+					}
+					if len(kept) == 0 {
+						delete(hits, ip)
+					} else {
+						hits[ip] = kept
+					}
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 		// 仅对 /api/* 生效；健康检查豁免。
@@ -960,6 +941,140 @@ func extractBearer(header string) string {
 		return parts[1]
 	}
 	return ""
+}
+
+// ConcurrencyTest 并发压测：以指定并发度向 agent 发送请求并统计延迟分布与吞吐量。
+func (s *Server) ConcurrencyTest(c *gin.Context) {
+	var req models.ConcurrencyTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err), "status": http.StatusBadRequest})
+		return
+	}
+	if req.Path == "" {
+		req.Path = "/v1/privacy/mask"
+	}
+	if req.Method == "" {
+		req.Method = "POST"
+	}
+	if req.Concurrency <= 0 {
+		req.Concurrency = 50
+	}
+	if req.Concurrency > 500 {
+		req.Concurrency = 500
+	}
+	if req.TotalRequests <= 0 {
+		req.TotalRequests = 200
+	}
+	if req.TotalRequests > 5000 {
+		req.TotalRequests = 5000
+	}
+
+	total := req.TotalRequests
+	concurrency := req.Concurrency
+	if concurrency > total {
+		concurrency = total
+	}
+
+	latencies := make([]float64, 0, total)
+	var latenciesMu sync.Mutex
+	var successCount, failedCount int
+
+	jobs := make(chan struct{}, total)
+	for i := 0; i < total; i++ {
+		jobs <- struct{}{}
+	}
+	close(jobs)
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range jobs {
+				start := time.Now()
+				ctx, cancel := context.WithTimeout(s.client.WithAuth(c.Request.Context()), 30*time.Second)
+				_, err := s.mapper.Dispatch(ctx, s.client.Raw(), req.Path, req.Body)
+				cancel()
+				elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+
+				latenciesMu.Lock()
+				latencies = append(latencies, elapsedMs)
+				if err == nil {
+					successCount++
+				} else {
+					failedCount++
+				}
+				latenciesMu.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
+	durationMs := float64(time.Since(startTime).Microseconds()) / 1000.0
+
+	sort.Float64s(latencies)
+	n := len(latencies)
+
+	if n == 0 {
+		c.JSON(http.StatusOK, models.ConcurrencyTestResponse{
+			Total:        total,
+			Success:      0,
+			Failed:       total,
+			DurationMs:   math.Round(durationMs*100) / 100,
+			Qps:          0,
+			AvgLatencyMs: 0,
+			MinLatencyMs: 0,
+			MaxLatencyMs: 0,
+			P50LatencyMs: 0,
+			P95LatencyMs: 0,
+			P99LatencyMs: 0,
+		})
+		return
+	}
+
+	var sum float64
+	for _, l := range latencies {
+		sum += l
+	}
+
+	percentile := func(p float64) float64 {
+		if n == 1 {
+			return latencies[0]
+		}
+		k := float64(n-1) * (p / 100.0)
+		f := int(k)
+		cIdx := f + 1
+		if cIdx >= n {
+			cIdx = n - 1
+		}
+		if f == cIdx {
+			return latencies[f]
+		}
+		return latencies[f]*float64(cIdx-f) + latencies[cIdx]*(k-float64(f))
+	}
+
+	qps := 0.0
+	if durationMs > 0 {
+		qps = float64(total) / (durationMs / 1000.0)
+	}
+
+	resp := models.ConcurrencyTestResponse{
+		Total:        total,
+		Success:      successCount,
+		Failed:       failedCount,
+		DurationMs:   math.Round(durationMs*100) / 100,
+		Qps:          math.Round(qps*100) / 100,
+		AvgLatencyMs: math.Round((sum/float64(n))*100) / 100,
+		MinLatencyMs: math.Round(latencies[0]*100) / 100,
+		MaxLatencyMs: math.Round(latencies[n-1]*100) / 100,
+		P50LatencyMs: math.Round(percentile(50)*100) / 100,
+		P95LatencyMs: math.Round(percentile(95)*100) / 100,
+		P99LatencyMs: math.Round(percentile(99)*100) / 100,
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // splitHosts 把逗号分隔的 host 白名单字符串拆分为去除空白后的切片；
