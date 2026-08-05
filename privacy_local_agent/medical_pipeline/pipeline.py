@@ -47,7 +47,7 @@ class MedicalPrivacyPipeline:
     """
 
     def _classify_field(self, key: str, val: str) -> FieldClassification:
-        val_str = str(val or "")
+        val_str = "" if val is None else str(val)
         
         # 1. PII 身份字段检测
         if key in PII_FIELD_RULES:
@@ -142,7 +142,7 @@ class MedicalPrivacyPipeline:
 
     def sanitize_field(self, key: str, val: str) -> str:
         """根据字段敏感类型执行脱敏与剥离。"""
-        val_str = str(val or "")
+        val_str = "" if val is None else str(val)
         
         # 身份 PII 字段脱敏：使用实际字段名调用 mask_value，确保 guess_field_type 正确推断
         if key in PII_FIELD_RULES:
@@ -194,19 +194,25 @@ class MedicalPrivacyPipeline:
             rec_high_risk: list[str] = []
             max_level = "L1"
             
-            level_rank = {"L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5}
+            # 兼容 L1~L5 与 C1~C5 双重等级体系防 crash
+            level_rank = {
+                "L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5,
+                "C1": 1, "C2": 2, "C3": 3, "C4": 4, "C5": 5,
+            }
             
             for key, val in rec.items():
-                val_str = str(val or "")
+                val_str = "" if val is None else str(val)
                 fc = self._classify_field(key, val_str)
                 field_classifications.append(fc)
                 
                 if fc.security_tag == "PII_IDENTITY":
                     rec_pii.append(key)
-                if fc.level in ["L4", "L5"]:
+                if fc.level in ["L4", "L5", "C4", "C5"]:
                     rec_high_risk.append(f"{key}:{fc.level}")
                     
-                if level_rank[fc.level] > level_rank[max_level]:
+                fc_rank = level_rank.get(fc.level, 1)
+                max_rank = level_rank.get(max_level, 1)
+                if fc_rank > max_rank:
                     max_level = fc.level
                     
                 # 单次联合推断/脱敏处理：当 sanitize=True 时进行脱敏，否则保留原值
