@@ -23,7 +23,7 @@ L5_TERMS_MAP: dict[str, list[str]] = {
         "重度精神分裂症", "精神分裂症", "幻听（命令性言语）", "命令性言语", "被害妄想", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "精神卫生中心"
     ],
     "GENETIC_DEFECT": [
-        "遗传性亨廷顿舞蹈病", "亨廷顿舞蹈病", "Huntington Disease", "CAG重复序列", "CAG扩增", "四苯嗪", "舞蹈样动作"
+        "遗传性亨廷顿舞蹈病", "亨廷顿舞蹈病", "亨廷顿病", "Huntington Disease", "CAG重复序列", "CAG扩增", "四苯嗪", "舞蹈样动作", "舞蹈样症状", "四肢舞蹈样动作", "舞蹈病"
     ],
 }
 
@@ -88,9 +88,10 @@ _DOSE = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))?"
 _FREQ = r"(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?"
 
 # 1. 死因相关句法短语重构：“因/由于/死于 'L4/L5词' (去世|死于|离世|逝世...)” -> “因病去世”
+# 注意：死因动作 (去世/死于...) 必须明确存在，严禁将“因'CAG重复'”等基因检测词误匹配为死因！
 _REDACT_DEATH_ACTION = r"(?:去世|死于|离世|殁于|不幸身亡|宣告不治|逝世)"
 _REDACT_CAUSE_DEATH_PATTERN = re.compile(
-    rf"(?:因|由于|死于|殁于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致|引起)?\s*({_REDACT_DEATH_ACTION})?",
+    rf"(?:因|由于|死于|殁于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致|引起)?\s*({_REDACT_DEATH_ACTION})",
     re.IGNORECASE,
 )
 _REDACT_SUFFER_DEATH_PATTERN = re.compile(
@@ -98,9 +99,9 @@ _REDACT_SUFFER_DEATH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 2. 完整服药/用药与处置句法擦除（包含“病理提示...”、“长期行...”、“服用...20mg qd控制症状”）
+# 2. 完整服药/用药与处置句法擦除（支持“予'四苯嗪'12.5mg bid口服控制舞蹈样症状”、“长期服用'奥氮平片'20mg qd控制症状”）
 _REDACT_MEDICATION_FULL_PATTERN = re.compile(
-    rf"(?:长期|定期|口服|服用|给予|使用|行|实施|接受)?\s*(?:病理提示|提示|行)?\s*{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:及|与|和|合并)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*(?:控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)?",
+    rf"(?:长期|定期|口服|服用|给予|使用|行|实施|接受|予|给予口服|开具|遵医嘱)?\s*(?:病理提示|提示|行)?\s*{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)",
     re.IGNORECASE,
 )
 
@@ -215,6 +216,7 @@ def redact_medical_text(text: str) -> str:
     s = _REDACT_HISTORY_PATTERN.sub("", s)
 
     # 10. 清理孤立残余介词、连词与标点
+    s = re.sub(r"发展为\s*与", "发展为", s)
     s = _CLEANUP_ORPHAN_PREP_PATTERN.sub(r"\1", s)
     s = _CLEANUP_VERB_PUNCT_PATTERN.sub("", s)
 
