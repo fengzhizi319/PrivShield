@@ -27,8 +27,8 @@
 
 | 能力 | 现有实现 | 方案中的用法 |
 |---|---|---|
-| 医疗 CSV 生成与合法校验码 | `scripts/generate_medical_data.py` | 扩展现有脚本，不新建第二套同名数据模板 |
-| 医疗病例图片 | `scripts/gen_medical_images.py` | 复用 `CaseTemplate`、`TEMPLATES` 和 `render_case()` |
+| 医疗 CSV 生成与合法校验码 | `scripts/data/generate_medical_data.py` | 扩展现有脚本，不新建第二套同名数据模板 |
+| 医疗病例图片 | `scripts/data/gen_medical_images.py` | 复用 `CaseTemplate`、`TEMPLATES` 和 `render_case()` |
 | 三层分类漏斗 | `privacy_local_agent/dynclassification/service.py` | 以 `classify_record()` / `classify_table()` 为主要入口 |
 | 分类 REST API | `privacy_local_agent/routers/dynclassification.py` | Console 的动态分类请求经 `/api/proxy` 透传 |
 | 分类 gRPC API | `privacy_local_agent/grpc_server.py`、`proto/privacy.proto` | Go 对已有可映射 RPC 使用 gRPC；无映射的动态分类路径明确走 REST fallback 或补充正式 RPC |
@@ -37,7 +37,7 @@
 | Go Console | `console/backend-go/internal/handlers`、`internal/mapper` | 与 Python 保持相同 `/api/*` 契约；动态分类当前必须处理 REST fallback 差异 |
 | Web 动态分类页 | `console/web/src/components/DynClassificationPanel.tsx` | 新增“病例流水线”视图或 Tab，沿用现有标准选择、结果徽章和原始 JSON 展示 |
 
-现有 `scripts/generate_medical_data.py` 已会向 Agent、Python Console 和 Go Console 的 sample 目录分发 CSV。新设计应把这些路径统一为可配置的复制目标，并避免三份内容分别生成导致数据不一致。
+现有 `scripts/data/generate_medical_data.py` 已会向 Agent、Python Console 和 Go Console 的 sample 目录分发 CSV。新设计应把这些路径统一为可配置的复制目标，并避免三份内容分别生成导致数据不一致。
 
 ## 3. 总体架构
 
@@ -209,7 +209,7 @@ privacy_local_agent/medical_pipeline/
 现有脚本可保留为薄 CLI：
 
 ```bash
-python scripts/generate_medical_data.py --count 20 --seed 2026
+python scripts/data/generate_medical_data.py --count 20 --seed 2026
 python -m privacy_local_agent.medical_pipeline --input .../data1.csv --output .../output
 ```
 

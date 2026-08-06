@@ -7,7 +7,7 @@
 
 ## 1. 命令行工具与脚本使用
 
-### 1.1 数据生成脚本 (`scripts/generate_medical_data.py`)
+### 1.1 数据生成脚本 (`scripts/data/generate_medical_data.py`)
 
 用于生成高仿真 20 条标准医疗记录 `data1.csv`：
 
@@ -15,10 +15,10 @@
 cd /home/charles/code/sfwork/privacy-local-agent
 
 # 生成 20 条数据保存到 data/data1.csv (默认 seed 2026)
-python scripts/generate_medical_data.py --output data/data1.csv
+python scripts/data/generate_medical_data.py --output data/data1.csv
 
 # 自定义记录条数与种子
-python scripts/generate_medical_data.py --output tmp/custom_data.csv --count 50 --seed 42
+python scripts/data/generate_medical_data.py --output tmp/custom_data.csv --count 50 --seed 42
 ```
 
 ### 1.2 分发脚本至控制台后端样例目录

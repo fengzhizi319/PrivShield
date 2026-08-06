@@ -42,8 +42,8 @@ usage() {
   -h, --help                显示本帮助信息并退出
 
 使用示例:
-  ./scripts/export_tensorrt_engine.sh
-  ./scripts/export_tensorrt_engine.sh -i model.onnx -o model_sm120.engine
+  ./scripts/env/export_tensorrt_engine.sh
+  ./scripts/env/export_tensorrt_engine.sh -i model.onnx -o model_sm120.engine
 EOF
     exit 0
 }

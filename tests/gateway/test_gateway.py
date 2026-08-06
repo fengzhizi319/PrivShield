@@ -20,6 +20,8 @@ from privacy_local_agent.gateway.http_proxy import create_http_gateway_app
 from privacy_local_agent.grpc_server import serve as grpc_serve
 from privacy_local_agent.main import app as rest_app
 
+pytestmark = pytest.mark.integration
+
 
 def find_free_port() -> int:
     """寻找本地空闲端口。"""
@@ -50,7 +52,7 @@ def backend_agent():
     grpc_thread.start()
 
     # 等待后台线程初始化并开始监听端口
-    time.sleep(1.5)
+    time.sleep(2.5)
 
     yield {
         "http_url": f"http://127.0.0.1:{rest_port}",

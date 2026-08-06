@@ -38,8 +38,8 @@ usage() {
   -h, --help          显示帮助信息并退出
 
 使用示例:
-  ./scripts/health_check.sh
-  ./scripts/health_check.sh --rest-port 8080 --grpc-port 50052
+  ./scripts/dev/health_check.sh
+  ./scripts/dev/health_check.sh --rest-port 8080 --grpc-port 50052
 EOF
     exit 0
 }

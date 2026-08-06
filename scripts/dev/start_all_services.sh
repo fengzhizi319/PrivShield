@@ -81,7 +81,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             echo -e "${GREEN} 所有服务启动成功且健康探针已就绪！${NC}"
             echo -e "${GREEN} REST 服务端点  : http://127.0.0.1:${REST_PORT}${NC}"
             echo -e "${GREEN} gRPC 服务端点  : 127.0.0.1:${GRPC_PORT}${NC}"
-            echo -e "${GREEN} 停止服务命令   : ./scripts/stop_all_services.sh${NC}"
+            echo -e "${GREEN} 停止服务命令   : ./scripts/dev/stop_all_services.sh${NC}"
             echo -e "${GREEN}====================================================${NC}"
             exit 0
         fi

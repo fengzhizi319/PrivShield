@@ -36,9 +36,12 @@ Thumbs.db
 # Local tooling
 .bin/
 
-# User-specific privacy profile (copy from sample-privacy-profile.yaml)
+# User-specific privacy profile (copy from config/sample-privacy-profile.yaml)
 privacy-profile.yaml
 
+
+# Local generated data
+data/sanitized_images/
 
 # MkDocs build output
 site/

@@ -36,8 +36,8 @@ usage() {
   -h, --help           显示帮助信息并退出
 
 使用示例:
-  ./scripts/benchmark_performance.sh
-  ./scripts/benchmark_performance.sh -n 500 -c 20
+  ./scripts/dev/benchmark_performance.sh
+  ./scripts/dev/benchmark_performance.sh -n 500 -c 20
 EOF
     exit 0
 }

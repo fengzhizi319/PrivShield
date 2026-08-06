@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 import grpc
 import httpx
 import pytest
+
+pytestmark = pytest.mark.integration
 import uvicorn
 
 from privacy_local_agent import privacy_pb2, privacy_pb2_grpc

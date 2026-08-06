@@ -288,6 +288,6 @@ graph TD
     Step4 -.->|加载失败 / 算子不支持| Fallback[降级回退至 PyTorch CUDA 引擎]
 ```
 
-1. **研发与编译期**：使用 `../../scripts/install_cuda_pytorch_sm120.sh` 安装支持 Blackwell (`sm120`) 的 PyTorch，完成 NER/VLM 模型训练与 ONNX 导出。
-2. **优化与构建期**：使用 `../../scripts/install_tensorrt_sm120.sh` 中的 TensorRT Builder 工具将 ONNX 编译为高性能 `.engine` 文件。
+1. **研发与编译期**：使用 `../../scripts/env/install_cuda_pytorch_sm120.sh` 安装支持 Blackwell (`sm120`) 的 PyTorch，完成 NER/VLM 模型训练与 ONNX 导出。
+2. **优化与构建期**：使用 `../../scripts/env/install_tensorrt_sm120.sh` 中的 TensorRT Builder 工具将 ONNX 编译为高性能 `.engine` 文件。
 3. **生产部署期**：对于只需 Small-NER 的纯推理容器，可以裁剪掉庞大的 PyTorch 依赖，仅保留 TensorRT 运行时，实现**超小镜像体积（< 500MB）与微秒级推理延迟**。

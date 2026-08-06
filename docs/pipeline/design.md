@@ -2,7 +2,7 @@
 
 > **文档版本**: 1.1 (已实操落盘与全栈贯通)  
 > **关联文档**: [`docs/pipeline/prd.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/pipeline/prd.md)  
-> **关键组件**: `scripts/generate_medical_data.py`, `privacy_local_agent/pipeline`, `privacy_local_agent/medical_pipeline`, `console/backend`, `console/backend-go`, `console/web`
+> **关键组件**: `scripts/data/generate_medical_data.py`, `privacy_local_agent/pipeline`, `privacy_local_agent/medical_pipeline`, `console/backend`, `console/backend-go`, `console/web`
 
 ---
 
@@ -13,7 +13,7 @@
 ```mermaid
 flowchart TD
     subgraph DataGen [1. 数据生成层]
-        SG[scripts/generate_medical_data.py] -->|GB 11643-1999 + L4/L5 病史| CSV[data/data1.csv]
+        SG[scripts/data/generate_medical_data.py] -->|GB 11643-1999 + L4/L5 病史| CSV[data/data1.csv]
     end
 
     subgraph CorePipeline [2. Agent 核心流水线]
@@ -57,7 +57,7 @@ flowchart TD
 | **残疾评估** | `disability_category`, `disability_level`, `assess_type_name`, `assess_result_name`, `assess_score`, `assess_time` | **L2-L3** | 保持原样 / 评估信息规约 |
 | **病程与图文** | `progress_note`, `progress_note_time` | **L4-L5** | 含图文病例引用 (如 `[DICOM-CT: /radiology/chest_ct_01.dcm]`)，剥离 L4/L5 诊断 |
 
-### 2.2 仿真生成规则 (`scripts/generate_medical_data.py`)
+### 2.2 仿真生成规则 (`scripts/data/generate_medical_data.py`)
 
 - **身份证号校验**: 遵循 GB 11643-1999 (ISO 7064:1983.MOD 11-2) 模 11-2 算法，生成 100% 可通过合法性校验的 18 位身份证。
 - **高敏场景覆盖**:

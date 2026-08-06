@@ -6,13 +6,13 @@ Extract classification rules from Markdown documents and auto-expand rule keywor
 
 用法示例 / Usage Examples:
 1. 从 Markdown 标准文档生成规则 YAML（标准输出）:
-   python scripts/gen_yaml_from_doc.py docs/standard/四川省健康医疗大数据应用指南.md --domain sc_health
+   python scripts/data/gen_yaml_from_doc.py docs/standard/四川省健康医疗大数据应用指南.md --domain sc_health
 
 2. 生成 YAML 并输出保存到指定路径:
-   python scripts/gen_yaml_from_doc.py docs/standard/四川省健康医疗大数据应用指南.md --domain sc_health -o rules/domains/sc_health_auto.yaml
+   python scripts/data/gen_yaml_from_doc.py docs/standard/四川省健康医疗大数据应用指南.md --domain sc_health -o rules/domains/sc_health_auto.yaml
 
 3. 使用大模型 API 进行高质量规则提取与词表扩充:
-   python scripts/gen_yaml_from_doc.py docs/standard/四川省健康医疗大数据应用指南.md --domain sc_health -o rules/domains/sc_health_expanded.yaml \
+   python scripts/data/gen_yaml_from_doc.py docs/standard/四川省健康医疗大数据应用指南.md --domain sc_health -o rules/domains/sc_health_expanded.yaml \
      --api-key "sk-xxx" --api-base "https://dashscope.aliyuncs.com/compatible-mode/v1" --model "qwen-plus"
 """
 
@@ -29,7 +29,7 @@ from typing import Any, Dict, List
 import yaml
 
 # 项目根目录挂载
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
 from privacy_local_agent.observability.logging_config import get_logger

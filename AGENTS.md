@@ -77,12 +77,15 @@ privacy-local-agent/
 ├── tests/                         # pytest suite
 ├── mkdocs.yml                       # MkDocs + Material configuration
 
-├── docs/                          # Chinese design/PRD/ops docs
-├── deploy/                        # Helm, K8s, Docker Compose
-│   ├── helm/
-│   ├── k8s/
-│   └── docker-compose/
-├── console/                      # 测试控制台（React + FastAPI / Go 代理）
+├── config/                        # Profile & runtime configs
+├── rules/                         # Preset classification rules & standards
+├── data/                          # Sample datasets & test data
+├── scripts/                       # Utility scripts
+│   ├── dev/                       # Services, health check & test runners
+│   ├── data/                      # Data generators & rule exporters
+│   ├── env/                       # Environment installers & acceleration
+│   └── models/                    # Model downloaders & converters
+├── console/                       # 测试控制台（React + FastAPI / Go 代理）
 │   ├── backend/                   # FastAPI 代理，转发请求到 agent REST
 │   ├── backend-go/                # Go gRPC 代理，可直接提供 Console UI
 │   └── web/                       # React 单页测试控制台
@@ -206,7 +209,7 @@ Key environment variables:
 4. Add tests in `tests/test_rest.py` and/or `tests/test_<primitive>.py`.
 5. Update `proto/privacy.proto` and regenerate stubs if adding gRPC:
    ```bash
-   python -m grpc_tools.protoc -I proto --python_out=. --grpc_python_out=. proto/privacy.proto
+   python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto
    ```
 
 ## 9. Adding a Classification Rule / Template / Composite Rule
@@ -349,7 +352,7 @@ Address these before any hardened production deployment.
 | Run test console backend | `cd console/backend && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |
 | Run gateway | `python -m privacy_local_agent.gateway.server` |
-| Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=. --grpc_python_out=. proto/privacy.proto` |
+| Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto` |
 | Build docs | `make docs-build` |
 | Serve docs | `make docs-serve` |
 | Download LLM | `python -m privacy_local_agent.privacy.download_model` |

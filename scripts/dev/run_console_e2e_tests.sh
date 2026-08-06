@@ -40,7 +40,8 @@ echo -e "${BLUE}====================================================${NC}"
 
 # 1. 启动 Mock Agent 服务 (端口 8079)
 echo -e "\n${YELLOW}[步骤 1/4] 启动 Mock Agent 桩服务 (端口 8079)...${NC}"
-python3 scripts/mock_agent_server.py 8079 &
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$SCRIPT_DIR/mock_agent_server.py" 8079 &
 MOCK_PID=$!
 sleep 1
 if ! kill -0 "$MOCK_PID" 2>/dev/null; then

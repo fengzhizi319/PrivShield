@@ -176,6 +176,9 @@ prod-stop:
 
 # ── Other ────────────────────────────────────────────────────
 
+proto-gen:
+	python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto
+
 clean:
 	rm -rf .pytest_cache __pycache__ .bin htmlcov .coverage coverage.xml
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

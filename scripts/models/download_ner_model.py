@@ -60,7 +60,7 @@ def main():
     model_id = "iic/nlp_raner_named-entity-recognition_chinese-base-cmeee"
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
+    project_root = os.path.dirname(os.path.dirname(current_dir))
     models_dir = os.path.join(project_root, ".models")
     os.makedirs(models_dir, exist_ok=True)
 

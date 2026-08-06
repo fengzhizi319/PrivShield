@@ -11,7 +11,7 @@
 在医疗健康数据开放与合规共享场景中，电子病历 (EMR)、残疾人评估记录及医保结算数据包含高度敏感的个人身份标识信息 (PII，如身份证号、医保证号) 以及极高风险的医疗病史信息（如 L4 级的恶性肿瘤/传染病病史、L5 级的重度精神障碍/遗传缺陷/HIV 感染等）。
 
 本设计方案旨在构建一个完整的**医疗数据合规治理 Pipeline**：
-1. **数据模拟生成 (`scripts/generate_medical_data.py`)**：自动生成 100 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、图片病例引用（包含血常规、梅毒病例、HIV 报告、胸片等真实图片文件路径）以及 L4/L5 级敏感病史的高仿真 `data1.csv`。
+1. **数据模拟生成 (`scripts/data/generate_medical_data.py`)**：自动生成 100 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、图片病例引用（包含血常规、梅毒病例、HIV 报告、胸片等真实图片文件路径）以及 L4/L5 级敏感病史的高仿真 `data1.csv`。
 2. **算法处理核心 (`privacy_local_agent/medical_pipeline/`)**：
    - 彻底与 `dynclassification` 统一合并：直接调用 `DynClassificationService.classify_field(..., sanitize=True)` 3 层漏斗 (Rule -> Small-NER -> Qwen2-VL) 完成 27 个字段及文本/图片病例的 L1~L5 风险分级标注。
    - **智能抹平与格式对称**：对 PII 及 L4/L5 级高敏感诊断执行自动抹平，对文本输出抹平文本，对图片输出遮罩打码后的新图片路径，强制保障输出数据中**绝对不包含任何 L4/L5 级原始敏感内容**。
@@ -29,7 +29,7 @@
 ```mermaid
 flowchart TD
     subgraph DataGen [数据生成脚本]
-        SG[scripts/generate_medical_data.py] -->|生成合规高仿真数据| D1[data1.csv]
+        SG[scripts/data/generate_medical_data.py] -->|生成合规高仿真数据| D1[data1.csv]
     end
 
     subgraph AgentPipeline [privacy_local_agent/medical_pipeline]
@@ -92,7 +92,7 @@ flowchart TD
 
 ---
 
-### 3.2 仿真数据生成器 (`scripts/generate_medical_data.py`)
+### 3.2 仿真数据生成器 (`scripts/data/generate_medical_data.py`)
 
 1. **GB 11643-1999 校验码算法**：计算 ISO 7064:1983.MOD 11-2 前 17 位加权余数，生成符合校验规则的真实格式身份证号。
 2. **L4/L5 级病史数据嵌入**：

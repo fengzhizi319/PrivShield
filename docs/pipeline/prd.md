@@ -70,7 +70,7 @@
 
 ### 4.1 数据生成验收
 
-- [ ] `python scripts/generate_medical_data.py` 执行成功，输出 `data/data1.csv`
+- [ ] `python scripts/data/generate_medical_data.py` 执行成功，输出 `data/data1.csv`
 - [ ] CSV 包含 20 行 × 28 列
 - [ ] 所有身份证号通过 MOD 11-2 校验
 - [ ] 病史中至少 3 条包含 L4 级内容、至少 2 条包含 L5 级内容

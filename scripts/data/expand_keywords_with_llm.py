@@ -3,16 +3,16 @@
 
 用法示例 / Usage Examples:
 1. 打印扩展后的 YAML 到标准输出 (Print to stdout):
-   python scripts/expand_keywords_with_llm.py rules/domains/general-pii.yaml
+   python scripts/data/expand_keywords_with_llm.py rules/domains/general-pii.yaml
 
 2. 直接覆盖原文件 (In-place update):
-   python scripts/expand_keywords_with_llm.py rules/domains/general-pii.yaml -i
+   python scripts/data/expand_keywords_with_llm.py rules/domains/general-pii.yaml -i
 
 3. 保存到新文件 (Save to output file):
-   python scripts/expand_keywords_with_llm.py rules/domains/finance.yaml -o rules/domains/finance_expanded.yaml
+   python scripts/data/expand_keywords_with_llm.py rules/domains/finance.yaml -o rules/domains/finance_expanded.yaml
 
 4. 使用 OpenAI/Qwen/DeepSeek API (Using API):
-   python scripts/expand_keywords_with_llm.py rules/domains/general-pii.yaml --api-key "sk-xxx" --api-base "https://dashscope.aliyuncs.com/compatible-mode/v1" --model "qwen-plus"
+   python scripts/data/expand_keywords_with_llm.py rules/domains/general-pii.yaml --api-key "sk-xxx" --api-base "https://dashscope.aliyuncs.com/compatible-mode/v1" --model "qwen-plus"
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from typing import Any, List
 import yaml
 
 # 项目跟路径引入
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
 from privacy_local_agent.observability.logging_config import get_logger

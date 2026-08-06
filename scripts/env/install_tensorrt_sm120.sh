@@ -48,10 +48,10 @@ usage() {
 
 使用示例:
   # 基础安装 (安装默认版本的 TensorRT Python 运行时)
-  ./scripts/install_tensorrt_sm120.sh
+  ./scripts/env/install_tensorrt_sm120.sh
 
   # 附带安装系统级 C++ 开发头文件 (需要 root / sudo 权限)
-  ./scripts/install_tensorrt_sm120.sh --system-install
+  ./scripts/env/install_tensorrt_sm120.sh --system-install
 EOF
     exit 0
 }

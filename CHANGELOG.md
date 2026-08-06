@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - 动态分类分级引擎基于 `OrderedDict` 的真实 LRU 评估缓存 (`ConfigurableRuleEngine._eval_cache`)，支持并发线程锁 (`_cache_lock`)、`PRIVACY_ENGINE_CACHE_MAX_SIZE` 环境变量配置及微秒级重复评估匹配
-- 独立 Markdown 文档提取与规则 YAML 生成脚本 (`scripts/gen_yaml_from_doc.py`)，支持从 Markdown 规范直接抽取规则
-- 大模型 YAML 关键词自动扩展脚本 (`scripts/expand_keywords_with_llm.py`)，支持在线 LLM API 与离线降级同义词表扩展
+- 独立 Markdown 文档提取与规则 YAML 生成脚本 (`scripts/data/gen_yaml_from_doc.py`)，支持从 Markdown 规范直接抽取规则
+- 大模型 YAML 关键词自动扩展脚本 (`scripts/data/expand_keywords_with_llm.py`)，支持在线 LLM API 与离线降级同义词表扩展
 - `rule_schema.py` 核心架构与系统流转图 Docstring 文档
 - 全面扩充 `general-pii` / `finance` / `medical` / `sc_health_db51` 领域规则包关键词词库
 - Apache-2.0 LICENSE

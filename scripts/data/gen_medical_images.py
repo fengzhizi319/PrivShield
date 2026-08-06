@@ -16,8 +16,8 @@
 
 用法::
 
-    python scripts/gen_medical_images.py            # 生成全部
-    python scripts/gen_medical_images.py --list     # 列出可用模板
+    python scripts/data/gen_medical_images.py            # 生成全部
+    python scripts/data/gen_medical_images.py --list     # 列出可用模板
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from PIL import Image, ImageDraw, ImageFont
 # 路径与常量
 # --------------------------------------------------------------------------- #
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "console" / "web" / "src" / "assets" / "medical"
 FONT_CACHE = PROJECT_ROOT / ".fonts" / "NotoSansSC.ttf"
 

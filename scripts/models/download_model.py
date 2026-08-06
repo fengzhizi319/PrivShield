@@ -47,7 +47,7 @@ def main():
     
     # 默认将模型存放在项目根目录下的 .models 目录中
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
+    project_root = os.path.dirname(os.path.dirname(current_dir))
     local_dir = os.path.join(project_root, ".models", "Qwen2-VL-2B-Instruct")
     
     print(f"[*] 目标保存路径: {local_dir}")

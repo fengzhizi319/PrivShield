@@ -7,11 +7,11 @@ Convert local PyTorch/Hugging Face models to Apple MLX format for macOS Metal in
     pip install mlx torch transformers safetensors
 
 用法 / Usage:
-    python scripts/convert_models_to_mlx.py \
+    python scripts/models/convert_models_to_mlx.py \
         --model .models/Qwen2-VL-2B-Instruct \
         --output .models/Qwen2-VL-2B-Instruct-mlx
 
-    python scripts/convert_models_to_mlx.py \
+    python scripts/models/convert_models_to_mlx.py \
         --model .models/raner_cmeee \
         --output .models/raner_cmeee-mlx
 """

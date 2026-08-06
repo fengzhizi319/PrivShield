@@ -279,7 +279,7 @@ exclude = ["privacy_local_agent/privacy_pb2.*"]
 ```
 **注意**：修改 `proto/privacy.proto` 后需重新生成：
 ```bash
-python -m grpc_tools.protoc -I proto --python_out=. --grpc_python_out=. proto/privacy.proto
+python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto
 ```
 
 ### 4.2 预算时间窗口重置

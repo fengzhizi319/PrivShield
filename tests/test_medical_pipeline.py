@@ -12,7 +12,7 @@ from privacy_local_agent.medical_pipeline.pipeline import (
 )
 from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "data"))
 from generate_medical_data import gen_id_card, generate_dataset
 
 

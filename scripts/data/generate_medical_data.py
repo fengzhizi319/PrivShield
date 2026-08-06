@@ -4,8 +4,8 @@
 生成 20 条逼真的模拟病人医疗记录 CSV（data1.csv），用于分类分级与脱敏流水线测试。
 
 Usage:
-    python scripts/generate_medical_data.py
-    python scripts/generate_medical_data.py --output data/data1.csv --count 20
+    python scripts/data/generate_medical_data.py
+    python scripts/data/generate_medical_data.py --output data/data1.csv --count 20
 """
 from __future__ import annotations
 

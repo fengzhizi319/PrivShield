@@ -549,7 +549,7 @@ class TestConvertScript:
 
     def test_require_macos(self):
         """非 macOS 平台应退出。"""
-        from scripts.convert_models_to_mlx import _require_macos
+        from scripts.models.convert_models_to_mlx import _require_macos
         # 在 macOS 上不应退出
         if platform.system() == "Darwin":
             _require_macos()  # 不应抛出异常
@@ -558,7 +558,7 @@ class TestConvertScript:
         """BFloat16 张量应正确转换。"""
         import torch
         import mlx.core as mx
-        from scripts.convert_models_to_mlx import _convert_state_dict_to_mlx
+        from scripts.models.convert_models_to_mlx import _convert_state_dict_to_mlx
 
         # 创建包含 BFloat16 的 state dict
         state = {
@@ -575,7 +575,7 @@ class TestConvertScript:
     def test_convert_state_dict_float32(self, mlx_available):
         """Float32 张量应正确转换。"""
         import torch
-        from scripts.convert_models_to_mlx import _convert_state_dict_to_mlx
+        from scripts.models.convert_models_to_mlx import _convert_state_dict_to_mlx
 
         state = {"w": torch.tensor([1.0, 2.0])}
         result = _convert_state_dict_to_mlx(state, dtype="float32")
@@ -583,7 +583,7 @@ class TestConvertScript:
 
     def test_copy_auxiliary_files(self, tmp_path):
         """辅助文件应正确复制。"""
-        from scripts.convert_models_to_mlx import _copy_auxiliary_files
+        from scripts.models.convert_models_to_mlx import _copy_auxiliary_files
 
         src = tmp_path / "src"
         src.mkdir()

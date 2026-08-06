@@ -36,13 +36,13 @@ usage() {
 
 使用示例:
   # 仅查看预算消耗统计
-  ./scripts/clean_privacy_budget_db.sh --info-only
+  ./scripts/dev/clean_privacy_budget_db.sh --info-only
 
   # 重置 'default' 命名空间的预算
-  ./scripts/clean_privacy_budget_db.sh --namespace default
+  ./scripts/dev/clean_privacy_budget_db.sh --namespace default
 
   # 重置所有预算
-  ./scripts/clean_privacy_budget_db.sh --reset-all
+  ./scripts/dev/clean_privacy_budget_db.sh --reset-all
 EOF
     exit 0
 }

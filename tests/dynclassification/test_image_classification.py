@@ -383,7 +383,7 @@ class TestGenMedicalImagesDetection:
     def generated_images_dir(self, tmp_path):
         """调用 gen_medical_images 的渲染逻辑生成测试图片到临时目录。"""
         # 导入生成脚本的模板和渲染函数
-        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "data"))
         try:
             from gen_medical_images import TEMPLATES, render_case
         finally:
@@ -438,7 +438,7 @@ class TestGenMedicalImagesDetection:
 
     def test_generated_images_cover_expected_levels(self, generated_images_dir):
         """验证生成脚本覆盖 L3~L5 不同敏感等级的病例场景。"""
-        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "data"))
         try:
             from gen_medical_images import TEMPLATES
         finally:
@@ -492,7 +492,7 @@ class TestRealImageClassification:
     @pytest.fixture(scope="class")
     def medical_images(self, tmp_path_factory):
         """生成全部病例测试图片。"""
-        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "data"))
         try:
             from gen_medical_images import TEMPLATES, render_case
         finally:

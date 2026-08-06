@@ -49,13 +49,13 @@ usage() {
 
 使用示例:
   # 基础安装 (安装默认的 CUDA 12.8 对应 PyTorch 驱动)
-  ./scripts/install_cuda_pytorch_sm120.sh
+  ./scripts/env/install_cuda_pytorch_sm120.sh
 
   # 使用 Nightly 预览通道安装最新的 PyTorch cu128 驱动
-  ./scripts/install_cuda_pytorch_sm120.sh -p nightly/cu128
+  ./scripts/env/install_cuda_pytorch_sm120.sh -p nightly/cu128
 
   # 自动安装系统级 CUDA 12.8 Toolkit (需要 root / sudo 权限)
-  ./scripts/install_cuda_pytorch_sm120.sh --install-cuda-toolkit
+  ./scripts/env/install_cuda_pytorch_sm120.sh --install-cuda-toolkit
 EOF
     exit 0
 }
