@@ -55,32 +55,46 @@ class MedicalPipelineResult:
     summary: dict[str, Any]
 
 
+try:
+    from ..dynclassification.ner_adapter import NerAdapter
+except ImportError:
+    NerAdapter = None
+
+
 class MedicalPrivacyPipeline:
     """医疗敏感数据全流程治理 Pipeline。
     
     1. 动态分类分级：集成 dynclassification 3层漏斗 (Rule -> NER -> LLM) 识别 27 个字段及临床文本中的 L1~L5 风险标识；
-    2. 身份与特高风险脱敏：抹平 PII 信息，强剥离 L4/L5 高风险病史词汇；
+    2. 身份与特高风险脱敏：抹平 PII 信息，强剥离 L4/L5 高风险病史词汇；支持 "ner" (Layer-2 Small-NER) 与 "rule" 双引擎抹平模式；
     3. 输出双结构数据：(1) 分级报告 (2) 合规脱敏数据。
     """
 
-    def __init__(self, dyn_service: DynClassificationService | None = None):
-        """初始化 Pipeline 引擎，挂载 DynClassificationService 统一分类能力。"""
+    def __init__(
+        self,
+        dyn_service: DynClassificationService | None = None,
+        redact_engine: str = "ner",
+    ):
+        """初始化 Pipeline 引擎，挂载 DynClassificationService 统一分类能力与 Small-NER 抹平引擎。"""
         if dyn_service is None:
             # 创建 DynClassificationService 并注入医疗领域文本脱敏回调
             # 解耦 dynclassification 对 medical_pipeline 的反向依赖
             dyn_service = DynClassificationService(text_sanitizer=self._medical_text_sanitizer)
         self.dyn_service = dyn_service
+        self.redact_engine = redact_engine
+        self.ner_adapter = NerAdapter() if NerAdapter is not None else None
         self._lock = threading.Lock()
         # 缓存 _classify_field 中 dyn_service 计算的 sanitized_value，供 _sanitize_field 复用，
         # 避免同一字段被三层漏斗分类两次（性能优化）。
         self._sanitized_cache: dict[tuple[str, str], str] = {}
 
-    @staticmethod
-    def _medical_text_sanitizer(field_name: str, text: str, final_level: str, mode: str = "redact") -> str:
+    def _medical_text_sanitizer(self, field_name: str, text: str, final_level: str, mode: str = "redact") -> str:
         """医疗领域文本脱敏回调（注入到 DynClassificationService）。
 
-        默认采用无痕抹平模式 (Redaction/Purge Mode)：彻底擦除 L4/L5 敏感病史与关联句法介词，
-        不留任何形如 [L4-xxx] 的提示性标志，避免读者推断出原始敏感病史。
+        支持双引擎抹平模式：
+        - redact_engine=="ner": 启用 Layer-2 Small-NER (ONNXRuntime/ModelScope/TensorRT) 实体识别无痕抹平
+        - redact_engine=="rule": 采用高级规则引擎抹平模式
+
+        默认彻底擦除 L4/L5 敏感病史与关联句法介词，不留任何形如 [L4-xxx] 的提示性标志。
         若 mode=="mask" 则回退为显式标签掩码模式。
         """
         if mode == "mask":
@@ -90,8 +104,12 @@ class MedicalPrivacyPipeline:
             for pat, replacement in L4_PATTERNS:
                 sanitized_text = pat.sub(replacement, sanitized_text)
         else:
-            # 默认无痕抹平模式 (Redaction/Purge Mode)
-            sanitized_text = redact_medical_text(text)
+            # 优先采用 Layer-2 Small-NER 抹平模式
+            if self.redact_engine == "ner":
+                sanitized_text = redact_medical_text_with_ner(text, ner_adapter=self.ner_adapter)
+            else:
+                sanitized_text = redact_medical_text(text)
+
             if field_name in ["diagnosis_name", "diagnosis"]:
                 if sanitized_text.strip() in ["慢性", "既往", "既往慢性"]:
                     sanitized_text = ""
