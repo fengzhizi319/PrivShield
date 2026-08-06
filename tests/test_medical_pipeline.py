@@ -382,6 +382,37 @@ def test_redact_huntington_genetic_case_complete_purge() -> None:
     assert res_ner == expected, f"NER 脱敏不符合预期: {res_ner}"
 
 
+def test_redact_psychiatric_hospital_case_complete_purge() -> None:
+    """重度精神障碍病例：必须完全擦除专科就诊地点（精神卫生中心）及全部重症描述，不留'曾就诊于精神卫生中心'。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    class PsychMockAdapter:
+        def extract(self, text: str) -> list[dict[str, str]]:
+            return [
+                {"text": "言语关联妄想", "type": "SYMPTOM"},
+                {"text": "命令性幻听", "type": "SYMPTOM"},
+                {"text": "保护性约束倾向", "type": "SYMPTOM"},
+                {"text": "重度精神分裂症", "type": "DISEASE"},
+                {"text": "奥氮平片", "type": "DRUG"},
+                {"text": "四苯嗪", "type": "DRUG"},
+            ]
+
+    text = (
+        "患者3年前无明显诱因出现言语关联妄想、命令性幻听及保护性约束倾向。"
+        "曾就诊于精神卫生中心，诊断为重度精神分裂症。"
+        "长期服用'奥氮平片'20mg qd及'四苯嗪'控制症状。"
+    )
+
+    res_rule = redact_medical_text(text)
+    res_ner = redact_medical_text_with_ner(text, ner_adapter=PsychMockAdapter())
+
+    assert "精神卫生中心" not in res_rule and "精神卫生中心" not in res_ner, "专科就诊地点严禁泄露"
+    assert "重度精神分裂症" not in res_rule and "重度精神分裂症" not in res_ner
+    assert "奥氮平" not in res_rule and "奥氮平" not in res_ner
+    assert res_rule == "", f"Rule 脱敏应抹平为空: {res_rule}"
+    assert res_ner == "", f"NER 脱敏应抹平为空: {res_ner}"
+
+
 
 def test_failed_image_redaction_never_returns_original_value() -> None:
     """不存在或损坏图片必须 fail closed，不能把原路径当作脱敏结果。"""
