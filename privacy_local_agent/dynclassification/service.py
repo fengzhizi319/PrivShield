@@ -140,14 +140,8 @@ class DynClassificationService:
 
     def _is_image_input(self, val_str: str) -> bool:
         """判断输入是否为图像（文件路径或 Base64 Data URI）。"""
-        stripped = val_str.strip()
-        return (
-            len(stripped) < 512
-            and any(
-                stripped.lower().endswith(ext)
-                for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom")
-            )
-        ) or stripped.lower().startswith("data:image/")
+        from .image_redaction import is_image_input
+        return is_image_input(val_str)
 
     def _compute_sanitized_value(
         self, field_name: str, val_str: str, field_result: FieldClassificationResult

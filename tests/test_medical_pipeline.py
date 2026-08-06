@@ -191,6 +191,43 @@ def test_pii_masking_format_name() -> None:
     assert masked_name != "张三丰", "姓名不应为原始值"
 
 
+def test_chinese_pii_field_names_are_classified_and_masked() -> None:
+    """中文字段名应与对应英文规范字段使用相同的分类和脱敏策略。"""
+    records = [{
+        "姓名": "张三丰",
+        "身份证号": "110101199003071234",
+        "家庭住址": "北京市朝阳区幸福路100号",
+        "残疾证号": "残疾证123456789",
+        "医保卡号": "医保卡987654321",
+    }]
+
+    result = process_medical_dataset(records)
+    masked = result.sanitized_data[0]
+    report = result.classification_report[0]
+
+    assert set(report["pii_fields_detected"]) == set(records[0])
+    assert masked["姓名"] != records[0]["姓名"]
+    assert masked["身份证号"].startswith("110101")
+    assert "********" in masked["身份证号"]
+    assert masked["家庭住址"] != records[0]["家庭住址"]
+    assert masked["残疾证号"] != records[0]["残疾证号"]
+    assert masked["医保卡号"] != records[0]["医保卡号"]
+
+
+def test_sanitizer_rejects_unknown_mode() -> None:
+    """脱敏模式拼写错误必须立即报错，不能静默进入默认分支。"""
+    pipeline = MedicalPrivacyPipeline(redact_engine="rule")
+
+    with pytest.raises(ValueError, match="Unsupported sanitization mode"):
+        pipeline._medical_text_sanitizer("diagnosis_name", "乙肝", "L4", mode="redcat")
+
+
+def test_pipeline_rejects_unknown_redact_engine() -> None:
+    """脱敏引擎名称拼写错误必须在初始化时失败。"""
+    with pytest.raises(ValueError, match="Unsupported redact_engine"):
+        MedicalPrivacyPipeline(redact_engine="nerx")
+
+
 def test_empty_records_handling() -> None:
     """验证空记录列表的处理不报错。"""
     res = process_medical_dataset([])

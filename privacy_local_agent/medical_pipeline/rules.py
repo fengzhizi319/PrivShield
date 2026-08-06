@@ -14,6 +14,36 @@ PII_FIELD_RULES: dict[str, str] = {
     "medical_insurance_no": "INSURANCE_NO",
 }
 
+# 中文数据源常用字段名到规范字段名的映射。保留规范英文键作为唯一规则来源，
+# 避免把别名数量误计入 PII 类型统计，同时让分类和脱敏使用完全一致的语义。
+PII_FIELD_ALIASES: dict[str, str] = {
+    "姓名": "name",
+    "真实姓名": "name",
+    "用户姓名": "name",
+    "身份证": "id_card_no",
+    "身份证号": "id_card_no",
+    "居民身份证": "id_card_no",
+    "公民身份号码": "id_card_no",
+    "地址": "registered_address",
+    "注册地址": "registered_address",
+    "登记地址": "registered_address",
+    "户籍地址": "registered_address",
+    "居住地址": "registered_address",
+    "居民住址": "registered_address",
+    "家庭住址": "registered_address",
+    "联系地址": "registered_address",
+    "残疾证号": "disability_cert_no",
+    "残疾人证号": "disability_cert_no",
+    "医保卡号": "medical_insurance_no",
+    "医保号": "medical_insurance_no",
+    "医疗保险号": "medical_insurance_no",
+}
+
+
+def canonicalize_pii_field(field_name: str) -> str:
+    """将中文或英文 PII 字段名转换为医疗 Pipeline 的规范字段名。"""
+    return PII_FIELD_ALIASES.get(field_name, field_name)
+
 # L5 极高风险病史与诊断词汇映射组（包含疾病名、缩写、临床特征）
 L5_TERMS_MAP: dict[str, list[str]] = {
     "HIV_AIDS": [
@@ -53,10 +83,10 @@ _L5_REPLACEMENT_MAP: dict[str, str] = {
 }
 
 _L4_REPLACEMENT_MAP: dict[str, str] = {
-    "infectious_disease": "INFECTIOUS_DISEASE",
-    "severe_chronic": "SEVERE_CHRONIC",
-    "malignant_neoplasm": "MALIGNANT_NEOPLASM",
-    "disability_special": "DISABILITY_SPECIAL",
+    "STD_VENEREAL": "INFECTIOUS_DISEASE",
+    "MALIGNANT_NEOPLASM": "MALIGNANT_NEOPLASM",
+    "HEPATITIS_VIRUS": "HEPATITIS_VIRUS",
+    "SEVERE_ORGAN_DAMAGE": "SEVERE_ORGAN_DAMAGE",
 }
 
 # 文本脱敏正则表达式：按类别编译 L5/L4 术语为正则，长词优先匹配
@@ -152,9 +182,9 @@ _FAMILY_MEMBERS = (
 )
 _CLEANUP_ORPHAN_SUBJECT_PATTERN = re.compile(rf"(?:^|[，,。；])\s*(?:{_FAMILY_MEMBERS})\s*([。；;])")
 
-# 10. 孤立介词、无用连词与残余修饰清理：“同时因”、“及倾向” -> “”
+# 10. 孤立介词、无用连词与残余修饰清理：“同时因”、“及倾向”、“长期，” -> “”
 _CLEANUP_ORPHAN_PREP_PATTERN = re.compile(
-    r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|及|与|和)\s*([。；;，,])"
+    r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|长期|定期|口服|服用|及|与|和)\s*([。；;，,])"
 )
 _CLEANUP_ORPHAN_VERB_PATTERN = re.compile(
     r"(?:^|[，,。；])\s*(?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有)\s*([。；;，,])"
@@ -244,6 +274,29 @@ def redact_medical_text(text: str) -> str:
     return s
 
 
+def _clean_orphan_syntax(s: str) -> str:
+    """清理擦除敏感实体后残存的孤立介词、连词、无宾语动词与多余标点。"""
+    if not s:
+        return s
+    # 1. 清理孤立无宾语动词：如“示。”、“提示。”、“急诊行提示”、“予行”、“予行及”、“予。”
+    s = re.sub(r"(?:急诊行|急诊就诊|就诊|行|实施|接受|予|给予)\s*(?:提示|检查提示|显示|示)?\s*(?:及|与|和)?\s*([。；;，,])", r"\1", s)
+    s = re.sub(r"(?:提示|显示|检查提示|检查示|示|予)\s*([。；;，,])", r"\1", s)
+
+    # 2. 清理孤立连词与介词碎片：如“伴及。”、“及。”、“与。”、“伴。”、“长期。”、“发展为。”
+    s = re.sub(r"(?:伴及|伴有|伴|及|与|和|合并|长期|定期)\s*([。；;，,])", r"\1", s)
+    s = re.sub(r"(?:出现|发展为|表现为)\s*([。；;，,])", r"\1", s)
+    s = re.sub(r"发展为\s*与", "发展为", s)
+
+    # 3. 标点与空括号自愈
+    s = re.sub(r"(['\"“‘'”’])\1+", "", s)
+    s = re.sub(r"([，。；：,;\s])\1+", r"\1", s)
+    s = re.sub(r"([，,])\s*([。;；])", r"\2", s)
+    s = re.sub(r"^[，,；;。]\s*", "", s)
+    s = re.sub(r"\(\s*\)", "", s)
+    s = re.sub(r"([。；;,，])\1+", r"\1", s)
+    return s.strip()
+
+
 def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
     """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎.
 
@@ -280,7 +333,8 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
 
         for ent in sorted_entities:
             term = ent.get("text", "").strip()
-            ent_type = str(ent.get("type", "")).upper()
+            # 兼容两种实体 schema：ner_adapter 返回 "label"，其他引擎可能返回 "type"
+            ent_type = str(ent.get("type") or ent.get("label") or "").upper()
             if not term or len(term) < 2:
                 continue
 
@@ -296,74 +350,6 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
                 s = re.sub(pat, "", s, flags=re.IGNORECASE)
             else:
                 # NER 识别出 DISEASE/TREATMENT/SYMPTOM 等：做实体级剥离
-                pat_paired = rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){quoted_term}\s*[、,，]\s*"
-                s = re.sub(pat_paired, r"\1", s, flags=re.IGNORECASE)
-                s = re.sub(quoted_term, "", s)
-
-def _clean_orphan_syntax(s: str) -> str:
-    """清理擦除敏感实体后残存的孤立介词、连词、无宾语动词与多余标点。"""
-    if not s:
-        return s
-    # 1. 清理孤立无宾语动词：如“示。”、“提示。”、“急诊行提示”、“予行”、“予行及”、“予。”
-    s = re.sub(r"(?:急诊行|急诊就诊|就诊|行|实施|接受|予|给予)\s*(?:提示|检查提示|显示|示)?\s*(?:及|与|和)?\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:提示|显示|检查提示|检查示|示|予)\s*([。；;，,])", r"\1", s)
-
-    # 2. 清理孤立连词与介词碎片：如“伴及。”、“及。”、“与。”、“伴。”、“发展为。”
-    s = re.sub(r"(?:伴及|伴有|伴|及|与|和|合并)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:出现|发展为|表现为)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"发展为\s*与", "发展为", s)
-
-    # 3. 标点与空括号自愈
-    s = re.sub(r"(['\"“‘'”’])\1+", "", s)
-    s = re.sub(r"([，。；：,;\s])\1+", r"\1", s)
-    s = re.sub(r"([，,])\s*([。;；])", r"\2", s)
-    s = re.sub(r"^[，,；;。]\s*", "", s)
-    s = re.sub(r"\(\s*\)", "", s)
-    s = re.sub(r"([。；;,，])\1+", r"\1", s)
-    return s.strip()
-
-
-def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
-    """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎."""
-    if not text:
-        return text
-
-    entities = []
-    if ner_adapter is not None:
-        try:
-            raw_entities = ner_adapter.extract(text)
-            if isinstance(raw_entities, list):
-                entities = raw_entities
-        except Exception:
-            entities = []
-
-    # 如果 NER 成功提取了实体项，执行纯 NER 神经网络驱动的实体级精准擦除
-    if entities:
-        s = text
-        sorted_entities = sorted(
-            [
-                e for e in entities
-                if isinstance(e, dict) and e.get("text", "").strip()
-            ],
-            key=lambda x: len(x.get("text", "")),
-            reverse=True,
-        )
-
-        for ent in sorted_entities:
-            term = ent.get("text", "").strip()
-            ent_type = str(ent.get("type", "")).upper()
-            if not term or len(term) < 2:
-                continue
-
-            quoted_term = rf"['\"“‘'”’]?{re.escape(term)}['\"”’]?"
-
-            if any(t in ent_type for t in ["DRUG", "MED", "CHEM"]):
-                pat = rf"(?:长期|定期|口服|服用|给予|使用|予|遵医嘱)?\s*{quoted_term}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)?"
-                s = re.sub(pat, "", s, flags=re.IGNORECASE)
-            elif any(t in ent_type for t in ["HOSPITAL", "ORG", "LOC"]):
-                pat = rf"(?:曾?就诊于|就诊于|收治于|转诊至)\s*{quoted_term}\s*(?:，|,|。|；|;)?"
-                s = re.sub(pat, "", s, flags=re.IGNORECASE)
-            else:
                 pat_paired = rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){quoted_term}\s*[、,，]\s*"
                 s = re.sub(pat_paired, r"\1", s, flags=re.IGNORECASE)
                 s = re.sub(quoted_term, "", s)

@@ -17,6 +17,28 @@ logger = get_logger(__name__)
 
 IMAGE_REDACTION_FAILURE = "[IMAGE-REDACTION-FAILED]"
 
+# 常见图像文件扩展名（含 DICOM 医学影像）
+IMAGE_FILE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dcm", ".dicom")
+
+
+# 文件路径长度上限：超过视为非文件路径（防超长字符串误判）
+_MAX_PATH_LEN = 512
+
+
+def is_image_input(val_str: str) -> bool:
+    """判断输入是否为图像（文件路径或 Base64 Data URI）。
+
+    收敛 pipeline / service / funnel 中重复的扩展名 + Data URI 检测逻辑，
+    避免各模块判断规则漂移。
+    """
+    if not val_str:
+        return False
+    stripped = val_str.strip()
+    return (
+        len(stripped) < _MAX_PATH_LEN
+        and any(stripped.lower().endswith(ext) for ext in IMAGE_FILE_EXTENSIONS)
+    ) or stripped.lower().startswith(("data:image/", "image:"))
+
 
 def _cleanup_old_sanitized_images(output_dir: Path, max_files: int = 200) -> None:
     """自动清理旧的打码图片，防止磁盘空间被满存（Disk Exhaustion 防护）。"""
@@ -61,11 +83,8 @@ def sanitize_image_input(
     is_data_uri = val_stripped.lower().startswith("data:image/")
     is_image_marker = val_stripped.lower().startswith("image:")
     is_file_path = (
-        len(val_stripped) < 512
-        and any(
-            val_stripped.lower().endswith(ext)
-            for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dcm", ".dicom")
-        )
+        len(val_stripped) < _MAX_PATH_LEN
+        and any(val_stripped.lower().endswith(ext) for ext in IMAGE_FILE_EXTENSIONS)
     )
 
     img: Optional[Image.Image] = None
