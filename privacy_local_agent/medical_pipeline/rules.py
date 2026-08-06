@@ -61,8 +61,8 @@ L5_TERMS_MAP: dict[str, list[str]] = {
 # L4 高风险病史与诊断词汇映射组（肿瘤、性病/传染病、严重器官损害）
 L4_TERMS_MAP: dict[str, list[str]] = {
     "STD_VENEREAL": [
-        "梅毒", "苍白密螺旋体", "TPPA阳性", "TPPA", "RPR阳性", "RPR", "淋病", "淋球菌", "尖锐湿疣",
-        "生殖器疱疹", "软下疳", "性病", "性传播疾病", "不洁性接触史", "硬下疳", "人乳头瘤病毒高危型"
+        "梅毒", "苍白密螺旋体", "TPPA阳性", "TPPA", "RPR阳性", "RPR 1:16", "RPR", "淋病", "淋球菌", "尖锐湿疣",
+        "生殖器疱疹", "软下疳", "性病", "性传播疾病", "不洁性接触史", "不洁接触史", "无痛性溃疡", "硬下疳", "人乳头瘤病毒高危型"
     ],
     "MALIGNANT_NEOPLASM": [
         "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "奥希替尼", "EGFR基因检测", "EGFR突变"
@@ -209,7 +209,7 @@ _CLEANUP_FAMILY_VERB_HEAL_PATTERN = re.compile(
 _CLEANUP_DEVELOP_AND_PATTERN = re.compile(r"发展为\s*与")
 _CLEANUP_PATIENT_TIME_PREFIX_PATTERN = re.compile(r"(?:患者\s*\d+\s*(?:年|月|天)?前)\s*([，,])")
 _CLEANUP_ORPHAN_PREP_PATTERN = re.compile(
-    r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|长期|定期|口服|服用|及|与|和)\s*([。；;，,])"
+    r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|长期|定期|口服|服用|血清学|血清学检查示?|及|与|和)\s*([。；;，,])"
 )
 _CLEANUP_ORPHAN_VERB_PATTERN = re.compile(
     r"(?:^|[，,。；])\s*(?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有)\s*([。；;，,])"
@@ -226,6 +226,20 @@ _CLEANUP_PUNCTUATION_PATTERN = re.compile(r"([，。；：,;])\1+")
 _CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,、])\s*([。;；])")
 _CLEANUP_LEADING_PUNCT_PATTERN = re.compile(r"^[，,；;。]\s*")
 _CLEANUP_EMPTY_PAREN_PATTERN = re.compile(r"\(\s*\)")
+
+# 10. 性传播疾病与极高敏特征综合句法擦除正则（涵盖血清学检查示TPPA/RPR滴度、不洁接触史、无痛性溃疡/硬下疳自愈等完整词句）
+_REDACT_STD_FEATURE_CLAUSE_PATTERN = re.compile(
+    r"(?:"
+    r"(?:检查出|确诊为|诊断为)?\s*['\"“]?(?:梅毒|TPPA阳性|RPR阳性|淋病|尖锐湿疣)['\"”]?\s*[，,。；;]?"
+    r"|(?:血清学检查示|血清学检查|血清学)?\s*(?:TPPA阳性|TPPA|RPR阳性|RPR\s*1:\d+|\d+:\d+)\s*[，,。；;]?"
+    r"|(?:追问病史[，,]?)?\s*(?:1年前有|既往有|曾有)?\s*(?:不洁性接触史|不洁接触史)\s*[，,。；;]?"
+    r"|(?:半年前|1年前)?\s*(?:外阴)?(?:曾出现|出现)?\s*无痛性溃疡(?:\(硬下疳\))?\s*(?:自愈)?\s*[，,。；;]?"
+    r")",
+    re.IGNORECASE,
+)
+
+# 11. 图片/附件路径名称清理（防止路径中泄露敏感词，如 /data/hiv_test_01.jpg -> /data/masked_01.jpg）
+_IMAGE_PATH_PATTERN = re.compile(r"/(?:[^/]+\.png|[^/]+\.jpg|[^/]+\.jpeg|[^/]+\.bmp)")
 
 
 def _redact_terms_only(text: str) -> str:
@@ -265,6 +279,23 @@ def _clean_orphan_syntax(s: str) -> str:
     # 5. 清理抹平后仅剩无主语/无主病因孤立频次或时间状语从句（如 "反复发作3年"、"3年"、"反复发作"）
     if re.match(r"^(?:反复发作|发作|持续|既往)?\s*\d+\s*(?:年|月|天|周|小时)?\s*(?:余)?\s*(?:年|月|天|周)?\s*[。；;，,]?$", s.strip()):
         return ""
+
+    # 6. 清理擦除敏感病史/症状后遗留的孤立前缀、后缀与时间短语（如"追问病史，1年前有"、"半年前外阴曾出现"、"自愈"）
+    s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)\s*([。；;，,])", r"\1", s)
+    s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)", "", s)
+    s = re.sub(r"(?:追问病史)\s*([。；;，,])", r"\1", s)
+    s = re.sub(r"(?:追问病史)", "", s)
+    s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
+    s = _CLEANUP_LEADING_PUNCT_PATTERN.sub("", s)
+    s = re.sub(r"([。；;,，])\1+", r"\1", s)
+
+    # 7. 去标识化擦除文本或图片引用路径中包含的高敏感英文词汇（如 syphilis, hiv, cancer 等）
+    s = re.sub(
+        r"(\b[\w/\\.-]*?)(?:syphilis|hiv|aids|cancer|tumor|hepatitis)([\w/\\.-]*\.(?:png|jpg|jpeg|dcm|webp|gif)\b)",
+        r"\1sanitized_case_image\2",
+        s,
+        flags=re.IGNORECASE,
+    )
 
     return s.strip()
 

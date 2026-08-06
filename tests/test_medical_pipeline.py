@@ -324,6 +324,40 @@ def test_redact_pure_sensitive_symptom_clause_wiped_completely() -> None:
     assert redact_medical_text_with_ner(text, ner_adapter=MockAdapter()) == "", "NER引擎对纯高敏症状句应直接抹平"
 
 
+def test_redact_syphilis_case_complete_purge_and_path_sanitization() -> None:
+    """梅毒与性传播疾病复杂病例：应完全擦除滴度、不洁接触史、硬下疳，去标识化图片文件名，且消除语病残渣。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    class SyphilisMockAdapter:
+        def extract(self, text: str) -> list[dict[str, str]]:
+            return [
+                {"text": "梅毒", "type": "DISEASE"},
+                {"text": "TPPA阳性", "type": "DISEASE"},
+                {"text": "RPR 1:16", "type": "DISEASE"},
+                {"text": "不洁性接触史", "type": "DISEASE"},
+                {"text": "无痛性溃疡", "type": "SYMPTOM"},
+                {"text": "硬下疳", "type": "SYMPTOM"},
+            ]
+
+    text = (
+        "患者1周前外院体检检查出'梅毒'，血清学检查示TPPA阳性，RPR 1:16。"
+        "追问病史，1年前有不洁性接触史，半年前外阴曾出现无痛性溃疡(硬下疳)自愈。"
+        "详见血清检验报告 data/samples/syphilis_case.png。"
+    )
+
+    res_rule = redact_medical_text(text)
+    res_ner = redact_medical_text_with_ner(text, ner_adapter=SyphilisMockAdapter())
+
+    assert "梅毒" not in res_rule and "梅毒" not in res_ner
+    assert "TPPA" not in res_rule and "TPPA" not in res_ner
+    assert "RPR" not in res_rule and "RPR" not in res_ner
+    assert "不洁性接触史" not in res_rule and "不洁性接触史" not in res_ner
+    assert "无痛性溃疡" not in res_rule and "无痛性溃疡" not in res_ner
+    assert "硬下疳" not in res_rule and "硬下疳" not in res_ner
+    assert "syphilis" not in res_rule and "syphilis" not in res_ner, "敏感图片文件名必须去标识化"
+    assert "血清学。" not in res_rule and "血清学。" not in res_ner, "不应遗留断句语病"
+
+
 
 def test_failed_image_redaction_never_returns_original_value() -> None:
     """不存在或损坏图片必须 fail closed，不能把原路径当作脱敏结果。"""
