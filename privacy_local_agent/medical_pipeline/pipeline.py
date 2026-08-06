@@ -92,6 +92,9 @@ class MedicalPrivacyPipeline:
         else:
             # 默认无痕抹平模式 (Redaction/Purge Mode)
             sanitized_text = redact_medical_text(text)
+            if field_name in ["diagnosis_name", "diagnosis"]:
+                if sanitized_text.strip() in ["慢性", "既往", "既往慢性"]:
+                    sanitized_text = ""
 
         # 仅对明确的个人信息字段应用 PII 掩码
         if field_name in PII_FIELD_RULES:
