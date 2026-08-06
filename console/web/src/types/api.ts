@@ -489,6 +489,8 @@ export interface MedicalFieldClassification {
   security_tag: string;
   description: string;
   rule_matched: string;
+  raw_value?: string;
+  sanitized_value?: string;
 }
 
 export interface MedicalRecordReport {
@@ -497,6 +499,7 @@ export interface MedicalRecordReport {
   pii_fields_detected: string[];
   high_sensitivity_detected: string[];
   field_details: MedicalFieldClassification[];
+  raw_record?: Record<string, string>;
 }
 
 export interface MedicalPipelineSummary {
@@ -513,6 +516,7 @@ export interface MedicalPipelineSummary {
 export interface MedicalPipelineResponse {
   classification_report: MedicalRecordReport[];
   sanitized_data: Record<string, string>[];
+  raw_data?: Record<string, string>[];
   summary: MedicalPipelineSummary;
 }
 

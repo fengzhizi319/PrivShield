@@ -5,7 +5,7 @@
  * 的全流程治理，提供双结构数据输出（分级报告与合规清洗数据）。
  */
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { MedicalPipelineResponse, MedicalRecordReport } from '@/types/api';
 import { runMedicalPipeline } from '@/api/client';
 import { Icon } from '@/components/icons';
@@ -21,6 +21,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'report' | 'sanitized'>('report');
   const [expandedRecord, setExpandedRecord] = useState<number | null>(1);
+  const [showRawComparison, setShowRawComparison] = useState(true);
 
   const handleExecute = async () => {
     setLoading(true);
@@ -130,29 +131,47 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
       {/* 视图 Tab 切换与数据内容区 */}
       {result && (
         <div className="mt-6 flex flex-1 flex-col rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex border-b border-gray-200 bg-gray-50/80 px-4 pt-3">
-            <button
-              onClick={() => setActiveTab('report')}
-              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
-                activeTab === 'report'
-                  ? 'border-teal-600 text-teal-700 bg-white rounded-t-lg shadow-sm'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Icon name="activity" className="h-4 w-4" />
-              1. 数据分类分级报告 ({(result.classification_report ?? []).length} 条)
-            </button>
-            <button
-              onClick={() => setActiveTab('sanitized')}
-              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
-                activeTab === 'sanitized'
-                  ? 'border-teal-600 text-teal-700 bg-white rounded-t-lg shadow-sm'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Icon name="shield" className="h-4 w-4" />
-              2. 脱敏清洗合规数据 (无 L4/L5 泄露)
-            </button>
+          <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50/80 px-4 pt-3">
+            <div className="flex">
+              <button
+                onClick={() => setActiveTab('report')}
+                className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
+                  activeTab === 'report'
+                    ? 'border-teal-600 text-teal-700 bg-white rounded-t-lg shadow-sm'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Icon name="activity" className="h-4 w-4" />
+                1. 数据分类分级报告 ({(result.classification_report ?? []).length} 条)
+              </button>
+              <button
+                onClick={() => setActiveTab('sanitized')}
+                className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
+                  activeTab === 'sanitized'
+                    ? 'border-teal-600 text-teal-700 bg-white rounded-t-lg shadow-sm'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Icon name="shield" className="h-4 w-4" />
+                2. 脱敏清洗合规数据 (与原始数据对比)
+              </button>
+            </div>
+
+            {activeTab === 'sanitized' && (
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-gray-500">对比视图:</span>
+                <button
+                  onClick={() => setShowRawComparison(!showRawComparison)}
+                  className={`rounded-lg px-3 py-1 text-xs font-bold transition-all border ${
+                    showRawComparison
+                      ? 'bg-teal-50 border-teal-300 text-teal-700 shadow-sm'
+                      : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {showRawComparison ? '🔘 双排对比模式 (原始 vs 脱敏)' : '⚪ 纯脱敏清洗模式'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Tab 1: 分类分级报告 */}
@@ -198,6 +217,8 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                               <thead className="bg-gray-100/70 text-gray-600">
                                 <tr>
                                   <th className="px-3 py-2">字段名</th>
+                                  <th className="px-3 py-2">原始数据 (Original)</th>
+                                  <th className="px-3 py-2">脱敏后数据 (Sanitized)</th>
                                   <th className="px-3 py-2">等级</th>
                                   <th className="px-3 py-2">安全标签</th>
                                   <th className="px-3 py-2">命中的治理规则</th>
@@ -205,19 +226,36 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100 bg-white">
-                                {rep.field_details.map((fd, idx) => (
-                                  <tr key={idx} className="hover:bg-gray-50">
-                                    <td className="px-3 py-2 font-mono font-bold text-gray-800">{fd.field_name}</td>
-                                    <td className="px-3 py-2">
-                                      <span className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold border ${levelBadgeCls(fd.level)}`}>
-                                        {fd.level}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2 font-mono text-gray-600">{fd.security_tag}</td>
-                                    <td className="px-3 py-2 text-indigo-600 font-medium">{fd.rule_matched}</td>
-                                    <td className="px-3 py-2 text-gray-500">{fd.description}</td>
-                                  </tr>
-                                ))}
+                                {rep.field_details.map((fd, idx) => {
+                                  const rawVal = fd.raw_value ?? (rep.raw_record ? rep.raw_record[fd.field_name] : '');
+                                  const sanVal = fd.sanitized_value ?? (result.sanitized_data?.[rep.record_index - 1]?.[fd.field_name] ?? '');
+                                  const isChanged = rawVal !== sanVal && sanVal !== '';
+                                  return (
+                                    <tr key={idx} className="hover:bg-gray-50">
+                                      <td className="px-3 py-2 font-mono font-bold text-gray-800">{fd.field_name}</td>
+                                      <td className="px-3 py-2 max-w-xs truncate font-mono text-gray-500 bg-gray-50/80 rounded px-1.5 py-0.5">
+                                        {rawVal || '-'}
+                                      </td>
+                                      <td className="px-3 py-2 max-w-xs truncate font-mono">
+                                        {isChanged ? (
+                                          <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                            {sanVal}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-700">{sanVal || '-'}</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <span className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold border ${levelBadgeCls(fd.level)}`}>
+                                          {fd.level}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 font-mono text-gray-600">{fd.security_tag}</td>
+                                      <td className="px-3 py-2 text-indigo-600 font-medium">{fd.rule_matched}</td>
+                                      <td className="px-3 py-2 text-gray-500">{fd.description}</td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -230,14 +268,14 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
             </div>
           )}
 
-          {/* Tab 2: 脱敏清洗合规数据 */}
+          {/* Tab 2: 脱敏清洗合规数据 (双排对比或单排模式) */}
           {activeTab === 'sanitized' && (
             <div className="flex-1 overflow-auto p-4">
               <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-inner">
                 <table className="min-w-full divide-y divide-gray-200 text-left text-xs">
                   <thead className="bg-gray-100 text-gray-700 sticky top-0">
                     <tr>
-                      <th className="px-3 py-2.5 font-bold">#</th>
+                      <th className="px-3 py-2.5 font-bold whitespace-nowrap">数据类型</th>
                       {Object.keys((result.sanitized_data ?? [])[0] || {}).map((col) => (
                         <th key={col} className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
                           {col}
@@ -246,36 +284,104 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
-                    {(result.sanitized_data ?? []).map((row, idx) => (
-                      <tr key={idx} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-bold text-gray-400">{idx + 1}</td>
-                        {Object.entries(row).map(([col, val]) => {
-                          const isPii = ['name', 'id_card_no', 'registered_address', 'disability_cert_no', 'medical_insurance_no'].includes(col);
-                          const isMaskedMed = val.includes('[L5-') || val.includes('[L4-');
-                          const isImageCase = val.includes('data/samples/') || val.includes('sanitized_') || val.endsWith('.png') || val.endsWith('.jpg');
-                          return (
-                            <td key={col} className="px-3 py-2 whitespace-nowrap">
-                              {isPii ? (
-                                <span className="rounded bg-emerald-50 px-2 py-0.5 font-mono text-emerald-700 border border-emerald-200">
-                                  {val}
+                    {(result.sanitized_data ?? []).map((sanRow, idx) => {
+                      const rawRow = result.raw_data?.[idx] || {};
+                      const recordNum = idx + 1;
+                      return showRawComparison ? (
+                        <React.Fragment key={idx}>
+                          {/* 1#. 原始数据行 */}
+                          <tr className="bg-amber-50/40 hover:bg-amber-50/80 border-t-2 border-amber-200">
+                            <td className="px-3 py-2.5 font-bold whitespace-nowrap text-amber-800 bg-amber-100/60 rounded-r border-r border-amber-200">
+                              <span className="inline-flex items-center gap-1">
+                                <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[11px] font-extrabold text-amber-900">
+                                  #{recordNum}
                                 </span>
-                              ) : isMaskedMed ? (
-                                <span className="rounded bg-purple-50 px-2 py-0.5 text-purple-700 border border-purple-200 font-medium">
-                                  {val}
-                                </span>
-                              ) : isImageCase ? (
-                                <span className="rounded bg-indigo-50 px-2 py-0.5 text-indigo-700 border border-indigo-200 font-medium flex items-center gap-1">
-                                  <span>🖼️ 图像病例脱敏:</span>
-                                  <span className="font-mono text-xs">{val}</span>
-                                </span>
-                              ) : (
-                                <span className="text-gray-700">{val}</span>
-                              )}
+                                <span>原始数据</span>
+                              </span>
                             </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
+                            {Object.entries(sanRow).map(([col]) => {
+                              const rawVal = rawRow[col] ?? '';
+                              const sanVal = sanRow[col] ?? '';
+                              const isDiff = rawVal !== sanVal;
+                              return (
+                                <td key={col} className="px-3 py-2 whitespace-nowrap max-w-sm truncate text-gray-600 font-mono">
+                                  {isDiff ? (
+                                    <span className="rounded bg-amber-100/90 px-2 py-0.5 font-bold text-amber-900 border border-amber-300">
+                                      {rawVal}
+                                    </span>
+                                  ) : (
+                                    <span>{rawVal}</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+
+                          {/* 1#. 脱敏合规数据行 */}
+                          <tr className="bg-emerald-50/30 hover:bg-emerald-50/60 border-b-2 border-emerald-100">
+                            <td className="px-3 py-2.5 font-bold whitespace-nowrap text-emerald-800 bg-emerald-100/60 rounded-r border-r border-emerald-200">
+                              <span className="inline-flex items-center gap-1">
+                                <span className="rounded bg-emerald-200/80 px-1.5 py-0.5 text-[11px] font-extrabold text-emerald-900">
+                                  #{recordNum}
+                                </span>
+                                <span>脱敏抹平</span>
+                              </span>
+                            </td>
+                            {Object.entries(sanRow).map(([col, val]) => {
+                              const rawVal = rawRow[col] ?? '';
+                              const isDiff = rawVal !== val;
+                              const isPii = ['name', 'id_card_no', 'registered_address', 'disability_cert_no', 'medical_insurance_no'].includes(col);
+                              const isImageCase = val.includes('data/samples/') || val.includes('sanitized_') || val.endsWith('.png') || val.endsWith('.jpg');
+                              return (
+                                <td key={col} className="px-3 py-2 whitespace-nowrap max-w-sm truncate font-mono">
+                                  {isPii ? (
+                                    <span className="rounded bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800 border border-emerald-300">
+                                      {val}
+                                    </span>
+                                  ) : isDiff ? (
+                                    <span className="rounded bg-teal-100 px-2 py-0.5 text-teal-800 font-bold border border-teal-300">
+                                      {val}
+                                    </span>
+                                  ) : isImageCase ? (
+                                    <span className="rounded bg-indigo-50 px-2 py-0.5 text-indigo-700 border border-indigo-200 font-medium inline-flex items-center gap-1">
+                                      <span>🖼️ 脱敏:</span>
+                                      <span>{val}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-700">{val}</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        </React.Fragment>
+                      ) : (
+                        /* 单排模式 */
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-bold text-gray-400">#{recordNum}</td>
+                          {Object.entries(sanRow).map(([col, val]) => {
+                            const isPii = ['name', 'id_card_no', 'registered_address', 'disability_cert_no', 'medical_insurance_no'].includes(col);
+                            const isImageCase = val.includes('data/samples/') || val.includes('sanitized_') || val.endsWith('.png') || val.endsWith('.jpg');
+                            return (
+                              <td key={col} className="px-3 py-2 whitespace-nowrap">
+                                {isPii ? (
+                                  <span className="rounded bg-emerald-50 px-2 py-0.5 font-mono text-emerald-700 border border-emerald-200">
+                                    {val}
+                                  </span>
+                                ) : isImageCase ? (
+                                  <span className="rounded bg-indigo-50 px-2 py-0.5 text-indigo-700 border border-indigo-200 font-medium flex items-center gap-1">
+                                    <span>🖼️ 图像病例脱敏:</span>
+                                    <span className="font-mono text-xs">{val}</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-700">{val}</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

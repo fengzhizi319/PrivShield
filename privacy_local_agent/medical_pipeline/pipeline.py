@@ -33,6 +33,8 @@ class FieldClassification:
     security_tag: str
     description: str
     rule_matched: str
+    raw_value: str = ""
+    sanitized_value: str = ""
 
 
 @dataclass
@@ -42,12 +44,14 @@ class RecordClassificationReport:
     pii_fields_detected: list[str]
     high_sensitivity_detected: list[str]  # L4/L5 级风险
     field_details: list[FieldClassification]
+    raw_record: dict[str, str] = None
 
 
 @dataclass
 class MedicalPipelineResult:
     classification_report: list[dict[str, Any]]
     sanitized_data: list[dict[str, str]]
+    raw_data: list[dict[str, str]]
     summary: dict[str, Any]
 
 
@@ -363,26 +367,30 @@ class MedicalPrivacyPipeline:
                         sanitized_rec[key] = "[L4-L5-DATA-REMOVED]"
                 else:
                     sanitized_rec[key] = val_str
-                
+
+                fc.raw_value = val_str
+                fc.sanitized_value = sanitized_rec[key]
+
             if max_level == "L5":
                 l5_count += 1
             elif max_level == "L4":
                 l4_count += 1
             elif max_level == "L3":
                 l3_count += 1
-                
+
             rep = RecordClassificationReport(
                 record_index=idx,
                 max_level=max_level,
                 pii_fields_detected=rec_pii,
                 high_sensitivity_detected=rec_high_risk,
                 field_details=field_classifications,
+                raw_record=rec,
             )
             reports.append(asdict(rep))
             sanitized_records.append(sanitized_rec)
-            
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-        
+
         summary = {
             "total_records": len(records),
             "l5_records_count": l5_count,
@@ -394,10 +402,11 @@ class MedicalPrivacyPipeline:
             "guarantee_no_l4_l5_raw_data": bool(sanitize and redaction_failures == 0),
             "duration_ms": round(elapsed_ms, 2),
         }
-        
+
         return MedicalPipelineResult(
             classification_report=reports,
             sanitized_data=sanitized_records,
+            raw_data=records,
             summary=summary,
         )
 
