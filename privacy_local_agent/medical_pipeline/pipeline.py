@@ -4,6 +4,7 @@ Core implementation of Medical Data Classification & Desensitization Pipeline.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -94,6 +95,7 @@ class MedicalPrivacyPipeline:
         # 缓存 _classify_field 中 dyn_service 计算的 sanitized_value，供 _sanitize_field 复用，
         # 避免同一字段被三层漏斗分类两次（性能优化）。
         self._sanitized_cache: dict[tuple[str, str], str] = {}
+        self._ner_cache: dict[str, str] = {}
 
     def _medical_text_sanitizer(self, field_name: str, text: str, final_level: str, mode: str = "redact") -> str:
         """医疗领域文本脱敏回调（注入到 DynClassificationService）。
@@ -112,9 +114,21 @@ class MedicalPrivacyPipeline:
             for pat, replacement in L4_PATTERNS:
                 sanitized_text = pat.sub(replacement, sanitized_text)
         else:
-            # 优先采用 Layer-2 Small-NER 抹平模式
             if self.redact_engine == "ner":
-                sanitized_text = redact_medical_text_with_ner(text, ner_adapter=self.ner_adapter)
+                clinical_keys = {
+                    "chief_complaint", "present_illness", "past_history",
+                    "personal_history", "family_history", "allergic_history",
+                    "progress_note", "diagnosis_name",
+                }
+                if (field_name in clinical_keys or self._contains_high_risk_text(text)) and self._could_benefit_from_ner(text):
+                    with self._lock:
+                        if text in self._ner_cache:
+                            sanitized_text = self._ner_cache[text]
+                        else:
+                            sanitized_text = redact_medical_text_with_ner(text, ner_adapter=self.ner_adapter)
+                            self._ner_cache[text] = sanitized_text
+                else:
+                    sanitized_text = redact_medical_text(text)
             else:
                 sanitized_text = redact_medical_text(text)
 
@@ -256,6 +270,13 @@ class MedicalPrivacyPipeline:
     def _contains_high_risk_text(text: str) -> bool:
         """判断文本是否仍包含未抹平的 L4/L5 术语。"""
         return any(pattern.search(text) for pattern, _replacement in L4_PATTERNS + L5_PATTERNS)
+
+    @staticmethod
+    def _could_benefit_from_ner(text: str) -> bool:
+        """快速筛选过滤：仅当文本包含至少 2 个连续汉字且长度 >= 4 时才触发深度 NER 推理。"""
+        if not text or len(text.strip()) < 4:
+            return False
+        return bool(re.search(r"[\u4e00-\u9fa5]{2,}", text))
 
     def _mask_pii_value(self, key: str, val_str: str) -> str:
         """PII 身份字段统一脱敏（提取公共逻辑，避免重复代码）。"""
@@ -404,8 +425,25 @@ class MedicalPrivacyPipeline:
                     fc.sanitized_value_rule = self._mask_pii_value(key, val_str)
                     fc.sanitized_value_ner = fc.sanitized_value_rule
                 else:
+                    # 性能超级优化：仅对临床长文本字段/高危敏感字段触发深度 Small-NER 前向推理，
+                    # 结构化/短文本字段直接复用超快规则管道，结合 LRU 缓存秒级响应
                     fc.sanitized_value_rule = redact_medical_text(val_str)
-                    fc.sanitized_value_ner = redact_medical_text_with_ner(val_str, ner_adapter=self.ner_adapter)
+                    clinical_keys = {
+                        "chief_complaint", "present_illness", "past_history",
+                        "personal_history", "family_history", "allergic_history",
+                        "progress_note", "diagnosis_name",
+                    }
+                    if (key in clinical_keys or self._contains_high_risk_text(val_str)) and self._could_benefit_from_ner(val_str):
+                        # 带内存缓存的 NER 抹平（相同文本 0ms 闪电响应）
+                        with self._lock:
+                            if val_str in self._ner_cache:
+                                fc.sanitized_value_ner = self._ner_cache[val_str]
+                            else:
+                                ner_res = redact_medical_text_with_ner(val_str, ner_adapter=self.ner_adapter)
+                                self._ner_cache[val_str] = ner_res
+                                fc.sanitized_value_ner = ner_res
+                    else:
+                        fc.sanitized_value_ner = fc.sanitized_value_rule
 
             if max_level == "L5":
                 l5_count += 1

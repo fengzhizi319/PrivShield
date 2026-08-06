@@ -79,7 +79,7 @@ class PrivacyAgentClient:
 
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
-                timeout=60.0,
+                timeout=180.0,
                 limits=httpx.Limits(max_connections=1000, max_keepalive_connections=200),
                 verify=verify_opt,
                 cert=cert_opt,

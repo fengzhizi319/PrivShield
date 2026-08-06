@@ -22,7 +22,7 @@ let API_BASE = '';
 
 /** 请求超时时间（毫秒），超过此时间将中断请求并抛出超时错误。 */
 /** Request timeout in milliseconds; exceeding this will abort the request and throw a timeout error. */
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 const MAX_IDEMPOTENT_RETRIES = 2;
 
 /**
