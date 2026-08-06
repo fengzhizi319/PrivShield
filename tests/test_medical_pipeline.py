@@ -439,6 +439,39 @@ def test_redact_family_history_death_and_paired_clause_syntax_fix() -> None:
     assert res_ner == expected, f"NER 脱敏语病修复不符合预期: {res_ner}"
 
 
+def test_redact_hepatitis_viral_load_and_biopsy_complete_purge() -> None:
+    """病毒性肝炎病例：必须擦除 HBV-DNA 病毒载量、肝硬化、肝穿刺活检 G3S4 阶段及检测下限提示，完全抹平为记录。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    class HepMockAdapter:
+        def extract(self, text: str) -> list[dict[str, str]]:
+            return [
+                {"text": "慢性乙型病毒性肝炎", "type": "DISEASE"},
+                {"text": "HBV-DNA 5.6×10^6 IU/mL", "type": "TEST"},
+                {"text": "早期肝硬化", "type": "DISEASE"},
+                {"text": "肝穿刺活检", "type": "TREATMENT"},
+                {"text": "G3S4", "type": "STAGE"},
+                {"text": "恩替卡韦", "type": "DRUG"},
+                {"text": "HBV-DNA", "type": "TEST"},
+            ]
+
+    text = (
+        "患者体检检查出'慢性乙型病毒性肝炎'(HBV-DNA 5.6×10^6 IU/mL)，"
+        "腹部超声提示'早期肝硬化'改变。行肝穿刺活检提示G3S4。"
+        "目前'恩替卡韦'0.5mg qd抗病毒治疗，HBV-DNA降至检测下限。"
+    )
+
+    res_rule = redact_medical_text(text)
+    res_ner = redact_medical_text_with_ner(text, ner_adapter=HepMockAdapter())
+
+    assert "HBV-DNA" not in res_rule and "HBV-DNA" not in res_ner, "HBV-DNA 病毒载量严禁泄露"
+    assert "肝硬化" not in res_rule and "肝硬化" not in res_ner
+    assert "G3S4" not in res_rule and "G3S4" not in res_ner
+    assert "恩替卡韦" not in res_rule and "恩替卡韦" not in res_ner
+    assert res_rule == "", f"Rule 脱敏应抹平为空: {res_rule}"
+    assert res_ner == "", f"NER 脱敏应抹平为空: {res_ner}"
+
+
 
 def test_failed_image_redaction_never_returns_original_value() -> None:
     """不存在或损坏图片必须 fail closed，不能把原路径当作脱敏结果。"""

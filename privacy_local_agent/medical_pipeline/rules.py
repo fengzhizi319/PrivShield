@@ -74,7 +74,8 @@ L4_TERMS_MAP: dict[str, list[str]] = {
         "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "奥希替尼", "EGFR基因检测", "EGFR突变"
     ],
     "HEPATITIS_VIRUS": [
-        "慢性乙型病毒性肝炎", "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "HBV-DNA", "HCV", "恩替卡韦", "肝硬化代偿期", "食管静脉曲张"
+        "慢性乙型病毒性肝炎", "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "早期肝硬化", "肝硬化", "肝硬化代偿期", "食管静脉曲张",
+        "HBV-DNA 5.6×10^6 IU/mL", "HBV-DNA定量", "HBV-DNA", "HBV", "HCV-RNA", "HCV", "恩替卡韦", "肝穿刺活检", "肝穿刺", "G3S4"
     ],
     "SEVERE_ORGAN_DAMAGE": [
         "慢性阻塞性肺疾病", "COPD", "急性心肌梗死", "冠状动脉重度狭窄"
@@ -145,6 +146,16 @@ _REDACT_CAUSE_DEATH_PATTERN = re.compile(
 )
 _REDACT_SUFFER_DEATH_PATTERN = re.compile(
     rf"(?:患有?|确诊(?:为)?|诊断(?:为)?|患)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*({_REDACT_DEATH_ACTION})",
+    re.IGNORECASE,
+)
+
+# 1.2 病毒性肝炎载量/检查/活检特征句法整块擦除（"HBV-DNA 5.6×10^6 IU/mL"、"行肝穿刺活检提示G3S4"、"HBV-DNA降至检测下限"）
+_REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN = re.compile(
+    rf"(?:\(?HBV-DNA\s*[\d.×^]+\s*(?:IU/mL|copies/ml)?\)?)|"
+    rf"(?:HBV-DNA(?:定量)?(?:降至|低于|为)?\s*(?:检测下限|阴性|\d+)?)|"
+    rf"(?:(?:行)?肝(?:脏)?穿刺(?:活检)?(?:提示|示)?\s*[A-Z0-9]+)|"
+    rf"(?:(?:腹部超声|超声|CT|MRI)?(?:提示|示)?\s*(?:'[^']*'|“[^”]*”)?\s*改变)|"
+    rf"(?:(?:目前|近期|现)?\s*HBV-DNA降至检测下限[。；;]?)",
     re.IGNORECASE,
 )
 
@@ -271,9 +282,10 @@ def _clean_orphan_syntax(s: str) -> str:
     if not s:
         return s
 
-    # 0. 优先清理擦除产生的空括号，避免阻碍后续孤立动词与标点匹配；并自动擦除就诊医院/机构句法
+    # 0. 优先清理擦除产生的空括号，避免阻碍后续孤立动词与标点匹配；并自动擦除就诊医院/机构句法与肝炎体征载量短语
     s = _CLEANUP_EMPTY_PAREN_PATTERN.sub("", s)
     s = _REDACT_HOSPITAL_PATTERN.sub("", s)
+    s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
 
     # 1. 清理孤立无宾语动词：如“示。”、“提示。”、“急诊行提示”、“予行”、“予行及”、“予。”
     s = _CLEANUP_NO_OBJ_VERB_PATTERN.sub(r"\1", s)
@@ -295,8 +307,8 @@ def _clean_orphan_syntax(s: str) -> str:
     # 5. 清理擦除敏感病史/症状后遗留的孤立前缀、后缀与时间短语（如"追问病史，1年前有"、"半年前外阴曾出现"、"自愈"、"长期"、"诊断为"）
     s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)\s*([。；;，,])", r"\1", s)
     s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)", "", s)
-    s = re.sub(r"(?:追问病史|诊断为|确诊为|长期|定期)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:追问病史|诊断为|确诊为|长期|定期)", "", s)
+    s = re.sub(r"(?:追问病史|诊断为|确诊为|长期|定期|体检|目前|近期|现|提示|示)\s*([。；;，,])", r"\1", s)
+    s = re.sub(r"(?:追问病史|诊断为|确诊为|长期|定期|体检|目前|近期|现|提示|示)", "", s)
     s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)\s*([。；;，,])", r"\1", s)
     s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)", "", s)
 
@@ -353,6 +365,8 @@ def redact_medical_text(text: str) -> str:
 
     # 1. 优先擦除遗传缺陷与基因检测突变综合句法（涵盖HTT基因CAG重复序列、舞蹈样动作等）
     s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
+    s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
+    s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
 
     # 1.1 优先将死因句法重构为自然流畅的“因病去世/死于”
     def _death_replace(match: re.Match) -> str:
@@ -436,7 +450,7 @@ _MAJOR_SENSITIVE_KEYWORDS = (
     # L4 Keywords
     "梅毒", "密螺旋体", "TPPA", "RPR", "淋病", "淋球菌", "尖锐湿疣", "疱疹", "软下疳", "性病", "不洁性接触", "硬下疳",
     "恶性肿瘤", "腺癌", "肺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "转移瘤", "癌", "肉瘤", "奥希替尼", "EGFR",
-    "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "HBV", "HCV", "恩替卡韦", "肝硬化", "静脉曲张",
+    "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "HBV-DNA", "HBV", "HCV-RNA", "HCV", "恩替卡韦", "肝硬化", "肝穿刺", "G3S4", "静脉曲张",
     "急性心肌梗死", "心肌梗死", "冠状动脉重度狭窄", "重度狭窄", "COPD", "阻塞性肺"
 )
 
@@ -513,6 +527,7 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         s = _REDACT_SUFFER_DEATH_PATTERN.sub(_death_replace, s)
         s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
         s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
+        s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
 
         for ent in sorted_entities:
             term = ent.get("text", "").strip()
