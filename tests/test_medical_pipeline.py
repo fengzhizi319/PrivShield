@@ -413,6 +413,32 @@ def test_redact_psychiatric_hospital_case_complete_purge() -> None:
     assert res_ner == "", f"NER 脱敏应抹平为空: {res_ner}"
 
 
+def test_redact_family_history_death_and_paired_clause_syntax_fix() -> None:
+    """家族史与死因病例：擦除恶性肿瘤与精神分裂症后，死因必须自然重构为'因病去世'，且不能残留'一弟患、'语法语病。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    class FamilyMockAdapter:
+        def extract(self, text: str) -> list[dict[str, str]]:
+            return [
+                {"text": "恶性肿瘤", "type": "DISEASE"},
+                {"text": "重度精神分裂症", "type": "DISEASE"},
+            ]
+
+    text = "父亲因'恶性肿瘤'去世(65岁)，母亲健在。一弟患'重度精神分裂症'、'2型糖尿病'。否认其他家族遗传病史。"
+
+    res_rule = redact_medical_text(text)
+    res_ner = redact_medical_text_with_ner(text, ner_adapter=FamilyMockAdapter())
+
+    expected = "父亲因病去世(65岁)，母亲健在。一弟患'2型糖尿病'。否认其他家族遗传病史。"
+
+    assert "恶性肿瘤" not in res_rule and "恶性肿瘤" not in res_ner
+    assert "精神分裂症" not in res_rule and "精神分裂症" not in res_ner
+    assert "因去世" not in res_rule and "因去世" not in res_ner, "不应残留孤立介词'因去世'"
+    assert "患、" not in res_rule and "患、" not in res_ner, "不应残留孤立顿号'患、'"
+    assert res_rule == expected, f"Rule 脱敏语病修复不符合预期: {res_rule}"
+    assert res_ner == expected, f"NER 脱敏语病修复不符合预期: {res_ner}"
+
+
 
 def test_failed_image_redaction_never_returns_original_value() -> None:
     """不存在或损坏图片必须 fail closed，不能把原路径当作脱敏结果。"""

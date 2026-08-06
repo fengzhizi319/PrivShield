@@ -299,6 +299,11 @@ def _clean_orphan_syntax(s: str) -> str:
     s = re.sub(r"(?:追问病史|诊断为|确诊为|长期|定期)", "", s)
     s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)\s*([。；;，,])", r"\1", s)
     s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)", "", s)
+
+    # 5.1 死因孤立介词自愈重构 ("因去世" -> "因病去世") 与动词+顿号残渣清理 ("一弟患、'2型糖尿病'" -> "一弟患'2型糖尿病'")
+    s = re.sub(r"(?:因|死于|因于)\s*(去世|死于|离世|逝世)", r"因病\1", s)
+    s = re.sub(r"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?))\s*[、,，]\s*", r"\1", s)
+
     s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
     s = _CLEANUP_LEADING_PUNCT_PATTERN.sub("", s)
     s = re.sub(r"([。；;,，])\1+", r"\1", s)
@@ -499,7 +504,13 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
             reverse=True,
         )
 
-        # 优先同步擦除文本中关联的死因、基因检测突变、血清学滴度短语
+        # 优先同步重构/擦除文本中关联的死因、基因检测突变、血清学滴度短语
+        def _death_replace(match: re.Match) -> str:
+            action = match.group(1)
+            return f"因病{action}"
+
+        s = _REDACT_CAUSE_DEATH_PATTERN.sub(_death_replace, s)
+        s = _REDACT_SUFFER_DEATH_PATTERN.sub(_death_replace, s)
         s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
         s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
 
