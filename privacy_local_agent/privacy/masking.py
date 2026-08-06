@@ -292,16 +292,31 @@ def mask_id_card(value: str) -> str:
 def mask_name(value: str) -> str:
     """中文姓名脱敏 / Chinese Name Masking.
 
-    保留首尾字，中间替换为 *。
+    剥离系统生成的序列/数字后缀（如 _4），按中文姓名规范处理：
+    - 2字姓名 (如"刘斌_4" / "张三"): 保留首字 -> "刘*" / "张*"
+    - 3字姓名 (如"张三丰" / "萧志明_1"): 保留首尾字 -> "张**丰" / "萧**明"
+    - 4字及以上 (如"欧阳六六"): 保留首尾字 -> "欧***六"
     """
-    if len(value) == 0:  # 空串守卫：避免索引越界
+    if not value:
         return value
-    if len(value) == 1:  # 单字守卫（如"李"）：替换为 "*"（避免出现 "李**李" 的两次暴露）
+
+    # 1. 剥离序列号/测试后缀（例如 _4, _100,  #1 等）
+    import re
+    clean_val = re.sub(r"[_\-\s#]\d+$", "", value.strip())
+    clean_val = re.sub(r"\d+$", "", clean_val).strip()
+
+    if not clean_val:
+        clean_val = value
+
+    val_len = len(clean_val)
+    if val_len <= 1:
         return "*"
-    if len(value) == 2:  # 两字姓名（如"张三"）：保留首字 + "*" → "张*"
-        return f"{value[0]}*"
-    # 三字及以上（如"张三丰"）：首字 + "**" + 尾字 → "张**丰"
-    return f"{value[0]}**{value[-1]}"
+    if val_len == 2:
+        return f"{clean_val[0]}*"
+    if val_len == 3:
+        return f"{clean_val[0]}**{clean_val[-1]}"
+
+    return f"{clean_val[0]}{'*' * (val_len - 2)}{clean_val[-1]}"
 
 
 def mask_bank_card(value: str) -> str:
