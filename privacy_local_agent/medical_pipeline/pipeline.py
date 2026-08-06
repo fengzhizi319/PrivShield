@@ -13,7 +13,13 @@ from privacy_local_agent.dynclassification import DynClassificationService
 from privacy_local_agent.dynclassification.image_redaction import IMAGE_REDACTION_FAILURE
 from privacy_local_agent.privacy.masking import mask_value
 
-from .rules import L4_PATTERNS, L5_PATTERNS, PII_FIELD_RULES, redact_medical_text
+from .rules import (
+    PII_FIELD_RULES,
+    L4_PATTERNS,
+    L5_PATTERNS,
+    redact_medical_text,
+    redact_medical_text_with_ner,
+)
 
 IMAGE_FAILURE = IMAGE_REDACTION_FAILURE
 

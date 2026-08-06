@@ -187,18 +187,18 @@ class DynClassificationService:
         final_level: str,
     ) -> str:
         """从漏斗结果或文本脱敏回调中获取 sanitized_value。"""
-        # 优先使用漏斗已计算的 sanitized_value
-        if getattr(funnel_result, "sanitized_value", None):
-            return funnel_result.sanitized_value
-
         # 图像输入：调用图像打码
         if self._is_image_input(val_str):
             from .image_redaction import sanitize_image_input
             return sanitize_image_input(val_str)
 
-        # 文本输入：使用可插拔文本脱敏回调
+        # 优先使用领域注入的可插拔文本脱敏回调 (无痕抹平 redaction 引擎)
         if self._text_sanitizer is not None:
             return self._text_sanitizer(field_name, val_str, final_level)
+
+        # 其次使用漏斗已计算的 sanitized_value
+        if getattr(funnel_result, "sanitized_value", None):
+            return funnel_result.sanitized_value
 
         # 向后兼容：尝试使用医疗领域规则进行文本脱敏
         return self._fallback_text_sanitizer(field_name, val_str, final_level)

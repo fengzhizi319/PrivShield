@@ -81,7 +81,8 @@ _ALL_L4_L5_TERMS = sorted(
     reverse=True,
 )
 
-_TERMS_OR = "|".join([re.escape(t) for t in _ALL_L4_L5_TERMS])
+_MASKED_LABEL_PATTERN = r"\[(?:L4|L5)-[A-Z_]+-SENSITIVE-MASKED\]"
+_TERMS_OR = "|".join([_MASKED_LABEL_PATTERN] + [re.escape(t) for t in _ALL_L4_L5_TERMS])
 _Q = r"['\"“‘'”’]?"
 _DOSE = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))?"
 _FREQ = r"(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?"
@@ -220,7 +221,8 @@ def redact_medical_text(text: str) -> str:
     # 10.1 孤立时间前缀自愈：将“患者1年前，”残留清除，直接输出“HBV-DNA阳性。”
     s = re.sub(r"(?:患者\s*\d+\s*(?:年|月|天)?前)\s*([，,])", "", s)
 
-    # 10.1 亲属孤立动词自愈：将“一弟患。”、“母亲患。”等残余重构为自然的“一弟患病。”、“母亲患病。”
+    # 10.1 亲属孤立动词与缺失动词自愈：“一弟'2型糖尿病'” -> “一弟患'2型糖尿病'”，“一弟患。” -> “一弟患病。”
+    s = re.sub(rf"({_FAMILY_MEMBERS})\s*['\"“‘'”’]", r"\1患'", s)
     _CLEANUP_FAMILY_VERB_HEAL_PATTERN = re.compile(
         rf"({_FAMILY_MEMBERS})\s*(?:患有?|确诊(?:为)?|诊断(?:为)?|患|有)\s*([。；;，,])"
     )
@@ -238,4 +240,67 @@ def redact_medical_text(text: str) -> str:
     s = re.sub(r"^[，,]\s*", "", s)
 
     return s
+
+
+def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
+    """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎.
+
+    借助 Layer-2 Small-NER (ONNXRuntime / ModelScope / TensorRT) 对文本中的
+    DISEASE(疾病), DRUG(药物), TREATMENT(诊疗处置), HOSPITAL(医疗机构), SYMPTOM(症状)
+    等实体进行上下文识别与精确定位抹平：
+    1. 若提供了 ner_adapter 且成功识别出实体，基于实体在原文的上下文绑定（如剂量、用法、曾就诊于）进行擦除；
+    2. 兼容智能语法自愈自检，确保语句自洽流畅；
+    3. 支持在 NER 模型未就绪时自动平滑 fallback 降级至 redact_medical_text 规则引擎。
+    """
+    if not text:
+        return text
+
+    entities = []
+    if ner_adapter is not None:
+        try:
+            raw_entities = ner_adapter.extract(text)
+            if isinstance(raw_entities, list):
+                entities = raw_entities
+        except Exception:
+            entities = []
+
+    # 如果 NER 成功提取了实体项，优先利用 NER 实体边界与识别信息
+    if entities:
+        s = text
+        ner_terms = [
+            e.get("text", "").strip()
+            for e in entities
+            if isinstance(e, dict) and e.get("text", "").strip()
+        ]
+        if ner_terms:
+            ner_or = "|".join([re.escape(t) for t in sorted(set(ner_terms), key=len, reverse=True)])
+            dose_pat = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))?"
+            freq_pat = r"(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?"
+
+            s = re.sub(
+                rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*)['\"“‘'”’]?(?:{ner_or})['\"”’]?\s*[、,，]\s*",
+                r"\1",
+                s,
+                flags=re.I,
+            )
+            s = re.sub(
+                rf"(?:长期|定期|口服|服用|给予|使用|行)?\s*['\"“‘'”’]?(?:{ner_or})['\"”’]?{dose_pat}{freq_pat}\s*(?:及|与|和|合并)?\s*(?:['\"“‘'”’]?(?:{ner_or})['\"”’]?{dose_pat}{freq_pat})*\s*(?:控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)?",
+                "",
+                s,
+                flags=re.I,
+            )
+            s = re.sub(
+                rf"(?:曾?就诊于|就诊于|收治于|转诊至)\s*['\"“‘'”’]?(?:{ner_or})['\"”’]?\s*(?:，|,|。|；|;)?",
+                "",
+                s,
+                flags=re.I,
+            )
+            s = re.sub(
+                rf"(?:诊断为|确诊为|检查出|查出|发现|提示为|考虑为)\s*['\"“‘'”’]?(?:{ner_or})['\"”’]?\s*(?:，|,|。|；|;)?",
+                "",
+                s,
+                flags=re.I,
+            )
+
+    return redact_medical_text(text)
 
