@@ -1,14 +1,14 @@
 /**
  * 后端切换器组件 / Backend Selector Component
  *
- * 功能：在 Python REST（8080）与 Go gRPC（8081）两个代理后端间切换。
- * Function: Switch between Python REST (8080) and Go gRPC (8081) proxy backends.
+ * 功能：在 Go gRPC（8081）与 Python REST（8080）两个代理后端间切换。
+ * Function: Switch between Go gRPC (8081) and Python REST (8080) proxy backends.
  *
  * 详细逻辑 / Detailed Logic：
  *   1. 切换时通过 ``setBaseUrl`` 更新全局 API 基址；
  *   2. 后续所有请求都会发往新选中的后端；
  *   3. 默认优先选择与当前页面同源的后端（页面由哪个后端提供 UI 就默认调用哪个）；
- *   4. Vite 开发模式等其他来源则回退到 Python REST。
+ *   4. Vite 开发模式等其他来源默认优先连接 Go gRPC 代理 (8081)。
  *
  * On switch, updates global API base URL via ``setBaseUrl``;
  * all subsequent requests will go to the newly selected backend.
@@ -26,21 +26,21 @@ import { Icon } from '@/components/icons';
  * label for UI display, value is the actual API base URL.
  */
 export interface BackendOption {
-  /** 显示标签（如 "Python REST (8080)"）/ Display label */
+  /** 显示标签（如 "Go gRPC (8081)"）/ Display label */
   label: string;
-  /** API 基址（如 "http://127.0.0.1:8080"）/ API base URL */
+  /** API 基址（如 "http://127.0.0.1:8081"）/ API base URL */
   value: string;
 }
 
 /**
  * 可选后端列表 / Available Backend List
  *
- * Python REST 后端监听 8080，Go gRPC 后端监听 8081。
- * Python REST backend listens on 8080, Go gRPC backend listens on 8081.
+ * 默认先连接 Go gRPC (8081)，再连接 Python REST (8080)。
+ * Defaults to Go gRPC (8081) first, then Python REST (8080).
  */
 export const DEFAULT_BACKENDS: BackendOption[] = [
+  { label: 'Go gRPC (8081)', value: 'http://127.0.0.1:8081' },      // Go gRPC 代理 (首选) / Go gRPC proxy (preferred)
   { label: 'Python REST (8080)', value: 'http://127.0.0.1:8080' },  // Python REST 代理 / Python REST proxy
-  { label: 'Go gRPC (8081)', value: 'http://127.0.0.1:8081' },      // Go gRPC 代理 / Go gRPC proxy
 ];
 
 /**
@@ -48,10 +48,10 @@ export const DEFAULT_BACKENDS: BackendOption[] = [
  *
  * 优先选择与当前页面同源的选项（页面由哪个后端提供服务，就默认调用哪个后端）。
  * 例如由 Go 后端 (8081) 提供 UI 时默认选中 Go gRPC；
- * Vite 开发模式 (5173) 等其他来源则回退到列表第一项（Python REST）。
+ * Vite 开发模式 (5173) 等其他来源则回退到列表第一项（Go gRPC 8081）。
  *
  * Prefers the option matching current page origin (if Go backend serves the UI, default to Go gRPC);
- * Vite dev mode (5173) or other origins fallback to first item (Python REST).
+ * Vite dev mode (5173) or other origins fallback to first item (Go gRPC 8081).
  */
 export const DEFAULT_BACKEND: BackendOption =
   // 查找与 window.location.origin 匹配的选项，找不到则用第一项

@@ -53,7 +53,7 @@ import MedicalPipelinePanel from '@/components/MedicalPipelinePanel';
 /** 引入错误边界组件：防止单组件崩溃导致整页白屏 / Import error boundary: prevent single component crash from blank page */
 import ErrorBoundary from '@/components/ErrorBoundary';
 /** 引入后端切换器类型与默认值 / Import backend selector type and default value */
-import { type BackendOption, DEFAULT_BACKEND } from '@/components/BackendSelector';
+import { DEFAULT_BACKEND, DEFAULT_BACKENDS, type BackendOption } from '@/components/BackendSelector';
 /** 引入内联 SVG 图标组件 / Import inline SVG icon component */
 import { Icon } from '@/components/icons';
 /** 引入国际化 Hook（提供 t() 翻译函数）/ Import i18n Hook (provides t() translation function) */
@@ -127,6 +127,22 @@ export default function App() {
       // After loading, go back to overview to avoid stale selection from previous backend
       setView({ type: 'overview' });
     } catch (e) {
+      // 若当前选中的是首选 Go gRPC 后端且请求失败，静默后连回退至 Python REST 后端
+      if (backend.value === DEFAULT_BACKENDS[0].value && DEFAULT_BACKENDS[1]) {
+        try {
+          const fallbackBackend = DEFAULT_BACKENDS[1];
+          setBaseUrl(fallbackBackend.value);
+          const [samplesData, healthData] = await Promise.all([fetchSamples(), fetchHealth()]);
+          setBackend(fallbackBackend);
+          setSamples(samplesData);
+          setHealth(healthData);
+          setView({ type: 'overview' });
+          return;
+        } catch (_) {
+          // 回退亦失败，重置为原始后端并抛出错误
+          setBaseUrl(backend.value);
+        }
+      }
       // 请求失败：记录错误消息 / Request failed: record error message
       setError(getErrorMessage(e));
       setHealth(null);          // 清空健康状态 / Clear health status
@@ -135,7 +151,7 @@ export default function App() {
     } finally {
       setLoading(false); // 无论成败都关闭加载状态 / Always disable loading state
     }
-  }, []);
+  }, [backend]);
 
   /**
    * 后端切换副作用 / Backend switch side effect
