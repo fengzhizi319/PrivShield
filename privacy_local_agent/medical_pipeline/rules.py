@@ -54,7 +54,7 @@ L5_TERMS_MAP: dict[str, list[str]] = {
         "重度精神分裂症", "精神分裂症", "幻听（命令性言语）", "命令性言语", "被害妄想", "幻听", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "精神卫生中心"
     ],
     "GENETIC_DEFECT": [
-        "遗传性亨廷顿舞蹈病", "亨廷顿舞蹈病", "亨廷顿病", "Huntington Disease", "CAG重复序列", "CAG扩增", "四苯嗪", "舞蹈样动作", "舞蹈样症状", "四肢舞蹈样动作", "舞蹈病"
+        "遗传性亨廷顿舞蹈病", "亨廷顿舞蹈病", "亨廷顿病", "Huntington Disease", "HTT基因CAG重复序列", "HTT基因", "HTT", "CAG重复序列", "CAG重复", "CAG扩增", "四苯嗪", "舞蹈样动作", "舞蹈样症状", "四肢舞蹈样动作", "舞蹈病"
     ],
 }
 
@@ -209,10 +209,10 @@ _CLEANUP_FAMILY_VERB_HEAL_PATTERN = re.compile(
 _CLEANUP_DEVELOP_AND_PATTERN = re.compile(r"发展为\s*与")
 _CLEANUP_PATIENT_TIME_PREFIX_PATTERN = re.compile(r"(?:患者\s*\d+\s*(?:年|月|天)?前)\s*([，,])")
 _CLEANUP_ORPHAN_PREP_PATTERN = re.compile(
-    r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|长期|定期|口服|服用|血清学|血清学检查示?|及|与|和)\s*([。；;，,])"
+    r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|控制|基因检测提示|基因检测示|基因检测|长期|定期|口服|服用|血清学|血清学检查示?|予|给予|及|与|和)\s*([。；;，,])"
 )
 _CLEANUP_ORPHAN_VERB_PATTERN = re.compile(
-    r"(?:^|[，,。；])\s*(?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有)\s*([。；;，,])"
+    r"(?:^|[，,。；])\s*(?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有|予|控制)\s*([。；;，,])"
 )
 _CLEANUP_VERB_PUNCT_PATTERN = re.compile(
     r"((?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有))\s*[、,，]"
@@ -220,7 +220,7 @@ _CLEANUP_VERB_PUNCT_PATTERN = re.compile(
 _CLEANUP_NO_OBJ_VERB_PATTERN = re.compile(
     r"(?:急诊行|急诊就诊|就诊|行|实施|接受|予|给予)\s*(?:提示|检查提示|显示|示)?\s*(?:及|与|和)?\s*([。；;，,])"
 )
-_CLEANUP_NO_OBJ_HINT_PATTERN = re.compile(r"(?:提示|显示|检查提示|检查示|示|予)\s*([。；;，,])")
+_CLEANUP_NO_OBJ_HINT_PATTERN = re.compile(r"(?:基因检测提示|基因检测示|基因检测|检查提示|检查示|提示|显示|示|予|控制)\s*([。；;，,])")
 _CLEANUP_EMPTY_QUOTES_PATTERN = re.compile(r"['\"“‘]['\"”’]")
 _CLEANUP_PUNCTUATION_PATTERN = re.compile(r"([，。；：,;])\1+")
 _CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,、])\s*([。;；])")
@@ -238,7 +238,16 @@ _REDACT_STD_FEATURE_CLAUSE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 11. 图片/附件路径名称清理（防止路径中泄露敏感词，如 /data/hiv_test_01.jpg -> /data/masked_01.jpg）
+# 11. 遗传缺陷与基因检测综合句法擦除正则（涵盖基因检测提示'遗传性亨廷顿舞蹈病'(HTT基因CAG重复序列46次)、四肢舞蹈样动作等）
+_REDACT_GENETIC_CLAUSE_PATTERN = re.compile(
+    r"(?:"
+    r"(?:基因检测提示|基因检测示|基因检测结果示?|基因检测)?\s*['\"“]?(?:遗传性亨廷顿舞蹈病|亨廷顿病?|舞蹈病|HTT基因|CAG重复序列|CAG重复|CAG扩增)['\"”]?\s*(?:\([^)]*\)|（[^）]*）)?\s*[，,。；;]?"
+    r"|(?:四肢)?舞蹈样动作\s*(?:与|和|及)?\s*"
+    r")",
+    re.IGNORECASE,
+)
+
+# 12. 图片/附件路径名称清理（防止路径中泄露敏感词，如 /data/hiv_test_01.jpg -> /data/masked_01.jpg）
 _IMAGE_PATH_PATTERN = re.compile(r"/(?:[^/]+\.png|[^/]+\.jpg|[^/]+\.jpeg|[^/]+\.bmp)")
 
 
@@ -255,6 +264,9 @@ def _clean_orphan_syntax(s: str) -> str:
     """清理擦除敏感实体后残存的孤立介词、连词、无宾语动词与多余标点。"""
     if not s:
         return s
+
+    # 0. 优先清理擦除产生的空括号，避免阻碍后续孤立动词与标点匹配
+    s = _CLEANUP_EMPTY_PAREN_PATTERN.sub("", s)
 
     # 1. 清理孤立无宾语动词：如“示。”、“提示。”、“急诊行提示”、“予行”、“予行及”、“予。”
     s = _CLEANUP_NO_OBJ_VERB_PATTERN.sub(r"\1", s)
@@ -325,7 +337,10 @@ def redact_medical_text(text: str) -> str:
 
     s = text
 
-    # 1. 优先将死因句法重构为自然流畅的“因病去世/死于”
+    # 1. 优先擦除遗传缺陷与基因检测突变综合句法（涵盖HTT基因CAG重复序列、舞蹈样动作等）
+    s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
+
+    # 1.1 优先将死因句法重构为自然流畅的“因病去世/死于”
     def _death_replace(match: re.Match) -> str:
         action = match.group(1)
         return f"因病{action}"
@@ -403,7 +418,7 @@ _MAJOR_SENSITIVE_KEYWORDS = (
     # L5 Keywords
     "HIV", "AIDS", "艾滋", "免疫缺陷", "CD4+", "抗逆转录",
     "精神分裂", "幻听", "妄想", "自伤", "砸物", "保护性约束", "奥氮平", "精神卫生",
-    "亨廷顿", "CAG重复", "CAG扩增", "四苯嗪", "舞蹈病", "舞蹈样",
+    "亨廷顿", "CAG重复", "CAG扩增", "CAG", "HTT基因", "HTT", "四苯嗪", "舞蹈病", "舞蹈样",
     # L4 Keywords
     "梅毒", "密螺旋体", "TPPA", "RPR", "淋病", "淋球菌", "尖锐湿疣", "疱疹", "软下疳", "性病", "不洁性接触", "硬下疳",
     "恶性肿瘤", "腺癌", "肺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "转移瘤", "癌", "肉瘤", "奥希替尼", "EGFR",

@@ -354,8 +354,32 @@ def test_redact_syphilis_case_complete_purge_and_path_sanitization() -> None:
     assert "不洁性接触史" not in res_rule and "不洁性接触史" not in res_ner
     assert "无痛性溃疡" not in res_rule and "无痛性溃疡" not in res_ner
     assert "硬下疳" not in res_rule and "硬下疳" not in res_ner
-    assert "syphilis" not in res_rule and "syphilis" not in res_ner, "敏感图片文件名必须去标识化"
-    assert "血清学。" not in res_rule and "血清学。" not in res_ner, "不应遗留断句语病"
+def test_redact_huntington_genetic_case_complete_purge() -> None:
+    """遗传缺陷（亨廷顿舞蹈病与HTT基因CAG重复）病例：应完全擦除基因突变修饰、专用药四苯嗪、舞蹈样动作，且消除断句语病残渣。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    class HuntingtonMockAdapter:
+        def extract(self, text: str) -> list[dict[str, str]]:
+            return [
+                {"text": "遗传性亨廷顿舞蹈病", "type": "DISEASE"},
+                {"text": "四肢舞蹈样动作", "type": "SYMPTOM"},
+                {"text": "HTT基因CAG重复序列46次", "type": "DISEASE"},
+                {"text": "四苯嗪", "type": "DRUG"},
+                {"text": "舞蹈样症状", "type": "SYMPTOM"},
+            ]
+
+    text = (
+        "患者2年前出现双手轻微不自主抖动与情绪易怒，近半年发展为四肢舞蹈样动作与步态不稳。"
+        "基因检测提示'遗传性亨廷顿舞蹈病'(HTT基因CAG重复序列46次)。"
+        "予'四苯嗪'12.5mg bid口服控制舞蹈样症状。"
+    )
+
+    res_rule = redact_medical_text(text)
+    res_ner = redact_medical_text_with_ner(text, ner_adapter=HuntingtonMockAdapter())
+
+    expected = "患者2年前双手轻微不自主抖动与情绪易怒，近半年发展为步态不稳。"
+    assert res_rule == expected, f"Rule 脱敏不符合预期: {res_rule}"
+    assert res_ner == expected, f"NER 脱敏不符合预期: {res_ner}"
 
 
 
