@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # PII 身份隐私字段及其默认脱敏规则定义
 PII_FIELD_RULES: dict[str, str] = {
@@ -111,17 +112,29 @@ _ALL_L4_L5_TERMS = sorted(
     reverse=True,
 )
 
+# 超长文本保护阈值：超过此长度时降级为简单词库擦除，
+# 防止复杂句法正则（含嵌套量词）在恶意/超长输入下触发灾难性回溯（ReDoS）
+_REDACT_MAX_TEXT_LENGTH = 50_000
+
+# 降级路径与 Fast-path 专用正则：词库级检测与擦除
+_TERMS_ONLY_PATTERN = re.compile(
+    "|".join([re.escape(t) for t in _ALL_L4_L5_TERMS]),
+    re.IGNORECASE,
+)
+
 _MASKED_LABEL_PATTERN = r"\[(?:L4|L5)-[A-Z_]+-SENSITIVE-MASKED\]"
+_MASKED_LABEL_RE = re.compile(_MASKED_LABEL_PATTERN)
+
 _TERMS_OR = "|".join([_MASKED_LABEL_PATTERN] + [re.escape(t) for t in _ALL_L4_L5_TERMS])
 _Q = r"['\"“‘'”’]?"
 _DOSE = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))?"
 _FREQ = r"(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?"
 
 # 1. 死因相关句法短语重构：“因/由于/死于 'L4/L5词' (去世|死于|离世|逝世...)” -> “因病去世”
-# 注意：死因动作 (去世/死于...) 必须明确存在，严禁将“因'CAG重复'”等基因检测词误匹配为死因！
+# 支持“因'HIV'导致的并发症去世”、“由于'恶性肿瘤'不幸身亡”等完整句法重构
 _REDACT_DEATH_ACTION = r"(?:去世|死于|离世|殁于|不幸身亡|宣告不治|逝世)"
 _REDACT_CAUSE_DEATH_PATTERN = re.compile(
-    rf"(?:因|由于|死于|殁于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致|引起)?\s*({_REDACT_DEATH_ACTION})",
+    rf"(?:因|由于|死于|殁于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致的并发症|引起的并发症|导致|引起)?\s*({_REDACT_DEATH_ACTION})",
     re.IGNORECASE,
 )
 _REDACT_SUFFER_DEATH_PATTERN = re.compile(
@@ -129,19 +142,20 @@ _REDACT_SUFFER_DEATH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 2. 完整服药/用药与处置句法擦除（支持“予'四苯嗪'12.5mg bid口服控制舞蹈样症状”、“长期服用'奥氮平片'20mg qd控制症状”）
+# 2. 完整服药/用药与处置句法擦除
+# 要求：前缀(服用/口服/给予...)、剂量用法(20mg qd)或后缀(控制症状/方案)至少有其一存在，避免无修饰裸词抢先匹配
+_MED_PREFIX = r"(?:长期|定期|口服|服用|给予|使用|行|实施|接受|予|给予口服|开具|遵医嘱)"
+_MED_SUFFIX = r"(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)"
+_MED_DOSE_FREQ_NONEMPTY = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?|\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po)"
+
 _REDACT_MEDICATION_FULL_PATTERN = re.compile(
-    rf"(?:长期|定期|口服|服用|给予|使用|行|实施|接受|予|给予口服|开具|遵医嘱)?\s*(?:病理提示|提示|行)?\s*{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)",
+    rf"(?:{_MED_PREFIX}\s*(?:病理提示|提示|行)?\s*{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*(?:{_MED_SUFFIX})?|"
+    rf"{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*{_MED_SUFFIX}|"
+    rf"{_Q}(?:{_TERMS_OR}){_Q}{_MED_DOSE_FREQ_NONEMPTY})",
     re.IGNORECASE,
 )
 
-# 3. 单个敏感药品/处置连同前置连词与后置用法擦除
-_REDACT_SINGLE_MED_PATTERN = re.compile(
-    rf"\s*(?:及|与|和|合并)?\s*{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用|控制症状|治疗|方案)?",
-    re.IGNORECASE,
-)
-
-# 4. 就诊机构与独立诊断句法整句擦除（“曾就诊于精神卫生中心”、“患者1年前查出'乙型肝炎'，”）
+# 3. 就诊机构与独立诊断句法整句擦除（"曾就诊于精神卫生中心"、"患者1年前查出'乙型肝炎'，"）
 _REDACT_HOSPITAL_PATTERN = re.compile(
     rf"(?:曾?就诊于|就诊于|收治于|转诊至)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:，|,|。|；|;)?",
     re.IGNORECASE,
@@ -151,38 +165,49 @@ _REDACT_DIAGNOSIS_STANDALONE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 5. 连词+敏感特征+倾向/表现整块擦除：“及保护性约束倾向” -> “”
+# 4. 连词+敏感特征+倾向/表现整块擦除：“及保护性约束倾向” -> “”
+# 要求：前缀(及|与|和|伴|伴有) 或 后缀(倾向|表现) 至少存在其一，避免裸词抢先匹配架空后续列表/亲属重构规则
 _REDACT_FEATURE_TENDENCY_PATTERN = re.compile(
-    rf"(?:及|与|和|伴|伴有)?\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:倾向|表现)?",
+    rf"(?:(?:及|与|和|伴|伴有)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:倾向|表现)?|{_Q}(?:{_TERMS_OR}){_Q}\s*(?:倾向|表现))",
     re.IGNORECASE,
 )
 
-# 6. 顿号/逗号分隔的复合疾病列表中的敏感词擦除：“患'重度精神分裂症'、'2型糖尿病'” -> “患'2型糖尿病'”
+# 5. 顿号/逗号分隔的复合疾病列表中的敏感词擦除："患'重度精神分裂症'、'2型糖尿病'" -> "患'2型糖尿病'"
 _REDACT_PAIRED_PATTERN = re.compile(
     rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){_Q}(?:{_TERMS_OR}){_Q}\s*[、,，]\s*",
     re.IGNORECASE,
 )
+# 5.1 补充：处理敏感词在列表非首位的场景（"患'2型糖尿病'、'重度精神分裂症'" -> "患'2型糖尿病'"）
+_REDACT_PAIRED_SUFFIX_PATTERN = re.compile(
+    rf"[、,，]\s*{_Q}(?:{_TERMS_OR}){_Q}",
+    re.IGNORECASE,
+)
 
-# 7. 亲属单疾病场景整句重构为“患病”：“母亲患'乙型肝炎'。” -> “母亲患病。”
+# 6. 亲属单疾病场景整句重构为"患病"："母亲患'乙型肝炎'。" -> "母亲患病。"
 _REDACT_SINGLE_SUFFER_PATTERN = re.compile(
     rf"(?:患有?|确诊(?:为)?|诊断(?:为)?|患)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:病史|史)?",
     re.IGNORECASE,
 )
 
-# 8. 既往史/病史带前缀与后缀完全擦除：“慢性乙型肝炎病史4年” -> “病史4年” (消除残留的“慢性”/“慢史”)
+# 7. 既往史/病史带前缀与后缀完全擦除：“慢性乙型肝炎病史4年” -> “病史4年” (消除残留的“慢性”/“慢史”)
 _REDACT_HISTORY_PATTERN = re.compile(
     rf"(?:既往|慢性)?\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:病史|史)?",
     re.IGNORECASE,
 )
 
-# 9. 消除擦除敏感词后可能残留的孤立亲属主语短语（例如“，一弟。” / “父亲。”）
+# 8. 亲属关系词定义与孤立主语/动词清理
 _FAMILY_MEMBERS = (
     r"父亲|母亲|祖父|祖母|外公|外婆|爷爷|奶奶|伯父|叔叔|舅舅|姑姑|姨妈|大伯|大舅|大姨|二姨|小姨|"
     r"一弟|二弟|三弟|长子|次子|长女|次女|大哥|二哥|大姐|二姐|弟弟|妹妹|哥哥|姐姐|爱人|配偶|丈夫|妻子|儿子|女儿|家属|家族成员"
 )
 _CLEANUP_ORPHAN_SUBJECT_PATTERN = re.compile(rf"(?:^|[，,。；])\s*(?:{_FAMILY_MEMBERS})\s*([。；;])")
+_CLEANUP_FAMILY_VERB_HEAL_PATTERN = re.compile(
+    rf"({_FAMILY_MEMBERS})\s*(?:患有?|确诊(?:为)?|诊断(?:为)?|患|有)\s*([。；;，,])"
+)
 
-# 10. 孤立介词、无用连词与残余修饰清理：“同时因”、“及倾向”、“长期，” -> “”
+# 9. 模块级预编译规范清理正则
+_CLEANUP_DEVELOP_AND_PATTERN = re.compile(r"发展为\s*与")
+_CLEANUP_PATIENT_TIME_PREFIX_PATTERN = re.compile(r"(?:患者\s*\d+\s*(?:年|月|天)?前)\s*([，,])")
 _CLEANUP_ORPHAN_PREP_PATTERN = re.compile(
     r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|长期|定期|口服|服用|及|与|和)\s*([。；;，,])"
 )
@@ -192,11 +217,48 @@ _CLEANUP_ORPHAN_VERB_PATTERN = re.compile(
 _CLEANUP_VERB_PUNCT_PATTERN = re.compile(
     r"((?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有))\s*[、,，]"
 )
-
-# 11. 标点符号与空引号清理正则
+_CLEANUP_NO_OBJ_VERB_PATTERN = re.compile(
+    r"(?:急诊行|急诊就诊|就诊|行|实施|接受|予|给予)\s*(?:提示|检查提示|显示|示)?\s*(?:及|与|和)?\s*([。；;，,])"
+)
+_CLEANUP_NO_OBJ_HINT_PATTERN = re.compile(r"(?:提示|显示|检查提示|检查示|示|予)\s*([。；;，,])")
 _CLEANUP_EMPTY_QUOTES_PATTERN = re.compile(r"['\"“‘]['\"”’]")
-_CLEANUP_PUNCTUATION_PATTERN = re.compile(r"([，。；：,;\s])\1+")
-_CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,])\s*([。;；])")
+_CLEANUP_PUNCTUATION_PATTERN = re.compile(r"([，。；：,;])\1+")
+_CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,、])\s*([。;；])")
+_CLEANUP_LEADING_PUNCT_PATTERN = re.compile(r"^[，,；;。]\s*")
+_CLEANUP_EMPTY_PAREN_PATTERN = re.compile(r"\(\s*\)")
+
+
+def _redact_terms_only(text: str) -> str:
+    """超长文本降级路径：仅做词库级擦除（无句法重构），保证性能与安全。
+
+    当输入文本超过 _REDACT_MAX_TEXT_LENGTH 时调用，避免复杂句法正则的 ReDoS 风险。
+    擦除后可能残留句法碎片（如"患有去世"），由上层 pipeline 的最终门禁兜底。
+    """
+    return _TERMS_ONLY_PATTERN.sub("", text)
+
+
+def _clean_orphan_syntax(s: str) -> str:
+    """清理擦除敏感实体后残存的孤立介词、连词、无宾语动词与多余标点。"""
+    if not s:
+        return s
+
+    # 1. 清理孤立无宾语动词：如“示。”、“提示。”、“急诊行提示”、“予行”、“予行及”、“予。”
+    s = _CLEANUP_NO_OBJ_VERB_PATTERN.sub(r"\1", s)
+    s = _CLEANUP_NO_OBJ_HINT_PATTERN.sub(r"\1", s)
+
+    # 2. 清理孤立连词与介词碎片：如“伴及。”、“及。”、“与。”、“伴。”、“长期。”、“发展为。”
+    s = _CLEANUP_ORPHAN_PREP_PATTERN.sub(r"\1", s)
+    s = re.sub(r"(?:出现|发展为|表现为)\s*([。；;，,])", r"\1", s)
+    s = _CLEANUP_DEVELOP_AND_PATTERN.sub("发展为", s)
+
+    # 3. 标点与空括号自愈
+    s = re.sub(r"(['\"“‘'”’])\1+", "", s)
+    s = _CLEANUP_PUNCTUATION_PATTERN.sub(r"\1", s)
+    s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
+    s = _CLEANUP_LEADING_PUNCT_PATTERN.sub("", s)
+    s = _CLEANUP_EMPTY_PAREN_PATTERN.sub("", s)
+    s = re.sub(r"([。；;,，])\1+", r"\1", s)
+    return s.strip()
 
 
 def redact_medical_text(text: str) -> str:
@@ -214,11 +276,19 @@ def redact_medical_text(text: str) -> str:
     if not text:
         return text
 
+    # 超长文本保护：降级为简单词库擦除，防止复杂句法正则的 ReDoS 风险
+    if len(text) > _REDACT_MAX_TEXT_LENGTH:
+        return _redact_terms_only(text)
+
+    # Fast-path 检查：如果不含任何 L4/L5 敏感词及脱敏标签，直接原样返回，避免自愈逻辑篡改干净文本
+    if not _TERMS_ONLY_PATTERN.search(text) and not _MASKED_LABEL_RE.search(text):
+        return text
+
     s = text
 
     # 1. 优先将死因句法重构为自然流畅的“因病去世/死于”
     def _death_replace(match: re.Match) -> str:
-        action = match.group(1) or "去世"
+        action = match.group(1)
         return f"因病{action}"
 
     s = _REDACT_CAUSE_DEATH_PATTERN.sub(_death_replace, s)
@@ -238,6 +308,8 @@ def redact_medical_text(text: str) -> str:
 
     # 6. 复合疾病场景：仅擦除敏感疾病与紧随的顿号，保留动词与后续非敏感疾病
     s = _REDACT_PAIRED_PATTERN.sub(r"\1", s)
+    # 6.1 补充：擦除列表非首位的敏感疾病（"患'2型糖尿病'、'重度精神分裂症'" -> "患'2型糖尿病'"）
+    s = _REDACT_PAIRED_SUFFIX_PATTERN.sub("", s)
 
     # 7. 单敏感疾病场景：自然重构为泛化“患病”（如“一弟患'重度精神分裂症'” -> “一弟患病”）
     s = _REDACT_SINGLE_SUFFER_PATTERN.sub("患病", s)
@@ -245,19 +317,15 @@ def redact_medical_text(text: str) -> str:
     # 8. 擦除既往史/病史带前缀与后缀的完整词组（防止留“慢史”）
     s = _REDACT_HISTORY_PATTERN.sub("", s)
 
-    # 10. 清理孤立残余介词、连词与标点
-    s = re.sub(r"发展为\s*与", "发展为", s)
+    # 9. 清理孤立残余介词、连词与标点
+    s = _CLEANUP_DEVELOP_AND_PATTERN.sub("发展为", s)
     s = _CLEANUP_ORPHAN_PREP_PATTERN.sub(r"\1", s)
     s = _CLEANUP_VERB_PUNCT_PATTERN.sub("", s)
 
-    # 10.1 孤立时间前缀自愈：将“患者1年前，”残留清除，直接输出“HBV-DNA阳性。”
-    s = re.sub(r"(?:患者\s*\d+\s*(?:年|月|天)?前)\s*([，,])", "", s)
+    # 9.1 孤立时间前缀自愈：将"患者1年前，"残留清除，直接输出"白细胞计数值正常。"
+    s = _CLEANUP_PATIENT_TIME_PREFIX_PATTERN.sub("", s)
 
-    # 10.1 亲属孤立动词与缺失动词自愈：“一弟'2型糖尿病'” -> “一弟患'2型糖尿病'”，“一弟患。” -> “一弟患病。”
-    s = re.sub(rf"({_FAMILY_MEMBERS})\s*['\"“‘'”’]", r"\1患'", s)
-    _CLEANUP_FAMILY_VERB_HEAL_PATTERN = re.compile(
-        rf"({_FAMILY_MEMBERS})\s*(?:患有?|确诊(?:为)?|诊断(?:为)?|患|有)\s*([。；;，,])"
-    )
+    # 9.2 亲属孤立动词与缺失动词自愈："一弟'重度精神分裂症'" -> "一弟患'重度精神分裂症'"，"一弟患。" -> "一弟患病。"
     s = _CLEANUP_FAMILY_VERB_HEAL_PATTERN.sub(r"\1患病\2", s)
 
     s = _CLEANUP_ORPHAN_VERB_PATTERN.sub(r"\1", s)
@@ -268,33 +336,8 @@ def redact_medical_text(text: str) -> str:
     s = _CLEANUP_PUNCTUATION_PATTERN.sub(r"\1", s)
     s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
 
-    # 11. 去除可能产生的开局或结尾孤立标点
-    s = re.sub(r"^[，,]\s*", "", s)
-
-    return s
-
-
-def _clean_orphan_syntax(s: str) -> str:
-    """清理擦除敏感实体后残存的孤立介词、连词、无宾语动词与多余标点。"""
-    if not s:
-        return s
-    # 1. 清理孤立无宾语动词：如“示。”、“提示。”、“急诊行提示”、“予行”、“予行及”、“予。”
-    s = re.sub(r"(?:急诊行|急诊就诊|就诊|行|实施|接受|予|给予)\s*(?:提示|检查提示|显示|示)?\s*(?:及|与|和)?\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:提示|显示|检查提示|检查示|示|予)\s*([。；;，,])", r"\1", s)
-
-    # 2. 清理孤立连词与介词碎片：如“伴及。”、“及。”、“与。”、“伴。”、“长期。”、“发展为。”
-    s = re.sub(r"(?:伴及|伴有|伴|及|与|和|合并|长期|定期)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:出现|发展为|表现为)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"发展为\s*与", "发展为", s)
-
-    # 3. 标点与空括号自愈
-    s = re.sub(r"(['\"“‘'”’])\1+", "", s)
-    s = re.sub(r"([，。；：,;\s])\1+", r"\1", s)
-    s = re.sub(r"([，,])\s*([。;；])", r"\2", s)
-    s = re.sub(r"^[，,；;。]\s*", "", s)
-    s = re.sub(r"\(\s*\)", "", s)
-    s = re.sub(r"([。；;,，])\1+", r"\1", s)
-    return s.strip()
+    # 11. 统一调起通用语法清理与标点自愈
+    return _clean_orphan_syntax(s)
 
 
 def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
@@ -358,4 +401,3 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
 
     # 仅当 NER 未识别出任何实体时，平滑降级至规则引擎
     return _clean_orphan_syntax(redact_medical_text(text))
-

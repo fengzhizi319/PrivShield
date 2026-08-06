@@ -10,7 +10,7 @@ from privacy_local_agent.medical_pipeline.pipeline import (
     MedicalPrivacyPipeline,
     process_medical_dataset,
 )
-from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
+from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS, redact_medical_text
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "data"))
 from generate_medical_data import gen_id_card, generate_dataset
@@ -253,6 +253,38 @@ def test_unknown_field_l4_l5_text_is_removed() -> None:
     assert "恶性肿瘤" not in sanitized
     assert sanitized != raw
     assert result.summary["guarantee_no_l4_l5_raw_data"] is True
+
+
+def test_clean_text_fast_path_preserves_unmodified_text() -> None:
+    """无敏感词文本应当通过 fast-path 原样保留，避免被语法自愈逻辑误篡改。"""
+    cases = [
+        "弟弟说'你好'，今天天气不错。",
+        "母亲“高血压”控制良好。",
+        "他长期。",
+        "注意保暖。。。多休息",
+        "第一段。\n\n第二段。",
+    ]
+    for text in cases:
+        assert redact_medical_text(text) == text, f"干净文本不应被篡改: {text}"
+
+
+def test_redact_paired_list_sensitive_suffix_cleanup() -> None:
+    """顿号列表中敏感词在后场景不应遗留 '、。' 标点碎片。"""
+    text = "一弟患'2型糖尿病'、'重度精神分裂症'。"
+    assert redact_medical_text(text) == "一弟患'2型糖尿病'。"
+
+
+def test_redact_medication_without_suffix() -> None:
+    """无结尾治疗后缀的服药文本亦应被完整抹平。"""
+    text = "服用'奥氮平片'20mg qd。"
+    assert redact_medical_text(text) == ""
+
+
+def test_redact_cause_of_death_with_complications() -> None:
+    """带有并发症修饰的死因句法应重构为因病去世。"""
+    text = "因'HIV'导致的并发症去世。"
+    assert redact_medical_text(text) == "因病去世。"
+
 
 
 def test_failed_image_redaction_never_returns_original_value() -> None:
