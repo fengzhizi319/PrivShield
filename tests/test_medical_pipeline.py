@@ -286,6 +286,32 @@ def test_redact_cause_of_death_with_complications() -> None:
     assert redact_medical_text(text) == "因病去世。"
 
 
+def test_ner_only_redacts_major_sensitive_l4_l5_entities() -> None:
+    """NER 引擎应仅对 L4/L5 重大高敏疾病/用药进行抹平，保留常规慢病与常用药。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    class MockAdapter:
+        def extract(self, text: str) -> list[dict[str, str]]:
+            return [
+                {"text": "高脂血症", "type": "DISEASE"},
+                {"text": "阿托伐他汀", "type": "DRUG"},
+                {"text": "高血压", "type": "DISEASE"},
+                {"text": "重度精神分裂症", "type": "DISEASE"},
+                {"text": "奥氮平片", "type": "DRUG"},
+            ]
+
+    common_text = "高脂血症病史5年，口服阿托伐他汀20mg qn。高血压病史3年，最高160/100mmHg。"
+    res_common = redact_medical_text_with_ner(common_text, ner_adapter=MockAdapter())
+    assert res_common == common_text, "常规慢病与常用药物不应被误脱敏"
+
+    mixed_text = "高脂血症病史5年，口服阿托伐他汀20mg qn。长期服用奥氮平片20mg qd控制重度精神分裂症症状。"
+    res_mixed = redact_medical_text_with_ner(mixed_text, ner_adapter=MockAdapter())
+    assert "高脂血症" in res_mixed
+    assert "阿托伐他汀" in res_mixed
+    assert "重度精神分裂症" not in res_mixed
+    assert "奥氮平片" not in res_mixed
+
+
 
 def test_failed_image_redaction_never_returns_original_value() -> None:
     """不存在或损坏图片必须 fail closed，不能把原路径当作脱敏结果。"""

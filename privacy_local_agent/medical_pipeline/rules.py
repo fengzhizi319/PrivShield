@@ -340,15 +340,69 @@ def redact_medical_text(text: str) -> str:
     return _clean_orphan_syntax(s)
 
 
+# ---------------------------------------------------------------------------
+# L4/L5 重大高敏疾病（及关联高敏处置/药物）提示词指南与判定核心逻辑
+# ---------------------------------------------------------------------------
+L4_L5_MAJOR_SENSITIVE_PROMPT_GUIDELINE = """
+【Layer-2 NER 级医疗实体无痕脱敏提示词准则 / L4-L5 Major Sensitive Entity Prompt Guidelines】
+NER 模型与提示词必须仅提取/匹配属于 L4/L5 重大高敏级别的医疗实体及其强相关高敏处置/用药：
+1. L5 极高敏级别：
+   - 免疫缺陷/艾滋病：HIV感染、HIV、艾滋病、艾滋、CD4+ T淋巴细胞、ART抗逆转录等；
+   - 精神障碍：重度精神分裂症、精神分裂症、幻听（命令性言语）、被害妄想、自伤倾向、保护性约束、奥氮平片、精神卫生中心等；
+   - 遗传缺陷：遗传性亨廷顿舞蹈病、亨廷顿舞蹈病、亨廷顿病、CAG重复序列、四苯嗪、舞蹈病等。
+2. L4 高敏级别：
+   - 性传播疾病：梅毒、苍白密螺旋体、TPPA阳性、RPR阳性、淋病、尖锐湿疣、生殖器疱疹、不洁性接触史、硬下疳等；
+   - 恶性肿瘤：恶性肿瘤、浸润性腺癌、肺腺癌、胃癌、肝癌、乳腺癌、宫颈癌、癌症、转移性肿瘤、奥希替尼、EGFR基因检测等；
+   - 病毒性肝炎：慢性乙型病毒性肝炎、乙型肝炎、乙肝、丙型肝炎、丙肝、HBV-DNA、HCV、恩替卡韦、肝硬化代偿期等；
+   - 严重器官损害：慢性阻塞性肺疾病、COPD、急性心肌梗死、冠状动脉重度狭窄等。
+
+【非重大高敏剔除原则】：
+常规慢性病（高血压、高脂血症、高血糖、普通糖尿病、脂肪肝、痛风等）、常见轻症（感冒、发烧、咳嗽、胃炎、头痛等）及常规治疗药物（如阿托伐他汀、硝苯地平、降压药、降脂药、二甲双胍、感冒药等）属于 L1/L2 低敏范围，严禁脱敏，必须原样保留。
+"""
+
+_MAJOR_SENSITIVE_KEYWORDS = (
+    # L5 Keywords
+    "HIV", "AIDS", "艾滋", "免疫缺陷", "CD4+", "抗逆转录",
+    "精神分裂", "幻听", "妄想", "自伤", "砸物", "保护性约束", "奥氮平", "精神卫生",
+    "亨廷顿", "CAG重复", "CAG扩增", "四苯嗪", "舞蹈病", "舞蹈样",
+    # L4 Keywords
+    "梅毒", "密螺旋体", "TPPA", "RPR", "淋病", "淋球菌", "尖锐湿疣", "疱疹", "软下疳", "性病", "不洁性接触", "硬下疳",
+    "恶性肿瘤", "腺癌", "肺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "转移瘤", "癌", "肉瘤", "奥希替尼", "EGFR",
+    "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "HBV", "HCV", "恩替卡韦", "肝硬化", "静脉曲张",
+    "急性心肌梗死", "心肌梗死", "冠状动脉重度狭窄", "重度狭窄", "COPD", "阻塞性肺"
+)
+
+
+def _is_major_sensitive_entity(term: str, ent_type: str = "") -> bool:
+    """判定实体词是否属于 L4/L5 重大高敏疾病或关联高敏处置/药物。"""
+    if not term or len(term) < 2:
+        return False
+
+    term_clean = term.strip()
+    term_upper = term_clean.upper()
+
+    # 1. 词库精确或包含匹配
+    if _TERMS_ONLY_PATTERN.search(term_clean):
+        return True
+
+    # 2. 核心重大高敏关键字匹配
+    for kw in _MAJOR_SENSITIVE_KEYWORDS:
+        if kw.upper() in term_upper:
+            return True
+
+    return False
+
+
 def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
     """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎.
 
     借助 Layer-2 Small-NER (ONNXRuntime / ModelScope / TensorRT) 对文本中的
-    DISEASE(疾病), DRUG(药物), TREATMENT(诊疗处置), HOSPITAL(医疗机构), SYMPTOM(症状)
+    L4/L5 重大高敏疾病(DISEASE), 关联高敏药物(DRUG), 诊疗处置(TREATMENT), 专科机构(HOSPITAL)
     等实体进行上下文识别与精确定位抹平：
-    1. 若提供了 ner_adapter 且成功识别出实体，基于实体在原文的上下文绑定（如剂量、用法、曾就诊于）进行擦除；
-    2. 兼容智能语法自愈自检，确保语句自洽流畅；
-    3. 支持在 NER 模型未就绪时自动平滑 fallback 降级至 redact_medical_text 规则引擎。
+    1. 遵循 L4_L5_MAJOR_SENSITIVE_PROMPT_GUIDELINE 指南，仅对 L4/L5 重大高敏实体进行脱敏；
+    2. 常规慢性病（如高血压、高脂血症）及常规用药予以保留；
+    3. 兼容智能语法自愈自检，确保语句自洽流畅；
+    4. 支持在 NER 模型未就绪时自动平滑 fallback 降级至 redact_medical_text 规则引擎。
     """
     if not text:
         return text
@@ -362,14 +416,19 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         except Exception:
             entities = []
 
-    # 如果 NER 成功提取了实体项，执行纯 NER 神经网络驱动的实体级精准擦除 (不落入规则引擎)
-    if entities:
+    # 筛选并仅保留 L4/L5 重大高敏级别的实体，过滤剔除高血压、高脂血症等常规 L1/L2 慢病/常规用药
+    sensitive_entities = [
+        e for e in entities
+        if isinstance(e, dict)
+        and e.get("text", "").strip()
+        and _is_major_sensitive_entity(e.get("text", ""), str(e.get("type") or e.get("label") or ""))
+    ]
+
+    # 如果 NER 成功提取了重大高敏实体项，执行纯 NER 神经网络驱动的实体级精准擦除 (不落入规则引擎)
+    if sensitive_entities:
         s = text
         sorted_entities = sorted(
-            [
-                e for e in entities
-                if isinstance(e, dict) and e.get("text", "").strip()
-            ],
+            sensitive_entities,
             key=lambda x: len(x.get("text", "")),
             reverse=True,
         )
@@ -399,5 +458,5 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
 
         return _clean_orphan_syntax(s)
 
-    # 仅当 NER 未识别出任何实体时，平滑降级至规则引擎
+    # 仅当 NER 未识别出任何重大高敏实体时，平滑降级至规则引擎
     return _clean_orphan_syntax(redact_medical_text(text))
