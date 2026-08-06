@@ -266,43 +266,51 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         except Exception:
             entities = []
 
-    # 如果 NER 成功提取了实体项，优先利用 NER 实体边界与识别信息
+    # 如果 NER 成功提取了实体项，执行纯 NER 神经网络驱动的实体级精准擦除 (不落入规则引擎)
     if entities:
         s = text
-        ner_terms = [
-            e.get("text", "").strip()
-            for e in entities
-            if isinstance(e, dict) and e.get("text", "").strip()
-        ]
-        if ner_terms:
-            ner_or = "|".join([re.escape(t) for t in sorted(set(ner_terms), key=len, reverse=True)])
-            dose_pat = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))?"
-            freq_pat = r"(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?"
+        sorted_entities = sorted(
+            [
+                e for e in entities
+                if isinstance(e, dict) and e.get("text", "").strip()
+            ],
+            key=lambda x: len(x.get("text", "")),
+            reverse=True,
+        )
 
-            s = re.sub(
-                rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*)['\"“‘'”’]?(?:{ner_or})['\"”’]?\s*[、,，]\s*",
-                r"\1",
-                s,
-                flags=re.I,
-            )
-            s = re.sub(
-                rf"(?:长期|定期|口服|服用|给予|使用|行)?\s*['\"“‘'”’]?(?:{ner_or})['\"”’]?{dose_pat}{freq_pat}\s*(?:及|与|和|合并)?\s*(?:['\"“‘'”’]?(?:{ner_or})['\"”’]?{dose_pat}{freq_pat})*\s*(?:控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)?",
-                "",
-                s,
-                flags=re.I,
-            )
-            s = re.sub(
-                rf"(?:曾?就诊于|就诊于|收治于|转诊至)\s*['\"“‘'”’]?(?:{ner_or})['\"”’]?\s*(?:，|,|。|；|;)?",
-                "",
-                s,
-                flags=re.I,
-            )
-            s = re.sub(
-                rf"(?:诊断为|确诊为|检查出|查出|发现|提示为|考虑为)\s*['\"“‘'”’]?(?:{ner_or})['\"”’]?\s*(?:，|,|。|；|;)?",
-                "",
-                s,
-                flags=re.I,
-            )
+        for ent in sorted_entities:
+            term = ent.get("text", "").strip()
+            ent_type = str(ent.get("type", "")).upper()
+            if not term or len(term) < 2:
+                continue
 
+            quoted_term = rf"['\"“‘'”’]?{re.escape(term)}['\"”’]?"
+
+            if any(t in ent_type for t in ["DRUG", "MED", "CHEM"]):
+                # NER 识别出药物/化学品：连同剂量用法及控制症状擦除
+                pat = rf"(?:长期|定期|口服|服用|给予|使用|予|遵医嘱)?\s*{quoted_term}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)?"
+                s = re.sub(pat, "", s, flags=re.IGNORECASE)
+            elif any(t in ent_type for t in ["HOSPITAL", "ORG", "LOC"]):
+                # NER 识别出医疗机构/组织：擦除就诊短语
+                pat = rf"(?:曾?就诊于|就诊于|收治于|转诊至)\s*{quoted_term}\s*(?:，|,|。|；|;)?"
+                s = re.sub(pat, "", s, flags=re.IGNORECASE)
+            else:
+                # NER 识别出 DISEASE/TREATMENT/SYMPTOM 等：做实体级剥离
+                pat_paired = rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){quoted_term}\s*[、,，]\s*"
+                s = re.sub(pat_paired, r"\1", s, flags=re.IGNORECASE)
+                s = re.sub(quoted_term, "", s)
+
+        # NER 专属格式自愈与净化
+        s = re.sub(r"发展为\s*与", "发展为", s)
+        s = re.sub(r"(?:出现|发展为)\s*[，,、与及]\s*", "", s)
+        s = re.sub(r"提示\s*\(", "提示(", s)
+        s = re.sub(r"(['\"“‘'”’])\1+", "", s)
+        s = re.sub(r"([，。；：,;\s])\1+", r"\1", s)
+        s = re.sub(r"([，,])\s*([。;；])", r"\2", s)
+        s = re.sub(r"^[，,]\s*", "", s)
+        s = re.sub(r"\(\s*\)", "", s)
+        return s.strip()
+
+    # 仅当 NER 未识别出任何实体时，平滑降级至规则引擎
     return redact_medical_text(text)
 
