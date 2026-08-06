@@ -41,6 +41,8 @@ class FieldClassification:
     rule_matched: str
     raw_value: str = ""
     sanitized_value: str = ""
+    sanitized_value_rule: str = ""
+    sanitized_value_ner: str = ""
 
 
 @dataclass
@@ -397,6 +399,13 @@ class MedicalPrivacyPipeline:
 
                 fc.raw_value = val_str
                 fc.sanitized_value = sanitized_rec[key]
+
+                if key in PII_FIELD_RULES:
+                    fc.sanitized_value_rule = self._mask_pii_value(key, val_str)
+                    fc.sanitized_value_ner = fc.sanitized_value_rule
+                else:
+                    fc.sanitized_value_rule = redact_medical_text(val_str)
+                    fc.sanitized_value_ner = redact_medical_text_with_ner(val_str, ner_adapter=self.ner_adapter)
 
             if max_level == "L5":
                 l5_count += 1

@@ -134,8 +134,39 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
               <Icon name="activity" className="h-4 w-4 text-teal-600" />
               数据分类分级与脱敏治理报告 ({(result.classification_report ?? []).length} 条)
             </div>
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <span>💡 点击展开记录可对比原始数据与脱敏清洗数据</span>
+            {/* 引擎切换与对比控制按钮 */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-gray-500">脱敏视图引擎切换:</span>
+              <button
+                onClick={() => setViewEngineMode('both')}
+                className={`rounded-lg px-2.5 py-1 font-bold transition-all border ${
+                  viewEngineMode === 'both'
+                    ? 'bg-teal-600 text-white border-teal-600 shadow-2xs'
+                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                📊 双引擎对比模式 (Rule vs Small-NER)
+              </button>
+              <button
+                onClick={() => setViewEngineMode('rule')}
+                className={`rounded-lg px-2.5 py-1 font-bold transition-all border ${
+                  viewEngineMode === 'rule'
+                    ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                ⚡ 规则引擎 (Layer-1 Rule)
+              </button>
+              <button
+                onClick={() => setViewEngineMode('ner')}
+                className={`rounded-lg px-2.5 py-1 font-bold transition-all border ${
+                  viewEngineMode === 'ner'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                🤖 Small-NER (Layer-2 NER)
+              </button>
             </div>
           </div>
 
@@ -182,7 +213,16 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                               <tr>
                                 <th className="px-3 py-2 font-bold">字段名</th>
                                 <th className="px-3 py-2 font-bold">原始数据 (Original Data)</th>
-                                <th className="px-3 py-2 font-bold">脱敏清洗数据 (Sanitized Data)</th>
+                                {(viewEngineMode === 'both' || viewEngineMode === 'rule') && (
+                                  <th className="px-3 py-2 font-bold text-amber-800 bg-amber-50/70">
+                                    ⚡ 规则抹平数据 (Layer-1 Rule)
+                                  </th>
+                                )}
+                                {(viewEngineMode === 'both' || viewEngineMode === 'ner') && (
+                                  <th className="px-3 py-2 font-bold text-indigo-800 bg-indigo-50/70">
+                                    🤖 Small-NER 实体抹平 (Layer-2 NER)
+                                  </th>
+                                )}
                                 <th className="px-3 py-2 font-bold">等级</th>
                                 <th className="px-3 py-2 font-bold">安全标签</th>
                                 <th className="px-3 py-2 font-bold">命中的治理规则</th>
@@ -192,23 +232,40 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                             <tbody className="divide-y divide-gray-100 bg-white">
                               {rep.field_details.map((fd, idx) => {
                                 const rawVal = fd.raw_value ?? (rep.raw_record ? rep.raw_record[fd.field_name] : '');
-                                const sanVal = fd.sanitized_value ?? (result.sanitized_data?.[rep.record_index - 1]?.[fd.field_name] ?? '');
-                                const isChanged = rawVal !== sanVal && sanVal !== '';
+                                const ruleVal = fd.sanitized_value_rule ?? fd.sanitized_value ?? '';
+                                const nerVal = fd.sanitized_value_ner ?? fd.sanitized_value ?? '';
+
+                                const isRuleDiff = rawVal !== ruleVal && ruleVal !== '';
+                                const isNerDiff = rawVal !== nerVal && nerVal !== '';
+
                                 return (
                                   <tr key={idx} className="hover:bg-gray-50/80 transition-colors">
                                     <td className="px-3 py-2 font-mono font-bold text-gray-800 whitespace-nowrap">{fd.field_name}</td>
-                                    <td className="px-3 py-2 min-w-[200px] max-w-md break-words whitespace-pre-wrap font-mono text-gray-600 bg-gray-50 rounded px-1.5 py-0.5 border border-gray-200/60">
+                                    <td className="px-3 py-2 min-w-[180px] max-w-xs break-words whitespace-pre-wrap font-mono text-gray-600 bg-gray-50 rounded px-1.5 py-0.5 border border-gray-200/60">
                                       {rawVal || '-'}
                                     </td>
-                                    <td className="px-3 py-2 min-w-[200px] max-w-md break-words whitespace-pre-wrap font-mono">
-                                      {isChanged ? (
-                                        <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 shadow-2xs">
-                                          {sanVal}
-                                        </span>
-                                      ) : (
-                                        <span className="text-gray-700">{sanVal || '-'}</span>
-                                      )}
-                                    </td>
+                                    {(viewEngineMode === 'both' || viewEngineMode === 'rule') && (
+                                      <td className="px-3 py-2 min-w-[180px] max-w-xs break-words whitespace-pre-wrap font-mono bg-amber-50/20">
+                                        {isRuleDiff ? (
+                                          <span className="text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 shadow-2xs">
+                                            {ruleVal}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-700">{ruleVal || '-'}</span>
+                                        )}
+                                      </td>
+                                    )}
+                                    {(viewEngineMode === 'both' || viewEngineMode === 'ner') && (
+                                      <td className="px-3 py-2 min-w-[180px] max-w-xs break-words whitespace-pre-wrap font-mono bg-indigo-50/20">
+                                        {isNerDiff ? (
+                                          <span className="text-indigo-800 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs">
+                                            {nerVal}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-700">{nerVal || '-'}</span>
+                                        )}
+                                      </td>
+                                    )}
                                     <td className="px-3 py-2 whitespace-nowrap">
                                       <span className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold border ${levelBadgeCls(fd.level)}`}>
                                         {fd.level}

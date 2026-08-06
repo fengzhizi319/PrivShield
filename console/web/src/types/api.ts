@@ -491,6 +491,8 @@ export interface MedicalFieldClassification {
   rule_matched: string;
   raw_value?: string;
   sanitized_value?: string;
+  sanitized_value_rule?: string;
+  sanitized_value_ner?: string;
 }
 
 export interface MedicalRecordReport {
