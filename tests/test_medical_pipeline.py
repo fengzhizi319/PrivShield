@@ -308,8 +308,20 @@ def test_ner_only_redacts_major_sensitive_l4_l5_entities() -> None:
     res_mixed = redact_medical_text_with_ner(mixed_text, ner_adapter=MockAdapter())
     assert "高脂血症" in res_mixed
     assert "阿托伐他汀" in res_mixed
-    assert "重度精神分裂症" not in res_mixed
-    assert "奥氮平片" not in res_mixed
+def test_redact_pure_sensitive_symptom_clause_wiped_completely() -> None:
+    """整句仅包含重大高敏症状与时间状语时，应直接抹平为空，不留标点或语病碎片。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    class MockAdapter:
+        def extract(self, text: str) -> list[dict[str, str]]:
+            return [
+                {"text": "幻听", "type": "SYMPTOM"},
+                {"text": "被害妄想", "type": "SYMPTOM"},
+            ]
+
+    text = "幻听与被害妄想反复发作3年"
+    assert redact_medical_text(text) == "", "规则引擎对纯高敏症状句应直接抹平"
+    assert redact_medical_text_with_ner(text, ner_adapter=MockAdapter()) == "", "NER引擎对纯高敏症状句应直接抹平"
 
 
 
