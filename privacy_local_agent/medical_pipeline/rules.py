@@ -107,29 +107,36 @@ _REDACT_DIAGNOSIS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 4. 顿号分隔的复合疾病列表中的敏感词擦除：“患'重度精神分裂症'、'2型糖尿病'” -> “患'2型糖尿病'”
+# 4. 顿号/逗号分隔的复合疾病列表中的敏感词擦除：“患'重度精神分裂症'、'2型糖尿病'” -> “患'2型糖尿病'” (避免产生“患、”标点)
 _REDACT_PAIRED_PATTERN = re.compile(
     rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){_Q}(?:{_TERMS_OR}){_Q}\s*[、,，]\s*",
     re.IGNORECASE,
 )
 
-# 5. 兜底匹配包含介词/动词/病史后缀的敏感短语：“患'重度精神分裂症'” / “有'乙肝'病史”
+# 5. 单疾病场景泛化为“患病”：“一弟患'重度精神分裂症'” -> “一弟患病”
+_REDACT_SINGLE_SUFFER_PATTERN = re.compile(
+    rf"(?:患有?|确诊(?:为)?|诊断(?:为)?|患)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:病史|史)?",
+    re.IGNORECASE,
+)
+
+# 6. 兜底匹配包含介词/动词/病史后缀的敏感短语：“有'乙肝'病史”
 _REDACT_PREFIX_PATTERN = re.compile(
     rf"(?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)?\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:病史|史)?",
     re.IGNORECASE,
 )
 
-# 6. 消除擦除敏感词后可能残留的孤立亲属主语短语（例如“，一弟。” / “父亲。”）
+# 7. 消除擦除敏感词后可能残留的孤立亲属主语短语（例如“，一弟。” / “父亲。”）
 _FAMILY_MEMBERS = (
     r"父亲|母亲|祖父|祖母|外公|外婆|爷爷|奶奶|伯父|叔叔|舅舅|姑姑|姨妈|大伯|大舅|大姨|二姨|小姨|"
     r"一弟|二弟|三弟|长子|次子|长女|次女|大哥|二哥|大姐|二姐|弟弟|妹妹|哥哥|姐姐|爱人|配偶|丈夫|妻子|儿子|女儿|家属|家族成员"
 )
 _CLEANUP_ORPHAN_SUBJECT_PATTERN = re.compile(rf"(?:^|[，,。；])\s*(?:{_FAMILY_MEMBERS})\s*([。；;])")
 
-# 7. 孤立动词/介词残余清理：“，患。” / “，因。” -> “”
+# 8. 孤立动词/介词与顿号残余清理：“，患。” / “，因。” / “患、” -> “”
 _CLEANUP_ORPHAN_VERB_PATTERN = re.compile(r"(?:^|[，,。；])\s*(?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有)\s*([。；;，,])")
+_CLEANUP_VERB_PUNCT_PATTERN = re.compile(r"((?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有))\s*[、,，]")
 
-# 8. 标点符号与空引号清理正则
+# 9. 标点符号与空引号清理正则
 _CLEANUP_EMPTY_QUOTES_PATTERN = re.compile(r"['\"“‘]['\"”’]")
 _CLEANUP_PUNCTUATION_PATTERN = re.compile(r"([，。；：,;\s])\1+")
 _CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,])\s*([。;；])")
@@ -140,8 +147,9 @@ def redact_medical_text(text: str) -> str:
 
     全面覆盖死因、诊疗服药、诊断检出、家族病史等各类复杂中文医疗句法：
     1. 把“因'恶性肿瘤'去世”、“死于'肺腺癌'”等死因短语自然重构为“因病去世”；
-    2. 将包含 L4/L5 敏感病史词汇连同与其绑定的介词/动词/服药/治疗动作完全擦除；
-    3. 清理空引号、孤立动词与无谓语孤立主语句，修复多余标点，做到语法流畅、自然无痕。
+    2. 将“一弟患'重度精神分裂症'、'2型糖尿病'”复合疾病中的敏感词与顿号去除，输出“一弟患'2型糖尿病'”；
+    3. 将单敏感疾病场景（如“一弟患'重度精神分裂症'”）自然重构泛化为“一弟患病”；
+    4. 清理空引号、孤立动词与多余标点，做到语法流畅、自然无痕。
     """
     if not text:
         return text
@@ -162,22 +170,26 @@ def redact_medical_text(text: str) -> str:
     # 3. 擦除诊断与检出短语（如“确诊为艾滋病”、“检查出梅毒”）
     s = _REDACT_DIAGNOSIS_PATTERN.sub("", s)
 
-    # 4. 保留后接非敏感疾病时的动词修饰：“患'L4病'、'L3病'” -> “患'L3病'”
+    # 4. 复合疾病场景：仅擦除敏感疾病与紧随的顿号，保留动词与后续非敏感疾病
     s = _REDACT_PAIRED_PATTERN.sub(r"\1", s)
 
-    # 5. 擦除“患有.../有...病史/因...”句法短语与单独术语
+    # 5. 单敏感疾病场景：自然重构为泛化“患病”（如“一弟患'重度精神分裂症'” -> “一弟患病”）
+    s = _REDACT_SINGLE_SUFFER_PATTERN.sub("患病", s)
+
+    # 6. 擦除剩余“有...病史/因...”通用前缀短语
     s = _REDACT_PREFIX_PATTERN.sub("", s)
 
-    # 6. 消除失去谓语语境的孤立主语句与孤立动词残余（如擦除病史后残存的“一弟。” / “，患。”）
+    # 7. 消除“患、”多余顿号及失去谓语语境的孤立主语句/动词残余
+    s = _CLEANUP_VERB_PUNCT_PATTERN.sub("", s)
     s = _CLEANUP_ORPHAN_VERB_PATTERN.sub(r"\1", s)
     s = _CLEANUP_ORPHAN_SUBJECT_PATTERN.sub(r"\1", s)
 
-    # 7. 标点与空引号格式净化自愈
+    # 8. 标点与空引号格式净化自愈
     s = _CLEANUP_EMPTY_QUOTES_PATTERN.sub("", s)
     s = _CLEANUP_PUNCTUATION_PATTERN.sub(r"\1", s)
     s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
 
-    # 8. 去除可能产生的开局或结尾孤立标点
+    # 9. 去除可能产生的开局或结尾孤立标点
     s = re.sub(r"^[，,]\s*", "", s)
 
     return s

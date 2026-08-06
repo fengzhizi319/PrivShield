@@ -197,10 +197,10 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                                 return (
                                   <tr key={idx} className="hover:bg-gray-50/80 transition-colors">
                                     <td className="px-3 py-2 font-mono font-bold text-gray-800 whitespace-nowrap">{fd.field_name}</td>
-                                    <td className="px-3 py-2 max-w-xs truncate font-mono text-gray-600 bg-gray-50 rounded px-1.5 py-0.5 border border-gray-200/60">
+                                    <td className="px-3 py-2 min-w-[200px] max-w-md break-words whitespace-pre-wrap font-mono text-gray-600 bg-gray-50 rounded px-1.5 py-0.5 border border-gray-200/60">
                                       {rawVal || '-'}
                                     </td>
-                                    <td className="px-3 py-2 max-w-xs truncate font-mono">
+                                    <td className="px-3 py-2 min-w-[200px] max-w-md break-words whitespace-pre-wrap font-mono">
                                       {isChanged ? (
                                         <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 shadow-2xs">
                                           {sanVal}
