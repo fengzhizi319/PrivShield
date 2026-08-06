@@ -47,6 +47,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Tuple
 
@@ -137,6 +138,43 @@ class ClassificationFunnel:
         self.ner = ner_adapter
         self.llm = llm_adapter
 
+    @staticmethod
+    def _should_trigger_ner(field_name: str, value: str, l1_tags: list[SecurityTag]) -> bool:
+        """评估是否需要触发 Layer-2 Small-NER 深度神经实体识别。
+        
+        遵循“简单规则先行，复杂长文本才用 NER”原则：
+        1. 排除 PII 身份/结构化短字段（如 id_card_no, phone, name, age, gender 等）；
+        2. 排除纯数字、纯英文、短标记（长度 < 4 或无中文）；
+        3. 仅对临床非结构化文书字段（present_illness, family_history 等）或 L1 未命中的复杂长文本触发。
+        """
+        if not value or len(value.strip()) < 4:
+            return False
+
+        # 检查是否包含连续中文汉字（简单数字/代码/英文不触发 NER）
+        if not re.search(r"[\u4e00-\u9fa5]{2,}", value):
+            return False
+
+        # 结构化字段/明确的 PII 与评估属性字段直接复用 L1 规则，不走 NER
+        simple_structured_fields = {
+            "id_card_no", "phone", "name", "patient_name", "age", "gender", "sex",
+            "medical_insurance_no", "social_security_no", "disability_cert_no",
+            "disability_category", "disability_level", "registered_address",
+            "house_address", "contact_phone", "guardian_phone", "assess_result_name"
+        }
+        if field_name.lower() in simple_structured_fields:
+            return False
+
+        # 复杂的非结构化临床长文书字段必定触发 NER
+        complex_clinical_fields = {
+            "chief_complaint", "present_illness", "past_history",
+            "personal_history", "family_history", "allergic_history",
+            "progress_note", "diagnosis_name", "diagnosis"
+        }
+        if field_name.lower() in complex_clinical_fields:
+            return True
+
+        return True
+
     def classify_field(self, field_name: str, value: Any) -> Tuple[FunnelResult, list[SecurityTag]]:
         """对单个字段执行三层漏斗分类。
 
@@ -181,8 +219,12 @@ class ClassificationFunnel:
         else:
             has_conflict = False
 
-        # ===== Step 3: Layer-2 NER 实体识别（可选） =====
-        if self.policy.enable_ner and self.ner is not None:
+        # ===== Step 3: Layer-2 NER 实体识别（智能门禁: 仅复杂非结构化长文本触发） =====
+        if (
+            self.policy.enable_ner
+            and self.ner is not None
+            and self._should_trigger_ner(field_name, str_value, tags)
+        ):
             # 触发条件: 无标签 或 当前最高等级 rank <= 配置阈值（中低敏感度时才需 NER 辅助）
             current_level = self._resolve_level(tags)
             current_rank = self.taxonomy.get_level_rank(current_level)
