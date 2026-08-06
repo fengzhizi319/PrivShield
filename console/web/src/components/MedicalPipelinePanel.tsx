@@ -20,6 +20,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
   const [result, setResult] = useState<MedicalPipelineResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedRecord, setExpandedRecord] = useState<number | null>(1);
+  const [viewEngineMode, setViewEngineMode] = useState<'both' | 'rule' | 'ner'>('both');
 
   const handleExecute = async () => {
     setLoading(true);
