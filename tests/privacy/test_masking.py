@@ -77,11 +77,16 @@ class TestMaskValue:
         assert mask_id_card("110101199001011234") == "110101********1234"
 
     def test_mask_name(self) -> None:
-        """验证中文姓名脱敏规则：2 字保留首字+*；3 字+保留首尾+中间 **。"""
+        """验证中文姓名脱敏规则：自动剥离末尾数字序号与后缀后进行规范脱敏。"""
         # 3 字姓名：保留首尾字，中间替换为 **
         assert mask_name("张三丰") == "张**丰"
+        # 带数字序号的 3 字姓名（如 "韩雨泽_3" -> 剥离为 "韩雨泽" -> "韩**泽"）
+        assert mask_name("韩雨泽_3") == "韩**泽"
+        assert mask_name("韩雨泽3") == "韩**泽"
         # 2 字姓名：保留首字，后接 *
         assert mask_name("李四") == "李*"
+        assert mask_name("李四-12") == "李*"
+        assert mask_name("王五 (3)") == "王*"
 
     def test_mask_email(self) -> None:
         """验证邮箱地址脱敏规则：用户名保留首尾字符，中间替换为 ***，域名完整保留。"""
