@@ -457,17 +457,20 @@ def _is_major_sensitive_entity(term: str, ent_type: str = "") -> bool:
 
 
 def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
-    """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎.
+    """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎 (Gold Standard Implementation).
 
-    借助 Layer-2 Small-NER (ONNXRuntime / ModelScope / TensorRT) 对文本中的
-    L4/L5 重大高敏疾病(DISEASE), 关联高敏药物(DRUG), 诊疗处置(TREATMENT), 专科机构(HOSPITAL)
-    等实体进行上下文识别与精确定位抹平：
-    1. 遵循 L4_L5_MAJOR_SENSITIVE_PROMPT_GUIDELINE 指南，仅对 L4/L5 重大高敏实体进行脱敏；
-    2. 常规慢性病（如高血压、高脂血症）及常规用药予以保留；
-    3. 兼容智能语法自愈自检，确保语句自洽流畅；
-    4. 支持在 NER 模型未就绪时自动平滑 fallback 降级至 redact_medical_text 规则引擎。
+    推荐黄金架构：【全上下文 NER 实体抽取 -> L4/L5 重大高敏筛选 -> 实体锚点句法绑定擦除 -> 语法自愈与完全抹平】
+    1. **全上下文 NER 抽取**：保持输入病历文本完整，直接调用 NER 模型进行实体抽取 (100% 保持神经网络上下文)；
+    2. **L4/L5 准则筛选**：遵循 L4_L5_MAJOR_SENSITIVE_PROMPT_GUIDELINE 准则，筛选出 L4/L5 重大高敏实体 (保留高血压/高脂血症等常规慢病)；
+    3. **句法绑定擦除**：以 NER 定位的实体为锚点，结合剂量用法、血清学滴度、基因突变修饰及就诊短语进行结构化擦除；
+    4. **语法自愈与 Purge**：调用 _clean_orphan_syntax 自愈清理断句残渣与敏感文件路径，若全句无主语病因则 Purge 抹平为 ""；
+    5. **Fast-Path 与降级兜底**：具备 Fast-Path (<1ms) 与 NER 未就绪时的平滑 fallback 规则降级能力。
     """
     if not text:
+        return text
+
+    # 0. Fast-Path 前置校验：若文本不含任何 L4/L5 敏感词及脱敏标签，快速原样返回 (<1ms)，避免误篡改干净文本
+    if not _TERMS_ONLY_PATTERN.search(text) and not _MASKED_LABEL_RE.search(text):
         return text
 
     entities = []
@@ -479,7 +482,7 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         except Exception:
             entities = []
 
-    # 筛选并仅保留 L4/L5 重大高敏级别的实体，过滤剔除高血压、高脂血症等常规 L1/L2 慢病/常规用药
+    # 1. 筛选并仅保留 L4/L5 重大高敏级别的实体，过滤剔除高血压、高脂血症等常规 L1/L2 慢病/常用药
     sensitive_entities = [
         e for e in entities
         if isinstance(e, dict)
@@ -487,7 +490,7 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         and _is_major_sensitive_entity(e.get("text", ""), str(e.get("type") or e.get("label") or ""))
     ]
 
-    # 如果 NER 成功提取了重大高敏实体项，执行纯 NER 神经网络驱动的实体级精准擦除 (不落入规则引擎)
+    # 2. 如果 NER 成功提取了重大高敏实体，在完整原文上执行实体锚点驱动的上下文句法绑定擦除
     if sensitive_entities:
         s = text
         sorted_entities = sorted(
@@ -496,9 +499,12 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
             reverse=True,
         )
 
+        # 优先同步擦除文本中关联的死因、基因检测突变、血清学滴度短语
+        s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
+        s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
+
         for ent in sorted_entities:
             term = ent.get("text", "").strip()
-            # 兼容两种实体 schema：ner_adapter 返回 "label"，其他引擎可能返回 "type"
             ent_type = str(ent.get("type") or ent.get("label") or "").upper()
             if not term or len(term) < 2:
                 continue
@@ -506,20 +512,20 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
             quoted_term = rf"['\"“‘'”’]?{re.escape(term)}['\"”’]?"
 
             if any(t in ent_type for t in ["DRUG", "MED", "CHEM"]):
-                # NER 识别出药物/化学品：连同剂量用法及控制症状擦除
+                # NER 识别出药物：连同剂量用法及控制症状短语绑定擦除
                 pat = rf"(?:长期|定期|口服|服用|给予|使用|予|遵医嘱)?\s*{quoted_term}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)?"
                 s = re.sub(pat, "", s, flags=re.IGNORECASE)
             elif any(t in ent_type for t in ["HOSPITAL", "ORG", "LOC"]):
-                # NER 识别出医疗机构/组织：擦除就诊短语
-                pat = rf"(?:曾?就诊于|就诊于|收治于|转诊至)\s*{quoted_term}\s*(?:，|,|。|；|;)?"
+                # NER 识别出医疗机构/组织：连同就诊短语绑定擦除
+                pat = rf"(?:曾?就诊于|就诊于|收治于|转诊至|住院于|门诊于)\s*{quoted_term}\s*(?:，|,|。|；|;)?"
                 s = re.sub(pat, "", s, flags=re.IGNORECASE)
             else:
-                # NER 识别出 DISEASE/TREATMENT/SYMPTOM 等：做实体级剥离
+                # NER 识别出 DISEASE/TREATMENT/SYMPTOM 等：做实体级精准剥离与列表顿号自愈
                 pat_paired = rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){quoted_term}\s*[、,，]\s*"
                 s = re.sub(pat_paired, r"\1", s, flags=re.IGNORECASE)
                 s = re.sub(quoted_term, "", s)
 
         return _clean_orphan_syntax(s)
 
-    # 仅当 NER 未识别出任何重大高敏实体时，平滑降级至规则引擎
+    # 3. 当 NER 未识别出实体（或推断异常）时，平滑降级由规则引擎兜底处理
     return _clean_orphan_syntax(redact_medical_text(text))
