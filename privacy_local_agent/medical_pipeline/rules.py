@@ -1,4 +1,10 @@
-"""医疗分类分级规则与 L4/L5 级词库模块 / Medical Classification Rules & L4/L5 Terminology Dictionary.
+"""医疗分类分级规则与 L4/L5 级脱敏引擎模块 / Medical Privacy Rules & Redaction Engine.
+
+采用 【🥇 动态字典 + 句法正则表达式 (Dynamic Dictionary & Regex Engine)】 核心架构：
+1. **动态字典 (Dynamic Dictionaries)**：分层分类维护 PII 别名字典与 L4/L5 重大高敏词库（涵盖 HIV、精神障碍、遗传缺陷、性病、恶性肿瘤、病毒性肝炎、重度器官损害等）；
+2. **Fast-Path 前置校验**：词库自动编译为长词优先正则，针对干净文本实现 <1ms 超低延迟原样放行，零篡改零误伤；
+3. **句法正则表达式 (Clause Grammar Patterns)**：高精度匹配服药剂量频次、血清学滴度、基因检测突变、死因重构、就诊机构及列表顿号；
+4. **语法自愈流水线 (_clean_orphan_syntax)**：自动消除断句残渣、悬空连词/介词/标点，对仅剩无主语状语从句执行 Purge to Empty 干净抹平。
 """
 
 from __future__ import annotations
