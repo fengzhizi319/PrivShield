@@ -335,9 +335,14 @@ export async function concurrencyTest(req: ConcurrencyTestRequest): Promise<Conc
  * Medical privacy pipeline: classifies & desensitizes medical records or data1.csv.
  */
 export async function runMedicalPipeline(req: MedicalPipelineRequest = {}): Promise<MedicalPipelineResponse> {
-  return request<MedicalPipelineResponse>('/api/medical_pipeline', {
+  const raw = await request<any>('/api/medical_pipeline', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
+  // 若代理后端包装在 raw.data 中，透明取内层 data 字段；否则取 raw 本身
+  if (raw && typeof raw === 'object' && 'data' in raw && raw.data && typeof raw.data === 'object' && 'summary' in raw.data) {
+    return raw.data as MedicalPipelineResponse;
+  }
+  return raw as MedicalPipelineResponse;
 }

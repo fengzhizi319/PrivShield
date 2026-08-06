@@ -99,29 +99,29 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
       )}
 
       {/* 统计指标面板 */}
-      {result && (
+      {result && result.summary && (
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <p className="text-xs font-medium text-gray-500">总处理记录数</p>
-            <p className="mt-1 text-2xl font-extrabold text-gray-900">{result.summary.total_records}</p>
+            <p className="mt-1 text-2xl font-extrabold text-gray-900">{result.summary?.total_records ?? 0}</p>
           </div>
           <div className="rounded-xl border border-red-200 bg-red-50/50 p-4 shadow-sm">
             <p className="text-xs font-medium text-red-600">L5 级极高风险记录</p>
-            <p className="mt-1 text-2xl font-extrabold text-red-700">{result.summary.l5_records_count}</p>
+            <p className="mt-1 text-2xl font-extrabold text-red-700">{result.summary?.l5_records_count ?? 0}</p>
           </div>
           <div className="rounded-xl border border-orange-200 bg-orange-50/50 p-4 shadow-sm">
             <p className="text-xs font-medium text-orange-600">L4 级高风险记录</p>
-            <p className="mt-1 text-2xl font-extrabold text-orange-700">{result.summary.l4_records_count}</p>
+            <p className="mt-1 text-2xl font-extrabold text-orange-700">{result.summary?.l4_records_count ?? 0}</p>
           </div>
           <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 shadow-sm">
             <p className="text-xs font-medium text-blue-600">单条脱敏 PII 字段</p>
-            <p className="mt-1 text-2xl font-extrabold text-blue-700">{result.summary.sanitized_pii_fields_per_record} 列</p>
+            <p className="mt-1 text-2xl font-extrabold text-blue-700">{result.summary?.sanitized_pii_fields_per_record ?? 0} 列</p>
           </div>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm col-span-2">
             <p className="text-xs font-medium text-emerald-700">合规保障承诺</p>
             <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-emerald-800">
               <Icon name="check" className="h-4 w-4 text-emerald-600" />
-              100% 抹平 L4/L5 原始高危病史词汇 (耗时 {result.summary.duration_ms} ms)
+              100% 抹平 L4/L5 原始高危病史词汇 (耗时 {result.summary?.duration_ms ?? 0} ms)
             </p>
           </div>
         </div>
@@ -140,7 +140,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
               }`}
             >
               <Icon name="activity" className="h-4 w-4" />
-              1. 数据分类分级报告 ({result.classification_report.length} 条)
+              1. 数据分类分级报告 ({(result.classification_report ?? []).length} 条)
             </button>
             <button
               onClick={() => setActiveTab('sanitized')}
@@ -159,7 +159,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
           {activeTab === 'report' && (
             <div className="flex-1 overflow-y-auto p-4">
               <div className="flex flex-col gap-3">
-                {result.classification_report.map((rep: MedicalRecordReport) => {
+                {(result.classification_report ?? []).map((rep: MedicalRecordReport) => {
                   const isExpanded = expandedRecord === rep.record_index;
                   return (
                     <div
@@ -238,7 +238,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                   <thead className="bg-gray-100 text-gray-700 sticky top-0">
                     <tr>
                       <th className="px-3 py-2.5 font-bold">#</th>
-                      {Object.keys(result.sanitized_data[0] || {}).map((col) => (
+                      {Object.keys((result.sanitized_data ?? [])[0] || {}).map((col) => (
                         <th key={col} className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
                           {col}
                         </th>
@@ -246,7 +246,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
-                    {result.sanitized_data.map((row, idx) => (
+                    {(result.sanitized_data ?? []).map((row, idx) => (
                       <tr key={idx} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-bold text-gray-400">{idx + 1}</td>
                         {Object.entries(row).map(([col, val]) => {
