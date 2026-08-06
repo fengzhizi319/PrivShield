@@ -81,11 +81,15 @@ primitives:
     # 默认敏感等级（未命中任何规则时的兜底级别）
     default_level: "L3"
 
+    # 脱敏抹平默认模式："redact" (无痕彻底抹平) 或 "mask" (显式标签掩码)
+    mask_mode: "redact"
+
     # 是否启用规则引擎（Layer-1），基于字段名和值模式匹配
     enable_rule_engine: true
 
-    # 是否启用小型 NER 模型（Layer-2），需下载模型文件
-    enable_small_ner: false
+    # 是否启用小型 NER 模型（Layer-2），优先开启 TensorRT 极致 GPU 加速引擎
+    enable_small_ner: true
+    prefer_tensorrt: true
 
     # 是否启用本地 LLM/VLM（Layer-3），需 GPU 和模型文件
     enable_llm: false

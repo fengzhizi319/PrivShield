@@ -71,3 +71,50 @@ L4_PATTERNS: list[tuple[re.Pattern, str]] = [
      f"[L4-{_L4_REPLACEMENT_MAP.get(cat, cat)}-SENSITIVE-MASKED]")
     for cat, terms in L4_TERMS_MAP.items()
 ]
+
+# ---------------------------------------------------------------------------
+# 无痕抹平模式 (Redaction / Purge Mode) 句法重构与彻底擦除正则引擎
+# ---------------------------------------------------------------------------
+_ALL_L4_L5_TERMS = sorted(
+    [term for terms in list(L5_TERMS_MAP.values()) + list(L4_TERMS_MAP.values()) for term in terms],
+    key=len,
+    reverse=True,
+)
+
+_TERMS_OR = "|".join([re.escape(t) for t in _ALL_L4_L5_TERMS])
+
+_REDACT_CAUSE_DEATH_PATTERN = re.compile(rf"因\s*(?:{_TERMS_OR})\s*(去世|死于)", re.IGNORECASE)
+_REDACT_SUFFER_DEATH_PATTERN = re.compile(rf"(?:患有?|确诊|患)\s*(?:{_TERMS_OR})\s*(去世|死于)", re.IGNORECASE)
+_REDACT_PREFIX_PATTERN = re.compile(rf"(?:因|患有?|确诊|患|有)\s*(?:{_TERMS_OR})\s*(?:病史|史)?", re.IGNORECASE)
+_REDACT_SOLO_PATTERN = re.compile(rf"(?:{_TERMS_OR})", re.IGNORECASE)
+_CLEANUP_PUNCTUATION_PATTERN = re.compile(r"([，。；：,;\s])\1+")
+_CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,])\s*([。;；])")
+
+
+def redact_medical_text(text: str) -> str:
+    """无痕抹平算法 (Redaction/Purge Mode).
+
+    将输入医疗病历文本中的 L4/L5 特高敏感病史词汇连同与其绑定的介词/动词前缀一并完全擦除，
+    并重构句法，修复冗余标点，使读者无法得知原句曾提及任何敏感病史。
+    """
+    if not text:
+        return text
+
+    s = text
+    # 1. 优先替换死因相关句法：“因恶性肿瘤去世” -> “去世”
+    s = _REDACT_CAUSE_DEATH_PATTERN.sub(r"\1", s)
+    s = _REDACT_SUFFER_DEATH_PATTERN.sub(r"\1", s)
+
+    # 2. 擦除“患有.../有...病史/因...”句法短语与单独术语
+    s = _REDACT_PREFIX_PATTERN.sub("", s)
+    s = _REDACT_SOLO_PATTERN.sub("", s)
+
+    # 3. 标点与格式清洗：消除连续多余标点与空子句
+    s = _CLEANUP_PUNCTUATION_PATTERN.sub(r"\1", s)
+    s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
+
+    # 4. 去除可能产生的开局或结尾孤立标点
+    s = re.sub(r"^[，,]\s*", "", s)
+
+    return s
+

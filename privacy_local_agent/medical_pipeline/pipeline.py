@@ -13,7 +13,7 @@ from privacy_local_agent.dynclassification import DynClassificationService
 from privacy_local_agent.dynclassification.image_redaction import IMAGE_REDACTION_FAILURE
 from privacy_local_agent.privacy.masking import mask_value
 
-from .rules import L4_PATTERNS, L5_PATTERNS, PII_FIELD_RULES
+from .rules import L4_PATTERNS, L5_PATTERNS, PII_FIELD_RULES, redact_medical_text
 
 IMAGE_FAILURE = IMAGE_REDACTION_FAILURE
 
@@ -72,20 +72,24 @@ class MedicalPrivacyPipeline:
         self._sanitized_cache: dict[tuple[str, str], str] = {}
 
     @staticmethod
-    def _medical_text_sanitizer(field_name: str, text: str, final_level: str) -> str:
+    def _medical_text_sanitizer(field_name: str, text: str, final_level: str, mode: str = "redact") -> str:
         """医疗领域文本脱敏回调（注入到 DynClassificationService）。
 
-        应用 L4/L5 词库替换，并对中高敏感度字段应用 PII 掩码。
+        默认采用无痕抹平模式 (Redaction/Purge Mode)：彻底擦除 L4/L5 敏感病史与关联句法介词，
+        不留任何形如 [L4-xxx] 的提示性标志，避免读者推断出原始敏感病史。
+        若 mode=="mask" 则回退为显式标签掩码模式。
         """
-        # 先应用 L5 替换，再应用 L4 替换
-        sanitized_text: str = text
-        for pat, replacement in L5_PATTERNS:
-            sanitized_text = pat.sub(replacement, sanitized_text)
-        for pat, replacement in L4_PATTERNS:
-            sanitized_text = pat.sub(replacement, sanitized_text)
+        if mode == "mask":
+            sanitized_text: str = text
+            for pat, replacement in L5_PATTERNS:
+                sanitized_text = pat.sub(replacement, sanitized_text)
+            for pat, replacement in L4_PATTERNS:
+                sanitized_text = pat.sub(replacement, sanitized_text)
+        else:
+            # 默认无痕抹平模式 (Redaction/Purge Mode)
+            sanitized_text = redact_medical_text(text)
 
-        # 仅对明确的个人信息字段应用 PII 掩码；临床文本已经通过上面的
-        # L4/L5 抽象标签完成抹平，不能再用默认策略遮盖标签本身。
+        # 仅对明确的个人信息字段应用 PII 掩码
         if field_name in PII_FIELD_RULES:
             return _mask_string(field_name, sanitized_text)
 
