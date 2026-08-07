@@ -10,6 +10,7 @@ import type { MedicalFieldClassification, MedicalPipelineResponse, MedicalRecord
 import { runYibaoPipeline } from '@/api/client';
 import { Icon } from '@/components/icons';
 import { getErrorMessage } from '@/utils/error';
+import { getFieldDisplayName } from '@/utils/fieldLabels';
 
 interface YibaoPipelinePanelProps {
   agentUrl?: string;
@@ -61,10 +62,7 @@ export default function YibaoPipelinePanel({ agentUrl }: YibaoPipelinePanelProps
   const filteredRecords = result?.classification_report?.filter((r: MedicalRecordReport) => {
     if (activeScenario === 'l5') return r.max_level === 'L5';
     if (activeScenario === 'l4') return r.max_level === 'L4';
-    if (activeScenario === 'pii') {
-      return (r.pii_fields_detected && r.pii_fields_detected.length > 0) ||
-        r.field_details?.some((f: MedicalFieldClassification) => f.sanitized_value_rule !== undefined);
-    }
+    if (activeScenario === 'pii') return (r.pii_fields_detected?.length ?? 0) > 0;
     return true;
   }) || [];
 
@@ -129,16 +127,35 @@ export default function YibaoPipelinePanel({ agentUrl }: YibaoPipelinePanelProps
           </div>
           <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 shadow-sm">
             <p className="text-xs font-medium text-blue-600">医保 PID 掩码字段</p>
-            <p className="mt-1 text-2xl font-extrabold text-blue-700">4 列/条</p>
+            <p className="mt-1 text-2xl font-extrabold text-blue-700">
+              {result.summary?.sanitized_pii_fields_per_record ?? 0} 列/条
+            </p>
           </div>
-          <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-4 shadow-sm col-span-2">
-            <p className="text-xs font-medium text-cyan-700">安全防护保证 (Guaranteed)</p>
-            <div className="mt-1 flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-xs font-bold text-white">
-                <Icon name="check" className="h-3.5 w-3.5" /> 100% 合格
-              </span>
-              <span className="text-xs text-cyan-900 font-medium">无高敏词泄漏</span>
-            </div>
+          <div className={`rounded-xl border p-4 shadow-sm col-span-2 ${
+            result.summary?.guarantee_no_l4_l5_raw_data
+              ? 'border-cyan-200 bg-cyan-50/50'
+              : 'border-red-300 bg-red-50/50'
+          }`}>
+            <p className={`text-xs font-medium ${result.summary?.guarantee_no_l4_l5_raw_data ? 'text-cyan-700' : 'text-red-700'}`}>
+              安全防护保证 (Guaranteed)
+            </p>
+            {result.summary?.guarantee_no_l4_l5_raw_data ? (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-xs font-bold text-white">
+                  <Icon name="check" className="h-3.5 w-3.5" /> 100% 合格
+                </span>
+                <span className="text-xs text-cyan-900 font-medium">无高敏词泄漏</span>
+              </div>
+            ) : (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
+                  合规校验未通过
+                </span>
+                <span className="text-xs text-red-900 font-medium">
+                  打码失败 {result.summary?.redaction_failures ?? 0} 处 / 门禁整值删除 {result.summary?.fail_safe_triggered_fields ?? 0} 字段
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -268,7 +285,7 @@ export default function YibaoPipelinePanel({ agentUrl }: YibaoPipelinePanelProps
                               <tbody className="divide-y divide-gray-100 bg-white">
                                 {rec.field_details.map((fieldInfo: MedicalFieldClassification) => (
                                   <tr key={fieldInfo.field_name} className="hover:bg-cyan-50/30">
-                                    <td className="px-3 py-2.5 font-mono font-medium text-cyan-900">{fieldInfo.field_name}</td>
+                                    <td className="px-3 py-2.5 font-mono font-medium text-cyan-900">{getFieldDisplayName(fieldInfo.field_name)}</td>
                                     <td className="px-3 py-2.5">
                                       <span className={`rounded border px-1.5 py-0.5 font-bold ${levelBadgeCls(fieldInfo.level)}`}>
                                         {fieldInfo.level}
@@ -314,13 +331,13 @@ export default function YibaoPipelinePanel({ agentUrl }: YibaoPipelinePanelProps
                   <thead className="bg-gray-100 text-gray-700 font-bold">
                     <tr>
                       <th className="px-3 py-2 text-left">#</th>
-                      <th className="px-3 py-2 text-left">结算流水号</th>
-                      <th className="px-3 py-2 text-left">人员 PID</th>
-                      <th className="px-3 py-2 text-left">性别</th>
-                      <th className="px-3 py-2 text-left">入院科室</th>
-                      <th className="px-3 py-2 text-left">ICD-10 编码</th>
-                      <th className="px-3 py-2 text-left">脱敏后诊断名称</th>
-                      <th className="px-3 py-2 text-left">入院病情</th>
+                      <th className="px-3 py-2 text-left">{getFieldDisplayName('insurance_settlement_id')}</th>
+                      <th className="px-3 py-2 text-left">{getFieldDisplayName('person_id')}</th>
+                      <th className="px-3 py-2 text-left">{getFieldDisplayName('gender')}</th>
+                      <th className="px-3 py-2 text-left">{getFieldDisplayName('admission_dept')}</th>
+                      <th className="px-3 py-2 text-left">{getFieldDisplayName('icd10_code')}</th>
+                      <th className="px-3 py-2 text-left">{getFieldDisplayName('diagnosis_name')}</th>
+                      <th className="px-3 py-2 text-left">{getFieldDisplayName('admission_condition')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 bg-white">
@@ -331,7 +348,7 @@ export default function YibaoPipelinePanel({ agentUrl }: YibaoPipelinePanelProps
                         <td className="px-3 py-2.5 font-mono text-blue-700 font-bold">{r.person_id}</td>
                         <td className="px-3 py-2.5 text-gray-700">{r.gender}</td>
                         <td className="px-3 py-2.5 text-gray-700">{r.admission_dept}</td>
-                        <td className="px-3 py-2.5 font-mono text-purple-700">{r.icd10_code}</td>
+                        <td className="px-3 py-2.5 font-mono text-purple-700">{r.icd10_code || <span className="text-gray-400 italic">[已抹平]</span>}</td>
                         <td className="px-3 py-2.5 font-bold text-gray-900 max-w-sm truncate">{r.diagnosis_name || <span className="text-gray-400 italic">[已零痕迹抹平]</span>}</td>
                         <td className="px-3 py-2.5 text-gray-700">{r.admission_condition}</td>
                       </tr>
