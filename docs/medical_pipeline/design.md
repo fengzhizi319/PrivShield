@@ -134,6 +134,50 @@ class MedicalPrivacyPipeline:
 
 ---
 
+### 3.5 技术代码实现与正则架构 (Technical Implementation & Pattern Architecture)
+
+> **对应标准规范**: [`redaction_algorithm_specification_v2.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/medical_pipeline/redaction_algorithm_specification_v2.md)
+
+为了支持标准规范中定义的治理原则与 8 步脱敏流水线，底层 Python 代码实现了精细的模块划分、正则表达式预编译与句法自愈管线。
+
+#### 1. 关键 Python 函数与方法签名
+
+| 模块文件 | 函数/方法 | 代码职责说明 |
+|---|---|---|
+| `rules.py` | `redact_medical_text(text: str) -> str` | 规则脱敏入口函数，按 8 步编排顺序依次执行正则重构与擦除 |
+| `rules.py` | `_clean_orphan_syntax(s: str) -> str` | 语法自愈函数，清理擦除敏感实体后残存的孤立介词、连词、悬空动词与死标点 |
+| `rules.py` | `_death_age_replace(match: re.Match) -> str` | 死因年龄重构回调，匹配包含年龄的死因句式，保留死因动词并执行年龄 K-匿名 |
+| `rules.py` | `_death_replace(match: re.Match) -> str` | 无年龄死因重构回调，将捕获的复合死因与并发症句式重构为"因病去世" |
+| `pipeline.py` | `MedicalPrivacyPipeline._contains_high_risk_text(text)` | 三级门禁强扫函数，原文/全角归一化/去噪后扫描 L4/L5 模式，触发 Fail-Safe 整值替换 |
+| `service.py` | `DynClassificationService._compute_sanitized_value()` | 动态分类内核脱敏算子，挂载 Fail-Safe 门禁并返回安全 sanitized_value |
+| `ner_engines.py` | `_chunk_text(text, max_chunk_len=120)` | 超长文本分句切片静态工具，基于自然标点分句与 120 字符带 20 字符重叠的滑动窗口 |
+
+#### 2. 底层预编译正则表达式对象 (`privacy_local_agent/medical_pipeline/rules.py`)
+
+代码中将高频句法规则预编译为全局 `Pattern` 对象，以实现微秒级高性能匹配：
+
+* **死因重构正则组**：
+  * `_REDACT_DEATH_ACTION`：`r"(?:去世|死于|离世|殁于|身亡于|病逝于|不幸身亡|宣告不治|逝世)"`
+  * `_REDACT_CAUSE_DEATH_PATTERN`：匹配 `(?:因|由于|死于|殁于|身亡于|病逝于|离世于|因为|由) [高敏病名] (破裂出血导致|并发症导致|抢救无效)? (去世|死于...)?`
+  * `_REDACT_DEATH_WITH_AGE_PATTERN`：匹配 `(身亡于|病逝于|死于|殁于|离世于|去世于|因|由于) [高敏病名] (50岁)`，提取组 1 动作词与组 2 年龄数字。
+* **四柱特征句法正则组**：
+  * `_REDACT_MEDICATION_FULL_PATTERN`：特异性用药与处置完整句法擦除正则（结合 `_MED_PREFIX` 前缀与 `_MED_SUFFIX` 后缀）
+  * `_REDACT_GENETIC_CLAUSE_PATTERN`：遗传缺陷与 CAG 重复序列擦除正则
+  * `_REDACT_STD_FEATURE_CLAUSE_PATTERN`：性传播疾病（梅毒/TPPA/RPR/醋酸白/CO2激光）综合句法正则
+  * `_REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN`：病毒性肝炎载量（HBV-DNA）、肝穿刺活检（G3S4）擦除正则
+* **高敏门禁检测正则组**：
+  * `L5_PATTERNS` / `L4_PATTERNS`：用于 Layer-1 扫描与三级门禁强扫的高敏模式列表
+  * `_TERMS_FIRST_CHARS_PATTERN`：词库首字符预筛正则，用于快速路径（Fast-Path）短路跳过干净文本
+
+#### 3. 代码级 ReDoS 灾难性回溯切断机制
+
+为了防止恶意构造的长空白串在正则组合槽位间引发灾难性回溯（ReDoS），代码层采取了三维防护：
+1. **连续水平空白折叠**：在 `redact_medical_text` 与 `_clean_orphan_syntax` 入口处执行 `s = re.sub(r"[ \t]{2,}", " ", s)`，将所有连续空格折叠为单空格，使可选组间的 `\s*` 回溯空间降为常数；
+2. **有界字符量词**：在 `_flex_escape` 词库编译中，字符间分隔符匹配使用有界量词 `[\s.\-_...]{0,1}`，确保线性匹配复杂度；
+3. **超长文本降级守卫**：当 `len(text) > 50,000` 时，自动降级为单次替换函数 `_redact_terms_only`，切断复杂的句法回溯。
+
+---
+
 ### 3.4 代理后端与 Frontend 跑通路线
 
 1. **Agent 接口层**：
