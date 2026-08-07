@@ -707,3 +707,49 @@ class TestChunkedMaskRecords:
         results = list(chunked_mask_records(gen()))
         assert len(results) == 2
         assert results[0][0]["mobile"] == "138****5678"
+
+
+class TestAdvancedOperators:
+    """高级脱敏算子测试 (FPE, Date Offset, Column Shuffle)。"""
+
+    def test_fpe_encrypt_numeric(self) -> None:
+        """验证保留格式加密 (FPE)：保持长度、格式形态一致且可重复相等匹配。"""
+        from privacy_local_agent.privacy.masking import fpe_encrypt_numeric
+
+        id_card = "110101199001011234"
+        encrypted = fpe_encrypt_numeric(id_card)
+        # 1. 验证长度一致
+        assert len(encrypted) == len(id_card)
+        # 2. 验证加密后依然全为数字形态
+        assert encrypted.isdigit()
+        # 3. 验证值与原文不同（被置换加密）
+        assert encrypted != id_card
+        # 4. 验证确定性与相等比较（同 Key 下两次加密结果一致）
+        assert fpe_encrypt_numeric(id_card) == encrypted
+
+    def test_random_date_offset(self) -> None:
+        """验证日期统一随机偏移 (Random Date Offset)：格式保持且时间序列差不变。"""
+        from privacy_local_agent.privacy.masking import random_date_offset
+
+        date_1 = "2025-03-15"
+        date_2 = "2025-03-20"
+        
+        # 统一偏移 10 天
+        offset_1 = random_date_offset(date_1, offset_days=10)
+        offset_2 = random_date_offset(date_2, offset_days=10)
+        
+        assert offset_1 == "2025-03-25"
+        assert offset_2 == "2025-03-30"
+
+    def test_shuffle_column(self) -> None:
+        """验证列洗牌 (Column Shuffle)：打乱映射关系但保持集合全集一致。"""
+        from privacy_local_agent.privacy.masking import shuffle_column
+
+        dept_list = ["肿瘤科", "心内科", "精神科", "皮肤科", "消化科"]
+        shuffled = shuffle_column(dept_list, seed=123)
+        
+        # 1. 验证元素全集一致
+        assert set(shuffled) == set(dept_list)
+        # 2. 验证排列顺序被打乱
+        assert shuffled != dept_list
+

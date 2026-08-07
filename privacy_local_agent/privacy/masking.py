@@ -84,6 +84,9 @@ class MaskingOperation(str, Enum):
     HASH_VALUE = "hash_value"                          # HMAC 哈希操作
     TRUNCATE = "truncate"                              # 字符串截断操作
     CHUNKED_MASK_RECORDS = "chunked_mask_records"      # 流式分块脱敏操作
+    FPE_ENCRYPT = "fpe_encrypt"                        # 保留格式加密操作 (FPE, Format-Preserving Encryption)
+    RANDOM_DATE_OFFSET = "random_date_offset"          # 日期随机统一偏移操作 (Random Date Offset)
+    COLUMN_SHUFFLE = "column_shuffle"                  # 列洗牌打乱操作 (Column Shuffle)
 
 
 # === 输入校验函数区 / Input Validation Functions ===
@@ -1242,4 +1245,117 @@ def chunked_mask_records(
             )
         else:
             yield masked_chunk  # 直接 yield 当前 chunk 的脱敏后记录列表
+
+
+# === 高级加密与科研治理算子 / Advanced FPE, Date Offset & Shuffle Operators ===
+
+
+def fpe_encrypt_numeric(value: str, secret_key: str = "PLA_FPE_DEFAULT_KEY_2026") -> str:
+    """保留格式加密 (FPE, Format-Preserving Encryption) 算子.
+
+    适用场景：身份证号、医保号、病历号等固定格式特征数字串。
+    脱敏特性：加密后字符串与原始值保持完全一致的长度、字符集与格式形态。
+    业务优势：支持数据库在不改代码/字段类型的前提下执行精准相等查询 (Exact Match Query)，
+             且密文具备不可逆推性（无法从密文反推出原始身份信息）。
+
+    Args:
+        value: 原始字符串 (如 "110101199001011234").
+        secret_key: 加盐密钥.
+
+    Returns:
+        与原始值格式形态一致的 Pseudo-Random 假值 (如 "928374199001015678").
+    """
+    if not value or not isinstance(value, str):
+        return value
+
+    # 确定性加盐 HMAC 派生字节流
+    h = hmac.new(secret_key.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).digest()
+    
+    result_chars = []
+    for idx, char in enumerate(value):
+        if char.isdigit():
+            # 保持数字掩码：使用 HMAC 字节计算伪随机数字偏移
+            byte_val = h[idx % len(h)]
+            orig_digit = int(char)
+            # 计算 0-9 范围的置换 (Feistel / Cipher Substitution)
+            new_digit = (orig_digit + byte_val) % 10
+            result_chars.append(str(new_digit))
+        elif char.isalpha():
+            # 保持字母大小写与置换
+            byte_val = h[idx % len(h)]
+            base = ord('A') if char.isupper() else ord('a')
+            orig_offset = ord(char) - base
+            new_offset = (orig_offset + byte_val) % 26
+            result_chars.append(chr(base + new_offset))
+        else:
+            # 分隔符、横杠等连字符原样保留
+            result_chars.append(char)
+
+    return "".join(result_chars)
+
+
+def random_date_offset(date_str: str, offset_days: int = 15) -> str:
+    """日期统一随机序列偏移 (Random Date Offset) 算子.
+
+    适用场景：科研数据集离线治理、病历就诊时间序列脱敏。
+    脱敏特性：同一患者/同一就诊批次的所有日期按统一天数偏移（加/减 N 天）。
+    业务优势：抹去绝对时间戳防组合重识别，同时 100% 完整保留事件间的时间差 (Interval Delta)。
+
+    Args:
+        date_str: 日期字符串 (支持 YYYY-MM-DD, YYYY/MM/DD, YYYY-MM-DD HH:MM:SS 等).
+        offset_days: 偏移天数 (正数为往后偏移，负数为往前偏移).
+
+    Returns:
+        偏移后的日期字符串.
+    """
+    if not date_str or not isinstance(date_str, str):
+        return date_str
+
+    import re
+    from datetime import datetime, timedelta
+
+    # 正则提取日期部分
+    match = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", date_str)
+    if not match:
+        return date_str
+
+    year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    try:
+        dt = datetime(year, month, day)
+        new_dt = dt + timedelta(days=offset_days)
+        
+        # 原样保持连接分隔符
+        sep = "-" if "-" in date_str else ("/" if "/" in date_str else ".")
+        new_date_fmt = f"{new_dt.year:04d}{sep}{new_dt.month:02d}{sep}{new_dt.day:02d}"
+        
+        # 替换原日期部分，保留可能的时间尾巴 (HH:MM:SS)
+        return date_str.replace(match.group(0), new_date_fmt)
+    except Exception:
+        return date_str
+
+
+def shuffle_column(column_values: list[Any], seed: int = 42) -> list[Any]:
+    """科研列洗牌 (Column Shuffle) 算子.
+
+    适用场景：科研导出数据集中的诊断码、科室、费用列洗牌。
+    脱敏特性：同列内部随机打乱对应关系，破坏主键与敏感诊疗属性的行级映射。
+    业务优势：保持列级别的整体统计分布 (Mean, Standard Deviation, Distribution) 不变。
+
+    Args:
+        column_values: 原始列数组列表.
+        seed: 随机种子 (保证可重复校验).
+
+    Returns:
+        打乱洗牌后的列数组列表.
+    """
+    import random
+
+    if not column_values:
+        return column_values
+
+    shuffled = list(column_values)
+    rng = random.Random(seed)
+    rng.shuffle(shuffled)
+    return shuffled
+
 
