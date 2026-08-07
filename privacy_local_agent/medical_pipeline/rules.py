@@ -217,11 +217,11 @@ _FREQ = r"(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?"
 # 支持“因'HIV'导致的并发症去世”、“由于'恶性肿瘤'不幸身亡”、“身亡于'急性心肌梗死'(40岁)”等完整句法重构
 _REDACT_DEATH_ACTION = r"(?:去世|死于|离世|殁于|身亡于|病逝于|不幸身亡|宣告不治|逝世)"
 _REDACT_CAUSE_DEATH_PATTERN = re.compile(
-    rf"(?:不幸)?\s*(?:因|由于|死于|殁于|身亡于|病逝于|离世于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致的并发症|引起的并发症|导致|引起)?\s*{_REDACT_DEATH_ACTION}",
+    rf"(?:不幸)?\s*(?:因|由于|死于|殁于|身亡于|病逝于|离世于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致的并发症|引起的并发症|破裂出血导致|破裂出血引起|破裂出血|出血导致|并发症导致|并发症|抢救无效|导致|引起)?\s*(?:{_REDACT_DEATH_ACTION})?",
     re.IGNORECASE,
 )
 _REDACT_DEATH_WITH_AGE_PATTERN = re.compile(
-    rf"(?:不幸)?\s*(身亡于|病逝于|死于|殁于|离世于|去世于)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*[\(（](\d+)\s*岁[\)）]",
+    rf"(?:不幸)?\s*(?:身亡于|病逝于|死于|殁于|离世于|去世于|因|由于)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:{_REDACT_DEATH_ACTION})?\s*[\(（](\d+)\s*岁[\)）]",
     re.IGNORECASE,
 )
 _REDACT_SUFFER_DEATH_PATTERN = re.compile(
@@ -458,6 +458,7 @@ def _clean_orphan_syntax(s: str) -> str:
     s = re.sub(r"(死于|殁于)\s*[\(（]([^）\)]+)[\)）]", r"\1\2", s)
     s = re.sub(r"(?<=[\u4e00-\u9fa5])患\s*([\(（。；;,，])", r"患病\1", s)
     s = re.sub(r"(?:因|死于|因于)\s*(去世|死于|离世|逝世)", r"因病\1", s)
+    s = re.sub(rf"({_FAMILY_MEMBERS})\s*(?:殁于|死于|身亡于|病逝于|离世于|由)\s*([。；;，,]|(?={_FAMILY_MEMBERS}))", r"\1因病去世\2", s)
     s = re.sub(r"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?))\s*[、,，]\s*", r"\1", s)
 
     # 5.2 单条记录准标识符自适应年龄 K-匿名泛化 (<60岁按3岁区间/age-(age%3)，>=60岁按2岁精细康养区间/age-(age%2))
@@ -541,27 +542,26 @@ def redact_medical_text(text: str) -> str:
     # 仅影响已进入敏感路径的文本（干净文本在上方 Fast-Path 已原样返回，零篡改）。
     s = re.sub(r"[ \t]{2,}", " ", s)
 
-    # 1. 优先擦除 CD4 计数、遗传缺陷、性病及肝炎综合句法
+    def _death_age_replace(match: re.Match) -> str:
+        raw_age = match.group(1)
+        from ..privacy.kano import adaptive_age_hierarchy
+        anon_age = adaptive_age_hierarchy(raw_age, under_60_interval=3, senior_interval=2, output_format="floor")
+        return f"因病去世({anon_age}岁)"
+
+    def _death_replace(match: re.Match) -> str:
+        return "因病去世"
+
+    # 1. 优先重构死因完整句法（因病去世/含年龄泛化）
+    s = _REDACT_DEATH_WITH_AGE_PATTERN.sub(_death_age_replace, s)
+    s = _REDACT_CAUSE_DEATH_PATTERN.sub(_death_replace, s)
+    s = _REDACT_SUFFER_DEATH_PATTERN.sub(_death_replace, s)
+
+    # 2. 擦除 CD4 计数、遗传缺陷、性病及肝炎综合句法
     s = _REDACT_CD4_PATTERN.sub("", s)
     s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
     s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
     s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
     s = _apply_category_generalizations(s)
-
-    def _death_age_replace(match: re.Match) -> str:
-        action = match.group(1) or "身亡于"
-        raw_age = match.group(2)
-        from ..privacy.kano import adaptive_age_hierarchy
-        anon_age = adaptive_age_hierarchy(raw_age, under_60_interval=3, senior_interval=2, output_format="floor")
-        return f"{action}{anon_age}岁"
-
-    def _death_replace(match: re.Match) -> str:
-        action = match.group(0)
-        return "因病去世" if "去世" in action or "离世" in action else "死于"
-
-    s = _REDACT_DEATH_WITH_AGE_PATTERN.sub(_death_age_replace, s)
-    s = _REDACT_CAUSE_DEATH_PATTERN.sub(_death_replace, s)
-    s = _REDACT_SUFFER_DEATH_PATTERN.sub(_death_replace, s)
 
     # 2. 优先擦除完整服药用药句法
     s = _REDACT_MEDICATION_FULL_PATTERN.sub("", s)

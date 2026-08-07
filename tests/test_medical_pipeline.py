@@ -444,6 +444,19 @@ def test_redact_family_history_death_and_paired_clause_syntax_fix() -> None:
     assert res_ner == expected, f"NER 脱敏语病修复不符合预期: {res_ner}"
 
 
+def test_redact_family_death_causes_complex() -> None:
+    """复杂家族死因句法（殁于...50岁、由...破裂出血导致去世）：死因必须自然重构为'因病去世'。"""
+    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+
+    text = "外婆殁于'亨廷顿舞蹈病'(50岁)，伯父由'食管静脉曲张'破裂出血导致去世。母亲患'2型糖尿病'。"
+    res_rule = redact_medical_text(text)
+    res_ner = redact_medical_text_with_ner(text)
+
+    expected = "外婆因病去世(48岁)，伯父因病去世。母亲患'2型糖尿病'。"
+    assert res_rule == expected, f"Rule 结果不符合预期: {res_rule!r}"
+    assert res_ner == expected, f"NER 结果不符合预期: {res_ner!r}"
+
+
 def test_redact_hepatitis_viral_load_and_biopsy_complete_purge() -> None:
     """病毒性肝炎病例：必须擦除 HBV-DNA 病毒载量、肝硬化、肝穿刺活检 G3S4 阶段及检测下限提示，完全抹平为记录。"""
     from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
