@@ -280,13 +280,21 @@ def mask_mobile(value: str) -> str:
 def mask_id_card(value: str) -> str:
     """中国大陆 18 位身份证号脱敏 / China 18-digit ID Card Masking.
 
-    保留前 6 位与后 4 位，中间 8 位替换为 ********。非 18 位原样返回。
+    标准的 18 位身份证号：保留前 6 位与后 4 位，中间 8 位替换为 ********。
+    非 18 位（如 15 位老身份证或变体）：执行安全掩码，绝不原样放行泄漏。
     """
-    # 守卫：中国大陆二代身份证固定 18 位（含末位 X）
-    if len(value) != 18:
-        return value  # 非标准长度原样返回
-    # value[:6]="110101"（地区码）, value[14:]="1234"（顺序码+校验位）
-    return f"{value[:6]}********{value[14:]}"
+    if not value:
+        return value
+    val_clean = value.strip()
+    n = len(val_clean)
+    if n == 18:
+        return f"{val_clean[:6]}********{val_clean[14:]}"
+    elif n >= 10:
+        return f"{val_clean[:3]}{'*' * (n - 7)}{val_clean[-4:]}"
+    elif n >= 4:
+        return f"{val_clean[:1]}{'*' * (n - 2)}{val_clean[-1:]}"
+    else:
+        return "*" * n
 
 
 def mask_name(value: str) -> str:

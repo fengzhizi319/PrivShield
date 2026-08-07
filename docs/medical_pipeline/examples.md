@@ -28,10 +28,12 @@ sample_records = [
 
 output = process_medical_dataset(sample_records)
 print("=== 分类分级报告 ===")
-print(output["classification_report"])
+# 注意：process_medical_dataset 返回 dataclass（MedicalPipelineResult），
+# 使用属性访问而非下标访问
+print(output.classification_report)
 
 print("\n=== 脱敏清洗数据 (零泄露) ===")
-print(output["sanitized_data"])
+print(output.sanitized_data)
 
 
 # 示例 2: 使用 PipelineService 处理 CSV 文件

@@ -10,7 +10,12 @@ from privacy_local_agent.medical_pipeline.pipeline import (
     MedicalPrivacyPipeline,
     process_medical_dataset,
 )
-from privacy_local_agent.medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS, redact_medical_text
+from privacy_local_agent.medical_pipeline.rules import (
+    L4_PATTERNS,
+    L5_PATTERNS,
+    redact_medical_text,
+    redact_medical_text_with_ner,
+)
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "data"))
 from generate_medical_data import gen_id_card, generate_dataset
@@ -429,7 +434,7 @@ def test_redact_family_history_death_and_paired_clause_syntax_fix() -> None:
     res_rule = redact_medical_text(text)
     res_ner = redact_medical_text_with_ner(text, ner_adapter=FamilyMockAdapter())
 
-    expected = "父亲因病去世(65岁)，母亲健在。一弟患'2型糖尿病'。否认其他家族遗传病史。"
+    expected = "父亲因病去世(64岁)，母亲健在。一弟患'2型糖尿病'。否认其他家族遗传病史。"
 
     assert "恶性肿瘤" not in res_rule and "恶性肿瘤" not in res_ner
     assert "精神分裂症" not in res_rule and "精神分裂症" not in res_ner
@@ -490,4 +495,216 @@ def test_sanitize_false_does_not_claim_a_safety_guarantee() -> None:
 
     assert result.sanitized_data[0]["present_illness"] == "HIV 感染"
     assert result.summary["guarantee_no_l4_l5_raw_data"] is False
+
+
+def test_implicit_std_description_redaction() -> None:
+    """验证隐式性病描述（菜花状赘生物、醋酸白试验阳性、HPV 6/11、咪喹莫特、CO2激光）识别为 L4 级并彻底抹平。"""
+    text = (
+        "患者1月前发现外阴及会阴部多发菜花状赘生物，逐渐增多，伴局部轻度瘙痒与异物感。"
+        "醋酸白试验阳性，HPV 6/11低危型阳性。行'CO2激光灼除术'及'咪喹莫特乳膏'局部涂抹。"
+        "胸片详见 data/samples/xray_chest.png。"
+    )
+    res_text = redact_medical_text(text)
+    assert "菜花状赘生物" not in res_text
+    assert "醋酸白试验" not in res_text
+    assert "HPV" not in res_text
+    assert "咪喹莫特" not in res_text
+    assert "CO2激光" not in res_text
+
+    result = process_medical_dataset([
+        {"present_illness": text, "chief_complaint": "外阴多发赘生物伴瘙痒1月"}
+    ])
+    assert result.classification_report[0]["max_level"] == "L4"
+    assert result.sanitized_data[0]["present_illness"] == "胸片详见 data/samples/xray_chest.png。"
+    assert result.sanitized_data[0]["chief_complaint"] == ""
+
+
+def test_implicit_hepatitis_description_redaction() -> None:
+    """验证乙肝隐式表征（HBsAg阳性、HBV-DNA定量、慢性乙型病毒性肝炎、恩替卡韦抗病毒治疗）识别为 L4 级且语法无残渣。"""
+    text1 = (
+        "患者2周前体检发现ALT 120U/L，AST 95U/L，HBsAg阳性。"
+        "进一步检查发现'慢性乙型病毒性肝炎'，HBV-DNA 2.3×10^5 IU/mL。"
+        "目前无发热、黄疸及腹水表现。"
+    )
+    text2 = "建议尽早启动恩替卡韦抗病毒治疗，注意休息，避免劳累及饮酒。"
+
+    res1 = redact_medical_text(text1)
+    assert "HBsAg阳性" not in res1
+    assert "慢性乙型病毒性肝炎" not in res1
+    assert "HBV-DNA" not in res1
+    assert "前发" not in res1  # 严防单个字符 '现' 被误删导致 '发现' 变成 '发'
+    assert not res1.endswith("腹水表。")  # 严防单个字符 '现' 被误删导致 '表现' 变成 '表'
+    assert "腹水表现" in res1
+
+    res2 = redact_medical_text(text2)
+    assert "恩替卡韦" not in res2
+    assert "启动，" not in res2  # 严防孤立动词残渣 '启动，'
+
+    dataset_result = process_medical_dataset([
+        {"present_illness": text1, "treatment_plan": text2}
+    ])
+    assert dataset_result.classification_report[0]["max_level"] == "L4"
+    assert "HBsAg阳性" not in dataset_result.sanitized_data[0]["present_illness"]
+    assert dataset_result.sanitized_data[0]["treatment_plan"] == "注意休息，避免劳累及饮酒。"
+
+
+def test_family_history_cancer_redaction_and_age_cleanup() -> None:
+    """验证家族肿瘤史中 '死于(62岁)' 的括号自愈为 '死于62岁'、'母亲患' 自愈为 '母亲患病' 且擦除消化道肿瘤。"""
+    text = "父亲死于'胃癌'(62岁)，母亲患'乳腺癌'(55岁确诊)。家族中有明显消化道肿瘤聚集倾向。"
+
+    rule_res = redact_medical_text(text)
+    assert rule_res == "父亲死于62岁，母亲患病(54岁确诊)。家族中有明显消化道疾病聚集倾向。"
+
+    ner_res = redact_medical_text_with_ner(text)
+    assert ner_res == "父亲死于62岁，母亲患病(54岁确诊)。家族中有明显消化道疾病聚集倾向。"
+
+
+def test_user_feedback_5_cases_fix() -> None:
+    """验证用户反馈的 5 个典型脱敏案例全流程精准防护与分级。"""
+    # Case 1: 梅毒 (早期隐性梅毒) -> 100% 抹平
+    c1 = "梅毒 (早期隐性梅毒)"
+    assert redact_medical_text(c1) == ""
+    assert redact_medical_text_with_ner(c1) == ""
+
+    # Case 2: HIV感染 (获得性免疫缺陷综合征) -> 100% 抹平 (防止将 HIV 的 IV 当成静脉注射而剩下 H)
+    c2 = "HIV感染 (获得性免疫缺陷综合征)"
+    assert redact_medical_text(c2) == ""
+    assert redact_medical_text_with_ner(c2) == ""
+
+    # Case 3: 长兄身亡于年龄去括号与 40岁 -> 39岁 泛化
+    c3 = "长兄不幸身亡于'急性心肌梗死'(40岁)。否认其他家族病史。"
+    assert redact_medical_text(c3) == "长兄身亡于39岁。否认其他家族病史。"
+    assert redact_medical_text_with_ner(c3) == "长兄身亡于39岁。否认其他家族病史。"
+
+    # Case 4: 乙肝与抗逆转录联合用药擦除
+    c4 = "患者1年前查出'乙型肝炎'，HBV-DNA阳性。目前行'抗逆转录治疗'与'恩替卡韦'口服。"
+    assert redact_medical_text(c4) == ""
+    assert redact_medical_text_with_ner(c4) == ""
+
+    # Case 5: 糖尿病(L2) + 奥氮平片(L5) 混合病例：定级升至 L5，仅擦除奥氮平片，保留糖尿病与二甲双胍
+    c5 = "患者多饮多尿5年，检查出'2型糖尿病'，空腹血糖 11.2mmol/L。服'二甲双胍'及'奥氮平片'。"
+    rule5 = redact_medical_text(c5)
+    ner5 = redact_medical_text_with_ner(c5)
+    expected5 = "患者多饮多尿5年，检查出'2型糖尿病'，空腹血糖 11.2mmol/L。服'二甲双胍'。"
+    assert rule5 == expected5
+    assert ner5 == expected5
+
+
+def test_redos_catastrophic_backtracking_prevention() -> None:
+    """验证 ReDoS 灾难性回溯防护：敏感词触发完整句法管线后，长空白/干扰串必须在线性时间内完成。"""
+    import time
+    # 干净文本：Fast-Path 原样返回（零篡改承诺）
+    clean_input = "患者" + " " * 100 + "xyz"
+    t0 = time.perf_counter()
+    assert redact_medical_text(clean_input) == clean_input.strip()
+    assert (time.perf_counter() - t0) * 1000 < 100.0
+
+    # 真实攻击面：敏感词触发句法擦除管线后，长空白串在各可选组 \s* 槽位间引发组合回溯。
+    # 修复前这些输入在用药/肝炎/病史句法正则上挂死（实测 >10s）；连续空白折叠后应秒级内完成。
+    attacks = [
+        "梅毒，患者" + " " * 100 + "xyz。",
+        "梅毒，患者" + " " * 2000 + "xyz。",
+        "梅毒，行" + " " * 500 + "noise",
+        "梅毒，CD4" + " " * 300 + "xyz",
+        "梅毒，" + " " * 2000 + "x",
+        "梅毒，血清学" + " " * 400 + "y",
+    ]
+    for attack in attacks:
+        t0 = time.perf_counter()
+        res = redact_medical_text(attack)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        assert elapsed_ms < 1000.0, f"ReDoS 匹配超时 ({elapsed_ms:.2f} ms)，输入长度 {len(attack)}"
+        assert "梅毒" not in res
+
+
+def test_all_33_sanitization_variant_bypasses() -> None:
+    """验证全角/字符打散/英文病名/同义词变体全数精准捕获脱敏，无漏网之鱼。"""
+    variants = [
+        ("全角 ＨＩＶ 阳性", "全角阳性"),
+        ("H I V 感染者", ""),  # flex 容忍字符间分隔符，"HIV感染" 复合词整词擦除
+        ("艾 滋 病 患者", ""),
+        ("AIDS 确诊病例", "确诊病例"),
+        ("syphilis 检查报告", "检查报告"),
+        ("奎硫平 20mg 服用", ""),
+        ("蜘蛛痣 及 肝掌 体征", ""),
+        ("CD4 计数 150/μL", ""),
+        # 以下为对抗性变体回归（曾全部绕过词库端到端泄露）
+        ("患者确诊为H I V感染", ""),
+        ("患者确诊为H.I.V感染", ""),
+        ("患者确诊为H-I-V感染", ""),
+        ("患者确诊为H​IV感染", ""),  # 零宽字符插入
+        ("患者确诊A I D S已一年", "患者患病已一年"),
+        ("患者确诊艾-滋-病", "患者患病"),
+        ("患者确诊艾·滋·病", "患者患病"),
+        ("精 神 分 裂病史", ""),
+        ("胃 癌术后", ""),
+        ("患者感染人免疫缺陷病毒", "患者感染"),
+        ("患者为获得性免疫缺陷者", ""),
+        ("ＨＩＶ 阳性", "阳性"),
+        ("患者确诊aizibing", "患者患病"),
+        ("患者有meidu病史", "患者有"),
+        ("患者患有feiai", "患者患病"),
+        ("患者为yigan携带者", "患者为携带者"),
+    ]
+    for raw, expected in variants:
+        res = redact_medical_text(raw)
+        assert res == expected, f"变体 '{raw}' 脱敏输出 '{res}' 不匹配预期 '{expected}'"
+
+
+def test_four_pillar_16_probes_coverage() -> None:
+    """验证四柱强剥离探针（单药/抗精神病/肝硬化体征/CD4计数/肿瘤治疗手段等）全覆盖。"""
+    probes = [
+        "替诺福韦 300mg", "拉米夫定 150mg", "喹硫平 200mg", "阿立哌唑 10mg",
+        "蜘蛛痣", "肝掌", "肝硬化腹水", "门静脉高压", "食管静脉曲张", "脾大", "脾功能亢进",
+        "CD4 细胞", "CD4+ T细胞 180/μL", "硬下疳", "菜花状", "HTT基因",
+        # 以下为审计补充的四柱探针（曾原样泄露）
+        "氨磺必利", "利培酮", "氯氮平", "齐多夫定", "依非韦伦",
+        "苄星青霉素", "干扰素", "病毒载量", "化疗", "放疗", "食管胃底静脉曲张", "门脉高压",
+    ]
+    for probe in probes:
+        res = redact_medical_text(f"患者有 {probe} 表现。")
+        assert probe not in res, f"四柱探针 '{probe}' 泄露在脱敏结果中: {res}"
+
+
+def test_all_8_specification_cases_exact_match() -> None:
+    """验证规范中的 8 个标准 Case 输出一致性。"""
+    cases = [
+        ("Case 1", "患者1月前发现外阴及会阴部多发菜花状赘生物，醋酸白试验阳性。行CO2激光灼除术及咪喹莫特乳膏外用。胸片详见 xray.png。", "胸片详见 xray.png。"),
+        ("Case 2", "患者2周前体检发现ALT 120U/L，AST 95U/L，HBsAg阳性。进一步检查发现'慢性乙型病毒性肝炎'，HBV-DNA 2.3×10^5 IU/mL。建议尽早启动恩替卡韦抗病毒治疗。", "患者2周前体检发现ALT 120U/L，AST 95U/L。"),
+        ("Case 3", "父亲死于'胃癌'(62岁)，母亲患'乳腺癌'(55岁确诊)。家族中有明显消化道肿瘤聚集倾向。", "父亲死于62岁，母亲患病(54岁确诊)。家族中有明显消化道疾病聚集倾向。"),
+        ("Case 4", "患者查出'HIV抗体阳性'，CD4+ T细胞180/μL。行'替诺福韦+拉米夫定'抗逆转录治疗。同住者无感染。", "同住者无感染。"),
+        ("Case 5", "曾就诊于精神卫生中心，诊断为'重度精神分裂症'。存在命令性幻听及保护性约束倾向。", ""),
+        ("Case 6", "基因检测提示'遗传性亨廷顿舞蹈病'(HTT基因CAG重复46次)。四肢舞蹈样动作明显。", ""),
+        ("Case 7", "原发性高血压病史10年，口服硝苯地平控释片30mg qd，血压控制良好。", "原发性高血压病史10年，口服硝苯地平控释片30mg qd，血压控制良好。"),
+        ("Case 8", "一弟因'恶性肿瘤'去世，一妹患'重度精神分裂症'、'2型糖尿病'。", "一弟因病去世，一妹患'2型糖尿病'。"),
+    ]
+    for case_id, raw, expected in cases:
+        res = redact_medical_text(raw)
+        assert res == expected, f"{case_id} 脱敏结果 '{res}' 不符合预期 '{expected}'"
+
+
+def test_ner_path_case4_cd4_and_art_residue_purged() -> None:
+    """回归：NER 引擎路径下 CD4 计数与双联 ART 药物残渣必须被规则镜像句法彻底清除。
+
+    修复前实测：Case 4 经 NER 引擎输出 '180/μL。行+。同住者无感染。'，
+    HIV 可由 CD4 计数 + 双联药物反推（四柱覆盖缺口）。
+    """
+    case4 = "患者查出'HIV抗体阳性'，CD4+ T细胞180/μL。行'替诺福韦+拉米夫定'抗逆转录治疗。同住者无感染。"
+    res = process_medical_dataset([{"present_illness": case4}])
+    out = res.sanitized_data[0]["present_illness"]
+    assert "180" not in out and "CD4" not in out
+    assert "替诺福韦" not in out and "拉米夫定" not in out
+    assert "同住者无感染。" in out
+    assert res.summary["guarantee_no_l4_l5_raw_data"] is True
+
+
+def test_summary_stats_are_measured_not_hardcoded() -> None:
+    """summary 合规统计必须为实测值：实际 PII 字段计数 + fail-safe 门禁触发数 + 输出回扫验证。"""
+    records = [{"name": "张伟", "id_card_no": "110101199003072381", "past_history": "确诊艾滋病"}]
+    res = process_medical_dataset(records)
+    assert res.summary["sanitized_pii_fields_total"] == 2
+    assert res.summary["sanitized_pii_fields_per_record"] == 2
+    assert "fail_safe_triggered_fields" in res.summary
+    assert res.summary["guarantee_no_l4_l5_raw_data"] is True
+
 

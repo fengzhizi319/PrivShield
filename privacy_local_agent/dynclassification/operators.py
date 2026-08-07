@@ -42,6 +42,9 @@ _ID_CARD_CHARS = ["1", "0", "X", "9", "8", "7", "6", "5", "4", "3", "2"]
 # Weight factors for Shanghai medical card 9-digit checksum (first 8 digits participate).
 _SH_MEDICAL_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1]
 
+# regex 算子输入长度上限（256KB）：超长输入截断评估，缓解 ReDoS 放大面。
+_REGEX_MAX_INPUT_LEN = 256 * 1024
+
 
 def _validate_id_card(value: str) -> bool:
     """校验中国大陆 18 位身份证号（GB 11643-1999） / Validate mainland China 18-digit ID card.
@@ -172,6 +175,9 @@ def regex_matcher(value: Any, params: dict[str, Any]) -> bool:
     Performs re.search (not fullmatch) so the pattern can match anywhere in the string.
     执行 re.search（不是 fullmatch），因此模式可以匹配字符串中的任何位置。
 
+    ReDoS 缓解：对匹配输入值施加长度上限（256KB），超长输入截断后评估，
+    缓解恶意/误配规则模式在超长输入上的灾难性回溯放大面。
+
     Args (params):
         pattern: str - 正则表达式模式 / Regular expression pattern
     """
@@ -182,6 +188,9 @@ def regex_matcher(value: Any, params: dict[str, Any]) -> bool:
     pattern = params.get("pattern", "")
     if not pattern:
         return False
+    # ReDoS 缓解：超长输入截断评估（上限 256KB）
+    if len(value) > _REGEX_MAX_INPUT_LEN:
+        value = value[:_REGEX_MAX_INPUT_LEN]
     try:
         # Execute regex search: returns True if pattern matches anywhere in value.
         return bool(re.search(pattern, value))

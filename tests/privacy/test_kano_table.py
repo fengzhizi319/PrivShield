@@ -383,3 +383,24 @@ class TestAnonymizeRecordsBatch:
     def test_anonymize_records_batch_empty_raises(self) -> None:
         with pytest.raises(ValueError, match="records must not be empty"):
             anonymize_records_batch([], ["age"], k=2)
+
+    def test_adaptive_age_hierarchy(self) -> None:
+        """测试单条记录自适应分段年龄泛化：<60岁按3岁区间(减余数)，>=60岁按2岁精细康养区间(减余数)。"""
+        from privacy_local_agent.privacy.kano import adaptive_age_hierarchy
+
+        # < 60 岁：3 岁区间测试 (30, 31, 32 -> 30)
+        assert adaptive_age_hierarchy(30, under_60_interval=3, senior_interval=2, output_format="floor") == "30"
+        assert adaptive_age_hierarchy(31, under_60_interval=3, senior_interval=2, output_format="floor") == "30"
+        assert adaptive_age_hierarchy(32, under_60_interval=3, senior_interval=2, output_format="floor") == "30"
+        assert adaptive_age_hierarchy(28, under_60_interval=3, senior_interval=2, output_format="floor") == "27"
+        assert adaptive_age_hierarchy(59, under_60_interval=3, senior_interval=2, output_format="floor") == "57"
+
+        # >= 60 岁：2 岁精细区间测试 (60, 61 -> 60; 62, 63 -> 62)
+        assert adaptive_age_hierarchy(60, under_60_interval=3, senior_interval=2, output_format="floor") == "60"
+        assert adaptive_age_hierarchy(61, under_60_interval=3, senior_interval=2, output_format="floor") == "60"
+        assert adaptive_age_hierarchy(62, under_60_interval=3, senior_interval=2, output_format="floor") == "62"
+        assert adaptive_age_hierarchy(63, under_60_interval=3, senior_interval=2, output_format="floor") == "62"
+
+        # 范围格式测试 output_format="range"
+        assert adaptive_age_hierarchy(31, under_60_interval=3, senior_interval=2, output_format="range") == "[30-32]"
+        assert adaptive_age_hierarchy(61, under_60_interval=3, senior_interval=2, output_format="range") == "[60-61]"

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import threading
 from pathlib import Path
@@ -28,6 +29,26 @@ from ..dynclassification.validator import validate_rules_dir
 from ..security.auth import require_permission
 
 router = APIRouter(prefix="/v1/dynclassification", tags=["Dynamic Classification"])
+
+
+def _bad_request_on_value_error(func):
+    """将服务层抛出的 ValueError（如非法 domain/standard 名称）转换为 HTTP 400。
+
+    ProfileLoader 对配置名称做白名单校验，非法名称（路径穿越尝试等）抛出
+    ValueError；路由层在此转换为干净的 4xx，避免泄漏为 500。
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+    return wrapper
 
 # 文件路径参数校验的基准目录（默认为服务工作目录）。
 # 所有用户提供的文件路径解析后必须位于该目录内，防止路径遍历攻击。
@@ -110,6 +131,7 @@ class GenerateProfileRequest(BaseModel):
     summary="动态分类分级评估（字段级）",
     dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
 )
+@_bad_request_on_value_error
 def evaluate_field(req: DynEvalFieldRequest):
     svc = get_service()
     svc.loader.check_and_reload()  # 触发轻量级修改检测
@@ -127,6 +149,7 @@ def evaluate_field(req: DynEvalFieldRequest):
     summary="动态分类分级评估（记录级）",
     dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
 )
+@_bad_request_on_value_error
 def evaluate_record(req: DynEvalRecordRequest):
     svc = get_service()
     svc.loader.check_and_reload()
@@ -143,6 +166,7 @@ def evaluate_record(req: DynEvalRecordRequest):
     summary="动态分类分级评估（表格级）",
     dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
 )
+@_bad_request_on_value_error
 def evaluate_table(req: DynEvalTableRequest):
     svc = get_service()
     svc.loader.check_and_reload()
@@ -160,6 +184,7 @@ def evaluate_table(req: DynEvalTableRequest):
     summary="规则预演：对样本数据集执行命中分布分析",
     dependencies=[*SECURITY_DEPS, require_permission("dynclassification:read")],
 )
+@_bad_request_on_value_error
 def dry_run(req: DryRunRequest):
     svc = get_service()
     svc.loader.check_and_reload()

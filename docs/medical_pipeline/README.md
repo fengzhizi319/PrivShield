@@ -41,7 +41,7 @@
 
 1. **阅读需求文档**: 查看 [prd.md](./prd.md) 了解业务场景与敏感等级分级定义。
 2. **理解架构设计**: 阅读 [design.md](./design.md) 掌握算法编排与双重输出逻辑。
-3. **运行数据生成**: 执行 `python scripts/data/generate_medical_data.py --output data/data1.csv` 生成 20 条模拟数据。
+3. **运行数据生成**: 执行 `python scripts/data/generate_medical_data.py --output data/data1.csv --count 100` 生成 100 条模拟数据（与仓库预置样例一致；脚本默认 20 条）。
 4. **代码示例参考**: 查看 [examples.md](./examples.md) 运行 Python SDK 示例脚本或发送 cURL HTTP 请求。
 5. **API 详细契约**: 查阅 [api_reference.md](./api_reference.md) 获取接口模型。
 6. **运行单元测试**: 参阅 [testing.md](./testing.md) 执行 `PYTHONPATH=. pytest tests/test_medical_pipeline.py -v`。

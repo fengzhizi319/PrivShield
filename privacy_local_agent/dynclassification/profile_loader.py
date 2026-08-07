@@ -16,6 +16,7 @@ This module is responsible for loading, caching, hot-reloading rule configuratio
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -35,6 +36,31 @@ from .models import DomainTaxonomy
 from .rule_schema import CompositeRuleDef, DowngradeRuleDef, RuleDef, RuleProfile, StandardDef
 
 logger = get_logger(__name__)
+
+# 配置文件名白名单：仅允许字母/数字/下划线/连字符。
+# domain/standard/taxonomy 名称直接参与 YAML 文件路径拼接，
+# 必须拒绝 ".."、"/"、"." 等字符，防止路径穿越读取任意 YAML（规则注入）。
+_CONFIG_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_config_name(name: str, kind: str) -> str:
+    """校验配置文件名合法性（路径穿越防护）。
+
+    Args:
+        name: 待校验的配置名称（domain / standard / taxonomy）。
+        kind: 配置类别（用于错误信息），如 "domain" / "standard" / "taxonomy"。
+
+    Returns:
+        校验通过的名称原样返回。
+
+    Raises:
+        ValueError: 名称为空或包含白名单外字符（如路径分隔符、点号）时抛出。
+    """
+    if not name or not _CONFIG_NAME_PATTERN.match(name):
+        raise ValueError(
+            f"非法{kind}名称 '{name}': 仅允许字母、数字、下划线和连字符"
+        )
+    return name
 
 
 class ProfileLoader:
@@ -216,7 +242,9 @@ class ProfileLoader:
             FileNotFoundError: 当对应的 YAML 配置文件不存在时抛出 / Raised when the corresponding YAML config file does not exist.
             yaml.YAMLError: 当 YAML 文件格式不合法时抛出 / Raised when the YAML file format is invalid.
             pydantic.ValidationError: 当配置数据与 DomainTaxonomy Schema 不匹配时抛出 / Raised when configuration data mismatches DomainTaxonomy Schema.
+            ValueError: 当名称包含非法字符（路径穿越防护）时抛出 / Raised when the name contains illegal characters (path traversal guard).
         """
+        _validate_config_name(name, "taxonomy")
         with self._lock:
             if name not in self._taxonomy_cache:
                 path = self.rules_dir / "taxonomies" / f"{name}.yaml"
@@ -240,7 +268,9 @@ class ProfileLoader:
             FileNotFoundError: 当对应的 YAML 配置文件不存在时抛出 / Raised when the corresponding YAML config file does not exist.
             yaml.YAMLError: 当 YAML 文件格式不合法时抛出 / Raised when the YAML file format is invalid.
             pydantic.ValidationError: 当配置数据与 RuleProfile Schema 不匹配时抛出 / Raised when configuration data mismatches RuleProfile Schema.
+            ValueError: 当名称包含非法字符（路径穿越防护）时抛出 / Raised when the name contains illegal characters (path traversal guard).
         """
+        _validate_config_name(domain, "domain")
         with self._lock:
             if domain not in self._profile_cache:
                 path = self.rules_dir / "domains" / f"{domain}.yaml"
@@ -264,7 +294,9 @@ class ProfileLoader:
             FileNotFoundError: 当对应的 YAML 配置文件不存在时抛出 / Raised when the corresponding YAML config file does not exist.
             yaml.YAMLError: 当 YAML 文件格式不合法时抛出 / Raised when the YAML file format is invalid.
             pydantic.ValidationError: 当配置数据与 StandardDef Schema 不匹配时抛出 / Raised when configuration data mismatches StandardDef Schema.
+            ValueError: 当名称包含非法字符（路径穿越防护）时抛出 / Raised when the name contains illegal characters (path traversal guard).
         """
+        _validate_config_name(standard_id, "standard")
         with self._lock:
             if standard_id not in self._standard_cache:
                 path = self.rules_dir / "standards" / f"{standard_id}.yaml"

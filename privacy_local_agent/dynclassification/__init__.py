@@ -51,11 +51,16 @@ from .rule_schema import (
 )
 # --- 导入高层服务入口点 / Import the high-level service entry point ---
 from .service import DynClassificationService
+from .domain_registry import DomainStrategyRegistry, TextSanitizerCallback, default_domain_registry
 
 # --- 公共 API 表面：控制通过 `from dynclassification import *` 导出的内容 / Public API surface: controls what is exported via `from dynclassification import *` ---
 __all__ = [
     # Service entry point
     "DynClassificationService",
+    # Domain Strategy Registry
+    "DomainStrategyRegistry",
+    "default_domain_registry",
+    "TextSanitizerCallback",
     # Document-to-YAML generator
     "StandardProfileGenerator",
     # Rule engines
@@ -86,7 +91,7 @@ __all__ = [
     "ClassificationResponse",
     "ConfidencePolicy",
     "EngineLayer",
-    # Rule schema models
+    # Rule schema models",
     "MatcherDef",
     "RuleDef",
     "DowngradeRuleDef",

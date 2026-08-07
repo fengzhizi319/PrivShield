@@ -147,6 +147,54 @@ class KAnonymityRecordResult:
 GeneralizationHierarchy = Callable[[str, int], str]
 
 
+def adaptive_age_hierarchy(
+    value: str | int | float,
+    under_60_interval: int = 3,
+    senior_interval: int = 2,
+    output_format: str = "floor",
+) -> str:
+    """单条记录自适应分段年龄泛化函数 (Adaptive Single-Record Age Generalization).
+
+    针对单条/流式数据中的准标识符年龄 (Age) 执行自适应分段 K-匿名泛化：
+    1. < 60 岁 (青年/中年)：年龄精细度对基础健康建议影响较小，采用较粗区间（默认 3 岁或 5 岁区间），
+       计算公式为：generalized_age = age - (age % under_60_interval)。
+       例如：30, 31, 32 均取余 3，泛化向下取整为 30。
+    2. >= 60 岁 (老年/康养高敏)：考虑年龄对老年康养照护与慢性病建议的高敏感度影响因子，采用较窄精细区间（2 岁区间），
+       计算公式为：generalized_age = age - (age % senior_interval)。
+       例如：60, 61 泛化为 60；62, 63 泛化为 62。
+
+    Args:
+        value: 原始年龄（整数、浮点数或数字字符串）。
+        under_60_interval: 60 岁以下泛化区间大小（默认 3 岁，也可配置为 5 岁）。
+        senior_interval: 60 岁及以上康养高敏泛化区间大小（默认 2 岁）。
+        output_format: "floor" (输出向下对齐数字如 "30") 或 "range" (输出区间如 "[30-32]")。
+
+    Returns:
+        泛化后的年龄字符串。若输入无法解析为数字（脏数据），原样返回。
+    """
+    try:
+        clean_val = str(value).rstrip("岁").strip()
+        age = int(float(clean_val))
+    except (ValueError, TypeError):
+        return str(value)
+
+    if age < 0:
+        return str(value)
+
+    if age < 60:
+        interval = max(1, under_60_interval)
+        start = age - (age % interval)
+    else:
+        interval = max(1, senior_interval)
+        start = age - (age % interval)
+
+    if output_format == "range":
+        end = start + interval - 1
+        return f"[{start}-{end}]" if interval > 1 else str(start)
+    else:
+        return str(start)
+
+
 def age_hierarchy(value: str, level: int) -> str:
     """年龄泛化层次函数。
 

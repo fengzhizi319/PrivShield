@@ -120,24 +120,6 @@ class DynClassificationService:
         # 可插拔文本脱敏回调（由领域模块注入，解耦反向依赖）
         self._text_sanitizer = text_sanitizer
 
-    def _build_funnel(self, engine: ConfigurableRuleEngine) -> ClassificationFunnel:
-        """线程安全地构建分类漏斗实例。"""
-        cache_key = f"{engine.domain}:{engine.standard_id}"
-        with self._service_lock:
-            if cache_key not in self._funnel_cache:
-                self._funnel_cache[cache_key] = ClassificationFunnel(
-                    engine=engine,
-                    ner_adapter=self._ner_adapter or consume_preloaded_adapter("ner"),
-                    llm_adapter=self._llm_adapter or consume_preloaded_adapter("llm"),
-                )
-            return self._funnel_cache[cache_key]
-
-    def _resolve_final_level(self, tags: list[SecurityTag], engine: ConfigurableRuleEngine) -> str:
-        """根据所有命中标签解析最终等级。"""
-        if not tags:
-            return "L0"
-        return max((tag.level for tag in tags), key=lambda l: engine.taxonomy.level_rank.get(l, 0))
-
     def _is_image_input(self, val_str: str) -> bool:
         """判断输入是否为图像（文件路径或 Base64 Data URI）。"""
         from .image_redaction import is_image_input
@@ -186,11 +168,17 @@ class DynClassificationService:
             from .image_redaction import sanitize_image_input
             return sanitize_image_input(val_str)
 
-        # 优先使用领域注入的可插拔文本脱敏回调 (无痕抹平 redaction 引擎)
+        # 1. 优先使用实例上注入的可插拔文本脱敏回调
         if self._text_sanitizer is not None:
             return self._text_sanitizer(field_name, val_str, final_level)
 
-        # 其次使用漏斗已计算的 sanitized_value
+        # 2. 其次查询领域注册表 (DomainStrategyRegistry) 中注册的回调
+        from .domain_registry import default_domain_registry
+        reg_sanitizer = default_domain_registry.get_sanitizer("medical")
+        if reg_sanitizer is not None:
+            return reg_sanitizer(field_name, val_str, final_level, "redact")
+
+        # 3. 使用漏斗已计算的 sanitized_value
         if getattr(funnel_result, "sanitized_value", None):
             return funnel_result.sanitized_value
 
@@ -202,7 +190,9 @@ class DynClassificationService:
     ) -> str:
         """向后兼容的文本脱敏器：尝试使用医疗领域规则。
 
-        若医疗模块不可用，返回原文本。
+        fail-closed 语义：脱敏流程发生任何异常（医疗模块不可用、
+        规则执行失败等）时返回固定失败占位符，绝不回退返回原文，
+        与 DomainStrategyRegistry 路径的 fail-closed 语义对齐。
         """
         try:
             from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
@@ -221,8 +211,12 @@ class DynClassificationService:
 
             return s_text
         except Exception:
-            # 医疗模块不可用，返回原文本
-            return text
+            # fail-closed：脱敏失败绝不泄露原文（如身份证号/病历原文）
+            logger.warning(
+                "text_sanitization_failed",
+                extra={"field_name": field_name, "final_level": final_level},
+            )
+            return "[REDACTION-FAILED]"
 
     def clear_cache(self) -> None:
         """清空分类缓存（规则重载或配置更新时调用）。"""
@@ -268,8 +262,9 @@ class DynClassificationService:
         cache_key = (domain or "", standard or "", field_name, val_key, sanitize)
         cached_resp = self._classification_cache.get(cache_key)
         if cached_resp is not None:
-            # 线程安全：创建副本后再修改 sanitized_value，避免直接修改缓存对象
-            field_result = cached_resp.field_result
+            # 线程安全：深拷贝缓存中的共享可变对象，避免调用方/后续分支
+            # 修改污染缓存（其他并发请求可能正持有同一对象）
+            field_result = cached_resp.field_result.model_copy(deep=True)
             if sanitize and field_result.sanitized_value is None:
                 val_str = str(value) if value is not None else ""
                 field_result = self._compute_sanitized_value(field_name, val_str, field_result)
@@ -293,7 +288,7 @@ class DynClassificationService:
         # The funnel orchestrates: Layer-1 Rule → Layer-2 NER → Layer-3 LLM
         # with confidence policy (conflict detection + decay + LLM arbitration).
         funnel = self._build_funnel(engine)
-        funnel_result, suppressed_tags = funnel.classify_field(field_name, value)
+        funnel_result, suppressed_tags = funnel.classify_field(field_name, value, sanitize=sanitize)
         tags = funnel_result.tags
 
         # Step 3: Use funnel result directly (level, confidence, layer already resolved).
@@ -700,11 +695,14 @@ class DynClassificationService:
         return engine.taxonomy.max_level(*levels)
 
     def _build_funnel(self, engine: ConfigurableRuleEngine) -> ClassificationFunnel:
-        """构建三层漏斗编排器（带缓存）。
+        """构建三层漏斗编排器（带缓存，线程安全）。
 
         根据引擎的 taxonomy 中配置的 confidence_policy 构建漏斗，
         并按需初始化 NER/LLM 适配器（lazy-load，全局单例）。
         Funnel 实例按 engine 的 domain:standard 键缓存，避免高频创建。
+
+        并发保护：double-checked locking——无锁快速路径命中缓存；
+        未命中时持锁构建，避免并发首请求重复构建适配器/重复加载模型。
 
         Args:
             engine: 当前请求对应的规则引擎实例。
@@ -718,52 +716,58 @@ class DynClassificationService:
         if cached is not None:
             return cached
 
-        # 从 taxonomy 获取置信度策略配置
-        policy = self._get_confidence_policy(engine)
+        with self._service_lock:
+            # Double-check：持锁后再次确认，防止并发重复构建
+            cached = self._funnel_cache.get(cache_key)
+            if cached is not None:
+                return cached
 
-        # 按需初始化 NER 适配器（全局单例，避免重复加载模型）
-        ner_adapter = None
-        if policy.enable_ner:
-            if self._ner_adapter is None:
-                taxonomy = engine.taxonomy
-                # fork-after-warmup：优先复用主进程预加载的适配器（COW 共享模型页）
-                preloaded = consume_preloaded_adapter("ner")
-                if preloaded is not None and preloaded._model_path == taxonomy.ner_model_path:
-                    self._ner_adapter = preloaded
-                    logger.info("ner_adapter_reused_preloaded")
-                else:
-                    self._ner_adapter = NerAdapter(
-                        model_path=taxonomy.ner_model_path,
-                        vocab_path=taxonomy.ner_vocab_path,
-                        label_mapping=taxonomy.ner_label_mapping,
-                    )
-            ner_adapter = self._ner_adapter
+            # 从 taxonomy 获取置信度策略配置
+            policy = self._get_confidence_policy(engine)
 
-        # 按需初始化 LLM 适配器（全局单例）
-        llm_adapter = None
-        if policy.enable_llm or policy.enable_llm_arbitration:
-            if self._llm_adapter is None:
-                # fork-after-warmup：优先复用主进程预加载的适配器（COW 共享模型页）
-                preloaded = consume_preloaded_adapter("llm")
-                if preloaded is not None and preloaded._model_path == engine.taxonomy.llm_model_path:
-                    self._llm_adapter = preloaded
-                    logger.info("llm_adapter_reused_preloaded")
-                else:
-                    self._llm_adapter = LlmAdapter(
-                        model_path=engine.taxonomy.llm_model_path,
-                        classify_prompt_template=engine.taxonomy.llm_classify_prompt_template,
-                    )
-            llm_adapter = self._llm_adapter
+            # 按需初始化 NER 适配器（全局单例，避免重复加载模型）
+            ner_adapter = None
+            if policy.enable_ner:
+                if self._ner_adapter is None:
+                    taxonomy = engine.taxonomy
+                    # fork-after-warmup：优先复用主进程预加载的适配器（COW 共享模型页）
+                    preloaded = consume_preloaded_adapter("ner")
+                    if preloaded is not None and preloaded._model_path == taxonomy.ner_model_path:
+                        self._ner_adapter = preloaded
+                        logger.info("ner_adapter_reused_preloaded")
+                    else:
+                        self._ner_adapter = NerAdapter(
+                            model_path=taxonomy.ner_model_path,
+                            vocab_path=taxonomy.ner_vocab_path,
+                            label_mapping=taxonomy.ner_label_mapping,
+                        )
+                ner_adapter = self._ner_adapter
 
-        funnel = ClassificationFunnel(
-            engine=engine,
-            taxonomy=engine.taxonomy,
-            confidence_policy=policy,
-            ner_adapter=ner_adapter,
-            llm_adapter=llm_adapter,
-        )
-        self._funnel_cache[cache_key] = funnel
-        return funnel
+            # 按需初始化 LLM 适配器（全局单例）
+            llm_adapter = None
+            if policy.enable_llm or policy.enable_llm_arbitration:
+                if self._llm_adapter is None:
+                    # fork-after-warmup：优先复用主进程预加载的适配器（COW 共享模型页）
+                    preloaded = consume_preloaded_adapter("llm")
+                    if preloaded is not None and preloaded._model_path == engine.taxonomy.llm_model_path:
+                        self._llm_adapter = preloaded
+                        logger.info("llm_adapter_reused_preloaded")
+                    else:
+                        self._llm_adapter = LlmAdapter(
+                            model_path=engine.taxonomy.llm_model_path,
+                            classify_prompt_template=engine.taxonomy.llm_classify_prompt_template,
+                        )
+                llm_adapter = self._llm_adapter
+
+            funnel = ClassificationFunnel(
+                engine=engine,
+                taxonomy=engine.taxonomy,
+                confidence_policy=policy,
+                ner_adapter=ner_adapter,
+                llm_adapter=llm_adapter,
+            )
+            self._funnel_cache[cache_key] = funnel
+            return funnel
 
     def _get_confidence_policy(self, engine: ConfigurableRuleEngine) -> ConfidencePolicy:
         """从引擎的 taxonomy 中提取置信度策略配置。

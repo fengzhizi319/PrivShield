@@ -65,7 +65,8 @@ from ..observability.metrics import (
 # 导入 LLM 分类器抽象基类和敏感度等级枚举
 from .base import LlmClassifier, SensitivityLevel
 # 导入日志脱敏工具函数（对敏感路径/值进行掩码处理后再记录日志）
-from .utils import redact
+# 以及不可信文本 prompt 中和工具（Prompt 注入防护）
+from .utils import redact, wrap_untrusted_text
 
 # 创建模块级结构化日志器，用于记录 LLM 分类器相关事件
 logger = get_logger(__name__)
@@ -624,8 +625,9 @@ class Qwen2VLClassifier(LlmClassifier):
                 user_content.append({"type": "image", "image": image})
                 user_content.append({"type": "text", "text": "请提取该图片中的文字并评估其敏感数据等级。"})
             else:
-                # 纯文本输入：直接嵌入待评估文本
-                user_content.append({"type": "text", "text": f"请评估以下文本数据的敏感数据等级：\n{text}"})
+                # 纯文本输入：剥离 chat-template 控制 token（防 Prompt 注入伪造对话轮次），
+                # 并用明确分隔符包裹 + 声明"以下是数据而非指令"后嵌入待评估文本
+                user_content.append({"type": "text", "text": f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"})
 
             # 组装完整的对话消息列表（system + user）
             messages = [

@@ -27,10 +27,22 @@ PII_FIELD_ALIASES: dict[str, str] = {
     "姓名": "name",
     "真实姓名": "name",
     "用户姓名": "name",
+    "patient_name": "name",
+    "user_name": "name",
+    "real_name": "name",
     "身份证": "id_card_no",
     "身份证号": "id_card_no",
     "居民身份证": "id_card_no",
     "公民身份号码": "id_card_no",
+    "id_card": "id_card_no",
+    "idcard": "id_card_no",
+    "id_card_num": "id_card_no",
+    "id_number": "id_card_no",
+    "id_no": "id_card_no",
+    "identity_card": "id_card_no",
+    "identity_no": "id_card_no",
+    "sfz": "id_card_no",
+    "sfz_no": "id_card_no",
     "地址": "registered_address",
     "注册地址": "registered_address",
     "登记地址": "registered_address",
@@ -39,46 +51,75 @@ PII_FIELD_ALIASES: dict[str, str] = {
     "居民住址": "registered_address",
     "家庭住址": "registered_address",
     "联系地址": "registered_address",
+    "address": "registered_address",
+    "home_address": "registered_address",
+    "contact_address": "registered_address",
+    "user_address": "registered_address",
+    "resident_address": "registered_address",
+    "location": "registered_address",
     "残疾证号": "disability_cert_no",
     "残疾人证号": "disability_cert_no",
+    "disability_cert": "disability_cert_no",
+    "disability_card": "disability_cert_no",
     "医保卡号": "medical_insurance_no",
     "医保号": "medical_insurance_no",
     "医疗保险号": "medical_insurance_no",
+    "insurance_no": "medical_insurance_no",
+    "med_insurance_no": "medical_insurance_no",
 }
 
 
 def canonicalize_pii_field(field_name: str) -> str:
     """将中文或英文 PII 字段名转换为医疗 Pipeline 的规范字段名。"""
-    return PII_FIELD_ALIASES.get(field_name, field_name)
+    if not field_name:
+        return field_name
+    return PII_FIELD_ALIASES.get(field_name.strip().lower(), PII_FIELD_ALIASES.get(field_name, field_name))
 
-# L5 极高风险病史与诊断词汇映射组（包含疾病名、缩写、临床特征）
+# L5 极高风险病史与诊断词汇映射组（包含疾病名、缩写、临床特征及变体）
 L5_TERMS_MAP: dict[str, list[str]] = {
     "HIV_AIDS": [
-        "获得性免疫缺陷综合征", "HIV感染", "HIV", "艾滋病", "艾滋", "CD4+ T淋巴细胞", "替诺福韦+拉米夫定+多替拉韦", "ART抗逆转录", "血清HIV-1"
+        "获得性免疫缺陷综合征", "获得性免疫缺陷", "人免疫缺陷病毒", "HIV感染", "HIV抗体阳性", "HIV抗体", "血清HIV-1", "HIV-1", "HIV-2", "HIV", "AIDS", "艾滋病", "艾滋",
+        "ＨＩＶ", "ＡＩＤＳ", "aizibing", "aizi", "CD4+ T淋巴细胞", "CD4+ T细胞", "CD4+T细胞", "CD4细胞", "CD4+ T", "CD4+T", "CD4计数", "CD4/CD8", "CD4",
+        "替诺福韦+拉米夫定+多替拉韦", "替诺福韦+拉米夫定", "替诺福韦", "拉米夫定", "多替拉韦", "依非韦伦", "阿巴卡韦", "恩曲他滨", "齐多夫定",
+        "抗逆转录治疗", "抗逆转录", "ART抗逆转录", "HIV病毒载量", "病毒载量"
     ],
     "PSYCHIATRIC_DISORDER": [
-        "重度精神分裂症", "精神分裂症", "言语关联妄想", "关联妄想", "命令性幻听", "保护性约束倾向", "幻听（命令性言语）", "命令性言语", "被害妄想", "幻听", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "精神卫生中心"
+        "重度精神分裂症", "精神分裂症", "精神分裂", "jingshenfenlie", "双相情感障碍", "言语关联妄想", "关联妄想", "命令性幻听", "保护性约束倾向", "幻听（命令性言语）",
+        "命令性言语", "被害妄想", "幻听", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "奥氮平", "富马酸喹硫平", "富马酸奎硫平",
+        "喹硫平", "奎硫平", "阿立哌唑", "利培酮", "氯氮平", "氨磺必利", "舒必利", "奋乃静", "氟哌啶醇", "哈泊度醇", "丙戊酸钠", "碳酸锂",
+        "精神卫生中心", "schizophrenia"
     ],
     "GENETIC_DEFECT": [
-        "遗传性亨廷顿舞蹈病", "亨廷顿舞蹈病", "亨廷顿病", "Huntington Disease", "HTT基因CAG重复序列", "HTT基因", "HTT", "CAG重复序列", "CAG重复", "CAG扩增", "四苯嗪", "舞蹈样动作", "舞蹈样症状", "四肢舞蹈样动作", "舞蹈病"
+        "遗传性亨廷顿舞蹈病", "亨廷顿舞蹈病", "亨廷顿病", "Huntington Disease", "HTT基因CAG重复序列", "HTT基因", "HTT", "CAG重复序列",
+        "CAG重复", "CAG扩增", "四苯嗪", "舞蹈样动作", "舞蹈样症状", "四肢舞蹈样动作", "舞蹈病", "Huntington"
     ],
 }
 
-# L4 高风险病史与诊断词汇映射组（肿瘤、性病/传染病、严重器官损害）
+# L4 高风险病史与诊断词汇映射组（肿瘤、性病/传染病、严重器官损害及变体）
 L4_TERMS_MAP: dict[str, list[str]] = {
     "STD_VENEREAL": [
-        "梅毒", "苍白密螺旋体", "TPPA阳性", "TPPA", "RPR阳性", "RPR 1:16", "RPR", "淋病", "淋球菌", "尖锐湿疣",
-        "生殖器疱疹", "软下疳", "性病", "性传播疾病", "不洁性接触史", "不洁接触史", "无痛性溃疡", "硬下疳", "人乳头瘤病毒高危型"
+        "早期隐性梅毒", "隐性梅毒", "早期梅毒", "晚期梅毒", "神经梅毒", "心血管梅毒", "先天梅毒", "胎传梅毒", "梅毒", "霉毒", "meidu", "苍白密螺旋体",
+        "TPPA阳性", "TPPA", "RPR阳性", "RPR 1:16", "RPR", "syphilis", "gonorrhea", "herpes", "chancroid",
+        "淋病", "淋球菌", "尖锐湿疣", "生殖器疱疹", "软下疳", "性病", "性传播疾病", "不洁性接触史", "不洁接触史", "无痛性溃疡", "硬下疳",
+        "人乳头瘤病毒高危型", "外阴多发赘生物伴瘙痒", "外阴多发赘生物", "会阴部多发菜花状赘生物", "会阴部多发赘生物", "肛周多发菜花状赘生物",
+        "肛周多发赘生物", "外阴菜花状赘生物", "外阴赘生物", "会阴部赘生物", "肛周赘生物", "多发赘生物", "菜花状赘生物", "鸡冠状赘生物",
+        "乳头状赘生物", "生殖器赘生物", "赘生物伴瘙痒", "赘生物", "菜花状", "鸡冠状", "caihuazhuang", "jiguanzhuang", "醋酸白试验阳性", "醋酸白试验", "HPV 6/11低危型阳性", "HPV 6/11低危型",
+        "HPV 6/11", "HPV 16/18", "HPV高危型", "HPV低危型", "HPV", "CO2激光灼除术", "CO2激光灼除", "激光灼除术", "咪喹莫特乳膏", "咪喹莫特", "二氧化碳激光",
+        "苄星青霉素"
     ],
     "MALIGNANT_NEOPLASM": [
-        "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "奥希替尼", "EGFR基因检测", "EGFR突变"
+        "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "肺ai", "肝ai", "胃ai", "feiai", "ganai", "weiai", "消化道肿瘤", "消化道恶性肿瘤", "转移性肿瘤",
+        "奥希替尼", "EGFR基因检测", "EGFR突变", "cancer", "tumor", "化疗", "放疗", "靶向治疗", "PD-1抑制剂", "PD-1"
     ],
     "HEPATITIS_VIRUS": [
-        "慢性乙型病毒性肝炎", "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "早期肝硬化", "肝硬化", "肝硬化代偿期", "食管静脉曲张",
-        "HBV-DNA 5.6×10^6 IU/mL", "HBV-DNA定量", "HBV-DNA", "HBV", "HCV-RNA", "HCV", "恩替卡韦", "肝穿刺活检", "肝穿刺", "G3S4"
+        "慢性乙型病毒性肝炎", "乙型肝炎", "乙肝", "yigan", "丙型肝炎", "丙肝", "binggan", "肝硬化失代偿期", "早期肝硬化", "肝硬化代偿期", "肝硬化", "小肝癌",
+        "蜘蛛痣", "肝掌", "肝硬化腹水", "门静脉高压", "门脉高压", "食管胃底静脉曲张破裂出血", "食管胃底静脉曲张", "静脉曲张破裂出血", "食管静脉曲张", "脾大", "脾肿大", "脾功能亢进",
+        "HBV-DNA阳性", "HBV-DNA阴性", "HBV-DNA 5.6×10^6 IU/mL", "HBV-DNA定量", "HBV-DNA", "HBV", "HCV-RNA", "HCV",
+        "恩贴卡韦", "恩替卡韦", "干扰素", "肝穿刺活检", "肝穿刺", "G3S4", "HBsAg阳性", "HBsAg", "HBeAg阳性", "HBeAg", "HBcAb阳性",
+        "HBcAb", "HBsAb", "HBeAb", "乙肝表面抗原", "乙肝两对半", "hepatitis", "cirrhosis", "ＨＢＶ", "ＨＣＶ"
     ],
     "SEVERE_ORGAN_DAMAGE": [
-        "慢性阻塞性肺疾病", "COPD", "急性心肌梗死", "冠状动脉重度狭窄"
+        "慢性阻塞性肺疾病", "COPD", "急性心肌梗死", "冠状动脉重度狭窄", "尿毒症", "肾功能衰竭"
     ],
 }
 
@@ -97,15 +138,33 @@ _L4_REPLACEMENT_MAP: dict[str, str] = {
     "SEVERE_ORGAN_DAMAGE": "SEVERE_ORGAN_DAMAGE",
 }
 
-# 文本脱敏正则表达式：按类别编译 L5/L4 术语为正则，长词优先匹配
+# 词项字符间容许的有界可选分隔符（空格/点/连字符/下划线/间隔号/零宽字符）。
+# 用于容忍 "H I V"、"H.I.V"、"艾-滋-病" 这类在词项字符间插入噪声的绕过变体；
+# {0,1} 有界量词保证每个字符间隙只有两种选择，匹配复杂度保持线性，杜绝引入 ReDoS。
+_FLEX_SEP = r"[\s.\-_·•​‌‍﻿]"
+
+
+def _flex_escape(term: str) -> str:
+    """将词项编译为"字符间容许可选分隔符"的正则片段（抗插入变体绕过）。
+
+    - 普通字符：re.escape 转义后用 ``_FLEX_SEP{0,1}`` 连接，容忍字符间插入至多一个分隔符；
+    - 词项自带的空白字符：编译为 ``\\s*``（容忍有无空格两种书写，如 "CD4+ T细胞" 与 "CD4+T细胞"）。
+    """
+    tokens = [r"\s*" if ch.isspace() else re.escape(ch) for ch in term]
+    if len(tokens) <= 1:
+        return "".join(tokens)
+    return (_FLEX_SEP + "{0,1}").join(tokens)
+
+
+# 文本脱敏正则表达式：按类别编译 L5/L4 术语为正则，长词优先 + 分隔符容忍匹配
 L5_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile("|".join([re.escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE),
+    (re.compile("|".join([_flex_escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE),
      f"[L5-{_L5_REPLACEMENT_MAP.get(cat, cat)}-SENSITIVE-MASKED]")
     for cat, terms in L5_TERMS_MAP.items()
 ]
 
 L4_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile("|".join([re.escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE),
+    (re.compile("|".join([_flex_escape(t) for t in sorted(terms, key=len, reverse=True)]), re.IGNORECASE),
      f"[L4-{_L4_REPLACEMENT_MAP.get(cat, cat)}-SENSITIVE-MASKED]")
     for cat, terms in L4_TERMS_MAP.items()
 ]
@@ -123,51 +182,64 @@ _ALL_L4_L5_TERMS = sorted(
 # 防止复杂句法正则（含嵌套量词）在恶意/超长输入下触发灾难性回溯（ReDoS）
 _REDACT_MAX_TEXT_LENGTH = 50_000
 
-# 降级路径与 Fast-path 专用正则：词库级检测与擦除
+# 降级路径与 Fast-path 专用正则：词库级检测与擦除（长词优先 + 分隔符容忍）
 _TERMS_ONLY_PATTERN = re.compile(
-    "|".join([re.escape(t) for t in _ALL_L4_L5_TERMS]),
+    "|".join([_flex_escape(t) for t in _ALL_L4_L5_TERMS]),
     re.IGNORECASE,
 )
 
 _MASKED_LABEL_PATTERN = r"\[(?:L4|L5)-[A-Z_]+-SENSITIVE-MASKED\]"
 _MASKED_LABEL_RE = re.compile(_MASKED_LABEL_PATTERN)
 
-_TERMS_OR = "|".join([_MASKED_LABEL_PATTERN] + [re.escape(t) for t in _ALL_L4_L5_TERMS])
+_TERMS_OR = "|".join([_MASKED_LABEL_PATTERN] + [_flex_escape(t) for t in _ALL_L4_L5_TERMS])
 _Q = r"['\"“‘'”’]?"
 _DOSE = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))?"
 _FREQ = r"(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?"
 
 # 1. 死因相关句法短语重构：“因/由于/死于 'L4/L5词' (去世|死于|离世|逝世...)” -> “因病去世”
-# 支持“因'HIV'导致的并发症去世”、“由于'恶性肿瘤'不幸身亡”等完整句法重构
-_REDACT_DEATH_ACTION = r"(?:去世|死于|离世|殁于|不幸身亡|宣告不治|逝世)"
+# 支持“因'HIV'导致的并发症去世”、“由于'恶性肿瘤'不幸身亡”、“身亡于'急性心肌梗死'(40岁)”等完整句法重构
+_REDACT_DEATH_ACTION = r"(?:去世|死于|离世|殁于|身亡于|病逝于|不幸身亡|宣告不治|逝世)"
 _REDACT_CAUSE_DEATH_PATTERN = re.compile(
-    rf"(?:因|由于|死于|殁于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致的并发症|引起的并发症|导致|引起)?\s*({_REDACT_DEATH_ACTION})",
+    rf"(?:不幸)?\s*(?:因|由于|死于|殁于|身亡于|病逝于|离世于|因为|由)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:导致的并发症|引起的并发症|导致|引起)?\s*{_REDACT_DEATH_ACTION}",
+    re.IGNORECASE,
+)
+_REDACT_DEATH_WITH_AGE_PATTERN = re.compile(
+    rf"(?:不幸)?\s*(身亡于|病逝于|死于|殁于|离世于|去世于)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*[\(（](\d+)\s*岁[\)）]",
     re.IGNORECASE,
 )
 _REDACT_SUFFER_DEATH_PATTERN = re.compile(
-    rf"(?:患有?|确诊(?:为)?|诊断(?:为)?|患)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*({_REDACT_DEATH_ACTION})",
+    rf"(?:患有?|确诊(?:为)?|诊断(?:为)?|患)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*{_REDACT_DEATH_ACTION}",
     re.IGNORECASE,
 )
 
-# 1.2 病毒性肝炎载量/检查/活检特征句法整块擦除（"HBV-DNA 5.6×10^6 IU/mL"、"行肝穿刺活检提示G3S4"、"HBV-DNA降至检测下限"）
+# CD4 细胞计数句法擦除（"CD4+ T细胞180/μL"、"CD4计数180个/μL"）。
+# 注意：字符间隙一律使用有界量词（\s{0,2}），杜绝长空白串上的组合回溯（ReDoS）。
+_REDACT_CD4_PATTERN = re.compile(
+    r"(?:CD4\+?\s{0,2}T?\s{0,1}(?:细胞|淋巴细胞)?\s{0,1}(?:计数)?\s{0,1}(?:为|约)?\s{0,1}\d+\s*(?:个|cells)?\s*(?:/μL|/µL|/ul|/mm3|/L)?\s*[，,。；;]?)",
+    re.IGNORECASE,
+)
+
+# 1.2 病毒性肝炎载量/检查/活检特征句法整块擦除（"HBV-DNA 5.6×10^6 IU/mL"、"行肝穿刺活检提示G3S4"、"HBsAg阳性"）
+# 数值字符类兼容上标数字（⁰¹²³⁴⁵⁶⁷⁸⁹，如 "4.8×10⁶ IU/mL"）
 _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN = re.compile(
-    rf"(?:\(?HBV-DNA\s*[\d.×^]+\s*(?:IU/mL|copies/ml)?\)?)|"
-    rf"(?:HBV-DNA(?:定量)?(?:降至|低于|为)?\s*(?:检测下限|阴性|\d+)?)|"
-    rf"(?:(?:行)?肝(?:脏)?穿刺(?:活检)?(?:提示|示)?\s*[A-Z0-9]+)|"
-    rf"(?:(?:腹部超声|超声|CT|MRI)?(?:提示|示)?\s*(?:'[^']*'|“[^”]*”)?\s*改变)|"
+    rf"(?:\(?HBV-DNA\s*[\d.×^E+\-⁰¹²³⁴⁵⁶⁷⁸⁹]+\s*(?:IU/mL|copies/ml)?\)?\s*[，,。；;]?)|"
+    rf"(?:HBV-DNA(?:\s*阳性|\s*阴性|定量)?(?:降至|低于|为)?\s*(?:检测下限|阴性|阳性|\d+)?\s*[，,。；;]?)|"
+    rf"(?:(?:HBsAg|HBeAg|HBcAb|HBsAb|HBeAb)(?:阳性|阴性)?\s*[，,。；;]?)|"
+    rf"(?:(?:行)?肝(?:脏)?穿刺(?:活检)?(?:提示|示)?\s*[A-Z0-9]+\s*[，,。；;]?)|"
+    rf"(?:(?:腹部超声|超声|CT|MRI)?(?:提示|示)?\s*(?:'[^']*'|“[^”]*”)?\s*改变\s*[，,。；;]?)|"
     rf"(?:(?:目前|近期|现)?\s*HBV-DNA降至检测下限[。；;]?)",
     re.IGNORECASE,
 )
 
 # 2. 完整服药/用药与处置句法擦除
 # 要求：前缀(服用/口服/给予...)、剂量用法(20mg qd)或后缀(控制症状/方案)至少有其一存在，避免无修饰裸词抢先匹配
-_MED_PREFIX = r"(?:长期|定期|口服|服用|给予|使用|行|实施|接受|予|给予口服|开具|遵医嘱)"
-_MED_SUFFIX = r"(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)"
-_MED_DOSE_FREQ_NONEMPTY = r"(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))(?:\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po))?|\s*(?:qd|bid|tid|qid|qn|qw|im|iv|po)"
+_MED_PREFIX = r"(?:建议)?\s*(?:尽早)?\s*(?:目前)?\s*(?:长期|定期|口服|服用|给予|使用|行|实施|接受|予|给予口服|开具|遵医嘱|启动|开始)"
+_MED_SUFFIX = r"(?:控制舞蹈样症状|控制症状|抗逆转录治疗|抗逆转录|抗病毒治疗|抗病毒|对症治疗|治疗|对症处理|口服|方案)"
+_MED_DOSE_FREQ_NONEMPTY = r"(?:(?:\s*\d+(?:\.\d+)?\s*(?:mg|g|ml|u|ug|片|粒|支|%))(?:\s*\b(?:qd|bid|tid|qid|qn|qw|im|iv|po)\b)?|\s*\b(?:qd|bid|tid|qid|qn|qw|im|iv|po)\b)"
 
 _REDACT_MEDICATION_FULL_PATTERN = re.compile(
-    rf"(?:{_MED_PREFIX}\s*(?:病理提示|提示|行)?\s*{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*(?:{_MED_SUFFIX})?|"
-    rf"{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*{_MED_SUFFIX}|"
+    rf"(?:{_MED_PREFIX}\s*(?:病理提示|提示|行)?\s*{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并|\+)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*(?:{_MED_SUFFIX})?|"
+    rf"{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并|\+)?\s*(?:{_Q}(?:{_TERMS_OR}){_Q}{_DOSE}{_FREQ})*\s*{_MED_SUFFIX}|"
     rf"{_Q}(?:{_TERMS_OR}){_Q}{_MED_DOSE_FREQ_NONEMPTY})",
     re.IGNORECASE,
 )
@@ -185,18 +257,18 @@ _REDACT_DIAGNOSIS_STANDALONE_PATTERN = re.compile(
 # 4. 连词+敏感特征+倾向/表现整块擦除：“及保护性约束倾向” -> “”
 # 要求：前缀(及|与|和|伴|伴有) 或 后缀(倾向|表现) 至少存在其一，避免裸词抢先匹配架空后续列表/亲属重构规则
 _REDACT_FEATURE_TENDENCY_PATTERN = re.compile(
-    rf"(?:(?:及|与|和|伴|伴有)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:倾向|表现)?|{_Q}(?:{_TERMS_OR}){_Q}\s*(?:倾向|表现))",
+    rf"(?:(?:及|与|和|伴|伴有)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:倾向|表现|体征|症状)?|{_Q}(?:{_TERMS_OR}){_Q}\s*(?:倾向|表现|体征|症状))",
     re.IGNORECASE,
 )
 
 # 5. 顿号/逗号分隔的复合疾病列表中的敏感词擦除："患'重度精神分裂症'、'2型糖尿病'" -> "患'2型糖尿病'"
 _REDACT_PAIRED_PATTERN = re.compile(
-    rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){_Q}(?:{_TERMS_OR}){_Q}\s*[、,，]\s*",
+    rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){_Q}(?:{_TERMS_OR}){_Q}\s*[、,，及与和]\s*",
     re.IGNORECASE,
 )
 # 5.1 补充：处理敏感词在列表非首位的场景（"患'2型糖尿病'、'重度精神分裂症'" -> "患'2型糖尿病'"）
 _REDACT_PAIRED_SUFFIX_PATTERN = re.compile(
-    rf"[、,，]\s*{_Q}(?:{_TERMS_OR}){_Q}",
+    rf"[、,，及与和]\s*{_Q}(?:{_TERMS_OR}){_Q}",
     re.IGNORECASE,
 )
 
@@ -215,7 +287,7 @@ _REDACT_HISTORY_PATTERN = re.compile(
 # 8. 亲属关系词定义与孤立主语/动词清理
 _FAMILY_MEMBERS = (
     r"父亲|母亲|祖父|祖母|外公|外婆|爷爷|奶奶|伯父|叔叔|舅舅|姑姑|姨妈|大伯|大舅|大姨|二姨|小姨|"
-    r"一弟|二弟|三弟|长子|次子|长女|次女|大哥|二哥|大姐|二姐|弟弟|妹妹|哥哥|姐姐|爱人|配偶|丈夫|妻子|儿子|女儿|家属|家族成员"
+    r"一弟|二弟|三弟|长子|次子|长女|次女|长兄|次兄|大哥|二哥|大姐|二姐|弟弟|妹妹|哥哥|姐姐|爱人|配偶|丈夫|妻子|儿子|女儿|家属|家族成员"
 )
 _CLEANUP_ORPHAN_SUBJECT_PATTERN = re.compile(rf"(?:^|[，,。；])\s*(?:{_FAMILY_MEMBERS})\s*([。；;])")
 _CLEANUP_FAMILY_VERB_HEAL_PATTERN = re.compile(
@@ -224,9 +296,9 @@ _CLEANUP_FAMILY_VERB_HEAL_PATTERN = re.compile(
 
 # 9. 模块级预编译规范清理正则
 _CLEANUP_DEVELOP_AND_PATTERN = re.compile(r"发展为\s*与")
-_CLEANUP_PATIENT_TIME_PREFIX_PATTERN = re.compile(r"(?:患者\s*\d+\s*(?:年|月|天)?前)\s*([，,])")
+_CLEANUP_PATIENT_TIME_PREFIX_PATTERN = re.compile(r"(?:患者\s*\d+\s*(?:年|月|天|周)?前)\s*([，,])")
 _CLEANUP_ORPHAN_PREP_PATTERN = re.compile(
-    r"(?:同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|控制|基因检测提示|基因检测示|基因检测|长期|定期|口服|服用|血清学|血清学检查示?|予|给予|及|与|和)\s*([。；;，,])"
+    r"(?:目前行|目前|阳性|阴性|显示阳性|提示阳性|抗病毒治疗|抗病毒|抗逆转录治疗|抗逆转录|同时因|由于|同时|曾?就诊于|诊断为|确诊为|检查出|查出|提示为|及倾向|及控制症状|控制症状|控制|基因检测提示|基因检测示|基因检测|长期|定期|口服|服用|血清学|血清学检查示?|予|给予|及|与|和)\s*([。；;，,])"
 )
 _CLEANUP_ORPHAN_VERB_PATTERN = re.compile(
     r"(?:^|[，,。；])\s*(?:因|由于|患有?|确诊|患|有|行|进行|接受|服用|合并|伴有|予|控制)\s*([。；;，,])"
@@ -242,15 +314,31 @@ _CLEANUP_EMPTY_QUOTES_PATTERN = re.compile(r"['\"“‘]['\"”’]")
 _CLEANUP_PUNCTUATION_PATTERN = re.compile(r"([，。；：,;])\1+")
 _CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,、])\s*([。;；])")
 _CLEANUP_LEADING_PUNCT_PATTERN = re.compile(r"^[，,；;。]\s*")
-_CLEANUP_EMPTY_PAREN_PATTERN = re.compile(r"\(\s*\)")
+_CLEANUP_EMPTY_PAREN_PATTERN = re.compile(r"[\(（]\s*[\)）]")
 
 # 10. 性传播疾病与极高敏特征综合句法擦除正则（涵盖血清学检查示TPPA/RPR滴度、不洁接触史、无痛性溃疡/硬下疳自愈等完整词句）
+# ReDoS 防护说明：临床中文短语的组成字词之间天然无空白，因此各分支的可选修饰组之间
+# 一律不使用 \s*（仅保留至多一处有界 \s{0,2}）。若可选组之间串联多个无界 \s*，
+# 恶意构造的 "患者 + 长空白串 + 噪声" 输入会在各 \s* 槽位间产生组合级回溯分配（灾难性回溯）。
 _REDACT_STD_FEATURE_CLAUSE_PATTERN = re.compile(
     r"(?:"
-    r"(?:检查出|确诊为|诊断为)?\s*['\"“]?(?:梅毒|TPPA阳性|RPR阳性|淋病|尖锐湿疣)['\"”]?\s*[，,。；;]?"
+    # 分支 1：梅毒等性病病史句法（"患者1年前有梅毒病史，"、"梅毒（早期隐性梅毒）"）
+    r"(?:患者)?(?:\d+[年月天]+前)?(?:既往有|曾有|自述有|有)?(?:早期|晚期|隐性|神经|心血管|胎传|先天)*梅毒(?:\s{0,2}[\(（][^)）]*[\)）])?(?:病史|史)?\s*[，,。；;]?"
+    r"|(?:患者)?(?:\d+[年月天]+前)?(?:既往有|曾有|自述有|有)?(?:淋病|尖锐湿疣|生殖器疱疹|软下疳|性病)(?:\s{0,2}[\(（][^)）]*[\)）])?(?:病史|史)?\s*[，,。；;]?"
+    # 分支 2：检查出/确诊为/诊断为 '梅毒' 类
+    r"|(?:检查出|确诊为|诊断为)?['\"“]?(?:梅毒|TPPA阳性|RPR阳性|淋病|尖锐湿疣)['\"”]?\s*[，,。；;]?"
+    # 分支 3：血清学 TPPA/RPR 滴度
     r"|(?:血清学检查示|血清学检查|血清学)?\s*(?:TPPA阳性|TPPA|RPR阳性|RPR\s*1:\d+|\d+:\d+)\s*[，,。；;]?"
-    r"|(?:追问病史[，,]?)?\s*(?:1年前有|既往有|曾有)?\s*(?:不洁性接触史|不洁接触史)\s*[，,。；;]?"
-    r"|(?:半年前|1年前)?\s*(?:外阴)?(?:曾出现|出现)?\s*无痛性溃疡(?:\(硬下疳\))?\s*(?:自愈)?\s*[，,。；;]?"
+    # 分支 4：不洁接触史（病因/诱因柱）
+    r"|(?:追问病史[，,]?)?(?:1年前有|既往有|曾有)?(?:不洁性接触史|不洁接触史)\s*[，,。；;]?"
+    # 分支 5：无痛性溃疡/硬下疳（体征柱）
+    r"|(?:半年前|1年前)?(?:外阴)?(?:曾出现|出现)?无痛性溃疡(?:[\(（]硬下疳[\)）])?(?:自愈)?\s*[，,。；;]?"
+    # 分支 6：菜花状/鸡冠状/乳头状赘生物体征群（体征柱）
+    r"|(?:患者)?(?:\d+[年月天]+前)?(?:发现|出现)?(?:外阴及会阴部|外阴|会阴部|肛周)?(?:及(?:外阴|会阴部|肛周))?(?:多发)?(?:(?:菜花状|鸡冠状|乳头状)?赘生物|菜花状|鸡冠状)(?:[，,]逐渐增多)?(?:[，,]伴(?:局部)?(?:轻度)?(?:瘙痒|异物感|接触性出血))*\s*[，,。；;]?"
+    # 分支 7：醋酸白试验/HPV 基因型/活检提示（检查柱）
+    r"|(?:醋酸白试验(?:阳性)?|HPV\s*(?:6/11|16/18)?(?:低危型|高危型)?(?:阳性)?|(?:病理)?活检提示(?:尖锐湿疣)?)\s*[，,。；;]?"
+    # 分支 8：CO2 激光/咪喹莫特等特异性处置（用药/处置柱）
+    r"|(?:行|给予|实施)?['\"“]?(?:CO2激光灼除术|CO2激光灼除治疗|CO2激光灼除|CO2激光治疗|激光灼除术|二氧化碳激光|咪喹莫特乳膏(?:外用|局部涂抹)?|咪喹莫特)['\"”]?(?:及|与|和)?['\"“]?(?:CO2激光灼除术|CO2激光灼除治疗|CO2激光灼除|CO2激光治疗|激光灼除术|二氧化碳激光|咪喹莫特乳膏(?:外用|局部涂抹)?|咪喹莫特)?['\"”]?(?:外用|局部涂抹|治疗)?\s*[，,。；;]?"
     r")",
     re.IGNORECASE,
 )
@@ -267,6 +355,38 @@ _REDACT_GENETIC_CLAUSE_PATTERN = re.compile(
 # 12. 图片/附件路径名称清理（防止路径中泄露敏感词，如 /data/hiv_test_01.jpg -> /data/masked_01.jpg）
 _IMAGE_PATH_PATTERN = re.compile(r"/(?:[^/]+\.png|[^/]+\.jpg|[^/]+\.jpeg|[^/]+\.bmp)")
 
+# 13. 范畴化降级泛化规则映射 (Category Generalization Rules)
+# 仅对适宜泛化的病种（肿瘤、肝炎、遗传缺陷、器官衰竭）自动重构降级为 L1/L2 通用系统/器官疾病表述；
+# 性病 (STD)、艾滋病 (HIV)、重度精神障碍属于禁止泛化范畴，100% 自动直接抹平切除 (Purge Only)！
+_CATEGORY_GENERALIZATION_RULES: list[tuple[re.Pattern, str]] = [
+    # 1. 恶性肿瘤范畴 -> 通用系统/器官疾病
+    # 注意：器官/系统前缀为必选匹配，且各系统专属规则先于裸"肿瘤"兜底规则，
+    # 否则 "呼吸系统肿瘤" 会被首条规则误泛化为 "呼吸系统消化道疾病"（张冠李戴）。
+    (re.compile(r"消化道(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "消化道疾病"),
+    (re.compile(r"(?:呼吸道|呼吸系统)(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "呼吸系统疾病"),
+    (re.compile(r"生殖系统(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "生殖系统疾病"),
+    (re.compile(r"神经系统(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "神经系统疾病"),
+    (re.compile(r"(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "相关系统疾病"),
+
+    # 2. 病毒性肝炎范畴 -> 通用肝脏疾病
+    (re.compile(r"(?:慢性乙型病毒性肝炎|乙型肝炎|乙肝|丙型肝炎|丙肝|肝硬化代偿期|早期肝硬化|肝硬化)(?=家族史|史|聚集倾向)", re.IGNORECASE), "肝脏疾病"),
+
+    # 3. 重大遗传缺陷范畴 -> 遗传性神经系统疾病
+    (re.compile(r"(?:遗传性亨廷顿舞蹈病|亨廷顿病|舞蹈病|罕见遗传病)(?=家族史|史|聚集倾向)", re.IGNORECASE), "遗传性神经系统疾病"),
+
+    # 4. 严重器官衰竭范畴 -> 系统重大疾病
+    (re.compile(r"(?:急性心肌梗死|冠状动脉重度狭窄)(?=家族史|史|聚集倾向)", re.IGNORECASE), "心血管系统疾病"),
+    (re.compile(r"(?:慢性阻塞性肺疾病|COPD)(?=家族史|史|聚集倾向)", re.IGNORECASE), "慢性呼吸系统疾病"),
+    (re.compile(r"(?:尿毒症|肾功能衰竭)(?=家族史|史|聚集倾向)", re.IGNORECASE), "肾脏系统疾病"),
+]
+
+def _apply_category_generalizations(text: str) -> str:
+    """应用范畴化降级泛化规则：将 L4/L5 重大高敏病种术语映射为 L1/L2 级的通用系统疾病泛化表述。"""
+    s = text
+    for pattern, replacement in _CATEGORY_GENERALIZATION_RULES:
+        s = pattern.sub(replacement, s)
+    return s
+
 
 def _redact_terms_only(text: str) -> str:
     """超长文本降级路径：仅做词库级擦除（无句法重构），保证性能与安全。
@@ -281,6 +401,10 @@ def _clean_orphan_syntax(s: str) -> str:
     """清理擦除敏感实体后残存的孤立介词、连词、无宾语动词与多余标点。"""
     if not s:
         return s
+
+    # ReDoS 全局防护（与 redact_medical_text 一致）：折叠连续水平空白串，
+    # 防止下方清理正则在长空白 run 上的组合回溯（幂等操作，正常文本不受影响）
+    s = re.sub(r"[ \t]{2,}", " ", s)
 
     # 0. 优先清理擦除产生的空括号，避免阻碍后续孤立动词与标点匹配；并自动擦除就诊医院/机构句法与肝炎体征载量短语
     s = _CLEANUP_EMPTY_PAREN_PATTERN.sub("", s)
@@ -304,17 +428,31 @@ def _clean_orphan_syntax(s: str) -> str:
     s = _CLEANUP_EMPTY_PAREN_PATTERN.sub("", s)
     s = re.sub(r"([。；;,，])\1+", r"\1", s)
 
-    # 5. 清理擦除敏感病史/症状后遗留的孤立前缀、后缀与时间短语（如"追问病史，1年前有"、"半年前外阴曾出现"、"自愈"、"长期"、"诊断为"）
+    # 5. 清理擦除敏感病史/症状后遗留的孤立前缀、后缀与时间短语
     s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)\s*([。；;，,])", r"\1", s)
     s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)", "", s)
-    s = re.sub(r"(?:追问病史|诊断为|确诊为|长期|定期|体检|目前|近期|现|提示|示)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:追问病史|诊断为|确诊为|长期|定期|体检|目前|近期|现|提示|示)", "", s)
+    s = re.sub(r"(?:追问病史|诊断为|确诊为|建议尽早启动|尽早启动|启动|进一步检查|进一步|发现)\s*([。；;，,])", r"\1", s)
+    s = re.sub(r"(?:追问病史|诊断为|确诊为|建议尽早启动|尽早启动|启动|进一步检查|进一步)", "", s)
     s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)\s*([。；;，,])", r"\1", s)
     s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)", "", s)
+    s = re.sub(r"(?:伴|与|和)?\s*(?:局部)?(?:轻度)?(?:瘙痒|异物感|接触性出血)\s*([。；;，,])?", r"\1", s)
 
-    # 5.1 死因孤立介词自愈重构 ("因去世" -> "因病去世") 与动词+顿号残渣清理 ("一弟患、'2型糖尿病'" -> "一弟患'2型糖尿病'")
+    # 5.1 死因孤立介词自愈重构 ("因去世" -> "因病去世")、括号年龄清理 ("死于(62岁)" -> "死于62岁") 与孤立"患"补全 ("母亲患(55岁确诊)" -> "母亲患病(55岁确诊)")
+    s = re.sub(r"(死于|殁于)\s*[\(（]([^）\)]+)[\)）]", r"\1\2", s)
+    s = re.sub(r"(?<=[\u4e00-\u9fa5])患\s*([\(（。；;,，])", r"患病\1", s)
     s = re.sub(r"(?:因|死于|因于)\s*(去世|死于|离世|逝世)", r"因病\1", s)
     s = re.sub(r"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?))\s*[、,，]\s*", r"\1", s)
+
+    # 5.2 单条记录准标识符自适应年龄 K-匿名泛化 (<60岁按3岁区间/age-(age%3)，>=60岁按2岁精细康养区间/age-(age%2))
+    def _age_anon_repl(match: re.Match) -> str:
+        prefix = match.group(1) or ""
+        age_num = match.group(2)
+        suffix = match.group(3) or ""
+        from ..privacy.kano import adaptive_age_hierarchy
+        anon_age = adaptive_age_hierarchy(age_num, under_60_interval=3, senior_interval=2, output_format="floor")
+        return f"{prefix}{anon_age}岁{suffix}"
+
+    s = re.sub(r"((?:死于|确诊|患病|发病|年龄|生于|现年|年满|[\(（])?\s*)(\d{1,3})\s*岁([^\)\n，,。；;]*)", _age_anon_repl, s)
 
     s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
     s = _CLEANUP_LEADING_PUNCT_PATTERN.sub("", s)
@@ -328,75 +466,99 @@ def _clean_orphan_syntax(s: str) -> str:
         flags=re.IGNORECASE,
     )
 
-    # 7. 清理开头孤立的连词（如擦除"幻听"后剩下的 "与反复发作3年" -> "反复发作3年"）
+    # 7. 清理开头孤立的连词与无谓主语（含敏感句被整体擦除后残留的 "患者胸片详见..." 中的悬空主语）
     s = re.sub(r"^[与和及且并]+\s*", "", s)
+    s = re.sub(r"^患者[。；;，,]\s*", "", s)
+    s = re.sub(r"^患者(?=[^，,。；;]{0,10}详见)", "", s)
 
-    # 8. 最终判断：若全句抹平后仅剩无主语/无主病因孤立频次或时间状语从句（如 "患者3年前无明显诱因"、"反复发作3年"、"3年"、"反复发作"），直接抹平清空
-    if re.match(r"^(?:患者)?\s*(?:\d+\s*(?:年|月|天|周|小时)?\s*(?:前)?)?\s*(?:无明显诱因|反复发作|发作|持续|既往)?\s*\d*\s*(?:年|月|天|周|小时)?\s*(?:余)?\s*(?:年|月|天|周)?\s*[。；;，,]?$", s.strip()):
+    # 8. 最终判断：若全句抹平后仅剩无主语/无主病因孤立频次、动词或时间状语从句，直接抹平清空。
+    # 该正则含多个无界 \s* 槽位与 $ 锚定，对长输入存在组合回溯风险——仅对短残渣（<=30 字符）执行，
+    # 长残渣不存在"无主语状语从句"语义，直接跳过既安全又防 ReDoS。
+    tail = s.strip()
+    if len(tail) <= 30 and re.match(r"^(?:患者)?\s*(?:\d+\s*(?:年|月|天|周|小时|周期|疗程|次)?\s*(?:前)?)?\s*(?:无明显诱因|体检|目前|近期|现|发现|检查出|查出|提示|示|进一步检查|进一步|出现|曾出现|既往|反复发作|发作|持续|存在|明显|自述|口服|服用|给予|使用|予|遵医嘱|服|长期|定期|术后|抗病毒治疗|抗病毒|抗逆转录治疗|抗逆转录|检测不到|低于检测下限|者|为者)*\s*\d*\s*(?:年|月|天|周|小时|周期|疗程|次)?\s*(?:余)?\s*(?:年|月|天|周)?\s*[。；;，,]*$", tail):
         return ""
 
     return s.strip()
 
 
-def redact_medical_text(text: str) -> str:
-    """全场景高级无痕抹平算法 (Redaction/Purge Mode).
+def normalize_fullwidth_alphanumeric(text: str) -> str:
+    """仅将全角英文字母与数字（如 ＨＩＶ、１２３）转换为半角（HIV、123），保留中文标点（，。；“”）。"""
+    def _repl(match: re.Match) -> str:
+        code = ord(match.group(0))
+        if 0xFF10 <= code <= 0xFF19 or 0xFF21 <= code <= 0xFF3A or 0xFF41 <= code <= 0xFF5A:
+            return chr(code - 0xfee0)
+        return match.group(0)
+    return re.sub(r"[\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]", _repl, text)
 
-    全面覆盖死因、专科就诊机构、完整服药剂量句法、诊断检出、家族病史等各类复杂中文医疗句法：
-    1. 把“因'恶性肿瘤'去世”自然重构为“因病去世”；
-    2. 将“及保护性约束倾向”整块擦除，将“曾就诊于精神卫生中心，诊断为重度精神分裂症。”整句完全消除；
-    3. 将“长期服用'奥氮平片'20mg qd及'四苯嗪'控制症状。”整句完全擦除，不残留“长期20mg qd及控制症状”；
-    4. 将“一弟患'重度精神分裂症'、'2型糖尿病'”中的敏感词与顿号去除，输出“一弟患'2型糖尿病'”；
-    5. 将单敏感疾病场景（如“一弟患'重度精神分裂症'”）自然重构泛化为“一弟患病”；
-    6. 消除“慢性乙型肝炎病史”中的“慢性”/“慢史”拼凑残渣，将整词干净擦除；
-    7. 清理“查出，”残留的动词与多余标点，做到语法自然流畅无痕。
-    """
+
+def redact_medical_text(text: str) -> str:
+    """全场景高级无痕抹平算法 (Redaction/Purge Mode)."""
     if not text:
         return text
 
-    # 超长文本保护：降级为简单词库擦除，防止复杂句法正则的 ReDoS 风险
-    if len(text) > _REDACT_MAX_TEXT_LENGTH:
-        return _redact_terms_only(text)
+    norm_text = normalize_fullwidth_alphanumeric(text)
 
-    # Fast-path 检查：如果不含任何 L4/L5 敏感词及脱敏标签，直接原样返回，避免自愈逻辑篡改干净文本
-    if not _TERMS_ONLY_PATTERN.search(text) and not _MASKED_LABEL_RE.search(text):
+    # 超长文本保护：降级为简单词库擦除
+    if len(norm_text) > _REDACT_MAX_TEXT_LENGTH:
+        return _redact_terms_only(norm_text)
+
+    stripped_norm = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_text)
+    if not _TERMS_ONLY_PATTERN.search(text) and not _TERMS_ONLY_PATTERN.search(norm_text) and not _TERMS_ONLY_PATTERN.search(stripped_norm) and not _MASKED_LABEL_RE.search(text):
         return text
 
-    s = text
+    s = norm_text
+    # 注：词库正则已通过 _flex_escape 实现字符间分隔符容忍（"H I V"/"H.I.V"/"艾-滋-病" 等变体
+    # 直接命中词库），无需再为个别词手工编写"先拼合再匹配"的补丁式规则。
 
-    # 1. 优先擦除遗传缺陷与基因检测突变综合句法（涵盖HTT基因CAG重复序列、舞蹈样动作等）
+    # ReDoS 全局防护：折叠连续水平空白串（>=2 个空格/制表符 → 单空格）。
+    # 句法正则的可选修饰组之间以 \s* 连接，恶意构造的长空白串会在多个 \s* 槽位间
+    # 引发组合级回溯分配（实测 "梅毒，患者"+2000空格 在用药句法正则上挂死 >10s）；
+    # 折叠后每个 \s* 槽位至多消费 1 个字符，回溯空间降为常数，一次性切断全模式攻击面。
+    # 仅影响已进入敏感路径的文本（干净文本在上方 Fast-Path 已原样返回，零篡改）。
+    s = re.sub(r"[ \t]{2,}", " ", s)
+
+    # 1. 优先擦除 CD4 计数、遗传缺陷、性病及肝炎综合句法
+    s = _REDACT_CD4_PATTERN.sub("", s)
     s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
     s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
     s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
+    s = _apply_category_generalizations(s)
 
-    # 1.1 优先将死因句法重构为自然流畅的“因病去世/死于”
+    def _death_age_replace(match: re.Match) -> str:
+        action = match.group(1) or "身亡于"
+        raw_age = match.group(2)
+        from ..privacy.kano import adaptive_age_hierarchy
+        anon_age = adaptive_age_hierarchy(raw_age, under_60_interval=3, senior_interval=2, output_format="floor")
+        return f"{action}{anon_age}岁"
+
     def _death_replace(match: re.Match) -> str:
-        action = match.group(1)
-        return f"因病{action}"
+        action = match.group(0)
+        return "因病去世" if "去世" in action or "离世" in action else "死于"
 
+    s = _REDACT_DEATH_WITH_AGE_PATTERN.sub(_death_age_replace, s)
     s = _REDACT_CAUSE_DEATH_PATTERN.sub(_death_replace, s)
     s = _REDACT_SUFFER_DEATH_PATTERN.sub(_death_replace, s)
 
-    # 2. 优先擦除完整服药用药句法（包含剂量、用法、连词及控制症状等修饰）
+    # 2. 优先擦除完整服药用药句法
     s = _REDACT_MEDICATION_FULL_PATTERN.sub("", s)
 
-    # 3. 擦除就诊机构句法短语（如“曾就诊于精神卫生中心，”）
+    # 3. 擦除就诊机构句法短语
     s = _REDACT_HOSPITAL_PATTERN.sub("", s)
 
-    # 4. 擦除独立诊断句法短语（如“诊断为重度精神分裂症。”）
+    # 4. 擦除独立诊断句法短语
     s = _REDACT_DIAGNOSIS_STANDALONE_PATTERN.sub("", s)
 
-    # 5. 擦除敏感特征倾向短语（如“及保护性约束倾向”）
+    # 5. 擦除敏感特征倾向短语
     s = _REDACT_FEATURE_TENDENCY_PATTERN.sub("", s)
 
-    # 6. 复合疾病场景：仅擦除敏感疾病与紧随的顿号，保留动词与后续非敏感疾病
+    # 6. 复合疾病场景
     s = _REDACT_PAIRED_PATTERN.sub(r"\1", s)
-    # 6.1 补充：擦除列表非首位的敏感疾病（"患'2型糖尿病'、'重度精神分裂症'" -> "患'2型糖尿病'"）
     s = _REDACT_PAIRED_SUFFIX_PATTERN.sub("", s)
 
-    # 7. 单敏感疾病场景：自然重构为泛化“患病”（如“一弟患'重度精神分裂症'” -> “一弟患病”）
+    # 7. 单敏感疾病场景
     s = _REDACT_SINGLE_SUFFER_PATTERN.sub("患病", s)
 
-    # 8. 擦除既往史/病史带前缀与后缀的完整词组（防止留“慢史”）
+    # 8. 擦除既往史/病史带前缀与后缀的完整词组
     s = _REDACT_HISTORY_PATTERN.sub("", s)
 
     # 9. 清理孤立残余介词、连词与标点
@@ -404,21 +566,16 @@ def redact_medical_text(text: str) -> str:
     s = _CLEANUP_ORPHAN_PREP_PATTERN.sub(r"\1", s)
     s = _CLEANUP_VERB_PUNCT_PATTERN.sub("", s)
 
-    # 9.1 孤立时间前缀自愈：将"患者1年前，"残留清除，直接输出"白细胞计数值正常。"
     s = _CLEANUP_PATIENT_TIME_PREFIX_PATTERN.sub("", s)
-
-    # 9.2 亲属孤立动词与缺失动词自愈："一弟'重度精神分裂症'" -> "一弟患'重度精神分裂症'"，"一弟患。" -> "一弟患病。"
     s = _CLEANUP_FAMILY_VERB_HEAL_PATTERN.sub(r"\1患病\2", s)
 
     s = _CLEANUP_ORPHAN_VERB_PATTERN.sub(r"\1", s)
     s = _CLEANUP_ORPHAN_SUBJECT_PATTERN.sub(r"\1", s)
 
-    # 10. 标点与空引号格式净化自愈
     s = _CLEANUP_EMPTY_QUOTES_PATTERN.sub("", s)
     s = _CLEANUP_PUNCTUATION_PATTERN.sub(r"\1", s)
     s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
 
-    # 11. 统一调起通用语法清理与标点自愈
     return _clean_orphan_syntax(s)
 
 
@@ -426,32 +583,24 @@ def redact_medical_text(text: str) -> str:
 # L4/L5 重大高敏疾病（及关联高敏处置/药物）提示词指南与判定核心逻辑
 # ---------------------------------------------------------------------------
 L4_L5_MAJOR_SENSITIVE_PROMPT_GUIDELINE = """
-【Layer-2 NER 级医疗实体无痕脱敏提示词准则 / L4-L5 Major Sensitive Entity Prompt Guidelines】
-NER 模型与提示词必须仅提取/匹配属于 L4/L5 重大高敏级别的医疗实体及其强相关高敏处置/用药：
-1. L5 极高敏级别：
-   - 免疫缺陷/艾滋病：HIV感染、HIV、艾滋病、艾滋、CD4+ T淋巴细胞、ART抗逆转录等；
-   - 精神障碍：重度精神分裂症、精神分裂症、幻听（命令性言语）、被害妄想、自伤倾向、保护性约束、奥氮平片、精神卫生中心等；
-   - 遗传缺陷：遗传性亨廷顿舞蹈病、亨廷顿舞蹈病、亨廷顿病、CAG重复序列、四苯嗪、舞蹈病等。
-2. L4 高敏级别：
-   - 性传播疾病：梅毒、苍白密螺旋体、TPPA阳性、RPR阳性、淋病、尖锐湿疣、生殖器疱疹、不洁性接触史、硬下疳等；
-   - 恶性肿瘤：恶性肿瘤、浸润性腺癌、肺腺癌、胃癌、肝癌、乳腺癌、宫颈癌、癌症、转移性肿瘤、奥希替尼、EGFR基因检测等；
-   - 病毒性肝炎：慢性乙型病毒性肝炎、乙型肝炎、乙肝、丙型肝炎、丙肝、HBV-DNA、HCV、恩替卡韦、肝硬化代偿期等；
-   - 严重器官损害：慢性阻塞性肺疾病、COPD、急性心肌梗死、冠状动脉重度狭窄等。
-
-【非重大高敏剔除原则】：
-常规慢性病（高血压、高脂血症、高血糖、普通糖尿病、脂肪肝、痛风等）、常见轻症（感冒、发烧、咳嗽、胃炎、头痛等）及常规治疗药物（如阿托伐他汀、硝苯地平、降压药、降脂药、二甲双胍、感冒药等）属于 L1/L2 低敏范围，严禁脱敏，必须原样保留。
+【Layer-2 NER & Rule 级医疗敏感数据四柱无痕脱敏提示词准则 / L4-L5 Four-Pillar Redaction Guidelines】
+对于 L4/L5 级别的重大高敏疾病（性病、恶性肿瘤、HIV/AIDS、重度精神障碍、重大遗传缺陷、病毒性肝炎等），必须遵循【四柱强剥离/无痕抹平原则】：
+1. 病因/诱因描述；
+2. 现象/体征描述；
+3. 诊断/检查描述；
+4. 用药/处置描述。
 """
 
 _MAJOR_SENSITIVE_KEYWORDS = (
     # L5 Keywords
-    "HIV", "AIDS", "艾滋", "免疫缺陷", "CD4+", "抗逆转录",
-    "精神分裂", "幻听", "妄想", "自伤", "砸物", "保护性约束", "奥氮平", "精神卫生",
+    "HIV", "AIDS", "艾滋", "免疫缺陷", "CD4+", "CD4", "抗逆转录", "病毒载量", "齐多夫定",
+    "精神分裂", "幻听", "妄想", "自伤", "砸物", "保护性约束", "奥氮平", "喹硫平", "奎硫平", "阿立哌唑", "利培酮", "氯氮平", "氨磺必利", "精神卫生",
     "亨廷顿", "CAG重复", "CAG扩增", "CAG", "HTT基因", "HTT", "四苯嗪", "舞蹈病", "舞蹈样",
     # L4 Keywords
-    "梅毒", "密螺旋体", "TPPA", "RPR", "淋病", "淋球菌", "尖锐湿疣", "疱疹", "软下疳", "性病", "不洁性接触", "硬下疳",
-    "恶性肿瘤", "腺癌", "肺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "转移瘤", "癌", "肉瘤", "奥希替尼", "EGFR",
-    "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "HBV-DNA", "HBV", "HCV-RNA", "HCV", "恩替卡韦", "肝硬化", "肝穿刺", "G3S4", "静脉曲张",
-    "急性心肌梗死", "心肌梗死", "冠状动脉重度狭窄", "重度狭窄", "COPD", "阻塞性肺"
+    "梅毒", "密螺旋体", "TPPA", "RPR", "淋病", "淋球菌", "尖锐湿疣", "疱疹", "软下疳", "性病", "不洁性接触", "硬下疳", "菜花状", "鸡冠状", "赘生物", "醋酸白", "咪喹莫特", "苄星青霉素",
+    "恶性肿瘤", "腺癌", "肺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "转移性肿瘤", "转移瘤", "癌", "肉瘤", "奥希替尼", "EGFR", "化疗", "放疗", "靶向治疗",
+    "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "HBV-DNA", "HBV", "HCV-RNA", "HCV", "恩替卡韦", "干扰素", "肝硬化", "蜘蛛痣", "肝掌", "肝硬化腹水", "门静脉高压", "门脉高压", "食管静脉曲张", "脾大", "脾功能亢进", "肝穿刺", "G3S4",
+    "急性心肌梗死", "心肌梗死", "冠状动脉重度狭窄", "重度狭窄", "COPD", "阻塞性肺", "尿毒症", "肾功能衰竭"
 )
 
 
@@ -463,11 +612,9 @@ def _is_major_sensitive_entity(term: str, ent_type: str = "") -> bool:
     term_clean = term.strip()
     term_upper = term_clean.upper()
 
-    # 1. 词库精确或包含匹配
     if _TERMS_ONLY_PATTERN.search(term_clean):
         return True
 
-    # 2. 核心重大高敏关键字匹配
     for kw in _MAJOR_SENSITIVE_KEYWORDS:
         if kw.upper() in term_upper:
             return True
@@ -476,21 +623,23 @@ def _is_major_sensitive_entity(term: str, ent_type: str = "") -> bool:
 
 
 def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
-    """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎 (Gold Standard Implementation).
-
-    推荐黄金架构：【全上下文 NER 实体抽取 -> L4/L5 重大高敏筛选 -> 实体锚点句法绑定擦除 -> 语法自愈与完全抹平】
-    1. **全上下文 NER 抽取**：保持输入病历文本完整，直接调用 NER 模型进行实体抽取 (100% 保持神经网络上下文)；
-    2. **L4/L5 准则筛选**：遵循 L4_L5_MAJOR_SENSITIVE_PROMPT_GUIDELINE 准则，筛选出 L4/L5 重大高敏实体 (保留高血压/高脂血症等常规慢病)；
-    3. **句法绑定擦除**：以 NER 定位的实体为锚点，结合剂量用法、血清学滴度、基因突变修饰及就诊短语进行结构化擦除；
-    4. **语法自愈与 Purge**：调用 _clean_orphan_syntax 自愈清理断句残渣与敏感文件路径，若全句无主语病因则 Purge 抹平为 ""；
-    5. **Fast-Path 与降级兜底**：具备 Fast-Path (<1ms) 与 NER 未就绪时的平滑 fallback 规则降级能力。
-    """
+    """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎 (Gold Standard Implementation)."""
     if not text:
         return text
 
-    # 0. Fast-Path 前置校验：若文本不含任何 L4/L5 敏感词及脱敏标签，快速原样返回 (<1ms)，避免误篡改干净文本
-    if not _TERMS_ONLY_PATTERN.search(text) and not _MASKED_LABEL_RE.search(text):
-        return text
+    norm_text = normalize_fullwidth_alphanumeric(text)
+
+    # 超长文本保护：与规则路径一致降级为词库级单次擦除，
+    # 防复杂句法正则 ReDoS 与超长文本的 NER 推理资源耗尽
+    if len(norm_text) > _REDACT_MAX_TEXT_LENGTH:
+        return _redact_terms_only(norm_text)
+
+    stripped_norm = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_text)
+
+    # 当未传入 NER 适配器时执行 Fast-path 前置校验
+    if ner_adapter is None:
+        if not _TERMS_ONLY_PATTERN.search(text) and not _TERMS_ONLY_PATTERN.search(norm_text) and not _TERMS_ONLY_PATTERN.search(stripped_norm) and not _MASKED_LABEL_RE.search(text):
+            return text
 
     entities = []
     if ner_adapter is not None:
@@ -501,7 +650,6 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         except Exception:
             entities = []
 
-    # 1. 筛选并仅保留 L4/L5 重大高敏级别的实体，过滤剔除高血压、高脂血症等常规 L1/L2 慢病/常用药
     sensitive_entities = [
         e for e in entities
         if isinstance(e, dict)
@@ -509,25 +657,37 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         and _is_major_sensitive_entity(e.get("text", ""), str(e.get("type") or e.get("label") or ""))
     ]
 
-    # 2. 如果 NER 成功提取了重大高敏实体，在完整原文上执行实体锚点驱动的上下文句法绑定擦除
     if sensitive_entities:
-        s = text
+        # ReDoS 全局防护：折叠连续水平空白串（同 redact_medical_text 主路径）
+        s = re.sub(r"[ \t]{2,}", " ", norm_text)
         sorted_entities = sorted(
             sensitive_entities,
             key=lambda x: len(x.get("text", "")),
             reverse=True,
         )
 
-        # 优先同步重构/擦除文本中关联的死因、基因检测突变、血清学滴度短语
-        def _death_replace(match: re.Match) -> str:
-            action = match.group(1)
-            return f"因病{action}"
+        def _death_age_replace(match: re.Match) -> str:
+            action = match.group(1) or "身亡于"
+            raw_age = match.group(2)
+            from ..privacy.kano import adaptive_age_hierarchy
+            anon_age = adaptive_age_hierarchy(raw_age, under_60_interval=3, senior_interval=2, output_format="floor")
+            return f"{action}{anon_age}岁"
 
+        def _death_replace(match: re.Match) -> str:
+            action = match.group(0)
+            return "因病去世" if "去世" in action or "离世" in action else "死于"
+
+        # 与规则路径对齐的句法擦除（NER 实体锚定擦除之外的规则兜底，
+        # 防止 NER 漏检 CD4 计数/用药句法等四柱特征残留——实测曾泄露 "180/μL。行+。" 类残渣）
+        s = _REDACT_CD4_PATTERN.sub("", s)
+        s = _REDACT_DEATH_WITH_AGE_PATTERN.sub(_death_age_replace, s)
         s = _REDACT_CAUSE_DEATH_PATTERN.sub(_death_replace, s)
         s = _REDACT_SUFFER_DEATH_PATTERN.sub(_death_replace, s)
         s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
         s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
         s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
+        s = _REDACT_MEDICATION_FULL_PATTERN.sub("", s)
+        s = _apply_category_generalizations(s)
 
         for ent in sorted_entities:
             term = ent.get("text", "").strip()
@@ -538,20 +698,16 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
             quoted_term = rf"['\"“‘'”’]?{re.escape(term)}['\"”’]?"
 
             if any(t in ent_type for t in ["DRUG", "MED", "CHEM"]):
-                # NER 识别出药物：连同剂量用法及控制症状短语绑定擦除
-                pat = rf"(?:长期|定期|口服|服用|给予|使用|予|遵医嘱)?\s*{quoted_term}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并)?\s*(?:控制舞蹈样症状|控制症状|抗病毒治疗|对症治疗|治疗|对症处理|口服|方案)?"
+                pat = rf"(?:长期|定期|口服|服用|给予|使用|予|遵医嘱)?\s*{quoted_term}{_DOSE}{_FREQ}\s*(?:口服|服用)?\s*(?:及|与|和|合并|\+)?\s*(?:控制舞蹈样症状|控制症状|抗逆转录治疗|抗逆转录|抗病毒治疗|抗病毒|对症治疗|治疗|对症处理|口服|方案)?"
                 s = re.sub(pat, "", s, flags=re.IGNORECASE)
             elif any(t in ent_type for t in ["HOSPITAL", "ORG", "LOC"]):
-                # NER 识别出医疗机构/组织：连同就诊短语绑定擦除
                 pat = rf"(?:曾?就诊于|就诊于|收治于|转诊至|住院于|门诊于)\s*{quoted_term}\s*(?:，|,|。|；|;)?"
                 s = re.sub(pat, "", s, flags=re.IGNORECASE)
             else:
-                # NER 识别出 DISEASE/TREATMENT/SYMPTOM 等：做实体级精准剥离与列表顿号自愈
                 pat_paired = rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){quoted_term}\s*[、,，]\s*"
                 s = re.sub(pat_paired, r"\1", s, flags=re.IGNORECASE)
                 s = re.sub(quoted_term, "", s)
 
         return _clean_orphan_syntax(s)
 
-    # 3. 当 NER 未识别出实体（或推断异常）时，平滑降级由规则引擎兜底处理
     return _clean_orphan_syntax(redact_medical_text(text))

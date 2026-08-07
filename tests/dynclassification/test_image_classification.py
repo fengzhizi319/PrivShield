@@ -574,7 +574,9 @@ class TestImageRedactionAndSymmetry:
         # 3. 校验出参格式为文件路径，且新文件存在
         assert out_path.exists()
         assert out_path.suffix == ".png"
-        assert "sanitized_syphilis_case.png" in out_path.name
+        # 输出文件名已匿名化（sha256 派生），不得泄露原始文件名（可能含患者姓名/病种）
+        assert out_path.name.startswith("sanitized_")
+        assert "syphilis_case" not in out_path.name
 
         # 4. 通过 DynClassificationService 测试集成
         service = DynClassificationService()

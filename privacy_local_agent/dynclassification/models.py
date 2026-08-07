@@ -59,16 +59,16 @@ class ConfidencePolicy(BaseModel):
     )
     # Whether to invoke LLM arbitration when conflict is detected.
     enable_llm_arbitration: bool = Field(
-        default_factory=lambda: os.environ.get("PRIVACY_LLM_ENABLE_ARBITRATION", "false").lower() == "true",
+        default_factory=lambda: os.environ.get("PRIVACY_LLM_ENABLE_ARBITRATION", "true").lower() == "true",
         alias="enableLlmArbitration",
-        description="是否启用 LLM 仲裁（需 ML 镜像，支持 PRIVACY_LLM_ENABLE_ARBITRATION 环境变量）",
+        description="是否启用 LLM 仲裁（默认 true，需 ML 镜像，支持 PRIVACY_LLM_ENABLE_ARBITRATION 环境变量）",
     )
     # LLM trigger threshold: invoke LLM when confidence falls below this value.
     llm_confidence_threshold: float = Field(
-        default_factory=lambda: float(os.environ.get("PRIVACY_LLM_CONFIDENCE_THRESHOLD", "0.6")),
+        default_factory=lambda: float(os.environ.get("PRIVACY_LLM_CONFIDENCE_THRESHOLD", "0.75")),
         ge=0.0, le=1.0,
         alias="llmConfidenceThreshold",
-        description="LLM 触发阈值（置信度低于此值时触发，默认 0.6，支持 PRIVACY_LLM_CONFIDENCE_THRESHOLD 环境变量）",
+        description="LLM 触发阈值（置信度低于此值时触发，默认 0.75，支持 PRIVACY_LLM_CONFIDENCE_THRESHOLD 环境变量）",
     )
     # Whether to enable Layer-2 NER entity extraction.
     enable_ner: bool = Field(

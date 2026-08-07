@@ -184,6 +184,7 @@ Key environment variables:
 | `PRIVACY_LLM_AUTO_ON_IMAGE` | `true` | Automatically route image inputs (file paths, Data URIs) to Layer-3 VLM |
 | `PRIVACY_LLM_CONFIDENCE_THRESHOLD` | `0.75` | Minimum confidence threshold for Layer-3 arbitration |
 | `PRIVACY_LLM_ENABLE_ARBITRATION` | `true` | Enable Layer-3 LLM arbitration on low confidence or uncertainty |
+| `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 图片打码允许读取的目录白名单（os.pathsep 分隔）；路径 resolve 后必须位于白名单内，拒绝目录穿越与 symlink 逃逸 |
 
 ## 7. Code Conventions
 

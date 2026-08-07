@@ -58,6 +58,9 @@ DEFAULT_NER_LABEL_MAPPING: dict[str, str] = {
     "dru": "MEDICATION",        # 药物
     "pro": "SURGERY",           # 手术/操作
     "bod": "BODY_PART",         # 身体部位
+    "ite": "EXAMINATION",       # 检查项目
+    "dep": "DEPARTMENT",        # 科室
+    "equ": "EQUIPMENT",         # 医疗设备
     "GENE": "GENOMIC_HINT",     # 基因（ModelScope 特有）
 }
 

@@ -50,6 +50,7 @@ from .rules import (
     canonicalize_pii_field,
     L4_PATTERNS,
     L5_PATTERNS,
+    normalize_fullwidth_alphanumeric,
     redact_medical_text,
     redact_medical_text_with_ner,
 )
@@ -61,6 +62,10 @@ IMAGE_FAILURE = IMAGE_REDACTION_FAILURE
 # NER 抹平缓存大小上限：防止长文本高并发下无界内存增长。
 # dict 保持插入序，超出上限时按 FIFO 淘汰最旧条目（见 _cache_ner_result）
 _NER_CACHE_MAX_SIZE = 2048
+
+# sanitized 缓存大小上限：与 NER 缓存相同的 FIFO 有界策略，
+# 防止长驻实例在图像字段/sanitize=False 等路径下无界增长（内存耗尽防护）
+_SANITIZED_CACHE_MAX_SIZE = 2048
 
 _SUPPORTED_REDACT_MODES = frozenset({"redact", "mask"})
 _SUPPORTED_REDACT_ENGINES = frozenset({"ner", "rule"})
@@ -159,8 +164,10 @@ class MedicalPrivacyPipeline:
                                 RecordClassificationReport + sanitized_rec  [双输出]
 
     线程安全：
-    - _sanitized_cache / _ner_cache 均为进程内共享状态，所有读写都经过 self._lock 保护；
-    - NER 推理在锁内执行（先查缓存、未命中则推理并写回），相同文本重复出现时 0ms 响应。
+    - _sanitized_cache / _ner_cache 均为进程内共享状态，所有读写都经过 self._lock 保护，
+      且两个缓存均有 FIFO 容量上限（防无界内存增长）；
+    - NER 推理采用双检模式：锁内查/写缓存、锁外执行推理，长耗时推理不阻塞并发线程，
+      相同文本重复出现时 0ms 响应。
     """
 
     def __init__(
@@ -186,6 +193,10 @@ class MedicalPrivacyPipeline:
             dyn_service = DynClassificationService(text_sanitizer=self._medical_text_sanitizer)
         self.dyn_service = dyn_service  # 挂载分类引擎（调用方也可注入自定义实例以替换默认漏斗）
         self.redact_engine = redact_engine  # 抹平引擎模式："ner" / "rule"
+
+        # 将医疗领域的脱敏回调注册到通用策略注册表 (DomainStrategyRegistry) 中
+        from ..dynclassification import default_domain_registry
+        default_domain_registry.register_sanitizer("medical", self._medical_text_sanitizer)
         # 惰性初始化 Small-NER 适配器；依赖缺失时为 None（纯规则降级运行）
         self.ner_adapter = NerAdapter() if NerAdapter is not None else None
         self._lock = threading.Lock()  # 全局互斥锁：保护下方两个共享缓存的并发读写
@@ -212,6 +223,18 @@ class MedicalPrivacyPipeline:
                 pass
         # 写入新条目（若键已存在则覆盖，同时刷新为"最新"插入位置）
         self._ner_cache[text] = sanitized
+
+    def _cache_sanitized_result(self, cache_key: tuple[str, str], sanitized: str) -> None:
+        """写入 sanitized 缓存；超过 _SANITIZED_CACHE_MAX_SIZE 时按 FIFO 淘汰最旧条目。
+
+        与 _cache_ner_result 相同的有界策略：调用方必须持有 self._lock。
+        """
+        if len(self._sanitized_cache) >= _SANITIZED_CACHE_MAX_SIZE:
+            try:
+                self._sanitized_cache.pop(next(iter(self._sanitized_cache)))
+            except (StopIteration, KeyError):
+                pass
+        self._sanitized_cache[cache_key] = sanitized
 
     def _medical_text_sanitizer(self, field_name: str, text: str, final_level: str, mode: str = "redact") -> str:
         """医疗领域文本脱敏回调（注入到 DynClassificationService）。
@@ -251,13 +274,18 @@ class MedicalPrivacyPipeline:
                 # 1) 字段属于临床文本 或 文本中仍有未抹平的高风险词汇；
                 # 2) 文本长度/含中文字符数满足阈值（_could_benefit_from_ner）。
                 if (field_name in clinical_keys or self._contains_high_risk_text(text)) and self._could_benefit_from_ner(text):
+                    # 双检模式：锁内仅做缓存查/写，NER 推理（百毫秒~秒级）在锁外执行，
+                    # 避免长耗时推理阻塞其他线程的缓存访问（并发吞吐）。
+                    # 极端情况下两个线程可能对同一文本重复推理一次，结果等价，无害。
                     with self._lock:
-                        # 缓存优先：相同文本直接复用上次 NER 推理结果（0ms 响应）
-                        if text in self._ner_cache:
-                            sanitized_text = self._ner_cache[text]
-                        else:
-                            # 缓存未命中 → 执行 Small-NER 推理抹平并写回缓存
-                            sanitized_text = redact_medical_text_with_ner(text, ner_adapter=self.ner_adapter)
+                        cached_ner = self._ner_cache.get(text)
+                    if cached_ner is not None:
+                        # 缓存命中：相同文本直接复用上次 NER 推理结果（0ms 响应）
+                        sanitized_text = cached_ner
+                    else:
+                        # 缓存未命中 → 锁外执行 Small-NER 推理抹平，再持锁写回缓存
+                        sanitized_text = redact_medical_text_with_ner(text, ner_adapter=self.ner_adapter)
+                        with self._lock:
                             self._cache_ner_result(text, sanitized_text)
                 else:
                     # 不满足深度推理条件 → 降级为纯规则引擎（正则）抹平
@@ -307,7 +335,7 @@ class MedicalPrivacyPipeline:
                 sanitized_value = dyn_resp.field_result.sanitized_value
                 if isinstance(sanitized_value, str) and sanitized_value != val_str:
                     with self._lock:
-                        self._sanitized_cache[(key, val_str)] = sanitized_value
+                        self._cache_sanitized_result((key, val_str), sanitized_value)
         except Exception:
             # 漏斗异常（如 LLM 未加载/超时）时静默降级：dyn_level 保持 None，由本地规则接管
             dyn_level = None
@@ -432,8 +460,26 @@ class MedicalPrivacyPipeline:
         双重用途：
         1. 作为 NER 深度推理的触发条件之一（文本中确实有高敏词才值得推理）；
         2. 作为最终门禁——process_records 中脱敏后仍命中则整值删除（见最终门禁逻辑）。
+
+        三级检测（词库正则已内建单分隔符容忍，此处再补全角与多分隔符变体）：
+        - 原文直接匹配；
+        - 全角字母/数字归一化（ＨＩＶ → HIV）后匹配；
+        - 剔除字符间插入噪声（空格/点/连字符/零宽字符，如 "H  I  V"、"艾-滋-病"）后匹配。
         """
-        return any(pattern.search(text) for pattern, _replacement in L4_PATTERNS + L5_PATTERNS)
+        patterns = L4_PATTERNS + L5_PATTERNS
+        if any(pattern.search(text) for pattern, _replacement in patterns):
+            return True
+        norm = normalize_fullwidth_alphanumeric(text)
+        if norm != text and any(pattern.search(norm) for pattern, _replacement in patterns):
+            return True
+        stripped = re.sub(
+            r"(?<=[a-zA-Z0-9一-龥])[\s.\-_·•​‌‍﻿]+(?=[a-zA-Z0-9一-龥])",
+            "",
+            norm,
+        )
+        if stripped != norm and any(pattern.search(stripped) for pattern, _replacement in patterns):
+            return True
+        return False
 
     @staticmethod
     def _could_benefit_from_ner(text: str) -> bool:
@@ -471,10 +517,10 @@ class MedicalPrivacyPipeline:
         因为 _sanitize_field 可复用 _classify_field 的缓存，避免重复调用 dyn_service。
         """
         # 公开 API 需要先执行分类以填充缓存（单次调用同时产出分级结果与脱敏值）
-        self._classify_field(key, val)
-        return self._sanitize_field(key, val)
+        fc = self._classify_field(key, val)
+        return self._sanitize_field(key, val, level_hint=fc.level)
 
-    def _sanitize_field(self, key: str, val: str) -> str:
+    def _sanitize_field(self, key: str, val: str, level_hint: str | None = None) -> str:
         """字段智能抹平脱敏（供 process_records 内部使用）。
 
         执行优先级（自上而下短路返回）：
@@ -483,12 +529,23 @@ class MedicalPrivacyPipeline:
         2. PII 字段 → 强掩码（不信任漏斗的弱脱敏）；
         3. 临床文本/高敏词 → 纯正则强剥离 L4/L5；
         4. 其余低敏字段 → 原样返回。
+
+        Args:
+            key: 字段名。
+            val: 字段原始值。
+            level_hint: 调用方已计算的分级结果（如 process_records 传入 fc.level），
+                传入后条件 (c) 直接复用该等级，避免对同一字段重入 _classify_field
+                造成二次完整漏斗推理（NER/LLM 成本翻倍）。
         """
         val_str = "" if val is None else str(val)  # 类型安全转换（与 _classify_field 保持一致）
 
         # 0. 图像病例检测：文件路径或 Base64 Data URI → 调用图像打码（fail-closed）
         # fail-closed 策略：打码失败绝不返回原图，而是返回固定失败标记供上层计数/告警
         if is_image_input(val_str):
+            # 图像分支提前返回：先消费 _classify_field 阶段可能写入的 sanitized 缓存项，
+            # 否则该条目永久残留（缓存膨胀）
+            with self._lock:
+                self._sanitized_cache.pop((key, val_str), None)
             try:
                 from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
                 return sanitize_image_input(val_str)  # 执行图像级打码（区域遮盖/人脸模糊）
@@ -523,11 +580,11 @@ class MedicalPrivacyPipeline:
         # 三个触发条件满足其一即抹平：
         # (a) 字段属临床自由文本（病史/诊断类）；
         # (b) 文本中检测到高敏词（不依赖字段名——未知字段里的敏感词同样必须抹平）；
-        # (c) 重新分级后为 L4/L5（说明分类阶段漏检，此处二次防御）。
+        # (c) 分级为 L4/L5（优先复用调用方传入的 level_hint，避免重入分类造成二次漏斗推理）。
         if (
             key in clinical_keys
             or self._contains_high_risk_text(val_str)
-            or self._classify_field(key, val_str).level in ["L4", "L5"]
+            or (level_hint if level_hint is not None else self._classify_field(key, val_str).level) in ["L4", "L5"]
         ):
             return self.sanitize_text(val_str)
 
@@ -554,6 +611,8 @@ class MedicalPrivacyPipeline:
         l4_count = 0
         l3_count = 0
         redaction_failures = 0  # 图像打码失败计数（影响合规保证标记）
+        fail_safe_triggered = 0  # 最终门禁触发计数（规则+NER 未抹净、被门禁整值删除的字段数）
+        pii_fields_total = 0  # 实际检出并掩码的 PII 字段总数（summary 实测统计用）
 
         # ── 外层循环：逐条记录处理 ──
         for idx, rec in enumerate(records, start=1):
@@ -594,15 +653,17 @@ class MedicalPrivacyPipeline:
                     max_level = fc.level
                     
                 # ② 脱敏：使用 _sanitize_field 复用 _classify_field 的 dyn_service 结果
-                #（单次调用优化——_classify_field 已填充缓存，_sanitize_field 直接消费，不重复跑漏斗）
+                #（单次调用优化——_classify_field 已填充缓存并产出 fc.level，
+                #  _sanitize_field 直接消费缓存与等级提示，不重复跑漏斗）
                 if sanitize:
-                    sanitized_rec[key] = self._sanitize_field(key, val_str)
+                    sanitized_rec[key] = self._sanitize_field(key, val_str, level_hint=fc.level)
                     if sanitized_rec[key] == IMAGE_FAILURE:
                         redaction_failures += 1  # 图像打码失败计数（不中断流程，仅记录）
                     elif self._contains_high_risk_text(sanitized_rec[key]):
                         # 最终门禁：任何漏网的高敏文本整体删除，不能返回部分原文。
                         # （覆盖规则引擎与 NER 都未抹净的极端场景，保证"零 L4/L5 原文泄露"）
                         sanitized_rec[key] = "[L4-L5-DATA-REMOVED]"
+                        fail_safe_triggered += 1  # 门禁触发计数（反映规则+NER 双引擎未抹净的字段数）
                 else:
                     sanitized_rec[key] = val_str  # sanitize=False：原样透传（仅做分级报告）
 
@@ -627,20 +688,24 @@ class MedicalPrivacyPipeline:
                     }
                     # 触发条件与 _medical_text_sanitizer 一致：临床字段或含高敏词，且文本值得推理
                     if (key in clinical_keys or self._contains_high_risk_text(val_str)) and self._could_benefit_from_ner(val_str):
-                        # 带内存缓存的 NER 抹平（相同文本 0ms 闪电响应）
+                        # 带内存缓存的 NER 抹平（相同文本 0ms 闪电响应）；
+                        # 双检模式：锁内仅查/写缓存，推理在锁外执行（不阻塞并发线程的缓存访问）
                         with self._lock:
-                            if val_str in self._ner_cache:
-                                fc.sanitized_value_ner = self._ner_cache[val_str]  # 缓存命中：直接复用
-                            else:
-                                # 缓存未命中：执行 NER 推理并写回缓存
-                                ner_res = redact_medical_text_with_ner(val_str, ner_adapter=self.ner_adapter)
+                            ner_cached = self._ner_cache.get(val_str)
+                        if ner_cached is not None:
+                            fc.sanitized_value_ner = ner_cached  # 缓存命中：直接复用
+                        else:
+                            # 缓存未命中：锁外执行 NER 推理，再持锁写回缓存
+                            ner_res = redact_medical_text_with_ner(val_str, ner_adapter=self.ner_adapter)
+                            with self._lock:
                                 self._cache_ner_result(val_str, ner_res)
-                                fc.sanitized_value_ner = ner_res
+                            fc.sanitized_value_ner = ner_res
                     else:
                         # 不值得推理：ner 快照直接等于规则结果（保证字段快照非空）
                         fc.sanitized_value_ner = fc.sanitized_value_rule
 
             # ── 记录级统计：按最高等级计数 ──
+            pii_fields_total += len(rec_pii)  # 累加实际检出/掩码的 PII 字段数
             if max_level == "L5":
                 l5_count += 1
             elif max_level == "L4":
@@ -662,6 +727,23 @@ class MedicalPrivacyPipeline:
             sanitized_records.append(sanitized_rec)
 
         # ── 汇总统计：耗时 + 各等级计数 + 合规保证标记 ──
+        # sanitize=False 时 _sanitize_field 未被调用，分类阶段写入的 sanitized 缓存
+        # 无人消费——统一清空，防止长驻实例缓存只写不读导致的膨胀（另有 FIFO 上限兜底）
+        if not sanitize:
+            with self._lock:
+                self._sanitized_cache.clear()
+
+        # 输出回扫验证（实测而非自报）：对全部脱敏字段执行三级高敏词检测
+        # （含全角/插字符变体），任何字段仍命中则合规保证标记为 False
+        leaked_fields = 0
+        if sanitize:
+            for rec_out in sanitized_records:
+                for out_val in rec_out.values():
+                    if out_val in (IMAGE_FAILURE, "[L4-L5-DATA-REMOVED]"):
+                        continue
+                    if self._contains_high_risk_text(out_val):
+                        leaked_fields += 1
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         summary = {
@@ -670,10 +752,13 @@ class MedicalPrivacyPipeline:
             "l4_records_count": l4_count,
             "l3_records_count": l3_count,
             "l1_l2_records_count": len(records) - l5_count - l4_count - l3_count,
-            "sanitized_pii_fields_per_record": len(PII_FIELD_RULES) if sanitize else 0,
+            # 实测统计：实际检出并掩码的 PII 字段总数与记录均值（不再硬编码词表大小）
+            "sanitized_pii_fields_total": pii_fields_total if sanitize else 0,
+            "sanitized_pii_fields_per_record": round(pii_fields_total / len(records), 2) if (sanitize and records) else 0,
             "redaction_failures": redaction_failures,
-            # 合规保证：开启脱敏且零打码失败 → 断言输出中无 L4/L5 原始数据泄露
-            "guarantee_no_l4_l5_raw_data": bool(sanitize and redaction_failures == 0),
+            "fail_safe_triggered_fields": fail_safe_triggered,
+            # 合规保证：开启脱敏 + 零打码失败 + 输出全量回扫零泄露（实测验证而非自报）
+            "guarantee_no_l4_l5_raw_data": bool(sanitize and redaction_failures == 0 and leaked_fields == 0),
             "duration_ms": round(elapsed_ms, 2),
         }
 

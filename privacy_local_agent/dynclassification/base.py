@@ -142,7 +142,11 @@ class LlmClassifier(ABC):
 
     @abstractmethod
     def classify(
-        self, text: str, upstream_level: SensitivityLevel, upstream_confidence: float
+        self,
+        text: str,
+        upstream_level: SensitivityLevel,
+        upstream_confidence: float,
+        sanitize: bool = False,
     ) -> dict[str, Any] | None:
         """基于上游结果对文本进行深度分类。 / Perform deep classification on text based on upstream results.
 
@@ -150,6 +154,11 @@ class LlmClassifier(ABC):
             text: 待分类的文本内容。 / Text content to classify.
             upstream_level: 上游引擎给出的等级。 / Level given by upstream engine.
             upstream_confidence: 上游引擎的置信度。 / Confidence of the upstream engine.
+            sanitize: 是否请求单次融合脱敏（分类+脱敏联合推断）。 / Whether to request single-pass fused sanitization.
+                适配层始终以此关键字参数调用，所有实现必须接受该形参；
+                不支持的引擎可仅接收而不实现联合推断。 / The adapter always passes this
+                keyword argument; implementations must accept it (engines without
+                fused sanitization may simply ignore it).
 
         Returns:
             结构化分类结果字典，或 None 表示无需修正。 / Structured classification result dict, or None indicating no correction needed.
@@ -160,7 +169,11 @@ class NoOpLlmClassifier(LlmClassifier):
     """默认空实现（降级用）：低置信度时给出保守回退结果。 / Default no-op implementation (fallback): gives conservative fallback result on low confidence."""
 
     def classify(
-        self, text: str, upstream_level: SensitivityLevel, upstream_confidence: float
+        self,
+        text: str,
+        upstream_level: SensitivityLevel,
+        upstream_confidence: float,
+        sanitize: bool = False,
     ) -> dict[str, Any] | None:
         """降级分类逻辑：置信度 < 0.6 时标记需人工复核。 / Fallback classification logic: flag for human review when confidence < 0.6."""
         if upstream_confidence < 0.6:

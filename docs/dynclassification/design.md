@@ -1030,6 +1030,55 @@ def plate_number_matcher(value: Any, params: dict[str, Any]) -> bool:
     return bool(re.match(pattern, str(value))) if value else False
 ```
 
+### 7.4 领域脱敏策略与回调注册表 (`DomainStrategyRegistry`)
+
+为了彻底解耦通用内核（`dynclassification`）与特定业务领域的隐私规则知识库（如 `medical_pipeline/rules.py` 医疗四柱脱敏规则、`finance_pipeline` 金融脱敏策略、`hr_pipeline` 人力资源脱敏策略），系统引入了 **`DomainStrategyRegistry`（领域策略注册表）**。
+
+#### 1. 策略模式与解耦架构
+
+```mermaid
+graph TD
+    subgraph CoreEngine [dynclassification 通用引擎内核]
+        Service[DynClassificationService 服务入口]
+        Funnel[ClassificationFunnel 3层漏斗编排]
+        Registry[DomainStrategyRegistry 策略注册表]
+    end
+
+    subgraph DomainApps [领域应用与规则提供者]
+        Medical[medical_pipeline/rules.py\n医疗四柱脱敏+自愈]
+        Finance[finance_pipeline/rules.py\n金融脱敏策略]
+        HRPipeline[hr_pipeline/rules.py\nHR 隐私策略]
+    end
+
+    Medical -->|注册 domain='medical' 脱敏策略| Registry
+    Finance -.->|注册 domain='finance' 脱敏策略| Registry
+    HRPipeline -.->|注册 domain='hr' 脱敏策略| Registry
+
+    Service -->|自动调度策略| Registry
+```
+
+#### 2. 回调函数签名与协议定义 (`privacy_local_agent/dynclassification/domain_registry.py`)
+
+```python
+# 领域文本脱敏回调函数签名：(field_name, text, final_level, mode) -> sanitized_text
+TextSanitizerCallback = Callable[[str, str, str, str], str]
+
+class DomainStrategyRegistry:
+    """领域策略与回调注册表（线程安全单例/多实例）。"""
+
+    def register_sanitizer(self, domain: str, sanitizer: TextSanitizerCallback) -> None:
+        """注册指定领域的文本脱敏回调函数（如 domain='medical'）。"""
+        ...
+
+    def get_sanitizer(self, domain: str) -> TextSanitizerCallback | None:
+        """获取指定领域的文本脱敏回调函数。"""
+        ...
+```
+
+#### 3. 动态调度机制与流水线集成
+- **动态检索逻辑**：当 `DynClassificationService` 对指定 `domain`（如 `"medical"`）评估字段脱敏时，首先查找显式注入的回调；若未注入，则查询 `default_domain_registry.get_sanitizer(domain)` 执行领域专属的【四柱强剥离】及句法自愈脱敏。
+- **零耦合保证**：`dynclassification` 通用内核不包含任何硬编码的医疗病名、金融卡号或 HR 隐私字段，各领域流水线在初始化时向单例注册表注入自身的 Provider，实现高内聚低耦合。
+
 ## 8. 通用规则执行引擎
 
 ### 8.1 ConfigurableRuleEngine

@@ -42,6 +42,11 @@
 │    - LLM 仲裁成功时直接使用 LLM 裁定等级（不再走 max_level）                  │
 │    - 否则: 排除降级标签 + 过滤低置信度标签后取 max_level                      │
 │    final_level = llm_level or resolve_level(effective_tags)             │
+│                                                                          │
+│  安全约束（fail-closed）:                                                  │
+│    - 场景 A 仲裁: LLM 裁定等级必须落在冲突标签等级集合内，否则拒绝并强制人工复核 │
+│    - 场景 B/C: LLM 裁定等级低于规则/上游等级时拒绝降级，保留原等级并人工复核     │
+│    - LLM 返回的 confidence 非数值时回退上游置信度，不崩溃                     │
 └─────────────────────────────────────────────────────────────────────────┘
 """
 
@@ -175,12 +180,15 @@ class ClassificationFunnel:
 
         return True
 
-    def classify_field(self, field_name: str, value: Any) -> Tuple[FunnelResult, list[SecurityTag]]:
+    def classify_field(self, field_name: str, value: Any, sanitize: bool = False) -> Tuple[FunnelResult, list[SecurityTag]]:
         """对单个字段执行三层漏斗分类。
 
         Args:
             field_name: 字段名。
             value: 字段值。
+            sanitize: 是否计算图像打码等脱敏产物（默认 False）。
+                仅当调用方显式请求脱敏时才执行 Step 6 的图像打码，
+                避免纯分类请求产生不必要的文件读写副作用。
 
         Returns:
             一个元组 (FunnelResult, suppressed_tags)，包含完整的分类决策信息和被压制的标签列表。
@@ -254,6 +262,9 @@ class ClassificationFunnel:
             # 场景 A: 规则冲突
             if self.policy.enable_llm_arbitration and self.llm is not None and self.llm.is_available:
                 # Phase 2: LLM 仲裁
+                # 冲突标签等级集合：LLM 仲裁只允许在该集合内选择，
+                # 集合外裁定（如被注入的 LLM 返回任意低等级）一律拒绝。
+                conflict_levels = {t.level for t in tags}
                 llm_result = self.llm.arbitrate(
                     field_name=field_name,
                     value=str_value,
@@ -261,13 +272,16 @@ class ClassificationFunnel:
                     taxonomy=self.taxonomy,
                 )
                 if llm_result:
-                    # LLM 仲裁成功: 使用 LLM 裁定的等级和置信度
-                    confidence = float(llm_result.get("confidence", confidence))
-                    reasoning = str(llm_result.get("reasoning", reasoning))
-                    engine_layer = EngineLayer.L3_LLM
-                    # LLM 裁定等级：直接作为最终等级，不被其他标签的 max_level 覆盖
+                    llm_confidence = self._safe_llm_confidence(
+                        llm_result.get("confidence"), confidence
+                    )
                     llm_level = llm_result.get("final_level", "")
-                    if llm_level and llm_level in self.taxonomy.levels:
+                    if llm_level and llm_level in self.taxonomy.levels and llm_level in conflict_levels:
+                        # LLM 仲裁成功（等级合法且在冲突集合内）: 使用 LLM 裁定的等级和置信度
+                        confidence = llm_confidence
+                        reasoning = str(llm_result.get("reasoning", reasoning))
+                        engine_layer = EngineLayer.L3_LLM
+                        # LLM 裁定等级：直接作为最终等级，不被其他标签的 max_level 覆盖
                         llm_adjudicated_level = llm_level
                         # 追加一个 LLM 裁定标签（用于审计追踪）
                         tags.append(SecurityTag(
@@ -295,16 +309,30 @@ class ClassificationFunnel:
                             else:
                                 surviving_tags.append(t)
                         tags[:] = surviving_tags
-                    # 复核标记刷新: LLM 高置信度仲裁成功时，清除历史复核标记，
-                    # 避免不必要的审核工单。
-                    # Refresh review flag: clear inherited needs_human_review when LLM
-                    # arbitrates with high confidence (>= llm_confidence_threshold).
-                    if confidence >= self.policy.llm_confidence_threshold:
-                        needs_human_review = False
-                    logger.info(
-                        "funnel_llm_arbitration",
-                        extra={"field_name": field_name, "llm_level": llm_level},
-                    )
+                        # 复核标记刷新: LLM 高置信度仲裁成功时，清除历史复核标记，
+                        # 避免不必要的审核工单。
+                        # Refresh review flag: clear inherited needs_human_review when LLM
+                        # arbitrates with high confidence (>= llm_confidence_threshold).
+                        if confidence >= self.policy.llm_confidence_threshold:
+                            needs_human_review = False
+                        logger.info(
+                            "funnel_llm_arbitration",
+                            extra={"field_name": field_name, "llm_level": llm_level},
+                        )
+                    else:
+                        # 安全地板校验：LLM 裁定等级非法或超出冲突标签等级集合
+                        # （可能来自 Prompt 注入/模型幻觉），拒绝采用其裁定，
+                        # 保留规则引擎结果并强制人工复核。
+                        needs_human_review = True
+                        reasoning += " | LLM仲裁等级超出冲突集合(已拒绝,待人工复核)"
+                        logger.warning(
+                            "funnel_llm_arbitration_rejected",
+                            extra={
+                                "field_name": field_name,
+                                "llm_level": llm_level,
+                                "conflict_levels": sorted(conflict_levels),
+                            },
+                        )
                 else:
                     # LLM 仲裁失败: 回退到 Phase 1 置信度衰减
                     confidence = self.policy.conflict_confidence
@@ -319,45 +347,87 @@ class ClassificationFunnel:
         elif self._is_image_field_or_value(field_name, value) and self.policy.auto_llm_on_image and self.llm is not None and self.llm.is_available:
             # 场景 C: 运维优化动态识别：包含图像/图片病例时，自动强制触发 Layer-3 多模态 LLM 视觉深度分析
             current_level = self._resolve_level(tags)
-            llm_result = self.llm.classify(str_value, current_level, confidence)
+            llm_result = self.llm.classify(str_value, current_level, confidence, sanitize=sanitize)
             if llm_result:
-                confidence = float(llm_result.get("confidence", confidence))
-                reasoning = "【多模态视觉识别】" + str(llm_result.get("reasoning", reasoning))
-                engine_layer = EngineLayer.L3_LLM
+                llm_confidence = self._safe_llm_confidence(
+                    llm_result.get("confidence"), confidence
+                )
                 llm_level = llm_result.get("final_level", "")
                 if llm_level and llm_level in self.taxonomy.levels:
-                    llm_adjudicated_level = llm_level
-                    tags.append(SecurityTag(
-                        level=llm_level,
-                        category="MULTIMODAL_IMAGE_ANALYSIS",
-                        confidence=confidence,
-                        source_engine="LLM",
-                        rule_id="LLM_MULTIMODAL_IMAGE",
-                        domain=self.taxonomy.domain,
-                        standard_id=self.taxonomy.standard_id,
-                    ))
+                    # 安全地板校验：LLM 无权将等级降到规则/上游已判定等级之下
+                    # （防止 Prompt 注入或模型幻觉导致的降级放行）。
+                    if self.taxonomy.get_level_rank(llm_level) < self.taxonomy.get_level_rank(current_level):
+                        needs_human_review = True
+                        reasoning += " | 多模态LLM降级裁定被拒绝(低于规则/上游等级,待人工复核)"
+                        logger.warning(
+                            "funnel_llm_downgrade_rejected",
+                            extra={
+                                "field_name": field_name,
+                                "llm_level": llm_level,
+                                "upstream_level": current_level,
+                            },
+                        )
+                    else:
+                        confidence = llm_confidence
+                        reasoning = "【多模态视觉识别】" + str(llm_result.get("reasoning", reasoning))
+                        engine_layer = EngineLayer.L3_LLM
+                        llm_adjudicated_level = llm_level
+                        tags.append(SecurityTag(
+                            level=llm_level,
+                            category="MULTIMODAL_IMAGE_ANALYSIS",
+                            confidence=confidence,
+                            source_engine="LLM",
+                            rule_id="LLM_MULTIMODAL_IMAGE",
+                            domain=self.taxonomy.domain,
+                            standard_id=self.taxonomy.standard_id,
+                        ))
+                else:
+                    confidence = llm_confidence
+                    reasoning = "【多模态视觉识别】" + str(llm_result.get("reasoning", reasoning))
+                    engine_layer = EngineLayer.L3_LLM
 
         elif confidence < self.policy.llm_confidence_threshold:
             # 场景 B: 低置信度兜底（无冲突但置信度不足）
             if self.policy.enable_llm and self.llm is not None and self.llm.is_available:
                 current_level = self._resolve_level(tags)
-                llm_result = self.llm.classify(str_value, current_level, confidence)
+                llm_result = self.llm.classify(str_value, current_level, confidence, sanitize=sanitize)
                 if llm_result:
-                    confidence = float(llm_result.get("confidence", confidence))
-                    reasoning = str(llm_result.get("reasoning", reasoning))
-                    engine_layer = EngineLayer.L3_LLM
+                    llm_confidence = self._safe_llm_confidence(
+                        llm_result.get("confidence"), confidence
+                    )
                     llm_level = llm_result.get("final_level", "")
                     if llm_level and llm_level in self.taxonomy.levels:
-                        llm_adjudicated_level = llm_level
-                        tags.append(SecurityTag(
-                            level=llm_level,
-                            category="LLM_CLASSIFICATION",
-                            confidence=confidence,
-                            source_engine="LLM",
-                            rule_id="LLM_DEEP",
-                            domain=self.taxonomy.domain,
-                            standard_id=self.taxonomy.standard_id,
-                        ))
+                        # 安全地板校验：LLM 无权将等级降到规则/上游已判定等级之下
+                        # （防止 Prompt 注入或模型幻觉导致的降级放行）。
+                        if self.taxonomy.get_level_rank(llm_level) < self.taxonomy.get_level_rank(current_level):
+                            needs_human_review = True
+                            reasoning += " | LLM降级裁定被拒绝(低于规则/上游等级,待人工复核)"
+                            logger.warning(
+                                "funnel_llm_downgrade_rejected",
+                                extra={
+                                    "field_name": field_name,
+                                    "llm_level": llm_level,
+                                    "upstream_level": current_level,
+                                },
+                            )
+                        else:
+                            confidence = llm_confidence
+                            reasoning = str(llm_result.get("reasoning", reasoning))
+                            engine_layer = EngineLayer.L3_LLM
+                            llm_adjudicated_level = llm_level
+                            tags.append(SecurityTag(
+                                level=llm_level,
+                                category="LLM_CLASSIFICATION",
+                                confidence=confidence,
+                                source_engine="LLM",
+                                rule_id="LLM_DEEP",
+                                domain=self.taxonomy.domain,
+                                standard_id=self.taxonomy.standard_id,
+                            ))
+                    else:
+                        confidence = llm_confidence
+                        reasoning = str(llm_result.get("reasoning", reasoning))
+                        engine_layer = EngineLayer.L3_LLM
 
         # ===== Step 5: 计算最终等级 =====
         # 优先级: LLM 裁定等级 > 有效标签 max_level
@@ -369,9 +439,10 @@ class ClassificationFunnel:
             final_level = self._resolve_level(tags)
 
         # ===== Step 6: 计算智能抹平 sanitized_value =====
-        # 当输入为图像时，自动调用图像打码模块生成脱敏后的图像
+        # 仅当调用方显式请求脱敏（sanitize=True）且输入为图像时，
+        # 才调用图像打码模块生成脱敏后的图像——纯分类请求不产生文件读写副作用。
         sanitized_value = ""
-        if self._is_image_field_or_value(field_name, value):
+        if sanitize and self._is_image_field_or_value(field_name, value):
             try:
                 from .image_redaction import sanitize_image_input
                 sanitized_value = sanitize_image_input(str_value)
@@ -403,12 +474,37 @@ class ClassificationFunnel:
         if val_lower.startswith("data:image/") or val_lower.startswith("image:"):
             return True
         # 3. 字段名称包含图像/影像语义标识
+        # 拉丁关键词使用词边界匹配（前后不得紧邻其他拉丁字母），
+        # 避免 "topic" 命中 "pic"、"imaging" 命中 "img" 之类的子串误报；
+        # 中文关键词无词边界概念，保持子串匹配。
         field_lower = field_name.lower()
-        image_keywords = ("image", "photo", "pic", "picture", "dicom", "xray", "ct_scan", "mri", "切片", "病例图片", "影像")
-        if any(k in field_lower for k in image_keywords):
+        latin_keywords = ("image", "photo", "pic", "picture", "dicom", "xray", "ct_scan", "mri", "img")
+        cjk_keywords = ("切片", "病例图片", "影像")
+        keyword_hit = any(
+            re.search(r"(^|[^a-z])" + re.escape(k) + r"([^a-z]|$)", field_lower)
+            for k in latin_keywords
+        ) or any(k in field_lower for k in cjk_keywords)
+        if keyword_hit:
             if len(val_str) > 3 and not val_str.startswith("http://") and not val_str.startswith("https://"):
                 return True
         return False
+
+    @staticmethod
+    def _safe_llm_confidence(raw: Any, fallback: float) -> float:
+        """将 LLM 返回的 confidence 安全转换为 float。
+
+        LLM 输出不可信：可能返回 "极高" 等非数值内容（甚至经由 Prompt 注入
+        构造），直接 float() 会抛 ValueError 导致请求 500。转换失败时回退到
+        上游置信度，保证漏斗流程不崩溃。
+        """
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "funnel_llm_confidence_invalid",
+                extra={"raw_confidence": str(raw)[:64], "fallback": fallback},
+            )
+            return fallback
 
     # ------------------------------------------------------------------
     # 内部方法 / Internal Methods

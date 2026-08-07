@@ -9,13 +9,13 @@
 
 ### 1.1 数据生成脚本 (`scripts/data/generate_medical_data.py`)
 
-用于生成高仿真 20 条标准医疗记录 `data1.csv`：
+用于生成高仿真医疗记录 `data1.csv`（脚本默认 20 条；仓库内各样例目录中预置的 `data1.csv` 均为 **100 条**）：
 
 ```bash
 cd /home/charles/code/sfwork/privacy-local-agent
 
-# 生成 20 条数据保存到 data/data1.csv (默认 seed 2026)
-python scripts/data/generate_medical_data.py --output data/data1.csv
+# 生成 100 条数据保存到 data/data1.csv (默认 seed 2026，与仓库预置样例一致)
+python scripts/data/generate_medical_data.py --output data/data1.csv --count 100
 
 # 自定义记录条数与种子
 python scripts/data/generate_medical_data.py --output tmp/custom_data.csv --count 50 --seed 42
@@ -45,6 +45,7 @@ cp data/data1.csv console/backend-go/internal/samples/data1.csv
 | `PRIVACY_REST_PORT` | `8079` | Agent REST 服务端口 |
 | `PRIVACY_DYNCLASSIFICATION_RULES_DIR` | `rules` | 分类分级规则存放目录 |
 | `PRIVACY_PROFILE` | — | 隐私配置文件 YAML 路径 |
+| `PRIVACY_IMAGE_ALLOWED_DIRS` | `<cwd>/data`、`uploads`、`samples`、`medical_images` + 系统临时目录 | 图片输入路径沙箱白名单（`os.pathsep` 分隔）。仅允许读取白名单目录内的图片文件，拒绝 `../` 目录穿越与 symlink 逃逸（任意文件读取防护）。生产环境应显式设置为可信图片存储目录 |
 
 ### 2.2 启动 Agent REST 服务
 

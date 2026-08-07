@@ -37,7 +37,7 @@
 {
   "classification_report": [
     {
-      "record_index": 0,
+      "record_index": 1,
       "max_level": "L5",
       "pii_fields_detected": ["id_card_no", "name", "registered_address"],
       "high_sensitivity_detected": ["diagnosis_name:L5", "present_illness:L5"],
@@ -76,12 +76,29 @@
     "l4_records_count": 0,
     "l3_records_count": 0,
     "l1_l2_records_count": 0,
+    "sanitized_pii_fields_total": 3,
     "sanitized_pii_fields_per_record": 3,
+    "redaction_failures": 0,
+    "fail_safe_triggered_fields": 0,
     "guarantee_no_l4_l5_raw_data": true,
     "duration_ms": 12.5
   }
 }
 ```
+
+#### 安全语义说明（务必阅读）
+
+- **`classification_report` 携带明文**：每条记录的 `raw_record` 与每个字段的 `raw_value` 均为**原始未脱敏值**（用于对照校验），`field_details` 中的 `sanitized_value_rule` / `sanitized_value_ner` 为双引擎对比快照。**本接口不能当作安全输出边界**——对外发布数据时只能使用 `sanitized_data`。
+- **`guarantee_no_l4_l5_raw_data` 为实测验证结果**：对全部脱敏输出执行三级高敏词回扫（含全角/插字符变体检测）后才置 `true`；存在图像打码失败（`redaction_failures > 0`）或回扫命中时为 `false`。
+- **`fail_safe_triggered_fields`**：被最终门禁整值删除（替换为 `[L4-L5-DATA-REMOVED]`）的字段数。该值持续偏高说明规则/NER 双引擎覆盖不足，应补充词库。
+
+#### 请求规模限制（资源耗尽防护）
+
+| 限制项 | 上限 | 超限响应 |
+|---|---|---|
+| 单请求记录数 | 500 条 | 422 |
+| 单记录字段数 | 100 个 | 422 |
+| 单字段值长度 | 100,000 字符 | 422 |
 
 ---
 
