@@ -221,7 +221,7 @@ _REDACT_CAUSE_DEATH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _REDACT_DEATH_WITH_AGE_PATTERN = re.compile(
-    rf"(?:不幸)?\s*(?:身亡于|病逝于|死于|殁于|离世于|去世于|因|由于)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:{_REDACT_DEATH_ACTION})?\s*[\(（](\d+)\s*岁[\)）]",
+    rf"(?:不幸)?\s*(身亡于|病逝于|死于|殁于|离世于|去世于|因|由于)\s*{_Q}(?:{_TERMS_OR}){_Q}\s*(?:{_REDACT_DEATH_ACTION})?\s*[\(（](\d+)\s*岁[\)）]",
     re.IGNORECASE,
 )
 _REDACT_SUFFER_DEATH_PATTERN = re.compile(
@@ -543,10 +543,13 @@ def redact_medical_text(text: str) -> str:
     s = re.sub(r"[ \t]{2,}", " ", s)
 
     def _death_age_replace(match: re.Match) -> str:
-        raw_age = match.group(1)
+        action = match.group(1) or "死于"
+        raw_age = match.group(2)
         from ..privacy.kano import adaptive_age_hierarchy
         anon_age = adaptive_age_hierarchy(raw_age, under_60_interval=3, senior_interval=2, output_format="floor")
-        return f"因病去世({anon_age}岁)"
+        if action in ("因", "由于"):
+            return f"因病去世({anon_age}岁)"
+        return f"{action}{anon_age}岁"
 
     def _death_replace(match: re.Match) -> str:
         return "因病去世"

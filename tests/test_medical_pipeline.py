@@ -452,7 +452,7 @@ def test_redact_family_death_causes_complex() -> None:
     res_rule = redact_medical_text(text)
     res_ner = redact_medical_text_with_ner(text)
 
-    expected = "外婆因病去世(48岁)，伯父因病去世。母亲患'2型糖尿病'。"
+    expected = "外婆殁于48岁，伯父因病去世。母亲患'2型糖尿病'。"
     assert res_rule == expected, f"Rule 结果不符合预期: {res_rule!r}"
     assert res_ner == expected, f"NER 结果不符合预期: {res_ner!r}"
 
