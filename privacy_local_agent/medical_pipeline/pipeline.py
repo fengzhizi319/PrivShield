@@ -579,7 +579,7 @@ class MedicalPrivacyPipeline:
         clinical_keys = {
             "diagnosis_name", "chief_complaint", "present_illness",
             "past_history", "personal_history", "family_history",
-            "allergic_history", "progress_note",
+            "allergic_history", "progress_note", "icd10_code", "admission_condition",
         }
         # 三个触发条件满足其一即抹平：
         # (a) 字段属临床自由文本（病史/诊断类）；

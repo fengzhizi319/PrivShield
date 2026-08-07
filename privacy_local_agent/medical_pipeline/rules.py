@@ -66,6 +66,14 @@ PII_FIELD_ALIASES: dict[str, str] = {
     "医疗保险号": "medical_insurance_no",
     "insurance_no": "medical_insurance_no",
     "med_insurance_no": "medical_insurance_no",
+    "医保结算流水号": "medical_insurance_no",
+    "insurance_settlement_id": "medical_insurance_no",
+    "人员唯一标识": "id_card_no",
+    "person_id": "id_card_no",
+    "定点医疗机构编码": "disability_cert_no",
+    "hospital_code": "disability_cert_no",
+    "明细结算流水号": "medical_insurance_no",
+    "settlement_seq_no": "medical_insurance_no",
 }
 
 

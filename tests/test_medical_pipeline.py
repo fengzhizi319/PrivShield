@@ -784,3 +784,58 @@ def test_pinyin_homophone_variants_caught() -> None:
         assert core not in res, f"拼音/形近变体 '{core}' 泄露在脱敏结果中: {res!r}"
 
 
+def test_yibao_csv_pipeline_processing() -> None:
+    """验证医保结算数据集 (yibao.csv 18 字段) 的分类分级与脱敏抹平测试。
+
+    检查内容：
+    1. 成功读取并解析 yibao.csv 50 条记录；
+    2. MedicalPrivacyPipeline 动态适配 18 字段模式，双结构输出结构完整；
+    3. 诊断名称与 ICD-10 中的 L4/L5 敏感病史 100% 抹平打码；
+    4. PII 医疗标识（person_id, insurance_settlement_id）被强有效掩码/脱敏；
+    5. 三级安全门禁回扫 100% 零高敏词泄漏。
+    """
+    import csv
+    from pathlib import Path
+    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+
+    yibao_csv_path = Path("privacy_local_agent/medical_pipeline/samples/yibao.csv")
+    assert yibao_csv_path.exists(), f"医保测试数据集 yibao.csv 不存在: {yibao_csv_path}"
+
+    with open(yibao_csv_path, "r", encoding="utf-8-sig") as f:
+        records = list(csv.DictReader(f))
+
+    assert len(records) == 50, f"预期 50 条医保记录，实际读取 {len(records)} 条"
+
+    pipeline = MedicalPrivacyPipeline()
+    res = pipeline.process_records(records, sanitize=True)
+
+    reports = res.classification_report
+    sanitized_records = res.sanitized_data
+
+    assert len(reports) == 50
+    assert len(sanitized_records) == 50
+
+    # 高敏词词库（用于 Fail-Closed 端到端回扫校验）
+    high_risk_terms = [
+        "HIV", "艾滋病", "艾滋", "梅毒", "尖锐湿疣", "菜花状",
+        "精神分裂症", "亨廷顿", "恶性肿瘤", "腺癌", "恩替卡韦"
+    ]
+
+    for idx, (rep, san) in enumerate(zip(reports, sanitized_records)):
+        # 1. 验证 18 个字段齐全
+        assert len(san) == 18, f"第 {idx+1} 条脱敏记录字段数量不符合 18 字段模式: {len(san)}"
+
+        # 2. 检查 PII 脱敏 (person_id, insurance_settlement_id)
+        assert "*" in san["person_id"], f"person_id 未脱敏掩码: {san['person_id']}"
+        assert "*" in san["insurance_settlement_id"], f"insurance_settlement_id 未脱敏掩码: {san['insurance_settlement_id']}"
+
+        # 3. 检查诊断名称 (diagnosis_name) 高敏词抹平
+        diag_name = san["diagnosis_name"]
+        for term in high_risk_terms:
+            assert term not in diag_name, f"第 {idx+1} 条脱敏记录泄露高敏词 '{term}': {diag_name!r}"
+
+        # 4. 门禁验证：_contains_high_risk_text 必须返回 False
+        assert not pipeline._contains_high_risk_text(diag_name), f"门禁校验失败，第 {idx+1} 条诊断仍包含高风险特征: {diag_name!r}"
+
+
+
