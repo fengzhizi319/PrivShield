@@ -48,12 +48,17 @@ from privacy_local_agent.privacy.masking import mask_value
 from .rules import (
     PII_FIELD_RULES,
     canonicalize_pii_field,
+    ICD10_FIELD_NAMES,
+    DATE_GENERALIZATION_FIELDS,
     L4_PATTERNS,
     L5_PATTERNS,
     _TERMS_FIRST_CHARS_PATTERN,
+    classify_icd10_code,
     normalize_fullwidth_alphanumeric,
+    redact_icd10_code,
     redact_medical_text,
     redact_medical_text_with_ner,
+    truncate_date_to_month,
 )
 
 # 图像打码失败标记的模块级别名：
@@ -70,6 +75,13 @@ _SANITIZED_CACHE_MAX_SIZE = 2048
 
 _SUPPORTED_REDACT_MODES = frozenset({"redact", "mask"})
 _SUPPORTED_REDACT_ENGINES = frozenset({"ner", "rule"})
+
+# 枚举型分类字段集合：取值来自封闭枚举（如科室、医疗类别），不是自由文本。
+# 对这类字段做 L4/L5 词库子串扫描会产生误伤（如科室"皮肤性病科"含"性病"被定级 L4
+# 并篡改为"皮肤科"），因此豁免自由文本高敏词扫描与抹平触发。
+_CATEGORICAL_FIELDS = frozenset({
+    "department", "dept", "dept_name", "admission_dept", "discharge_dept",
+})
 
 
 def _mask_string(field_name: str, value: str) -> str:
@@ -251,6 +263,11 @@ class MedicalPrivacyPipeline:
             supported = ", ".join(sorted(_SUPPORTED_REDACT_MODES))
             raise ValueError(f"Unsupported sanitization mode {mode!r}; expected one of: {supported}")
 
+        # 枚举型分类字段（科室等）不做自由文本抹平：封闭枚举值的子串命中属于误伤
+        # （如"皮肤性病科"含"性病"被改成"皮肤科"），原样返回
+        if field_name.strip().lower() in _CATEGORICAL_FIELDS:
+            return text
+
         # ── 分支一：mask 模式（显式标签掩码）──
         # 场景：上层请求保留可读性的"打标签式"脱敏（如 [L4-TUMOR-MASKED]），
         # 而非默认的无痕抹平（不留任何提示性标志）。
@@ -298,8 +315,7 @@ class MedicalPrivacyPipeline:
             # 语义清洗：诊断字段若被抹平成残缺的修饰词（如"慢性"），
             # 说明其主体（病名）已被抹除，保留修饰词无意义且易泄露上下文 → 整体置空
             if field_name in ["diagnosis_name", "diagnosis"]:
-                if sanitized_text.strip() in ["慢性", "既往", "既往慢性"]:
-                    sanitized_text = ""
+                sanitized_text = self._purge_diagnosis_residual(field_name, text, sanitized_text)
 
         # 收尾：仅对明确的个人信息字段应用 PII 掩码（字段名命中 PII_FIELD_RULES），
         # 确保身份类信息走统一的强掩码规则而非文本抹平逻辑
@@ -355,36 +371,54 @@ class MedicalPrivacyPipeline:
                 rule_matched=f"PII_RULE_{PII_FIELD_RULES[canonical_key]}",
             )
 
+        # ── 步骤 1.5: ICD-10 诊断编码字段定级（§9 规约：高危编码段 L4/L5）──
+        # 诊断名称抹平后编码本身仍泄露病种（如 B20.900=HIV、C34.900=肺恶性肿瘤），
+        # 因此编码字段按 ICD-10 章节码段独立定级，先于自由文本词库扫描。
+        if key.strip().lower() in ICD10_FIELD_NAMES:
+            icd_result = classify_icd10_code(val_str)
+            if icd_result is not None:
+                icd_level, icd_category = icd_result
+                return FieldClassification(
+                    field_name=key,
+                    level=icd_level,
+                    security_tag=f"HIGH_RISK_MEDICAL_{icd_level}",
+                    description=f"ICD-10 {icd_level} 高危诊断编码 ({icd_category})",
+                    rule_matched=f"ICD10_{icd_level}_RULE",
+                )
+
         # ── 步骤 2: 病史文本 L5/L4 术语扫描（正则词库匹配，最高等级优先）──
         # 设计要点：先扫 L5、再扫 L4。L5 已是全表最高级，命中即提前中断（短路优化，避免多余正则开销）；
         # 未命中 L5 才继续扫 L4（L4 命中同样中断）。
+        # 枚举型分类字段（科室等）豁免扫描：封闭枚举值的子串命中属于误伤（如"皮肤性病科"含"性病"）。
         detected_level: str | None = None
         detected_category: str | None = None  # 命中的风险类别代码（如 IMMUNODEFICIENCY），供报告追溯
 
-        for pat, _replacement in L5_PATTERNS:
-            if pat.search(val_str):
-                detected_level = "L5"
-                # 从替换标签中提取类别代码 (如 [L5-IMMUNODEFICIENCY-SENSITIVE-MASKED] → IMMUNODEFICIENCY)
-                tag = _replacement.strip("[]")
-                parts = tag.split("-")
-                if len(parts) >= 2:
-                    detected_category = parts[1]
-                break  # L5 已是最高级，中断循环
-
-        if detected_level is None:
-            for pat, _replacement in L4_PATTERNS:
+        if key.strip().lower() not in _CATEGORICAL_FIELDS:
+            for pat, _replacement in L5_PATTERNS:
                 if pat.search(val_str):
-                    detected_level = "L4"
+                    detected_level = "L5"
+                    # 从替换标签中提取类别代码 (如 [L5-IMMUNODEFICIENCY-SENSITIVE-MASKED] → IMMUNODEFICIENCY)
                     tag = _replacement.strip("[]")
                     parts = tag.split("-")
                     if len(parts) >= 2:
                         detected_category = parts[1]
-                    break  # 已找到 L4
+                    break  # L5 已是最高级，中断循环
+
+            if detected_level is None:
+                for pat, _replacement in L4_PATTERNS:
+                    if pat.search(val_str):
+                        detected_level = "L4"
+                        tag = _replacement.strip("[]")
+                        parts = tag.split("-")
+                        if len(parts) >= 2:
+                            detected_category = parts[1]
+                        break  # 已找到 L4
 
         # ── 步骤 2.5: 融合 dynclassification 动态分类引擎的定级结果 ──
         # 本地正则未命中，但 3 层漏斗（Rule->NER->LLM）识别出 L4/L5 时同样采纳，
         # 覆盖词库外的同义/变体表达（如 LLM 理解出的"转移癌"等复杂语义）。
-        if detected_level is None and dyn_level in ["L4", "L5"]:
+        # 枚举型分类字段同样豁免（避免漏斗对封闭枚举值的误判抬高记录等级）。
+        if detected_level is None and key.strip().lower() not in _CATEGORICAL_FIELDS and dyn_level in ["L4", "L5"]:
             detected_level = dyn_level
 
         # 依据最终等级构造对应 FieldClassification（L5 > L4 优先返回）
@@ -407,24 +441,35 @@ class MedicalPrivacyPipeline:
 
         # ── 步骤 3: 普通临床与评估字段按医疗标准规范映射 ──
         # 未命中高敏词库时，按字段语义定级：
-        # - L3: 临床病史与问诊主诉（主诉/既往史/家族史/过敏史）——敏感度较高；
-        # - L2: 健康与残疾评估信息（残疾类别/等级/评估结果/个人史）——敏感度中等。
-        if key in ["chief_complaint", "past_history", "family_history", "allergic_history"]:
+        # - L3: 临床病史、问诊主诉与诊断名称（主诉/既往史/家族史/过敏史/诊断名称）——敏感度较高；
+        # - L2: 健康与残疾评估信息（残疾类别/等级/评估结果/个人史）、入院病情、
+        #       非高危诊断编码与完整精度日期准标识符——敏感度中等。
+        if key in ["chief_complaint", "past_history", "family_history", "allergic_history", "diagnosis_name"]:
             return FieldClassification(
                 field_name=key,
                 level="L3",
                 security_tag="CLINICAL_HISTORY",
-                description="临床病史与问诊主诉",
+                description="临床病史、问诊主诉与诊断信息",
                 rule_matched="CLINICAL_TEXT_RULE",
             )
-            
-        if key in ["disability_category", "disability_level", "assess_result_name", "personal_history"]:
+
+        if key in ["disability_category", "disability_level", "assess_result_name", "personal_history", "admission_condition"]:
             return FieldClassification(
                 field_name=key,
                 level="L2",
                 security_tag="HEALTH_ASSESSMENT",
                 description="健康与残疾评估信息",
                 rule_matched="ASSESSMENT_RULE",
+            )
+
+        # 良性 ICD-10 编码（高危编码已在步骤 1.5 拦截）与完整精度日期准标识符
+        if key.strip().lower() in ICD10_FIELD_NAMES or key.strip() in DATE_GENERALIZATION_FIELDS or key.strip().lower() in DATE_GENERALIZATION_FIELDS:
+            return FieldClassification(
+                field_name=key,
+                level="L2",
+                security_tag="QUASI_IDENTIFIER",
+                description="诊断编码/日期准标识符信息",
+                rule_matched="QUASI_IDENTIFIER_RULE",
             )
 
         # ── 步骤 4: 通用 L1 级兜底 ──
@@ -452,6 +497,24 @@ class MedicalPrivacyPipeline:
             sanitized = pat.sub(replacement, sanitized)
         for pat, replacement in L4_PATTERNS:
             sanitized = pat.sub(replacement, sanitized)
+        return sanitized
+
+    @staticmethod
+    def _purge_diagnosis_residual(field_name: str, original: str, sanitized: str) -> str:
+        """诊断名称字段的残余整值抹平（§9 规约：L4/L5 诊断彻底抹平）。
+
+        诊断名称是结构化诊断标签而非叙事文本：高敏词抹平后残留的修饰碎片
+        （如 "确诊"、"伴滴度阳性"、"升结肠"）既无医学意义，又会泄露上下文
+        （部位/检查手段可反推病种），因此原文含高敏词且值已被改写时整值置空。
+        良性诊断（未含高敏词、未被改写）原样保留，不影响数据可用性。
+        """
+        if field_name not in ("diagnosis_name", "diagnosis"):
+            return sanitized
+        residual = sanitized.strip()
+        if residual in ("慢性", "既往", "既往慢性"):
+            return ""
+        if residual and residual != original.strip() and MedicalPrivacyPipeline._contains_high_risk_text(original):
+            return ""
         return sanitized
 
     @staticmethod
@@ -506,6 +569,16 @@ class MedicalPrivacyPipeline:
             return _mask_string("name", val_str)
         if canonical_key == "registered_address":
             return _mask_string("address", val_str)
+        if canonical_key == "person_id":
+            # 人员唯一标识：保留标识前缀与末 4 位（如 PID****1234），维持记录关联能力
+            if len(val_str) > 7:
+                return val_str[:3] + "****" + val_str[-4:]
+            return "****"
+        if canonical_key == "hospital_code":
+            # 定点医疗机构编码：保留前 5 位机构区划前缀，尾部掩码（如 H1101****）
+            if len(val_str) > 5:
+                return val_str[:5] + "****"
+            return "****"
         if canonical_key in ["disability_cert_no", "medical_insurance_no"]:
             # 证件号/医保号：本地首尾保留格式掩码——
             # 长度 >6 时保留前 4 后 2、中间星号填充；短串直接全掩码
@@ -569,11 +642,25 @@ class MedicalPrivacyPipeline:
             # 例如姓名只做了部分抹平而未按身份证规则掩码）
             if canonicalize_pii_field(key) in PII_FIELD_RULES:
                 return self._mask_pii_value(key, val_str)
+            # 枚举型分类字段不信任漏斗的文本改写（封闭枚举值抹平属误伤），原样返回
+            if key.strip().lower() in _CATEGORICAL_FIELDS:
+                return val_str
             return cached  # 非 PII 字段直接信任漏斗结果（已含 NER/LLM 智能抹平）
 
         # 2. PII 字段始终使用强掩码（缓存未命中时兜底，确保身份信息绝不裸奔）
         if canonicalize_pii_field(key) in PII_FIELD_RULES:
             return self._mask_pii_value(key, val_str)
+
+        # 2.5 ICD-10 诊断编码字段：按章节码段脱敏（L5 整值抹平、L4 替换范畴码），
+        # 防止诊断名称抹平后编码本身泄露病种（如 B20.900=HIV）
+        if key.strip().lower() in ICD10_FIELD_NAMES:
+            redacted_code = redact_icd10_code(val_str)
+            if redacted_code != val_str:
+                return redacted_code
+
+        # 2.6 日期准标识符字段：完整精度日期截断为年月（§9 规约 L2 泛化）
+        if key.strip() in DATE_GENERALIZATION_FIELDS or key.strip().lower() in DATE_GENERALIZATION_FIELDS:
+            return truncate_date_to_month(val_str)
 
         # 3. 备用降级：文本强剥离 L4/L5 术语（纯正则快速路径）
         clinical_keys = {
@@ -583,14 +670,16 @@ class MedicalPrivacyPipeline:
         }
         # 三个触发条件满足其一即抹平：
         # (a) 字段属临床自由文本（病史/诊断类）；
-        # (b) 文本中检测到高敏词（不依赖字段名——未知字段里的敏感词同样必须抹平）；
+        # (b) 文本中检测到高敏词（不依赖字段名——未知字段里的敏感词同样必须抹平；
+        #     枚举型分类字段如科室豁免，避免"皮肤性病科"子串误伤）；
         # (c) 分级为 L4/L5（优先复用调用方传入的 level_hint，避免重入分类造成二次漏斗推理）。
         if (
             key in clinical_keys
-            or self._contains_high_risk_text(val_str)
+            or canonicalize_pii_field(key) in clinical_keys
+            or (key.strip().lower() not in _CATEGORICAL_FIELDS and self._contains_high_risk_text(val_str))
             or (level_hint if level_hint is not None else self._classify_field(key, val_str).level) in ["L4", "L5"]
         ):
-            return self.sanitize_text(val_str)
+            return self._purge_diagnosis_residual(key, val_str, self.sanitize_text(val_str))
 
         # 4. 低敏/普通字段：不满足任何抹平条件 → 原样返回（避免过度脱敏破坏数据可用性）
         return val_str
@@ -663,9 +752,10 @@ class MedicalPrivacyPipeline:
                     sanitized_rec[key] = self._sanitize_field(key, val_str, level_hint=fc.level)
                     if sanitized_rec[key] == IMAGE_FAILURE:
                         redaction_failures += 1  # 图像打码失败计数（不中断流程，仅记录）
-                    elif self._contains_high_risk_text(sanitized_rec[key]):
+                    elif key.strip().lower() not in _CATEGORICAL_FIELDS and self._contains_high_risk_text(sanitized_rec[key]):
                         # 最终门禁：任何漏网的高敏文本整体删除，不能返回部分原文。
-                        # （覆盖规则引擎与 NER 都未抹净的极端场景，保证"零 L4/L5 原文泄露"）
+                        # （覆盖规则引擎与 NER 都未抹净的极端场景，保证"零 L4/L5 原文泄露"；
+                        #  枚举型分类字段豁免——"皮肤性病科"等封闭枚举值的子串命中属误伤）
                         sanitized_rec[key] = "[L4-L5-DATA-REMOVED]"
                         fail_safe_triggered += 1  # 门禁触发计数（反映规则+NER 双引擎未抹净的字段数）
                 else:
@@ -742,7 +832,9 @@ class MedicalPrivacyPipeline:
         leaked_fields = 0
         if sanitize:
             for rec_out in sanitized_records:
-                for out_val in rec_out.values():
+                for out_key, out_val in rec_out.items():
+                    if out_key.strip().lower() in _CATEGORICAL_FIELDS:
+                        continue  # 枚举型分类字段不参与高敏词回扫（子串误伤豁免）
                     if out_val in (IMAGE_FAILURE, "[L4-L5-DATA-REMOVED]"):
                         continue
                     if self._contains_high_risk_text(out_val):

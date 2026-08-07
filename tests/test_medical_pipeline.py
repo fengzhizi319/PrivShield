@@ -797,6 +797,7 @@ def test_yibao_csv_pipeline_processing() -> None:
     import csv
     from pathlib import Path
     from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+    from privacy_local_agent.medical_pipeline.rules import classify_icd10_code
 
     yibao_csv_path = Path("privacy_local_agent/medical_pipeline/samples/yibao.csv")
     assert yibao_csv_path.exists(), f"医保测试数据集 yibao.csv 不存在: {yibao_csv_path}"
@@ -836,6 +837,131 @@ def test_yibao_csv_pipeline_processing() -> None:
 
         # 4. 门禁验证：_contains_high_risk_text 必须返回 False
         assert not pipeline._contains_high_risk_text(diag_name), f"门禁校验失败，第 {idx+1} 条诊断仍包含高风险特征: {diag_name!r}"
+
+        # 5. ICD-10 高危编码不得原样泄露（§9 规约：诊断名抹平后编码仍可反推病种）
+        raw_icd = rep["raw_record"]["icd10_code"]
+        icd_result = classify_icd10_code(raw_icd)
+        if icd_result is not None:
+            icd_level = icd_result[0]
+            assert san["icd10_code"] != raw_icd, f"第 {idx+1} 条高危 ICD-10 编码原样泄露: {raw_icd}"
+            if icd_level == "L5":
+                assert san["icd10_code"] == "", f"第 {idx+1} 条 L5 编码未整值抹平: {san['icd10_code']!r}"
+            else:
+                assert san["icd10_code"].startswith("[L4-ICD_"), f"第 {idx+1} 条 L4 编码未替换为范畴码: {san['icd10_code']!r}"
+        else:
+            assert san["icd10_code"] == raw_icd, f"第 {idx+1} 条良性 ICD-10 编码被误改: {raw_icd} -> {san['icd10_code']}"
+
+        # 6. 枚举型科室字段零篡改（"皮肤性病科" 含"性病"子串，不得误伤）
+        assert san["admission_dept"] == rep["raw_record"]["admission_dept"]
+        assert san["discharge_dept"] == rep["raw_record"]["discharge_dept"]
+
+        # 7. 日期准标识符截断为年月（§9 规约 L2 泛化）
+        for date_key in ("birth_date", "admission_date", "discharge_date"):
+            assert len(san[date_key]) == 7 and san[date_key][4] == "-", (
+                f"第 {idx+1} 条 {date_key} 未截断为年月: {san[date_key]!r}"
+            )
+
+        # 8. person_id 按 L3 人员标识定级（不得误映射为身份证 L4 抬高全量记录等级）
+        pid_detail = next(f for f in rep["field_details"] if f["field_name"] == "person_id")
+        assert pid_detail["level"] == "L3", f"person_id 定级错误: {pid_detail['level']}"
+        assert san["person_id"].startswith("PID****"), f"person_id 掩码格式错误: {san['person_id']}"
+
+
+def test_icd10_code_classification_and_redaction() -> None:
+    """ICD-10 高危编码段定级与脱敏单元测试（rules.classify_icd10_code / redact_icd10_code）。"""
+    from privacy_local_agent.medical_pipeline.rules import (
+        classify_icd10_code,
+        redact_icd10_code,
+    )
+
+    # L5 极高敏：HIV / 精神分裂症 / 亨廷顿舞蹈病 → 整值抹平
+    for code in ("B20.900", "B24.x00", "F20.900", "F25.100", "G10.x00", "G10"):
+        assert classify_icd10_code(code)[0] == "L5", f"{code} 应判定为 L5"
+        assert redact_icd10_code(code) == "", f"{code} 应整值抹平"
+
+    # L4 高敏：性病 / 肿瘤 / 病毒性肝炎 / 急性心梗 / 肾衰 / 慢阻肺 → 范畴码替换
+    l4_cases = {
+        "A51.000": "[L4-ICD_INFECTIOUS]",
+        "A63.000": "[L4-ICD_INFECTIOUS]",
+        "C34.900": "[L4-ICD_NEOPLASM]",
+        "D05.100": "[L4-ICD_NEOPLASM]",
+        "B18.100": "[L4-ICD_LIVER]",
+        "I21.900": "[L4-ICD_CARDIOVASCULAR]",
+        "N18.500": "[L4-ICD_RENAL]",
+        "J44.100": "[L4-ICD_RESPIRATORY]",
+    }
+    for code, expected in l4_cases.items():
+        assert classify_icd10_code(code)[0] == "L4", f"{code} 应判定为 L4"
+        assert redact_icd10_code(code) == expected, f"{code} 范畴码错误: {redact_icd10_code(code)!r}"
+
+    # 良性编码与非法输入：原样保留
+    for code in ("I10.x00", "E11.900", "J18.900", "K35.800", "", "abc", "12345"):
+        assert classify_icd10_code(code) is None, f"{code} 不应判定为高危"
+        assert redact_icd10_code(code) == code, f"{code} 应原样保留"
+
+    # 范畴码标签自身不得触发高敏词门禁（防二次命中整值删除）
+    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+    for code in l4_cases:
+        assert not MedicalPrivacyPipeline._contains_high_risk_text(redact_icd10_code(code))
+
+
+def test_categorical_department_field_no_false_positive() -> None:
+    """枚举型科室字段豁免自由文本高敏扫描：'皮肤性病科' 不得被定级 L4 或篡改。"""
+    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+
+    pipeline = MedicalPrivacyPipeline()
+    res = pipeline.process_records(
+        [{"admission_dept": "皮肤性病科", "discharge_dept": "皮肤性病科", "gender": "女"}],
+        sanitize=True,
+    )
+    san = res.sanitized_data[0]
+    assert san["admission_dept"] == "皮肤性病科"
+    assert san["discharge_dept"] == "皮肤性病科"
+    levels = {f["field_name"]: f["level"] for f in res.classification_report[0]["field_details"]}
+    assert levels["admission_dept"] == "L1", f"科室字段被误定级: {levels['admission_dept']}"
+
+
+def test_yibao_person_id_and_hospital_code_masking() -> None:
+    """person_id / hospital_code 独立 PII 规则：定级 L3，格式掩码符合 §9 规约。"""
+    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+
+    pipeline = MedicalPrivacyPipeline()
+    res = pipeline.process_records(
+        [{"person_id": "PID66453983", "hospital_code": "H4201020015"}],
+        sanitize=True,
+    )
+    san = res.sanitized_data[0]
+    assert san["person_id"] == "PID****3983"
+    assert san["hospital_code"] == "H4201****"
+    levels = {f["field_name"]: f["level"] for f in res.classification_report[0]["field_details"]}
+    assert levels["person_id"] == "L3"
+    assert levels["hospital_code"] == "L3"
+
+
+def test_chinese_and_combined_field_names_support() -> None:
+    """测试 Pipeline 支持纯中文 Key（如 '身份证号'）、纯英文 Key 和中英组合 Key（如 'id_card_no (身份证号)'）无缝识别与治理。"""
+    pipeline = MedicalPrivacyPipeline()
+
+    chinese_record = {
+        "姓名": "张三",
+        "身份证号": "110101199003072345",
+        "主诉": "确诊HIV感染3年，伴咳嗽",
+        "诊断名称": "获得性免疫缺陷综合征(HIV)"
+    }
+    res = pipeline.process_records([chinese_record], sanitize=True)
+    san = res.sanitized_data[0]
+    assert "*" in san["身份证号"]
+    assert "HIV" not in san["诊断名称"]
+    assert "艾滋" not in san["诊断名称"]
+
+    combined_record = {
+        "id_card_no (身份证号)": "110101199003072345",
+        "diagnosis_name (诊断名称)": "梅毒硬下疳",
+    }
+    res_comb = pipeline.process_records([combined_record], sanitize=True)
+    san_comb = res_comb.sanitized_data[0]
+    assert "*" in san_comb["id_card_no (身份证号)"]
+    assert "梅毒" not in san_comb["diagnosis_name (诊断名称)"]
 
 
 

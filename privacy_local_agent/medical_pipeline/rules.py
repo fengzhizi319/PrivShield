@@ -19,6 +19,8 @@ PII_FIELD_RULES: dict[str, str] = {
     "registered_address": "ADDRESS",
     "disability_cert_no": "DISABILITY_CERT",
     "medical_insurance_no": "INSURANCE_NO",
+    "person_id": "PERSON_ID",
+    "hospital_code": "HOSPITAL_CODE",
 }
 
 # 中文数据源常用字段名到规范字段名的映射。保留规范英文键作为唯一规则来源，
@@ -68,20 +70,57 @@ PII_FIELD_ALIASES: dict[str, str] = {
     "med_insurance_no": "medical_insurance_no",
     "医保结算流水号": "medical_insurance_no",
     "insurance_settlement_id": "medical_insurance_no",
-    "人员唯一标识": "id_card_no",
-    "person_id": "id_card_no",
-    "定点医疗机构编码": "disability_cert_no",
-    "hospital_code": "disability_cert_no",
+    "人员唯一标识": "person_id",
+    "person_id": "person_id",
+    "pid": "person_id",
+    "定点医疗机构编码": "hospital_code",
+    "hospital_code": "hospital_code",
     "明细结算流水号": "medical_insurance_no",
     "settlement_seq_no": "medical_insurance_no",
+    # 临床与诊断字段别名映射
+    "主诉": "chief_complaint",
+    "现病史": "present_illness",
+    "既往史": "past_history",
+    "个人史": "personal_history",
+    "家族史": "family_history",
+    "过敏史": "allergic_history",
+    "诊断名称": "diagnosis_name",
+    "病程记录": "progress_note",
+    "诊断编码": "icd10_code",
+    "诊断编码(ICD-10)": "icd10_code",
+    "诊断编码（ICD-10）": "icd10_code",
+    "icd-10": "icd10_code",
+    "icd10": "icd10_code",
+    "入院病情": "admission_condition",
 }
 
 
 def canonicalize_pii_field(field_name: str) -> str:
-    """将中文或英文 PII 字段名转换为医疗 Pipeline 的规范字段名。"""
+    """将中文、英文或中英组合 (如 id_card_no (身份证号)) 字段名转换为规范字段名。"""
     if not field_name:
         return field_name
-    return PII_FIELD_ALIASES.get(field_name.strip().lower(), PII_FIELD_ALIASES.get(field_name, field_name))
+    cleaned = field_name.strip()
+
+    # 直接匹配字典
+    if cleaned in PII_FIELD_ALIASES:
+        return PII_FIELD_ALIASES[cleaned]
+    if cleaned.lower() in PII_FIELD_ALIASES:
+        return PII_FIELD_ALIASES[cleaned.lower()]
+
+    # 若包含括号如 "id_card_no (身份证号)" 或 "身份证号 (id_card_no)"，提取括号内外部分尝试匹配
+    if "(" in cleaned or "（" in cleaned:
+        import re
+        parts = re.split(r"[（\(\）\)]+", cleaned)
+        for part in parts:
+            p = part.strip()
+            if not p:
+                continue
+            if p in PII_FIELD_ALIASES:
+                return PII_FIELD_ALIASES[p]
+            if p.lower() in PII_FIELD_ALIASES:
+                return PII_FIELD_ALIASES[p.lower()]
+
+    return cleaned
 
 # L5 极高风险病史与诊断词汇映射组（包含疾病名、缩写、临床特征及变体）
 L5_TERMS_MAP: dict[str, list[str]] = {
@@ -93,7 +132,7 @@ L5_TERMS_MAP: dict[str, list[str]] = {
     ],
     "PSYCHIATRIC_DISORDER": [
         "重度精神分裂症", "精神分裂症", "精神分裂", "jingshenfenlie", "精神分lie", "双相情感障碍", "言语关联妄想", "关联妄想", "命令性幻听", "保护性约束倾向", "幻听（命令性言语）",
-        "命令性言语", "被害妄想", "幻听", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "奥氮平", "富马酸喹硫平", "富马酸奎硫平",
+        "命令性言语", "被害妄想", "幻听", "幻觉", "偏执", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "奥氮平", "富马酸喹硫平", "富马酸奎硫平",
         "喹硫平", "奎硫平", "阿立哌唑", "利培酮", "氯氮平", "氨磺必利", "舒必利", "奋乃静", "氟哌啶醇", "哈泊度醇", "丙戊酸钠", "碳酸锂",
         "精神卫生中心", "schizophrenia"
     ],
@@ -116,7 +155,7 @@ L4_TERMS_MAP: dict[str, list[str]] = {
         "苄星青霉素"
     ],
     "MALIGNANT_NEOPLASM": [
-        "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "肺ai", "肝ai", "胃ai", "feiai", "ganai", "weiai", "乳腺ai", "肠ai", "直肠ai", "结肠ai", "食道ai", "食管ai", "胰ai", "胰腺ai", "宫颈ai", "卵巢ai", "前列腺ai", "鼻咽ai", "淋巴ai", "骨ai", "脑ai", "皮肤ai", "肾ai", "膀胱ai", "甲状腺ai", "消化道肿瘤", "消化道恶性肿瘤", "转移性肿瘤",
+        "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "腺癌", "导管癌", "鳞状细胞癌", "鳞癌", "肉瘤", "肺ai", "肝ai", "胃ai", "feiai", "ganai", "weiai", "乳腺ai", "肠ai", "直肠ai", "结肠ai", "食道ai", "食管ai", "胰ai", "胰腺ai", "宫颈ai", "卵巢ai", "前列腺ai", "鼻咽ai", "淋巴ai", "骨ai", "脑ai", "皮肤ai", "肾ai", "膀胱ai", "甲状腺ai", "消化道肿瘤", "消化道恶性肿瘤", "转移性肿瘤",
         "奥希替尼", "EGFR基因检测", "EGFR突变", "cancer", "tumor", "化疗", "放疗", "靶向治疗", "PD-1抑制剂", "PD-1"
     ],
     "HEPATITIS_VIRUS": [
@@ -127,7 +166,7 @@ L4_TERMS_MAP: dict[str, list[str]] = {
         "HBcAb", "HBsAb", "HBeAb", "乙肝表面抗原", "乙肝两对半", "hepatitis", "cirrhosis", "ＨＢＶ", "ＨＣＶ"
     ],
     "SEVERE_ORGAN_DAMAGE": [
-        "慢性阻塞性肺疾病", "COPD", "急性心肌梗死", "冠状动脉重度狭窄", "尿毒症", "肾功能衰竭"
+        "慢性阻塞性肺疾病", "COPD", "急性心肌梗死", "心肌梗死", "心肌梗塞", "冠状动脉重度狭窄", "尿毒症", "肾功能衰竭"
     ],
 }
 
@@ -505,6 +544,85 @@ def _clean_orphan_syntax(s: str) -> str:
         return ""
 
     return s.strip()
+
+
+# ---------------------------------------------------------------------------
+# ICD-10 高危诊断编码段治理（§9 规约：L5 强抹平，L4 替换为范畴码）
+# 诊断名称抹平后，编码本身（如 B20.900=HIV、C34.900=肺恶性肿瘤）仍会泄露病种，
+# 因此对编码字段按 ICD-10 章节码段独立定级与脱敏。
+# ---------------------------------------------------------------------------
+
+# 诊断编码字段名集合（命中这些字段名时才按 ICD-10 码段规则处理，避免误伤普通文本）
+ICD10_FIELD_NAMES: frozenset[str] = frozenset({
+    "icd10_code", "icd10", "icd_code", "icd", "diagnosis_code", "诊断编码",
+})
+
+# ICD-10 编码形态：字母 + 两位类目数字 + 可选亚目（如 C34.900 / I10.x00 / G10）
+_ICD10_CODE_PATTERN = re.compile(r"^\s*([A-Za-z])(\d{2})(?:\.[xX\d]\d*)?\s*$")
+
+
+def classify_icd10_code(code: str) -> tuple[str, str] | None:
+    """按 ICD-10 章节码段判定诊断编码的风险等级与范畴。
+
+    Returns:
+        (level, category) 元组；level 为 "L5"（极高敏，需整值抹平）或 "L4"（高敏，
+        替换为范畴码）；category 为范畴代码（用于脱敏替换标签与审计追溯）。
+        非高危编码或非法编码形态返回 None。
+    """
+    match = _ICD10_CODE_PATTERN.match(code or "")
+    if not match:
+        return None
+    letter, number = match.group(1).upper(), int(match.group(2))
+    # L5 极高敏：HIV(B20-B24)、精神分裂症(F20-F29)、亨廷顿舞蹈病(G10)
+    if (letter == "B" and 20 <= number <= 24) or (letter == "F" and 20 <= number <= 29) or (letter == "G" and number == 10):
+        return ("L5", "ICD_HIGH_SENSITIVE")
+    # L4 高敏：性传播疾病(A50-A64)、肿瘤(C00-C97/D00-D48)、病毒性肝炎(B15-B19)、
+    # 急性心肌梗死(I21-I22)、慢性肾病/尿毒症(N18-N19)、慢阻肺(J44)
+    if letter == "A" and 50 <= number <= 64:
+        return ("L4", "ICD_INFECTIOUS")
+    if (letter == "C" and 0 <= number <= 97) or (letter == "D" and 0 <= number <= 48):
+        return ("L4", "ICD_NEOPLASM")
+    if letter == "B" and 15 <= number <= 19:
+        # 注意：范畴标签不得包含 "HEPATITIS" 等词库敏感词，
+        # 否则替换结果会被最终门禁（_contains_high_risk_text）二次命中
+        return ("L4", "ICD_LIVER")
+    if letter == "I" and 21 <= number <= 22:
+        return ("L4", "ICD_CARDIOVASCULAR")
+    if letter == "N" and 18 <= number <= 19:
+        return ("L4", "ICD_RENAL")
+    if letter == "J" and number == 44:
+        return ("L4", "ICD_RESPIRATORY")
+    return None
+
+
+def redact_icd10_code(code: str) -> str:
+    """ICD-10 编码脱敏：L5 整值抹平（返回空串），L4 替换为范畴码，非高危原样返回。"""
+    result = classify_icd10_code(code)
+    if result is None:
+        return code
+    level, category = result
+    if level == "L5":
+        return ""
+    return f"[L4-{category}]"
+
+
+# ---------------------------------------------------------------------------
+# 日期准标识符泛化（§9 规约：出生/入院/出院日期 L2，截断为年月）
+# ---------------------------------------------------------------------------
+
+# 日期泛化字段名集合：完整精度日期属于准标识符（组合重识别风险），截断为年月
+DATE_GENERALIZATION_FIELDS: frozenset[str] = frozenset({
+    "birth_date", "admission_date", "discharge_date", "出生日期", "入院日期", "出院日期",
+})
+
+_DATE_PREFIX_PATTERN = re.compile(r"(\d{4})[-/.](\d{1,2})[-/.]\d{1,2}")
+
+
+def truncate_date_to_month(date_str: str) -> str:
+    """将 YYYY-MM-DD / YYYY/MM/DD 等完整日期截断为 YYYY-MM（无法解析时原样返回）。"""
+    if not date_str or not isinstance(date_str, str):
+        return date_str
+    return _DATE_PREFIX_PATTERN.sub(r"\1-\2", date_str, count=1)
 
 
 def normalize_fullwidth_alphanumeric(text: str) -> str:
