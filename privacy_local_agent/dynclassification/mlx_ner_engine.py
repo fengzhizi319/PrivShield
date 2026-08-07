@@ -389,8 +389,94 @@ class MLXSmallNerEngine(SmallNerEngine):
 
         return entities
 
+    @staticmethod
+    def _chunk_text(text: str, max_chunk_len: int = 120) -> list[str]:
+        """按句号/分号/换行智能分句；超长单句采用 120 字符带 20 字符重叠的滑动窗口切片。"""
+        import re
+        if not text or len(text) <= max_chunk_len:
+            return [text]
+
+        chunks: list[str] = []
+        raw_sentences = [s for s in re.split(r"(?<=[。；;\n\r])", text) if s]
+        curr_chunk = ""
+
+        for s in raw_sentences:
+            if len(s) > max_chunk_len:
+                if curr_chunk:
+                    chunks.append(curr_chunk)
+                    curr_chunk = ""
+                step = max(max_chunk_len - 20, 10)
+                for i in range(0, len(s), step):
+                    chunks.append(s[i:i + max_chunk_len])
+            elif len(curr_chunk) + len(s) <= max_chunk_len:
+                curr_chunk += s
+            else:
+                chunks.append(curr_chunk)
+                curr_chunk = s
+
+        if curr_chunk:
+            chunks.append(curr_chunk)
+
+        return chunks if chunks else [text]
+
+    def _extract_single_chunk(self, text: str, max_len: int = 128) -> list[dict[str, Any]]:
+        """单块文本的 MLX Metal GPU NER 推理。"""
+        import mlx.core as mx
+        assert self.tokenizer is not None and self._weights is not None
+
+        input_ids, attention_mask, token_type_ids = self.tokenizer.encode(text, max_len=max_len)
+
+        # BERT 前向传播（Metal GPU）
+        hidden = self._bert_forward(input_ids, attention_mask, token_type_ids)
+
+        # Linear classifier: (seq_len, 768) → (seq_len, 37)
+        cls_w = self._weights["linear.weight"]
+        cls_b = self._weights["linear.bias"]
+        logits = hidden @ cls_w.T + cls_b  # (seq_len, 37)
+
+        # 计算有效序列长度
+        tokens = ["[CLS]", *self.tokenizer.tokenize(text)[:max_len - 2], "[SEP]"]
+        seq_len = len(tokens)
+
+        # 发射分数（取有效序列部分）
+        logits_np = logits[:seq_len]
+        mx.eval(logits_np)
+        emissions = logits_np.tolist()
+
+        # CRF Viterbi 解码
+        crf_start = self._weights["crf.start_transitions"]
+        crf_end = self._weights["crf.end_transitions"]
+        crf_trans = self._weights["crf.transitions"]
+        mx.eval(crf_start, crf_end, crf_trans)
+
+        label_indices = _viterbi_decode(
+            emissions=emissions,
+            start_transitions=crf_start.tolist(),
+            end_transitions=crf_end.tolist(),
+            transitions=crf_trans.tolist(),
+            seq_len=seq_len,
+        )
+
+        # 计算每个位置的 softmax 概率（用于置信度）
+        import numpy as np
+        logits_arr = np.array(emissions)
+        exp_logits = np.exp(logits_arr - np.max(logits_arr, axis=-1, keepdims=True))
+        probs_arr = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+        token_probs = [float(probs_arr[i, label_indices[i]]) for i in range(seq_len)]
+
+        # 解析 BIOES 标签
+        entities = self._parse_bioes_tags(tokens, label_indices, token_probs)
+
+        # 映射标签到统一标准类别
+        for ent in entities:
+            raw_label = ent["label"]
+            if raw_label in self.label_mapping:
+                ent["label"] = self.label_mapping[raw_label]
+
+        return entities
+
     def extract(self, text: str) -> list[dict[str, Any]]:
-        """提取输入文本中的医疗实体（MLX Metal GPU 推理）。
+        """提取输入文本中的医疗实体（MLX Metal GPU 推理，支持超长文本分句切片）。
 
         Args:
             text: 目标文本片段。
@@ -404,61 +490,32 @@ class MLXSmallNerEngine(SmallNerEngine):
             CLASSIFICATION_NER_TOTAL.labels(status="init_failed").inc()
             return []
 
-        import mlx.core as mx
-
-        assert self.tokenizer is not None and self._weights is not None
         start_time = time.monotonic()
         try:
-            max_len = 128
-            input_ids, attention_mask, token_type_ids = self.tokenizer.encode(text, max_len=max_len)
+            max_chunk_len = 120
+            if len(text) > max_chunk_len:
+                chunks = self._chunk_text(text, max_chunk_len=max_chunk_len)
+                merged_entities: list[dict[str, Any]] = []
+                seen_keys: set[tuple[str, str]] = set()
 
-            # BERT 前向传播（Metal GPU）
-            hidden = self._bert_forward(input_ids, attention_mask, token_type_ids)
+                for chunk in chunks:
+                    chunk_entities = self._extract_single_chunk(chunk, max_len=128)
+                    for ent in chunk_entities:
+                        key = (ent["text"], ent["label"])
+                        if key not in seen_keys:
+                            seen_keys.add(key)
+                            merged_entities.append(ent)
 
-            # Linear classifier: (seq_len, 768) → (seq_len, 37)
-            cls_w = self._weights["linear.weight"]
-            cls_b = self._weights["linear.bias"]
-            logits = hidden @ cls_w.T + cls_b  # (seq_len, 37)
+                duration = time.monotonic() - start_time
+                CLASSIFICATION_NER_TOTAL.labels(status="success").inc()
+                CLASSIFICATION_NER_DURATION.labels(engine="mlx").observe(duration)
+                logger.debug(
+                    "mlx_ner_extract_completed",
+                    extra={"entity_count": len(merged_entities), "duration_s": round(duration, 4)},
+                )
+                return merged_entities
 
-            # 计算有效序列长度
-            tokens = ["[CLS]", *self.tokenizer.tokenize(text)[:max_len - 2], "[SEP]"]
-            seq_len = len(tokens)
-
-            # 发射分数（取有效序列部分）
-            logits_np = logits[:seq_len]
-            mx.eval(logits_np)
-            emissions = logits_np.tolist()
-
-            # CRF Viterbi 解码
-            crf_start = self._weights["crf.start_transitions"]
-            crf_end = self._weights["crf.end_transitions"]
-            crf_trans = self._weights["crf.transitions"]
-            mx.eval(crf_start, crf_end, crf_trans)
-
-            label_indices = _viterbi_decode(
-                emissions=emissions,
-                start_transitions=crf_start.tolist(),
-                end_transitions=crf_end.tolist(),
-                transitions=crf_trans.tolist(),
-                seq_len=seq_len,
-            )
-
-            # 计算每个位置的 softmax 概率（用于置信度）
-            import numpy as np
-            logits_arr = np.array(emissions)
-            exp_logits = np.exp(logits_arr - np.max(logits_arr, axis=-1, keepdims=True))
-            probs_arr = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
-            token_probs = [float(probs_arr[i, label_indices[i]]) for i in range(seq_len)]
-
-            # 解析 BIOES 标签
-            entities = self._parse_bioes_tags(tokens, label_indices, token_probs)
-
-            # 映射标签到统一标准类别
-            for ent in entities:
-                raw_label = ent["label"]
-                if raw_label in self.label_mapping:
-                    ent["label"] = self.label_mapping[raw_label]
-
+            entities = self._extract_single_chunk(text, max_len=128)
             duration = time.monotonic() - start_time
             CLASSIFICATION_NER_TOTAL.labels(status="success").inc()
             CLASSIFICATION_NER_DURATION.labels(engine="mlx").observe(duration)

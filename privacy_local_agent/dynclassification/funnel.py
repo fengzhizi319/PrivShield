@@ -200,19 +200,26 @@ class ClassificationFunnel:
 
         # 补全高敏病史扫描：当文本命中 L5/L4 医疗模式时，确保生成对应的 L5/L4 SecurityTag
         try:
-            from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
+            from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS, normalize_fullwidth_alphanumeric
+            norm_val = normalize_fullwidth_alphanumeric(str_value)
+            stripped_val = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_val)
+            scan_targets = {str_value, norm_val, stripped_val}
+
+            is_l5 = False
             for pat, _rep in L5_PATTERNS:
-                if pat.search(str_value):
+                if any(pat.search(t) for t in scan_targets):
                     tags.append(SecurityTag(
                         level="L5", category="HIGH_RISK_MEDICAL_L5", confidence=0.99,
                         source_engine="RULE", rule_id="MEDICAL_L5_STRICT_RULE",
                         domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
                         needs_human_review=True,
                     ))
+                    is_l5 = True
                     break
-            else:
+
+            if not is_l5:
                 for pat, _rep in L4_PATTERNS:
-                    if pat.search(str_value):
+                    if any(pat.search(t) for t in scan_targets):
                         tags.append(SecurityTag(
                             level="L4", category="HIGH_RISK_MEDICAL_L4", confidence=0.95,
                             source_engine="RULE", rule_id="MEDICAL_L4_STRICT_RULE",
