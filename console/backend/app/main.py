@@ -872,12 +872,13 @@ async def concurrency_test(req: ConcurrencyTestRequest):
 async def medical_pipeline(req: dict[str, Any]):
     """医疗敏感数据全流程治理代理端点：分类分级与 L4/L5 数据脱敏。
 
-    若未指定 records，自动从本地 samples/data1.csv 读取医疗示例数据（预置 100 条）进行处理。
+    若未指定 records，根据 dataset 参数（"yibao" 或 "data1"）选择对应的示例数据。
     """
     records = req.get("records")
     if not records:
         import csv
-        sample_path = Path(__file__).resolve().parent.parent / "samples" / "data1.csv"
+        sample_name = "yibao.csv" if req.get("dataset") == "yibao" else "data1.csv"
+        sample_path = Path(__file__).resolve().parent.parent / "samples" / sample_name
         records = []
         if sample_path.exists():
             with open(sample_path, encoding="utf-8-sig") as f:  # utf-8-sig 兼容带/不带 BOM 的 CSV
@@ -888,6 +889,13 @@ async def medical_pipeline(req: dict[str, Any]):
         path="/v1/medical/process",
         body={"records": records},
     )
+
+
+@app.post("/api/yibao_pipeline")
+async def yibao_pipeline(req: dict[str, Any]):
+    """医保结算数据全流程治理代理端点：读入 yibao.csv 18 字段进行治理。"""
+    req["dataset"] = "yibao"
+    return await medical_pipeline(req)
 
 
 @app.post("/api/pipeline/process")

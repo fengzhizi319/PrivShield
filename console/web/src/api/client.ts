@@ -346,3 +346,19 @@ export async function runMedicalPipeline(req: MedicalPipelineRequest = {}): Prom
   }
   return raw as MedicalPipelineResponse;
 }
+
+/**
+ * 医保结算数据全流程治理：对 yibao.csv 18 字段执行分类分级与 L4/L5 抹平脱敏。
+ * Yibao pipeline: classifies & desensitizes 18-field medical insurance records or yibao.csv.
+ */
+export async function runYibaoPipeline(req: MedicalPipelineRequest = {}): Promise<MedicalPipelineResponse> {
+  const raw = await request<any>('/api/yibao_pipeline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...req, dataset: 'yibao' }),
+  });
+  if (raw && typeof raw === 'object' && 'data' in raw && raw.data && typeof raw.data === 'object' && 'summary' in raw.data) {
+    return raw.data as MedicalPipelineResponse;
+  }
+  return raw as MedicalPipelineResponse;
+}

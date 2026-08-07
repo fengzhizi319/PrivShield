@@ -69,6 +69,10 @@ interface SidebarProps {
   onMedicalPipeline?: () => void;
   /** 当前是否处于医疗敏感数据治理视图 / Whether currently in medical pipeline view */
   medicalActive?: boolean;
+  /** 进入医保结算数据治理 / Enter yibao pipeline */
+  onYibaoPipeline?: () => void;
+  /** 当前是否处于医保结算数据治理视图 / Whether currently in yibao pipeline view */
+  yibaoActive?: boolean;
 }
 
 
@@ -190,6 +194,8 @@ export default function Sidebar({
   opsActive = false,
   onMedicalPipeline,
   medicalActive = false,
+  onYibaoPipeline,
+  yibaoActive = false,
 }: SidebarProps) {
   const { t } = useI18n(); // 获取翻译函数 / Get translation function
 
@@ -354,6 +360,14 @@ export default function Sidebar({
           label="医疗敏感数据治理"
           activeClass="bg-teal-50 font-medium text-teal-700"
           iconClass="bg-teal-100 text-teal-600"
+        />
+        <NavEntry
+          onClick={onYibaoPipeline}
+          active={yibaoActive}
+          icon="file-text"
+          label="医保结算数据治理"
+          activeClass="bg-cyan-50 font-medium text-cyan-700"
+          iconClass="bg-cyan-100 text-cyan-600"
           className="mb-2"
         />
 

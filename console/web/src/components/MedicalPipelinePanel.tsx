@@ -5,7 +5,7 @@
  * 的全流程治理，提供双结构数据输出（分级报告与合规清洗数据）。
  */
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MedicalPipelineResponse, MedicalRecordReport } from '@/types/api';
 import { runMedicalPipeline } from '@/api/client';
 import { Icon } from '@/components/icons';
