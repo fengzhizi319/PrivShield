@@ -50,6 +50,9 @@ import (
 //   - []string: schema (ordered column names) / 列名顺序
 //   - error: parse failure / 解析失败错误
 func ParseCSV(data []byte) ([]map[string]string, []string, error) {
+	// 剥离 UTF-8 BOM（若有），否则首列表头会带 \ufeff 前缀
+	// Strip UTF-8 BOM (if present) so the first header key is not polluted
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	// 从字节切片创建 CSV 读取器
 	// Create CSV reader from byte slice
 	reader := csv.NewReader(bytes.NewReader(data))

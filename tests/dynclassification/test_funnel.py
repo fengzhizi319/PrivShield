@@ -238,7 +238,22 @@ class TestNerLayer:
         assert result.engine_layer == EngineLayer.L2_SMALL_NER
 
     def test_ner_sensitive_disease_l4(self, taxonomy, engine_conflict):
-        """NER 识别敏感疾病时升级为 L4。"""
+        """NER 识别 L4 敏感疾病时升级为 L4。"""
+        mock_ner = MagicMock(spec=NerAdapter)
+        mock_ner.extract.return_value = [
+            {"label": "MEDICAL_DISEASE", "text": "抑郁症", "confidence": 0.85}
+        ]
+
+        policy = ConfidencePolicy(enable_ner=True)
+        funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, ner_adapter=mock_ner)
+        result, _suppressed = funnel.classify_field("note", "抑郁症")
+
+        ner_tags = [t for t in result.tags if t.source_engine == "SMALL_NER"]
+        assert ner_tags[0].level == "L4"
+        assert result.final_level == "L4"
+
+    def test_ner_l5_sensitive_disease_l5(self, taxonomy, engine_conflict):
+        """NER 识别 L5 极高敏疾病 (如 HIV/艾滋病) 时升级为 L5。"""
         mock_ner = MagicMock(spec=NerAdapter)
         mock_ner.extract.return_value = [
             {"label": "MEDICAL_DISEASE", "text": "HIV感染", "confidence": 0.85}
@@ -246,11 +261,9 @@ class TestNerLayer:
 
         policy = ConfidencePolicy(enable_ner=True)
         funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, ner_adapter=mock_ner)
-        result, _suppressed = funnel.classify_field("diagnosis", "HIV感染")
+        result, _suppressed = funnel.classify_field("note", "HIV感染")
 
-        ner_tags = [t for t in result.tags if t.source_engine == "SMALL_NER"]
-        assert ner_tags[0].level == "L4"
-        assert result.final_level == "L4"
+        assert result.final_level == "L5"
 
     def test_ner_disabled_skips(self, taxonomy, engine_conflict):
         """enable_ner=false 时跳过 NER 层。"""

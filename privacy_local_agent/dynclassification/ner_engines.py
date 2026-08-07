@@ -207,7 +207,7 @@ class ONNXSmallNerEngine(SmallNerEngine):
     with lazy-loading and graceful degradation support.
     """
 
-    def __init__(self, model_path: str | None = None, vocab_path: str | None = None, label_mapping: dict[str, str] | None = None, device: str | None = None):
+    def __init__(self, model_path: str | None = None, vocab_path: str | None = None, label_mapping: dict[str, str] | None = None, device: str | None = None, max_len: int = 128):
         """初始化 ONNX NER 引擎 / Initialize ONNX NER Engine.
 
         仅设置路径和状态标志，不实际加载模型（延迟加载策略）。
@@ -231,6 +231,8 @@ class ONNXSmallNerEngine(SmallNerEngine):
         self.label_mapping = label_mapping or DEFAULT_NER_LABEL_MAPPING
         # 目标计算设备（影响 Execution Provider 选择）
         self.device = device
+        # 最大序列长度（默认 128，可配置）
+        self.max_len = max_len
         # ONNX 推理会话（延迟初始化）
         self.session: Any | None = None
         # BERT 分词器实例（延迟初始化）
@@ -303,27 +305,108 @@ class ONNXSmallNerEngine(SmallNerEngine):
             )
             raise e
 
+    def _parse_bioes_tags(self, tokens: list[str], label_indices: list[int], probs: list[float]) -> list[dict[str, Any]]:
+        """解析 BIOES 序列标注 (37 类 RaNER / CMeEE 标准模型) / Parse BIOES Sequence Labels.
+
+        BIOES 标注方案 (37 类):
+        - B-XXX: 实体起始 (Begin)
+        - I-XXX: 实体内部 (Inside)
+        - E-XXX: 实体结束 (End)
+        - S-XXX: 单字实体 (Single)
+        - O: 非实体 (Outside)
+        """
+        bioes_label_map: dict[int, str] = {
+            0: "O",
+            1: "B-bod", 2: "S-bod",
+            3: "B-dep", 4: "S-dep",
+            5: "B-dis", 6: "S-dis",
+            7: "B-dru", 8: "S-dru",
+            9: "B-equ", 10: "S-equ",
+            11: "B-ite", 12: "S-ite",
+            13: "B-mic", 14: "S-mic",
+            15: "B-pro", 16: "S-pro",
+            17: "B-sym", 18: "S-sym",
+            19: "I-bod", 20: "E-bod",
+            21: "I-dep", 22: "E-dep",
+            23: "I-dis", 24: "E-dis",
+            25: "I-dru", 26: "E-dru",
+            27: "I-equ", 28: "E-equ",
+            29: "I-ite", 30: "E-ite",
+            31: "I-mic", 32: "E-mic",
+            33: "I-pro", 34: "E-pro",
+            35: "I-sym", 36: "E-sym",
+        }
+
+        entities: list[dict[str, Any]] = []
+        current_entity: dict[str, Any] | None = None
+
+        for idx in range(1, len(tokens) - 1):
+            token = tokens[idx]
+            if token == "[SEP]" or token == "[PAD]":
+                break
+
+            label_idx = label_indices[idx]
+            prob = probs[idx]
+            tag = bioes_label_map.get(label_idx, "O")
+
+            if tag == "O":
+                if current_entity:
+                    entities.append(current_entity)
+                    current_entity = None
+            elif tag.startswith("S-"):
+                if current_entity:
+                    entities.append(current_entity)
+                ent_type = tag.split("-")[1]
+                entities.append({
+                    "text": token,
+                    "label": ent_type,
+                    "confidence": prob,
+                })
+                current_entity = None
+            elif tag.startswith("B-"):
+                if current_entity:
+                    entities.append(current_entity)
+                ent_type = tag.split("-")[1]
+                current_entity = {
+                    "text": token,
+                    "label": ent_type,
+                    "confidence": prob,
+                }
+            elif tag.startswith("I-") and current_entity:
+                ent_type = tag.split("-")[1]
+                if ent_type == current_entity["label"]:
+                    current_entity["text"] += token
+                    current_entity["confidence"] = min(current_entity["confidence"], prob)
+                else:
+                    entities.append(current_entity)
+                    current_entity = None
+            elif tag.startswith("E-") and current_entity:
+                ent_type = tag.split("-")[1]
+                if ent_type == current_entity["label"]:
+                    current_entity["text"] += token
+                    current_entity["confidence"] = min(current_entity["confidence"], prob)
+                    entities.append(current_entity)
+                    current_entity = None
+                else:
+                    entities.append(current_entity)
+                    current_entity = None
+            else:
+                if current_entity:
+                    entities.append(current_entity)
+                    current_entity = None
+
+        if current_entity:
+            entities.append(current_entity)
+
+        return entities
+
     def _parse_bio_tags(self, tokens: list[str], label_indices: list[int], probs: list[float]) -> list[dict[str, Any]]:
-        """解析 BIO 序列标注 / Parse BIO Sequence Labels.
+        """解析 BIO 序列标注 (13 类旧版 BIO) / Parse BIO Sequence Labels.
 
         BIO 标注方案 / BIO Labeling Scheme:
         - B-XXX: 实体起始 (Begin)
         - I-XXX: 实体内部 (Inside)
         - O: 非实体 (Outside)
-
-        状态机逻辑 / State Machine Logic:
-        - 遇到 B- 标签：开始新实体（如果前一个实体未完成则先保存） / Encounter B- tag: Start new entity (save previous entity if unfinished)
-        - 遇到 I- 标签且类型匹配：合并到当前实体 / Encounter I- tag and type matches: Merge into current entity
-        - 遇到 I- 标签但类型不匹配：结束当前实体，丢弃不匹配的 I- / Encounter I- tag but type mismatch: End current entity, discard mismatched I-
-        - 遇到 O 标签：结束当前实体 / Encounter O tag: End current entity
-
-        Args:
-            tokens: token 序列（含 [CLS]/[SEP]） / Token sequence (including [CLS]/[SEP]).
-            label_indices: 每个 token 的预测标签索引 / Predicted label index per token.
-            probs: 每个 token 的预测概率 / Prediction probability per token.
-
-        Returns:
-            命名实体字典列表，每个字典含 text/label/confidence / List of named entity dictionaries, each containing text/label/confidence.
         """
         # CMeEE 标签索引映射表（索引 0 为 O，1-12 为 B/I 标签对）
         label_map = {
@@ -333,6 +416,9 @@ class ONNXSmallNerEngine(SmallNerEngine):
             7: "B-sym", 8: "I-sym",    # 症状（symptom）
             9: "B-ite", 10: "I-ite",   # 检查项目（item）
             11: "B-bod", 12: "I-bod",  # 身体部位（body）
+            13: "B-dep", 14: "I-dep",  # 科室（department）
+            15: "B-equ", 16: "I-equ",  # 医疗设备（equipment）
+            17: "B-mic", 18: "I-mic",  # 微生物（microbe）
         }
 
         entities: list[dict[str, Any]] = []  # 已完成的实体列表
@@ -388,20 +474,77 @@ class ONNXSmallNerEngine(SmallNerEngine):
 
         return entities
 
-    def extract(self, text: str) -> list[dict[str, Any]]:
+    @staticmethod
+    def _chunk_text(text: str, max_chunk_len: int = 120) -> list[str]:
+        """将长文本按句号/分号/换行符切分为不大于 max_chunk_len 的子句，超长单句走滑动窗口。"""
+        import re
+        if not text or len(text) <= max_chunk_len:
+            return [text]
+
+        chunks: list[str] = []
+        raw_sentences = [s for s in re.split(r"(?<=[。；;\n\r])", text) if s]
+        curr_chunk = ""
+
+        for s in raw_sentences:
+            if len(s) > max_chunk_len:
+                if curr_chunk:
+                    chunks.append(curr_chunk)
+                    curr_chunk = ""
+                step = max(max_chunk_len - 20, 10)
+                for i in range(0, len(s), step):
+                    chunks.append(s[i:i + max_chunk_len])
+            elif len(curr_chunk) + len(s) <= max_chunk_len:
+                curr_chunk += s
+            else:
+                chunks.append(curr_chunk)
+                curr_chunk = s
+
+        if curr_chunk:
+            chunks.append(curr_chunk)
+
+        return chunks if chunks else [text]
+
+    def _extract_single_chunk(self, text: str, eff_max_len: int = 128) -> list[dict[str, Any]]:
+        """单块文本的 ONNX NER 推理。"""
+        assert self.tokenizer is not None and self.session is not None
+        input_ids, attention_mask, token_type_ids = self.tokenizer.encode(text, max_len=eff_max_len)
+        inputs = {
+            "input_ids": [input_ids],
+            "attention_mask": [attention_mask],
+            "token_type_ids": [token_type_ids],
+        }
+        outputs = self.session.run(None, inputs)
+        logits = outputs[0][0]
+        num_labels = logits.shape[-1] if len(logits.shape) > 1 else 13
+
+        import numpy as np
+        exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
+        probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+        label_indices = np.argmax(probs, axis=-1).tolist()
+        token_probs = [probs[i, label_indices[i]] for i in range(len(label_indices))]
+        tokens = ["[CLS]", *self.tokenizer.tokenize(text)[:eff_max_len - 2], "[SEP]"]
+
+        if num_labels >= 37:
+            entities = self._parse_bioes_tags(tokens, label_indices, token_probs)
+        else:
+            entities = self._parse_bio_tags(tokens, label_indices, token_probs)
+
+        for ent in entities:
+            raw_label = ent["label"]
+            if raw_label in self.label_mapping:
+                ent["label"] = self.label_mapping[raw_label]
+
+        return entities
+
+    def extract(self, text: str, max_len: int | None = None) -> list[dict[str, Any]]:
         """提取输入文本中的医疗实体 / Extract Medical Entities from Text.
 
-        完整推理流程：
-        1. 延迟初始化 ONNX 会话（首次调用时加载模型）。
-        2. 使用 BERT Tokenizer 对文本进行分词编码。
-        3. 执行 ONNX 推理获取 logits。
-        4. 计算 Softmax 概率分布。
-        5. 取 argmax 得到预测标签索引。
-        6. 解析 BIO 标签序列为实体列表。
-        7. 映射原始标签到统一标准类别。
+        支持长文本 (>128 Token) 自动智能分句与滑动窗口切片推理，
+        防止 128 Token 截断导致的末尾实体漏检。
 
         Args:
             text: 目标文本片段 / Target text segment.
+            max_len: 可选的最大序列长度，默认使用实例配置 max_len。
 
         Returns:
             命名实体字典列表，每个字典含 text/label/confidence。
@@ -417,63 +560,56 @@ class ONNXSmallNerEngine(SmallNerEngine):
 
         # 断言初始化成功（类型检查用）
         assert self.tokenizer is not None and self.session is not None
-        # 记录推理开始时间
         start_time = time.monotonic()
         try:
-            # === 步骤1：分词编码 ===
-            max_len = 128  # 最大序列长度
-            # 将文本编码为 BERT 输入格式（input_ids, attention_mask, token_type_ids）
-            input_ids, attention_mask, token_type_ids = self.tokenizer.encode(text, max_len=max_len)
+            eff_max_len = max_len or getattr(self, "max_len", 128)
+            max_chunk_len = max(eff_max_len - 2, 10)
 
-            # === 步骤2：组装 ONNX 输入 ===
-            # ONNX 模型期望 batch 维度，所以包装为列表
-            inputs = {
-                "input_ids": [input_ids],
-                "attention_mask": [attention_mask],
-                "token_type_ids": [token_type_ids],
-            }
+            if len(text) > max_chunk_len:
+                chunks = self._chunk_text(text, max_chunk_len=max_chunk_len)
+                merged_entities: list[dict[str, Any]] = []
+                seen_keys: set[tuple[str, str]] = set()
 
-            # === 步骤3：执行 ONNX 推理 ===
-            outputs = self.session.run(None, inputs)
-            # 取出第一个输出（logits），去掉 batch 维度
-            # shape: (seq_len, num_labels)，如 (128, 13)
-            logits = outputs[0][0]
+                for chunk in chunks:
+                    chunk_ents = self._extract_single_chunk(chunk, eff_max_len)
+                    for ent in chunk_ents:
+                        key = (ent["text"], ent["label"])
+                        if key not in seen_keys:
+                            seen_keys.add(key)
+                            merged_entities.append(ent)
+                        else:
+                            for existing in merged_entities:
+                                if (existing["text"], existing["label"]) == key:
+                                    existing["confidence"] = max(existing["confidence"], ent["confidence"])
+                duration = time.monotonic() - start_time
+                CLASSIFICATION_NER_TOTAL.labels(status="success").inc()
+                CLASSIFICATION_NER_DURATION.labels(engine="onnx").observe(duration)
+                logger.debug(
+                    "onnx_ner_extract_completed",
+                    extra={"entity_count": len(merged_entities), "duration_s": round(duration, 4)},
+                )
+                return merged_entities
 
-            # === 步骤4：计算 Softmax 概率 ===
-            import numpy as np
-
-            # 数值稳定的 Softmax：先减去最大值防止 exp 溢出
-            exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
-            # 归一化得到概率分布
-            probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
-
-            # === 步骤5：取 argmax 得到预测标签 ===
-            label_indices = np.argmax(probs, axis=-1).tolist()  # 每个位置的最大概率标签索引
-            # 提取每个位置对应预测标签的概率值
-            token_probs = [probs[i, label_indices[i]] for i in range(len(label_indices))]
-
-            # 重建 token 序列（与编码时一致，用于 BIO 解析）
-            tokens = ["[CLS]", *self.tokenizer.tokenize(text)[:max_len - 2], "[SEP]"]
-
-            # === 步骤6：解析 BIO 标签为实体列表 ===
-            entities = self._parse_bio_tags(tokens, label_indices, token_probs)
-
-            # === 步骤7：映射实体标签到统一标准类别（使用可配置映射） ===
-            for ent in entities:
-                raw_label = ent["label"]
-                if raw_label in self.label_mapping:
-                    ent["label"] = self.label_mapping[raw_label]
-
-            # 计算推理耗时并记录指标
+            entities = self._extract_single_chunk(text, eff_max_len)
             duration = time.monotonic() - start_time
-            CLASSIFICATION_NER_TOTAL.labels(status="success").inc()  # 成功计数 +1
-            CLASSIFICATION_NER_DURATION.labels(engine="onnx").observe(duration)  # 记录延迟
-            # 输出调试日志
+            CLASSIFICATION_NER_TOTAL.labels(status="success").inc()
+            CLASSIFICATION_NER_DURATION.labels(engine="onnx").observe(duration)
             logger.debug(
                 "onnx_ner_extract_completed",
                 extra={"entity_count": len(entities), "duration_s": round(duration, 4)},
             )
             return entities
+
+        except Exception as e:
+            # 推理异常：记录错误指标和日志，返回空列表（优雅降级）
+            duration = time.monotonic() - start_time
+            CLASSIFICATION_NER_TOTAL.labels(status="error").inc()
+            CLASSIFICATION_NER_DURATION.labels(engine="onnx").observe(duration)
+            logger.warning(
+                "onnx_ner_extract_error",
+                extra={"error": str(e), "duration_s": round(duration, 4)},
+            )
+            return []
 
         except Exception as e:
             # 推理异常：记录错误指标和日志，返回空列表（优雅降级）
@@ -836,35 +972,73 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
             CLASSIFICATION_NER_TOTAL.labels(status="init_failed").inc()
             return []
 
+    def _extract_single_chunk(self, text: str) -> list[dict[str, Any]]:
+        """调用 ModelScope pipeline 提取单块文本命名实体。"""
+        assert self.pipeline is not None
+        res = self.pipeline(text)
+        output = res.get("output", [])
+        entities: list[dict[str, Any]] = []
+        for item in output:
+            raw_label = item.get("type", "")
+            span = item.get("span", "")
+            label = self.label_mapping.get(raw_label, raw_label)
+            entities.append(
+                {
+                    "text": span,
+                    "label": label,
+                    "confidence": 1.0,
+                }
+            )
+        return entities
+
+    def extract(self, text: str) -> list[dict[str, Any]]:
+        """调用 ModelScope pipeline 提取命名实体 / Extract Entities via ModelScope Pipeline.
+
+        支持长文本 (>120 Token) 智能分句切片推理，防止长病文书截断漏检。
+
+        Args:
+            text: 目标文本 / Target text.
+
+        Returns:
+            命名实体字典列表，每个字典含 text/label/confidence。
+            初始化失败或推理异常时返回空列表。
+        """
+        try:
+            # 延迟初始化
+            self._lazy_init()
+        except Exception:
+            # 初始化失败：递增失败计数，返回空列表
+            CLASSIFICATION_NER_TOTAL.labels(status="init_failed").inc()
+            return []
+
         # 断言管道已初始化
         assert self.pipeline is not None
         # 记录推理开始时间
         start_time = time.monotonic()
         try:
-            # 调用 ModelScope NER 管道
-            res = self.pipeline(text)
-            # 提取输出实体列表
-            output = res.get("output", [])
+            max_chunk_len = 120
+            if len(text) > max_chunk_len:
+                chunks = ONNXSmallNerEngine._chunk_text(text, max_chunk_len=max_chunk_len)
+                merged_entities: list[dict[str, Any]] = []
+                seen_keys: set[tuple[str, str]] = set()
 
-            # 构建标准化实体列表
-            entities: list[dict[str, Any]] = []
-            for item in output:
-                raw_label = item.get("type", "")  # 原始实体类型
-                span = item.get("span", "")        # 实体文本
-
-                # 映射原始标签到统一标准类别（使用可配置映射）
-                label = self.label_mapping.get(raw_label, raw_label)
-
-                # 构建标准化实体字典
-                entities.append(
-                    {
-                        "text": span,           # 实体文本
-                        "label": label,         # 标准化标签
-                        "confidence": 1.0,      # ModelScope 管道不返回逐实体置信度，默认 1.0
-                    }
+                for chunk in chunks:
+                    chunk_ents = self._extract_single_chunk(chunk)
+                    for ent in chunk_ents:
+                        key = (ent["text"], ent["label"])
+                        if key not in seen_keys:
+                            seen_keys.add(key)
+                            merged_entities.append(ent)
+                duration = time.monotonic() - start_time
+                CLASSIFICATION_NER_TOTAL.labels(status="success").inc()
+                CLASSIFICATION_NER_DURATION.labels(engine="modelscope").observe(duration)
+                logger.debug(
+                    "modelscope_ner_extract_completed",
+                    extra={"entity_count": len(merged_entities), "duration_s": round(duration, 4)},
                 )
+                return merged_entities
 
-            # 计算推理耗时并记录指标
+            entities = self._extract_single_chunk(text)
             duration = time.monotonic() - start_time
             CLASSIFICATION_NER_TOTAL.labels(status="success").inc()
             CLASSIFICATION_NER_DURATION.labels(engine="modelscope").observe(duration)

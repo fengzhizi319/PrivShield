@@ -153,6 +153,14 @@ class DynClassificationService:
                 field_name, val_str, field_result.final_level
             )
 
+        # 最终安全门禁：任何脱敏后仍残留 L4/L5 高敏文本的情况，整值替换为 [L4-L5-DATA-REMOVED]
+        try:
+            from ..medical_pipeline.pipeline import MedicalPrivacyPipeline
+            if MedicalPrivacyPipeline._contains_high_risk_text(new_result.sanitized_value):
+                new_result.sanitized_value = "[L4-L5-DATA-REMOVED]"
+        except Exception:
+            pass
+
         return new_result
 
     def _get_sanitized_value_from_funnel(
@@ -170,20 +178,28 @@ class DynClassificationService:
 
         # 1. 优先使用实例上注入的可插拔文本脱敏回调
         if self._text_sanitizer is not None:
-            return self._text_sanitizer(field_name, val_str, final_level)
+            sanitized = self._text_sanitizer(field_name, val_str, final_level)
+        else:
+            # 2. 其次查询领域注册表 (DomainStrategyRegistry) 中注册的回调
+            from .domain_registry import default_domain_registry
+            reg_sanitizer = default_domain_registry.get_sanitizer("medical")
+            if reg_sanitizer is not None:
+                sanitized = reg_sanitizer(field_name, val_str, final_level, "redact")
+            elif getattr(funnel_result, "sanitized_value", None):
+                sanitized = funnel_result.sanitized_value
+            else:
+                # 向后兼容：尝试使用医疗领域规则进行文本脱敏
+                sanitized = self._fallback_text_sanitizer(field_name, val_str, final_level)
 
-        # 2. 其次查询领域注册表 (DomainStrategyRegistry) 中注册的回调
-        from .domain_registry import default_domain_registry
-        reg_sanitizer = default_domain_registry.get_sanitizer("medical")
-        if reg_sanitizer is not None:
-            return reg_sanitizer(field_name, val_str, final_level, "redact")
+        # 最终安全门禁：任何脱敏后仍残留 L4/L5 高敏文本的情况，整值替换为 [L4-L5-DATA-REMOVED]
+        try:
+            from ..medical_pipeline.pipeline import MedicalPrivacyPipeline
+            if MedicalPrivacyPipeline._contains_high_risk_text(sanitized):
+                return "[L4-L5-DATA-REMOVED]"
+        except Exception:
+            pass
 
-        # 3. 使用漏斗已计算的 sanitized_value
-        if getattr(funnel_result, "sanitized_value", None):
-            return funnel_result.sanitized_value
-
-        # 向后兼容：尝试使用医疗领域规则进行文本脱敏
-        return self._fallback_text_sanitizer(field_name, val_str, final_level)
+        return sanitized
 
     def _fallback_text_sanitizer(
         self, field_name: str, text: str, final_level: str
@@ -208,6 +224,11 @@ class DynClassificationService:
             # 对中高敏感度字段应用 PII 掩码
             if final_level in ["L3", "L4", "L5", "C4", "C5"]:
                 s_text = mask_value(field_name, s_text)
+
+            # 最终门禁检查：防止漏网高敏词
+            from ..medical_pipeline.pipeline import MedicalPrivacyPipeline
+            if MedicalPrivacyPipeline._contains_high_risk_text(s_text):
+                return "[L4-L5-DATA-REMOVED]"
 
             return s_text
         except Exception:

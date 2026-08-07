@@ -79,12 +79,12 @@ def canonicalize_pii_field(field_name: str) -> str:
 L5_TERMS_MAP: dict[str, list[str]] = {
     "HIV_AIDS": [
         "获得性免疫缺陷综合征", "获得性免疫缺陷", "人免疫缺陷病毒", "HIV感染", "HIV抗体阳性", "HIV抗体", "血清HIV-1", "HIV-1", "HIV-2", "HIV", "AIDS", "艾滋病", "艾滋",
-        "ＨＩＶ", "ＡＩＤＳ", "aizibing", "aizi", "CD4+ T淋巴细胞", "CD4+ T细胞", "CD4+T细胞", "CD4细胞", "CD4+ T", "CD4+T", "CD4计数", "CD4/CD8", "CD4",
+        "ＨＩＶ", "ＡＩＤＳ", "aizibing", "aizi", "H1V", "HlV", "CD4+ T淋巴细胞", "CD4+ T细胞", "CD4+T细胞", "CD4细胞", "CD4+ T", "CD4+T", "CD4计数", "CD4/CD8", "CD4",
         "替诺福韦+拉米夫定+多替拉韦", "替诺福韦+拉米夫定", "替诺福韦", "拉米夫定", "多替拉韦", "依非韦伦", "阿巴卡韦", "恩曲他滨", "齐多夫定",
         "抗逆转录治疗", "抗逆转录", "ART抗逆转录", "HIV病毒载量", "病毒载量"
     ],
     "PSYCHIATRIC_DISORDER": [
-        "重度精神分裂症", "精神分裂症", "精神分裂", "jingshenfenlie", "双相情感障碍", "言语关联妄想", "关联妄想", "命令性幻听", "保护性约束倾向", "幻听（命令性言语）",
+        "重度精神分裂症", "精神分裂症", "精神分裂", "jingshenfenlie", "精神分lie", "双相情感障碍", "言语关联妄想", "关联妄想", "命令性幻听", "保护性约束倾向", "幻听（命令性言语）",
         "命令性言语", "被害妄想", "幻听", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "奥氮平", "富马酸喹硫平", "富马酸奎硫平",
         "喹硫平", "奎硫平", "阿立哌唑", "利培酮", "氯氮平", "氨磺必利", "舒必利", "奋乃静", "氟哌啶醇", "哈泊度醇", "丙戊酸钠", "碳酸锂",
         "精神卫生中心", "schizophrenia"
@@ -100,7 +100,7 @@ L4_TERMS_MAP: dict[str, list[str]] = {
     "STD_VENEREAL": [
         "早期隐性梅毒", "隐性梅毒", "早期梅毒", "晚期梅毒", "神经梅毒", "心血管梅毒", "先天梅毒", "胎传梅毒", "梅毒", "霉毒", "meidu", "苍白密螺旋体",
         "TPPA阳性", "TPPA", "RPR阳性", "RPR 1:16", "RPR", "syphilis", "gonorrhea", "herpes", "chancroid",
-        "淋病", "淋球菌", "尖锐湿疣", "生殖器疱疹", "软下疳", "性病", "性传播疾病", "不洁性接触史", "不洁接触史", "无痛性溃疡", "硬下疳",
+        "淋病", "淋球菌", "尖锐湿疣", "生殖器疱疹", "软下疳", "性病", "性传播疾病", "xingbing", "linbing", "不洁性接触史", "不洁接触史", "无痛性溃疡", "硬下疳",
         "人乳头瘤病毒高危型", "外阴多发赘生物伴瘙痒", "外阴多发赘生物", "会阴部多发菜花状赘生物", "会阴部多发赘生物", "肛周多发菜花状赘生物",
         "肛周多发赘生物", "外阴菜花状赘生物", "外阴赘生物", "会阴部赘生物", "肛周赘生物", "多发赘生物", "菜花状赘生物", "鸡冠状赘生物",
         "乳头状赘生物", "生殖器赘生物", "赘生物伴瘙痒", "赘生物", "菜花状", "鸡冠状", "caihuazhuang", "jiguanzhuang", "醋酸白试验阳性", "醋酸白试验", "HPV 6/11低危型阳性", "HPV 6/11低危型",
@@ -108,11 +108,11 @@ L4_TERMS_MAP: dict[str, list[str]] = {
         "苄星青霉素"
     ],
     "MALIGNANT_NEOPLASM": [
-        "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "肺ai", "肝ai", "胃ai", "feiai", "ganai", "weiai", "消化道肿瘤", "消化道恶性肿瘤", "转移性肿瘤",
+        "恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "肺ai", "肝ai", "胃ai", "feiai", "ganai", "weiai", "乳腺ai", "肠ai", "直肠ai", "结肠ai", "食道ai", "食管ai", "胰ai", "胰腺ai", "宫颈ai", "卵巢ai", "前列腺ai", "鼻咽ai", "淋巴ai", "骨ai", "脑ai", "皮肤ai", "肾ai", "膀胱ai", "甲状腺ai", "消化道肿瘤", "消化道恶性肿瘤", "转移性肿瘤",
         "奥希替尼", "EGFR基因检测", "EGFR突变", "cancer", "tumor", "化疗", "放疗", "靶向治疗", "PD-1抑制剂", "PD-1"
     ],
     "HEPATITIS_VIRUS": [
-        "慢性乙型病毒性肝炎", "乙型肝炎", "乙肝", "yigan", "丙型肝炎", "丙肝", "binggan", "肝硬化失代偿期", "早期肝硬化", "肝硬化代偿期", "肝硬化", "小肝癌",
+        "慢性乙型病毒性肝炎", "乙型肝炎", "乙肝", "yigan", "乙gan", "丙型肝炎", "丙肝", "binggan", "丙gan", "肝硬化失代偿期", "早期肝硬化", "肝硬化代偿期", "肝硬化", "小肝癌",
         "蜘蛛痣", "肝掌", "肝硬化腹水", "门静脉高压", "门脉高压", "食管胃底静脉曲张破裂出血", "食管胃底静脉曲张", "静脉曲张破裂出血", "食管静脉曲张", "脾大", "脾肿大", "脾功能亢进",
         "HBV-DNA阳性", "HBV-DNA阴性", "HBV-DNA 5.6×10^6 IU/mL", "HBV-DNA定量", "HBV-DNA", "HBV", "HCV-RNA", "HCV",
         "恩贴卡韦", "恩替卡韦", "干扰素", "肝穿刺活检", "肝穿刺", "G3S4", "HBsAg阳性", "HBsAg", "HBeAg阳性", "HBeAg", "HBcAb阳性",
@@ -148,12 +148,20 @@ def _flex_escape(term: str) -> str:
     """将词项编译为"字符间容许可选分隔符"的正则片段（抗插入变体绕过）。
 
     - 普通字符：re.escape 转义后用 ``_FLEX_SEP{0,1}`` 连接，容忍字符间插入至多一个分隔符；
-    - 词项自带的空白字符：编译为 ``\\s*``（容忍有无空格两种书写，如 "CD4+ T细胞" 与 "CD4+T细胞"）。
+    - 词项自带的空白字符：编译为 ``\\s*``（容忍有无空格两种书写，如 "CD4+ T细胞" 与 "CD4+T细胞"）；
+    - **ASCII 词项词边界保护**：首/尾字符为 ASCII 字母数字时，分别附加
+      ``(?<![A-Za-z0-9])`` / ``(?![A-Za-z0-9])`` 零宽断言，防止 "archive" 中的 "hiv"、
+      "hearing aids" 中的 "aids"、"http" 中的 "htt"、"ABCD4" 中的 "CD4" 等
+      子串误命中（良性英文/编码文本被整值门禁抹除的可用性事故）；
+      CJK 词项无词边界概念，保持子串匹配（中文语境天然连用）。
     """
     tokens = [r"\s*" if ch.isspace() else re.escape(ch) for ch in term]
-    if len(tokens) <= 1:
-        return "".join(tokens)
-    return (_FLEX_SEP + "{0,1}").join(tokens)
+    if not tokens:
+        return ""
+    body = (_FLEX_SEP + "{0,1}").join(tokens) if len(tokens) > 1 else tokens[0]
+    left = r"(?<![A-Za-z0-9])" if term[0].isascii() and term[0].isalnum() else ""
+    right = r"(?![A-Za-z0-9])" if term[-1].isascii() and term[-1].isalnum() else ""
+    return f"{left}{body}{right}"
 
 
 # 文本脱敏正则表达式：按类别编译 L5/L4 术语为正则，长词优先 + 分隔符容忍匹配
@@ -185,6 +193,15 @@ _REDACT_MAX_TEXT_LENGTH = 50_000
 # 降级路径与 Fast-path 专用正则：词库级检测与擦除（长词优先 + 分隔符容忍）
 _TERMS_ONLY_PATTERN = re.compile(
     "|".join([_flex_escape(t) for t in _ALL_L4_L5_TERMS]),
+    re.IGNORECASE,
+)
+
+# 词库首字符快速预筛：任何词项匹配必以词项首字符开头（词边界为零宽断言，不改变首字符）。
+# 干净文本（如 "男"、"34"、"血压控制良好"）极少包含词库首字符——
+# 先用单字符类做一次 O(n) 预筛，未命中即跳过数百分支的全量词库匹配，
+# 将 Fast-Path 从 ~240ms/49KB 降回毫秒级。
+_TERMS_FIRST_CHARS_PATTERN = re.compile(
+    "[" + re.escape("".join(sorted({t[0] for t in _ALL_L4_L5_TERMS if t}))) + "]",
     re.IGNORECASE,
 )
 
@@ -502,8 +519,15 @@ def redact_medical_text(text: str) -> str:
     if len(norm_text) > _REDACT_MAX_TEXT_LENGTH:
         return _redact_terms_only(norm_text)
 
+    # 首字符预筛：不含任何词库首字符（且无脱敏标签）的文本直接原样返回（毫秒级），
+    # 避免对干净文本逐位置尝试数百分支的全量词库匹配
+    if not _TERMS_FIRST_CHARS_PATTERN.search(text) and not _MASKED_LABEL_RE.search(text):
+        return text
+
+    # 三级检测：原文 → 全角归一化 → 剔除字符间噪声；三级文本去重，避免对同一内容重复全量扫描
     stripped_norm = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_text)
-    if not _TERMS_ONLY_PATTERN.search(text) and not _TERMS_ONLY_PATTERN.search(norm_text) and not _TERMS_ONLY_PATTERN.search(stripped_norm) and not _MASKED_LABEL_RE.search(text):
+    scan_variants = {text, norm_text, stripped_norm}
+    if not any(_TERMS_ONLY_PATTERN.search(v) for v in scan_variants) and not _MASKED_LABEL_RE.search(text):
         return text
 
     s = norm_text
@@ -636,9 +660,11 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
 
     stripped_norm = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_text)
 
-    # 当未传入 NER 适配器时执行 Fast-path 前置校验
+    # 当未传入 NER 适配器时执行 Fast-path 前置校验（首字符预筛 → 全量词库三级检测，变体去重）
     if ner_adapter is None:
-        if not _TERMS_ONLY_PATTERN.search(text) and not _TERMS_ONLY_PATTERN.search(norm_text) and not _TERMS_ONLY_PATTERN.search(stripped_norm) and not _MASKED_LABEL_RE.search(text):
+        if not _TERMS_FIRST_CHARS_PATTERN.search(text) and not _MASKED_LABEL_RE.search(text):
+            return text
+        if not any(_TERMS_ONLY_PATTERN.search(v) for v in {text, norm_text, stripped_norm}) and not _MASKED_LABEL_RE.search(text):
             return text
 
     entities = []
@@ -659,35 +685,18 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
 
     if sensitive_entities:
         # ReDoS 全局防护：折叠连续水平空白串（同 redact_medical_text 主路径）
-        s = re.sub(r"[ \t]{2,}", " ", norm_text)
+        collapsed = re.sub(r"[ \t]{2,}", " ", norm_text)
         sorted_entities = sorted(
             sensitive_entities,
             key=lambda x: len(x.get("text", "")),
             reverse=True,
         )
 
-        def _death_age_replace(match: re.Match) -> str:
-            action = match.group(1) or "身亡于"
-            raw_age = match.group(2)
-            from ..privacy.kano import adaptive_age_hierarchy
-            anon_age = adaptive_age_hierarchy(raw_age, under_60_interval=3, senior_interval=2, output_format="floor")
-            return f"{action}{anon_age}岁"
-
-        def _death_replace(match: re.Match) -> str:
-            action = match.group(0)
-            return "因病去世" if "去世" in action or "离世" in action else "死于"
-
-        # 与规则路径对齐的句法擦除（NER 实体锚定擦除之外的规则兜底，
-        # 防止 NER 漏检 CD4 计数/用药句法等四柱特征残留——实测曾泄露 "180/μL。行+。" 类残渣）
-        s = _REDACT_CD4_PATTERN.sub("", s)
-        s = _REDACT_DEATH_WITH_AGE_PATTERN.sub(_death_age_replace, s)
-        s = _REDACT_CAUSE_DEATH_PATTERN.sub(_death_replace, s)
-        s = _REDACT_SUFFER_DEATH_PATTERN.sub(_death_replace, s)
-        s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
-        s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
-        s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
-        s = _REDACT_MEDICATION_FULL_PATTERN.sub("", s)
-        s = _apply_category_generalizations(s)
+        # 先执行规则全量句法擦除（复用主路径：已知词库 + 全部句法步骤 + 语法自愈）。
+        # NER 实体锚定擦除单独工作时只擦实体本身，会遗留 "180/μL。行+。"、"确诊" 等
+        # 句法残渣（实测泄露）；完整规则路径保证已知特征零残渣，
+        # 随后再以 NER 实体为锚点擦除词库外的高敏实体（NER 的核心增量价值）。
+        s = redact_medical_text(collapsed)
 
         for ent in sorted_entities:
             term = ent.get("text", "").strip()
@@ -706,8 +715,13 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
             else:
                 pat_paired = rf"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?)\s*){quoted_term}\s*[、,，]\s*"
                 s = re.sub(pat_paired, r"\1", s, flags=re.IGNORECASE)
-                s = re.sub(quoted_term, "", s)
+                s = re.sub(quoted_term, "", s, flags=re.IGNORECASE)
 
         return _clean_orphan_syntax(s)
 
-    return _clean_orphan_syntax(redact_medical_text(text))
+    # NER 未识别出高敏实体（或推断异常）时，降级由规则引擎兜底。
+    # 注意：不得在此再套一层 _clean_orphan_syntax——那些清理正则（删"出现/进一步/伴瘙痒"等）
+    # 的设计前提是"文本已经历敏感词擦除、只剩残渣"，对干净文本会误删合法用词
+    # （实测 "患者出现皮疹3天，伴瘙痒。" 被篡改为 "患者皮疹3天。"）；
+    # redact_medical_text 内部已对敏感文本完成语法自愈，对干净文本走 Fast-Path 原样返回。
+    return redact_medical_text(text)

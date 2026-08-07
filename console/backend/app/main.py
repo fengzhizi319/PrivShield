@@ -872,7 +872,7 @@ async def concurrency_test(req: ConcurrencyTestRequest):
 async def medical_pipeline(req: dict[str, Any]):
     """医疗敏感数据全流程治理代理端点：分类分级与 L4/L5 数据脱敏。
 
-    若未指定 records，自动从本地 samples/data1.csv 读取 20 条医疗示例数据进行处理。
+    若未指定 records，自动从本地 samples/data1.csv 读取医疗示例数据（预置 100 条）进行处理。
     """
     records = req.get("records")
     if not records:
@@ -880,7 +880,7 @@ async def medical_pipeline(req: dict[str, Any]):
         sample_path = Path(__file__).resolve().parent.parent / "samples" / "data1.csv"
         records = []
         if sample_path.exists():
-            with open(sample_path, encoding="utf-8") as f:
+            with open(sample_path, encoding="utf-8-sig") as f:  # utf-8-sig 兼容带/不带 BOM 的 CSV
                 reader = csv.DictReader(f)
                 records = list(reader)
     return await agent_client.request(
@@ -899,7 +899,7 @@ async def pipeline_process(req: dict[str, Any]):
         sample_path = Path(__file__).resolve().parent.parent / "samples" / "data1.csv"
         records = []
         if sample_path.exists():
-            with open(sample_path, encoding="utf-8") as f:
+            with open(sample_path, encoding="utf-8-sig") as f:  # utf-8-sig 兼容带/不带 BOM 的 CSV
                 reader = csv.DictReader(f)
                 records = list(reader)
     return await agent_client.request(

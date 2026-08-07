@@ -522,3 +522,105 @@ class TestDefaultLabelMapping:
     def test_gene_maps_to_genomic_hint(self):
         """基因(GENE)应映射为 GENOMIC_HINT。"""
         assert DEFAULT_NER_LABEL_MAPPING["GENE"] == "GENOMIC_HINT"
+
+
+# =========================================================================== #
+# ONNX 37类 BIOES 解析与 dyn 门禁专项测试
+# =========================================================================== #
+
+
+class TestBIOESAndSafetyGate:
+    """测试 ONNX 37 类 BIOES 解析、自动识别与 dyn 门禁。"""
+
+    def test_parse_bioes_tags_37_classes(self):
+        """测试 37 类 BIOES 标签状态机解析（含 S-, B-, I-, E-, O 标记）。"""
+        engine = ONNXSmallNerEngine()
+        tokens = ["[CLS]", "患", "者", "确", "诊", "肺", "癌", "及", "艾", "滋", "病", "[SEP]"]
+        # 5: B-dis, 23: I-dis, 24: E-dis, 7: B-dru, 8: S-dru, 18: S-sym, etc.
+        # "肺" -> B-dis (5), "癌" -> E-dis (24)
+        # "艾" -> B-dis (5), "滋" -> I-dis (23), "病" -> E-dis (24)
+        label_indices = [0, 0, 0, 0, 0, 5, 24, 0, 5, 23, 24, 0]
+        probs = [0.99] * len(tokens)
+
+        entities = engine._parse_bioes_tags(tokens, label_indices, probs)
+        assert len(entities) == 2
+        assert entities[0]["text"] == "肺癌"
+        assert entities[0]["label"] == "dis"
+        assert entities[1]["text"] == "艾滋病"
+        assert entities[1]["label"] == "dis"
+
+    def test_extract_37_classes_autodetect(self, tmp_path):
+        """当 ONNX 推理输出 logits shape 为 (seq_len, 37) 时，应自动识别并调用 _parse_bioes_tags。"""
+        vocab_path = tmp_path / "vocab.txt"
+        tokens = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "患", "者", "肺", "癌"]
+        vocab_path.write_text("\n".join(tokens), encoding="utf-8")
+
+        model_path = tmp_path / "model.onnx"
+        model_path.write_bytes(b"dummy_onnx")
+
+        engine = ONNXSmallNerEngine(model_path=str(model_path), vocab_path=str(vocab_path), max_len=16)
+
+        mock_session = MagicMock()
+        # logits shape: (1, 16, 37)
+        mock_logits = np.zeros((1, 16, 37), dtype=np.float32)
+        # token index 2 is [CLS], 3 is [SEP].
+        # index 3 ("肺") -> B-dis (5), index 4 ("癌") -> E-dis (24)
+        mock_logits[0, 3, 5] = 10.0
+        mock_logits[0, 4, 24] = 10.0
+
+        mock_session.run.return_value = [mock_logits]
+        engine.session = mock_session
+        engine.tokenizer = SimpleChineseBertTokenizer(str(vocab_path))
+        engine._initialized = True
+
+        entities = engine.extract("患者肺癌")
+        assert len(entities) >= 1
+        assert entities[0]["text"] == "肺癌"
+        assert entities[0]["label"] == "MEDICAL_DISEASE"
+
+    def test_dyn_service_l5_rating_and_safety_gate(self):
+        """测试 dyn classification 定级一致性 (艾滋病判 L5) 与 Fail-Safe 安全门禁。"""
+        from privacy_local_agent.dynclassification.service import DynamicClassificationService
+
+        service = DynamicClassificationService()
+        
+        # 1. 验证极高敏文本 (艾滋病) 被判为 L5
+        result = service.classify_field("chief_complaint", "患者确诊艾滋病")
+        assert result.field_result is not None
+        assert result.field_result.final_level == "L5"
+
+        # 2. 验证若脱敏后仍包含 L4/L5 敏感词，触发 [L4-L5-DATA-REMOVED] 安全门禁
+        sanitized = service._get_sanitized_value_from_funnel(
+            "chief_complaint",
+            "患者确诊 HIV 阳性",
+            funnel_result=MagicMock(sanitized_value="患者确诊 HIV 阳性"),
+            final_level="L5"
+        )
+        assert sanitized == "[L4-L5-DATA-REMOVED]"
+
+    def test_onnx_ner_long_text_chunking(self):
+        """测试长文本 (>128 tokens) 智能分句与切片推理。"""
+        # 测试 _chunk_text 静态方法
+        long_text = "患者于3年前因反复咳嗽就诊。经检查提示右肺占位。病理确诊为肺腺癌，行切除术。近1周来出现头痛，复查提示脑转移瘤。"
+        chunks = ONNXSmallNerEngine._chunk_text(long_text, max_chunk_len=30)
+        assert len(chunks) > 1
+        assert "".join(chunks) == long_text
+
+        # 模拟长文本 extract 推理
+        engine = ONNXSmallNerEngine(max_len=32)
+        engine._lazy_init = MagicMock()
+        engine._initialized = True
+        engine.tokenizer = MagicMock()
+        engine.session = MagicMock()
+        engine._extract_single_chunk = MagicMock(side_effect=[
+            [{"text": "肺腺癌", "label": "MEDICAL_DISEASE", "confidence": 0.9}],
+            [{"text": "脑转移瘤", "label": "MEDICAL_DISEASE", "confidence": 0.95}],
+            [{"text": "脑转移瘤", "label": "MEDICAL_DISEASE", "confidence": 0.95}],
+        ])
+
+        entities = engine.extract(long_text, max_len=32)
+        assert len(entities) == 2
+        assert entities[0]["text"] == "肺腺癌"
+        assert entities[1]["text"] == "脑转移瘤"
+
+

@@ -50,6 +50,7 @@ from .rules import (
     canonicalize_pii_field,
     L4_PATTERNS,
     L5_PATTERNS,
+    _TERMS_FIRST_CHARS_PATTERN,
     normalize_fullwidth_alphanumeric,
     redact_medical_text,
     redact_medical_text_with_ner,
@@ -465,7 +466,10 @@ class MedicalPrivacyPipeline:
         - 原文直接匹配；
         - 全角字母/数字归一化（ＨＩＶ → HIV）后匹配；
         - 剔除字符间插入噪声（空格/点/连字符/零宽字符，如 "H  I  V"、"艾-滋-病"）后匹配。
+        前置词库首字符预筛：不含任何词库首字符的文本直接判否（毫秒级短路）。
         """
+        if not _TERMS_FIRST_CHARS_PATTERN.search(text):
+            return False
         patterns = L4_PATTERNS + L5_PATTERNS
         if any(pattern.search(text) for pattern, _replacement in patterns):
             return True
@@ -483,12 +487,12 @@ class MedicalPrivacyPipeline:
 
     @staticmethod
     def _could_benefit_from_ner(text: str) -> bool:
-        """快速筛选过滤：仅当文本包含至少 2 个连续汉字且长度 >= 4 时才触发深度 NER 推理。
+        """快速筛选过滤：仅当文本包含至少 2 个连续汉字且长度 >= 2 时才触发深度 NER 推理。
 
         成本控制前提：NER 是深度学习前向推理（毫秒~秒级），而纯正则只需微秒级。
         对短文本/纯数字/英文短串直接跳过推理，防止高并发下推理吞吐被打满。
         """
-        if not text or len(text.strip()) < 4:
+        if not text or len(text.strip()) < 2:
             return False  # 空文本或去除空白后不足 4 字符 → 无推理价值
         # 至少包含 2 个连续汉字才可能含中文病史实体（英文/纯符号文本交给规则引擎）
         return bool(re.search(r"[\u4e00-\u9fa5]{2,}", text))

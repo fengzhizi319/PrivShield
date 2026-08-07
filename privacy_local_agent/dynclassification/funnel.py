@@ -152,7 +152,7 @@ class ClassificationFunnel:
         2. 排除纯数字、纯英文、短标记（长度 < 4 或无中文）；
         3. 仅对临床非结构化文书字段（present_illness, family_history 等）或 L1 未命中的复杂长文本触发。
         """
-        if not value or len(value.strip()) < 4:
+        if not value or len(value.strip()) < 2:
             return False
 
         # 检查是否包含连续中文汉字（简单数字/代码/英文不触发 NER）
@@ -197,6 +197,31 @@ class ClassificationFunnel:
 
         # ===== Step 1: Layer-1 规则引擎评估 =====
         tags, suppressed_tags = self.engine.evaluate(field_name, value)
+
+        # 补全高敏病史扫描：当文本命中 L5/L4 医疗模式时，确保生成对应的 L5/L4 SecurityTag
+        try:
+            from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS
+            for pat, _rep in L5_PATTERNS:
+                if pat.search(str_value):
+                    tags.append(SecurityTag(
+                        level="L5", category="HIGH_RISK_MEDICAL_L5", confidence=0.99,
+                        source_engine="RULE", rule_id="MEDICAL_L5_STRICT_RULE",
+                        domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
+                        needs_human_review=True,
+                    ))
+                    break
+            else:
+                for pat, _rep in L4_PATTERNS:
+                    if pat.search(str_value):
+                        tags.append(SecurityTag(
+                            level="L4", category="HIGH_RISK_MEDICAL_L4", confidence=0.95,
+                            source_engine="RULE", rule_id="MEDICAL_L4_STRICT_RULE",
+                            domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
+                        ))
+                        break
+        except Exception:
+            pass
+
         # 取所有命中标签的最大置信度（支持规则自定义 confidence）
         # Use max confidence from matched tags (supports per-rule custom confidence)
         confidence = max((t.confidence for t in tags), default=0.0)
@@ -605,7 +630,15 @@ class ClassificationFunnel:
                     needs_human_review=True,
                 ))
             elif label == "MEDICAL_DISEASE":
-                if any(kw in ent_text for kw in sensitive_keywords):
+                l5_kws = ["hiv", "aids", "艾滋", "精神分裂", "基因", "遗传缺陷"]
+                if any(kw in ent_text for kw in l5_kws):
+                    tags.append(SecurityTag(
+                        level=highest_level, category="HIGH_RISK_MEDICAL_L5", confidence=conf,
+                        source_engine="SMALL_NER", rule_id="NER_DIS_L5_STRICT",
+                        domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
+                        needs_human_review=True,
+                    ))
+                elif any(kw in ent_text for kw in sensitive_keywords):
                     tags.append(SecurityTag(
                         level=second_highest, category="MEDICAL_SENSITIVE_DISEASE", confidence=conf,
                         source_engine="SMALL_NER", rule_id="NER_DIS_SENSITIVE",

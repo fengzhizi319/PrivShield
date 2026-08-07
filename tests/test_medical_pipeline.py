@@ -708,3 +708,66 @@ def test_summary_stats_are_measured_not_hardcoded() -> None:
     assert res.summary["guarantee_no_l4_l5_raw_data"] is True
 
 
+def test_ascii_term_word_boundary_no_false_positive() -> None:
+    """ASCII 词项必须带词边界：良性英文/编码文本不得因子串误命中而被擦除。
+
+    回归：修复前 "archive" 被抠成 "arce"（含 hiv）、"http://" 被抠成 "seep://"（含 htt）、
+    "ABCD4" 被抠成 "AB"（含 CD4），叠加最终门禁会导致良性字段被整值抹除。
+    """
+    benign_cases = [
+        "archive the report please",       # arcHIVe
+        "see http://example.com/result",   # HTTp
+        "lab code ABCD4 pending",          # abCD4
+        "HRPR positive control",           # hRPR
+        "SHCV protocol v2",                # sHCV
+        "chopper machine",
+        "campus activity",
+    ]
+    for raw in benign_cases:
+        assert redact_medical_text(raw) == raw, f"良性文本被误改: {raw!r} -> {redact_medical_text(raw)!r}"
+
+    # 真敏感词在词边界位置仍必须命中
+    assert "HIV" not in redact_medical_text("HIV test ordered")
+    assert "tumor" not in redact_medical_text("the tumor board meets weekly")
+    assert "CD4" not in redact_medical_text("CD4计数180个/μL")
+
+
+def test_ner_fallback_preserves_clean_text() -> None:
+    """NER 未检出高敏实体时的规则降级路径，对干净文本必须零篡改。
+
+    回归：修复前 fallback 在 redact 结果上再套一层语法自愈清理，
+    导致干净文本被误删词（"患者出现皮疹3天，伴瘙痒。" -> "患者皮疹3天。"）。
+    """
+    clean_texts = [
+        "患者出现皮疹3天，伴瘙痒。",
+        "患者2年前  曾行阑尾切除术。",
+        "进一步检查发现右肺结节，建议随访。",
+        "原发性高血压病史10年，口服硝苯地平控释片30mg qd，血压控制良好。",
+    ]
+    for text in clean_texts:
+        assert redact_medical_text_with_ner(text) == text, f"干净文本被误改: {text!r}"
+
+
+def test_pinyin_homophone_variants_caught() -> None:
+    """拼音/同音/形近/字符替换变体必须命中词库（系统性覆盖，非仅审计样例）。"""
+    cases = [
+        ("患者得了aizibing", "aizibing"),
+        ("肺ai晚期", "肺ai"),
+        ("霉毒病史", "霉毒"),
+        ("确诊meidu一年", "meidu"),
+        ("jingshenfenlie病史", "jingshenfenlie"),
+        ("精神分lie病史", "精神分lie"),
+        ("乙gan病史10年", "乙gan"),
+        ("丙gan史", "丙gan"),
+        ("胃ai术后", "胃ai"),
+        ("乳腺ai", "乳腺ai"),
+        ("结直肠ai待查", "肠ai"),
+        ("xingbing门诊就诊", "xingbing"),
+        ("H1V携带者", "H1V"),
+        ("HlV阳性", "HlV"),
+    ]
+    for raw, core in cases:
+        res = redact_medical_text(raw)
+        assert core not in res, f"拼音/形近变体 '{core}' 泄露在脱敏结果中: {res!r}"
+
+
