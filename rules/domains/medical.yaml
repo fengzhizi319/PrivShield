@@ -150,13 +150,13 @@ downgrade_rules:
     name: "运营统计强制降级"
     keywords: [
       "turnover_rate", "device_usage", "inventory", "hospital_stat", "bed_occupancy",
-      "stat", "count", "cnt", "门诊量", "住院人次", "设备利用率", "床位周转率", "库存统计", "工作量"
+      "stat", "stat_count", "cnt", "门诊量", "住院人次", "设备利用率", "床位周转率", "库存统计", "工作量"
     ]
     level: "L2"
     category: "OPERATIONAL_STAT"
     force_suppress: true                  # 启用强制覆盖: 可压制符合条件的误中普通规则标签
     max_force_suppress_level: "L3"        # 强行覆盖上限: 可把误标为 L3 的普通规则压制降至 L2
-    exempt_rules: []                      # 压制豁免例外名单 (空=按等级全额压制；如需要保护精细校验规则可填写如 ['RULE_MED_ICD10'])
+    exempt_rules: ["RULE_PII_BANK_CARD"]  # 银行卡规则豁免强制降级
 
 # ==============================================================================
 # 3. 组合/上下文增强规则 (composite_rules)

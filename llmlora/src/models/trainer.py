@@ -1,0 +1,427 @@
+# -*- coding: utf-8 -*-
+"""
+LoRA 训练与权重导出执行器 / LoRA training & merge-export runner.
+
+针对 llmlora/basemodels/cmeee_merged（Qwen3.5-0.8B 混合注意力 CausalLM）
+Tailored for llmlora/basemodels/cmeee_merged (Qwen3.5-0.8B hybrid-attention CausalLM),
+实现工业级 SFT 闭环 / implements an industrial SFT loop:
+
+1. Tokenizer 加载与 pad 兜底 / Tokenizer loading with pad fallback.
+2. JSONL 数据加载 + Prompt Labels Masking（仅 Assistant 输出计损失） /
+   JSONL loading + prompt labels masking (loss only on assistant tokens).
+3. 精度与设备自动适配（bf16 / fp16 / fp32） /
+   Automatic dtype & device selection (bf16 / fp16 / fp32).
+4. PEFT LoRA 目标层自动探查（交集 + 排除 lm_head/embed/mtp） /
+   Automatic LoRA target-module probing (intersection, excluding lm_head/embed/mtp).
+5. 训练 / 验证 / 最佳 checkpoint 加载 / 断点续训 /
+   Train / eval / best-checkpoint reload / resume from checkpoint.
+6. 训练后抽样生成自检（JSON 合法率） /
+   Post-training sampled generation self-check (JSON validity).
+7. Merge & Unload 导出独立合并模型 / Merge & unload into a standalone model.
+
+依赖环境 / Required environment: llmlora/.venv (transformers>=5.2, peft, accelerate)。
+"""
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+from datasets import Dataset
+from peft import LoraConfig, PeftModel, TaskType, get_peft_model
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    Trainer,
+    TrainingArguments,
+)
+
+from llmlora.src.dataset.data_collator import DataCollatorForSFT, IGNORE_INDEX
+from llmlora.src.dataset.loader import (
+    load_jsonl,
+    make_tokenize_fn,
+    render_prompt_text,
+)
+from llmlora.src.utils.config import Config
+from llmlora.src.utils.logger import setup_logger
+from llmlora.src.utils.metrics import extract_json_from_text
+
+logger = setup_logger("trainer")
+
+
+class LoRATrainingRunner:
+    """LoRA 微调训练与合并导出管理类 / LoRA fine-tuning & merge-export runner.
+
+    专门适配 llmlora/basemodels/cmeee_merged 预训练实体提取基座模型。
+    Tailored for the CMeEE entity-extraction merged base model.
+
+    生命周期 / Lifecycle:
+        runner = LoRATrainingRunner(cfg)
+        runner.train()          # 训练 + 保存 + 评估 + (可选)合并导出
+        runner.merge_and_export()  # 也可单独调用
+    """
+
+    def __init__(self, cfg: Config):
+        """初始化执行器并校验配置 / Initialize runner and validate config."""
+        self.cfg = cfg
+        self.cfg.validate()
+        self.tokenizer = None
+        self.model = None
+        # 保留原始验证集样本用于训练后生成自检
+        # Keep raw dev samples for the post-training generation self-check
+        self._dev_raw: List[Dict[str, Any]] = []
+
+    # ------------------------------------------------------------------
+    # 硬件与精度 / Hardware & dtype
+    # ------------------------------------------------------------------
+
+    def _resolve_dtype(self) -> Tuple[torch.dtype, bool, bool]:
+        """解析计算精度 / Resolve compute dtype.
+
+        优先级 / Priority: cfg.dtype 显式指定 > bf16 硬件支持 > fp16 > fp32。
+        Explicit cfg.dtype wins, then bf16 support, then fp16, then fp32.
+
+        Returns:
+            (model_dtype, use_bf16, use_fp16) 供模型加载与 TrainingArguments 使用。
+        """
+        forced = (self.cfg.dtype or "auto").lower()
+        cuda_available = torch.cuda.is_available()
+
+        if forced == "bf16":
+            return torch.bfloat16, True, False
+        if forced == "fp16":
+            return torch.float16, False, True
+        if forced == "fp32":
+            return torch.float32, False, False
+
+        # auto 模式 / Auto mode
+        if cuda_available and torch.cuda.is_bf16_supported():
+            return torch.bfloat16, True, False
+        if cuda_available:
+            return torch.float16, False, True
+        return torch.float32, False, False
+
+    # ------------------------------------------------------------------
+    # Tokenizer / 数据集 / Tokenizer & datasets
+    # ------------------------------------------------------------------
+
+    def prepare_tokenizer(self):
+        """加载与初始化 Tokenizer / Load and initialize the tokenizer."""
+        logger.info(f"正在从 {self.cfg.base_model_path} 加载 Tokenizer...")
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.cfg.base_model_path,
+            trust_remote_code=True,
+            padding_side="right",
+        )
+        # 基座 tokenizer 已带 pad_token(<|endoftext|>)，此处仅作兜底
+        # The base tokenizer ships a pad token; this is only a safety net
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        logger.info(
+            f"Tokenizer 加载成功 | vocab={len(self.tokenizer)} "
+            f"| pad_id={self.tokenizer.pad_token_id} | eos_id={self.tokenizer.eos_token_id}"
+        )
+
+    def prepare_dataset(self) -> Tuple[Dataset, Dataset]:
+        """加载 JSONL 数据集并执行 Labels Masking Tokenization。
+
+        Load JSONL datasets and apply labels-masking tokenization.
+
+        过滤策略 / Filtering: labels 全为 -100 的样本（截断后 assistant 内容丢失）
+        Samples whose labels are all -100 (assistant content lost after truncation)
+        会在训练时产生 NaN 损失，直接过滤。
+        would yield NaN loss and are dropped.
+        """
+        logger.info("加载与预处理训练/验证数据集...")
+        if not os.path.exists(self.cfg.train_data_path):
+            raise FileNotFoundError(
+                f"未找到训练集数据: {self.cfg.train_data_path}，"
+                "请先执行 python -m llmlora.scripts.generate_data"
+            )
+        if not os.path.exists(self.cfg.dev_data_path):
+            raise FileNotFoundError(f"未找到验证集数据: {self.cfg.dev_data_path}")
+
+        train_raw = load_jsonl(self.cfg.train_data_path)
+        dev_raw = load_jsonl(self.cfg.dev_data_path)
+        self._dev_raw = dev_raw
+        logger.info(f"训练集样本量: {len(train_raw)} | 验证集样本量: {len(dev_raw)}")
+
+        tokenize_fn = make_tokenize_fn(self.tokenizer, self.cfg.max_length)
+
+        def _build(raw: List[Dict[str, Any]], split_name: str) -> Dataset:
+            ds = Dataset.from_list(raw)
+            ds = ds.map(
+                tokenize_fn,
+                batched=False,
+                remove_columns=list(ds.column_names),
+                desc=f"Tokenizing {split_name} (Prompt -100 Masking)",
+            )
+            before = len(ds)
+            ds = ds.filter(
+                lambda x: any(lbl != IGNORE_INDEX for lbl in x["labels"]),
+                desc=f"过滤全掩码样本 {split_name}",
+            )
+            dropped = before - len(ds)
+            if dropped:
+                logger.warning(f"{split_name} 过滤 {dropped} 条全掩码样本（截断导致）")
+            return ds
+
+        train_ds = _build(train_raw, "train")
+        dev_ds = _build(dev_raw, "dev")
+        return train_ds, dev_ds
+
+    # ------------------------------------------------------------------
+    # 模型与 PEFT / Model & PEFT
+    # ------------------------------------------------------------------
+
+    def _find_target_modules(self) -> List[str]:
+        """探查模型中实际存在的 Linear 叶子层并与候选列表求交集。
+
+        Probe real Linear leaf modules of the model and intersect with candidates.
+
+        排除 lm_head / embed / mtp 等非目标层，防止破坏语言模型头与
+        Excludes lm_head / embed / mtp layers so the LM head, embeddings and
+        多 token 预测草稿层；若交集为空则回退到全部合法 Linear 层。
+        MTP draft layers stay untouched; falls back to all valid Linear leaves.
+        """
+        excluded = tuple(self.cfg.excluded_module_keywords)
+        leaf_names: set[str] = set()
+        for name, module in self.model.named_modules():
+            if isinstance(module, torch.nn.Linear):
+                leaf = name.split(".")[-1]
+                if any(kw in name for kw in excluded):
+                    continue
+                leaf_names.add(leaf)
+
+        targets = [m for m in self.cfg.target_modules if m in leaf_names]
+        if not targets:
+            targets = sorted(leaf_names)
+            logger.warning(
+                f"候选 target_modules 与基座无交集，回退为全部 Linear 层: {targets}"
+            )
+        return targets
+
+    def prepare_model_and_peft(self):
+        """加载基座模型并注入 PEFT LoRA 模块 / Load base model and inject LoRA."""
+        model_dtype, use_bf16, _ = self._resolve_dtype()
+        cuda_available = torch.cuda.is_available()
+        logger.info(
+            f"加载 CausalLM 基座模型 ({self.cfg.base_model_path}) "
+            f"| dtype={model_dtype} | cuda={cuda_available}"
+        )
+
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.cfg.base_model_path,
+            torch_dtype=model_dtype,
+            device_map="auto" if cuda_available else None,
+            trust_remote_code=True,
+        )
+        # 训练必须关闭 KV cache（与 gradient checkpointing 不兼容）
+        # KV cache must be off during training (incompatible with grad checkpointing)
+        self.model.config.use_cache = False
+
+        valid_targets = self._find_target_modules()
+        logger.info(
+            f"注入 PEFT LoRA | 目标层: {valid_targets} "
+            f"| r={self.cfg.lora_r} | alpha={self.cfg.lora_alpha} "
+            f"| dropout={self.cfg.lora_dropout}"
+        )
+
+        lora_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            r=self.cfg.lora_r,
+            lora_alpha=self.cfg.lora_alpha,
+            lora_dropout=self.cfg.lora_dropout,
+            target_modules=valid_targets,
+            bias="none",
+        )
+
+        self.model = get_peft_model(self.model, lora_config)
+        # gradient checkpointing 需要输入梯度回传通路
+        # gradient checkpointing requires the input-require-grads hook
+        if hasattr(self.model, "enable_input_require_grads"):
+            self.model.enable_input_require_grads()
+
+        self.model.print_trainable_parameters()
+
+    # ------------------------------------------------------------------
+    # 训练主流程 / Training main flow
+    # ------------------------------------------------------------------
+
+    def train(self):
+        """执行完整训练流程 / Run the full training pipeline."""
+        self.prepare_tokenizer()
+        train_ds, dev_ds = self.prepare_dataset()
+        self.prepare_model_and_peft()
+
+        _, use_bf16, use_fp16 = self._resolve_dtype()
+
+        # 梯度检查点：混合注意力架构可能不完全支持，失败时自动降级关闭
+        # Gradient checkpointing may not be fully supported by hybrid attention;
+        # degrade gracefully on failure.
+        grad_ckpt = self.cfg.gradient_checkpointing
+        grad_ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False}
+
+        training_args = TrainingArguments(
+            output_dir=self.cfg.output_dir,
+            num_train_epochs=self.cfg.num_epochs,
+            max_steps=self.cfg.max_steps,
+            per_device_train_batch_size=self.cfg.batch_size,
+            per_device_eval_batch_size=self.cfg.batch_size,
+            gradient_accumulation_steps=self.cfg.grad_accum_steps,
+            learning_rate=self.cfg.learning_rate,
+            weight_decay=self.cfg.weight_decay,
+            warmup_ratio=self.cfg.warmup_ratio,
+            lr_scheduler_type="cosine",
+            logging_steps=self.cfg.logging_steps,
+            save_strategy="steps",
+            save_steps=self.cfg.save_steps,
+            save_total_limit=self.cfg.save_total_limit,
+            eval_strategy="steps",
+            eval_steps=self.cfg.eval_steps,
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+            bf16=use_bf16,
+            fp16=use_fp16,
+            gradient_checkpointing=grad_ckpt,
+            gradient_checkpointing_kwargs=grad_ckpt_kwargs if grad_ckpt else None,
+            optim=self.cfg.optim,
+            report_to=[],
+            dataloader_pin_memory=torch.cuda.is_available(),
+            dataloader_num_workers=self.cfg.dataloader_num_workers,
+            remove_unused_columns=False,
+            seed=self.cfg.seed,
+        )
+
+        data_collator = DataCollatorForSFT(
+            tokenizer=self.tokenizer,
+            pad_to_multiple_of=8,
+        )
+
+        trainer = Trainer(
+            model=self.model,
+            args=training_args,
+            train_dataset=train_ds,
+            eval_dataset=dev_ds,
+            data_collator=data_collator,
+            processing_class=self.tokenizer,
+        )
+
+        logger.info("开始执行 LoRA 微调...")
+        train_result = trainer.train(
+            resume_from_checkpoint=self.cfg.resume_from_checkpoint
+        )
+
+        metrics = train_result.metrics
+        train_loss = metrics.get("train_loss")
+        logger.info(
+            f"训练完成: train_loss={'N/A' if train_loss is None else round(train_loss, 4)}, "
+            f"runtime={metrics.get('train_runtime', 'N/A')}s"
+        )
+
+        logger.info(f"保存 LoRA 权重及配置到: {self.cfg.output_dir}")
+        trainer.save_model(self.cfg.output_dir)
+        self.tokenizer.save_pretrained(self.cfg.output_dir)
+
+        eval_results = trainer.evaluate()
+        logger.info(f"验证集 eval_loss: {eval_results.get('eval_loss', 'N/A')}")
+
+        # 训练后生成自检：验证模型能否产出合法 JSON
+        # Post-training generation self-check: verify the model emits valid JSON
+        self._sanity_generate()
+
+        # 释放 trainer 与显存 / Release trainer and VRAM before optional merge
+        del trainer
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        if self.cfg.merge_on_completion:
+            self.merge_and_export()
+
+    def _sanity_generate(self, num_samples: int = 3, max_new_tokens: int = 256):
+        """用少量验证集样本做生成自检 / Generation self-check on a few dev samples.
+
+        不阻断训练流程：任何异常只记录告警。
+        Never blocks the pipeline: exceptions are logged as warnings only.
+        """
+        if not self._dev_raw:
+            return
+        try:
+            device = next(self.model.parameters()).device
+            self.model.eval()
+            valid = 0
+            samples = self._dev_raw[:num_samples]
+            for sample in samples:
+                prompt_text = render_prompt_text(self.tokenizer, sample.get("input", ""))
+                inputs = self.tokenizer(prompt_text, return_tensors="pt").to(device)
+                with torch.inference_mode():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens,
+                        do_sample=False,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                    )
+                response = self.tokenizer.decode(
+                    outputs[0][inputs["input_ids"].shape[1]:],
+                    skip_special_tokens=True,
+                )
+                parsed = extract_json_from_text(response)
+                if parsed is not None:
+                    valid += 1
+            logger.info(f"生成自检: {valid}/{len(samples)} 条输出为合法 JSON")
+        except Exception as exc:  # noqa: BLE001 - 自检不应中断主流程
+            logger.warning(f"生成自检失败（不影响训练产物）: {exc}")
+
+    # ------------------------------------------------------------------
+    # 合并导出 / Merge & export
+    # ------------------------------------------------------------------
+
+    def merge_and_export(self):
+        """将 LoRA 权重合并回基座并导出独立 checkpoint / Merge LoRA into base and export.
+
+        在 CPU 内存完成合并以避免 GPU OOM；基座 tie_word_embeddings=True，
+        Merging happens in CPU RAM to avoid GPU OOM; the base ties word embeddings,
+        save_pretrained 会自动处理权重共享，不会重复保存 lm_head。
+        and save_pretrained handles weight sharing without duplicating lm_head.
+        """
+        logger.info("开始执行 LoRA 权重与基座模型合并 (Merge & Unload)...")
+        os.makedirs(self.cfg.merged_output_dir, exist_ok=True)
+
+        try:
+            # 合并导出统一使用基座原始 dtype（config.json 中为 bfloat16）
+            # Merge & export in the base model's native dtype (bfloat16)
+            export_dtype = self._resolve_dtype()[0]
+
+            base_model = AutoModelForCausalLM.from_pretrained(
+                self.cfg.base_model_path,
+                torch_dtype=export_dtype,
+                device_map="cpu",
+                trust_remote_code=True,
+            )
+            peft_model = PeftModel.from_pretrained(base_model, self.cfg.output_dir)
+            merged_model = peft_model.merge_and_unload()
+
+            logger.info(f"保存合并后的模型到: {self.cfg.merged_output_dir}")
+            merged_model.save_pretrained(
+                self.cfg.merged_output_dir,
+                max_shard_size=self.cfg.max_shard_size,
+                safe_serialization=True,
+            )
+            self.tokenizer.save_pretrained(self.cfg.merged_output_dir)
+            # 同步生成配置，保证推理侧采样参数一致
+            # Persist generation config so inference uses identical sampling params
+            if getattr(base_model, "generation_config", None) is not None:
+                base_model.generation_config.save_pretrained(self.cfg.merged_output_dir)
+            logger.info("权重合并并导出成功！")
+        except Exception as exc:
+            logger.error(f"合并权重时发生异常: {exc}", exc_info=True)
+            raise
+
+
+def run_lora_training(cfg: Config) -> LoRATrainingRunner:
+    """启动微调主入口 / Main entry for fine-tuning."""
+    runner = LoRATrainingRunner(cfg)
+    runner.train()
+    return runner

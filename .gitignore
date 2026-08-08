@@ -45,3 +45,7 @@ data/sanitized_images/
 
 # MkDocs build output
 site/
+
+# llmlora basemodels & output
+/llmlora/basemodels/
+/llmlora/output/

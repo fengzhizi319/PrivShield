@@ -1,0 +1,219 @@
+# -*- coding: utf-8 -*-
+"""
+llmlora 评估与 Benchmark 验证脚本 / Evaluation & benchmark script.
+
+在 test.jsonl 上评估微调模型（基座 + LoRA 或合并模型）：
+Evaluates the fine-tuned model (base + LoRA or merged model) on test.jsonl:
+
+- JSON 合法解析率 / JSON validity rate
+- 密级 (max_level) 准确率 / Sensitivity level accuracy
+- 实体 Precision / Recall / F1 / Entity P/R/F1
+- 无痕抹平零泄漏率（字面残留 + 规则引擎复扫） /
+  Zero-leakage rate of smoothed text (literal residual + rule-engine rescan)
+- 推理延迟统计（P50/P95） / Inference latency statistics (P50/P95)
+
+用法 / Usage:
+    # LoRA adapter 模式 / Adapter mode
+    python -m llmlora.scripts.evaluate \
+        --model-path llmlora/basemodels/cmeee_merged \
+        --adapter-path llmlora/output/saves/qwen35-cmeee-privacy-lora
+    # 合并模型模式 / Merged model mode
+    python -m llmlora.scripts.evaluate \
+        --model-path llmlora/output/models/qwen35-cmeee-privacy-merged
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+# 支持从任意工作目录启动 / Allow launching from any cwd
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from llmlora.src.dataset.loader import load_jsonl  # noqa: E402
+from llmlora.src.inference.engine import QwenPrivacyLoRAEngine  # noqa: E402
+from llmlora.src.utils.metrics import (  # noqa: E402
+    calculate_classification_metrics,
+    calculate_entity_f1,
+    extract_json_from_text,
+    find_leaked_values,
+    summarize_latency,
+)
+
+
+def _build_leakage_scanner(rules_dir: str):
+    """构建规则引擎复扫器；导入失败时降级为仅字面检查。
+
+    Build a rule-engine rescan function; degrades to literal-only checks when
+    the project package is unavailable.
+
+    Returns:
+        (scanner_fn_or_None, description)
+    """
+    try:
+        from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
+        from privacy_local_agent.dynclassification.profile_loader import ProfileLoader
+
+        loader = ProfileLoader(rules_dir)
+        taxonomy = loader.load_taxonomy("default")
+        profiles = [loader.load_profile(d) for d in ("general-pii", "medical")]
+        engine = ConfigurableRuleEngine(
+            taxonomy=taxonomy, profiles=profiles, domain="llmlora-eval"
+        )
+
+        def _scan(text: str) -> bool:
+            tags, _ = engine.evaluate("content", text)
+            return any((taxonomy.levels.get(t.level).rank if taxonomy.levels.get(t.level) else 0) >= 2 for t in tags)
+
+        return _scan, f"规则引擎复扫（{engine.rule_count} 条规则）"
+    except Exception as exc:  # noqa: BLE001 - 评估降级而非失败
+        print(f"[WARN] 规则引擎不可用，零泄漏仅做字面残留检查: {exc}")
+        return None, "仅字面残留检查"
+
+
+def run_evaluation(
+    model_path: str,
+    adapter_path: Optional[str],
+    test_data_path: str,
+    rules_dir: str,
+    max_samples: int = 0,
+) -> Dict[str, Any]:
+    """执行完整 Benchmark 评估 / Run the full benchmark evaluation."""
+    print(f"正在加载推理引擎, model_path: {model_path}, adapter_path: {adapter_path}")
+    engine = QwenPrivacyLoRAEngine(model_path=model_path, adapter_path=adapter_path)
+
+    print(f"读取测试集数据: {test_data_path}")
+    test_samples = load_jsonl(test_data_path)
+    if max_samples > 0:
+        test_samples = test_samples[:max_samples]
+    print(f"测试集中包含 {len(test_samples)} 条样本")
+
+    scanner, scanner_desc = _build_leakage_scanner(rules_dir)
+
+    predictions: List[str] = []
+    references: List[Dict[str, Any]] = []
+    latencies_ms: List[float] = []
+    leak_checked = 0
+    leak_clean = 0
+
+    for i, sample in enumerate(test_samples):
+        input_text = sample.get("input", "") or sample.get("instruction", "")
+        gt_output_str = sample.get("output", "{}")
+        try:
+            ref_json = (
+                json.loads(gt_output_str)
+                if isinstance(gt_output_str, str)
+                else gt_output_str
+            )
+        except json.JSONDecodeError:
+            ref_json = {}
+
+        start = time.perf_counter()
+        result = engine.classify(input_text)
+        latencies_ms.append((time.perf_counter() - start) * 1000.0)
+
+        pred_str = json.dumps(result, ensure_ascii=False) if result else ""
+        predictions.append(pred_str)
+        references.append(ref_json)
+
+        # 零泄漏校验：对模型输出的 smoothed_text 做残留与复扫
+        # Zero-leakage check on the model's smoothed_text output
+        ref_entities = ref_json.get("classification", {}).get("entities", [])
+        sensitive_values = [str(e.get("text", "")) for e in ref_entities if e.get("text")]
+        if sensitive_values and result:
+            smoothed = str(result.get("smoothed_text", ""))
+            literal_leak = bool(find_leaked_values(smoothed, sensitive_values))
+            rule_leak = bool(scanner and scanner(smoothed))
+            leak_checked += 1
+            if not literal_leak and not rule_leak:
+                leak_clean += 1
+
+        if (i + 1) % 10 == 0:
+            print(f"已评估 [{i + 1}/{len(test_samples)}] 条样本")
+
+    cls_metrics = calculate_classification_metrics(predictions, references)
+    entity_metrics = calculate_entity_f1(predictions, references)
+    latency = summarize_latency(latencies_ms)
+    zero_leak_rate = leak_clean / leak_checked if leak_checked else 0.0
+
+    print("\n" + "=" * 56)
+    print("评估完成，结果报告:")
+    print(f"  JSON 格式合法解析率 : {cls_metrics['json_valid_rate'] * 100:.2f}%")
+    print(f"  分类密级 Accuracy  : {cls_metrics['level_accuracy'] * 100:.2f}%")
+    print(f"  实体 Precision     : {entity_metrics['entity_precision'] * 100:.2f}%")
+    print(f"  实体 Recall        : {entity_metrics['entity_recall'] * 100:.2f}%")
+    print(f"  实体 F1            : {entity_metrics['entity_f1'] * 100:.2f}%")
+    print(f"  实体密级一致率      : {entity_metrics['entity_level_agreement'] * 100:.2f}%")
+    print(f"  二次扫描零泄漏率    : {zero_leak_rate * 100:.2f}% ({scanner_desc}, n={leak_checked})")
+    print(
+        f"  推理延迟           : mean={latency['mean']:.1f}ms "
+        f"p50={latency['p50']:.1f}ms p95={latency['p95']:.1f}ms max={latency['max']:.1f}ms"
+    )
+    print("=" * 56)
+
+    return {
+        **cls_metrics,
+        **entity_metrics,
+        "zero_leakage_rate": zero_leak_rate,
+        "latency": latency,
+    }
+
+
+def main() -> None:
+    """评估入口 / Evaluation entry point."""
+    parser = argparse.ArgumentParser(description="评估 llmlora 模型效果")
+    parser.add_argument(
+        "--model-path", type=str,
+        default=str(_REPO_ROOT / "llmlora" / "basemodels" / "cmeee_merged"),
+        help="基座模型路径或合并后的模型路径",
+    )
+    parser.add_argument(
+        "--adapter-path", type=str,
+        default=str(_REPO_ROOT / "llmlora" / "output" / "saves" / "qwen35-cmeee-privacy-lora"),
+        help="LoRA 适配器路径（目录不存在时自动忽略；合并模型默认不叠加）",
+    )
+    parser.add_argument(
+        "--test-data-path", type=str,
+        default=str(_REPO_ROOT / "llmlora" / "data" / "test.jsonl"),
+        help="测试集路径",
+    )
+    parser.add_argument(
+        "--rules-dir", type=str, default=str(_REPO_ROOT / "rules"),
+        help="规则库目录（零泄漏复扫用）",
+    )
+    parser.add_argument("--max-samples", type=int, default=0, help="最多评估条数（0=全部）")
+    args = parser.parse_args()
+
+    # 适配器挂载策略 / Adapter mounting policy:
+    # 1. adapter 目录不存在 → 不挂载 / Missing adapter dir -> skip.
+    # 2. 未显式指定 adapter 且 model-path 是合并模型（路径含 merged）→ 不挂载，
+    #    避免在已融合 LoRA 权重上重复叠加适配器。
+    #    Default adapter is skipped for merged models to avoid double-applying
+    #    the LoRA weights that are already fused into the checkpoint.
+    adapter_explicit = "--adapter-path" in sys.argv
+    adapter_path: Optional[str] = (
+        args.adapter_path if Path(args.adapter_path).exists() else None
+    )
+    if (
+        adapter_path is not None
+        and not adapter_explicit
+        and "merged" in Path(args.model_path).name.lower()
+    ):
+        print(
+            f"检测到合并模型 ({args.model_path})，跳过默认 LoRA 适配器挂载"
+            f"（如需叠加请显式传 --adapter-path）"
+        )
+        adapter_path = None
+    run_evaluation(
+        args.model_path, adapter_path, args.test_data_path,
+        args.rules_dir, args.max_samples,
+    )
+
+
+if __name__ == "__main__":
+    main()

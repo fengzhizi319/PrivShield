@@ -97,6 +97,22 @@ rules:
           ]
           use_word_boundaries: false
 
+  # --- 银行卡/账号 ---
+  - id: "RULE_PII_BANK_CARD"
+    name: "银行卡/账户字段名"
+    category: "PERSONAL_BASIC"
+    level: "L3"
+    priority: 50
+    match_logic: "AND"
+    matchers:
+      - target: "field_name"
+        operator: "keyword_contains"
+        params:
+          keywords: [
+            "bank_card", "bank_account", "card_no", "account_no", "银行卡", "卡号", "还款账户", "银行账户"
+          ]
+          use_word_boundaries: false
+
 # ==============================================================================
 # 2. 敏感度降级与覆盖规则 (downgrade_rules)
 # 可用字段包含：id, name, keywords, level, category, force_suppress, max_force_suppress_level, exempt_rules
@@ -114,14 +130,14 @@ downgrade_rules:
   - id: "general-pii:RULE_DOWN_OPS"
     name: "运营统计强制降级"
     keywords: [
-      "turnover_rate", "device_usage", "inventory", "stat", "statistics", "count", "cnt",
+      "turnover_rate", "device_usage", "inventory", "stat", "statistics", "stat_count", "cnt",
       "total_cnt", "total_num", "stat_num", "门诊人次", "床位统计", "工作量统计", "周转率", "使用率", "库存", "汇总"
     ]
     level: "L2"
     category: "OPERATIONAL_STAT"
     force_suppress: true                  # 是否开启强制压制 (true=强行压制符合条件的普通规则)
     max_force_suppress_level: "L3"        # 覆盖上限等级 (可强行将误报的 L3 降为 L2)
-    exempt_rules: []                      # 压制豁免例外名单 (空=按等级全额压制；如需要保护精细校验规则可填写如 ['RULE_PII_IDCARD'])
+    exempt_rules: ["RULE_PII_BANK_CARD"]  # 银行卡规则豁免强制降级
 
 # ==============================================================================
 # 3. 组合/上下文增强规则 (composite_rules)
