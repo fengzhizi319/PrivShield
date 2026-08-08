@@ -79,11 +79,7 @@ def _is_path_allowed(path: Path) -> bool:
 
 
 def is_image_input(val_str: str) -> bool:
-    """判断输入是否为图像（文件路径或 Base64 Data URI）。
-
-    收敛 pipeline / service / funnel 中重复的扩展名 + Data URI 检测逻辑，
-    避免各模块判断规则漂移。
-    """
+    """判断输入是否为图像（文件路径或 Base64 Data URI）。"""
     if not val_str:
         return False
     stripped = val_str.strip()

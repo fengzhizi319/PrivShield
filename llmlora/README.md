@@ -34,7 +34,7 @@ llmlora/
 │   └── design_and_workflow.md    # 完整设计方案与工作流
 ├── output/
 │   ├── saves/qwen35-cmeee-privacy-lora/     # LoRA adapter 权重
-│   └── models/qwen35-cmeee-privacy-merged/  # 合并导出端到端模型
+│   └── models/Qwen3.5-0.8B-Privacy-Classifier-Smoother/  # 合并导出端到端模型
 ├── scripts/                      # 常用命令 sh 脚本 + Python 入口
 └── src/
     ├── dataset/                  # loader.py (Labels Masking) / data_collator.py
@@ -107,7 +107,7 @@ cd /home/charles/code/sfwork/privacy-local-agent
 
 llmlora/.venv/bin/python -m llmlora.scripts.generate_data --train-size 1000 --dev-size 100 --test-size 50
 llmlora/.venv/bin/python -m llmlora.scripts.train --epochs 3 --batch-size 4
-llmlora/.venv/bin/python -m llmlora.scripts.evaluate --model-path llmlora/output/models/qwen35-cmeee-privacy-merged
+llmlora/.venv/bin/python -m llmlora.scripts.evaluate --model-path llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
 ```
 
 ---

@@ -180,8 +180,8 @@ class TestQwen2VLClassifier:
         mock_torch.cuda = MagicMock()
         mock_torch.cuda.is_available.return_value = True
         mock_torch.cuda.device_count.return_value = 1
-        # 2 GB free
-        mock_torch.cuda.mem_get_info.return_value = (2 * 1024**3, 12 * 1024**3)
+        # 1 GB free (低于 1.6 GB 最低显存要求)
+        mock_torch.cuda.mem_get_info.return_value = (1 * 1024**3, 12 * 1024**3)
         # Mock MPS 不可用
         mock_torch.backends.mps.is_available.return_value = False
 

@@ -37,7 +37,6 @@
 | `PRIVACY_DYNCLASSIFICATION_RULES_DIR` | `rules` | 动态规则配置根目录 |
 | `PRIVACY_DYNCLASSIFICATION_HOT_RELOAD` | `true` | 是否开启配置热重载功能 |
 | `PRIVACY_DYNCLASSIFICATION_RELOAD_INTERVAL` | `0` | 配置文件 mtime 变更自动检测最小间隔（秒，0=无节流） |
-| `PRIVACY_LLM_AUTO_ON_IMAGE` | `true` | 检测到图片字段/文件/Base64 时是否自动调度 Layer-3 VLM |
 | `PRIVACY_LLM_CONFIDENCE_THRESHOLD` | `0.75` | 触发 Layer-3 仲裁的最小置信度阈值 |
 | `PRIVACY_LLM_ENABLE_ARBITRATION` | `true` | 置信度不足或判定不确定时是否启用大模型仲裁 |
 | `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | 进程级大模型推理最大并发信号量（防 VRAM OOM） |

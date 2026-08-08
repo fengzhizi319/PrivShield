@@ -2,8 +2,8 @@
 """
 LoRA 训练与权重导出执行器 / LoRA training & merge-export runner.
 
-针对 llmlora/basemodels/cmeee_merged（Qwen3.5-0.8B 混合注意力 CausalLM）
-Tailored for llmlora/basemodels/cmeee_merged (Qwen3.5-0.8B hybrid-attention CausalLM),
+针对 llmlora/basemodels/qwen3.5-0.8b（Qwen3.5-0.8B CausalLM）
+Tailored for llmlora/basemodels/qwen3.5-0.8b (Qwen3.5-0.8B CausalLM),
 实现工业级 SFT 闭环 / implements an industrial SFT loop:
 
 1. Tokenizer 加载与 pad 兜底 / Tokenizer loading with pad fallback.
@@ -53,8 +53,8 @@ logger = setup_logger("trainer")
 class LoRATrainingRunner:
     """LoRA 微调训练与合并导出管理类 / LoRA fine-tuning & merge-export runner.
 
-    专门适配 llmlora/basemodels/cmeee_merged 预训练实体提取基座模型。
-    Tailored for the CMeEE entity-extraction merged base model.
+    专门适配 llmlora/basemodels/qwen3.5-0.8b 原版基座模型。
+    Tailored for the Qwen3.5-0.8B base model.
 
     生命周期 / Lifecycle:
         runner = LoRATrainingRunner(cfg)
@@ -414,6 +414,18 @@ class LoRATrainingRunner:
             # Persist generation config so inference uses identical sampling params
             if getattr(base_model, "generation_config", None) is not None:
                 base_model.generation_config.save_pretrained(self.cfg.merged_output_dir)
+
+            # 兼容 vLLM v0.26 加载 Qwen3.5 纯文本模型 config.json
+            config_path = Path(self.cfg.merged_output_dir) / "config.json"
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg_data = json.load(f)
+                if "text_config" in cfg_data and isinstance(cfg_data["text_config"], dict):
+                    if cfg_data["text_config"].get("model_type") == "qwen3_5_text":
+                        cfg_data["text_config"]["model_type"] = "qwen3_5"
+                        with open(config_path, "w", encoding="utf-8") as f:
+                            json.dump(cfg_data, f, indent=4, ensure_ascii=False)
+
             logger.info("权重合并并导出成功！")
         except Exception as exc:
             logger.error(f"合并权重时发生异常: {exc}", exc_info=True)

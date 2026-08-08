@@ -172,7 +172,7 @@ class MLXLlmClassifier(LlmClassifier):
         if not model_dir:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(current_dir))
-            model_dir = os.path.join(project_root, ".models", "Qwen2-VL-2B-Instruct-mlx")
+            model_dir = os.path.join(project_root, ".models", "Qwen3.5-0.8B-Privacy-Classifier-Smoother-mlx")
 
         self.model_dir = model_dir
         self._classify_prompt_template = classify_prompt_template

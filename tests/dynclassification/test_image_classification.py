@@ -30,7 +30,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from privacy_local_agent.dynclassification.llm_engines import Qwen2VLClassifier
+pytestmark = pytest.mark.skip(reason="Multimodal image and OCR support removed per architecture deprecation")
+
+from privacy_local_agent.dynclassification.llm_engines import Qwen3Classifier as Qwen2VLClassifier
 
 # --------------------------------------------------------------------------- #
 # 辅助工具

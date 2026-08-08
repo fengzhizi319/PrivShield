@@ -219,7 +219,7 @@ class DomainTaxonomy(BaseModel):
         default=None,
         description="NER 词表文件路径（ONNX 引擎用），None 时自动检测",
     )
-    # LLM model directory path (e.g. .models/Qwen2-VL-2B-Instruct).
+    # LLM model directory path (e.g. .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother).
     llm_model_path: Optional[str] = Field(
         default=None,
         description="LLM 模型目录路径，None 时使用默认路径",

@@ -72,11 +72,11 @@ class Config:
     # 1. 路径配置 / Path configuration
     # ------------------------------------------------------------------
 
-    # 底层基座模型路径（CMeEE NER 合并后的 Qwen3.5-0.8B CausalLM）
-    # Base model path (Qwen3.5-0.8B CausalLM merged from CMeEE NER fine-tune)
+    # 底层基座模型路径（原版 Qwen3.5-0.8B CausalLM）
+    # Base model path (Original Qwen3.5-0.8B CausalLM)
     base_model_path: str = field(
         default_factory=lambda: _env(
-            "LLMLORA_BASE_MODEL", str(LLMLORA_DIR / "basemodels" / "cmeee_merged")
+            "LLMLORA_BASE_MODEL", str(LLMLORA_DIR / "basemodels" / "qwen3.5-0.8b")
         )
     )
 
@@ -96,7 +96,7 @@ class Config:
     output_dir: str = field(
         default_factory=lambda: _env(
             "LLMLORA_OUTPUT_DIR",
-            str(LLMLORA_DIR / "output" / "saves" / "qwen35-cmeee-privacy-lora"),
+            str(LLMLORA_DIR / "output" / "saves" / "qwen35-privacy-lora"),
         )
     )
 
@@ -105,7 +105,7 @@ class Config:
     merged_output_dir: str = field(
         default_factory=lambda: _env(
             "LLMLORA_MERGED_OUTPUT_DIR",
-            str(LLMLORA_DIR / "output" / "models" / "qwen35-cmeee-privacy-merged"),
+            str(LLMLORA_DIR / "output" / "models" / "Qwen3.5-0.8B-Privacy-Classifier-Smoother"),
         )
     )
 

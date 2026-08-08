@@ -1131,6 +1131,11 @@ func (s *Server) YibaoPipeline(c *gin.Context) {
 			}
 		}
 	}
+	if len(records) == 0 {
+		// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
+		c.JSON(http.StatusNotFound, gin.H{"detail": "示例数据文件缺失或为空: yibao.csv", "status": http.StatusNotFound})
+		return
+	}
 
 	start := time.Now()
 	proxyReq := models.ProxyRequest{

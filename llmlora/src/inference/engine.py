@@ -30,9 +30,9 @@ logger = setup_logger("inference")
 
 
 class QwenPrivacyLoRAEngine:
-    """基于微调 Qwen CMeEE-Merged 的纯文本分类分级与无痕抹平推理引擎。
+    """基于微调 Qwen3.5-0.8B 的纯文本分类分级与无痕抹平推理引擎。
 
-    Inference engine built on the fine-tuned Qwen CMeEE-Merged base.
+    Inference engine built on the fine-tuned Qwen3.5-0.8B base.
 
     Args:
         model_path: 基座或合并模型路径 / Base or merged model path.
@@ -169,8 +169,8 @@ class QwenPrivacyLoRAEngine:
         """执行分类分级及无痕抹平推理 / Run classification & smoothing inference.
 
         Returns:
-            解析后的 JSON dict（含 classification / smoothed_text），
-            Parsed JSON dict (with classification / smoothed_text);
+            解析后的 JSON dict（含 final_level / sanitized_text 等），
+            Parsed JSON dict (with final_level / sanitized_text etc.);
             解析失败返回 None / None when the output is not valid JSON.
         """
         response = self.generate_raw(text, max_new_tokens=max_new_tokens)

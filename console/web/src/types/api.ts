@@ -513,6 +513,12 @@ export interface MedicalPipelineSummary {
   sanitized_pii_fields_per_record: number;
   guarantee_no_l4_l5_raw_data: boolean;
   duration_ms: number;
+  /** 图像打码失败数 / Image redaction failures */
+  redaction_failures?: number;
+  /** 最终门禁整值删除字段数 / Fail-safe purged fields */
+  fail_safe_triggered_fields?: number;
+  /** 实际掩码 PII 字段总数 / Total masked PII fields */
+  sanitized_pii_fields_total?: number;
 }
 
 export interface MedicalPipelineResponse {

@@ -884,6 +884,9 @@ async def medical_pipeline(req: dict[str, Any]):
             with open(sample_path, encoding="utf-8-sig") as f:  # utf-8-sig 兼容带/不带 BOM 的 CSV
                 reader = csv.DictReader(f)
                 records = list(reader)
+        if not records:
+            # 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
+            raise HTTPException(status_code=404, detail=f"示例数据文件缺失或为空: {sample_name}")
     return await agent_client.request(
         method="POST",
         path="/v1/medical/process",

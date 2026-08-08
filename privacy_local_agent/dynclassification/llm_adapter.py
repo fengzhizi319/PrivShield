@@ -1,12 +1,12 @@
 """LLM 分类器适配器 / LLM Classifier Adapter.
 
 为 dynclassification 三层漏斗提供 Layer-3 LLM 深度分类与仲裁能力。
-采用 lazy-load 策略：仅在首次调用时加载底层 Qwen2-VL 模型，
+采用 lazy-load 策略：仅在首次调用时加载底层 Qwen3.5 微调模型，
 避免核心路径引入重量级 ML 依赖（torch/transformers）。
 
 English Description:
 Provides Layer-3 LLM deep classification and arbitration capabilities for the dynclassification three-layer funnel.
-Adopts a lazy-load strategy: only loads the underlying Qwen2-VL model upon the first call,
+Adopts a lazy-load strategy: only loads the underlying Qwen3.5 fine-tuned model upon the first call,
 avoiding heavy ML dependencies (torch/transformers) in the core path.
 
 执行逻辑 / Execution Logic:
@@ -16,7 +16,7 @@ avoiding heavy ML dependencies (torch/transformers) in the core path.
 │  classify(text, upstream_level, upstream_confidence)             │
 │    │                                                             │
 │    ├─ 首次调用 → _lazy_init()                                     │
-│    │   ├─ 尝试加载 Qwen2VLClassifier                              │
+│    │   ├─ 尝试加载 Qwen3Classifier                                │
 │    │   └─ 失败 → 标记不可用, 后续返回 None                           │
 │    │                                                            │
 │    └─ 调用底层 classify() → dict | None                           │
@@ -50,11 +50,11 @@ logger = get_logger(__name__)
 
 # ─── 进程级 LLM 推理并发与内存保护 / Process-wide LLM inference guardrails ───
 # 单实例 classifier 内部虽有互斥锁（推理已串行化），但进程内可能存在多个模型实例
-# （主分类器 + 视觉回退引擎 + 多个命名空间/域的服务实例），并发推理叠加会推高内存，
+# （主分类器 + 多个命名空间/域的服务实例），并发推理叠加会推高内存，
 # 最终触发 OOM 崩溃 —— 表现为 Go 客户端收到 connection reset by peer。
 # 这里用模块级信号量限制整个进程的 LLM 推理并发数（所有 LlmAdapter 实例共享）。
 # A single classifier instance serializes its own inference, but a process may hold
-# multiple model instances (primary + vision fallback + per-namespace services);
+# multiple model instances (primary + per-namespace services);
 # concurrent inference across instances piles up memory and can trigger OOM crashes
 # (surfacing as connection reset by peer in the Go client). This module-level semaphore
 # caps total LLM inference concurrency across the entire process (shared by all adapters).
@@ -76,9 +76,9 @@ _LLM_MIN_FREE_MEM_MB = float(os.environ.get("PRIVACY_LLM_MIN_FREE_MEM_MB", "512"
 class LlmAdapter:
     """LLM 分类器适配器（Layer-3） / LLM Classifier Adapter (Layer-3).
 
-    封装旧模块 privacy/classification/classification_llm.py 的 Qwen2VLClassifier，
+    封装 Qwen3Classifier（纯文本微调模型），
     提供 classify() 和 arbitrate() 两个接口供 ClassificationFunnel 调用。
-    Wraps Qwen2VLClassifier from the old privacy/classification/classification_llm.py module,
+    Wraps Qwen3Classifier (text-only fine-tuned model),
     providing classify() and arbitrate() interfaces for ClassificationFunnel.
 
     Attributes:
@@ -96,15 +96,14 @@ class LlmAdapter:
         """初始化适配器（不加载模型） / Initialize the adapter (without loading the model).
 
         Args:
-            model_path: 模型本地路径（可选，默认 .models/Qwen2-VL-2B-Instruct）。 / Local model path (optional).
-            classify_prompt_template: LLM 分类 system prompt 模板（可选，支持占位符）。 / LLM classification system prompt template (optional).
+            model_path: 模型本地路径（可选，默认 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother）。
+            classify_prompt_template: LLM 分类 system prompt 模板（可选，支持占位符）。
             device: 目标计算设备（"cuda" / "cpu" / "mps" / None）。
         """
         self._model_path = model_path
         self._classify_prompt_template = classify_prompt_template
         self._device = device
         self._classifier: Any = None
-        self._fallback_classifier: Any = None  # PyTorch 回退引擎（支持视觉）
         self._available = True
         self._initialized = False
         self._init_lock = threading.Lock()
@@ -114,7 +113,7 @@ class LlmAdapter:
 
         尝试顺序 / Attempt order:
         1. MLXLlmClassifier (Apple Silicon Metal GPU, macOS 优先)
-        2. Qwen2VLClassifier (PyTorch, CUDA/MPS/CPU)
+        2. Qwen3Classifier (PyTorch, CUDA/MPS/CPU)
         失败则标记不可用。
 
         线程安全：使用 Lock + double-check 防止并发请求重复初始化。
@@ -137,20 +136,20 @@ class LlmAdapter:
                     self._classifier._lazy_init()
                     logger.info("llm_adapter_initialized", extra={"backend": "mlx_metal", "model_path": self._model_path})
                     self._initialized = True
-                    # MLX 不支持视觉，延迟初始化 PyTorch 回退引擎
+                    # MLX 引擎初始化成功
                     return
                 except Exception as e:
                     logger.debug("llm_mlx_unavailable", extra={"error": str(e)})
 
-            # 尝试 2: PyTorch Qwen2VL 引擎
+            # 尝试 2: PyTorch Qwen3 引擎
             try:
-                from .llm_engines import Qwen2VLClassifier
-                self._classifier = Qwen2VLClassifier(
+                from .llm_engines import Qwen3Classifier
+                self._classifier = Qwen3Classifier(
                     model_path=self._model_path,
                     classify_prompt_template=self._classify_prompt_template,
                     device=self._device,
                 )
-                logger.info("llm_adapter_initialized", extra={"backend": "qwen2vl", "model_path": self._model_path})
+                logger.info("llm_adapter_initialized", extra={"backend": "qwen3", "model_path": self._model_path})
                 self._initialized = True
             except Exception as e:
                 self._available = False
@@ -254,57 +253,14 @@ class LlmAdapter:
         def _do_classify() -> dict[str, Any] | None:
             from .base import SensitivityLevel
             level_enum = SensitivityLevel.from_string(upstream_level)
-            result = self._classifier.classify(
+            return self._classifier.classify(
                 text, level_enum, upstream_confidence, sanitize=sanitize
             )
-            if result is None and self._is_image_input(text):
-                result = self._classify_with_fallback(text, level_enum, upstream_confidence)
-            return result
 
         try:
             return self._infer(_do_classify)
         except Exception as e:
             logger.warning("llm_classify_failed", extra={"error": str(e)})
-            return None
-
-    @staticmethod
-    def _is_image_input(text: str) -> bool:
-        """检测输入是否为图片（三级检测策略）。"""
-        text_stripped = text.strip()
-        # 第 1 级：图片扩展名
-        if any(text_stripped.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp")):
-            return True
-        # 第 2 级：Data URI 格式
-        if text_stripped.startswith("data:image/"):
-            return True
-        # 第 3 级：纯 Base64 图片数据
-        if len(text_stripped) > 100:
-            import re as _re
-            if _re.match(r'^[A-Za-z0-9+/\n\r]+=*$', text_stripped[:200]):
-                if text_stripped.startswith(("iVBOR", "/9j/", "R0lGOD", "UklGR")):
-                    return True
-        return False
-
-    def _classify_with_fallback(
-        self, text: str, level_enum: Any, confidence: float
-    ) -> dict[str, Any] | None:
-        """使用 PyTorch Qwen2VL 回退引擎处理图片输入。"""
-        if self._fallback_classifier is None:
-            try:
-                from .llm_engines import Qwen2VLClassifier
-                self._fallback_classifier = Qwen2VLClassifier(
-                    model_path=self._model_path,
-                    classify_prompt_template=self._classify_prompt_template,
-                    device=self._device,
-                )
-                logger.info("llm_fallback_initialized", extra={"backend": "qwen2vl"})
-            except Exception as e:
-                logger.debug("llm_fallback_unavailable", extra={"error": str(e)})
-                return None
-        try:
-            return self._fallback_classifier.classify(text, level_enum, confidence)
-        except Exception as e:
-            logger.warning("llm_fallback_classify_failed", extra={"error": str(e)})
             return None
 
     def arbitrate(

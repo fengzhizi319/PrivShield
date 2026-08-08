@@ -43,12 +43,12 @@ def download_via_huggingface(model_id: str, local_dir: str) -> bool:
 
 
 def main():
-    model_id = "Qwen/Qwen2-VL-2B-Instruct"
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
     
     # 默认将模型存放在项目根目录下的 .models 目录中
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    local_dir = os.path.join(project_root, ".models", "Qwen2-VL-2B-Instruct")
+    local_dir = os.path.join(project_root, ".models", "Qwen3.5-0.8B-Privacy-Classifier-Smoother")
     
     print(f"[*] 目标保存路径: {local_dir}")
     os.makedirs(local_dir, exist_ok=True)

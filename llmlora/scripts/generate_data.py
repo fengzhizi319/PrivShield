@@ -65,6 +65,7 @@ FALLBACK_LABELS: Dict[str, Tuple[str, str]] = {
     "PHONE": ("L3", "PERSONAL_BASIC"),
     "BANK_CARD": ("L3", "PERSONAL_BASIC"),
     "EMAIL": ("L3", "PERSONAL_BASIC"),
+    "AGE": ("L2", "PERSONAL_BASIC"),
     "MEDICAL_DIAGNOSIS": ("L4", "MEDICAL_TREATMENT"),
 }
 
@@ -76,6 +77,7 @@ FIELD_HINTS: Dict[str, str] = {
     "PHONE": "phone",
     "BANK_CARD": "bank_card_no",
     "EMAIL": "email",
+    "AGE": "age",
     "MEDICAL_DIAGNOSIS": "diagnosis",
 }
 
@@ -127,17 +129,46 @@ TEMPLATES: Dict[str, List[str]] = {
     ],
 }
 
-DISEASES = ["急性支气管炎", "II型糖尿病", "高血压病3级", "冠状动脉粥样硬化", "重度抑郁症"]
-MEDICATIONS = ["阿莫西林克拉维酸钾", "二甲双胍片", "硝苯地平控释片", "舍曲林片"]
-SYMPTOMS = ["持续性头痛", "胸闷气短", "反复发热", "关节肿痛"]
-EXAMS = ["胸部CT", "血常规", "肝功能", "心电图"]
+DISEASES = [
+    # 常规慢病（L1/L2，原样保留）
+    "急性支气管炎", "II型糖尿病", "原发性高血压病3级", "慢性胃炎",
+    # 消化道恶性肿瘤（L4，降级为消化道慢性疾病）
+    "胃癌", "结肠癌", "食管癌",
+    # 呼吸系统恶性肿瘤（L4，降级为呼吸系统常规疾病）
+    "肺癌", "支气管肺癌",
+    # 心血管重症（L4，降级为心血管常见病）
+    "急性心肌梗死", "冠状动脉重度狭窄", "心力衰竭",
+    # 肝脏器官重症（L4，降级为肝脏常见病变）
+    "肝硬化失代偿期", "病毒性肝炎",
+    # 罕见遗传缺陷（L5，降级为遗传性神经系统疾病）
+    "亨廷顿舞蹈病",
+    # 性病 / 极敏感传染病（L4/L5，彻底抹平隐去）
+    "梅毒", "淋病", "HIV抗体阳性", "尖锐湿疣", "艾滋病",
+    # 重度精神障碍（L4，彻底抹平隐去）
+    "重度抑郁症", "精神分裂症", "双相情感障碍",
+]
+
+MEDICATIONS = [
+    "阿莫西林克拉维酸钾", "二甲双胍片", "硝苯地平控释片", "舍曲林片",
+    "拉米夫定片", "阿昔洛韦片", "奥氮平片", "富马酸替诺福韦二吡呋酯片"
+]
+
+SYMPTOMS = [
+    "持续性头痛", "胸闷气短", "反复发热", "关节肿痛",
+    "外阴赘生物", "无痛性溃疡", "命令性幻听", "舞蹈样动作", "不洁性接触史"
+]
+
+EXAMS = [
+    "胸部CT", "血常规", "肝功能", "心电图",
+    "醋酸白试验阳性", "TPPA阳性", "RPR阳性", "CD4+计数检查", "HBV-DNA载量"
+]
 MERCHANTS = ["京东商城", "美团外卖", "滴滴出行", "支付宝转账"]
 
 # 领域采样权重 / Domain sampling weights
 DOMAIN_WEIGHTS: List[Tuple[str, int]] = [
-    ("finance", 25),
-    ("medical", 30),
-    ("enterprise", 20),
+    ("finance", 20),
+    ("medical", 40),
+    ("enterprise", 15),
     ("ecommerce", 10),
     ("negative", 15),
 ]
@@ -154,13 +185,7 @@ _PUNCT_CLEANUP_RULES = [
 
 
 class RuleBasedDataGenerator:
-    """规则驱动的 SFT 样本生成器 / Rule-driven SFT sample generator.
-
-    组合 Faker 伪造数据、项目 Layer-1 规则引擎与规则化抹平器，
-    Combines Faker synthetic data, the project's Layer-1 rule engine and
-    产出带 Ground Truth 的 {input, output} 训练样本。
-    the rule-based smoother to emit {input, output} samples with ground truth.
-    """
+    """规则驱动的 SFT 样本生成器 / Rule-driven SFT sample generator."""
 
     def __init__(self, rules_dir: str, seed: int = 42):
         """初始化 Faker 与规则引擎 / Initialize Faker and the rule engine."""
@@ -168,8 +193,6 @@ class RuleBasedDataGenerator:
         self.faker = Faker("zh_CN")
         Faker.seed(seed)
 
-        # 构建打标引擎：default 体系 + general-pii/medical 规则包
-        # Build the labeling engine: default taxonomy + general-pii/medical packs
         loader = ProfileLoader(rules_dir)
         taxonomy = loader.load_taxonomy("default")
         profiles = [loader.load_profile(d) for d in LABELING_DOMAINS]
@@ -182,25 +205,13 @@ class RuleBasedDataGenerator:
         self.dropped = 0
         self.level_stats: Dict[str, int] = {}
 
-    # ------------------------------------------------------------------
-    # 规则打标 / Rule-based labeling
-    # ------------------------------------------------------------------
-
     def _rank(self, level: str) -> int:
         """获取等级排序权重（未知等级记 0） / Get level rank (unknown = 0)."""
         level_def = self.taxonomy.levels.get(level)
         return level_def.rank if level_def else 0
 
     def label_entity(self, kind: str, value: str) -> Tuple[str, str, float]:
-        """用规则引擎裁定单个实体的 (level, category, confidence)。
-
-        Let the rule engine adjudicate one entity's (level, category, confidence).
-
-        规则命中 → 取命中标签中 rank 最高的等级；
-        On rule hit, the highest-rank tag wins;
-        未命中 → 使用 FALLBACK_LABELS 兜底并降低置信度。
-        on miss, FALLBACK_LABELS applies with reduced confidence.
-        """
+        """用规则引擎裁定单个实体的 (level, category, confidence)。"""
         field_hint = FIELD_HINTS.get(kind, kind.lower())
         tags, _suppressed = self.engine.evaluate(field_hint, value)
         if tags:
@@ -210,35 +221,78 @@ class RuleBasedDataGenerator:
         return level, category, 0.8
 
     # ------------------------------------------------------------------
-    # 规则化抹平 / Rule-based smoothing
+    # 规则化无痕抹平与四柱强剥离 / Rule-based smoothing & Four-pillar stripping
     # ------------------------------------------------------------------
 
     def _mask_value_by_kind(self, kind: str, val: str, level: str) -> str:
-        """根据规则与密级分层处理（参照脱敏规则定义）：
+        """根据 redaction_algorithm_specification.md 执行严格的四柱剥离与泛化降级：
         
-        - L1/L2（非高敏）：不打码、不泛化，保持原样；
-        - L3（标识性敏感数据）：进行格式保留掩码打码（Star Masking），不用语义词泛化；
-        - L4/L5（高敏/极高敏数据）：对可泛化的诊疗病历、处方药品、敏感病症进行语义概念泛化（如“相关药品”、“相关病情”）。
+        1. 极敏感传染病/性病 (梅毒, HIV, 尖锐湿疣) 与 重度精神障碍 (抑郁, 精神分裂)：彻底隐去/重写为常规门诊随访；
+        2. 恶性肿瘤 / 罕见遗传病 / 心血管重症：执行分类范畴降级（如 胃癌/结肠癌 -> 消化道慢性疾病；亨廷顿舞蹈病 -> 遗传性神经系统疾病）；
+        3. 四柱体征/检查/处置（醋酸白阳性、CD4+、外阴赘生物、CO2激光）：整词/整句清除；
+        4. PII 标识符：平滑无痕替代（患者、相关身份证号、预留联系电话）。
         """
-        # 非高敏数据 (L1/L2) 不处理
         if level in ("L1", "L2"):
             return val
 
-        # L4/L5 高敏数据：执行语义概念泛化 (Semantic Generalization)
-        if level in ("L4", "L5") or kind == "MEDICAL_DIAGNOSIS":
-            if any(med in val for med in ["片", "胶囊", "颗粒", "注射液", "口服液", "散"]):
-                return "相关药品"
-            if any(sym in val for sym in ["痛", "发热", "气短", "咳嗽", "肿"]):
-                return "相关症状"
-            return "相关病情"
+        if kind == "MEDICAL_DIAGNOSIS" or level in ("L4", "L5"):
+            # §6.5 禁止泛化范畴（性病 / HIV / 重度精神障碍）：彻底抹平
+            if any(s in val for s in ["梅毒", "淋病", "HIV", "艾滋", "尖锐湿疣", "醋酸白", "TPPA", "RPR", "CD4+"]):
+                return "门诊常规检查"
+            if any(s in val for s in ["抑郁", "精神分裂", "狂躁", "双相", "幻听"]):
+                return "门诊随访"
 
-        # L3 一般敏感数据：执行常规格式掩码打码 (Star Masking)
+            # §6.5 范畴化降级泛化映射
+            if any(s in val for s in ["癌", "瘤", "白血病", "淋巴瘤"]):
+                if any(k in val for k in ["胃", "肠", "食管", "消化"]):
+                    return "消化道慢性疾病"
+                if any(k in val for k in ["肺", "支气管"]):
+                    return "呼吸系统常规疾病"
+                if "肝" in val:
+                    return "肝脏常见病变"
+                return "常规慢性疾病"
+
+            if "亨廷顿舞蹈病" in val or "舞蹈样动作" in val:
+                return "遗传性神经系统疾病"
+
+            if any(s in val for s in ["心肌梗死", "冠心病", "狭窄", "心衰"]):
+                return "心血管系统常见病"
+
+            if "肝硬化" in val or "肝炎" in val:
+                return "肝脏常见病变"
+
+            if any(med in val for med in ["片", "胶囊", "颗粒", "注射液", "口服液"]):
+                return "常规门诊处方药"
+
+            return "常见慢性疾病"
+            # 心血管重症 -> 泛化为 L2 级心血管疾病
+            if any(s in val for s in ["心肌梗死", "冠心病", "心衰"]):
+                return "心血管常见病"
+            # 处方药品泛化
+            if any(med in val for med in ["片", "胶囊", "颗粒", "注射液", "口服液"]):
+                return "常规门诊处方药"
+            return "常见慢性疾病"
+
+        # PII 实体掩码与年龄 K-匿名泛化处理 (§6.2 & §6.4)
+        if kind == "AGE":
+            try:
+                age_val = int(val)
+                if age_val < 60:
+                    gen_age = age_val - (age_val % 3)
+                else:
+                    gen_age = age_val - (age_val % 2)
+                return str(gen_age)
+            except ValueError:
+                return val
+
         if kind == "NAME":
             if len(val) <= 1:
                 return "*"
             if len(val) == 2:
                 return val[0] + "*"
-            return val[0] + "*" * (len(val) - 2) + val[-1]
+            if len(val) == 3:
+                return val[0] + "*" + val[-1]
+            return val[:2] + "*" * (len(val) - 2)
 
         if kind == "ID_CARD":
             if len(val) == 18:
@@ -267,14 +321,10 @@ class RuleBasedDataGenerator:
                 return f"{masked_user}@{domain}"
             return "*" * len(val)
 
-        return "*" * len(val)
+        return val
 
     def smooth_text(self, text: str, entities: List[Dict[str, Any]]) -> str:
-        """根据密级分层执行无痕打码与高敏语义泛化。
-
-        - L3 标识符 -> 格式打码（如 马*兰、131****6724）
-        - L4/L5 诊疗 -> 概念泛化（如 相关药品、相关病情）
-        """
+        """根据密级分层执行无痕重写与高敏语义泛化降级。"""
         smoothed = text
         replacements: List[Tuple[str, str]] = []
         for entity in entities:
@@ -298,12 +348,7 @@ class RuleBasedDataGenerator:
     def verify_zero_leakage(
         self, smoothed: str, entities: List[Dict[str, Any]]
     ) -> bool:
-        """双重零泄漏校验 / Dual zero-leakage verification.
-
-        1. 敏感值字面量残留检查 / Literal residual check.
-        2. 规则引擎对抹平文本复扫，命中 L2+ 即泄漏 /
-           Rule-engine rescan of the smoothed text; any L2+ hit means leakage.
-        """
+        """双重零泄漏校验 / Dual zero-leakage verification."""
         values = [e["_value"] for e in entities]
         if find_leaked_values(smoothed, values):
             return False
@@ -344,23 +389,27 @@ class RuleBasedDataGenerator:
         "phone": "PHONE",
         "bank_card": "BANK_CARD",
         "email": "EMAIL",
+        "age": "AGE",
         "disease": "MEDICAL_DIAGNOSIS",
         "medication": "MEDICAL_DIAGNOSIS",
         "symptom": "MEDICAL_DIAGNOSIS",
+        "exam": "MEDICAL_DIAGNOSIS",
     }
 
     def generate_one(self) -> Optional[Dict[str, Any]]:
-        """生成一条 SFT 样本；QA 失败返回 None / Generate one sample or None on QA failure."""
+        """生成一条精简版 SFT 样本（包含 final_level, confidence, reasoning, sanitized_text；无 entities）"""
         domains = [d for d, _ in DOMAIN_WEIGHTS]
         weights = [w for _, w in DOMAIN_WEIGHTS]
         domain = self.rng.choices(domains, weights=weights, k=1)[0]
         template = self.rng.choice(TEMPLATES[domain])
 
-        # 负样本：无实体，抹平文本即原文 / Negative: no entities, smoothed == original
+        # 负样本：无敏感实体，抹平文本即原文
         if domain == "negative":
             output_payload = {
-                "classification": {"max_level": NEGATIVE_LEVEL, "entities": []},
-                "smoothed_text": template,
+                "final_level": NEGATIVE_LEVEL,
+                "confidence": 1.0,
+                "reasoning": "文本为公开通用资讯，无敏感信息",
+                "sanitized_text": template,
             }
             self.level_stats[NEGATIVE_LEVEL] = self.level_stats.get(NEGATIVE_LEVEL, 0) + 1
             return {
@@ -371,8 +420,6 @@ class RuleBasedDataGenerator:
         values = self._slot_values()
         input_text = template.format(**values)
 
-        # 从模板占位符反推该样本包含的实体槽位
-        # Infer entity slots from the template placeholders
         entities: List[Dict[str, Any]] = []
         for slot, category in self._SLOT_CATEGORY.items():
             if f"{{{slot}}}" not in template:
@@ -382,14 +429,9 @@ class RuleBasedDataGenerator:
             entities.append(
                 {
                     "text": value,
-                    # 导出类别采用规则引擎裁定的 taxonomy 类别，保持与
-                    # Exported category follows the rule-engine taxonomy verdict
-                    # 线上分类体系一致 / consistent with the production taxonomy
                     "category": rule_category,
                     "level": level,
                     "confidence": confidence,
-                    # 内部字段：合成类别（选占位符用）与原始值（导出前剔除）
-                    # Internal: synthetic kind (for placeholder pick) & raw value
                     "_kind": category,
                     "_value": value,
                 }
@@ -405,12 +447,11 @@ class RuleBasedDataGenerator:
         )
         self.level_stats[max_level] = self.level_stats.get(max_level, 0) + 1
 
-        clean_entities = [
-            {k: v for k, v in e.items() if not k.startswith("_")} for e in entities
-        ]
         output_payload = {
-            "classification": {"max_level": max_level, "entities": clean_entities},
-            "smoothed_text": smoothed,
+            "final_level": max_level,
+            "confidence": 0.95,
+            "reasoning": f"命中{max_level}敏感分类特征，已进行无痕重写与降级抹平",
+            "sanitized_text": smoothed,
         }
         return {
             "input": input_text,
@@ -441,9 +482,9 @@ def _write_jsonl(path: Path, samples: List[Dict[str, Any]]) -> None:
 def main() -> None:
     """数据生成入口 / Data generation entry point."""
     parser = argparse.ArgumentParser(description="生成 llmlora 规则驱动 SFT 数据集")
-    parser.add_argument("--train-size", type=int, default=1000, help="训练集数量")
-    parser.add_argument("--dev-size", type=int, default=100, help="验证集数量")
-    parser.add_argument("--test-size", type=int, default=50, help="测试集数量")
+    parser.add_argument("--train-size", type=int, default=30000, help="训练集数量")
+    parser.add_argument("--dev-size", type=int, default=1000, help="验证集数量")
+    parser.add_argument("--test-size", type=int, default=500, help="测试集数量")
     parser.add_argument(
         "--output-dir",
         type=str,

@@ -47,18 +47,14 @@ observability = [
     "opentelemetry-exporter-otlp>=1.24.0",
 ]
 ml = [
-    # ML 相关依赖全部保持“可选”，用于更强的多模态分类、NER 和模型推理。
+    # ML 相关依赖全部保持“可选”，用于专精 LLM 分类、NER 和模型推理。
     # 设计目标是：缺少这些包时，服务仍能启动，并自动退化到规则/轻量实现，
     # 方便本地开发、CI，以及不需要大模型的部署环境。
     "torch>=2.2.0",
-    # torchvision 为 qwen-vl-utils 多模态图片预处理的运行时依赖
-    "torchvision>=0.17.0",
-    "transformers>=4.45.0,<5.0",
+    "transformers>=4.45.0",
     "accelerate>=0.30.0",
     "onnxruntime>=1.17.0",
     "pillow>=10.2.0",
-    # Qwen2-VL 多模态图片预处理（可选，缺失时自动降级为直接传图）
-    "qwen-vl-utils>=0.0.8",
     # ModelScope Small-NER 推理后端（可选，缺失时 NER 层自动降级；datasets 为其运行时依赖）
     "modelscope>=1.20.0",
     "datasets>=4.0.0,<=4.8.4",

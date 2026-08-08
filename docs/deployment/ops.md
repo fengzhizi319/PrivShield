@@ -119,12 +119,9 @@ make docker-ml            # 等价于 --target ml
 | 包 | 版本约束 | 用途 |
 |---|---|---|
 | torch | >= 2.2.0 | 深度学习推理 |
-| torchvision | >= 0.17.0 | Qwen2-VL 图片预处理 |
-| transformers | >= 4.45.0, < 5.0 | 模型加载 |
+| transformers | >= 4.45.0 | 模型加载 |
 | accelerate | >= 0.30.0 | 模型加速 |
 | onnxruntime | >= 1.17.0 | NER ONNX 推理 |
-| pillow | >= 10.2.0 | 图片处理 |
-| qwen-vl-utils | >= 0.0.8 | Qwen2-VL 多模态预处理 |
 | modelscope | >= 1.20.0 | ModelScope NER 管道 |
 | datasets | >= 4.0.0, <= 4.8.4 | ModelScope 运行时依赖 |
 

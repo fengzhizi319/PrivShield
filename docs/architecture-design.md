@@ -98,7 +98,7 @@ graph TB
     L1 -->|命中 高置信| OUT[输出分级结果]
     L1 -->|未命中或低置信| L2[Layer 2 Small-NER<br/>ONNX/ModelScope 轻量实体抽取]
     L2 -->|抽取到实体| OUT
-    L2 -->|仍不足| L3[Layer 3 端侧 VLM/LLM<br/>Qwen2-VL 多模态理解]
+    L2 -->|仍不足| L3[Layer 3 专精 SFT LLM<br/>Qwen3.5 语义定级与无痕抹平]
     L3 --> OUT
     OUT --> REVIEW[低置信 → 人工复核队列]
 ```
@@ -109,7 +109,7 @@ graph TB
 |---|---|---|---|---|
 | **L1** | `DefaultRuleEngine` / `VectorizedRuleEngine` | 正则 + 字段名 + 结构匹配，pandas 向量化 | 总是先执行 | 毫秒级，处理 80%+ 明确模式（身份证、手机号、ICD10…） |
 | **L2** | `ONNXSmallNerEngine` / `ModelScopeSmallNerEngine` | ONNX Runtime / ModelScope 轻量 NER（DAMO RaNER 医疗模型） | `enable_small_ner` 且（无标签 或 等级 ≤ L3） | 中等耗时，抽取疾病/药物/基因等上下文实体 |
-| **L3** | `Qwen2VLClassifier` | 端侧多模态大模型 Qwen2-VL-2B-Instruct（torch + transformers） | `enable_llm` 或 置信度 < `llm_confidence_threshold` | 最慢但最强，解决复杂语义与多模态识别 |
+| **L3** | `Qwen3Classifier` | 专精 SFT 纯文本大模型 Qwen3.5-0.8B-Privacy-Classifier-Smoother（torch + transformers） | `enable_llm` 或 置信度 < `llm_confidence_threshold` | 解决复杂语义定级与无痕抹平 |
 
 #### 2.1.2 为何这样选择
 
@@ -135,7 +135,7 @@ if cp.enable_llm or confidence < cp.llm_confidence_threshold:
     llm_result = self.llm.classify(str(value), final_level, confidence)
 ```
 
-**优雅降级（NoOp 模式）**：每一层的重依赖都允许缺失。初始化时按 `ONNX > ModelScope > NoOp` 与 `Qwen2-VL > NoOp` 的优先级自动探测，依赖不存在或模型目录缺失时注入空实现（`NoOpSmallNerEngine` / `NoOpLlmClassifier`），服务照常启动，只是该层不产生结果。这让同一份代码可以在"无 ML 依赖的轻量容器"和"带 GPU 的完整容器"里无缝运行。
+**优雅降级（NoOp 模式）**：每一层的重依赖都允许缺失。初始化时按 `ONNX > ModelScope > NoOp` 与 `Qwen3.5 > NoOp` 的优先级自动探测，依赖不存在或模型目录缺失时注入空实现（`NoOpSmallNerEngine` / `NoOpLlmClassifier`），服务照常启动，只是该层不产生结果。这让同一份代码可以在"无 ML 依赖的轻量容器"和"带 GPU 的完整容器"里无缝运行。
 
 **延迟加载（Lazy Loading）**：`torch`/`transformers`/`onnxruntime` 从不在模块顶层导入，而是在引擎首次被实际使用时才 `import` 并加载权重，避免拖慢冷启动、避免无 ML 依赖环境直接 ImportError。
 
@@ -542,7 +542,7 @@ graph TB
 - **负载/混沌/内存泄漏测试套件**尚未建立，需补齐以验证大规模长时间运行稳定性；
 - Go 代理的 gRPC 当前使用 insecure credentials，生产应升级为 mTLS；
 - 覆盖率门禁现为 60%，随测试完善应逐步提升至 80%+；
-- 漏斗 L3 可探索更小/更快的端侧模型（如量化版 VLM）以进一步压低尾延迟。
+- 漏斗 L3 可探索 vLLM / TensorRT-LLM 引擎加速以进一步压低尾延迟。
 
 ### 8.3 一句话总结
 

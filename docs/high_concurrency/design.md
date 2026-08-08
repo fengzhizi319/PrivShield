@@ -1502,7 +1502,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 | 评估维度 | 现有的 Python 实现 (`privacy-local-agent`) | Go 语言重构 / 实现 |
 |---|---|---|
 | **开发与重构成成本** | **极方便 (零重构成本)**<br>• 完全保留现有所有脱敏、DP 差分隐私、K-匿名 Mondrian 算法及规则引擎。<br>• 现有的 100+ pytest 测试套件无缝复用。 | **成本高 (需完全重写)**<br>• 需要用 Go 重新实现所有脱敏、DP 算法、K-匿名算法、 compliance 模板与规则解析。<br>• 算法逻辑与测试用例验证工作量大。 |
-| **AI / ML 模型生态** | **原生第一支持 (极方便)**<br>• 对 L2 Small-NER (ONNX) 和 L3 LLM/VLM (PyTorch/Transformers/Qwen2-VL) 支持极佳。<br>• 模型加载、Prompt 构造、流式输出、GPU 加速生态最成熟。 | **生态较弱 (复杂)**<br>• Go 缺乏成熟的 PyTorch/Transformers 第一方生态。<br>• 运行 AI 模型需依赖 CGO 调用 `onnxruntime-c` 或 `libtorch`，编译复杂，驱动适配困难。 |
+| **AI / ML 模型生态** | **原生第一支持 (极方便)**<br>• 对 L2 Small-NER (ONNX) 和 L3 LLM (PyTorch/Transformers/Qwen3.5) 支持极佳。<br>• 模型加载、Prompt 构造、流式输出、GPU 加速生态最成熟。 | **生态较弱 (复杂)**<br>• Go 缺乏成熟的 PyTorch/Transformers 第一方生态。<br>• 运行 AI 模型需依赖 CGO 调用 `onnxruntime-c` 或 `libtorch`，编译复杂，驱动适配困难。 |
 | **并发与连接处理 (10k QPS)** | **需借力外部网关/多进程**<br>• 受限于 CPython GIL，单进程仅 $1,500 \sim 2,500 \text{ QPS}$。<br>• 达到 10k QPS 需依赖多 Pod / Gunicorn 多进程 + 前置 Envoy 网关。 | **原生性能极强 (单机轻松达标)**<br>• 无 GIL 瓶颈，原生 Goroutine / CSP 模型轻松承载 $10k \sim 50k$ 并发连接。<br>• 网络 I/O 与并发调度开销极低。 |
 | **Sidecar 资源占用** | **较大**<br>• 基础内存占用较重 (数百 MB)，若加载 PyTorch 模型可能达 2GB+。 | **极小**<br>• 编译为单个静态二进制文件，内存占用仅需 $10\text{MB} \sim 50\text{MB}$，启动毫秒级。 |
 

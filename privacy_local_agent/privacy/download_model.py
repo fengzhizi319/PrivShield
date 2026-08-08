@@ -1,19 +1,21 @@
-"""本地多模态大模型一键下载工具 / One-Click Local Multimodal LLM Download Utility.
+"""本地微调大模型一键下载工具 / One-Click Local Fine-tuned LLM Download Utility.
 
 中文说明：
-支持通过 ModelScope (首选) 或 Hugging Face 镜像站高速下载 Qwen2-VL-2B-Instruct 模型权重。
+支持通过 ModelScope (首选) 或 Hugging Face 镜像站高速下载 Qwen3.5-0.8B-Privacy-Classifier-Smoother
+微调模型权重（医疗隐私分类专用纯文本模型）。
 下载策略采用优先级回退机制：
 1. 优先使用 ModelScope SDK（国内速度最快）。
 2. 若 ModelScope 不可用则回退至 Hugging Face 镜像站（hf-mirror.com）。
 
-模型默认存储在项目根目录下的 .models/Qwen2-VL-2B-Instruct 中，
-供 classification_llm.py 中的 Qwen2VLClassifier 延迟加载使用。
+模型默认存储在项目根目录下的 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother 中，
+供 llm_engines.py 中的 Qwen3Classifier 延迟加载使用。
 
 English Description:
-One-click download utility for the Qwen2-VL-2B-Instruct multimodal LLM.
+One-click download utility for the Qwen3.5-0.8B-Privacy-Classifier-Smoother fine-tuned LLM
+(medical privacy classification text-only model).
 Supports ModelScope (preferred) and Hugging Face mirror as fallback.
-The model is stored under .models/Qwen2-VL-2B-Instruct in the project root
-for lazy-loading by Qwen2VLClassifier in classification_llm.py.
+The model is stored under .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother in the project root
+for lazy-loading by Qwen3Classifier in llm_engines.py.
 
 Usage:
     python -m privacy_local_agent.privacy.download_model
@@ -37,7 +39,7 @@ def download_via_modelscope(model_id: str, local_dir: str) -> bool:
 
     Args:
         model_id: ModelScope 模型标识符 / ModelScope model identifier
-            (e.g. "Qwen/Qwen2-VL-2B-Instruct").
+            (e.g. "Qwen/Qwen3.5-0.8B-Privacy-Classifier-Smoother").
         local_dir: 本地保存目录 / Local directory to save the model.
 
     Returns:
@@ -73,7 +75,7 @@ def download_via_huggingface(model_id: str, local_dir: str) -> bool:
 
     Args:
         model_id: Hugging Face 仓库 ID / Hugging Face repository ID
-            (e.g. "Qwen/Qwen2-VL-2B-Instruct").
+            (e.g. "Qwen/Qwen3.5-0.8B-Privacy-Classifier-Smoother").
         local_dir: 本地保存目录 / Local directory to save the model.
 
     Returns:
@@ -100,23 +102,32 @@ def main():
     """模型下载主入口 / Main Entry Point for Model Download.
 
     执行步骤 / Execution Steps:
-    1. 确定模型保存路径（项目根目录/.models/Qwen2-VL-2B-Instruct）。
-       (Determine model save path: project_root/.models/Qwen2-VL-2B-Instruct)
+    1. 确定模型保存路径（项目根目录/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother）。
+       (Determine model save path: project_root/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother)
     2. 优先尝试 ModelScope 下载。
        (Try ModelScope download first)
     3. 若失败则回退至 Hugging Face 镜像下载。
        (Fall back to Hugging Face mirror if ModelScope fails)
-    4. 根据结果输出成功/失败信息并设置退出码。
+    4. 根据结果输出成功/失败的信息并设置退出码。
        (Output success/failure message and set exit code)
     """
-    model_id = "Qwen/Qwen2-VL-2B-Instruct"
+    # 微调模型标识（本地合并导出的 Qwen3.5-0.8B 隐私分类器）
+    # 如果是本地微调模型，model_id 仅用于日志显示，实际从本地目录加载
+    model_id = "Qwen/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
 
     # 默认将模型存放在项目根目录下的 .models 目录中
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    local_dir = os.path.join(project_root, ".models", "Qwen2-VL-2B-Instruct")
+    local_dir = os.path.join(project_root, ".models", "Qwen3.5-0.8B-Privacy-Classifier-Smoother")
 
     print(f"[*] 目标保存路径: {local_dir}")
+
+    # 如果模型目录已存在且包含权重文件，跳过下载
+    model_weight = os.path.join(local_dir, "model.safetensors")
+    if os.path.exists(model_weight):
+        print(f"[+] 模型已存在: {local_dir}，跳过下载。")
+        sys.exit(0)
+
     os.makedirs(local_dir, exist_ok=True)
 
     # 优先使用 ModelScope（国内速度最快）

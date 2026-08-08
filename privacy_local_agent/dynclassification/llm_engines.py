@@ -1,15 +1,15 @@
-"""基于本地多模态大模型 Qwen2-VL-2B-Instruct 的数据分类分级器。
+"""基于本地纯文本大模型 Qwen3.5-0.8B-Privacy-Classifier-Smoother 的数据分类分级器。
 
 中文说明：
-支持本地病例图像、手写病例图片以及纯文本数据的智能 OCR 识别与零样本敏感定级推理。
-具备延迟加载、自动降级、多模态输入检测等企业级能力。
+支持纯文本数据的零样本敏感定级推理（微调后的医疗隐私分类专用模型）。
+具备延迟加载、自动降级等企业级能力。
+注意：该模型为纯文本 CausalLM，不支持图像/视觉输入。
 
 架构设计：
-- Qwen2VLClassifier：多模态分类器主类，继承 LlmClassifier 抽象基类
+- Qwen3Classifier：纯文本分类器主类，继承 LlmClassifier 抽象基类
 - 延迟加载：首次调用 classify() 时才加载模型权重（避免启动阻塞和显存浪费）
 - 双重检查锁定：线程安全的模型初始化（gRPC 多线程环境）
 - 专用推理线程池：隔离推理与 gRPC 工作线程，配合超时机制防止永久阻塞
-- 三级图片检测：本地路径 → Data URI Base64 → 纯 Base64 数据
 - JSON 结果解析：正则提取 + 容错降级
 
 降级策略：
@@ -19,22 +19,20 @@
 - JSON 解析失败 → 返回 None → 降级
 
 English Description:
-Data classification and grading engine based on local multimodal LLM Qwen2-VL-2B-Instruct.
-Supports intelligent OCR recognition and zero-shot sensitivity grading for local medical
-images, handwritten records, and plain text data. Features lazy-loading, graceful
-degradation, and multimodal input detection capabilities.
+Data classification and grading engine based on local text-only LLM
+Qwen3.5-0.8B-Privacy-Classifier-Smoother (fine-tuned medical privacy classifier).
+Supports zero-shot sensitivity grading for plain text data. Features lazy-loading
+and graceful degradation. Note: text-only model, no image/vision input support.
 """
 
-# 启用延迟注解求值，允许在类型提示中引用尚未定义的类名（如 Image.Image）
+# 启用延迟注解求值，允许在类型提示中引用尚未定义的类名
 from __future__ import annotations
 
-# 导入 base64 编解码模块，用于解码 Base64 格式的图片数据
-import base64
 # 导入 JSON 解析模块，用于解析大模型返回的 JSON 结构化结果
 import json
 # 导入操作系统接口，用于文件路径拼接、目录存在性检查、环境变量读取
 import os
-# 导入正则表达式模块，用于 Data URI 匹配和 JSON 提取
+# 导入正则表达式模块，用于 JSON 提取
 import re
 # 导入线程模块，用于创建互斥锁保护模型初始化和推理的线程安全
 import threading
@@ -44,14 +42,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 # 导入线程池超时异常类型，用于捕获推理超时事件
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-# 导入字节流 IO，用于将 Base64 解码后的字节包装为文件对象供 PIL 读取
-from io import BytesIO
-# 导入类型注解工具：TYPE_CHECKING 用于条件导入，Any 通用类型，cast 类型断言
-from typing import TYPE_CHECKING, Any, cast
-
-# 仅在类型检查时导入 PIL Image 类型（运行时不导入，避免硬依赖）
-if TYPE_CHECKING:
-    from PIL import Image
+# 导入类型注解工具：Any 通用类型，cast 类型断言
+from typing import Any, cast
 
 # 导入结构化日志工厂函数（支持 JSON 格式日志输出）
 from ..observability.logging_config import get_logger
@@ -71,26 +63,29 @@ from .utils import redact, wrap_untrusted_text
 # 创建模块级结构化日志器，用于记录 LLM 分类器相关事件
 logger = get_logger(__name__)
 
+# 默认模型目录名 / Default model directory name
+_DEFAULT_MODEL_DIR = "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
 
 
-class Qwen2VLClassifier(LlmClassifier):
-    """基于本地部署 Qwen2-VL-2B-Instruct 的多模态分类器 / Qwen2-VL Multimodal Classifier.
+class Qwen3Classifier(LlmClassifier):
+    """基于本地部署 Qwen3.5-0.8B-Privacy-Classifier-Smoother 的纯文本分类器。
 
     中文说明：
-    支持对图片路径、Base64 图片以及纯文本进行 OCR、理解与敏感等级评估。
+    支持对纯文本数据进行敏感等级评估。
     本类是三层分类漏斗的第三层（Layer-3），在规则引擎（Layer-1）和 NER（Layer-2）
     之后执行，作为最终的兜底分类手段。
+    注意：该模型为纯文本 CausalLM，不支持图像输入。
 
     线程安全设计：
     - _lock：互斥锁，保护模型初始化（双重检查锁定）和推理过程（串行化）
     - _executor：单线程池，将推理隔离到独立线程，配合超时机制
 
     English Description:
-    Supports OCR, understanding, and sensitivity level assessment for image paths,
-    Base64-encoded images, and plain text inputs.
+    Text-only classifier based on the fine-tuned Qwen3.5-0.8B medical privacy model.
+    Supports sensitivity level assessment for plain text inputs only (no image/vision).
     """
 
-    # VLM 推理超时（秒）：Qwen2-VL-2B 在 CPU 上单张图片推理可能需要 60-120 秒，
+    # 推理超时（秒）：0.8B 纯文本模型在 CPU 上推理通常较快，
     # 超时后放弃本次推理并返回 None 触发降级，避免无限阻塞 gRPC 工作线程。
     # 可通过环境变量 PRIVACY_VLM_TIMEOUT 覆盖，默认 180 秒。
     _INFERENCE_TIMEOUT = int(os.environ.get("PRIVACY_VLM_TIMEOUT", "180"))
@@ -108,21 +103,18 @@ class Qwen2VLClassifier(LlmClassifier):
 
         Args:
             model_path: 模型本地路径 / Local model path.
-                如果不指定，默认使用项目根目录下的 .models/Qwen2-VL-2B-Instruct。
-                (Defaults to .models/Qwen2-VL-2B-Instruct under project root)
+                如果不指定，默认使用项目根目录下的 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother。
+                (Defaults to .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother under project root)
             classify_prompt_template: 自定义分类 system prompt 模板 / Custom classification prompt template.
                 支持占位符: {domain}, {standard_id}, {levels_desc}。
                 None 时使用内置医疗领域默认 prompt。
             device: 目标计算设备（"cuda" / "cpu" / "mps" / None）。
         """
-        # 如果未指定模型路径，自动计算默认路径
+        # 如果未指定模型路径，自动计算默认路径 (.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother)
         if not model_path:
-            # 获取当前文件所在目录（classification/）
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            # 向上两级得到项目根目录（privacy_local_agent/ 的父目录）
             project_root = os.path.dirname(os.path.dirname(current_dir))
-            # 拼接默认模型目录路径
-            model_path = os.path.join(project_root, ".models", "Qwen2-VL-2B-Instruct")
+            model_path = os.path.join(project_root, ".models", _DEFAULT_MODEL_DIR)
 
         # 保存模型路径供后续 _lazy_init 使用
         self.model_path = model_path
@@ -132,8 +124,8 @@ class Qwen2VLClassifier(LlmClassifier):
         self.device = device
         # 模型实例占位（延迟初始化后赋值）
         self._model: Any = None
-        # 处理器实例占位（用于构建模型输入张量）
-        self._processor: Any = None
+        # Tokenizer 实例占位（用于构建模型输入张量）
+        self._tokenizer: Any = None
         # 初始化完成标志（False 表示尚未加载模型）
         self._initialized = False
         # 初始化错误缓存（记录首次失败原因，后续直接抛出不重试）
@@ -146,7 +138,7 @@ class Qwen2VLClassifier(LlmClassifier):
         # 专用推理线程池：将模型推理隔离到单独线程，配合超时机制，
         # 即使推理卡死也不会永久阻塞 gRPC 工作线程。
         # max_workers=1 确保同一时刻只有一个推理任务在执行（串行化）。
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vlm-infer")
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-infer")
 
     def _lazy_init(self):
         """延迟初始化模型 / Lazy-Initialize Model.
@@ -188,13 +180,13 @@ class Qwen2VLClassifier(LlmClassifier):
             try:
                 # 延迟导入 PyTorch（避免模块顶层导入导致的启动延迟和依赖问题）
                 import torch
-                # 延迟导入 transformers 库中的 Qwen2-VL 模型类和处理器
-                from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
+                # 延迟导入 transformers 库中的 CausalLM 模型类和 tokenizer
+                from transformers import AutoModelForCausalLM, AutoTokenizer
 
-                # 验证模型目录是否存在（用户需先运行下载脚本）
+                # 验证模型目录是否存在（用户需先下载微调模型）
                 if not os.path.exists(self.model_path) or not os.path.isdir(self.model_path):
                     raise FileNotFoundError(
-                        f"本地模型未找到，请先运行下载脚本或下载模型至: {self.model_path}"
+                        f"本地模型未找到，请先下载微调模型至: {self.model_path}"
                     )
 
                 # 检测计算设备，优先级：显式/环境变量指定 > CUDA GPU > macOS MPS > CPU
@@ -202,7 +194,7 @@ class Qwen2VLClassifier(LlmClassifier):
 
                 # 记录模型加载开始的结构化日志
                 logger.info(
-                    "qwen2vl_model_loading",
+                    "qwen3_model_loading",
                     extra={"model_path": self.model_path, "device": device},
                 )
 
@@ -210,34 +202,39 @@ class Qwen2VLClassifier(LlmClassifier):
                 is_cuda = device.startswith("cuda")
                 dtype = torch.float16 if is_cuda else torch.float32
 
-                # 从本地目录加载预训练模型权重
+                # 从本地目录加载预训练 CausalLM 模型权重
                 if is_cuda:
-                    self._model = Qwen2VLForConditionalGeneration.from_pretrained(
+                    self._model = AutoModelForCausalLM.from_pretrained(
                         self.model_path,
-                        dtype=dtype,
+                        torch_dtype=dtype,
                         device_map="auto" if device == "cuda" else device,
+                        trust_remote_code=True,
                     )
                 elif device == "mps":
-                    self._model = Qwen2VLForConditionalGeneration.from_pretrained(
+                    self._model = AutoModelForCausalLM.from_pretrained(
                         self.model_path,
-                        dtype=torch.float32,
+                        torch_dtype=torch.float32,
                         device_map="mps",
+                        trust_remote_code=True,
                     )
                 else:
-                    self._model = Qwen2VLForConditionalGeneration.from_pretrained(
+                    self._model = AutoModelForCausalLM.from_pretrained(
                         self.model_path,
-                        dtype=torch.float32,
+                        torch_dtype=torch.float32,
+                        trust_remote_code=True,
                     )
                     self._model = self._model.to("cpu")
 
-                # 加载模型对应的处理器（tokenizer + image processor）
-                self._processor = AutoProcessor.from_pretrained(self.model_path)
+                # 加载模型对应的 tokenizer
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_path, trust_remote_code=True
+                )
                 # 标记初始化完成
                 self._initialized = True
                 # 记录模型初始化成功的结构化日志
                 logger.info(
-                    "qwen2vl_model_initialized",
-                    extra={"model_path": self.model_path, "device": device, "engine": "qwen2vl"},
+                    "qwen3_model_initialized",
+                    extra={"model_path": self.model_path, "device": device, "engine": "qwen3"},
                 )
 
             except Exception as e:
@@ -245,11 +242,19 @@ class Qwen2VLClassifier(LlmClassifier):
                 self._init_error = e
                 # 记录初始化失败的警告日志
                 logger.warning(
-                    "qwen2vl_model_init_failed",
+                    "qwen3_model_init_failed",
                     extra={"error": str(e), "model_path": self.model_path},
                 )
                 # 重新抛出异常，让调用方（classify）捕获并触发降级
                 raise e
+
+    @property
+    def _processor(self) -> Any:
+        return self._tokenizer
+
+    @_processor.setter
+    def _processor(self, value: Any) -> None:
+        self._tokenizer = value
 
     @property
     def is_ready(self) -> bool:
@@ -292,7 +297,7 @@ class Qwen2VLClassifier(LlmClassifier):
         ``torch.cuda.is_available()`` 仍会返回 True，但任何真正的 CUDA 运算都会抛出
         ``RuntimeError: no kernel image is available for execution on the device``。
 
-        本方法执行一次微小的张量运算来确认 CUDA 不仅“可见”而且“可用”，避免后续
+        本方法执行一次微小的张量运算来确认 CUDA 不仅"可见"而且"可用"，避免后续
         模型加载时因不兼容架构而崩溃。
 
         Returns:
@@ -331,26 +336,26 @@ class Qwen2VLClassifier(LlmClassifier):
         if target_device:
             target_device_lower = target_device.lower()
             if target_device_lower in ("cpu", "mps") or target_device_lower.startswith("cuda"):
-                if target_device_lower.startswith("cuda") and not Qwen2VLClassifier._is_cuda_compatible(torch):
+                if target_device_lower.startswith("cuda") and not Qwen3Classifier._is_cuda_compatible(torch):
                     logger.warning(
-                        "qwen2vl_custom_cuda_not_compatible_fallback_next",
+                        "qwen3_custom_cuda_not_compatible_fallback_next",
                         extra={"target_device": target_device},
                     )
                 else:
                     return target_device_lower
 
         # 2. 级联 1：优先检测 NVIDIA CUDA GPU
-        if torch.cuda.is_available() and Qwen2VLClassifier._is_cuda_compatible(torch):
+        if torch.cuda.is_available() and Qwen3Classifier._is_cuda_compatible(torch):
             try:
                 total_free = sum(
                     torch.cuda.mem_get_info(i)[0] for i in range(torch.cuda.device_count())
                 )
-                # Qwen2-VL-2B FP16 约需 2.5GB 显存，可通过 PRIVACY_VLM_MIN_VRAM_GB 配置（默认 2.5GB）
-                min_vram_gb = float(os.environ.get("PRIVACY_VLM_MIN_VRAM_GB", "2.5"))
+                # Qwen3.5-0.8B FP16 约需 1.6GB 显存，可通过 PRIVACY_VLM_MIN_VRAM_GB 配置（默认 1.6GB）
+                min_vram_gb = float(os.environ.get("PRIVACY_VLM_MIN_VRAM_GB", "1.6"))
                 min_vram_bytes = min_vram_gb * 1024 * 1024 * 1024
                 if total_free >= min_vram_bytes:
                     logger.info(
-                        "qwen2vl_select_cuda",
+                        "qwen3_select_cuda",
                         extra={
                             "device_count": torch.cuda.device_count(),
                             "free_vram_gb": round(total_free / (1024**3), 2),
@@ -358,7 +363,7 @@ class Qwen2VLClassifier(LlmClassifier):
                     )
                     return "cuda"
                 logger.info(
-                    "qwen2vl_cuda_vram_insufficient_checking_mps_or_cpu",
+                    "qwen3_cuda_vram_insufficient_checking_mps_or_cpu",
                     extra={
                         "free_vram_gb": round(total_free / (1024**3), 2),
                         "required_vram_gb": min_vram_gb,
@@ -366,7 +371,7 @@ class Qwen2VLClassifier(LlmClassifier):
                 )
             except Exception as e:
                 logger.warning(
-                    "qwen2vl_vram_check_failed_checking_mps_or_cpu",
+                    "qwen3_vram_check_failed_checking_mps_or_cpu",
                     extra={"error": str(e)},
                 )
                 # 即使显存获取异常，CUDA 本身依然兼容可用，直接使用 CUDA
@@ -374,94 +379,12 @@ class Qwen2VLClassifier(LlmClassifier):
 
         # 3. 级联 2：检测 Apple Silicon Mac Metal (MPS)
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            logger.info("qwen2vl_select_mps_metal", extra={"engine": "qwen2vl", "device": "mps"})
+            logger.info("qwen3_select_mps_metal", extra={"engine": "qwen3", "device": "mps"})
             return "mps"
 
         # 4. 级联 3：无可用 GPU 时降级至 CPU
-        logger.info("qwen2vl_select_cpu_fallback", extra={"engine": "qwen2vl", "device": "cpu"})
+        logger.info("qwen3_select_cpu_fallback", extra={"engine": "qwen3", "device": "cpu"})
         return "cpu"
-
-    def _detect_image(self, text: str) -> Image.Image | None:
-        """检测输入是否为图片 / Detect if Input is an Image.
-
-        中文说明：检测输入文本是否为本地图片路径或 Base64 编码图片，
-        如果是，加载并返回 PIL.Image 实例。
-
-        三级检测策略（按优先级）：
-        1. 本地文件路径：以常见图片扩展名结尾且文件存在
-        2. Data URI 格式：data:image/xxx;base64,... 前缀
-        3. 纯 Base64 数据：长度 > 100 且可成功解码为图片
-
-        English Description: Detects whether input text is a local image path or
-        Base64-encoded image. If so, loads and returns a PIL.Image instance.
-
-        Args:
-            text: 输入文本 / Input text.
-
-        Returns:
-            PIL.Image 实例或 None（非图片输入） / PIL.Image instance or None.
-        """
-        # 尝试导入 PIL 库（未安装时返回 None，退化为纯文本处理）
-        try:
-            from PIL import Image
-            Image.MAX_IMAGE_PIXELS = 25_000_000
-        except ImportError:
-            return None
-
-        # 去除首尾空白字符
-        text_stripped = text.strip()
-        img: Optional[Image.Image] = None
-
-        # === 第 1 级检测：本地图片文件路径 ===
-        if (
-            len(text_stripped) < 512
-            and any(
-                text_stripped.lower().endswith(ext)
-                for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-            )
-            and os.path.exists(text_stripped)
-            and os.path.isfile(text_stripped)
-        ):
-            try:
-                with Image.open(text_stripped) as raw_img:
-                    img = raw_img.convert("RGB")
-            except Exception as e:
-                logger.warning(
-                    "llm_image_load_failed",
-                    extra={"path": redact(text_stripped), "error": str(e)},
-                )
-
-        # === 第 2 级检测：Data URI 格式的 Base64 图片 ===
-        elif re.match(r"^data:image\/[a-zA-Z]+;base64,(.+)$", text_stripped):
-            data_uri_match = re.match(r"^data:image\/[a-zA-Z]+;base64,(.+)$", text_stripped)
-            if data_uri_match:
-                try:
-                    base64_data = data_uri_match.group(1)
-                    image_bytes = base64.b64decode(base64_data)
-                    with Image.open(BytesIO(image_bytes)) as raw_img:
-                        img = raw_img.convert("RGB")
-                except Exception as e:
-                    logger.warning(
-                        "llm_base64_decode_failed",
-                        extra={"error": str(e)},
-                    )
-
-        # === 第 3 级检测：纯 Base64 数据（无 Data URI 前缀）===
-        elif len(text_stripped) > 100 and not text_stripped.startswith("http"):
-            try:
-                image_bytes = base64.b64decode(text_stripped, validate=True)
-                with Image.open(BytesIO(image_bytes)) as raw_img:
-                    img = raw_img.convert("RGB")
-            except Exception:
-                pass
-
-        if img is not None:
-            # 高分辨率大图防 OOM 自动缩放下采样 (Max 2048x2048)
-            if img.width > 2048 or img.height > 2048:
-                img.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
-            return img
-
-        return None
 
     def classify(
         self,
@@ -470,7 +393,7 @@ class Qwen2VLClassifier(LlmClassifier):
         upstream_confidence: float,
         sanitize: bool = False,
     ) -> dict[str, Any] | None:
-        """使用本地 Qwen2-VL 大模型对输入进行分类与单次融合脱敏。"""
+        """使用本地 Qwen3.5 微调模型对输入进行分类。"""
         try:
             self._lazy_init()
         except Exception:
@@ -492,7 +415,7 @@ class Qwen2VLClassifier(LlmClassifier):
 
             # 计算推理耗时并记录到 Prometheus 直方图指标
             duration = time.monotonic() - start_time
-            CLASSIFICATION_LLM_DURATION.labels(engine="qwen2vl").observe(duration)
+            CLASSIFICATION_LLM_DURATION.labels(engine="qwen3").observe(duration)
             # 记录推理完成的 debug 日志
             logger.debug(
                 "llm_classify_completed",
@@ -509,7 +432,7 @@ class Qwen2VLClassifier(LlmClassifier):
             # 递增超时状态计数器
             CLASSIFICATION_LLM_TOTAL.labels(status="timeout").inc()
             # 记录超时耗时到直方图
-            CLASSIFICATION_LLM_DURATION.labels(engine="qwen2vl").observe(duration)
+            CLASSIFICATION_LLM_DURATION.labels(engine="qwen3").observe(duration)
             # 记录超时错误日志
             logger.error(
                 "llm_classify_timeout",
@@ -526,7 +449,7 @@ class Qwen2VLClassifier(LlmClassifier):
             # 递增错误状态计数器
             CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
             # 记录错误耗时到直方图
-            CLASSIFICATION_LLM_DURATION.labels(engine="qwen2vl").observe(duration)
+            CLASSIFICATION_LLM_DURATION.labels(engine="qwen3").observe(duration)
             # 记录错误详情日志
             logger.error(
                 "llm_classify_error",
@@ -547,7 +470,7 @@ class Qwen2VLClassifier(LlmClassifier):
         会确保 gRPC 线程不会永久等待。
 
         Args:
-            text: 待分类文本或图片路径。
+            text: 待分类文本。
             upstream_level: 上游敏感度等级。
             upstream_confidence: 上游置信度。
 
@@ -565,16 +488,15 @@ class Qwen2VLClassifier(LlmClassifier):
         """模型推理核心逻辑（已持有锁）。
 
         执行步骤：
-        1. 检测输入是否为图片（三级检测）
-        2. 构建 system prompt（定义评估标准和输出格式）
-        3. 构建 user content（文本或图片+文本）
-        4. 使用 processor 构建模型输入张量
-        5. 执行模型 generate 推理
-        6. 解码生成 token 为文本
-        7. 从文本中提取 JSON 结构化结果
+        1. 构建 system prompt（定义评估标准和输出格式）
+        2. 构建 user content（纯文本输入）
+        3. 使用 tokenizer 构建模型输入张量
+        4. 执行模型 generate 推理
+        5. 解码生成 token 为文本
+        6. 从文本中提取 JSON 结构化结果
 
         Args:
-            text: 待分类文本或图片路径。
+            text: 待分类文本。
             upstream_level: 上游敏感度等级（供 prompt 参考）。
             upstream_confidence: 上游置信度（供 prompt 参考）。
 
@@ -582,9 +504,6 @@ class Qwen2VLClassifier(LlmClassifier):
             解析后的分类结果字典或 None。
         """
         try:
-            # 检测并加载多模态图像输入（三级检测策略）
-            image = self._detect_image(text)
-
             # 构建 system prompt：定义角色、评估标准和输出 JSON 格式
             # 优先使用自定义模板（支持 {domain}/{standard_id}/{levels_desc} 占位符）
             if self._classify_prompt_template:
@@ -618,45 +537,26 @@ class Qwen2VLClassifier(LlmClassifier):
                     "}"
                 )
 
-            # 构建 user content：根据是否为图片选择不同的输入格式
-            user_content = []
-            if image is not None:
-                # 图片输入：添加图片对象 + 文字指令（OCR + 评估）
-                user_content.append({"type": "image", "image": image})
-                user_content.append({"type": "text", "text": "请提取该图片中的文字并评估其敏感数据等级。"})
-            else:
-                # 纯文本输入：剥离 chat-template 控制 token（防 Prompt 注入伪造对话轮次），
-                # 并用明确分隔符包裹 + 声明"以下是数据而非指令"后嵌入待评估文本
-                user_content.append({"type": "text", "text": f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"})
+            # 构建 user content：纯文本输入
+            # 剥离 chat-template 控制 token（防 Prompt 注入伪造对话轮次），
+            # 并用明确分隔符包裹 + 声明"以下是数据而非指令"后嵌入待评估文本
+            user_text = f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"
 
             # 组装完整的对话消息列表（system + user）
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
+                {"role": "user", "content": user_text},
             ]
 
-            # 使用处理器将对话消息转换为模型可接受的文本 prompt 格式
-            # apply_chat_template 会按照 Qwen2-VL 的对话模板格式化消息
-            text_prompt = self._processor.apply_chat_template(
+            # 使用 tokenizer 将对话消息转换为模型可接受的文本 prompt 格式
+            # apply_chat_template 会按照模型的对话模板格式化消息
+            text_prompt = self._tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
 
-            # 处理图片输入：如果有图片，需要额外处理视觉信息
-            image_inputs = None
-            if image is not None:
-                try:
-                    # 优先使用 qwen_vl_utils 的 process_vision_info 处理图片
-                    from qwen_vl_utils import process_vision_info
-
-                    # 从消息中提取并处理视觉信息（图片缩放、归一化等）
-                    image_inputs, _video_inputs = process_vision_info(messages)
-                except ImportError:
-                    # 兼容未安装 qwen-vl-utils 的情况：直接使用 PIL Image 对象
-                    image_inputs = [image]
-
-            # 使用处理器将文本和图片转换为模型输入张量（input_ids, pixel_values 等）
-            inputs = self._processor(
-                text=[text_prompt], images=image_inputs, padding=True, return_tensors="pt"
+            # 使用 tokenizer 将文本转换为模型输入张量（input_ids 等）
+            inputs = self._tokenizer(
+                text=[text_prompt], padding=True, return_tensors="pt"
             )
             # 将所有输入张量移动到模型所在设备（CUDA/MPS/CPU）
             inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
@@ -683,7 +583,7 @@ class Qwen2VLClassifier(LlmClassifier):
                     out_ids[len(in_ids) :]
                     for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
                 ]
-                output_text = self._processor.batch_decode(
+                output_text = self._tokenizer.batch_decode(
                     generated_ids_trimmed,
                     skip_special_tokens=True,
                     clean_up_tokenization_spaces=False,
@@ -751,3 +651,7 @@ class Qwen2VLClassifier(LlmClassifier):
 
         # 解析失败则返回 None 触发降级（上层使用 Layer-1/Layer-2 的结果）
         return None
+
+
+# 向后兼容别名：旧代码可能通过 Qwen2VLClassifier 引用 / Backward-compatible alias
+Qwen2VLClassifier = Qwen3Classifier

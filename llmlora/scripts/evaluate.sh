@@ -10,7 +10,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 if [[ $# -eq 0 ]]; then
-    set -- --model-path llmlora/output/models/qwen35-cmeee-privacy-merged
+    set -- --model-path llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
 fi
 
 exec "$VENV_PY" -m llmlora.scripts.evaluate "$@"

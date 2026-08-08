@@ -633,35 +633,35 @@ export default function DynClassificationPanel() {
                     <button
                       type="button"
                       onClick={() => {
-                        setFieldName("case_image");
-                        setFieldValue("data/samples/syphilis_case.png");
+                        setFieldName("id_card");
+                        setFieldValue("445321193704139886");
                         setDomain("medical");
                       }}
                       className="rounded bg-purple-50 px-2 py-1 text-xs text-purple-700 hover:bg-purple-100 border border-purple-200"
                     >
-                      📷 梅毒图像病例 (syphilis_case.png)
+                      💳 身份证号 (PII)
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        setFieldName("hiv_report_image");
-                        setFieldValue("data/samples/hiv_report.jpg");
+                        setFieldName("medical_history");
+                        setFieldValue("门诊复诊记录：周某，男，42岁，梅毒螺旋体抗体阳性，HIV筛查阴性。");
                         setDomain("medical");
                       }}
                       className="rounded bg-purple-50 px-2 py-1 text-xs text-purple-700 hover:bg-purple-100 border border-purple-200"
                     >
-                      🖼️ HIV检验报告图片 (hiv_report.jpg)
+                      📋 门诊极敏感主诉 (HIV/梅毒)
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        setFieldName("blood_routine_image");
-                        setFieldValue("data/samples/blood_routine.jpg");
+                        setFieldName("genomic_sequence");
+                        setFieldValue("基因检测报告：BRCA1基因检测到 c.5266dupC 致病突变。");
                         setDomain("medical");
                       }}
                       className="rounded bg-purple-50 px-2 py-1 text-xs text-purple-700 hover:bg-purple-100 border border-purple-200"
                     >
-                      🩸 血常规异常图片 (blood_routine.jpg)
+                      🧬 人类基因与罕见病 (L5)
                     </button>
                   </div>
                 </div>

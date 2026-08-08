@@ -4,8 +4,7 @@ llmlora 评估指标工具模块 / Evaluation metrics utilities.
 
 包含 / Includes:
 - JSON 合法解析率 / JSON validity rate
-- 密级 (max_level) 准确率 / Sensitivity level accuracy
-- 实体级 Precision / Recall / F1 与密级一致率 / Entity P/R/F1 and level agreement
+- 密级 (final_level) 准确率 / Sensitivity level accuracy
 - Zero-Leakage 零泄漏校验 / Zero-leakage verification helpers
 - 推理延迟统计 / Inference latency statistics
 """
@@ -79,6 +78,9 @@ def calculate_classification_metrics(
 ) -> Dict[str, float]:
     """计算 JSON 合法率与密级准确率 / Compute JSON validity and level accuracy.
 
+    新格式（精简版）：{"final_level": "L3", "confidence": 0.95, "reasoning": "...", "sanitized_text": "..."}
+    New format (slim): {"final_level": "L3", "confidence": 0.95, "reasoning": "...", "sanitized_text": "..."}
+
     Args:
         predictions: 模型原始输出字符串列表 / Raw model output strings.
         references: Ground Truth JSON 对象列表 / Ground-truth JSON objects.
@@ -99,8 +101,14 @@ def calculate_classification_metrics(
             continue
         valid_json_cnt += 1
 
-        pred_level = pred_json.get("classification", {}).get("max_level", "")
-        ref_level = ref.get("classification", {}).get("max_level", "")
+        # 新格式：顶层 final_level / New format: top-level final_level
+        pred_level = pred_json.get("final_level", "")
+        ref_level = ref.get("final_level", "")
+        # 兼容旧格式 / Backward compatibility with old format
+        if not pred_level:
+            pred_level = pred_json.get("classification", {}).get("max_level", "")
+        if not ref_level:
+            ref_level = ref.get("classification", {}).get("max_level", "")
         if pred_level and pred_level == ref_level:
             level_match_cnt += 1
 
@@ -113,22 +121,26 @@ def calculate_classification_metrics(
 def calculate_entity_f1(
     predictions: List[str], references: List[Dict[str, Any]]
 ) -> Dict[str, float]:
-    """计算实体级 Micro Precision / Recall / F1 与命中实体的密级一致率。
+    """计算实体级 Micro Precision / Recall / F1（兼容新旧格式）。
 
-    Compute micro entity Precision / Recall / F1 and level agreement.
+    Compute micro entity Precision / Recall / F1 (backward-compatible).
 
-    匹配规则 / Matching rule: 实体按 (text 精确相等) 配对，
-    Entities are paired by exact text equality;
-    配对成功且 level 相同则计入 level_agreement 分子。
-    pairs with identical level contribute to level agreement.
+    新格式无 entities 字段，此时所有指标返回 0（分类密级准确率由
+    calculate_classification_metrics 负责）。
+    The new slim format has no entities field; all metrics return 0 in that
+    case (level accuracy is handled by calculate_classification_metrics).
     """
     tp = fp = fn = 0
     level_agree = 0
+    has_entities = False
 
     for pred, ref in zip(predictions, references):
-        pred_json = extract_json_from_text(pred)
+        pred_json = extract_json_from_text(pred) if pred else None
         pred_entities = _get_entities(pred_json) if pred_json else []
         ref_entities = _get_entities(ref)
+
+        if ref_entities or pred_entities:
+            has_entities = True
 
         # 按 text 建索引（同 text 多次出现取首个） / Index by text (first occurrence wins)
         ref_by_text: Dict[str, Dict[str, Any]] = {}
@@ -149,6 +161,16 @@ def calculate_entity_f1(
                 fp += 1
 
         fn += len(ref_by_text) - len(matched_texts)
+
+    # 新格式无 entities，返回零值表示不适用
+    # New slim format has no entities; return zeros to indicate N/A
+    if not has_entities:
+        return {
+            "entity_precision": 0.0,
+            "entity_recall": 0.0,
+            "entity_f1": 0.0,
+            "entity_level_agreement": 0.0,
+        }
 
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0

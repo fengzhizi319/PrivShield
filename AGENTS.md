@@ -14,7 +14,7 @@
 | Differential Privacy | ✅ Ready | Laplace count/sum/mean with budget accounting |
 | K-anonymity | ✅ Ready | Per-record heuristic & dataset-level generalization |
 | Query Obfuscation | ✅ Ready | Dummy query injection |
-| Classification | ✅ Ready | Rule engine → Small-NER → local VLM/LLM |
+| Classification | ✅ Ready | Rule engine → Small-NER → local LLM |
 | Gateway / Load Balancer | ✅ Ready | REST + gRPC reverse proxy with health checks |
 | TLS / Auth / Rate Limit | ✅ Ready | Opt-in via environment variables |
 | Observability | ✅ Ready | Structured logs + Prometheus `/metrics` + optional tracing |
@@ -31,7 +31,7 @@
 - **Pydantic v2** for models
 - **PyYAML** for profile configuration
 - **ONNX Runtime / ModelScope** for Small-NER (optional, lazy-loaded)
-- **PyTorch + Transformers + Qwen2-VL** for LLM/VLM layer (optional, lazy-loaded)
+- **PyTorch + Transformers + Qwen3.5** for LLM layer (optional, lazy-loaded)
 
 Core dependencies are pinned in `pyproject.toml`. Heavy ML dependencies are **not** pinned as runtime deps; they are lazy-loaded and degraded gracefully if absent.
 
@@ -181,7 +181,6 @@ Key environment variables:
 | `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | Process-wide LLM inference concurrency cap (semaphore, prevents OOM) |
 | `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | `30` | Max seconds a request waits for the LLM inference slot before degrading |
 | `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | Skip LLM layer when available memory falls below this threshold (MB) |
-| `PRIVACY_LLM_AUTO_ON_IMAGE` | `true` | Automatically route image inputs (file paths, Data URIs) to Layer-3 VLM |
 | `PRIVACY_LLM_CONFIDENCE_THRESHOLD` | `0.75` | Minimum confidence threshold for Layer-3 arbitration |
 | `PRIVACY_LLM_ENABLE_ARBITRATION` | `true` | Enable Layer-3 LLM arbitration on low confidence or uncertainty |
 | `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 图片打码允许读取的目录白名单（os.pathsep 分隔）；路径 resolve 后必须位于白名单内，拒绝目录穿越与 symlink 逃逸 |

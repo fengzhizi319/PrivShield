@@ -52,7 +52,7 @@ graph TD
 | `test_downgrade_override.py` | 降级规则、override 压制、白名单语义 |
 | `test_funnel.py` | 三层漏斗编排（NER/LLM mock、置信度策略、配置化映射） |
 | `test_ner_adapter.py` | Layer-2 NER 实体提取引擎与适配器（ONNX / ModelScope 延迟加载与优雅降级） |
-| `test_llm_adapter.py` | Layer-3 LLM 大模型分类与冲突仲裁适配器（Qwen2-VL 级联分类、JSON 响应解析） |
+| `test_llm_adapter.py` | Layer-3 LLM 大模型分类与冲突仲裁适配器（Qwen3.5 专精 SFT 分类与 JSON 响应解析） |
 
 ---
 

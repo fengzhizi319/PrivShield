@@ -78,7 +78,7 @@
     │  仍不确定 / 需仲裁 ↓
     │
   Layer-3: QwenPrivacyLoRAEngine (替换原 Qwen2VLClassifier)
-    │  加载 .models/Qwen2.5-0.5B-Privacy-Merged
+    │  加载 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
     │  常驻内存 < 1.5GB，推理延迟 50~150ms
     │  输出：分类分级 JSON + 无痕抹平文本
     └→ FunnelResult
@@ -86,15 +86,12 @@
 
 ### 2.2 与 `LlmAdapter` 的集成方式
 
-`LlmAdapter` 的 `_lazy_init()` 方法中，当检测到微调模型路径存在时，优先加载 `QwenPrivacyLoRAEngine`，否则回退到原有 `Qwen2VLClassifier`：
+`LlmAdapter` 的 `_lazy_init()` 方法中，默认加载纯文本隐私分类与抹平专精模型 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`：
 
 ```text
 LlmAdapter._lazy_init()
     │
-    ├── .models/Qwen2.5-0.5B-Privacy-Merged 存在？
-    │     └─ 是 → 加载 QwenPrivacyLoRAEngine（常驻，纯文本推理）
-    │
-    └── 不存在 → 回退到 Qwen2VLClassifier（原有逻辑）
+    └─ 加载微调 SFT 专精模型 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`（纯文本高效分类与抹平）
 ```
 
 ### 2.3 环境变量控制
