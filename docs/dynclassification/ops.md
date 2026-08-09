@@ -23,6 +23,10 @@
   - [故障 2: 算子未找到异常 (`KeyError: 未找到名为 'xxx' 的匹配算子`)](#故障-2-算子未找到异常-keyerror-未找到名为-xxx-的匹配算子)
 - [5. 降级规则 `force_suppress` 与 `exempt_rules` 最佳实践指南](#5-降级规则-force_suppress-与-exempt_rules-最佳实践指南)
   - [5.1 强制压制 4 重判定条件与综合实战案例](#51-强制压制-4-重判定条件与综合实战案例)
+- [6. Layer-3 LLM 多后端配置与 vLLM 运维指南](#6-layer-3-llm-多后端配置与-vllm-运维指南)
+  - [6.1 .env 配置文件多模式切换](#61-env-配置文件多模式切换)
+  - [6.2 vLLM 运行服务启动与运维参数](#62-vllm-运行服务启动与运维参数)
+  - [6.3 验证与冒烟测试命令](#63-验证与冒烟测试命令)
 
 ---
 
@@ -235,4 +239,81 @@ downgrade_rules:
 
 **最终裁定结果**：
 宽泛误报规则 `RULE_PII_FUZZY_KEYWORD` 被成功压制擦除；而属于豁免例外的精确规则 `RULE_IDCARD_EXACT`、绝密规则 `RULE_TOP_SECRET_HASH` 以及实际扫出手机号数据的 `RULE_PHONE_REGEX` 均被安全保留。
+
+---
+
+## 6. Layer-3 LLM 多后端配置与 vLLM 运维指南
+
+Layer-3 大模型深度分类与仲裁服务支持多种提供者（Provider）后端，包含独立进程 vLLM OpenAI 兼容 HTTP 服务、本地 PyTorch / Transformers 引擎、macOS Apple Silicon MLX 引擎以及外部通用 OpenAI 接口（如 Ollama、DeepSeek、云端 Qwen API 等）。
+
+---
+
+### 6.1 `.env` 配置文件多模式切换
+
+项目根目录下的 `.env`（可复制 `.env.example` 获得）集中管理 Layer-3 LLM 调用的配置参数。通过修改 `PRIVACY_LLM_PROVIDER` 及其关联环境变量，可以在不同模式间灵活切换：
+
+#### 模式 1：vLLM OpenAI 兼容 HTTP API 服务 (推荐：生产环境 / 高并发 / 独立卡池)
+```env
+PRIVACY_LLM_PROVIDER=vllm
+PRIVACY_LLM_API_BASE=http://127.0.0.1:8000/v1
+PRIVACY_LLM_MODEL_NAME=Qwen3.5-0.8B-Privacy-Classifier-Smoother
+PRIVACY_LLM_API_KEY=EMPTY
+```
+
+#### 模式 2：本地 PyTorch + Transformers 部署 (单机进程内模式 / CUDA 或 CPU)
+```env
+PRIVACY_LLM_PROVIDER=qwen3
+PRIVACY_LLM_MODEL_PATH=.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+PRIVACY_LLM_DEVICE=cuda
+```
+
+#### 模式 3：本地 Apple Silicon MLX 引擎 (macOS 专属 / Metal GPU 加速)
+```env
+PRIVACY_LLM_PROVIDER=mlx
+PRIVACY_LLM_MODEL_PATH=.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother-mlx
+```
+
+#### 模式 4：通用第三方 OpenAI 兼容接口 (如 Ollama, DeepSeek API, 云端 Qwen API)
+```env
+PRIVACY_LLM_PROVIDER=openai
+PRIVACY_LLM_API_BASE=http://127.0.0.1:11434/v1
+PRIVACY_LLM_MODEL_NAME=qwen2.5:latest
+PRIVACY_LLM_API_KEY=ollama
+```
+
+---
+
+### 6.2 vLLM 运行服务启动与运维参数
+
+在项目根目录下，提供了内置的 vLLM 一键启动脚本：
+
+- Shell 脚本：`./start_vllm_server.sh`
+- Python 入口：`python run_vllm_server.py`
+
+#### 关键环境变量控制参数
+
+| 环境变量 | 默认值 | 运维说明 |
+|---|---|---|
+| `PRIVACY_LLM_API_HOST` | `127.0.0.1` | vLLM API 服务监听主机地址 |
+| `PRIVACY_LLM_API_PORT` | `8000` | vLLM API 服务监听端口 |
+| `PRIVACY_LLM_MODEL_PATH` | `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother` | 本地权重路径（自动降级在线开源权重） |
+| `PRIVACY_LLM_MODEL_NAME` | `Qwen3.5-0.8B-Privacy-Classifier-Smoother` | 对外暴露的模型名称（HTTP 接口 `model` 字段） |
+| `PRIVACY_VLLM_GPU_MEMORY_UTILIZATION` | `0.90` | GPU 显存利用率上限控制（0.0 ~ 1.0） |
+| `PRIVACY_VLM_TIMEOUT` | `180` | HTTP 推理请求最长等待超时时间（秒） |
+
+#### 异常容忍与自动降级机制
+- **未安装 vLLM**：运行 `./start_vllm_server.sh` 时若检测到缺少 `vllm` 依赖，将输出明确的错误提示及降级建议，不影响 Agent REST/gRPC 服务的单独运行。
+- **服务未启动 / 网络故障**：Agent 在调用 Layer-3 时若无法连接 vLLM endpoint 或超时，`OpenAILlmClassifier` 将自动捕获异常并返回 `None`，触发第一阶段置信度衰减的降级机制，保证前端响应不卡死。
+
+---
+
+### 6.3 验证与冒烟测试命令
+
+在完成 `.env` 配置或启动 vLLM 服务后，可运行冒烟测试进行验证：
+
+```bash
+# 运行 vLLM 集成与 LLM 适配器全套冒烟测试
+PYTHONPATH=. pytest tests/dynclassification/test_vllm_llm_integration.py tests/dynclassification/test_llm_adapter.py -v
+```
+
 

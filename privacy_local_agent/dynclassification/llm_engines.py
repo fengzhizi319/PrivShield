@@ -54,6 +54,7 @@ from ..observability.metrics import (
     CLASSIFICATION_LLM_DURATION,
     CLASSIFICATION_LLM_TOTAL,
 )
+from ..env_loader import load_env_file
 # 导入 LLM 分类器抽象基类和敏感度等级枚举
 from .base import LlmClassifier, SensitivityLevel
 # 导入日志脱敏工具函数（对敏感路径/值进行掩码处理后再记录日志）
@@ -655,3 +656,204 @@ class Qwen3Classifier(LlmClassifier):
 
 # 向后兼容别名：旧代码可能通过 Qwen2VLClassifier 引用 / Backward-compatible alias
 Qwen2VLClassifier = Qwen3Classifier
+
+
+class OpenAILlmClassifier(LlmClassifier):
+    """基于 OpenAI 兼容 HTTP API（如 vLLM、Ollama、DeepSeek、Qwen API）的数据分类分级器。
+
+    支持通过 HTTP POST 服务与部署在 8000 端口的 vLLM OpenAI API 通信，
+    执行 Layer-3 LLM 敏感度评估。
+
+    使用 Python 标准库 urllib.request 实现，无需额外的 ML/PyTorch/httpx 依赖。
+    """
+
+    _INFERENCE_TIMEOUT = int(
+        os.environ.get("PRIVACY_VLM_TIMEOUT", os.environ.get("PRIVACY_LLM_TIMEOUT", "180"))
+    )
+
+    def __init__(
+        self,
+        api_base: str | None = None,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        classify_prompt_template: str | None = None,
+        timeout: float | None = None,
+    ):
+        """初始化 OpenAI/vLLM 接口分类器。
+
+        Args:
+            api_base: OpenAI API 基础 URL，默认从 PRIVACY_LLM_API_BASE 或 PRIVACY_VLLM_URL 读取，
+                回退至 "http://127.0.0.1:8000/v1"。
+            model_name: 模型名称，默认从 PRIVACY_LLM_MODEL_NAME 读取，
+                回退至 "Qwen3.5-0.8B-Privacy-Classifier-Smoother"。
+            api_key: API 密钥（可选，默认 PRIVACY_LLM_API_KEY 或 "EMPTY"）。
+            classify_prompt_template: 自定义分类 system prompt 模板。
+            timeout: 超时时间（秒）。
+        """
+        load_env_file()
+
+        base_url = (
+            api_base
+            or os.environ.get("PRIVACY_LLM_API_BASE")
+            or os.environ.get("PRIVACY_VLLM_URL")
+            or "http://127.0.0.1:8000/v1"
+        )
+        base_url = base_url.rstrip("/")
+        if not base_url.endswith("/v1") and not base_url.endswith("/chat/completions"):
+            self.chat_url = f"{base_url}/v1/chat/completions"
+        elif base_url.endswith("/v1"):
+            self.chat_url = f"{base_url}/chat/completions"
+        else:
+            self.chat_url = base_url
+
+        self.api_base = base_url
+        self.model_name = (
+            model_name
+            or os.environ.get("PRIVACY_LLM_MODEL_NAME")
+            or _DEFAULT_MODEL_DIR
+        )
+        self.api_key = api_key or os.environ.get("PRIVACY_LLM_API_KEY", "EMPTY")
+        self._classify_prompt_template = classify_prompt_template
+        self.timeout = timeout or float(self._INFERENCE_TIMEOUT)
+
+        self._initialized = True
+        self._init_error: Exception | None = None
+        self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vllm-http-infer")
+
+    @property
+    def is_ready(self) -> bool:
+        """服务器是否已就绪。"""
+        return self._initialized and self._init_error is None
+
+    def warmup(self) -> bool:
+        """预热连接（保持与基类一致）。"""
+        return True
+
+    def classify(
+        self,
+        text: str,
+        upstream_level: SensitivityLevel,
+        upstream_confidence: float,
+        sanitize: bool = False,
+    ) -> dict[str, Any] | None:
+        """通过 HTTP 调用 vLLM / OpenAI 服务对文本进行定级。"""
+        start_time = time.monotonic()
+        try:
+            future = self._executor.submit(
+                self._do_classify_http, text, upstream_level, upstream_confidence
+            )
+            result = future.result(timeout=self.timeout)
+            duration = time.monotonic() - start_time
+            CLASSIFICATION_LLM_DURATION.labels(engine="vllm").observe(duration)
+            return result
+        except FuturesTimeoutError:
+            duration = time.monotonic() - start_time
+            CLASSIFICATION_LLM_TOTAL.labels(status="timeout").inc()
+            CLASSIFICATION_LLM_DURATION.labels(engine="vllm").observe(duration)
+            logger.error("vllm_http_classify_timeout", extra={"timeout_s": self.timeout, "url": self.chat_url})
+            return None
+        except Exception as e:
+            duration = time.monotonic() - start_time
+            CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
+            CLASSIFICATION_LLM_DURATION.labels(engine="vllm").observe(duration)
+            logger.error("vllm_http_classify_error", extra={"error": str(e), "url": self.chat_url})
+            return None
+
+    def _do_classify_http(
+        self, text: str, upstream_level: SensitivityLevel, upstream_confidence: float
+    ) -> dict[str, Any] | None:
+        """执行 HTTP POST 请求与 JSON 解析。"""
+        if self._classify_prompt_template:
+            system_prompt = self._classify_prompt_template.format(
+                domain="medical",
+                standard_id="DB51_T_2989",
+                levels_desc=(
+                    "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变或罕见病样本。\n"
+                    "- L4 (高风险): 包含精神疾病、敏感传染病或完整的住院病历。\n"
+                    "- L3 (中风险): 包含个人身份信息（PII）、普通的门诊诊疗记录或常规检验指标数值。\n"
+                    "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
+                    "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感特征的统计指标。"
+                ),
+            )
+        else:
+            system_prompt = (
+                "你是一个医疗数据分类分级领域的资深安全专家。请对输入的医疗数据进行敏感等级评估。\n"
+                "评估标准如下：\n"
+                "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变（如 BRCA1/TP53）或罕见病样本。\n"
+                "- L4 (高风险): 包含精神疾病（如精神分裂）、敏感传染病（如 HIV/AIDS/梅毒）或完整的住院病历。\n"
+                "- L3 (中风险): 包含个人身份信息（PII，如身份证号、手机号）、普通的门诊诊疗记录或常规检验指标数值（如血常规）。\n"
+                "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
+                "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感和特征的统计指标。\n\n"
+                "请严格根据上述标准进行定级，并仅输出符合以下 JSON 格式的结构化内容，不要包含额外的解释文字或 ``` 块：\n"
+                "{\n"
+                '  "final_level": "L1/L2/L3/L4/L5",\n'
+                '  "sub_category": "分类标签简称",\n'
+                '  "confidence": 0.0到1.0之间的浮点数,\n'
+                '  "reasoning": "定级判别的推理过程说明",\n'
+                '  "needs_human_review": true/false\n'
+                "}"
+            )
+
+        user_text = f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 512,
+        }
+
+        import urllib.error
+        import urllib.request
+
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self.chat_url,
+            data=req_data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                if resp.status != 200:
+                    logger.warning("vllm_http_non_200", extra={"status": resp.status})
+                    CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
+                    return None
+                resp_body = resp.read().decode("utf-8")
+                resp_json = json.loads(resp_body)
+                content = resp_json["choices"][0]["message"]["content"]
+                result = self._parse_json_result(content, upstream_level, upstream_confidence)
+                if result:
+                    CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
+                else:
+                    CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
+                return result
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as err:
+            logger.warning("vllm_http_request_failed", extra={"error": str(err)})
+            CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
+            return None
+
+    def _parse_json_result(
+        self, output_text: str, upstream_level: SensitivityLevel, upstream_confidence: float
+    ) -> dict[str, Any] | None:
+        json_match = re.search(r"(\{.*\})", output_text, re.DOTALL)
+        json_str = json_match.group(1) if json_match else output_text
+        try:
+            res = json.loads(json_str)
+            if "final_level" in res:
+                return cast("dict[str, Any]", res)
+        except Exception as e:
+            logger.warning("llm_json_parse_failed", extra={"error": str(e)})
+        return None
+
+
+# 别名定义
+VLLMLlmClassifier = OpenAILlmClassifier
+

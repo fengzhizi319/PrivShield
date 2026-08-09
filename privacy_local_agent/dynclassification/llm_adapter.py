@@ -43,6 +43,7 @@ import sys
 import threading
 from typing import Any
 
+from ..env_loader import load_env_file
 from ..observability.logging_config import get_logger
 from .models import DomainTaxonomy, SecurityTag
 
@@ -111,10 +112,11 @@ class LlmAdapter:
     def _lazy_init(self) -> None:
         """延迟初始化 LLM 分类器 / Lazy initialize LLM classifier.
 
-        尝试顺序 / Attempt order:
-        1. MLXLlmClassifier (Apple Silicon Metal GPU, macOS 优先)
-        2. Qwen3Classifier (PyTorch, CUDA/MPS/CPU)
-        失败则标记不可用。
+        支持通过 PRIVACY_LLM_PROVIDER 环境变量切换多种后端:
+        - "vllm" / "openai": 使用 OpenAI 兼容 HTTP API（如 vLLM Server / Ollama / Remote API）
+        - "qwen3" / "transformers": 使用 PyTorch 本地模型
+        - "mlx": 使用 macOS Apple Silicon Metal 引擎
+        - "auto" (默认): 自动判断 (显式配置 API URL 优先 -> macOS MLX -> PyTorch Qwen3)
 
         线程安全：使用 Lock + double-check 防止并发请求重复初始化。
         """
@@ -125,8 +127,35 @@ class LlmAdapter:
             if self._initialized:
                 return
 
-            # 尝试 1: MLX 引擎（Apple Silicon Metal GPU，仅 macOS）
-            if sys.platform == "darwin":
+            load_env_file()
+            provider = os.environ.get(
+                "PRIVACY_LLM_PROVIDER",
+                os.environ.get("PRIVACY_LLM_BACKEND", "auto")
+            ).strip().lower()
+
+            # 模式 A: 未指定本地 model_path 且 provider 为 vllm/openai (或 auto 并且配置了 API URL)
+            if not self._model_path and (
+                provider in ("vllm", "openai")
+                or (provider == "auto" and (os.environ.get("PRIVACY_LLM_API_BASE") or os.environ.get("PRIVACY_VLLM_URL")))
+            ):
+                try:
+                    from .llm_engines import OpenAILlmClassifier
+                    self._classifier = OpenAILlmClassifier(
+                        classify_prompt_template=self._classify_prompt_template,
+                    )
+                    logger.info("llm_adapter_initialized", extra={"backend": "vllm_openai_http", "api_base": self._classifier.api_base})
+                    self._initialized = True
+                    self._available = True
+                    return
+                except Exception as e:
+                    logger.warning("llm_vllm_http_unavailable", extra={"error": str(e)})
+                    if provider in ("vllm", "openai"):
+                        self._available = False
+                        self._initialized = True
+                        return
+
+            # 模式 B: 显式指定 mlx 或 (auto + macOS)
+            if provider == "mlx" or (provider == "auto" and sys.platform == "darwin"):
                 try:
                     from .mlx_llm_engine import MLXLlmClassifier
                     self._classifier = MLXLlmClassifier(
@@ -136,12 +165,16 @@ class LlmAdapter:
                     self._classifier._lazy_init()
                     logger.info("llm_adapter_initialized", extra={"backend": "mlx_metal", "model_path": self._model_path})
                     self._initialized = True
-                    # MLX 引擎初始化成功
+                    self._available = True
                     return
                 except Exception as e:
                     logger.debug("llm_mlx_unavailable", extra={"error": str(e)})
+                    if provider == "mlx":
+                        self._available = False
+                        self._initialized = True
+                        return
 
-            # 尝试 2: PyTorch Qwen3 引擎
+            # 模式 C: 显式指定 qwen3 或 auto 兜底: PyTorch Qwen3 引擎
             try:
                 from .llm_engines import Qwen3Classifier
                 self._classifier = Qwen3Classifier(
@@ -151,6 +184,7 @@ class LlmAdapter:
                 )
                 logger.info("llm_adapter_initialized", extra={"backend": "qwen3", "model_path": self._model_path})
                 self._initialized = True
+                self._available = True
             except Exception as e:
                 self._available = False
                 self._initialized = True
