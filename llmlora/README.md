@@ -55,7 +55,7 @@ llmlora/
 |---|---|
 | `scripts/setup_env.sh` | 创建/更新独立训练环境（transformers 5.14.1 等依赖）并校验版本 |
 | `scripts/generate_data.sh` | 生成训练/验证/测试数据（规则引擎打标 + 零泄漏 QA） |
-| `scripts/train.sh` | LoRA 训练一键启动（默认训练完自动合并导出） |
+| `scripts/train.sh` | LoRA 训练一键启动（默认训练完自动合并导出并同步复制至 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`） |
 | `scripts/evaluate.sh` | Benchmark 评估（JSON 合法率/密级 Acc/实体 F1/零泄漏/延迟） |
 | `scripts/smoke_test.sh` | 端到端冒烟：小数据生成 → 10 步训练 + 合并 → 快速评估 |
 

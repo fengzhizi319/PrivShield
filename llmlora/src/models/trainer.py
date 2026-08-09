@@ -433,9 +433,40 @@ class LoRATrainingRunner:
             self._patch_for_vllm_compatibility(export_dtype)
 
             logger.info("权重合并并导出成功！")
+            if self.cfg.auto_copy_to_agent_dir and self.cfg.agent_model_dir:
+                self._copy_to_agent_model_dir()
         except Exception as exc:
             logger.error(f"合并权重时发生异常: {exc}", exc_info=True)
             raise
+
+    def _copy_to_agent_model_dir(self) -> None:
+        """将合并导出后的完整模型自动同步复制到 Agent 部署目录 (.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother)。
+
+        Auto-copy the merged model artifacts into the main Agent model deployment directory.
+        """
+        import shutil
+
+        src_dir = Path(self.cfg.merged_output_dir)
+        dst_dir = Path(self.cfg.agent_model_dir)
+
+        if not src_dir.exists():
+            logger.warning(f"源合并模型目录不存在，跳过自动同步复制: {src_dir}")
+            return
+
+        logger.info(f"🚀 开始将合并模型自动同步复制到 Agent 部署目录: {dst_dir}")
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        for item in src_dir.iterdir():
+            dst_item = dst_dir / item.name
+            if item.is_dir():
+                if dst_item.exists():
+                    shutil.rmtree(dst_item)
+                shutil.copytree(item, dst_item)
+            else:
+                shutil.copy2(item, dst_item)
+
+        logger.info(f"✅ 模型已成功同步复制到 Agent 部署目录: {dst_dir}")
+
 
     def _patch_for_vllm_compatibility(self, export_dtype: torch.dtype) -> None:
         """补丁合并模型以兼容 vLLM 加载 / Patch merged model for vLLM compatibility.

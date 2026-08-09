@@ -109,6 +109,22 @@ class Config:
         )
     )
 
+    # Agent 主模型部署目录（训练合并后自动同步的目标路径）
+    # Target deployment directory for Privacy Local Agent
+    agent_model_dir: str = field(
+        default_factory=lambda: _env(
+            "LLMLORA_AGENT_MODEL_DIR",
+            str(_REPO_ROOT / ".models" / "Qwen3.5-0.8B-Privacy-Classifier-Smoother"),
+        )
+    )
+
+    # 训练合并完成后是否自动复制模型权重到 agent_model_dir
+    # Whether to auto-copy merged model to agent_model_dir upon completion
+    auto_copy_to_agent_dir: bool = field(
+        default_factory=lambda: _env_bool("LLMLORA_AUTO_COPY_TO_AGENT_DIR", True)
+    )
+
+
     @property
     def train_data_path(self) -> str:
         """训练集路径 / Training set path."""

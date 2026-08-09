@@ -79,8 +79,10 @@ def main() -> None:
         "--dtype", type=str, default="auto", choices=["auto", "bf16", "fp16", "fp32"],
         help="强制计算精度",
     )
+    parser.add_argument("--agent-model-dir", type=str, default=None, help="Agent .models 部署目标目录")
     parser.add_argument("--no-gradient-checkpointing", action="store_true", help="关闭梯度检查点")
     parser.add_argument("--no-merge", action="store_true", help="训练后不自动合并 LoRA 权重")
+    parser.add_argument("--no-copy-to-agent", action="store_true", help="训练合并后不自动同步到 Agent .models 部署目录")
     args = parser.parse_args()
 
     cfg = Config()
@@ -93,6 +95,10 @@ def main() -> None:
         cfg.output_dir = args.output_dir
     if args.merged_output_dir:
         cfg.merged_output_dir = args.merged_output_dir
+    if args.agent_model_dir:
+        cfg.agent_model_dir = args.agent_model_dir
+    if args.no_copy_to_agent:
+        cfg.auto_copy_to_agent_dir = False
     cfg.resume_from_checkpoint = args.resume_from_checkpoint
     cfg.num_epochs = args.epochs
     cfg.max_steps = args.max_steps
