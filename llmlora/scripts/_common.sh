@@ -9,6 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLMLORA_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(dirname "$LLMLORA_DIR")"
 VENV_PY="$LLMLORA_DIR/.venv/bin/python"
+VENV_BIN="$LLMLORA_DIR/.venv/bin"
+
+# 将 venv bin 加入 PATH（确保 ninja 等工具可被 vLLM flashinfer 找到）
+# Add venv bin to PATH (so ninja etc. can be found by vLLM flashinfer)
+export PATH="$VENV_BIN:$PATH"
 
 if [[ ! -x "$VENV_PY" ]]; then
     echo "[错误] 未找到独立训练环境: $VENV_PY" >&2

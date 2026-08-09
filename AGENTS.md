@@ -44,30 +44,30 @@ privacy-local-agent/
 │   ├── grpc_server.py             # gRPC servicer
 │   ├── server.py                  # REST + gRPC combined launcher
 │   ├── service.py                 # PrivacyService orchestrator
-│   ├── classification_routes.py   # Classification REST router
-│   ├── classification_service.py  # Classification service wrapper
-│   ├── classification_grpc.py     # Classification gRPC methods
+│   ├── schemas.py                 # REST request models (Pydantic)
+│   ├── routers/                   # REST sub-routers (mask/dp/kano/qol/dynclassification/...)
 │   ├── security/                  # TLS / auth / rate-limit
 │   ├── observability/             # Logging / metrics / tracing
-│   ├── privacy/                   # Primitives and classification
+│   ├── privacy/                   # Privacy primitives
 │   │   ├── masking.py
 │   │   ├── dp.py
 │   │   ├── kano.py
 │   │   ├── qol.py
 │   │   ├── budget.py
 │   │   ├── profile.py
-│   │   ├── classification.py              # Public API entry (ClassificationAPI)
-│   │   ├── classification_models.py       # Pydantic models + abstract base classes
-│   │   ├── classification_rule_engine.py  # Default rule engine + rule utilities
-│   │   ├── classification_vectorized.py   # Optional pandas-based vectorized rule engine
-│   │   ├── classification_utils.py        # ZK helpers + templates + SecretFlow adapter
-│   │   ├── classification_composite.py    # Composite / context-aware rules
-│   │   ├── classification_async.py        # Async classification jobs
-│   │   ├── classification_review.py       # Human review store + export
-│   │   ├── classification_ner.py          # Small-NER engines
-│   │   ├── classification_llm.py          # Local LLM/VLM classifier
 │   │   ├── download_model.py
 │   │   └── download_ner_model.py
+│   ├── dynclassification/         # Dynamic classification (3-layer funnel: Rule → NER → LLM)
+│   │   ├── funnel.py              # ClassificationFunnel orchestrator + Safety Floor
+│   │   ├── engine.py              # ConfigurableRuleEngine (YAML rules)
+│   │   ├── models.py              # SecurityTag / ConfidencePolicy / DomainTaxonomy
+│   │   ├── rule_schema.py         # RuleDef / RuleProfile schema
+│   │   ├── composite.py           # Composite rules
+│   │   ├── service.py             # DynClassificationService
+│   │   ├── ner_adapter.py / ner_engines.py       # Small-NER (lazy-load)
+│   │   ├── llm_adapter.py / llm_engines.py       # Local LLM/VLM (lazy-load)
+│   │   ├── mlx_ner_engine.py / mlx_llm_engine.py # MLX backends
+│   │   └── image_redaction.py     # Image redaction
 │   └── gateway/                   # Optional gateway/load balancer
 │       ├── server.py
 │       ├── balancer.py
@@ -112,10 +112,10 @@ pip install -e ".[dev]"
 PYTHONPATH=. pytest tests -q
 
 # Run a specific test file
-PYTHONPATH=. pytest tests/test_rest.py -v
+PYTHONPATH=. pytest tests/api/test_rest.py -v
 
-# Benchmark classification layers
-PYTHONPATH=. python tests/benchmark_classification.py
+# Benchmark privacy primitives
+PYTHONPATH=. python tests/benchmark_primitives.py
 
 # Download models (optional, required for LLM/NER layers)
 python -m privacy_local_agent.privacy.download_model
@@ -173,11 +173,7 @@ Key environment variables:
 | `PRIVACY_TLS_ENABLED` | `false` | Enable TLS on REST/gRPC |
 | `PRIVACY_AUTH_ENABLED` | `false` | Enable API key auth |
 | `PRIVACY_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
-| `PRIVACY_REVIEW_DB` | — | SQLite DB path for classification review store |
 | `PRIVACY_WARMUP_LLM` | `false` | Async warmup local LLM on REST startup |
-| `PRIVACY_ASYNC_MAX_WORKERS` | `4` | Thread pool size for async classification jobs |
-| `PRIVACY_ASYNC_JOB_TTL_SECONDS` | `3600` | TTL for async classification jobs |
-| `PRIVACY_ASYNC_MAX_JOBS` | `1000` | Max concurrent async classification jobs |
 | `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | Process-wide LLM inference concurrency cap (semaphore, prevents OOM) |
 | `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | `30` | Max seconds a request waits for the LLM inference slot before degrading |
 | `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | Skip LLM layer when available memory falls below this threshold (MB) |
@@ -201,52 +197,48 @@ Key environment variables:
 ## 8. Adding a New Privacy Primitive
 
 1. Implement the algorithm in `privacy_local_agent/privacy/<primitive>.py`.
-2. Add a Pydantic request/response model in `privacy_local_agent/privacy/classification_models.py` or a new models file.
+2. Add a Pydantic request/response model in `privacy_local_agent/schemas.py` or a new models file.
 3. Expose it in:
    - `privacy_local_agent/service.py` (business logic)
-   - `privacy_local_agent/main.py` (REST route)
+   - `privacy_local_agent/routers/<primitive>.py` (REST sub-router, mounted by `main.py`)
    - `privacy_local_agent/grpc_server.py` (gRPC method)
-4. Add tests in `tests/test_rest.py` and/or `tests/test_<primitive>.py`.
+4. Add tests in `tests/api/test_rest.py` and/or `tests/test_<primitive>.py`.
 5. Update `proto/privacy.proto` and regenerate stubs if adding gRPC:
    ```bash
    python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto
    ```
 
-## 9. Adding a Classification Rule / Template / Composite Rule
+## 9. Adding a Classification Rule / Composite Rule / Taxonomy
+
+分类规则已迁移至 `dynclassification` 模块并全面 YAML 化：领域规则在 `rules/domains/*.yaml`，
+分类体系在 `rules/taxonomies/*.yaml`；引擎为 `ConfigurableRuleEngine`
+（`dynclassification/engine.py`），规则 schema 见 `dynclassification/rule_schema.py`。
+旧 `privacy/classification/` 子包（含 vectorized/async/review/template 机制）已删除，勿再引用。
 
 ### 9.1 Adding a Layer-1 Rule
 
-1. Add rule logic in `privacy_local_agent/privacy/classification_rule_engine.py` (`DefaultRuleEngine`).
-2. If the rule is value-based and can be vectorized, update `VectorizedRuleEngine` in `privacy_local_agent/privacy/classification_vectorized.py` to keep batch behavior consistent.
-3. Update `ClassificationResult` models if new output fields are needed.
-4. Add a test case in `tests/test_classification.py`; add a consistency check in `tests/test_classification_vectorized.py` when the vectorized engine is affected.
-5. Document the rule in `docs/classification/testing.md`.
+1. 在对应的 `rules/domains/*.yaml` 中新增 `RuleDef`（`id`/`level`/`category`/`matchers`），
+   降级规则加入 `downgrade_rules` 节（`DowngradeRuleDef`）。
+2. 匹配算子定义在 `dynclassification/operators.py`；新算子经 `operator_registry.py` 注册。
+3. 在 `tests/dynclassification/` 添加测试（参考 `test_funnel.py`、`test_downgrade_override.py`）。
 
-### 9.2 Adding a Compliance Template
+### 9.2 Adding a Composite Rule
 
-1. Define template defaults in `privacy_local_agent/privacy/classification_utils.py` (`TEMPLATES`).
-2. If the template requires new field-name rules, add them in `DefaultRuleEngine._apply_template_field_rules`.
-3. Add a test in `tests/test_classification_templates.py`.
-4. Document the template in `docs/classification/prd.md` and `docs/classification/design.md`.
+1. 在 `dynclassification/composite.py` 中添加规则。
+2. 在 `tests/dynclassification/` 添加测试。
 
-### 9.3 Adding a Composite Rule
+### 9.3 Adding a Taxonomy / Standard
 
-1. Add the rule to `CompositeRuleEngine.DEFAULT_RULES` in `privacy_local_agent/privacy/classification_composite.py`,
-   or pass it via the `compositeRules` request parameter.
-2. Add a test in `tests/test_classification_composite.py`.
-3. Document the rule in `docs/classification/design.md`.
-
-### 9.4 Extending Async / Review APIs
-
-1. Core logic lives in `privacy_local_agent/privacy/classification_async.py` and `privacy_local_agent/privacy/classification_review.py`.
-2. Expose new methods via `ClassificationService` and REST/gRPC routes.
-3. Update `proto/privacy.proto` and regenerate stubs when adding gRPC methods.
-4. Add tests in `tests/test_classification_async.py` and `tests/test_classification_review.py`.
+1. 新增 `rules/taxonomies/<domain>.yaml`：`levels`（按 rank 升序）、`default_level`，
+   并**显式补齐 `confidence_policy` 节**（字段与默认值见
+   `docs/dynclassification/three_layer_funnel_design.md` §2.3）。
+2. 新增对应领域规则 `rules/domains/<domain>.yaml`。
+3. 在 `tests/dynclassification/test_standards_switching.py` 扩展体系切换用例。
 
 ## 10. Testing Guidelines
 
 - All changes must include tests.
-- Mock heavy ML models in unit tests (see `tests/test_classification_ner.py` and `tests/test_classification_llm.py`).
+- Mock heavy ML models in unit tests (see `tests/dynclassification/test_ner_adapter.py` and `tests/dynclassification/test_llm_adapter.py`).
 - Gateway tests use `httpx` / `grpc.aio` channels; run them with the gateway server fixture.
 - Budget tests cover both in-memory and SQLite backends.
 

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 vLLM 高性能推理性能测试 (Fast Sub-20s Mode).
+
+vLLM v0.26 通过 Qwen3_5ForConditionalGeneration 多模态架构加载模型，
+需要合并模型包含完整的 config.json（含 vision_config）和 model.visual.* 权重。
 """
 from __future__ import annotations
 
@@ -30,11 +33,13 @@ def run_vllm_benchmark(
     test_data_path: str,
     batch_sizes: List[int] = [1, 4, 16],
     gpu_utilization: float = 0.5,
+    max_model_len: int = 4096,
 ) -> Dict[str, Any]:
     """运行 vLLM 快速基准测试"""
     print("=" * 64)
     print("🚀 启动 vLLM 高性能推理性能 Benchmark (快速模式)")
     print(f"  模型路径: {model_path}")
+    print(f"  max_model_len: {max_model_len}")
     print("=" * 64)
 
     samples = load_jsonl(test_data_path)
@@ -46,30 +51,17 @@ def run_vllm_benchmark(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # 临时将 model_type 设为 qwen2，绕过 vLLM 多模态 Qwen3_5Config 的 preprocessor 校验
-    cfg_file = Path(model_path) / "config.json"
-    cfg_backup = cfg_file.read_text(encoding="utf-8")
-    try:
-        cfg_data = json.loads(cfg_backup)
-        cfg_data["model_type"] = "qwen2"
-        cfg_data["architectures"] = ["Qwen2ForCausalLM"]
-        cfg_data.pop("sliding_window", None)
-        cfg_data.pop("use_sliding_window", None)
-        cfg_data.pop("rope_parameters", None)
-        cfg_file.write_text(json.dumps(cfg_data, indent=2), encoding="utf-8")
-
-        start_init = time.perf_counter()
-        llm = LLM(
-            model=model_path,
-            trust_remote_code=True,
-            tensor_parallel_size=1,
-            gpu_memory_utilization=gpu_utilization,
-            enforce_eager=True,
-            disable_log_stats=True,
-        )
-        init_time = time.perf_counter() - start_init
-    finally:
-        cfg_file.write_text(cfg_backup, encoding="utf-8")
+    start_init = time.perf_counter()
+    llm = LLM(
+        model=model_path,
+        trust_remote_code=True,
+        tensor_parallel_size=1,
+        gpu_memory_utilization=gpu_utilization,
+        enforce_eager=True,
+        disable_log_stats=True,
+        max_model_len=max_model_len,
+    )
+    init_time = time.perf_counter() - start_init
     print(f"✅ vLLM 引擎初始化完成，耗时: {init_time:.2f}s\n")
 
     sampling_params = SamplingParams(
@@ -122,9 +114,23 @@ def main():
         type=str,
         default=str(_REPO_ROOT / "llmlora" / "data" / "test.jsonl"),
     )
+    parser.add_argument(
+        "--max-model-len",
+        type=int,
+        default=4096,
+        help="vLLM max_model_len（限制 KV cache 内存占用）",
+    )
+    parser.add_argument(
+        "--json-out",
+        type=str,
+        default="",
+        help="测试结果 JSON 保存路径",
+    )
     args = parser.parse_args()
 
-    run_vllm_benchmark(args.model_path, args.test_data)
+    results = run_vllm_benchmark(args.model_path, args.test_data, max_model_len=args.max_model_len)
+    if args.json_out and results:
+        Path(args.json_out).write_text(json.dumps(results, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

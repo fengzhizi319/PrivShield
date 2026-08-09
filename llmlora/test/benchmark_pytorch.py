@@ -114,9 +114,17 @@ def main():
         type=str,
         default=str(_REPO_ROOT / "llmlora" / "data" / "test.jsonl"),
     )
+    parser.add_argument(
+        "--json-out",
+        type=str,
+        default="",
+        help="测试结果 JSON 保存路径",
+    )
     args = parser.parse_args()
 
-    run_pytorch_benchmark(args.model_path, args.test_data)
+    results = run_pytorch_benchmark(args.model_path, args.test_data)
+    if args.json_out and results:
+        Path(args.json_out).write_text(json.dumps(results, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

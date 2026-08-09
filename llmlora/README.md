@@ -1,4 +1,4 @@
-# llmlora — Qwen3.5 基座 LoRA 专精微调（纯文本隐私分类分级与无痕抹平）
+ba'sh# llmlora — Qwen3.5 基座 LoRA 专精微调（纯文本隐私分类分级与无痕抹平）
 
 基于 `basemodels/cmeee_merged`（Qwen3.5 0.8B CMeEE NER 合并基座，约 752M 参数）做二阶段 LoRA SFT，
 专门面向**纯文本**场景（不考虑图片 OCR）：
@@ -38,7 +38,9 @@ llmlora/
 ├── scripts/                      # 常用命令 sh 脚本 + Python 入口
 └── src/
     ├── dataset/                  # loader.py (Labels Masking) / data_collator.py
-    ├── inference/                # engine.py (QwenPrivacyLoRAEngine)
+    ├── inference/
+    │   ├── engine.py             # QwenPrivacyLoRAEngine (PyTorch 原生推理)
+    │   └── engine_vllm.py        # QwenPrivacyVLLMEngine (vLLM 高性能推理)
     ├── models/                   # trainer.py (LoRATrainingRunner)
     └── utils/                    # config.py / logger.py / metrics.py
 ```
@@ -83,8 +85,13 @@ llmlora/
 ### 3.4 评估
 
 ```bash
+# PyTorch 后端（默认）
 ./llmlora/scripts/evaluate.sh                               # 默认评估合并模型（全部测试样本）
 ./llmlora/scripts/evaluate.sh --max-samples 20
+
+# vLLM 后端（更快，约 7x 加速）
+./llmlora/scripts/evaluate.sh --backend vllm --max-samples 20
+
 # 基座 + LoRA adapter 模式
 ./llmlora/scripts/evaluate.sh \
     --model-path llmlora/basemodels/cmeee_merged \
@@ -93,6 +100,11 @@ llmlora/
 
 > 注意：使用合并模型时默认**不再叠加** adapter（避免双重应用 LoRA 权重）；
 > 如需叠加请显式传 `--adapter-path`。
+
+| 推理后端 | 首次加载 | 单条推理延迟 | 吞吐 | 适用场景 |
+|---|---|---|---|---|
+| PyTorch（默认） | ~5s | ~4200ms | ~0.24 条/s | 开发调试、小批量评估 |
+| vLLM | ~22s（含 CUDA Graph 捕获） | ~570ms | ~1.76 条/s | 大批量评估、生产部署 |
 
 ### 3.5 端到端冒烟测试
 
@@ -108,6 +120,7 @@ cd /home/charles/code/sfwork/privacy-local-agent
 llmlora/.venv/bin/python -m llmlora.scripts.generate_data --train-size 1000 --dev-size 100 --test-size 50
 llmlora/.venv/bin/python -m llmlora.scripts.train --epochs 3 --batch-size 4
 llmlora/.venv/bin/python -m llmlora.scripts.evaluate --model-path llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+llmlora/.venv/bin/python -m llmlora.scripts.evaluate --backend vllm --model-path llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
 ```
 
 ---
@@ -134,3 +147,4 @@ llmlora/.venv/bin/python -m llmlora.scripts.evaluate --model-path llmlora/output
 3. **thinking 标记处理**：训练与推理统一 `enable_thinking=False`，避免模板注入空思考块污染 JSON 输出。
 4. **LoRA 注入层**：自动探查全部 Linear 叶子层（含混合注意力的 `in_proj_*` 系列），排除 `lm_head`/`embed`/`mtp`，可训练参数约 1.42%。
 5. **Sidecar 接入**：`src/inference/engine.py` 提供 `QwenPrivacyLoRAEngine`（线程安全、延迟加载、批处理），可替换 privacy-local-agent Layer-3 的通用 LLM 引擎。
+6. **双推理后端**：支持 PyTorch 原生推理和 vLLM 高性能推理，通过 `--backend pytorch|vllm` 切换。vLLM 后端利用 PagedAttention 和 CUDA Graphs 实现约 7x 加速。

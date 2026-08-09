@@ -396,6 +396,79 @@ class TestLlmArbitration:
 
 
 # ===========================================================================
+# Layer-3 安全地板兜底：LLM 未返回合法等级
+# ===========================================================================
+
+
+class TestLlmNoValidLevelSafetyFloor:
+    """LLM 返回结果但无合法 final_level 时的防御行为。
+
+    安全地板要求：无效裁定不得刷新置信度、不得归属 L3_LLM，
+    保留上游结果并强制人工复核（防止"高置信度+无等级"注入静默抬升置信度）。
+    """
+
+    def test_scenario_b_missing_final_level_keeps_upstream(self, taxonomy, engine_conflict):
+        """场景 B：LLM 输出缺少 final_level → 保留上游置信度与层级归属。"""
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.is_available = True
+        mock_llm.classify.return_value = {
+            "confidence": 0.99,  # 注入式高置信度，无等级
+            "reasoning": "无法确定等级",
+        }
+
+        policy = ConfidencePolicy(enable_llm=True, llm_confidence_threshold=0.6)
+        funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, llm_adapter=mock_llm)
+        result, _suppressed = funnel.classify_field("unknown_field", "some text")
+
+        # confidence 保持上游 0.0，不被 LLM 的 0.99 刷新
+        assert result.confidence == 0.0
+        assert result.engine_layer == EngineLayer.L1_RULE
+        assert result.needs_human_review
+        assert "未返回有效等级" in result.reasoning
+        # 不产生 LLM 审计标签
+        assert not [t for t in result.tags if t.source_engine == "LLM"]
+
+    def test_scenario_b_invalid_final_level_rejected(self, taxonomy, engine_conflict):
+        """场景 B：LLM 输出 taxonomy 之外的等级（L9）→ 视为无效裁定。"""
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.is_available = True
+        mock_llm.classify.return_value = {
+            "final_level": "L9",
+            "confidence": 0.99,
+            "reasoning": "伪造等级",
+        }
+
+        policy = ConfidencePolicy(enable_llm=True, llm_confidence_threshold=0.6)
+        funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, llm_adapter=mock_llm)
+        result, _suppressed = funnel.classify_field("unknown_field", "some text")
+
+        assert result.confidence == 0.0
+        assert result.final_level == "L3"  # 回退 default_level，而非 L9
+        assert result.engine_layer == EngineLayer.L1_RULE
+        assert result.needs_human_review
+
+    def test_scenario_c_missing_final_level_keeps_upstream(self, taxonomy, engine_conflict):
+        """场景 C：多模态 LLM 未返回 final_level → 保留上游结果并人工复核。"""
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.is_available = True
+        mock_llm.classify.return_value = {
+            "confidence": 0.95,
+            "reasoning": "图像内容不清晰",
+        }
+
+        policy = ConfidencePolicy(auto_llm_on_image=True)
+        funnel = ClassificationFunnel(engine_conflict, taxonomy, policy, llm_adapter=mock_llm)
+        result, _suppressed = funnel.classify_field(
+            "case_image", "data:image/png;base64,iVBORw0KGgo="
+        )
+
+        assert result.confidence == 0.0
+        assert result.engine_layer == EngineLayer.L1_RULE
+        assert result.needs_human_review
+        assert "未返回有效等级" in result.reasoning
+
+
+# ===========================================================================
 # FunnelResult 结构完整性
 # ===========================================================================
 

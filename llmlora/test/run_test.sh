@@ -15,6 +15,9 @@ if [ ! -f "$VENV_PY" ]; then
     VENV_PY="python"
 fi
 
+# 确保 venv bin 目录在 PATH 中（ninja 等工具）
+export PATH="$REPO_ROOT/llmlora/.venv/bin:$PATH"
+
 export VLLM_USE_V1=0
 export VLLM_USE_V2_MODEL_RUNNER=0
 export VLLM_ENABLE_V1_MULTIPROCESSING=0

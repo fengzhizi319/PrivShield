@@ -149,7 +149,7 @@ class ClassificationFunnel:
         
         遵循“简单规则先行，复杂长文本才用 NER”原则：
         1. 排除 PII 身份/结构化短字段（如 id_card_no, phone, name, age, gender 等）；
-        2. 排除纯数字、纯英文、短标记（长度 < 4 或无中文）；
+        2. 排除纯数字、纯英文、短标记（去空白长度 < 2 或无连续中文）；
         3. 仅对临床非结构化文书字段（present_illness, family_history 等）或 L1 未命中的复杂长文本触发。
         """
         if not value or len(value.strip()) < 2:
@@ -229,8 +229,8 @@ class ClassificationFunnel:
         except Exception:
             pass
 
-        # 取所有命中标签的最大置信度（支持规则自定义 confidence）
-        # Use max confidence from matched tags (supports per-rule custom confidence)
+        # 取所有命中标签的最大置信度（规则标签恒为确定性 1.0，L5/L4 补全扫描为 0.99/0.95）
+        # Use max confidence from matched tags (rule tags are deterministic 1.0)
         confidence = max((t.confidence for t in tags), default=0.0)
         engine_layer = EngineLayer.L1_RULE
         reasoning = ""
@@ -414,9 +414,15 @@ class ClassificationFunnel:
                             standard_id=self.taxonomy.standard_id,
                         ))
                 else:
-                    confidence = llm_confidence
-                    reasoning = "【多模态视觉识别】" + str(llm_result.get("reasoning", reasoning))
-                    engine_layer = EngineLayer.L3_LLM
+                    # 安全地板兜底：LLM 未返回合法等级（可能来自 Prompt 注入/模型幻觉），
+                    # 视为无效裁定——不刷新置信度、不归属 L3，保留上游结果并强制人工复核，
+                    # 防止"高置信度 + 无等级"输出静默抬高整体置信度。
+                    needs_human_review = True
+                    reasoning += " | 多模态LLM未返回有效等级(保留上游结果,待人工复核)"
+                    logger.warning(
+                        "funnel_llm_no_valid_level",
+                        extra={"field_name": field_name, "scenario": "C"},
+                    )
 
         elif confidence < self.policy.llm_confidence_threshold:
             # 场景 B: 低置信度兜底（无冲突但置信度不足）
@@ -457,9 +463,15 @@ class ClassificationFunnel:
                                 standard_id=self.taxonomy.standard_id,
                             ))
                     else:
-                        confidence = llm_confidence
-                        reasoning = str(llm_result.get("reasoning", reasoning))
-                        engine_layer = EngineLayer.L3_LLM
+                        # 安全地板兜底：LLM 未返回合法等级（可能来自 Prompt 注入/模型幻觉），
+                        # 视为无效裁定——不刷新置信度、不归属 L3，保留上游结果并强制人工复核，
+                        # 防止"高置信度 + 无等级"输出静默抬高整体置信度。
+                        needs_human_review = True
+                        reasoning += " | LLM未返回有效等级(保留上游结果,待人工复核)"
+                        logger.warning(
+                            "funnel_llm_no_valid_level",
+                            extra={"field_name": field_name, "scenario": "B"},
+                        )
 
         # ===== Step 5: 计算最终等级 =====
         # 优先级: LLM 裁定等级 > 有效标签 max_level

@@ -36,6 +36,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from llmlora.src.dataset.loader import load_jsonl  # noqa: E402
 from llmlora.src.inference.engine import QwenPrivacyLoRAEngine  # noqa: E402
+from llmlora.src.inference.engine_vllm import QwenPrivacyVLLMEngine  # noqa: E402
 from llmlora.src.utils.metrics import (  # noqa: E402
     calculate_classification_metrics,
     calculate_entity_f1,
@@ -79,10 +80,15 @@ def run_evaluation(
     test_data_path: str,
     rules_dir: str,
     max_samples: int = 0,
+    backend: str = "pytorch",
 ) -> Dict[str, Any]:
     """执行完整 Benchmark 评估 / Run the full benchmark evaluation."""
-    print(f"正在加载推理引擎, model_path: {model_path}, adapter_path: {adapter_path}")
-    engine = QwenPrivacyLoRAEngine(model_path=model_path, adapter_path=adapter_path)
+    print(f"正在加载推理引擎 [{backend}], model_path: {model_path}, adapter_path: {adapter_path}")
+
+    if backend == "vllm":
+        engine = QwenPrivacyVLLMEngine(model_path=model_path, adapter_path=adapter_path)
+    else:
+        engine = QwenPrivacyLoRAEngine(model_path=model_path, adapter_path=adapter_path)
 
     print(f"读取测试集数据: {test_data_path}")
     test_samples = load_jsonl(test_data_path)
@@ -177,11 +183,15 @@ def main() -> None:
         help="规则库目录（零泄漏复扫用）",
     )
     parser.add_argument("--max-samples", type=int, default=0, help="最多评估条数（0=全部）")
+    parser.add_argument(
+        "--backend", type=str, default="pytorch", choices=["pytorch", "vllm"],
+        help="推理后端：pytorch（默认）或 vllm（更快，需安装 vllm）",
+    )
     args = parser.parse_args()
 
     # 适配器挂载策略 / Adapter mounting policy:
     # 1. adapter 目录不存在 → 不挂载 / Missing adapter dir -> skip.
-    # 2. 未显式指定 adapter 且 model-path 是合并模型（路径含 merged）→ 不挂载，
+    # 2. 未显式指定 adapter 且 model-path 是合并模型（路径含 merged 或 smoother）→ 不挂载，
     #    避免在已融合 LoRA 权重上重复叠加适配器。
     #    Default adapter is skipped for merged models to avoid double-applying
     #    the LoRA weights that are already fused into the checkpoint.
@@ -189,10 +199,12 @@ def main() -> None:
     adapter_path: Optional[str] = (
         args.adapter_path if Path(args.adapter_path).exists() else None
     )
+    model_name_lower = Path(args.model_path).name.lower()
+    is_merged_model = "merged" in model_name_lower or "smoother" in model_name_lower
     if (
         adapter_path is not None
         and not adapter_explicit
-        and "merged" in Path(args.model_path).name.lower()
+        and is_merged_model
     ):
         print(
             f"检测到合并模型 ({args.model_path})，跳过默认 LoRA 适配器挂载"
@@ -201,7 +213,7 @@ def main() -> None:
         adapter_path = None
     run_evaluation(
         args.model_path, adapter_path, args.test_data_path,
-        args.rules_dir, args.max_samples,
+        args.rules_dir, args.max_samples, args.backend,
     )
 
 

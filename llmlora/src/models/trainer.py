@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -214,9 +215,10 @@ class LoRATrainingRunner:
         self.model = AutoModelForCausalLM.from_pretrained(
             self.cfg.base_model_path,
             torch_dtype=model_dtype,
-            device_map="auto" if cuda_available else None,
             trust_remote_code=True,
         )
+        if cuda_available:
+            self.model.to("cuda")
         # 训练必须关闭 KV cache（与 gradient checkpointing 不兼容）
         # KV cache must be off during training (incompatible with grad checkpointing)
         self.model.config.use_cache = False
@@ -379,15 +381,16 @@ class LoRATrainingRunner:
     # ------------------------------------------------------------------
 
     def merge_and_export(self):
-        """将 LoRA 权重合并回基座并导出独立 checkpoint / Merge LoRA into base and export.
+        """将训练好的 LoRA 权重与基座模型融合，导出独立模型。
 
-        在 CPU 内存完成合并以避免 GPU OOM；基座 tie_word_embeddings=True，
-        Merging happens in CPU RAM to avoid GPU OOM; the base ties word embeddings,
-        save_pretrained 会自动处理权重共享，不会重复保存 lm_head。
-        and save_pretrained handles weight sharing without duplicating lm_head.
+        Merge trained LoRA weights with the base model and export as a standalone model.
+        导出格式兼容 vLLM v0.26（Qwen3_5ForConditionalGeneration 多模态包装器）。
+        Export format is compatible with vLLM v0.26 (Qwen3_5ForConditionalGeneration).
         """
         logger.info("开始执行 LoRA 权重与基座模型合并 (Merge & Unload)...")
         os.makedirs(self.cfg.merged_output_dir, exist_ok=True)
+        if self.tokenizer is None:
+            self.prepare_tokenizer()
 
         try:
             # 合并导出统一使用基座原始 dtype（config.json 中为 bfloat16）
@@ -403,7 +406,7 @@ class LoRATrainingRunner:
             peft_model = PeftModel.from_pretrained(base_model, self.cfg.output_dir)
             merged_model = peft_model.merge_and_unload()
 
-            logger.info(f"保存合并后的模型到: {self.cfg.merged_output_dir}")
+            logger.info(f"保存合并后的文本模型权重到: {self.cfg.merged_output_dir}")
             merged_model.save_pretrained(
                 self.cfg.merged_output_dir,
                 max_shard_size=self.cfg.max_shard_size,
@@ -415,21 +418,80 @@ class LoRATrainingRunner:
             if getattr(base_model, "generation_config", None) is not None:
                 base_model.generation_config.save_pretrained(self.cfg.merged_output_dir)
 
-            # 兼容 vLLM v0.26 加载 Qwen3.5 纯文本模型 config.json
-            config_path = Path(self.cfg.merged_output_dir) / "config.json"
-            if config_path.exists():
-                with open(config_path, "r", encoding="utf-8") as f:
-                    cfg_data = json.load(f)
-                if "text_config" in cfg_data and isinstance(cfg_data["text_config"], dict):
-                    if cfg_data["text_config"].get("model_type") == "qwen3_5_text":
-                        cfg_data["text_config"]["model_type"] = "qwen3_5"
-                        with open(config_path, "w", encoding="utf-8") as f:
-                            json.dump(cfg_data, f, indent=4, ensure_ascii=False)
+            # ------------------------------------------------------------------
+            # vLLM v0.26 兼容性补丁 / vLLM v0.26 compatibility patch
+            # ------------------------------------------------------------------
+            # vLLM 模型注册表仅有 Qwen3_5ForConditionalGeneration（多模态），
+            # 不支持独立的 Qwen3_5ForCausalLM。因此需要：
+            # 1. 用原始基座的完整 config.json（含 vision_config + text_config 嵌套）
+            # 2. 将原始基座的 visual.* 权重合并到 merged safetensors
+            #
+            # vLLM's model registry only has Qwen3_5ForConditionalGeneration
+            # (multimodal), not standalone Qwen3_5ForCausalLM. So we must:
+            # 1. Use the original base's full config.json (with vision_config)
+            # 2. Copy visual.* weights from the original base into merged safetensors
+            self._patch_for_vllm_compatibility(export_dtype)
 
             logger.info("权重合并并导出成功！")
         except Exception as exc:
             logger.error(f"合并权重时发生异常: {exc}", exc_info=True)
             raise
+
+    def _patch_for_vllm_compatibility(self, export_dtype: torch.dtype) -> None:
+        """补丁合并模型以兼容 vLLM 加载 / Patch merged model for vLLM compatibility.
+
+        vLLM v0.26 仅注册了 Qwen3_5ForConditionalGeneration（多模态架构），
+        需要完整的 config.json（嵌套 text_config + vision_config）和 visual.* 权重。
+        """
+        from safetensors.torch import load_file, save_file
+
+        merged_dir = Path(self.cfg.merged_output_dir)
+        base_dir = Path(self.cfg.base_model_path)
+        config_path = merged_dir / "config.json"
+
+        # 1. 用原始基座模型的完整 config.json 替换拍平的文本配置
+        # Replace the flattened text config with the original base's full config
+        base_config_path = base_dir / "config.json"
+        if base_config_path.exists():
+            import shutil
+            shutil.copy2(str(base_config_path), str(config_path))
+
+            # 更新 text_config 中被 LoRA 训练修改的参数（如有）
+            # Update text_config params that may have changed during LoRA training
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg_data = json.load(f)
+            cfg_data.pop("sliding_window", None)
+            cfg_data.pop("use_sliding_window", None)
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg_data, f, indent=2, ensure_ascii=False)
+            logger.info("config.json 已替换为原始基座完整格式（含 vision_config）")
+
+        # 2. 将原始基座的 model.visual.* 权重合并到 merged safetensors
+        # Merge model.visual.* weights from the original base into merged safetensors
+        base_st_files = list(base_dir.glob("*.safetensors"))
+        merged_st_files = list(merged_dir.glob("*.safetensors"))
+
+        if base_st_files and merged_st_files:
+            # 加载原始基座的所有权重（含 model.visual.*）
+            # Load all weights from the original base (including model.visual.*)
+            visual_weights: Dict[str, torch.Tensor] = {}
+            for st_file in base_st_files:
+                state_dict = load_file(str(st_file), device="cpu")
+                for key, tensor in state_dict.items():
+                    if key.startswith("model.visual.") or key.startswith("visual."):
+                        target_key = key if key.startswith("model.visual.") else f"model.{key}"
+                        visual_weights[target_key] = tensor.to(export_dtype)
+
+            if visual_weights:
+                # 将 visual 权重写入 merged 的第一个 safetensors 分片
+                # Write visual weights into the first merged safetensors shard
+                target_file = merged_st_files[0]
+                existing = load_file(str(target_file), device="cpu")
+                existing.update(visual_weights)
+                save_file(existing, str(target_file))
+                logger.info(
+                    f"已合并 {len(visual_weights)} 个 visual.* 权重到 {target_file.name}"
+                )
 
 
 def run_lora_training(cfg: Config) -> LoRATrainingRunner:
