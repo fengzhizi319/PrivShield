@@ -34,6 +34,7 @@ Welcome to the **Privacy Local Agent** documentation.
 - **Data Classification** — 3-layer funnel: Rule Engine → NER → LLM
 - **Infrastructure** — Gateway, load balancer, health checks
 - **Production** — Security, observability, deployment
+- **Audit & Security** — [Full Project Audit & Remediation Report (2026)](audit_reports/2026_full_project_audit_report.md)
 - **Appendix** — Personalized profiles, improvement suggestions
 
 ---
