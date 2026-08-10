@@ -81,7 +81,7 @@ npm run lint         # eslint . --ext ts,tsx --max-warnings 0
 
 ```bash
 # 1. 启动 agent + Python 后端
-./console/start.sh
+./console/scripts/dev-start.sh
 
 # 2. 构建前端（若未构建）
 cd console/web && npm run build

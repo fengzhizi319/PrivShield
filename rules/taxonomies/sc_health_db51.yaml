@@ -59,3 +59,12 @@ categories:
     name: 金融账户数据
     parent_id: PERSONAL_BASIC
 default_level: L3
+
+# 置信度策略配置（按 AGENTS.md §9.3 显式补齐，取值与 default 体系保持一致的保守默认）
+confidence_policy:
+  conflict_confidence: 0.7        # 规则冲突时的置信度（普通规则 + 降级规则同时命中）
+  conflict_needs_review: true     # 冲突时标记人工复核
+  enable_llm_arbitration: false   # 是否启用 LLM 仲裁（需 ML 镜像）
+  llm_confidence_threshold: 0.6   # LLM 触发阈值
+  enable_ner: false               # 是否启用 NER 层
+  enable_llm: false               # 是否显式启用 LLM 层

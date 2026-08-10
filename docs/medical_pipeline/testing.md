@@ -28,7 +28,7 @@
 ### 2.1 运行医疗 Pipeline 测试集
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 PYTHONPATH=. pytest tests/test_medical_pipeline.py -v
 ```
 

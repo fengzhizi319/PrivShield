@@ -1183,13 +1183,13 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = No
         bound_port = server.add_secure_port(f"{host}:{port}", creds)  # 安全端口
         if bound_port == 0:
             raise RuntimeError(f"Failed to bind gRPC secure port on {host}:{port}")
-        print(f"gRPC server started on {host}:{port} (TLS/mTLS)")
+        logger.info("grpc_server_started", extra={"host": host, "port": bound_port, "tls": True})
     else:
         # 本地开发模式，使用非安全端口；生产环境建议启用 TLS/mTLS
         bound_port = server.add_insecure_port(f"{host}:{port}")  # 非安全端口
         if bound_port == 0:
             raise RuntimeError(f"Failed to bind gRPC port on {host}:{port}")
-        print(f"gRPC server started on {host}:{port}")
+        logger.info("grpc_server_started", extra={"host": host, "port": bound_port, "tls": False})
 
     # ── 步骤 5：启动服务 / Step 5: Start server ──
     server.start()  # 非阻塞启动，后台线程开始接受连接

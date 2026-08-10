@@ -152,7 +152,7 @@ def test_ner_custom_sensitive_keywords(taxonomy, engine_conflict):
 ### 校验命令
 
 ```bash
-cd /Users/charles/Documents/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 PYTHONPATH=. python -m pytest tests/dynclassification/ -v
 ```
 
@@ -191,7 +191,7 @@ def test_validate_standards(yaml_file):
 ## 5. 运行全套单元测试
 
 ```bash
-cd /Users/charles/Documents/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 PYTHONPATH=. pytest tests/dynclassification/ -v
 ```
 

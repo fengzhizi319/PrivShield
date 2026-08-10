@@ -33,7 +33,7 @@ from ..observability.metrics import (
 from .composite import CompositeRuleEngine
 from .engine import ConfigurableRuleEngine
 from .models import DomainTaxonomy
-from .rule_schema import CompositeRuleDef, DowngradeRuleDef, RuleDef, RuleProfile, StandardDef
+from .rule_schema import CompositeRuleDef, RuleDef, RuleProfile, StandardDef
 
 logger = get_logger(__name__)
 

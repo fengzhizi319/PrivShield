@@ -41,7 +41,7 @@ Helm Chart 通过 `flavor: core` 或 `flavor: ml` 自动选择镜像标签；当
 ### 3.1 开发模式（默认关闭 TLS/认证）
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 
 # 构建 core 镜像
 docker build --target core -t privacy-local-agent:0.1.0 .
@@ -108,7 +108,7 @@ helm install pla ./deploy/helm/privacy-local-agent \
 ### 4.1 基础部署
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 
 # 直接 apply kustomization 组织的 manifests
 kubectl apply -k ./deploy/k8s/
@@ -150,7 +150,7 @@ kubectl apply -k ./deploy/k8s/
 ### 5.1 基础启动
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/deploy/docker-compose
+cd deploy/docker-compose
 
 # 启动服务（-d 后台运行）
 docker-compose up -d

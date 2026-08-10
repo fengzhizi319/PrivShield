@@ -49,3 +49,10 @@ site/
 # llmlora basemodels & output
 /llmlora/basemodels/
 /llmlora/output/
+
+# Secrets: 环境密钥文件一律不入库（模板 .env.example 除外）
+.env
+.env.*
+!.env.example
+/llmlora/.env
+/llmlora/.env.*

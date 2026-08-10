@@ -3,7 +3,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
 from privacy_local_agent.deps import SECURITY_DEPS, service

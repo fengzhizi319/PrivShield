@@ -9,7 +9,7 @@ import csv
 import io
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
+from fastapi import APIRouter, HTTPException, File, UploadFile, Query, status
 from pydantic import BaseModel, Field
 
 from privacy_local_agent.deps import SECURITY_DEPS
@@ -50,7 +50,7 @@ async def process_records(req: ProcessRecordsRequest) -> PipelineResult:
         )
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-    except Exception as e:
+    except Exception:
         logger.error("pipeline_process_records_failed", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Pipeline processing encounter internal error")
 
@@ -99,6 +99,6 @@ async def process_csv(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.error("pipeline_process_csv_failed", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process uploaded CSV file")

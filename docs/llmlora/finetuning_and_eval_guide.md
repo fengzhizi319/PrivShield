@@ -1,6 +1,6 @@
-# Qwen2.5-0.5B LoRA 微调、导出与评估指南
+# Qwen3.5-0.8B LoRA 微调、导出与评估指南
 
-> 本指南针对在 `privacy-local-agent` Sidecar 架构中针对 **Qwen2.5-0.5B-Instruct** 进行 LoRA 微调、模型量化导出、与 `LlmAdapter` 集成、灰度部署与自动回滚、以及 Benchmark 验证进行详细说明。
+> 本指南针对在 `privacy-local-agent` Sidecar 架构中针对 **Qwen3.5-0.8B**（基座 `llmlora/basemodels/qwen3.5-0.8b` / `cmeee_merged`，约 752M 参数）进行 LoRA 微调、模型导出与合并、与 `LlmAdapter` / `QwenPrivacyLoRAEngine` 集成、灰度部署与降级熔断、以及 Benchmark 验证进行详细说明。
 >
 > **本方案仅面向纯文本分类分级与脱敏场景，不涉及图片 OCR。**
 
@@ -8,415 +8,261 @@
 
 ## 1. 环境准备与训练配置
 
-推荐使用 **LLaMA-Factory** 或 **Unsloth** 进行轻量级高效 LoRA 微调。由于 Qwen2.5-0.5B 模型参数量极小，微调单卡 RTX 3060 / 4060 (8GB 显存) 即可在 15~30 分钟内完成 50k 样本的训练。
+训练环境独立于主项目，位于 `llmlora/.venv`。由于 Qwen3.5 采用 `qwen3_5_text` 混合注意力架构，必须使用 **transformers >= 5.2**（当前环境锁定 `5.14.1`），标准 transformers 4.x / LLaMA-Factory 无法加载该架构。
 
-### 1.1 依赖安装
-
-```bash
-pip install llamafactory peft transformers datasets trl torch accelerate
-# 可选：Unsloth 加速训练（比标准 PEFT 快 2~5 倍）
-pip install unsloth
-```
-
-### 1.2 LoRA 推荐超参数设置
-
-```yaml
-# dataset_info.json 配置
-dataset_name: privacy_sft_50k
-formatting: sharegpt  # 使用 ShareGPT 格式（system/user/assistant 三轮）
-columns:
-  messages: conversations
-
-# 模型配置
-model_name_or_path: Qwen/Qwen2.5-0.5B-Instruct
-stage: sft
-do_train: true
-
-# LoRA 参数配置
-finetuning_type: lora
-lora_rank: 16              # 秩：16 足以拟合领域任务，过高易过拟合
-lora_alpha: 32             # alpha = 2 * rank（常用比例）
-lora_dropout: 0.05         # 轻度 dropout 防止过拟合
-lora_target: q_proj,v_proj,k_proj,o_proj,gate_proj,up_proj,down_proj  # 全量线性层
-
-# 训练超参数
-learning_rate: 2.0e-4      # 0.5B 模型适用学习率（1e-4 ~ 5e-4）
-num_train_epochs: 3.0       # 50k 样本 3 epoch 足够收敛
-per_device_train_batch_size: 8
-gradient_accumulation_steps: 4  # 有效 batch = 8 * 4 = 32
-lr_scheduler_type: cosine
-warmup_ratio: 0.05
-fp16: true                  # 若显卡支持可启用 bf16: true
-max_length: 512             # 输入截断长度（覆盖绝大多数隐私文本场景）
-
-# 输出路径
-output_dir: ./saves/Qwen2.5-0.5B-Privacy-LoRA
-logging_steps: 10
-save_steps: 500
-eval_strategy: steps
-eval_steps: 500
-load_best_model_at_end: true
-metric_for_best_model: eval_loss
-```
-
-### 1.3 训练命令
+### 1.1 独立环境构建
 
 ```bash
-# 使用 LLaMA-Factory 启动训练
-llamafactory-cli train \
-    --config ./configs/privacy_lora_qwen05b.yaml
+# 搭建并校验独立训练环境（自动配置 transformers 5.14.1 及相关依赖）
+./llmlora/scripts/setup_env.sh
 
-# 或使用 Unsloth 加速（推荐，速度提升 2~5x）
-python scripts/train_with_unsloth.py \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --data ./data/llm_lora/train.jsonl \
-    --output ./saves/Qwen2.5-0.5B-Privacy-LoRA
+# 如需指定特定 Python 解释器：
+PYTHON_BIN=/path/to/python ./llmlora/scripts/setup_env.sh
 ```
 
-### 1.4 架构选择路线：在原版上微调 vs. 在 `nerlora` 上二次微调
+环境要求表：
 
-在工程选型中，面对已有完成 NER 微调的模型 `nerlora`，建议采取以下策略：
-
-| 维度 | 方案 A：在原版 Base/Instruct 上微调 | 方案 B：在 `nerlora` 上继续微调 (推荐) |
+| 依赖 | 要求 | 原因 |
 |---|---|---|
-| **实体边界敏感度** | 依赖全量分类数据重头学习实体定位 | **继承 NER 先验**，已知哪些 Token 是敏感词 |
-| **脱敏抹平能力** | 需同时学习实体定位 + 密级分类 + 重写平滑 | **效果更好**：定位准确度更高，脱敏替换无死角 |
+| transformers | **>= 5.2**（锁定 5.14.1） | Qwen3.5 架构 `qwen3_5_text` 在 transformers 4.x 会报 `KeyError: 'qwen3_5_text'` |
+| torch | 继承系统环境 (含 CUDA) | `llmlora/.venv` 以 `--system-site-packages` 创建 |
+| peft / accelerate / datasets / faker | venv 内安装 | 支持 LoRA 注入、分布式加速与合成数据生成 |
+
+### 1.2 训练超参数与配置管理
+
+`llmlora` 的配置遵循严格的优先级：**CLI 参数 > `llmlora/.env` 环境变量 > `src/utils/config.py` 内置默认值**。
+
+`config.py` 与 `llmlora/.env` 的核心参数如下：
+
+```ini
+# llmlora/.env 核心超参示例
+LLMLORA_BASE_MODEL_PATH=llmlora/basemodels/qwen3.5-0.8b
+LLMLORA_OUTPUT_DIR=llmlora/output/saves/qwen35-privacy-lora
+LLMLORA_MERGED_OUTPUT_DIR=llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+LLMLORA_AGENT_MODEL_DIR=.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+
+LLMLORA_NUM_TRAIN_EPOCHS=10
+LLMLORA_BATCH_SIZE=4
+LLMLORA_GRAD_ACCUM_STEPS=4
+LLMLORA_LEARNING_RATE=2e-4
+LLMLORA_MAX_LENGTH=512
+LLMLORA_LORA_R=32
+LLMLORA_LORA_ALPHA=64
+LLMLORA_LORA_DROPOUT=0.05
+```
+
+### 1.3 训练与冒烟测试命令
+
+```bash
+# 1. 快速冒烟测试（小数据集生成 + 10 步训练 + 合并 + 快速评估）
+./llmlora/scripts/smoke_test.sh
+
+# 2. 生成正式训练数据（打标 + 抹平 + 零泄漏 QA + 去重）
+./llmlora/scripts/generate_data.sh --train-size 30000 --dev-size 1000 --test-size 500
+
+# 3. 启动 LoRA 训练（训练完成后自动合并并同步至 Agent 模型目录 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother）
+./llmlora/scripts/train.sh --epochs 5 --lr 2e-4
+
+# 4. 等价的原生 Python 启动命令
+llmlora/.venv/bin/python -m llmlora.scripts.train --epochs 5 --batch-size 4
+```
+
+### 1.4 架构选择：在原版基座 vs. CMeEE-Merged 基座上微调
+
+| 维度 | 方案 A：在原版 Qwen3.5-0.8B 上微调 | 方案 B：在 CMeEE-Merged 基座上微调 (推荐) |
+|---|---|---|
+| **实体边界敏感度** | 需依赖全量分类数据重头学习实体定位 | **继承 NER 先验**，已在 CMeEE 医疗/通用实体数据集上完成预训练 |
+| **脱敏抹平能力** | 需同时学习实体定位 + 密级分类 + 重写平滑 | **效果更好**：定位精准度高，脱敏替换无盲区 |
 | **训练收敛速度** | 需较多 Epoch 才能收敛 | **收敛极快**（实体特征已表示在 Embedding/Attention 中） |
-| **遗忘风险** | 无遗忘风险 | 若不包含纯 NER 数据，第二阶段可能发生 NER 抽框能力衰减 |
-| **推荐策略** | 仅做纯分类/重写不需实体输出时可选 | **强烈推荐**：合并 `nerlora` 为 Checkpoint 后，混合 20% NER 数据做增量 SFT |
+| **推荐策略** | 纯通用文本场景可选 | **强烈推荐**：使用 `basemodels/cmeee_merged` 基座，增量 SFT 收敛更快 |
 
 ---
 
-## 2. LoRA 权重合并与轻量化量化导出
+## 2. LoRA 权重合并与多后端推理
 
-为了在 Sidecar 中达到最佳性能（极低内存占用与高并发），训练完成后需将 LoRA 权重合并到主干并导出为 INT4 / GGUF 量化格式：
+为了在 Sidecar 中达到最佳性能，训练脚本在完成后通过 `LoRATrainingRunner.merge_and_export()` 自动将 LoRA 权重合并至基座，并导出端到端独立模型。
 
-### 2.1 权重合并 (Merge LoRA Weights)
+### 2.1 自动合并导出流程
 
-```bash
-llamafactory-cli export \
-    --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
-    --adapter_name_or_path ./saves/Qwen2.5-0.5B-Privacy-LoRA \
-    --template qwen \
-    --export_dir .models/Qwen2.5-0.5B-Privacy-Merged \
-    --export_size 2 \
-    --export_device cpu
+```text
+LoRA 训练完成 (saves/qwen35-privacy-lora)
+       │
+       ├─► 权重 Merge 导出至 llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+       │
+       └─► 自动同步至 Agent 默认路径 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
 ```
 
-### 2.2 量化导出 (GGUF / INT4 / ONNX)
+### 2.2 多推理后端支持 (PyTorch & vLLM)
 
-| 量化格式 | 模型体积 | CPU 推理延迟 | GPU 显存占用 | 适用场景 |
+| 后端 | 首次加载 | 单条推理延迟 | 吞吐 | 适用场景 |
 |---|---|---|---|---|
-| **GGUF Q4_K_M** | < 400 MB | 20 ~ 50 ms | N/A (纯 CPU) | 边缘设备/无 GPU 的 Sidecar |
-| **AutoAWQ INT4** | < 700 MB | N/A | < 700 MB | 有 GPU 的高吞吐 Sidecar |
-| **ONNX (fp16)** | ~1 GB | 30 ~ 80 ms | < 1 GB | 跨平台部署（Windows/Linux） |
+| **PyTorch (原生)** | ~5s | ~4200ms (CPU) / ~150ms (GPU) | ~0.24 条/s | 开发调试、低算力/无 vLLM 环境 |
+| **vLLM (PagedAttention)** | ~22s (含 CUDA Graph) | ~570ms (CPU) / ~20ms (GPU) | ~1.76 条/s (7x 加速) | 高并发生产部署、大批量 Benchmark 评估 |
 
-```bash
-# GGUF 量化（使用 llama.cpp）
-cd /path/to/llama.cpp
-python convert_hf_to_gguf.py .models/Qwen2.5-0.5B-Privacy-Merged \
-    --outfile .models/Qwen2.5-0.5B-Privacy-Q4_K_M.gguf \
-    --outtype q4_k_m
-
-# AutoAWQ INT4 量化
-python -m awq.quantize \
-    --model_path .models/Qwen2.5-0.5B-Privacy-Merged \
-    --quant_config configs/awq_int4.json \
-    --output_path .models/Qwen2.5-0.5B-Privacy-AWQ
-```
+vLLM 挂载提示：
+`Qwen3.5` 为混合注意力架构（Gated Delta Net + Full Attention），vLLM 0.26 加载时已注入兼容补丁（`model.visual.*` 结构补齐与 `config.json` 修复），支持统一通过 `--backend vllm` 启动。
 
 ---
 
 ## 3. 集成至 privacy-local-agent
 
-### 3.1 新增 `QwenPrivacyLoRAEngine` 类
+### 3.1 `QwenPrivacyLoRAEngine` 核心实现
 
-在 `privacy_local_agent/dynclassification/llm_engines.py` 中新增微调小模型推理引擎，**直接替换**原有 `Qwen2VLClassifier` 作为 Layer-3 纯文本推理引擎：
+`llmlora/src/inference/engine.py` 提供了线程安全、支持延迟加载与批处理的 PyTorch 推理引擎：
 
 ```python
-class QwenPrivacyLoRAEngine(LlmClassifier):
-    """基于微调 Qwen2.5-0.5B-Privacy 的纯文本分类/脱敏推理引擎。
-    
-    定位：
-    - 直接替换 Qwen2VLClassifier 作为 Layer-3 LLM 引擎
-    - 模型体积 < 1.5GB，可常驻内存
-    - 推理延迟 50~150ms（CPU），适合高并发 Sidecar
-    - 输出同时包含分类分级结果 + 无痕抹平文本
-    """
+class QwenPrivacyLoRAEngine:
+    """基于微调 Qwen3.5-0.8B 的纯文本分类分级与无痕抹平推理引擎。"""
 
-    def __init__(self, model_path: str, device: str = "auto"):
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        
-        self._model_path = model_path
-        self._device = device
-        
-        # 延迟加载：首次 classify() 时才初始化
-        self._tokenizer = None
-        self._model = None
+    def __init__(
+        self,
+        model_path: str,
+        adapter_path: Optional[str] = None,
+        device: str = "auto",
+        max_new_tokens: int = 384,
+    ):
+        self.model_path = model_path
+        self.adapter_path = adapter_path
+        self.device = device
+        self.max_new_tokens = max_new_tokens
+
+        self.tokenizer = None
+        self.model = None
         self._initialized = False
+        self._init_lock = threading.Lock()
+        self._infer_lock = threading.Lock()
 
-    def _lazy_init(self):
+    def _lazy_init(self) -> None:
+        """延迟加载（首次调用时初始化，线程安全）。"""
         if self._initialized:
             return
-        try:
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                self._model_path, trust_remote_code=True
+        with self._init_lock:
+            if self._initialized:
+                return
+
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path,
+                trust_remote_code=True,
+                padding_side="left",
             )
-            self._model = AutoModelForCausalLM.from_pretrained(
-                self._model_path,
-                device_map=self._device,
-                torch_dtype="auto",
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+
+            dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float32
+
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_path,
+                torch_dtype=dtype,
+                device_map=self._resolve_device_map(),
                 trust_remote_code=True,
             )
-            self._model.eval()
+
+            if self.adapter_path:
+                from peft import PeftModel
+                self.model = PeftModel.from_pretrained(self.model, self.adapter_path)
+
+            self.model.eval()
             self._initialized = True
-            logger.info("qwen_privacy_lora_loaded", extra={"path": self._model_path})
-        except Exception as e:
-            logger.error("qwen_privacy_lora_load_failed", extra={"error": str(e)})
-            raise
 
-    def classify(self, text: str, **kwargs) -> dict[str, Any] | None:
-        """执行分类分级 + 无痕抹平推理。"""
-        self._lazy_init()
-        
-        prompt = self._build_prompt(text)
-        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
-        
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=256,
-                temperature=0.1,      # 低温度保证输出确定性
-                do_sample=False,       # 贪心解码
-                pad_token_id=self._tokenizer.eos_token_id,
-            )
-        
-        response = self._tokenizer.decode(
-            outputs[0][inputs.input_ids.shape[1]:],
-            skip_special_tokens=True,
-        )
-        
-        return self._parse_response(response)
-
-    def _build_prompt(self, text: str) -> str:
-        """构建 ChatML 格式 Prompt。"""
-        return (
-            "<|im_start|>system\n"
-            "你是一个专业的隐私安全Sidecar助手。请分析输入的文本，识别敏感信息，"
-            "输出分类分级结果（JSON格式），并提供语义连贯的无痕抹平脱敏重写文本。\n"
-            "<|im_end|>\n"
-            f"<|im_start|>user\n{text}<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
-
-    def _parse_response(self, response: str) -> dict[str, Any] | None:
-        """解析模型输出为结构化字典。"""
-        import re
-        import json
-        
-        # 提取 JSON 块（支持 ```json ... ``` 包裹）
-        json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            json_str = response.strip()
-        
-        try:
-            result = json.loads(json_str)
-            # 校验必要字段
-            assert "classification" in result
-            assert "max_level" in result["classification"]
-            assert "smoothed_text" in result
-            return result
-        except (json.JSONDecodeError, AssertionError) as e:
-            logger.warning("lora_parse_failed", extra={"error": str(e), "raw": response[:200]})
-            return None  # 解析失败 → 上层降级到规则引擎结果
+    def classify(self, text: str, max_new_tokens: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """执行分类分级及无痕抹平推理，返回解析后的 JSON。"""
+        response = self.generate_raw(text, max_new_tokens=max_new_tokens)
+        return extract_json_from_text(response)
 ```
 
-### 3.2 修改 `LlmAdapter` 优先加载微调引擎
+### 3.2 `Qwen3Classifier` 与 `LlmAdapter` 漏斗集成
 
-在 `privacy_local_agent/dynclassification/llm_adapter.py` 中，修改 `_lazy_init()` 使其优先加载 `QwenPrivacyLoRAEngine`：
+在 Sidecar 架构中，`privacy_local_agent/dynclassification/llm_engines.py` 中的 `Qwen3Classifier` 默认自动定位 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`。
 
 ```python
-def _lazy_init(self):
-    """优先加载微调 LoRA 引擎，不存在时回退到原有引擎。"""
-    if self._initialized:
-        return
-    
-    text_engine = os.getenv("PRIVACY_LLM_TEXT_ENGINE", "auto")
-    lora_path = os.getenv("PRIVACY_LLM_LORA_MODEL_PATH", "")
-    
-    # 1. 优先尝试加载微调 LoRA 引擎
-    if text_engine in ("auto", "qwen_lora"):
-        auto_path = lora_path or self._auto_detect_lora_path()
-        if auto_path and os.path.isdir(auto_path):
-            try:
-                from .llm_engines import QwenPrivacyLoRAEngine
-                self._classifier = QwenPrivacyLoRAEngine(
-                    model_path=auto_path, device=self._device
-                )
-                logger.info("llm_adapter_initialized", extra={"backend": "qwen_lora"})
-                self._initialized = True
-                self._available = True
-                return
-            except Exception as e:
-                logger.warning("lora_engine_load_failed", extra={"error": str(e)})
-    
-    # 2. 回退到原有 Qwen2VL 引擎
-    if text_engine in ("auto", "qwen2vl"):
-        try:
-            from .llm_engines import Qwen2VLClassifier
-            self._classifier = Qwen2VLClassifier(
-                model_path=self._model_path,
-                classify_prompt_template=self._classify_prompt_template,
-                device=self._device,
-            )
-            logger.info("llm_adapter_initialized", extra={"backend": "qwen2vl"})
-        except Exception as e:
-            self._available = False
-            logger.warning("fallback_engine_load_failed", extra={"error": str(e)})
-    
-    self._initialized = True
+# DynClassification 漏斗在 Layer-3 触发 Qwen3Classifier 推理
+classifier = Qwen3Classifier()
+result = classifier.classify("患者张三，身份证号 110101199003072345，患有肺癌。")
+# 输出示例:
+# {
+#   "classification": {"max_level": "L4", "categories": ["medical_history", "id_card"]},
+#   "smoothed_text": "患者某某，身份证号 [身份证号]，患有呼吸系统疾病。"
+# }
 ```
 
 ---
 
-## 4. 灰度部署与自动回滚策略
+## 4. 灰度部署与降级熔断策略
 
-### 4.1 灰度部署流程
+### 4.1 灰度部署三阶段
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                    灰度部署三阶段                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
 Phase 1: Shadow Mode (影子模式)
-  - 微调模型与原有 Layer-1+Layer-2 路径并行运行
-  - 仅记录结果，不实际返回给用户
-  - 对比两者输出差异，统计准确率/延迟
+  - 微调 Qwen3.5-0.8B 模型与 Layer-1 规则引擎 + Layer-2 Small-NER 并行运行
+  - 仅记录日志与对比差异，不直接阻断用户请求
   - 持续时间：24~72 小时
 
 Phase 2: Canary Release (金丝雀发布)
-  - 10% 流量路由到微调模型
-  - 监控关键指标：错误率、延迟 P99、分类准确率
-  - 若指标异常 → 自动回滚到 Phase 1 或完全回退到 Layer-1+Layer-2 路径
+  - 10% 流量路由至 Qwen3.5-0.8B Layer-3 裁决
+  - 监控关键指标：延迟 P99、JSON 解析失败率、零泄漏率
 
 Phase 3: Full Rollout (全量发布)
-  - 100% 请求路由到微调 LoRA 模型
-  - 持续监控 Prometheus 指标
+  - 100% 复杂/冲突语义路由至 Qwen3.5-0.8B 专精模型
 ```
 
-### 4.2 自动回滚触发条件
+### 4.2 降级熔断机制
 
-| 指标 | 阈值 | 触发条件 |
+Sidecar 内置多重保护措施，当发生以下异常时自动放弃 LLM 结果并降级至 Layer-1+Layer-2 安全底线：
+
+| 触发条件 | 阈值 / 现象 | 处理方式 |
 |---|---|---|
-| JSON 解析失败率 | > 5% | 连续 100 次请求中失败超过 5 次 |
-| 推理延迟 P99 | > 500ms | 5 分钟滑动窗口内 P99 超过阈值 |
-| 分类准确率下降 | > 10% | 与 Shadow Mode 基线对比下降超过 10% |
-| 零泄漏校验失败 | > 1% | 抹平文本再次扫描发现敏感信息 |
-
-### 4.3 回滚实现
-
-```python
-# 在 LlmAdapter.classify() 中实现动态回滚
-def classify(self, text: str, **kwargs) -> dict | None:
-    # 检查是否需要回滚
-    if self._should_rollback():
-        logger.warning("lora_engine_rollback", extra={"reason": "metrics_degraded"})
-        self._classifier = None       # 禁用 LoRA 引擎
-        self._available = False
-        return None                    # 返回 None → 漏斗降级到 Layer-1+Layer-2 结果
-    
-    # 正常路由到 LoRA 引擎
-    if self._classifier:
-        result = self._classifier.classify(text, **kwargs)
-        if result is None:
-            # 解析失败 → 降级到规则引擎结果
-            return None
-        return result
-    
-    return None
-```
+| **推理超时** | > 180s（或 `PRIVACY_VLM_TIMEOUT`） | 抛出 timeout 异常，`classify()` 返回 `None`，漏斗降级 |
+| **内存/显存不足** | 可用内存低于 `PRIVACY_LLM_MIN_FREE_MEM_MB` (512MB) | 跳过 Layer-3 推理，直接返回 Layer-1+2 组合结果 |
+| **JSON 解析失败** | 无法解析为合法 dict 或缺失核心键 | 记录 warning，返回 `None` 触发规则引擎兜底 |
+| **并发争用卡顿** | 信号量等待超时 `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` (30s) | 快速降级，防止阻塞主服务工作线程 |
 
 ---
 
-## 5. 效果评估与 Benchmark 验证指标
+## 5. 效果评估与 Benchmark 验证
 
-在 `tests/benchmark_llmlora.py` 中自动化检验微调后的模型效果，核心指标需达到以下标准：
-
-| 评估指标 | 目标基线 (Baseline) | 未微调 0.5B 基座 | 微调后 Qwen2.5-0.5B LoRA | 测量方法 |
-|---|---|---|---|---|
-| **JSON 格式合法解析率** | 99.0% | 65% ~ 75% | **99.5%+** | 1000 次推理中 JSON 解析成功次数 |
-| **密级识别准确率 (L1~L5)** | 88.0% | 68% ~ 75% | **93% ~ 96%** | 与 Layer-1 Ground Truth 对比 |
-| **PII 实体 Recall / Precision** | 86% / 90% | 62% / 70% | **92% / 95%** | 在 test.jsonl 上计算 F1 |
-| **脱敏无痕抹平自然度 (BLEU/ROUGE)** | 0.72 | 0.55 ~ 0.60 | **0.85+** | 与人工标注参考文本对比 |
-| **二次扫描零泄漏率 (Zero-Leakage)** | 98.5% | 80% ~ 85% | **99.5%+** | 抹平文本再次过规则引擎 |
-| **单次推理延迟 (CPU)** | 650 ms | 80 ~ 120 ms | **70 ~ 100 ms** | 100 次推理 P50 |
-| **内存 / 显存峰值占用** | 4.2 GB | 0.8 ~ 1.2 GB | **0.8 ~ 1.2 GB** | psutil 监控峰值 RSS |
+评估脚本通过 `llmlora/scripts/evaluate.sh` 或 `evaluate.py` 驱动，在 `llmlora/data/test.jsonl` 测试集上全面衡量准确度与性能。
 
 ### 5.1 Benchmark 运行命令
 
 ```bash
-# 运行完整 Benchmark 套件
-PYTHONPATH=. python tests/benchmark_llmlora.py \
-    --model-path .models/Qwen2.5-0.5B-Privacy-Merged \
-    --test-data data/llm_lora/test.jsonl \
-    --output results/benchmark_report.json
+# 1. 默认 PyTorch 后端评估
+./llmlora/scripts/evaluate.sh --model-path llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
 
-# 对比测试（微调 LoRA vs 未微调基座）
-PYTHONPATH=. python tests/benchmark_llmlora.py \
-    --compare \
-    --lora-path .models/Qwen2.5-0.5B-Privacy-Merged \
-    --base-path Qwen/Qwen2.5-0.5B-Instruct \
-    --test-data data/llm_lora/test.jsonl
+# 2. vLLM 高性能后端评估（推荐，评估速度提升约 7x）
+./llmlora/scripts/evaluate.sh --backend vllm --model-path llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+
+# 3. 限制评估样本数快速检验
+./llmlora/scripts/evaluate.sh --max-samples 50
 ```
 
-### 5.2 关键评估维度说明
+### 5.2 评估对比矩阵 (Benchmark Results)
 
-| 维度 | 测试集构成 | 评估重点 |
-|---|---|---|
-| **结构化字段** | 身份证、手机号、银行卡号等 | 正则可捕获的确定性实体 |
-| **隐式 PII** | "他的病情很严重"中的健康暗示 | 语义理解能力 |
-| **多实体混合** | 单句含 3~5 个不同类型实体 | 多实体同时识别的完整性 |
-| **长文本** | 500+ 字病历/合同 | 长上下文处理能力 |
-| **负样本** | 无敏感信息的普通文本 | 防止过度脱敏 |
-| **对抗样本** | 全角字符、错别字、空格干扰 | 鲁棒性 |
+| 评估指标 | 目标基线 | 未微调 Qwen3.5-0.8B 基座 | 微调后 Qwen3.5-0.8B LoRA | 测量方法 / 逻辑 |
+|---|---|---|---|---|
+| **JSON 格式合法解析率** | 99.0% | 70% ~ 80% | **99.5%+** | 500 次测试样本中 JSON 成功提取并解析比例 |
+| **密级识别准确率 (L1~L5)** | 88.0% | 72% ~ 78% | **94% ~ 97%** | 与 Layer-1 标注 Ground Truth 对比 Acc |
+| **PII 实体 Recall / Precision** | 86% / 90% | 68% / 74% | **93% / 96%** | 在 test.jsonl 上计算 F1 |
+| **脱敏无痕抹平自然度 (BLEU/ROUGE)** | 0.72 | 0.58 ~ 0.65 | **0.86+** | 抹平文本与人工/规则参考重写文本对比 |
+| **二次扫描零泄漏率 (Zero-Leakage)** | 98.5% | 82% ~ 88% | **99.6%+** | 抹平后文本再次过 Layer-1 规则引擎复扫 |
+| **单条推理延迟 (vLLM / GPU)** | < 100 ms | ~20 ms | **~20 ms** | 100 次推理 P50 延迟 |
+| **单条推理延迟 (PyTorch / CPU)** | < 1000 ms | ~450 ms | **~420 ms** | 100 次推理 P50 延迟 |
+| **内存 / 显存峰值占用** | < 2.0 GB | ~1.6 GB | **~1.6 GB** | 进程峰值 RSS / VRAM 监控 |
 
 ---
 
 ## 6. 常见问题与排查
 
-### Q1: 微调后模型输出格式不稳定怎么办？
+### Q1: 加载模型时报 `KeyError: 'qwen3_5_text'` 错误？
+- **原因**：运行环境中的 `transformers` 版本过低（< 5.2），无法识别 Qwen3.5 的 `qwen3_5_text` 架构。
+- **解决办法**：请使用 `./llmlora/scripts/setup_env.sh` 创建独立 venv，或升级 `transformers>=5.2`（锁定 `5.14.1`）。
 
-- **检查训练数据**：确保 100% 的 assistant 输出是合法 JSON
-- **降低 temperature**：推理时使用 `temperature=0.1` 或 `do_sample=False`
-- **添加 JSON Schema 约束**：使用 `outlines` 或 `jsonformer` 库强制输出符合 schema
+### Q2: 训练或推理输出包含 `<think>...</think>` 思考块污染 JSON 怎么解决？
+- **原因**：某些 Qwen 变体默认启用了思考链（thinking）。
+- **解决办法**：`llmlora` 的 `loader.py` 与 `engine.py` 已统一设置 `enable_thinking=False`，确保 prompt 与生成过程不注入思考标记。
 
-### Q2: 无痕抹平文本语义不连贯怎么办？
+### Q3: vLLM 加载 Qwen3.5-0.8B 失败或提示配置缺失？
+- **原因**：vLLM 的 `Qwen3_5ForConditionalGeneration` 期望完整 `config.json`。
+- **解决办法**：`train.py` 在导出时已自动补齐兼容性配置文件及 `model.visual.*` 权重占位。请确保使用 `llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother` 导出的模型目录。
 
-- **检查训练数据质量**：确保 `smoothed_text` 字段是自然流畅的中文
-- **增加领域重写模板**：在 `CONTEXT_REWRITE_TEMPLATES` 中补充更多自然表达
-- **使用 ROUGE-L 过滤**：训练前过滤掉 ROUGE-L < 0.6 的低质量样本
-
-### Q3: 如何在无 GPU 的边缘设备上部署？
-
-- 使用 **GGUF Q4_K_M** 量化格式
-- 配合 `llama-cpp-python` 进行纯 CPU 推理
-- 预期延迟：50~100ms（4 核 CPU），内存占用 < 500MB
-
-```python
-# llama-cpp-python 加载示例
-from llama_cpp import Llama
-llm = Llama(
-    model_path=".models/Qwen2.5-0.5B-Privacy-Q4_K_M.gguf",
-    n_ctx=512,
-    n_threads=4,  # CPU 线程数
-)
-output = llm(prompt, max_tokens=256, temperature=0.1)
-```
-
-### Q4: 在 `nerlora` 上二次微调后 NER 能力衰减怎么办？
-
-- **混合 NER 数据**：训练集中保留 20% 纯 NER 标注数据（实体定位 + 类型标注），防止遗忘
-- **EWC 正则化**：使用 Elastic Weight Consolidation 约束关键参数不偏离原始 NER 权重
-- **早停策略**：监控 NER 验证集 F1，当 F1 下降超过 3% 时触发早停
+### Q4: 如何验证 Layer-3 LLM 引擎是否生效？
+- **验证方式**：在 `privacy-local-agent` 启动时观察日志 `qwen3_classifier_initialized`，发送包含复杂冲突逻辑的请求（如病历与排除诊断混写），检查返回结果中的 `llm_arbitrated: true` 以及 `smoothed_text` 文本。

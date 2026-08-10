@@ -1,7 +1,7 @@
 # 医疗数据分类分级与脱敏流水线设计方案 (Medical Privacy Pipeline Design)
 
 > **文档版本**: 1.1 (已实操落盘与全栈贯通)  
-> **关联文档**: [`docs/pipeline/prd.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/pipeline/prd.md)  
+> **关联文档**: [`docs/pipeline/prd.md`](prd.md)  
 > **关键组件**: `scripts/data/generate_medical_data.py`, `privacy_local_agent/pipeline`, `privacy_local_agent/medical_pipeline`, `console/backend`, `console/backend-go`, `console/web`
 
 ---

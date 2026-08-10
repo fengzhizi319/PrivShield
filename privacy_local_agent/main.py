@@ -23,13 +23,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .deps import (
-    service,  # 重新导出，保持 ``from privacy_local_agent.main import service`` 可用
-)
 from .observability.logging_config import configure_logging
 from .observability.metrics import make_asgi_app
 from .observability.middleware import ObservabilityMiddleware
 from .observability.tracing import init_tracing
+from .deps import service  # noqa: F401  # 对外再导出：tests 与外部调用方经 main.service 取单例
 from .pipeline import router as pipeline_router
 from .routers import budget, dp, dynclassification, file, health, kano, ldp, mask, medical, ops, profile, qol
 from .security.auth import ApiKeyAuthAsgiMiddleware

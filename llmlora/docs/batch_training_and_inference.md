@@ -269,7 +269,7 @@ llmlora/.env (配置 LLMLORA_BATCH_SIZE=16, LLMLORA_GRAD_ACCUM_STEPS=2)
 ---
 
 > 📖 **延伸阅读与关联文档**：
-> - [架构设计与工作流设计文档](file:///home/charles/code/sfwork/privacy-local-agent/llmlora/docs/design_and_workflow.md)
-> - [推理性能 Benchmark 实测报告](file:///home/charles/code/sfwork/privacy-local-agent/llmlora/test/benchmark_report.md)
-> - [单次推理性能优化方案](file:///home/charles/code/sfwork/privacy-local-agent/llmlora/docs/inference_optimization.md)
-> - [训练数据集生成规约](file:///home/charles/code/sfwork/privacy-local-agent/docs/medical_pipeline/医疗健康数据分类分级与隐私脱敏算法标准规范.md)
+> - [架构设计与工作流设计文档](design_and_workflow.md)
+> - [推理性能 Benchmark 实测报告](../test/benchmark_report.md)
+> - [单次推理性能优化方案](inference_optimization.md)
+> - [训练数据集生成规约](../../docs/medical_pipeline/医疗健康数据分类分级与隐私脱敏算法标准规范.md)

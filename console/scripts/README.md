@@ -32,7 +32,10 @@
   bash ./console/scripts/dev-start.sh
   # 或赋予执行权限后直接运行:
   ./console/scripts/dev-start.sh
+  # 非交互模式（CI/无 TTY：端口被占用时自动终止占用进程）:
+  ./console/scripts/dev-start.sh --force
   ```
+  > `dev-start*.sh` 系列均支持 `--force`；不传时端口冲突会交互询问，无 TTY 环境下则报错退出。
 
 #### 2. `./console/scripts/dev-start-go.sh`
 - **作用**：一键启动 **Go gRPC 代理模式** 开发环境。

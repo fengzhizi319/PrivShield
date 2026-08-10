@@ -298,6 +298,9 @@ message DynSecurityTagProto {
   string source_engine = 4;
   string domain = 5;
   string standard_id = 6;
+  bool is_override = 7;    // 是否为强制覆盖标签 / Whether this is a forced override tag
+  bool is_downgrade = 8;   // 是否由降级规则产生 / Whether produced by a downgrade rule
+  string match_target = 9; // 匹配目标: field_name | field_value / Match target
 }
 
 message DynClassificationResponse {
@@ -305,8 +308,6 @@ message DynClassificationResponse {
   string max_level = 2;
   string audit_timestamp = 3;
   string engine_layer = 4;
-  double confidence = 5;
-  bool needs_human_review = 6;
 }
 ```
 

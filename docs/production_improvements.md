@@ -69,5 +69,5 @@
 ### 3.2 改进方案
 将虚假词典池纳入隐私配置文件中，并支持请求参数级覆盖：
 1. **扩展默认参数**：在 `privacy_local_agent/privacy/profile.py` 中，为 `qol` 原语的默认参数增加 `medical_pool` 与 `generic_pool` 默认列表。
-2. **参数透传与覆盖**：在 [qol.py](file:///home/charles/code/sfwork/privacy-local-agent/privacy_local_agent/privacy/qol.py) 中，使 `obfuscate_query` 接收可选的 `medical_pool` 与 `generic_pool` 参数。若传入，则覆盖硬编码的静态列表。
-3. **服务层解析**：在 [service.py](file:///home/charles/code/sfwork/privacy-local-agent/privacy_local_agent/service.py) 调用 `obfuscate_query` 时，先从 `resolver` 中解析出 profile 中的配置或请求体覆盖的词典列表，最终传给算法层。
+2. **参数透传与覆盖**：在 [qol.py](../privacy_local_agent/privacy/qol.py) 中，使 `obfuscate_query` 接收可选的 `medical_pool` 与 `generic_pool` 参数。若传入，则覆盖硬编码的静态列表。
+3. **服务层解析**：在 [service.py](../privacy_local_agent/service.py) 调用 `obfuscate_query` 时，先从 `resolver` 中解析出 profile 中的配置或请求体覆盖的词典列表，最终传给算法层。

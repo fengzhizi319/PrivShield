@@ -203,6 +203,10 @@ class RuleBasedDataGenerator:
         self.taxonomy = taxonomy
         self.dropped = 0
         self.level_stats: Dict[str, int] = {}
+        # 结构签名（模板 + 非标识符槽位值）跨分割累积集合：用于 dev/test
+        # 排除与 train 近重复（同模板同病种仅 PII 不同的样本）。
+        self._seen_signatures: set = set()
+        self.near_duplicate_dropped = 0
         # 跨分割 input 去重集合：防止 train/dev/test 出现完全相同的敏感样本（数据泄漏）
         # Cross-split input dedup set: prevents identical sensitive samples
         # leaking across train/dev/test splits
@@ -396,6 +400,9 @@ class RuleBasedDataGenerator:
         "exam": "MEDICAL_DIAGNOSIS",
     }
 
+    # PII 标识符槽位：不参与结构签名（同模板同语义槽位、仅 PII 不同的样本视为近重复）
+    _IDENTIFIER_SLOTS = frozenset({"name", "id_card", "phone", "bank_card", "email"})
+
     def generate_one(self) -> Optional[Dict[str, Any]]:
         """生成一条精简版 SFT 样本（包含 final_level, confidence, reasoning, sanitized_text；无 entities）"""
         domains = [d for d, _ in DOMAIN_WEIGHTS]
@@ -419,6 +426,20 @@ class RuleBasedDataGenerator:
 
         values = self._slot_values()
         input_text = template.format(**values)
+
+        # 结构签名 = (领域, 模板, 决定标签的语义槽位值)：同模板且实体槽位（病种/药品/
+        # 症状/检查/年龄）相同、仅 PII 标识符（姓名/证件号等）或日期/金额/商户等
+        # 非实体槽位不同的样本视为近重复，供 dev/test 分割排除。
+        sig_slots = tuple(
+            sorted(
+                (slot, val)
+                for slot, val in values.items()
+                if slot in self._SLOT_CATEGORY
+                and slot not in self._IDENTIFIER_SLOTS
+                and f"{{{slot}}}" in template
+            )
+        )
+        sample_sig = (domain, template, sig_slots)
 
         entities: List[Dict[str, Any]] = []
         for slot, category in self._SLOT_CATEGORY.items():
@@ -458,9 +479,10 @@ class RuleBasedDataGenerator:
         return {
             "input": input_text,
             "output": json.dumps(output_payload, ensure_ascii=False),
+            "_sig": sample_sig,  # 结构签名，generate_batch 使用后弹出，不写入 jsonl
         }
 
-    def generate_batch(self, count: int) -> List[Dict[str, Any]]:
+    def generate_batch(self, count: int, exclude_prior_signatures: bool = False) -> List[Dict[str, Any]]:
         """生成 count 条样本（QA 丢弃与跨分割重复均自动补采）。
 
         Generate samples, resampling on QA drops and cross-split duplicates.
@@ -468,14 +490,17 @@ class RuleBasedDataGenerator:
         去重策略 / Dedup policy:
         - 以 input 全文为键，跨 train/dev/test 累积去重（同一分割内同样生效），
           防止完全相同的敏感样本泄漏到多个分割；
+        - exclude_prior_signatures=True 时（dev/test 分割）额外按结构签名
+          （模板 + 非标识符槽位值）去重：同模板同病种仅 PII 不同的近重复样本
+          不会进入评估集，避免评估指标虚高；
         - 负样本（negative 领域，固定公开模板、无任何敏感实体）不参与去重，
           否则少量模板耗尽后会撞满 max_attempts 并破坏 L1 类分布；
           负样本跨分割重复不泄漏敏感信息。
         """
         samples: List[Dict[str, Any]] = []
-        # 补采上限防止病态循环 / Resample cap guards against pathological loops
+        # 补采上限防止病态循环；签名排除模式下签名空间更小，放宽补采倍数
         attempts = 0
-        max_attempts = count * 5
+        max_attempts = count * (10 if exclude_prior_signatures else 5)
         negative_templates = set(TEMPLATES["negative"])
         while len(samples) < count and attempts < max_attempts:
             attempts += 1
@@ -486,10 +511,16 @@ class RuleBasedDataGenerator:
             if input_text in negative_templates:
                 samples.append(sample)
                 continue
+            sig = sample.pop("_sig", None)
             if input_text in self._seen_inputs:
                 self.duplicate_dropped += 1
                 continue
+            if exclude_prior_signatures and sig is not None and sig in self._seen_signatures:
+                self.near_duplicate_dropped += 1
+                continue
             self._seen_inputs.add(input_text)
+            if sig is not None:
+                self._seen_signatures.add(sig)
             samples.append(sample)
         return samples
 
@@ -536,12 +567,15 @@ def main() -> None:
         ("dev.jsonl", args.dev_size),
         ("test.jsonl", args.test_size),
     ]:
-        samples = generator.generate_batch(size)
+        # 评估分割（dev/test）按结构签名排除与先行分割的近重复样本
+        is_eval_split = filename != "train.jsonl"
+        samples = generator.generate_batch(size, exclude_prior_signatures=is_eval_split)
         _write_jsonl(output_dir / filename, samples)
         print(f"成功导出 {len(samples)}/{size} 条数据到: {output_dir / filename}")
 
     print(f"零泄漏 QA 丢弃样本数: {generator.dropped}")
     print(f"跨分割/同分割重复丢弃样本数: {generator.duplicate_dropped}")
+    print(f"近重复（同模板同语义槽位）丢弃样本数: {generator.near_duplicate_dropped}")
     print(f"密级分布: {dict(sorted(generator.level_stats.items()))}")
 
 

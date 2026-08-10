@@ -342,7 +342,7 @@ class ONNXSmallNerEngine(SmallNerEngine):
 
         for idx in range(1, len(tokens) - 1):
             token = tokens[idx]
-            if token == "[SEP]" or token == "[PAD]":
+            if token == "[SEP]" or token == "[PAD]":  # noqa: S105 —— 分词器特殊标记字面量，非口令
                 break
 
             label_idx = label_indices[idx]
@@ -428,7 +428,7 @@ class ONNXSmallNerEngine(SmallNerEngine):
         for idx in range(1, len(tokens) - 1):
             token = tokens[idx]
             # 遇到 [SEP] 或 [PAD] 表示有效序列结束
-            if token == "[SEP]" or token == "[PAD]":
+            if token == "[SEP]" or token == "[PAD]":  # noqa: S105 —— 分词器特殊标记字面量，非口令
                 break
 
             # 获取当前 token 的预测标签和概率
@@ -945,32 +945,6 @@ class ModelScopeSmallNerEngine(SmallNerEngine):
                 extra={"error": str(e), "model_id": self.model_id},
             )
             raise e
-
-    def extract(self, text: str) -> list[dict[str, Any]]:
-        """调用 ModelScope pipeline 提取命名实体 / Extract Entities via ModelScope Pipeline.
-
-        执行步骤 / Execution Steps:
-        1. 延迟初始化 ModelScope 管道（首次调用时加载）。
-        2. 调用 pipeline 获取 NER 输出。
-        3. 解析输出并映射标签到统一标准类别。
-
-        ModelScope NER 管道输出格式：
-        {'output': [{'type': 'dis', 'start': 11, 'end': 17, 'span': '急性心肌梗死'}]}
-
-        Args:
-            text: 目标文本 / Target text.
-
-        Returns:
-            命名实体字典列表，每个字典含 text/label/confidence。
-            初始化失败或推理异常时返回空列表。
-        """
-        try:
-            # 延迟初始化
-            self._lazy_init()
-        except Exception:
-            # 初始化失败：递增失败计数，返回空列表
-            CLASSIFICATION_NER_TOTAL.labels(status="init_failed").inc()
-            return []
 
     def _extract_single_chunk(self, text: str) -> list[dict[str, Any]]:
         """调用 ModelScope pipeline 提取单块文本命名实体。"""

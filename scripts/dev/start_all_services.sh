@@ -38,9 +38,20 @@ check_port() {
     local port=$1
     if command -v lsof &> /dev/null; then
         if lsof -i:"$port" &> /dev/null; then
-            echo -e "${YELLOW}警告: 端口 ${port} 已被占用，尝试停止已有实例...${NC}"
+            echo -e "${YELLOW}警告: 端口 ${port} 已被占用（本脚本不自动停止已有实例，请先运行 stop_all_services.sh）...${NC}"
         fi
     fi
+}
+
+# 日志轮转：启动时归档上一轮日志（保留最近 5 份），避免 .logs/*.log 无限增长。
+# 注：仅覆盖"重启截断"场景；长时间运行持续增长的日志请使用系统 logrotate（生产环境）。
+rotate_log() {
+    local log_file=$1 keep=5 i
+    [ -f "$log_file" ] || return 0
+    for (( i=keep-1; i>=1; i-- )); do
+        [ -f "${log_file}.$i" ] && mv "${log_file}.$i" "${log_file}.$((i+1))"
+    done
+    mv "$log_file" "${log_file}.1"
 }
 
 check_port "$REST_PORT"
@@ -50,6 +61,7 @@ check_port "$CONSOLE_PORT"
 # 2. 启动核心 REST + gRPC 侧边栏
 echo -e "\n${YELLOW}[1/2] 启动 Core REST & gRPC Agent 侧边栏进程...${NC}"
 AGENT_LOG="${LOG_DIR}/agent_server.log"
+rotate_log "$AGENT_LOG"
 
 nohup python3 -m privacy_local_agent.server > "$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
@@ -59,6 +71,7 @@ echo -e "Agent 进程 PID: ${GREEN}${AGENT_PID}${NC} (日志: ${AGENT_LOG})"
 # 3. 启动 Console Backend 代理控制台
 echo -e "\n${YELLOW}[2/2] 启动 Console API 代理控制台进程...${NC}"
 CONSOLE_LOG="${LOG_DIR}/console_backend.log"
+rotate_log "$CONSOLE_LOG"
 
 if [ -f "console/backend/main.py" ]; then
     (cd console/backend && nohup python3 main.py > "../../${CONSOLE_LOG}" 2>&1 & echo $! > "../../${LOG_DIR}/console.pid")

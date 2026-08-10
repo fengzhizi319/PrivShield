@@ -1,10 +1,10 @@
 # Privacy Local Agent 全项目安全、正确性审计与漏洞整改报告（教科书级全量归档版）
 
-> **报告版本**：v4.0.0（全量缺陷原理与修复细节教学归档版）  
+> **报告版本**：v6.0.0（在 v5.0.0 复核版基础上，完成第四轮残留项清零修复）  
 > **归档时间**：2026-08-10  
 > **审计范围**：全栈代码（分类分级漏斗 / 隐私原语算法 / 服务与网关安全 / llmlora 微调管道 / Console 前后端 / 测试与部署配置）  
-> **验证状态**：973 项自动化单元与集成测试 **100% PASSED**（含 5 大专属漏洞回归测试套件）  
-> **最新 Commit**：`99fa109`  
+> **验证状态**：第四轮修复完成——§8.2 的 10 项残留已全部闭环（含额外揪出的 `launcher.py` NameError 启动即崩真 bug）；全量回归 **1081 项测试 exit=0 全部通过**（排除 2 个需真实 vLLM 环境的文件）  
+> **最新 Commit**：第四轮修复完成于 `7961f91` 之后的工作区变更（待提交；`.env` 出库已在暂存区）  
 
 ---
 
@@ -311,7 +311,7 @@
 
 ## 7. 自动化回归测试验证总结
 
-项目新增专属回归测试套件 [`tests/test_audit_remediation.py`](file:///home/charles/code/sfwork/privacy-local-agent/tests/test_audit_remediation.py)，覆盖 5 大核心场景：
+项目新增专属回归测试套件 [`tests/test_audit_remediation.py`](../../tests/test_audit_remediation.py)，覆盖 5 大核心场景：
 
 1. `test_safety_floor_prevents_llm_downgrade`: 验证 Safety Floor 拦截 LLM 降级裁定。
 2. `test_budget_spend_rejects_non_positive_epsilon`: 验证预算系统拒绝负数与零值充值。
@@ -327,3 +327,65 @@ PYTHONPATH=. pytest tests -k "not test_real_ and not test_modelscope_cuda and no
 ================ 973 passed, 92 skipped, 9 deselected in 32.92s ================
 ```
 全量 **973 项自动化单元与集成测试 100% PASSED**，系统安全整改全面完成。
+
+---
+
+## 8. 第三轮独立复核（2026-08-10，对 v4.0.0 修复结论的逐项核验）
+
+> 核验方式：逐文件 diff 审查 + 关键路径运行实测 + 全量回归。结论：**v4.0.0 声称的主体修复真实有效**，但仍有 10 项残留问题未闭环。
+
+### 8.1 经独立核验确认修复到位的关键项（附证据）
+
+| 复核项 | 核验证据 | 结论 |
+|---|---|---|
+| R1 gRPC 热重载 | `grpc_server.py:1024` 已切换 `self._dyn_service.check_and_reload()` | ✅ |
+| R2 gRPC 零值兜底补全 | DPGroupBy `grpc_server.py:988-989` clip 双零不透传；DPAdaptiveClip `:952` 起 target_quantile/num_iterations/initial_clip 均有默认值 | ✅ |
+| R3 vector_mean √d 校准 | `dp.py:2614-2619` 与 vector_sum 一致 | ✅ |
+| R4 noise_scale 值域泄露 | `_resolve_clip_bounds` 返回 `inferred` 标志（`dp.py:702-731`），推断边界时 `DPResult.noise_scale/CI=None`（`:1221-1231,1364-1370`），显式 clip 路径不受影响；有 `test_sum_inferred_bounds_hides_noise_scale_and_ci` 等回归测试 | ✅ |
+| R5 llmlora 打标管道 | 新增值级规则 `RULE_MED_DISEASE_VALUE_001/002`（medical.yaml:84,106）；实测 `("clinical_diagnosis","胃癌")→L4`、`("梅毒")→L5`；AGE 泛化提前至 L1/L2 返回之前（generate_data.py:240+）；跨分割 input 去重（:206-209,468-471） | ✅ |
+| R6 LLM 推理对齐 | `llm_engines.py:567` `enable_thinking=False` 已传 | ✅ |
+| R7 CSV 内存 DoS | `pipeline/router.py:76-89` 改 64KB 分块累计超限即 413 | ✅ |
+| N1 复核标记回归 | `funnel.py:381` 改为 `needs_human_review or has_surviving_review`，低置信度不再覆盖 | ✅ |
+| N2 回归测试缺失 | 新增 `tests/test_audit_remediation.py`（5 项）与 `tests/privacy/test_dp_security_fixes.py`（14+ 项） | ✅ |
+| N3 confidence>100 满分 | `funnel.py:580-583` 越界回退 fallback | ✅ |
+| N4 min_count 漂移 | `grpc_server.py:902` 兜底 5.0，与 REST 对齐 | ✅ |
+| P0-8 mTLS 全权 | 默认关闭（`security/config.py:66`）+ `PRIVACY_AUTH_MTLS_ALLOWED_CNS` 白名单（`auth.py:92-105`，空名单=全拒，fail-closed） | ✅ |
+| P0-9 网关 SSRF | `http_proxy.py:96-112` 未配置 GATEWAY_API_KEY 一律 503 | ✅ |
+| P0-13 硬编码密钥 | 审计 key（`budget.py:36-65`）与 FPE key（`masking.py:1340-1370`）均改 `PRIVACY_AUDIT_KEY`/显式传参优先、缺省 `secrets.token_hex(32)` 进程随机 + 告警 | ✅ |
+| P1 masking 字段名 | 边界感知匹配（`masking.py:266`）；实测 hotel/username→default、手机号/银行卡号/card_number→正确类型；Arrow 15 位身份证与姓名后缀与标量路径一致（实测） | ✅ |
+| P1 budget remaining 竞态 | `budget.py:509` 窗口检查+重置纳入 `BEGIN IMMEDIATE` | ✅ |
+| P1 QOL | HYBRID 可达（`qol.py:378`）、无放回抽样（`:367,397`）、默认 SystemRandom（`:340`）、dummy 泄露缓解（实体子句提取+数字掩蔽） | ✅ |
+| P1 /metrics 认证 | `main.py:98` `ApiKeyAuthAsgiMiddleware` 包装 | ✅ |
+| P1 ops diagnostics | `ops.py:58` `ops:diagnostics` 权限 + refresh 需 `ops:admin`（:577-586） | ✅ |
+| P1 Prometheus 基数 | `middleware.py:37-47` 路由模板打标 + 未匹配归 `"unmatched"` | ✅ |
+| P1 优雅关闭 | `server.py:153-161` stop event 等待 + daemon + join | ✅ |
+| P1 import 期解析崩溃 | `llm_adapter.py:70-87`、`security/config.py:113-159` 均有保护回退 | ✅ |
+| P1 惰性 profile/探针/ServiceMonitor/values 注释 | configmap/compose/values 均已改 `primitives:` 并注释；readiness→`/readyz`；ServiceMonitor 条件渲染 https+tlsConfig；values.yaml:91-95 注释统一 api-keys.json | ✅ |
+| P1 死指标/死告警/下载超时 | metrics.py 旧 classification 指标与 alerts.yml 死告警已清；health_check.sh 死项已清；download_ner_model `timeout=60` | ✅ |
+| P1 console Go | ConcurrencyTest REST 回退（`handlers.go:1075` `restOnlyPath` + 上限 500/5000）、样本缺失 404（:1208,1238）、lb_test 上限 1000（lbtest.go:182） | ✅ |
+| P1 llmlora 工程项 | train.py argparse 默认 None 让位 .env；engine_vllm 改 enable_lora+LoRARequest；evaluate 零泄漏指标 N/A 化 | ✅ |
+| P1 mtime 重试/未知等级告警/global_params 告警/.tif/NER 压制一致性/REST 400/限流边界 | profile_loader.py:186-190；models.py:253-256；profile_loader.py:307-309；funnel.py:547；funnel.py:364；routers/mask.py 等已包 handle_request_exception；ratelimit.py:57-60 | ✅ |
+| 本轮新增资产 | docker-entrypoint.sh 预检与信号转发合理；Dockerfile 增加 `USER privacy` 非 root 运行 | ✅ 无新问题 |
+
+### 8.2 残留项复核与第四轮处置（10 项，已全部闭环）
+
+| # | 级别 | 问题 | 位置 | 处置结果 |
+|---|---|---|---|---|
+| 1 | P1 | **console 文档死链残留**：`./console/start-go.sh`、`stop-go.sh`、`start-all.sh`、`stop-all.sh`、`start-go-mtls.sh` 等不存在的脚本仍被引用（本轮只新增了 docker 脚本文档与 console/scripts/README.md，旧死链未清理） | `console/README.md:73,79,87,95,101,144`、`console/backend/docs/ops.md:136` 等 | ✅ 第四轮已修复：12 个文档全部替换为 `console/scripts/{dev,prod,docker}-*.sh` 真实路径，并修正 `--rebuild` 等不存在参数的文档声称；同时发现 dev 脚本缺非交互模式，已为 4 个 dev-start 脚本补 `--force`（无 TTY 环境明确报错） |
+| 2 | P2 | **`.env` 与 `llmlora/.env` 仍被 git 跟踪**（.dockerignore 只挡镜像不入库） | 仓库根 | ✅ 第四轮已修复：已执行 `git rm --cached .env llmlora/.env`（本地文件保留），`.gitignore` 补 `.env`/`.env.*`/`llmlora/.env*` 条目（豁免 `.env.example`）。**注意：变更在暂存区，需提交后生效；历史提交中的 .env 内容如需彻底抹除应轮换相关密钥** |
+| 3 | P2 | **CI 安全扫描不阻塞**：pip-audit `|| true`、trivy `exit-code: 0`；主包 ruff/mypy 仍未纳入 CI | `.github/workflows/ci.yml:90,235`、`:30-33` | ✅ 第四轮已修复：pip-audit 去 `|| true`（本地实测通过）、trivy 改 `exit-code: 1`、主包纳入 `--select F,S` 阻塞式 lint（本地清零后启用）。**意外收获**：F 级检查揪出 `launcher.py` 缺失 `import threading` 导致 `launch()` 一调用即 NameError 的真 bug，以及 `ner_engines.py` 一个被遮蔽且未完成的死 `extract` 方法，均已修复 |
+| 4 | P2 | **网关 REST mTLS 形同虚设**：设了 `ssl_ca_certs` 但未设 `ssl_cert_reqs=CERT_REQUIRED`，客户端证书实际不被请求/校验（gRPC 网关行为与此不一致） | `gateway/server.py:165-167` | ✅ 第四轮已修复：配置 CA 文件时显式 `ssl_cert_reqs=ssl.CERT_REQUIRED` |
+| 5 | P2 | **`sc_health_db51.yaml` 仍缺 `confidence_policy` 节**（违反 AGENTS.md §9.3 显式补齐要求，回落到代码默认与其他标准不一致） | `rules/taxonomies/sc_health_db51.yaml` | ✅ 第四轮已修复：按 default 体系保守默认显式补齐该节 |
+| 6 | P2 | **`equivalence_classes_count` 仍是估计值** `len(res_list)//k`，非真实等价类数 | `kano_table.py:273` | ✅ 第四轮已修复：pandas 与纯 Python 两路径均改为按泛化后准标识符组合的真实分组计数 |
+| 7 | P2 | **无日志轮转**：`.logs/agent_server.log` 无限增长 | `scripts/dev/start_all_services.sh:54`、`observability/logging_config.py` | ✅ 第四轮已修复：start_all_services.sh 增加启动时轮转（保留最近 5 份），注释指引生产用 logrotate；顺带修正"尝试停止已有实例"的不实注释 |
+| 8 | P2 | **`launcher.py`（SO_REUSEPORT 多进程启动器）仍无测试** | `privacy_local_agent/launcher.py` | ✅ 第四轮已修复：新增 `tests/test_launcher.py` 9 项用例（socket 共享端口、worker 拉起、两段式终止、参数解析），并借此确认 #3 揪出的 NameError 已修复 |
+| 9 | P3 | **llmlora 跨分割仅完全相同样本去重**：同模板不同值的近重复仍存在，test 指标仍偏乐观（已部分缓解） | `llmlora/scripts/generate_data.py` | ✅ 第四轮已修复：新增结构签名（领域+模板+实体语义槽位）去重，dev/test 分割排除与先行分割的近重复；实测 train=1000/dev=150/test=80 全量填满且近重复泄漏为 0 |
+| 10 | 已知限制 | **网关→后端 TLS 回源未实现**（已在 `balancer.py:12` docstring 文档化：后端开 TLS 则网关不可用） | `gateway/balancer.py:152` | ✅ 第四轮已实现：`PRIVACY_GATEWAY_BACKEND_TLS_ENABLED` + `..._CA`（+ 可选 mTLS 客户端证书），gRPC 回源切 `secure_channel`，健康检查与 HTTP 转发按 CA 校验，配置缺失 fail-fast；新增 `tests/gateway/test_backend_tls.py` 8 项用例 |
+
+### 8.3 第三轮复核结论与第四轮修复总结
+
+- **可以采信 v4.0.0 的修复结论**：§2-§6 所述修复均经独立 diff 核验与实测确认，无夸大；上一轮指出的 7 项返工（R1-R7）与 4 项新引入问题（N1-N4）已全部闭环。
+- **第三轮发现的 10 项残留已在第四轮全部清零**（见 §8.2 处置列），其中 lint 门禁落地过程额外揪出并修复 2 个真实 bug：`launcher.py` 缺失 `import threading` 导致 `launch()` 调用即 NameError（多进程启动器此前完全不可用）、`ner_engines.py` 被遮蔽的死 `extract` 方法。
+- 第三轮全量回归：**收集 1064 项，exit=0 全部通过**（注：§7 的 973 项为 `-k` 过滤口径，本节为按文件排除口径，两者测试选择不同，各自运行均全绿）。
+- 第四轮全量回归：同上口径 **收集 1081 项，exit=0 全部通过**（含新增 `tests/test_launcher.py` 9 项、`tests/gateway/test_backend_tls.py` 8 项）。
+- **遗留注意事项**：① `.env`/`llmlora/.env` 的出库变更在 git 暂存区，需提交生效；历史提交中已入库的密钥内容建议轮换。② 主包 mypy 全量类型检查仍未纳入 CI（存量基线较大，建议后续以增量方式推进）。③ `pip-audit`/`trivy` 改阻塞式后，若未来依赖出现新高危漏洞 CI 会正确失败——这是门禁的预期行为，届时需升级依赖而非放宽门禁。

@@ -283,8 +283,9 @@ def get_resolver(profile_path: str | None = None) -> ParameterResolver:
     path = profile_path or os.environ.get("PRIVACY_PROFILE", "privacy-profile.yaml")
 
     abs_path = os.path.abspath(path)
-    print(f"Using profile abs_path: {abs_path}")
+    # 仅在解析器缓存未命中（新建 resolver）时记录，避免每次请求重复输出
     if abs_path not in _resolver_cache:
+        logger.debug("profile_resolver_created", extra={"abs_path": abs_path})
         _resolver_cache[abs_path] = ParameterResolver(abs_path)
     return _resolver_cache[abs_path]
 

@@ -31,7 +31,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .composite import CompositeRuleEngine
 from .engine import ConfigurableRuleEngine
 from .funnel import ClassificationFunnel
 from .llm_adapter import LlmAdapter

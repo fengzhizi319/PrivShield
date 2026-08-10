@@ -59,7 +59,7 @@ from ..env_loader import load_env_file
 from .base import LlmClassifier, SensitivityLevel
 # 导入日志脱敏工具函数（对敏感路径/值进行掩码处理后再记录日志）
 # 以及不可信文本 prompt 中和工具（Prompt 注入防护）
-from .utils import redact, wrap_untrusted_text
+from .utils import wrap_untrusted_text
 
 # 创建模块级结构化日志器，用于记录 LLM 分类器相关事件
 logger = get_logger(__name__)
@@ -829,7 +829,8 @@ class OpenAILlmClassifier(LlmClassifier):
         import urllib.request
 
         req_data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
+        # noqa: S310 —— chat_url 来自显式运维配置（vLLM API base），非用户输入拼接
+        req = urllib.request.Request(  # noqa: S310
             self.chat_url,
             data=req_data,
             headers={
@@ -840,7 +841,7 @@ class OpenAILlmClassifier(LlmClassifier):
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310
                 if resp.status != 200:
                     logger.warning("vllm_http_non_200", extra={"status": resp.status})
                     CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()

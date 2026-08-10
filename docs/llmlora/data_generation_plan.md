@@ -1,6 +1,6 @@
 # 基于 Layer-1 规则漏斗的训练数据自动生成与蒸馏方案
 
-> 本方案旨在利用 `privacy-local-agent` 现有的 Layer-1 规则引擎（`ConfigurableRuleEngine`，含正则表达、敏感词库、掩码策略与行业合规模板），构建一套零人工成本、自动化的高质量合成数据生成管道（Data Generation Pipeline），用于微调 Qwen2.5-0.5B-Instruct 轻量大模型。
+> 本方案旨在利用 `privacy-local-agent` 现有的 Layer-1 规则引擎（`ConfigurableRuleEngine`，含正则表达、敏感词库、掩码策略与行业合规模板），构建一套零人工成本、自动化的高质量合成数据生成管道（Data Generation Pipeline），用于微调 Qwen3.5-0.8B 轻量大模型。
 
 ---
 
@@ -47,6 +47,37 @@
    └─────────────────────────────────────────────────────────────────────┘
                       │
                       ▼
+             导出 SFT 训练集 (`dataset_sft.jsonl`)
+```
+
+---
+
+## 2. 核心任务定义 (Task Alignment)
+
+微调的目标是让 Qwen3.5-0.8B 模型同时具备**分类分级**与**无痕抹平脱敏**两大能力。─────┘
+                      │
+                      ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 2. Layer-1 自动标注 (Automatic Labeling via Layer-1 Rules)          │
+   │    - 调用 ConfigurableRuleEngine.evaluate() 获取 SecurityTag 列表   │
+   │    - 记录注入位置、实体类型、数据密级 (L1~L5)、安全标签               │
+   └─────────────────────────────────────────────────────────────────────┘
+                      │
+                      ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 3. 无痕抹平脱敏生成 (Seamless Context Desensitization)              │
+   │    - 两级策略：掩码替换 (Mask) + 上下文语义重写 (Context Rewrite)    │
+   │    - 使用掩码策略表 + 重写模板库生成自然连贯的抹平文本               │
+   └─────────────────────────────────────────────────────────────────────┘
+                      │
+                      ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 4. 质量校验与滤除 (QA & Zero-Leakage Validation Filter)             │
+   │    - JSON 校验 + 再次运行 Layer-1 规则扫描抹平文本确认无敏感遗漏      │
+   │    - 语法连贯度评分过滤（基于字符 n-gram 流畅度检测）                │
+   └─────────────────────────────────────────────────────────────────────┘
+                      │
+                      ▼
             导出 SFT 训练集 (`dataset_sft.jsonl`)
 ```
 
@@ -54,7 +85,7 @@
 
 ## 2. 核心任务定义 (Task Alignment)
 
-微调的目标是让 Qwen2.5-0.5B 模型同时具备**分类分级**与**无痕抹平脱敏**两大能力。
+微调的目标是让 Qwen3.5-0.8B 模型同时具备**分类分级**与**无痕抹平脱敏**两大能力。
 
 ### 任务 1：分类分级 (Classification & Tagging)
 - **输入**：包含敏感信息的原始语句或字段值。
@@ -409,13 +440,13 @@ def validate_sample(sample: dict, engine: ConfigurableRuleEngine) -> bool:
 
 ```bash
 # 生成完整 SFT 数据集
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 python scripts/data/generate_llm_lora_dataset.py \
     --train-size 50000 \
     --val-size 5000 \
     --test-size 2000 \
     --output-dir ./data/llm_lora/ \
-    --model Qwen2.5-0.5B-Instruct
+    --model Qwen3.5-0.8B
 ```
 
 生成的文件结构：

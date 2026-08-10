@@ -11,7 +11,7 @@ from __future__ import annotations
 # datetime/timezone for generating UTC timestamps in audit info
 from datetime import datetime, timezone
 import os
-from typing import Any, Optional
+from typing import Optional
 
 # Pydantic v2: BaseModel for schema, ConfigDict for model settings, Field for annotations
 from pydantic import BaseModel, ConfigDict, Field

@@ -3,7 +3,7 @@
 ## 1. 运行全部单元测试
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend
+cd console/backend
 source .venv/bin/activate          # 或使用 .venv/bin/python -m pytest
 pytest tests -q
 ```
@@ -77,11 +77,11 @@ pytest tests -k "lb_test" -v
 
 ```bash
 # 终端一：启动 agent
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 python -m privacy_local_agent.server
 
 # 终端二：启动后端
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend
+cd console/backend
 source .venv/bin/activate
 ./run.sh
 ```
@@ -89,7 +89,7 @@ source .venv/bin/activate
 ### 运行
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend
+cd console/backend
 source .venv/bin/activate
 python smoke_test.py
 ```
@@ -105,16 +105,16 @@ python smoke_test.py
 ### 启动后端
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend
+cd console/backend
 ./run.sh        # 等价于 uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 ### 使用一键脚本（同时启动 agent 与后端）
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
-./console/start.sh       # 启动
-./console/stop.sh        # 停止
+cd /path/to/privacy-local-agent
+./console/scripts/dev-start.sh       # 启动
+./console/scripts/dev-stop.sh        # 停止
 ```
 
 ## 7. 调试技巧

@@ -7,20 +7,26 @@ Load-balancing and health-check engine.
 Defines backend worker nodes, scheduling strategies, async health-check loop,
 and a per-node circuit breaker for fault isolation.
 
-.. warning::
-    **回源明文约束（已知限制）**：网关到后端的回源链路目前固定使用明文——
-    gRPC 通道为 ``grpc.aio.insecure_channel``，健康检查写死 ``http://``。
-    因此**后端（Agent worker）不得启用 TLS**：一旦后端开启 TLS，
-    网关的所有转发与健康检查都会失败，网关实际上不可用。
-    部署时必须保证网关与后端位于同一可信内网（或由 Service Mesh/网络策略
-    提供链路加密）；网关面向客户端的一侧仍可正常终结 TLS/mTLS。
-    TLS 回源（网关作为 TLS 客户端校验后端证书）尚未实现。
+.. note::
+    **回源 TLS（可选）**：网关到后端的回源链路默认使用明文
+    （``grpc.aio.insecure_channel`` + ``http://`` 健康检查），适用于网关与
+    后端同可信内网的部署。若后端启用了 TLS，设置以下环境变量开启 TLS 回源：
+
+    - ``PRIVACY_GATEWAY_BACKEND_TLS_ENABLED=true``：启用 TLS 回源；
+    - ``PRIVACY_GATEWAY_BACKEND_TLS_CA``：校验后端证书的 CA 文件路径（必填，
+      缺失或未配置时启动/首次请求即报错，fail-fast）；
+    - ``PRIVACY_GATEWAY_BACKEND_TLS_CLIENT_CERT`` / ``..._CLIENT_KEY``：
+      可选，后端要求 mTLS 时的客户端证书与私钥。
+
+    启用后健康检查与 HTTP 转发按该 CA 校验后端证书（节点注册时使用
+    ``https://`` 前缀的 ``http_url``），gRPC 回源切换为 ``secure_channel``。
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import random
 import threading
 import time
@@ -46,6 +52,70 @@ GRPC_CHANNEL_OPTIONS = [
     ("grpc.max_receive_message_length", GRPC_MAX_MESSAGE_BYTES),
     ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_BYTES),
 ]
+
+
+def backend_tls_enabled() -> bool:
+    """是否启用网关→后端的 TLS 回源 / Whether backend-origin TLS is enabled."""
+    return os.environ.get("PRIVACY_GATEWAY_BACKEND_TLS_ENABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def backend_tls_verify() -> "str | bool":
+    """httpx ``verify`` 参数：启用回源 TLS 时返回 CA 路径，否则默认校验。
+
+    Raises:
+        RuntimeError: 启用了回源 TLS 但未配置 ``PRIVACY_GATEWAY_BACKEND_TLS_CA``。
+    """
+    if not backend_tls_enabled():
+        return True
+    ca_path = os.environ.get("PRIVACY_GATEWAY_BACKEND_TLS_CA", "").strip()
+    if not ca_path:
+        raise RuntimeError(
+            "PRIVACY_GATEWAY_BACKEND_TLS_ENABLED=true 但未配置 "
+            "PRIVACY_GATEWAY_BACKEND_TLS_CA（后端证书校验 CA 文件路径）"
+        )
+    if not os.path.isfile(ca_path):
+        raise RuntimeError(f"回源 TLS CA 文件不存在: {ca_path}")
+    return ca_path
+
+
+def backend_channel_credentials() -> "grpc.ChannelCredentials | None":
+    """构建回源 gRPC 通道凭据；未启用 TLS 时返回 None（调用方用 insecure_channel）。
+
+    支持可选 mTLS（PRIVACY_GATEWAY_BACKEND_TLS_CLIENT_CERT / _CLIENT_KEY）。
+
+    Raises:
+        RuntimeError: TLS 配置缺失或证书文件不存在。
+    """
+    if not backend_tls_enabled():
+        return None
+    ca_path = backend_tls_verify()  # 复用校验逻辑（缺失/不存在时抛 RuntimeError）
+    with open(ca_path, "rb") as f:
+        root_certs = f.read()
+    client_cert_path = os.environ.get("PRIVACY_GATEWAY_BACKEND_TLS_CLIENT_CERT", "").strip()
+    client_key_path = os.environ.get("PRIVACY_GATEWAY_BACKEND_TLS_CLIENT_KEY", "").strip()
+    private_key = certificate_chain = None
+    if client_cert_path or client_key_path:
+        if not (client_cert_path and client_key_path):
+            raise RuntimeError(
+                "回源 mTLS 需同时配置 PRIVACY_GATEWAY_BACKEND_TLS_CLIENT_CERT 与 "
+                "PRIVACY_GATEWAY_BACKEND_TLS_CLIENT_KEY"
+            )
+        for p in (client_cert_path, client_key_path):
+            if not os.path.isfile(p):
+                raise RuntimeError(f"回源 mTLS 客户端证书/私钥文件不存在: {p}")
+        with open(client_key_path, "rb") as f:
+            private_key = f.read()
+        with open(client_cert_path, "rb") as f:
+            certificate_chain = f.read()
+    return grpc.ssl_channel_credentials(
+        root_certificates=root_certs,
+        private_key=private_key,
+        certificate_chain=certificate_chain,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +219,16 @@ class BackendNode:
             # 首次访问时创建出双份 channel 而泄漏其一。
             with self._stub_lock:
                 if self._grpc_stub is None:
-                    self._grpc_channel = grpc.aio.insecure_channel(
-                        self.grpc_address, options=GRPC_CHANNEL_OPTIONS
-                    )
+                    credentials = backend_channel_credentials()
+                    if credentials is not None:
+                        # TLS 回源：按 PRIVACY_GATEWAY_BACKEND_TLS_CA 校验后端证书
+                        self._grpc_channel = grpc.aio.secure_channel(
+                            self.grpc_address, credentials, options=GRPC_CHANNEL_OPTIONS
+                        )
+                    else:
+                        self._grpc_channel = grpc.aio.insecure_channel(
+                            self.grpc_address, options=GRPC_CHANNEL_OPTIONS
+                        )
                     self._grpc_stub = privacy_pb2_grpc.PrivacyServiceStub(self._grpc_channel)
         return self._grpc_stub
 
@@ -333,7 +410,8 @@ async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0) -> No
         interval: 检测间隔时间（秒）。
     """
     logger.info("Starting background health check loop", extra={"interval_seconds": interval})
-    async with httpx.AsyncClient() as client:
+    # 回源 TLS 启用时按配置的 CA 校验后端证书（backend_tls_verify 在配置缺失时抛错）
+    async with httpx.AsyncClient(verify=backend_tls_verify()) as client:
         while True:
             for node in balancer.nodes:
                 # 1. 检查 REST (HTTP) 服务

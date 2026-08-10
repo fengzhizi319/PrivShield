@@ -578,11 +578,11 @@ cd console/web && corepack pnpm dev
 ### 7.2 一键启动脚本
 
 ```bash
-cd console
-./start-go.sh     # 启动 Go 后端 + 前端
-./start.sh        # 启动 Python 后端 + 前端
-./start-all.sh    # 启动 agent + 后端 + 前端
-./stop-all.sh     # 停止所有
+# 从仓库根目录执行
+./console/scripts/dev-start-go.sh     # 启动 Go 后端 + 前端
+./console/scripts/dev-start.sh        # 启动 Python 后端 + 前端
+./console/scripts/dev-start-all.sh    # 启动 agent + 后端 + 前端
+./console/scripts/dev-stop.sh         # 停止所有
 ```
 
 ### 7.3 Docker 部署

@@ -87,12 +87,15 @@ jobs:
         run: pip install pip-audit
 
       - name: Run pip-audit
-        run: pip-audit -r requirements-core.txt --ignore-vuln PYSEC-2022-43012 || true
+        # 阻塞式门禁：发现漏洞即失败（PYSEC-2022-43012 为已知豁免）
+        run: pip-audit -r requirements-core.txt --ignore-vuln PYSEC-2022-43012
 
-      - name: Ruff security rules
+      - name: Ruff security & correctness rules
+        # F（Pyflakes 正确性）+ S（Bandit 安全）阻塞式检查主包；
+        # S110（try-except-pass）为本仓库刻意的静默降级风格，与 S101/S104/S311/S324 一并豁免
         run: |
           pip install ruff
-          ruff check privacy_local_agent/ --select S --ignore S101,S104,S311,S324
+          ruff check privacy_local_agent/ --select F,S --ignore S101,S104,S110,S311,S324
 
   go-backend:
     name: Go Backend
@@ -232,7 +235,8 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: 0
+          # 阻塞式门禁：存在 CRITICAL/HIGH 漏洞时 job 失败（exit-code 0 等于扫描形同虚设）
+          exit-code: 1
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3

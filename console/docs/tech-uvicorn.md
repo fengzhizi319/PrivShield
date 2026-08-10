@@ -42,7 +42,7 @@ Uvicorn serves as the HTTP server for the Python REST proxy backend:
 
 #### 开发模式（启动脚本）/ Development Mode (Startup Script)
 
-文件 / File：`console/start.sh`
+文件 / File：`console/scripts/dev-start.sh`
 
 ```bash
 # 在虚拟环境中启动 Uvicorn

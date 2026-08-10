@@ -30,7 +30,7 @@
 ## 3. 运行测试
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 PYTHONPATH=. pytest tests/test_qol.py -v
 ```
 

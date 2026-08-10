@@ -15,7 +15,6 @@ import argparse
 import asyncio
 import contextlib
 import os
-import sys
 from typing import Any
 
 import yaml
@@ -155,8 +154,12 @@ async def async_main(
 
     # 2. 启动 HTTP 网关 FastAPI + Uvicorn 服务器（支持 TLS 终结）
     http_app = create_http_gateway_app(balancer)
+    import ssl as _ssl
+
     import uvicorn
 
+    # mTLS：配置了 CA 文件时必须显式要求并校验客户端证书，
+    # 否则 uvicorn 默认 ssl.CERT_NONE，ssl_ca_certs 形同虚设（客户端证书根本不会被请求）。
     uv_config = uvicorn.Config(
         app=http_app,
         host=gw["rest_host"],
@@ -165,6 +168,9 @@ async def async_main(
         ssl_certfile=gw["tls_cert_file"] if gw.get("tls_enabled") else None,
         ssl_keyfile=gw["tls_key_file"] if gw.get("tls_enabled") else None,
         ssl_ca_certs=gw["tls_ca_file"] if gw.get("tls_enabled") and gw.get("tls_ca_file") else None,
+        ssl_cert_reqs=(
+            _ssl.CERT_REQUIRED if gw.get("tls_enabled") and gw.get("tls_ca_file") else _ssl.CERT_NONE
+        ),
     )
     uv_server = uvicorn.Server(uv_config)
 

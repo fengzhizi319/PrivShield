@@ -29,7 +29,7 @@ from privacy_local_agent.observability.metrics import (
     GATEWAY_RETRIES_TOTAL,
 )
 
-from .balancer import LoadBalancer
+from .balancer import LoadBalancer, backend_tls_verify
 
 logger = get_logger(__name__)
 
@@ -87,6 +87,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
             timeout=httpx.Timeout(30.0),
             limits=httpx.Limits(max_keepalive_connections=100, max_connections=500),
             trust_env=False,  # 禁用环境变量代理，防止本地转发流量被拦截
+            verify=backend_tls_verify(),  # 回源 TLS 启用时按 CA 校验后端证书
         )
         yield
         # 优雅释放连接池
@@ -202,6 +203,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                     timeout=httpx.Timeout(30.0),
                     limits=httpx.Limits(max_keepalive_connections=100, max_connections=500),
                     trust_env=False,
+                    verify=backend_tls_verify(),
                 )
                 request.app.state.http_client = client
                 request.app.state.http_client_loop = current_loop

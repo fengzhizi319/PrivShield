@@ -223,7 +223,6 @@ class MLXSmallNerEngine(SmallNerEngine):
         hidden_size = cfg["hidden_size"]
         num_heads = cfg["num_attention_heads"]
         num_layers = cfg["num_hidden_layers"]
-        intermediate_size = cfg["intermediate_size"]
         head_dim = hidden_size // num_heads
 
         # === Embeddings ===

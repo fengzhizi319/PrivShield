@@ -65,18 +65,18 @@ bash ./console/scripts/docker-stop.sh
 ./console/scripts/dev-stop.sh
 ```
 
-`stop.sh` 会读取 `console/.pids/` 下记录的 PID 并安全终止 `privacy_local_agent` 与测试控制台后端。
+`dev-stop.sh` 会读取 `console/.pids/` 下记录的 PID 并安全终止 `privacy_local_agent` 与测试控制台后端。
 
 若要通过 **Go gRPC** 后端访问同样的隐私能力，可改用：
 
 ```bash
-./console/start-go.sh
+./console/scripts/dev-start-go.sh
 ```
 
 对应停止脚本：
 
 ```bash
-./console/stop-go.sh
+./console/scripts/dev-stop.sh
 ```
 
 该脚本会启动 `privacy_local_agent`（同时监听 REST 与 gRPC）和 `console/backend-go` 中的 Go 代理服务，访问地址为 `http://127.0.0.1:8081`。
@@ -84,7 +84,7 @@ bash ./console/scripts/docker-stop.sh
 若要以 **mTLS 双向认证** 模式运行（Go 代理到 agent 的 gRPC 链路全程加密并互验证书），可执行：
 
 ```bash
-./console/start-go-mtls.sh
+./console/scripts/dev-start-go-mtls.sh
 ```
 
 该脚本会在证书缺失时自动调用 `console/backend-go/scripts/gen-certs.sh` 生成一套自签名测试证书，随后同时以 mTLS 模式启动 agent 与 Go 代理。详见 [backend-go/docs/ops.md](backend-go/docs/ops.md) 第 5 节。
@@ -92,13 +92,13 @@ bash ./console/scripts/docker-stop.sh
 若要**同时启动两个后端**（Python REST + Go gRPC），以便在前端顶部 Backend Selector 中随意切换，可执行：
 
 ```bash
-./console/start-all.sh
+./console/scripts/dev-start-all.sh
 ```
 
 对应停止脚本：
 
 ```bash
-./console/stop-all.sh
+./console/scripts/dev-stop.sh
 ```
 
 该脚本会同时启动 `privacy_local_agent`（REST 8079 + gRPC 50051）、Python REST 代理后端（`http://127.0.0.1:8080`）与 Go gRPC 代理后端（`http://127.0.0.1:8081`）。打开任一 Console 地址，顶部 Backend Selector 即可在两个后端间自由切换。
@@ -139,9 +139,9 @@ corepack pnpm build
 
 ### 4. 打开控制台
 
-- `./console/start.sh` 启动后访问 `http://127.0.0.1:8080`（Python 后端提供 UI）
-- `./console/start-go.sh` 启动后访问 `http://127.0.0.1:8081`（Go 后端直接提供 UI）
-- `./console/start-all.sh` 启动后两个地址均可访问，顶部 Backend Selector 可随意切换后端
+- `./console/scripts/dev-start.sh` 启动后访问 `http://127.0.0.1:8080`（Python 后端提供 UI）
+- `./console/scripts/dev-start-go.sh` 启动后访问 `http://127.0.0.1:8081`（Go 后端直接提供 UI）
+- `./console/scripts/dev-start-all.sh` 启动后两个地址均可访问，顶部 Backend Selector 可随意切换后端
 
 左侧选择功能分组和端点，点击「Send Request」即可测试。
 

@@ -39,5 +39,5 @@ open http://127.0.0.1:8080
 也可以直接使用一键脚本（同时拉起 agent 与控制台后端）：
 
 ```bash
-./console/start.sh
+./console/scripts/dev-start.sh
 ```

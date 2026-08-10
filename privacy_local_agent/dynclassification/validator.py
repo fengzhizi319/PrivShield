@@ -13,7 +13,6 @@ from __future__ import annotations
 # difflib provides fuzzy string matching for "did you mean?" suggestions
 import difflib
 from pathlib import Path
-from typing import Any
 
 # PyYAML for parsing rule configuration files
 import yaml

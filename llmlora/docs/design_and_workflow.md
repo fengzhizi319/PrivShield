@@ -206,7 +206,7 @@ llmlora/
 ## 7. 运行指令
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 
 # 1. 生成训练/验证/测试数据（规则引擎打标 + 零泄漏 QA，输出到 llmlora/data/）
 llmlora/.venv/bin/python -m llmlora.scripts.generate_data --train-size 1000 --dev-size 100 --test-size 50

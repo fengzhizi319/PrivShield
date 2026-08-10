@@ -171,7 +171,7 @@ Layer-2 实体识别模型相关文件统一存放在项目根目录的 `.models
 
 若需使用 PyTorch / ModelScope 原生 CUDA 后端运行 Layer-2 Small-NER，由于 RTX 50 系列基于全新的 Blackwell 架构 (`sm_120`)，传统 PyTorch 预编译包无法执行 GPU Kernel，需使用 `cu128` 版本的 PyTorch 并安装特定配套 C++ 运行时库。详细的安装步骤、四大踩坑点（包含 `libcupti.so.12` 自动预加载与 LLVM 命名冲突避坑）与验证命令请参阅专用指南：
 
-- 📖 **[PyTorch CUDA sm_120 安装与避坑全指南](file:///home/charles/code/sfwork/privacy-local-agent/docs/dynclassification/cuda_sm120_setup.md)**
+- 📖 **[PyTorch CUDA sm_120 安装与避坑全指南](cuda_sm120_setup.md)**
 
 ### 故障 1: YAML 解析校验失败，引擎拒绝载入
 - **现象**：调用 `profiles/reload` 返回 500 错误，日志输出 `ValidationError`。

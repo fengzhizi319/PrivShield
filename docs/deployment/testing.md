@@ -54,7 +54,7 @@
 ### 4.1 Lint 检查
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 make helm-lint
 ```
 
@@ -69,7 +69,7 @@ helm lint deploy/helm/privacy-local-agent
 ### 4.2 模板渲染
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 make helm-template
 ```
 
@@ -112,7 +112,7 @@ helm template ml deploy/helm/privacy-local-agent \
 ### 5.1 Dry Run
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 kubectl apply -k deploy/k8s/ --dry-run=client
 ```
 
@@ -145,7 +145,7 @@ curl http://localhost:8079/health
 ### 6.1 启动服务
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/deploy/docker-compose
+cd deploy/docker-compose
 docker-compose up -d
 ```
 
@@ -171,7 +171,7 @@ docker-compose down
 ## 7. 镜像构建验证
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 
 # core 镜像
 make docker-core

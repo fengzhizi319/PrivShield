@@ -36,7 +36,7 @@
 ## 运行示例
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 source .venv/bin/activate
 PYTHONPATH=. python docs/production_observability/examples/observability_usage.py
 ```

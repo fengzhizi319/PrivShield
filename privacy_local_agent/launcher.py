@@ -36,6 +36,7 @@ import os
 import signal
 import socket
 import sys
+import threading
 import time
 
 from .observability.logging_config import get_logger
@@ -111,7 +112,6 @@ def _worker_entry(
     from .security.config import get_security_settings
     from .security.tls import uvicorn_ssl_kwargs
 
-    import threading
     import uvicorn
 
     # 复用 server.py 的 uvloop/httptools 自动检测结果（多进程模式同样生效）
@@ -328,7 +328,7 @@ def main() -> None:
         "--workers",
         type=int,
         default=None,
-        help=f"Number of worker processes (default: min(cpu_count, 8) or PRIVACY_WORKERS).",
+        help="Number of worker processes (default: min(cpu_count, 8) or PRIVACY_WORKERS).",
     )
     parser.add_argument(
         "--rest-host",

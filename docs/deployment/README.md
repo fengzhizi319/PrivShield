@@ -33,7 +33,7 @@
 ## 运行示例
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 
 # Helm 开发模式一键部署
 helm install pla ./deploy/helm/privacy-local-agent

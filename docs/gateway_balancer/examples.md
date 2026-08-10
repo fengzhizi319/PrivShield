@@ -35,7 +35,7 @@
 ### 2.1 使用环境变量启动
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 source .venv/bin/activate
 
 export GATEWAY_REST_PORT=8000

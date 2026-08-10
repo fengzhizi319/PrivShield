@@ -997,22 +997,18 @@ def prefix_matcher(value: Any, params: dict[str, Any]) -> bool:
 @OperatorRegistry.register("id_card_checksum")
 def id_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
     """中国大陆 18 位身份证校验算子（GB 11643-1999）。"""
-    # 复用现有 classification_rule_engine.py 中的校验逻辑
-    from .classification_rule_engine import _id_card_checksum
-    return _id_card_checksum(str(value) if value else "")
+    return _validate_id_card(str(value) if value else "")
 
 
 @OperatorRegistry.register("medical_card_checksum")
 def medical_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
     """上海医保卡号校验算子。"""
-    from .classification_rule_engine import _shanghai_medical_card_checksum
-    return _shanghai_medical_card_checksum(str(value) if value else "")
+    return _validate_shanghai_medical_card(str(value) if value else "")
 
 
 @OperatorRegistry.register("icd10_range")
 def icd10_range_matcher(value: Any, params: dict[str, Any]) -> bool:
     """ICD-10 编码格式校验算子（仅判断是否为合法 ICD-10 编码）。"""
-    from .classification_rule_engine import _normalize_icd10
     return _normalize_icd10(str(value) if value else "") is not None
 
 

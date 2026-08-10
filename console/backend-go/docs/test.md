@@ -3,7 +3,7 @@
 ## 1. 运行全部测试
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend-go
+cd console/backend-go
 
 go test ./...
 ```
@@ -59,7 +59,7 @@ go test ./internal/handlers -v
 集成测试需要真实启动 `privacy-local-agent`：
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 python -m privacy_local_agent.server
 ```
 
@@ -73,7 +73,7 @@ Go 代理默认会连接 `127.0.0.1:50051`。
 ### 运行集成测试
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend-go
+cd console/backend-go
 go test ./tests -v
 ```
 
@@ -104,7 +104,7 @@ go test ./tests -v
 如果修改了 `proto/privacy.proto`，需要重新生成 Go 代码：
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend-go
+cd console/backend-go
 
 protoc \
   -I ../backend/proto \
@@ -136,7 +136,7 @@ go test ./...
 ## 6. 构建检查
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend-go
+cd console/backend-go
 
 go build ./cmd/server
 ```
@@ -153,16 +153,16 @@ go test ./...
 启动 Go gRPC 代理后端：
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent/console/backend-go
+cd console/backend-go
 go run ./cmd/server
 ```
 
 或使用仓库根目录的一键脚本（同时启动 agent 与 Go 代理）：
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
-./console/start-go.sh
-./console/stop-go.sh    # 在另一个终端停止
+cd /path/to/privacy-local-agent
+./console/scripts/dev-start-go.sh
+./console/scripts/dev-stop.sh    # 在另一个终端停止
 ```
 
 ## 9. 调试技巧

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..privacy.masking import FieldType, mask_record, mask_value
+from ..privacy.masking import FieldType, mask_value
 from .models import MaskingDetail, RecordClassificationDetail
 
 # 从 medical_pipeline 统一导入 L4/L5 敏感词库（单一事实来源）

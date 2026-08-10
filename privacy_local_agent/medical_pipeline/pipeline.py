@@ -391,27 +391,17 @@ class MedicalPrivacyPipeline:
         # 未命中 L5 才继续扫 L4（L4 命中同样中断）。
         # 枚举型分类字段（科室等）豁免扫描：封闭枚举值的子串命中属于误伤（如"皮肤性病科"含"性病"）。
         detected_level: str | None = None
-        detected_category: str | None = None  # 命中的风险类别代码（如 IMMUNODEFICIENCY），供报告追溯
 
         if key.strip().lower() not in _CATEGORICAL_FIELDS:
             for pat, _replacement in L5_PATTERNS:
                 if pat.search(val_str):
                     detected_level = "L5"
-                    # 从替换标签中提取类别代码 (如 [L5-IMMUNODEFICIENCY-SENSITIVE-MASKED] → IMMUNODEFICIENCY)
-                    tag = _replacement.strip("[]")
-                    parts = tag.split("-")
-                    if len(parts) >= 2:
-                        detected_category = parts[1]
                     break  # L5 已是最高级，中断循环
 
             if detected_level is None:
                 for pat, _replacement in L4_PATTERNS:
                     if pat.search(val_str):
                         detected_level = "L4"
-                        tag = _replacement.strip("[]")
-                        parts = tag.split("-")
-                        if len(parts) >= 2:
-                            detected_category = parts[1]
                         break  # 已找到 L4
 
         # ── 步骤 2.5: 融合 dynclassification 动态分类引擎的定级结果 ──

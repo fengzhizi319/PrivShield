@@ -100,7 +100,7 @@ privacy-local-agent/
 ## 4. Build & Test Commands
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 
 # Install in editable mode
 pip install -e .

@@ -280,7 +280,6 @@ class MLXLlmClassifier(LlmClassifier):
         num_heads = cfg["num_attention_heads"]
         num_kv_heads = cfg["num_key_value_heads"]
         num_layers = cfg["num_hidden_layers"]
-        intermediate_size = cfg["intermediate_size"]
         head_dim = hidden_size // num_heads
         rope_theta = cfg.get("rope_theta", 1000000.0)
         rms_eps = cfg.get("rms_norm_eps", 1e-6)

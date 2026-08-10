@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import csv
 import json
-import os
+import re
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .classifier import classify_records
 from .masker import mask_records
@@ -311,7 +311,14 @@ class PipelineService:
         if not path.is_file():
             raise FileNotFoundError(f"SQLite DB not found: {path}")
 
-        sql = query_or_table if "SELECT" in query_or_table.upper() else f"SELECT * FROM {query_or_table}"
+        if "SELECT" in query_or_table.upper():
+            # 调用方显式传入完整 SQL（本地工具特性，原样执行） / Caller-provided full SQL passthrough
+            sql = query_or_table  # noqa: S608
+        else:
+            # 表名拼接进 SQL：强制标识符校验，防 SQL 注入 / Validate identifier to prevent SQL injection
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", query_or_table):
+                raise ValueError(f"非法表名（仅允许字母/数字/下划线）: {query_or_table!r}")
+            sql = f"SELECT * FROM {query_or_table}"  # noqa: S608 —— 表名已经上方标识符校验
         conn = sqlite3.connect(path)
         try:
             conn.row_factory = sqlite3.Row

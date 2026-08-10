@@ -270,7 +270,9 @@ def k_anonymize_table(
 
         result_df = _mondrian_pd(df, max_depth)
         res_list = cast("list[dict[str, Any]]", result_df.to_dict(orient="records"))
-        eq_count = len(res_list) // max(1, k)
+        # 真实等价类计数：按泛化后的准标识符组合分组统计，
+        # 而非 len(rows)//k 的估算（单叶子或尾组合并时估算值会虚高）。
+        eq_count = len({tuple(str(r.get(c)) for c in qi_cols) for r in res_list}) if res_list else 0
         logger.info(
             "kano_table_completed",
             extra={
@@ -310,7 +312,8 @@ def k_anonymize_table(
         return left + right
 
     final_res = _mondrian(rows, max_depth)
-    eq_count = len(final_res) // max(1, k)
+    # 真实等价类计数：按泛化后的准标识符组合分组统计（与 pandas 路径口径一致）
+    eq_count = len({tuple(str(r.get(c)) for c in qi_cols) for r in final_res}) if final_res else 0
     logger.info(
         "kano_table_completed",
         extra={

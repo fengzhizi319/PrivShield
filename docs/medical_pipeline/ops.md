@@ -12,7 +12,7 @@
 用于生成高仿真医疗记录 `data1.csv`（脚本默认 20 条；仓库内各样例目录中预置的 `data1.csv` 均为 **100 条**）：
 
 ```bash
-cd /home/charles/code/sfwork/privacy-local-agent
+cd /path/to/privacy-local-agent
 
 # 生成 100 条数据保存到 data/data1.csv (默认 seed 2026，与仓库预置样例一致)
 python scripts/data/generate_medical_data.py --output data/data1.csv --count 100

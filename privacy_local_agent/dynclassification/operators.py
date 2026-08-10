@@ -23,7 +23,7 @@ from __future__ import annotations
 
 # re module for regex-based pattern matching operators
 import re
-from typing import Any, Tuple
+from typing import Any
 
 # Import the registry to register all built-in operators via decorators
 from .operator_registry import OperatorRegistry, OperatorResult

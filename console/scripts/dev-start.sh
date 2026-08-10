@@ -3,7 +3,8 @@
 # 【开发模式】一键启动 Python REST 控制台 (Vite 热更新)
 # Launch Python REST proxy console in DEV mode with Vite HMR dev server
 #
-# 用法 / Usage: ./console/scripts/dev-start.sh
+# 用法 / Usage: ./console/scripts/dev-start.sh [--force]
+#   --force: 非交互模式，端口被占用时自动终止占用进程（CI/脚本化场景）
 #
 # 启动组件 / Launched Components:
 #   1. privacy_local_agent (REST: 8079)
@@ -12,6 +13,14 @@
 # ============================================================================
 
 set -euo pipefail
+
+# --force：非交互模式（CI/无 TTY 环境），端口冲突时自动终止占用进程
+FORCE=false
+for arg in "$@"; do
+    case "$arg" in
+        --force) FORCE=true ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONSOLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -67,7 +76,15 @@ check_port_available() {
         exit 1
     fi
 
-    read -rp "是否自动终止上述进程以释放端口？[y/N] " answer
+    if [[ "$FORCE" == "true" ]]; then
+        echo "（--force 非交互模式：自动终止占用端口 $port 的进程）"
+        answer="y"
+    elif [[ ! -t 0 ]]; then
+        echo "错误：端口 $port 被占用且当前为非交互环境（无 TTY）。请手动释放端口，或使用 --force 自动处理。"
+        exit 1
+    else
+        read -rp "是否自动终止上述进程以释放端口？[y/N] " answer
+    fi
     case "$answer" in
         [yY]|[yY][eE][sS])
             for pid in $pids; do

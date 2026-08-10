@@ -81,7 +81,7 @@ tests/test_routes.py::test_proxy_upstream_error PASSED
 
 ```bash
 # 前置：先启动 agent 与控制台后端
-./console/start.sh
+./console/scripts/dev-start.sh
 
 # 另一终端
 cd console/backend

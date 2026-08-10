@@ -473,7 +473,6 @@ def _build_llm_status() -> dict[str, Any]:
     model_exists = os.path.exists(os.path.join(_PROJECT_ROOT, model_rel))
 
     deps_met = not missing_deps
-    predicted_available = deps_met and model_exists
 
     if missing_deps:
         reason: str | None = "缺少依赖: " + ", ".join(missing_deps)
