@@ -146,17 +146,64 @@ def test_backend_5xx_records_circuit_breaker_failure(patched_client):
     assert node.circuit_breaker._failure_count == 1
 
 
-def test_register_node_invalid_scheme_rejected():
+def test_register_node_invalid_scheme_rejected(monkeypatch):
     """注册节点的 http_url 必须校验 Scheme，非 http/https 返回 400。"""
+    monkeypatch.setenv("GATEWAY_API_KEY", "secret-token-123")
     balancer = LoadBalancer(strategy="round_robin")
     client = TestClient(create_http_gateway_app(balancer))
 
     resp = client.post(
         "/v1/gateway/register",
+        headers={"Authorization": "Bearer secret-token-123"},
         json={"http_url": "ftp://malicious-node.test", "grpc_address": "127.0.0.1:50051"},
     )
     assert resp.status_code == 400
     assert "Invalid http_url scheme" in resp.json()["detail"]
+
+
+def test_management_endpoints_fail_closed_without_key(monkeypatch):
+    """未配置 GATEWAY_API_KEY 时管理端点一律 503（fail-closed，防 SSRF）。"""
+    monkeypatch.delenv("GATEWAY_API_KEY", raising=False)
+    balancer = LoadBalancer(strategy="round_robin")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    resp_reg = client.post(
+        "/v1/gateway/register",
+        json={"http_url": "http://node-b.test", "grpc_address": "127.0.0.1:50051"},
+    )
+    assert resp_reg.status_code == 503
+    assert "GATEWAY_API_KEY" in resp_reg.json()["detail"]
+
+    resp_dereg = client.post(
+        "/v1/gateway/deregister",
+        json={"http_url": "http://node-b.test", "grpc_address": "127.0.0.1:50051"},
+    )
+    assert resp_dereg.status_code == 503
+
+
+def test_502_does_not_leak_backend_error(patched_client):
+    """502 响应不得回传后端异常原文（可能含内网 URL），仅给通用文案。"""
+    _calls, state = patched_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow backend", request=request)
+
+    state["handler"] = handler
+
+    balancer = LoadBalancer(strategy="round_robin")
+    balancer.add_node("http://node-a.internal:9000", "127.0.0.1:50051")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    resp = client.post(
+        "/v1/privacy/mask",
+        json={"field_name": "mobile", "value": "13812345678", "context": ""},
+    )
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert "Bad Gateway" in detail
+    # 不泄漏后端异常细节与内网地址
+    assert "slow backend" not in detail
+    assert "node-a.internal" not in detail
 
 
 def test_register_node_auth_constant_time(monkeypatch):

@@ -2,6 +2,12 @@
 # ============================================================================
 # 【开发模式】一键停止控制台全部开发服务
 # Stop all dev mode console services (Agent, Backends, Vite Dev Server)
+#
+# ⚠️ 注意 / WARNING:
+#   本脚本除按 console/.pids/ 中的 PID 文件精确停止外，还会对固定端口
+#   (5173/8080/8081/8079/50051) 上残留的任何进程执行 kill 清理。
+#   若你在这些端口上手动启动了自己的进程（非本脚本拉起的），也会被终止。
+#   清理策略为先 SIGTERM 优雅退出、1 秒后仍存活再 SIGKILL 强杀。
 # ============================================================================
 
 set -euo pipefail
@@ -50,8 +56,15 @@ kill_by_port() {
 
     if [[ -n "$pids" ]]; then
         echo "清理端口 $port 上的残余进程 ($name: $pids)..."
+        # 两段式终止：先 SIGTERM 允许进程优雅退出，1 秒后仍存活再 SIGKILL
         for pid in $pids; do
-            kill -9 "$pid" 2>/dev/null || true
+            kill -15 "$pid" 2>/dev/null || true
+        done
+        sleep 1
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null || true
+            fi
         done
     fi
 }

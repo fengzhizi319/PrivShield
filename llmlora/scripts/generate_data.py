@@ -203,6 +203,11 @@ class RuleBasedDataGenerator:
         self.taxonomy = taxonomy
         self.dropped = 0
         self.level_stats: Dict[str, int] = {}
+        # 跨分割 input 去重集合：防止 train/dev/test 出现完全相同的敏感样本（数据泄漏）
+        # Cross-split input dedup set: prevents identical sensitive samples
+        # leaking across train/dev/test splits
+        self._seen_inputs: set[str] = set()
+        self.duplicate_dropped = 0
 
     def _rank(self, level: str) -> int:
         """获取等级排序权重（未知等级记 0） / Get level rank (unknown = 0)."""
@@ -231,6 +236,20 @@ class RuleBasedDataGenerator:
         3. 四柱体征/检查/处置（醋酸白阳性、CD4+、外阴赘生物、CO2激光）：整词/整句清除；
         4. PII 标识符：平滑无痕替代（患者、相关身份证号、预留联系电话）。
         """
+        # AGE K-匿名泛化处理 (§6.4)：无论密级一律先泛化，保证原始年龄不原样残留。
+        # 注意：该分支必须位于 L1/L2 提前返回之前，否则永远不可达，
+        # 且原样残留的年龄会被 verify_zero_leakage 字面检查命中导致样本全灭。
+        if kind == "AGE":
+            try:
+                age_val = int(val)
+                if age_val < 60:
+                    gen_age = age_val - (age_val % 3)
+                else:
+                    gen_age = age_val - (age_val % 2)
+                return str(gen_age)
+            except ValueError:
+                return val
+
         if level in ("L1", "L2"):
             return val
 
@@ -264,26 +283,8 @@ class RuleBasedDataGenerator:
                 return "常规门诊处方药"
 
             return "常见慢性疾病"
-            # 心血管重症 -> 泛化为 L2 级心血管疾病
-            if any(s in val for s in ["心肌梗死", "冠心病", "心衰"]):
-                return "心血管常见病"
-            # 处方药品泛化
-            if any(med in val for med in ["片", "胶囊", "颗粒", "注射液", "口服液"]):
-                return "常规门诊处方药"
-            return "常见慢性疾病"
 
-        # PII 实体掩码与年龄 K-匿名泛化处理 (§6.2 & §6.4)
-        if kind == "AGE":
-            try:
-                age_val = int(val)
-                if age_val < 60:
-                    gen_age = age_val - (age_val % 3)
-                else:
-                    gen_age = age_val - (age_val % 2)
-                return str(gen_age)
-            except ValueError:
-                return val
-
+        # PII 实体掩码 (§6.2)
         if kind == "NAME":
             if len(val) <= 1:
                 return "*"
@@ -441,14 +442,16 @@ class RuleBasedDataGenerator:
             self.dropped += 1
             return None
 
-        max_level = max(
-            (e["level"] for e in entities), key=self._rank, default=NEGATIVE_LEVEL
-        )
+        # 密级取 rank 最高的实体；confidence 直接采用该实体 label_entity 的
+        # 实际返回值（规则命中 1.0 / 兜底 0.8），不再硬编码 0.95
+        max_entity = max(entities, key=lambda e: self._rank(e["level"]), default=None)
+        max_level = max_entity["level"] if max_entity else NEGATIVE_LEVEL
+        confidence = max_entity["confidence"] if max_entity else 1.0
         self.level_stats[max_level] = self.level_stats.get(max_level, 0) + 1
 
         output_payload = {
             "final_level": max_level,
-            "confidence": 0.95,
+            "confidence": confidence,
             "reasoning": f"命中{max_level}敏感分类特征，已进行无痕重写与降级抹平",
             "sanitized_text": smoothed,
         }
@@ -458,16 +461,36 @@ class RuleBasedDataGenerator:
         }
 
     def generate_batch(self, count: int) -> List[Dict[str, Any]]:
-        """生成 count 条样本（QA 丢弃自动补采） / Generate samples, resampling on QA drops."""
+        """生成 count 条样本（QA 丢弃与跨分割重复均自动补采）。
+
+        Generate samples, resampling on QA drops and cross-split duplicates.
+
+        去重策略 / Dedup policy:
+        - 以 input 全文为键，跨 train/dev/test 累积去重（同一分割内同样生效），
+          防止完全相同的敏感样本泄漏到多个分割；
+        - 负样本（negative 领域，固定公开模板、无任何敏感实体）不参与去重，
+          否则少量模板耗尽后会撞满 max_attempts 并破坏 L1 类分布；
+          负样本跨分割重复不泄漏敏感信息。
+        """
         samples: List[Dict[str, Any]] = []
         # 补采上限防止病态循环 / Resample cap guards against pathological loops
         attempts = 0
         max_attempts = count * 5
+        negative_templates = set(TEMPLATES["negative"])
         while len(samples) < count and attempts < max_attempts:
             attempts += 1
             sample = self.generate_one()
-            if sample is not None:
+            if sample is None:
+                continue
+            input_text = sample["input"]
+            if input_text in negative_templates:
                 samples.append(sample)
+                continue
+            if input_text in self._seen_inputs:
+                self.duplicate_dropped += 1
+                continue
+            self._seen_inputs.add(input_text)
+            samples.append(sample)
         return samples
 
 
@@ -518,6 +541,7 @@ def main() -> None:
         print(f"成功导出 {len(samples)}/{size} 条数据到: {output_dir / filename}")
 
     print(f"零泄漏 QA 丢弃样本数: {generator.dropped}")
+    print(f"跨分割/同分割重复丢弃样本数: {generator.duplicate_dropped}")
     print(f"密级分布: {dict(sorted(generator.level_stats.items()))}")
 
 

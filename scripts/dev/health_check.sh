@@ -9,7 +9,7 @@
 #   3. REST API 端口 (默认 8079) 及 HTTP /health 端点可用性探针
 #   4. gRPC 服务端口 (默认 50051) 连通性探针
 #   5. Prometheus /metrics 监控端点响应检查
-#   6. 本地 SQLite 隐私预算与评审数据库文件状态巡检
+#   6. 本地 SQLite 隐私预算数据库文件状态巡检
 # ==============================================================================
 
 set -euo pipefail
@@ -159,18 +159,11 @@ fi
 # 5. 本地持久化数据库文件巡检
 echo -e "\n${YELLOW}[5/5] 巡检持久化数据库文件...${NC}"
 BUDGET_DB="${PRIVACY_BUDGET_DB:-privacy_budget.db}"
-REVIEW_DB="${PRIVACY_REVIEW_DB:-classification_review.db}"
 
 if [ -f "$BUDGET_DB" ]; then
     echo -e "隐私预算数据库 : ${GREEN}存在 (${BUDGET_DB}, 大小: $(du -h "$BUDGET_DB" | cut -f1))${NC}"
 else
     echo -e "隐私预算数据库 : ${YELLOW}未发现 (${BUDGET_DB}，当前可能使用内存预算模式)${NC}"
-fi
-
-if [ -f "$REVIEW_DB" ]; then
-    echo -e "人工复核数据库 : ${GREEN}存在 (${REVIEW_DB}, 大小: $(du -h "$REVIEW_DB" | cut -f1))${NC}"
-else
-    echo -e "人工复核数据库 : ${YELLOW}未发现 (${REVIEW_DB})${NC}"
 fi
 
 echo -e "\n${GREEN}====================================================${NC}"

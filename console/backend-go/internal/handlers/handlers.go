@@ -311,9 +311,7 @@ func (s *Server) Proxy(c *gin.Context) {
 	// - /v1/dynclassification/* 动态分类分级
 	// - /v1/ops/* 运维诊断
 	// - /health 健康检查
-	if strings.HasPrefix(req.Path, "/v1/dynclassification/") ||
-		strings.HasPrefix(req.Path, "/v1/ops/") ||
-		req.Path == "/health" {
+	if restOnlyPath(req.Path) {
 		s.proxyRest(c, start, req)
 		return
 	}
@@ -352,11 +350,19 @@ func (s *Server) Proxy(c *gin.Context) {
 	})
 }
 
-// proxyRest 辅助函数：通过 HTTP 将 REST 请求透明代理到 Agent REST 服务
-func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequest) {
-	// REST 与 gRPC 是 agent 的两个独立服务，主机/端口可能不同，
-	// 因此 REST 回退默认值使用 agent REST 默认地址（127.0.0.1:8079），
-	// 而非 gRPC 主机（AgentGRPCHost），避免配置不一致时路由到错误地址。
+// restOnlyPath 报告路径是否仅存在于 Agent REST 服务（无 gRPC 对应方法），
+// 这些路径直接走 REST 转发。Proxy 与 ConcurrencyTest 共用同一判定。
+func restOnlyPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/dynclassification/") ||
+		strings.HasPrefix(path, "/v1/ops/") ||
+		path == "/health"
+}
+
+// agentRestBaseURL 返回 agent REST 服务的基础地址。
+// REST 与 gRPC 是 agent 的两个独立服务，主机/端口可能不同，
+// 因此默认值使用 agent REST 默认地址（127.0.0.1:8079），
+// 而非 gRPC 主机（AgentGRPCHost），避免配置不一致时路由到错误地址。
+func agentRestBaseURL() string {
 	restHost := os.Getenv("PRIVACY_REST_HOST")
 	if restHost == "" {
 		restHost = "127.0.0.1"
@@ -367,11 +373,47 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 		restPort = "8079"
 	}
 
+	return fmt.Sprintf("http://%s:%s", restHost, restPort)
+}
+
+// extractRestErrorDetail 从上游错误响应体中提取可读的错误描述。
+// 优先取 JSON 体中的 detail 字段（FastAPI 规范，对齐 Python 后端
+// console/backend/app/client.py 的 _extract_detail 行为）；
+// 非 JSON 或无 detail 字段时降级为截断后的原始文本，避免把整段
+// HTML/堆栈塞进响应 detail。
+func extractRestErrorDetail(body []byte, statusCode int) string {
+	var data any
+	if err := json.Unmarshal(body, &data); err == nil {
+		if m, ok := data.(map[string]any); ok {
+			if d, exists := m["detail"]; exists {
+				if s, ok := d.(string); ok {
+					return s
+				}
+				// detail 非字符串（如校验错误数组）时序列化为 JSON 返回
+				if raw, err := json.Marshal(d); err == nil {
+					return string(raw)
+				}
+			}
+		}
+	}
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return fmt.Sprintf("agent REST returned status %d", statusCode)
+	}
+	const maxDetailLen = 512
+	if len(text) > maxDetailLen {
+		text = text[:maxDetailLen] + "..."
+	}
+	return text
+}
+
+// proxyRest 辅助函数：通过 HTTP 将 REST 请求透明代理到 Agent REST 服务
+func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequest) {
 	method := strings.ToUpper(req.Method)
 	if method == "" {
 		method = "POST"
 	}
-	url := fmt.Sprintf("http://%s:%s%s", restHost, restPort, req.Path)
+	url := agentRestBaseURL() + req.Path
 
 	var reqBodyReader io.Reader
 	if len(req.Body) > 0 {
@@ -403,7 +445,7 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 	_ = json.Unmarshal(respBytes, &respData)
 
 	if resp.StatusCode >= 400 {
-		c.JSON(resp.StatusCode, gin.H{"detail": string(respBytes), "status": resp.StatusCode})
+		c.JSON(resp.StatusCode, gin.H{"detail": extractRestErrorDetail(respBytes, resp.StatusCode), "status": resp.StatusCode})
 		return
 	}
 
@@ -414,6 +456,45 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 		Via:        "go-rest-proxy",
 		Protocol:   "REST",
 	})
+}
+
+// callRestOnce 以 REST 方式向 agent 发送单个请求（不写出 HTTP 响应），
+// 供 ConcurrencyTest 压测 REST-only 路径或 gRPC 不支持路径的回退使用。
+func (s *Server) callRestOnce(method, path string, body json.RawMessage) error {
+	method = strings.ToUpper(method)
+	if method == "" {
+		method = "POST"
+	}
+	url := agentRestBaseURL() + path
+
+	var reqBodyReader io.Reader
+	if len(body) > 0 {
+		reqBodyReader = bytes.NewReader(body)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, method, url, reqBodyReader)
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if s.cfg.AgentAPIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("agent REST %s %s returned status %d", method, path, resp.StatusCode)
+	}
+	return nil
 }
 
 // Batch 逐个转发一组请求并汇总成功/失败统计。
@@ -496,7 +577,7 @@ func (s *Server) Batch(c *gin.Context) {
 //
 // 支持的表单字段：
 //   - file：数据文件（.csv 或 .json）
-//   - operation：操作类型（mask_dataframe | k_anonymize | classify_table）
+//   - operation：操作类型（mask_dataframe | k_anonymize）
 //   - params：JSON 字符串，如 {"columns":[...],"qi_cols":[...],"k":2,"context":""}
 //
 // 执行逻辑：
@@ -988,6 +1069,10 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 	}
 	close(jobs)
 
+	// REST-only 路径（/health、/v1/dynclassification/* 等）无 gRPC 对应方法，
+	// 与 Proxy 保持一致的前缀拦截：整段压测直接走 REST，避免全部请求失败。
+	useREST := restOnlyPath(req.Path)
+
 	startTime := time.Now()
 	var wg sync.WaitGroup
 
@@ -997,9 +1082,18 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 			defer wg.Done()
 			for range jobs {
 				start := time.Now()
-				ctx, cancel := context.WithTimeout(s.client.WithAuth(context.Background()), 30*time.Second)
-				_, err := s.mapper.Dispatch(ctx, s.client.Raw(), req.Path, req.Body)
-				cancel()
+				var err error
+				if useREST {
+					err = s.callRestOnce(req.Method, req.Path, req.Body)
+				} else {
+					ctx, cancel := context.WithTimeout(s.client.WithAuth(context.Background()), 30*time.Second)
+					_, err = s.mapper.Dispatch(ctx, s.client.Raw(), req.Path, req.Body)
+					cancel()
+					// gRPC 不支持该路径时回退 REST（与 Proxy 的错误回退策略一致）
+					if err != nil && strings.Contains(err.Error(), "unsupported gRPC path") {
+						err = s.callRestOnce(req.Method, req.Path, req.Body)
+					}
+				}
 				elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 				latenciesMu.Lock()
@@ -1080,6 +1174,25 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// loadSampleRecords 读取 internal/samples 下的内置 CSV 样本。
+// 优先解析相对 StaticDistDir 的部署布局路径，其次回退到 CWD 相对路径；
+// 文件缺失或解析为空时返回明确错误，调用方应映射为 404 而非转发空数据。
+func (s *Server) loadSampleRecords(name string) ([]map[string]string, error) {
+	samplePath := filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", name)
+	if _, err := os.Stat(samplePath); err != nil {
+		samplePath = filepath.Join("internal", "samples", name)
+	}
+	data, err := os.ReadFile(samplePath)
+	if err != nil {
+		return nil, fmt.Errorf("示例数据文件缺失: %s", name)
+	}
+	parsed, _, err := fileparse.ParseCSV(data)
+	if err != nil || len(parsed) == 0 {
+		return nil, fmt.Errorf("示例数据文件为空或解析失败: %s", name)
+	}
+	return parsed, nil
+}
+
 // MedicalPipeline 医疗敏感数据全流程治理代理端点：分类分级与 L4/L5 数据脱敏。
 func (s *Server) MedicalPipeline(c *gin.Context) {
 	var body struct {
@@ -1089,15 +1202,13 @@ func (s *Server) MedicalPipeline(c *gin.Context) {
 
 	records := body.Records
 	if len(records) == 0 {
-		samplePath := filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", "data1.csv")
-		if _, err := os.Stat(samplePath); err != nil {
-			samplePath = "internal/samples/data1.csv"
+		loaded, err := s.loadSampleRecords("data1.csv")
+		if err != nil {
+			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
+			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			return
 		}
-		if data, err := os.ReadFile(samplePath); err == nil {
-			if parsed, _, err := fileparse.ParseCSV(data); err == nil && len(parsed) > 0 {
-				records = parsed
-			}
-		}
+		records = loaded
 	}
 
 	start := time.Now()
@@ -1121,20 +1232,13 @@ func (s *Server) YibaoPipeline(c *gin.Context) {
 
 	records := body.Records
 	if len(records) == 0 {
-		samplePath := filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", "yibao.csv")
-		if _, err := os.Stat(samplePath); err != nil {
-			samplePath = "internal/samples/yibao.csv"
+		loaded, err := s.loadSampleRecords("yibao.csv")
+		if err != nil {
+			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
+			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			return
 		}
-		if data, err := os.ReadFile(samplePath); err == nil {
-			if parsed, _, err := fileparse.ParseCSV(data); err == nil && len(parsed) > 0 {
-				records = parsed
-			}
-		}
-	}
-	if len(records) == 0 {
-		// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
-		c.JSON(http.StatusNotFound, gin.H{"detail": "示例数据文件缺失或为空: yibao.csv", "status": http.StatusNotFound})
-		return
+		records = loaded
 	}
 
 	start := time.Now()
@@ -1160,15 +1264,13 @@ func (s *Server) PipelineProcess(c *gin.Context) {
 
 	records := body.Records
 	if len(records) == 0 {
-		samplePath := filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", "data1.csv")
-		if _, err := os.Stat(samplePath); err != nil {
-			samplePath = "internal/samples/data1.csv"
+		loaded, err := s.loadSampleRecords("data1.csv")
+		if err != nil {
+			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
+			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			return
 		}
-		if data, err := os.ReadFile(samplePath); err == nil {
-			if parsed, _, err := fileparse.ParseCSV(data); err == nil && len(parsed) > 0 {
-				records = parsed
-			}
-		}
+		records = loaded
 	}
 
 	standard := body.Standard

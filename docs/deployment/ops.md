@@ -161,7 +161,7 @@ helm install pla ./deploy/helm/privacy-local-agent
 - `flavor: core`，使用轻量镜像
 - TLS / Auth / RateLimit 均关闭
 - 资源：requests 100m CPU / 256Mi，limits 1000m CPU / 1Gi
-- 探针：liveness `/health`（10s 间隔），readiness `/health`（5s 间隔）
+- 探针：liveness `/health`（10s 间隔），readiness `/readyz`（5s 间隔，额外校验配置解析器与预算 DB 连通性）
 - HPA / Ingress / NetworkPolicy / ServiceMonitor 均关闭
 
 ### 3.3 生产安装（TLS + 认证 + HPA）
@@ -308,7 +308,7 @@ livenessProbe:
   periodSeconds: 10
 readinessProbe:
   httpGet:
-    path: /health
+    path: /readyz
     port: http
   initialDelaySeconds: 5
   periodSeconds: 5
@@ -481,7 +481,7 @@ docker-compose down
 
 | 端点 | 用途 | 返回 |
 |---|---|---|
-| `GET /health` | 通用健康检查（K8s liveness/readiness 默认） | `{"status": "ok", "namespace": "..."}` |
+| `GET /health` | 通用健康检查（K8s liveness 默认；readiness 默认使用 `/readyz`） | `{"status": "ok", "namespace": "..."}` |
 | `GET /livez` | 存活探针 | `{"status": "alive"}` |
 | `GET /readyz` | 就绪探针（检查配置解析器 + 预算 DB 连通性） | `{"status": "ready", "llm_ready": true/false}` |
 | `GET /readyz/llm` | LLM 分类器就绪探针 | 200 或 503 |
@@ -542,10 +542,6 @@ docker-compose down
 | `privacy_classification_composite_hits_total` | Counter | rule_id | 组合规则命中 |
 | `privacy_classification_jobs_total` | Counter | status | 异步分类任务 |
 | `privacy_classification_jobs_duration_seconds` | Histogram | status | 异步任务延迟 |
-| `privacy_classification_review_queue_size` | Gauge | — | 人工审核队列大小 |
-| `privacy_classification_templates_total` | Counter | template | 合规模板使用 |
-| `privacy_classification_vectorized_batch_total` | Counter | field_name | 向量化批处理次数 |
-| `privacy_classification_vectorized_batch_size` | Histogram | — | 批处理行数分布 |
 
 **安全指标**：
 
@@ -594,7 +590,6 @@ rule_files:
 | HighGatewayRetryRate | errors | warning | 重试率 > 10% | 5m |
 | PrivacyBudgetNearlyExhausted | privacy | warning | 预算剩余 < 0.1 | 1m |
 | PrivacyBudgetExhausted | privacy | critical | 预算耗尽 ≤ 0 | 1m |
-| ClassificationReviewQueueBacklog | classification | warning | 审核队列 > 100 | 10m |
 | HighLLMClassifierErrorRate | classification | warning | LLM 错误率 > 10% | 5m |
 
 ### 9.3 Grafana 仪表盘
@@ -711,7 +706,6 @@ networkPolicy:
 | `PRIVACY_ASYNC_MAX_WORKERS` | `4` | 异步分类线程池大小 |
 | `PRIVACY_ASYNC_JOB_TTL_SECONDS` | `3600` | 异步任务 TTL |
 | `PRIVACY_ASYNC_MAX_JOBS` | `1000` | 最大并发异步任务数 |
-| `PRIVACY_REVIEW_DB` | — | 分类审核 SQLite 路径 |
 | `PRIVACY_VLM_TIMEOUT` | `180` | VLM 推理超时（秒） |
 | `PRIVACY_HEALTH_NO_AUTH` | `true` | 健康检查跳过认证 |
 | `PRIVACY_HEALTH_NO_RATE_LIMIT` | `true` | 健康检查跳过限速 |

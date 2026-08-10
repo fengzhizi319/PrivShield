@@ -17,6 +17,7 @@ import contextlib
 import hashlib
 import hmac
 import os
+import secrets
 import sqlite3
 import threading
 import time
@@ -31,15 +32,18 @@ logger = get_logger(__name__)
 class BudgetAuditLogger:
     """不可篡改的 HMAC 签名隐私预算审计日志。
 
-    审计密钥通过环境变量 PRIVACY_AUDIT_KEY 配置；若未设置则回退到默认密钥并输出警告。
-    生产环境务必通过环境变量设置高强度随机密钥。
+    审计密钥通过环境变量 PRIVACY_AUDIT_KEY 或显式构造参数配置；
+    若均未提供，则使用 ``secrets.token_hex(32)`` 生成进程级随机密钥并输出警告。
+    进程级随机密钥意味着进程重启后无法校验重启前写入的审计记录签名；
+    生产环境务必通过环境变量或构造参数设置高强度随机密钥并妥善保管。
     """
 
     def __init__(self, secret_key: bytes | None = None, log_file: str | None = None) -> None:
         """初始化审计日志器。
 
         Args:
-            secret_key: HMAC 签名密钥；为 None 时从环境变量 PRIVACY_AUDIT_KEY 读取。
+            secret_key: HMAC 签名密钥；为 None 时从环境变量 PRIVACY_AUDIT_KEY 读取；
+                两者均未提供时生成进程级随机密钥（重启后旧记录不可校验）。
             log_file: 审计日志文件路径；为 None 时从环境变量 PRIVACY_BUDGET_AUDIT_LOG 读取。
         """
         env_key = os.environ.get("PRIVACY_AUDIT_KEY")
@@ -48,13 +52,17 @@ class BudgetAuditLogger:
         elif env_key is not None:
             self.secret_key = env_key.encode("utf-8")
         else:
+            # 不再使用随源码公开的硬编码默认密钥（HMAC 签名可被任何人伪造）；
+            # 改为进程级随机密钥：签名在本进程生命周期内可校验，重启后旧记录不可校验。
+            self.secret_key = secrets.token_hex(32).encode("utf-8")
             logger.warning(
-                "audit_logger_insecure_key",
+                "audit_logger_process_random_key",
                 extra={
-                    "recommendation": "Set PRIVACY_AUDIT_KEY env var for production.",
+                    "detail": "No audit key configured; generated a process-level random HMAC key. "
+                    "Audit signatures cannot be verified after process restart.",
+                    "recommendation": "Set PRIVACY_AUDIT_KEY env var (or pass secret_key) for production.",
                 },
             )
-            self.secret_key = b"privacy-local-agent-default-audit-key"
         # Default audit path; configurable via PRIVACY_BUDGET_AUDIT_LOG env var.
         default_path = "/tmp/budget_audit.log"  # noqa: S108
         self.log_file = log_file or os.environ.get("PRIVACY_BUDGET_AUDIT_LOG", default_path)
@@ -493,6 +501,12 @@ class BudgetAccountant:
             with self._mu:
                 conn = self._get_db_conn(db_path)
                 try:
+                    # Ensure a clean transaction state in case a previous error left it rolled back
+                    conn.rollback()
+                    # 使用 BEGIN IMMEDIATE 排他性事务：窗口检查 + 重置必须与其他进程的
+                    # spend/remaining 互斥，否则并发下本进程的窗口重置 UPDATE 可能抹掉
+                    # 其他进程已扣减的预算（竞态条件）。
+                    conn.execute("BEGIN IMMEDIATE")
                     cursor = conn.execute(
                         "SELECT epsilon_total, delta_total, epsilon_spent, delta_spent, window_seconds, window_start "
                         "FROM privacy_budgets WHERE namespace = ?",
@@ -519,7 +533,7 @@ class BudgetAccountant:
                                 "WHERE namespace = ?",
                                 (self._window_start, self.namespace),
                             )
-                            conn.commit()
+                        conn.commit()
                         self.epsilon_spent = eps_spent
                         self.delta_spent = del_spent
                         self._update_metrics(eps_total, del_total, eps_spent, del_spent)
@@ -528,6 +542,7 @@ class BudgetAccountant:
                             "delta": del_total - del_spent,
                         }
                     else:
+                        conn.commit()
                         self._update_metrics(
                             self.epsilon_total, self.delta_total, 0.0, 0.0
                         )
@@ -536,6 +551,7 @@ class BudgetAccountant:
                             "delta": self.delta_total,
                         }
                 except Exception:
+                    conn.rollback()
                     self._close_db_conn()
                     raise
         else:

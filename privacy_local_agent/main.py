@@ -32,6 +32,7 @@ from .observability.middleware import ObservabilityMiddleware
 from .observability.tracing import init_tracing
 from .pipeline import router as pipeline_router
 from .routers import budget, dp, dynclassification, file, health, kano, ldp, mask, medical, ops, profile, qol
+from .security.auth import ApiKeyAuthAsgiMiddleware
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -92,7 +93,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(ObservabilityMiddleware)
 
 # 暴露 Prometheus metrics。
-app.mount("/metrics", make_asgi_app())
+# 挂载的子应用绕过 FastAPI 依赖体系，因此在 ASGI 层包裹 API Key 校验中间件：
+# PRIVACY_AUTH_ENABLED=true 时 /metrics 需要合法 Bearer Key，否则保持开放。
+app.mount("/metrics", ApiKeyAuthAsgiMiddleware(make_asgi_app()))
 
 # 挂载动态分类路由
 app.include_router(dynclassification.router)

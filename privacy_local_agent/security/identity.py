@@ -41,13 +41,21 @@ ANONYMOUS_IDENTITY = Identity("internal", "anonymous", ["*"])
 def permission_for_rest_path(path: str) -> str:
     """Map a REST path to the required permission string.
 
+    .. note::
+        **参考映射，当前未接线**：REST 路由均在 ``routers/*`` 中通过
+        ``require_permission(...)`` 显式声明权限，本函数仅供文档/示例参考
+        （见 ``docs/production_security/``），路由变更时需手动保持同步。
+        gRPC 侧权限映射 ``permission_for_grpc_method`` 则是在接线状态
+        （``AuthInterceptor`` 使用）。
+
     Paths are matched by prefix where it makes sense. Unknown paths require a
     generic wildcard permission for safety.
     """
     path = path.rstrip("/")
     if path in ("/health", "/livez", "/readyz"):
         return "health:read"
-    if path in ("/v1/privacy/mask", "/v1/privacy/mask_record"):
+    if path.startswith("/v1/privacy/mask"):
+        # /v1/privacy/mask、/mask_record、/mask/batch、/mask/dataframe
         return "privacy:mask"
     if path == "/v1/privacy/hash":
         return "privacy:hash"
@@ -55,7 +63,8 @@ def permission_for_rest_path(path: str) -> str:
         return "privacy:dp"
     if path.startswith("/v1/privacy/k_anonymize"):
         return "privacy:kano"
-    if path == "/v1/privacy/qol/obfuscate":
+    if path.startswith("/v1/privacy/qol/"):
+        # /v1/privacy/qol/obfuscate、/qol/obfuscate/batch
         return "privacy:qol"
     if path == "/v1/privacy/budget":
         return "privacy:budget"
@@ -73,6 +82,13 @@ def permission_for_rest_path(path: str) -> str:
         ):
             return "dynclassification:write"
         return "dynclassification:read"
+    if path.startswith("/v1/medical"):
+        return "medical:process"
+    if path.startswith("/v1/pipeline"):
+        return "pipeline:process"
+    if path.startswith("/v1/ops/"):
+        # refresh 触发模型重载需更高权限 ops:admin（在端点内校验）。
+        return "ops:diagnostics"
     # Conservative default for unknown routes.
     return "*"
 

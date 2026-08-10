@@ -211,8 +211,10 @@ def test_grpc_proxy_generic_forwarding(backend_agent, tmp_path, monkeypatch):
         loop.close()
 
 
-def test_dynamic_registration(backend_agent):
+def test_dynamic_registration(backend_agent, monkeypatch):
     """测试动态注册与注销 API。"""
+    monkeypatch.setenv("GATEWAY_API_KEY", "test-key")
+    headers = {"Authorization": "Bearer test-key"}
     balancer = LoadBalancer(strategy="round_robin")
     # 初始节点池为空
     assert len(balancer.nodes) == 0
@@ -228,6 +230,7 @@ def test_dynamic_registration(backend_agent):
             "grpc_address": backend_agent["grpc_address"],
             "weight": 2,
         },
+        headers=headers,
     )
     assert res_reg.status_code == 200
     assert res_reg.json()["status"] == "registered"
@@ -242,6 +245,7 @@ def test_dynamic_registration(backend_agent):
             "grpc_address": backend_agent["grpc_address"],
             "weight": 5,
         },
+        headers=headers,
     )
     assert res_reg_dup.status_code == 200
     assert len(balancer.nodes) == 1
@@ -254,6 +258,7 @@ def test_dynamic_registration(backend_agent):
             "http_url": backend_agent["http_url"],
             "grpc_address": backend_agent["grpc_address"],
         },
+        headers=headers,
     )
     assert res_dereg.status_code == 200
     assert res_dereg.json()["status"] == "deregistered"

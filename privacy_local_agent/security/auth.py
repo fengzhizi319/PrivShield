@@ -85,8 +85,13 @@ def _authenticate_mtls(
     """Derive an internal Identity from a verified mTLS client certificate.
 
     The gRPC auth_context is populated only when the connection uses TLS and the
-    client presented a certificate. We treat any verified mTLS peer as an internal
-    service when ``auth_internal_mtls_enabled`` is true.
+    client presented a certificate. A certificate passing CA verification only
+    proves possession of *a* certificate, not authorization to access this
+    service — so mTLS auth is disabled by default and, when enabled via
+    ``PRIVACY_AUTH_INTERNAL_MTLS_ENABLED``, the certificate Common Name must
+    additionally match the ``PRIVACY_AUTH_MTLS_ALLOWED_CNS`` whitelist
+    (JSON array or comma-separated). An empty whitelist rejects every
+    certificate (fail-closed).
     """
     if not settings.auth_internal_mtls_enabled:
         return None
@@ -97,6 +102,12 @@ def _authenticate_mtls(
     if not cn_bytes:
         return None
     cn = cn_bytes.decode("utf-8", errors="replace")
+    if cn not in settings.auth_mtls_allowed_cns:
+        logger.warning(
+            "mTLS client certificate rejected: CN not in whitelist",
+            extra={"cn": cn, "reason": "cn_not_allowed"},
+        )
+        return None
     return Identity("internal", cn, ["*"])
 
 
@@ -198,7 +209,13 @@ def require_permission(permission: str) -> Any:
 
 
 def require_rest_path_permission(path: str) -> Any:
-    """Convenience wrapper that enforces the permission for a REST path."""
+    """Convenience wrapper that enforces the permission for a REST path.
+
+    .. note::
+        **参考实现，当前未接线**：各路由显式使用 ``require_permission(...)``
+        声明权限，本便捷函数依赖 ``permission_for_rest_path`` 的参考映射，
+        仅供文档/示例参考。
+    """
     return require_permission(permission_for_rest_path(path))
 
 
@@ -281,3 +298,58 @@ def get_identity_from_grpc_context(
         context.abort(grpc.StatusCode.UNAUTHENTICATED, "Missing or invalid credentials")
     assert identity is not None
     return identity
+
+
+# ---------------------------------------------------------------------------
+# ASGI API-key middleware (for mounted sub-apps such as /metrics)
+# ---------------------------------------------------------------------------
+
+class ApiKeyAuthAsgiMiddleware:
+    """Pure-ASGI middleware enforcing API-key auth on a mounted sub-application.
+
+    ``app.mount()`` 挂载的子应用（如 Prometheus ``/metrics``）绕过 FastAPI 路由
+    依赖体系，``get_current_identity`` 不会执行。本中间件在 ASGI 层直接校验
+    ``Authorization: Bearer <key>``，复用与 REST 相同的常量时间 key 比对逻辑。
+
+    Behaviour:
+    - ``PRIVACY_AUTH_ENABLED`` 关闭时完全透传（行为与未包裹一致）；
+    - 开启时缺失/无效 key 返回 401 并计入 ``privacy_auth_denials_total``。
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        settings = get_security_settings()
+        if settings.auth_enabled:
+            headers = {
+                k.decode("latin-1").lower(): v.decode("latin-1")
+                for k, v in scope.get("headers", [])
+            }
+            token = _extract_bearer_token(headers.get("authorization"))
+            identity = _authenticate_api_key(settings, token) if token else None
+            if identity is None:
+                record_auth_denial("unauthenticated")
+                logger.warning(
+                    "Authentication failed on mounted sub-app",
+                    extra={"path": scope.get("path", ""), "reason": "missing_or_invalid_token"},
+                )
+                body = b"Unauthorized: missing or invalid credentials"
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            (b"content-type", b"text/plain; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode("ascii")),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+
+        await self.app(scope, receive, send)

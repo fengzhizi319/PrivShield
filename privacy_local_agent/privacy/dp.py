@@ -160,17 +160,22 @@ class DPResult:
         value: 带噪声的聚合结果（标量 float 或多维数组）/ Noisy query value (scalar or array).
         noise_mechanism: 使用的 DP 噪声机制（"laplace" 或 "gaussian"）/ Noise mechanism ("laplace" or "gaussian").
         noise_scale: 噪声分布的核心参数（Laplace b 或 Gaussian sigma）/ Noise distribution scale parameter.
+            当 clip 边界是从数据中推断出来时，该值由数据推导（= (max-min)/ε），
+            直接返回会把数据范围泄露给调用方，此时置 None。
+            (None when clip bounds were data-inferred, to avoid leaking the data range.)
         epsilon_spent: 本次运算所消耗的 epsilon 预算 / Epsilon budget consumed.
         delta_spent: 本次运算所消耗的 delta 预算 / Delta budget consumed.
         confidence_interval: 置信区间 (lower, upper)，根据 confidence_level 计算 / Two-sided confidence interval.
+            同样地，clip 边界为数据推断时置信区间亦由数据推导，置 None。
+            (None when clip bounds were data-inferred.)
     """
 
     value: Any
     noise_mechanism: str
-    noise_scale: float | list[float] | np.ndarray
+    noise_scale: float | list[float] | np.ndarray | None
     epsilon_spent: float
     delta_spent: float
-    confidence_interval: tuple[float, float] | list[tuple[float, float]] | dict[Any, tuple[float, float]]
+    confidence_interval: tuple[float, float] | list[tuple[float, float]] | dict[Any, tuple[float, float]] | None
 
     def to_arrow(self) -> Any:
         # 将 DPResult 转换为附带 DP 隐私 Metadata 的 PyArrow Table，支持零拷贝列式传输
@@ -585,7 +590,10 @@ class DPApi:
         u = self.rng.random() - 0.5
         # Determine sign of the sample
         sign = -1.0 if u < 0 else 1.0
-        # Apply inverse CDF: X = -b * sign * ln(1 - 2|u|) with domain safety check
+        # Apply inverse CDF: X = -b * sign * ln(1 - 2|u|) with domain safety check.
+        # 注意：max(1e-12, ...) 将采样尾部截断在 |noise| <= ln(1e12) * scale ≈ 27.6 * scale，
+        # 相对理想 Laplace 分布存在极轻微失真（尾部概率 ~1e-12 被截除）。该截断为防御
+        # log(0) 的数值安全措施，对 (epsilon, 0)-DP 保证无实质影响，故保留此行为。
         return -scale * sign * math.log(max(1e-12, 1.0 - 2.0 * abs(u)))
 
     def _sample_gaussian(self, sigma: float) -> float:
@@ -683,18 +691,23 @@ class DPApi:
         clip_lower: float | None,
         clip_upper: float | None,
         mechanism: str,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, bool]:
         # 解析 clip 上下界：Gaussian 必须显式提供，Laplace 允许数据推断（带警告）
-        """解析并返回 clip 上下界。
+        """解析并返回 clip 上下界及"是否从数据推断"标志。
 
         Gaussian 机制必须提供显式 clip 区间；Laplace 在未提供时允许使用数据推断
         的区间作为向后兼容，但会发出警告。
+
+        Returns:
+            (lower, upper, inferred)：inferred 为 True 表示边界由数据 min/max 推导，
+            调用方不得把由该边界计算的 noise_scale / confidence_interval 返回给调用者
+            （否则通过 sensitivity = (max - min) 反推泄露数据范围）。
         """
         # Both bounds explicitly provided: validate ordering and return as floats
         if clip_lower is not None and clip_upper is not None:
             if clip_lower > clip_upper:
                 raise ValueError("clip_lower must be <= clip_upper")
-            return float(clip_lower), float(clip_upper)
+            return float(clip_lower), float(clip_upper), False
 
         # Gaussian mechanism requires explicit clip bounds (no data-dependent inference)
         if mechanism == Mechanism.GAUSSIAN:
@@ -715,7 +728,7 @@ class DPApi:
                 "recommendation": "Set clip_lower/clip_upper explicitly for production DP guarantees.",
             },
         )
-        return lower, upper
+        return lower, upper, True
 
     def _validate_inputs(
         self,
@@ -1058,9 +1071,22 @@ class DPApi:
         self._notify_rdp(mechanism, noise_scale, sensitivity)
         # Step 8: If return_details, compute confidence interval and wrap in DPResult
         if return_details:
-            ci = compute_confidence_interval(
-                final_val, noise_scale, mechanism, confidence_level
-            )
+            if discrete and mechanism == Mechanism.LAPLACE:
+                # Discrete Laplace (Two-sided Geometric) 的精确尾部公式：
+                # P(|X| >= t) = 2 λ^t / (1 + λ)，其中 λ = e^{-1/b}；
+                # 反解得 margin = b * ln(2 / (alpha * (1 + λ)))。
+                # 不能套用连续 Laplace 的 -b*ln(alpha)，否则 CI 偏窄。
+                if noise_scale > 0.0 and not math.isnan(final_val):
+                    alpha = max(1e-12, 1.0 - confidence_level)
+                    lam = math.exp(-1.0 / noise_scale)
+                    margin = noise_scale * math.log(2.0 / (alpha * (1.0 + lam)))
+                    ci = (final_val - margin, final_val + margin)
+                else:
+                    ci = (final_val, final_val)
+            else:
+                ci = compute_confidence_interval(
+                    final_val, noise_scale, mechanism, confidence_level
+                )
             return DPResult(
                 value=final_val,
                 noise_mechanism=mechanism,
@@ -1144,7 +1170,7 @@ class DPApi:
         # Step 3: Resolve clip bounds and compute true sum on clipped data
         if _is_sparse_matrix(arr):
             # Sparse path: resolve clip bounds from min/max of stored values
-            lower, upper = self._resolve_clip_bounds(
+            lower, upper, bounds_inferred = self._resolve_clip_bounds(
                 np.array([arr.min(), arr.max()]) if arr.nnz > 0 else np.array([]),
                 clip_lower,
                 clip_upper,
@@ -1159,7 +1185,7 @@ class DPApi:
             true_sum = float(clipped_data.sum()) if arr.nnz > 0 else 0.0
         else:
             # Dense path: resolve clip bounds (may infer from data for Laplace)
-            lower, upper = self._resolve_clip_bounds(
+            lower, upper, bounds_inferred = self._resolve_clip_bounds(
                 arr, clip_lower, clip_upper, mechanism
             )
             # Clip values to [lower, upper] to bound per-element sensitivity
@@ -1192,6 +1218,17 @@ class DPApi:
         self._notify_rdp(mechanism, noise_scale, sensitivity)
         # Step 6: If return_details, compute CI and wrap in DPResult
         if return_details:
+            if bounds_inferred:
+                # 边界由数据 [min, max] 推断：noise_scale = (max-min)/ε 与 CI 均由数据推导，
+                # 返回给调用方会泄露数据范围（值域泄露），因此置 None 不上报。
+                return DPResult(
+                    value=final_val,
+                    noise_mechanism=mechanism,
+                    noise_scale=None,
+                    epsilon_spent=epsilon,
+                    delta_spent=delta,
+                    confidence_interval=None,
+                )
             ci = compute_confidence_interval(
                 final_val, noise_scale, mechanism, confidence_level
             )
@@ -1250,12 +1287,13 @@ class DPApi:
         # Step 2: Empty dataset => return 0.0 immediately (no budget consumed)
         if n_samples == 0:
             if return_details:
+                # 未执行任何子查询，预算分文未花，如实上报 0.0
                 return DPResult(
                     value=0.0,
                     noise_mechanism=mechanism,
                     noise_scale=0.0,
-                    epsilon_spent=epsilon,
-                    delta_spent=delta,
+                    epsilon_spent=0.0,
+                    delta_spent=0.0,
                     confidence_interval=(0.0, 0.0),
                 )
             return 0.0
@@ -1319,6 +1357,17 @@ class DPApi:
 
         # Step 7: Delta method variance estimation for ratio estimator
         if return_details:
+            if sum_scale is None or count_scale is None:
+                # sum 子查询的 clip 边界由数据推断（noise_scale 已被置 None）：
+                # 等效 scale 与 CI 均由数据推导，返回会泄露数据范围，故置 None。
+                return DPResult(
+                    value=final_val,
+                    noise_mechanism=mechanism,
+                    noise_scale=None,
+                    epsilon_spent=epsilon,
+                    delta_spent=delta,
+                    confidence_interval=None,
+                )
             eff_scale, ci = self._mean_delta_method_ci(
                 final_val, noisy_sum, noisy_count, sum_scale, count_scale, mechanism, confidence_level
             )
@@ -1756,12 +1805,14 @@ class DPApi:
         # Guard against divergence: if noisy_count too small, ratio is unstable
         if noisy_count < min_count or noisy_count <= 0.0:
             if return_details:
+                # 此处仅执行过 count 子查询（花费 eps_sub），sum 子查询未执行，
+                # 如实上报实际花费而非整个 epsilon。
                 return DPResult(
                     value=0.0,
                     noise_mechanism=mechanism,
                     noise_scale=0.0,
-                    epsilon_spent=epsilon,
-                    delta_spent=delta,
+                    epsilon_spent=eps_sub,
+                    delta_spent=delta_sub,
                     confidence_interval=(0.0, 0.0),
                 )
             return 0.0
@@ -2074,9 +2125,10 @@ class DPApi:
         # Guard against divergence: if noisy_count too small, ratio is unstable
         if noisy_count < min_count or noisy_count <= 0.0:
             if return_details:
+                # 仅 count 子查询已花费 eps_sub，sum 子查询未执行，如实上报。
                 return DPResult(
                     value=0.0, noise_mechanism=mechanism, noise_scale=0.0,
-                    epsilon_spent=epsilon, delta_spent=delta,
+                    epsilon_spent=eps_sub, delta_spent=delta_sub,
                     confidence_interval=(0.0, 0.0),
                 )
             return 0.0
@@ -2343,7 +2395,16 @@ class DPApi:
             # Sensitivity = range width (max per-element change after clipping)
             sens = max(0.0, upper - lower)
         else:
-            # No clip bounds: use raw sum with default sensitivity=1
+            # No clip bounds: use raw sum with default sensitivity=1.
+            # WARNING: 无界数据下 sensitivity=1.0 是任意假定的值，DP 保证随之失效；
+            # 与 _resolve_clip_bounds 的告警保持一致，生产环境必须显式提供 clip 边界。
+            logger.warning(
+                "accumulator_sensitivity_unbounded",
+                extra={
+                    "recommendation": "Set clip_lower/clip_upper explicitly for production DP guarantees; "
+                    "without clipping, sensitivity=1.0 is an arbitrary assumption and the DP guarantee is void for unbounded data.",
+                },
+            )
             s = float(arr.sum()) if size > 0 else 0.0
             sens = 1.0
 
@@ -2540,16 +2601,23 @@ class DPApi:
         if noisy_count < min_count or noisy_count <= 0.0:
             zero_vec = np.zeros(matrix.shape[1], dtype=np.float64)
             if return_details:
+                # 仅 count 子查询已花费 eps_sub，sum 子查询未执行，如实上报。
                 return DPResult(
                     value=zero_vec, noise_mechanism=mechanism, noise_scale=0.0,
-                    epsilon_spent=epsilon, delta_spent=delta,
+                    epsilon_spent=eps_sub, delta_spent=delta_sub,
                     confidence_interval=[(0.0, 0.0)] * matrix.shape[1],
                 )
             return zero_vec
 
         # Step 4: Compute noisy sum with the other half of the budget
-        noise_scale = self._compute_noise_scale(max_norm, eps_sub, delta_sub, mechanism)
-        noises = self._sample_isotropic_noise(matrix.shape[1], mechanism, noise_scale)
+        # Gaussian 机制的 L2 敏感度为 max_norm
+        # Laplace 机制对 d 维向量在 L2 clip 约束下的 L1 敏感度上界为 sqrt(d) * max_norm
+        # （与 vector_sum 保持一致的 √d 校准，否则高维 Laplace 欠噪）
+        d = matrix.shape[1]
+        import math
+        sensitivity = (max_norm * math.sqrt(d)) if ((mechanism == Mechanism.LAPLACE or mechanism == "laplace") and d > 1) else max_norm
+        noise_scale = self._compute_noise_scale(sensitivity, eps_sub, delta_sub, mechanism)
+        noises = self._sample_isotropic_noise(d, mechanism, noise_scale)
 
         # Consume budget for the sum query
         self.budget.spend(eps_sub, delta_sub)
@@ -2596,7 +2664,7 @@ class DPApi:
 
         执行步骤：
         1. 按 group_col 字段对输入的 pandas DataFrame 做的分组 num_groups。
-        2. 依据密码学 Tau-Thresholding 理论求解临界过滤阈值 tau = 1.0 + ln(1/delta_query) / eps_query。
+        2. 依据密码学 Tau-Thresholding 理论求解临界过滤阈值 tau = 1.0 + ln(1/(2*delta_query)) / eps_query。
         3. 对每个 Group 先调用 self.count 获得带噪频次 cnt。
         4. 判定 cnt >= tau：若小于 tau 则判定该 Group 为罕见/孤立敏感数据，予以强行丢弃（Drop）；
         5. 对保留下来的 Group 进一步计算目标 target_col 的 count/sum/mean 带噪聚合。
@@ -2621,8 +2689,8 @@ class DPApi:
         eps_per_query = epsilon / (num_groups * 2)
         del_per_query = delta / (num_groups * 2)
         # Step 4: Compute tau threshold for privacy-safe group filtering
-        # tau = 1 + ln(1/delta_query) / eps_query (from Tau-Thresholding theory)
-        tau = 1.0 + math.log(1.0 / max(1e-12, del_per_query)) / max(1e-12, eps_per_query)
+        # Standard Tau-Thresholding: tau = 1 + ln(1/(2*delta_query)) / eps_query
+        tau = 1.0 + math.log(1.0 / (2.0 * max(1e-12, del_per_query))) / max(1e-12, eps_per_query)
 
         # Step 5: Iterate over groups, filter by noisy count >= tau, then aggregate
         result = {}
@@ -2677,10 +2745,21 @@ class LocalDPApi:
     """
 
     def __init__(self, seed: int | None = None):
-        # 初始化 LocalDPApi，绑定随机数种子以保证可复现性
-        """初始化 LocalDPApi，绑定随机数种子。"""
-        # Create a seeded PRNG for reproducible randomized response
-        self.rng = random.Random(seed)
+        # 初始化 LocalDPApi：显式 seed 用确定性 PRNG（测试复现），默认用密码学安全 RNG
+        """初始化 LocalDPApi，绑定随机数源。
+
+        Args:
+            seed: 显式传入时使用 ``random.Random(seed)``（Mersenne Twister，
+                仅供测试复现，非加密安全）；默认 None 时使用
+                ``secrets.SystemRandom()``（OS 熵源，密码学安全），
+                与中央 DP 路径的 SecureRandom 默认姿态一致。
+        """
+        if seed is not None:
+            # Deterministic PRNG for reproducible tests only
+            self.rng: random.Random = random.Random(seed)
+        else:
+            # Cryptographically secure RNG for production (unpredictable)
+            self.rng = secrets.SystemRandom()
 
     @staticmethod
     def _validate_epsilon(epsilon: float) -> None:
@@ -2791,12 +2870,19 @@ class LocalDPApi:
         epsilon: float,
     ) -> dict[Any, float]:
         # 根据扰动后的类别样本，使用无偏纠偏公式估计各类别的真实直方图分布
-        """根据扰动后的类别样本估计各类别的真实无偏直方图分布。
+        """根据扰动后的类别样本估计各类别的真实直方图分布。
 
         执行步骤：
-        1. 统计各类别的无偏矫正分母 D = p - q，其中 p = exp(eps)/(k-1+exp(eps))，q = (1-p)/(k-1)。
-        2. 聚合上报的类频计数，应用纠偏估计量：hat_f_j = (count_j - n * q) / (p - q)。
-        3. 将估算概率过小的类频非负截断，并归一化使得所有类频之和为 1.0。
+        1. 计算随机响应概率：p = e^ε/(k-1+e^ε)（报出真实类别的概率），
+           q = (1-p)/(k-1)（报出任一指定错误类别的概率），纠偏分母 D = p - q。
+        2. 统计上报样本中各类别的**频率** f_reported_j = count_j / n，
+           应用纠偏估计量：hat_f_j = (f_reported_j - q) / (p - q)。
+        3. 将负的估计值非负截断为 0，再归一化使所有类别频率之和为 1.0
+           （若截断后总和为 0，则回退为均匀分布 1/k）。
+
+        注意：第 3 步的非负截断与归一化是对无偏估计量的正则化后处理，
+        因此最终输出是"归一化后的频率估计"，严格意义上不再是无偏估计；
+        随样本量增大，截断/归一化的影响趋近于 0，估计渐近无偏。
         """
         # Validate epsilon is positive
         self._validate_epsilon(epsilon)

@@ -19,14 +19,17 @@ def qol_obfuscate(req: QolRequest):
     Returns:
         {"result": <混淆后的查询列表>}
     """
-    return {"result": service.obfuscate_query(
-        req.query,
-        req.num_dummies,
-        req.domain,
-        medical_pool=req.medical_pool,
-        generic_pool=req.generic_pool,
-        seed=req.seed,
-    )}
+    try:
+        return {"result": service.obfuscate_query(
+            req.query,
+            req.num_dummies,
+            req.domain,
+            medical_pool=req.medical_pool,
+            generic_pool=req.generic_pool,
+            seed=req.seed,
+        )}
+    except Exception as e:
+        handle_request_exception(e)
 
 
 @router.post("/v1/privacy/qol/obfuscate/batch", dependencies=[*SECURITY_DEPS, require_permission("privacy:qol")])

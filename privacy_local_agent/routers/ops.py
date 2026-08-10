@@ -34,16 +34,29 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import NAMESPACE
-from ..security.auth import get_current_identity
+from ..observability.logging_config import get_logger
+from ..observability.middleware import record_auth_denial
+from ..security.auth import get_current_identity, require_permission
+from ..security.identity import Identity
 from ..security.ratelimit import rate_limit_dependency
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/ops", tags=["Ops"])
 
-# 健康/诊断类端点单独声明认证 + 限速依赖（与 health 路由保持一致，不含权限校验）。
-_OPS_DEPS = [Depends(get_current_identity), Depends(rate_limit_dependency)]
+# 诊断端点依赖：认证 + 限速 + 接口级权限。
+# - 读取诊断信息需要 "ops:diagnostics" scope；
+# - refresh=true 会真实加载数百 MB 模型（DoS 面），需要更高权限 "ops:admin"
+#   （在端点函数体内校验，见 diagnostics()）。
+# 注意：未启用认证时（本地开发默认）匿名身份持有 ["*"]，上述校验全部放行。
+_OPS_DEPS = [
+    Depends(get_current_identity),
+    Depends(rate_limit_dependency),
+    require_permission("ops:diagnostics"),
+]
 
 # 项目根目录：routers/ → privacy_local_agent/ → 项目根。
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -545,7 +558,10 @@ def _build_hardware() -> dict[str, Any]:
 
 
 @router.get("/diagnostics", dependencies=_OPS_DEPS)
-def diagnostics(refresh: bool = False) -> dict[str, Any]:
+def diagnostics(
+    refresh: bool = False,
+    identity: Identity = Depends(get_current_identity),
+) -> dict[str, Any]:
     """一站式运维诊断接口。
 
     返回服务信息、NER/LLM 降级链路、依赖安装情况、模型文件与硬件加速状态，
@@ -553,11 +569,22 @@ def diagnostics(refresh: bool = False) -> dict[str, Any]:
     以及 Agent 内部 NER/LLM 降级到了哪一级、缺少哪些驱动与如何安装。
 
     Args:
-        refresh: 为 True 时先失效引擎探测缓存再重新探测。用于服务运行期间
-            补装依赖（如 mlx）或下载模型后，不重启服务即可刷新诊断结论；
-            重新探测会实际加载模型，耗时较长，仅由用户显式点击“刷新诊断”触发。
+        refresh: 为 True 时先失效引擎探测缓存再重新探测。重新探测会真实加载
+            数百 MB 模型、耗时较长，属于高成本管理操作，因此除
+            ``ops:diagnostics`` 外还要求调用者持有 ``ops:admin`` scope，
+            防止低权限调用者反复触发模型加载造成 DoS。
     """
     if refresh:
+        if not identity.has_permission("ops:admin"):
+            record_auth_denial("forbidden")
+            logger.warning(
+                "Diagnostics refresh rejected: missing ops:admin scope",
+                extra={"identity_name": identity.name},
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: refresh requires ops:admin scope",
+            )
         _invalidate_probe_cache()
     dependencies = [
         _dep_info(

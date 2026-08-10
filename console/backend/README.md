@@ -32,6 +32,11 @@ pytest tests -v
 | `PRIVACY_CONSOLE_HOST` | `127.0.0.1` | 后端监听地址 |
 | `PRIVACY_CONSOLE_PORT` | `8080` | 后端监听端口 |
 | `PRIVACY_CONSOLE_STATIC_DIR` | `../web/dist` | 前端构建产物目录 |
+| `CONSOLE_API_KEY` | - | Console 自身 API Key（设置后 `/api/*` 需携带 `Authorization: Bearer`） |
+| `CONSOLE_RATE_LIMIT` | `600` | 单 IP 每分钟请求上限（0 表示不限流） |
+| `CONSOLE_MAX_UPLOAD_BYTES` | `10485760` | `/api/upload` 上传大小上限（字节，默认 10MB） |
+| `LB_ALLOWED_HOSTS` | - | `/api/lb_test` 探测目标 host 白名单（逗号分隔，命中后跳过私有网段校验） |
+| `LB_ALLOW_PRIVATE_IPS` | `false` | 允许 `/api/lb_test` 探测私有网段地址（内网部署场景） |
 
 ## 核心文件
 

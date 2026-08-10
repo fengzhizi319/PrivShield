@@ -61,6 +61,7 @@ class QwenPrivacyVLLMEngine:
 
         self._llm = None
         self._tokenizer = None
+        self._lora_request = None
         self._initialized = False
         self._init_lock = threading.Lock()
 
@@ -93,14 +94,24 @@ class QwenPrivacyVLLMEngine:
                 disable_log_stats=True,
             )
 
-            # LoRA adapter 挂载（vLLM 原生支持）
-            # LoRA adapter attachment (vLLM native support)
+            # LoRA adapter 支持（vLLM 0.26 正确 API：构造时仅 enable_lora，
+            # generate 时传 LoRARequest；EngineArgs 无 lora_modules 字段，
+            # 传入会抛 TypeError）
+            # LoRA adapter support (vLLM 0.26 API: enable_lora at construction,
+            # LoRARequest at generate time; EngineArgs has no lora_modules
+            # field and passing it raises TypeError)
             if self.adapter_path:
                 llm_kwargs["enable_lora"] = True
-                llm_kwargs["lora_modules"] = [self.adapter_path]
-                logger.info(f"挂载 LoRA 适配器: {self.adapter_path}")
+                # 覆盖常见 LoRA 秩（默认 16 放不下 r=32/64 的 adapter）
+                llm_kwargs["max_lora_rank"] = 64
+                logger.info(f"启用 LoRA 支持，适配器: {self.adapter_path}")
 
             self._llm = LLM(**llm_kwargs)
+
+            if self.adapter_path:
+                from vllm.lora.request import LoRARequest
+
+                self._lora_request = LoRARequest("privacy_lora", 1, self.adapter_path)
 
             # 获取 tokenizer 用于 prompt 构造
             # Get tokenizer for prompt construction
@@ -134,7 +145,9 @@ class QwenPrivacyVLLMEngine:
         prompt_text = render_prompt_text(self._tokenizer, text)
         sampling_params = self._build_sampling_params(max_new_tokens)
 
-        outputs = self._llm.generate([prompt_text], sampling_params)
+        outputs = self._llm.generate(
+            [prompt_text], sampling_params, lora_request=self._lora_request
+        )
         return outputs[0].outputs[0].text
 
     def classify(self, text: str, max_new_tokens: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -166,7 +179,9 @@ class QwenPrivacyVLLMEngine:
         prompts = [render_prompt_text(self._tokenizer, t) for t in texts]
         sampling_params = self._build_sampling_params(max_new_tokens)
 
-        outputs = self._llm.generate(prompts, sampling_params)
+        outputs = self._llm.generate(
+            prompts, sampling_params, lora_request=self._lora_request
+        )
 
         results: List[Optional[Dict[str, Any]]] = []
         for output in outputs:

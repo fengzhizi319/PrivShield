@@ -40,7 +40,9 @@ def download_file(url: str, target_path: str) -> bool:
     req = urllib.request.Request(url, headers=headers)
 
     try:
-        with urllib.request.urlopen(req) as response:
+        # timeout=60：限制连接建立与单次 socket 读阻塞的最长秒数，
+        # 防止镜像站无响应时下载进程无限挂起（分块下载期间每次 read 均受约束）
+        with urllib.request.urlopen(req, timeout=60) as response:
             with open(target_path, "wb") as out_file:
                 # 采用 1MB 分块读取，防止大文件下载时内存溢出
                 chunk_size = 1024 * 1024

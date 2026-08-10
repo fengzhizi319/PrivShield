@@ -128,10 +128,6 @@ type SamplesResponse struct {
 //
 // 前端“一键批量测试”提交一组请求，后端逐个转发并汇总结果。
 // 单个请求失败不会中断整个批次。
-// BatchRequest 是前端发送到 POST /api/batch 的 JSON 请求体。
-//
-// 前端"一键批量测试"提交一组请求，后端逐个转发并汇总结果。
-// 单个请求失败不会中断整个批次。
 type BatchRequest struct {
 	// Requests：待转发的请求列表，每个元素为一个完整的 ProxyRequest
 	Requests []ProxyRequest `json:"requests"`

@@ -63,21 +63,26 @@ def main() -> None:
     parser.add_argument("--merged-output-dir", type=str, default=None, help="合并模型保存目录")
     parser.add_argument("--resume-from-checkpoint", type=str, default=None, help="断点续训 checkpoint 目录")
     # 训练超参 / Training hyper-params
-    parser.add_argument("--epochs", type=int, default=3, help="训练 Epoch 数")
-    parser.add_argument("--max-steps", type=int, default=-1, help="最大训练步数（-1=跑满 epoch）")
-    parser.add_argument("--batch-size", type=int, default=4, help="每卡 Batch Size")
-    parser.add_argument("--grad-accum-steps", type=int, default=4, help="梯度累积步数")
-    parser.add_argument("--lr", type=float, default=2e-4, help="学习率")
-    parser.add_argument("--max-length", type=int, default=512, help="单样本最大 token 长度")
-    parser.add_argument("--seed", type=int, default=42, help="随机种子")
+    # 所有超参默认 None：仅在显式传参时覆盖 Config，
+    # 避免 argparse 默认值静默覆盖 Config 内置值与 llmlora/.env 环境变量。
+    # All hyper-params default to None: cfg is overridden only when a flag is
+    # explicitly passed, so argparse never silently clobbers Config defaults
+    # or llmlora/.env overrides.
+    parser.add_argument("--epochs", type=int, default=None, help="训练 Epoch 数（默认取 Config/.env）")
+    parser.add_argument("--max-steps", type=int, default=None, help="最大训练步数（-1=跑满 epoch；默认取 Config/.env）")
+    parser.add_argument("--batch-size", type=int, default=None, help="每卡 Batch Size（默认取 Config/.env）")
+    parser.add_argument("--grad-accum-steps", type=int, default=None, help="梯度累积步数（默认取 Config/.env）")
+    parser.add_argument("--lr", type=float, default=None, help="学习率（默认取 Config/.env）")
+    parser.add_argument("--max-length", type=int, default=None, help="单样本最大 token 长度（默认取 Config/.env）")
+    parser.add_argument("--seed", type=int, default=None, help="随机种子（默认取 Config/.env）")
     # LoRA / LoRA
-    parser.add_argument("--lora-r", type=int, default=16, help="LoRA 秩 r")
-    parser.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha")
-    parser.add_argument("--lora-dropout", type=float, default=0.05, help="LoRA dropout")
+    parser.add_argument("--lora-r", type=int, default=None, help="LoRA 秩 r（默认取 Config/.env）")
+    parser.add_argument("--lora-alpha", type=int, default=None, help="LoRA alpha（默认取 Config/.env）")
+    parser.add_argument("--lora-dropout", type=float, default=None, help="LoRA dropout（默认取 Config/.env）")
     # 硬件与导出 / Hardware & export
     parser.add_argument(
-        "--dtype", type=str, default="auto", choices=["auto", "bf16", "fp16", "fp32"],
-        help="强制计算精度",
+        "--dtype", type=str, default=None, choices=["auto", "bf16", "fp16", "fp32"],
+        help="强制计算精度（默认取 Config/.env）",
     )
     parser.add_argument("--agent-model-dir", type=str, default=None, help="Agent .models 部署目标目录")
     parser.add_argument("--no-gradient-checkpointing", action="store_true", help="关闭梯度检查点")
@@ -99,21 +104,34 @@ def main() -> None:
         cfg.agent_model_dir = args.agent_model_dir
     if args.no_copy_to_agent:
         cfg.auto_copy_to_agent_dir = False
-    cfg.resume_from_checkpoint = args.resume_from_checkpoint
-    cfg.num_epochs = args.epochs
-    cfg.max_steps = args.max_steps
-    cfg.batch_size = args.batch_size
-    cfg.grad_accum_steps = args.grad_accum_steps
-    cfg.learning_rate = args.lr
-    cfg.max_length = args.max_length
-    cfg.seed = args.seed
-    cfg.lora_r = args.lora_r
-    cfg.lora_alpha = args.lora_alpha
-    cfg.lora_dropout = args.lora_dropout
-    cfg.dtype = args.dtype
+    if args.resume_from_checkpoint:
+        cfg.resume_from_checkpoint = args.resume_from_checkpoint
+    if args.epochs is not None:
+        cfg.num_epochs = args.epochs
+    if args.max_steps is not None:
+        cfg.max_steps = args.max_steps
+    if args.batch_size is not None:
+        cfg.batch_size = args.batch_size
+    if args.grad_accum_steps is not None:
+        cfg.grad_accum_steps = args.grad_accum_steps
+    if args.lr is not None:
+        cfg.learning_rate = args.lr
+    if args.max_length is not None:
+        cfg.max_length = args.max_length
+    if args.seed is not None:
+        cfg.seed = args.seed
+    if args.lora_r is not None:
+        cfg.lora_r = args.lora_r
+    if args.lora_alpha is not None:
+        cfg.lora_alpha = args.lora_alpha
+    if args.lora_dropout is not None:
+        cfg.lora_dropout = args.lora_dropout
+    if args.dtype:
+        cfg.dtype = args.dtype
     if args.no_gradient_checkpointing:
         cfg.gradient_checkpointing = False
-    cfg.merge_on_completion = not args.no_merge
+    if args.no_merge:
+        cfg.merge_on_completion = False
 
     logger.info(
         f"训练配置 | base={os.path.basename(cfg.base_model_path)} "

@@ -142,17 +142,6 @@ groups:
 
   - name: privacy-local-agent.classification
     rules:
-      # 分类审核队列积压 / Classification review queue backlog
-      - alert: ClassificationReviewQueueBacklog
-        expr: privacy_classification_review_queue_size > 100
-        for: 10m
-        labels:
-          severity: warning
-          service: privacy-local-agent
-        annotations:
-          summary: "Classification review queue backlog"
-          description: "The classification human-review queue has more than 100 pending entries for more than 10 minutes."
-
       # LLM 分类器错误率过高 / LLM classifier error rate too high
       - alert: HighLLMClassifierErrorRate
         expr: |

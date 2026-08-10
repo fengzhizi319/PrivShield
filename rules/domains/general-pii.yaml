@@ -129,8 +129,10 @@ downgrade_rules:
 
   - id: "general-pii:RULE_DOWN_OPS"
     name: "运营统计强制降级"
+    # 注：移除裸短关键词 "stat"/"cnt"——降级匹配为归一化子串语义（engine._evaluate_downgrade），
+    # "stat" 会误伤 "status" 等字段；保留 "statistics"/"stat_count"/"total_cnt" 等复合关键词。
     keywords: [
-      "turnover_rate", "device_usage", "inventory", "stat", "statistics", "stat_count", "cnt",
+      "turnover_rate", "device_usage", "inventory", "statistics", "stat_count",
       "total_cnt", "total_num", "stat_num", "门诊人次", "床位统计", "工作量统计", "周转率", "使用率", "库存", "汇总"
     ]
     level: "L2"

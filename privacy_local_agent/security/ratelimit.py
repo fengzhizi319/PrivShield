@@ -55,14 +55,25 @@ class Limiter:
             burst = self._settings.rate_limit_default_burst
 
         window_seconds = max(1.0, burst / rps) if rps > 0 else 1.0
-        # limits uses integer multiples; round up to be slightly more conservative.
-        return RateLimitItemPerSecond(int(burst), math.ceil(window_seconds))
+        # limits 仅接受整型配额：0 < burst < 1 时 int() 会截断为 0 导致全量拒绝，
+        # 向上取整并保底 1（宁可略宽松也不全拒）。
+        return RateLimitItemPerSecond(max(1, math.ceil(burst)), math.ceil(window_seconds))
 
     def is_allowed(self, identity: Identity, endpoint: str) -> bool:
         """Return True if the call is within the rate limit for identity + endpoint."""
         key = f"{identity.service_type}:{identity.name}:{endpoint}"
         item = self._limit_for_endpoint(endpoint)
-        return self._limiter.hit(item, key)
+        try:
+            return self._limiter.hit(item, key)
+        except Exception as exc:
+            # 存储后端不可用（如 Redis 断连）时 hit() 会抛异常，若放任上抛
+            # 会导致全站 500。按本服务"本地优先"的定位降级为放行并告警，
+            # 保证限流基础设施故障不放大为可用性故障。
+            logger.warning(
+                "Rate limiter storage unavailable, degrading to allow",
+                extra={"endpoint": endpoint, "error": str(exc)},
+            )
+            return True
 
 
 # Module-level singleton so REST and gRPC share the same limiter state.
@@ -121,7 +132,12 @@ async def rate_limit_dependency(request: Request) -> None:
 
 
 def rate_limit_for_path(path: str) -> Any:
-    """Return a FastAPI dependency enforcing rate limits for a specific path."""
+    """Return a FastAPI dependency enforcing rate limits for a specific path.
+
+    .. note::
+        **参考实现，当前未接线**：各路由统一使用 ``rate_limit_dependency``
+        （按请求实际路径限流），本便捷函数仅供文档/示例参考。
+    """
 
     async def _checker(request: Request) -> None:
         settings = get_security_settings()
@@ -133,6 +149,7 @@ def rate_limit_for_path(path: str) -> Any:
         if identity is None:
             identity = Identity("external", "anonymous", [])
         if not get_limiter().is_allowed(identity, path):
+            record_auth_denial("rate_limited")
             logger.warning(
                 "Rate limit exceeded",
                 extra={"path": path, "identity_type": identity.service_type, "identity_name": identity.name},

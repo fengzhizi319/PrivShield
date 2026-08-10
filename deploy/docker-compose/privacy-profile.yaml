@@ -1,9 +1,23 @@
-server:
-  rest_host: "0.0.0.0"
-  rest_port: 8079
-  grpc_host: "0.0.0.0"
-  grpc_port: 50051
-privacy:
-  default_epsilon: 1.0
-  default_delta: 1e-6
-  default_k: 5
+# privacy-local-agent 隐私参数配置（docker-compose 挂载用）
+#
+# 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
+# primitives.<primitive> 覆盖内置默认参数；其他顶层键（如 server:/privacy:）
+# 不会被解析。监听地址等请使用 docker-compose.yml 中的 PRIVACY_* 环境变量。
+#
+# 下方取值与代码内置默认值一致（行为中性，仅作显式示例）：
+#   dp: epsilon=1.0, delta=0.0, mechanism=laplace
+#   k_anonymity: k=5, l=2, t=0.2, max_depth=10
+#   sanitization: engine=mask
+# 更多可配置项（qol / classification 等）参见 config/sample-privacy-profile.yaml。
+primitives:
+  dp:
+    epsilon: 1.0
+    delta: 0.0
+    mechanism: "laplace"
+  k_anonymity:
+    k: 5
+    l: 2
+    t: 0.2
+    max_depth: 10
+  sanitization:
+    engine: "mask"

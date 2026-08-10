@@ -507,34 +507,40 @@ class Qwen3Classifier(LlmClassifier):
         try:
             # 构建 system prompt：定义角色、评估标准和输出 JSON 格式
             # 优先使用自定义模板（支持 {domain}/{standard_id}/{levels_desc} 占位符）
+            #
+            # 训练/推理对齐说明（仅 Qwen3Classifier 加载微调模型，其他引擎保留原 prompt）：
+            # 本引擎的 L1~L5 等级定义与输出字段契约（final_level/confidence/reasoning/
+            # sanitized_text）与微调训练侧 llmlora/src/dataset/loader.py 的
+            # SYSTEM_PROMPT 及输出 schema 保持一致，避免训练/推理分布偏移导致
+            # 微调模型输出漂移；渲染 prompt 时亦与训练侧一致地关闭 thinking 模式。
             if self._classify_prompt_template:
                 system_prompt = self._classify_prompt_template.format(
                     domain="medical",
                     standard_id="DB51_T_2989",
                     levels_desc=(
-                        "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变或罕见病样本。\n"
-                        "- L4 (高风险): 包含精神疾病、敏感传染病或完整的住院病历。\n"
-                        "- L3 (中风险): 包含个人身份信息（PII）、普通的门诊诊疗记录或常规检验指标数值。\n"
-                        "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
-                        "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感特征的统计指标。"
+                        "- L1 (公开数据): 无敏感信息的公开资讯、通用日常文本。\n"
+                        "- L2 (内部数据): 业务统计指标、系统日志、设备运维等低敏感内部数据。\n"
+                        "- L3 (敏感数据/个人基本信息): 姓名、身份证号、手机号、银行卡号、电子邮箱等个人基础标识与资产信息。\n"
+                        "- L4 (高敏感数据/诊疗与金融敏感): 疾病诊断（如重度抑郁症、高血压、冠心病）、病历主诉、处方药品等医疗健康敏感信息。\n"
+                        "- L5 (极敏感数据): 基因组、生物特征、特级商业机密等核心数据。"
                     ),
                 )
             else:
                 system_prompt = (
-                    "你是一个医疗数据分类分级领域的资深安全专家。请对输入的医疗数据进行敏感等级评估。\n"
-                    "评估标准如下：\n"
-                    "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变（如 BRCA1/TP53）或罕见病样本。\n"
-                    "- L4 (高风险): 包含精神疾病（如精神分裂）、敏感传染病（如 HIV/AIDS/梅毒）或完整的住院病历。\n"
-                    "- L3 (中风险): 包含个人身份信息（PII，如身份证号、手机号）、普通的门诊诊疗记录或常规检验指标数值（如血常规）。\n"  # noqa: E501
-                    "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
-                    "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感和特征的统计指标。\n\n"
+                    "你是一个专业的隐私安全Sidecar助手。请分析输入的文本，识别敏感信息，"
+                    "输出分类分级结果（JSON格式），并提供语义连贯的无痕抹平脱敏重写文本。\n\n"
+                    "【数据分类分级标准指南】\n"
+                    "- L1 (公开数据): 无敏感信息的公开资讯、通用日常文本。\n"
+                    "- L2 (内部数据): 业务统计指标、系统日志、设备运维等低敏感内部数据。\n"
+                    "- L3 (敏感数据/个人基本信息): 姓名、身份证号、手机号、银行卡号、电子邮箱等个人基础标识与资产信息。\n"
+                    "- L4 (高敏感数据/诊疗与金融敏感): 疾病诊断（如重度抑郁症、高血压、冠心病）、病历主诉、处方药品等医疗健康敏感信息。\n"
+                    "- L5 (极敏感数据): 基因组、生物特征、特级商业机密等核心数据。\n\n"
                     "请严格根据上述标准进行定级，并仅输出符合以下 JSON 格式的结构化内容，不要包含额外的解释文字或 ``` 块：\n"  # noqa: E501
                     "{\n"
                     '  "final_level": "L1/L2/L3/L4/L5",\n'
-                    '  "sub_category": "分类标签简称",\n'
                     '  "confidence": 0.0到1.0之间的浮点数,\n'
                     '  "reasoning": "定级判别的推理过程说明",\n'
-                    '  "needs_human_review": true/false\n'
+                    '  "sanitized_text": "语义连贯的无痕抹平脱敏重写文本"\n'
                     "}"
                 )
 
@@ -550,10 +556,20 @@ class Qwen3Classifier(LlmClassifier):
             ]
 
             # 使用 tokenizer 将对话消息转换为模型可接受的文本 prompt 格式
-            # apply_chat_template 会按照模型的对话模板格式化消息
-            text_prompt = self._tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
+            # apply_chat_template 会按照模型的对话模板格式化消息。
+            # 与训练侧（llmlora/src/dataset/loader.py render_prompt_text）保持一致：
+            # Qwen3.5 模板在 add_generation_prompt 时默认注入 <think> 前缀，
+            # 必须显式传入 enable_thinking=False 走非思考分支，
+            # 否则推理输出会带思考标记导致 JSON 解析失败；
+            # 不支持该 kwarg 的旧模板回退为不传（TypeError 兼容）。
+            try:
+                text_prompt = self._tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+                )
+            except TypeError:
+                text_prompt = self._tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
 
             # 使用 tokenizer 将文本转换为模型输入张量（input_ids 等）
             inputs = self._tokenizer(

@@ -114,25 +114,6 @@ CLASSIFICATION_JOBS_DURATION = Histogram(
     buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0],
 )
 
-# Classification human-review queue size.
-CLASSIFICATION_REVIEW_QUEUE_SIZE = Gauge(
-    "privacy_classification_review_queue_size",
-    "Current number of pending classification review entries.",
-)
-
-# Classification shadow mode diff counter.
-CLASSIFICATION_SHADOW_DIFF_TOTAL = Counter(
-    "privacy_classification_shadow_diff_total",
-    "Total number of shadow mode classification differences.",
-)
-
-# Classification compliance template usage counter.
-CLASSIFICATION_TEMPLATES_TOTAL = Counter(
-    "privacy_classification_templates_total",
-    "Total number of classification requests using a compliance template.",
-    ["template"],
-)
-
 # Classification rule engine hit counter (Layer-1).
 CLASSIFICATION_RULE_HITS_TOTAL = Counter(
     "privacy_classification_rule_hits_total",
@@ -183,20 +164,6 @@ CLASSIFICATION_LLM_DURATION = Histogram(
     "LLM classifier inference latency in seconds.",
     ["engine"],
     buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0],
-)
-
-# Vectorized rule engine batch evaluation counter.
-CLASSIFICATION_VECTORIZED_BATCH_TOTAL = Counter(
-    "privacy_classification_vectorized_batch_total",
-    "Total number of vectorized batch evaluations.",
-    ["field_name"],
-)
-
-# Vectorized rule engine batch size histogram.
-CLASSIFICATION_VECTORIZED_BATCH_SIZE = Histogram(
-    "privacy_classification_vectorized_batch_size",
-    "Number of rows per vectorized batch evaluation.",
-    buckets=[1, 10, 50, 100, 500, 1000, 5000, 10000, 50000],
 )
 
 # Dynamic classification metrics (动态分类分级可观测性)

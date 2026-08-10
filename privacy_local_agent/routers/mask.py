@@ -25,7 +25,10 @@ def mask(req: MaskRequest):
     Returns:
         {"result": <脱敏后的值>}
     """
-    return {"result": service.mask(req.field_name, req.value, req.context)}
+    try:
+        return {"result": service.mask(req.field_name, req.value, req.context)}
+    except Exception as e:
+        handle_request_exception(e)
 
 
 @router.post("/v1/privacy/mask_record", dependencies=[*SECURITY_DEPS, require_permission("privacy:mask")])
@@ -38,7 +41,10 @@ def mask_record(req: MaskRecordRequest):
     Returns:
         {"result": <脱敏后的记录字典>}
     """
-    return {"result": service.mask_record(req.record, req.context)}
+    try:
+        return {"result": service.mask_record(req.record, req.context)}
+    except Exception as e:
+        handle_request_exception(e)
 
 
 @router.post("/v1/privacy/mask/batch", dependencies=[*SECURITY_DEPS, require_permission("privacy:mask")])
@@ -77,4 +83,7 @@ def hash_value(req: HashRequest):
     Returns:
         {"result": <16 位 base64 摘要>}
     """
-    return {"result": service.hash(req.value, req.salt)}
+    try:
+        return {"result": service.hash(req.value, req.salt)}
+    except Exception as e:
+        handle_request_exception(e)

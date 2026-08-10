@@ -899,7 +899,7 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
             "epsilon": request.epsilon if request.epsilon > 0 else 1.0,
             "delta": request.delta,
             "mechanism": request.mechanism if request.mechanism else "laplace",
-            "min_count": request.min_count if request.min_count > 0 else 1,
+            "min_count": request.min_count if request.min_count > 0 else 5.0,  # 对齐 REST 默认值（service.py:323）
             "return_details": request.return_details,
         }
         # 调用业务层执行向量均值：L2 截断 + 各向同性加噪 + noisy_count 归一化
@@ -944,11 +944,14 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
             DPAdaptiveClipResponse: 包含推荐的 clip_lower 与 clip_upper。
         """
         # 构建自适应截断参数
+        # proto3 零值视为未设置，回退到与 REST 一致的默认值（service.py:333-335：
+        # target_quantile=0.95 / num_iterations=15 / initial_clip=10.0），
+        # 避免 proto3 默认 0 被业务层当作有效参数（如 0 次迭代导致估计失效）。
         params = {
             "epsilon": request.epsilon,              # 用于截断估计的隐私预算
-            "target_quantile": request.target_quantile,  # 目标分位数（如 0.95）
-            "num_iterations": request.num_iterations,    # 二分搜索迭代次数
-            "initial_clip": request.initial_clip,        # 初始截断范围
+            "target_quantile": request.target_quantile if request.target_quantile > 0 else 0.95,  # 目标分位数
+            "num_iterations": request.num_iterations if request.num_iterations > 0 else 15,       # 二分搜索迭代次数
+            "initial_clip": request.initial_clip if request.initial_clip > 0 else 10.0,           # 初始截断范围
         }
         # 调用业务层执行自适应截断估计，返回 (lower, upper) 元组
         lower, upper = self.service.dp_adaptive_clip(list(request.values), params)
@@ -978,9 +981,13 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
             "epsilon": request.epsilon,      # 隐私预算
             "delta": request.delta,          # δ 参数
             "mechanism": request.mechanism,  # 噪声机制
-            "clip_lower": request.clip_lower,  # 组内截断下界
-            "clip_upper": request.clip_upper,  # 组内截断上界
         }
+        # proto3 标量默认为 0：clip_lower/clip_upper 双零时视为未设置，不透传，
+        # 由业务层自行推导截断边界（参照 _dp_params_from_request 的 guard 写法）；
+        # 直接透传 0.0/0.0 会被业务层误当作有效截断区间 [0, 0]。
+        if request.clip_lower != 0.0 or request.clip_upper != 0.0:
+            params["clip_lower"] = request.clip_lower  # 组内截断下界
+            params["clip_upper"] = request.clip_upper  # 组内截断上界
         # 调用业务层执行分组聚合：按 group_col 分组，对 target_col 执行 agg 操作并加噪
         res = self.service.dp_groupby(df, request.group_col, request.target_col, request.agg, params)
         # 序列化为 JSON 返回
@@ -1010,8 +1017,11 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
         if not hasattr(self, "_dyn_service") or self._dyn_service is None:
             self._dyn_service = DynClassificationService()
 
-        # 检查规则文件是否变更，若有更新则热重载（支持运行中修改规则无需重启）
-        self._dyn_service.loader.check_and_reload()
+        # 检查规则文件是否变更，若有更新则热重载（支持运行中修改规则无需重启）。
+        # 注意必须走 DynClassificationService.check_and_reload()（service.py:664），
+        # 该方法在 loader 重载后连带清空 funnel/分类结果缓存与 NER/LLM 适配器；
+        # 直接调用 loader.check_and_reload() 会导致旧引擎缓存继续生效，热重载形同虚设。
+        self._dyn_service.check_and_reload()
         # 提取请求参数
         field_name = request.field_name    # 待分类的字段名
         value = request.field_value        # 字段值

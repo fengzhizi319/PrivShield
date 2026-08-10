@@ -45,7 +45,7 @@ def classify_records(
         记录级分级明细列表。
     """
     svc = _get_dyn_service(rules_dir)
-    svc.loader.check_and_reload()
+    svc.check_and_reload()
 
     results: list[RecordClassificationDetail] = []
 

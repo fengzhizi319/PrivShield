@@ -34,7 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from llmlora.src.dataset.loader import load_jsonl  # noqa: E402
+from llmlora.src.dataset.loader import extract_user_input, load_jsonl  # noqa: E402
 from llmlora.src.inference.engine import QwenPrivacyLoRAEngine  # noqa: E402
 from llmlora.src.inference.engine_vllm import QwenPrivacyVLLMEngine  # noqa: E402
 from llmlora.src.utils.metrics import (  # noqa: E402
@@ -105,7 +105,8 @@ def run_evaluation(
     leak_clean = 0
 
     for i, sample in enumerate(test_samples):
-        input_text = sample.get("input", "") or sample.get("instruction", "")
+        # 与训练侧 loader.extract_user_input 保持一致（instruction+"\n"+input）
+        input_text = extract_user_input(sample)
         gt_output_str = sample.get("output", "{}")
         try:
             ref_json = (
@@ -126,9 +127,11 @@ def run_evaluation(
 
         # 零泄漏校验：对模型输出的 sanitized_text 做规则引擎复扫
         # Zero-leakage check: rule-engine rescan on the model's sanitized_text
+        # scanner 不可用（规则引擎降级）时跳过本校验，指标记为 N/A，
+        # 杜绝 scanner=None 时 rule_leak 恒 False 造成的静默满分。
         sanitized = str(result.get("sanitized_text", "") or result.get("smoothed_text", "")) if result else ""
-        if sanitized:
-            rule_leak = bool(scanner and scanner(sanitized))
+        if sanitized and scanner is not None:
+            rule_leak = bool(scanner(sanitized))
             leak_checked += 1
             if not rule_leak:
                 leak_clean += 1
@@ -139,13 +142,20 @@ def run_evaluation(
     cls_metrics = calculate_classification_metrics(predictions, references)
     entity_metrics = calculate_entity_f1(predictions, references)
     latency = summarize_latency(latencies_ms)
-    zero_leak_rate = leak_clean / leak_checked if leak_checked else 0.0
+    # scanner 缺失或无 sanitized_text 可检时指标为 None（N/A），不得按满分计
+    zero_leak_available = scanner is not None and leak_checked > 0
+    zero_leak_rate: Optional[float] = (
+        leak_clean / leak_checked if zero_leak_available else None
+    )
 
     print("\n" + "=" * 56)
     print("评估完成，结果报告:")
     print(f"  JSON 格式合法解析率 : {cls_metrics['json_valid_rate'] * 100:.2f}%")
     print(f"  分类密级 Accuracy  : {cls_metrics['level_accuracy'] * 100:.2f}%")
-    print(f"  二次扫描零泄漏率    : {zero_leak_rate * 100:.2f}% ({scanner_desc}, n={leak_checked})")
+    if zero_leak_rate is not None:
+        print(f"  二次扫描零泄漏率    : {zero_leak_rate * 100:.2f}% ({scanner_desc}, n={leak_checked})")
+    else:
+        print(f"  二次扫描零泄漏率    : N/A ({scanner_desc}，指标不可用，不计分)")
     print(
         f"  推理延迟           : mean={latency['mean']:.1f}ms "
         f"p50={latency['p50']:.1f}ms p95={latency['p95']:.1f}ms max={latency['max']:.1f}ms"
@@ -156,6 +166,7 @@ def run_evaluation(
         **cls_metrics,
         **entity_metrics,
         "zero_leak_rate": zero_leak_rate,
+        "zero_leak_rate_available": zero_leak_available,
         "latency": latency,
     }
 

@@ -1,10 +1,21 @@
-"""Test auto-copy of merged LoRA model to Agent .models directory."""
+"""Test auto-copy of merged LoRA model to Agent .models directory.
+
+干净克隆（无 basemodels/ 模型权重、无 llmlora 训练环境）下也可运行：
+- torch/transformers/peft/datasets 任一缺失时整模块 pytest.skip
+  （trainer 模块顶层 import 这些重依赖）；
+- Config.validate() 的路径校验通过 tmp_path 伪目录满足，
+  不再隐式依赖真实 basemodels/ 与 rules/ 目录。
+"""
 
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+import pytest
+
+# 重依赖缺失时整体跳过（干净克隆的根 .venv 通常不含训练栈）
+pytest.importorskip("torch", reason="需要 llmlora 训练环境（torch）")
+pytest.importorskip("transformers", reason="需要 llmlora 训练环境（transformers）")
+pytest.importorskip("peft", reason="需要 llmlora 训练环境（peft）")
+pytest.importorskip("datasets", reason="需要 llmlora 训练环境（datasets）")
 
 from llmlora.src.models.trainer import LoRATrainingRunner
 from llmlora.src.utils.config import Config
@@ -23,6 +34,13 @@ def test_copy_to_agent_model_dir(tmp_path):
     (sub_dir / "tokenizer.json").write_text('{"tokenizer": "test"}', encoding="utf-8")
 
     cfg = Config()
+    # 用 tmp_path 伪目录满足 validate()，避免隐式依赖真实 basemodels/ 与 rules/
+    fake_base = tmp_path / "basemodel"
+    fake_base.mkdir()
+    fake_rules = tmp_path / "rules"
+    fake_rules.mkdir()
+    cfg.base_model_path = str(fake_base)
+    cfg.rules_dir = str(fake_rules)
     cfg.merged_output_dir = str(src_dir)
     cfg.agent_model_dir = str(dst_dir)
     cfg.auto_copy_to_agent_dir = True

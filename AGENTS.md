@@ -161,9 +161,9 @@ Key environment variables:
 | `PRIVACY_ENV_PROFILE` | `vllm` | Active LLM profile (`vllm`/`qwen3`/`mlx`/`openai`, loads `config/env/<profile>.env`) |
 | `PRIVACY_PROFILE` | — | Path to YAML parameter profile |
 | `PRIVACY_NAMESPACE` | `default` | Budget namespace |
-| `PRIVACY_REST_HOST` | `127.0.0.1` | REST host |
+| `PRIVACY_REST_HOST` | `0.0.0.0`（`server.py`/`launcher.py`）；`127.0.0.1`（仅 `main.py` 单独入口） | REST host |
 | `PRIVACY_REST_PORT` | `8079` | REST port |
-| `PRIVACY_GRPC_HOST` | `127.0.0.1` | gRPC host |
+| `PRIVACY_GRPC_HOST` | `0.0.0.0`（`server.py`/`grpc_server.py`/`launcher.py`） | gRPC host |
 | `PRIVACY_GRPC_PORT` | `50051` | gRPC port |
 | `PRIVACY_BUDGET_DB` | — | SQLite DB path for distributed budget |
 | `PRIVACY_BUDGET_WINDOW_SECONDS` | — | Time window for automatic privacy budget reset |
@@ -180,7 +180,16 @@ Key environment variables:
 | `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | Skip LLM layer when available memory falls below this threshold (MB) |
 | `PRIVACY_LLM_CONFIDENCE_THRESHOLD` | `0.75` | Minimum confidence threshold for Layer-3 arbitration |
 | `PRIVACY_LLM_ENABLE_ARBITRATION` | `true` | Enable Layer-3 LLM arbitration on low confidence or uncertainty |
+| `PRIVACY_NER_ENABLE` | `false` | Enable Layer-2 Small-NER entity extraction（dynclassification） |
+| `PRIVACY_LLM_ENABLE` | `false` | Explicitly enable Layer-3 LLM layer regardless of confidence（dynclassification） |
+| `PRIVACY_LLM_AUTO_ON_IMAGE` | `true` | Auto-trigger multimodal LLM layer when image/DICOM input detected |
+| `PRIVACY_ENGINE_CACHE_MAX_SIZE` | `4096` | Layer-1 rule engine field-evaluation LRU cache capacity |
+| `PRIVACY_CLASSIFICATION_CACHE_SIZE` | `10000` | DynClassificationService result LRU cache capacity |
 | `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 图片打码允许读取的目录白名单（os.pathsep 分隔）；路径 resolve 后必须位于白名单内，拒绝目录穿越与 symlink 逃逸 |
+
+> 注意：三个入口的默认监听地址不同 —— `python -m privacy_local_agent.main` 仅绑定 `127.0.0.1`（REST-only），
+> 而 `python -m privacy_local_agent.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`。
+> 生产部署请显式设置 `PRIVACY_REST_HOST` / `PRIVACY_GRPC_HOST` 并配合 TLS/Auth。
 
 ## 7. Code Conventions
 
@@ -301,10 +310,10 @@ Address these before any hardened production deployment.
 | Document | Path | Purpose |
 |---|---|---|
 | README | `README.md` | Quick start and examples |
-| Classification design | `docs/classification/design.md` | 3-layer funnel architecture |
-| Classification ops | `docs/classification/ops.md` | Deployment and YAML profile |
-| Classification PRD | `docs/classification/prd.md` | Requirements |
-| LLM PRD | `docs/classification_llm/prd.md` | Multimodal LLM gateway requirements |
+| Dynclassification design | `docs/dynclassification/design.md` | Dynamic classification architecture |
+| Three-layer funnel design | `docs/dynclassification/three_layer_funnel_design.md` | 3-layer funnel (Rule → NER → LLM) design |
+| Dynclassification PRD | `docs/dynclassification/prd.md` | Dynamic classification requirements |
+| 2026 full project audit report | `docs/audit_reports/2026_full_project_audit_report.md` | 全项目安全/正确性审计与整改报告 |
 | Gateway design | `docs/gateway_balancer/design.md` | Gateway and load balancer |
 | Production security PRD | `docs/production_security/prd.md` | TLS/auth/rate-limit requirements |
 | Production security design | `docs/production_security/design.md` | TLS/auth/rate-limit architecture |

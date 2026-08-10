@@ -28,7 +28,7 @@ from privacy_local_agent.observability.metrics import (
     GATEWAY_RETRIES_TOTAL,
 )
 
-from .balancer import LoadBalancer
+from .balancer import GRPC_MAX_MESSAGE_BYTES, LoadBalancer
 
 logger = get_logger(__name__)
 
@@ -236,7 +236,14 @@ async def start_grpc_gateway(
     Returns:
         启动后的 gRPC 异步服务器实例。
     """
-    server = grpc.aio.server()
+    server = grpc.aio.server(
+        options=[
+            # 收发消息上限 64 MiB，与后端 grpc_server.serve() 对齐；
+            # 默认 4 MiB 对大表/图片分类场景极易超限导致连接重置。
+            ("grpc.max_receive_message_length", GRPC_MAX_MESSAGE_BYTES),
+            ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_BYTES),
+        ]
+    )
     privacy_pb2_grpc.add_PrivacyServiceServicer_to_server(
         GatewayGrpcServicer(balancer), server
     )

@@ -33,6 +33,20 @@ def _generate_request_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
+def _metrics_path(request: Request) -> str:
+    """Return the route template path for Prometheus labels (bounded cardinality).
+
+    必须在 ``call_next`` 之后调用：Starlette 路由匹配完成后才把命中的
+    ``Route`` 写入 ``request.scope["route"]``。未匹配路由（如 404 扫描）
+    统一归入 ``"unmatched"``，避免攻击者用随机路径制造无界 label 基数。
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if isinstance(path, str) and path:
+        return path
+    return "unmatched"
+
+
 def _get_request_id_from_metadata(context: grpc.ServicerContext) -> str:
     """Extract x-request-id from gRPC invocation metadata."""
     metadata = dict(context.invocation_metadata() or [])
@@ -100,10 +114,12 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             )
 
             duration = time.perf_counter() - start
-            REQUESTS_TOTAL.labels(method=method, path=path, status=str(status_code)).inc()
-            REQUEST_DURATION.labels(method=method, path=path).observe(duration)
-            TRAFFIC_BYTES_TOTAL.labels(method=method, path=path, direction="request").inc(request_size)
-            TRAFFIC_BYTES_TOTAL.labels(method=method, path=path, direction="response").inc(response_size)
+            # metrics 标签使用路由模板（有界基数）；日志保留原始路径便于排查。
+            metric_path = _metrics_path(request)
+            REQUESTS_TOTAL.labels(method=method, path=metric_path, status=str(status_code)).inc()
+            REQUEST_DURATION.labels(method=method, path=metric_path).observe(duration)
+            TRAFFIC_BYTES_TOTAL.labels(method=method, path=metric_path, direction="request").inc(request_size)
+            TRAFFIC_BYTES_TOTAL.labels(method=method, path=metric_path, direction="response").inc(response_size)
 
             logger.info(
                 "%s %s %s %.3fms request=%dB response=%dB identity=%s",
@@ -120,9 +136,10 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             return response
         except Exception as exc:
             duration = time.perf_counter() - start
-            REQUESTS_TOTAL.labels(method=method, path=path, status="500").inc()
-            REQUEST_DURATION.labels(method=method, path=path).observe(duration)
-            TRAFFIC_BYTES_TOTAL.labels(method=method, path=path, direction="request").inc(request_size)
+            metric_path = _metrics_path(request)
+            REQUESTS_TOTAL.labels(method=method, path=metric_path, status="500").inc()
+            REQUEST_DURATION.labels(method=method, path=metric_path).observe(duration)
+            TRAFFIC_BYTES_TOTAL.labels(method=method, path=metric_path, direction="request").inc(request_size)
             logger.exception(
                 "%s %s 500 %.3fms request=%dB error=%s",
                 method,

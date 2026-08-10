@@ -6,6 +6,15 @@ Load-balancing and health-check engine.
 
 Defines backend worker nodes, scheduling strategies, async health-check loop,
 and a per-node circuit breaker for fault isolation.
+
+.. warning::
+    **回源明文约束（已知限制）**：网关到后端的回源链路目前固定使用明文——
+    gRPC 通道为 ``grpc.aio.insecure_channel``，健康检查写死 ``http://``。
+    因此**后端（Agent worker）不得启用 TLS**：一旦后端开启 TLS，
+    网关的所有转发与健康检查都会失败，网关实际上不可用。
+    部署时必须保证网关与后端位于同一可信内网（或由 Service Mesh/网络策略
+    提供链路加密）；网关面向客户端的一侧仍可正常终结 TLS/mTLS。
+    TLS 回源（网关作为 TLS 客户端校验后端证书）尚未实现。
 """
 
 from __future__ import annotations
@@ -26,6 +35,17 @@ from privacy_local_agent.observability.metrics import (
 )
 
 logger = get_logger(__name__)
+
+# gRPC 收发消息上限 64 MiB，与后端 grpc_server.serve() 的
+# max_receive/max_send_message_length 配置对齐（默认 4 MiB 对大表/图片
+# 分类场景极易超限，导致连接被重置）。
+GRPC_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+
+# 网关到后端的 gRPC 通道选项（回源方向）。
+GRPC_CHANNEL_OPTIONS = [
+    ("grpc.max_receive_message_length", GRPC_MAX_MESSAGE_BYTES),
+    ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_BYTES),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -117,13 +137,22 @@ class BackendNode:
         self._grpc_channel: grpc.aio.Channel | None = None
         self._grpc_stub: privacy_pb2_grpc.PrivacyServiceStub | None = None
         self._connection_lock = asyncio.Lock()
+        # 保护 grpc_stub 懒初始化：并发首次访问时避免重复创建 channel
+        # （多创建的 channel 无引用会被泄漏）。
+        self._stub_lock = threading.Lock()
 
     @property
     def grpc_stub(self) -> privacy_pb2_grpc.PrivacyServiceStub:
         """延迟初始化并获取 gRPC Stub / Lazily initialize gRPC stub."""
         if self._grpc_stub is None:
-            self._grpc_channel = grpc.aio.insecure_channel(self.grpc_address)
-            self._grpc_stub = privacy_pb2_grpc.PrivacyServiceStub(self._grpc_channel)
+            # Double-checked locking：通道创建幂等但非原子，加锁防止并发
+            # 首次访问时创建出双份 channel 而泄漏其一。
+            with self._stub_lock:
+                if self._grpc_stub is None:
+                    self._grpc_channel = grpc.aio.insecure_channel(
+                        self.grpc_address, options=GRPC_CHANNEL_OPTIONS
+                    )
+                    self._grpc_stub = privacy_pb2_grpc.PrivacyServiceStub(self._grpc_channel)
         return self._grpc_stub
 
     @contextlib.asynccontextmanager

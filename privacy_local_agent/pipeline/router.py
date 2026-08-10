@@ -71,12 +71,22 @@ async def process_csv(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV files are supported")
 
     try:
-        content = await file.read()
-        if len(content) > _MAX_CSV_SIZE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"CSV file size exceeds limit of {_MAX_CSV_SIZE_BYTES // (1024*1024)}MB",
-            )
+        # 分块读取并累计校验大小：在读取过程中即时检测超限，
+        # 避免先全量读入内存再校验导致超大文件耗尽内存（DoS 防护）；超限返回 413。
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = await file.read(64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _MAX_CSV_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"CSV file size exceeds limit of {_MAX_CSV_SIZE_BYTES // (1024*1024)}MB",
+                )
+            chunks.append(chunk)
+        content = b"".join(chunks)
         text = content.decode("utf-8", errors="replace")
         reader = csv.DictReader(io.StringIO(text))
         records = [dict(row) for row in reader]

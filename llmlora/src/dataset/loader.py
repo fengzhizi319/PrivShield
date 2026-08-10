@@ -120,12 +120,16 @@ def render_prompt_text(tokenizer: PreTrainedTokenizerBase, user_input: str) -> s
         return tokenizer.apply_chat_template(messages, **kwargs)
 
 
-def _extract_user_input(sample: Dict[str, Any]) -> str:
+def extract_user_input(sample: Dict[str, Any]) -> str:
     """从样本中提取用户输入 / Extract the user input from a sample.
 
     兼容两种数据形态 / Supports two sample shapes:
     - {"input": "..."}（instruction 已并入 system prompt）
     - {"instruction": "...", "input": "..."}（两者拼接）
+
+    训练（tokenize_sft_sample）与评估（scripts/evaluate.py 等）共用本函数，
+    保证输入构造一致。
+    Shared by training and evaluation so input construction stays consistent.
     """
     instruction = sample.get("instruction") or ""
     user_input = sample.get("input") or ""
@@ -166,7 +170,7 @@ def tokenize_sft_sample(
     Returns:
         {"input_ids", "attention_mask", "labels"} 三个等长 list。
     """
-    user_input = _extract_user_input(sample)
+    user_input = extract_user_input(sample)
     output_text = _extract_output_text(sample)
 
     messages = build_messages(user_input, assistant_output=output_text)

@@ -24,7 +24,9 @@ Built-in input validation, structured logging, and Prometheus metrics instrument
 # 启用 PEP 563 延迟注解求值，允许在类型注解中引用尚未定义的类（如自引用）
 from __future__ import annotations
 
-import random  # 伪随机数生成器，用于 Dummy 查询抽样和真实查询插入位置随机化
+import random  # 伪随机数生成器，仅用于显式传入 seed 时的可复现路径
+import re  # 正则表达式，用于槽位模板的子句切分与数字串掩蔽
+import secrets  # 密码学安全随机源，seed=None 时的默认 RNG
 from dataclasses import dataclass  # dataclass 装饰器，自动生成 __init__/__repr__ 等
 from enum import Enum  # 枚举基类，用于 ObfuscationDomain/ObfuscationStrategy
 
@@ -135,7 +137,7 @@ class QoLResult:
 
     Attributes:
         queries: 包含真实查询与虚假 dummy 查询在内的混淆文本列表。
-        real_query_index: 真实查询在混淆列表中的索引下划位置。
+        real_query_index: 真实查询在混淆列表中的索引位置。
         domain: 应用的混淆领域（"medical" / "generic"）。
         num_dummies: 生成的 Dummy 虚假查询数量。
     """
@@ -200,7 +202,7 @@ MEDICAL_DUMMY = [
     "颈椎病康复训练操指南",
     "偏头痛的诱发因素与缓解方式",
     "脑梗塞前兆表现及预防建议",
-    "骨质疏防摔倒安全提示",
+    "骨质疏松防摔倒安全提示",
     "带状疱疹的临床表现及治疗",
     "过敏性皮炎日常注意事项",
     "甲状腺结节患者饮食禁忌",
@@ -247,6 +249,25 @@ ENTITIES = [
     "居住证", "天气预报", "市民卡", "数字证书", "身份证"
 ]
 
+# === 槽位模板防泄露辅助 / Slot-Filling Template Leakage Mitigation ===
+
+# 子句切分正则：中英文标点与空白字符，用于提取包含实体的最小子句
+_CLAUSE_SPLIT_RE = re.compile(r"[，,。．.;；:：!！?？、\s]+")
+# 数字串掩蔽正则：防止电话/证件号等数字片段进入 Dummy 查询
+_DIGITS_RUN_RE = re.compile(r"\d+")
+
+
+def _extract_entity_clause(query: str, matched_term: str) -> str:
+    """提取包含匹配实体的最小子句 / Extract the Minimal Clause Containing the Entity.
+
+    按中英文标点与空白切分查询，仅返回包含实体词的第一个子句，用于构建槽位替换模板，
+    避免把真实查询的其他片段（可能含 PII）带入每条 Dummy。切分后找不到时回退完整查询。
+    """
+    for clause in _CLAUSE_SPLIT_RE.split(query):
+        if matched_term in clause:
+            return clause
+    return query
+
 
 def obfuscate_query(
     query: str,
@@ -266,12 +287,23 @@ def obfuscate_query(
        (Select medical or generic dummy pool by domain)
     3. 优先使用语义实体槽位（Slot-Filling）匹配并生成近邻语义 Dummy 查询。
        (Prefer semantic slot-filling to generate near-neighbor dummies)
-    4. 若未能匹配实体，基于长度相近原则从 Dummy 池中抽取补齐。
-       (Fallback to length-similarity sampling if no entity match)
+    4. 若槽位替换未生成足够 Dummy（含未匹配实体的情形），基于长度相近原则
+       从 Dummy 池中无放回抽样补齐；两种来源混合时策略标记为 HYBRID。
+       (Top up via length-similarity sampling without replacement when slot filling
+        produced fewer than num_dummies; mixed sources are reported as HYBRID)
     5. 将真实 query 随机插入到混淆列表中的某个随机位置。
        (Insert real query at random position in obfuscated list)
     6. 记录结构化日志并返回混淆列表或 QoLResult。
        (Emit structured log and return obfuscated list or QoLResult)
+
+    安全性说明 / Security Notes:
+    - 随机源：默认（seed=None）使用密码学安全随机源 secrets.SystemRandom()，
+      dummy 组合不可预测；显式传入 seed 时使用 random.Random(seed)，仅供测试复现。
+    - 槽位替换的泄露缓解：模板仅保留包含实体的最小子句（按中英文标点/空白切分），
+      并将子句中的数字串掩蔽为 *，缓解真实查询中的其他内容（可能含 PII）进入 Dummy。
+      该措施是缓解而非根除——实体所在子句的其余文本仍会保留在每条 Dummy 中；
+      高敏感场景建议传入自定义 pool（将跳过槽位替换，仅做纯池抽样）。
+    - Dummy 采用无放回抽样；仅当候选池小于 num_dummies 时循环补齐（此时可能重复）。
 
     Args:
         query: 待混淆的真实查询 / Real query to obfuscate.
@@ -303,7 +335,9 @@ def obfuscate_query(
         pool = (MEDICAL_DUMMY if is_medical else GENERIC_DUMMY)  # 未自定义则用内置词库
 
     dummies: list[str] = []       # 存储生成的 Dummy 查询列表
-    rng = random.Random(seed)     # 创建独立随机数生成器（seed 保证可复现性，不污染全局 random）
+    # 默认（seed=None）使用密码学安全随机源，避免可预测的 Dummy 组合与插入位置；
+    # 显式传入 seed 时使用 random.Random(seed) 保证可复现（仅供测试/调试）
+    rng = secrets.SystemRandom() if seed is None else random.Random(seed)
     strategy_used = ObfuscationStrategy.LENGTH_SIMILARITY.value  # 默认策略：长度相近抽样
 
     # Step 3: 语义槽位替换（Slot-Filling）—— 仅在使用内置词库时启用
@@ -320,14 +354,17 @@ def obfuscate_query(
                 break  # 找到第一个匹配即停止（贪心策略）
 
         if matched_term:
-            # 构建模板：将匹配到的实体词替换为占位符
-            # 例如："高血压患者饮食建议" → "{disease}患者饮食建议"
-            template = query.replace(matched_term, placeholder)
+            # 构建模板，先做泄露缓解（最小化真实查询内容进入 Dummy）：
+            # 1. 仅保留包含匹配实体的最小子句，丢弃其他可能含 PII 的片段；
+            # 2. 子句内的数字串掩蔽为 *（防止电话/证件号等进入 Dummy）。
+            # 例如："我叫张三，如何治疗高血压" → "如何治疗{disease}"
+            template = _DIGITS_RUN_RE.sub("*", _extract_entity_clause(query, matched_term))
+            template = template.replace(matched_term, placeholder)
             # 从实体词库中排除已匹配的词，避免生成与真实查询相同的 Dummy
             choices = [t for t in terms_list if t != matched_term]
-            if len(choices) >= num_dummies:
-                # 候选实体充足时：无放回抽样 num_dummies 个实体
-                selected_terms = rng.sample(choices, num_dummies)
+            if choices:
+                # 无放回抽取至多 num_dummies 个实体；不足时剩余数量由 Step 4 长度抽样补齐（HYBRID）
+                selected_terms = rng.sample(choices, min(num_dummies, len(choices)))
                 # 将每个实体填充到模板中生成 Dummy 查询
                 for st in selected_terms:
                     dummies.append(template.replace(placeholder, st))
@@ -339,11 +376,11 @@ def obfuscate_query(
         if dummies:
             # 已有部分槽位替换结果 + 还需长度抽样补齐 → 混合策略
             strategy_used = ObfuscationStrategy.HYBRID.value
-        # 从 Dummy 池中排除与真实查询完全相同的条目（避免生成与真实查询一样的 Dummy）
-        filtered_pool = [p for p in pool if p != query]
+        # 从 Dummy 池中排除与真实查询或已生成 Dummy 完全相同的条目，并去重（保持顺序）
+        filtered_pool = list(dict.fromkeys(p for p in pool if p != query and p not in dummies))
         if not filtered_pool:
-            # 防御性处理：如果池中与查询全部相同，回退使用完整池
-            filtered_pool = list(pool)
+            # 防御性处理：如果池被过滤为空，回退使用去重后的完整池
+            filtered_pool = list(dict.fromkeys(pool))
 
         # 长度相近策略：优先选择与真实查询长度差 <= 6 的候选
         query_len = len(query)  # 计算真实查询字符长度
@@ -355,9 +392,20 @@ def obfuscate_query(
             # 仍然无候选时使用全部池（保证始终能生成 Dummy）
             close_candidates = filtered_pool
 
-        # 有放回抽样补齐剩余 Dummy（允许重复，因为池可能小于 num_dummies）
-        while len(dummies) < num_dummies:
-            dummies.append(rng.choice(close_candidates))  # 随机选取一个候选加入
+        if close_candidates:
+            # 无放回抽样补齐（避免重复 Dummy）
+            dummies.extend(rng.sample(close_candidates, min(needed, len(close_candidates))))
+            # 兜底：候选池小于缺口时循环复用候选补齐数量（此时不可避免出现重复）
+            idx = 0
+            while len(dummies) < num_dummies:
+                dummies.append(close_candidates[idx % len(close_candidates)])
+                idx += 1
+        else:
+            # 极端情况：自定义池为空，无法生成任何 Dummy，降级返回较少结果
+            logger.warning(
+                "qol_dummy_pool_empty",
+                extra={"domain": domain, "num_dummies": num_dummies},
+            )
 
     # Step 5: 将真实查询随机插入到 Dummy 列表中的某个位置
     pos = rng.randint(0, len(dummies))  # 生成 [0, len(dummies)] 范围内的随机插入位置
@@ -381,7 +429,7 @@ def obfuscate_query(
             queries=result,             # 混淆后的查询列表
             real_query_index=pos,       # 真实查询位置索引
             domain=domain,              # 混淆领域
-            num_dummies=num_dummies,    # Dummy 数量
+            num_dummies=len(dummies),   # 实际生成的 Dummy 数量（池为空降级时可能少于请求值）
         )
     return result  # 直接返回混淆后的查询列表
 
@@ -435,7 +483,9 @@ def obfuscate_query_batch(
 
     # 列表推导式：对每个查询调用 obfuscate_query 执行混淆
     # 所有查询共享相同的 num_dummies/domain/pool/seed 参数
-    # 注意：seed 相同时每个查询的混淆结果仍然不同（因为查询内容不同导致槽位匹配不同）
+    # 注意：显式传入相同 seed 时各查询共用同一 RNG 序列，仅当查询内容不同导致
+    # 槽位匹配/候选池不同，结果才可能不同——结构相同的查询在相同 seed 下会产生
+    # 完全相同的 Dummy 组合。批量场景建议不传 seed（默认使用系统安全随机源）。
     results = [
         obfuscate_query(
             query,                    # 当前待混淆的查询

@@ -24,14 +24,16 @@
  │   ├── DowngradeRuleDef  : 降级/压制规则 (keywords, level, force_suppress...)       │
  │   ├── CompositeRuleDef  : 记录级组合升级规则 (patterns, min_matches, target_level) │
  │   ├── RuleProfile       : 领域规则包容器 (domain, rules, downgrade_rules...)     │
- │   └── StandardDef       : 标准集组合与覆盖 (domains, global_params, overrides)   │
+ │   └── StandardDef       : 标准集组合与覆盖 (domains, rule_overrides, 追加规则)    │
  └────────────────────────────────────────┬────────────────────────────────────────┘
                                           │
                                           │  读取模型构建规则集 (Pass Model Objects)
                                           ▼
  [ 规则加载与合并器 / Profile Loader ] (profile_loader.py)
    ├── 加载 StandardDef 引用的所有领域规则包 (RuleProfile)
-   ├── 执行全局覆盖 (global_params) 与规则级覆盖 (rule_overrides)
+   ├── 执行规则级覆盖 (rule_overrides)
+   │   注意：StandardDef.global_params（旧 alias: overrides）当前无消费方，
+   │   属于死配置；profile_loader 加载时会记录 warning 提示其不会生效。
    └── 输出合并后的规则集合 list[RuleDef] / list[DowngradeRuleDef]
                            │
                            │  初始化与引擎加载 (Initialize Runtime Engines)
@@ -317,8 +319,10 @@ class StandardDef(BaseModel):
     # Global parameter adjustments applied to all rules in this standard.
     # E.g. {"default_level": "C3"} overrides the engine's default level.
     # 应用于本标准下所有规则的全局参数调整（如 default_level）。
+    # 注意：当前为预留字段，profile_loader 无消费方（死配置），
+    # 加载含非空 global_params 的标准时会记录 warning 提示其不会生效。
     # 注：alias="overrides" 保留旧 YAML key 的向后兼容性。
-    global_params: dict[str, Any] = Field(default_factory=dict, alias="overrides", description="全局参数覆盖")
+    global_params: dict[str, Any] = Field(default_factory=dict, alias="overrides", description="全局参数覆盖（预留字段，当前未生效）")
     # Per-rule attribute overrides: {rule_id: {field_name: new_value}}.
     # Allows a standard to adjust specific rules' level/category/priority.
     # 规则级属性覆盖：{rule_id: {field_name: new_value}}。

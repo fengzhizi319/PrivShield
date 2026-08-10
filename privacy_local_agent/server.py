@@ -109,11 +109,13 @@ def main():
     )
     rest_server = uvicorn.Server(config)
 
-    # 2. 在非守护线程中启动 REST 服务
+    # 2. 在守护线程中启动 REST 服务
+    # daemon=True：即使下方 join 超时 REST 线程未能退出，也不会挂住整个进程，
+    # 保证 SIGTERM 后进程总能干净退出。
     rest_thread = threading.Thread(
         target=rest_server.run,
         name="uvicorn-rest-server",
-        daemon=False,
+        daemon=True,
     )
     rest_thread.start()
 
@@ -146,13 +148,19 @@ def main():
 
     # 6. 执行优雅退出
     print("[*] 正在停止 gRPC 服务 (保留 5 秒在途处理时间)...")
-    grpc_server.stop(grace=5)
+    # stop() 返回 threading.Event：grace 期内在途 RPC 完成后触发。
+    # 必须等待该事件（带超时兜底），否则进程会在在途 RPC 尚未排空时直接退出。
+    stop_event = grpc_server.stop(grace=5)
+    if not stop_event.wait(timeout=10):
+        print("[!] gRPC 服务未能在超时前排空在途请求，已强制取消剩余 RPC。")
 
     print("[*] 正在停止 REST 服务...")
     rest_server.should_exit = True
 
-    # 等待 REST 线程退出
+    # 等待 REST 线程退出；daemon=True 保证即使超时进程也能退出
     rest_thread.join(timeout=10)
+    if rest_thread.is_alive():
+        print("[!] REST 服务线程未在超时内退出，随主进程强制终止。")
     print("[+] 双协议服务优雅退出成功，进程安全终止。")
     sys.exit(0)
 

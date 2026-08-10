@@ -53,16 +53,26 @@ service:
 agent:
   logLevel: info
   logFormat: text
+  # privacy-profile.yaml 内容（挂载到 /etc/privacy-local-agent/privacy-profile.yaml）。
+  # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
+  # primitives.<primitive> 覆盖内置默认参数；其他顶层键（如 server:/privacy:）
+  # 不会被解析。监听地址等请改用 extraEnv 设置 PRIVACY_* 环境变量。
+  # 下方取值与代码内置默认值一致（行为中性，仅作显式示例）：
+  # dp: epsilon=1.0, delta=0.0, mechanism=laplace
+  # k_anonymity: k=5, l=2, t=0.2, max_depth=10；sanitization: engine=mask
   profile: |
-    server:
-      rest_host: "0.0.0.0"
-      rest_port: 8079
-      grpc_host: "0.0.0.0"
-      grpc_port: 50051
-    privacy:
-      default_epsilon: 1.0
-      default_delta: 1e-6
-      default_k: 5
+    primitives:
+      dp:
+        epsilon: 1.0
+        delta: 0.0
+        mechanism: "laplace"
+      k_anonymity:
+        k: 5
+        l: 2
+        t: 0.2
+        max_depth: 10
+      sanitization:
+        engine: "mask"
 
 # 安全开关
 security:
@@ -78,11 +88,12 @@ security:
     keyFile: /certs/tls.key
   auth:
     enabled: false
-    # 用户自管 API Key Secret（包含 api_keys 文件）
+    # 用户自管 API Key Secret（Secret 中须包含名为 api-keys.json 的数据键，
+    # 内容为 JSON：{"<api-key>": {"name": "...", "scopes": [...]}}）
     apiKeysSecret: ""
-    # 也可直接填写 api_keys 文件内容（不推荐用于生产）
+    # 也可直接填写 api-keys.json 文件内容（不推荐用于生产），
+    # Chart 会生成 <fullname>-secrets Secret 并以 api-keys.json 键挂载
     apiKeys: ""
-    keysFile: /secrets/api_keys
   # 哪些路径可跳过认证，建议保留 /health
   publicPaths:
     - /health
@@ -97,6 +108,8 @@ resources:
     memory: 256Mi
 
 # 探针
+# liveness 使用 /health（轻量存活检查），readiness 使用 /readyz
+# （/readyz 额外校验配置解析器与隐私预算 DB 连通性，未就绪时不接流量）。
 probes:
   liveness:
     path: /health
@@ -105,7 +118,7 @@ probes:
     periodSeconds: 10
     failureThreshold: 3
   readiness:
-    path: /health
+    path: /readyz
     port: http
     initialDelaySeconds: 5
     periodSeconds: 5
@@ -146,6 +159,12 @@ serviceMonitor:
   interval: 30s
   scrapeTimeout: 10s
   labels: {}
+  # security.tls.enabled=true 时自动以 scheme=https 抓取 /metrics，并使用下方 tlsConfig。
+  # 自签名证书场景默认 insecureSkipVerify；如需校验服务端证书，改为 CA 引用，例如：
+  # tlsConfig:
+  #   caFile: /etc/prometheus/secrets/<tls-secret-name>/tls.crt
+  tlsConfig:
+    insecureSkipVerify: true
 
 # 节点亲和/容忍
 nodeSelector: {}

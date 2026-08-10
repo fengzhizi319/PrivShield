@@ -59,6 +59,26 @@ def test_metrics_endpoint_exists():
     assert "# HELP" in response.text
 
 
+def test_metrics_requires_auth_when_enabled(monkeypatch):
+    """PRIVACY_AUTH_ENABLED=true 时 /metrics 需要合法 API Key。"""
+    monkeypatch.setenv("PRIVACY_AUTH_ENABLED", "true")
+    monkeypatch.setenv("PRIVACY_AUTH_INTERNAL_KEYS_JSON", '{"sk-metrics":{"name":"mon","scopes":["*"]}}')
+    monkeypatch.setenv("PRIVACY_RATE_LIMIT_ENABLED", "false")
+
+    # 无凭证 → 401
+    resp = client.get("/metrics")
+    assert resp.status_code == 401
+
+    # 错误凭证 → 401
+    resp = client.get("/metrics", headers={"Authorization": "Bearer wrong"})
+    assert resp.status_code == 401
+
+    # 合法凭证 → 200
+    resp = client.get("/metrics", headers={"Authorization": "Bearer sk-metrics"})
+    assert resp.status_code == 200
+    assert "# HELP" in resp.text
+
+
 def test_request_metrics_recorded():
     """调用业务接口后 /metrics 应包含对应请求指标。"""
     response = client.post(
@@ -103,8 +123,28 @@ def test_auth_denial_metric_recorded(monkeypatch):
     response = client.post("/v1/privacy/mask", json={"field_name": "mobile", "value": "13812345678"})
     assert response.status_code == 401
 
-    metrics = client.get("/metrics").text
+    # 认证开启时抓取 /metrics 也需要携带合法凭证
+    metrics = client.get("/metrics", headers={"Authorization": "Bearer sk"}).text
     assert 'privacy_auth_denials_total{reason="unauthenticated"}' in metrics
+
+
+def test_unmatched_route_uses_bounded_label():
+    """404 路径不得产生无界 label：统一归入 path="unmatched"。"""
+    import privacy_local_agent.observability.metrics as metrics_module
+
+    probe_path = "/definitely-not-a-route-7f3a9c"
+    counter = metrics_module.REQUESTS_TOTAL.labels(method="GET", path="unmatched", status="404")
+    before = counter._value.get()
+
+    response = client.get(probe_path)
+    assert response.status_code == 404
+
+    after = counter._value.get()
+    assert after == before + 1
+
+    # 原始随机路径不得出现在任何指标 label 中
+    metrics = client.get("/metrics").text
+    assert probe_path not in metrics
 
 
 def test_traffic_metrics_recorded():

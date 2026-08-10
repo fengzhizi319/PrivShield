@@ -51,13 +51,20 @@ class TestRestPathPermission:
             ("/readyz", "health:read"),
             ("/v1/privacy/mask", "privacy:mask"),
             ("/v1/privacy/mask_record", "privacy:mask"),
+            ("/v1/privacy/mask/batch", "privacy:mask"),
+            ("/v1/privacy/mask/dataframe", "privacy:mask"),
             ("/v1/privacy/hash", "privacy:hash"),
             ("/v1/privacy/dp/count", "privacy:dp"),
             ("/v1/privacy/k_anonymize/record", "privacy:kano"),
             ("/v1/privacy/qol/obfuscate", "privacy:qol"),
+            ("/v1/privacy/qol/obfuscate/batch", "privacy:qol"),
             ("/v1/privacy/budget", "privacy:budget"),
             ("/v1/privacy/profile/recommend", "privacy:profile"),
             ("/v1/privacy/classify/field", "classification:read"),
+            ("/v1/medical/process", "medical:process"),
+            ("/v1/pipeline/process_records", "pipeline:process"),
+            ("/v1/pipeline/process_csv", "pipeline:process"),
+            ("/v1/ops/diagnostics", "ops:diagnostics"),
             ("/some/unknown/route", "*"),
         ],
     )
@@ -139,7 +146,10 @@ class TestAuthenticateApiKey:
 
 class TestAuthenticateMtls:
     def test_valid_mtls(self):
-        settings = SecuritySettings(auth_internal_mtls_enabled=True)
+        settings = SecuritySettings(
+            auth_internal_mtls_enabled=True,
+            auth_mtls_allowed_cns=["internal-client"],
+        )
         ctx = {
             "transport_security_type": [b"ssl"],
             "x509_common_name": [b"internal-client"],
@@ -150,18 +160,49 @@ class TestAuthenticateMtls:
         assert ident.name == "internal-client"
         assert ident.scopes == ["*"]
 
+    def test_default_disabled(self):
+        """mTLS 认证默认关闭：仅凭 CA 校验通过的证书不能获得身份。"""
+        settings = SecuritySettings()
+        assert settings.auth_internal_mtls_enabled is False
+        ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"internal-client"]}
+        assert auth_mod._authenticate_mtls(settings, ctx) is None
+
+    def test_enabled_but_empty_whitelist_rejects(self):
+        """启用 mTLS 但未配置 CN 白名单时拒绝所有证书（fail-closed）。"""
+        settings = SecuritySettings(auth_internal_mtls_enabled=True)
+        ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"any-cn"]}
+        assert auth_mod._authenticate_mtls(settings, ctx) is None
+
+    def test_cn_not_in_whitelist_rejected(self):
+        """CN 未命中白名单的证书被拒绝。"""
+        settings = SecuritySettings(
+            auth_internal_mtls_enabled=True,
+            auth_mtls_allowed_cns=["allowed-svc"],
+        )
+        ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"rogue-svc"]}
+        assert auth_mod._authenticate_mtls(settings, ctx) is None
+
     def test_disabled(self):
-        settings = SecuritySettings(auth_internal_mtls_enabled=False)
+        settings = SecuritySettings(
+            auth_internal_mtls_enabled=False,
+            auth_mtls_allowed_cns=["cn"],
+        )
         ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"cn"]}
         assert auth_mod._authenticate_mtls(settings, ctx) is None
 
     def test_non_ssl(self):
-        settings = SecuritySettings(auth_internal_mtls_enabled=True)
+        settings = SecuritySettings(
+            auth_internal_mtls_enabled=True,
+            auth_mtls_allowed_cns=["cn"],
+        )
         ctx = {"transport_security_type": [b"insecure"], "x509_common_name": [b"cn"]}
         assert auth_mod._authenticate_mtls(settings, ctx) is None
 
     def test_no_common_name(self):
-        settings = SecuritySettings(auth_internal_mtls_enabled=True)
+        settings = SecuritySettings(
+            auth_internal_mtls_enabled=True,
+            auth_mtls_allowed_cns=["cn"],
+        )
         ctx = {"transport_security_type": [b"ssl"]}
         assert auth_mod._authenticate_mtls(settings, ctx) is None
 
@@ -204,3 +245,24 @@ class TestLimiter:
         rl.reset_limiter()
         c = rl.get_limiter()
         assert c is not a
+
+    def test_fractional_burst_rounded_up_not_zero(self):
+        """0 < burst < 1 时配额向上取整为 1，而非截断为 0 导致全量拒绝。"""
+        rl.reset_limiter()
+        limiter = rl.Limiter(self._settings(rate_limit_default_rps=1, rate_limit_default_burst=0.5))
+        item = limiter._limit_for_endpoint("/v1/privacy/mask")
+        assert item.amount == 1
+        ident = Identity("external", "u3", [])
+        assert limiter.is_allowed(ident, "/v1/privacy/mask") is True
+
+    def test_storage_failure_degrades_to_allow(self):
+        """存储后端（如 Redis）不可用时限流降级为放行，不应导致全站 500。"""
+        rl.reset_limiter()
+        limiter = rl.Limiter(self._settings())
+
+        def _boom(*args, **kwargs):
+            raise ConnectionError("redis is down")
+
+        limiter._limiter.hit = _boom  # type: ignore[method-assign]
+        ident = Identity("external", "u4", [])
+        assert limiter.is_allowed(ident, "/v1/privacy/mask") is True

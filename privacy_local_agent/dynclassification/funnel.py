@@ -355,10 +355,13 @@ class ClassificationFunnel:
                         ))
 
                         # 核心修复 3: 一致性压制，绝对不擦除 match_target == "field_value" 的真实数据证据标签
+                        # 压制范围覆盖所有非 LLM 来源（RULE/SMALL_NER/COMPOSITE），
+                        # 否则 NER/COMPOSITE 幸存标签与裁定等级不一致，外部按 max_level 重算会得到不同结果；
+                        # 降级标签（is_downgrade）与值级证据标签（field_value）仍豁免压制。
                         surviving_tags = []
                         for t in tags:
                             if (
-                                t.source_engine == "RULE"
+                                t.source_engine != "LLM"
                                 and not t.is_downgrade
                                 and t.level != llm_level
                                 and t.match_target != "field_value"
@@ -369,11 +372,13 @@ class ClassificationFunnel:
                         tags[:] = surviving_tags
 
                         # 核心修复 4: 只有当 LLM 高置信度且当前存活标签中没有任何强标注 needs_human_review 时才清除复核
+                        # 低置信度仲裁成功时不得覆盖既有复核标记（保留 Step 4 起始计算的原值），
+                        # 否则既有 needs_human_review=True 会被静默洗成 False。
                         has_surviving_review = any(t.needs_human_review for t in tags if t.source_engine != "LLM")
                         if confidence >= self.policy.llm_confidence_threshold and not has_surviving_review:
                             needs_human_review = False
                         else:
-                            needs_human_review = has_surviving_review
+                            needs_human_review = needs_human_review or has_surviving_review
 
                         logger.info(
                             "funnel_llm_arbitration",
@@ -538,8 +543,8 @@ class ClassificationFunnel:
             return False
         val_str = str(value).strip()
         val_lower = val_str.lower()
-        # 1. 常见图像文件扩展名检测
-        if any(val_lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".dcm", ".dicom", ".tiff")):
+        # 1. 常见图像文件扩展名检测（与 image_redaction.IMAGE_FILE_EXTENSIONS 对齐）
+        if any(val_lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dcm", ".dicom")):
             return True
         # 2. Base64 图像编码
         if val_lower.startswith("data:image/") or val_lower.startswith("image:"):
@@ -571,6 +576,14 @@ class ClassificationFunnel:
         try:
             val = float(raw)
             if math.isnan(val) or math.isinf(val):
+                return fallback
+            if val > 100.0 or val < 0.0:
+                # 超出 [0, 100] 范围的异常/负数值，
+                # 视为非法/恶意输入，回退上游置信度而非 clamp 成为满分 1.0 或 0.0。
+                logger.warning(
+                    "funnel_llm_confidence_out_of_range",
+                    extra={"raw_confidence": str(raw)[:64], "fallback": fallback},
+                )
                 return fallback
             if val > 1.0 and val <= 100.0:
                 val = val / 100.0  # 容错处理如 95.0 -> 0.95

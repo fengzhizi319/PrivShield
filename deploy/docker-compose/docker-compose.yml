@@ -10,8 +10,16 @@ services:
       target: core
     image: privacy-local-agent:0.1.0
     container_name: privacy-local-agent
-    env_file:
-      - ../../config/env/vllm.env
+    # 默认不加载任何 LLM 场景 profile：core 镜像不含 ML 依赖，Layer-3 LLM
+    # 分类会自动降级跳过，其余隐私原语不受影响。
+    #
+    # 如需启用 Layer-3 LLM 分类，按场景选择 config/env/ 下的 profile 注入：
+    #   env_file:
+    #     - ../../config/env/qwen3.env   # 进程内 PyTorch 推理（需 ml 镜像 + 模型文件）
+    #     - ../../config/env/vllm.env    # 外部 vLLM 服务（见文件底部可选编排示例）
+    # 注意：vllm.env 中 PRIVACY_LLM_API_BASE 默认 http://127.0.0.1:8000/v1，
+    # 指向容器自身；搭配下方 vllm 服务时请改用 http://vllm:8000/v1
+    # （可用 environment 覆盖，无需修改仓库内 env 文件）。
     ports:
       # 对外暴露 REST 和 gRPC 端口；若部署到不可信网络，请配合 TLS / Auth 使用。
       - "8079:8079"
@@ -49,3 +57,28 @@ services:
       retries: 3
       start_period: 5s
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 可选：vLLM Layer-3 分类服务编排示例（默认注释，不启动）。
+  # 启用步骤：
+  #   1. 取消本段注释，并准备 GPU 与模型文件（见 docs/dynclassification/ops.md）；
+  #   2. 在 privacy-local-agent 服务中启用 env_file: ../../config/env/vllm.env；
+  #   3. 在 privacy-local-agent.environment 中覆盖：
+  #        PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
+  #      （容器网络内 127.0.0.1 指向容器自身，必须使用服务名寻址）。
+  # vllm:
+  #   image: vllm/vllm-openai:latest
+  #   container_name: privacy-local-agent-vllm
+  #   command: ["--model", "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother", "--gpu-memory-utilization", "0.90"]
+  #   volumes:
+  #     - ../../.models:/models:ro
+  #   ports:
+  #     - "8000:8000"
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   restart: unless-stopped

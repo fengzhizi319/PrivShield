@@ -113,6 +113,31 @@ def validate_rules_dir(rules_dir: str | Path = "rules") -> ValidationResult:
                 # Any parse/validation failure is a critical error.
                 res.add_error(f"[Taxonomy 校验失败] {yaml_file.name}: {exc}")
 
+    # --- Phase 1.5: Parse standards first to map domain -> referenced taxonomies ---
+    # 领域包本身不强制声明 taxonomy，其等级体系由引用它的 StandardDef 决定
+    # （如 gd_health 的 G1~G4 由 standards/gd_health.yaml 的 taxonomy 指定）。
+    # 必须先解析 standards，才能按各 profile 自身归属的 taxonomy 分别校验等级引用，
+    # 避免用单一 taxonomy（如 default 的 L1~L5）校验所有领域包造成误报。
+    domain_taxonomy_refs: dict[str, set[str]] = {}
+    if std_dir.exists():
+        for yaml_file in std_dir.glob("*.yaml"):
+            try:
+                # Parse and validate against StandardDef schema.
+                data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+                std = StandardDef.model_validate(data)
+
+                # Check that the referenced taxonomy file exists (either already loaded
+                # in Phase 1 or physically present on disk).
+                if std.taxonomy not in taxonomies and not (tax_dir / f"{std.taxonomy}.yaml").exists():
+                    res.add_warning(
+                        f"[Standard 引用提醒] 文件 {yaml_file.name} 引用了未找到的 Taxonomy: '{std.taxonomy}'"
+                    )
+                # Record domain -> taxonomy association for per-profile validation in Phase 2.
+                for domain_name in std.domains:
+                    domain_taxonomy_refs.setdefault(domain_name, set()).add(std.taxonomy)
+            except Exception as exc:
+                res.add_error(f"[Standard 校验失败] {yaml_file.name}: {exc}")
+
     # --- Phase 2: Validate domain profiles and their operator references ---
     if dom_dir.exists():
         for yaml_file in dom_dir.glob("*.yaml"):
@@ -133,9 +158,12 @@ def validate_rules_dir(rules_dir: str | Path = "rules") -> ValidationResult:
                                 f"[Domain 规则算子未找到] 文件 {yaml_file.name}, 规则 '{rule.id}', 算子 '{op_name}' 未在注册表中找到{suggestion}"
                             )
 
-                # --- 新增校验: 降级规则字段合法性 ---
+                # --- 降级规则字段合法性（按该 profile 自身归属的 taxonomy 分别校验） ---
                 _validate_downgrade_rules(
-                    profile, yaml_file.name, taxonomies, res
+                    profile,
+                    yaml_file.name,
+                    _resolve_profile_taxonomies(profile, yaml_file.stem, taxonomies, domain_taxonomy_refs),
+                    res,
                 )
 
                 # --- 新增校验: 规则 ID 唯一性 ---
@@ -144,24 +172,35 @@ def validate_rules_dir(rules_dir: str | Path = "rules") -> ValidationResult:
             except Exception as exc:
                 res.add_error(f"[Domain Profile 校验失败] {yaml_file.name}: {exc}")
 
-    # --- Phase 3: Validate standard definitions and taxonomy references ---
-    if std_dir.exists():
-        for yaml_file in std_dir.glob("*.yaml"):
-            try:
-                # Parse and validate against StandardDef schema.
-                data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
-                std = StandardDef.model_validate(data)
-
-                # Check that the referenced taxonomy file exists (either already loaded
-                # in Phase 1 or physically present on disk).
-                if std.taxonomy not in taxonomies and not (tax_dir / f"{std.taxonomy}.yaml").exists():
-                    res.add_warning(
-                        f"[Standard 引用提醒] 文件 {yaml_file.name} 引用了未找到的 Taxonomy: '{std.taxonomy}'"
-                    )
-            except Exception as exc:
-                res.add_error(f"[Standard 校验失败] {yaml_file.name}: {exc}")
-
     return res
+
+
+def _resolve_profile_taxonomies(
+    profile: RuleProfile,
+    file_stem: str,
+    taxonomies: dict[str, DomainTaxonomy],
+    domain_taxonomy_refs: dict[str, set[str]],
+) -> dict[str, DomainTaxonomy]:
+    """确定校验某个领域包等级引用时所依据的候选 Taxonomy 集合。
+
+    解析规则（与 profile_loader 的运行时行为对齐）:
+    1. profile.default_taxonomy 显式声明的 taxonomy；
+    2. 引用了该领域包的 StandardDef 所声明的 taxonomy（一个领域包可被多个标准组合引用，
+       如 general-pii 同时用于 default 引擎与 jrt0197 标准）；
+    3. 内置 "default" taxonomy 兜底（_build_engine_from_domain 在 profile 未声明
+       default_taxonomy 时回退到 "default"）。
+
+    等级引用只要在任一候选 taxonomy 中存在即视为合法，避免跨体系组合（L/C/G 混用）产生误报。
+    """
+    candidates: dict[str, DomainTaxonomy] = {}
+    if profile.default_taxonomy and profile.default_taxonomy in taxonomies:
+        candidates[profile.default_taxonomy] = taxonomies[profile.default_taxonomy]
+    for tax_name in domain_taxonomy_refs.get(file_stem, ()):
+        if tax_name in taxonomies:
+            candidates[tax_name] = taxonomies[tax_name]
+    if "default" in taxonomies:
+        candidates.setdefault("default", taxonomies["default"])
+    return candidates
 
 
 # ===========================================================================
@@ -182,22 +221,27 @@ def _validate_downgrade_rules(
     2. force_suppress=false 却配置了 max_force_suppress_level 属于死配置（告警） / force_suppress=false but configured max_force_suppress_level is a dead config (warning).
     3. 降级规则的 level 在 taxonomy 中存在 / Downgrade rule's level exists in taxonomy.
     4. 普通规则的 level 在 taxonomy 中存在（rank=0 会被任何 force_suppress 规则压制） / Normal rule's level exists in taxonomy (rank=0 will be suppressed by any force_suppress rule).
+
+    多 taxonomy 说明 / Multi-taxonomy note:
+        `taxonomies` 为该 profile 的候选 taxonomy 集合（见 _resolve_profile_taxonomies），
+        等级引用只要在任一候选中存在即视为合法，避免用单一 taxonomy 校验所有领域包
+        造成跨体系误报（如 gd_health 的 G1~G4 被 default 的 L1~L5 误判为不存在）。
     """
-    # 尝试获取关联的 taxonomy（可能不存在，此时跳过等级存在性检查）
-    taxonomy: DomainTaxonomy | None = None
-    if taxonomies:
-        # 使用第一个可用的 taxonomy 作为参考（多数项目只有一个 default）
-        taxonomy = next(iter(taxonomies.values()))
+    # 候选 taxonomy 为空时跳过等级存在性检查（无参考体系可校验）
+    candidate_names = sorted(taxonomies.keys())
+
+    def _level_exists(level_id: str) -> bool:
+        """等级在任一候选 taxonomy 中存在即视为合法。"""
+        return any(level_id in tax.levels for tax in taxonomies.values())
 
     # 校验降级规则
     for rule in profile.downgrade_rules:
         # 检查 1: max_force_suppress_level 存在性
-        if rule.max_force_suppress_level and taxonomy:
-            if rule.max_force_suppress_level not in taxonomy.levels:
+        if rule.max_force_suppress_level and taxonomies:
+            if not _level_exists(rule.max_force_suppress_level):
                 res.add_error(
                     f"[降级规则等级未找到] 文件 {file_name}, 规则 '{rule.id}': "
-                    f"max_force_suppress_level='{rule.max_force_suppress_level}' 在 taxonomy 中不存在"
-                    f"（可用: {list(taxonomy.levels.keys())}）"
+                    f"max_force_suppress_level='{rule.max_force_suppress_level}' 在候选 taxonomy {candidate_names} 中均不存在"
                 )
 
         # 检查 2: 死配置告警
@@ -216,10 +260,10 @@ def _validate_downgrade_rules(
             )
 
         # 检查 3: 降级规则 level 存在性
-        if taxonomy and rule.level not in taxonomy.levels:
+        if taxonomies and not _level_exists(rule.level):
             res.add_error(
                 f"[降级规则等级未找到] 文件 {file_name}, 规则 '{rule.id}': "
-                f"level='{rule.level}' 在 taxonomy 中不存在"
+                f"level='{rule.level}' 在候选 taxonomy {candidate_names} 中均不存在"
             )
 
         # 检查 5: exempt_rules 豁免例外名单校验
@@ -239,12 +283,12 @@ def _validate_downgrade_rules(
                     )
 
     # 检查 4: 普通规则 level 存在性
-    if taxonomy:
+    if taxonomies:
         for rule in profile.rules:
-            if rule.level not in taxonomy.levels:
+            if not _level_exists(rule.level):
                 res.add_error(
                     f"[规则等级未找到] 文件 {file_name}, 规则 '{rule.id}': "
-                    f"level='{rule.level}' 在 taxonomy 中不存在"
+                    f"level='{rule.level}' 在候选 taxonomy {candidate_names} 中均不存在"
                     f"（rank=0 会被任何 force_suppress 规则压制）"
                 )
 

@@ -66,6 +66,12 @@ class LoRATrainingRunner:
     def __init__(self, cfg: Config):
         """初始化执行器并校验配置 / Initialize runner and validate config."""
         self.cfg = cfg
+        # 基座路径归一化为绝对路径：peft 保存的 adapter_config.json 会原样记录
+        # base_model_name_or_path，相对路径会导致 adapter 换个工作目录即失效。
+        # Normalize to an absolute path: peft persists base_model_name_or_path
+        # verbatim in adapter_config.json; a relative path breaks the adapter
+        # when loaded from any other working directory.
+        self.cfg.base_model_path = str(Path(self.cfg.base_model_path).resolve())
         self.cfg.validate()
         self.tokenizer = None
         self.model = None

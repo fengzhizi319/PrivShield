@@ -91,7 +91,11 @@ HEALTH_METHOD = "/privacy.local.PrivacyService/Health"
 
 class TestExtractIdentityFromGrpcContext:
     def test_mtls_path(self):
-        settings = SecuritySettings(auth_enabled=True, auth_internal_mtls_enabled=True)
+        settings = SecuritySettings(
+            auth_enabled=True,
+            auth_internal_mtls_enabled=True,
+            auth_mtls_allowed_cns=["internal-client"],
+        )
         ctx = FakeContext(
             auth_context={
                 "transport_security_type": [b"ssl"],
@@ -102,6 +106,23 @@ class TestExtractIdentityFromGrpcContext:
         assert ident is not None
         assert ident.name == "internal-client"
         assert ident.scopes == ["*"]
+
+    def test_mtls_cn_not_whitelisted_falls_through(self):
+        """mTLS 证书 CN 未命中白名单时不得授予身份（回退到后续凭证检查）。"""
+        settings = SecuritySettings(
+            auth_enabled=True,
+            auth_internal_mtls_enabled=True,
+            auth_mtls_allowed_cns=["allowed-svc"],
+        )
+        ctx = FakeContext(
+            auth_context={
+                "transport_security_type": [b"ssl"],
+                "x509_common_name": [b"rogue-svc"],
+            },
+            metadata=[],
+        )
+        ident = auth_mod._extract_identity_from_grpc_context(settings, ctx, MASK_METHOD)
+        assert ident is None
 
     def test_health_exempt(self):
         settings = SecuritySettings(auth_enabled=True, health_no_auth=True)

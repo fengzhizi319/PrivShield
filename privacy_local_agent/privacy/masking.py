@@ -33,6 +33,8 @@ import contextlib  # 提供 suppress 等上下文管理工具，用于优雅地�
 import functools
 import hashlib  # 提供 SHA-256 等哈希算法，供 HMAC 使用
 import hmac  # HMAC 消息认证码实现，用于加盐哈希
+import re  # 正则表达式，用于字段名边界感知匹配与姓名后缀剥离
+import secrets  # 密码学安全随机源，用于默认随机密钥与列洗牌
 from dataclasses import dataclass, field  # dataclass 装饰器，自动生成 __init__/__repr__ 等
 from enum import Enum  # 枚举基类，用于 FieldType/MaskingOperation
 from typing import TYPE_CHECKING, Any, cast
@@ -61,12 +63,12 @@ class FieldType(str, Enum):
     IDE 自动补全 + 静态类型检查，避免裸字符串拼写错误。
     """
 
-    MOBILE = "mobile"        # 手机号类型（匹配 mobile/phone/tel 关键字）
+    MOBILE = "mobile"        # 手机号类型（匹配 mobile/phone/手机号/联系电话 等，tel 为边界匹配）
     ID_CARD = "id_card"      # 身份证类型（匹配 id_card/idcard/身份证/identity）
-    NAME = "name"            # 姓名类型（匹配 name/姓名）
-    BANK_CARD = "bank_card"  # 银行卡类型（匹配 bank/card_no）
+    NAME = "name"            # 姓名类型（匹配 姓名/fullname 等，name 为边界匹配）
+    BANK_CARD = "bank_card"  # 银行卡类型（匹配 bank/card_no/银行卡 等，card 为边界匹配）
     EMAIL = "email"          # 邮箱类型（匹配 email/mail/邮箱）
-    ADDRESS = "address"      # 地址类型（匹配 addr/address/地址）
+    ADDRESS = "address"      # 地址类型（匹配 addr/address/地址/住址）
     DEFAULT = "default"      # 默认类型（未匹配到任何规则时的兜底）
 
 
@@ -225,6 +227,44 @@ class MaskingResult:
 
 # === 字段类型推断 / Field Type Inference ===
 
+# 字段名关键字规则表 / Field-name keyword rule table
+# 每条规则: (字段类型, 裸子串关键字, 边界感知关键字)
+# - 裸子串关键字：较长、歧义低的关键字（含全部中文关键字），直接子串匹配；
+# - 边界感知关键字：短且歧义高的英文关键字（tel/name/mail/card），
+#   仅当出现在分词边界（字符串首尾、下划线、数字等非字母字符两侧）时才命中，
+#   避免 "hotel" 误中 "tel"、"username"/"hostname"/"filename" 误中 "name"。
+# 规则按优先级从高到低排列，第一个命中即返回（短路求值）。
+_FIELD_TYPE_RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (FieldType.MOBILE.value,
+     ("mobile", "phone", "手机号", "手机", "联系电话", "电话号码", "电话"),
+     ("tel",)),
+    (FieldType.ID_CARD.value,
+     ("id_card", "idcard", "身份证", "identity"),
+     ()),
+    (FieldType.EMAIL.value,
+     ("email", "邮箱", "电子邮箱"),
+     ("mail",)),
+    (FieldType.ADDRESS.value,
+     ("addr", "address", "地址", "住址"),
+     ()),
+    (FieldType.NAME.value,
+     # fullname/surname/nickname 等常见复合姓名词显式列入，避免被边界规则误排除
+     ("姓名", "名字", "fullname", "surname", "nickname"),
+     ("name",)),
+    (FieldType.BANK_CARD.value,
+     ("bank", "card_no", "银行卡", "卡号"),
+     ("card",)),  # 边界匹配额外支持 card_number；id_card 已被上方规则先行命中
+)
+
+
+def _bounded_contains(lower_name: str, keyword: str) -> bool:
+    """边界感知关键字匹配 / Boundary-Aware Keyword Matching.
+
+    仅当关键字两侧为非字母边界（字符串首尾、下划线、数字、符号等）时返回 True，
+    用于抑制短英文关键字的子串误伤（如 "hotel" 中的 "tel"、"username" 中的 "name"）。
+    """
+    return re.search(rf"(?<![a-z]){re.escape(keyword)}(?![a-z])", lower_name) is not None
+
 
 @functools.lru_cache(maxsize=2048)
 def guess_field_type(field_name: str) -> str:
@@ -233,10 +273,13 @@ def guess_field_type(field_name: str) -> str:
     执行步骤 / Execution Steps:
     1. 将输入字段名转为小写，进行大小写不敏感匹配。
        (Lowercase the field name for case-insensitive matching)
-    2. 使用关键字规则链判断字段属于 mobile, id_card, name, bank_card, email, address 还是 default。
-       (Apply keyword rule chain to classify field type)
-    3. 返回匹配的 FieldType 枚举值字符串。
-       (Return matched FieldType enum value string)
+    2. 按优先级遍历关键字规则表：长/中文关键字做裸子串匹配；
+       短歧义英文关键字（tel/name/mail/card）做边界感知匹配，
+       仅在下划线/首尾等非字母边界处命中。
+       (Iterate the rule table by priority: plain substring for distinctive or
+        Chinese keywords; boundary-aware matching for short ambiguous English ones)
+    3. 返回匹配的 FieldType 枚举值字符串，未命中任何规则时返回 default。
+       (Return matched FieldType enum value string; "default" if none matches)
 
     Args:
         field_name: 字段名（大小写不敏感）/ Field name (case-insensitive).
@@ -247,18 +290,11 @@ def guess_field_type(field_name: str) -> str:
     # 统一转小写，实现大小写不敏感匹配（如 "Mobile"、"PHONE" 均可识别）
     lower = field_name.lower()
     # 规则链：按优先级从高到低依次匹配，第一个命中即返回（短路求值）
-    if "mobile" in lower or "phone" in lower or "tel" in lower:  # 手机号关键字
-        return FieldType.MOBILE.value
-    if "id_card" in lower or "idcard" in lower or "身份证" in lower or "identity" in lower:  # 身份证关键字
-        return FieldType.ID_CARD.value
-    if "email" in lower or "mail" in lower or "邮箱" in lower:  # 邮箱关键字
-        return FieldType.EMAIL.value
-    if "addr" in lower or "address" in lower or "地址" in lower:  # 地址关键字
-        return FieldType.ADDRESS.value
-    if "name" in lower or "姓名" in lower:  # 姓名关键字（注意：放在 email/address 之后避免 "username" 误匹配）
-        return FieldType.NAME.value
-    if "bank" in lower or "card_no" in lower:  # 银行卡关键字
-        return FieldType.BANK_CARD.value
+    for ftype, substring_kws, bounded_kws in _FIELD_TYPE_RULES:
+        if any(kw in lower for kw in substring_kws):  # 裸子串关键字（长词/中文）
+            return ftype
+        if any(_bounded_contains(lower, kw) for kw in bounded_kws):  # 边界感知关键字（短词）
+            return ftype
     # 兜底：未匹配任何规则，返回默认类型（使用通用前后保留策略）
     return FieldType.DEFAULT.value
 
@@ -739,16 +775,36 @@ def _mask_arrow_column(col: Any, col_name: str, context: str) -> Any:
         return pc.if_else(pc.equal(length, 11), masked, col)
 
     if ft == FieldType.ID_CARD:
-        # 身份证脱敏：保留前6后4，中间替换为 ********；非18位原样返回
-        length = pc.utf8_length(col)  # 向量化计算字符长度
-        masked = pc.binary_join_element_wise(  # 逐元素拼接
-            pc.utf8_slice_codeunits(col, 0, 6),    # 前 6 位（地区码）
-            "********",                             # 8 个星号掩码（隐藏出生日期+顺序码）
-            pc.utf8_slice_codeunits(col, 14, None), # 第 15 位到末尾（后 4 位校验码段）
-            "",                                     # 空分隔符
+        # 身份证脱敏：与标量 mask_id_card 完全对齐的分级掩码，绝不原样放行：
+        # 18 位 → 前6+********+后4；>=10 位（含 15 位老证）→ 前3+*(n-7)+后4；
+        # >=4 位 → 首字符+*(n-2)+尾字符；更短 → 全 * 填充。
+        col_clean = pc.utf8_trim_whitespace(col)  # 对齐标量路径的 strip() 预处理
+        length = pc.utf8_length(col_clean)  # 向量化计算字符长度
+        masked_18 = pc.binary_join_element_wise(  # 18 位标准证掩码
+            pc.utf8_slice_codeunits(col_clean, 0, 6),    # 前 6 位（地区码）
+            "********",                                   # 8 个星号掩码（隐藏出生日期+顺序码）
+            pc.utf8_slice_codeunits(col_clean, 14, None), # 第 15 位到末尾（后 4 位校验码段）
+            "",                                           # 空分隔符
         )
-        # 条件选择：仅 18 位标准身份证才脱敏
-        return pc.if_else(pc.equal(length, 18), masked, col)
+        masked_ge10 = pc.binary_join_element_wise(  # >=10 位（如 15 位老证）：前3+(n-7)星+后4
+            pc.utf8_slice_codeunits(col_clean, 0, 3),
+            # 星号数量钳位到非负（短字符串上该分支结果会被 if_else 丢弃，但 binary_repeat 遇负数会抛错）
+            pc.binary_repeat("*", pc.max_element_wise(pc.subtract(length, 7), 0)),
+            pc.utf8_slice_codeunits(col_clean, -4, None),
+            "",
+        )
+        masked_ge4 = pc.binary_join_element_wise(  # >=4 位：首字符+(n-2)星+尾字符
+            pc.utf8_slice_codeunits(col_clean, 0, 1),
+            pc.binary_repeat("*", pc.max_element_wise(pc.subtract(length, 2), 0)),
+            pc.utf8_slice_codeunits(col_clean, -1, None),
+            "",
+        )
+        masked_short = pc.binary_repeat("*", length)  # <4 位：全星填充
+        # 分级条件选择（顺序与标量 mask_id_card 的 if/elif 链等价）
+        result = pc.if_else(pc.greater_equal(length, 4), masked_ge4, masked_short)
+        result = pc.if_else(pc.greater_equal(length, 10), masked_ge10, result)
+        result = pc.if_else(pc.equal(length, 18), masked_18, result)
+        return result
 
     if ft == FieldType.BANK_CARD:
         # 银行卡脱敏：保留前4后4，中间替换为 " **** **** "；长度<8原样返回
@@ -763,16 +819,36 @@ def _mask_arrow_column(col: Any, col_name: str, context: str) -> Any:
         return pc.if_else(pc.greater_equal(length, 8), masked, col)
 
     if ft == FieldType.NAME:
-        # 姓名脱敏：2字→首字+*; 3字+→首字+**+尾字; 空串/1字原样返回
-        length = pc.utf8_length(col)  # 向量化计算字符长度
-        first_char = pc.utf8_slice_codeunits(col, 0, 1)   # 提取首字符（姓氏）
-        last_char = pc.utf8_slice_codeunits(col, -1, None) # 提取末字符（名字尾字）
+        # 姓名脱敏：与标量 mask_name 完全对齐 —— 先剥离尾部序号/测试后缀
+        # （如 "韩雨泽_3"→"韩雨泽"、"张三-12"→"张三"、"王五 (3)"→"王五"），再分级掩码：
+        # 1 字→"*"；2 字→首字+*；3 字→首字+**+尾字；4 字及以上→首字+*(n-2)+尾字；空串原样返回。
+        col_clean = pc.utf8_trim_whitespace(col)  # 对齐标量 strip() 预处理
+        # 剥离尾部序号后缀（_3 / -12 / #1 / (3) / [2] / 纯数字结尾），与标量正则一致
+        cleaned = pc.replace_substring_regex(col_clean, r"[_\-\s#(\[]*\d+[)\]]*$", "")
+        cleaned = pc.utf8_trim_whitespace(cleaned)
+        cleaned = pc.replace_substring_regex(cleaned, r"\d+$", "")
+        cleaned = pc.utf8_trim_whitespace(cleaned)
+        # 剥离后为空时回退原始值（与标量 clean_val = value 一致）
+        cleaned = pc.if_else(pc.equal(pc.utf8_length(cleaned), 0), col, cleaned)
+        length = pc.utf8_length(cleaned)  # 向量化计算字符长度
+        first_char = pc.utf8_slice_codeunits(cleaned, 0, 1)    # 提取首字符（姓氏）
+        last_char = pc.utf8_slice_codeunits(cleaned, -1, None)  # 提取末字符（名字尾字）
         masked_2 = pc.binary_join_element_wise(first_char, "*", "")  # 2字：姓+*
-        masked_3plus = pc.binary_join_element_wise(first_char, "**", last_char, "")  # 3字+：姓+**+尾
-        # 两级条件选择：先处理 2 字情况，再处理 3 字及以上情况
-        result = pc.if_else(pc.equal(length, 2), masked_2, col)  # 2字→masked_2，其他暂保留原值
-        result = pc.if_else(pc.greater_equal(length, 3), masked_3plus, result)  # 3字+→masked_3plus
-        return result  # 0/1 字长度不满足条件，保持原值
+        masked_3 = pc.binary_join_element_wise(first_char, "**", last_char, "")  # 3字：姓+**+尾
+        masked_4plus = pc.binary_join_element_wise(  # 4字+：姓+(n-2)星+尾
+            first_char,
+            # 星号数量钳位到非负（短字符串上该分支结果会被 if_else 丢弃，但 binary_repeat 遇负数会抛错）
+            pc.binary_repeat("*", pc.max_element_wise(pc.subtract(length, 2), 0)),
+            last_char,
+            "",
+        )
+        # 分级条件选择（与标量 mask_name 一致；空串/Null 保持原值）
+        result = col
+        result = pc.if_else(pc.equal(length, 1), "*", result)  # 1字→*
+        result = pc.if_else(pc.equal(length, 2), masked_2, result)
+        result = pc.if_else(pc.equal(length, 3), masked_3, result)
+        result = pc.if_else(pc.greater_equal(length, 4), masked_4plus, result)
+        return result
 
     if ft == FieldType.EMAIL:
         # 邮箱脱敏：无@原样返回; 有@时用户名首字+***+尾字+@+域名完整保留
@@ -810,7 +886,8 @@ def _mask_arrow_column(col: Any, col_name: str, context: str) -> Any:
     length = pc.utf8_length(col)  # 向量化计算字符长度
     prefix = pc.utf8_slice_codeunits(col, 0, 3)   # 提取前 3 个字符
     suffix = pc.utf8_slice_codeunits(col, -3, None)  # 提取后 3 个字符（负索引）
-    star_count = pc.subtract(length, 6)  # 计算中间需要填充的星号数量 = 总长 - 首尾各3
+    # 星号数量 = 总长 - 首尾各3；钳位到非负（binary_repeat 遇负数会抛错，短字符串结果由 if_else 丢弃）
+    star_count = pc.max_element_wise(pc.subtract(length, 6), 0)
     stars = pc.binary_repeat("*", star_count)  # 向量化重复 * 字符 star_count 次
     masked = pc.binary_join_element_wise(prefix, stars, suffix, "")  # 拼接：前缀+星号+后缀
     # 条件选择：仅长度 > 6 时脱敏（否则中间无字符可掩码）
@@ -1006,21 +1083,27 @@ def mask_dataframe(
 
 
 def hash_value(value: str, salt: str, return_details: bool = False) -> str | MaskingResult:
-    """对字符串进行 HMAC-SHA256 哈希 / HMAC-SHA256 Hash with Salt.
+    """对字符串进行 HMAC-SHA256 哈希 / HMAC-SHA256 Keyed Hash.
 
     执行步骤 / Execution Steps:
     1. 校验 salt 参数非空且为字符串。
        (Validate salt parameter is non-empty string)
-    2. 使用传入盐值与原始字符串构建 HMAC-SHA256。
-       (Construct HMAC-SHA256 with salt and value)
+    2. 使用传入密钥与原始字符串构建 HMAC-SHA256。
+       (Construct HMAC-SHA256 with key and value)
     3. 计算摘要并进行 base64 编码，截取前 16 字符导出。
        (Compute digest, base64 encode, truncate to 16 chars)
     4. 记录结构化日志并累加指标。
        (Emit structured log and increment metrics)
 
+    安全性说明 / Security Notes:
+    - 参数 salt 实为 HMAC 的**保密密钥**，而非可公开的随机盐：HMAC 抵抗字典攻击
+      的能力依赖该值的机密性，调用方应按密钥管理（保密、按用途隔离、定期轮换）。
+    - 输出为 base64 编码截取的前 16 个字符（96 bit 摘要）。按生日界估算，
+      约 2^48 次哈希后有约 50% 概率出现碰撞；超大规模去重/关联场景需自行评估碰撞风险。
+
     Args:
         value: 待哈希的原始字符串 / Original string to hash.
-        salt: HMAC 盐值 / HMAC salt (must not be empty).
+        salt: HMAC 保密密钥（非可公开盐）/ HMAC secret key (keep confidential; must not be empty).
         return_details: 是否返回 MaskingResult / Whether to return MaskingResult.
 
     Returns:
@@ -1249,39 +1332,71 @@ def chunked_mask_records(
 
 # === 高级加密与科研治理算子 / Advanced FPE, Date Offset & Shuffle Operators ===
 
+# fpe_encrypt_numeric 的进程级随机密钥：首次在未显式传密钥的调用中生成并缓存，
+# 同进程内保持稳定（保证进程内两次加密结果一致、支持相等匹配），跨进程不复现。
+_PROCESS_FPE_KEY: str | None = None
 
-def fpe_encrypt_numeric(value: str, secret_key: str = "PLA_FPE_DEFAULT_KEY_2026") -> str:
+
+def _get_process_fpe_key() -> str:
+    """获取（必要时生成）进程级 FPE 随机密钥 / Get or Generate Process-Level FPE Key."""
+    global _PROCESS_FPE_KEY
+    if _PROCESS_FPE_KEY is None:
+        _PROCESS_FPE_KEY = secrets.token_hex(32)  # 256-bit 进程级随机密钥
+        logger.warning(
+            "fpe_default_key_generated",
+            extra={
+                "hint": "fpe_encrypt_numeric called without secret_key; a process-random "
+                        "key was generated — results are stable within this process only "
+                        "and NOT reproducible across processes."
+            },
+        )
+    return _PROCESS_FPE_KEY
+
+
+def fpe_encrypt_numeric(value: str, secret_key: str | None = None) -> str:
     """保留格式加密 (FPE, Format-Preserving Encryption) 算子.
 
     适用场景：身份证号、医保号、病历号等固定格式特征数字串。
     脱敏特性：加密后字符串与原始值保持完全一致的长度、字符集与格式形态。
-    业务优势：支持数据库在不改代码/字段类型的前提下执行精准相等查询 (Exact Match Query)，
-             且密文具备不可逆推性（无法从密文反推出原始身份信息）。
+    业务优势：支持数据库在不改代码/字段类型的前提下执行精准相等查询 (Exact Match Query)。
+
+    算法与安全性说明（如实描述） / Algorithm & Security Notes:
+    - 本实现并非 NIST FF1/FF3 等标准 FPE 算法，实际构造为：以整个输入为消息计算
+      HMAC-SHA256(secret_key, value) 派生 32 字节密钥流，再逐字符做模加置换
+      （数字 mod 10、字母 mod 26、分隔符等其他字符原样保留）的确定性格式保持编码。
+    - 同一密钥下输出确定，支持相等匹配；密钥保密时密文不直接暴露明文。
+      但对低熵输入（如固定位数数字串），持有密钥者可穷举反推——安全性依赖
+      密钥保密与输入熵，不应视为密码学意义上可证明安全的加密方案。
+    - 默认 secret_key=None 时使用进程级随机密钥（secrets.token_hex(32)，
+      首次调用时生成并缓存，同时记录 warning 日志）：同一进程内结果稳定，
+      跨进程不可复现。需要跨进程一致或结果可持久化时，必须显式传入密钥。
 
     Args:
         value: 原始字符串 (如 "110101199001011234").
-        secret_key: 加盐密钥.
+        secret_key: 加密密钥；None（默认）使用进程级随机密钥.
 
     Returns:
-        与原始值格式形态一致的 Pseudo-Random 假值 (如 "928374199001015678").
+        与原始值格式形态一致的伪随机置换值 (如 "928374199001015678").
     """
     if not value or not isinstance(value, str):
         return value
 
-    # 确定性加盐 HMAC 派生字节流
+    if secret_key is None:
+        secret_key = _get_process_fpe_key()  # 进程级随机密钥兜底
+
+    # 确定性 HMAC 派生密钥流（以整个输入为消息，输出随输入整体变化）
     h = hmac.new(secret_key.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).digest()
-    
+
     result_chars = []
     for idx, char in enumerate(value):
         if char.isdigit():
-            # 保持数字掩码：使用 HMAC 字节计算伪随机数字偏移
+            # 数字：取密钥流字节做 mod-10 加扰置换
             byte_val = h[idx % len(h)]
             orig_digit = int(char)
-            # 计算 0-9 范围的置换 (Feistel / Cipher Substitution)
             new_digit = (orig_digit + byte_val) % 10
             result_chars.append(str(new_digit))
         elif char.isalpha():
-            # 保持字母大小写与置换
+            # 字母：保持大小写，取密钥流字节做 mod-26 加扰置换
             byte_val = h[idx % len(h)]
             base = ord('A') if char.isupper() else ord('a')
             orig_offset = ord(char) - base
@@ -1334,16 +1449,23 @@ def random_date_offset(date_str: str, offset_days: int = 15) -> str:
         return date_str
 
 
-def shuffle_column(column_values: list[Any], seed: int = 42) -> list[Any]:
+def shuffle_column(column_values: list[Any], seed: int | None = None) -> list[Any]:
     """科研列洗牌 (Column Shuffle) 算子.
 
     适用场景：科研导出数据集中的诊断码、科室、费用列洗牌。
     脱敏特性：同列内部随机打乱对应关系，破坏主键与敏感诊疗属性的行级映射。
     业务优势：保持列级别的整体统计分布 (Mean, Standard Deviation, Distribution) 不变。
 
+    随机性说明 / Randomness Semantics:
+    - 默认 seed=None：使用密码学安全随机源 secrets.SystemRandom()，每次调用产生
+      不可复现的独立置换；对同长度多列分别调用也会产生不同置换，行级映射真正被破坏。
+    - 显式传入 seed：使用 random.Random(seed)，结果可复现，仅供测试/科研复算。
+      注意：对同长度多列传入相同 seed 会产生完全相同的置换，行级映射将被保留——
+      安全敏感场景请勿固定 seed。
+
     Args:
         column_values: 原始列数组列表.
-        seed: 随机种子 (保证可重复校验).
+        seed: 随机种子；None（默认）使用系统安全随机源，显式传入则可复现.
 
     Returns:
         打乱洗牌后的列数组列表.
@@ -1354,8 +1476,11 @@ def shuffle_column(column_values: list[Any], seed: int = 42) -> list[Any]:
         return column_values
 
     shuffled = list(column_values)
-    rng = random.Random(seed)
-    rng.shuffle(shuffled)
+    if seed is None:
+        secrets.SystemRandom().shuffle(shuffled)  # 密码学安全随机源，不可复现
+    else:
+        rng = random.Random(seed)  # 显式种子：可复现路径
+        rng.shuffle(shuffled)
     return shuffled
 
 

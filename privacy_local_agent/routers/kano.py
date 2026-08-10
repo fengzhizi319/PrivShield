@@ -19,7 +19,10 @@ def k_anonymize_record(req: KAnonRequest):
     Returns:
         {"result": <泛化后的记录字典>}
     """
-    return {"result": service.k_anonymize_record(req.record, req.qi_cols, req.k)}
+    try:
+        return {"result": service.k_anonymize_record(req.record, req.qi_cols, req.k)}
+    except Exception as e:
+        handle_request_exception(e)
 
 
 @router.post("/v1/privacy/k_anonymize/table", dependencies=[*SECURITY_DEPS, require_permission("privacy:kano")])

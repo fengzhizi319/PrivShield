@@ -69,7 +69,8 @@ spec:
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /health
+              # /readyz 校验配置解析器与隐私预算 DB 连通性；liveness 保持 /health
+              path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5

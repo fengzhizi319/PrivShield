@@ -439,6 +439,6 @@ class TestClassifyInnerPromptTemplate:
         call_args = classifier._processor.apply_chat_template.call_args
         messages = call_args[0][0]
         system_content = messages[0]["content"]
-        assert "医疗数据分类分级" in system_content
+        assert "分类分级" in system_content
         assert "L5" in system_content
         assert "L1" in system_content

@@ -183,8 +183,10 @@ class ProfileLoader:
                     return True
                 except Exception as e:
                     logger.error(f"Hot-reload failed: {e}. Keeping old configuration.", exc_info=True)
-                    # 失败时恢复 mtime 以便下次能再次触发重载 / Restore mtime on failure so reload can be triggered next time
-                    self._file_mtimes = {f: f.stat().st_mtime for f in self.rules_dir.glob("**/*.yaml") if f.exists()}
+                    # 失败时保留旧 mtime 记录（不得记录新 mtime），
+                    # 否则同一变更会被误判为"已加载"而永不再重试。
+                    # Keep old mtimes on failure (do NOT record new mtimes),
+                    # otherwise the same change would be mistaken as loaded and never retried.
                     return False
         return False
 
@@ -301,7 +303,18 @@ class ProfileLoader:
             if standard_id not in self._standard_cache:
                 path = self.rules_dir / "standards" / f"{standard_id}.yaml"
                 data = yaml.safe_load(path.read_text(encoding="utf-8"))
-                self._standard_cache[standard_id] = StandardDef.model_validate(data)
+                std_def = StandardDef.model_validate(data)
+                # global_params 当前无任何消费方（死配置）：加载时显式告警提示其不会生效，
+                # 避免运维误以为 global_params 中的 default_level 等配置已被应用。
+                if std_def.global_params:
+                    logger.warning(
+                        "standard_global_params_ignored",
+                        extra={
+                            "standard_id": standard_id,
+                            "global_params": std_def.global_params,
+                        },
+                    )
+                self._standard_cache[standard_id] = std_def
             return self._standard_cache[standard_id]
 
     # ------------------------------------------------------------------

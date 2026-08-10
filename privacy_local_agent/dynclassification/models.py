@@ -16,6 +16,10 @@ from typing import Any, Optional
 # Pydantic v2: BaseModel for schema, ConfigDict for model settings, Field for annotations
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 # ===========================================================================
 # 引擎层级与置信度策略 / Engine Layer & Confidence Policy
@@ -245,6 +249,17 @@ class DomainTaxonomy(BaseModel):
         if not level_ids:
             return self.default_level
         # Step 2: Filter to only IDs that exist in our levels dict (ignore unknown IDs).
+        # 未知等级静默过滤是 fail-open 行为：补 warning 保证可观测性（含等级名与 taxonomy）。
+        unknown = [lid for lid in level_ids if lid not in self.levels]
+        if unknown:
+            logger.warning(
+                "taxonomy_unknown_level_filtered",
+                extra={
+                    "unknown_levels": unknown,
+                    "taxonomy": self.standard_id,
+                    "domain": self.domain,
+                },
+            )
         valid = [lid for lid in level_ids if lid in self.levels]
         # Step 3: If none of the provided IDs are valid, fall back to default.
         if not valid:
@@ -264,6 +279,15 @@ class DomainTaxonomy(BaseModel):
         # Look up the level in the levels dict; return its rank or 0 if not found.
         if level_id in self.levels:
             return self.levels[level_id].rank
+        # 未找到时返回 0 属于 fail-open 兜底：补 warning 保证可观测性（含等级名与 taxonomy）。
+        logger.warning(
+            "taxonomy_unknown_level_rank_fallback",
+            extra={
+                "level_id": level_id,
+                "taxonomy": self.standard_id,
+                "domain": self.domain,
+            },
+        )
         return 0
 
 

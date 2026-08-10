@@ -96,11 +96,24 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
     gateway_api_key = os.environ.get("GATEWAY_API_KEY", "")
 
     def require_management_auth(authorization: str | None) -> None:
-        """Protect topology mutation endpoints when an operator key is configured."""
-        if gateway_api_key:
-            expected = f"Bearer {gateway_api_key}"
-            if not authorization or not hmac.compare_digest(authorization.encode("utf-8"), expected.encode("utf-8")):
-                raise HTTPException(status_code=401, detail="Unauthorized gateway management request")
+        """Protect topology mutation endpoints with an operator key (fail-closed).
+
+        未配置 ``GATEWAY_API_KEY`` 时管理端点一律返回 503（fail-closed）：
+        拓扑注册/注销可借 SSRF 把流量引向任意内网地址，绝不能默认放行。
+        本地开发如需使用，必须显式设置一个已知值（不接受空值）。
+        """
+        if not gateway_api_key:
+            logger.warning(
+                "Gateway management endpoint rejected: GATEWAY_API_KEY is not configured; "
+                "set it explicitly to enable /v1/gateway/register|deregister"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Gateway management API is disabled: GATEWAY_API_KEY is not configured",
+            )
+        expected = f"Bearer {gateway_api_key}"
+        if not authorization or not hmac.compare_digest(authorization.encode("utf-8"), expected.encode("utf-8")):
+            raise HTTPException(status_code=401, detail="Unauthorized gateway management request")
 
     @app.post("/v1/gateway/register")
     async def register_node(req: RegisterRequest, authorization: str | None = Header(default=None)):
@@ -178,6 +191,11 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
 
             if client is None or cached_loop is not current_loop:
                 if client is not None:
+                    # 已知限制：跨事件循环重建客户端时，旧 client 的关闭是
+                    # fire-and-forget（aclose 调度到当前 loop 异步执行）。
+                    # 若旧 loop 上仍有在途请求复用该 client，可能被淘汰中的
+                    # 连接掐断；该场景仅在同一 app 实例被多个 loop 交替服务时
+                    # 出现（如混合测试/多 loop 部署），生产单 loop 部署不受影响。
                     asyncio.create_task(client.aclose())  # noqa: RUF006
 
                 client = httpx.AsyncClient(
@@ -246,7 +264,8 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                     break
 
 
-        # 若重试全部耗尽
+        # 若重试全部耗尽：不向客户端回传后端异常原文（可能含内网 URL/拓扑信息），
+        # 详细原因仅记录在网关内部日志中。
         duration = time.perf_counter() - start_time
         GATEWAY_REQUESTS_TOTAL.labels(protocol="http", method=method, status="502").inc()
         GATEWAY_LATENCY.labels(protocol="http").observe(duration)
@@ -256,7 +275,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
         )
         raise HTTPException(
             status_code=502,
-            detail=f"Bad Gateway: All {max_retries} backend retry attempts failed. Last error: {last_exception!s}",
+            detail=f"Bad Gateway: all {max_retries} backend retry attempts failed",
         )
 
     return app

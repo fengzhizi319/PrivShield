@@ -10,11 +10,14 @@ existing tests keep working; production opts in via environment variables.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path  # noqa: TC003 - needed at runtime for Pydantic model annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class KeyConfig(BaseModel):
@@ -58,7 +61,12 @@ class SecuritySettings(BaseModel):
 
     # ---------------------------- Auth --------------------------------
     auth_enabled: bool = Field(default=False)
-    auth_internal_mtls_enabled: bool = Field(default=True)
+    # mTLS 客户端证书认证默认关闭：任何通过 CA 校验的证书仅代表"持有合法证书"，
+    # 不代表"被授权访问本服务"，必须显式启用并配置 CN 白名单才会被授予内部身份。
+    auth_internal_mtls_enabled: bool = Field(default=False)
+    # mTLS 客户端证书 CN 白名单；仅当 CN 命中白名单时才授予内部身份（["*"] scope）。
+    # 白名单为空时拒绝所有 mTLS 证书（fail-closed）。
+    auth_mtls_allowed_cns: list[str] = Field(default_factory=list)
     internal_keys: dict[str, KeyConfig] = Field(default_factory=dict)
     external_keys: dict[str, KeyConfig] = Field(default_factory=dict)
 
@@ -94,17 +102,75 @@ def _load_bool_env(name: str, default: bool = False) -> bool:
 
 
 def _load_json_env(name: str, default: dict[str, Any]) -> dict[str, Any]:
-    """Parse a JSON object from an environment variable."""
+    """Parse a JSON object from an environment variable.
+
+    解析失败时回退默认值并告警，绝不抛出——本模块在 import 期执行，
+    非法环境变量不应导致整个包崩溃。
+    """
     value = os.environ.get(name, "").strip()
     if not value:
         return default
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Environment variable {name} contains invalid JSON: {exc}") from exc
+        logger.warning(
+            "Environment variable %s contains invalid JSON (%s); falling back to default.",
+            name,
+            exc,
+        )
+        return default
     if not isinstance(parsed, dict):
-        raise ValueError(f"Environment variable {name} must be a JSON object.")
+        logger.warning(
+            "Environment variable %s must be a JSON object; falling back to default.", name
+        )
+        return default
     return parsed
+
+
+def _load_float_env(name: str, default: float) -> float:
+    """Parse a float environment variable, falling back to default on bad input."""
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning(
+            "Environment variable %s=%r is not a valid float; falling back to %s.",
+            name,
+            value,
+            default,
+        )
+        return default
+
+
+def _load_str_list_env(name: str) -> list[str]:
+    """Parse a string-list environment variable (JSON array or comma-separated).
+
+    兼容两种格式：JSON 数组（'["a","b"]'）与逗号分隔（'a,b'）。
+    解析失败时回退空列表（fail-closed）并告警。
+    """
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return []
+    if value.startswith("["):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "Environment variable %s contains invalid JSON (%s); falling back to empty list.",
+                name,
+                exc,
+            )
+            return []
+        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+            logger.warning(
+                "Environment variable %s must be a JSON array of strings; falling back to empty list.",
+                name,
+            )
+            return []
+        return [item.strip() for item in parsed if item.strip()]
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 def get_security_settings() -> SecuritySettings:
@@ -123,18 +189,17 @@ def get_security_settings() -> SecuritySettings:
         ),
         tls_key_password=os.environ.get("PRIVACY_TLS_KEY_PASSWORD") or None,
         auth_enabled=_load_bool_env("PRIVACY_AUTH_ENABLED"),
+        # mTLS 认证默认关闭（fail-closed）：仅当显式启用且 CN 命中白名单时才授权。
         auth_internal_mtls_enabled=_load_bool_env(
-            "PRIVACY_AUTH_INTERNAL_MTLS_ENABLED", default=True
+            "PRIVACY_AUTH_INTERNAL_MTLS_ENABLED", default=False
         ),
+        # CN 白名单：JSON 数组或逗号分隔，如 '["secretpad","gateway"]' 或 'secretpad,gateway'
+        auth_mtls_allowed_cns=_load_str_list_env("PRIVACY_AUTH_MTLS_ALLOWED_CNS"),
         internal_keys=_load_json_env("PRIVACY_AUTH_INTERNAL_KEYS_JSON", {}),
         external_keys=_load_json_env("PRIVACY_AUTH_EXTERNAL_KEYS_JSON", {}),
         rate_limit_enabled=_load_bool_env("PRIVACY_RATE_LIMIT_ENABLED"),
-        rate_limit_default_rps=float(
-            os.environ.get("PRIVACY_RATE_LIMIT_DEFAULT_RPS", "10")
-        ),
-        rate_limit_default_burst=float(
-            os.environ.get("PRIVACY_RATE_LIMIT_DEFAULT_BURST", "20")
-        ),
+        rate_limit_default_rps=_load_float_env("PRIVACY_RATE_LIMIT_DEFAULT_RPS", 10.0),
+        rate_limit_default_burst=_load_float_env("PRIVACY_RATE_LIMIT_DEFAULT_BURST", 20.0),
         rate_limit_per_endpoint=_load_json_env(
             "PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON", {}
         ),

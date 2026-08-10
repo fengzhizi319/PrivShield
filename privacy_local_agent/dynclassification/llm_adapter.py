@@ -59,19 +59,52 @@ logger = get_logger(__name__)
 # concurrent inference across instances piles up memory and can trigger OOM crashes
 # (surfacing as connection reset by peer in the Go client). This module-level semaphore
 # caps total LLM inference concurrency across the entire process (shared by all adapters).
+
+# 注意：本模块会被 dynclassification/__init__.py eager import，环境变量解析
+# 必须容错（非法值回退默认值并告警），不能让整个包在 import 期崩溃。
+def _env_int(name: str, default: int) -> int:
+    """解析整型环境变量，非法值回退默认值并告警。"""
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning(
+            "Environment variable %s=%r is not a valid int; falling back to %d.",
+            name, value, default,
+        )
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """解析浮点环境变量，非法值回退默认值并告警。"""
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning(
+            "Environment variable %s=%r is not a valid float; falling back to %s.",
+            name, value, default,
+        )
+        return default
+
+
 _LLM_INFER_SEMAPHORE = threading.Semaphore(
-    max(1, int(os.environ.get("PRIVACY_LLM_MAX_CONCURRENCY", "1")))
+    max(1, _env_int("PRIVACY_LLM_MAX_CONCURRENCY", 1))
 )
 
 # 信号量排队等待超时（秒）：并发请求超过上限时，等待超时后直接降级跳过 LLM 层，
 # 避免请求在信号量队列中无限堆积导致 gRPC 工作线程耗尽。
 # Queue wait timeout (seconds): when concurrency is saturated, requests waiting longer
 # than this timeout degrade by skipping the LLM layer instead of exhausting gRPC workers.
-_LLM_SEMAPHORE_WAIT_SECONDS = float(os.environ.get("PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS", "30"))
+_LLM_SEMAPHORE_WAIT_SECONDS = _env_float("PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS", 30.0)
 
 # 推理前可用内存阈值（MB）：低于该阈值时跳过 LLM 层触发降级，防止 OOM 崩溃。
 # Available-memory threshold (MB): below this, the LLM layer is skipped to prevent OOM.
-_LLM_MIN_FREE_MEM_MB = float(os.environ.get("PRIVACY_LLM_MIN_FREE_MEM_MB", "512"))
+_LLM_MIN_FREE_MEM_MB = _env_float("PRIVACY_LLM_MIN_FREE_MEM_MB", 512.0)
 
 
 class LlmAdapter:
