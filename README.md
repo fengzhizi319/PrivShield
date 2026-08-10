@@ -1,6 +1,6 @@
 # privacy-local-agent
 
-> Python 本地隐私保护 Agent，提供 REST + gRPC 双协议 Sidecar 服务，用于无法直接嵌入 Java/Go SDK 的场景，或多语言统一接入。
+> Python 本地隐私保护 Sidecar Agent，全面落地 **「三层四柱五御六类」医疗数据安全与隐私治理架构**，提供 REST + gRPC 双协议高可用服务。
 
 
 ## 目录 (Table of Contents)

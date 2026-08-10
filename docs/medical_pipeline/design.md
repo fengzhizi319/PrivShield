@@ -12,7 +12,13 @@
 
 在医疗健康数据开放与合规共享场景中，电子病历 (EMR)、残疾人评估记录及医保结算数据包含高度敏感的个人身份标识信息 (PII，如身份证号、医保证号) 以及极高风险的医疗病史信息（如 L4 级的恶性肿瘤/传染病病史、L5 级的重度精神障碍/遗传缺陷/HIV 感染等）。
 
-本设计方案旨在构建一个完整的**医疗数据合规治理 Pipeline**：
+本设计方案旨在构建一个完整的**「三层四柱五御六类」医疗数据合规治理 Pipeline**：
+
+- **三层 (3-Layer Funnel)**：3 层识别与决策漏斗 (Layer-1 规则引擎 ➔ Layer-2 Small-NER ➔ Layer-3 LLM/VLM 仲裁) + 角色三视图控制。
+- **四柱 (4-Pillar Matrix)**：高敏疾病 **病因/体征/诊断/处置** 4 柱特征强剥离。
+- **五御 (5-Fold Defense)**：**御越权** (DB51 分级)、**御泄漏** (角色三视图+Masking)、**御推断** (DP 差分加噪)、**御关联** (K-匿名泛化)、**御追踪** (FPE + 查询混淆)。
+- **六类 (6-Category Matrix)**：覆盖 **身份标识、联系方式、诊疗信息、检验检查、财务信息、生物特征** 6 类字段矩阵。
+
 1. **数据模拟生成 (`scripts/data/generate_medical_data.py`)**：自动生成 100 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、以及 L4/L5 级敏感病史的高仿真 `data1.csv`。
 2. **算法处理核心 (`privacy_local_agent/medical_pipeline/`)**：
    - 彻底与 `dynclassification` 统一合并：直接调用 `DynClassificationService.classify_field(..., sanitize=True)` 3 层漏斗 (Rule -> Small-NER -> Qwen3.5 LLM) 完成 27 个字段及文本病历的 L1~L5 风险分级标注。
