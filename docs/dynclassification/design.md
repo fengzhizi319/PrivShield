@@ -711,6 +711,23 @@ composite_rules:
     category: "COMPOSITE_MEDICAL_GENOMIC"
 ```
 
+### 6.2.1 敏感病种完整范畴与 ICD-10 区间映射
+
+DB51/T 2989—2023 第 4 级列举了三大类敏感病种 + 一个兜底项（"其他敏感病种诊疗数据"），标准本身未展开兜底项。下表为项目基于临床共识对"敏感病种"的完整展开定义，以及对应 ICD-10 编码区间与 YAML 规则中的 `category` 标识符：
+
+| 范畴编号 | 病种类别 | 典型病种 | ICD-10 敏感区间 | YAML `category` | 脱敏治理策略 |
+|---|---|---|---|---|---|
+| L4-STD | 性传播疾病 | 梅毒、淋病、尖锐湿疣、生殖器疱疹、HPV 感染 | A50–A64 | `STD_VENEREAL` | **彻底抹平**（严禁泛化） |
+| L4-MALIGNANT | 恶性肿瘤 | 肺癌、胃癌、肝癌、乳腺癌、宫颈癌等；化疗/放疗/靶向治疗 | C00–D49 | `MALIGNANT_NEOPLASM` | **范畴化泛化**（→ 相关系统疾病） |
+| L4-HEPATITIS | 病毒性肝炎 | 乙型肝炎、丙型肝炎、肝硬化及并发症 | B15–B19 | `HEPATITIS_VIRUS` | **范畴化泛化**（→ 肝脏疾病） |
+| L4-ORGAN | 严重器官损害 | COPD、急性心肌梗死、尿毒症/肾功能衰竭 | I21–I22, J44, N18–N19 | `SEVERE_ORGAN_DAMAGE` | **范畴化泛化**（→ 相关系统疾病） |
+| L4-AIDS | 艾滋病 / HIV 感染 | 艾滋病、HIV 感染、CD4+ 计数、抗逆转录治疗 | B20–B24 | `HIV_AIDS` | **彻底抹平**（严禁泛化） |
+| L4-PSYCHIATRIC | 重型精神障碍 | 重度精神分裂症、双相情感障碍；特异性抗精神病药物 | F20–F29 | `PSYCHIATRIC_DISORDER` | **彻底抹平**（严禁泛化） |
+
+> **级别与策略的区分（DB51 对齐）**：艾滋病/HIV 与重型精神病在 DB51/T 2989—2023 中属第 4 级“敏感病种”，定级与标准保持一致；但因其极高社会污名化风险，脱敏策略升级为彻底抹平（与 L5 同级强度）。工程实现中，`L5_TERMS_MAP` 为**抹平级词库**（含 `HIV_AIDS`、`PSYCHIATRIC_DISORDER`、`GENETIC_DEFECT`），`L4_TERMS_MAP` 为**泛化级词库**；词库级别标记体现抹平策略强度，不代表 DB51 定级。详见《医疗健康数据分类分级与隐私脱敏算法标准规范》（`../medical_pipeline/医疗健康数据分类分级与隐私脱敏算法标准规范.md`）§2.3.2。
+
+完整词库与正则引擎见 `medical_pipeline/rules.py` 中 `L4_TERMS_MAP` 与 `L5_TERMS_MAP`。ICD-10 编码区间判定由 `icd10_range` 算子执行（见 §8.2）。
+
 ### 6.3 金融领域规则 Profile 示例
 
 ```yaml

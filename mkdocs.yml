@@ -136,9 +136,7 @@ nav:
       - 运维指南: medical_pipeline/ops.md
       - 需求文档: medical_pipeline/prd.md
       - 测试指南: medical_pipeline/testing.md
-      - 图片抹除算法规范: medical_pipeline/redaction_algorithm_specification.md
-      - 图片抹除算法规范 v2: medical_pipeline/redaction_algorithm_specification_v2.md
-      - 图片抹除算法规范 v3: medical_pipeline/redaction_algorithm_specification_v3.md
+      - 脱敏算法标准规范: medical_pipeline/医疗健康数据分类分级与隐私脱敏算法标准规范.md
     - 端到端流水线:
       - 流水线设计（实施版）: pipeline/design.md
       - 流水线设计（Gemini 草案）: pipeline/designgemini.md

@@ -4,13 +4,13 @@
 > **面向对象**: 架构师、后端/Agent 开发者、算法工程师、前端开发者  
 > **功能目标**: 提供真实医疗场景数据生成、3-Layer 分类分级 (L1-L5)、L4/L5 高敏感数据脱敏剥离与双输出保障，并实现 Agent、Python/Go 控制台后端以及 Web 前端的全链路接入。
 
-> **标准算法规范**: [`redaction_algorithm_specification.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/medical_pipeline/redaction_algorithm_specification.md)  
+> **标准算法规范**: [`医疗健康数据分类分级与隐私脱敏算法标准规范.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/medical_pipeline/医疗健康数据分类分级与隐私脱敏算法标准规范.md)  
 
 ---
 
 ## 1. 概述与需求背景 (Overview & Requirements)
 
-在医疗健康数据开放与合规共享场景中，电子病历 (EMR)、残疾人评估记录及医保结算数据包含高度敏感的个人身份标识信息 (PII，如身份证号、医保证号) 以及极高风险的医疗病史信息（如 L4 级的恶性肿瘤/传染病病史、L5 级的重度精神障碍/遗传缺陷/HIV 感染等）。
+在医疗健康数据开放与合规共享场景中，电子病历 (EMR)、残疾人评估记录及医保结算数据包含高度敏感的个人身份标识信息 (PII，如身份证号、医保证号) 以及极高风险的医疗病史信息（如 L4 级的恶性肿瘤/病毒性肝炎病史，以及 DB51 同为 L4 级但采用最严格抹平策略的 HIV 感染/重度精神障碍/性病，L5 级的遗传缺陷等，定级与策略的区分见标准规范 §2.3.2）。
 
 本设计方案旨在构建一个完整的**「三层四柱五御六类」医疗数据合规治理 Pipeline**：
 
@@ -143,7 +143,7 @@ class MedicalPrivacyPipeline:
 
 ### 3.5 技术代码实现与正则架构 (Technical Implementation & Pattern Architecture)
 
-> **对应标准规范**: [`redaction_algorithm_specification_v2.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/medical_pipeline/redaction_algorithm_specification_v2.md)
+> **对应标准规范**: [`医疗健康数据分类分级与隐私脱敏算法标准规范.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/medical_pipeline/医疗健康数据分类分级与隐私脱敏算法标准规范.md)
 
 为了支持标准规范中定义的治理原则与 8 步脱敏流水线，底层 Python 代码实现了精细的模块划分、正则表达式预编译与句法自愈管线。
 
