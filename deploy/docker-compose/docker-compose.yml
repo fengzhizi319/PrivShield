@@ -1,10 +1,70 @@
-version: "3.9"
+# =============================================================================
+# Privacy Local Agent - Docker Compose 全栈编排
+# Privacy Local Agent - Full Stack Docker Compose Orchestration
+#
+# 服务拓扑 / Service Topology:
+#   ┌─────────────────┐     ┌────────────────────┐
+#   │   Console Web   │────▶│ Console Backend Go │
+#   │    (Nginx)      │     │    (gRPC/REST)     │
+#   │     :5173       │     │      :8081         │
+#   └─────────────────┘     └─────────┬──────────┘
+#                                      │
+#                            ┌─────────▼──────────┐
+#                            │ Privacy Local Agent │
+#                            │   REST:8079 gRPC    │
+#                            │      :50051         │
+#                            └─────────────────────┘
+#
+# 启动方式 / Usage:
+#   docker compose up -d                    # 启动核心服务
+#   docker compose --profile llm up -d      # 启用 vLLM GPU 推理
+#   docker compose --profile monitoring up  # 启用监控栈
+# =============================================================================
 
+# =============================================================================
+# 网络定义 / Networks
+# =============================================================================
+networks:
+  # 前端网络：Web UI 访问
+  # Frontend network: Web UI access
+  frontend:
+    driver: bridge
+
+  # 后端网络：Agent 核心服务与后端代理通信
+  # Backend network: Agent core service and backend proxy communication
+  backend:
+    driver: bridge
+    internal: true  # 不对外暴露，仅内部通信
+
+  # LLM 网络：大模型推理服务（可选）
+  # LLM network: Large model inference service (optional)
+  llm:
+    driver: bridge
+    internal: true
+
+# =============================================================================
+# 持久化卷定义 / Volumes
+# =============================================================================
+volumes:
+  # 隐私预算数据库（SQLite）
+  # Privacy budget database (SQLite)
+  budget-db:
+    driver: local
+
+  # 审计日志持久化
+  # Audit log persistence
+  audit-logs:
+    driver: local
+
+# =============================================================================
+# 服务定义 / Services
+# =============================================================================
 services:
-  # ============================================================================
+
+  # ===========================================================================
   # 1. Privacy Local Agent 核心 Sidecar 服务
-  # REST: 8079 | gRPC: 50051
-  # ============================================================================
+  #    REST: 8079 | gRPC: 50051
+  # ===========================================================================
   privacy-local-agent:
     build:
       context: ../..
@@ -13,8 +73,8 @@ services:
     image: privacy-local-agent:0.1.0
     container_name: privacy-local-agent
     ports:
-      - "8079:8079"
-      - "50051:50051"
+      - "8079:8079"   # REST API
+      - "50051:50051" # gRPC
     environment:
       PRIVACY_REST_HOST: "0.0.0.0"
       PRIVACY_REST_PORT: "8079"
@@ -22,24 +82,48 @@ services:
       PRIVACY_GRPC_PORT: "50051"
       PRIVACY_PROFILE: "/etc/privacy-local-agent/privacy-profile.yaml"
       PRIVACY_LOG_LEVEL: "INFO"
-      PRIVACY_LOG_FORMAT: "text"
-      # 如需关联下方的 vLLM 服务，取消注释并设置如下：
+      PRIVACY_LOG_FORMAT: "json"  # 容器环境推荐 JSON 日志
+      # 持久化预算数据库
+      # Persist budget database
+      PRIVACY_BUDGET_DB: "/data/budget/budget.db"
+      # 如需关联 vLLM 服务，取消注释：
+      # To connect vLLM service, uncomment:
       # PRIVACY_ENV_PROFILE: "vllm"
       # PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
     volumes:
       - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro
+      - budget-db:/data/budget
+      - audit-logs:/var/log/privacy
+    networks:
+      - backend
+      - llm  # 允许访问 LLM 服务
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
+    # 资源限制 / Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    # 日志配置 / Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     restart: unless-stopped
 
-  # ============================================================================
+  # ===========================================================================
   # 2. Console Go 后端代理服务 (Go gRPC / REST 高性能代理)
-  # PORT: 8081
-  # ============================================================================
+  #    PORT: 8081
+  # ===========================================================================
   console-backend-go:
     build:
       context: ../../console/backend-go
@@ -56,12 +140,35 @@ services:
     depends_on:
       privacy-local-agent:
         condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # 资源限制 / Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     restart: unless-stopped
 
-  # ============================================================================
+  # ===========================================================================
   # 3. Console Python 后端代理服务 (Python FastAPI REST 代理)
-  # PORT: 8080
-  # ============================================================================
+  #    PORT: 8080
+  # ===========================================================================
   console-backend-python:
     build:
       context: ../../console/backend
@@ -77,12 +184,35 @@ services:
     depends_on:
       privacy-local-agent:
         condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # 资源限制 / Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     restart: unless-stopped
 
-  # ============================================================================
-  # 4. Console React 单页测试控制台 Web UI (Nginx 静态服务 / 代理)
-  # PORT: 5173
-  # ============================================================================
+  # ===========================================================================
+  # 4. Console React 单页测试控制台 Web UI (Nginx 静态服务)
+  #    PORT: 5173
+  # ===========================================================================
   console-web:
     build:
       context: ../../console/web
@@ -92,29 +222,139 @@ services:
     ports:
       - "5173:5173"
     depends_on:
-      - console-backend-go
-      - console-backend-python
+      console-backend-go:
+        condition: service_healthy
+      console-backend-python:
+        condition: service_healthy
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5173/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # 资源限制 / Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
     restart: unless-stopped
 
-  # ============================================================================
+  # ===========================================================================
   # 5. 可选：vLLM Layer-3 本地大模型推理服务 (GPU 加速)
-  # PORT: 8000
-  # 启用说明：使用 docker-compose --profile llm up -d 启动
-  # ============================================================================
+  #    PORT: 8000
+  #    启用：docker compose --profile llm up -d
+  # ===========================================================================
   vllm:
     profiles: ["llm"]
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.6.3
     container_name: privacy-local-agent-vllm
-    command: ["--model", "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother", "--gpu-memory-utilization", "0.90"]
+    command:
+      - "--model"
+      - "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      - "--gpu-memory-utilization"
+      - "0.85"
+      - "--max-model-len"
+      - "4096"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
     volumes:
       - ../../.models:/models:ro
     ports:
       - "8000:8000"
+    networks:
+      - llm
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1  # 限制为 1 张 GPU，支持多租户
               capabilities: [gpu]
+        limits:
+          memory: 8G
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 6. 可选：Prometheus 监控服务
+  #     PORT: 9090
+  #     启用：docker compose --profile monitoring up -d
+  # ===========================================================================
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.54.1
+    container_name: privacy-local-agent-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - backend
+      - frontend
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 7. 可选：Grafana 可视化面板
+  #     PORT: 3000
+  #     启用：docker compose --profile monitoring up -d
+  # ===========================================================================
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.2.0
+    container_name: privacy-local-agent-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: privacy  # 生产环境请修改！
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../grafana:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - frontend
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     restart: unless-stopped

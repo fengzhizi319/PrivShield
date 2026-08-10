@@ -60,6 +60,8 @@ python -m privacy_local_agent.server
 
 ### Docker 运行
 
+#### 单容器运行
+
 ```bash
 # core 镜像（默认推荐，不含 torch/transformers/onnxruntime）
 docker build --target core -t privacy-local-agent:0.1.0 .
@@ -68,6 +70,48 @@ docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
 # ml 镜像（含完整本地分类模型依赖）
 docker build --target ml -t privacy-local-agent:0.1.0-ml .
 ```
+
+#### Docker Compose 全栈编排
+
+一键启动 Agent + Console 控制台（Go/Python 双后端 + Web UI）：
+
+```bash
+# 启动核心服务（Agent + Go 后端 + Web UI）
+./console/scripts/docker-start-go.sh
+
+# 启动全栈（Agent + 双后端 + Web UI）
+./console/scripts/docker-start-all.sh
+
+# 启用 vLLM GPU 推理服务
+./console/scripts/docker-start-all.sh --with-llm
+
+# 启用监控栈（Prometheus + Grafana）
+docker compose --profile monitoring up -d
+
+# 一键停止并清理
+./console/scripts/docker-stop.sh
+```
+
+**服务端口映射：**
+
+| 服务 | 端口 | 说明 |
+|---|---|---|
+| Agent REST | 8079 | FastAPI 主服务 |
+| Agent gRPC | 50051 | gRPC 主服务 |
+| Console Web UI | 5173 | React 控制台 |
+| Go Backend | 8081 | 高性能 gRPC/REST 代理 |
+| Python Backend | 8080 | FastAPI REST 代理 |
+| vLLM (可选) | 8000 | GPU 大模型推理 |
+| Prometheus (可选) | 9090 | 监控指标采集 |
+| Grafana (可选) | 3000 | 可视化面板 |
+
+**安全特性：**
+- 所有容器以非 root 用户运行
+- 基础镜像版本锁定，确保构建可追溯
+- 内置 HEALTHCHECK 健康检查
+- 资源限制（CPU/Memory）防止资源耗尽
+- 日志轮转配置（json-file driver）
+- 网络隔离（frontend / backend / llm）
 
 ## 生产安全（可选）
 
@@ -276,9 +320,20 @@ make docker-core
 # 构建 ml 镜像（含 torch/transformers/onnxruntime）
 make docker-ml
 
-# 运行
+# 运行（非 root 用户，内置健康检查）
 docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+
+# 挂载自定义配置文件
+docker run -v ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro \
+  -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
 ```
+
+**镜像安全特性：**
+- 非 root 用户运行（`USER privacy`）
+- 基础镜像版本锁定（`python:3.10.14-slim-bookworm`）
+- 分层 COPY 减小镜像体积
+- 内置 `HEALTHCHECK` 指令
+- 完整的 `.dockerignore` 排除敏感文件
 
 ### 可编辑安装（开发用）
 

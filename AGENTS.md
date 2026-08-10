@@ -350,6 +350,7 @@ Address these before any hardened production deployment.
 | Run Docker Console (Python Backend + Web) | `./console/scripts/docker-start-python.sh` |
 | Run Docker Full Stack (Agent+Backends+Web) | `./console/scripts/docker-start-all.sh [--with-llm]` |
 | Run Docker LLM (vLLM) | `./console/scripts/docker-start-llm.sh` |
+| Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
 | Stop Docker Services | `./console/scripts/docker-stop.sh` |
 | Run Prod Console (Go + Static) | `./console/scripts/prod-start-go.sh` |
 | Run Prod Console (Python + Static) | `./console/scripts/prod-start.sh` |
