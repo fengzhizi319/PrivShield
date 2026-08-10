@@ -29,14 +29,6 @@ service PrivacyService {
   rpc KAnonymizeDataFrame (KAnonymizeDataFrameRequest) returns (KAnonymizeDataFrameResponse);
   rpc ObfuscateQuery (ObfuscateQueryRequest) returns (ObfuscateQueryResponse);
   rpc ObfuscateQueryBatch (ObfuscateQueryBatchRequest) returns (ObfuscateQueryBatchResponse);
-  rpc ClassifyField (ClassifyFieldRequest) returns (ClassifyFieldResponse);
-  rpc ClassifyRecord (ClassifyRecordRequest) returns (ClassifyRecordResponse);
-  rpc ClassifyTable (ClassifyTableRequest) returns (ClassifyTableResponse);
-  rpc ClassifyTableAsync (ClassifyTableAsyncRequest) returns (ClassifyTableAsyncResponse);
-  rpc GetClassificationJob (GetClassificationJobRequest) returns (GetClassificationJobResponse);
-  rpc ClassifySecretFlow (ClassifySecretFlowRequest) returns (ClassifySecretFlowResponse);
-  rpc ConfirmReview (ConfirmReviewRequest) returns (ConfirmReviewResponse);
-  rpc ExportReviews (ExportReviewsRequest) returns (ExportReviewsResponse);
   rpc Health (HealthRequest) returns (HealthResponse);
   rpc RecommendParams (RecommendRequest) returns (RecommendResponse);
   rpc PerturbBinaryBatch (PerturbBinaryBatchRequest) returns (PerturbBinaryBatchResponse);
@@ -47,6 +39,7 @@ service PrivacyService {
   rpc DPVectorSum (DPVectorSumRequest) returns (DPVectorSumResponse);
   rpc DPAdaptiveClip (DPAdaptiveClipRequest) returns (DPAdaptiveClipResponse);
   rpc DPGroupBy (DPGroupByRequest) returns (DPGroupByResponse);
+  rpc DPVectorMean (DPVectorMeanRequest) returns (DPVectorMeanResponse);
   rpc DynClassify (DynClassificationRequest) returns (DynClassificationResponse);
 }
 
@@ -237,92 +230,8 @@ message ObfuscateQueryResponse {
   repeated string result = 1;
 }
 
-message ClassifyFieldRequest {
-  string field_name = 1;
-  string value = 2;
-  string params_json = 3;
-}
-
-message ClassifyFieldResponse {
-  string result_json = 1;
-}
-
 message RecordEntry {
   map<string, string> fields = 1;
-}
-
-message ClassifyRecordRequest {
-  RecordEntry record = 1;
-  string params_json = 2;
-}
-
-message ClassifyRecordResponse {
-  string result_json = 1;
-}
-
-message ClassifyTableRequest {
-  repeated string schema = 1;
-  repeated RecordEntry rows = 2;
-  string params_json = 3;
-}
-
-message ClassifyTableResponse {
-  string result_json = 1;
-}
-
-message ClassifyTableAsyncRequest {
-  repeated string schema = 1;
-  repeated RecordEntry rows = 2;
-  string params_json = 3;
-}
-
-message ClassifyTableAsyncResponse {
-  string job_id = 1;
-  string status = 2;
-  string created_at = 3;
-}
-
-message GetClassificationJobRequest {
-  string job_id = 1;
-}
-
-message GetClassificationJobResponse {
-  string job_id = 1;
-  string status = 2;
-  string result_json = 3;
-  string error = 4;
-  string created_at = 5;
-  string finished_at = 6;
-}
-
-message ClassifySecretFlowRequest {
-  string party = 1;
-  string params_json = 2;
-  string data_json = 3;
-}
-
-message ClassifySecretFlowResponse {
-  string result_json = 1;
-}
-
-message ConfirmReviewRequest {
-  string review_id = 1;
-  string corrected_level = 2;
-  string reviewer = 3;
-  string comment = 4;
-}
-
-message ConfirmReviewResponse {
-  string result_json = 1;
-}
-
-message ExportReviewsRequest {
-  string format = 1;
-  bool mask_input = 2;
-}
-
-message ExportReviewsResponse {
-  string data = 1;
 }
 
 message HealthRequest {}
@@ -473,6 +382,21 @@ message DPChunkedHistogramRequest {
   double delta = 5;
 }
 
+message DPVectorMeanRequest {
+  repeated DoubleChunk vectors = 1;
+  double max_norm = 2;
+  double epsilon = 3;
+  double delta = 4;
+  string mechanism = 5;
+  double min_count = 6;
+  bool return_details = 7;
+}
+
+message DPVectorMeanResponse {
+  repeated double mean_vector = 1 [packed = true];
+  DPResultProto result_details = 2;
+}
+
 message DynClassificationRequest {
   string field_name = 1;
   string field_value = 2;
@@ -487,7 +411,7 @@ message DynSecurityTagProto {
   string source_engine = 4;
   string domain = 5;
   string standard_id = 6;
-  bool is_override = 7;    // 是否为覆盖型降级标签
+  bool is_override = 7;    // 是否为强制覆盖标签 / Whether this is a forced override tag
   bool is_downgrade = 8;   // 是否由降级规则产生
   string match_target = 9; // 匹配目标: field_name | field_value
 }

@@ -896,6 +896,61 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
             noisy_vec = list(res)
             return privacy_pb2.DPVectorSumResponse(noisy_vector=noisy_vec)
 
+    def DPVectorMean(self, request, context):
+        """DP 向量均值 gRPC 方法。
+
+        Compute a differentially private mean over a collection of vectors,
+        with per-vector L2 norm clipping, isotropic noise, and noisy_count normalization.
+
+        Args:
+            request: DPVectorMeanRequest，包含 vectors（向量列表）、max_norm、DP 参数。
+            context: gRPC 服务上下文。
+
+        Returns:
+            DPVectorMeanResponse: 包含加噪均值向量及可选的详细信息。
+        """
+        # 延迟导入 numpy 用于向量运算
+        import numpy as np
+        # 将 protobuf repeated DoubleChunk 转为二维 Python 列表
+        vec_list = [list(chunk.values) for chunk in request.vectors]
+        # 构建 numpy 二维数组 (n_vectors × dim)
+        vectors = np.array(vec_list)
+        # 构建参数字典：max_norm 用于 L2 截断以控制灵敏度
+        params = {
+            "max_norm": request.max_norm,        # L2 范数截断上界
+            "epsilon": request.epsilon,          # 隐私预算
+            "delta": request.delta,              # δ 参数
+            "mechanism": request.mechanism,      # 噪声机制
+            "min_count": request.min_count,      # 最小计数阈值（noisy_count 归一化）
+            "return_details": request.return_details,  # 是否返回详细信息
+        }
+        # 调用业务层执行向量均值：L2 截断 + 各向同性加噪 + noisy_count 归一化
+        res = self.service.dp_vector_mean(vectors, params)
+
+        # 根据业务层返回类型判断是否携带详细信息
+        if hasattr(res, "value"):
+            # 返回了 DPResult 对象：提取加噪均值向量与元数据
+            mean_vec = list(res.value)  # 加噪后的均值向量
+            # 噪声尺度可能是数组（每维不同）或标量，统一转为单个 float
+            noise_scale = (
+                float(np.mean(res.noise_scale))  # 多维取均值
+                if isinstance(res.noise_scale, (list, np.ndarray))
+                else float(res.noise_scale)      # 标量直接转换
+            )
+            # 构建详细信息 protobuf 消息
+            dp_proto = privacy_pb2.DPResultProto(
+                value_vector=mean_vec,            # 加噪均值向量
+                noise_mechanism=res.noise_mechanism,  # 实际使用的噪声机制
+                noise_scale=noise_scale,          # 噪声尺度
+                epsilon_spent=res.epsilon_spent,  # 实际消耗的 ε
+                delta_spent=res.delta_spent,      # 实际消耗的 δ
+            )
+            return privacy_pb2.DPVectorMeanResponse(mean_vector=mean_vec, result_details=dp_proto)
+        else:
+            # 仅返回纯向量（未请求详细信息）
+            mean_vec = list(res)
+            return privacy_pb2.DPVectorMeanResponse(mean_vector=mean_vec)
+
     def DPAdaptiveClip(self, request, context):
         """自适应截断边界估计 gRPC 方法。
 
