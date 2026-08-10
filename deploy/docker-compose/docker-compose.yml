@@ -43,7 +43,7 @@ services:
       # - ./certs:/certs:ro
     healthcheck:
       # 健康检查直接探测 REST /health，方便 compose 依赖判断和本地排障。
-      test: ["CMD", "wget", "-qO-", "http://localhost:8079/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8079/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3

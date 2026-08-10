@@ -631,26 +631,29 @@ class Qwen3Classifier(LlmClassifier):
         Returns:
             解析后的结果字典（含 final_level 等字段）或 None / Parsed result dict or None.
         """
+        # 先剥离 Qwen3.5 等思考模型可能输出的 <think>...</think> 思考链
+        cleaned_text = re.sub(r"<think>.*?</think>", "", output_text, flags=re.DOTALL).strip()
+
         # 使用正则表达式提取第一个 {} 包裹的 JSON 内容（DOTALL 匹配跨行）
-        json_match = re.search(r"(\{.*\})", output_text, re.DOTALL)
-        # 如果匹配到则提取 JSON 字符串，否则使用整个输出文本尝试解析
-        json_str = json_match.group(1) if json_match else output_text
+        json_match = re.search(r"(\{.*\})", cleaned_text, re.DOTALL)
+        json_str = json_match.group(1) if json_match else cleaned_text
 
         try:
             # 尝试解析 JSON 字符串为 Python 字典
             res = json.loads(json_str)
-            # 校验关键字段 final_level 是否存在（确保是有效的分类结果）
-            if "final_level" in res:
-                # 类型断言并返回有效的分类结果字典
+            # 校验关键字段 final_level 是否存在
+            if isinstance(res, dict) and "final_level" in res:
+                # 兼容训练/推理字段契约：统一补全 category 与 sub_category
+                cat = res.get("category") or res.get("sub_category") or "GENERAL"
+                res["category"] = cat
+                res["sub_category"] = cat
                 return cast("dict[str, Any]", res)
         except Exception as e:
-            # JSON 解析失败（格式不合法/字段类型错误等）
             logger.warning(
                 "llm_json_parse_failed",
                 extra={"error": str(e)},
             )
 
-        # 解析失败则返回 None 触发降级（上层使用 Layer-1/Layer-2 的结果）
         return None
 
 

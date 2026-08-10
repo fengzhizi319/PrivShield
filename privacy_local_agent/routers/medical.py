@@ -3,12 +3,14 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
-from privacy_local_agent.deps import service
+from privacy_local_agent.deps import SECURITY_DEPS, service
+from privacy_local_agent.security.auth import require_permission
 
 router = APIRouter(prefix="/v1/medical", tags=["medical"])
+
 
 # 输入规模上限（资源耗尽防护）：单请求记录数、单记录字段数、单字段值长度。
 # 脱敏管线含 NER 推理（百毫秒~秒级/字段）与复杂句法正则，无界输入可被用于 DoS。
@@ -39,8 +41,11 @@ class MedicalProcessResponse(BaseModel):
     summary: dict[str, Any] = Field(..., description="处理元数据与统计")
 
 
-@router.post("/process", response_model=MedicalProcessResponse)
-
+@router.post(
+    "/process",
+    response_model=MedicalProcessResponse,
+    dependencies=[*SECURITY_DEPS, require_permission("medical:process")],
+)
 def process_medical(req: MedicalProcessRequest) -> dict[str, Any]:
     """对提交的医疗数据集执行 3-Layer 分类分级与 L4/L5 敏感数据抹平脱敏。"""
     return service.process_medical_data(req.records)

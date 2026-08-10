@@ -661,6 +661,18 @@ class DynClassificationService:
         """列出所有已注册算子（从 OperatorRegistry 查询）。"""
         return OperatorRegistry.list_operators()
 
+    def check_and_reload(self, force: bool = False) -> bool:
+        """检查底层配置文件的变动。若有变动，同步清空 funnel 缓存与 loader 缓存。"""
+        reloaded = self.loader.check_and_reload(force=force)
+        if reloaded:
+            with self._service_lock:
+                self._funnel_cache.clear()
+                self._classification_cache.clear()
+                self._ner_adapter = None
+                self._llm_adapter = None
+            logger.info("DynClassificationService funnel and adapter cache cleared due to hot-reload.")
+        return reloaded
+
     def reload(self) -> None:
         """热加载：清除缓存，下次请求时重新加载配置。
 
@@ -668,11 +680,12 @@ class DynClassificationService:
         模型路径、标签映射、prompt 模板等配置变更后能生效。
         """
         self.loader.invalidate_cache()
-        # 清除 funnel 缓存（引擎重建后 funnel 也需重建）
-        self._funnel_cache.clear()
-        # 重置 NER/LLM 适配器（全局单例），使新 taxonomy 配置生效
-        self._ner_adapter = None
-        self._llm_adapter = None
+        # 清除 funnel 与分类结果缓存（引擎重载后相关缓存也需清空）
+        with self._service_lock:
+            self._funnel_cache.clear()
+            self._classification_cache.clear()
+            self._ner_adapter = None
+            self._llm_adapter = None
 
     def generate_profile_from_doc(self, doc_path: str | Path) -> dict[str, str]:
         """从标准 Markdown 文档自动抽取并生成 YAML 配置文件，并重新载入引擎缓存。

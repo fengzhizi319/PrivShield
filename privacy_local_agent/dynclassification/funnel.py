@@ -198,21 +198,31 @@ class ClassificationFunnel:
         # ===== Step 1: Layer-1 规则引擎评估 =====
         tags, suppressed_tags = self.engine.evaluate(field_name, value)
 
-        # 补全高敏病史扫描：当文本命中 L5/L4 医疗模式时，确保生成对应的 L5/L4 SecurityTag
+        # 补全高敏病史扫描：当文本命中 L5/L4 医疗模式时，确保生成对应的顶级/次高级 SecurityTag
         try:
             from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS, normalize_fullwidth_alphanumeric
             norm_val = normalize_fullwidth_alphanumeric(str_value)
             stripped_val = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_val)
             scan_targets = {str_value, norm_val, stripped_val}
 
+            # 动态适配当前 taxonomy 的最高 rank 与次高 rank level
+            sorted_levels = sorted(
+                self.taxonomy.levels.items(),
+                key=lambda item: item[1].rank,
+                reverse=True,
+            )
+            top_level = sorted_levels[0][0] if sorted_levels else "L5"
+            second_top_level = sorted_levels[1][0] if len(sorted_levels) > 1 else top_level
+
             is_l5 = False
             for pat, _rep in L5_PATTERNS:
                 if any(pat.search(t) for t in scan_targets):
                     tags.append(SecurityTag(
-                        level="L5", category="HIGH_RISK_MEDICAL_L5", confidence=0.99,
+                        level=top_level, category="HIGH_RISK_MEDICAL_L5", confidence=0.99,
                         source_engine="RULE", rule_id="MEDICAL_L5_STRICT_RULE",
                         domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
                         needs_human_review=True,
+                        match_target="field_value",
                     ))
                     is_l5 = True
                     break
@@ -221,9 +231,11 @@ class ClassificationFunnel:
                 for pat, _rep in L4_PATTERNS:
                     if any(pat.search(t) for t in scan_targets):
                         tags.append(SecurityTag(
-                            level="L4", category="HIGH_RISK_MEDICAL_L4", confidence=0.95,
+                            level=second_top_level, category="HIGH_RISK_MEDICAL_L4", confidence=0.95,
                             source_engine="RULE", rule_id="MEDICAL_L4_STRICT_RULE",
                             domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
+                            needs_human_review=False,
+                            match_target="field_value",
                         ))
                         break
         except Exception:
@@ -294,9 +306,17 @@ class ClassificationFunnel:
             # 场景 A: 规则冲突
             if self.policy.enable_llm_arbitration and self.llm is not None and self.llm.is_available:
                 # Phase 2: LLM 仲裁
-                # 冲突标签等级集合：LLM 仲裁只允许在该集合内选择，
-                # 集合外裁定（如被注入的 LLM 返回任意低等级）一律拒绝。
+                # 冲突标签等级集合：LLM 仲裁只允许在该集合内选择
                 conflict_levels = {t.level for t in tags}
+
+                # 核心修复 1: 值级证据安全地基 (Safety Floor)
+                # 若存在 field_value 证据标签，LLM 裁定的等级绝不可低于值级证据中的最大 rank
+                val_evidence_tags = [t for t in tags if t.match_target == "field_value" and not t.is_downgrade]
+                val_evidence_max_rank = max(
+                    (self.taxonomy.get_level_rank(t.level) for t in val_evidence_tags),
+                    default=0,
+                )
+
                 llm_result = self.llm.arbitrate(
                     field_name=field_name,
                     value=str_value,
@@ -308,14 +328,22 @@ class ClassificationFunnel:
                         llm_result.get("confidence"), confidence
                     )
                     llm_level = llm_result.get("final_level", "")
-                    if llm_level and llm_level in self.taxonomy.levels and llm_level in conflict_levels:
-                        # LLM 仲裁成功（等级合法且在冲突集合内）: 使用 LLM 裁定的等级和置信度
+                    llm_level_rank = self.taxonomy.get_level_rank(llm_level) if llm_level in self.taxonomy.levels else -1
+
+                    # 核心修复 2: 校验等级合法性、冲突集合属性，且必须满足 Safety Floor (rank >= val_evidence_max_rank)
+                    if (
+                        llm_level
+                        and llm_level in self.taxonomy.levels
+                        and llm_level in conflict_levels
+                        and llm_level_rank >= val_evidence_max_rank
+                    ):
+                        # LLM 仲裁成功（等级合法、在冲突集合内且高于/等于值级证据地基）
                         confidence = llm_confidence
                         reasoning = str(llm_result.get("reasoning", reasoning))
                         engine_layer = EngineLayer.L3_LLM
-                        # LLM 裁定等级：直接作为最终等级，不被其他标签的 max_level 覆盖
                         llm_adjudicated_level = llm_level
-                        # 追加一个 LLM 裁定标签（用于审计追踪）
+
+                        # 追加 LLM 裁定标签
                         tags.append(SecurityTag(
                             level=llm_level,
                             category="LLM_ARBITRATION",
@@ -325,43 +353,42 @@ class ClassificationFunnel:
                             domain=self.taxonomy.domain,
                             standard_id=self.taxonomy.standard_id,
                         ))
-                        # 一致性保障: 将与 LLM 裁定等级冲突的普通规则标签
-                        # 移入 suppressed_tags，确保外部对 tags 重算 max_level
-                        # 的结果与 final_level 一致。
-                        # Consistency: suppress normal rule tags whose level conflicts
-                        # with LLM verdict so external re-computation stays consistent.
+
+                        # 核心修复 3: 一致性压制，绝对不擦除 match_target == "field_value" 的真实数据证据标签
                         surviving_tags = []
                         for t in tags:
                             if (
                                 t.source_engine == "RULE"
                                 and not t.is_downgrade
                                 and t.level != llm_level
+                                and t.match_target != "field_value"
                             ):
                                 suppressed_tags.append(t)
                             else:
                                 surviving_tags.append(t)
                         tags[:] = surviving_tags
-                        # 复核标记刷新: LLM 高置信度仲裁成功时，清除历史复核标记，
-                        # 避免不必要的审核工单。
-                        # Refresh review flag: clear inherited needs_human_review when LLM
-                        # arbitrates with high confidence (>= llm_confidence_threshold).
-                        if confidence >= self.policy.llm_confidence_threshold:
+
+                        # 核心修复 4: 只有当 LLM 高置信度且当前存活标签中没有任何强标注 needs_human_review 时才清除复核
+                        has_surviving_review = any(t.needs_human_review for t in tags if t.source_engine != "LLM")
+                        if confidence >= self.policy.llm_confidence_threshold and not has_surviving_review:
                             needs_human_review = False
+                        else:
+                            needs_human_review = has_surviving_review
+
                         logger.info(
                             "funnel_llm_arbitration",
                             extra={"field_name": field_name, "llm_level": llm_level},
                         )
                     else:
-                        # 安全地板校验：LLM 裁定等级非法或超出冲突标签等级集合
-                        # （可能来自 Prompt 注入/模型幻觉），拒绝采用其裁定，
-                        # 保留规则引擎结果并强制人工复核。
+                        # 安全地基/规则校验拒绝
                         needs_human_review = True
-                        reasoning += " | LLM仲裁等级超出冲突集合(已拒绝,待人工复核)"
+                        reasoning += " | LLM仲裁等级未达安全地基或超出冲突集合(已拒绝,待人工复核)"
                         logger.warning(
                             "funnel_llm_arbitration_rejected",
                             extra={
                                 "field_name": field_name,
                                 "llm_level": llm_level,
+                                "val_evidence_max_rank": val_evidence_max_rank,
                                 "conflict_levels": sorted(conflict_levels),
                             },
                         )
@@ -535,20 +562,25 @@ class ClassificationFunnel:
 
     @staticmethod
     def _safe_llm_confidence(raw: Any, fallback: float) -> float:
-        """将 LLM 返回的 confidence 安全转换为 float。
+        """将 LLM 返回的 confidence 安全转换为 [0.0, 1.0] 范围内的 float。
 
-        LLM 输出不可信：可能返回 "极高" 等非数值内容（甚至经由 Prompt 注入
-        构造），直接 float() 会抛 ValueError 导致请求 500。转换失败时回退到
-        上游置信度，保证漏斗流程不崩溃。
+        LLM 输出不可信：可能返回 "极高"、NaN、Inf 或 95.0（甚至经由 Prompt 注入构造）。
+        直接 float() 可能会抛 ValueError 或在 Pydantic le=1.0 校验时抛 ValidationError 导致 500。
         """
+        import math
         try:
-            return float(raw)
+            val = float(raw)
+            if math.isnan(val) or math.isinf(val):
+                return fallback
+            if val > 1.0 and val <= 100.0:
+                val = val / 100.0  # 容错处理如 95.0 -> 0.95
+            return max(0.0, min(1.0, val))
         except (TypeError, ValueError):
             logger.warning(
                 "funnel_llm_confidence_invalid",
                 extra={"raw_confidence": str(raw)[:64], "fallback": fallback},
             )
-            return fallback
+            return max(0.0, min(1.0, fallback))
 
     # ------------------------------------------------------------------
     # 内部方法 / Internal Methods

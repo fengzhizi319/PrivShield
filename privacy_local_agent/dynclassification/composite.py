@@ -29,27 +29,14 @@ def _normalize(name: str) -> str:
     """规范化字段名用于模式匹配 / Normalize field names for pattern matching.
 
     Normalization steps:
-    1. Convert to lowercase (case-insensitive matching).
-    2. Remove spaces.
+    1. Convert to lowercase.
+    2. Strip spaces, underscores, and hyphens so 'id_card', 'id-card', 'idcard' match seamlessly.
     """
-    return str(name).lower().replace(" ", "")
+    return re.sub(r"[\s_\-]+", "", str(name).lower())
 
 
 class CompositeRuleEngine:
-    """复合规则引擎 / Composite Rule Engine.
-
-    维护一组复合规则，对单条记录及其字段分类结果进行后处理。
-    当记录中的字段名组合满足某条复合规则的 min_matches 阈值时，
-    生成对应的 SecurityTag 并升级记录的最终敏感度等级。
-    Maintains a set of composite rules to post-process a single record and its field classification results.
-    When a combination of field names in a record meets the min_matches threshold of a composite rule,
-    generates a corresponding SecurityTag and upgrades the final sensitivity level of the record.
-
-    Attributes:
-        rules: 当前生效的复合规则列表 / List of currently active composite rules.
-        domain: 领域标识 / Domain identifier.
-        standard_id: 标准标识 / Standard identifier.
-    """
+    """复合规则引擎 / Composite Rule Engine."""
 
     def __init__(
         self,
@@ -57,34 +44,22 @@ class CompositeRuleEngine:
         domain: str = "",
         standard_id: str = "",
     ):
-        """初始化复合规则引擎 / Initialize the composite rule engine.
-
-        Args:
-            rules: 复合规则列表；None 时使用空列表 / List of composite rules; uses empty list if None.
-            domain: 领域标识 / Domain identifier.
-            standard_id: 标准标识 / Standard identifier.
-        """
-        # Store a defensive copy of the rules list to prevent external mutation.
         self.rules = list(rules) if rules else []
         self.domain = domain
         self.standard_id = standard_id
 
-        # Pre-compile regex patterns for each rule to avoid repeated compilation
-        # during batch evaluation (performance optimization for hot path).
-        # Patterns are compiled with word boundaries baked in for consistent matching.
         self._compiled_patterns: dict[str, list[re.Pattern]] = {}
         for rule in self.rules:
             compiled_list: list[re.Pattern] = []
             for pattern in rule.field_patterns:
                 try:
-                    # Compile with word boundaries and IGNORECASE for consistent matching.
-                    # Word boundaries prevent partial matches like 'gene' in 'general_note'.
-                    bounded_pattern = r"\b" + pattern + r"\b"
+                    # 将 pattern 正确进行原子分组包覆，防止 | 交替符破坏词边界；
+                    # 匹配词边界或下划线边界
+                    bounded_pattern = rf"(?:\b|_)(?:{pattern})(?:\b|_)"
                     compiled_list.append(re.compile(bounded_pattern, re.IGNORECASE))
                 except re.error as e:
                     logger.error(f"Invalid regex pattern in composite rule '{rule.id}': '{pattern}'. Error: {e}")
                     pass
-            # Map rule ID -> its compiled patterns for O(1) lookup during evaluation.
             self._compiled_patterns[rule.id] = compiled_list
 
     def evaluate(
@@ -123,12 +98,10 @@ class CompositeRuleEngine:
             for compiled in compiled_patterns:
                 # For each pattern, check if ANY field in the record matches it.
                 for norm_name, original_name in norm_fields.items():
-                    # Use the pre-compiled pattern directly (word boundaries already included).
-                    if compiled.search(norm_name):
-                        # Pattern matched a field: increment counter and record the field name.
+                    # 同时匹配规范化名称与原始名称
+                    if compiled.search(norm_name) or compiled.search(original_name):
                         matched += 1
                         matched_names.append(original_name)
-                        # Break inner loop: one match per pattern is sufficient.
                         break
 
                 # Early exit optimization: if threshold already met, skip remaining patterns.

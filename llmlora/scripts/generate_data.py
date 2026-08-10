@@ -70,15 +70,14 @@ FALLBACK_LABELS: Dict[str, Tuple[str, str]] = {
 }
 
 # 规则引擎字段名提示词：触发 field_name 关键词类规则
-# Field-name hints fed to the rule engine to trigger field_name keyword rules
 FIELD_HINTS: Dict[str, str] = {
     "NAME": "patient_name",
     "ID_CARD": "id_card",
-    "PHONE": "phone",
-    "BANK_CARD": "bank_card_no",
+    "PHONE": "mobile",
+    "BANK_CARD": "bank_card",
     "EMAIL": "email",
-    "AGE": "age",
-    "MEDICAL_DIAGNOSIS": "diagnosis",
+    "AGE": "patient_age",
+    "MEDICAL_DIAGNOSIS": "clinical_diagnosis",
 }
 
 # 抹平占位符（按实体类别）：采用统一且清晰的合规占位词

@@ -1,13 +1,11 @@
-# 医疗健康数据隐私脱敏与泛化算法标准规范
-*(Medical Health Data Privacy Redaction & Generalization Algorithm Standard Specification)*
+# 医疗健康数据分类分级与隐私脱敏算法标准规范
+*(Medical Health Data Classification, Privacy Redaction Algorithm Standard Specification)*
 
 > **文档版本**：v3.0.0  
 > **文档状态**：正式发布 / 行业标准规范  
 > **适用范围**：医疗健康数据脱敏与泛化处理的算法设计、业务规则、数据库离线治理与单条流式代理合规审计  
 > **更新时间**：2026-08-07  
 > **法规基线**：国家卫健委、公安部、网信办等五部门《医疗卫生机构数据安全和个人信息保护管理办法（试行）》（国卫规划发〔2026〕6号）  
-> **设计方案引用**：技术实现与代码架构详见架构设计文档 [`docs/medical_pipeline/design.md`](file:///home/charles/code/sfwork/privacy-local-agent/docs/medical_pipeline/design.md)  
-> **变更说明**：引入五部门 2026 最新新规；建立 **6 类敏感字段×脱敏算法矩阵**；扩充 FPE (保留格式加密)、列洗牌 (Column Shuffle)、日期统一随机偏移 (Random Date Offset)、DICOM Tag 元数据清洗规范；建立 HIS / EMR / LIS / PACS / 科研数据集分系统脱敏实施方案与角色三视图访问控制标准；补全核心算法规则章（四柱剥离、PII 掩码一致性、八步句法重构、年龄 K-匿名、泛化映射、门禁与质量指标）；第 2 章重构为以 DB51/T 2989—2023 五级分级为基准，6 类高敏字段补充并入形成增强 L4/L5 标准。
 
 ---
 

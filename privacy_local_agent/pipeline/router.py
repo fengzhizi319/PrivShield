@@ -9,15 +9,20 @@ import csv
 import io
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, File, UploadFile, Query
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
 from pydantic import BaseModel, Field
+
+from privacy_local_agent.deps import SECURITY_DEPS
+from privacy_local_agent.security.auth import require_permission
+from privacy_local_agent.observability.logging_config import get_logger
 
 from .models import PipelineResult
 from .service import PipelineService
 
-
+logger = get_logger(__name__)
 router = APIRouter(prefix="/v1/pipeline", tags=["Pipeline"])
 _service = PipelineService()
+_MAX_CSV_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
 
 
 class ProcessRecordsRequest(BaseModel):
@@ -29,7 +34,11 @@ class ProcessRecordsRequest(BaseModel):
     mask_l5: bool = Field(default=True, description="是否掩码 L5 数据")
 
 
-@router.post("/process_records", response_model=PipelineResult)
+@router.post(
+    "/process_records",
+    response_model=PipelineResult,
+    dependencies=[*SECURITY_DEPS, require_permission("pipeline:process")],
+)
 async def process_records(req: ProcessRecordsRequest) -> PipelineResult:
     """对 JSON 记录数组执行分类分级与脱敏流水线。"""
     try:
@@ -39,11 +48,18 @@ async def process_records(req: ProcessRecordsRequest) -> PipelineResult:
             mask_l4=req.mask_l4,
             mask_l5=req.mask_l5,
         )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pipeline processing failed: {e}")
+        logger.error("pipeline_process_records_failed", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Pipeline processing encounter internal error")
 
 
-@router.post("/process_csv", response_model=PipelineResult)
+@router.post(
+    "/process_csv",
+    response_model=PipelineResult,
+    dependencies=[*SECURITY_DEPS, require_permission("pipeline:process")],
+)
 async def process_csv(
     file: UploadFile = File(..., description="上传的 CSV 文件"),
     standard: Optional[str] = Query(default="jrt0197", description="分类标准"),
@@ -52,10 +68,15 @@ async def process_csv(
 ) -> PipelineResult:
     """上传 CSV 文件，执行分类分级与脱敏流水线。"""
     if not file.filename or not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV files are supported")
 
     try:
         content = await file.read()
+        if len(content) > _MAX_CSV_SIZE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"CSV file size exceeds limit of {_MAX_CSV_SIZE_BYTES // (1024*1024)}MB",
+            )
         text = content.decode("utf-8", errors="replace")
         reader = csv.DictReader(io.StringIO(text))
         records = [dict(row) for row in reader]
@@ -66,5 +87,8 @@ async def process_csv(
             mask_l4=mask_l4,
             mask_l5=mask_l5,
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process uploaded CSV: {e}")
+        logger.error("pipeline_process_csv_failed", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process uploaded CSV file")

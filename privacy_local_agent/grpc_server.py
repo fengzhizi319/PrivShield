@@ -632,15 +632,13 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
         Returns:
             ObfuscateQueryResponse: 包含混淆后的查询列表 result。
         """
-        # 调用业务层查询混淆：注入 num_dummies 个虚拟查询与真实查询混合
+        num_dummies = request.num_dummies if request.num_dummies > 0 else 3
         result = self.service.obfuscate_query(
             request.query,           # 原始真实查询
-            request.num_dummies,     # 需要注入的虚拟查询数量
-            request.domain,          # 查询领域（medical/generic）
-            # 可选自定义虚拟查询池：仅当非空时传递
+            num_dummies,             # 需要注入的虚拟查询数量
+            request.domain if request.domain else "medical",  # 查询领域
             medical_pool=list(request.medical_pool) if request.medical_pool else None,
             generic_pool=list(request.generic_pool) if request.generic_pool else None,
-            # 随机种子：proto3 默认 0 视为未设置，传 None 使用系统随机源
             seed=request.seed if request.seed != 0 else None,
         )
         return privacy_pb2.ObfuscateQueryResponse(result=result)
@@ -863,66 +861,46 @@ class PrivacyServicer(privacy_pb2_grpc.PrivacyServiceServicer):
         vectors = np.array(vec_list)
         # 构建参数字典：max_norm 用于 L2 截断以控制灵敏度
         params = {
-            "max_norm": request.max_norm,        # L2 范数截断上界
-            "epsilon": request.epsilon,          # 隐私预算
-            "delta": request.delta,              # δ 参数
-            "mechanism": request.mechanism,      # 噪声机制
-            "return_details": request.return_details,  # 是否返回详细信息
+            "max_norm": request.max_norm if request.max_norm > 0 else 1.0,
+            "epsilon": request.epsilon if request.epsilon > 0 else 1.0,
+            "delta": request.delta,
+            "mechanism": request.mechanism if request.mechanism else "laplace",
+            "return_details": request.return_details,
         }
         # 调用业务层执行向量求和 + 截断 + 加噪
         res = self.service.dp_vector_sum(vectors, params)
 
         # 根据业务层返回类型判断是否携带详细信息
         if hasattr(res, "value"):
-            # 返回了 DPResult 对象：提取加噪向量与元数据
-            noisy_vec = list(res.value)  # 加噪后的向量
-            # 噪声尺度可能是数组（每维不同）或标量，统一转为单个 float
+            noisy_vec = list(res.value)
             noise_scale = (
-                float(np.mean(res.noise_scale))  # 多维取均值
+                float(np.mean(res.noise_scale))
                 if isinstance(res.noise_scale, (list, np.ndarray))
-                else float(res.noise_scale)      # 标量直接转换
+                else float(res.noise_scale)
             )
-            # 构建详细信息 protobuf 消息
             dp_proto = privacy_pb2.DPResultProto(
-                value_vector=noisy_vec,           # 加噪向量
-                noise_mechanism=res.noise_mechanism,  # 实际使用的噪声机制
-                noise_scale=noise_scale,          # 噪声尺度
-                epsilon_spent=res.epsilon_spent,  # 实际消耗的 ε
-                delta_spent=res.delta_spent,      # 实际消耗的 δ
+                value_vector=noisy_vec,
+                noise_mechanism=res.noise_mechanism,
+                noise_scale=noise_scale,
+                epsilon_spent=res.epsilon_spent,
+                delta_spent=res.delta_spent,
             )
             return privacy_pb2.DPVectorSumResponse(noisy_vector=noisy_vec, result_details=dp_proto)
         else:
-            # 仅返回纯向量（未请求详细信息）
             noisy_vec = list(res)
             return privacy_pb2.DPVectorSumResponse(noisy_vector=noisy_vec)
 
     def DPVectorMean(self, request, context):
-        """DP 向量均值 gRPC 方法。
-
-        Compute a differentially private mean over a collection of vectors,
-        with per-vector L2 norm clipping, isotropic noise, and noisy_count normalization.
-
-        Args:
-            request: DPVectorMeanRequest，包含 vectors（向量列表）、max_norm、DP 参数。
-            context: gRPC 服务上下文。
-
-        Returns:
-            DPVectorMeanResponse: 包含加噪均值向量及可选的详细信息。
-        """
-        # 延迟导入 numpy 用于向量运算
         import numpy as np
-        # 将 protobuf repeated DoubleChunk 转为二维 Python 列表
         vec_list = [list(chunk.values) for chunk in request.vectors]
-        # 构建 numpy 二维数组 (n_vectors × dim)
         vectors = np.array(vec_list)
-        # 构建参数字典：max_norm 用于 L2 截断以控制灵敏度
         params = {
-            "max_norm": request.max_norm,        # L2 范数截断上界
-            "epsilon": request.epsilon,          # 隐私预算
-            "delta": request.delta,              # δ 参数
-            "mechanism": request.mechanism,      # 噪声机制
-            "min_count": request.min_count,      # 最小计数阈值（noisy_count 归一化）
-            "return_details": request.return_details,  # 是否返回详细信息
+            "max_norm": request.max_norm if request.max_norm > 0 else 1.0,
+            "epsilon": request.epsilon if request.epsilon > 0 else 1.0,
+            "delta": request.delta,
+            "mechanism": request.mechanism if request.mechanism else "laplace",
+            "min_count": request.min_count if request.min_count > 0 else 1,
+            "return_details": request.return_details,
         }
         # 调用业务层执行向量均值：L2 截断 + 各向同性加噪 + noisy_count 归一化
         res = self.service.dp_vector_mean(vectors, params)

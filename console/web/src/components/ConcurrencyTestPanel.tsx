@@ -39,13 +39,13 @@ const DEFAULT_MASK_BODY = {
 const PRESET_PATHS = [
   { path: '/v1/privacy/mask', method: 'POST', label: 'Mask PII', body: DEFAULT_MASK_BODY },
   {
-    path: '/v1/privacy/dp_count',
+    path: '/v1/privacy/dp/count',
     method: 'POST',
     label: 'DP Count',
     body: { values: [1, 2, 3, 4, 5], params: { epsilon: 1.0 } },
   },
   {
-    path: '/v1/privacy/dp_sum',
+    path: '/v1/privacy/dp/sum',
     method: 'POST',
     label: 'DP Sum',
     body: { values: [1, 2, 3, 4, 5], params: { epsilon: 1.0, clip_lower: 0, clip_upper: 10 } },

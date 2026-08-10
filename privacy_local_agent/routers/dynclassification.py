@@ -134,7 +134,7 @@ class GenerateProfileRequest(BaseModel):
 @_bad_request_on_value_error
 def evaluate_field(req: DynEvalFieldRequest):
     svc = get_service()
-    svc.loader.check_and_reload()  # 触发轻量级修改检测
+    svc.check_and_reload()  # 触发轻量级修改检测
     resp = svc.classify_field(
         field_name=req.field_name,
         value=req.value,
@@ -152,7 +152,7 @@ def evaluate_field(req: DynEvalFieldRequest):
 @_bad_request_on_value_error
 def evaluate_record(req: DynEvalRecordRequest):
     svc = get_service()
-    svc.loader.check_and_reload()
+    svc.check_and_reload()
     resp = svc.classify_record(
         record=req.record,
         domain=req.domain,
@@ -169,7 +169,7 @@ def evaluate_record(req: DynEvalRecordRequest):
 @_bad_request_on_value_error
 def evaluate_table(req: DynEvalTableRequest):
     svc = get_service()
-    svc.loader.check_and_reload()
+    svc.check_and_reload()
     resp = svc.classify_table(
         schema=req.schema_,
         rows=req.rows,
@@ -187,7 +187,7 @@ def evaluate_table(req: DynEvalTableRequest):
 @_bad_request_on_value_error
 def dry_run(req: DryRunRequest):
     svc = get_service()
-    svc.loader.check_and_reload()
+    svc.check_and_reload()
     if not req.sample_data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

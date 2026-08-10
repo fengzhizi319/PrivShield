@@ -712,8 +712,6 @@ class DPApi:
         logger.warning(
             "clip_bounds_inferred_from_data",
             extra={
-                "lower": lower,
-                "upper": upper,
                 "recommendation": "Set clip_lower/clip_upper explicitly for production DP guarantees.",
             },
         )
@@ -2463,9 +2461,14 @@ class DPApi:
         # Increment metrics counter by dimensionality d
         DP_QUERIES_TOTAL.labels(mechanism=mechanism, aggregation="sum").inc(matrix.shape[1])
 
-        # Step 6: Generate isotropic noise vector (each dimension independently noised)
-        noise_scale = self._compute_noise_scale(max_norm, epsilon, delta, mechanism)
-        noises = self._sample_isotropic_noise(matrix.shape[1], mechanism, noise_scale)
+        # Step 6: Generate isotropic noise vector
+        # Gaussian 机制的 L2 敏感度为 max_norm
+        # Laplace 机制对 d 维向量在 L2 clip 约束下的 L1 敏感度上界为 sqrt(d) * max_norm
+        d = matrix.shape[1]
+        import math
+        sensitivity = (max_norm * math.sqrt(d)) if (mechanism == "laplace" and d > 1) else max_norm
+        noise_scale = self._compute_noise_scale(sensitivity, epsilon, delta, mechanism)
+        noises = self._sample_isotropic_noise(d, mechanism, noise_scale)
 
         # Add noise to the true vector sum
         noisy_vec = true_sum + noises

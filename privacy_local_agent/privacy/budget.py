@@ -334,12 +334,15 @@ class BudgetAccountant:
         若配置了 SQLite，则通过排他性写入事务保证多进程一致性。
 
         Args:
-            epsilon: 本次操作需要消耗的 epsilon 预算。
-            delta: 本次操作需要消耗的 delta 预算，默认 0。
+            epsilon: 本次操作需要消耗的 epsilon 预算（必须 > 0）。
+            delta: 本次操作需要消耗的 delta 预算（必须 >= 0），默认 0。
 
         Raises:
+            ValueError: 当 epsilon <= 0 或 delta < 0 时。
             PrivacyBudgetExhausted: 当累计 epsilon 或 delta 超过总预算时。
         """
+        if epsilon <= 0.0 or delta < 0.0:
+            raise ValueError(f"Budget amount to spend must be strictly positive (got epsilon={epsilon}, delta={delta})")
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
             with self._mu:
