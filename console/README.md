@@ -27,15 +27,40 @@
 确保已安装 `privacy_local_agent` 和 `console/backend` 的虚拟环境依赖，并已构建前端（`console/web/dist` 存在），然后执行：
 
 ```bash
-./console/start.sh
 ```
 
 该脚本会同时启动 `privacy_local_agent` 和测试控制台后端，等待健康检查后输出访问地址，按 `Ctrl+C` 停止所有服务。
 
+### 2. Docker 模式启动 (Docker Container & Docker Compose)
+
+若需要在 Docker 容器环境中一键构建并运行 Backend、Agent 或 LLM 模块，使用 `console/scripts/docker-*.sh` 系列脚本：
+
+```bash
+# 1. 单独在 Docker 中运行 Agent (Core / ML 镜像)
+./console/scripts/docker-start-agent.sh [core|ml]
+
+# 2. 启动 vLLM 大模型推理容器 (GPU 加速)
+./console/scripts/docker-start-llm.sh
+
+# 3. 启动 Agent + Go 代理 + React Web UI 容器套件
+./console/scripts/docker-start-go.sh
+
+# 4. 启动 Agent + Python 代理 + React Web UI 容器套件
+./console/scripts/docker-start-python.sh
+
+# 5. 启动全栈 Docker 容器套件（Agent + 双后端 + Web UI + 可选 vLLM）
+./console/scripts/docker-start-all.sh [--with-llm]
+
+# 6. 一键停止并清理所有 Docker 容器服务
+./console/scripts/docker-stop.sh
+```
+
+### 3. 开发模式与生产静态代理脚本
+
 也可以使用对应的停止脚本（例如在其他终端或 CI 场景中）：
 
 ```bash
-./console/stop.sh
+./console/scripts/dev-stop.sh
 ```
 
 `stop.sh` 会读取 `console/.pids/` 下记录的 PID 并安全终止 `privacy_local_agent` 与测试控制台后端。

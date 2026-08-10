@@ -1,34 +1,21 @@
 version: "3.9"
 
 services:
+  # ============================================================================
+  # 1. Privacy Local Agent 核心 Sidecar 服务
+  # REST: 8079 | gRPC: 50051
+  # ============================================================================
   privacy-local-agent:
-    # 这里直接从仓库根目录构建 core 镜像，适合本地联调和快速启动。
-    # 如果需要完整 ML 能力，应改用 Dockerfile 的 `ml` target。
     build:
       context: ../..
       dockerfile: Dockerfile
       target: core
     image: privacy-local-agent:0.1.0
     container_name: privacy-local-agent
-    # 默认不加载任何 LLM 场景 profile：core 镜像不含 ML 依赖，Layer-3 LLM
-    # 分类会自动降级跳过，其余隐私原语不受影响。
-    #
-    # 如需启用 Layer-3 LLM 分类，按场景选择 config/env/ 下的 profile 注入：
-    #   env_file:
-    #     - ../../config/env/qwen3.env   # 进程内 PyTorch 推理（需 ml 镜像 + 模型文件）
-    #     - ../../config/env/vllm.env    # 外部 vLLM 服务（见文件底部可选编排示例）
-    # 注意：vllm.env 中 PRIVACY_LLM_API_BASE 默认 http://127.0.0.1:8000/v1，
-    # 指向容器自身；搭配下方 vllm 服务时请改用 http://vllm:8000/v1
-    # （可用 environment 覆盖，无需修改仓库内 env 文件）。
     ports:
-      # 对外暴露 REST 和 gRPC 端口；若部署到不可信网络，请配合 TLS / Auth 使用。
       - "8079:8079"
       - "50051:50051"
     environment:
-      # 这些环境变量对应仓库内统一的运行时配置接口：
-      # - `PRIVACY_REST_*` / `PRIVACY_GRPC_*` 控制监听地址
-      # - `PRIVACY_PROFILE` 指向 YAML 预设，容器内会被挂载到只读路径
-      # - `PRIVACY_LOG_*` 控制日志格式，便于本地调试或接入日志系统
       PRIVACY_REST_HOST: "0.0.0.0"
       PRIVACY_REST_PORT: "8079"
       PRIVACY_GRPC_HOST: "0.0.0.0"
@@ -36,49 +23,98 @@ services:
       PRIVACY_PROFILE: "/etc/privacy-local-agent/privacy-profile.yaml"
       PRIVACY_LOG_LEVEL: "INFO"
       PRIVACY_LOG_FORMAT: "text"
-      # 如需启用 TLS/认证，取消下面注释并挂载对应文件。
-      # `PRIVACY_AUTH_EXTERNAL_KEYS_JSON` 采用 JSON 字符串，键名是 API key 标识，
-      # 值里可写入 `name` / `scopes` 等元数据；生产环境建议改为 Secret 注入。
-      # PRIVACY_TLS_ENABLED: "true"
-      # PRIVACY_TLS_CERT_FILE: "/certs/tls.crt"
-      # PRIVACY_TLS_KEY_FILE: "/certs/tls.key"
-      # PRIVACY_AUTH_ENABLED: "true"
-      # PRIVACY_AUTH_EXTERNAL_KEYS_JSON: '{"dev-key":{"name":"local","scopes":["*"]}}'
+      # 如需关联下方的 vLLM 服务，取消注释并设置如下：
+      # PRIVACY_ENV_PROFILE: "vllm"
+      # PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
     volumes:
-      # 预设配置文件只读挂载，避免容器内被意外修改。
       - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro
-      # 如启用 TLS，请把证书目录以只读方式挂载进容器。
-      # - ./certs:/certs:ro
     healthcheck:
-      # 健康检查直接探测 REST /health，方便 compose 依赖判断和本地排障。
-      test: ["CMD-SHELL", "curl -f http://localhost:8079/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 5s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # 可选：vLLM Layer-3 分类服务编排示例（默认注释，不启动）。
-  # 启用步骤：
-  #   1. 取消本段注释，并准备 GPU 与模型文件（见 docs/dynclassification/ops.md）；
-  #   2. 在 privacy-local-agent 服务中启用 env_file: ../../config/env/vllm.env；
-  #   3. 在 privacy-local-agent.environment 中覆盖：
-  #        PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
-  #      （容器网络内 127.0.0.1 指向容器自身，必须使用服务名寻址）。
-  # vllm:
-  #   image: vllm/vllm-openai:latest
-  #   container_name: privacy-local-agent-vllm
-  #   command: ["--model", "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother", "--gpu-memory-utilization", "0.90"]
-  #   volumes:
-  #     - ../../.models:/models:ro
-  #   ports:
-  #     - "8000:8000"
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: all
-  #             capabilities: [gpu]
-  #   restart: unless-stopped
+  # ============================================================================
+  # 2. Console Go 后端代理服务 (Go gRPC / REST 高性能代理)
+  # PORT: 8081
+  # ============================================================================
+  console-backend-go:
+    build:
+      context: ../../console/backend-go
+      dockerfile: Dockerfile
+    image: privacy-console-backend-go:0.1.0
+    container_name: privacy-console-backend-go
+    ports:
+      - "8081:8081"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8081"
+      PRIVACY_AGENT_GRPC_ADDR: "privacy-local-agent:50051"
+      PRIVACY_AGENT_REST_ADDR: "http://privacy-local-agent:8079"
+    depends_on:
+      privacy-local-agent:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # 3. Console Python 后端代理服务 (Python FastAPI REST 代理)
+  # PORT: 8080
+  # ============================================================================
+  console-backend-python:
+    build:
+      context: ../../console/backend
+      dockerfile: Dockerfile
+    image: privacy-console-backend-python:0.1.0
+    container_name: privacy-console-backend-python
+    ports:
+      - "8080:8080"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      AGENT_API_URL: "http://privacy-local-agent:8079"
+    depends_on:
+      privacy-local-agent:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # 4. Console React 单页测试控制台 Web UI (Nginx 静态服务 / 代理)
+  # PORT: 5173
+  # ============================================================================
+  console-web:
+    build:
+      context: ../../console/web
+      dockerfile: Dockerfile
+    image: privacy-console-web:0.1.0
+    container_name: privacy-console-web
+    ports:
+      - "5173:5173"
+    depends_on:
+      - console-backend-go
+      - console-backend-python
+    restart: unless-stopped
+
+  # ============================================================================
+  # 5. 可选：vLLM Layer-3 本地大模型推理服务 (GPU 加速)
+  # PORT: 8000
+  # 启用说明：使用 docker-compose --profile llm up -d 启动
+  # ============================================================================
+  vllm:
+    profiles: ["llm"]
+    image: vllm/vllm-openai:latest
+    container_name: privacy-local-agent-vllm
+    command: ["--model", "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother", "--gpu-memory-utilization", "0.90"]
+    volumes:
+      - ../../.models:/models:ro
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped

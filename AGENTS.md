@@ -345,6 +345,12 @@ Address these before any hardened production deployment.
 | Run Dev Console (Python + Vite HMR) | `./console/scripts/dev-start.sh` |
 | Run Dev Console (Dual Backend + Vite) | `./console/scripts/dev-start-all.sh` |
 | Run Dev Console (Go mTLS + Vite) | `./console/scripts/dev-start-go-mtls.sh` |
+| Run Docker Agent (Core/ML) | `./console/scripts/docker-start-agent.sh [core|ml]` |
+| Run Docker Console (Go Backend + Web) | `./console/scripts/docker-start-go.sh` |
+| Run Docker Console (Python Backend + Web) | `./console/scripts/docker-start-python.sh` |
+| Run Docker Full Stack (Agent+Backends+Web) | `./console/scripts/docker-start-all.sh [--with-llm]` |
+| Run Docker LLM (vLLM) | `./console/scripts/docker-start-llm.sh` |
+| Stop Docker Services | `./console/scripts/docker-stop.sh` |
 | Run Prod Console (Go + Static) | `./console/scripts/prod-start-go.sh` |
 | Run Prod Console (Python + Static) | `./console/scripts/prod-start.sh` |
 | Run Prod Console (Dual Backend + Static) | `./console/scripts/prod-start-all.sh` |

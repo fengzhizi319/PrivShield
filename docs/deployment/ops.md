@@ -327,16 +327,55 @@ volumeMounts:
 
 ---
 
-## 5. Docker Compose 部署
+## 5. Docker Compose 与 Docker 自动化部署
 
-适用于本地联调和快速验证，无需 K8s 集群。
+适用于本地快速联调、完整容器化测试及单机一键部署。
+
+### 5.1 Docker Compose 全栈服务编排
+
+`deploy/docker-compose/docker-compose.yml` 提供了涵盖 Agent、双 Console 代理后端、React Web UI 及 vLLM 大模型的完整服务编排：
+
+| 服务组件 | 镜像 / 构建目标 | 容器端口 | 功能说明 |
+|---|---|---|---|
+| `privacy-local-agent` | `Dockerfile` (`target: core`) | 8079 (REST) / 50051 (gRPC) | 隐私 Agent 核心 Sidecar 服务 |
+| `console-backend-go` | `console/backend-go/Dockerfile` | 8081 | Go gRPC 高性能代理后端 |
+| `console-backend-python` | `console/backend/Dockerfile` | 8080 | Python FastAPI REST 代理后端 |
+| `console-web` | `console/web/Dockerfile` | 5173 | React 单页控制台 Nginx 静态服务 |
+| `vllm` | `vllm/vllm-openai:latest` (profile: `llm`) | 8000 | vLLM Layer-3 本地大模型推理（GPU） |
 
 ```bash
 cd deploy/docker-compose
-docker-compose up -d
+
+# 启动核心服务套件 (Agent + Go/Python 后端 + Web UI)
+docker compose up -d
+
+# 启动包含 vLLM 大模型 GPU 推理容器的全栈服务
+docker compose --profile llm up -d
 ```
 
-**docker-compose.yml 关键配置**：
+### 5.2 自动化 Docker 脚本运行集 (`console/scripts/docker-*.sh`)
+
+为简化容器化运维与测试，项目在 `console/scripts/` 中内置了一套便捷的 Docker 脚本：
+
+```bash
+# 1. 独立运行 Privacy Agent 容器 (支持 core / ml 目标)
+./console/scripts/docker-start-agent.sh [core|ml]
+
+# 2. 启动 vLLM 大模型推理服务容器 (GPU 加速)
+./console/scripts/docker-start-llm.sh
+
+# 3. 启动 Agent + Go 代理后端 + Web UI 容器套件
+./console/scripts/docker-start-go.sh
+
+# 4. 启动 Agent + Python 代理后端 + Web UI 容器套件
+./console/scripts/docker-start-python.sh
+
+# 5. 启动全栈 Docker 容器套件 (Agent + 双后端 + Web UI + 可选 vLLM)
+./console/scripts/docker-start-all.sh [--with-llm]
+
+# 6. 一键停止并清理所有运行中的 Docker 容器
+./console/scripts/docker-stop.sh
+```
 
 ```yaml
 services:
