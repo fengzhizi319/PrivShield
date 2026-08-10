@@ -29,6 +29,8 @@
   - Vite 前端开发服务器 (UI: `http://localhost:5173`)
 - **用法**：
   ```bash
+  bash ./console/scripts/dev-start.sh
+  # 或赋予执行权限后直接运行:
   ./console/scripts/dev-start.sh
   ```
 
@@ -40,7 +42,7 @@
   - Vite 前端开发服务器 (UI: `http://localhost:5173`)
 - **用法**：
   ```bash
-  ./console/scripts/dev-start-go.sh
+  bash ./console/scripts/dev-start-go.sh
   ```
 
 #### 3. `./console/scripts/dev-start-all.sh`
@@ -53,7 +55,7 @@
 - **特色**：前端顶部将出现 **Backend Selector** 下拉框，可在 Python 与 Go 双后端间自由切换。
 - **用法**：
   ```bash
-  ./console/scripts/dev-start-all.sh
+  bash ./console/scripts/dev-start-all.sh
   ```
 
 #### 4. `./console/scripts/dev-start-go-mtls.sh`
@@ -61,14 +63,14 @@
 - **特色**：若缺失证书，自动调用 `gen-certs.sh` 生成自签名测试证书，Go 代理至 Agent 之间的 gRPC 链路全程加密与双向身份校验。
 - **用法**：
   ```bash
-  ./console/scripts/dev-start-go-mtls.sh
+  bash ./console/scripts/dev-start-go-mtls.sh
   ```
 
 #### 5. `./console/scripts/dev-stop.sh`
 - **作用**：安全停止并清理所有开发模式下的后台 PID 进程。
 - **用法**：
   ```bash
-  ./console/scripts/dev-stop.sh
+  bash ./console/scripts/dev-stop.sh
   ```
 
 ---
@@ -82,7 +84,7 @@
 - **服务端口**：控制台 UI & API 统一位于 `http://127.0.0.1:8080`。
 - **用法**：
   ```bash
-  ./console/scripts/prod-start.sh
+  bash ./console/scripts/prod-start.sh
   ```
 
 #### 2. `./console/scripts/prod-start-go.sh`
@@ -90,7 +92,7 @@
 - **服务端口**：控制台 UI & API 统一位于 `http://127.0.0.1:8081`。
 - **用法**：
   ```bash
-  ./console/scripts/prod-start-go.sh
+  bash ./console/scripts/prod-start-go.sh
   ```
 
 #### 3. `./console/scripts/prod-start-all.sh`
@@ -98,21 +100,21 @@
 - **服务端口**：Python 控制台 `http://127.0.0.1:8080` | Go 控制台 `http://127.0.0.1:8081`。
 - **用法**：
   ```bash
-  ./console/scripts/prod-start-all.sh
+  bash ./console/scripts/prod-start-all.sh
   ```
 
 #### 4. `./console/scripts/prod-start-go-mtls.sh`
 - **作用**：以 **mTLS 双向加密认证模式** 启动 Go 代理静态托管生产环境。
 - **用法**：
   ```bash
-  ./console/scripts/prod-start-go-mtls.sh
+  bash ./console/scripts/prod-start-go-mtls.sh
   ```
 
 #### 5. `./console/scripts/prod-stop.sh`
 - **作用**：安全停止并清理所有生产静态托管模式下的后台 PID 进程。
 - **用法**：
   ```bash
-  ./console/scripts/prod-stop.sh
+  bash ./console/scripts/prod-stop.sh
   ```
 
 ---
@@ -129,7 +131,11 @@
 - **服务端口**：REST `http://127.0.0.1:8079` | gRPC `127.0.0.1:50051`。
 - **用法**：
   ```bash
-  ./console/scripts/docker-start-agent.sh [core|ml]
+  # 启动轻量 core 镜像 Agent 容器
+  bash ./console/scripts/docker-start-agent.sh core
+
+  # 启动全量 ml 镜像 Agent 容器
+  bash ./console/scripts/docker-start-agent.sh ml
   ```
 
 #### 2. `./console/scripts/docker-start-llm.sh`
@@ -137,7 +143,7 @@
 - **服务端口**：OpenAI 兼容 REST API `http://127.0.0.1:8000/v1`。
 - **用法**：
   ```bash
-  ./console/scripts/docker-start-llm.sh
+  bash ./console/scripts/docker-start-llm.sh
   ```
 
 #### 3. `./console/scripts/docker-start-go.sh`
@@ -145,7 +151,7 @@
 - **服务端口**：Web UI `http://localhost:5173` | Go API `http://localhost:8081`。
 - **用法**：
   ```bash
-  ./console/scripts/docker-start-go.sh
+  bash ./console/scripts/docker-start-go.sh
   ```
 
 #### 4. `./console/scripts/docker-start-python.sh`
@@ -153,7 +159,7 @@
 - **服务端口**：Web UI `http://localhost:5173` | Python API `http://localhost:8080`。
 - **用法**：
   ```bash
-  ./console/scripts/docker-start-python.sh
+  bash ./console/scripts/docker-start-python.sh
   ```
 
 #### 5. `./console/scripts/docker-start-all.sh`
@@ -162,17 +168,17 @@
 - **用法**：
   ```bash
   # 启动全栈基础套件
-  ./console/scripts/docker-start-all.sh
+  bash ./console/scripts/docker-start-all.sh
 
   # 启动全栈基础套件 + vLLM 大模型推理服务
-  ./console/scripts/docker-start-all.sh --with-llm
+  bash ./console/scripts/docker-start-all.sh --with-llm
   ```
 
 #### 6. `./console/scripts/docker-stop.sh`
 - **作用**：一键优雅停止、移除并清理所有由上述 Docker 脚本启动的容器与 Compose 服务。
 - **用法**：
   ```bash
-  ./console/scripts/docker-stop.sh
+  bash ./console/scripts/docker-stop.sh
   ```
 
 ---

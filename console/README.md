@@ -39,22 +39,22 @@
 
 ```bash
 # 1. 单独在 Docker 中运行 Agent (Core / ML 镜像)
-./console/scripts/docker-start-agent.sh [core|ml]
+bash ./console/scripts/docker-start-agent.sh [core|ml]
 
 # 2. 启动 vLLM 大模型推理容器 (GPU 加速)
-./console/scripts/docker-start-llm.sh
+bash ./console/scripts/docker-start-llm.sh
 
 # 3. 启动 Agent + Go 代理 + React Web UI 容器套件
-./console/scripts/docker-start-go.sh
+bash ./console/scripts/docker-start-go.sh
 
 # 4. 启动 Agent + Python 代理 + React Web UI 容器套件
-./console/scripts/docker-start-python.sh
+bash ./console/scripts/docker-start-python.sh
 
 # 5. 启动全栈 Docker 容器套件（Agent + 双后端 + Web UI + 可选 vLLM）
-./console/scripts/docker-start-all.sh [--with-llm]
+bash ./console/scripts/docker-start-all.sh [--with-llm]
 
 # 6. 一键停止并清理所有 Docker 容器服务
-./console/scripts/docker-stop.sh
+bash ./console/scripts/docker-stop.sh
 ```
 
 ### 3. 开发模式与生产静态代理脚本
