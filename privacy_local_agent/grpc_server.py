@@ -27,6 +27,9 @@ graph TD
 """
 
 # ─── 标准库导入 / Standard library imports ───
+from .env_loader import load_env_file
+load_env_file()
+
 import os  # 用于读取环境变量配置（profile路径、命名空间、日志级别等）
 from concurrent import futures  # 提供 ThreadPoolExecutor，作为 gRPC 服务器的工作线程池
 

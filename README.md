@@ -161,16 +161,15 @@ print(resp.result)
 
 | 能力 | REST | gRPC | 本地 SDK |
 |---|---|---|---|
-| 字段级分类 | `POST /v1/privacy/classify/field` | `ClassifyField` | `ClassificationService.classify_field` |
-| 记录级分类 | `POST /v1/privacy/classify/record` | `ClassifyRecord` | `ClassificationService.classify_record` |
-| 表级分类 | `POST /v1/privacy/classify/table` | `ClassifyTable` | `ClassificationService.classify_table` |
+| 字段级分类 | `POST /v1/dynclassification/eval` | `DynClassifyField` | `DynClassificationService.eval` |
+| 3层漏斗分类 | `POST /v1/dynclassification/eval` | `DynClassifyField` | `ClassificationFunnel.evaluate` |
 
-数据分类拥有独立的服务层与路由层：
+数据分类拥有基于 3 层漏斗（规则引擎 -> Small-NER -> Local LLM）的引擎架构：
 
-- 服务编排：`privacy_local_agent.classification_service.ClassificationService`
-- REST 路由：`privacy_local_agent.classification_routes`
-- gRPC 实现：`privacy_local_agent.classification_grpc.ClassificationGrpcServicer`
-- 底层原语：`privacy_local_agent.privacy.classification.ClassificationAPI`
+- 漏斗编排：`privacy_local_agent.dynclassification.funnel.ClassificationFunnel`
+- 服务包装：`privacy_local_agent.dynclassification.service.DynClassificationService`
+- REST 路由：`privacy_local_agent.routers.dynclassification`
+- 规则配置与加载：`privacy_local_agent.dynclassification.profile_loader.ProfileLoader`
 
 #### 本地 SDK
 

@@ -24,6 +24,9 @@ from .main import app
 from .security.config import get_security_settings
 from .security.tls import uvicorn_ssl_kwargs
 
+from .env_loader import load_env_file
+load_env_file()
+
 # 从环境变量读取监听地址与端口
 REST_HOST = os.environ.get("PRIVACY_REST_HOST", "0.0.0.0")
 REST_PORT = int(os.environ.get("PRIVACY_REST_PORT", "8079"))

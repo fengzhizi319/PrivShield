@@ -27,6 +27,12 @@
   - [6.1 .env 配置文件多模式切换](#61-env-配置文件多模式切换)
   - [6.2 vLLM 运行服务启动与运维参数](#62-vllm-运行服务启动与运维参数)
   - [6.3 验证与冒烟测试命令](#63-验证与冒烟测试命令)
+- [7. 零停机在线无痛升级指南 (Zero-Downtime Hot Upgrade)](#7-零停机在线无痛升级指南-zero-downtime-hot-upgrade)
+  - [7.1 升级架构与三分层策略](#71-升级架构与三分层策略)
+  - [7.2 算法规则与分类策略在线热重载 (0ms 停机)](#72-算法规则与分类策略在线热重载-0ms-停机)
+  - [7.3 LLM 基座模型与 LoRA 权重蓝绿切流](#73-llm-基座模型与-lora-权重蓝绿切流)
+  - [7.4 Agent 核心服务无损平滑替换 (SO_REUSEPORT & K8s RollingUpdate)](#74-agent-核心服务无损平滑替换-so_reuseport--k8s-rollingupdate)
+  - [7.5 运维升级标准 SOP 与紧急回退预案](#75-运维升级标准-sop-与紧急回退预案)
 
 ---
 
@@ -248,16 +254,43 @@ Layer-3 大模型深度分类与仲裁服务支持多种提供者（Provider）�
 
 ---
 
-### 6.1 `.env` 配置文件多模式切换
+### 6.1 集中式 Profile 场景级联配置 (方案二)
 
-项目根目录下的 `.env`（可复制 `.env.example` 获得）集中管理 Layer-3 LLM 调用的配置参数。通过修改 `PRIVACY_LLM_PROVIDER` 及其关联环境变量，可以在不同模式间灵活切换：
+运维无需在 `.env` 中修改多行注释，项目支持集中存放在 `config/env/` 下的场景 Profile 动态加载机制。只需在 `.env` 中修改一行 `PRIVACY_ENV_PROFILE`（或在启动命令前代入）：
 
-#### 模式 1：vLLM OpenAI 兼容 HTTP API 服务 (推荐：生产环境 / 高并发 / 独立卡池)
 ```env
-PRIVACY_LLM_PROVIDER=vllm
-PRIVACY_LLM_API_BASE=http://127.0.0.1:8000/v1
-PRIVACY_LLM_MODEL_NAME=Qwen3.5-0.8B-Privacy-Classifier-Smoother
-PRIVACY_LLM_API_KEY=EMPTY
+# 运维主控配置 (.env 集中控制入口)
+PRIVACY_ENV_PROFILE=vllm
+```
+
+#### 集中式 Profile 文件配置一览 (`config/env/`):
+
+- **vLLM 生产服务模式 (`config/env/vllm.env`)**:
+  ```env
+  PRIVACY_LLM_PROVIDER=vllm
+  PRIVACY_LLM_API_BASE=http://127.0.0.1:8000/v1
+  PRIVACY_LLM_MODEL_NAME=Qwen3.5-0.8B-Privacy-Classifier-Smoother
+  PRIVACY_LLM_API_KEY=EMPTY
+  PRIVACY_LLM_API_HOST=127.0.0.1
+  PRIVACY_LLM_API_PORT=8000
+  PRIVACY_LLM_MODEL_PATH=.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+  PRIVACY_VLLM_GPU_MEMORY_UTILIZATION=0.90
+  ```
+
+- **PyTorch 本地直接部署模式 (`config/env/qwen3.env`)**:
+  ```env
+  PRIVACY_LLM_PROVIDER=qwen3
+  PRIVACY_LLM_MODEL_PATH=.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+  PRIVACY_LLM_DEVICE=cuda
+  ```
+
+- **通用 OpenAI / Ollama 外部接口模式 (`config/env/openai.env`)**:
+  ```env
+  PRIVACY_LLM_PROVIDER=openai
+  PRIVACY_LLM_API_BASE=http://127.0.0.1:11434/v1
+  PRIVACY_LLM_MODEL_NAME=qwen2.5:latest
+  PRIVACY_LLM_API_KEY=ollama
+  ```
 ```
 
 #### 模式 2：本地 PyTorch + Transformers 部署 (单机进程内模式 / CUDA 或 CPU)
@@ -315,5 +348,155 @@ PRIVACY_LLM_API_KEY=ollama
 # 运行 vLLM 集成与 LLM 适配器全套冒烟测试
 PYTHONPATH=. pytest tests/dynclassification/test_vllm_llm_integration.py tests/dynclassification/test_llm_adapter.py -v
 ```
+
+---
+
+## 7. 零停机在线无痛升级指南 (Zero-Downtime Hot Upgrade)
+
+在生产环境中，升级 `privacy-local-agent` 或其内部的算法规则与大模型时，必须保障业务连续性。本项目支持分层的零停机时间（Zero-Downtime）平滑在线热升级能力。
+
+---
+
+### 7.1 升级架构与三分层策略
+
+| 升级分层 | 影响范围 | 推荐无痛方案 | 预期停机时间 | 资源/显存消耗 |
+| :--- | :--- | :--- | :--- | :--- |
+| **层级 1：算法规则与策略** | 脱敏规则 YAML、分类体系、判定阈值 | **原子指针热重载** (`POST /ops/reload-rules`) | **0 毫秒** (零中断) | 无额外消耗 |
+| **层级 2：LoRA 微调权重** | 医疗 NER 实体抽取、特定领域 SFT 适配器 | **vLLM 原生动态 Adapter 挂载** (`LoRARequest`) | **0 毫秒** (零中断) | 极低 (仅加载增量秩) |
+| **层级 3：LLM 基座大模型** | Qwen3.5 0.8B 升级至 3B 或换掉 LLM 后端 | **双端口蓝绿平滑切流** (`8000` ➔ `8001`) | **0 毫秒** (零中断) | 短暂双份显存 (就绪即释放旧版) |
+| **层级 4：Agent 核心服务** | Agent 代码更新、Python 依赖升级、接口变动 | **Linux SO_REUSEPORT** / **K8s RollingUpdate** | **0 毫秒** (零中断) | 短暂双份 CPU/内存 |
+
+---
+
+### 7.2 算法规则与分类策略在线热重载 (0ms 停机)
+
+不需要重启 Agent 进程，通过内置的原子指针替换（Atomic Reference Swap）机制实现策略瞬间热重载。
+
+#### 1. 基于文件监听自动热重载 (Inotify)
+在 `config/env/vllm.env` 或 `.env` 中配置：
+```env
+PRIVACY_DYNCLASSIFICATION_HOT_RELOAD=true
+PRIVACY_DYNCLASSIFICATION_RELOAD_INTERVAL=2
+```
+当直接修改 `rules/` 或 `rules/taxonomies/` 目录下的 YAML 文件后，系统会在后台重新解析校验，校验通过后自动执行内存指针原子切换：在途请求继续使用旧版引擎，新请求瞬时切换到新引擎。
+
+#### 2. 通过 HTTP API 显式触发热重载 (推荐 CI/CD 自动化调用)
+运维部署新版 YAML 规则文件后，发送 API 触发刷新：
+```bash
+curl -X POST http://127.0.0.1:8079/ops/reload-rules
+```
+返回结果示例：
+```json
+{
+  "status": "success",
+  "message": "Rules and taxonomy reloaded successfully",
+  "rule_count": 86
+}
+```
+
+---
+
+### 7.3 LLM 基座模型与 LoRA 权重蓝绿切流
+
+#### 1. 仅升级 LoRA 微调权重 (0ms 停机)
+在 `vLLM` 引擎中，LoRA Adapter 属于动态挂载模块。升级步骤：
+1. 将训练导出的新版 LoRA Adapter 保存在目录中（如 `.models/cmeee_lora_v2`）。
+2. 在 Agent 推理层透传 `LoRARequest("cmeee_lora_v2", 2, ".models/cmeee_lora_v2")`。
+3. vLLM 在接收到请求后自动按需动态挂载新权重，旧模型无需重启。
+
+#### 2. 基座大模型版本升级（双端口蓝绿切流 SOP）
+当升级底层 LLM 基座（如 0.8B 升级至 3B）时，由于显存加载需数秒至数十秒，可采用蓝绿平滑切流：
+
+```mermaid
+graph LR
+    A[网关/Agent] -->|旧流量 PRIVACY_LLM_API_PORT=8000| B[旧版 vLLM v1 模型]
+    A -.->|切流 PRIVACY_LLM_API_PORT=8001| C[新版 vLLM v2 模型]
+```
+
+1. **拉起新版 vLLM 绿环境服务 (端口 8001)**：
+   ```bash
+   PRIVACY_LLM_API_PORT=8001 \
+   PRIVACY_LLM_MODEL_PATH=.models/Qwen3.5-3B-Privacy \
+   python run_vllm_server.py
+   ```
+2. **确认新环境就绪 (Health Check)**：
+   ```bash
+   curl -I http://127.0.0.1:8001/health
+   # 确认返回 HTTP/1.1 200 OK
+   ```
+3. **切换 Agent Profile 场景配置**：
+   在 `config/env/vllm.env` 中更新 API 端口：
+   ```env
+   PRIVACY_LLM_API_BASE=http://127.0.0.1:8001/v1
+   PRIVACY_LLM_API_PORT=8001
+   ```
+4. **平滑下线旧版 8000 端口服务**：
+   停止 8000 端口旧进程，释放旧版模型显存。
+
+---
+
+### 7.4 Agent 核心服务无损平滑替换 (SO_REUSEPORT & K8s RollingUpdate)
+
+#### 1. Linux 单机部署：SO_REUSEPORT 端口复用热重启
+项目底层的 Uvicorn 与 gRPC 支持 Linux 内核的 `SO_REUSEPORT` 端口复用，允许多个进程绑定同一端口：
+
+1. **拉起新版 Agent 进程**（内核会自动在 8079 / 50051 端口上进行平滑分流）：
+   ```bash
+   python -m privacy_local_agent.server
+   ```
+2. **向旧版 Agent 发送优雅退出信号**：
+   ```bash
+   kill -SIGTERM <OLD_AGENT_PID>
+   ```
+3. **在途请求平滑收尾**：旧版 Agent 捕获 `SIGTERM` 后拒绝接收新连接，在处理完内部已在途的请求（In-flight requests）后自动干净退出，实现单机 0 丢包热替换。
+
+#### 2. K8s 容器部署：RollingUpdate + PreStop 优雅摘除
+在 Helm Chart 的 `values.yaml` 中已配置标准的滚动更新策略：
+```yaml
+# deploy/helm/privacy-local-agent/values.yaml
+deployment:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  terminationGracePeriodSeconds: 30
+```
+部署升级时执行：
+```bash
+helm upgrade pla ./deploy/helm/privacy-local-agent -f values.yaml
+```
+Kubernetes 会先拉起 1 个新 Pod 并完成健康探测（`GET /health` 为 200 OK），随后才将 Service 流量切至新 Pod 并安全终止旧 Pod。
+
+---
+
+### 7.5 运维升级标准 SOP 与紧急回退预案
+
+#### 运维升级五步 SOP
+
+```text
+[1. 预检环境与权重] ➔ [2. 部署新配置/新服务] ➔ [3. 健康检查验证] ➔ [4. 瞬间切流] ➔ [5. 回退准备与旧服务清理]
+```
+
+1. **步骤 1：新权重/新配置校验**：
+   在真正部署前，使用命令行进行快速语法与格式检验。
+2. **步骤 2：并行拉起新后端**：
+   保持当前环境不变，拉起新环境或更新对应 `config/env/*.env`。
+3. **步骤 3：健康检查**：
+   验证 `/health` 端点，确保各项指标及模型已 100% 就绪。
+4. **步骤 4：主控 Profile 一行切流**：
+   修改 `.env` 里的 `PRIVACY_ENV_PROFILE` 并重新载入。
+
+#### 🚨 紧急回退预案 (Rollback Plan)
+
+若升级后发现业务异常或准确率跌落：
+1. **策略/规则回退**：
+   从 Git 恢复 `rules/` 备份版本，发送 `curl -X POST http://127.0.0.1:8079/ops/reload-rules`（小于 1 秒完成回退）。
+2. **LLM/vLLM 服务回退**：
+   将 `config/env/vllm.env` 中的 `PRIVACY_LLM_API_BASE` 瞬间重置回旧端口 `http://127.0.0.1:8000/v1`（1 秒完成回退）。
+3. **K8s 快速回退**：
+   ```bash
+   helm rollback pla
+   ```
 
 

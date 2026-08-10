@@ -57,21 +57,21 @@ Python REST + gRPC 双协议隐私计算 Sidecar，以独立进程/容器形式�
 
 ```
 privacy_local_agent/
-├── privacy/           → 核心隐私原语 (dp, masking, kano, qol, budget, classification*)
+├── privacy/           → 核心隐私原语 (dp, masking, kano, qol, budget)
+├── dynclassification/ → 动态分类分级 (3-layer funnel: Rule -> NER -> LLM)
 ├── security/          → 安全层 (auth, ratelimit, tls, identity, config)
 ├── observability/     → 可观测性 (metrics, tracing, logging_config, middleware, context)
 ├── gateway/           → 网关/负载均衡 (balancer, http_proxy, grpc_proxy, server)
 ├── main.py            → REST API 入口 (FastAPI)
 ├── grpc_server.py     → gRPC 服务入口
 ├── service.py         → 业务服务层 (PrivacyService)
-├── classification_routes.py → 分类路由 (独立 Router)
-└── classification_service.py → 分类业务逻辑
+└── routers/           → 模块化子路由 (dynclassification, mask, dp, kano, qol 等)
 ```
 
 **要点**：
-- 隐私原语、安全、可观测性三大关注点独立包
+- 隐私原语、动态分类、安全、可观测性四大关注点独立包
 - REST 和 gRPC 共享同一 `PrivacyService` 业务层
-- 分类功能因复杂度高，独立拆分 routes/service/engine 三层
+- 分类功能基于 3 层漏斗（规则引擎 ➔ Small-NER ➔ Local LLM）独立封装在 `dynclassification/`
 
 ### 2.2 双协议支持
 

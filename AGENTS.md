@@ -158,6 +158,7 @@ Key environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `PRIVACY_ENV_PROFILE` | `vllm` | Active LLM profile (`vllm`/`qwen3`/`mlx`/`openai`, loads `config/env/<profile>.env`) |
 | `PRIVACY_PROFILE` | — | Path to YAML parameter profile |
 | `PRIVACY_NAMESPACE` | `default` | Budget namespace |
 | `PRIVACY_REST_HOST` | `127.0.0.1` | REST host |

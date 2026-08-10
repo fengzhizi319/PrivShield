@@ -111,14 +111,19 @@ def main():
     4. 根据结果输出成功/失败的信息并设置退出码。
        (Output success/failure message and set exit code)
     """
-    # 微调模型标识（本地合并导出的 Qwen3.5-0.8B 隐私分类器）
-    # 如果是本地微调模型，model_id 仅用于日志显示，实际从本地目录加载
-    model_id = "Qwen/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+    from privacy_local_agent.env_loader import load_env_file
+    load_env_file()
 
-    # 默认将模型存放在项目根目录下的 .models 目录中
+    # 微调模型标识（本地合并导出的 Qwen3.5-0.8B 隐私分类器）
+    model_id = os.environ.get("PRIVACY_LLM_MODEL_NAME", "Qwen/Qwen3.5-0.8B-Privacy-Classifier-Smoother")
+
+    # 优先读取环境变量 PRIVACY_LLM_MODEL_PATH，未配置时默认存放在项目根目录下的 .models 目录中
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    local_dir = os.path.join(project_root, ".models", "Qwen3.5-0.8B-Privacy-Classifier-Smoother")
+    local_dir = os.environ.get(
+        "PRIVACY_LLM_MODEL_PATH",
+        os.path.join(project_root, ".models", "Qwen3.5-0.8B-Privacy-Classifier-Smoother")
+    )
 
     print(f"[*] 目标保存路径: {local_dir}")
 

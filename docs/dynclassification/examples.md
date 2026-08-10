@@ -110,7 +110,7 @@ print(tags)
 
 ```python
 from typing import Any
-from privacy_local_agent.privacy.classification.operator_registry import OperatorRegistry
+from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
 
 # 1. 使用装饰器注册自定义算子：中国新能源车牌号校验算子
 @OperatorRegistry.register("nev_plate_number")
@@ -184,33 +184,26 @@ curl -X POST http://127.0.0.1:8079/v1/dynclassification/profiles/reload
 
 ---
 
-## 4. Python 影子模式（Shadow Mode）对比测试示例
+## 4. Python 动态分类引擎调用示例
 
-在线上升级或迁移规则包时，开启影子模式对比新旧引擎产出的标签是否一致：
+在代码中初始化动态分类规则引擎并评估字段：
 
 ```python
-from privacy_local_agent.privacy.classification.profile_loader import ProfileLoader
-from privacy_local_agent.privacy.classification.classification_rule_engine import DefaultRuleEngine
+from privacy_local_agent.dynclassification.profile_loader import ProfileLoader
+from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
 
 loader = ProfileLoader("rules")
-new_engine = loader.get_engine(standard="sc_health_db51")
-old_engine = DefaultRuleEngine()
+taxonomy = loader.load_taxonomy("default")
+profiles = [loader.load_profile(p) for p in ("general-pii", "medical")]
+engine = ConfigurableRuleEngine(taxonomy=taxonomy, profiles=profiles)
 
 field = "brca1_status"
 value = "rs123456"
 
-# 新引擎计算
-new_tags = new_engine.evaluate(field, value)
-# 旧引擎计算
-old_tags = old_engine.evaluate(field, value)
+# 执行分类规则评估
+tags, max_level = engine.evaluate(field, value)
 
-new_keys = {(t.level, t.category) for t in new_tags}
-old_keys = {(t.level, t.category) for t in old_tags}
-
-if new_keys != old_keys:
-    print(f"[警告] 新旧引擎输出结果存在差异！")
-    print(f"新引擎结果: {new_keys}")
-    print(f"旧引擎结果: {old_keys}")
-else:
-    print("[成功] 新旧引擎匹配结果完全一致。")
+print(f"最强判定等级: {max_level}")
+for tag in tags:
+    print(f"命中规则 [{tag.rule_id}]: 等级 {tag.level}, 类别 {tag.category}")
 ```

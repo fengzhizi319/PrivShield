@@ -10,6 +10,8 @@ services:
       target: core
     image: privacy-local-agent:0.1.0
     container_name: privacy-local-agent
+    env_file:
+      - ../../config/env/vllm.env
     ports:
       # 对外暴露 REST 和 gRPC 端口；若部署到不可信网络，请配合 TLS / Auth 使用。
       - "8079:8079"

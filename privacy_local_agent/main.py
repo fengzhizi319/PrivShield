@@ -11,6 +11,9 @@ REST API entrypoint built with FastAPI. Endpoint implementations are split into
 (service singleton, security deps, exception mapping) live in ``deps.py``.
 """
 
+from .env_loader import load_env_file
+load_env_file()
+
 import os
 from contextlib import asynccontextmanager
 

@@ -124,12 +124,18 @@ def main():
     4. 根据结果设置退出码。
        (Set exit code based on result)
     """
+    from privacy_local_agent.env_loader import load_env_file
+    load_env_file()
+
     # CMeEE 命名实体识别模型（中文医学命名实体识别）
     model_id = "iic/nlp_raner_named-entity-recognition_chinese-base-cmeee"
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    models_dir = os.path.join(project_root, ".models")
+    models_dir = os.environ.get(
+        "PRIVACY_MODELS_DIR",
+        os.path.join(project_root, ".models")
+    )
     os.makedirs(models_dir, exist_ok=True)
 
     # 优先尝试从 ModelScope 进行下载（国内速度最快）
