@@ -86,6 +86,13 @@ security:
     key: ""
     certFile: /certs/tls.crt
     keyFile: /certs/tls.key
+    # mTLS 客户端证书校验模式：none / optional / require
+    clientAuth: none
+    # CA 证书 Secret（包含 ca.crt），clientAuth 为 optional/require 时必填
+    caSecret: ""
+    caFile: /certs/ca.crt
+    # 私钥加密口令 Secret（可选，Secret 中须包含名为 key-password 的数据键）
+    keyPasswordSecret: ""
   auth:
     enabled: false
     # 用户自管 API Key Secret（Secret 中须包含名为 api-keys.json 的数据键，
@@ -94,6 +101,23 @@ security:
     # 也可直接填写 api-keys.json 文件内容（不推荐用于生产），
     # Chart 会生成 <fullname>-secrets Secret 并以 api-keys.json 键挂载
     apiKeys: ""
+    # 内部 mTLS 客户端证书认证（默认关闭，fail-closed）
+    internalMtls:
+      enabled: false
+      # mTLS CN 白名单 YAML ConfigMap 名称（包含 mtls-whitelist.yaml 键）。
+      # 设置后 PRIVACY_AUTH_MTLS_ALLOWED_CNS 被忽略。
+      whitelistConfigMap: ""
+      # 回退：静态 CN 列表（逗号分隔），当 whitelistConfigMap 未设置时使用
+      allowedCns: ""
+  # 速率限制
+  rateLimit:
+    enabled: false
+    defaultRps: 10
+    defaultBurst: 20
+    # 分布式限速后端 Redis URL（不设置则进程内限速）
+    redisUrl: ""
+    # 按端点覆盖，JSON 对象字符串
+    perEndpointJson: ""
   # 哪些路径可跳过认证，建议保留 /health
   publicPaths:
     - /health

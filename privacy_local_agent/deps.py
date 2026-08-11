@@ -41,10 +41,15 @@ SECURITY_DEPS = [Depends(get_current_identity), Depends(rate_limit_dependency)]
 
 
 def handle_request_exception(exc: Exception) -> None:
-    """将隐私计算异常映射到合适的 HTTP 状态码，避免服务器错误误报为 400。"""
+    """将隐私计算异常映射到合适的 HTTP 状态码，避免服务器错误误报为 400。
+
+    Known exception types return a fixed detail string to avoid leaking internal
+    implementation details (file paths, SQL errors, etc.) to callers.
+    """
     if isinstance(exc, PrivacyBudgetExhausted):
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        raise HTTPException(status_code=429, detail="Privacy budget exhausted") from exc
     if isinstance(exc, ValueError):
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.debug("ValueError in request handler", extra={"error": str(exc)})
+        raise HTTPException(status_code=400, detail="Invalid request parameters") from exc
     logger.exception("unexpected_request_error")
     raise HTTPException(status_code=500, detail="Internal server error") from exc

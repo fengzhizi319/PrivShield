@@ -21,11 +21,14 @@ import uvicorn
 
 from .grpc_server import serve as grpc_serve
 from .main import app
+from .observability.logging_config import get_logger
 from .security.config import get_security_settings
 from .security.tls import uvicorn_ssl_kwargs
 
 from .env_loader import load_env_file
 load_env_file()
+
+logger = get_logger(__name__)
 
 # 从环境变量读取监听地址与端口
 REST_HOST = os.environ.get("PRIVACY_REST_HOST", "0.0.0.0")
@@ -89,6 +92,24 @@ def main():
         help=f"gRPC server port (default: {GRPC_PORT} or PRIVACY_GRPC_PORT).",
     )
     args = parser.parse_args()
+
+    # Emit a prominent security warning when all protections are disabled.
+    # This helps operators notice the insecure default before exposing the service.
+    _sec = get_security_settings()
+    if not _sec.tls_enabled and not _sec.auth_enabled and not _sec.rate_limit_enabled:
+        logger.warning(
+            "="*72 + "\n"
+            "  SECURITY WARNING: All security features are DISABLED.\n"
+            "  TLS=off  Auth=off  RateLimit=off\n"
+            "  All endpoints (including /v1/ops/diagnostics) are exposed\n"
+            "  without encryption, authentication, or rate limiting.\n"
+            "  For production deployments, set:\n"
+            "    PRIVACY_TLS_ENABLED=true\n"
+            "    PRIVACY_AUTH_ENABLED=true\n"
+            "    PRIVACY_RATE_LIMIT_ENABLED=true\n"
+            "  See docs/production_security/ops.md for details.\n"
+            + "="*72
+        )
 
     # 1. 配置 REST 隐式启动
     ssl_kwargs = uvicorn_ssl_kwargs(get_security_settings())

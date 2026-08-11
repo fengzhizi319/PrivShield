@@ -42,7 +42,7 @@ def test_diagnostics_endpoint_structure():
     assert "timestamp" in data
     for key in ("service", "engines", "dependencies", "models", "hardware"):
         assert key in data
-    for key in ("name", "namespace", "python_version", "project_root", "rest_port", "grpc_port"):
+    for key in ("name", "namespace", "python_version", "rest_port", "grpc_port"):
         assert key in data["service"]
     assert "ner" in data["engines"]
     assert "llm" in data["engines"]

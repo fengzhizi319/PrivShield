@@ -17,6 +17,7 @@ import pytest
 
 from privacy_local_agent.security import auth as auth_mod
 from privacy_local_agent.security import ratelimit as rl
+from privacy_local_agent.security import whitelist as wl_mod
 from privacy_local_agent.security.config import KeyConfig, RateLimitConfig, SecuritySettings
 from privacy_local_agent.security.identity import (
     ANONYMOUS_IDENTITY,
@@ -145,20 +146,28 @@ class TestAuthenticateApiKey:
 
 
 class TestAuthenticateMtls:
-    def test_valid_mtls(self):
-        settings = SecuritySettings(
-            auth_internal_mtls_enabled=True,
-            auth_mtls_allowed_cns=["internal-client"],
-        )
-        ctx = {
-            "transport_security_type": [b"ssl"],
-            "x509_common_name": [b"internal-client"],
-        }
-        ident = auth_mod._authenticate_mtls(settings, ctx)
-        assert ident is not None
-        assert ident.service_type == "internal"
-        assert ident.name == "internal-client"
-        assert ident.scopes == ["*"]
+    def test_valid_mtls(self, monkeypatch):
+        # _authenticate_mtls now always uses the singleton WhitelistManager,
+        # so we must configure it via env vars and reset the singleton.
+        monkeypatch.setenv("PRIVACY_AUTH_MTLS_ALLOWED_CNS", "internal-client")
+        monkeypatch.delenv("PRIVACY_AUTH_MTLS_WHITELIST_FILE", raising=False)
+        wl_mod.reset_whitelist_manager()
+        try:
+            settings = SecuritySettings(
+                auth_internal_mtls_enabled=True,
+                auth_mtls_allowed_cns=["internal-client"],
+            )
+            ctx = {
+                "transport_security_type": [b"ssl"],
+                "x509_common_name": [b"internal-client"],
+            }
+            ident = auth_mod._authenticate_mtls(settings, ctx)
+            assert ident is not None
+            assert ident.service_type == "internal"
+            assert ident.name == "internal-client"
+            assert ident.scopes == ["*"]
+        finally:
+            wl_mod.reset_whitelist_manager()
 
     def test_default_disabled(self):
         """mTLS 认证默认关闭：仅凭 CA 校验通过的证书不能获得身份。"""

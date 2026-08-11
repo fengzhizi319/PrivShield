@@ -31,6 +31,7 @@ from .deps import service  # noqa: F401  # 对外再导出：tests 与外部调�
 from .pipeline import router as pipeline_router
 from .routers import budget, dp, dynclassification, file, health, kano, ldp, mask, medical, ops, profile, qol
 from .security.auth import ApiKeyAuthAsgiMiddleware
+from .security.config import get_security_settings
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -77,7 +78,15 @@ async def lifespan(app: FastAPI):
 
 
 # FastAPI 应用实例；title 用于 OpenAPI 文档，lifespan 用于生命周期钩子
-app = FastAPI(title="SecretFlow Local Privacy Agent", lifespan=lifespan)
+# When auth is enabled, disable /docs and /openapi.json to prevent unauthenticated
+# callers from discovering the full API surface.
+_auth_enabled = get_security_settings().auth_enabled
+app = FastAPI(
+    title="SecretFlow Local Privacy Agent",
+    lifespan=lifespan,
+    docs_url=None if _auth_enabled else "/docs",
+    openapi_url=None if _auth_enabled else "/openapi.json",
+)
 
 # 安全响应头中间件
 app.add_middleware(SecurityHeadersMiddleware)

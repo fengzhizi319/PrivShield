@@ -36,6 +36,7 @@ def _bad_request_on_value_error(func):
 
     ProfileLoader 对配置名称做白名单校验，非法名称（路径穿越尝试等）抛出
     ValueError；路由层在此转换为干净的 4xx，避免泄漏为 500。
+    使用固定文案避免向调用方泄露内部实现细节。
     """
 
     @functools.wraps(func)
@@ -43,9 +44,13 @@ def _bad_request_on_value_error(func):
         try:
             return func(*args, **kwargs)
         except ValueError as exc:
+            import logging
+            logging.getLogger(__name__).debug(
+                "DynClassification ValueError", extra={"error": str(exc)}
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
+                detail="Invalid request parameters",
             ) from exc
 
     return wrapper
@@ -232,9 +237,13 @@ def generate_profile(req: GenerateProfileRequest):
             "generated_files": generated,
         }
     except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "generate_profile failed", extra={"error": str(exc)}
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"解析或生成配置文件失败: {exc}",
+            detail="Failed to generate configuration from document",
         )
 
 

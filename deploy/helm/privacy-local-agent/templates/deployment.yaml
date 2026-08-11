@@ -72,6 +72,19 @@ spec:
               value: {{ .Values.security.tls.certFile | quote }}
             - name: PRIVACY_TLS_KEY_FILE
               value: {{ .Values.security.tls.keyFile | quote }}
+            - name: PRIVACY_TLS_CLIENT_AUTH
+              value: {{ .Values.security.tls.clientAuth | default "none" | quote }}
+            {{- if .Values.security.tls.caSecret }}
+            - name: PRIVACY_TLS_CA_FILE
+              value: {{ .Values.security.tls.caFile | quote }}
+            {{- end }}
+            {{- if .Values.security.tls.keyPasswordSecret }}
+            - name: PRIVACY_TLS_KEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.tls.keyPasswordSecret | quote }}
+                  key: key-password
+            {{- end }}
             {{- end }}
             {{- if .Values.security.auth.enabled }}
             - name: PRIVACY_AUTH_ENABLED
@@ -90,6 +103,33 @@ spec:
                   key: api-keys.json
             {{- end }}
             {{- end }}
+            {{- if .Values.security.auth.internalMtls.enabled }}
+            - name: PRIVACY_AUTH_INTERNAL_MTLS_ENABLED
+              value: "true"
+            {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
+            - name: PRIVACY_AUTH_MTLS_WHITELIST_FILE
+              value: "/etc/privacy-local-agent/mtls-whitelist.yaml"
+            {{- else if .Values.security.auth.internalMtls.allowedCns }}
+            - name: PRIVACY_AUTH_MTLS_ALLOWED_CNS
+              value: {{ .Values.security.auth.internalMtls.allowedCns | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.security.rateLimit.enabled }}
+            - name: PRIVACY_RATE_LIMIT_ENABLED
+              value: "true"
+            - name: PRIVACY_RATE_LIMIT_DEFAULT_RPS
+              value: {{ .Values.security.rateLimit.defaultRps | quote }}
+            - name: PRIVACY_RATE_LIMIT_DEFAULT_BURST
+              value: {{ .Values.security.rateLimit.defaultBurst | quote }}
+            {{- if .Values.security.rateLimit.redisUrl }}
+            - name: PRIVACY_RATE_LIMIT_REDIS_URL
+              value: {{ .Values.security.rateLimit.redisUrl | quote }}
+            {{- end }}
+            {{- if .Values.security.rateLimit.perEndpointJson }}
+            - name: PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON
+              value: {{ .Values.security.rateLimit.perEndpointJson | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.security.enabled }}
             - name: PRIVACY_RATE_LIMIT_ENABLED
               value: "true"
@@ -104,6 +144,12 @@ spec:
             {{- if .Values.security.tls.enabled }}
             - name: tls-certs
               mountPath: /certs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
+            - name: mtls-whitelist
+              mountPath: /etc/privacy-local-agent/mtls-whitelist.yaml
+              subPath: mtls-whitelist.yaml
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -158,6 +204,11 @@ spec:
             {{- else }}
             secretName: {{ include "privacy-local-agent.fullname" . }}-secrets
             {{- end }}
+        {{- end }}
+        {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
+        - name: mtls-whitelist
+          configMap:
+            name: {{ .Values.security.auth.internalMtls.whitelistConfigMap | quote }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

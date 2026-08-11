@@ -59,6 +59,11 @@ class WhitelistConfig(BaseModel):
     version: str = "1.0"
     entries: list[CNEntry] = Field(default_factory=list)
     default_scopes: list[str] = Field(default_factory=list)
+    # NOTE: default_scopes is parsed from the YAML but NOT currently wired into
+    # the auth decision path (auth.py always rejects unlisted CNs). It is retained
+    # for forward compatibility so the schema does not need a version bump when
+    # the feature is eventually implemented. Do NOT rely on it for fail-open
+    # semantics — all CNs not explicitly listed are always denied.
 
 
 class WhitelistManager:

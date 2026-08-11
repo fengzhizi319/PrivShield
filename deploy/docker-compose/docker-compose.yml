@@ -135,8 +135,8 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "8081"
-      PRIVACY_AGENT_GRPC_ADDR: "privacy-local-agent:50051"
-      PRIVACY_AGENT_REST_ADDR: "http://privacy-local-agent:8079"
+      PRIVACY_AGENT_GRPC_HOST: "privacy-local-agent"
+      PRIVACY_AGENT_GRPC_PORT: "50051"
     depends_on:
       privacy-local-agent:
         condition: service_healthy
@@ -338,7 +338,7 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: privacy  # 生产环境请修改！
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-changeme}"  # 必须通过 .env 或环境变量设置！
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ../grafana:/etc/grafana/provisioning:ro

@@ -19,6 +19,7 @@ from limits import RateLimitItemPerSecond, storage, strategies
 
 from ..observability.logging_config import get_logger
 from ..observability.middleware import record_auth_denial
+from ..observability.metrics import AUTH_DENIALS_TOTAL
 from .config import SecuritySettings, get_security_settings
 from .identity import Identity, is_health_path_or_method
 
@@ -34,7 +35,18 @@ class Limiter:
     def __init__(self, settings: SecuritySettings):
         self._settings = settings
         if settings.rate_limit_redis_url:
-            self._storage: storage.Storage = storage.RedisStorage(settings.rate_limit_redis_url)
+            # Fail-fast precheck: the ``redis`` package is not a declared core
+            # dependency. If it's missing, ``storage.RedisStorage`` will raise an
+            # ImportError at construction time — catch it here and surface a clear
+            # ConfigurationError so operators know exactly what to install rather
+            # than seeing opaque 500s on every request.
+            try:
+                self._storage: storage.Storage = storage.RedisStorage(settings.rate_limit_redis_url)
+            except ImportError as exc:
+                raise RuntimeError(
+                    "PRIVACY_RATE_LIMIT_REDIS_URL is set but the 'redis' Python package "
+                    "is not installed. Install it with: pip install redis"
+                ) from exc
         else:
             self._storage = storage.MemoryStorage()
         self._limiter = strategies.MovingWindowRateLimiter(self._storage)
@@ -67,8 +79,11 @@ class Limiter:
             return self._limiter.hit(item, key)
         except Exception as exc:
             # 存储后端不可用（如 Redis 断连）时 hit() 会抛异常，若放任上抛
-            # 会导致全站 500。按本服务"本地优先"的定位降级为放行并告警，
+            # 会导致全站 500。按本服务“本地优先”的定位降级为放行并告警，
             # 保证限流基础设施故障不放大为可用性故障。
+            # 同时递增 metrics 计数器，让运维可通过 privacy_auth_denials_total{reason="rate_limit_storage_error"}
+            # 感知到限流后端异常。
+            AUTH_DENIALS_TOTAL.labels(reason="rate_limit_storage_error").inc()
             logger.warning(
                 "Rate limiter storage unavailable, degrading to allow",
                 extra={"endpoint": endpoint, "error": str(exc)},

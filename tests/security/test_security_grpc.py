@@ -22,6 +22,7 @@ import pytest
 
 from privacy_local_agent.security import auth as auth_mod
 from privacy_local_agent.security import ratelimit as rl
+from privacy_local_agent.security import whitelist as wl_mod
 from privacy_local_agent.security.auth import AuthInterceptor
 from privacy_local_agent.security.config import KeyConfig, SecuritySettings, get_security_settings
 from privacy_local_agent.security.identity import ANONYMOUS_IDENTITY
@@ -90,22 +91,30 @@ HEALTH_METHOD = "/privacy.local.PrivacyService/Health"
 # ---------------------------------------------------------------------------
 
 class TestExtractIdentityFromGrpcContext:
-    def test_mtls_path(self):
-        settings = SecuritySettings(
-            auth_enabled=True,
-            auth_internal_mtls_enabled=True,
-            auth_mtls_allowed_cns=["internal-client"],
-        )
-        ctx = FakeContext(
-            auth_context={
-                "transport_security_type": [b"ssl"],
-                "x509_common_name": [b"internal-client"],
-            }
-        )
-        ident = auth_mod._extract_identity_from_grpc_context(settings, ctx, MASK_METHOD)
-        assert ident is not None
-        assert ident.name == "internal-client"
-        assert ident.scopes == ["*"]
+    def test_mtls_path(self, monkeypatch):
+        # _authenticate_mtls now uses the singleton WhitelistManager,
+        # so configure it via env vars and reset the singleton.
+        monkeypatch.setenv("PRIVACY_AUTH_MTLS_ALLOWED_CNS", "internal-client")
+        monkeypatch.delenv("PRIVACY_AUTH_MTLS_WHITELIST_FILE", raising=False)
+        wl_mod.reset_whitelist_manager()
+        try:
+            settings = SecuritySettings(
+                auth_enabled=True,
+                auth_internal_mtls_enabled=True,
+                auth_mtls_allowed_cns=["internal-client"],
+            )
+            ctx = FakeContext(
+                auth_context={
+                    "transport_security_type": [b"ssl"],
+                    "x509_common_name": [b"internal-client"],
+                }
+            )
+            ident = auth_mod._extract_identity_from_grpc_context(settings, ctx, MASK_METHOD)
+            assert ident is not None
+            assert ident.name == "internal-client"
+            assert ident.scopes == ["*"]
+        finally:
+            wl_mod.reset_whitelist_manager()
 
     def test_mtls_cn_not_whitelisted_falls_through(self):
         """mTLS 证书 CN 未命中白名单时不得授予身份（回退到后续凭证检查）。"""

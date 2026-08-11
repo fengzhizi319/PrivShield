@@ -92,11 +92,12 @@ def _grpc_error_mapper(fn):
         except PrivacyBudgetExhausted as e:
             # 隐私预算耗尽：返回 RESOURCE_EXHAUSTED，客户端可据此触发预算重置或降级
             context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
-            context.set_details(str(e))  # 将异常消息作为错误详情传递给客户端
+            context.set_details("Privacy budget exhausted")  # Fixed message — avoid leaking internal state
         except ValueError as e:
             # 参数校验失败（如 epsilon<=0、空数据等）：返回 INVALID_ARGUMENT
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(str(e))  # 携带具体的校验失败原因
+            context.set_details("Invalid request parameters")  # Fixed message — avoid leaking internals
+            logger.debug("gRPC ValueError", extra={"error": str(e)})
         except Exception:
             # 未预期异常：记录完整堆栈到日志，向客户端仅暴露通用错误信息，避免泄露内部实现
             logger.exception("grpc_request_error")  # 输出包含 traceback 的 ERROR 日志

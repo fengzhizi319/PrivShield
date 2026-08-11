@@ -206,7 +206,7 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
         else:
             await context.abort(
                 grpc.StatusCode.INTERNAL,
-                f"Gateway internal error after {max_retries} attempts: {last_exception}",
+                "Gateway internal error: all backend retry attempts failed",
             )
 
 
@@ -248,7 +248,15 @@ async def start_grpc_gateway(
         GatewayGrpcServicer(balancer), server
     )
 
-    if tls_enabled and tls_cert_file and tls_key_file:
+    if tls_enabled:
+        # Fail-fast: TLS requested but cert/key missing — do NOT silently downgrade
+        # to plaintext. This mirrors the HTTP side's fail-fast behaviour and the
+        # agent's own SecuritySettings validator.
+        if not tls_cert_file or not tls_key_file:
+            raise ValueError(
+                "Gateway gRPC TLS is enabled but tls_cert_file and/or tls_key_file "
+                "are missing. Refusing to start with plaintext transport."
+            )
         # 读取证书和私钥 / Read cert and key
         with open(tls_cert_file, "rb") as f:
             cert_chain = f.read()
@@ -273,8 +281,8 @@ async def start_grpc_gateway(
         )
     else:
         server.add_insecure_port(f"{host}:{port}")
-        logger.info(
-            "Gateway gRPC server started",
+        logger.warning(
+            "Gateway gRPC server started WITHOUT TLS — plaintext transport",
             extra={"host": host, "port": port},
         )
 

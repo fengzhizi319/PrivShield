@@ -37,7 +37,7 @@ def readyz():
     验证关键依赖（配置与隐私预算持久化存储）是否可访问。
     """
     if not service.resolver:
-        raise HTTPException(status_code=503, detail="Configuration resolver not initialized")
+        raise HTTPException(status_code=503, detail="Service not ready")
 
     db_path = os.environ.get("PRIVACY_BUDGET_DB")
     if db_path:
@@ -47,6 +47,14 @@ def readyz():
             conn.execute("SELECT 1")
             conn.close()
         except sqlite3.Error as e:
-            raise HTTPException(status_code=503, detail=f"Database check failed: {e}") from e
+            # Use a fixed message to avoid leaking internal file paths to
+            # unauthenticated callers (health endpoints are auth-exempt by default).
+            import logging
+            logging.getLogger(__name__).warning(
+                "readyz database check failed", extra={"error": str(e)}
+            )
+            raise HTTPException(
+                status_code=503, detail="Database connectivity check failed"
+            ) from e
 
     return {"status": "ready"}

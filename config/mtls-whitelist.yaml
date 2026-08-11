@@ -19,9 +19,10 @@
 
 version: "1.0"
 
-# 默认 scope：当 CN 通过 CA 校验但不在白名单中时授予的权限。
-# 空列表表示拒绝（fail-closed，推荐）。
-# 仅当 auth_internal_mtls_enabled=true 时生效。
+# 默认 scope（当前未接线，保留供未来使用）：
+# 注意：当前实现中，未列在下方白名单中的 CN 一律拒绝（fail-closed），
+# 本字段不被 auth.py 读取。保留仅为前向兼容，避免修改 schema 版本。
+# 请勿依赖此字段实现 fail-open 语义。
 default_scopes: []
 
 # CN 白名单条目

@@ -46,7 +46,10 @@ def _parse_upload_to_records(content: bytes, filename: str) -> list[dict[str, An
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"文件解析失败: {exc}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to parse uploaded file (unsupported format or corrupt content)",
+        ) from exc
 
     # 缺失值统一为空字符串，与下游字符串语义保持一致
     df = df.fillna("")
@@ -86,7 +89,11 @@ async def process_file(
     try:
         options = json.loads(params or "{}")
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"params 需为合法 JSON: {exc}") from exc
+        import logging
+        logging.getLogger(__name__).debug(
+            "params JSON decode failed", extra={"error": str(exc)}
+        )
+        raise HTTPException(status_code=400, detail="params must be valid JSON") from exc
     if not isinstance(options, dict):
         raise HTTPException(status_code=400, detail="params 需为 JSON 对象")
 

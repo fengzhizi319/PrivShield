@@ -452,7 +452,8 @@ def test_dp_arrow_ipc_unsupported_aggregation():
         headers={"Content-Type": "application/vnd.apache.arrow.stream"},
     )
     assert resp.status_code == 400
-    assert "Unsupported aggregation" in resp.json()["detail"]
+    # The detail is now a fixed message to avoid leaking internal error text.
+    assert "Invalid request parameters" in resp.json()["detail"]
 
 
 def test_dp_noisy_histogram_rest():

@@ -654,7 +654,6 @@ def diagnostics(
             "name": os.environ.get("PRIVACY_SERVICE_NAME", "privacy-local-agent"),
             "namespace": NAMESPACE,
             "python_version": platform.python_version(),
-            "project_root": _PROJECT_ROOT,
             "rest_port": int(os.environ.get("PRIVACY_REST_PORT", "8079")),
             "grpc_port": int(os.environ.get("PRIVACY_GRPC_PORT", "50051")),
         },

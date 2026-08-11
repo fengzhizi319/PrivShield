@@ -109,19 +109,13 @@ def _authenticate_mtls(
         return None
     cn = cn_bytes.decode("utf-8", errors="replace")
 
-    # Determine which whitelist to use:
-    # 1. If settings has explicit whitelist file, use it
-    # 2. If settings has explicit CN list, use it (backward compatibility)
-    # 3. Otherwise use the global singleton (initialized from env vars)
-    if settings.auth_mtls_whitelist_file is not None:
-        from pathlib import Path as _Path
-        from .whitelist import WhitelistManager as _WM
-        manager = _WM(config_path=_Path(settings.auth_mtls_whitelist_file))
-    elif settings.auth_mtls_allowed_cns:
-        from .whitelist import WhitelistManager as _WM
-        manager = _WM(static_cns=settings.auth_mtls_allowed_cns)
-    else:
-        manager = get_whitelist_manager()
+    # Always use the module-level singleton WhitelistManager which supports:
+    # - YAML config file with per-CN scopes (PRIVACY_AUTH_MTLS_WHITELIST_FILE)
+    # - Fallback to static CN list (PRIVACY_AUTH_MTLS_ALLOWED_CNS) with ["*"] scope
+    # - Hot-reload via mtime detection (request-driven, passive check)
+    # Creating a new WhitelistManager per RPC would re-read and re-parse the YAML
+    # file on every call, causing unnecessary disk I/O under high concurrency.
+    manager = get_whitelist_manager()
 
     entry = manager.get_entry(cn)
     if entry is None:
@@ -333,9 +327,14 @@ class ApiKeyAuthAsgiMiddleware:
     依赖体系，``get_current_identity`` 不会执行。本中间件在 ASGI 层直接校验
     ``Authorization: Bearer <key>``，复用与 REST 相同的常量时间 key 比对逻辑。
 
+    When auth is enabled, the middleware also enforces that the authenticated
+    identity holds the ``ops:metrics`` scope (or wildcard ``*``), preventing
+    low-privilege API keys from accessing operational metrics.
+
     Behaviour:
     - ``PRIVACY_AUTH_ENABLED`` 关闭时完全透传（行为与未包裹一致）；
-    - 开启时缺失/无效 key 返回 401 并计入 ``privacy_auth_denials_total``。
+    - 开启时缺失/无效 key 返回 401 并计入 ``privacy_auth_denials_total``；
+    - 开启时合法 key 但缺少 ``ops:metrics`` scope 返回 403。
     """
 
     def __init__(self, app: Any) -> None:
@@ -365,6 +364,27 @@ class ApiKeyAuthAsgiMiddleware:
                     {
                         "type": "http.response.start",
                         "status": 401,
+                        "headers": [
+                            (b"content-type", b"text/plain; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode("ascii")),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+
+            # Scope check: /metrics requires ops:metrics (or wildcard *)
+            if not identity.has_permission("ops:metrics"):
+                record_auth_denial("forbidden")
+                logger.warning(
+                    "Authorization failed on mounted sub-app: insufficient scope",
+                    extra={"path": scope.get("path", ""), "identity_name": identity.name},
+                )
+                body = b"Forbidden: insufficient scope for metrics access"
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 403,
                         "headers": [
                             (b"content-type", b"text/plain; charset=utf-8"),
                             (b"content-length", str(len(body)).encode("ascii")),
