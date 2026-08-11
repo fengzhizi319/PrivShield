@@ -30,6 +30,7 @@ from .identity import (
     permission_for_grpc_method,
     permission_for_rest_path,
 )
+from .whitelist import get_whitelist_manager
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -89,9 +90,14 @@ def _authenticate_mtls(
     proves possession of *a* certificate, not authorization to access this
     service — so mTLS auth is disabled by default and, when enabled via
     ``PRIVACY_AUTH_INTERNAL_MTLS_ENABLED``, the certificate Common Name must
-    additionally match the ``PRIVACY_AUTH_MTLS_ALLOWED_CNS`` whitelist
-    (JSON array or comma-separated). An empty whitelist rejects every
-    certificate (fail-closed).
+    additionally match the whitelist.
+
+    Whitelist lookup uses the :class:`WhitelistManager` singleton which supports:
+    - YAML config file with per-CN scopes (``PRIVACY_AUTH_MTLS_WHITELIST_FILE``)
+    - Fallback to static CN list (``PRIVACY_AUTH_MTLS_ALLOWED_CNS``) with ["*"] scope
+    - Hot-reload when the config file changes
+
+    An empty whitelist rejects every certificate (fail-closed).
     """
     if not settings.auth_internal_mtls_enabled:
         return None
@@ -102,13 +108,29 @@ def _authenticate_mtls(
     if not cn_bytes:
         return None
     cn = cn_bytes.decode("utf-8", errors="replace")
-    if cn not in settings.auth_mtls_allowed_cns:
+
+    # Determine which whitelist to use:
+    # 1. If settings has explicit whitelist file, use it
+    # 2. If settings has explicit CN list, use it (backward compatibility)
+    # 3. Otherwise use the global singleton (initialized from env vars)
+    if settings.auth_mtls_whitelist_file is not None:
+        from pathlib import Path as _Path
+        from .whitelist import WhitelistManager as _WM
+        manager = _WM(config_path=_Path(settings.auth_mtls_whitelist_file))
+    elif settings.auth_mtls_allowed_cns:
+        from .whitelist import WhitelistManager as _WM
+        manager = _WM(static_cns=settings.auth_mtls_allowed_cns)
+    else:
+        manager = get_whitelist_manager()
+
+    entry = manager.get_entry(cn)
+    if entry is None:
         logger.warning(
             "mTLS client certificate rejected: CN not in whitelist",
             extra={"cn": cn, "reason": "cn_not_allowed"},
         )
         return None
-    return Identity("internal", cn, ["*"])
+    return Identity("internal", cn, entry.scopes)
 
 
 def _extract_identity_from_grpc_context(

@@ -18,7 +18,7 @@
 |---|---|---|
 | [security_requirements.md](./security_requirements.md) | 技术栈常见漏洞总结与安全编码规范 | 全体开发人员、安全审计员 |
 | [prd.md](./prd.md) | 产品需求文档 | 产品经理、项目经理 |
-| [design.md](./design.md) | 技术架构、威胁模型与实现细节 | 安全架构师、后端开发 |
+| [design.md](./design.md) | 技术架构、威胁模型、mTLS 白名单认证与实现细节 | 安全架构师、后端开发 |
 | [api_reference.md](./api_reference.md) | 环境变量、配置项与 TLS/Auth/RateLimit 接口参考 | 接入开发者、SRE |
 | [examples.md](./examples.md) | TLS、API Key、速率限制的 Python/REST/gRPC 配置示例 | 接入开发者 |
 | [examples/security_usage.py](./examples/security_usage.py) | 可运行的完整示例脚本 | 接入开发者 |
@@ -47,6 +47,7 @@ PYTHONPATH=. python docs/production_security/examples/security_usage.py
 |---|---|---|
 | TLS | `PRIVACY_TLS_ENABLED=true` | REST/gRPC 仅接受加密连接 |
 | mTLS | `PRIVACY_TLS_CLIENT_AUTH=require` | 强制校验客户端证书 |
+| mTLS CN 白名单认证 | `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` + `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 或 `PRIVACY_AUTH_MTLS_ALLOWED_CNS` | gRPC 客户端证书 CN 命中白名单即授予内部身份，支持 per-CN scope |
 | API Key 认证 | `PRIVACY_AUTH_ENABLED=true` | 静态 Bearer Token 鉴权 |
 | 速率限制 | `PRIVACY_RATE_LIMIT_ENABLED=true` | 按身份 + 接口限流 |
 

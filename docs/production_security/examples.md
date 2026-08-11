@@ -50,6 +50,10 @@ export PRIVACY_TLS_CA_FILE=./certs/ca.crt
 export PRIVACY_TLS_CLIENT_AUTH=require
 
 export PRIVACY_AUTH_ENABLED=true
+# mTLS CN 白名单认证（默认关闭，需显式开启）
+export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true
+export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["internal-client","privacy-console-go-client"]'
+# 同时配置 API Key 作为 mTLS 的备选认证方式
 export PRIVACY_AUTH_INTERNAL_KEYS_JSON='{"sk-internal":{"name":"secretpad","scopes":["*"]}}'
 export PRIVACY_AUTH_EXTERNAL_KEYS_JSON='{"sk-external":{"name":"portal","scopes":["privacy:mask","classification:read"]}}'
 
@@ -156,12 +160,16 @@ creds = grpc.ssl_channel_credentials(
 )
 with grpc.secure_channel("127.0.0.1:50051", creds) as channel:
     stub = privacy_pb2_grpc.PrivacyServiceStub(channel)
+    # 方式一：mTLS CN 命中白名单时无需 API Key，自动获得内部身份
+    # 方式二：同时携带 API Key 作为备选（mTLS 优先）
     resp = stub.Mask(
         privacy_pb2.MaskRequest(field_name="mobile", value="13812345678"),
         metadata=(("authorization", "Bearer sk-internal"),),
     )
     print(resp.result)
 ```
+
+> **提示**：当服务端启用 `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` 且客户端证书 CN 命中 `PRIVACY_AUTH_MTLS_ALLOWED_CNS` 白名单时，客户端无需携带 API Key 即可完成认证（详见 [design.md §6.3](./design.md)）。
 
 ## 5. 速率限制配置示例
 

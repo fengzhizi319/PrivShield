@@ -21,17 +21,22 @@ from .ratelimit import (
     rate_limit_for_path,
 )
 from .tls import grpc_server_credentials, uvicorn_ssl_kwargs
+from .whitelist import CNEntry, WhitelistConfig, WhitelistManager, get_whitelist_manager, reset_whitelist_manager
 
 __all__ = [
     "AuthInterceptor",
+    "CNEntry",
     "Identity",
     "Limiter",
     "RateLimitInterceptor",
     "SecuritySettings",
+    "WhitelistConfig",
+    "WhitelistManager",
     "get_current_identity",
     "get_identity_from_grpc_context",
     "get_limiter",
     "get_security_settings",
+    "get_whitelist_manager",
     "grpc_server_credentials",
     "permission_for_grpc_method",
     "permission_for_rest_path",
@@ -39,6 +44,7 @@ __all__ = [
     "rate_limit_for_path",
     "require_permission",
     "require_rest_path_permission",
+    "reset_whitelist_manager",
     "settings",
     "uvicorn_ssl_kwargs",
 ]

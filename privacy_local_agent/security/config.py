@@ -64,9 +64,12 @@ class SecuritySettings(BaseModel):
     # mTLS 客户端证书认证默认关闭：任何通过 CA 校验的证书仅代表"持有合法证书"，
     # 不代表"被授权访问本服务"，必须显式启用并配置 CN 白名单才会被授予内部身份。
     auth_internal_mtls_enabled: bool = Field(default=False)
-    # mTLS 客户端证书 CN 白名单；仅当 CN 命中白名单时才授予内部身份（["*"] scope）。
+    # mTLS 客户端证书 CN 白名单；仅当 CN 命中白名单时才授予内部身份。
     # 白名单为空时拒绝所有 mTLS 证书（fail-closed）。
+    # 注意：当 auth_mtls_whitelist_file 设置时，本字段被忽略。
     auth_mtls_allowed_cns: list[str] = Field(default_factory=list)
+    # mTLS CN 白名单 YAML 配置文件路径。设置后启用 per-CN scope 控制与热重载。
+    auth_mtls_whitelist_file: Path | None = Field(default=None)
     internal_keys: dict[str, KeyConfig] = Field(default_factory=dict)
     external_keys: dict[str, KeyConfig] = Field(default_factory=dict)
 
@@ -194,7 +197,10 @@ def get_security_settings() -> SecuritySettings:
             "PRIVACY_AUTH_INTERNAL_MTLS_ENABLED", default=False
         ),
         # CN 白名单：JSON 数组或逗号分隔，如 '["secretpad","gateway"]' 或 'secretpad,gateway'
+        # 注意：当 PRIVACY_AUTH_MTLS_WHITELIST_FILE 设置时，本字段被忽略。
         auth_mtls_allowed_cns=_load_str_list_env("PRIVACY_AUTH_MTLS_ALLOWED_CNS"),
+        # mTLS CN 白名单 YAML 配置文件路径（可选）
+        auth_mtls_whitelist_file=os.environ.get("PRIVACY_AUTH_MTLS_WHITELIST_FILE") or None,
         internal_keys=_load_json_env("PRIVACY_AUTH_INTERNAL_KEYS_JSON", {}),
         external_keys=_load_json_env("PRIVACY_AUTH_EXTERNAL_KEYS_JSON", {}),
         rate_limit_enabled=_load_bool_env("PRIVACY_RATE_LIMIT_ENABLED"),

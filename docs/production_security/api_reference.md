@@ -15,6 +15,7 @@
   - [2.4 认证依赖](#24-认证依赖)
   - [2.5 速率限制](#25-速率限制)
   - [2.6 身份与权限](#26-身份与权限)
+  - [2.7 白名单管理器](#27-白名单管理器)
 - [3. REST 接口行为](#3-rest-接口行为)
   - [3.1 认证](#31-认证)
   - [3.2 速率限制](#32-速率限制)
@@ -46,7 +47,9 @@
 | `PRIVACY_AUTH_ENABLED` | `false` | 否 | 是否启用 API Key 认证鉴权。 |
 | `PRIVACY_AUTH_INTERNAL_KEYS_JSON` | `{}` | 否 | 内部服务 API Key 映射，JSON 对象。 |
 | `PRIVACY_AUTH_EXTERNAL_KEYS_JSON` | `{}` | 否 | 外部服务 API Key 映射，JSON 对象。 |
-| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `true` | 否 | gRPC 是否将验证通过的 mTLS 客户端视为内部服务。 |
+| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `false` | 否 | gRPC 是否将验证通过的 mTLS 客户端视为内部服务（默认关闭，fail-closed）。 |
+| `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | — | 否 | mTLS CN 白名单 YAML 配置文件路径。设置后启用 per-CN scope 控制与热重载。 |
+| `PRIVACY_AUTH_MTLS_ALLOWED_CNS` | `[]` | 否 | mTLS 客户端证书 CN 静态白名单（JSON 数组或逗号分隔）。当 WHITELIST_FILE 未设置时使用，所有 CN 获得 `["*"]` 全权限。 |
 
 JSON 格式：
 
@@ -98,7 +101,9 @@ class SecuritySettings(BaseModel):
     tls_key_password: str | None = None
 
     auth_enabled: bool = False
-    auth_internal_mtls_enabled: bool = True
+    auth_internal_mtls_enabled: bool = False
+    auth_mtls_allowed_cns: list[str] = Field(default_factory=list)
+    auth_mtls_whitelist_file: Path | None = None  # YAML 配置文件路径
     internal_keys: dict[str, KeyConfig] = Field(default_factory=dict)
     external_keys: dict[str, KeyConfig] = Field(default_factory=dict)
 
@@ -277,6 +282,51 @@ class Identity:
 | `ClassifyField`, `ClassifyRecord`, `ClassifyTable` | `classification:read` |
 | `RecommendParams` | `privacy:profile` |
 
+### 2.7 白名单管理器
+
+位置：`privacy_local_agent.security.whitelist`
+
+#### `WhitelistManager`
+
+```python
+class WhitelistManager:
+    def __init__(self, config_path: Path | None, static_cns: list[str] | None): ...
+    def get_entry(self, cn: str) -> CNEntry | None: ...
+    def get_scopes(self, cn: str) -> list[str] | None: ...
+    def is_allowed(self, cn: str) -> bool: ...
+    def reload(self) -> None: ...
+    @property
+    def all_entries(self) -> list[CNEntry]: ...
+    @property
+    def default_scopes(self) -> list[str]: ...
+    @property
+    def last_error(self) -> str | None: ...
+```
+
+线程安全的 mTLS CN 白名单管理器，支持基于文件 mtime 的热重载。
+
+#### `CNEntry`
+
+```python
+class CNEntry(BaseModel):
+    cn: str
+    scopes: list[str] = Field(default_factory=lambda: ["*"])
+    description: str = ""
+    enabled: bool = True
+```
+
+单个 CN 白名单条目。
+
+#### `get_whitelist_manager`
+
+```python
+def get_whitelist_manager() -> WhitelistManager
+```
+
+返回模块级单例 `WhitelistManager`。首次调用时从环境变量初始化：
+- `PRIVACY_AUTH_MTLS_WHITELIST_FILE` → YAML 配置文件
+- `PRIVACY_AUTH_MTLS_ALLOWED_CNS` → 静态 CN 列表（回退）
+
 ---
 
 ## 3. REST 接口行为
@@ -323,7 +373,16 @@ metadata=(("authorization", "Bearer <token>"),)
 
 ### 4.2 mTLS 身份
 
-当 `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` 且连接使用 TLS 并携带客户端证书时，gRPC 服务端从 `auth_context["x509_common_name"]` 提取 CN，构造 `Identity("internal", cn, ["*"])`。
+当 `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` 且连接使用 TLS 并携带客户端证书时，gRPC 服务端从 `auth_context["x509_common_name"]` 提取 CN。通过 `WhitelistManager` 查找 CN 白名单：
+
+- **YAML 配置文件**（`PRIVACY_AUTH_MTLS_WHITELIST_FILE`）：使用条目定义的 scopes，支持 per-CN 权限控制与热重载
+- **静态列表**（`PRIVACY_AUTH_MTLS_ALLOWED_CNS`）：所有 CN 获得 `["*"]` 全权限
+
+构造 `Identity("internal", cn, entry.scopes)`，授予对应权限。
+
+**凭证优先级**：mTLS 认证优先于 API Key。mTLS 白名单匹配成功后不再检查 API Key；mTLS 未匹配时回退到 API Key 认证。
+
+> 详细原理与步骤见 `design.md` §6.3。白名单管理器详见 §6.8。
 
 ### 4.3 速率限制
 

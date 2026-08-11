@@ -46,7 +46,9 @@
 | `PRIVACY_AUTH_ENABLED` | `false` | 是否启用认证鉴权。 |
 | `PRIVACY_AUTH_INTERNAL_KEYS_JSON` | `{}` | 内部服务 API Key 映射。 |
 | `PRIVACY_AUTH_EXTERNAL_KEYS_JSON` | `{}` | 外部服务 API Key 映射。 |
-| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `true` | gRPC 是否允许 mTLS 客户端作为内部服务。 |
+| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `false` | gRPC 是否允许 mTLS 客户端证书作为内部服务（默认关闭，fail-closed）。 |
+| `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | — | mTLS CN 白名单 YAML 配置文件路径（推荐）。设置后启用 per-CN scope 控制与热重载。 |
+| `PRIVACY_AUTH_MTLS_ALLOWED_CNS` | `[]` | mTLS 客户端证书 CN 静态白名单（JSON 数组或逗号分隔）。当 WHITELIST_FILE 未设置时使用，所有 CN 获得 `["*"]` 全权限。 |
 
 JSON 格式示例：
 
@@ -137,6 +139,16 @@ export PRIVACY_TLS_CA_FILE=./certs/ca.crt
 export PRIVACY_TLS_CLIENT_AUTH=require
 
 export PRIVACY_AUTH_ENABLED=true
+# 启用 mTLS CN 白名单认证（默认关闭，需显式开启）
+export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true
+
+# 方式一：YAML 白名单配置文件（推荐，支持 per-CN scope + 热重载）
+export PRIVACY_AUTH_MTLS_WHITELIST_FILE=./config/mtls-whitelist.yaml
+
+# 方式二：静态 CN 列表（向后兼容，所有 CN 获得 ["*"] 全权限）
+# export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["internal-client","privacy-console-go-client"]'
+
+# 同时配置 API Key 作为 mTLS 的备选认证方式
 export PRIVACY_AUTH_INTERNAL_KEYS_JSON='{"sk-internal":{"name":"secretpad","scopes":["*"]}}'
 export PRIVACY_AUTH_EXTERNAL_KEYS_JSON='{"sk-external":{"name":"portal","scopes":["privacy:mask"]}}'
 
@@ -193,12 +205,16 @@ creds = grpc.ssl_channel_credentials(
 )
 with grpc.secure_channel("127.0.0.1:50051", creds) as channel:
     stub = privacy_pb2_grpc.PrivacyServiceStub(channel)
+    # 方式一：mTLS 证书 CN 命中白名单时，无需 API Key，自动获得内部身份
+    # 方式二：同时携带 API Key 作为备选（mTLS 优先，API Key 仅在 mTLS 未匹配时生效）
     resp = stub.Mask(
         privacy_pb2.MaskRequest(field_name="mobile", value="13812345678"),
         metadata=(("authorization", "Bearer sk-internal"),),
     )
     print(resp.result)
 ```
+
+> **提示**：当 mTLS CN 白名单认证启用且客户端证书 CN 命中白名单时，客户端无需携带 API Key 即可完成认证。详见 `design.md` §6.3。
 
 ---
 

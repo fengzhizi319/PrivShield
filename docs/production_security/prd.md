@@ -50,6 +50,7 @@
 | FR-TLS-2 | 支持通过环境变量指定服务器证书、私钥、CA 证书、私钥口令。 |
 | FR-TLS-3 | 支持 `none`/`optional`/`require` 三种客户端认证模式。 |
 | FR-TLS-4 | gRPC 在 `require` 模式下通过 mTLS 提取客户端证书身份用于内部服务鉴权。 |
+| FR-TLS-5 | mTLS 认证采用两层校验：传输层 CA 信任链校验 + 应用层 CN 白名单匹配，仅 CN 命中 `PRIVACY_AUTH_MTLS_ALLOWED_CNS` 的客户端才授予内部身份。 |
 
 ### 4.2 认证与鉴权
 
@@ -58,8 +59,9 @@
 | FR-AUTH-1 | 当 `PRIVACY_AUTH_ENABLED=true` 时，除健康检查外所有接口必须携带有效凭证。 |
 | FR-AUTH-2 | 支持 internal（通配权限）与 external（受限 scope）两类服务身份。 |
 | FR-AUTH-3 | REST 外部服务使用 `Authorization: Bearer <token>`；REST 内部服务使用内部 API Key。 |
-| FR-AUTH-4 | gRPC 外部服务通过 metadata `authorization` 携带 token；gRPC 内部服务优先使用 mTLS 身份，也允许使用内部 API Key。 |
-| FR-AUTH-5 | 鉴权失败返回明确的 HTTP/gRPC 状态码与错误信息，不泄露内部实现细节。 |
+| FR-AUTH-4 | gRPC 外部服务通过 metadata `authorization` 携带 token；gRPC 内部服务优先使用 mTLS 身份（CN 命中白名单），也允许使用内部 API Key。 |
+| FR-AUTH-5 | mTLS 认证默认关闭（fail-closed）：必须显式设置 `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` 且配置 CN 白名单才会授予内部身份。 |
+| FR-AUTH-6 | 鉴权失败返回明确的 HTTP/gRPC 状态码与错误信息，不泄露内部实现细节。 |
 
 ### 4.3 速率限制
 
@@ -94,6 +96,8 @@
 - [ ] 新增 `privacy_local_agent/security/` 模块，包含 config/tls/identity/auth/ratelimit。
 - [ ] REST/gRPC 在开启 TLS 后仅接受 HTTPS/gRPCs 连接。
 - [ ] mTLS `require` 模式拒绝无客户端证书的调用。
+- [ ] mTLS CN 白名单：命中白名单的 CN 获得内部身份（`["*"]` scope），未命中的被拒绝。
+- [ ] mTLS 认证默认关闭（fail-closed）：未显式启用时即使证书合法也不授予身份。
 - [ ] 内部 API Key 可访问所有接口；外部 API Key 越权被拦截。
 - [ ] 超速调用 REST 返回 429，gRPC 返回 `RESOURCE_EXHAUSTED`。
 - [ ] `/health` 与 `Health` 默认保持匿名、不限速。

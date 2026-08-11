@@ -25,6 +25,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from privacy_local_agent.security.config import SecuritySettings, get_security_settings
+from privacy_local_agent.security.auth import _authenticate_mtls
 from privacy_local_agent.security.identity import Identity, permission_for_rest_path
 from privacy_local_agent.security.ratelimit import Limiter
 from privacy_local_agent.security.tls import uvicorn_ssl_kwargs
@@ -199,6 +200,9 @@ def main():
                 "PRIVACY_TLS_CA_FILE": str(certs["ca_cert"]),
                 "PRIVACY_TLS_CLIENT_AUTH": "require",
                 "PRIVACY_AUTH_ENABLED": "true",
+                # mTLS CN 白名单认证（默认关闭，需显式开启）
+                "PRIVACY_AUTH_INTERNAL_MTLS_ENABLED": "true",
+                "PRIVACY_AUTH_MTLS_ALLOWED_CNS": '["internal-client"]',
                 "PRIVACY_AUTH_INTERNAL_KEYS_JSON": '{"sk-internal":{"name":"secretpad","scopes":["*"]}}',
                 "PRIVACY_AUTH_EXTERNAL_KEYS_JSON": '{"sk-external":{"name":"portal","scopes":["privacy:mask","classification:read"]}}',
                 "PRIVACY_RATE_LIMIT_ENABLED": "true",
@@ -213,6 +217,8 @@ def main():
         print(f"  tls_enabled={settings.tls_enabled}")
         print(f"  tls_client_auth={settings.tls_client_auth}")
         print(f"  auth_enabled={settings.auth_enabled}")
+        print(f"  auth_internal_mtls_enabled={settings.auth_internal_mtls_enabled}")
+        print(f"  auth_mtls_allowed_cns={settings.auth_mtls_allowed_cns}")
         print(f"  internal_keys={list(settings.internal_keys.keys())}")
         print(f"  external_keys={list(settings.external_keys.keys())}")
         print(f"  rate_limit_enabled={settings.rate_limit_enabled}")
@@ -223,7 +229,25 @@ def main():
         for key, value in ssl_kwargs.items():
             print(f"  {key}: {value}")
 
-        # 3. 模拟 API Key 认证
+        # 3. 模拟 mTLS CN 白名单认证
+        print("\n模拟 mTLS CN 白名单认证：")
+        # 模拟 gRPC auth_context（客户端证书 CN = "internal-client"，在 TLS 通道上）
+        mtls_ctx_allowed = {
+            "transport_security_type": [b"ssl"],
+            "x509_common_name": [b"internal-client"],
+        }
+        mtls_identity = _authenticate_mtls(settings, mtls_ctx_allowed)
+        print(f"  CN=internal-client (在白名单中) -> {mtls_identity}")
+
+        # CN 不在白名单中的证书被拒绝
+        mtls_ctx_rejected = {
+            "transport_security_type": [b"ssl"],
+            "x509_common_name": [b"unknown-client"],
+        }
+        mtls_rejected = _authenticate_mtls(settings, mtls_ctx_rejected)
+        print(f"  CN=unknown-client (不在白名单中) -> {mtls_rejected}")
+
+        # 4. 模拟 API Key 认证
         print("\n模拟 API Key 认证：")
         internal_identity = _authenticate_api_key(settings, "sk-internal")
         print(f"  sk-internal -> {internal_identity}")
@@ -234,14 +258,14 @@ def main():
         invalid_identity = _authenticate_api_key(settings, "invalid-token")
         print(f"  invalid-token -> {invalid_identity}")
 
-        # 4. 模拟 Authorization header 解析
+        # 5. 模拟 Authorization header 解析
         print("\n模拟 Authorization 解析：")
         token = _extract_bearer_token("Bearer sk-internal")
         print(f"  'Bearer sk-internal' -> {token}")
         token = _extract_bearer_token("Basic sk-internal")
         print(f"  'Basic sk-internal' -> {token}")
 
-        # 5. 模拟权限校验
+        # 6. 模拟权限校验
         print("\n模拟接口权限校验：")
         permission = permission_for_rest_path("/v1/privacy/dp/count")
         print(f"  /v1/privacy/dp/count 需要权限: {permission}")
@@ -252,7 +276,7 @@ def main():
         print(f"  /v1/privacy/mask 需要权限: {permission}")
         print(f"  外部服务是否允许: {external_identity.has_permission(permission)}")
 
-        # 6. 模拟速率限制
+        # 7. 模拟速率限制
         print("\n模拟速率限制（默认 10 rps / 20 burst）：")
         limiter = Limiter(settings)
         identity = Identity("external", "portal", ["privacy:mask"])

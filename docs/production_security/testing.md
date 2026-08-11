@@ -72,6 +72,8 @@ def test_mtls_requires_ca():
 
 ### 3.3 认证与鉴权
 
+#### API Key 认证测试
+
 ```python
 import pytest
 from fastapi.testclient import TestClient
@@ -125,6 +127,52 @@ def test_missing_token_returns_401(auth_enabled):
 def test_health_exempt_by_default(auth_enabled):
     resp = client.get("/health")
     assert resp.status_code == 200
+```
+
+#### mTLS CN 白名单认证测试
+
+```python
+import pytest
+from privacy_local_agent.security.auth import _authenticate_mtls
+from privacy_local_agent.security.config import SecuritySettings
+
+
+def test_mtls_default_disabled():
+    """mTLS 认证默认关闭：仅凭 CA 校验通过的证书不能获得身份。"""
+    settings = SecuritySettings()
+    ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"any-client"]}
+    assert _authenticate_mtls(settings, ctx) is None
+
+
+def test_mtls_cn_in_whitelist_grants_internal_identity():
+    """CN 命中白名单的客户端获得内部身份，scope 为 ["*"]。"""
+    settings = SecuritySettings(
+        auth_internal_mtls_enabled=True,
+        auth_mtls_allowed_cns=["internal-client"],
+    )
+    ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"internal-client"]}
+    ident = _authenticate_mtls(settings, ctx)
+    assert ident is not None
+    assert ident.service_type == "internal"
+    assert ident.name == "internal-client"
+    assert ident.scopes == ["*"]
+
+
+def test_mtls_cn_not_in_whitelist_rejected():
+    """CN 未命中白名单的证书被拒绝。"""
+    settings = SecuritySettings(
+        auth_internal_mtls_enabled=True,
+        auth_mtls_allowed_cns=["allowed-svc"],
+    )
+    ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"rogue-svc"]}
+    assert _authenticate_mtls(settings, ctx) is None
+
+
+def test_mtls_enabled_but_empty_whitelist_rejects_all():
+    """启用 mTLS 但未配置 CN 白名单时拒绝所有证书（fail-closed）。"""
+    settings = SecuritySettings(auth_internal_mtls_enabled=True)
+    ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"any-cn"]}
+    assert _authenticate_mtls(settings, ctx) is None
 ```
 
 ### 3.4 速率限制
@@ -353,6 +401,8 @@ PYTHONPATH=. pytest tests/test_security_rate_limit.py -v
 - [ ] 动态生成 CA/服务器/客户端证书并在测试中使用。
 - [ ] 仅服务端 TLS 下，受信 CA 可连接，不受信 CA 失败。
 - [ ] mTLS `require` 模式下，缺失客户端证书连接失败。
+- [ ] mTLS CN 白名单：命中白名单的 CN 获得内部身份，未命中的被拒绝。
+- [ ] mTLS 默认关闭（fail-closed）：未显式启用时即使证书合法也不授予身份。
 - [ ] 内部 API Key 可访问全部接口，外部 API Key 越权返回 403 / `PERMISSION_DENIED`。
 - [ ] 缺失/无效凭证返回 401 / `UNAUTHENTICATED`。
 - [ ] 超速调用返回 429 / `RESOURCE_EXHAUSTED`。

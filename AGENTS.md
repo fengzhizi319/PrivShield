@@ -46,7 +46,7 @@ privacy-local-agent/
 │   ├── service.py                 # PrivacyService orchestrator
 │   ├── schemas.py                 # REST request models (Pydantic)
 │   ├── routers/                   # REST sub-routers (mask/dp/kano/qol/dynclassification/...)
-│   ├── security/                  # TLS / auth / rate-limit
+│   ├── security/                  # TLS / auth / rate-limit / whitelist
 │   ├── observability/             # Logging / metrics / tracing
 │   ├── privacy/                   # Privacy primitives
 │   │   ├── masking.py
@@ -173,6 +173,9 @@ Key environment variables:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Optional OpenTelemetry OTLP endpoint |
 | `PRIVACY_TLS_ENABLED` | `false` | Enable TLS on REST/gRPC |
 | `PRIVACY_AUTH_ENABLED` | `false` | Enable API key auth |
+| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `false` | Enable mTLS client certificate auth for gRPC (fail-closed) |
+| `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | — | Path to YAML CN whitelist config (enables per-CN scopes + hot-reload) |
+| `PRIVACY_AUTH_MTLS_ALLOWED_CNS` | `[]` | Static CN list (fallback when WHITELIST_FILE not set); all CNs get `["*"]` scope |
 | `PRIVACY_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
 | `PRIVACY_WARMUP_LLM` | `false` | Async warmup local LLM on REST startup |
 | `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | Process-wide LLM inference concurrency cap (semaphore, prevents OOM) |
