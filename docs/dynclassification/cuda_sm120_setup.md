@@ -22,7 +22,16 @@
   - [5.1 基础 PyTorch CUDA 运算验证](#51-基础-pytorch-cuda-运算验证)
   - [5.2 ModelScope Small-NER 医疗实体识别 CUDA 推理实测](#52-modelscope-small-ner-医疗实体识别-cuda-推理实测)
   - [5.3 运行单元测试集](#53-运行单元测试集)
-- [6. 总结](#6-总结)
+- [6. Layer-3 Qwen3.5 微调模型本地 PyTorch 推理环境搭建](#6-layer-3-qwen35-微调模型本地-pytorch-推理环境搭建)
+  - [6.1 依赖版本矩阵（已验证组合）](#61-依赖版本矩阵已验证组合)
+  - [6.2 一键安装命令](#62-一键安装命令)
+  - [🚨 踩坑 4：transformers 4.x 不识别 `qwen3_5` 架构](#-踩坑-4transformers-4x-不识别-qwen3_5-架构)
+  - [🚨 踩坑 5：缺失 `einops` 导致 `Qwen3_5ForCausalLM` 加载失败](#-踩坑-5缺失-einops-导致-qwen3_5forcausallm-加载失败)
+  - [🚨 踩坑 6：triton 3.7.x 报 `0 active drivers` 无法发现 GPU](#-踩坑-6triton-37x-报-0-active-drivers-无法发现-gpu)
+  - [🚨 踩坑 7：缺失 fla / causal-conv1d 回退慢路径](#-踩坑-7缺失-fla--causal-conv1d-回退慢路径)
+  - [6.3 推理 dtype 与 prompt 对齐要求](#63-推理-dtype-与-prompt-对齐要求)
+  - [6.4 验证命令](#64-验证命令)
+- [7. 总结](#7-总结)
 
 ---
 
@@ -239,6 +248,101 @@ PYTHONPATH=. pytest tests/dynclassification/test_real_models.py -v
 
 ---
 
-## 6. 总结
+## 6. Layer-3 Qwen3.5 微调模型本地 PyTorch 推理环境搭建
+
+本节记录在 **`.venv`（项目根虚拟环境）与 `llmlora/.venv`（LoRA 训练环境）** 两个 Python 3.13 环境中，成功运行 Layer-3 微调模型 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`（`Qwen3Classifier` 本地 PyTorch 后端，`PRIVACY_LLM_PROVIDER=qwen3`）所需的完整依赖与踩坑记录。两个环境均已实测通过：
+
+```bash
+PYTHONPATH=. pytest 'tests/dynclassification/test_real_models.py::TestRealLlmAdapter::test_real_llm_loads_and_returns_structured_result' -v -m ''
+```
+
+### 6.1 依赖版本矩阵（已验证组合）
+
+| 包 | 已验证版本 | 必需性 | 说明 |
+|---|---|---|---|
+| `torch` | `2.12.0.dev20260408+cu128` | 必需 | 见本文第 2 节（sm_120 支持） |
+| `transformers` | `>=5.14.1` | 必需 | 4.x 未注册 `qwen3_5`（`qwen3_next`）架构，无法加载 |
+| `huggingface_hub` | `>=1.27.0` | 必需 | transformers 5.x 硬依赖 1.x API，旧版 0.x 不兼容 |
+| `einops` | `>=0.8.2` | 必需 | `Qwen3_5ForCausalLM` 加载时硬依赖 |
+| `fla-core` | `>=0.5.2` | 必需 | flash-linear-attention，提供线性注意力层 triton kernel；缺失时回退有缺陷的纯 PyTorch 实现，生成可能损坏/截断 |
+| `triton` | `3.6.0` | 必需（GPU） | 由 torch 管理；**3.7.1 在 WSL 下无法发现 GPU driver**，需降级 |
+| `causal-conv1d` | `>=1.5.0` | 可选 | mamba/conv 层 CUDA fast-path，缺失仅影响性能不影响正确性 |
+| `tokenizers` / `safetensors` | `0.22.x` / `>=0.8.0` | 随 transformers 自动安装 | 无需特殊处理 |
+
+### 6.2 一键安装命令
+
+```bash
+# 网络较慢时先清除失效代理，并使用清华镜像源
+unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
+PIP_MIRROR="-i https://pypi.tuna.tsinghua.edu.cn/simple"
+
+# 升级 transformers 到 5.x（会自动带上 huggingface_hub>=1.x）
+pip install $PIP_MIRROR "transformers>=5.14.0" "huggingface_hub>=1.27.0"
+
+# Qwen3.5 加载与推理必备依赖
+pip install $PIP_MIRROR "einops>=0.8.0" "fla-core>=0.5.2"
+
+# 可选：fast-path 加速（mamba/conv 层 CUDA kernel）
+pip install $PIP_MIRROR causal-conv1d
+
+# WSL 下若 triton 为 3.7.x 且报 "0 active drivers"，降级到 3.6.0
+pip install $PIP_MIRROR triton==3.6.0
+```
+
+> **离线/慢网络替代方案**：若两环境 Python 版本一致（本项目均为 3.13），可直接从另一个可用环境拷贝纯 Python 包目录与 `*.dist-info`，例如：
+> ```bash
+> SRC=llmlora/.venv/lib/python3.13/site-packages
+> DST=.venv/lib/python3.13/site-packages
+> rm -rf $DST/transformers $DST/transformers-*.dist-info
+> cp -r $SRC/transformers $SRC/transformers-5.14.1.dist-info $DST/
+> # einops / fla / triton 同理；含 C 扩展的包（如 torch、causal-conv1d）建议仍用 pip 安装
+> ```
+
+### 🚨 踩坑 4：transformers 4.x 不识别 `qwen3_5` 架构
+
+- **现象**：`Qwen3Classifier` 初始化失败，日志 `qwen3_model_init_failed`；直接加载报 `KeyError: 'qwen3_5'`。
+- **原因**：Qwen3.5 采用 linear-attention/mamba 混合架构，在 transformers 中注册为 `qwen3_next`，仅 5.x 版本支持。
+- **解决**：升级 `transformers>=5.14.0`（同时会要求 `huggingface_hub>=1.x`）。
+
+### 🚨 踩坑 5：缺失 `einops` 导致 `Qwen3_5ForCausalLM` 加载失败
+
+- **现象**：transformers 5.x 已安装，但加载模型报 `ModuleNotFoundError: No module named 'einops'`，随后级联为 `Could not import module 'Qwen3_5ForCausalLM'`。
+- **原因**：`Qwen3_5ForCausalLM` 模型代码硬导入 `einops`，但它未列入 transformers 的传递依赖。
+- **解决**：`pip install einops>=0.8.0`。注意部分 venv（如 `llmlora/.venv`）可能从 conda 环境借用系统包，目标 `.venv` 无法借用时必须显式安装。
+
+### 🚨 踩坑 6：triton 3.7.x 报 `0 active drivers` 无法发现 GPU
+
+- **现象**：模型能加载，但 `generate()` 时抛 `RuntimeError: 0 active drivers ([]). There should only be one.`（来自 `triton/runtime/driver.py`，由 fla 的 `l2norm_fwd_kernel` 触发）；`_classify_inner` 捕获后返回 `None`，日志仅见 `llm_classify_inner_error`。
+- **原因**：triton 3.7.1 在 WSL 环境下无法发现 GPU driver；同机 triton 3.6.0 正常。
+- **解决**：`pip install triton==3.6.0`。
+- **排查提示**：`_classify_inner` 的异常详情在 `logger.error(..., extra={"error": str(e)})` 中，pytest 默认不显示，需单独写脚本复现才能看到真实异常栈。
+
+### 🚨 踩坑 7：缺失 fla / causal-conv1d 回退慢路径
+
+- **现象**：启动日志出现 `[transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation.`
+- **原因**：Qwen3.5 混合架构的线性注意力/mamba 层优先使用 fla（triton kernel）与 causal-conv1d 的 CUDA fast-path。
+- **影响与解决**：缺失 fla 时回退实现可能产生损坏/截断的 JSON 生成，**必须安装 `fla-core`**；缺失 causal-conv1d 仅降低速度、不影响正确性，按需安装。
+
+### 6.3 推理 dtype 与 prompt 对齐要求
+
+1. **必须使用 `bfloat16` 加载**：Qwen3.5 的 linear-attention/mamba 混合层在 FP16 下数值溢出，会导致 JSON 生成损坏/截断（`llm_engines.py` 中 `_resolve_cuda_dtype` 已默认优先 bf16）。
+2. **微调模型 prompt 必须与训练侧严格一致**：训练侧（`llmlora/src/dataset/loader.py`）为短 SYSTEM_PROMPT + 裸文本输入；`Qwen3Classifier._classify_inner` 通过 `_is_finetuned_model()` 识别微调模型后自动采用训练同款模板（`_FINETUNED_SYSTEM_PROMPT` + `sanitize_for_prompt(text)` + `enable_thinking=False`）。切勿为微调模型附加额外前导语/包裹符，否则小模型会提前 EOS 导致 JSON 截断。
+
+### 6.4 验证命令
+
+```bash
+# 环境自检
+.venv/bin/python -c "import transformers, huggingface_hub, einops, fla, triton; \
+print(transformers.__version__, huggingface_hub.__version__, einops.__version__, triton.__version__)"
+
+# 端到端真实模型测试（需 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother 已就位）
+PYTHONPATH=. .venv/bin/python -m pytest \
+  'tests/dynclassification/test_real_models.py::TestRealLlmAdapter::test_real_llm_loads_and_returns_structured_result' -v -m ''
+# 预期：1 passed（约 15-18s）；llmlora/.venv 同理可验证
+```
+
+---
+
+## 7. 总结
 
 通过上述 **`cu128` Nightly 依赖匹配 + 自动 C++ 共享库预加载 (CUPTI / CuFFT) + 运行级 CUDA 算力探针** 组合方案，成功搞定了最新的 **Blackwell (`sm_120`) 架构 RTX 50 系列 GPU** 上 PyTorch 硬件加速与 ModelScope Small-NER 的完美运行！

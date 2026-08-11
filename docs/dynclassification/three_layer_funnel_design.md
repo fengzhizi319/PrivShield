@@ -15,6 +15,20 @@
   - [2.5 置信度 (Confidence Score) 计算与流转推导](#25-置信度-confidence-score-计算与流转推导)
   - [2.6 安全地板防御机制 (Safety Floor)](#26-安全地板防御机制-safety-floor)
   - [2.7 最终等级裁定优先级](#27-最终等级裁定优先级)
+  - [2.8 Layer-2 Small-NER 分类分级原理与实现详解](#28-layer-2-small-ner-分类分级原理与实现详解)
+    - [2.8.1 NER 模型架构与推理流程](#281-ner-模型架构与推理流程)
+    - [2.8.2 从 NER 实体到 SecurityTag 的等级映射](#282-从-ner-实体到-securitytag-的等级映射)
+    - [2.8.3 NER 智能门禁机制](#283-ner-智能门禁机制)
+    - [2.8.4 NER 置信度计算与融合](#284-ner-置信度计算与融合)
+    - [2.8.5 多后端降级策略](#285-多后端降级策略)
+    - [2.8.6 配置化多标准适配](#286-配置化多标准适配)
+  - [2.9 NER 分类分级与脱敏抹平的联动机制](#29-ner-分类分级与脱敏抹平的联动机制)
+    - [2.9.1 联动架构总览](#291-联动架构总览)
+    - [2.9.2 NER 实体类型驱动的分类决策](#292-ner-实体类型驱动的分类决策)
+    - [2.9.3 文本脱敏抹平 (Sanitization) 联动](#293-文本脱敏抹平-sanitization-联动)
+    - [2.9.4 图像脱敏抹平 (Image Redaction) 联动](#294-图像脱敏抹平-image-redaction-联动)
+    - [2.9.5 NER 分类结果与脱敏策略的编排关系](#295-ner-分类结果与脱敏策略的编排关系)
+    - [2.9.6 NER 脱敏联动的降级与容错](#296-ner-脱敏联动的降级与容错)
 - [3. 新增文件](#3-新增文件)
 - [4. 修改文件](#4-修改文件)
 - [5. 接口设计](#5-接口设计)
@@ -255,6 +269,404 @@ final_level = LLM 裁定等级（若仲裁/深度分类成功裁定）
 2. **降级标签排除**：当非降级标签存在时，降级标签（`is_downgrade=True`）不参与等级上推；
    但当 override 已压制所有普通标签、仅剩降级标签时，降级标签代表最终裁定，参与计算。
 3. **无有效标签**：回退到 taxonomy 的 `default_level`。
+
+### 2.8 Layer-2 Small-NER 分类分级原理与实现详解
+
+本节深入阐述 Layer-2 Small-NER 如何从非结构化医疗文本中提取实体、将实体映射为安全标签、
+并最终参与敏感度等级裁定的完整原理与实现链路。
+
+#### 2.8.1 NER 模型架构与推理流程
+
+Small-NER 基于 **CMeEE（Chinese Medical Entity Recognition）** 中文医学命名实体识别数据集
+微调的 BERT 模型，采用 **BIOES / BIO 序列标注方案**，支持识别 9 类医疗实体。
+
+```
+NER 推理流水线 / NER Inference Pipeline
+═══════════════════════════════════════
+
+  输入文本 (如: "患者确诊2型糖尿病10年，口服二甲双胍治疗")
+    │
+    ├─① 文本预处理
+    │   ├─ 短文本 (≤120字): 直接编码推理
+    │   └─ 长文本 (>120字): 智能分句 (句号/分号/换行)
+    │       + 滑动窗口 (120字窗口 + 20字重叠，防止截断漏检)
+    │
+    ├─② Tokenizer 编码 (SimpleChineseBertTokenizer)
+    │   ├─ 中文: 逐字切分（每个汉字为一个 token）
+    │   ├─ 英文: 逐字母切分 + 大小写折叠 (HIV→hiv)
+    │   └─ 输出: [CLS] 单字token₁...tokenₙ [SEP] [PAD]...
+    │       → (input_ids, attention_mask, token_type_ids)
+    │
+    ├─③ 模型前向推理
+    │   ├─ ONNX Runtime (推荐，轻量高效，CPU/CUDA)
+    │   ├─ TensorRT (NVIDIA GPU FP16 极致加速)
+    │   ├─ ModelScope (PyTorch + 达摩院 RaNER 管道)
+    │   └─ MLX (Apple Silicon Metal GPU)
+    │   → logits (seq_len, num_labels)
+    │
+    ├─④ 序列标注解码
+    │   ├─ BIOES 模式 (37类): B-xxx/I-xxx/E-xxx/S-xxx → 实体
+    │   └─ BIO 模式 (13类):  B-xxx/I-xxx → 实体
+    │   置信度: softmax → 每个 token 取 argmax 标签概率
+    │          多 token 实体取 min (木桶原则)
+    │
+    ├─⑤ 标签归一化映射
+    │   dis→MEDICAL_DISEASE, sym→MEDICAL_DISEASE,
+    │   dru→MEDICATION, pro→SURGERY, bod→BODY_PART,
+    │   ite→EXAMINATION, dep→DEPARTMENT, equ→EQUIPMENT,
+    │   mic→MEDICAL_DISEASE, GENE→GENOMIC_HINT
+    │
+    └─⑥ 输出: [{"label": "MEDICAL_DISEASE", "text": "糖尿病", "confidence": 0.92},
+                {"label": "MEDICATION", "text": "二甲双胍", "confidence": 0.88}]
+```
+
+**支持的实体类型（CMeEE 标准 9 类）**：
+
+| 原始标签 | 标准标签 | 含义 | 示例 |
+|---|---|---|---|
+| `dis` | `MEDICAL_DISEASE` | 疾病 | 糖尿病、高血压、艾滋病 |
+| `sym` | `MEDICAL_DISEASE` | 症状（归入疾病大类） | 头痛、咳嗽、胸闷 |
+| `mic` | `MEDICAL_DISEASE` | 微生物（归入疾病大类） | 幽门螺杆菌、HIV病毒 |
+| `dru` | `MEDICATION` | 药物 | 二甲双胍、阿司匹林 |
+| `pro` | `SURGERY` | 手术/操作 | 冠脉搭桥、穿刺活检 |
+| `bod` | `BODY_PART` | 身体部位 | 心脏、肝脏、膝关节 |
+| `ite` | `EXAMINATION` | 检查项目 | CT扫描、血常规 |
+| `dep` | `DEPARTMENT` | 科室 | 心内科、骨科 |
+| `equ` | `EQUIPMENT` | 医疗设备 | 呼吸机、除颤仪 |
+| `GEN` | `GENOMIC_HINT` | 基因提示（ModelScope 特有） | BRCA1、EGFR突变 |
+
+#### 2.8.2 从 NER 实体到 SecurityTag 的等级映射
+
+NER 提取的实体需经过 **实体→等级映射** 才能参与最终分类裁定。
+映射逻辑实现在 `ClassificationFunnel._run_ner()` 中，采用三级决策策略：
+
+```
+NER 实体 → SecurityTag 等级映射决策树
+══════════════════════════════════════════
+
+  实体 {label, text, confidence}
+    │
+    ├─ 优先级1: taxonomy.ner_entity_mapping 配置化映射
+    │   (taxonomy YAML 中显式定义 label→level，如 GENOMIC_HINT→L5)
+    │   → 直接使用配置等级，needs_human_review = (level == 最高等级)
+    │
+    ├─ 优先级2: 内置硬编码规则（当 taxonomy 未配置时）
+    │   │
+    │   ├─ label == "GENOMIC_HINT"
+    │   │   → level = 最高等级 (L5), needs_human_review = True
+    │   │   → 基因信息属极敏感（遗传隐私）
+    │   │
+    │   ├─ label == "MEDICAL_DISEASE"
+    │   │   │
+    │   │   ├─ 文本含 L5 关键词 (hiv/aids/艾滋/精神分裂/基因/遗传缺陷)
+    │   │   │   → level = 最高等级 (L5), category = HIGH_RISK_MEDICAL_L5
+    │   │   │   → needs_human_review = True
+    │   │   │
+    │   │   ├─ 文本含敏感关键词 (肿瘤/癌症/白血病/梅毒/抑郁症...)
+    │   │   │   → level = 次高等级 (L4), category = MEDICAL_SENSITIVE_DISEASE
+    │   │   │   → 敏感病种关键词列表可通过 taxonomy.ner_sensitive_keywords 配置
+    │   │   │
+    │   │   └─ 普通疾病
+    │   │       → level = 中间等级 (L3), category = MEDICAL_DISEASE
+    │   │
+    │   ├─ label ∈ {"MEDICATION", "SURGERY", "BODY_PART"}
+    │   │   → level = 中间等级 (L3)
+    │   │
+    │   └─ 其他未知标签
+    │       → level = 中间等级 (L3), category = 原始标签名
+    │       → 防止自定义 NER 标签被静默丢弃
+    │
+    └─ 输出: SecurityTag(
+              level=mapped_level,
+              category=label,
+              confidence=ner_confidence,
+              source_engine="SMALL_NER",
+              rule_id=f"NER_{label}",
+              ...)
+```
+
+**动态等级推断**：最高等级（如 L5）、次高等级（如 L4）、中间等级（如 L3）
+均从 taxonomy.levels 的 rank 排序中动态推断，而非硬编码——
+这使得同一套映射逻辑可适配 L1~L5 医疗体系、C1~C4 金融体系、G1~G4 广东医疗体系等。
+
+#### 2.8.3 NER 智能门禁机制
+
+NER 推理有毫秒级延迟（ONNX ~5ms, ModelScope ~30ms），为避免对结构化短字段产生无效开销，
+漏斗在 `_should_trigger_ner()` 中实现了多层门禁：
+
+```
+NER 智能门禁决策流程
+════════════════════
+
+  输入: (field_name, value)
+    │
+    ├─ 排除1: 空值/超短文本 → strip()后长度 < 2 → 拒绝
+    ├─ 排除2: 纯数字/纯英文 → 无连续 ≥2 个中文汉字 → 拒绝
+    ├─ 排除3: PII 结构化短字段
+    │   {id_card_no, phone, name, patient_name, age, gender, sex,
+    │    medical_insurance_no, social_security_no, disability_cert_no,
+    │    registered_address, house_address, contact_phone, ...}
+    │   → 这些字段由 L1 规则引擎完全覆盖，NER 无附加价值 → 拒绝
+    │
+    ├─ 强制触发: 临床非结构化文书字段
+    │   {chief_complaint, present_illness, past_history,
+    │    personal_history, family_history, allergic_history,
+    │    progress_note, diagnosis_name, diagnosis}
+    │   → 这些字段包含复杂医疗语义，NER 有最大增益 → 接受
+    │
+    └─ 默认: 通过中文检查的其余文本 → 接受
+```
+
+此外还有 **等级触发阈值**：即使门禁放行，NER 也仅在当前等级 rank ≤ `ner_trigger_max_rank`
+时才实际执行——已经确定为高敏（如 L4/L5）的字段无需 NER 锦上添花。
+
+#### 2.8.4 NER 置信度计算与融合
+
+NER 层的置信度计算遵循以下规则：
+
+1. **实体置信度**：NER 模型对每个 token 输出 softmax 概率分布，
+   取 argmax 标签的概率作为该 token 的置信度。
+   多 token 实体（如"二甲双胍"4个字）取所有 token 概率的**最小值**（木桶原则）：
+
+$$\text{confidence}_{\text{entity}} = \min_{i=1}^{n} P(\text{label}_i | \text{token}_i)$$
+
+2. **阶段融合（最大值覆盖策略）**：NER 标签追加到已有标签列表后，
+   整体置信度取所有标签的最大值：
+
+$$\text{confidence}_{\text{L1+L2}} = \max\left(\text{confidence}_{\text{L1}},\; \max_{t \in \text{tags}_{\text{NER}}}(t.\text{confidence})\right)$$
+
+3. **参与等级裁定的门槛**：置信度低于 `min_tag_confidence`（默认 0.5）的 NER 标签
+   仅作审计记录，**不参与** `resolve_level` 的等级计算——
+   防止低置信度 NER 标签无条件拉高最终等级。
+
+4. **engine_layer 归属判定**：`engine_layer` 仅在 NER **实际影响决策** 时更新为 `L2_SMALL_NER`：
+   - L1 无标签时 NER 提供了首个分类结果 → 归属 L2
+   - NER 等级高于 L1 结果 → 归属 L2
+   - 否则保持 `L1_RULE`（NER 标签虽存在但未改变决策）
+
+#### 2.8.5 多后端降级策略
+
+NER 引擎采用 **四级降级链**，确保在不同硬件环境下均可提供服务：
+
+```
+降级优先级:
+  0. MLXSmallNerEngine     → Apple Silicon Metal GPU (仅 macOS)
+  1. TensorRTSmallNerEngine → NVIDIA GPU FP16 极致加速 (零 PyTorch 依赖)
+  2. ONNXSmallNerEngine     → ONNX Runtime CPU/CUDA (推荐，轻量高效)
+  3. ModelScopeSmallNerEngine → PyTorch + ModelScope 管道 (兼容性最好)
+  4. 全部不可用             → NerAdapter 标记 _available=False, extract() 返回 []
+```
+
+所有后端共享同一套 `extract(text) → list[dict]` 接口，上层漏斗无需感知底层差异。
+初始化使用 `threading.Lock` + double-check 保证线程安全，防止并发请求重复加载模型。
+
+#### 2.8.6 配置化多标准适配
+
+不同标准体系可通过 taxonomy YAML 自定义 NER 行为，无需修改代码：
+
+```yaml
+# rules/taxonomies/finance_jrt0197.yaml 示例
+ner_entity_mapping:           # 实体类型→等级显式映射
+  MEDICAL_DISEASE: "C3"       # 金融体系下疾病实体统一为 C3
+  MEDICATION: "C2"            # 药物降为 C2
+  GENOMIC_HINT: "C4"          # 基因信息升为 C4
+
+ner_sensitive_keywords:       # 自定义敏感关键词
+  - "内幕交易"
+  - "账户密码"
+
+ner_label_mapping:            # 覆盖内置 NER 原始标签映射
+  dis: "FINANCE_DISEASE_PROXY"
+
+ner_trigger_max_rank: 2       # 金融体系限制 NER 仅在 C1/C2 时触发
+```
+
+### 2.9 NER 分类分级与脱敏抹平的联动机制
+
+NER 层不仅参与分类分级，其识别结果还直接驱动下游脱敏策略的选择与执行。
+本节详述 NER → 分类 → 脱敏的完整联动链路。
+
+#### 2.9.1 联动架构总览
+
+```
+NER 驱动的分类→脱敏联动链路
+═══════════════════════════════
+
+  原始文本 / 图像
+    │
+    ▼
+  ┌──────────────────────────────────────────────────────┐
+  │  Layer-2 NER 实体识别                                 │
+  │  提取: 疾病/药物/手术/身体部位/基因/检查项目...       │
+  │  输出: [{label, text, confidence}, ...]               │
+  └──────────────────────────────────────────────────────┘
+    │                          │
+    ▼                          ▼
+  ┌────────────────────┐  ┌──────────────────────────────┐
+  │  分类分级路径        │  │  脱敏抹平路径                 │
+  │  实体→SecurityTag   │  │  分类结果→脱敏策略选择         │
+  │  →等级裁定          │  │  →字段级 masking / 图像打码    │
+  │  →final_level      │  │  →sanitized_value             │
+  └────────────────────┘  └──────────────────────────────┘
+    │                          │
+    ▼                          ▼
+  FieldClassificationResult   sanitized_value (抹平产物)
+  {final_level, confidence,    ├─ 文本: masking 模块字段级脱敏
+   engine_layer, tags}         └─ 图像: image_redaction 打码
+```
+
+#### 2.9.2 NER 实体类型驱动的分类决策
+
+NER 识别的实体类型通过 `_run_ner()` 映射为 `SecurityTag`，每个标签携带 `category` 属性，
+该 category 直接决定下游脱敏模块的字段类型识别（`FieldType`）和脱敏操作选择：
+
+| NER 实体类型 | SecurityTag.category | 敏感度等级 | 下游脱敏策略 |
+|---|---|---|---|
+| `GENOMIC_HINT` | `GENOMIC_HINT` | L5（极敏感） | 完全遮蔽 / HMAC 哈希 |
+| `MEDICAL_DISEASE` (高敏病种) | `HIGH_RISK_MEDICAL_L5` | L5 | 完全遮蔽 + 人工复核 |
+| `MEDICAL_DISEASE` (敏感病种) | `MEDICAL_SENSITIVE_DISEASE` | L4 | 泛化替换 / 上位词替换 |
+| `MEDICAL_DISEASE` (普通) | `MEDICAL_DISEASE` | L3 | 掩码 / K-匿名泛化 |
+| `MEDICATION` | `MEDICATION` | L3 | 药物类别泛化（如"二甲双胍"→"降糖药"） |
+| `SURGERY` | `SURGERY` | L3 | 手术类型泛化 |
+| `BODY_PART` | `BODY_PART` | L3 | 身体系统上位泛化 |
+| `EXAMINATION` | `EXAMINATION` | L3 | 检查类别泛化 |
+
+> **注意**：NER 产出的 `SecurityTag.category` 与 masking 模块的 `FieldType` 枚举
+> 是两个独立的分类体系——前者用于**敏感度分级**，后者用于**字段名模式匹配脱敏**。
+> 两者的联动发生在 `service.py` 编排层：分类结果决定该字段"需要多强的脱敏"，
+> masking 模块根据字段名/分类 category 决定"用什么方式脱敏"。
+
+#### 2.9.3 文本脱敏抹平 (Sanitization) 联动
+
+当调用方传入 `sanitize=True` 时，漏斗根据分类结果执行不同粒度的文本抹平：
+
+**1. 字段级结构化脱敏（masking 模块）**
+
+masking 模块（`privacy/masking.py`）根据字段名自动识别类型并施加对应脱敏：
+
+```python
+# masking 模块字段类型识别与脱敏策略
+FieldType.MOBILE   → 手机号掩码: 138****1234
+FieldType.ID_CARD  → 身份证掩码: 330801********0789
+FieldType.NAME     → 姓名掩码: 张*三
+FieldType.BANK_CARD → 银行卡掩码: 6222****1234
+FieldType.EMAIL    → 邮箱掩码: z***@example.com
+FieldType.ADDRESS  → 地址截断: 浙江省***
+FieldType.DEFAULT  → 通用掩码: 保留首尾各1字符
+```
+
+**2. LLM 融合脱敏（Layer-3 联合推断）**
+
+当 `sanitize=True` 传入 LLM 适配器时，LLM 引擎（`Qwen3.5-0.8B-Privacy-Classifier-Smoother`）
+在分类的同时输出 `sanitized_text`——将分类与脱敏合并在一次推理中完成：
+
+- 身份证号 → 星号化: `330801********0789`
+- 年龄 → K-匿名区间重写: `45岁` → `[40,50]`
+- 敏感疾病名 → 上位泛化: `艾滋病` → `慢性传染病`
+- 具体药物名 → 类别泛化: `二甲双胍` → `口服降糖药`
+
+LLM 融合脱敏的优势在于能理解上下文语义：
+- "他拿了那个免疫靶向药" → 识别为"靶向治疗药物"并泛化
+- "既往有HIV阳性病史" → 同时处理疾病名和感染状态
+
+**3. 脱敏结果传递**
+
+```
+FunnelResult.sanitized_value
+  │
+  ├─ 文本输入 + sanitize=True
+  │   ├─ 图像字段 → image_redaction 打码产物 (路径/Base64)
+  │   └─ 非图像字段 → 空字符串 (文本脱敏由 masking 模块在外部处理)
+  │
+  └─ FieldClassificationResult.sanitized_value
+      → 由 REST/gRPC 响应返回给调用方
+      → 调用方据此替换原始数据
+```
+
+#### 2.9.4 图像脱敏抹平 (Image Redaction) 联动
+
+当分类结果判定输入包含图像/影像（场景 C）且 `sanitize=True` 时，
+漏斗调用 `image_redaction.sanitize_image_input()` 生成打码产物：
+
+```
+图像打码执行流程
+════════════════
+
+  输入: 图像文件路径 / Base64 Data URI
+    │
+    ├─① 输入类型识别
+    │   ├─ 文件路径 (.jpg/.png/.dcm/.dicom...) → 沙箱校验
+    │   ├─ Base64 Data URI (data:image/...) → 解码
+    │   └─ 不匹配 → 返回原文或失败占位符
+    │
+    ├─② 安全防护 (fail-closed)
+    │   ├─ 路径穿越防护: resolve() + 白名单目录前缀匹配
+    │   ├─ Symlink 逃逸拦截: resolve 后重新校验前缀
+    │   ├─ DecompressionBomb: MAX_IMAGE_PIXELS = 25M
+    │   └─ OOM 防护: 超 2048×2048 自动下采样 (LANCZOS)
+    │
+    ├─③ 敏感区域遮挡
+    │   ├─ 默认遮挡: 头部 16% + 底部 18%
+    │   │   (覆盖姓名/诊断文字/签名区域)
+    │   └─ 自定义 boxes: [(ymin, xmin, ymax, xmax)] 比例/像素坐标
+    │
+    ├─④ 输出与清理
+    │   ├─ 文件路径: sha256(文件名)[:12] 匿名命名 + 原子替换
+    │   ├─ Base64: 统一输出 PNG 格式
+    │   └─ 磁盘防满: 自动清理超过 200 个旧文件
+    │
+    └─⑤ DICOM 等无法安全派生的格式 → 返回 [IMAGE-REDACTION-FAILED]
+```
+
+**安全约束**：
+- 图像打码仅在 `sanitize=True` 时执行——纯分类请求不产生文件读写副作用
+- 路径白名单通过 `PRIVACY_IMAGE_ALLOWED_DIRS` 环境变量配置
+- DICOM 格式因无法安全派生为普通图像，直接返回失败占位符（fail-closed）
+
+#### 2.9.5 NER 分类结果与脱敏策略的编排关系
+
+`service.py` / `funnel.py` 作为编排层，将 NER 分类结果与脱敏策略桥接：
+
+```
+编排层决策逻辑 (service.py 视角)
+══════════════════════════════════
+
+  classify_field(field_name, value, sanitize=True)
+    │
+    ├─ Step 1: 漏斗分类 → FunnelResult
+    │   ├─ final_level = "L4" (NER 识别到敏感疾病)
+    │   ├─ tags = [{category: "MEDICAL_SENSITIVE_DISEASE", ...}]
+    │   └─ engine_layer = "L2_SMALL_NER"
+    │
+    ├─ Step 2: 根据 final_level 选择脱敏强度
+    │   ├─ L5 (极敏感): 完全遮蔽 + HMAC 哈希 + 人工复核
+    │   ├─ L4 (高敏感): 泛化替换 / LLM 融合脱敏
+    │   ├─ L3 (中敏感): 掩码 / K-匿名泛化
+    │   ├─ L2 (低敏感): 简单掩码
+    │   └─ L1 (公开):   不脱敏
+    │
+    ├─ Step 3: 执行脱敏
+    │   ├─ 文本字段 → masking.mask_value(field_name, value)
+    │   ├─ 图像字段 → image_redaction.sanitize_image_input(value)
+    │   └─ LLM sanitize=True → LLM 同时输出分类+脱敏文本
+    │
+    └─ Step 4: 返回 FieldClassificationResult
+        ├─ final_level, confidence, tags, engine_layer
+        └─ sanitized_value (脱敏后的值)
+```
+
+#### 2.9.6 NER 脱敏联动的降级与容错
+
+NER → 分类 → 脱敏链路的每个环节均有独立的降级策略，确保整体流程不崩溃：
+
+| 故障场景 | 降级行为 | 脱敏影响 |
+|---|---|---|
+| NER 后端全部不可用 | `extract()` 返回 `[]`，跳过 Layer-2 | 分类回退到 L1 规则 + L3 LLM；脱敏由 masking 模块兜底 |
+| NER 门禁拦截（PII短字段） | 跳过 Layer-2 | 这些字段由 L1 规则完全覆盖，脱敏不受影响 |
+| NER 置信度低于 `min_tag_confidence` | 标签仅作审计记录，不参与等级计算 | 不影响脱敏策略选择 |
+| LLM 融合脱敏失败 | `sanitized_text` 为空 | 回退到 masking 模块的字段级脱敏 |
+| 图像打码失败 | `sanitized_value` 留空，记录 warning | 分类结果不受影响，仅脱敏产物缺失 |
+| 图像路径沙箱校验失败 | 返回 `[IMAGE-REDACTION-FAILED]` | 拒绝处理，防止任意文件读取 |
 
 ---
 

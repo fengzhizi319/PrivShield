@@ -1,9 +1,9 @@
 """真实 NER / LLM 模型冒烟测试 / Real Model Smoke Tests.
 
-这些测试要求 .models/ 目录下已下载 NER 与 Qwen2-VL 模型，并且当前环境安装了
+这些测试要求 .models/ 目录下已下载 NER 与 Qwen3.5-0.8B 模型，并且当前环境安装了
 [ml] 可选依赖（torch/transformers/onnxruntime/modelscope 等）。
 
-由于加载 4.2GB 的本地大模型非常耗时，所有测试都标记为 slow + real_models，
+由于加载本地大模型非常耗时，所有测试都标记为 slow + real_models，
 常规 CI 运行时应使用 `-m "not real_models"` 跳过。
 """
 
@@ -28,6 +28,8 @@ class TestRealNerAdapter:
 
         text = "患者诊断为糖尿病和高血压"
         entities = adapter.extract(text)
+        print(f"Extracted entities: {entities}")
+        # Extracted entities: [{'text': '糖尿病', '糖尿病label': 'MEDICAL_DISEASE', 'confidence': 1.0},{'text': '高血压', 'label': 'MEDICAL_DISEASE', 'confidence': 1.0}]
 
         labels = {ent["label"] for ent in entities}
         assert "MEDICAL_DISEASE" in labels
@@ -36,11 +38,20 @@ class TestRealNerAdapter:
 
 
 class TestRealLlmAdapter:
-    """使用 .models/Qwen2-VL-2B-Instruct 真实模型验证 LLM 分类。"""
+    """使用 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother 真实模型验证 LLM 分类。"""
 
-    def test_real_llm_loads_and_returns_structured_result(self):
-        """LlmAdapter 应能加载本地 Qwen2-VL 并返回含 final_level 的结构化结果。"""
-        adapter = LlmAdapter()
+    def test_real_llm_loads_and_returns_structured_result(self, monkeypatch):
+        """LlmAdapter 应能加载本地 Qwen3.5-0.8B 并返回含 final_level 的结构化结果。"""
+        # 强制使用本地 PyTorch 后端，避免 vllm.env 将 provider 设为 HTTP API
+        # （本地无 vLLM 服务会导致请求失败返回 None）。
+        # 清空 PRIVACY_ENV_PROFILE 阻止 load_env_file() 加载 config/env/vllm.env，
+        # 重置 env loader 缓存，防止 load_env_file() 覆盖 monkeypatch 的值。
+        import privacy_local_agent.env_loader as _env_mod
+        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "")
+        monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "qwen3")
+        _env_mod._ENV_LOADED = False
+
+        adapter = LlmAdapter(".models/Qwen3.5-0.8B-Privacy-Classifier-Smoother")
         assert adapter.is_available, "LLM 初始化失败，请检查模型文件与依赖"
 
         result = adapter.classify(
@@ -48,13 +59,19 @@ class TestRealLlmAdapter:
             upstream_level="L3",
             upstream_confidence=0.6,
         )
+        print(f"LLM result: {result}")
         assert result is not None
         assert "final_level" in result
         assert "confidence" in result
         assert 0.0 <= result["confidence"] <= 1.0
 
-    def test_real_llm_arbitrate_returns_structured_result(self):
+    def test_real_llm_arbitrate_returns_structured_result(self, monkeypatch):
         """LlmAdapter.arbitrate 应能组装冲突上下文并返回裁定结果。"""
+        import privacy_local_agent.env_loader as _env_mod
+        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "")
+        monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "qwen3")
+        _env_mod._ENV_LOADED = False
+
         from privacy_local_agent.dynclassification.models import (
             CategoryDef,
             DomainTaxonomy,

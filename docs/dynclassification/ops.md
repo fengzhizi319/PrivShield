@@ -27,6 +27,7 @@
   - [6.1 .env 配置文件多模式切换](#61-env-配置文件多模式切换)
   - [6.2 vLLM 运行服务启动与运维参数](#62-vllm-运行服务启动与运维参数)
   - [6.3 验证与冒烟测试命令](#63-验证与冒烟测试命令)
+  - [6.4 本地 PyTorch 推理环境依赖要求](#64-本地-pytorch-推理环境依赖要求)
 - [7. 零停机在线无痛升级指南 (Zero-Downtime Hot Upgrade)](#7-零停机在线无痛升级指南-zero-downtime-hot-upgrade)
   - [7.1 升级架构与三分层策略](#71-升级架构与三分层策略)
   - [7.2 算法规则与分类策略在线热重载 (0ms 停机)](#72-算法规则与分类策略在线热重载-0ms-停机)
@@ -347,6 +348,27 @@ PRIVACY_LLM_API_KEY=ollama
 ```bash
 # 运行 vLLM 集成与 LLM 适配器全套冒烟测试
 PYTHONPATH=. pytest tests/dynclassification/test_vllm_llm_integration.py tests/dynclassification/test_llm_adapter.py -v
+```
+
+---
+
+### 6.4 本地 PyTorch 推理环境依赖要求
+
+使用本地 PyTorch 后端（`PRIVACY_LLM_PROVIDER=qwen3`）运行微调模型 `Qwen3.5-0.8B-Privacy-Classifier-Smoother` 时，除 `requirements-ml.txt` 基础依赖外，还需注意以下已验证的版本组合（完整安装命令与踩坑记录见 [cuda_sm120_setup.md 第 6 节](cuda_sm120_setup.md#6-layer-3-qwen35-微调模型本地-pytorch-推理环境搭建)）：
+
+| 包 | 最低版本 | 说明 |
+|---|---|---|
+| `transformers` | `>=5.14.0` | 4.x 未注册 `qwen3_5`（`qwen3_next`）架构，加载会报 `KeyError` |
+| `huggingface_hub` | `>=1.27.0` | transformers 5.x 硬依赖，旧版 0.x API 不兼容 |
+| `einops` | `>=0.8.0` | `Qwen3_5ForCausalLM` 加载硬依赖，缺失则 `ModuleNotFoundError` |
+| `fla-core` | `>=0.5.2` | 线性注意力层 triton kernel；缺失回退实现会产生损坏/截断 JSON |
+| `triton` | `3.6.0`（WSL） | 3.7.1 在 WSL 下报 `0 active drivers` 无法发现 GPU，需降级 |
+| `causal-conv1d` | 可选 | fast-path 加速，缺失仅影响性能 |
+
+安装后运行真实模型端到端测试验证：
+
+```bash
+PYTHONPATH=. pytest 'tests/dynclassification/test_real_models.py::TestRealLlmAdapter::test_real_llm_loads_and_returns_structured_result' -v -m ''
 ```
 
 ---

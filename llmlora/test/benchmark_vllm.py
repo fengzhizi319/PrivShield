@@ -31,7 +31,7 @@ from llmlora.src.dataset.loader import render_prompt_text, load_jsonl
 def run_vllm_benchmark(
     model_path: str,
     test_data_path: str,
-    batch_sizes: List[int] = [1, 4, 16],
+    batch_sizes: List[int] = [1, 4],
     gpu_utilization: float = 0.5,
     max_model_len: int = 4096,
 ) -> Dict[str, Any]:

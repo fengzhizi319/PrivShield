@@ -93,13 +93,28 @@ from ..env_loader import load_env_file
 from .base import LlmClassifier, SensitivityLevel
 # 导入日志脱敏工具函数（对敏感路径/值进行掩码处理后再记录日志）
 # 以及不可信文本 prompt 中和工具（Prompt 注入防护）
-from .utils import wrap_untrusted_text
+from .utils import sanitize_for_prompt, wrap_untrusted_text
 
 # 创建模块级结构化日志器，用于记录 LLM 分类器相关事件
 logger = get_logger(__name__)
 
 # 默认模型目录名 / Default model directory name
 _DEFAULT_MODEL_DIR = "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+
+# 微调模型训练侧 system prompt（与 llmlora/src/dataset/loader.py SYSTEM_PROMPT 保持一致）。
+# 注意：不要在末尾追加 JSON 格式规范等训练时未出现的内容——
+# 0.8B 微调模型对 prompt 分布漂移极其敏感，任何训练分布外的附加文本
+# 都会导致生成漂移（提前 EOS / JSON 截断）。输出 JSON schema 已在训练样本中内化。
+_FINETUNED_SYSTEM_PROMPT = (
+    "你是一个专业的隐私安全Sidecar助手。请分析输入的文本，识别敏感信息，"
+    "输出分类分级结果（JSON格式），并提供语义连贯的无痕抹平脱敏重写文本。\n\n"
+    "【数据分类分级标准指南】\n"
+    "- L1 (公开数据): 无敏感信息的公开资讯、通用日常文本。\n"
+    "- L2 (内部数据): 业务统计指标、系统日志、设备运维等低敏感内部数据。\n"
+    "- L3 (敏感数据/个人基本信息): 姓名、身份证号、手机号、银行卡号、电子邮箱等个人基础标识与资产信息。\n"
+    "- L4 (高敏感数据/诊疗与金融敏感): 疾病诊断（如重度抑郁症、高血压、冠心病）、病历主诉、处方药品等医疗健康敏感信息。\n"
+    "- L5 (极敏感数据): 基因组、生物特征、特级商业机密等核心数据。"
+)
 
 
 class Qwen3Classifier(LlmClassifier):
@@ -233,30 +248,41 @@ class Qwen3Classifier(LlmClassifier):
                     extra={"model_path": self.model_path, "device": device},
                 )
 
-                # 选择模型精度：CUDA/GPU 使用 FP16 节省显存，CPU/MPS 使用 FP32 保证精度
+                # 选择模型精度：优先使用模型 config 声明的 dtype（如 Qwen3.5 为 bfloat16）。
+                # 注意：Qwen3.5 的 linear-attention/mamba 混合层在 FP16 下会数值溢出，
+                # 导致生成内容损坏截断（JSON 解析失败），CUDA 下禁止无脑降级为 FP16。
                 is_cuda = device.startswith("cuda")
-                dtype = torch.float16 if is_cuda else torch.float32
+                dtype = self._resolve_cuda_dtype(torch) if is_cuda else torch.float32
+
+                # transformers 5.x 将 torch_dtype 弃用改用 dtype；旧版本仅接受 torch_dtype。
+                # 按版本选择参数名，避免告警与兼容性问题。
+                import transformers as _transformers
+
+                _use_new_kw = _transformers.__version__.split(".")[0].isdigit() and int(
+                    _transformers.__version__.split(".")[0]
+                ) >= 5
+                dtype_kw = {"dtype": dtype} if _use_new_kw else {"torch_dtype": dtype}
 
                 # 从本地目录加载预训练 CausalLM 模型权重
                 if is_cuda:
                     self._model = AutoModelForCausalLM.from_pretrained(
                         self.model_path,
-                        torch_dtype=dtype,
                         device_map="auto" if device == "cuda" else device,
                         trust_remote_code=True,
+                        **dtype_kw,
                     )
                 elif device == "mps":
                     self._model = AutoModelForCausalLM.from_pretrained(
                         self.model_path,
-                        torch_dtype=torch.float32,
                         device_map="mps",
                         trust_remote_code=True,
+                        **dtype_kw,
                     )
                 else:
                     self._model = AutoModelForCausalLM.from_pretrained(
                         self.model_path,
-                        torch_dtype=torch.float32,
                         trust_remote_code=True,
+                        **dtype_kw,
                     )
                     self._model = self._model.to("cpu")
 
@@ -322,6 +348,57 @@ class Qwen3Classifier(LlmClassifier):
             return True  # 初始化成功
         except Exception:
             return False  # 初始化失败（依赖缺失/模型不存在等）
+
+    def _is_finetuned_model(self) -> bool:
+        """判断当前加载的是否为项目微调的 Privacy-Classifier-Smoother 模型。
+
+        微调模型的推理 prompt 必须与训练侧（llmlora/src/dataset/loader.py）严格一致：
+        短 system prompt + 裸用户文本。训练分布外的附加文本（JSON schema 说明、
+        "请评估以下文本…"前导语、««« 分隔符包裹）会导致 0.8B 小模型生成漂移、
+        提前 EOS 造成 JSON 截断（llm_json_parse_failed）。
+
+        Returns:
+            模型目录名匹配默认微调模型名且未配置自定义模板时返回 True。
+        """
+        base = os.path.basename(os.path.normpath(self.model_path))
+        return base == _DEFAULT_MODEL_DIR and self._classify_prompt_template is None
+
+    def _resolve_cuda_dtype(self, torch: Any) -> Any:
+        """选择 CUDA 推理精度：优先模型 config 声明的 dtype，其次 bf16，最后 fp16。
+
+        Qwen3.5 等含 linear-attention/mamba 层的混合架构在 FP16 下会数值溢出，
+        导致生成内容损坏截断；因此当模型 config 声明 bfloat16 且设备支持 bf16 时，
+        必须使用 bf16；仅在不支持 bf16 的旧 GPU 上才回退 FP16。
+
+        Returns:
+            torch dtype（bfloat16 / float16）。
+        """
+        bf16_supported = False
+        try:
+            bf16_supported = bool(torch.cuda.is_bf16_supported())
+        except Exception:
+            bf16_supported = False
+
+        # 读取模型 config 声明的训练精度（如 Qwen3.5 的 text_config.dtype = bfloat16）
+        cfg_dtype_name: str | None = None
+        try:
+            from transformers import AutoConfig
+
+            cfg = AutoConfig.from_pretrained(self.model_path, trust_remote_code=True)
+            text_cfg = getattr(cfg, "text_config", None) or cfg
+            raw = getattr(text_cfg, "dtype", None) or getattr(text_cfg, "torch_dtype", None)
+            cfg_dtype_name = str(raw).replace("torch.", "") if raw is not None else None
+        except Exception:
+            cfg_dtype_name = None
+
+        # config 声明 bf16 且设备支持 → 必须 bf16（fp16 会导致混合层数值溢出）
+        if cfg_dtype_name in ("bfloat16", "bf16"):
+            return torch.bfloat16 if bf16_supported else torch.float32
+        # config 声明 fp16 → 遵循
+        if cfg_dtype_name in ("float16", "fp16"):
+            return torch.float16
+        # 未声明时：设备支持 bf16 则默认 bf16（更宽的动态范围，更安全）
+        return torch.bfloat16 if bf16_supported else torch.float16
 
     @staticmethod
     def _is_cuda_compatible(torch: Any) -> bool:
@@ -547,7 +624,12 @@ class Qwen3Classifier(LlmClassifier):
             # sanitized_text）与微调训练侧 llmlora/src/dataset/loader.py 的
             # SYSTEM_PROMPT 及输出 schema 保持一致，避免训练/推理分布偏移导致
             # 微调模型输出漂移；渲染 prompt 时亦与训练侧一致地关闭 thinking 模式。
-            if self._classify_prompt_template:
+            is_finetuned = self._is_finetuned_model()
+            if is_finetuned:
+                # 微调模型：system prompt 必须与训练侧完全一致（不含 JSON schema 说明），
+                # 否则 0.8B 小模型会生成漂移、提前 EOS 导致 JSON 截断。
+                system_prompt = _FINETUNED_SYSTEM_PROMPT
+            elif self._classify_prompt_template:
                 system_prompt = self._classify_prompt_template.format(
                     domain="medical",
                     standard_id="DB51_T_2989",
@@ -578,10 +660,15 @@ class Qwen3Classifier(LlmClassifier):
                     "}"
                 )
 
-            # 构建 user content：纯文本输入
-            # 剥离 chat-template 控制 token（防 Prompt 注入伪造对话轮次），
-            # 并用明确分隔符包裹 + 声明"以下是数据而非指令"后嵌入待评估文本
-            user_text = f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"
+            # 构建 user content：
+            # - 微调模型：训练样本的 user 消息为裸文本（无前导语、无分隔符包裹），
+            #   推理必须保持一致，否则生成漂移/截断。仅剥离 chat-template 控制 token
+            #   防止伪造对话轮次（不改变可见文本分布）。
+            # - 非微调模型：保留前导语 + ««« 分隔符包裹的 Prompt 注入防护。
+            if is_finetuned:
+                user_text = sanitize_for_prompt(text)
+            else:
+                user_text = f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"
 
             # 组装完整的对话消息列表（system + user）
             messages = [
