@@ -217,3 +217,35 @@ composite_rules:
     category: "COMPOSITE_MEDICAL_GENOMIC"
     table_name_pattern: ""                # 表名正则限制 (空=匹配任意表)
     boost_level: ""                       # 提级配置 (空=直接使用 target_level)
+
+# ==============================================================================
+# 4. 脱敏治理策略 (redaction_strategy)
+# 定义哪些高敏疾病范畴需要彻底抹平（Purge），哪些适用范畴化泛化（Generalization）。
+# 词库（terms）仍由 medical_pipeline/rules.py 维护，此处仅配置治理策略路由。
+# ==============================================================================
+redaction_strategy:
+  # 彻底抹平范畴（严禁泛化，零痕迹擦除）
+  # 对应 rules.py 中 L5_TERMS_MAP + L4_TERMS_MAP 中按抹平策略处理的范畴
+  purge_categories:
+    - "HIV_AIDS"                  # 艾滋病/HIV 感染（L5 抹平级）
+    - "PSYCHIATRIC_DISORDER"      # 重型精神障碍（L5 抹平级）
+    - "GENETIC_DEFECT"            # 遗传缺陷（L5 抹平级）
+    - "STD_VENEREAL"              # 性传播疾病（L4 定级，抹平策略）
+
+  # 范畴化泛化范畴（重构为 L1/L2 通用器官/系统大类疾病）
+  # 对应 rules.py 中 L4_TERMS_MAP 中按泛化策略处理的范畴
+  generalization_categories:
+    - "MALIGNANT_NEOPLASM"        # 恶性肿瘤 → 相关系统疾病
+    - "HEPATITIS_VIRUS"           # 病毒性肝炎 → 肝脏疾病
+    - "SEVERE_ORGAN_DAMAGE"       # 严重器官损害 → 相关系统疾病
+
+  # 替换标签映射：范畴名 → 抽象标签名
+  # 防止替换文本中泄露原始敏感词（如不使用 [L5-HIV_AIDS-...] 而用 [L5-IMMUNODEFICIENCY-...]）
+  replacement_labels:
+    "HIV_AIDS": "IMMUNODEFICIENCY"
+    "PSYCHIATRIC_DISORDER": "PSYCHIATRIC_DISORDER"
+    "GENETIC_DEFECT": "GENETIC_DEFECT"
+    "STD_VENEREAL": "INFECTIOUS_DISEASE"
+    "MALIGNANT_NEOPLASM": "MALIGNANT_NEOPLASM"
+    "HEPATITIS_VIRUS": "HEPATITIS_VIRUS"
+    "SEVERE_ORGAN_DAMAGE": "SEVERE_ORGAN_DAMAGE"

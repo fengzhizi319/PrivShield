@@ -29,6 +29,7 @@
 确保已安装 `privacy_local_agent` 和 `console/backend` 的虚拟环境依赖，并已构建前端（`console/web/dist` 存在），然后执行：
 
 ```bash
+bash ./console/scripts/dev-start-all.sh
 ```
 
 该脚本会同时启动 `privacy_local_agent` 和测试控制台后端，等待健康检查后输出访问地址，按 `Ctrl+C` 停止所有服务。

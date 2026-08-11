@@ -7,46 +7,46 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  ClassificationFunnel.classify_field(field_name, value)                 │
 │                                                                         │
-│  Step 1: Layer-1 规则引擎评估                                             │
+│  Step 1: Layer-1 规则引擎评估                                              │
 │    tags, suppressed_tags = engine.evaluate(field_name, value)           │
 │    confidence = max(tag.confidence for tag in tags) or 0.0              │
 │    engine_layer = "L1_RULE"                                             │
 │                                                                         │
 │  Step 2: 冲突检测（精细化）                                                 │
-│    normal_rule_tags = 普通规则标签（非降级）                              │
-│    downgrade_tags = 降级标签                                            │
-│    has_conflict = 两者共存 AND max_level(normal) != max_level(downgrade) │
+│    normal_rule_tags = 普通规则标签（非降级）                                 │
+│    downgrade_tags = 降级标签                                              │
+│    has_conflict = 两者共存 AND max_level(normal) != max_level(downgrade)  │
 │                                                                         │
 │  Step 3: Layer-2 NER (可选)                                              │
 │    触发: policy.enable_ner AND (无标签 OR 等级 <= 阈值)                     │
 │    ner_tags = ner_adapter.extract(value)                                │
-│    → 映射为 SecurityTag, 追加到 tags                                      │
+│    → 映射为 SecurityTag, 追加到 tags                                       │
 │    → engine_layer = "L2_SMALL_NER"                                      │
 │                                                                         │
 │  Step 4: 置信度策略 + Layer-3 LLM (可选)                                   │
-│    ┌────────────────────────────────────────────────────────────────┐    │
-│    │  if has_conflict:                                              │    │
-│    │    if policy.enable_llm_arbitration AND llm.is_available:      │    │
-│    │      → LLM 仲裁: 裁定等级 + 修正置信度                              │    │
-│    │      → engine_layer = "L3_LLM"                                 │    │
-│    │    else:                                                       │    │
-│    │      → Phase 1 衰减: confidence = policy.conflict_confidence    │    │
-│    │      → needs_human_review = policy.conflict_needs_review       │    │
-│    │  elif confidence < policy.llm_confidence_threshold:            │    │
-│    │    if policy.enable_llm AND llm.is_available:                  │    │
-│    │      → LLM 深度分类                                              │    │
-│    │      → engine_layer = "L3_LLM"                                 │    │
-│    └────────────────────────────────────────────────────────────────┘    │
-│                                                                          │
+│    ┌────────────────────────────────────────────────────────────────┐   │
+│    │  if has_conflict:                                              │   │
+│    │    if policy.enable_llm_arbitration AND llm.is_available:      │   │
+│    │      → LLM 仲裁: 裁定等级 + 修正置信度                              │   │
+│    │      → engine_layer = "L3_LLM"                                 │   │
+│    │    else:                                                       │   │
+│    │      → Phase 1 衰减: confidence = policy.conflict_confidence    │   │
+│    │      → needs_human_review = policy.conflict_needs_review       │   │
+│    │  elif confidence < policy.llm_confidence_threshold:            │   │
+│    │    if policy.enable_llm AND llm.is_available:                  │   │
+│    │      → LLM 深度分类                                              │   │
+│    │      → engine_layer = "L3_LLM"                                 │   │
+│    └────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
 │  Step 5: 计算最终等级 + 构造 FunnelResult                                   │
-│    - LLM 仲裁成功时直接使用 LLM 裁定等级（不再走 max_level）                  │
-│    - 否则: 排除降级标签 + 过滤低置信度标签后取 max_level                      │
+│    - LLM 仲裁成功时直接使用 LLM 裁定等级（不再走 max_level）                    │
+│    - 否则: 排除降级标签 + 过滤低置信度标签后取 max_level                        │
 │    final_level = llm_level or resolve_level(effective_tags)             │
-│                                                                          │
+│                                                                         │
 │  安全约束（fail-closed）:                                                  │
-│    - 场景 A 仲裁: LLM 裁定等级必须落在冲突标签等级集合内，否则拒绝并强制人工复核 │
-│    - 场景 B/C: LLM 裁定等级低于规则/上游等级时拒绝降级，保留原等级并人工复核     │
-│    - LLM 返回的 confidence 非数值时回退上游置信度，不崩溃                     │
+│    - 场景 A 仲裁: LLM 裁定等级必须落在冲突标签等级集合内，否则拒绝并强制人工复核      │
+│    - 场景 B/C: LLM 裁定等级低于规则/上游等级时拒绝降级，保留原等级并人工复核         │
+│    - LLM 返回的 confidence 非数值时回退上游置信度，不崩溃                       │
 └─────────────────────────────────────────────────────────────────────────┘
 """
 

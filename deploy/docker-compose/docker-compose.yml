@@ -72,24 +72,40 @@ services:
       target: core
     image: privacy-local-agent:0.1.0
     container_name: privacy-local-agent
+    # 读取项目根目录 .env 作为基础配置（运维统一入口）
+    # Load project root .env as base config (single ops entry point)
+    env_file:
+      - path: ../../.env
+        required: false
     ports:
       - "8079:8079"   # REST API
       - "50051:50051" # gRPC
     environment:
+      # ── 容器覆盖项 / Container overrides ──
+      # 容器内必须绑定 0.0.0.0（.env 中的 127.0.0.1 仅适用于宿主机开发）
+      # Must bind 0.0.0.0 inside container (.env 127.0.0.1 is for host dev only)
       PRIVACY_REST_HOST: "0.0.0.0"
-      PRIVACY_REST_PORT: "8079"
       PRIVACY_GRPC_HOST: "0.0.0.0"
-      PRIVACY_GRPC_PORT: "50051"
+      # 容器环境推荐 JSON 日志格式
+      # JSON log format recommended for container environments
+      PRIVACY_LOG_FORMAT: "json"
+      # 容器内 profile 配置挂载路径（通过 volume 映射）
+      # Profile config mount path inside container (via volume mount)
       PRIVACY_PROFILE: "/etc/privacy-local-agent/privacy-profile.yaml"
-      PRIVACY_LOG_LEVEL: "INFO"
-      PRIVACY_LOG_FORMAT: "json"  # 容器环境推荐 JSON 日志
-      # 持久化预算数据库
-      # Persist budget database
+      # 持久化预算数据库路径
+      # Persisted budget database path
       PRIVACY_BUDGET_DB: "/data/budget/budget.db"
-      # 如需关联 vLLM 服务，取消注释：
-      # To connect vLLM service, uncomment:
-      # PRIVACY_ENV_PROFILE: "vllm"
+      # ── 可选：关联 vLLM 推理服务 / Optional: connect vLLM inference service ──
+      # 取消注释以下行并在 .env 中设置 PRIVACY_ENV_PROFILE=vllm
+      # Uncomment below and set PRIVACY_ENV_PROFILE=vllm in .env
       # PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
+      # ── 可选：安全配置 / Optional: security config ──
+      # 生产环境请在 .env 中取消注释 TLS/Auth/RateLimit 配置
+      # For production, uncomment TLS/Auth/RateLimit in .env
+      # PRIVACY_TLS_ENABLED: "true"
+      # PRIVACY_TLS_CERT_FILE: "/certs/tls.crt"
+      # PRIVACY_TLS_KEY_FILE: "/certs/tls.key"
+      # PRIVACY_AUTH_ENABLED: "true"
     volumes:
       - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro
       - budget-db:/data/budget

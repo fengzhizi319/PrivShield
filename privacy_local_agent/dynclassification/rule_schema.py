@@ -251,6 +251,47 @@ class CompositeRuleDef(BaseModel):
 
 
 # ===========================================================================
+# 脱敏治理策略 / Redaction Treatment Strategy
+# ===========================================================================
+
+
+class RedactionStrategyDef(BaseModel):
+    """脱敏治理策略定义（YAML 可配置）。 / Redaction Treatment Strategy Definition (YAML-configurable).
+
+    定义哪些高敏疾病范畴需要彻底抹平（Purge），哪些适用范畴化泛化（Generalization）。
+    Defines which high-sensitivity disease categories require purge-only treatment
+    and which are eligible for categorical generalization.
+
+    该模型将原本硬编码在 rules.py 中的 L4/L5 治理策略提升为 YAML 可配置项，
+    使运维/合规团队可在不修改代码的情况下调整治理策略。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # 彻底抹平范畴列表（严禁泛化，零痕迹擦除）。
+    # Purge-only categories (strictly no generalization, zero-trace erasure).
+    # 对应 rules.py 中 L5_TERMS_MAP / L4_TERMS_MAP 的键（如 HIV_AIDS, PSYCHIATRIC_DISORDER, STD_VENEREAL）。
+    purge_categories: list[str] = Field(
+        default_factory=list,
+        description="彻底抹平范畴列表（如 HIV_AIDS, PSYCHIATRIC_DISORDER, STD_VENEREAL）",
+    )
+    # 范畴化泛化范畴列表（重构为低敏通用大类疾病）。
+    # Generalization-eligible categories (rewrite to lower-sensitivity general disease classes).
+    # 对应 rules.py 中 L4_TERMS_MAP 的键（如 MALIGNANT_NEOPLASM, HEPATITIS_VIRUS, SEVERE_ORGAN_DAMAGE）。
+    generalization_categories: list[str] = Field(
+        default_factory=list,
+        description="范畴化泛化范畴列表（如 MALIGNANT_NEOPLASM, HEPATITIS_VIRUS）",
+    )
+    # 替换标签映射：范畴名 -> 抽象标签名（防止替换文本泄露原始敏感词）。
+    # Replacement label mapping: category -> abstract label (prevents leaking sensitive terms in replacements).
+    # 如 {"HIV_AIDS": "IMMUNODEFICIENCY"} 使替换标签为 [L5-IMMUNODEFICIENCY-SENSITIVE-MASKED] 而非 [L5-HIV_AIDS-...]。
+    replacement_labels: dict[str, str] = Field(
+        default_factory=dict,
+        description="替换标签映射: 范畴名 -> 抽象标签名",
+    )
+
+
+# ===========================================================================
 # 规则 Profile 与标准组合 / Rule Profile & Standard Definition
 # ===========================================================================
 
@@ -291,6 +332,13 @@ class RuleProfile(BaseModel):
     # Composite rules evaluated at record level (multi-field combination).
     # 在记录级评估的复合规则（多字段组合）。
     composite_rules: list[CompositeRuleDef] = Field(default_factory=list, description="复合规则列表")
+    # Optional: redaction treatment strategy (which disease categories to purge vs generalize).
+    # Only used by domain profiles that include medical treatment redaction rules (e.g. 'medical').
+    # 可选：脱敏治理策略（哪些疾病范畴需彻底抹平 vs 范畴化泛化）。
+    # 仅用于包含医疗脱敏规则的领域包（如 'medical'）。
+    redaction_strategy: Optional[RedactionStrategyDef] = Field(
+        default=None, description="脱敏治理策略（抹平 vs 泛化范畴配置）"
+    )
 
 
 class StandardDef(BaseModel):

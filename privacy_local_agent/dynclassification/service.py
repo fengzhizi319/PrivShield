@@ -198,8 +198,8 @@ class DynClassificationService:
 
         # 最终安全门禁：任何脱敏后仍残留 L4/L5 高敏文本的情况，整值替换为 [L4-L5-DATA-REMOVED]
         try:
-            from ..medical_pipeline.pipeline import MedicalPrivacyPipeline
-            if MedicalPrivacyPipeline._contains_high_risk_text(new_result.sanitized_value):
+            from ..medical_pipeline.rules import contains_high_risk_text
+            if contains_high_risk_text(new_result.sanitized_value):
                 new_result.sanitized_value = "[L4-L5-DATA-REMOVED]"
         except Exception:
             pass
@@ -236,8 +236,8 @@ class DynClassificationService:
 
         # 最终安全门禁：任何脱敏后仍残留 L4/L5 高敏文本的情况，整值替换为 [L4-L5-DATA-REMOVED]
         try:
-            from ..medical_pipeline.pipeline import MedicalPrivacyPipeline
-            if MedicalPrivacyPipeline._contains_high_risk_text(sanitized):
+            from ..medical_pipeline.rules import contains_high_risk_text
+            if contains_high_risk_text(sanitized):
                 return "[L4-L5-DATA-REMOVED]"
         except Exception:
             pass
@@ -269,8 +269,8 @@ class DynClassificationService:
                 s_text = mask_value(field_name, s_text)
 
             # 最终门禁检查：防止漏网高敏词
-            from ..medical_pipeline.pipeline import MedicalPrivacyPipeline
-            if MedicalPrivacyPipeline._contains_high_risk_text(s_text):
+            from ..medical_pipeline.rules import contains_high_risk_text
+            if contains_high_risk_text(s_text):
                 return "[L4-L5-DATA-REMOVED]"
 
             return s_text

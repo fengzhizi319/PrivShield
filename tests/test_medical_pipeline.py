@@ -900,9 +900,9 @@ def test_icd10_code_classification_and_redaction() -> None:
         assert redact_icd10_code(code) == code, f"{code} 应原样保留"
 
     # 范畴码标签自身不得触发高敏词门禁（防二次命中整值删除）
-    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+    from privacy_local_agent.medical_pipeline.rules import contains_high_risk_text
     for code in l4_cases:
-        assert not MedicalPrivacyPipeline._contains_high_risk_text(redact_icd10_code(code))
+        assert not contains_high_risk_text(redact_icd10_code(code))
 
 
 def test_categorical_department_field_no_false_positive() -> None:
@@ -964,4 +964,175 @@ def test_chinese_and_combined_field_names_support() -> None:
     assert "梅毒" not in san_comb["diagnosis_name (诊断名称)"]
 
 
+# === YAML 可配置脱敏策略测试 ===
+
+
+def test_load_redaction_strategy_from_yaml() -> None:
+    """验证从 YAML 加载脱敏策略配置正确解析 purge/generalization/replacement 三个节。"""
+    from privacy_local_agent.medical_pipeline.rules import load_redaction_strategy
+
+    config = load_redaction_strategy()
+    # YAML 中应定义了 purge_categories
+    assert "HIV_AIDS" in config.purge_categories
+    assert "PSYCHIATRIC_DISORDER" in config.purge_categories
+    assert "GENETIC_DEFECT" in config.purge_categories
+    assert "STD_VENEREAL" in config.purge_categories
+    # YAML 中应定义了 generalization_categories
+    assert "MALIGNANT_NEOPLASM" in config.generalization_categories
+    assert "HEPATITIS_VIRUS" in config.generalization_categories
+    assert "SEVERE_ORGAN_DAMAGE" in config.generalization_categories
+    # 替换标签映射应正确构建
+    assert config.l5_replacement_map["HIV_AIDS"] == "IMMUNODEFICIENCY"
+    assert config.l4_replacement_map["STD_VENEREAL"] == "INFECTIOUS_DISEASE"
+
+
+def test_load_redaction_strategy_fallback_on_missing_yaml() -> None:
+    """验证 YAML 不存在时回退到代码内置默认值。"""
+    from privacy_local_agent.medical_pipeline.rules import load_redaction_strategy
+
+    config = load_redaction_strategy(rules_dir="/nonexistent/path", domain="nonexistent")
+    # 默认值应包含所有 L5 范畴 + STD_VENEREAL
+    assert "HIV_AIDS" in config.purge_categories
+    assert "STD_VENEREAL" in config.purge_categories
+    # 默认值应包含 L4 中非 STD 的范畴
+    assert "MALIGNANT_NEOPLASM" in config.generalization_categories
+    assert "HEPATITIS_VIRUS" in config.generalization_categories
+
+
+def test_pipeline_with_custom_redaction_strategy() -> None:
+    """验证 Pipeline 接受自定义 RedactionStrategyConfig 并正确编译替换标签。"""
+    from privacy_local_agent.medical_pipeline.rules import RedactionStrategyConfig
+
+    custom_strategy = RedactionStrategyConfig(
+        purge_categories=["HIV_AIDS"],
+        generalization_categories=["MALIGNANT_NEOPLASM"],
+        l5_replacement_map={"HIV_AIDS": "CUSTOM_L5_TAG"},
+        l4_replacement_map={"MALIGNANT_NEOPLASM": "CUSTOM_L4_TAG"},
+    )
+    pipeline = MedicalPrivacyPipeline(redaction_strategy=custom_strategy)
+    # 自定义替换标签应生效
+    text = "患者HIV抗体阳性"
+    sanitized = pipeline.sanitize_text(text)
+    assert "CUSTOM_L5_TAG" in sanitized
+    assert "HIV" not in sanitized
+
+
+def test_custom_strategy_controls_redaction_generalization() -> None:
+    """泛化/抹平决策必须由运行时策略控制，而非固定使用代码默认规则。"""
+    from privacy_local_agent.medical_pipeline.rules import RedactionStrategyConfig, redact_medical_text
+
+    default_text = redact_medical_text("母亲有恶性肿瘤家族史。")
+    custom = RedactionStrategyConfig(
+        purge_categories=["MALIGNANT_NEOPLASM"],
+        generalization_categories=[],
+    )
+    custom_text = redact_medical_text("母亲有恶性肿瘤家族史。", strategy=custom)
+    pipeline_text = MedicalPrivacyPipeline(
+        redact_engine="rule", redaction_strategy=custom
+    )._medical_text_sanitizer(
+        "family_history", "母亲有恶性肿瘤家族史。", "L4"
+    )
+
+    assert "相关系统疾病" in default_text
+    assert "恶性肿瘤" not in custom_text
+    assert "相关系统疾病" not in custom_text
+    assert "恶性肿瘤" not in pipeline_text
+    assert "相关系统疾病" not in pipeline_text
+
+
+def test_pipeline_default_strategy_matches_yaml() -> None:
+    """验证默认 Pipeline（无显式策略）从 YAML 加载的策略与手动加载一致。"""
+    from privacy_local_agent.medical_pipeline.rules import load_redaction_strategy
+
+    pipeline = MedicalPrivacyPipeline()
+    yaml_config = load_redaction_strategy()
+    assert pipeline.redaction_strategy.purge_categories == yaml_config.purge_categories
+    assert pipeline.redaction_strategy.generalization_categories == yaml_config.generalization_categories
+    assert pipeline.redaction_strategy.l5_replacement_map == yaml_config.l5_replacement_map
+
+
+def test_contains_high_risk_text_module_level_function() -> None:
+    """验证模块级 contains_high_risk_text 函数与 Pipeline 实例方法行为一致。"""
+    from privacy_local_agent.medical_pipeline.rules import contains_high_risk_text
+
+    pipeline = MedicalPrivacyPipeline()
+    test_cases = [
+        "患者HIV抗体阳性",
+        "血压正帘",
+        "确诊恶性肿瘤",
+        "皮肤性病科",
+    ]
+    for text in test_cases:
+        assert contains_high_risk_text(text) == pipeline._contains_high_risk_text(text), (
+            f"模块级函数与实例方法结果不一致: {text!r}"
+        )
+
+
+def test_contains_high_risk_text_accepts_custom_patterns() -> None:
+    """验证 contains_high_risk_text 支持自定义 patterns 参数检测自定义替换标签。"""
+    from privacy_local_agent.medical_pipeline.rules import (
+        RedactionStrategyConfig,
+        compile_l4_l5_patterns,
+        contains_high_risk_text,
+    )
+
+    # 构建自定义策略，使用非默认替换标签
+    custom = RedactionStrategyConfig(
+        purge_categories=["HIV_AIDS"],
+        l5_replacement_map={"HIV_AIDS": "CUSTOM_IMMUNO"},
+    )
+    custom_l5, custom_l4 = compile_l4_l5_patterns(
+        l5_replacement_map=custom.l5_replacement_map,
+    )
+    custom_patterns = custom_l5 + custom_l4
+
+    # 含自定义替换标签（标准格式）的文本应被检出
+    # 注意：_MASKED_LABEL_RE 会匹配任何 [L4|L5-...-SENSITIVE-MASKED] 格式标签，
+    # 因此无论 patterns 是否自定义，标准格式标签都会被检出（安全门禁的保守策略）。
+    text_with_custom_label = "患者[L5-CUSTOM_IMMUNO-SENSITIVE-MASKED]抗体阳性"
+    assert contains_high_risk_text(text_with_custom_label, patterns=custom_patterns)
+    # 默认 patterns 也会检出标准格式标签（_MASKED_LABEL_RE 不区分标签内容）
+    assert contains_high_risk_text(text_with_custom_label)
+
+    # 非标准格式的裸标签不应被 _MASKED_LABEL_RE 匹配，
+    # 默认 patterns 不含 CUSTOM_IMMUNO 相关模式，故不应检出
+    text_with_bare_label = "患者[CUSTOM_IMMUNO]抗体阳性"
+    assert not contains_high_risk_text(text_with_bare_label)
+
+    # 原始敏感词仍应被检出（无论是否自定义 patterns）
+    assert contains_high_risk_text("患者HIV抗体阳性", patterns=custom_patterns)
+    assert contains_high_risk_text("患者HIV抗体阳性")
+
+
+def test_pipeline_safety_check_detects_custom_labels() -> None:
+    """验证 Pipeline 的 _contains_high_risk_text 能检测自定义替换标签。"""
+    from privacy_local_agent.medical_pipeline.rules import RedactionStrategyConfig
+
+    custom_strategy = RedactionStrategyConfig(
+        purge_categories=["HIV_AIDS"],
+        l5_replacement_map={"HIV_AIDS": "CUSTOM_TAG"},
+    )
+    pipeline = MedicalPrivacyPipeline(redaction_strategy=custom_strategy)
+
+    # 含自定义替换标签的文本应被 Pipeline 实例方法检出
+    assert pipeline._contains_high_risk_text("[L5-CUSTOM_TAG-SENSITIVE-MASKED]")
+    # 原始敏感词也应被检出
+    assert pipeline._contains_high_risk_text("HIV抗体阳性")
+    # 干净文本不应误判
+    assert not pipeline._contains_high_risk_text("血压控制良好")
+
+
+def test_default_generalization_allowed_is_precomputed() -> None:
+    """验证 _DEFAULT_GENERALIZATION_ALLOWED 预计算集合与规则定义一致。"""
+    from privacy_local_agent.medical_pipeline.rules import (
+        _CATEGORY_GENERALIZATION_RULES,
+        _DEFAULT_GENERALIZATION_ALLOWED,
+    )
+
+    expected = {cat for cat, _pat, _repl in _CATEGORY_GENERALIZATION_RULES}
+    assert _DEFAULT_GENERALIZATION_ALLOWED == expected
+    assert "MALIGNANT_NEOPLASM" in _DEFAULT_GENERALIZATION_ALLOWED
+    assert "HEPATITIS_VIRUS" in _DEFAULT_GENERALIZATION_ALLOWED
+    assert "GENETIC_DEFECT" in _DEFAULT_GENERALIZATION_ALLOWED
+    assert "SEVERE_ORGAN_DAMAGE" in _DEFAULT_GENERALIZATION_ALLOWED
 

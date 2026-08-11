@@ -9,6 +9,92 @@
 
 Unified launcher with graceful shutdown for REST and gRPC servers.
 Captures termination signals, stops both servers with a grace period, and joins threads.
+
+===================================================================================
+              双协议服务启动与优雅关闭执行流程 / Dual-Protocol Lifecycle
+===================================================================================
+
+  python -m privacy_local_agent.server
+       │
+       ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  模块加载阶段 / Module Bootstrap                                           │
+  │    1. load_env_file()          → 加载 .env 环境变量                        │
+  │    2. 读取 PRIVACY_REST_HOST/PORT, PRIVACY_GRPC_HOST/PORT                │
+  │    3. 探测 uvloop / httptools  → 有则启用高性能事件循环与 HTTP 解析器          │
+  └──────────────────────────────────┬──────────────────────────────────────┘
+                                     ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  main() 入口                                                            │
+  │    1. argparse 解析 CLI 参数（优先级: CLI > 环境变量 > 默认值）               │
+  │    2. get_security_settings() → 检查 TLS/Auth/RateLimit 状态             │
+  │       └─ 全部关闭时打印 SECURITY WARNING 横幅                              │
+  └──────────────────────────────────┬──────────────────────────────────────┘
+                                     ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  启动阶段 / Startup Phase                                                 │
+  │                                                                         │
+  │    ┌──────────────────────────────┐   ┌──────────────────────────────┐  │
+  │    │  Step 1: 配置 REST            │   │  Step 3: 启动 gRPC            │  │
+  │    │  uvicorn_ssl_kwargs()        │   │  grpc_serve(                  │  │
+  │    │  uvicorn.Config(             │   │    wait_for_termination=False │  │
+  │    │      limit_concurrency       │   │  )                            │  │
+  │    │      limit_max_requests      │   │  → 返回 grpc_server 对象        │  │
+  │    │      + uvloop/httptools      │   │    (主线程继续)                 │  │
+  │    │    )                         │   └──────────────────────────────┘  │
+  │    │  Step 2:                     │                                     │
+  │    │  rest_thread = Thread(       │   ┌──────────────────────────────┐  │
+  │    │    target=rest_server.run,   │   │  Step 4: 注册信号处理器         │  │
+  │    │    daemon=True,              │   │  SIGTERM ─┐                  │  │
+  │    │  )                           │   │           ├→ handle_shutdown()│  │
+  │    │  rest_thread.start()         │   │  SIGINT ──┘   → set event    │  │
+  │    │  → REST 在守护线程中运行        │   └──────────────────────────────┘  │
+  │    └──────────────────────────────┘                                     │
+  └──────────────────────────────────┬──────────────────────────────────────┘
+                                     ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  运行阶段 / Serving Phase                                                 │
+  │                                                                         │
+  │   主线程:  while not shutdown_event.is_set(): time.sleep(0.2)            │
+  │                                                                         │
+  │   REST 守护线程:  uvicorn.Server.run()  ← 处理 HTTP 请求                    │
+  │   gRPC 线程池:    grpc_server       ← 处理 RPC 请求                        │
+  │                                                                         │
+  │   ┌──────────┐          ┌──────────────────────────┐                    │
+  │   │  Client   │──HTTP──▶│  REST (uvicorn) :8079    │                    │
+  │   └──────────┘          └──────────────────────────┘                    │
+  │   ┌──────────┐          ┌──────────────────────────┐                    │
+  │   │  Client   │──gRPC──▶│  gRPC server    :50051   │                    │
+  │   └──────────┘          └──────────────────────────┘                    │
+  └──────────────────────────────────┬──────────────────────────────────────┘
+                                     │  SIGTERM / SIGINT / Ctrl+C
+                                     ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  优雅关闭阶段 / Graceful Shutdown Phase                                    │
+  │                                                                         │
+  │    Step 5: handle_shutdown() → shutdown_event.set()                     │
+  │            主线程退出 while 循环                                           │
+  │                                                                         │
+  │    Step 6: 停止 gRPC                                                     │
+  │      grpc_server.stop(grace=5)  → 5 秒 grace 期处理在途 RPC                │
+  │      stop_event.wait(timeout=10) → 最多等 10 秒排空                        │
+  │      超时 → 打印警告，强制取消剩余 RPC                                        │
+  │                                                                         │
+  │    Step 7: 停止 REST                                                     │
+  │      rest_server.should_exit = True  → uvicorn 停止接受新连接              │
+  │      rest_thread.join(timeout=10)    → 等待线程退出                        │
+  │      daemon=True → 超时后随主进程强制终止                                    │
+  │                                                                         │
+  │    Step 8: sys.exit(0) → 进程干净退出                                      │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  线程模型 / Thread Model:
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  主线程 (main)        : 信号监听 + 优雅关闭调度                       │
+  │  守护线程 (daemon=True) : uvicorn REST 服务                        │
+  │  gRPC 线程池            : max_workers=64 (可配置)                  │
+  └─────────────────────────────────────────────────────────────────┘
+===================================================================================
 """
 
 import os

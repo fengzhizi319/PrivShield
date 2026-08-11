@@ -10,7 +10,15 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+import yaml
+
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # PII 身份隐私字段及其默认脱敏规则定义
 PII_FIELD_RULES: dict[str, str] = {
@@ -185,6 +193,178 @@ _L4_REPLACEMENT_MAP: dict[str, str] = {
     "SEVERE_ORGAN_DAMAGE": "SEVERE_ORGAN_DAMAGE",
 }
 
+
+# ---------------------------------------------------------------------------
+# YAML 可配置脱敏策略加载 (Redaction Strategy Loader)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RedactionStrategyConfig:
+    """运行时脱敏治理策略配置（从 YAML 加载或代码默认值构建）。
+
+    Attributes:
+        purge_categories: 彻底抹平范畴列表（严禁泛化）。
+        generalization_categories: 范畴化泛化范畴列表。
+        l5_replacement_map: L5 范畴 → 抽象替换标签映射。
+        l4_replacement_map: L4 范畴 → 抽象替换标签映射。
+    """
+
+    purge_categories: list[str] = field(default_factory=list)
+    generalization_categories: list[str] = field(default_factory=list)
+    l5_replacement_map: dict[str, str] = field(default_factory=dict)
+    l4_replacement_map: dict[str, str] = field(default_factory=dict)
+
+
+def load_redaction_strategy(
+    rules_dir: str | Path | None = None,
+    domain: str = "medical",
+) -> RedactionStrategyConfig:
+    """从 YAML 领域规则包加载脱敏治理策略。
+
+    读取 ``rules/domains/<domain>.yaml`` 中的 ``redaction_strategy`` 节，
+    返回运行时策略配置。若 YAML 中未定义该节，则回退到代码内置默认值
+    （与 ``_L5_REPLACEMENT_MAP`` / ``_L4_REPLACEMENT_MAP`` 保持一致）。
+
+    Args:
+        rules_dir: 规则配置根目录；为 None 时自动检测（环境变量 → 默认 ``rules``）。
+        domain: 领域包名称（默认 ``"medical"``）。
+
+    Returns:
+        RedactionStrategyConfig: 运行时脱敏策略配置。
+    """
+    import os
+
+    if rules_dir is None:
+        rules_dir = os.environ.get("PRIVACY_DYNCLASSIFICATION_RULES_DIR", "rules")
+    yaml_path = Path(rules_dir) / "domains" / f"{domain}.yaml"
+
+    if not yaml_path.exists():
+        logger.info(
+            "redaction_strategy_yaml_not_found",
+            extra={"path": str(yaml_path), "fallback": "hardcoded_defaults"},
+        )
+        return _build_default_strategy_config()
+
+    try:
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(
+            "redaction_strategy_yaml_parse_error",
+            extra={"path": str(yaml_path), "error": str(exc), "fallback": "hardcoded_defaults"},
+        )
+        return _build_default_strategy_config()
+
+    strategy_data = data.get("redaction_strategy") if isinstance(data, dict) else None
+    if strategy_data is None:
+        logger.info(
+            "redaction_strategy_not_defined_in_yaml",
+            extra={"domain": domain, "fallback": "hardcoded_defaults"},
+        )
+        return _build_default_strategy_config()
+
+    # 校验：所有范畴必须存在于 L5_TERMS_MAP 或 L4_TERMS_MAP 中
+    all_known_categories = set(L5_TERMS_MAP.keys()) | set(L4_TERMS_MAP.keys())
+    purge_cats = strategy_data.get("purge_categories", [])
+    gen_cats = strategy_data.get("generalization_categories", [])
+    unknown = set(purge_cats + gen_cats) - all_known_categories
+    if unknown:
+        logger.warning(
+            "redaction_strategy_unknown_categories",
+            extra={"unknown": sorted(unknown), "known": sorted(all_known_categories)},
+        )
+
+    # 校验：purge 与 generalization 范畴不应重叠（重叠时 purge 静默胜出，易造成配置误解）
+    overlap = set(purge_cats) & set(gen_cats)
+    if overlap:
+        logger.warning(
+            "redaction_strategy_purge_generalization_overlap",
+            extra={
+                "overlapping_categories": sorted(overlap),
+                "resolution": "purge_categories takes precedence; remove from generalization_categories if intentional",
+            },
+        )
+
+    replacement_labels = strategy_data.get("replacement_labels", {})
+
+    config = RedactionStrategyConfig(
+        purge_categories=list(purge_cats),
+        generalization_categories=list(gen_cats),
+        l5_replacement_map={
+            cat: replacement_labels.get(cat, _L5_REPLACEMENT_MAP.get(cat, cat))
+            for cat in purge_cats
+            if cat in L5_TERMS_MAP
+        },
+        l4_replacement_map={
+            cat: replacement_labels.get(cat, _L4_REPLACEMENT_MAP.get(cat, cat))
+            for cat in purge_cats + gen_cats
+            if cat in L4_TERMS_MAP
+        },
+    )
+    logger.info(
+        "redaction_strategy_loaded_from_yaml",
+        extra={
+            "domain": domain,
+            "purge_categories": config.purge_categories,
+            "generalization_categories": config.generalization_categories,
+        },
+    )
+    return config
+
+
+def _build_default_strategy_config() -> RedactionStrategyConfig:
+    """从代码内置默认值构建默认脱敏策略配置（YAML 缺失时的回退路径）。"""
+    return RedactionStrategyConfig(
+        purge_categories=list(L5_TERMS_MAP.keys()) + ["STD_VENEREAL"],
+        generalization_categories=[
+            cat for cat in L4_TERMS_MAP if cat != "STD_VENEREAL"
+        ],
+        l5_replacement_map=dict(_L5_REPLACEMENT_MAP),
+        l4_replacement_map=dict(_L4_REPLACEMENT_MAP),
+    )
+
+
+def compile_l4_l5_patterns(
+    l5_replacement_map: dict[str, str] | None = None,
+    l4_replacement_map: dict[str, str] | None = None,
+) -> tuple[list[tuple[re.Pattern, str]], list[tuple[re.Pattern, str]]]:
+    """根据替换标签映射编译 L5/L4 术语正则模式列表。
+
+    允许调用方传入自定义替换标签映射（来自 YAML 策略配置），
+    若未传入则使用模块级默认映射。
+
+    Args:
+        l5_replacement_map: L5 范畴 → 抽象替换标签；为 None 时使用 ``_L5_REPLACEMENT_MAP``。
+        l4_replacement_map: L4 范畴 → 抽象替换标签；为 None 时使用 ``_L4_REPLACEMENT_MAP``。
+
+    Returns:
+        (L5_PATTERNS, L4_PATTERNS) 元组，每个元素为 ``(compiled_regex, replacement_label)`` 列表。
+    """
+    l5_map = l5_replacement_map if l5_replacement_map is not None else _L5_REPLACEMENT_MAP
+    l4_map = l4_replacement_map if l4_replacement_map is not None else _L4_REPLACEMENT_MAP
+
+    l5_patterns = [
+        (
+            re.compile(
+                "|".join([_flex_escape(t) for t in sorted(terms, key=len, reverse=True)]),
+                re.IGNORECASE,
+            ),
+            f"[L5-{l5_map.get(cat, cat)}-SENSITIVE-MASKED]",
+        )
+        for cat, terms in L5_TERMS_MAP.items()
+    ]
+    l4_patterns = [
+        (
+            re.compile(
+                "|".join([_flex_escape(t) for t in sorted(terms, key=len, reverse=True)]),
+                re.IGNORECASE,
+            ),
+            f"[L4-{l4_map.get(cat, cat)}-SENSITIVE-MASKED]",
+        )
+        for cat, terms in L4_TERMS_MAP.items()
+    ]
+    return l5_patterns, l4_patterns
+
 # 词项字符间容许的有界可选分隔符（空格/点/连字符/下划线/间隔号/零宽字符）。
 # 用于容忍 "H I V"、"H.I.V"、"艾-滋-病" 这类在词项字符间插入噪声的绕过变体；
 # {0,1} 有界量词保证每个字符间隙只有两种选择，匹配复杂度保持线性，杜绝引入 ReDoS。
@@ -252,8 +432,49 @@ _TERMS_FIRST_CHARS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+
+# 替换标签匹配正则：匹配脱敏流程产生的标准格式标签 [L4|L5-...-SENSITIVE-MASKED]
+# 定义于 contains_high_risk_text 之前，供其预筛逻辑引用
 _MASKED_LABEL_PATTERN = r"\[(?:L4|L5)-[A-Z_]+-SENSITIVE-MASKED\]"
 _MASKED_LABEL_RE = re.compile(_MASKED_LABEL_PATTERN)
+
+
+def contains_high_risk_text(
+    text: str,
+    patterns: list[tuple[re.Pattern, str]] | None = None,
+) -> bool:
+    """模块级高敏文本检测函数。
+
+    供外部模块（如 dynclassification/service.py）在无 Pipeline 实例时调用。
+
+    Args:
+        text: 待检测文本。
+        patterns: 自定义 ``(compiled_regex, replacement_label)`` 模式列表。
+            为 None 时使用模块级默认模式（``L4_PATTERNS`` + ``L5_PATTERNS``）；
+            Pipeline 实例应传入 ``self._l5_patterns + self._l4_patterns``
+            以检测自定义替换标签。
+    """
+    # 替换标签（如 [L5-IMMUNODEFICIENCY-SENSITIVE-MASKED]）以 '[' 开头，
+    # 不在词库首字符集中——必须先于 _TERMS_FIRST_CHARS_PATTERN 预筛检查，
+    # 否则仅含替换标签的文本会被预筛误判为安全而提前返回 False。
+    if _MASKED_LABEL_RE.search(text):
+        return True
+    if not _TERMS_FIRST_CHARS_PATTERN.search(text):
+        return False
+    effective_patterns = patterns if patterns is not None else L4_PATTERNS + L5_PATTERNS
+    if any(pattern.search(text) for pattern, _replacement in effective_patterns):
+        return True
+    norm = normalize_fullwidth_alphanumeric(text)
+    if norm != text and any(pattern.search(norm) for pattern, _replacement in effective_patterns):
+        return True
+    stripped = re.sub(
+        r"(?<=[a-zA-Z0-9一-龥])[\s.\-_·•\u200b\u200c\ufeff]+(?=[a-zA-Z0-9一-龥])",
+        "",
+        norm,
+    )
+    if stripped != norm and any(pattern.search(stripped) for pattern, _replacement in effective_patterns):
+        return True
+    return False
 
 _TERMS_OR = "|".join([_MASKED_LABEL_PATTERN] + [_flex_escape(t) for t in _ALL_L4_L5_TERMS])
 _Q = r"['\"“‘'”’]?"
@@ -422,32 +643,55 @@ _IMAGE_PATH_PATTERN = re.compile(r"/(?:[^/]+\.png|[^/]+\.jpg|[^/]+\.jpeg|[^/]+\.
 # 13. 范畴化降级泛化规则映射 (Category Generalization Rules)
 # 仅对适宜泛化的病种（肿瘤、肝炎、遗传缺陷、器官衰竭）自动重构降级为 L1/L2 通用系统/器官疾病表述；
 # 性病 (STD)、艾滋病 (HIV)、重度精神障碍属于禁止泛化范畴，100% 自动直接抹平切除 (Purge Only)！
-_CATEGORY_GENERALIZATION_RULES: list[tuple[re.Pattern, str]] = [
+_CATEGORY_GENERALIZATION_RULES: list[tuple[str, re.Pattern, str]] = [
     # 1. 恶性肿瘤范畴 -> 通用系统/器官疾病
     # 注意：器官/系统前缀为必选匹配，且各系统专属规则先于裸"肿瘤"兜底规则，
     # 否则 "呼吸系统肿瘤" 会被首条规则误泛化为 "呼吸系统消化道疾病"（张冠李戴）。
-    (re.compile(r"消化道(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "消化道疾病"),
-    (re.compile(r"(?:呼吸道|呼吸系统)(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "呼吸系统疾病"),
-    (re.compile(r"生殖系统(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "生殖系统疾病"),
-    (re.compile(r"神经系统(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "神经系统疾病"),
-    (re.compile(r"(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "相关系统疾病"),
+    ("MALIGNANT_NEOPLASM", re.compile(r"消化道(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "消化道疾病"),
+    ("MALIGNANT_NEOPLASM", re.compile(r"(?:呼吸道|呼吸系统)(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "呼吸系统疾病"),
+    ("MALIGNANT_NEOPLASM", re.compile(r"生殖系统(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "生殖系统疾病"),
+    ("MALIGNANT_NEOPLASM", re.compile(r"神经系统(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "神经系统疾病"),
+    ("MALIGNANT_NEOPLASM", re.compile(r"(?:恶性)?肿瘤(?=聚集倾向|家族史|史|风险)", re.IGNORECASE), "相关系统疾病"),
 
     # 2. 病毒性肝炎范畴 -> 通用肝脏疾病
-    (re.compile(r"(?:慢性乙型病毒性肝炎|乙型肝炎|乙肝|丙型肝炎|丙肝|肝硬化代偿期|早期肝硬化|肝硬化)(?=家族史|史|聚集倾向)", re.IGNORECASE), "肝脏疾病"),
+    ("HEPATITIS_VIRUS", re.compile(r"(?:慢性乙型病毒性肝炎|乙型肝炎|乙肝|丙型肝炎|丙肝|肝硬化代偿期|早期肝硬化|肝硬化)(?=家族史|史|聚集倾向)", re.IGNORECASE), "肝脏疾病"),
 
     # 3. 重大遗传缺陷范畴 -> 遗传性神经系统疾病
-    (re.compile(r"(?:遗传性亨廷顿舞蹈病|亨廷顿病|舞蹈病|罕见遗传病)(?=家族史|史|聚集倾向)", re.IGNORECASE), "遗传性神经系统疾病"),
+    ("GENETIC_DEFECT", re.compile(r"(?:遗传性亨廷顿舞蹈病|亨廷顿病|舞蹈病|罕见遗传病)(?=家族史|史|聚集倾向)", re.IGNORECASE), "遗传性神经系统疾病"),
 
     # 4. 严重器官衰竭范畴 -> 系统重大疾病
-    (re.compile(r"(?:急性心肌梗死|冠状动脉重度狭窄)(?=家族史|史|聚集倾向)", re.IGNORECASE), "心血管系统疾病"),
-    (re.compile(r"(?:慢性阻塞性肺疾病|COPD)(?=家族史|史|聚集倾向)", re.IGNORECASE), "慢性呼吸系统疾病"),
-    (re.compile(r"(?:尿毒症|肾功能衰竭)(?=家族史|史|聚集倾向)", re.IGNORECASE), "肾脏系统疾病"),
+    ("SEVERE_ORGAN_DAMAGE", re.compile(r"(?:急性心肌梗死|冠状动脉重度狭窄)(?=家族史|史|聚集倾向)", re.IGNORECASE), "心血管系统疾病"),
+    ("SEVERE_ORGAN_DAMAGE", re.compile(r"(?:慢性阻塞性肺疾病|COPD)(?=家族史|史|聚集倾向)", re.IGNORECASE), "慢性呼吸系统疾病"),
+    ("SEVERE_ORGAN_DAMAGE", re.compile(r"(?:尿毒症|肾功能衰竭)(?=家族史|史|聚集倾向)", re.IGNORECASE), "肾脏系统疾病"),
 ]
 
-def _apply_category_generalizations(text: str) -> str:
-    """应用范畴化降级泛化规则：将 L4/L5 重大高敏病种术语映射为 L1/L2 级的通用系统疾病泛化表述。"""
+# 预计算默认泛化允许集合（避免每次 _apply_category_generalizations 调用重复构建）
+_DEFAULT_GENERALIZATION_ALLOWED: frozenset[str] = frozenset(
+    {category for category, _pattern, _replacement in _CATEGORY_GENERALIZATION_RULES}
+)
+
+
+def _apply_category_generalizations(
+    text: str, strategy: RedactionStrategyConfig | None = None
+) -> str:
+    """按运行时策略应用泛化；未列入泛化的类别继续走抹平流程。
+
+    Args:
+        text: 待泛化文本。
+        strategy: 运行时策略配置。为 None 时使用代码内置默认泛化规则
+        （所有 ``_CATEGORY_GENERALIZATION_RULES`` 中出现的类别均允许泛化，无 purge 排除）。
+        注意：None 语义 ≠ YAML 默认策略——Pipeline 始终从 YAML 加载并传入显式策略。
+    """
     s = text
-    for pattern, replacement in _CATEGORY_GENERALIZATION_RULES:
+    if strategy is not None:
+        allowed = set(strategy.generalization_categories)
+        purged = set(strategy.purge_categories)
+    else:
+        allowed = _DEFAULT_GENERALIZATION_ALLOWED
+        purged = set()
+    for category, pattern, replacement in _CATEGORY_GENERALIZATION_RULES:
+        if category not in allowed or category in purged:
+            continue
         s = pattern.sub(replacement, s)
     return s
 
@@ -635,8 +879,10 @@ def normalize_fullwidth_alphanumeric(text: str) -> str:
     return re.sub(r"[\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]", _repl, text)
 
 
-def redact_medical_text(text: str) -> str:
-    """全场景高级无痕抹平算法 (Redaction/Purge Mode)."""
+def redact_medical_text(
+    text: str, strategy: RedactionStrategyConfig | None = None
+) -> str:
+    """全场景高级无痕抹平算法，泛化决策由 ``strategy`` 控制。"""
     if not text:
         return text
 
@@ -690,7 +936,7 @@ def redact_medical_text(text: str) -> str:
     s = _REDACT_GENETIC_CLAUSE_PATTERN.sub("", s)
     s = _REDACT_STD_FEATURE_CLAUSE_PATTERN.sub("", s)
     s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
-    s = _apply_category_generalizations(s)
+    s = _apply_category_generalizations(s, strategy)
 
     # 2. 优先擦除完整服药用药句法
     s = _REDACT_MEDICATION_FULL_PATTERN.sub("", s)
@@ -775,7 +1021,11 @@ def _is_major_sensitive_entity(term: str, ent_type: str = "") -> bool:
     return False
 
 
-def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
+def redact_medical_text_with_ner(
+    text: str,
+    ner_adapter: Any = None,
+    strategy: RedactionStrategyConfig | None = None,
+) -> str:
     """Layer-2 Small-NER 驱动的高级命名实体识别无痕抹平引擎 (Gold Standard Implementation)."""
     if not text:
         return text
@@ -825,7 +1075,7 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
         # NER 实体锚定擦除单独工作时只擦实体本身，会遗留 "180/μL。行+。"、"确诊" 等
         # 句法残渣（实测泄露）；完整规则路径保证已知特征零残渣，
         # 随后再以 NER 实体为锚点擦除词库外的高敏实体（NER 的核心增量价值）。
-        s = redact_medical_text(collapsed)
+        s = redact_medical_text(collapsed, strategy=strategy)
 
         for ent in sorted_entities:
             term = ent.get("text", "").strip()
@@ -853,4 +1103,4 @@ def redact_medical_text_with_ner(text: str, ner_adapter: Any = None) -> str:
     # 的设计前提是"文本已经历敏感词擦除、只剩残渣"，对干净文本会误删合法用词
     # （实测 "患者出现皮疹3天，伴瘙痒。" 被篡改为 "患者皮疹3天。"）；
     # redact_medical_text 内部已对敏感文本完成语法自愈，对干净文本走 Fast-Path 原样返回。
-    return redact_medical_text(text)
+    return redact_medical_text(text, strategy=strategy)

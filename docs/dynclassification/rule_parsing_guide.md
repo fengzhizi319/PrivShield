@@ -16,8 +16,15 @@
   - [3.1 总体调用链](#31-总体调用链)
   - [3.2 匹配器执行细节](#32-匹配器执行细节)
   - [3.3 `keyword_contains` 算子实现](#33-keyword_contains-算子实现)
-  - [3.4 多匹配器逻辑（match_logic）](#34-多匹配器逻辑match_logic)
-  - [3.5 输出结果](#35-输出结果)
+  - [3.4 `regex` 算子实现](#34-regex-算子实现)
+  - [3.5 `prefix_match` / `suffix_match` 算子实现](#35-prefix_match--suffix_match-算子实现)
+  - [3.6 `id_card_checksum` 算子实现](#36-id_card_checksum-算子实现)
+  - [3.7 `medical_card_checksum` 算子实现](#37-medical_card_checksum-算子实现)
+  - [3.8 `icd10_range` 算子实现](#38-icd10_range-算子实现)
+  - [3.9 `luhn_checksum` 算子实现](#39-luhn_checksum-算子实现)
+  - [3.10 其他内置算子](#310-其他内置算子)
+  - [3.11 多匹配器逻辑（match_logic）](#311-多匹配器逻辑match_logic)
+  - [3.12 输出结果](#312-输出结果)
 - [4. 算子注册机制](#4-算子注册机制)
   - [4.1 注册表架构](#41-注册表架构)
   - [4.2 内置算子清单](#42-内置算子清单)
@@ -166,22 +173,45 @@ engine.evaluate("brca1_mutation", "阳性")
 
 ### 3.2 匹配器执行细节
 
-`_execute_matcher()` 方法的核心逻辑：
+`_execute_matcher()` 方法的核心逻辑（返回归一化的 `OperatorResult`）：
 
 ```python
-def _execute_matcher(self, matcher: MatcherDef, field_name: str, str_value: str) -> bool:
-    # 1. 从注册表获取算子函数
-    op_func = OperatorRegistry.get(matcher.operator)
+def _execute_matcher(self, matcher: MatcherDef, field_name: str, str_value: str) -> OperatorResult:
+    # 1. 从注册表获取算子函数（KeyError 时返回 miss）
+    try:
+        op_func = OperatorRegistry.get(matcher.operator)
+    except KeyError:
+        return OperatorResult(hit=False)
 
     # 2. 根据 target 决定输入值
     target_value = field_name if matcher.target == "field_name" else str_value
 
     # 3. 空值短路
     if target_value is None or target_value == "":
-        return False
+        return OperatorResult(hit=False)
 
-    # 4. 执行算子
-    return bool(op_func(target_value, matcher.params))
+    # 4. 执行算子并归一化结果（支持 bool / OperatorResult / tuple 三种返回）
+    try:
+        raw = op_func(target_value, matcher.params)
+        return normalize_result(raw)
+    except Exception as exc:
+        # 算子异常 fail-safe：记录错误指标，返回未命中
+        logger.warning(f"operator_execution_failed: {matcher.operator}", exc_info=exc)
+        return OperatorResult(hit=False)
+```
+
+**`normalize_result()` 归一化逻辑**：
+
+```python
+def normalize_result(raw: bool | OperatorResult | tuple) -> OperatorResult:
+    if isinstance(raw, bool):
+        return OperatorResult(hit=raw)
+    elif isinstance(raw, OperatorResult):
+        return raw
+    elif isinstance(raw, tuple):  # 向后兼容 (hit, level, category)
+        return OperatorResult(hit=raw[0], level=raw[1], category=raw[2])
+    else:
+        return Operator(hit=bool(raw))
 ```
 
 ### 3.3 `keyword_contains` 算子实现
@@ -190,24 +220,280 @@ def _execute_matcher(self, matcher: MatcherDef, field_name: str, str_value: str)
 # privacy_local_agent/dynclassification/operators.py
 @OperatorRegistry.register("keyword_contains")
 def keyword_contains_matcher(value: Any, params: dict[str, Any]) -> bool:
-    norm = str(value).lower().replace("_", "").replace(" ", "")
     keywords = params.get("keywords", [])
-    return any(kw.lower().replace("_", "").replace(" ", "") in norm for kw in keywords if kw)
+    use_word_boundaries = params.get("use_word_boundaries", False)  # 默认纯子串匹配
+
+    if use_word_boundaries:
+        # 单词边界模式：对原始值仅做小写化，保留分隔符以使 \b 生效
+        raw_lower = str(value).lower() if value else ""
+        if not raw_lower:
+            return False
+        for kw in keywords:
+            if kw:
+                pattern = r"\b" + re.escape(kw.lower()) + r"\b"
+                if re.search(pattern, raw_lower):
+                    return True
+        return False
+    else:
+        # 纯子串模式：归一化后匹配（去下划线/空格）
+        norm = str(value).lower().replace("_", "").replace(" ", "") if value else ""
+        if not norm:
+            return False
+        return any(kw.lower().replace("_", "").replace(" ", "") in norm for kw in keywords if kw)
 ```
 
-**归一化规则**：输入值和关键词均执行 `小写 + 去下划线 + 去空格`，然后做子串包含判断。
+**算法说明**：
 
-匹配示例：
+该算子支持两种匹配模式，由 `params.use_word_boundaries` 控制：
+
+| 模式 | `use_word_boundaries` | 归一化方式 | 匹配语义 | 典型场景 |
+|---|---|---|---|---|
+| **纯子串匹配**（默认） | `false` | 输入值和关键词均执行 `小写 + 去下划线 + 去空格` | `kw in norm`（子串包含） | 字段名匹配（`brca1_mutation` → `brca1`） |
+| **单词边界匹配** | `true` | 输入值仅小写化（保留分隔符），关键词也仅小写化 | `\bkw\b`（正则单词边界） | 需要避免 "report" 误中 "reported" 的场景 |
+
+**纯子串匹配示例**（默认模式）：
 
 | 输入字段名 | 归一化后 | 命中关键词 | 结果 |
 |---|---|---|---|
-| `brca1_mutation` | `brca1mutation` | `brca1` | 命中 |
-| `BRCA2_Status` | `brca2status` | `brca2` | 命中 |
-| `TP53` | `tp53` | `tp53` | 命中 |
-| `serum_tp53_level` | `serumtp53level` | `tp53` | 命中 |
-| `hemoglobin` | `hemoglobin` | — | 未命中 |
+| `brca1_mutation` | `brca1mutation` | `brca1` | ✅ 命中 |
+| `BRCA2_Status` | `brca2status` | `brca2` | ✅ 命中 |
+| `TP53` | `tp53` | `tp53` | ✅ 命中 |
+| `serum_tp53_level` | `serumtp53level` | `tp53` | ✅ 命中 |
+| `hemoglobin` | `hemoglobin` | — | ❌ 未命中 |
 
-### 3.4 多匹配器逻辑（match_logic）
+**单词边界匹配示例**（`use_word_boundaries=true`）：
+
+| 输入值 | 小写化后 | 关键词 | 正则模式 | 结果 |
+|---|---|---|---|---|
+| `reported` | `reported` | `report` | `\breport\b` | ❌ 未命中（\b 不匹配） |
+| `report` | `report` | `report` | `\breport\b` | ✅ 命中 |
+| `annual_report_2024` | `annual_report_2024` | `report` | `\breport\b` | ✅ 命中（`_` 是单词边界） |
+
+### 3.4 `regex` 算子实现
+
+```python
+@OperatorRegistry.register("regex")
+def regex_matcher(value: Any, params: dict[str, Any]) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    pattern = params.get("pattern", "")
+    if not pattern:
+        return False
+    # ReDoS 缓解：超长输入截断评估（上限 256KB）
+    if len(value) > _REGEX_MAX_INPUT_LEN:  # _REGEX_MAX_INPUT_LEN = 256 * 1024
+        value = value[:_REGEX_MAX_INPUT_LEN]
+    try:
+        return bool(re.search(pattern, value))
+    except re.error:
+        return False  # 无效正则 fail-safe
+```
+
+**算法说明**：
+
+- 使用 `re.search()`（非 `fullmatch`），模式可匹配字符串任意位置
+- **ReDoS 防护**：输入长度上限 256KB，超长输入截断后评估，缓解恶意/误配规则模式的灾难性回溯
+- **异常安全**：无效正则模式返回 `False`（fail-safe），不抛出异常
+
+匹配示例：
+
+| 输入值 | pattern | 结果 |
+|---|---|---|
+| `rs12345` | `rs\d+` | ✅ 命中（基因组变异编号） |
+| `ABC\x01\x02` | `^ABC` | ✅ 命中（文件格式头检测） |
+| `normal_text` | `^##fileformat=VCF` | ❌ 未命中 |
+
+### 3.5 `prefix_match` / `suffix_match` 算子实现
+
+```python
+@OperatorRegistry.register("prefix_match")
+def prefix_matcher(value: Any, params: dict[str, Any]) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    prefixes = params.get("prefixes", [])
+    case_insensitive = params.get("case_insensitive", True)  # 默认大小写不敏感
+    if case_insensitive:
+        v = value.lower()
+        return any(v.startswith(p.lower()) for p in prefixes)
+    return any(value.startswith(p) for p in prefixes)
+
+@OperatorRegistry.register("suffix_match")
+def suffix_matcher(value: Any, params: dict[str, Any]) -> bool:
+    # 结构与 prefix_match 对称，使用 endswith() 替代 startswith()
+    ...
+```
+
+**算法说明**：
+
+- 默认大小写不敏感（`case_insensitive=True`），可通过参数关闭
+- 用于文件格式检测（如 BAM/VCF 文件头）、编码前缀匹配等
+
+匹配示例：
+
+| 输入值 | prefixes | case_insensitive | 结果 |
+|---|---|---|---|
+| `BAM\x01\x02` | `["BAM\x01", "@SQ"]` | `true` | ✅ 命中（BAM 文件头） |
+| `##fileformat=VCF` | `["##fileformat=VCF"]` | `true` | ✅ 命中（VCF 文件头） |
+| `icd_A50` | `["icd_"]` | `true` | ✅ 命中 |
+
+### 3.6 `id_card_checksum` 算子实现
+
+```python
+@OperatorRegistry.register("id_card_checksum")
+def id_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
+    return _validate_id_card(str(value) if value else "")
+
+def _validate_id_card(value: str) -> bool:
+    # Step 1: 长度必须正好 18 位
+    if len(value) != 18:
+        return False
+    # Step 2: 正则校验结构：6位地区码 + 8位生日(19xx/20xx) + 3位顺序码 + 校验位
+    if not re.match(
+        r"^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$",
+        value,
+    ):
+        return False
+    # Step 3: 计算前 17 位加权和，对 11 取模，映射到校验字符
+    _ID_CARD_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+    _ID_CARD_CHARS = ["1", "0", "X", "9", "8", "7", "6", "5", "4", "3", "2"]
+    total = sum(int(value[i]) * _ID_CARD_WEIGHTS[i] for i in range(17))
+    expected = _ID_CARD_CHARS[total % 11]
+    # Step 4: 比较计算校验字符与第 18 位（大小写不敏感）
+    return value[17].upper() == expected
+```
+
+**算法说明**（GB 11643-1999 标准）：
+
+1. **长度校验**：必须正好 18 位字符
+2. **结构校验**：正则验证 `6位地区码 + 出生年月日 + 3位顺序码 + 1位校验位`
+3. **加权求和**：前 17 位分别乘以权重 `[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2]`，求和
+4. **模 11 映射**：总和 mod 11 → 映射到校验字符 `"10X98765432"`
+5. **比较**：计算的校验字符与第 18 位比较（'X' 大小写不敏感）
+
+校验示例：
+
+| 输入值 | 长度 | 结构 | 加权和 mod 11 | 期望校验位 | 实际校验位 | 结果 |
+|---|---|---|---|---|---|---|
+| `445321193704139886` | 18 ✅ | ✅ | 2 → "X" | X | 6 | ❌ 校验失败 |
+| `110101199003074518` | 18 ✅ | ✅ | 计算值 | X | X | ✅ 校验通过 |
+| `12345` | 5 ❌ | — | — | — | — | ❌ 长度不符 |
+
+### 3.7 `medical_card_checksum` 算子实现
+
+```python
+@OperatorRegistry.register("medical_card_checksum")
+def medical_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
+    return _validate_medical_card(str(value) if value else "")
+
+def _validate_medical_card(value: str) -> bool:
+    # Step 1: 必须正好 9 位数字
+    if not re.match(r"^\d{9}$", value):
+        return False
+    # Step 2: 前 8 位加权和
+    _SH_MEDICAL_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1]
+    digits = [int(c) for c in value]
+    total = sum(digits[i] * _SH_MEDICAL_WEIGHTS[i] for i in range(8))
+    # Step 3: 模 10 补数
+    expected = (10 - total % 10) % 10
+    # Step 4: 比较第 9 位
+    return digits[8] == expected
+```
+
+**算法说明**（上海医保卡号校验）：
+
+1. **长度校验**：必须正好 9 位数字
+2. **加权求和**：前 8 位分别乘以权重 `[7,9,10,5,8,4,2,1]`，求和
+3. **模 10 补数**：`(10 - total % 10) % 10`
+4. **比较**：计算校验位与第 9 位比较
+
+### 3.8 `icd10_range` 算子实现
+
+```python
+@OperatorRegistry.register("icd10_range")
+def icd10_range_matcher(value: Any, params: dict[str, Any]) -> OperatorResult:
+    icd = _normalize_icd10(str(value) if value else "")
+    if not icd:
+        return OperatorResult(hit=False)  # 非法 ICD-10 编码
+
+    intervals = params.get("intervals", [])
+    for interval in intervals:
+        if _in_icd10_interval(icd, interval["start"], interval["end"]):
+            # 命中敏感区间：返回升级等级和类别
+            level = params.get("upgrade_level", "L4")
+            category = interval.get("category", "")
+            return OperatorResult(hit=True, level=level, category=category)
+
+    # 未命中敏感区间但为合法 ICD-10：使用默认等级
+    level = params.get("default_level", "L3")
+    return OperatorResult(hit=True, level=level, category="MEDICAL_ICD10_GENERAL")
+
+def _normalize_icd10(code: str) -> tuple[str, int] | None:
+    """解析 ICD-10 编码为 (字母, 数字) 元组。支持 B20.0 与 B200 格式。"""
+    s = str(code).upper().strip() if code else ""
+    match = re.match(r"^([A-Z])(\d{2})(?:\.?\d{0,2})?$", s)
+    if not match:
+        return None
+    return match.group(1), int(match.group(2))
+
+def _in_icd10_interval(code: tuple[str, int], start: str, end: str) -> bool:
+    """判断 ICD-10 编码是否落在闭区间内（元组字典序比较）。"""
+    start_norm = _normalize_icd10(start)
+    end_norm = _normalize_icd10(end)
+    if not start_norm or not end_norm:
+        return False
+    return start_norm <= code <= end_norm
+```
+
+**算法说明**：
+
+1. **编码解析**：`_normalize_icd10()` 将 ICD-10 编码解析为 `(字母, 数字)` 元组，支持 `B20.0` 和 `B200` 两种格式
+2. **区间判定**：`_in_icd10_interval()` 使用元组字典序比较（先按字母，再按数字）
+3. **动态等级**：命中敏感区间返回 `upgrade_level`（如 L4），否则返回 `default_level`（如 L3）
+4. **返回类型**：`OperatorResult`，携带动态等级和类别信息
+
+匹配示例：
+
+| 输入值 | 解析结果 | 命中区间 | 返回 |
+|---|---|---|---|
+| `B20.5` | `("B", 20)` | B20~B24 (HIV) | `OperatorResult(hit=True, level="L4", category="MEDICAL_ICD10_HIV")` |
+| `F25.0` | `("F", 25)` | F20~F29 (精神类) | `OperatorResult(hit=True, level="L4", category="MEDICAL_ICD10_PSYCHIATRIC")` |
+| `J10.0` | `("J", 10)` | 无敏感区间命中 | `OperatorResult(hit=True, level="L3", category="MEDICAL_ICD10_GENERAL")` |
+| `XYZ` | `None` | — | `OperatorResult(hit=False)` |
+
+### 3.9 `luhn_checksum` 算子实现
+
+```python
+@OperatorRegistry.register("luhn_checksum")
+def luhn_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
+    s = str(value).strip() if value else ""
+    min_len = params.get("min_length", 13)
+    max_len = params.get("max_length", 19)
+    if not s.isdigit() or not (min_len <= len(s) <= max_len):
+        return False
+    digits = [int(d) for d in s]
+    odd_sum = sum(digits[-1::-2])       # 从右往左奇数位之和
+    even_sum = sum(sum(divmod(2 * d, 10)) for d in digits[-2::-2])  # 偶数位×2后各位之和
+    return (odd_sum + even_sum) % 10 == 0
+```
+
+**算法说明**（Luhn 算法 / ISO/IEC 7812-1）：
+
+1. **长度校验**：全数字且长度在 `[min_length, max_length]` 内
+2. **奇数位求和**：从最右位（校验位）开始，每隔一位取数求和
+3. **偶数位处理**：每隔一位取数×2，若结果>9则减9（等价于各位相加），再求和
+4. **校验**：总和 mod 10 == 0 则有效
+
+### 3.10 其他内置算子
+
+| 算子 | 核心算法 | 返回类型 |
+|---|---|---|
+| `length_range` | `min_length <= len(str(value)) <= max_length` | `bool` |
+| `exact_match` | 归一化后完全相等：`norm(value) in [norm(v) for v in allowed]` | `bool` |
+| `ip_address` | 正则匹配 IPv4（4组0-255点分隔）或 IPv6（8组4位十六进制冒号分隔） | `bool` |
+| `mac_address` | 正则匹配 `^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$` | `bool` |
+| `chinese_name` | 正则匹配 `^[\u4e00-\u9fa5]{2,4}$`（2~4个 CJK 统一表意文字） | `bool` |
+| `email` | 正则匹配 `^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`（RFC 5322 简化版） | `bool` |
+
+### 3.11 多匹配器逻辑（match_logic）
 
 当一条规则包含多个 matcher 时，通过 `match_logic` 字段控制组合逻辑：
 
@@ -232,7 +518,7 @@ def keyword_contains_matcher(value: Any, params: dict[str, Any]) -> bool:
   match_logic: "OR"    # 字段名含关键词 或 字段值匹配 rs编号 → 均命中
 ```
 
-### 3.5 输出结果
+### 3.12 输出结果
 
 命中后生成 `SecurityTag` 对象：
 
@@ -272,46 +558,54 @@ class OperatorRegistry:
 
 ### 4.2 内置算子清单
 
-| 算子名称 | 功能 | 典型 params |
-|---|---|---|
-| `regex` | 正则表达式匹配 | `{pattern: "..."}` |
-| `keyword_contains` | 关键词子串包含（归一化后） | `{keywords: [...]}` |
-| `prefix_match` | 前缀匹配 | `{prefixes: [...]}` |
-| `suffix_match` | 后缀匹配 | `{suffixes: [...]}` |
-| `id_card_checksum` | 中国大陆 18 位身份证校验 | 无 |
-| `medical_card_checksum` | 上海医保卡号校验 | 无 |
-| `icd10_range` | ICD-10 编码区间判定 | `{default_level, upgrade_level, intervals}` |
-| `luhn_checksum` | Luhn 算法（银行卡号） | `{min_length, max_length}` |
-| `length_range` | 字符串长度范围 | `{min_length, max_length}` |
-| `exact_match` | 精确取值匹配 | `{values: [...]}` |
-| `ip_address` | IPv4/IPv6 地址判定 | 无 |
-| `mac_address` | MAC 地址匹配 | 无 |
-| `chinese_name` | 中文姓名模式（2~4 字） | 无 |
+| 算子名称 | 功能 | 算法摘要 | 典型 params |
+|---|---|---|---|
+| `regex` | 正则表达式匹配 | `re.search()` + 256KB ReDoS 截断 | `{pattern: "..."}` |
+| `keyword_contains` | 关键词子串包含 | 归一化后子串包含 / `\b` 单词边界 | `{keywords: [...], use_word_boundaries: false}` |
+| `prefix_match` | 前缀匹配 | `startswith()` + 大小写不敏感 | `{prefixes: [...], case_insensitive: true}` |
+| `suffix_match` | 后缀匹配 | `endswith()` + 大小写不敏感 | `{suffixes: [...], case_insensitive: true}` |
+| `id_card_checksum` | 中国大陆 18 位身份证校验 | GB 11643-1999 加权 mod 11 | 无 |
+| `medical_card_checksum` | 上海医保卡号校验 | 9位加权 mod 10 补数 | 无 |
+| `icd10_range` | ICD-10 编码区间判定 | 元组字典序区间比较 → `OperatorResult` | `{default_level, upgrade_level, intervals}` |
+| `luhn_checksum` | Luhn 算法（银行卡号） | ISO/IEC 7812-1 奇偶位加权 mod 10 | `{min_length: 13, max_length: 19}` |
+| `length_range` | 字符串长度范围 | `min <= len(str) <= max` | `{min_length, max_length}` |
+| `exact_match` | 精确取值匹配 | 归一化后完全相等 | `{values: [...]}` |
+| `ip_address` | IPv4/IPv6 地址判定 | 正则匹配 IPv4/IPv6 格式 | 无 |
+| `mac_address` | MAC 地址匹配 | 正则匹配 6组十六进制 | 无 |
+| `chinese_name` | 中文姓名模式 | 正则匹配 2~4 字 CJK 表意文字 | 无 |
+| `email` | 电子邮箱匹配 | RFC 5322 简化版正则 | 无 |
 
 ### 4.3 ICD-10 算子特殊机制
 
-`icd10_range` 算子返回元组实现动态等级：
+`icd10_range` 算子返回 `OperatorResult`，携带动态等级和类别信息，引擎在 `_evaluate_rule()` 中解析并覆盖规则默认等级：
 
 ```python
-# 算子返回元组 (is_hit, level, category)
+# 算子返回 OperatorResult，携带动态等级/类别
 # 命中敏感区间 → 返回升级等级
-return True, params.get("upgrade_level", "L4"), interval.get("category", "")
+return OperatorResult(hit=True, level=params.get("upgrade_level", "L4"), category=interval.get("category", ""))
 
 # 未命中敏感区间但为合法 ICD-10 → 使用默认等级
-return True, params.get("default_level", "L3"), "MEDICAL_ICD10_GENERAL"
+return OperatorResult(hit=True, level=params.get("default_level", "L3"), category="MEDICAL_ICD10_GENERAL")
 
 # 非法 ICD-10 编码 → 未命中
-return False, "", ""
+return OperatorResult(hit=False)
 ```
 
-引擎在 `_evaluate_rule()` 中解析元组返回值覆盖规则默认等级：
+引擎在 `_evaluate_rule()` 中通过 `OperatorResult` 动态覆盖等级：
 
 ```python
-if matcher.operator == "icd10_range":
-    is_hit, level, category = raw_result
-    if is_hit:
-        dynamic_level = level
-        dynamic_category = category
+# _evaluate_rule() 中的动态等级解析
+for matcher in rule.matchers:
+    op_result = self._execute_matcher(matcher, field_name, str_value)
+    is_hit = op_result.hit
+    # 命中时捕获由算子返回的动态等级/类别 (如 ICD-10 动态匹配)
+    if is_hit and op_result.level is not None:
+        dynamic_level = op_result.level
+        dynamic_category = op_result.category
+
+# 最终使用动态等级或回退到规则默认等级
+level = dynamic_level if dynamic_level is not None else rule.level
+category = dynamic_category if dynamic_category is not None else rule.category
 ```
 
 ---

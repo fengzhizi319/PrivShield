@@ -1,5 +1,9 @@
 # 动态分类分级标准适配架构设计
 
+> **状态**：本文档与 `privacy_local_agent/dynclassification/` 代码实现全面对齐（最后同步：2026-08）。
+> 主要更新：`force_suppress`/`exempt_rules` 字段名、`OperatorResult` 返回类型、14+ 内置算子、
+> `DomainTaxonomy.confidence_policy`/`get_level_rank`、LRU 评估缓存、短路优化、`fnmatch` 豁免逻辑。
+
 本文档描述将 `privacy-local-agent` 中硬编码的数据分类分级逻辑改造为支持多领域、多行业标准通用适配的架构设计。核心设计思想为 **"标准配置化、规则声明化、算子插件化、执行上下文动态化"**，实现代码（引擎逻辑）与数据（行业分类标准、分级矩阵、匹配规则）的完全解耦。
 
 ## 目录
@@ -73,7 +77,7 @@ graph LR
 |---|---|
 | 引擎与规则分离 | 引擎只做"解释执行"，不包含任何领域知识 |
 | 领域包可组合 | 一个标准 = N 个领域包 + 参数覆盖 |
-| 算子无状态 | 每个算子是纯函数 `(value, params) → bool`，无副作用 |
+| 算子无状态 | 每个算子是纯函数 `(value, params) → bool \| OperatorResult`，无副作用 |
 | 配置即代码 | YAML 规则文件可纳入版本控制、Code Review、CI 校验 |
 | 渐进式迁移 | 旧 DefaultRuleEngine 保留为 fallback，新旧引擎可并行运行 |
 | 约定优于配置 | 未指定 domain/standard 时使用默认领域包，行为与当前一致 |
@@ -103,7 +107,7 @@ flowchart TD
     end
 
     subgraph Operators ["内置/自定义算子库 (Operators)"]
-        OpRegex["regex_match"]
+        OpRegex["regex"]
         OpID["id_card_checksum"]
         OpICD["icd10_range"]
         OpLuhn["luhn_checksum"]
@@ -173,7 +177,7 @@ sequenceDiagram
 
 ### 4.5 敏感度降级规则（Downgrade Rules）
 
-敏感度降级规则是 `ConfigurableRuleEngine` 中的一种**反向修正机制**，用于解决通用规则对特定字段的"过度分类"问题。当前实现已从单一的"兜底归属"演进为支持**可选的强制覆盖（override）**模式，允许 YAML 通过 `override`、`max_force_suppress_level`、`suppress_rules` 三个字段精确控制压制行为。
+敏感度降级规则是 `ConfigurableRuleEngine` 中的一种**反向修正机制**，用于解决通用规则对特定字段的"过度分类"问题。当前实现已从单一的"兜底归属"演进为支持**可选的强制覆盖（override）**模式，允许 YAML 通过 `force_suppress`、`max_force_suppress_level`、`exempt_rules` 三个字段精确控制压制行为。
 
 #### 4.5.1 设计动机
 
@@ -186,9 +190,9 @@ sequenceDiagram
 | `public_report`（公开报告） | L3（敏感数据） | 对外公开信息 | L1（公开数据） |
 | `annual_summary`（年度汇总） | L3（敏感数据） | 对外公开信息 | L1（公开数据） |
 
-降级规则通过在字段名中匹配特定关键词，将这些字段"下调"到合理的低等级。当启用 `override=true` 时，还能进一步**强制压制**误中的普通规则标签，避免宽泛规则把运营/公开字段错误地拉高等级。
+降级规则通过在字段名中匹配特定关键词，将这些字段"下调"到合理的低等级。当启用 `force_suppress=true` 时，还能进一步**强制压制**误中的普通规则标签，避免宽泛规则把运营/公开字段错误地拉高等级。
 
-> 说明：上表中的“通用规则判定”示例假设使用子串匹配语义。注意：降级规则使用纯子串匹配（`kw in norm_name`），而普通规则的 `keyword_contains` 算子默认使用单词边界匹配（`use_word_boundaries: true`），两者语义不同。
+> 说明：上表中的“通用规则判定”示例假设使用子串匹配语义。注意：降级规则使用纯子串匹配（`kw in norm_name`），而普通规则的 `keyword_contains` 算子默认使用纯子串匹配（`use_word_boundaries: false`），两者语义不同。
 
 #### 4.5.2 数据模型
 
@@ -201,17 +205,17 @@ class DowngradeRuleDef(BaseModel):
     当字段名匹配指定关键词时，将等级降级到目标等级。
     典型场景：公开字段降为 L1，运营统计字段降为 L2。
 
-    强制覆盖模式（override=true）：
+    强制覆盖模式（force_suppress=true）：
         默认情况下，降级规则仅作为"兜底归属"——在无普通规则命中时替代默认等级。
-        当设置 override=true 后，降级规则可强制压制 rank <= max_force_suppress_level 的
+        当设置 force_suppress=true 后，降级规则可强制压制 rank <= max_force_suppress_level 的
         普通规则标签，解决宽泛规则误中运营/公开字段的问题。
 
         执行流程:
         ┌──────────────────────────────────────────────────────────────┐
-        │  override=false (默认):                                       │
+        │  force_suppress=false (默认):                                  │
         │    降级标签 + 普通标签 → 取 max → 降级无效（仅兜底）          │
         │                                                              │
-        │  override=true:                                              │
+        │  force_suppress=true:                                         │
         │    先移除 rank <= cap 的普通标签 → 再取 max → 降级生效        │
         └──────────────────────────────────────────────────────────────┘
     """
@@ -221,9 +225,9 @@ class DowngradeRuleDef(BaseModel):
     level: str                        # 降级目标等级（如 "L1"、"L2"）
     category: str                     # 降级后归属的业务类别
     match_target: str = "field_name"  # 匹配目标（目前仅支持字段名）
-    override: bool = False            # 是否启用强制覆盖（压制普通规则标签）
+    force_suppress: bool = False       # 是否启用强制覆盖（压制普通规则标签）; alias="override"
     max_force_suppress_level: str = ""      # 覆盖等级上限（空=使用 level 字段自身）
-    suppress_rules: list[str] = []     # 压制白名单：仅列出的 rule_id 可被压制（空=压制所有）
+    exempt_rules: list[str] = []       # 压制豁免例外名单（支持 fnmatch 通配符）; alias="exclude_rules"
 ```
 
 字段说明：
@@ -236,9 +240,9 @@ class DowngradeRuleDef(BaseModel):
 | `level` | `str` | — | 降级目标等级，如 `L1` / `L2`。 |
 | `category` | `str` | — | 降级后归属的业务类别。 |
 | `match_target` | `str` | `"field_name"` | 匹配目标，当前仅支持字段名。 |
-| `override` | `bool` | `False` | 是否启用强制覆盖。`false` 为兜底模式，`true` 可压制普通规则。 |
+| `force_suppress` | `bool` | `False` | 是否启用强制覆盖（YAML 别名 `override`）。`false` 为兜底模式，`true` 可压制普通规则。 |
 | `max_force_suppress_level` | `str` | `""` | 覆盖等级上限（包含）。空字符串时默认使用 `level` 字段；否则使用此处指定的等级。只有 `rank <= cap_rank` 的普通标签会被移除。 |
-| `suppress_rules` | `list[str]` | `[]` | 精细白名单。仅指定 `rule_id` 的普通规则允许被压制；空列表表示压制所有符合条件的普通规则。 |
+| `exempt_rules` | `list[str]` | `[]` | 压制豁免例外名单（YAML 别名 `exclude_rules`，支持 `fnmatch` 通配符）。空列表=没有例外全额压制；非空=列表中的规则受保护不被压制。 |
 
 #### 4.5.3 执行流程
 
@@ -247,7 +251,7 @@ class DowngradeRuleDef(BaseModel):
 ```mermaid
 graph TD
     A["Phase 1: 遍历所有普通规则<br/>（按 priority 降序）"] --> B["Phase 2: 执行降级规则<br/>（所有降级规则均评估）"]
-    B --> C["Phase 3: 强制覆盖裁定<br/>（仅 override=true 的降级规则生效）"]
+    B --> C["Phase 3: 强制覆盖裁定<br/>（仅 force_suppress=true 的降级规则生效）"]
     C --> D["Phase 4: 合并剩余标签与降级标签<br/>按 (level, category) 去重"]
     D --> E["返回 (final_tags, suppressed_tags)"]
 ```
@@ -255,8 +259,8 @@ graph TD
 具体执行逻辑：
 
 1. **Phase 1 — 普通规则评估**：按优先级遍历普通规则，生成 `normal_tags`。
-2. **Phase 2 — 降级规则评估**：字段名归一化后，使用纯子串匹配（`kw in norm_name`）对所有降级规则做关键词匹配（注意：降级规则不使用 `keyword_contains` 算子，无单词边界限制）；命中的生成 `downgrade_tags`，并标记 `is_downgrade=True`。若规则 `override=true`，则同时标记 `is_override=True`。
-3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_force_suppress_level))`；同时合并所有 `exempt_rules`（或 YAML 别名 `exclude_rules`）豁免例外名单。随后从 `normal_tags` 中移除满足以下**全部 4 个条件**的普通标签：
+2. **Phase 2 — 降级规则评估**：字段名归一化后，使用纯子串匹配（`kw in norm_name`）对所有降级规则做关键词匹配（注意：降级规则不使用 `keyword_contains` 算子，无单词边界限制）；命中的生成 `downgrade_tags`，并标记 `is_downgrade=True`。若规则 `force_suppress=true`，则同时标记 `is_override=True`。
+3. **Phase 3 — 强制覆盖裁定**：从 `downgrade_tags` 中筛选 `is_override=True` 的标签，计算 `cap_rank = min(rank(max_force_suppress_level))`；同时合并所有 `exempt_rules`（YAML 别名 `exclude_rules`）豁免例外名单。随后从 `normal_tags` 中移除满足以下**全部 4 个条件**的普通标签：
    - **条件 1 (非降级标签)**：必须是普通规则产出的标签（`is_override=False`，降级标签自身不会互相压制）；
    - **条件 2 (等级未超限)**：普通标签的 `rank <= cap_rank`；
    - **条件 3 (字段名匹配豁免)**：普通标签的 `match_target` 不是 `field_value`（基于数据值的扫描匹配永远豁免保护，避免误删真实敏感数据）；
@@ -266,9 +270,9 @@ graph TD
 
 #### 4.5.4 两种工作模式
 
-降级规则有两种互斥的工作模式，由 `override` 字段控制：
+降级规则有两种互斥的工作模式，由 `force_suppress` 字段控制：
 
-| 模式 | `override` | 行为 | 典型场景 |
+| 模式 | `force_suppress` | 行为 | 典型场景 |
 |---|---|---|---|
 | **兜底模式** | `false` | 降级标签与普通标签共存，最终等级取 `max`。因此降级标签仅在无普通规则命中时才真正影响结果。 | 为未命中任何规则的运营/公开字段提供默认低等级，避免落入 `default_level`（如 L3）。 |
 | **强制覆盖模式** | `true` | 先移除 `rank <= cap_rank` 的普通标签（可指定白名单），再取 `max`。降级规则可真正把被误中字段的等级拉低。 | 通用规则过于宽泛（如包含 `report` 就判定为敏感），需要把 `public_report` 等字段强制压回 L1。 |
@@ -276,19 +280,19 @@ graph TD
 两种模式的执行流程对比如下：
 
 ```
-override=false (默认):
+force_suppress=false (默认):
   normal_tags = [L4, L3]
   downgrade_tags = [L1]
   final = max(L4, L3, L1) = L4          # 降级规则仅兜底，不改变高等级结果
 
-override=true, max_force_suppress_level="L3":
+force_suppress=true, max_force_suppress_level="L3":
   normal_tags = [L4, L3]
   downgrade_tags = [L1(override)]
   cap_rank = rank("L3") = 3
   移除 rank <= 3 的普通标签 → normal_tags = [L4]
   final = max(L4, L1) = L4              # L4 高于 cap，不被压制
 
-override=true, max_force_suppress_level="L4":
+force_suppress=true, max_force_suppress_level="L4":
   normal_tags = [L4, L3]
   downgrade_tags = [L1(override)]
   cap_rank = rank("L4") = 4
@@ -296,16 +300,16 @@ override=true, max_force_suppress_level="L4":
   final = max(L1) = L1                  # 强制覆盖生效
 ```
 
-#### 4.5.5 `max_force_suppress_level` 与 `suppress_rules` 精细控制
+#### 4.5.5 `max_force_suppress_level` 与 `exempt_rules` 精细控制
 
-`max_force_suppress_level` 和 `suppress_rules` 共同决定强制覆盖的边界，避免一刀切：
+`max_force_suppress_level` 和 `exempt_rules` 共同决定强制覆盖的边界，避免一刀切：
 
 - **`max_force_suppress_level`**：覆盖等级上限（包含）。仅 `rank <= cap_rank` 的普通标签会被移除。例如：
   - `level="L2"`、`max_force_suppress_level=""`：等价于 `cap_rank = rank("L2")`，只压制 L1/L2 的普通标签。
   - `level="L2"`、`max_force_suppress_level="L4"`：允许压制 L1~L4 的普通标签（将原本误标为 L3/L4 的误报标签强行压制并降级为 L2），但保留 L5（如果存在）。
   - **静态校验提示**：规则校验器（`validator.py`）会在检测到 `force_suppress=true` 但未指定 `max_force_suppress_level` 时主动输出 `[配置提示]` 告警，提醒配置人员如需压制更高等级误报（如将 L3/L4 强行降级为 L2），应显式指定 `max_force_suppress_level: "L3"` 或 `"L4"`。
 
-- **`exempt_rules`（别名 `exclude_rules`）**：豁免例外名单（支持 `fnmatch` 通配符）。用于当默认全额压制可能误伤极少数精确检验规则时手写例外：
+- **`exempt_rules`**（Python 字段名；YAML 别名 `exclude_rules`）：压制豁免例外名单（支持 `fnmatch` 通配符）。用于当默认全额压制可能误伤极少数精确检验规则时手写例外：
   - `[]`（默认）：没有例外，符合 rank 条件的所有普通字段名标签全额压制。
   - `["RULE_IDCARD_EXACT", "*_EXACT"]`：列表中的规则属于例外，受保护绝对不被压制。
 
@@ -349,7 +353,7 @@ downgrade_rules:
 - **兜底模式（`force_suppress=false`）**：降级标签与普通标签共同参与 `max_level`，因此降级标签**不会覆盖**高等级普通标签。核心价值是为无普通规则命中的字段提供低等级归属。
 - **强制覆盖模式（`force_suppress=true`）**：`rank <= cap_rank` 的普通标签先被移除，再由剩余标签与降级标签取 `max`。因此降级规则可以**真正降低**被误中字段的最终等级。
 - 无论哪种模式，被压制的标签都会作为 `suppressed_tags` 返回，可用于审计、Console 展示和 `DYNCLASSIFICATION_OVERRIDE_SUPPRESSED_TOTAL` 指标监控。
-- 注意：`match_target == "field_value"` 的普通标签（即基于字段真实内容命中的规则，如身份证校验、银行卡号校验）不会被 override 压制，以保证真实敏感内容不被错误降级。
+- 注意：`match_target == "field_value"` 的普通标签（即基于字段真实内容命中的规则，如身份证校验、银行卡号校验）不会被 force_suppress 压制，以保证真实敏感内容不被错误降级。
 
 #### 4.5.7 YAML 配置示例
 
@@ -426,10 +430,21 @@ class CategoryDef(BaseModel):
     description: Optional[str] = None
 
 
+class ConfidencePolicy(BaseModel):
+    """置信度策略配置（冲突衰减 + LLM 仲裁触发条件）。"""
+    conflict_confidence: float = 0.7     # 规则冲突时的置信度
+    conflict_needs_review: bool = True   # 冲突时标记人工复核
+    enable_llm_arbitration: bool = False # 是否启用 LLM 仲裁
+    llm_confidence_threshold: float = 0.6  # LLM 触发阈值
+    enable_ner: bool = False             # 是否启用 NER 层
+    enable_llm: bool = False             # 是否显式启用 LLM 层
+
+
 class DomainTaxonomy(BaseModel):
     """领域分类体系完整定义。
 
     一个 Taxonomy 对应一个行业标准的分类分级元数据。
+    支持通过 confidence_policy 节配置置信度策略。
     """
     domain: str                # 领域标识，如 "healthcare", "finance", "gov"
     standard_id: str           # 标准编号，如 "DB51_T_2989", "JR_T_0197"
@@ -438,18 +453,38 @@ class DomainTaxonomy(BaseModel):
     levels: dict[str, SensitivityLevelDef] = Field(default_factory=dict)
     categories: dict[str, CategoryDef] = Field(default_factory=dict)
     default_level: str = "L3"  # 无规则命中时的默认等级 ID
+    confidence_policy: Optional[ConfidencePolicy] = None  # 置信度策略配置
+    ner_entity_mapping: Optional[dict[str, str]] = None   # NER 实体类型→等级 ID 映射
+    ner_sensitive_keywords: Optional[list[str]] = None    # NER 敏感关键词列表
+    llm_arbitration_prompt_template: Optional[str] = None # LLM 仲裁 prompt 模板
+    ner_label_mapping: Optional[dict[str, str]] = None    # NER 原始标签→标准标签映射
+    ner_model_path: Optional[str] = None                  # NER 模型文件路径
+    ner_vocab_path: Optional[str] = None                  # NER 词表文件路径
+    llm_model_path: Optional[str] = None                  # LLM 模型目录路径
+    llm_classify_prompt_template: Optional[str] = None    # LLM 分类 prompt 模板
 
     def max_level(self, *level_ids: str) -> str:
         """返回等级集合中 rank 最高的等级 ID。"""
         if not level_ids:
             return self.default_level
-        return max(level_ids, key=lambda lid: self.levels[lid].rank)
+        valid = [lid for lid in level_ids if lid in self.levels]
+        if not valid:
+            return self.default_level
+        return max(valid, key=lambda lid: self.levels[lid].rank)
+
+    def get_level_rank(self, level_id: str) -> int:
+        """获取等级的排序权重。未找到时返回 0。"""
+        if level_id in self.levels:
+            return self.levels[level_id].rank
+        return 0
 
     def get_category_path(self, category_id: str) -> list[str]:
         """获取分类的完整路径（从根到叶）。"""
         path = []
         current = category_id
-        while current and current in self.categories:
+        visited: set[str] = set()
+        while current and current in self.categories and current not in visited:
+            visited.add(current)
             path.append(current)
             current = self.categories[current].parent_id
         return list(reversed(path))
@@ -465,22 +500,60 @@ version: "1.0.0"
 description: "内置默认分类体系（兼容现有 L1~L5 + DB51 业务分类）"
 
 levels:
-  L1: {name: "公开数据", rank: 1, description: "无隐私风险"}
-  L2: {name: "内部数据", rank: 2, description: "低敏感度"}
-  L3: {name: "敏感数据", rank: 3, description: "中敏感度"}
-  L4: {name: "高敏感数据", rank: 4, description: "需重点保护"}
-  L5: {name: "极敏感数据", rank: 5, description: "最高级别保护"}
+  L1:
+    id: "L1"
+    name: "公开数据"
+    rank: 1
+    description: "无隐私风险，可公开访问"
+  L2:
+    id: "L2"
+    name: "内部数据"
+    rank: 2
+    description: "低敏感度，仅限内部使用"
+  L3:
+    id: "L3"
+    name: "敏感数据"
+    rank: 3
+    description: "中敏感度，涉及个人基本信息"
+  L4:
+    id: "L4"
+    name: "高敏感数据"
+    rank: 4
+    description: "需重点保护，涉及敏感病种/金融账户"
+  L5:
+    id: "L5"
+    name: "极敏感数据"
+    rank: 5
+    description: "最高级别保护，涉及基因组/生物识别"
 
 categories:
-  PERSONAL_BASIC: {name: "个人基本信息"}
-  MEDICAL_TREATMENT: {name: "诊疗信息"}
-  FEE_BILLING: {name: "费用信息"}
-  PUBLIC_HEALTH: {name: "公共卫生信息"}
-  MANAGEMENT: {name: "管理信息"}
-  GENOMIC: {name: "基因组信息", parent_id: "MEDICAL_TREATMENT"}
-  FINANCIAL: {name: "金融信息"}
+  PERSONAL_BASIC: {id: "PERSONAL_BASIC", name: "个人基本信息"}
+  MEDICAL_TREATMENT: {id: "MEDICAL_TREATMENT", name: "诊疗信息"}
+  FEE_BILLING: {id: "FEE_BILLING", name: "费用信息"}
+  PUBLIC_HEALTH: {id: "PUBLIC_HEALTH", name: "公共卫生信息"}
+  MANAGEMENT: {id: "MANAGEMENT", name: "管理信息"}
+  GENOMIC: {id: "GENOMIC", name: "基因组信息", parent_id: "MEDICAL_TREATMENT"}
+  FINANCIAL: {id: "FINANCIAL", name: "金融信息"}
+  MEDICAL_ICD10_GENERAL: {id: "MEDICAL_ICD10_GENERAL", name: "ICD-10 通用编码", parent_id: "MEDICAL_TREATMENT"}
+  MEDICAL_ICD10_HIV: {id: "MEDICAL_ICD10_HIV", name: "ICD-10 HIV 相关", parent_id: "MEDICAL_TREATMENT"}
+  MEDICAL_ICD10_STD: {id: "MEDICAL_ICD10_STD", name: "ICD-10 性传播疾病", parent_id: "MEDICAL_TREATMENT"}
+  MEDICAL_ICD10_PSYCHIATRIC: {id: "MEDICAL_ICD10_PSYCHIATRIC", name: "ICD-10 精神类疾病", parent_id: "MEDICAL_TREATMENT"}
+  MEDICAL_ICD10_CANCER: {id: "MEDICAL_ICD10_CANCER", name: "ICD-10 恶性肿瘤", parent_id: "MEDICAL_TREATMENT"}
+  PUBLIC_REPORT: {id: "PUBLIC_REPORT", name: "公开报告"}
+  OPERATIONAL_STAT: {id: "OPERATIONAL_STAT", name: "运营统计"}
+  COMPOSITE_PII_COMBO: {id: "COMPOSITE_PII_COMBO", name: "组合敏感个人信息"}
+  COMPOSITE_MEDICAL_GENOMIC: {id: "COMPOSITE_MEDICAL_GENOMIC", name: "组合医疗基因组"}
 
 default_level: "L3"
+
+# 置信度策略配置
+confidence_policy:
+  conflict_confidence: 0.7
+  conflict_needs_review: true
+  enable_llm_arbitration: false
+  llm_confidence_threshold: 0.6
+  enable_ner: false
+  enable_llm: false
 ```
 
 ```yaml
@@ -547,9 +620,9 @@ class DowngradeRuleDef(BaseModel):
     level: str                 # 降级目标等级
     category: str              # 降级后归属的业务类别
     match_target: str = "field_name"  # 匹配目标
-    override: bool = False     # 是否启用强制覆盖（压制普通规则标签）
+    force_suppress: bool = False  # 是否启用强制覆盖; alias="override"
     max_force_suppress_level: str = ""      # 覆盖等级上限（空=使用 level 字段）
-    suppress_rules: list[str] = Field(default_factory=list)  # 压制白名单（空=压制所有）
+    exempt_rules: list[str] = Field(default_factory=list, alias="exclude_rules")  # 豁免例外名单
 
 
 class CompositeRuleDef(BaseModel):
@@ -567,6 +640,7 @@ class RuleProfile(BaseModel):
     domain: str                # 所属领域
     version: str = "1.0.0"
     description: str = ""
+    default_taxonomy: Optional[str] = None  # 默认关联的分类体系（用于单领域校验）
     rules: list[RuleDef] = Field(default_factory=list)
     downgrade_rules: list[DowngradeRuleDef] = Field(default_factory=list)
     composite_rules: list[CompositeRuleDef] = Field(default_factory=list)
@@ -575,15 +649,17 @@ class RuleProfile(BaseModel):
 class StandardDef(BaseModel):
     """标准组合定义。
 
-    一个标准 = 多个领域包组合 + 参数覆盖 + 等级映射。
+    一个标准 = 多个领域包组合 + 参数覆盖 + 规则级覆盖 + 追加规则。
     """
     standard_id: str           # 标准标识
     description: str = ""
-    taxonomy: str              # 引用的 taxonomy 文件名
+    taxonomy: str = "default"  # 引用的 taxonomy 文件名
     domains: list[str] = Field(default_factory=list)  # 组合的领域包列表
-    global_params: dict[str, Any] = Field(default_factory=dict)  # 全局参数覆盖
+    global_params: dict[str, Any] = Field(default_factory=dict, alias="overrides")  # 全局参数覆盖（预留，当前未生效）
     rule_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)  # 规则级覆盖
     extra_rules: list[RuleDef] = Field(default_factory=list)  # 追加规则
+    extra_downgrade_rules: list[DowngradeRuleDef] = Field(default_factory=list)  # 追加降级规则
+    extra_composite_rules: list[CompositeRuleDef] = Field(default_factory=list)  # 追加复合规则
 ```
 
 ### 6.2 医疗领域规则 Profile 示例
@@ -892,7 +968,25 @@ global_params:
 ```python
 # privacy_local_agent/dynclassification/operator_registry.py
 
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, Union
+from dataclasses import dataclass
+
+
+@dataclass(slots=True)
+class OperatorResult:
+    """算子统一返回结果。
+
+    算子可返回 bool（简单命中/未命中）或 OperatorResult（携带动态等级/类别）。
+    引擎通过 normalize_result() 统一处理两种返回类型。
+    """
+    hit: bool
+    level: str | None = None      # None 时使用规则定义的 level
+    category: str | None = None   # None 时使用规则定义的 category
+
+
+def normalize_result(raw: Any) -> OperatorResult:
+    """将算子原始返回值归一化为 OperatorResult。支持 bool / OperatorResult / tuple。"""
+    ...
 
 
 class MatcherOperator(Protocol):
@@ -900,38 +994,49 @@ class MatcherOperator(Protocol):
 
     所有算子必须实现此签名：接收待匹配值和参数字典，返回是否命中。
     算子必须是无状态纯函数，不持有实例变量。
+    返回类型：bool（简单命中）或 OperatorResult（携带动态等级/类别）。
     """
-    def __call__(self, value: Any, params: dict[str, Any]) -> bool: ...
+    def __call__(self, value: Any, params: dict[str, Any]) -> Union[bool, OperatorResult]: ...
 
 
 class OperatorRegistry:
-    """算子注册表（单例）。
+    """算子注册表（类级单例）。
 
     管理所有已注册的匹配算子，支持装饰器注册和运行时动态注册。
+    线程安全策略：写路径（register/clear）使用 Lock 保护，读路径（get/has）无锁（GIL 优化）。
     """
 
+    _lock = threading.Lock()
     _operators: dict[str, MatcherOperator] = {}
 
     @classmethod
     def register(cls, name: str):
         """算子注册装饰器。"""
         def decorator(func: MatcherOperator) -> MatcherOperator:
-            cls._operators[name] = func
+            with cls._lock:
+                cls._operators[name] = func
             return func
         return decorator
 
     @classmethod
     def register_func(cls, name: str, func: MatcherOperator) -> None:
         """运行时动态注册算子（支持插件热加载）。"""
-        cls._operators[name] = func
+        with cls._lock:
+            cls._operators[name] = func
 
     @classmethod
     def get(cls, name: str) -> MatcherOperator:
-        """获取已注册算子。"""
-        if name not in cls._operators:
-            raise KeyError(f"未找到名为 '{name}' 的匹配算子，"
-                          f"可用算子: {list(cls._operators.keys())}")
-        return cls._operators[name]
+        """获取已注册算子（无锁读，热路径优化）。"""
+        try:
+            return cls._operators[name]
+        except KeyError:
+            available = list(cls._operators.keys())
+            raise KeyError(f"未找到名为 '{name}' 的匹配算子。可用算子: {available}")
+
+    @classmethod
+    def has(cls, name: str) -> bool:
+        """检查算子是否已注册（无锁读）。"""
+        return name in cls._operators
 
     @classmethod
     def list_operators(cls) -> list[str]:
@@ -941,57 +1046,89 @@ class OperatorRegistry:
 
 ### 7.2 内置算子实现
 
+当前共 14+ 内置算子：`regex`、`keyword_contains`、`prefix_match`、`suffix_match`、
+`id_card_checksum`、`medical_card_checksum`、`luhn_checksum`、`icd10_range`、
+`length_range`、`exact_match`、`ip_address`、`mac_address`、`chinese_name`、`email`。
+
 ```python
 # privacy_local_agent/dynclassification/operators.py
 
 import re
 from typing import Any
-from .operator_registry import OperatorRegistry
+from .operator_registry import OperatorRegistry, OperatorResult
 
 
 @OperatorRegistry.register("regex")
 def regex_matcher(value: Any, params: dict[str, Any]) -> bool:
-    """正则表达式匹配算子。"""
+    """正则表达式匹配算子。内置输入长度上限 256KB 防止 ReDoS。"""
     if not isinstance(value, str) or not value:
         return False
+    if len(value) > 256 * 1024:
+        value = value[:256 * 1024]  # 截断缓解 ReDoS
     pattern = params.get("pattern", "")
-    return bool(re.search(pattern, value))
+    if not pattern:
+        return False
+    try:
+        return bool(re.search(pattern, value))
+    except re.error:
+        return False  # 无效正则 fail-safe
 
 
 @OperatorRegistry.register("keyword_contains")
 def keyword_contains_matcher(value: Any, params: dict[str, Any]) -> bool:
     """关键词匹配算子。
 
-    将输入值与关键词均归一化（小写 + 去下划线/空格）后匹配。
-    默认使用单词边界（\\b）进行匹配，避免 "report" 误中 "reported"；
-    需要纯子串匹配时可配置 params.use_word_boundaries=false。
+    默认使用纯子串匹配（use_word_boundaries=false）；
+    启用单词边界时对原始值（仅小写化）进行正则匹配，而非归一化后的字符串。
 
     params:
         keywords: list[str] - 关键词列表
-        use_word_boundaries: bool - 是否使用单词边界（默认 True）
+        use_word_boundaries: bool - 是否使用单词边界（默认 False）
     """
-    norm = str(value).lower().replace("_", "").replace(" ", "")
     keywords = params.get("keywords", [])
-    use_word_boundaries = params.get("use_word_boundaries", True)
+    use_word_boundaries = params.get("use_word_boundaries", False)
 
     if use_word_boundaries:
+        raw_lower = str(value).lower() if value else ""
+        if not raw_lower:
+            return False
         for kw in keywords:
             if kw:
-                pattern = r"\b" + re.escape(kw.lower().replace("_", "").replace(" ", "")) + r"\b"
-                if re.search(pattern, norm):
+                pattern = r"\b" + re.escape(kw.lower()) + r"\b"
+                if re.search(pattern, raw_lower):
                     return True
         return False
     else:
+        norm = str(value).lower().replace("_", "").replace(" ", "") if value else ""
+        if not norm:
+            return False
         return any(kw.lower().replace("_", "").replace(" ", "") in norm for kw in keywords if kw)
 
 
 @OperatorRegistry.register("prefix_match")
 def prefix_matcher(value: Any, params: dict[str, Any]) -> bool:
-    """前缀匹配算子。"""
-    if not isinstance(value, str):
+    """前缀匹配算子。默认大小写不敏感。"""
+    if not isinstance(value, str) or not value:
         return False
     prefixes = params.get("prefixes", [])
+    case_insensitive = params.get("case_insensitive", True)
+    if case_insensitive:
+        v = value.lower()
+        return any(v.startswith(p.lower()) for p in prefixes)
     return any(value.startswith(p) for p in prefixes)
+
+
+@OperatorRegistry.register("suffix_match")
+def suffix_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """后缀匹配算子。默认大小写不敏感。"""
+    if not isinstance(value, str) or not value:
+        return False
+    suffixes = params.get("suffixes", [])
+    case_insensitive = params.get("case_insensitive", True)
+    if case_insensitive:
+        v = value.lower()
+        return any(v.endswith(s.lower()) for s in suffixes)
+    return any(value.endswith(s) for s in suffixes)
 
 
 @OperatorRegistry.register("id_card_checksum")
@@ -1003,13 +1140,31 @@ def id_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
 @OperatorRegistry.register("medical_card_checksum")
 def medical_card_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
     """上海医保卡号校验算子。"""
-    return _validate_shanghai_medical_card(str(value) if value else "")
+    return _validate_medical_card(str(value) if value else "")
 
 
 @OperatorRegistry.register("icd10_range")
-def icd10_range_matcher(value: Any, params: dict[str, Any]) -> bool:
-    """ICD-10 编码格式校验算子（仅判断是否为合法 ICD-10 编码）。"""
-    return _normalize_icd10(str(value) if value else "") is not None
+def icd10_range_matcher(value: Any, params: dict[str, Any]) -> OperatorResult:
+    """ICD-10 编码区间判定算子。
+
+    返回 OperatorResult，携带动态等级和类别信息：
+    - 命中敏感区间: OperatorResult(hit=True, level=upgrade_level, category=interval.category)
+    - 未命中敏感区间: OperatorResult(hit=True, level=default_level, category="MEDICAL_ICD10_GENERAL")
+    - 非法编码: OperatorResult(hit=False)
+    """
+    icd = _normalize_icd10(str(value) if value else "")
+    if not icd:
+        return OperatorResult(hit=False)
+
+    intervals = params.get("intervals", [])
+    for interval in intervals:
+        if _in_icd10_interval(icd, interval["start"], interval["end"]):
+            level = params.get("upgrade_level", "L4")
+            category = interval.get("category", "")
+            return OperatorResult(hit=True, level=level, category=category)
+
+    level = params.get("default_level", "L3")
+    return OperatorResult(hit=True, level=level, category="MEDICAL_ICD10_GENERAL")
 
 
 @OperatorRegistry.register("luhn_checksum")
@@ -1024,6 +1179,59 @@ def luhn_checksum_matcher(value: Any, params: dict[str, Any]) -> bool:
     odd_sum = sum(digits[-1::-2])
     even_sum = sum(sum(divmod(2 * d, 10)) for d in digits[-2::-2])
     return (odd_sum + even_sum) % 10 == 0
+
+
+@OperatorRegistry.register("length_range")
+def length_range_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """字符串长度范围匹配算子。"""
+    s = str(value) if value else ""
+    min_len = params.get("min_length", 0)
+    max_len = params.get("max_length", float("inf"))
+    return min_len <= len(s) <= max_len
+
+
+@OperatorRegistry.register("exact_match")
+def exact_match_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """精确匹配算子（归一化后完全相等）。"""
+    norm = str(value).lower().replace("_", "").replace(" ", "") if value else ""
+    allowed = params.get("values", [])
+    return norm in [v.lower().replace("_", "").replace(" ", "") for v in allowed]
+
+
+@OperatorRegistry.register("ip_address")
+def ip_address_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """IPv4 / IPv6 地址判定算子。"""
+    if not isinstance(value, str) or not value:
+        return False
+    ipv4_pattern = r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+    ipv6_pattern = r"^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$"
+    s = value.strip()
+    return bool(re.match(ipv4_pattern, s) or re.match(ipv6_pattern, s))
+
+
+@OperatorRegistry.register("mac_address")
+def mac_address_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """MAC 地址匹配算子。"""
+    if not isinstance(value, str) or not value:
+        return False
+    mac_pattern = r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$"
+    return bool(re.match(mac_pattern, value.strip()))
+
+
+@OperatorRegistry.register("chinese_name")
+def chinese_name_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """中文姓名匹配算子（2~4 字常见汉字姓名模式）。"""
+    if not isinstance(value, str) or not value:
+        return False
+    return bool(re.match(r"^[\u4e00-\u9fa5]{2,4}$", value.strip()))
+
+
+@OperatorRegistry.register("email")
+def email_matcher(value: Any, params: dict[str, Any]) -> bool:
+    """电子邮箱匹配算子（RFC 5322 简化版）。"""
+    if not isinstance(value, str) or not value:
+        return False
+    return bool(re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", value.strip()))
 ```
 
 ### 7.3 算子扩展机制
@@ -1102,7 +1310,7 @@ class DomainStrategyRegistry:
 from typing import Any, Tuple
 from .models import DomainTaxonomy, SecurityTag
 from .rule_schema import RuleProfile, RuleDef, MatcherDef, DowngradeRuleDef
-from .operator_registry import OperatorRegistry
+from .operator_registry import OperatorRegistry, OperatorResult, normalize_result
 
 
 class ConfigurableRuleEngine:
@@ -1118,6 +1326,7 @@ class ConfigurableRuleEngine:
         profiles: list[RuleProfile],
         domain: str = "",
         standard_id: str = "",
+        cache_max_size: int | None = None,
     ):
         self.taxonomy = taxonomy
         self.domain = domain
@@ -1125,10 +1334,17 @@ class ConfigurableRuleEngine:
         # 合并所有领域包的规则，按 priority 降序排列
         self.rules = self._merge_rules(profiles)
         self.downgrade_rules = self._merge_downgrade_rules(profiles)
-        # 初始化线程安全的 OrderedDict 真实 LRU 评估缓存 (微秒级 O(1) 重复评估匹配)
+        # 初始化线程安全的 OrderedDict 真实 LRU 评估缓存
         self._cache_lock = threading.Lock()
-        self._eval_cache_max_size = int(os.environ.get("PRIVACY_ENGINE_CACHE_MAX_SIZE", "4096"))
+        if cache_max_size is not None:
+            self._eval_cache_max_size = max(1, cache_max_size)
+        else:
+            self._eval_cache_max_size = int(
+                os.environ.get("PRIVACY_ENGINE_CACHE_MAX_SIZE", "4096")
+            )
         self._eval_cache: OrderedDict[tuple[str, str], Tuple[list[SecurityTag], list[SecurityTag]]] = OrderedDict()
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
 
     def clear_cache(self) -> None:
         """清空规则引擎评估缓存。"""
@@ -1172,7 +1388,7 @@ class ConfigurableRuleEngine:
         0. 缓存检查：仅在 context is None 时生效，Key 为 (field_name, str_value[:200])（局限于当前引擎实例）。
         1. 遍历所有普通规则，生成 normal_tags。
         2. 执行降级规则，生成 downgrade_tags（标记 is_override / is_downgrade）。
-        3. 对 override=true 的降级规则执行强制覆盖压制。
+        3. 对 force_suppress=true 的降级规则执行强制覆盖压制。
         4. 合并剩余标签 + 降级标签，按 (level, category) 去重。
         5. 缓存写入：无 context 时进行 OrderedDict LRU 淘汰与新结果写入。
         """
@@ -1199,7 +1415,7 @@ class ConfigurableRuleEngine:
         # Phase 2: 降级规则评估
         downgrade_tags = self._evaluate_downgrade(field_name)
 
-        # Phase 3: 强制覆盖压制（仅 override=true 的降级规则生效）
+        # Phase 3: 强制覆盖压制（仅 force_suppress=true 的降级规则生效）
         surviving_tags, suppressed_tags = self._apply_override_suppression(
             normal_tags, downgrade_tags
         )
@@ -1225,12 +1441,34 @@ class ConfigurableRuleEngine:
         if not rule.matchers:
             return None
 
-        results = []
-        for matcher in rule.matchers:
-            hit = self._execute_matcher(matcher, field_name, str_value)
-            results.append(hit)
+        results: list[bool] = []
+        dynamic_level: str | None = None
+        dynamic_category: str | None = None
+        hit_target: str = "field_name"  # 记录首个命中算子的 target
 
-        if rule.match_logic.upper() == "OR":
+        is_or_logic = rule.match_logic.upper() == "OR"
+
+        for matcher in rule.matchers:
+            op_result = self._execute_matcher(matcher, field_name, str_value)
+            is_hit = op_result.hit
+            results.append(is_hit)
+
+            # 命中时捕获算子返回的动态等级/类别（如 ICD-10 动态匹配）
+            if is_hit and op_result.level is not None:
+                dynamic_level = op_result.level
+                dynamic_category = op_result.category
+
+            # 记录首个命中算子的 target
+            if is_hit and hit_target == "field_name":
+                hit_target = matcher.target
+
+            # 短路优化: OR 命中即断，AND 未命中即断
+            if is_or_logic and is_hit:
+                break
+            elif not is_or_logic and not is_hit:
+                break
+
+        if is_or_logic:
             matched = any(results)
         else:
             matched = all(results)
@@ -1238,27 +1476,57 @@ class ConfigurableRuleEngine:
         if not matched:
             return None
 
+        # Prometheus 规则命中指标
+        DYNCLASSIFICATION_RULE_HITS_TOTAL.labels(
+            rule_id=rule.id,
+            domain=self.domain or "default",
+            standard=self.standard_id or "default",
+        ).inc()
+
+        level = dynamic_level if dynamic_level is not None else rule.level
+        category = dynamic_category if dynamic_category is not None else rule.category
+
+        # AND 逻辑: 任一 matcher 命中 field_value 则为 field_value
+        # OR 逻辑: 使用首个命中 matcher 的 target
+        if is_or_logic:
+            match_target = hit_target
+        else:
+            match_target = "field_value" if any(
+                m.target == "field_value" for m in rule.matchers
+            ) else "field_name"
+
         return SecurityTag(
-            level=rule.level,
-            category=rule.category,
+            level=level,
+            category=category,
             source_engine="RULE",
             rule_id=rule.id,
             domain=self.domain,
             standard_id=self.standard_id,
-            match_target="field_value" if any(
-                m.target == "field_value" for m in rule.matchers
-            ) else "field_name",
+            match_target=match_target,
         )
 
     def _execute_matcher(
         self, matcher: MatcherDef, field_name: str, str_value: str
-    ) -> bool:
-        """执行单个匹配器。"""
-        op_func = OperatorRegistry.get(matcher.operator)
+    ) -> OperatorResult:
+        """执行单个匹配器，返回归一化的 OperatorResult。"""
+        try:
+            op_func = OperatorRegistry.get(matcher.operator)
+        except KeyError:
+            return OperatorResult(hit=False)
+
         target_value = field_name if matcher.target == "field_name" else str_value
         if target_value is None or target_value == "":
-            return False
-        return op_func(target_value, matcher.params)
+            return OperatorResult(hit=False)
+
+        try:
+            raw = op_func(target_value, matcher.params)
+            return normalize_result(raw)
+        except Exception as exc:
+            logger.warning(
+                "operator_execution_failed",
+                extra={"operator": matcher.operator, "field_name": field_name, "error": str(exc)},
+            )
+            return OperatorResult(hit=False)
 
     def _evaluate_downgrade(self, field_name: str) -> list[SecurityTag]:
         """执行敏感度降级规则（详见 4.5 节）。"""
@@ -1274,7 +1542,7 @@ class ConfigurableRuleEngine:
                     rule_id=rule.id,
                     domain=self.domain,
                     standard_id=self.standard_id,
-                    is_override=rule.override,
+                    is_override=rule.force_suppress,
                     is_downgrade=True,
                 ))
         return tags
@@ -1292,7 +1560,7 @@ class ConfigurableRuleEngine:
         if not override_tags:
             return normal_tags, []
 
-        # 计算所有 override 规则中最低的 cap_rank
+        # 计算所有 override 规则中最低的 cap_rank（安全保守原则）
         cap_ranks = []
         for tag in override_tags:
             cap_level = self._get_override_cap_level(tag.rule_id, tag.level)
@@ -1303,18 +1571,12 @@ class ConfigurableRuleEngine:
             return normal_tags, []
         min_cap_rank = min(cap_ranks)
 
-        # 合并 suppress_rules 白名单
-        suppress_whitelist: set[str] = set()
-        has_whitelist = False
+        # 合并所有 override 规则的 exempt_rules 豁免例外名单（取并集）
+        exempt_patterns: set[str] = set()
         for tag in override_tags:
             rule_def = self._find_downgrade_rule(tag.rule_id)
-            if rule_def and rule_def.suppress_rules:
-                has_whitelist = True
-                suppress_whitelist.update(rule_def.suppress_rules)
-            elif rule_def and not rule_def.suppress_rules:
-                has_whitelist = False
-                suppress_whitelist.clear()
-                break
+            if rule_def and rule_def.exempt_rules:
+                exempt_patterns.update(rule_def.exempt_rules)
 
         # 移除 rank <= cap_rank 的普通标签（field_value 命中除外）
         surviving_tags = []
@@ -1325,12 +1587,26 @@ class ConfigurableRuleEngine:
                 continue
             tag_rank = self.taxonomy.get_level_rank(tag.level)
             if tag_rank <= min_cap_rank:
-                if has_whitelist and tag.rule_id not in suppress_whitelist:
-                    surviving_tags.append(tag)
-                    continue
+                # exempt_rules 豁免校验（支持精确匹配及 fnmatch 通配符）
+                if exempt_patterns:
+                    is_exempt = any(
+                        p == tag.rule_id or fnmatch.fnmatch(tag.rule_id, p)
+                        for p in exempt_patterns
+                    )
+                    if is_exempt:
+                        surviving_tags.append(tag)
+                        continue
                 suppressed_tags.append(tag)
             else:
                 surviving_tags.append(tag)
+
+        # Prometheus 压制指标
+        if suppressed_tags:
+            for tag in suppressed_tags:
+                DYNCLASSIFICATION_OVERRIDE_SUPPRESSED_TOTAL.labels(
+                    domain=self.domain or "default",
+                    suppressed_rule_id=tag.rule_id,
+                ).inc()
 
         return surviving_tags, suppressed_tags
 
@@ -1362,33 +1638,31 @@ class ConfigurableRuleEngine:
 
 ### 8.2 ICD-10 特殊处理
 
-ICD-10 规则需要动态返回等级（一般编码 L3，敏感区间 L4），通过 `icd10_range` 算子的扩展实现：
+ICD-10 规则需要动态返回等级（一般编码 L3，敏感区间 L4），通过 `icd10_range` 算子返回 `OperatorResult` 实现：
 
 ```python
 @OperatorRegistry.register("icd10_range")
-def icd10_range_matcher(value: Any, params: dict[str, Any]) -> Tuple[bool, str, str]:
+def icd10_range_matcher(value: Any, params: dict[str, Any]) -> OperatorResult:
     """ICD-10 编码区间判定算子。
 
-    返回一个元组 (is_hit, level, category)：
-    - is_hit: 是否为合法 ICD-10 编码
-    - level: 动态等级（敏感区间返回 upgrade_level，否则返回 default_level）
-    - category: 动态类别（敏感区间返回配置的 category，否则返回 MEDICAL_ICD10_GENERAL）
+    返回 OperatorResult，携带动态等级和类别：
+    - 命中敏感区间: OperatorResult(hit=True, level=upgrade_level, category=interval.category)
+    - 未命中敏感区间: OperatorResult(hit=True, level=default_level, category="MEDICAL_ICD10_GENERAL")
+    - 非法编码: OperatorResult(hit=False)
     """
     icd = _normalize_icd10(str(value) if value else "")
     if not icd:
-        return False, "", ""
+        return OperatorResult(hit=False)
 
     intervals = params.get("intervals", [])
     for interval in intervals:
         if _in_icd10_interval(icd, interval["start"], interval["end"]):
-            # 命中敏感区间：返回升级等级和类别
             level = params.get("upgrade_level", "L4")
             category = interval.get("category", "")
-            return True, level, category
+            return OperatorResult(hit=True, level=level, category=category)
 
-    # 未命中敏感区间：使用默认等级
     level = params.get("default_level", "L3")
-    return True, level, "MEDICAL_ICD10_GENERAL"
+    return OperatorResult(hit=True, level=level, category="MEDICAL_ICD10_GENERAL")
 ```
 
 ## 9. Profile 管理与上下文调度
@@ -1925,7 +2199,7 @@ flowchart TD
 | Operator Registry | 算子注册表，管理所有可用算子的单例 |
 | Profile Loader | 配置加载器，负责 YAML 解析、缓存和热加载 |
 | ConfigurableRuleEngine | 通用规则引擎，解释执行声明式规则 |
-| Downgrade Rules | 敏感度降级规则，通过字段名关键词匹配将过度分类的字段下调到合理低等级；支持 `force_suppress` 强制覆盖、`max_force_suppress_level` 与 `suppress_rules` 精细控制 |
+| Downgrade Rules | 敏感度降级规则，通过字段名关键词匹配将过度分类的字段下调到合理低等级；支持 `force_suppress` 强制覆盖、`max_force_suppress_level` 与 `exempt_rules`（别名 `exclude_rules`）精细控制 |
 | Engine Fallback | 引擎层容错回退，高层引擎不可用时自动回退到低层引擎 |
 | Hot Reload | 热加载，运行时重新加载配置无需重启 |
 | Shadow Mode | 影子模式，新旧引擎并行对比结果 |

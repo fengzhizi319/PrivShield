@@ -52,8 +52,11 @@ from .rules import (
     DATE_GENERALIZATION_FIELDS,
     L4_PATTERNS,
     L5_PATTERNS,
-    _TERMS_FIRST_CHARS_PATTERN,
+    RedactionStrategyConfig,
     classify_icd10_code,
+    compile_l4_l5_patterns,
+    contains_high_risk_text,
+    load_redaction_strategy,
     normalize_fullwidth_alphanumeric,
     redact_icd10_code,
     redact_medical_text,
@@ -187,18 +190,27 @@ class MedicalPrivacyPipeline:
         self,
         dyn_service: DynClassificationService | None = None,
         redact_engine: str = "ner",
+        redaction_strategy: RedactionStrategyConfig | None = None,
     ):
         """初始化 Pipeline 引擎，挂载 DynClassificationService 统一分类能力与 Small-NER 抹平引擎。
 
         Args:
             dyn_service: 动态分类服务实例；为 None 时自动创建，并注入医疗文本脱敏回调。
             redact_engine: 文本抹平引擎选择："ner"（Small-NER 推理）或 "rule"（纯正则快速路径）。
+            redaction_strategy: 脱敏治理策略配置；为 None 时自动从 YAML 加载（回退到代码默认值）。
         """
         if redact_engine not in _SUPPORTED_REDACT_ENGINES:
             supported = ", ".join(sorted(_SUPPORTED_REDACT_ENGINES))
             raise ValueError(
                 f"Unsupported redact_engine {redact_engine!r}; expected one of: {supported}"
             )
+        # 加载脱敏治理策略（YAML 可配置 → 代码默认值回退）
+        self.redaction_strategy = redaction_strategy or load_redaction_strategy()
+        # 根据策略编译 L4/L5 正则模式（替换标签可由 YAML 自定义）
+        self._l5_patterns, self._l4_patterns = compile_l4_l5_patterns(
+            l5_replacement_map=self.redaction_strategy.l5_replacement_map or None,
+            l4_replacement_map=self.redaction_strategy.l4_replacement_map or None,
+        )
         if dyn_service is None:
             # 创建 DynClassificationService 并注入医疗领域文本脱敏回调
             # 解耦 dynclassification 对 medical_pipeline 的反向依赖
@@ -274,9 +286,9 @@ class MedicalPrivacyPipeline:
         if mode == "mask":
             sanitized_text: str = text
             # 依次应用 L5（极高敏）→ L4（高敏）正则替换，将命中词汇替换为带等级标签的占位符
-            for pat, replacement in L5_PATTERNS:
+            for pat, replacement in self._l5_patterns:
                 sanitized_text = pat.sub(replacement, sanitized_text)
-            for pat, replacement in L4_PATTERNS:
+            for pat, replacement in self._l4_patterns:
                 sanitized_text = pat.sub(replacement, sanitized_text)
         # ── 分支二：redact 模式（无痕抹平，默认）──
         else:
@@ -302,15 +314,15 @@ class MedicalPrivacyPipeline:
                         sanitized_text = cached_ner
                     else:
                         # 缓存未命中 → 锁外执行 Small-NER 推理抹平，再持锁写回缓存
-                        sanitized_text = redact_medical_text_with_ner(text, ner_adapter=self.ner_adapter)
+                        sanitized_text = redact_medical_text_with_ner(text, ner_adapter=self.ner_adapter, strategy=self.redaction_strategy)
                         with self._lock:
                             self._cache_ner_result(text, sanitized_text)
                 else:
                     # 不满足深度推理条件 → 降级为纯规则引擎（正则）抹平
-                    sanitized_text = redact_medical_text(text)
+                    sanitized_text = redact_medical_text(text, strategy=self.redaction_strategy)
             else:
                 # "rule" 引擎：始终使用纯正则快速路径
-                sanitized_text = redact_medical_text(text)
+                sanitized_text = redact_medical_text(text, strategy=self.redaction_strategy)
 
             # 语义清洗：诊断字段若被抹平成残缺的修饰词（如"慢性"），
             # 说明其主体（病名）已被抹除，保留修饰词无意义且易泄露上下文 → 整体置空
@@ -393,13 +405,13 @@ class MedicalPrivacyPipeline:
         detected_level: str | None = None
 
         if key.strip().lower() not in _CATEGORICAL_FIELDS:
-            for pat, _replacement in L5_PATTERNS:
+            for pat, _replacement in self._l5_patterns:
                 if pat.search(val_str):
                     detected_level = "L5"
                     break  # L5 已是最高级，中断循环
 
             if detected_level is None:
-                for pat, _replacement in L4_PATTERNS:
+                for pat, _replacement in self._l4_patterns:
                     if pat.search(val_str):
                         detected_level = "L4"
                         break  # 已找到 L4
@@ -483,14 +495,13 @@ class MedicalPrivacyPipeline:
         sanitized = text
         # 先 L5（极高敏）后 L4（高敏）逐模式替换；
         # 顺序不可交换：L5 模式更具体，先替换可避免 L4 模式提前吞掉上下文
-        for pat, replacement in L5_PATTERNS:
+        for pat, replacement in self._l5_patterns:
             sanitized = pat.sub(replacement, sanitized)
-        for pat, replacement in L4_PATTERNS:
+        for pat, replacement in self._l4_patterns:
             sanitized = pat.sub(replacement, sanitized)
         return sanitized
 
-    @staticmethod
-    def _purge_diagnosis_residual(field_name: str, original: str, sanitized: str) -> str:
+    def _purge_diagnosis_residual(self, field_name: str, original: str, sanitized: str) -> str:
         """诊断名称字段的残余整值抹平（§9 规约：L4/L5 诊断彻底抹平）。
 
         诊断名称是结构化诊断标签而非叙事文本：高敏词抹平后残留的修饰碎片
@@ -503,40 +514,24 @@ class MedicalPrivacyPipeline:
         residual = sanitized.strip()
         if residual in ("慢性", "既往", "既往慢性"):
             return ""
-        if residual and residual != original.strip() and MedicalPrivacyPipeline._contains_high_risk_text(original):
+        if residual and residual != original.strip() and self._contains_high_risk_text(original):
             return ""
         return sanitized
 
-    @staticmethod
-    def _contains_high_risk_text(text: str) -> bool:
+    def _contains_high_risk_text(self, text: str) -> bool:
         """判断文本是否仍包含未抹平的 L4/L5 术语。
 
         双重用途：
         1. 作为 NER 深度推理的触发条件之一（文本中确实有高敏词才值得推理）；
         2. 作为最终门禁——process_records 中脱敏后仍命中则整值删除（见最终门禁逻辑）。
 
-        三级检测（词库正则已内建单分隔符容忍，此处再补全角与多分隔符变体）：
-        - 原文直接匹配；
-        - 全角字母/数字归一化（ＨＩＶ → HIV）后匹配；
-        - 剔除字符间插入噪声（空格/点/连字符/零宽字符，如 "H  I  V"、"艾-滋-病"）后匹配。
+        使用实例级 L4/L5 模式（含自定义替换标签），委托模块级函数执行三级检测。
         前置词库首字符预筛：不含任何词库首字符的文本直接判否（毫秒级短路）。
         """
-        if not _TERMS_FIRST_CHARS_PATTERN.search(text):
-            return False
-        patterns = L4_PATTERNS + L5_PATTERNS
-        if any(pattern.search(text) for pattern, _replacement in patterns):
-            return True
-        norm = normalize_fullwidth_alphanumeric(text)
-        if norm != text and any(pattern.search(norm) for pattern, _replacement in patterns):
-            return True
-        stripped = re.sub(
-            r"(?<=[a-zA-Z0-9一-龥])[\s.\-_·•​‌‍﻿]+(?=[a-zA-Z0-9一-龥])",
-            "",
-            norm,
+        return contains_high_risk_text(
+            text,
+            patterns=self._l5_patterns + self._l4_patterns,
         )
-        if stripped != norm and any(pattern.search(stripped) for pattern, _replacement in patterns):
-            return True
-        return False
 
     @staticmethod
     def _could_benefit_from_ner(text: str) -> bool:
@@ -764,7 +759,7 @@ class MedicalPrivacyPipeline:
                     # 非 PII 字段：
                     # 性能超级优化：仅对临床长文本字段/高危敏感字段触发深度 Small-NER 前向推理，
                     # 结构化/短文本字段直接复用超快规则管道，结合 LRU 缓存秒级响应
-                    fc.sanitized_value_rule = redact_medical_text(val_str)
+                    fc.sanitized_value_rule = redact_medical_text(val_str, strategy=self.redaction_strategy)
                     clinical_keys = {
                         "chief_complaint", "present_illness", "past_history",
                         "personal_history", "family_history", "allergic_history",
@@ -780,7 +775,7 @@ class MedicalPrivacyPipeline:
                             fc.sanitized_value_ner = ner_cached  # 缓存命中：直接复用
                         else:
                             # 缓存未命中：锁外执行 NER 推理，再持锁写回缓存
-                            ner_res = redact_medical_text_with_ner(val_str, ner_adapter=self.ner_adapter)
+                            ner_res = redact_medical_text_with_ner(val_str, ner_adapter=self.ner_adapter, strategy=self.redaction_strategy)
                             with self._lock:
                                 self._cache_ner_result(val_str, ner_res)
                             fc.sanitized_value_ner = ner_res
