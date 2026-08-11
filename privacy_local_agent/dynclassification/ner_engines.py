@@ -11,6 +11,7 @@
 架构设计：
 - SimpleChineseBertTokenizer：纯 Python 分词器，无第三方依赖
 - ONNXSmallNerEngine：ONNX Runtime 推理后端（推荐，轻量高效）
+- TensorRTSmallNerEngine：NVIDIA GPU TensorRT 加速后端
 - ModelScopeSmallNerEngine：ModelScope 管道推理后端（兼容，需 PyTorch）
 
 降级策略：
@@ -22,6 +23,38 @@ Local lightweight Named Entity Recognition (Small-NER) engine based on ONNX Runt
 Provides a pure-Python BERT Tokenizer and an efficient BIO tag parser.
 Supports both ONNX Runtime and ModelScope inference backends with lazy-loading
 and graceful degradation capabilities.
+
+===================================================================================
+              NER 引擎推理流程 / NER Engine Inference Flow
+===================================================================================
+
+  engine.extract(text)
+    │
+    ├─① 文本预处理
+    │   ├─ 短文本 (<=120字): 直接推理
+    │   └─ 长文本 (>120字): 智能分句 (句号/分号/换行) + 滑动窗口 (120字+20字重叠)
+    │
+    ├─② Tokenizer 编码
+    │   └─ SimpleChineseBertTokenizer.encode(text, max_len=128)
+    │       → [CLS] 单字切分 token1...tokenN [SEP] [PAD]...
+    │       → (input_ids, attention_mask, token_type_ids)
+    │
+    ├─③ 模型推理 (ONNX / TensorRT / ModelScope)
+    │   └─ BERT 前向传播 → logits (seq_len, num_labels)
+    │
+    ├─④ 序列标注解码
+    │   ├─ ONNX/TensorRT: BIO 标签解析 (B-xxx/I-xxx → 实体)
+    │   └─ ModelScope: 直接返回实体列表
+    │
+    ├─⑤ 标签映射
+    │   └─ 原始标签 → 标准标签 (dis→MEDICAL_DISEASE, dru→MEDICATION...)
+    │
+    └─⑥ 返回 list[dict] : [{"label": "MEDICAL_DISEASE", "text": "...", "confidence": 0.9}]
+
+  支持的实体类型 (CMeEE 标准):
+  dis=疾病, sym=症状, mic=微生物, dru=药物, pro=手术,
+  bod=身体部位, ite=检查项目, dep=科室, equ=医疗设备
+===================================================================================
 """
 
 # 启用延迟注解求值，允许在类型提示中引用尚未定义的类名

@@ -3,8 +3,36 @@
 本模块实现通用动态分类引擎 (dynclassification) 与特异性领域规则 (medical / finance / hr 等) 之间的解耦。
 遵循【依赖倒置原则 (DIP)】与【策略模式 (Strategy Pattern)】：
 1. 核心内核 (dynclassification) 保持纯净、领域无关；
-2. 领域模块 (如 medical_pipeline/rules.py) 作为 Provider 动态注册其特定规则、句法自愈逻辑与词表；
+2. 领域模块 (如 medical_pipeline/rules.py) 作为 Provider 动态注册其特定规则、句法自愈逻辑与词库；
 3. 支持通过 domain 参数自动调度对应领域的脱敏回调函数。
+
+===================================================================================
+              依赖倒置解耦流程 / DIP Decoupling Flow
+===================================================================================
+
+  领域模块启动时 (Provider)               分类服务运行时 (Consumer)
+       │                                         │
+       ▼                                         ▼
+  medical_pipeline/rules.py               service._compute_sanitized_value()
+    │                                         │
+    │ register_sanitizer("medical", fn)       │ get_sanitizer("medical")
+    ▼                                         ▼
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  DomainStrategyRegistry (全局单例)                             │
+  │                                                                 │
+  │  _sanitizers = {                                                │
+  │    "medical":  medical_sanitize_text,                           │
+  │    "finance":  finance_sanitize_text,                           │
+  │    ...                                                          │
+  │  }                                                              │
+  └─────────────────────────────────────────────────────────────────┘
+
+  调用链 / Call chain:
+  service → funnel → L1/L2/L3 分类 → 获取 final_level
+    → service._compute_sanitized_value(field_name, text, result)
+      → registry.get_sanitizer(domain)(field_name, text, final_level, "redact")
+      → 最终安全门禁: L4/L5 残留 → "[L4-L5-DATA-REMOVED]"
+===================================================================================
 """
 
 from __future__ import annotations

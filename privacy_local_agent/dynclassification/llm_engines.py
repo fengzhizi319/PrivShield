@@ -7,6 +7,7 @@
 
 架构设计：
 - Qwen3Classifier：纯文本分类器主类，继承 LlmClassifier 抽象基类
+- OpenAILlmClassifier：通过 HTTP API 调用 vLLM/Ollama/OpenAI 兼容服务
 - 延迟加载：首次调用 classify() 时才加载模型权重（避免启动阻塞和显存浪费）
 - 双重检查锁定：线程安全的模型初始化（gRPC 多线程环境）
 - 专用推理线程池：隔离推理与 gRPC 工作线程，配合超时机制防止永久阻塞
@@ -23,6 +24,39 @@ Data classification and grading engine based on local text-only LLM
 Qwen3.5-0.8B-Privacy-Classifier-Smoother (fine-tuned medical privacy classifier).
 Supports zero-shot sensitivity grading for plain text data. Features lazy-loading
 and graceful degradation. Note: text-only model, no image/vision input support.
+
+===================================================================================
+              LLM 分类推理流程 / LLM Classification Inference Flow
+===================================================================================
+
+  Qwen3Classifier.classify(text, upstream_level, upstream_confidence)
+    │
+    ├─① 安全检查
+    │   ├─ 图片输入检测 → 返回 None (纯文本模型不支持)
+    │   └─ _lazy_init() (双重检查锁定)
+    │       ├─ 检查已初始化 → 快速返回
+    │       ├─ 检查初始化失败缓存 → 抛出缓存异常
+    │       └─ 加锁 → 导入 torch/transformers → 加载模型 → 检测设备
+    │
+    ├─② 构建 Prompt
+    │   ├─ system_prompt: 医疗数据分类分级规则 (L1~L5)
+    │   └─ user_prompt: wrap_untrusted_text(text) (Prompt 注入防护)
+    │
+    ├─③ 推理执行 (专用线程池 + 超时保护)
+    │   └─ _executor.submit(_classify_inner) → future.result(timeout=180s)
+    │       ├─ tokenizer.apply_chat_template(messages) → prompt_ids
+    │       ├─ model.generate(prompt_ids, max_new_tokens=512) → output_ids
+    │       └─ tokenizer.decode(output_ids) → output_text
+    │
+    ├─④ 解析 JSON 结果
+    │   └─ re.search(r'{.*}', output_text) → json.loads()
+    │       → {"final_level": "L3", "confidence": 0.9, "reasoning": "..."}
+    │
+    └─⑤ 返回 dict | None (None = 降级，上层使用 Phase 1 置信度衰减)
+
+  OpenAILlmClassifier.classify(text, ...)
+    └─ HTTP POST → api_base/chat/completions → JSON 响应 → 解析结果
+===================================================================================
 """
 
 # 启用延迟注解求值，允许在类型提示中引用尚未定义的类名

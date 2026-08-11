@@ -1,9 +1,29 @@
 """三层漏斗引擎抽象基类与枚举 / Engine ABCs and Enums.
 
 定义 Layer-2 NER 引擎和 Layer-3 LLM 分类器的抽象接口，
-以及敏感度等级枚举，供 ner_engines.py / llm_engines.py 实现。 /
+以及敏感度等级枚举，供 ner_engines.py / llm_engines.py 实现。 / 
 Defines abstract interfaces for Layer-2 NER engine and Layer-3 LLM classifier,
 and sensitivity level enumerations for ner_engines.py / llm_engines.py to implement.
+
+===================================================================================
+              抽象接口与实现层次 / Abstract Interface & Implementation Hierarchy
+===================================================================================
+
+  抽象基类 (本模块)              具体实现                              空实现 (降级)
+  ─────────────────          ──────────────────────              ──────────────────
+  SmallNerEngine             ├─ ONNXSmallNerEngine (ONNX RT)     NoOpSmallNerEngine
+    extract(text)             ├─ TensorRTSmallNerEngine (NVIDIA)    extract() → []
+     → list[dict]             ├─ ModelScopeSmallNerEngine
+                              └─ MLXSmallNerEngine (Apple MLX)
+
+  LlmClassifier              ├─ Qwen3Classifier (PyTorch)        NoOpLlmClassifier
+    classify(text, ...)       ├─ OpenAILlmClassifier (HTTP API)    classify() → None
+     → dict | None            └─ MLXLlmClassifier (Apple MLX)      or 保守回退
+
+  SensitivityLevel (Enum)
+    L1~L5: 通用/医疗         用途: 上游结果传递、LLM 仲裁输入
+    C1~C4: 金融 (JR/T 0197)  from_string("L3") → SensitivityLevel.L3
+===================================================================================
 """
 
 from __future__ import annotations

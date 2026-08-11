@@ -4,6 +4,45 @@
 所有模型均为 Pydantic v2 BaseModel，支持 YAML/JSON 序列化与校验。 / All models are Pydantic v2 BaseModels, supporting YAML/JSON serialization and validation.
 
 本模块完全独立于旧分类引擎（privacy/classification/），无交叉依赖。 / This module is completely independent of the old classification engine (privacy/classification/) with no cross-dependencies.
+
+===================================================================================
+              数据模型层次与在分类流程中的位置 / Data Model Hierarchy
+===================================================================================
+
+  YAML 配置文件                         运行时数据流
+  (rules/**/*.yaml)                   (Request → Response)
+       │                                      │
+       │  ProfileLoader 反序列化                │  service.classify_field()
+       ▼                                      ▼
+  ┌────────────────────────┐            ┌──────────────────────────────┐
+  │  DomainTaxonomy        │            │  FieldClassificationResult   │
+  │  ├── levels (L1~L5)    │──引用───▶   │  ├── tags: list[SecurityTag] │
+  │  ├── categories        │            │  ├── final_level: str        │
+  │  ├── confidence_policy │            │  ├── confidence: float       │
+  │  └── default_level     │            │  ├── engine_layer: str       │
+  └────────────────────────┘            │  └── sanitized_value: str    │
+       │                                └──────────────────────────────┘
+       │ 被引用                                  │ 包含
+       ▼                                        ▼
+  ┌───────────────────────┐    ┌────────────────────────────────┐
+  │  SensitivityLevelDefv │    │  SecurityTag (单次规则命中)       │
+  │  id / name / rankv    │    │  level / category / confidence │
+  └───────────────────────┘    │  source_engine / rule_id       │
+       ▲                       │  is_override / is_downgrade    │
+       │ rank 比较              └────────────────────────────────┘
+       │                                │
+  ┌───────────────────────┐             │ 聚合
+  │  ConfidencePolicy     │             ▼
+  │  conflict_confidence  │    ┌──────────────────────────────┐
+  │  llm_threshold        │    │  RecordClassificationResult  │
+  │  enable_ner / llm     │    │  (多字段 → 记录级)             │
+  └───────────────────────┘    │      ▼                       │
+                               │  TableClassificationResult   │
+                               │  (多记录 → 表级)               │
+                               └──────────────────────────────┘
+  模型依赖方向（从上到下）：
+  ConfidencePolicy → SensitivityLevelDef → DomainTaxonomy → SecurityTag → FieldResult → RecordResult → TableResult → AuditInfo → ClassificationResponse
+===================================================================================
 """
 
 from __future__ import annotations

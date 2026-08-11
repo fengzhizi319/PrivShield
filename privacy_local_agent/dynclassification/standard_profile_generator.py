@@ -6,6 +6,33 @@ Input a Markdown formatted classification and grading standard document,
 1. taxonomies/<standard_id>.yaml - 分类分级元数据定义 / Classification metadata definition
 2. domains/<standard_id>.yaml    - 领域匹配规则包 / Domain matching rule profile
 3. standards/<standard_id>.yaml  - 标准组合定义 / Standard combination definition
+
+===================================================================================
+              自动生成执行流程 / Auto-Generation Execution Flow
+===================================================================================
+
+  StandardProfileGenerator(doc_path="docs/standard/XXX.md")
+    │
+    ├─① parse()
+    │   ├─ _extract_standard_id()    → 从“标准编号”行或文件名提取 (如 sc_health_db51)
+    │   ├─ _extract_levels()         → 识别等级体系 (L1~L5 医疗 / C1~C4 金融)
+    │   ├─ _extract_categories()     → 识别分类目录树 (PERSONAL_BASIC, MEDICAL_TREATMENT...)
+    │   └─ _generate_rules()         → 从文档关键词正向命中生成规则
+    │       ├─ 身份证件 → id_card_checksum + keyword_contains
+    │       ├─ 手机号码 → regex + keyword_contains
+    │       ├─ 银行卡号 → luhn_checksum + keyword_contains
+    │       ├─ 敏感病种 → keyword_contains (AND 逻辑)
+    │       ├─ 基因遗传 → keyword_contains (AND 逻辑)
+    │       └─ 运营统计 → DowngradeRuleDef (降级规则)
+    │
+    ├─② generate_files(output_dir="rules")
+    │   ├─ 写入 taxonomies/{id}.yaml  → DomainTaxonomy.model_dump()
+    │   ├─ 写入 domains/{id}.yaml     → RuleProfile.model_dump()
+    │   ├─ 写入 standards/{id}.yaml   → StandardDef.model_dump()
+    │   └─ 反向校验: 重新加载并 model_validate() 确保输出合法
+    │
+    └─ CLI: python -m ...standard_profile_generator --doc xxx.md --output rules
+===================================================================================
 """
 
 from __future__ import annotations

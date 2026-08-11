@@ -20,6 +20,50 @@ CompositeRuleEngine 的调用逻辑，支持字段级、记录级和表级分类
     # 记录级分类
     record = {"name": "张三", "id_card": "110101199001011237", "phone": "13800138000"}
     result = service.classify_record(record)
+
+===================================================================================
+                  服务层执行流程 / Service Layer Execution Flow
+===================================================================================
+
+  外部请求 (REST / gRPC / 直接调用)
+       │
+       ▼
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  DynClassificationService                                            │
+  │                                                                      │
+  │  classify_field(name, value, domain, standard, sanitize)             │
+  │    │                                                                 │
+  │    ├─① ProfileLoader.get_engine(domain, standard)                    │
+  │    │     → 加载 YAML → 合并规则 → 构建 ConfigurableRuleEngine (带缓存) │
+  │    │                                                                 │
+  │    ├─② _build_funnel() (double-checked locking)                      │
+  │    │     → 获取/懒初始化 NerAdapter + LlmAdapter                      │
+  │    │     → 组装 ClassificationFunnel(engine, taxonomy, policy, ner, llm)│
+  │    │                                                                 │
+  │    ├─③ funnel.classify_field(field_name, value)                      │
+  │    │     → L1 规则引擎 → L2 NER → L3 LLM 三层漏斗                     │
+  │    │     → 返回 FunnelResult (tags, final_level, confidence, ...)     │
+  │    │                                                                 │
+  │    ├─④ 包装为 FieldClassificationResult                               │
+  │    │     → 填充 sanitized_value (图像打码 / 文本脱敏回调)              │
+  │    │     → 最终安全门禁: L4/L5 残留 → "[L4-L5-DATA-REMOVED]"          │
+  │    │                                                                 │
+  │    └─⑤ 包装为 ClassificationResponse + AuditInfo 返回                 │
+  │                                                                      │
+  │  classify_record(record, ...)                                         │
+  │    → 对每个字段调用 classify_field()                                    │
+  │    → CompositeRuleEngine.evaluate() 多字段组合升级                     │
+  │    → 聚合为 RecordClassificationResult                                 │
+  │                                                                      │
+  │  classify_table(records, ...)                                         │
+  │    → 对每条记录调用 classify_record()                                   │
+  │    → 聚合为 TableClassificationResult                                  │
+  │                                                                      │
+  │  性能优化 / Performance:                                              │
+  │    - fork-after-warmup COW: 主进程预加载模型，子进程共享只读页           │
+  │    - LRU 分类结果缓存: 相同 (field_name, value, domain, standard) 命中缓存│
+  │    - Funnel 实例缓存: 相同 domain:standard 复用 Funnel                 │
+  ══════════════════════════════════════════════════════════════════════════
 """
 
 from __future__ import annotations

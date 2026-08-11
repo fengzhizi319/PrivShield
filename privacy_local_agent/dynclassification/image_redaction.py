@@ -1,5 +1,33 @@
 """图像病例与医学影像智能抹平/打码处理模块。
 Image Case & Medical Image Smart Redaction / Sanitization Module.
+
+===================================================================================
+              图像处理执行流程 / Image Processing Execution Flow
+===================================================================================
+
+  sanitize_image_input(val_str, output_dir, boxes)
+    │
+    ├─① 输入类型判断
+    │   ├─ 文件路径 (xxx.jpg/png/dcm) → 沙箱校验 _is_path_allowed()
+    │   ├─ Base64 Data URI (data:image/...) → base64 解码
+    │   └─ 均不匹配 → 返回原文或失败占位符
+    │
+    ├─② 安全防护
+    │   ├─ 路径穿越防护: resolve() + 白名单目录前缀匹配
+    │   ├─ DecompressionBomb: MAX_IMAGE_PIXELS = 25M
+    │   └─ OOM防护: 超 2048x2048 自动下采样 (LANCZOS)
+    │
+    ├─③ 敏感区域遮挡
+    │   ├─ 默认遮挡区: 头部 16% + 底部 18% (姓名/诊断/签名)
+    │   └─ 自定义 boxes: [(ymin, xmin, ymax, xmax), ...] 比例或像素坐标
+    │
+    ├─④ 输出与清理
+    │   ├─ 文件路径: sha256(文件名)[:12] 匿名命名 + 原子替换 (tmp→rename)
+    │   ├─ Base64: 统一输出 PNG 格式
+    │   └─ 磁盘防满: 自动清理超过 200 个旧文件
+    │
+    └─⑤ fail-closed: DICOM 等无法安全派生的格式返回 [IMAGE-REDACTION-FAILED]
+===================================================================================
 """
 
 from __future__ import annotations

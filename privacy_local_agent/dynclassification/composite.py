@@ -10,6 +10,30 @@ Executed after field-level classification of a single record, upgrading sensitiv
   "name" + "id_card" + "mobile"，则组合后应升级为 L5。
   A single "name" field might only be L3, but if "name" + "id_card" + "mobile"
   exist simultaneously in the same record, the combination should be upgraded to L5.
+
+===================================================================================
+              复合规则执行流程 / Composite Rule Execution Flow
+===================================================================================
+
+  service.classify_record(record)
+       │
+       ├─① 对每个字段调用 funnel.classify_field() → 字段级结果
+       │
+       ├─② CompositeRuleEngine.evaluate(record, field_results)
+       │     │
+       │     │  for each rule in composite_rules:
+       │     │    for each pattern in rule.field_patterns:
+       │     │      正则匹配字段名 → 命中数 += 1
+       │     │    if 命中数 >= rule.min_matches:
+       │     │      生成 SecurityTag(level=target_level, source_engine="COMPOSITE")
+       │     │
+       │     └─→ 返回 list[SecurityTag]
+       │
+       ├─③ apply_to_record_level(current_level, composite_tags, taxonomy)
+       │     → 只升不降: final = max(current_level, *composite_tag_levels)
+       │
+       └─④ 聚合为 RecordClassificationResult
+===================================================================================
 """
 
 from __future__ import annotations

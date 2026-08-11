@@ -14,9 +14,38 @@
 - ip_address: IP 地址匹配 / IP address matching
 - mac_address: MAC 地址匹配 / MAC address matching
 - chinese_name: 中文姓名匹配 / Chinese name matching
+- email: 电子邮箱匹配 / Email address matching
 
 所有算子均为无状态纯函数 / All operators are stateless pure functions, 签名 / signature: (value: Any, params: dict) -> bool.
 本模块完全独立，不依赖旧分类引擎代码 / This module is completely independent and does not rely on old classification engine code.
+
+===================================================================================
+              算子注册与调用流程 / Operator Registration & Invocation Flow
+===================================================================================
+
+  模块加载时 (import operators)             规则评估时 (engine.evaluate)
+       │                                         │
+       ▼                                         ▼
+  @OperatorRegistry.register("regex")      engine._evaluate_single_rule(rule, ...)
+       │                                         │
+       │ 装饰器注册                                │ 遍历 matchers
+       ▼                                         ▼
+  OperatorRegistry._operators["regex"]     OperatorRegistry.get("regex")
+    = regex_matcher                              │
+       │                                         │ 调用算子
+       ▼                                         ▼
+  _operators = {                           regex_matcher(value, params)
+    "regex": regex_matcher,                    │
+    "keyword_contains": ...,                   └─→ bool / OperatorResult
+    "id_card_checksum": ...,
+    ... (13+ 算子)
+  }
+
+  算子返回类型 / Operator return types:
+    - bool: 简单命中/未命中 → normalize_result() → OperatorResult(hit=True/False)
+    - OperatorResult: 携带动态等级/类别 → 引擎直接使用
+    - tuple (向后兼容): (hit, level, category) → normalize_result() → OperatorResult
+===================================================================================
 """
 
 from __future__ import annotations
