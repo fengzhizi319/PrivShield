@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """医疗数据生成脚本 / Medical Data Generator.
 
-生成 20 条逼真的模拟病人医疗记录 CSV（data1.csv），用于分类分级与脱敏流水线测试。
+生成 20 条逼真的模拟病人医疗记录 CSV（kangyang.csv，康养数据），
+用于分类分级与脱敏流水线测试。
 
 Usage:
     python scripts/data/generate_medical_data.py
-    python scripts/data/generate_medical_data.py --output data/data1.csv --count 20
+    python scripts/data/generate_medical_data.py --output data/kangyang.csv --count 20
 """
 from __future__ import annotations
 
@@ -413,7 +414,7 @@ def generate_dataset(count: int = 20) -> list[dict]:
 
 def main():
     parser = argparse.ArgumentParser(description="生成模拟医疗数据 CSV")
-    parser.add_argument("--output", default="data/data1.csv", help="输出文件路径")
+    parser.add_argument("--output", default="data/kangyang.csv", help="输出文件路径")
     parser.add_argument("--count", type=int, default=20, help="生成记录数")
     parser.add_argument("--seed", type=int, default=2026, help="随机种子")
     args = parser.parse_args()

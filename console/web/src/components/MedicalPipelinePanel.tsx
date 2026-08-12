@@ -1,7 +1,7 @@
 /**
  * 医疗敏感数据治理视图 / Medical Privacy Pipeline View
  *
- * 展示从 data1.csv 到分类分级 (3-Layer L1~L5) 与脱敏清洗 (PII + L4/L5 强抹平)
+ * 展示从 康养仿真医疗数据集 (kangyang.csv) 到分类分级 (3-Layer L1~L5) 与脱敏清洗 (PII + L4/L5 强抹平)
  * 的全流程治理，提供双结构数据输出（分级报告与合规清洗数据）。
  */
 
@@ -67,7 +67,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
             医疗敏感数据分类分级与脱敏全流程治理 (Medical Pipeline)
           </h2>
           <p className="mt-1 text-xs text-gray-500">
-            加载仿真医疗数据集 <span className="font-mono font-medium text-indigo-600">data1.csv</span>，执行 3-Layer 分类分级（识别 L4/L5 特高风险病史）与 PII/L4/L5 强抹平脱敏。
+            加载康养仿真医疗数据集 <span className="font-mono font-medium text-indigo-600">kangyang.csv</span>，执行 3-Layer 分类分级（识别 L4/L5 特高风险病史）与 PII/L4/L5 强抹平脱敏。
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -87,7 +87,7 @@ export default function MedicalPipelinePanel({ agentUrl }: MedicalPipelinePanelP
             ) : (
               <Icon name="refresh" className="h-4 w-4" />
             )}
-            重新加载并治理 data1.csv
+            重新加载并治理 kangyang.csv
           </button>
         </div>
       </div>

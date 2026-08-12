@@ -23,7 +23,7 @@
 
 遵循《数据安全法》、《医疗健康数据安全指南》及 JR/T 0197-2020 标准对 27 个字段进行分类分级划分：
 
-| 字段类别 | 中文字段 | 英文 Key (`data1.csv`) | 默认等级 | 合规治理要求 |
+| 字段类别 | 中文字段 | 英文 Key (`kangyang.csv`) | 默认等级 | 合规治理要求 |
 |---|---|---|---|---|
 | **个人身份** | 姓名 | `name` | **L3 (高敏感)** | 姓名格式掩码（如 `张*`） |
 | | 身份证号 | `id_card_no` | **L4 (极高敏感)** | 18 位格式保频掩码（如 `110101********1237`） |
@@ -73,7 +73,7 @@
 - **F-3.1**: Agent 服务暴露 REST API `POST /v1/medical/process` 及 `POST /v1/pipeline/process_records`。
 - **F-3.2**: Python 后端代理 `POST /api/medical_pipeline` 与 `POST /api/pipeline/process`。
 - **F-3.3**: Go 后端代理 `POST /api/medical_pipeline` 与 `POST /api/pipeline/process`。
-- **F-3.4**: Web 控制台提供 `MedicalPipelinePanel.tsx` 页面，支持一键从 `data1.csv` 加载数据并分栏展示结果。
+- **F-3.4**: Web 控制台提供 `MedicalPipelinePanel.tsx` 页面，支持一键从 `kangyang.csv` 加载数据并分栏展示结果。
 
 ---
 

@@ -1,4 +1,4 @@
-"""生成覆盖各类死因、诊疗服药、诊断检出、图文病例及复合疾病句法的 data1.csv 测试集。
+"""生成覆盖各类死因、诊疗服药、诊断检出、图文病例及复合疾病句法的 kangyang.csv（康养）测试集。
 """
 
 import csv
@@ -428,9 +428,9 @@ for idx in range(100):
 
 def main():
     target_paths = [
-        Path("data/data1.csv"),
-        Path("console/backend/samples/data1.csv"),
-        Path("console/backend-go/internal/samples/data1.csv"),
+        Path("data/kangyang.csv"),
+        Path("console/backend/samples/kangyang.csv"),
+        Path("console/backend-go/internal/samples/kangyang.csv"),
     ]
 
     for p in target_paths:

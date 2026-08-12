@@ -7,7 +7,7 @@
 项目当前已具备完整的隐私原语能力（脱敏、差分隐私、K-匿名、分类分级），但缺少一条**端到端的演示流水线**，能够直观展示"原始医疗数据 → 分类分级 → 脱敏输出"的完整过程。
 
 本需求的目标：
-1. 提供一批高仿真医疗数据（data1.csv），包含 L1-L5 各敏感度级别
+1. 提供一批高仿真医疗数据（kangyang.csv），包含 L1-L5 各敏感度级别
 2. 构建流水线模块，串联 `dynclassification` + `privacy/masking`，一键完成分级 + 脱敏
 3. 在测试控制台前端增加可视化面板，支持 Python 后端和 Go 后端双通道联调
 
@@ -19,7 +19,7 @@
 
 | 编号 | 需求 | 优先级 |
 |---|---|---|
-| F-1.1 | 在 `scripts/` 中新建 Python 脚本，生成 CSV 文件 `data1.csv` | P0 |
+| F-1.1 | 在 `scripts/` 中新建 Python 脚本，生成 CSV 文件 `kangyang.csv` | P0 |
 | F-1.2 | 自动生成 20 条记录，包含 28 个字段（见 design.md 第 2 节） | P0 |
 | F-1.3 | 身份证号符合 GB 11643-1999 标准（MOD 11-2 校验码正确） | P0 |
 | F-1.4 | 病史字段包含 L4 级内容（详细手术记录）和 L5 级内容（基因检测、精神疾病史） | P0 |
@@ -43,11 +43,11 @@
 
 | 编号 | 需求 | 优先级 |
 |---|---|---|
-| F-3.1 | data1.csv 复制到 Python 后端和 Go 后端的合适目录 | P0 |
+| F-3.1 | kangyang.csv 复制到 Python 后端和 Go 后端的合适目录 | P0 |
 | F-3.2 | Python 后端新增 `/api/pipeline/process` 端点，代理转发到 agent | P0 |
 | F-3.3 | Go 后端新增 `/api/pipeline/process` 端点，通过 gRPC 调用 agent | P0 |
 | F-3.4 | 前端新增 MedicalPipelinePanel 面板，展示分级结果和脱敏数据 | P0 |
-| F-3.5 | 前端面板支持「执行 data1.csv 分级脱敏」一键操作 | P1 |
+| F-3.5 | 前端面板支持「执行 kangyang.csv 分级脱敏」一键操作 | P1 |
 | F-3.6 | 前端面板支持上传自定义 CSV 文件 | P2 |
 | F-3.7 | 前端面板支持导出分级报告 JSON 和脱敏后 CSV | P2 |
 | F-3.8 | 前端面板支持中英文国际化 | P1 |
@@ -70,7 +70,7 @@
 
 ### 4.1 数据生成验收
 
-- [ ] `python scripts/data/generate_medical_data.py` 执行成功，输出 `data/data1.csv`
+- [ ] `python scripts/data/generate_medical_data.py` 执行成功，输出 `data/kangyang.csv`
 - [ ] CSV 包含 20 行 × 28 列
 - [ ] 所有身份证号通过 MOD 11-2 校验
 - [ ] 病史中至少 3 条包含 L4 级内容、至少 2 条包含 L5 级内容

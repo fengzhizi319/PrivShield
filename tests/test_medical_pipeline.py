@@ -98,9 +98,9 @@ def test_medical_privacy_pipeline_no_raw_l4_l5_leak() -> None:
                 assert term not in val, f"字段 {key} 泄漏了 L4/L5 敏感词汇 '{term}': {val}"
 
 
-def test_data1_csv_file_pipeline_execution() -> None:
-    """从本地读取真实生成的 data1.csv 并执行全流程测试。"""
-    csv_path = Path(__file__).resolve().parent.parent / "privacy_local_agent" / "medical_pipeline" / "samples" / "data1.csv"
+def test_kangyang_csv_file_pipeline_execution() -> None:
+    """从本地读取真实生成的 kangyang.csv 并执行全流程测试。"""
+    csv_path = Path(__file__).resolve().parent.parent / "privacy_local_agent" / "medical_pipeline" / "samples" / "kangyang.csv"
     assert csv_path.exists()
     
     records = []

@@ -231,9 +231,9 @@ class TestQwen2VLClassifier:
         from pathlib import Path
         from privacy_local_agent.dynclassification import DynClassificationService
 
-        csv_path = Path("data/data1.csv")
+        csv_path = Path("data/kangyang.csv")
         if not csv_path.exists():
-            pytest.skip("data/data1.csv 不存在，跳过批量评测")
+            pytest.skip("data/kangyang.csv 不存在，跳过批量评测")
 
         service = DynClassificationService()
         records = []

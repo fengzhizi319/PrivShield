@@ -12,7 +12,7 @@
 | 测试维度 | 验证内容 | 测试用例文件 | 状态 |
 |---|---|---|---|
 | **1. 校验码合法性** | 身份证号符合 GB 11643-1999 (ISO 7064:1983.MOD 11-2) 模 11-2 校验 | `tests/test_medical_pipeline.py::test_generate_valid_id_card_checksum` | ✅ PASS |
-| **2. 字段规范与数量** | 模拟数据完整包含 27 个标准医疗与 PII 字段（仓库预置 `data1.csv` 为 100 条） | `tests/test_medical_pipeline.py::test_generated_dataset_fields_count` | ✅ PASS |
+| **2. 字段规范与数量** | 模拟数据完整包含 27 个标准医疗与 PII 字段（仓库预置 `kangyang.csv` 为 100 条） | `tests/test_medical_pipeline.py::test_generated_dataset_fields_count` | ✅ PASS |
 | **3. 零泄露与强剥离** | 经治理后的 `sanitized_data` 绝对不含 HIV、恶性肿瘤、重度精神障碍等原始词 | `tests/test_medical_pipeline.py::test_medical_privacy_pipeline_no_raw_l4_l5_leak` | ✅ PASS |
 | **4. 双重结构契约** | `classification_report` 与 `sanitized_data` 格式与结构完全符合定义 | `tests/test_medical_pipeline.py::test_medical_privacy_pipeline_dual_output` | ✅ PASS |
 | **5. 通用 Pipeline** | `PipelineService` 的 `process_records`、`process_csv` 及 `/v1/pipeline/*` 端点 | `tests/test_pipeline.py` | ✅ PASS |

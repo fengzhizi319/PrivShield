@@ -8,7 +8,7 @@
 
 需求包含三条必须闭环的链路：
 
-1. 生成 20 条具有医疗语义、包含 L4/L5 病史、个人信息和图文病例引用的仿真数据，并输出 `data1.csv`。
+1. 生成 20 条具有医疗语义、包含 L4/L5 病史、个人信息和图文病例引用的仿真数据，并输出 `kangyang.csv`。
 2. 读取 CSV，调用 `privacy_local_agent.dynclassification` 完成字段/记录分类分级，再调用 `privacy_local_agent.privacy` 完成脱敏；最终同时得到“分级数据”和“不含 L4/L5 数据的脱敏数据”。
 3. 将同一流程接入测试控制台：React 前端可发起和查看处理结果，Python Console 后端和 Go Console 后端都能转发并跑通完整 Agent 链路。
 
@@ -43,7 +43,7 @@
 
 ```mermaid
 graph LR
-    G[generate_medical_data.py] --> CSV[data1.csv]
+    G[generate_medical_data.py] --> CSV[kangyang.csv]
     I[gen_medical_images.py] --> IMG[medical/*.png]
     CSV --> P[medical_pipeline]
     IMG --> P
@@ -95,7 +95,7 @@ case_image_path
 
 该字段只存相对路径，例如 `medical/genetic_report.png`，用于将文字病例与图片病例绑定；不改变上述 27 个必需字段的含义。为兼容已有 CSV，缺失该列时按纯文字病例处理。
 
-若必须严格保持 27 列，则使用同目录的 `data1.images.json` 作为 `record_id -> image paths` sidecar，而不是把路径塞进病历正文。实现前应选择一种方案并在 schema 中固定，不能同时采用两套隐式约定。
+若必须严格保持 27 列，则使用同目录的 `kangyang.images.json` 作为 `record_id -> image paths` sidecar，而不是把路径塞进病历正文。实现前应选择一种方案并在 schema 中固定，不能同时采用两套隐式约定。
 
 ### 4.2 仿真数据规则
 
@@ -120,7 +120,7 @@ JSON 作为完整结果，CSV 作为前端下载和人工查看的扁平化视�
 ```json
 {
   "schema_version": "1.0",
-  "source": {"file": "data1.csv", "synthetic": true},
+  "source": {"file": "kangyang.csv", "synthetic": true},
   "standard": "<实际采用的动态分类标准>",
   "summary": {
     "records": 20,
@@ -210,7 +210,7 @@ privacy_local_agent/medical_pipeline/
 
 ```bash
 python scripts/data/generate_medical_data.py --count 20 --seed 2026
-python -m privacy_local_agent.medical_pipeline --input .../data1.csv --output .../output
+python -m privacy_local_agent.medical_pipeline --input .../kangyang.csv --output .../output
 ```
 
 如果实现阶段选择不增加包级 CLI，则必须保证 `scripts` 脚本能调用包内函数，避免测试通过执行脚本复制出第二套业务逻辑。
@@ -220,7 +220,7 @@ python -m privacy_local_agent.medical_pipeline --input .../data1.csv --output ..
 - 先写临时文件，校验通过后使用原子替换，避免前端读到半成品。
 - 输入 CSV 编码固定为 UTF-8 with BOM 或 UTF-8；实现时选择一种并在文档/测试中固定，中文 Excel 兼容性优先时使用 UTF-8 with BOM。
 - 输出目录默认位于 `privacy_local_agent/medical_pipeline/output/`，用户可以用 `--output` 覆盖。
-- 不覆盖原始 `data1.csv`；输入和输出路径必须经过 `Path.resolve()` 校验，禁止输出到项目外不可控位置（除非 CLI 明确允许）。
+- 不覆盖原始 `kangyang.csv`；输入和输出路径必须经过 `Path.resolve()` 校验，禁止输出到项目外不可控位置（除非 CLI 明确允许）。
 - 单条记录错误记录在 manifest 中并按 `--fail-fast` 决定是否终止；安全门禁错误必须终止并清理不安全输出。
 
 ## 7. Agent 与 Console 接口设计
@@ -268,7 +268,7 @@ POST /v1/medical-pipeline/process
 Python Console 继续作为薄 REST 代理：
 
 - `/api/proxy` 透传 pipeline、动态分类和 masking 请求。
-- `/api/upload` 支持上传 `data1.csv`，文件由 Agent 解析；后端不执行算法。
+- `/api/upload` 支持上传 `kangyang.csv`，文件由 Agent 解析；后端不执行算法。
 - `/api/samples` 增加一个医疗流水线示例，标注 `backend: both`，请求体使用与 Agent 一致的字段命名。
 - 响应继续包装为 `status`、`duration_ms`、`data`、`via="python-rest"`、`protocol="REST"`。
 
@@ -286,7 +286,7 @@ Go Console 必须与 Python Console 暴露完全相同的 `/api/*` JSON 契约�
 
 在现有 `DynClassificationPanel` 中增加“医疗病例流水线” Tab，或新建同级 `MedicalDataPipelinePanel`，推荐后者以隔离复杂状态。页面至少包括：
 
-1. 选择/生成 `data1.csv`，显示 20 条记录和是否含图片病例。
+1. 选择/生成 `kangyang.csv`，显示 20 条记录和是否含图片病例。
 2. 选择分类标准、是否启用图片分类、严格移除 L4/L5 开关（默认开启且不可在生产模式关闭）。
 3. 触发分类与脱敏，显示处理阶段、总记录数、L4/L5 字段计数、删除计数和错误。
 4. 分成两个结果面板：
@@ -374,7 +374,7 @@ make docs-build
 ### 11.1 推荐实施顺序
 
 1. 固定字段 schema、图片绑定方式、默认分类标准和等级映射。
-2. 将现有生成脚本整理为可复用函数，生成单一 `data1.csv` 并按需复制到两个 Console fixture 目录。
+2. 将现有生成脚本整理为可复用函数，生成单一 `kangyang.csv` 并按需复制到两个 Console fixture 目录。
 3. 实现 `medical_pipeline` 的读入、分类适配、脱敏适配和安全门禁。
 4. 增加 Agent/包级单元测试和输出 fixture。
 5. 接入 Python Console、Go Console 与统一示例契约。
@@ -397,10 +397,10 @@ make docs-build
 
 以下事项不能由实现者隐式决定，应在编码前固定：
 
-1. 是否采用 `case_image_path` 扩展列，还是使用 `data1.images.json` sidecar。
+1. 是否采用 `case_image_path` 扩展列，还是使用 `kangyang.images.json` sidecar。
 2. 默认动态分类标准的 ID，以及该标准中 L4/L5 的确切语义和 rank 映射。
 3. 是否新增 `/v1/medical-pipeline/process`；若不新增，如何通过现有 `/api/upload` 和 `/api/proxy` 组合保证原子性。
 4. Go 动态分类继续 REST fallback，还是新增/完善正式 gRPC 映射。
 5. 脱敏结果对含有 L4/L5 的整条记录采取“保留行并清空高敏字段”，还是“整行删除”；本方案默认保留稳定行并清空高敏字段，以便与分类结果逐行对照。
-6. `data1.csv` 是否作为仓库 fixture 提交；默认建议只提交生成脚本和最小测试 fixture，避免在仓库中长期保存大量医疗语义样本。
+6. `kangyang.csv` 是否作为仓库 fixture 提交；默认建议只提交生成脚本和最小测试 fixture，避免在仓库中长期保存大量医疗语义样本。
 

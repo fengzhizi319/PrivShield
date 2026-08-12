@@ -9,13 +9,13 @@
 
 ### 1.1 数据生成脚本 (`scripts/data/generate_medical_data.py`)
 
-用于生成高仿真医疗记录 `data1.csv`（脚本默认 20 条；仓库内各样例目录中预置的 `data1.csv` 均为 **100 条**）：
+用于生成高仿真医疗记录 `kangyang.csv`（脚本默认 20 条；仓库内各样例目录中预置的 `kangyang.csv` 均为 **100 条**）：
 
 ```bash
 cd /path/to/privacy-local-agent
 
-# 生成 100 条数据保存到 data/data1.csv (默认 seed 2026，与仓库预置样例一致)
-python scripts/data/generate_medical_data.py --output data/data1.csv --count 100
+# 生成 100 条数据保存到 data/kangyang.csv (默认 seed 2026，与仓库预置样例一致)
+python scripts/data/generate_medical_data.py --output data/kangyang.csv --count 100
 
 # 自定义记录条数与种子
 python scripts/data/generate_medical_data.py --output tmp/custom_data.csv --count 50 --seed 42
@@ -23,14 +23,14 @@ python scripts/data/generate_medical_data.py --output tmp/custom_data.csv --coun
 
 ### 1.2 分发脚本至控制台后端样例目录
 
-生成的 `data1.csv` 需要自动分发给测试控制台的 Python 与 Go 后端：
+生成的 `kangyang.csv` 需要自动分发给测试控制台的 Python 与 Go 后端：
 
 ```bash
 # 复制至 Python 后端样例目录
-cp data/data1.csv console/backend/samples/data1.csv
+cp data/kangyang.csv console/backend/samples/kangyang.csv
 
 # 复制至 Go 后端样例目录
-cp data/data1.csv console/backend-go/internal/samples/data1.csv
+cp data/kangyang.csv console/backend-go/internal/samples/kangyang.csv
 ```
 
 ---

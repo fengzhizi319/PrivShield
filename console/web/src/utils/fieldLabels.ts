@@ -5,7 +5,7 @@
  */
 
 export const FIELD_CN_NAMES: Record<string, string> = {
-  // === 27 字段医疗数据 (data1.csv) ===
+  // === 27 字段康养医疗数据 (kangyang.csv) ===
   name: '姓名',
   id_card_no: '身份证号',
   registered_address: '户籍地址',

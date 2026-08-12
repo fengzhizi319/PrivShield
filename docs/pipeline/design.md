@@ -13,7 +13,7 @@
 ```mermaid
 flowchart TD
     subgraph DataGen [1. 数据生成层]
-        SG[scripts/data/generate_medical_data.py] -->|GB 11643-1999 + L4/L5 病史| CSV[data/data1.csv]
+        SG[scripts/data/generate_medical_data.py] -->|GB 11643-1999 + L4/L5 病史| CSV[data/kangyang.csv]
     end
 
     subgraph CorePipeline [2. Agent 核心流水线]
@@ -44,7 +44,7 @@ flowchart TD
 
 ## 2. 字段规范与数据生成
 
-### 2.1 字段定义 (data1.csv)
+### 2.1 字段定义 (kangyang.csv)
 
 固定 27 个标准医疗与个人身份字段，覆盖 5 个语义组：
 
@@ -64,7 +64,7 @@ flowchart TD
   - **L4 场景**: 恶性肿瘤 (肺腺癌/胃癌)、乙型肝炎、严重冠心病。
   - **L5 场景**: HIV/艾滋病、重度精神分裂症、遗传性亨廷顿舞蹈病。
 - **图文病历标记**: 包含文字描述及 PACS/DICOM/病理切片图的图片引用路径。
-- **CLI 参数**: 支持 `--output` (默认 `data/data1.csv`), `--count` (默认 20), `--seed` (默认 2026)。
+- **CLI 参数**: 支持 `--output` (默认 `data/kangyang.csv`), `--count` (默认 20), `--seed` (默认 2026)。
 
 ---
 
@@ -85,7 +85,7 @@ privacy_local_agent/
 │   ├── __init__.py           # 医疗专属模块导出
 │   ├── rules.py              # 医疗敏感词汇正则与规则库
 │   ├── pipeline.py           # MedicalPrivacyPipeline 实现
-│   └── samples/data1.csv     # 仿真数据集备份
+│   └── samples/kangyang.csv     # 仿真数据集备份
 └── main.py                   # 挂载 pipeline.router 与 medical.router
 ```
 
@@ -115,17 +115,17 @@ class PipelineResult(BaseModel):
 - 扩展 `console/backend/app/main.py`:
   - `POST /api/pipeline/process`
   - `POST /api/medical_pipeline`
-- 若请求体未提供 `records`，自动读取 `console/backend/samples/data1.csv`。
+- 若请求体未提供 `records`，自动读取 `console/backend/samples/kangyang.csv`。
 
 ### 4.2 Go 后端 (`console/backend-go`)
 - 扩展 `console/backend-go/internal/handlers/handlers.go`:
   - `POST /api/pipeline/process`
   - `POST /api/medical_pipeline`
-- 若请求体未提供 `records`，自动读取 `console/backend-go/internal/samples/data1.csv` 并在 HTTP 代理层透传到 Agent。
+- 若请求体未提供 `records`，自动读取 `console/backend-go/internal/samples/kangyang.csv` 并在 HTTP 代理层透传到 Agent。
 
 ### 4.3 Web 前端 (`console/web`)
 - 组件: `MedicalPipelinePanel.tsx`
-- 支持一键触发 `data1.csv` 治理，双 Tab 展示：
+- 支持一键触发 `kangyang.csv` 治理，双 Tab 展示：
   1. **分类分级报告 (Classification Report)**: 记录级与字段级 L1~L5 等级 Badge 展示。
   2. **脱敏清洗数据 (Sanitized Data)**: 展示符合 100% 剥离要求的安全表格。
 

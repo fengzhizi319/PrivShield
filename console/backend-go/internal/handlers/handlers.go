@@ -1202,7 +1202,7 @@ func (s *Server) MedicalPipeline(c *gin.Context) {
 
 	records := body.Records
 	if len(records) == 0 {
-		loaded, err := s.loadSampleRecords("data1.csv")
+		loaded, err := s.loadSampleRecords("kangyang.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
 			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
@@ -1264,7 +1264,7 @@ func (s *Server) PipelineProcess(c *gin.Context) {
 
 	records := body.Records
 	if len(records) == 0 {
-		loaded, err := s.loadSampleRecords("data1.csv")
+		loaded, err := s.loadSampleRecords("kangyang.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
 			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})

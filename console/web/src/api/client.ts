@@ -331,8 +331,8 @@ export async function concurrencyTest(req: ConcurrencyTestRequest): Promise<Conc
 }
 
 /**
- * 医疗敏感数据全流程治理：对医疗记录或 data1.csv 执行分类分级与 L4/L5 抹平脱敏。
- * Medical privacy pipeline: classifies & desensitizes medical records or data1.csv.
+ * 医疗敏感数据全流程治理：对康养医疗记录或 kangyang.csv 执行分类分级与 L4/L5 抹平脱敏。
+ * Medical privacy pipeline: classifies & desensitizes medical records or kangyang.csv.
  */
 export async function runMedicalPipeline(req: MedicalPipelineRequest = {}): Promise<MedicalPipelineResponse> {
   const raw = await request<any>('/api/medical_pipeline', {

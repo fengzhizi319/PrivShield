@@ -38,7 +38,7 @@ print(output.sanitized_data)
 
 # 示例 2: 使用 PipelineService 处理 CSV 文件
 service = PipelineService(standard="jrt0197")
-res = service.process_csv("data/data1.csv", mask_l4=True, mask_l5=True)
+res = service.process_csv("data/kangyang.csv", mask_l4=True, mask_l5=True)
 
 print(f"\n处理完成，总记录数: {res.classification_summary.total_records}")
 print(f"各风险等级分布: {res.classification_summary.level_distribution}")

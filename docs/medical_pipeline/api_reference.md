@@ -145,7 +145,7 @@
 - **Method**: `POST`
 - **Content-Type**: `multipart/form-data`
 - **Query Parameters**: `standard=jrt0197&mask_l4=true&mask_l5=true`
-- **Form Data**: `file=@data1.csv`
+- **Form Data**: `file=@kangyang.csv`
 
 ---
 
@@ -160,7 +160,7 @@ service = PipelineService(standard="jrt0197")
 result: PipelineResult = service.process_records(records, mask_l4=True, mask_l5=True)
 
 # 2. CSV 文件处理
-result: PipelineResult = service.process_csv("data/data1.csv")
+result: PipelineResult = service.process_csv("data/kangyang.csv")
 ```
 
 ---
@@ -168,9 +168,9 @@ result: PipelineResult = service.process_csv("data/data1.csv")
 ## 3. 控制台代理 API
 
 ### 3.1 Python 后端代理 (`console/backend`)
-- `POST /api/medical_pipeline`: 未传 `records` 时自动读取 `console/backend/samples/data1.csv`。
+- `POST /api/medical_pipeline`: 未传 `records` 时自动读取 `console/backend/samples/kangyang.csv`。
 - `POST /api/pipeline/process`: 通用代理端点。
 
 ### 3.2 Go 后端代理 (`console/backend-go`)
-- `POST /api/medical_pipeline`: 未传 `records` 时自动读取 `console/backend-go/internal/samples/data1.csv`。
+- `POST /api/medical_pipeline`: 未传 `records` 时自动读取 `console/backend-go/internal/samples/kangyang.csv`。
 - `POST /api/pipeline/process`: 通用代理端点。
