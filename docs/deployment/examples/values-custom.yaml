@@ -41,20 +41,24 @@ service:
 agent:
   logLevel: info
   logFormat: json
+  # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
+  # primitives.<primitive> 覆盖内置默认参数；其他顶层键不会被解析。
   profile: |
-    server:
-      rest_host: "0.0.0.0"
-      rest_port: 8079
-      grpc_host: "0.0.0.0"
-      grpc_port: 50051
-    privacy:
-      default_epsilon: 1.0
-      default_delta: 1e-6
-      default_k: 5
+    primitives:
+      dp:
+        epsilon: 1.0
+        delta: 0.0
+        mechanism: "laplace"
+      k_anonymity:
+        k: 5
+        l: 2
+        t: 0.2
+        max_depth: 10
+      sanitization:
+        engine: "mask"
 
-# 安全开关：启用安全模块，但 TLS 与 Auth Secret 由外部管理
+# 安全开关：TLS、Auth、RateLimit 分别控制；默认关闭，生产环境需显式开启
 security:
-  enabled: true
   tls:
     enabled: true
     existingSecret: pla-tls

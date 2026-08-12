@@ -144,6 +144,7 @@ deploy/helm/privacy-local-agent/
     ├── ingress.yaml            # 可选 Ingress
     ├── namespace.yaml          # 可选 Namespace 创建
     ├── networkpolicy.yaml      # 可选 NetworkPolicy
+    ├── poddisruptionbudget.yaml # 可选 PodDisruptionBudget
     ├── secret.yaml             # 内置 Secret（TLS 证书 / API Key）
     ├── service.yaml            # ClusterIP Service（REST 8079 + gRPC 50051）
     ├── serviceaccount.yaml     # ServiceAccount
@@ -197,9 +198,9 @@ helm install pla ./deploy/helm/privacy-local-agent \
 |---|---|---|
 | replicaCount | 1 | 2 |
 | agent.logFormat | text | json |
-| security.enabled | false | true |
 | security.tls.enabled | false | true |
 | security.auth.enabled | false | true |
+| security.rateLimit.enabled | false | true |
 | resources.requests | 100m / 256Mi | 500m / 512Mi |
 | resources.limits | 1000m / 1Gi | 2000m / 2Gi |
 | autoscaling.enabled | false | true（2~10 副本） |
@@ -341,7 +342,7 @@ volumeMounts:
 | `console-backend-go` | `console/backend-go/Dockerfile` | 8081 | Go gRPC 高性能代理后端 |
 | `console-backend-python` | `console/backend/Dockerfile` | 8080 | Python FastAPI REST 代理后端 |
 | `console-web` | `console/web/Dockerfile` | 5173 | React 单页控制台 Nginx 静态服务 |
-| `vllm` | `vllm/vllm-openai:latest` (profile: `llm`) | 8000 | vLLM Layer-3 本地大模型推理（GPU） |
+| `vllm` | `vllm/vllm-openai:v0.6.3` (profile: `llm`) | 8000 | vLLM Layer-3 本地大模型推理（GPU） |
 
 ```bash
 cd deploy/docker-compose
@@ -396,11 +397,11 @@ services:
     volumes:
       - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8079/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
 ```
 
@@ -420,7 +421,7 @@ volumes:
 **停止服务**：
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ---
@@ -454,7 +455,7 @@ docker-compose down
 | `PRIVACY_AUTH_ENABLED` | `false` | 启用 API Key 认证 |
 | `PRIVACY_AUTH_EXTERNAL_KEYS_JSON` | `{}` | 外部 API Key JSON 映射 |
 | `PRIVACY_AUTH_INTERNAL_KEYS_JSON` | `{}` | 内部 API Key JSON 映射 |
-| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `true` | 内部 mTLS 免 Key 认证 |
+| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `false` | 内部 mTLS 免 Key 认证 |
 
 **API Key JSON 格式**：
 
@@ -522,18 +523,12 @@ docker-compose down
 |---|---|---|
 | `GET /health` | 通用健康检查（K8s liveness 默认；readiness 默认使用 `/readyz`） | `{"status": "ok", "namespace": "..."}` |
 | `GET /livez` | 存活探针 | `{"status": "alive"}` |
-| `GET /readyz` | 就绪探针（检查配置解析器 + 预算 DB 连通性） | `{"status": "ready", "llm_ready": true/false}` |
-| `GET /readyz/llm` | LLM 分类器就绪探针 | 200 或 503 |
+| `GET /readyz` | 就绪探针（检查配置解析器 + 预算 DB 连通性） | `{"status": "ready"}` |
 
 **就绪探针检查逻辑**（`/readyz`）：
 1. 验证 `Configuration resolver` 已初始化，否则返回 503。
 2. 若配置了 `PRIVACY_BUDGET_DB`，尝试 SQLite 连接（2s 超时），失败返回 503。
-3. 返回 LLM 就绪状态。
-
-**LLM 探针**（`/readyz/llm`）：
-- 未启用 LLM 或使用 NoOp 分类器 → 200
-- 模型已加载成功 → 200
-- 模型正在预热或初始化失败 → 503
+3. 返回 `{"status": "ready"}`。
 
 **TLS 模式下的探针**：Helm 模板自动切换为 `exec` 方式（`curl -fsS -k https://...`），避免 httpGet 无法处理自签证书。
 
@@ -742,9 +737,6 @@ networkPolicy:
 | `PRIVACY_RATE_LIMIT_DEFAULT_BURST` | `20` | 默认突发 |
 | `PRIVACY_RATE_LIMIT_REDIS_URL` | — | Redis 限流后端 |
 | `PRIVACY_WARMUP_LLM` | `false` | 启动时异步预热 LLM |
-| `PRIVACY_ASYNC_MAX_WORKERS` | `4` | 异步分类线程池大小 |
-| `PRIVACY_ASYNC_JOB_TTL_SECONDS` | `3600` | 异步任务 TTL |
-| `PRIVACY_ASYNC_MAX_JOBS` | `1000` | 最大并发异步任务数 |
 | `PRIVACY_VLM_TIMEOUT` | `180` | VLM 推理超时（秒） |
 | `PRIVACY_HEALTH_NO_AUTH` | `true` | 健康检查跳过认证 |
 | `PRIVACY_HEALTH_NO_RATE_LIMIT` | `true` | 健康检查跳过限速 |
@@ -771,7 +763,7 @@ curl http://localhost:8079/health
 
 # 就绪探针
 curl http://localhost:8079/readyz
-# 期望：{"status":"ready","llm_ready":true/false}
+# 期望：{"status":"ready"}
 
 # 存活探针
 curl http://localhost:8079/livez
@@ -781,14 +773,14 @@ curl http://localhost:8079/livez
 curl http://localhost:8079/metrics | head -20
 
 # 脱敏接口冒烟
-curl -X POST http://localhost:8079/mask \
+curl -X POST http://localhost:8079/v1/privacy/mask \
   -H "Content-Type: application/json" \
-  -d '{"data": {"name": "张三", "phone": "13800138000"}}'
+  -d '{"field_name": "mobile", "value": "13800138000", "context": "medical"}'
 
 # DP 查询冒烟
-curl -X POST http://localhost:8079/dp/count \
+curl -X POST http://localhost:8079/v1/privacy/dp/count \
   -H "Content-Type: application/json" \
-  -d '{"value": 100, "epsilon": 1.0}'
+  -d '{"values": [1, 0, 1, 1, 0], "params": {"epsilon": 1.0}}'
 ```
 
 ### 13.2 TLS 环境验证
@@ -810,10 +802,10 @@ curl -k -H "X-API-Key: your-api-key" https://localhost:8079/health
 cd deploy/docker-compose
 
 # 查看容器状态与健康检查
-docker-compose ps
+docker compose ps
 
 # 查看日志
-docker-compose logs -f privacy-local-agent
+docker compose logs -f privacy-local-agent
 
 # 冒烟测试
 curl http://localhost:8079/health
@@ -829,7 +821,6 @@ curl http://localhost:8079/health
 | Pod Pending | 资源不足 / 节点亲和不满足 | `kubectl describe pod <name>` 查看 Events |
 | 健康检查失败（liveness） | 端口未监听 / 安全中间件拦截 | 确认 `/health` 在 `publicPaths` 白名单中；检查 `PRIVACY_HEALTH_NO_AUTH=true` |
 | 就绪探针 503 | 配置解析器未初始化 / SQLite DB 不可达 | 检查 `PRIVACY_PROFILE` 路径是否正确挂载；检查 `PRIVACY_BUDGET_DB` 文件权限 |
-| LLM 探针 503 | 模型预热中或初始化失败 | 查看日志中 `warmup` 相关信息；确认 ml 镜像且模型文件存在 |
 | gRPC 调用失败 | Service 端口 / TLS 设置不一致 | 确认 Service 暴露 50051；TLS 模式下客户端需使用 TLS channel |
 | 认证 401 | API Key 未配置或格式错误 | 检查 `PRIVACY_AUTH_EXTERNAL_KEYS_JSON` 是否为合法 JSON；Header 使用 `X-API-Key` |
 | 速率限制 429 | RPS 超限 | 调大 `PRIVACY_RATE_LIMIT_DEFAULT_RPS` 或配置 `PER_ENDPOINT` 覆盖 |

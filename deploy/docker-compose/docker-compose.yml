@@ -56,6 +56,16 @@ volumes:
   audit-logs:
     driver: local
 
+  # Prometheus 持久化数据
+  # Prometheus persisted data
+  prometheus-data:
+    driver: local
+
+  # Grafana 持久化数据
+  # Grafana persisted data
+  grafana-data:
+    driver: local
+
 # =============================================================================
 # 服务定义 / Services
 # =============================================================================
@@ -149,8 +159,8 @@ services:
     ports:
       - "8081:8081"
     environment:
-      HOST: "0.0.0.0"
-      PORT: "8081"
+      PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      PRIVACY_CONSOLE_PORT: "8081"
       PRIVACY_AGENT_GRPC_HOST: "privacy-local-agent"
       PRIVACY_AGENT_GRPC_PORT: "50051"
     depends_on:
@@ -194,9 +204,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      HOST: "0.0.0.0"
-      PORT: "8080"
-      AGENT_API_URL: "http://privacy-local-agent:8079"
+      PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      PRIVACY_CONSOLE_PORT: "8080"
+      PRIVACY_AGENT_URL: "http://privacy-local-agent:8079"
     depends_on:
       privacy-local-agent:
         condition: service_healthy
@@ -238,9 +248,7 @@ services:
     ports:
       - "5173:5173"
     depends_on:
-      console-backend-go:
-        condition: service_healthy
-      console-backend-python:
+      privacy-local-agent:
         condition: service_healthy
     networks:
       - frontend
@@ -321,6 +329,7 @@ services:
       - "9090:9090"
     volumes:
       - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/alerts.yml:/etc/prometheus/rules/privacy-local-agent-alerts.yml:ro
       - prometheus-data:/prometheus
     networks:
       - backend

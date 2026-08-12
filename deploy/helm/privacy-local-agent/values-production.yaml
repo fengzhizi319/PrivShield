@@ -14,13 +14,14 @@ agent:
   logFormat: json
 
 security:
-  enabled: true
   tls:
     enabled: true
     existingSecret: ""  # 必填
   auth:
     enabled: true
     apiKeysSecret: ""   # 必填
+  rateLimit:
+    enabled: true
 
 resources:
   limits:

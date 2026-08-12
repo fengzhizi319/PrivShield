@@ -91,7 +91,7 @@ helm template prod deploy/helm/privacy-local-agent \
 ```
 
 **检查项**：
-- Deployment 中 `PRIVACY_TLS_ENABLED=true`、`PRIVACY_AUTH_ENABLED=true`。
+- Deployment 中 `PRIVACY_TLS_ENABLED=true`、`PRIVACY_AUTH_ENABLED=true`、`PRIVACY_RATE_LIMIT_ENABLED=true`。
 - TLS 卷挂载使用 `existingSecret` 名称。
 - HPA 资源被渲染。
 - NetworkPolicy 被渲染。
@@ -146,14 +146,14 @@ curl http://localhost:8079/health
 
 ```bash
 cd deploy/docker-compose
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 6.2 容器状态检查
 
 ```bash
-docker-compose ps
-docker-compose logs -f privacy-local-agent
+docker compose ps
+docker compose logs -f privacy-local-agent
 ```
 
 ### 6.3 健康检查
@@ -165,7 +165,7 @@ curl http://localhost:8079/health
 ### 6.4 停止服务
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ## 7. 镜像构建验证
@@ -200,7 +200,7 @@ curl -s -X POST http://localhost:8079/v1/privacy/dp/count \
 # 测试 masking 接口
 curl -s -X POST http://localhost:8079/v1/privacy/mask \
   -H "Content-Type: application/json" \
-  -d '{"data": {"phone": "13800138000", "email": "user@example.com"}}'
+  -d '{"field_name": "mobile", "value": "13800138000", "context": "medical"}'
 ```
 
 若启用认证，请在请求头中加入 `X-API-Key`：
@@ -236,7 +236,7 @@ curl -s -H "X-API-Key: my-api-key" http://localhost:8079/health
 - [ ] `helm template test deploy/helm/privacy-local-agent` 成功渲染。
 - [ ] 生产 values + TLS/认证 Secret 可正确渲染。
 - [ ] `kubectl apply -k deploy/k8s/ --dry-run=client` 通过。
-- [ ] `docker-compose up -d` 能启动服务并通过 `/health` 检查。
+- [ ] `docker compose up -d` 能启动服务并通过 `/health` 检查。
 - [ ] `core` 与 `ml` 镜像均可成功构建。
 - [ ] 冒烟测试（health / dp / mask）返回 200。
 - [ ] 启用认证后，无 Key 请求返回 401，携带正确 Key 请求返回 200。

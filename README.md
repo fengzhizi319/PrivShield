@@ -205,8 +205,9 @@ print(resp.result)
 
 | 能力 | REST | gRPC | 本地 SDK |
 |---|---|---|---|
-| 字段级分类 | `POST /v1/dynclassification/eval` | `DynClassifyField` | `DynClassificationService.eval` |
-| 3层漏斗分类 | `POST /v1/dynclassification/eval` | `DynClassifyField` | `ClassificationFunnel.evaluate` |
+| 字段级分类 | `POST /v1/dynclassification/eval` | `DynClassifyField` | `DynClassificationService.classify_field` |
+| 记录级分类 | `POST /v1/dynclassification/eval_record` | `DynClassifyRecord` | `DynClassificationService.classify_record` |
+| 表级分类 | `POST /v1/dynclassification/eval_table` | `DynClassifyTable` | `DynClassificationService.classify_table` |
 
 数据分类拥有基于 3 层漏斗（规则引擎 -> Small-NER -> Local LLM）的引擎架构：
 
@@ -218,13 +219,13 @@ print(resp.result)
 #### 本地 SDK
 
 ```python
-from privacy_local_agent.classification_service import ClassificationService
+from privacy_local_agent.dynclassification import DynClassificationService
 
-service = ClassificationService()
+service = DynClassificationService(rules_dir="rules")
 
 # 字段级 / Field level
 result = service.classify_field("id_card", "110101199001011237")
-print(result["finalLevel"], result["tags"])
+print(result.final_level, result.tags)
 
 # 记录级 / Record level
 result = service.classify_record({
@@ -232,7 +233,7 @@ result = service.classify_record({
     "mobile": "13800138000",
     "diagnosis": "B21.1",
 })
-print(result["finalLevel"])
+print(result.final_level)
 
 # 表级 / Table level
 result = service.classify_table(
@@ -243,17 +244,30 @@ result = service.classify_table(
         "diagnosis": "C78.0",
     }],
 )
-print(result["finalLevel"])
+print(result.final_level)
 ```
 
 #### REST
 
 ```bash
-curl -X POST http://127.0.0.1:8079/v1/privacy/classify/field \
+# 字段级
+curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval \
   -H "Content-Type: application/json" \
-  -d '{"field_name":"id_card","value":"110101199001011237","params":{}}'
+  -d '{"fieldName":"id_card","value":"110101199001011237"}'
 
-curl -X POST http://127.0.0.1:8079/v1/privacy/classify/table \
+# 记录级
+curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval_record \
+  -H "Content-Type: application/json" \
+  -d '{
+    "record": {
+      "id_card": "110101199001011237",
+      "mobile": "13800138000",
+      "diagnosis": "B21.1"
+    }
+  }'
+
+# 表级
+curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval_table \
   -H "Content-Type: application/json" \
   -d '{
     "schema": ["id_card", "brca1_status", "diagnosis"],
@@ -261,8 +275,7 @@ curl -X POST http://127.0.0.1:8079/v1/privacy/classify/table \
       "id_card": "110101199001011237",
       "brca1_status": "positive",
       "diagnosis": "C78.0"
-    }],
-    "params": {}
+    }]
   }'
 ```
 
@@ -405,33 +418,16 @@ make docs-clean
 
 ### 数据分类
 
-#### 分类引擎（规则 → NER → LLM 三层漏斗）
-- [概述](./docs/classification/README.md)
-- [PRD 产品需求文档](./docs/classification/prd.md)
-- [Design 设计文档](./docs/classification/design.md)
-- [Operations 运维文档](./docs/classification/ops.md)
-- [Testing 测试文档](./docs/classification/testing.md)
-- [API Reference](./docs/classification/api_reference.md)
-- [Examples 示例](./docs/classification/examples.md)
-- [Performance 性能基准](./docs/classification/performance.md)
-
-#### LLM / VLM 分类层
-- [概述](./docs/classification_llm/README.md)
-- [PRD 产品需求文档](./docs/classification_llm/prd.md)
-- [Design 设计文档](./docs/classification_llm/design.md)
-- [Operations 运维文档](./docs/classification_llm/ops.md)
-- [Testing 测试文档](./docs/classification_llm/testing.md)
-- [API Reference](./docs/classification_llm/api_reference.md)
-- [Examples 示例](./docs/classification_llm/examples.md)
-
-#### NER 分类层
-- [概述](./docs/classification_ner/README.md)
-- [PRD 产品需求文档](./docs/classification_ner/prd.md)
-- [Design 设计文档](./docs/classification_ner/design.md)
-- [Operations 运维文档](./docs/classification_ner/ops.md)
-- [Testing 测试文档](./docs/classification_ner/testing.md)
-- [API Reference](./docs/classification_ner/api_reference.md)
-- [Examples 示例](./docs/classification_ner/examples.md)
+#### 动态分类引擎（规则 → NER → LLM 三层漏斗）
+- [概述](./docs/dynclassification/README.md)
+- [PRD 产品需求文档](./docs/dynclassification/prd.md)
+- [Design 设计文档](./docs/dynclassification/design.md)
+- [Operations 运维文档](./docs/dynclassification/ops.md)
+- [Testing 测试文档](./docs/dynclassification/testing.md)
+- [API Reference](./docs/dynclassification/api_reference.md)
+- [Examples 示例](./docs/dynclassification/examples.md)
+- [三层漏斗设计文档](./docs/dynclassification/three_layer_funnel_design.md)
+- [降级规则设计文档](./docs/dynclassification/downgrade_override_design.md)
 
 ### 网关 / 负载均衡
 

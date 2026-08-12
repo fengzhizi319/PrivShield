@@ -48,5 +48,5 @@ helm install pla ./deploy/helm/privacy-local-agent \
 kubectl apply -k ./deploy/k8s/
 
 # Docker Compose 本地启动
-cd deploy/docker-compose && docker-compose up -d
+cd deploy/docker-compose && docker compose up -d
 ```

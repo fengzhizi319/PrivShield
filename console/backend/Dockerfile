@@ -39,8 +39,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 USER privacy
 
 ENV PYTHONUNBUFFERED=1
-ENV HOST=0.0.0.0
-ENV PORT=8080
-ENV AGENT_API_URL=http://privacy-local-agent:8079
+ENV PRIVACY_CONSOLE_HOST=0.0.0.0
+ENV PRIVACY_CONSOLE_PORT=8080
+ENV PRIVACY_AGENT_URL=http://privacy-local-agent:8079
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

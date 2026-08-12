@@ -35,7 +35,7 @@
 |---|---|
 | SRE | 通过 `helm install` 一键部署，并配置 HPA 自动扩缩容。 |
 | 运维 | 通过 K8s Secret 注入 TLS 证书与 API Key，而不是写入镜像。 |
-| 开发 | 本地用 docker-compose 启动 agent + gateway 进行联调。 |
+| 开发 | 本地用 Docker Compose 启动 agent + console 后端进行联调。 |
 | 安全 | 通过 NetworkPolicy 限制只有 gateway 能访问 worker。 |
 
 ## 4. 功能需求
@@ -49,7 +49,7 @@
 | DEP-HELM-3 | ConfigMap 挂载 `privacy-profile.yaml`。 |
 | DEP-HELM-4 | Secret 可选挂载 TLS 证书（`/certs`）与 API Key 环境变量。 |
 | DEP-HELM-5 | Service 暴露 REST（8079）与 gRPC（50051）端口。 |
-| DEP-HELM-6 | Liveness/readiness 探针使用 `/health`。 |
+| DEP-HELM-6 | Liveness 探针使用 `/health`，readiness 探针使用 `/readyz`。 |
 | DEP-HELM-7 | 可选 HPA 基于 CPU/内存自动伸缩。 |
 | DEP-HELM-8 | 可选 Ingress 暴露 REST 端口。 |
 | DEP-HELM-9 | 可选 NetworkPolicy 限制入口流量。 |
@@ -66,7 +66,7 @@
 
 | ID | 需求 |
 |---|---|
-| DEP-COMPOSE-1 | `deploy/docker-compose/docker-compose.yml` 启动 worker + gateway。 |
+| DEP-COMPOSE-1 | `deploy/docker-compose/docker-compose.yml` 启动 Agent + Console 后端代理与 Web UI。 |
 
 ## 5. 非功能需求
 

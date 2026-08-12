@@ -74,9 +74,8 @@ agent:
       sanitization:
         engine: "mask"
 
-# 安全开关
+# 安全开关（TLS、认证、限速分别控制，均默认关闭便于本地测试）
 security:
-  enabled: false
   tls:
     enabled: false
     # 用户自管 TLS Secret（包含 tls.crt / tls.key）
@@ -130,6 +129,21 @@ resources:
   requests:
     cpu: 100m
     memory: 256Mi
+
+# 滚动更新策略
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+# Pod 优雅终止宽限期（秒），未设置则使用 K8s 默认值 30
+terminationGracePeriodSeconds: 30
+
+# PodDisruptionBudget（可选，生产环境可启用以保证最小可用副本）
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
 
 # 探针
 # liveness 使用 /health（轻量存活检查），readiness 使用 /readyz

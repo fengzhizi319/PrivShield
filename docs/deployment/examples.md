@@ -153,10 +153,10 @@ kubectl apply -k ./deploy/k8s/
 cd deploy/docker-compose
 
 # 启动服务（-d 后台运行）
-docker-compose up -d
+docker compose up -d
 
 # 查看日志
-docker-compose logs -f privacy-local-agent
+docker compose logs -f privacy-local-agent
 
 # 测试健康检查
 curl http://localhost:8079/health
@@ -188,8 +188,8 @@ volumes:
 3. 重启服务：
 
 ```bash
-docker-compose down
-docker-compose up -d
+docker compose down
+docker compose up -d
 ```
 
 4. 验证（注意使用 `-k` 跳过自签名证书校验）：
@@ -211,7 +211,7 @@ curl -k https://localhost:8079/health
 
 - TLS 证书与私钥建议通过 `kubectl create secret tls` 或外部 Secret 管理工具（如 cert-manager、Vault）创建，不写入 values 明文。
 - API Key Secret 的 data key 必须为 `api-keys.json`，格式为 JSON 对象，每个 key 对应 `name` 与 `scopes`。
-- 当 `security.enabled=true` 时，Chart 会自动启用 rate limit，并保留 `/health` 作为公开路径。
+- TLS、认证、速率限制分别通过 `security.tls.enabled`、`security.auth.enabled`、`security.rateLimit.enabled` 控制；默认均关闭，生产环境需显式开启。`/health` 默认作为公开路径。
 - 原生 K8s 中启用 TLS/认证时，需同步修改 `deployment.yaml` 中的环境变量、volumeMounts 与 volumes。
 
 ## 8. 验证部署

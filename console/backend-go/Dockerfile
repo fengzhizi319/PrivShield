@@ -55,9 +55,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 # Switch to non-root user
 USER privacy
 
-ENV HOST=0.0.0.0
-ENV PORT=8081
-ENV PRIVACY_AGENT_GRPC_ADDR=privacy-local-agent:50051
-ENV PRIVACY_AGENT_REST_ADDR=http://privacy-local-agent:8079
+ENV PRIVACY_CONSOLE_HOST=0.0.0.0
+ENV PRIVACY_CONSOLE_PORT=8081
+ENV PRIVACY_AGENT_GRPC_HOST=privacy-local-agent
+ENV PRIVACY_AGENT_GRPC_PORT=50051
 
 CMD ["/app/server"]

@@ -8,6 +8,10 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "privacy-local-agent.selectorLabels" . | nindent 6 }}
@@ -27,6 +31,9 @@ spec:
       serviceAccountName: {{ include "privacy-local-agent.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -130,10 +137,6 @@ spec:
               value: {{ .Values.security.rateLimit.perEndpointJson | quote }}
             {{- end }}
             {{- end }}
-            {{- if .Values.security.enabled }}
-            - name: PRIVACY_RATE_LIMIT_ENABLED
-              value: "true"
-            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -144,6 +147,12 @@ spec:
             {{- if .Values.security.tls.enabled }}
             - name: tls-certs
               mountPath: /certs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.security.tls.caSecret }}
+            - name: ca-cert
+              mountPath: {{ .Values.security.tls.caFile }}
+              subPath: ca.crt
               readOnly: true
             {{- end }}
             {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
@@ -204,6 +213,11 @@ spec:
             {{- else }}
             secretName: {{ include "privacy-local-agent.fullname" . }}-secrets
             {{- end }}
+        {{- if .Values.security.tls.caSecret }}
+        - name: ca-cert
+          secret:
+            secretName: {{ .Values.security.tls.caSecret | quote }}
+        {{- end }}
         {{- end }}
         {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
         - name: mtls-whitelist
