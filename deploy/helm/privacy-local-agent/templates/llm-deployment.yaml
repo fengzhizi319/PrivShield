@@ -1,0 +1,123 @@
+{{- if .Values.llm.enabled }}
+# ── Layer-3 LLM 独立推理服务（vLLM / GPU）──
+# 与 core Deployment 完全解耦：升级/重启只影响 LLM 层；
+# LLM 挂掉时 core 自动降级 Layer-1 规则 + Layer-2 NER（core 无需安装 torch/vllm）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "privacy-local-agent.fullname" . }}-llm
+  labels:
+    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: llm
+spec:
+  # LLM 为 GPU 有状态推理服务，默认单副本；
+  # 多副本需按显存规划调整（tensor-parallel 或独立 GPU 分配）
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "privacy-local-agent.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: llm
+  template:
+    metadata:
+      labels:
+        {{- include "privacy-local-agent.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: llm
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # vLLM 官方镜像默认以 root 运行（模型缓存/共享内存）；
+      # 如需非 root 加固，通过 llm.podSecurityContext / llm.securityContext 配置
+      {{- with .Values.llm.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: vllm
+          {{- with .Values.llm.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.llm.image.repository }}:{{ .Values.llm.image.tag }}"
+          imagePullPolicy: {{ .Values.llm.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.llm.port }}
+              protocol: TCP
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+          args:
+            - "--model"
+            - {{ .Values.llm.modelPath | quote }}
+            - "--served-model-name"
+            - {{ .Values.llm.servedModelName | quote }}
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - {{ .Values.llm.gpuMemoryUtilization | quote }}
+            - "--max-model-len"
+            - {{ .Values.llm.maxModelLen | quote }}
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - {{ .Values.llm.port | quote }}
+          {{- with .Values.llm.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.llm.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.llm.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.llm.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.llm.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.llm.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.llm.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.llm.probes.readiness.failureThreshold }}
+          volumeMounts:
+            - name: model-weights
+              mountPath: /models
+              readOnly: true
+            {{- with .Values.llm.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: model-weights
+          {{- if .Values.llm.storage.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.llm.storage.existingClaim }}
+          {{- else if .Values.llm.storage.hostPath }}
+          hostPath:
+            path: {{ .Values.llm.storage.hostPath }}
+            type: Directory
+          {{- else }}
+          # 未配置 storage.hostPath / storage.existingClaim 时挂空目录（需先配置模型来源）
+          emptyDir: {}
+          {{- end }}
+        {{- with .Values.llm.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.llm.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.llm.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.llm.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

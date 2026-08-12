@@ -1,0 +1,19 @@
+# =============================================================================
+# Layer-3 LLM 推理服务入口
+# core 通过 http://privacy-local-agent-llm:8000/v1 调用（OpenAI 兼容）。
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: privacy-local-agent-llm
+  namespace: privacy-local-agent
+  labels:
+    app: privacy-local-agent-llm
+spec:
+  type: ClusterIP
+  selector:
+    app: privacy-local-agent-llm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

@@ -54,6 +54,16 @@ spec:
             #     secretKeyRef:
             #       name: privacy-local-agent-apikeys
             #       key: api-keys.json
+            # 如需启用 Layer-3 LLM 独立推理服务（运行时解耦），取消下面注释并部署
+            # llm-deployment.yaml / llm-service.yaml（LLM 挂掉时 core 自动降级 Layer-1+2）：
+            # - name: PRIVACY_LLM_PROVIDER
+            #   value: "vllm"
+            # - name: PRIVACY_LLM_API_BASE
+            #   value: "http://privacy-local-agent-llm:8000/v1"
+            # - name: PRIVACY_LLM_MODEL_NAME
+            #   value: "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+            # - name: PRIVACY_LLM_API_KEY
+            #   value: "EMPTY"
           volumeMounts:
             - name: config
               mountPath: /etc/privacy-local-agent

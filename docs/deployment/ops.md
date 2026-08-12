@@ -18,23 +18,24 @@
   - [4.1 资源清单](#41-资源清单)
   - [4.2 部署步骤](#42-部署步骤)
 - [5. Docker Compose 部署](#5-docker-compose-部署)
-- [6. 安全配置](#6-安全配置)
-  - [6.1 TLS / mTLS](#61-tls--mtls)
-  - [6.2 API Key 认证](#62-api-key-认证)
-  - [6.3 速率限制](#63-速率限制)
-- [7. 服务启动与优雅关闭](#7-服务启动与优雅关闭)
-- [8. 健康检查与探针](#8-健康检查与探针)
-- [9. 监控与告警](#9-监控与告警)
-  - [9.1 Prometheus 指标](#91-prometheus-指标)
-  - [9.2 告警规则](#92-告警规则)
-  - [9.3 Grafana 仪表盘](#93-grafana-仪表盘)
-  - [9.4 ServiceMonitor（Prometheus Operator）](#94-servicemonitorprometheus-operator)
-- [10. 自动伸缩（HPA）](#10-自动伸缩hpa)
-- [11. 网络策略（NetworkPolicy）](#11-网络策略networkpolicy)
-- [12. 环境变量参考](#12-环境变量参考)
-- [13. 验证与冒烟测试](#13-验证与冒烟测试)
-- [14. 故障排查](#14-故障排查)
-- [15. 日常运维操作](#15-日常运维操作)
+- [6. LLM 推理服务部署（集成模式 / 解耦模式）](#6-llm-推理服务部署集成模式--解耦模式)
+- [7. 安全配置](#7-安全配置)
+  - [7.1 TLS / mTLS](#71-tls--mtls)
+  - [7.2 API Key 认证](#72-api-key-认证)
+  - [7.3 速率限制](#73-速率限制)
+- [8. 服务启动与优雅关闭](#8-服务启动与优雅关闭)
+- [9. 健康检查与探针](#9-健康检查与探针)
+- [10. 监控与告警](#10-监控与告警)
+  - [10.1 Prometheus 指标](#101-prometheus-指标)
+  - [10.2 告警规则](#102-告警规则)
+  - [10.3 Grafana 仪表盘](#103-grafana-仪表盘)
+  - [10.4 ServiceMonitor（Prometheus Operator）](#104-servicemonitorprometheus-operator)
+- [11. 自动伸缩（HPA）](#11-自动伸缩hpa)
+- [12. 网络策略（NetworkPolicy）](#12-网络策略networkpolicy)
+- [13. 环境变量参考](#13-环境变量参考)
+- [14. 验证与冒烟测试](#14-验证与冒烟测试)
+- [15. 故障排查](#15-故障排查)
+- [16. 日常运维操作](#16-日常运维操作)
 
 ---
 
@@ -60,7 +61,7 @@
 Dockerfile 采用三阶段构建，通过 `--target` 选择最终镜像：
 
 ```text
-base (python:3.10-slim)
+base (python:3.13.13-slim-bookworm)
  ├── 安装 curl / ca-certificates（K8s 探针依赖）
  ├── 安装 requirements-core.txt（核心运行时依赖）
  │
@@ -342,7 +343,7 @@ volumeMounts:
 | `console-backend-go` | `console/backend-go/Dockerfile` | 8081 | Go gRPC 高性能代理后端 |
 | `console-backend-python` | `console/backend/Dockerfile` | 8080 | Python FastAPI REST 代理后端 |
 | `console-web` | `console/web/Dockerfile` | 5173 | React 单页控制台 Nginx 静态服务 |
-| `vllm` | `vllm/vllm-openai:v0.6.3` (profile: `llm`) | 8000 | vLLM Layer-3 本地大模型推理（GPU） |
+| `vllm` | `vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}` (profile: `llm`) | 8000 | vLLM Layer-3 本地大模型推理（GPU；Qwen3.5 混合注意力架构需 vLLM 0.26+） |
 
 ```bash
 cd deploy/docker-compose
@@ -426,11 +427,129 @@ docker compose down
 
 ---
 
-## 6. 安全配置
+## 6. LLM 推理服务部署（集成模式 / 解耦模式）
+
+Layer-3 LLM 深度分类支持两种部署模式，核心差异是 **LLM 推理在哪里运行**：
+
+| 维度 | 集成模式（进程内本地推理） | 解耦模式（外部独立 vLLM 服务） |
+|---|---|---|
+| LLM 运行位置 | Agent 进程内（PyTorch/Transformers） | 独立 vLLM 容器/服务（OpenAI 兼容 HTTP） |
+| Agent 镜像 | **ml**（含 torch/transformers） | **core**（无需 ML 依赖） |
+| `PRIVACY_LLM_PROVIDER` | `qwen3` | `vllm` |
+| 模型来源 | 本地模型目录（需挂载进容器/Pod） | vLLM 侧管理（挂载 `.models`） |
+| 适用场景 | 无 GPU / 单机私有化交付 / 测试 | 生产 GPU / 高并发 / 多副本 |
+| 多副本扩容 | ❌ 不可（每副本加载一份模型，OOM 风险） | ✅ core 多副本共享一个 LLM 实例 |
+
+### 6.1 集成模式（进程内本地 LLM）
+
+**本地直跑**：`.env` 或 `PRIVACY_ENV_PROFILE=qwen3`（加载 `config/env/qwen3.env`）：
+
+```ini
+PRIVACY_LLM_PROVIDER=qwen3
+PRIVACY_LLM_MODEL_PATH=.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+PRIVACY_LLM_DEVICE=cuda          # 无 GPU 改 cpu
+PRIVACY_LLM_ENABLE=true          # 可选：显式启用 Layer-3（默认按置信度触发）
+PRIVACY_NER_ENABLE=true          # Layer-2 Small-NER
+```
+
+**Helm 部署**（`llm.enabled` 保持 false，**勿开启**——那是解耦模式）：
+
+```bash
+helm install pla-ml ./deploy/helm/privacy-local-agent \
+  -f ./deploy/helm/privacy-local-agent/values-ml.yaml \
+  --set image.tag=0.1.0-ml
+```
+
+```yaml
+# 自定义 values（集成模式关键配置）
+flavor: ml                          # 必须 ml 镜像（含 torch）
+extraEnv:
+  - name: PRIVACY_LLM_PROVIDER
+    value: "qwen3"
+  - name: PRIVACY_LLM_MODEL_PATH
+    value: "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+  - name: PRIVACY_LLM_DEVICE
+    value: "cuda"
+  - name: PRIVACY_LLM_ENABLE
+    value: "true"
+extraVolumes:                       # 模型权重不在镜像内，必须挂载
+  - name: models
+    hostPath: { path: /data/models }    # 生产推荐 PVC
+extraVolumeMounts:
+  - name: models
+    mountPath: /models
+```
+
+### 6.2 解耦模式（外部独立 vLLM 服务）
+
+**本地直跑**：`.env` 或 `PRIVACY_ENV_PROFILE=vllm`（加载 `config/env/vllm.env`），并先启动 vLLM 服务：
+
+```ini
+PRIVACY_LLM_PROVIDER=vllm
+PRIVACY_LLM_API_BASE=http://127.0.0.1:8000/v1
+PRIVACY_LLM_MODEL_NAME=Qwen3.5-0.8B-Privacy-Classifier-Smoother
+PRIVACY_LLM_API_KEY=EMPTY
+```
+
+```bash
+python run_vllm_server.py          # 宿主机方式启动 vLLM
+# 或 Docker 方式（官方镜像，零构建）：
+docker compose --profile llm up -d vllm
+```
+
+**Helm 部署** —— 方式一：**Helm 全托管**（一条命令同时创建 core + LLM Deployment）：
+
+```bash
+helm install pla ./deploy/helm/privacy-local-agent --set llm.enabled=true
+```
+
+- 自动创建 `-llm` Deployment（vLLM + GPU 预留）+ ClusterIP Service
+- core 自动注入 4 个连接 env，`PRIVACY_LLM_API_BASE` 指向 `http://<fullname>-llm:8000/v1`
+- 模型来源：`llm.storage.hostPath`（单节点）或 `llm.storage.existingClaim`（PVC，生产推荐）
+- GPU 调度：`llm.nodeSelector` / `llm.tolerations`（需集群安装 NVIDIA device plugin）
+
+方式二：**外部已有 vLLM 服务**（LLM 不由 Helm 管理，core 只连出去）：
+
+```yaml
+extraEnv:
+  - name: PRIVACY_LLM_PROVIDER
+    value: "vllm"
+  - name: PRIVACY_LLM_API_BASE
+    value: "http://llm-svc.llm-ns.svc:8000/v1"   # 外部 vLLM 服务地址
+  - name: PRIVACY_LLM_MODEL_NAME
+    value: "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+  - name: PRIVACY_LLM_API_KEY
+    value: "EMPTY"
+```
+
+**Docker Compose**：已内置解耦配置（core 服务 4 个 `PRIVACY_LLM_*` env + vllm 服务），无需改动：
+
+```bash
+docker compose up -d                # 纯 core（无 LLM）
+docker compose --profile llm up -d  # 解耦模式（core + 独立 vLLM）
+```
+
+> **易错点**：解耦模式下 `PRIVACY_LLM_MODEL_NAME` 必须与 vLLM 启动参数 `--served-model-name` **完全一致**，否则返回 404；两种模式**二选一**——集成模式误开 `llm.enabled=true` 会导致模板注入的 `PRIVACY_LLM_PROVIDER=vllm` 覆盖 `qwen3` 配置。
+
+### 6.3 并发与内存护栏（两种模式通用）
+
+进程级防护，防止并发推理叠加导致 OOM（历史上曾表现为 Go 客户端 `connection reset by peer`）：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | 进程级 LLM 推理并发上限（信号量，所有适配器共享） |
+| `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | `30` | 信号量排队超时，超时降级跳过 LLM 层 |
+| `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | 推理前内存预检阈值，低于则降级 |
+
+> 护栏为**进程级**，跨 Pod 无效：集成模式多副本部署时每副本各加载一份模型，内存/显存线性增长，**禁止多副本扩容**；需要并发扩展请改用解耦模式（core 多副本 + 单个 vLLM 实例）。
+
+---
+
+## 7. 安全配置
 
 所有安全开关默认关闭，生产环境通过环境变量显式启用。配置由 `privacy_local_agent/security/config.py` 中的 `SecuritySettings` 统一解析。
 
-### 6.1 TLS / mTLS
+### 7.1 TLS / mTLS
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -448,7 +567,7 @@ docker compose down
 
 **Helm 部署时**：TLS 证书通过 K8s Secret 挂载到 `/certs/` 目录，Deployment 模板自动配置探针使用 `curl -k https://...` 方式探测。
 
-### 6.2 API Key 认证
+### 7.2 API Key 认证
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -473,7 +592,7 @@ docker compose down
 
 **请求携带方式**：HTTP Header `X-API-Key: your-api-key-string`。
 
-### 6.3 速率限制
+### 7.3 速率限制
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -487,7 +606,7 @@ docker compose down
 
 ---
 
-## 7. 服务启动与优雅关闭
+## 8. 服务启动与优雅关闭
 
 容器入口为 `python -m privacy_local_agent.server`，该模块实现 REST + gRPC 双协议统一启动：
 
@@ -517,7 +636,7 @@ docker compose down
 
 ---
 
-## 8. 健康检查与探针
+## 9. 健康检查与探针
 
 | 端点 | 用途 | 返回 |
 |---|---|---|
@@ -534,9 +653,9 @@ docker compose down
 
 ---
 
-## 9. 监控与告警
+## 10. 监控与告警
 
-### 9.1 Prometheus 指标
+### 10.1 Prometheus 指标
 
 指标通过 `/metrics` 端点暴露（`prometheus-client` ASGI app），所有指标以 `privacy_` 为前缀。
 
@@ -600,7 +719,7 @@ docker compose down
 | `privacy_profile_resolve_total` | Counter | primitive, status | 参数解析操作 |
 | `privacy_data_extraction_total` | Counter | format, status | 数据提取操作 |
 
-### 9.2 告警规则
+### 10.2 告警规则
 
 告警规则文件位于 `deploy/prometheus/alerts.yml`，挂载到 Prometheus rules 目录使用：
 
@@ -626,7 +745,7 @@ rule_files:
 | PrivacyBudgetExhausted | privacy | critical | 预算耗尽 ≤ 0 | 1m |
 | HighLLMClassifierErrorRate | classification | warning | LLM 错误率 > 10% | 5m |
 
-### 9.3 Grafana 仪表盘
+### 10.3 Grafana 仪表盘
 
 预置仪表盘 JSON 位于 `deploy/grafana/dashboard.json`，包含以下面板：
 
@@ -644,7 +763,7 @@ rule_files:
 
 **导入方式**：Grafana → Dashboards → Import → Upload JSON file → 选择 `deploy/grafana/dashboard.json`。
 
-### 9.4 ServiceMonitor（Prometheus Operator）
+### 10.4 ServiceMonitor（Prometheus Operator）
 
 Helm 安装时设置 `serviceMonitor.enabled=true` 即可自动创建 ServiceMonitor：
 
@@ -663,7 +782,7 @@ spec:
 
 ---
 
-## 10. 自动伸缩（HPA）
+## 11. 自动伸缩（HPA）
 
 Helm 模板使用 `autoscaling/v2` API，支持 CPU 和内存双指标：
 
@@ -684,7 +803,7 @@ autoscaling:
 
 ---
 
-## 11. 网络策略（NetworkPolicy）
+## 12. 网络策略（NetworkPolicy）
 
 生产环境启用 NetworkPolicy 限制入站流量：
 
@@ -706,7 +825,7 @@ networkPolicy:
 
 ---
 
-## 12. 环境变量参考
+## 13. 环境变量参考
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -736,6 +855,17 @@ networkPolicy:
 | `PRIVACY_RATE_LIMIT_DEFAULT_RPS` | `10` | 默认 RPS |
 | `PRIVACY_RATE_LIMIT_DEFAULT_BURST` | `20` | 默认突发 |
 | `PRIVACY_RATE_LIMIT_REDIS_URL` | — | Redis 限流后端 |
+| `PRIVACY_LLM_PROVIDER` | `auto` | LLM 后端：`qwen3`（集成模式本地推理）/ `vllm` / `openai`（解耦模式 HTTP）/ `mlx` |
+| `PRIVACY_LLM_API_BASE` | — | 外部 vLLM/OpenAI 端点（解耦模式必配，如 `http://vllm:8000/v1`） |
+| `PRIVACY_LLM_MODEL_NAME` | — | 模型对外标识，须与 vLLM `--served-model-name` 一致 |
+| `PRIVACY_LLM_API_KEY` | `EMPTY` | 外部服务 API Key |
+| `PRIVACY_LLM_MODEL_PATH` | `.models/Qwen3.5-...` | 本地模型路径（集成模式） |
+| `PRIVACY_LLM_DEVICE` | `auto` | 本地推理设备：`cuda` / `cpu` / `mps` |
+| `PRIVACY_LLM_ENABLE` | `false` | 显式启用 Layer-3 LLM 层（默认按置信度触发） |
+| `PRIVACY_NER_ENABLE` | `false` | 启用 Layer-2 Small-NER 实体抽取 |
+| `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | 进程级 LLM 推理并发上限（信号量） |
+| `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | `30` | 信号量排队超时（秒），超时降级 |
+| `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | 推理前可用内存阈值（MB），低于则降级 |
 | `PRIVACY_WARMUP_LLM` | `false` | 启动时异步预热 LLM |
 | `PRIVACY_VLM_TIMEOUT` | `180` | VLM 推理超时（秒） |
 | `PRIVACY_HEALTH_NO_AUTH` | `true` | 健康检查跳过认证 |
@@ -743,9 +873,9 @@ networkPolicy:
 
 ---
 
-## 13. 验证与冒烟测试
+## 14. 验证与冒烟测试
 
-### 13.1 K8s 环境验证
+### 14.1 K8s 环境验证
 
 ```bash
 # 查看 Pod 状态
@@ -783,7 +913,7 @@ curl -X POST http://localhost:8079/v1/privacy/dp/count \
   -d '{"values": [1, 0, 1, 1, 0], "params": {"epsilon": 1.0}}'
 ```
 
-### 13.2 TLS 环境验证
+### 14.2 TLS 环境验证
 
 ```bash
 # 跳过证书验证
@@ -796,7 +926,7 @@ curl --cacert ca.crt https://localhost:8079/health
 curl -k -H "X-API-Key: your-api-key" https://localhost:8079/health
 ```
 
-### 13.3 Docker Compose 验证
+### 14.3 Docker Compose 验证
 
 ```bash
 cd deploy/docker-compose
@@ -813,7 +943,7 @@ curl http://localhost:8079/health
 
 ---
 
-## 14. 故障排查
+## 15. 故障排查
 
 | 现象 | 可能原因 | 排查步骤 |
 |---|---|---|
@@ -851,9 +981,9 @@ kubectl get secret pla-tls -n privacy-local-agent -o yaml
 
 ---
 
-## 15. 日常运维操作
+## 16. 日常运维操作
 
-### 15.1 扩缩容
+### 16.1 扩缩容
 
 ```bash
 # 手动扩容（HPA 关闭时）
@@ -863,7 +993,7 @@ kubectl scale deploy/privacy-local-agent -n privacy-local-agent --replicas=3
 kubectl get hpa -n privacy-local-agent
 ```
 
-### 15.2 滚动更新
+### 16.2 滚动更新
 
 ```bash
 # 更新镜像版本
@@ -878,7 +1008,7 @@ kubectl rollout status deploy/privacy-local-agent -n privacy-local-agent
 kubectl rollout undo deploy/privacy-local-agent -n privacy-local-agent
 ```
 
-### 15.3 配置变更
+### 16.3 配置变更
 
 ```bash
 # 编辑 ConfigMap
@@ -888,7 +1018,7 @@ kubectl edit configmap privacy-local-agent-config -n privacy-local-agent
 kubectl rollout restart deploy/privacy-local-agent -n privacy-local-agent
 ```
 
-### 15.4 证书轮换
+### 16.4 证书轮换
 
 ```bash
 # 更新 TLS Secret
@@ -900,7 +1030,7 @@ kubectl create secret tls pla-tls \
 kubectl rollout restart deploy/privacy-local-agent -n privacy-local-agent
 ```
 
-### 15.5 日志查看
+### 16.5 日志查看
 
 ```bash
 # 实时日志
@@ -913,7 +1043,7 @@ kubectl logs --tail=100 -n privacy-local-agent deploy/privacy-local-agent
 kubectl logs -n privacy-local-agent deploy/privacy-local-agent | jq '.level == "error"'
 ```
 
-### 15.6 Helm 预检查（CI/CD）
+### 16.6 Helm 预检查（CI/CD）
 
 ```bash
 # Chart 语法检查

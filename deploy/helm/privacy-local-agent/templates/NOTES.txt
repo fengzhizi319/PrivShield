@@ -7,6 +7,13 @@ Flavor: {{ .Values.flavor }}
 REST service: {{ include "privacy-local-agent.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.restPort }}
 gRPC service: {{ include "privacy-local-agent.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.grpcPort }}
 
+{{- if .Values.llm.enabled }}
+Layer-3 LLM service: {{ include "privacy-local-agent.fullname" . }}-llm.{{ .Release.Namespace }}.svc:{{ .Values.llm.port }}/v1 (independent vLLM Deployment)
+  - LLM 升级/重启不影响 core；LLM 挂掉时 core 自动降级 Layer-1+2
+  - 模型权重来源：llm.storage.hostPath（宿主 .models）或 llm.storage.existingClaim（PVC）
+  - GPU 调度：llm.nodeSelector / llm.tolerations（需 NVIDIA device plugin）
+{{- end }}
+
 {{- if .Values.security.tls.enabled }}
 TLS is enabled. Make sure the certificate secret is mounted correctly.
 {{- end }}

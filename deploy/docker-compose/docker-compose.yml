@@ -16,9 +16,17 @@
 #                            └─────────────────────┘
 #
 # 启动方式 / Usage:
-#   docker compose up -d                    # 启动核心服务
-#   docker compose --profile llm up -d      # 启用 vLLM GPU 推理
+#   docker compose up -d                    # 启动核心服务（不含 LLM，纯 core 镜像）
+#   docker compose --profile llm up -d      # 启用 vLLM GPU 推理（独立 LLM 容器）
+#   docker compose --profile llm up -d vllm # 仅启动/升级 LLM 服务，core 无感知
+#   docker compose restart vllm             # LLM 单独重启，core 自动降级到规则+NER 层
 #   docker compose --profile monitoring up  # 启用监控栈
+#
+# 运行时解耦设计 / Runtime Decoupling:
+#   core 镜像（无 torch）与 vLLM 推理容器完全独立：
+#   - LLM 升级/重启        → core 零感知（HTTP 短连接，自动重试）
+#   - LLM 挂掉/OOM         → core 自动降级 Layer-1 规则 + Layer-2 NER，REST/gRPC 不受影响
+#   - LLM 依赖变更          → 只重建 vllm 容器，core 镜像永不重建
 # =============================================================================
 
 # =============================================================================
@@ -105,10 +113,15 @@ services:
       # 持久化预算数据库路径
       # Persisted budget database path
       PRIVACY_BUDGET_DB: "/data/budget/budget.db"
-      # ── 可选：关联 vLLM 推理服务 / Optional: connect vLLM inference service ──
-      # 取消注释以下行并在 .env 中设置 PRIVACY_ENV_PROFILE=vllm
-      # Uncomment below and set PRIVACY_ENV_PROFILE=vllm in .env
-      # PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
+      # ── Layer-3 LLM 推理服务连接（运行时解耦）──
+      # vLLM 独立容器（服务名 vllm:8000）承载 LLM 推理，core 通过 OpenAI 兼容 HTTP 调用：
+      #   - LLM 升级/重启 → core 零感知（短连接自动重试）
+      #   - LLM 挂掉/OOM  → core 自动降级 Layer-1+Layer-2（信号量等待/内存阈值兜底）
+      # 如业务不需要 LLM（纯 core 模式），注释掉以下 4 行即可
+      PRIVACY_LLM_PROVIDER: "vllm"
+      PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
+      PRIVACY_LLM_MODEL_NAME: "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      PRIVACY_LLM_API_KEY: "EMPTY"
       # ── 可选：安全配置 / Optional: security config ──
       # 生产环境请在 .env 中取消注释 TLS/Auth/RateLimit 配置
       # For production, uncomment TLS/Auth/RateLimit in .env
@@ -275,17 +288,25 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 5. 可选：vLLM Layer-3 本地大模型推理服务 (GPU 加速)
+  # 5. 可选：vLLM Layer-3 本地大模型推理服务 (GPU 加速，独立容器)
   #    PORT: 8000
-  #    启用：docker compose --profile llm up -d
+  #    启用：docker compose --profile llm up -d vllm
+  #    独立运维：升级/重启只影响 LLM 层，core 自动降级，互不干扰
   # ===========================================================================
   vllm:
     profiles: ["llm"]
-    image: vllm/vllm-openai:v0.6.3
+    # Qwen3.5 为混合注意力架构（Gated Delta Net + Full Attention），需较新 vLLM：
+    #   - llmlora 评估环境实测 vLLM 0.26+（见 docs/llmlora/finetuning_and_eval_guide.md §2.2）
+    #   - 旧镜像 v0.6.3（2024 年）无法加载 Qwen3.5，此处默认 latest
+    #   - 生产环境建议固定 tag（如 ${VLLM_IMAGE_TAG} 指定 v0.26.x）保证可复现
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
     container_name: privacy-local-agent-vllm
     command:
       - "--model"
       - "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      - "--served-model-name"
+      - "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      - "--trust-remote-code"
       - "--gpu-memory-utilization"
       - "0.85"
       - "--max-model-len"
@@ -300,6 +321,13 @@ services:
       - "8000:8000"
     networks:
       - llm
+    healthcheck:
+      # vLLM OpenAI 兼容 /health 端点（容器内 python 探测，无需额外安装 curl）
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s  # vLLM 首次加载模型约 22s+，给足宽限
     deploy:
       resources:
         reservations:

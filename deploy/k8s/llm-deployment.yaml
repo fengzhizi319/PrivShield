@@ -1,0 +1,99 @@
+# =============================================================================
+# Layer-3 LLM 独立推理服务（vLLM / GPU）
+# 与 core Deployment 完全解耦：升级/重启只影响 LLM 层；
+# LLM 挂掉时 core 自动降级 Layer-1 规则 + Layer-2 NER（core 无需安装 torch/vllm）。
+#
+# 启用方式：
+#   kubectl apply -f llm-service.yaml -f llm-deployment.yaml
+#   （并取消 deployment.yaml 中 LLM 连接 env 的注释）
+# 前置条件：
+#   - 集群已安装 NVIDIA device plugin
+#   - 模型权重已挂载到 /models（默认 hostPath 指向宿主 .models，生产建议改用 PVC）
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: privacy-local-agent-llm
+  namespace: privacy-local-agent
+  labels:
+    app: privacy-local-agent-llm
+spec:
+  # LLM 为 GPU 有状态推理服务，默认单副本；
+  # 多副本需按显存规划调整（tensor-parallel 或独立 GPU 分配）
+  replicas: 1
+  selector:
+    matchLabels:
+      app: privacy-local-agent-llm
+  template:
+    metadata:
+      labels:
+        app: privacy-local-agent-llm
+    spec:
+      containers:
+        - name: vllm
+          # Qwen3.5 为混合注意力架构（Gated Delta Net + Full Attention），需较新 vLLM：
+          # llmlora 评估环境实测 vLLM 0.26+（见 docs/llmlora/finetuning_and_eval_guide.md §2.2）；
+          # 生产环境建议固定版本 tag（如 v0.26.x）保证可复现。
+          image: vllm/vllm-openai:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+          args:
+            - "--model"
+            - "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+            - "--served-model-name"
+            - "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.85"
+            - "--max-model-len"
+            - "4096"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "8"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          volumeMounts:
+            - name: model-weights
+              mountPath: /models
+              readOnly: true
+      volumes:
+        - name: model-weights
+          # 单机测试：hostPath 指向宿主 .models 目录；
+          # 生产环境请改用 PVC（将模型 COPY 进 PVC 后挂载）
+          hostPath:
+            path: /home/charles/code/sfwork/privacy-local-agent/.models
+            type: Directory
+      # GPU 节点调度：如集群使用节点标签，取消下面注释
+      # nodeSelector:
+      #   nvidia.com/gpu: "true"
+      # tolerations:
+      #   - key: gpu
+      #     operator: Exists
+      #     effect: NoSchedule

@@ -8,3 +8,7 @@ resources:
   - service.yaml
   # 使用自管证书/密钥时取消下面注释
   # - secret.example.yaml
+  # 启用 Layer-3 LLM 独立推理服务（GPU，运行时解耦）时取消下面注释：
+  # LLM 升级/重启不影响 core；LLM 挂掉时 core 自动降级 Layer-1+2
+  # - llm-deployment.yaml
+  # - llm-service.yaml

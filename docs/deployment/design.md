@@ -14,20 +14,24 @@
   - [4.4 values.yaml 与 env 文件的关系](#44-valuesyaml-与-env-文件的关系)
   - [4.5 探针配置](#45-探针配置)
 - [5. core/ml 镜像分层](#5-coreml-镜像分层)
-- [6. 安全设计](#6-安全设计)
-- [7. 可观测性设计](#7-可观测性设计)
-- [8. 部署流程](#8-部署流程)
-- [9. 测试策略](#9-测试策略)
-- [10. 滚动更新与回滚策略 / Rolling Update & Rollback Strategy](#10-滚动更新与回滚策略-rolling-update-rollback-strategy)
-  - [10.1 滚动更新策略](#101-滚动更新策略)
-  - [10.2 回滚方案 / Rollback Plan](#102-回滚方案-rollback-plan)
-  - [10.3 蓝绿部署（可选）/ Blue-Green Deployment (Optional)](#103-蓝绿部署可选-blue-green-deployment-optional)
-  - [10.4 金丝雀发布（可选）/ Canary Release (Optional)](#104-金丝雀发布可选-canary-release-optional)
-- [11. 工业化评分 / Industrialization Scorecard](#11-工业化评分-industrialization-scorecard)
-  - [11.1 加权评分表](#111-加权评分表)
-  - [11.2 结论](#112-结论)
-  - [11.3 亮点](#113-亮点)
-  - [11.4 改进建议](#114-改进建议)
+- [6. LLM 推理服务部署设计](#6-llm-推理服务部署设计)
+  - [6.1 集成模式：进程内本地推理](#61-集成模式进程内本地推理)
+  - [6.2 解耦模式：外部独立 vLLM 服务](#62-解耦模式外部独立-vllm-服务)
+  - [6.3 并发与资源护栏](#63-并发与资源护栏)
+- [7. 安全设计](#7-安全设计)
+- [8. 可观测性设计](#8-可观测性设计)
+- [9. 部署流程](#9-部署流程)
+- [10. 测试策略](#10-测试策略)
+- [11. 滚动更新与回滚策略 / Rolling Update & Rollback Strategy](#11-滚动更新与回滚策略-rolling-update-rollback-strategy)
+  - [11.1 滚动更新策略](#111-滚动更新策略)
+  - [11.2 回滚方案 / Rollback Plan](#112-回滚方案-rollback-plan)
+  - [11.3 蓝绿部署（可选）/ Blue-Green Deployment (Optional)](#113-蓝绿部署可选-blue-green-deployment-optional)
+  - [11.4 金丝雀发布（可选）/ Canary Release (Optional)](#114-金丝雀发布可选-canary-release-optional)
+- [12. 工业化评分 / Industrialization Scorecard](#12-工业化评分-industrialization-scorecard)
+  - [12.1 加权评分表](#121-加权评分表)
+  - [12.2 结论](#122-结论)
+  - [12.3 亮点](#123-亮点)
+  - [12.4 改进建议](#124-改进建议)
 
 ---
 
@@ -370,18 +374,89 @@ Compose 场景下 env 文件的用法与 K8s 不同：
 
 分层设计减少默认镜像体积与攻击面，用户按需选择。
 
-## 6. 安全设计
+## 6. LLM 推理服务部署设计
+
+三层分类漏斗的 Layer-3（LLM 分类/仲裁）提供**集成模式**与**解耦模式**两种部署形态，对应 `PRIVACY_LLM_PROVIDER` 的 `qwen3` 与 `vllm`。二者决定镜像选型、副本策略与 GPU 资源归属，是生产部署的核心决策点。
+
+| 维度 | 集成模式（进程内本地推理） | 解耦模式（外部独立 vLLM 服务） |
+|---|---|---|
+| 推理引擎 | LlmAdapter 进程内加载 Qwen3.5（transformers PyTorch） | OpenAILlmClassifier 经 HTTP 调用外部 vLLM（OpenAI 兼容 API） |
+| `PRIVACY_LLM_PROVIDER` | `qwen3` | `vllm` |
+| Agent 镜像 | **ml**（含 torch/transformers） | **core**（无需 ML 依赖） |
+| GPU 归属 | Agent Pod（每副本一份模型） | 独立 vLLM Deployment/Pod |
+| 多副本扩容 | ❌ 不可（每副本一份模型，OOM 风险） | ✅ core 多副本共享单个 LLM 实例 |
+| 适用场景 | 一体式单机/离线交付、测试、无独立 GPU 编排 | 生产多副本高可用、GPU 集中管理、滚动发布不打断模型加载 |
+
+### 6.1 集成模式：进程内本地推理（provider=qwen3）
+
+**原理**：agent 进程内加载 Qwen3.5 分类模型（`PRIVACY_LLM_PROVIDER=qwen3`，transformers PyTorch 后端，`llm_adapter.py` 懒加载单例），LLM 推理与脱敏/分类业务同进程。
+
+**关键约束**：
+
+- 每副本加载一份模型 → N 副本 = N 份显存/内存，**禁止 HPA 多副本扩容**（历史上已发生多实例并发推理叠加导致 OOM、Go 客户端 `connection reset by peer` 的事故）；
+- 进程级并发护栏（信号量/内存预检/超时降级）仅保护单进程，跨 Pod 无效（见 §6.3）；
+- 滚动更新 `maxSurge` 期间新旧副本并存 = 双份模型，需确保节点资源富余。
+
+**Helm 部署**（Chart 未提供集成模式开关，values 需自行注入）：
+
+- `flavor: ml`（使用 ml 镜像）；
+- `extraEnv` 注入 4 个变量：`PRIVACY_LLM_PROVIDER=qwen3`、`PRIVACY_LLM_MODEL_PATH=/models/<model-dir>`、`PRIVACY_LLM_DEVICE=cuda`（或 `cpu`）、`PRIVACY_LLM_ENABLE=true`（需要 Layer-2 时另加 `PRIVACY_NER_ENABLE=true`）；
+- `extraVolumes` + `extraVolumeMounts` 把模型目录挂载到 `/models`（`hostPath` 或 PVC/`existingClaim`，只读，换模型零重建）；
+- 节点调度：`nodeSelector`/`tolerations` 指向 GPU 节点，`resources.limits` 声明 `nvidia.com/gpu: 1`；
+- **勿开 `llm.enabled`**：模板注入的 `PRIVACY_LLM_PROVIDER=vllm` 会覆盖 `qwen3`，两模式不可混用。
+
+### 6.2 解耦模式：外部独立 vLLM 服务（provider=vllm）
+
+**原理**：LLM 推理卸载到独立 vLLM 服务（OpenAI 兼容 `/v1` API），agent 经 `OpenAILlmClassifier` HTTP 调用，进程内无 torch 依赖 → **core 镜像即可**。核心动机：
+
+- 多副本高可用与 LLM 单点资源解耦：core 副本数可随业务负载弹性伸缩（HPA），共享同一个 vLLM 实例；
+- GPU 资源集中管理：模型常驻一个（或少量）vLLM Pod，加载/升级不随 agent 发布反复发生；
+- 镜像体积与攻击面最小化：agent 不打包重型 ML 依赖。
+
+**配置**（agent 侧 `extraEnv` 注入）：`PRIVACY_LLM_PROVIDER=vllm`、`PRIVACY_LLM_API_BASE=<vLLM 地址>/v1`、`PRIVACY_LLM_MODEL_NAME=<served-model-name>`、`PRIVACY_LLM_API_KEY=EMPTY`（本地无需鉴权时）。
+
+> **易错点**：`PRIVACY_LLM_MODEL_NAME` 必须与 vLLM 启动参数 `--served-model-name` **完全一致**，否则 vLLM 返回 404（模型不存在）。
+
+**部署形态 A：Helm 全托管**（`--set llm.enabled=true`）——Chart 自动渲染：
+
+- `<fullname>-llm` Deployment：`vllm/vllm-openai` 镜像、模型挂载（`llm.storage.hostPath`/`existingClaim`）、GPU 调度（`llm.nodeSelector`/`tolerations`）、`resources.limits."nvidia.com/gpu": 1`、探针（`initialDelaySeconds: 60`，模型加载慢）、`--gpu-memory-utilization`/`--max-model-len` 等启动参数；
+- `<fullname>-llm` Service（ClusterIP，端口 8000）；
+- 自动向 core 注入 `PRIVACY_LLM_*` env，`PRIVACY_LLM_API_BASE=http://<fullname>-llm:8000/v1`（集群 DNS）。
+
+**部署形态 B：外部已有 vLLM**（独立 namespace / 独立集群 / 宿主机）——`llm.enabled` 保持关闭，core `extraEnv` 指向外部地址：`PRIVACY_LLM_API_BASE=http://llm-svc.llm-ns.svc:8000/v1`（集群内）/ `http://<node-ip>:8000/v1`（跨集群需暴露端口）。Docker Compose 场景已内置 `vllm` 服务（`deploy/docker-compose/docker-compose.yml`），agent 自动注入 `API_BASE=http://vllm:8000/v1`。
+
+### 6.3 并发与资源护栏
+
+LLM 推理进程内置三道护栏（`llm_adapter.py`，模块级全局，所有 adapter 实例共享）：
+
+| 护栏 | 环境变量 | 默认 | 作用 |
+|---|---|---|---|
+| 并发信号量 | `PRIVACY_LLM_MAX_CONCURRENCY` | 1 | 进程级推理并发上限（防 OOM 的核心闸门） |
+| 排队超时 | `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | 30 | 等待推理槽位超时后降级（跳过 LLM 层） |
+| 内存预检 | `PRIVACY_LLM_MIN_FREE_MEM_MB` | 512 | 可用内存低于阈值时跳过 LLM 层 |
+
+**作用域边界**：护栏为**进程级**，跨 Pod 无效。因此集成模式必须限制副本数为 1（多副本 = 多份模型，护栏互不可见）；解耦模式下护栏约束的是 agent 侧发往 vLLM 的并发请求数，vLLM 侧的并发由 `--max-num-seqs` 等参数控制。
+
+**决策矩阵**：
+
+| 需求 | 选型 |
+|---|---|
+| 单机/离线/测试，无 GPU 编排需求 | 集成模式（ml 镜像，副本数=1） |
+| 生产多副本 + 弹性伸缩 + GPU 集中管理 | 解耦模式（core 镜像 + 独立 vLLM） |
+| 已有多副本 core 集群，想补 LLM 层 | 解耦模式（Helm `llm.enabled=true` 或指向外部 vLLM） |
+
+## 7. 安全设计
 
 - TLS 证书、API Key 均通过 `existingSecret` 注入，Chart 不生成随机密钥。
 - NetworkPolicy 默认关闭，生产 values 中启用。
 - ServiceAccount 默认创建，RBAC 最小化（无需访问 K8s API）。
 
-## 7. 可观测性设计
+## 8. 可观测性设计
 
 - Prometheus 通过 ServiceMonitor 抓取 `/metrics`（values 可选）。
 - 日志输出到 stdout/stderr，由集群日志系统采集。
 
-## 8. 部署流程
+## 9. 部署流程
 
 ```bash
 # 1. 构建镜像（core）
@@ -403,16 +478,16 @@ kubectl apply -k ./deploy/k8s/
 cd deploy/docker-compose && docker compose up -d
 ```
 
-## 9. 测试策略
+## 10. 测试策略
 
 - `helm lint` 与 `helm template` 通过。
 - 原生 K8s manifests 可 `kubectl apply`。
 - Docker Compose 可启动 Agent + Console 后端代理与 Web UI。
 - core/ml 镜像构建成功。
 
-## 10. 滚动更新与回滚策略 / Rolling Update & Rollback Strategy
+## 11. 滚动更新与回滚策略 / Rolling Update & Rollback Strategy
 
-### 10.1 滚动更新策略
+### 11.1 滚动更新策略
 
 Helm Chart 默认使用 Kubernetes 原生滚动更新（RollingUpdate），确保零停机发布：
 
@@ -451,9 +526,9 @@ podDisruptionBudget:
   minAvailable: 1
 ```
 
-### 10.2 回滚方案 / Rollback Plan
+### 11.2 回滚方案 / Rollback Plan
 
-#### 10.2.1 Helm 回滚
+#### 11.2.1 Helm 回滚
 
 ```bash
 # 查看发布历史 / View release history
@@ -469,7 +544,7 @@ helm rollback privacy-local-agent 3
 helm rollback privacy-local-agent --wait --timeout 5m
 ```
 
-#### 10.2.2 原生 K8s 回滚
+#### 11.2.2 原生 K8s 回滚
 
 ```bash
 # 查看 Deployment 历史 / View deployment history
@@ -485,7 +560,7 @@ kubectl rollout undo deployment/privacy-local-agent --to-revision=3
 kubectl rollout status deployment/privacy-local-agent
 ```
 
-#### 10.2.3 自动回滚触发条件 / Auto-Rollback Triggers
+#### 11.2.3 自动回滚触发条件 / Auto-Rollback Triggers
 
 建议配置以下监控告警作为自动回滚触发条件（结合 Argo Rollouts 或 Flagger）：
 
@@ -496,7 +571,7 @@ kubectl rollout status deployment/privacy-local-agent
 | Pod 重启次数 | > 3 次 | 5 分钟 | 自动回滚 |
 | readinessProbe 失败 | 连续 3 次 | - | Kubernetes 自动处理 |
 
-### 10.3 蓝绿部署（可选）/ Blue-Green Deployment (Optional)
+### 11.3 蓝绿部署（可选）/ Blue-Green Deployment (Optional)
 
 对于关键业务场景，可使用 Argo Rollouts 实现蓝绿部署：
 
@@ -536,7 +611,7 @@ kubectl argo rollouts promote privacy-local-agent
 kubectl argo rollouts abort privacy-local-agent
 ```
 
-### 10.4 金丝雀发布（可选）/ Canary Release (Optional)
+### 11.4 金丝雀发布（可选）/ Canary Release (Optional)
 
 使用 Argo Rollouts 或 Istio 实现渐进式流量切换：
 
@@ -557,13 +632,13 @@ strategy:
         version: stable
 ```
 
-## 11. 工业化评分 / Industrialization Scorecard
+## 12. 工业化评分 / Industrialization Scorecard
 
 > **工业化软件 = 功能正确 + 性能稳定 + 安全可靠 + 可维护 + 可观测 + 可快速迭代**
 >
 > 评估框架参考 ISO/IEC 25010 与 Google SRE 实践，采用 6 维度加权评分（1–10 分）。
 
-### 11.1 加权评分表
+### 12.1 加权评分表
 
 | 维度 | 权重 | 得分 | 说明 |
 |------|------|------|------|
@@ -575,11 +650,11 @@ strategy:
 | 工程化 | 15% | 7/10 | CI 验证 Docker build + Helm chart-testing + Trivy 镜像扫描 |
 | **总分** | **100%** | **7.55** | |
 
-### 11.2 结论
+### 12.2 结论
 
 **通过（Pass）**——满足工业化要求，可进入主线。
 
-### 11.3 亮点
+### 12.3 亮点
 
 - 三种部署形式覆盖从本地到生产全场景。
 - core/ml 镜像分层减少默认体积与攻击面。
@@ -588,7 +663,7 @@ strategy:
 - 完整的滚动更新 + 回滚 + 蓝绿/金丝雀发布策略。
 - CI 集成 chart-testing 与 Trivy 镜像漏洞扫描。
 
-### 11.4 改进建议
+### 12.4 改进建议
 
 | 优先级 | 建议 | 影响维度 |
 |--------|------|----------|
