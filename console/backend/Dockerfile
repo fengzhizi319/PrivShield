@@ -1,8 +1,8 @@
 # Console Python Backend Dockerfile
-# 锁定 Python 版本，确保构建可追溯性
+# 锁定 Python 版本（3.13，与主 agent 镜像统一），确保构建可追溯性
 # Pinned Python version for build reproducibility
 
-FROM python:3.10.14-slim-bookworm
+FROM python:3.13.13-slim-bookworm
 
 WORKDIR /app
 

@@ -15,6 +15,7 @@
 
 | 文档 | 说明 | 目标读者 |
 |---|---|---|
+| [from_code_to_k8s.md](./from_code_to_k8s.md) | 小白向：从本地代码到 Kubernetes 的完整链路 | 初学者、全栈开发 |
 | [prd.md](./prd.md) | 产品需求文档 | 产品经理、项目经理 |
 | [design.md](./design.md) | 部署架构、交付形式与配置管理策略 | 架构师、后端开发 |
 | [examples.md](./examples.md) | Helm、K8s 原生、Docker Compose 完整部署示例 | SRE、运维、开发 |
@@ -24,11 +25,12 @@
 
 ## 快速开始
 
-1. 阅读 [prd.md](./prd.md) 了解部署产品需求与验收标准。
-2. 阅读 [design.md](./design.md) 掌握架构选型与 Chart 结构。
-3. 查看 [examples.md](./examples.md) 或参考 [examples/values-custom.yaml](./examples/values-custom.yaml) 完成首次部署。
-4. 部署后按 [testing.md](./testing.md) 执行验证测试。
-5. 日常运维与排障参考 [ops.md](./ops.md)。
+- **纯新手 / 第一次把本地代码部署到 K8s**：先读 [from_code_to_k8s.md](./from_code_to_k8s.md)。
+- **了解部署产品需求与验收标准**：阅读 [prd.md](./prd.md)。
+- **掌握架构选型与 Chart 结构**：阅读 [design.md](./design.md)。
+- **查看完整部署示例**：参考 [examples.md](./examples.md) 或 [examples/values-custom.yaml](./examples/values-custom.yaml)。
+- **部署后验证**：按 [testing.md](./testing.md) 执行测试。
+- **日常运维与排障**：参考 [ops.md](./ops.md)。
 
 ## 运行示例
 

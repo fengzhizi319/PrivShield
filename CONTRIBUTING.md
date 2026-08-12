@@ -23,7 +23,7 @@ pre-commit install
 ## Code Style
 
 - **Formatter/Linter**: [Ruff](https://docs.astral.sh/ruff/) (line-length 100)
-- **Type checking**: mypy (Python 3.10+)
+- **Type checking**: mypy (Python 3.13+)
 - **Docstrings**: Bilingual (中文 + English), Google-style with Args/Returns
 - **Tests**: pytest with hypothesis for property-based testing
 

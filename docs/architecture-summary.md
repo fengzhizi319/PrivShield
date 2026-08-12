@@ -124,7 +124,7 @@ gRPC (grpcio, port 50051)  ←→  PrivacyService  ←→  隐私原语
 
 ```yaml
 lint (ruff + mypy)
-  → test (Python 3.10/3.11/3.12 矩阵, coverage)
+  → test (Python 3.13 矩阵, coverage)
     → security (pip-audit)
       → docker build
 ```
@@ -328,9 +328,9 @@ def grpc_stub(self):
 
 ### 4.7 多 Python 版本兼容
 
-- 使用 `from __future__ import annotations` 支持 3.10 的 `X | Y` 类型语法
-- CI 矩阵覆盖 3.10/3.11/3.12
-- 避免使用 3.12+ 独有特性
+- 使用 `from __future__ import annotations` 保证注解延迟求值（兼容 3.13 的 `X | Y` 类型语法）
+- CI 矩阵覆盖 3.13（`requires-python = ">=3.13"`）
+- 避免使用 3.14+ 独有特性
 
 ---
 
@@ -338,7 +338,7 @@ def grpc_stub(self):
 
 | 组件 | 版本/说明 |
 |------|-----------|
-| Python | 3.10+ (CI 矩阵 3.10/3.11/3.12) |
+| Python | 3.13+ (CI 矩阵 3.13) |
 | FastAPI | REST API 框架 |
 | grpcio | gRPC 服务 |
 | Pydantic | 请求/响应模型验证 |

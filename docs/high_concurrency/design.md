@@ -735,7 +735,7 @@ build-backend = "maturin"
 
 [project]
 name = "privacy_rust_ext"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 ```
 
 ```bash

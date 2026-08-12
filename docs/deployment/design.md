@@ -6,6 +6,7 @@
 - [1. 概述](#1-概述)
 - [2. 设计目标](#2-设计目标)
 - [3. 架构选型](#3-架构选型)
+  - [3.1 K8s 适用场景与需求说明](#31-k8s-适用场景与需求说明)
 - [4. Helm Chart 结构](#4-helm-chart-结构)
   - [4.1 Helm 介绍](#41-helm-介绍)
   - [4.2 关键 values 说明](#42-关键-values-说明)
@@ -53,6 +54,53 @@
 | 入口 | ClusterIP Service + Ingress | REST 通过 Ingress 暴露，gRPC 通过 Service 内部调用 |
 | 弹性 | HPA v2 | 基于 CPU/内存横向扩展 |
 | 隔离 | NetworkPolicy | 可选，限制仅指定 label 的 Pod 可访问 |
+
+### 3.1 K8s 适用场景与需求说明
+
+本项目的 K8s 资产（Helm Chart `deploy/helm/privacy-local-agent/`、原生 manifests `deploy/k8s/`）为**生产级部署形态**，非实验性方案（CI 已有 `helm-lint` job：`ct lint` + kind 集群 `ct install` 验证）。以下场景明确需要 K8s：
+
+#### 3.1.1 多副本高可用生产部署（核心场景）
+
+生产 values（`values-production.yaml`）已启用 `replicaCount: 2`、HPA `minReplicas: 2`、滚动更新 `maxUnavailable: 0`、PDB 等能力，Docker Compose 无法提供：
+
+- **故障自愈**：Pod 崩溃/被杀后自动重建，`/health`（liveness）与 `/readyz`（readiness，额外校验配置解析器与隐私预算 DB 连通性）探针驱动摘流与重启；
+- **滚动发布零停机**：`strategy.maxUnavailable: 0 + maxSurge` 配合 PodDisruptionBudget 保证最小可用副本；
+- **多实例隐私预算一致性**：`PRIVACY_BUDGET_DB`（SQLite 分布式预算）正是为多实例设计——多副本运行时预算需跨实例共享，单副本/单机场景无此需求。
+
+#### 3.1.2 弹性扩缩容（流量波动）
+
+- HPA v2：CPU 70% / 内存 80% 阈值触发，`minReplicas 2 → maxReplicas 10` 自动横向扩展；
+- 项目具备高并发与网关负载均衡设计（`privacy_local_agent/gateway/`、`docs/high_concurrency/`），脱敏/分类请求量不恒定，LLM 层慢请求占用资源，需要按负载弹性伸缩。
+
+#### 3.1.3 生产安全加固
+
+- TLS 证书、API Key 经 **Secret** 注入（`security.tls.existingSecret` / `security.auth.apiKeysSecret`），可独立轮换，优于 Compose 文件挂载；
+- **NetworkPolicy**：生产 values 已启用，仅允许 `app.kubernetes.io/part-of: privacy-local-agent` 的 Pod 访问；
+- PodSecurityContext：`runAsNonRoot`、`drop: ALL` capabilities、只读根文件系统；
+- mTLS CN 白名单 ConfigMap 挂载（`mtls-whitelist.yaml`），支持 per-CN scope 与热重载。
+
+#### 3.1.4 可观测性接入
+
+- `serviceMonitor.enabled: true` 时 Prometheus 自动发现抓取 `/metrics`（`deploy/prometheus/` + `deploy/grafana/` 联动告警）；
+- 日志输出 stdout/stderr，由集群日志系统（EFK/Loki）统一采集。
+
+#### 3.1.5 服务暴露与集群内集成
+
+- REST 经 **Ingress**（TLS 终结）暴露给外部调用方（医院/数据局/业务平台）；
+- gRPC 走 ClusterIP Service 供集群内调用方访问（如 console-backend-go 代理）；
+- 与 vLLM 推理服务同集群部署时，`PRIVACY_LLM_API_BASE` 指向集群 DNS 而非 `127.0.0.1`（`config/env/vllm.env` 的本地默认值不适用）。
+
+#### 3.1.6 不需要 K8s 的场景（对照）
+
+| 场景 | 部署形态 | 说明 |
+|---|---|---|
+| 本地开发 / 联调 | 本地直跑 | `python -m privacy_local_agent.server`，`.env` + `config/env/<profile>.env` 级联加载 |
+| 内部演示 / 单机小规模 | Docker 单容器 | `docker build --target core|ml` + `docker run`，环境变量注入 |
+| 本地全栈（agent + console + vLLM + 监控） | Docker Compose | `deploy/docker-compose/docker-compose.yml` 一键拉起，`env_file: ../../.env` 注入配置 |
+
+**决策建议**：单机、演示、开发 → Compose / 直跑；对外提供脱敏服务、需要多副本高可用 + 弹性伸缩 + 安全合规（TLS/网络隔离/审计）→ K8s，使用 `helm install -f values-production.yaml`（配合自管 TLS/API Key Secret）。
+
+> **注意**：K8s 部署时镜像内无 `.env`（`.dockerignore` 排除），配置完全由 values 控制（见 §4.4），LLM 等无 values 字段的配置须经 `extraEnv` 注入——这是生产配置受控的强制要求。
 
 ## 4. Helm Chart 结构
 Helm 是 Kubernetes 生态中事实标准的**包管理器**，常被称为「Kubernetes 的 apt/yum」。它把部署在 K8s 上的一组相关资源（Deployment、Service、ConfigMap、Ingress 等）打包成一个可复用、可配置、可版本化的单元，大幅简化了复杂应用在容器集群中的安装、升级与回滚。

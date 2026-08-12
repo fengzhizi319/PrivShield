@@ -25,7 +25,7 @@
 
 ## 2. Technology Stack
 
-- **Python 3.10+**
+- **Python 3.13+**
 - **FastAPI** + **Uvicorn** for REST
 - **gRPC** (`grpcio`) for RPC
 - **Pydantic v2** for models

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "privacy-local-agent"
 version = "0.1.0"
 description = "Local REST/gRPC agent for privacy primitives"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
@@ -97,7 +97,7 @@ include = ["privacy_local_agent*"]
 # - `tests` 是主测试集
 # - `console/backend` 是同仓库中的辅助后端
 # 因此这里将多个源码根目录一起纳入 lint/format 规则。
-target-version = "py310"
+target-version = "py313"
 line-length = 120
 src = ["privacy_local_agent", "tests", "console/backend"]
 
@@ -152,9 +152,9 @@ indent-style = "space"
 [tool.mypy]
 # 这里同样覆盖 `console/backend`，因为它共享一部分仓库级约束和公共代码风格。
 # 统一检查可以减少主包与控制台后端之间的接口漂移。
-# python_version 使用 3.12 是为了兼容 numpy 2.x stub 中的 PEP 695 type 语句；
-# 项目运行时仍要求 Python >=3.10，运行时测试在 3.13 下执行。
-python_version = "3.12"
+# python_version 与运行时下限（requires-python >=3.13）保持一致；
+# 3.13 同样兼容 numpy 2.x stub 中的 PEP 695 type 语句。
+python_version = "3.13"
 plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
