@@ -348,11 +348,13 @@ Address these before any hardened production deployment.
 | Run Dev Console (Python + Vite HMR) | `bash ./console/scripts/dev-start.sh` |
 | Run Dev Console (Dual Backend + Vite) | `bash ./console/scripts/dev-start-all.sh` |
 | Run Dev Console (Go mTLS + Vite) | `bash ./console/scripts/dev-start-go-mtls.sh` |
-| Run Docker Agent (Core/ML) | `bash ./console/scripts/docker-start-agent.sh [core|ml]` |
+| Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
+| Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
 | Run Docker Console (Go Backend + Web) | `bash ./console/scripts/docker-start-go.sh` |
 | Run Docker Console (Python Backend + Web) | `bash ./console/scripts/docker-start-python.sh` |
 | Run Docker Full Stack (Agent+Backends+Web) | `bash ./console/scripts/docker-start-all.sh [--with-llm]` |
-| Run Docker LLM (vLLM) | `bash ./console/scripts/docker-start-llm.sh` |
+| Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
+| Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |
 | Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
 | Stop Docker Services | `bash ./console/scripts/docker-stop.sh` |
 | Run Prod Console (Go + Static) | `bash ./console/scripts/prod-start-go.sh` |

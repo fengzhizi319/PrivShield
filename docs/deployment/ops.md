@@ -597,6 +597,26 @@ docker compose --profile llm up -d
    - **关键坑点**：在 Docker Compose 中，若服务只 attached 到 `internal: true` 的网络，即使写了 `ports:` 也不会创建宿主机端口映射，`docker inspect` 会显示 `"8000/tcp": null`，宿主机 `curl 127.0.0.1:8000` 会无响应。因此 `llm` 网络必须设为 `internal: false`（或让 vllm 同时属于一个非 internal 网络），才能通过 `ports:` 暴露调试端口。
    - 映射格式 `"宿主机IP:宿主机端口:容器端口"`（省略 IP 表示绑定宿主机所有网卡；如 `"127.0.0.1:8000:8000"` 仅回环可访问，更安全）
 
+   两条通道的拓扑关系（core 与 vllm 是**两个独立容器**，互连不依赖端口映射）：
+
+   ```text
+   ┌─────────────────────────── llm 网络（bridge） ────────────────────────────┐
+   │ 通道① 容器间直连（不走 ports）：                                          │
+   │   privacy-local-agent ──DNS: "vllm" → 容器IP──▶ vllm:8000（容器内监听）   │
+   │                                                                          │
+   │ 通道② 宿主机访问（走 ports）：                                             │
+   │   宿主机 curl 127.0.0.1:8000 ──端口映射──▶ vllm 容器:8000                │
+   └──────────────────────────────────────────────────────────────────────────┘
+   ```
+
+   **容器间互连成立的三前提**（缺一不可）：
+
+   | 前提 | 配置位置 | 说明 |
+   |---|---|---|
+   | ① core 与 vllm 在**同一网络** | 两服务 `networks:` 均含 `llm` | 不在同网络则 core 内 DNS 解析不到 `vllm` |
+   | ② vllm **容器内监听 0.0.0.0** | vllm `command:` 的 `--host 0.0.0.0` | 若监听 127.0.0.1 只接受自身回环请求，其他容器一律连不上 |
+   | ③ core 用**服务名**访问 | `PRIVACY_LLM_API_BASE: http://vllm:8000/v1` | 容器 IP 会变，服务名由 Docker DNS 自动解析 |
+
    **只改对外端口（推荐做法）**：宿主机 8000 被占用或想换对外端口时，只改 `ports:` 左侧即可，agent 内部调用完全不受影响：
 
    ```yaml
@@ -627,6 +647,16 @@ docker compose --profile llm up -d
 - 分类请求进入 Layer-3 时，agent 以 OpenAI 兼容 HTTP 调用 vllm
 - vllm 挂掉/OOM → agent 自动降级 Layer-1 规则 + Layer-2 NER，REST/gRPC 不受影响（运行时解耦）
 - 升级 vllm 只需 `docker compose up -d vllm`，core 容器无需重建
+
+**core 与 vllm 不在同一网络（独立部署）时的替代方案**：
+
+| 场景 | 方案 | 配置要点 |
+|---|---|---|
+| 同机、不同部署（无共享网络） | A. 建共享网络（推荐，等同 compose 效果） | `docker network create llm-net`；vllm 启动加 `--network llm-net --network-alias vllm`；core 加 `--network llm-net`，`PRIVACY_LLM_API_BASE=http://vllm:8000/v1` 不变，仍走内部直连 |
+| 同机、不同部署 | B. 走宿主机端口映射 | vllm `ports:` 绑定 `0.0.0.0:8000:8000`（**不能绑 127.0.0.1**，否则其他容器访问不到）；core 容器内写 `http://host.docker.internal:8000/v1` + `extra_hosts: ["host.docker.internal:host-gateway"]` |
+| 跨主机部署 | 只能走映射 + 实际 IP | vllm 映射 `0.0.0.0:8000:8000`；core 写 `http://<vllm主机IP>:8000/v1`（`host.docker.internal` 跨主机失效，需写实际 IP） |
+
+> **坑点**：core 容器内 `127.0.0.1` 指的是 **core 容器自己**，不是宿主机；容器内访问宿主机必须用 `host.docker.internal`（Linux 需 `extra_hosts` 或 `--network host`）或宿主机实际 IP。
 
 #### 5.2.8 compose 命令的实现位置与 `restart`/`up` 区别
 
@@ -737,7 +767,7 @@ naming to privacy-local-agent:0.1.0                ← 构建出同名镜像
 
 > ①/② 构建后镜像 ID 变化，`up -d` 检测到差异会**自动重建容器**，无需手动删容器。
 
-**与项目脚本的差异**：`console/scripts/docker-start-agent.sh` 走裸 `docker build`（每次运行都重新构建，适合开发期频繁改代码）；compose `up -d` 是“有镜像就复用”（适合稳定期省时间）。两者行为不同，按场景选用。
+**与项目脚本的差异**：`scripts/dev/docker-start-agent.sh` 走裸 `docker build`（每次运行都重新构建，适合开发期频繁改代码）；compose `up -d` 是“有镜像就复用”（适合稳定期省时间）。两者行为不同，按场景选用。
 
 **按改动类型选命令（心法表）**：
 
@@ -747,16 +777,18 @@ naming to privacy-local-agent:0.1.0                ← 构建出同名镜像
 | 只改 `.env` / `privacy-profile.yaml` 等配置 | `docker compose up -d` | 无需构建；配置变化会重建容器 |
 | 只是服务卡死想重启 | `docker compose restart` | 镜像、配置都不变，最轻量 |
 
-### 5.3 自动化 Docker 脚本运行集 (`console/scripts/docker-*.sh`)
+### 5.3 自动化 Docker 脚本运行集
 
-为简化容器化运维与测试，项目在 `console/scripts/` 中内置了一套便捷的 Docker 脚本：
+为简化容器化运维与测试，项目在 `scripts/dev/`（侧边栏/LLM 单组分）与 `console/scripts/`（全栈/控制台）中内置了一套便捷的 Docker 脚本：
 
 ```bash
-# 1. 独立运行 Privacy Agent 容器 (支持 core / ml 目标)
-./console/scripts/docker-start-agent.sh [core|ml]
+# 1. 独立运行/停止 Privacy Agent 容器 (支持 core / ml 目标)
+./scripts/dev/docker-start-agent.sh [core|ml]
+./scripts/dev/docker-stop-agent.sh
 
-# 2. 启动 vLLM 大模型推理服务容器 (GPU 加速)
-./console/scripts/docker-start-llm.sh
+# 2. 启动/停止 vLLM 大模型推理服务容器 (GPU 加速)
+./scripts/dev/docker-start-llm.sh
+./scripts/dev/docker-stop-llm.sh
 
 # 3. 启动 Agent + Go 代理后端 + Web UI 容器套件
 ./console/scripts/docker-start-go.sh
@@ -767,7 +799,7 @@ naming to privacy-local-agent:0.1.0                ← 构建出同名镜像
 # 5. 启动全栈 Docker 容器套件 (Agent + 双后端 + Web UI + 可选 vLLM)
 ./console/scripts/docker-start-all.sh [--with-llm]
 
-# 6. 一键停止并清理所有运行中的 Docker 容器
+# 6. 一键停止并清理全栈 Docker 容器与 Compose 栈
 ./console/scripts/docker-stop.sh
 ```
 

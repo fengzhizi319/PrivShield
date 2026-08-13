@@ -3,7 +3,7 @@
 # 【Docker 模式】单组分启动 Privacy Local Agent
 # Launch Privacy Local Agent in Docker container
 #
-# 用法 / Usage: ./console/scripts/docker-start-agent.sh [core|ml]
+# 用法 / Usage: ./scripts/dev/docker-start-agent.sh [core|ml]
 # ============================================================================
 
 set -euo pipefail

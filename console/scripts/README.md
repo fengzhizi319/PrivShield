@@ -126,7 +126,8 @@
 
 基于 Docker 镜像构建与 Docker Compose 容器编排，支持在完全隔离的容器环境中运行全套服务。
 
-#### 1. `./console/scripts/docker-start-agent.sh`
+#### 1. `./scripts/dev/docker-start-agent.sh`
+- **说明**：此脚本属于 Agent Core 服务组件，已从 `console/scripts/` 迁移至 `./scripts/dev/docker-start-agent.sh`。
 - **作用**：在独立 Docker 容器中构建并启动 Privacy Local Agent 核心 Sidecar 服务。
 - **参数**：
   - `core`（默认）：构建轻量级原语镜像 (`privacy-local-agent:0.1.0`)。
@@ -135,18 +136,19 @@
 - **用法**：
   ```bash
   # 启动轻量 core 镜像 Agent 容器
-  bash ./console/scripts/docker-start-agent.sh core
+  bash ./scripts/dev/docker-start-agent.sh core
 
   # 启动全量 ml 镜像 Agent 容器
-  bash ./console/scripts/docker-start-agent.sh ml
+  bash ./scripts/dev/docker-start-agent.sh ml
   ```
 
-#### 2. `./console/scripts/docker-start-llm.sh`
+#### 2. `./scripts/dev/docker-start-llm.sh`
+- **说明**：此脚本属于 Agent LLM 服务组件，已从 `console/scripts/` 迁移至 `./scripts/dev/docker-start-llm.sh`。
 - **作用**：在 Docker 容器中启动 vLLM 大模型 GPU 推理服务（采用 Compose `llm` Profile）。
 - **服务端口**：OpenAI 兼容 REST API `http://127.0.0.1:8000/v1`。
 - **用法**：
   ```bash
-  bash ./console/scripts/docker-start-llm.sh
+  bash ./scripts/dev/docker-start-llm.sh
   ```
 
 #### 3. `./console/scripts/docker-start-go.sh`

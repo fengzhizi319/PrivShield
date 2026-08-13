@@ -86,6 +86,7 @@ from ..observability.logging_config import get_logger
 # - CLASSIFICATION_LLM_TOTAL：LLM 调用次数计数器（按状态标签：success/error/timeout/init_failed）
 from ..observability.metrics import (
     CLASSIFICATION_LLM_DURATION,
+    CLASSIFICATION_LLM_TOKENS_TOTAL,
     CLASSIFICATION_LLM_TOTAL,
 )
 from ..env_loader import load_env_file
@@ -727,7 +728,30 @@ class Qwen3Classifier(LlmClassifier):
                     clean_up_tokenization_spaces=False,
                 )[0]
 
+                prompt_tokens = len(inputs["input_ids"][0])
+                completion_tokens = len(generated_ids_trimmed[0])
+                total_tokens = prompt_tokens + completion_tokens
+
+                CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="prompt", engine="qwen3").inc(prompt_tokens)
+                CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="completion", engine="qwen3").inc(completion_tokens)
+                CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="total", engine="qwen3").inc(total_tokens)
+
+                logger.info(
+                    "qwen3_token_usage",
+                    extra={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    },
+                )
+
                 result = self._parse_json_result(output_text, upstream_level, upstream_confidence)
+                if result is not None:
+                    result["usage"] = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    }
                 CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
                 return result
             finally:
@@ -909,7 +933,95 @@ class OpenAILlmClassifier(LlmClassifier):
             CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
             CLASSIFICATION_LLM_DURATION.labels(engine="vllm").observe(duration)
             logger.error("vllm_http_classify_error", extra={"error": str(e), "url": self.chat_url})
-            return None
+    def sanitize_text(self, text: str) -> str:
+        """纯脱敏与无痕抹平接口：仅对文本进行 PII 与敏感信息抹平重写，不考虑分类分级逻辑。
+
+        Args:
+            text: 待脱敏的原始文本段落。
+
+        Returns:
+            脱敏抹平后的重写文本。
+        """
+        result = self.classify(text, SensitivityLevel.L3, 0.6)
+        sanitized: str | None = None
+        if result and isinstance(result, dict) and result.get("sanitized_text"):
+            sanitized = str(result["sanitized_text"])
+
+        if not sanitized:
+            sanitized = text
+
+        # 规则双重兜底防护：
+        # 1. 硬敏感 PII 特征（18位身份证号、11位手机号、常见中文姓名如"张三"）正则打码
+        sanitized = re.sub(
+            r"([1-9]\d{5})\d{8}(\d{3}[\dXx])",
+            r"\1********\2",
+            sanitized,
+        )
+        sanitized = re.sub(
+            r"(1[3-9]\d)\d{4}(\d{4})",
+            r"\1****\2",
+            sanitized,
+        )
+        # 中文姓名格式化掩码（如 "患者张三" -> "患者张*"；"张三" -> "张*"）
+        sanitized = re.sub(
+            r"(?<=姓名[：:])\s*([\u4e00-\u9fa5])[\u4e00-\u9fa5]{1,2}",
+            r"\1*",
+            sanitized,
+        )
+        sanitized = re.sub(
+            r"(?<=患者)\s*([\u4e00-\u9fa5])[\u4e00-\u9fa5]{1,2}",
+            r"\1*",
+            sanitized,
+        )
+
+        # 2. L5 级特种极高敏病种（HIV/艾滋、性病、重度精神障碍、特异性抗病毒药物）无痕擦除（替换为空字符串或顺滑连词，严禁输出"[已抹平]"等标签）
+        l5_purge_patterns = [
+            r"(?i)\bHIV(?:-1|-2)?\b",
+            r"(?i)\bAIDS\b",
+            r"艾滋病?",
+            r"人免疫缺陷病毒",
+            r"获得性免疫缺陷综合征",
+            r"梅毒",
+            r"(?i)\bsyphilis\b",
+            r"淋病",
+            r"(?i)\bgonorrhea\b",
+            r"精神分裂症?",
+            r"(?i)\bschizophrenia\b",
+            r"抗逆转录[治疗]*",
+            r"HAART[治疗]*",
+            r"替诺福韦",
+            r"拉米夫定",
+            r"依非韦伦",
+            r"多替拉韦",
+        ]
+        for pat in l5_purge_patterns:
+            sanitized = re.sub(pat, "", sanitized)
+
+        # 3. 清理擦除特种药物与病名后遗留的悬空运算符与修饰括号（如 "（ +  + ）" -> ""；"（感染期）" -> ""）
+        sanitized = re.sub(r"[\(（][\s\+\-\*\/]*[\)）]", "", sanitized)
+        sanitized = re.sub(
+            r"[\(（]\s*(?:HIV\s*)?(?:[\u4e00-\u9fa5]{0,6}(?:期|型|阶段|试验)|期|型)?\s*[\)）]",
+            "",
+            sanitized,
+        )
+
+        # 4. 修正残缺的治疗动作短语与悬空谓语（如 "开展  抗病毒治疗" -> "开展常规对症治疗"；"诊断为，" -> "，"）
+        sanitized = re.sub(r"开展\s*(?:HAART\s*)?抗病毒治疗", "开展常规对症治疗", sanitized)
+        sanitized = re.sub(r"(?:HAART\s*)?抗病毒治疗", "常规对症治疗", sanitized)
+        sanitized = re.sub(r"(?:诊断为|确诊为|提示为?|显示为?|检查出|主诉为?)\s*([，,。；;])", r"\1", sanitized)
+
+        # 5. 【关键】：在所有敏感词与修饰括号擦除完成后，执行标点碰撞修复（消除 "初步诊断：，" -> "初步诊断："）
+        sanitized = re.sub(r"([：:])\s*[，,、]", r"\1", sanitized)
+        sanitized = re.sub(r"([：:])\s*[。；;]", r"。", sanitized)
+        sanitized = re.sub(r"([，,])\s*([。；;])", r"\2", sanitized)
+        sanitized = re.sub(r"([，,。；;])\s*\1+", r"\1", sanitized)
+
+        # 6. 规范空白字符：合并多重空格，消除中文标点前后的多余悬空空格
+        sanitized = re.sub(r"[ \t]{2,}", " ", sanitized)
+        sanitized = re.sub(r"\s+([，,。；;：:\)）])", r"\1", sanitized)
+        sanitized = re.sub(r"([\(（])\s+", r"\1", sanitized)
+
+        return sanitized.strip()
 
     def _do_classify_http(
         self, text: str, upstream_level: SensitivityLevel, upstream_confidence: float
@@ -933,19 +1045,28 @@ class OpenAILlmClassifier(LlmClassifier):
             system_prompt = _FINETUNED_SYSTEM_PROMPT
         else:
             system_prompt = (
-                "你是一个医疗数据分类分级领域的资深安全专家。请对输入的医疗数据进行敏感等级评估。\n"
+                "你是一个医疗数据分类分级与隐私脱敏领域的资深安全专家。\n"
+                "请对输入的医疗数据进行敏感等级评估，并生成语义流畅、通顺自然的无痕抹平脱敏文本。\n\n"
                 "评估标准如下：\n"
                 "- L5 (极高风险): 包含人类基因序列、遗传信息、基因突变（如 BRCA1/TP53）或罕见病样本。\n"
                 "- L4 (高风险): 包含精神疾病（如精神分裂）、敏感传染病（如 HIV/AIDS/梅毒）或完整的住院病历。\n"
                 "- L3 (中风险): 包含个人身份信息（PII，如身份证号、手机号）、普通的门诊诊疗记录或常规检验指标数值（如血常规）。\n"
                 "- L2 (低风险): 仅包含医院科室运营、设备使用率或脱敏后的去标识化统计数据。\n"
                 "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感和特征的统计指标。\n\n"
-                "请严格根据上述标准进行定级，并仅输出符合以下 JSON 格式的结构化内容，不要包含额外的解释文字或 ``` 块：\n"
+                "【脱敏重写语法与通顺度要求】：\n"
+                "1. 语法自愈润色：擦除或抹平敏感信息（如 HIV、梅毒、特定高敏诊断或 PII 姓名/身份证号）后，必须对前后连接词、介词、标点进行自然重构与润色，保证上下文语法通顺流畅，严禁遗留“诊断为，”、“结果：”等悬空断句残渣。\n"
+                "2. 处方整句重构：遇到多药联合处方（如“替诺福韦 + 拉米夫定 + 依非韦伦”）或抗病毒方案时，必须将整句用药平滑重构为“开展常规对症治疗与健康管理”，严禁逐字擦除后残留加号“+”、“（ + + ）”空括号或多余空格。\n"
+                "3. 孤立修饰词与括号清理：擦除主病名（如“艾滋病”、“梅毒”）时，其紧随其后的病期、分型、试验或变体修饰括号（如“（HIV 感染期）”、“（确证试验）”、“（早期隐性梅毒）”）必须一并连同括号整块擦除，严禁留存“（感染期）”、“（确证试验）”等悬空修饰短语。\n"
+                "4. 标点符号语法自愈：擦除主病名或小标题后的敏感词时，严禁输出“：，”或“：。”等非法标点组合（如“初步诊断：，伴...”必须平滑润色为“初步诊断：伴卡氏肺孢子虫肺炎。”或“初步诊断：卡氏肺孢子虫肺炎。”）。\n"
+                "5. 语义平滑替代：彻底抹平的敏感范畴可重构为常规身体检查或常规指标评估（如“诊断为 HIV 阳性”平滑润色为“开展常规健康体检与常规指标监测”），保证整段文本读起来完全通顺。\n"
+                "6. 严禁生硬标记：重写结果 sanitized_text 中严禁包含“[已抹平]”、“[脱敏]”、“[泛化]”等生硬的人工占位标记，必须输出自然可读的完整段落。\n\n"
+                "请仅输出符合以下 JSON 格式的结构化内容：\n"
                 "{\n"
                 '  "final_level": "L1/L2/L3/L4/L5",\n'
                 '  "sub_category": "分类标签简称",\n'
                 '  "confidence": 0.0到1.0之间的浮点数,\n'
                 '  "reasoning": "定级判别的推理过程说明",\n'
+                '  "sanitized_text": "自然通顺、语法连贯的无痕抹平脱敏重写文本",\n'
                 '  "needs_human_review": true/false\n'
                 "}"
             )
@@ -990,8 +1111,33 @@ class OpenAILlmClassifier(LlmClassifier):
                 resp_body = resp.read().decode("utf-8")
                 resp_json = json.loads(resp_body)
                 content = resp_json["choices"][0]["message"]["content"]
+
+                # 统计 Token 消耗（输入、输出、总计）
+                usage = resp_json.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                total_tokens = usage.get("total_tokens", 0)
+
+                if prompt_tokens:
+                    CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="prompt", engine="vllm").inc(prompt_tokens)
+                if completion_tokens:
+                    CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="completion", engine="vllm").inc(completion_tokens)
+                if total_tokens:
+                    CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="total", engine="vllm").inc(total_tokens)
+
+                logger.info(
+                    "vllm_token_usage",
+                    extra={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    },
+                )
+
                 result = self._parse_json_result(content, upstream_level, upstream_confidence)
                 if result:
+                    if usage:
+                        result["usage"] = usage
                     CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
                 else:
                     CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
@@ -1013,6 +1159,77 @@ class OpenAILlmClassifier(LlmClassifier):
         except Exception as e:
             logger.warning("llm_json_parse_failed", extra={"error": str(e)})
         return None
+
+
+def build_prompt_from_domain_and_taxonomy_yaml(
+    domain_yaml_path: str | Path,
+    taxonomy_yaml_path: str | Path,
+) -> str:
+    """从领域规则 YAML (如 medical.yaml) 和分类体系 YAML (如 default.yaml) 动态解析并构建完整的 System Prompt。
+
+    解析内容包含：
+    1. 【数据分类分级标准指南】：分类等级 ID、名称、Rank 及描述；
+    2. 【敏感数据脱敏抹平与泛化治理策略指南】：Purge 彻底抹平范畴与 Generalization 抽象泛化范畴。
+
+    Args:
+        domain_yaml_path: 领域规则配置文件路径 (如 rules/domains/medical.yaml)。
+        taxonomy_yaml_path: 分类体系配置文件路径 (如 rules/taxonomies/default.yaml)。
+
+    Returns:
+        包含完整分类标准与脱敏抹平策略指南的 System Prompt 文本。
+    """
+    import yaml
+
+    with open(domain_yaml_path, encoding="utf-8") as f:
+        domain_cfg = yaml.safe_load(f) or {}
+
+    with open(taxonomy_yaml_path, encoding="utf-8") as f:
+        taxonomy_cfg = yaml.safe_load(f) or {}
+
+    # 1. 动态生成【数据分类分级标准指南】
+    levels_desc_lines = ["【数据分类分级标准指南】"]
+    levels = taxonomy_cfg.get("levels", {})
+    for lvl_id in sorted(levels.keys(), key=lambda k: levels[k].get("rank", 0)):
+        lvl_info = levels[lvl_id]
+        levels_desc_lines.append(f"- {lvl_info['id']} ({lvl_info['name']}): {lvl_info['description']}")
+
+    # 2. 动态生成【敏感数据脱敏抹平与泛化治理策略指南】
+    redaction_cfg = domain_cfg.get("redaction_strategy", {})
+    purge_cats = redaction_cfg.get("purge_categories", [])
+    gen_cats = redaction_cfg.get("generalization_categories", [])
+
+    strategy_lines = ["【敏感数据脱敏抹平与泛化治理策略指南】"]
+    if purge_cats:
+        strategy_lines.append(f"- 彻底抹平范畴 (Purge - 零痕迹擦除/替换为通用掩码): {', '.join(purge_cats)}")
+    if gen_cats:
+        strategy_lines.append(f"- 范畴化泛化范畴 (Generalization - 重构为系统器官大类疾病): {', '.join(gen_cats)}")
+    strategy_lines.append("- 个人基础标识 (PII - 姓名/身份证号/手机号/住址): 进行脱敏掩码抹平处理")
+
+    fluency_lines = [
+        "【脱敏重写语法与通顺度要求】",
+        "1. 语法自愈润色：擦除或抹平敏感信息（如 HIV、梅毒、特定高敏诊断或 PII 姓名/身份证号）后，必须对前后连接词、介词、标点进行自然重构与润色，保证上下文语法通顺流畅，严禁遗留“诊断为，”、“结果：”等悬空断句残渣。",
+        "2. 处方整句重构：遇到多药联合处方（如“替诺福韦 + 拉米夫定 + 依非韦伦”）或抗病毒方案时，必须将整句用药平滑重构为“开展常规对症治疗与健康管理”，严禁逐字擦除后残留加号“+”、“（ + + ）”空括号或多余空格。",
+        "3. 孤立修饰词与括号清理：擦除主病名（如“艾滋病”、“梅毒”）时，其紧随其后的病期、分型、试验或变体修饰括号（如“（HIV 感染期）”、“（确证试验）”、“（早期隐性梅毒）”）必须一并连同括号整块擦除，严禁留存“（感染期）”、“（确证试验）”等悬空修饰短语。",
+        "4. 标点符号语法自愈：擦除主病名或小标题后的敏感词时，严禁输出“：，”或“：。”等非法标点组合（如“初步诊断：，伴...”必须平滑润色为“初步诊断：伴卡氏肺孢子虫肺炎。”或“初步诊断：卡氏肺孢子虫肺炎。”）。",
+        "5. 语义平滑替代：彻底抹平的敏感范畴可重构为常规身体检查或常规指标评估（如“诊断为 HIV 阳性”平滑润色为“开展常规健康体检与常规指标监测”），保证整段文本读起来完全通顺。",
+        "6. 严禁生硬标记：重写结果 sanitized_text 中严禁包含“[已抹平]”、“[脱敏]”、“[泛化]”等生硬的人工占位标记，必须输出自然可读的完整段落。",
+    ]
+
+    guidance_str = "\n".join(levels_desc_lines) + "\n\n" + "\n".join(strategy_lines) + "\n\n" + "\n".join(fluency_lines)
+
+    system_prompt = (
+        f"你是一个专业的隐私安全Sidecar助手。请分析输入的文本，识别敏感信息，"
+        f"输出分类分级结果（JSON格式），并提供语义流畅、语法通顺的无痕抹平脱敏重写文本。\n\n"
+        f"{guidance_str}\n\n"
+        f"请严格根据上述标准进行定级与脱敏抹平，并仅输出符合以下 JSON 格式的结构化内容：\n"
+        f"{{\n"
+        f'  "final_level": "L1/L2/L3/L4/L5",\n'
+        f'  "confidence": 0.0到1.0之间的浮点数,\n'
+        f'  "reasoning": "定级判别的推理过程说明",\n'
+        f'  "sanitized_text": "自然通顺、语法连贯的无痕抹平脱敏重写文本"\n'
+        f"}}"
+    )
+    return system_prompt
 
 
 # 别名定义

@@ -166,6 +166,13 @@ CLASSIFICATION_LLM_DURATION = Histogram(
     buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0],
 )
 
+# Classification LLM tokens consumed counter (Layer-3).
+CLASSIFICATION_LLM_TOKENS_TOTAL = Counter(
+    "privacy_classification_llm_tokens_total",
+    "Total LLM tokens consumed by prompt/completion type and engine.",
+    ["type", "engine"],
+)
+
 # Dynamic classification metrics (动态分类分级可观测性)
 DYNCLASSIFICATION_RULE_HITS_TOTAL = Counter(
     "classification_rule_hits_total",

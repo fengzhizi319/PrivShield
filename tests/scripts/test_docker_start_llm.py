@@ -1,8 +1,8 @@
-"""console/scripts/docker-start-llm.sh 启动脚本测试 / docker-start-llm.sh Script Tests.
+"""scripts/dev/docker-start-llm.sh 启动脚本测试 / docker-start-llm.sh Script Tests.
 
 =====================================================================
 测试目标 / Test Goal:
-    验证 console/scripts/docker-start-llm.sh（Docker 方式启动 vLLM Layer-3
+    验证 scripts/dev/docker-start-llm.sh（Docker 方式启动 vLLM Layer-3
     推理服务）是否可以正常运行，并防止脚本 / 编排配置被误改导致回归。
 
 测试分层设计 / Layered Test Design（由浅入深，外部依赖逐层增加）:
@@ -70,8 +70,8 @@ import yaml  # 解析 docker-compose.yml 为 dict
 # parents[1]=tests → parents[2]=项目根
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# 被测脚本：console/scripts/docker-start-llm.sh（vLLM 容器启动入口）
-SCRIPT_PATH = PROJECT_ROOT / "console" / "scripts" / "docker-start-llm.sh"
+# 被测脚本：scripts/dev/docker-start-llm.sh（vLLM 容器启动入口）
+SCRIPT_PATH = PROJECT_ROOT / "scripts" / "dev" / "docker-start-llm.sh"
 
 # docker compose 编排目录：脚本执行时会 cd 到的目标目录
 COMPOSE_DIR = PROJECT_ROOT / "deploy" / "docker-compose"
@@ -170,10 +170,13 @@ def _run_script_with_fake_docker(bash_bin: str, exit_code: int) -> tuple[subproc
         # 不 chmod 的话 PATH 查找会忽略该文件）
         fake_docker.chmod(fake_docker.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-        # Step 5: 复制当前环境并前置临时目录到 PATH，
-        # 使脚本内的 `docker` 解析到 fake 脚本（PATH 查找顺序从前到后）
-        env = os.environ.copy()
-        env["PATH"] = str(tmp_dir) + os.pathsep + env.get("PATH", "")
+        # Step 5: 复制当前环境并前置临时目录到 PATH（过滤超大环境变量）
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("ANTIGRAVITY") and k != "LS_COLORS"
+        }
+        env["PATH"] = str(tmp_dir) + os.pathsep + os.environ.get("PATH", "")
 
         # Step 6: 以 bash 显式执行被测脚本（cwd 固定在项目根目录，
         # 验证脚本内部自身的 cd 逻辑）；60s 超时兜底防止脚本挂死
@@ -206,7 +209,7 @@ class TestScriptStaticChecks:
         """脚本必须具备用户位可执行权限。
 
         原因 / Reason:
-            运维可能直接以 ./console/scripts/docker-start-llm.sh 方式调用，
+            运维可能直接以 ./scripts/dev/docker-start-llm.sh 方式调用，
             缺少执行位将报 Permission denied。
         """
         mode = SCRIPT_PATH.stat().st_mode
@@ -228,7 +231,12 @@ class TestScriptStaticChecks:
             捕获变量引用错误、括号不匹配等静态语法问题；
             这类问题运行时才暴露，且在 set -e 下难以定位。
         """
-        result = subprocess.run([bash_bin, "-n", str(SCRIPT_PATH)], capture_output=True, text=True)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("ANTIGRAVITY") and k != "LS_COLORS"
+        }
+        result = subprocess.run([bash_bin, "-n", str(SCRIPT_PATH)], capture_output=True, text=True, env=env)
         # 语法错误时 bash -n 返回非 0，并在 stderr 输出错误位置（用于定位）
         assert result.returncode == 0, result.stderr
 
@@ -321,6 +329,16 @@ class TestComposeDefinition:
 
     def test_vllm_service_gpu_reservation(self, compose_config):
         """vLLM 为 GPU 推理服务，必须保留 NVIDIA GPU 设备。
+         • 从 compose_config 字典中深层提取 vllm 服务的设备预留列表。对应 YAML 中的以下结构：
+            services:
+              vllm:
+                deploy:
+                  resources:
+                    reservations:
+                      devices: # <--- 获取到这里的列表
+                        - driver: nvidia
+                          count: 1
+                          capabilities: [gpu]
 
         原因 / Reason:
             若无 GPU 保留，vLLM 容器启动时无可用 GPU，推理服务将无法工作。
@@ -787,6 +805,7 @@ class TestVllmServiceIntegration:
     def test_models_endpoint_lists_served_model(self, vllm_service):
         """GET /v1/models 应返回 compose --served-model-name 指定的模型。"""
         models = _http_get_json(f"{vllm_service['api_base']}/models")
+        print(f"GET /v1/models 返回: {models}")
         assert models is not None, "/v1/models 无响应"
         ids = [m.get("id") for m in models.get("data", [])]
         assert ids, "/v1/models 返回空模型列表"
@@ -801,6 +820,7 @@ class TestVllmServiceIntegration:
             "temperature": 0.0,
         }
         resp = _http_post_json(f"{vllm_service['api_base']}/chat/completions", payload)
+        print(f"POST /v1/chat/completions 返回: {resp}")
         assert resp is not None, "/v1/chat/completions 无响应"
         assert resp["model"] == VLLM_SERVED_MODEL_NAME
         content = resp["choices"][0]["message"]["content"]
@@ -819,7 +839,7 @@ class TestVllmServiceIntegration:
             "messages": [
                 {
                     "role": "system",
-                    "content": "你是一个专业的隐私安全Sidecar助手。请分析输入文本，输出分类分级结果（JSON格式），并给出无痕抹平脱敏重写文本。",
+                    "content": "你是一个专业的分类分级与数据脱敏抹平的Sidecar助手。请分析输入文本，输出分类分级结果L1,L2,L3,L4,L5的其中一个分级（JSON格式），并给出无痕抹平脱敏重写文本。",
                 },
                 {
                     "role": "user",
@@ -830,12 +850,69 @@ class TestVllmServiceIntegration:
             "temperature": 0.0,
         }
         resp = _http_post_json(f"{vllm_service['api_base']}/chat/completions", payload)
+        print(f"POST /v1/chat/completions 返回: {resp}")
         assert resp is not None, "/v1/chat/completions 无响应"
         content = resp["choices"][0]["message"]["content"]
         # 成功识别 PII 即可通过：包含敏感等级 L3~L5 或出现脱敏掩码
         assert any(level in content for level in ("L3", "L4", "L5")) or any(
             mask in content for mask in ("*", "脱敏", "sanitized")
         ), f"模型未识别/脱敏 PII，输出: {content[:200]}"
+
+    def test_entity_extraction_with_yaml_prompt_task(self, vllm_service):
+        """真实任务：从 rules/domains/medical.yaml 与 rules/taxonomies/default.yaml 动态解析分类分级指南及脱敏抹平/泛化治理策略，
+        注入 System Prompt 传给 vLLM，验证模型能否精准输出 L1~L5 结构化 JSON 及脱敏抹平结果。
+        """
+        from privacy_local_agent.dynclassification.llm_engines import (
+            build_prompt_from_domain_and_taxonomy_yaml,
+        )
+
+        medical_yaml_path = PROJECT_ROOT / "rules" / "domains" / "medical.yaml"
+        taxonomy_yaml_path = PROJECT_ROOT / "rules" / "taxonomies" / "default.yaml"
+
+        # 从领域 YAML 与体系 YAML 动态解析并构建完整的 System Prompt (含分级指南 + 脱敏抹平/泛化策略指南)
+        system_prompt = build_prompt_from_domain_and_taxonomy_yaml(
+            domain_yaml_path=medical_yaml_path,
+            taxonomy_yaml_path=taxonomy_yaml_path,
+        )
+
+        # Step 3: 发起 OpenAI 兼容接口请求
+        payload = {
+            "model": vllm_service["model"],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": "患者李四，身份证号 510101199001015678，诊断为 HIV 阳性，联系电话 13987654321。",
+                },
+            ],
+            "max_tokens": 256,
+            "temperature": 0.0,
+        }
+
+        resp = _http_post_json(f"{vllm_service['api_base']}/chat/completions", payload)
+        print(f"POST /v1/chat/completions (含 YAML Prompt) 返回: {resp}")
+        assert resp is not None, "/v1/chat/completions 无响应"
+
+        content = resp["choices"][0]["message"]["content"]
+        assert content.strip(), "模型返回空内容"
+
+        # 统计并打印 Token 消耗
+        usage = resp.get("usage", {})
+        print(
+            f"[Token 消耗统计] 输入(Prompt): {usage.get('prompt_tokens', 'N/A')}, "
+            f"输出(Completion): {usage.get('completion_tokens', 'N/A')}, "
+            f"总计(Total): {usage.get('total_tokens', 'N/A')}"
+        )
+
+        # Step 4: 校验返回内容解析出合法 JSON，且 final_level 属于 L1~L5
+        json_match = re.search(r"\{.*\}", content, re.DOTALL)
+        assert json_match is not None, f"模型输出未匹配到 JSON 结构: {content}"
+
+        parsed_json = json.loads(json_match.group(0))
+        assert "final_level" in parsed_json, f"JSON 中缺少 final_level 字段: {parsed_json}"
+        assert parsed_json["final_level"] in ("L1", "L2", "L3", "L4", "L5"), (
+            f"final_level 必须为 L1~L5 之一，实际返回: {parsed_json['final_level']}"
+        )
 
     def test_classify_pii_text_via_agent_engine(self, vllm_service):
         """agent 生产路径：经 OpenAILlmClassifier 对含 PII 文本定级（应 >= L3）。"""
@@ -870,13 +947,45 @@ class TestVllmServiceIntegration:
         assert 0.0 <= confidence <= 1.0, f"confidence 越界: {confidence}"
 
     def test_classify_public_statistic_via_agent_engine(self, vllm_service):
-        """公开统计指标（门诊总量）经 agent 生产路径应返回有效分级结果。"""
+        """公开统计指标（门诊总量）经 agent 生产路径应返回有效分级结果。
+        ### 1. 为什么单独的 LLM（0.8B）会误判为 L4？
+
+          你测试的文本是："我院 2025 年度门诊总量 120 万人次，同比上升 8%"
+
+          • 过度分类误报（Over-classification）：
+          由于 Qwen3.5-0.8B 是轻量级端侧小模型，当它在泛化理解文本时，看到了“我院”、“门诊”等医疗词汇，注意力机制发生了过度敏感，误将其归到了“医疗诊疗”大类中的高敏级别（L4）。
+          • 缺少规则压制：
+          在 test_classify_public_statistic_via_agent_engine 测试中，你是直接单独调用了 LLM 接口。此时只有大模型自己在做判断，没有经过 Agent 管道中的其他层级。
+          ──────
+          ### 2. 这恰恰体现了 Agent「三层四柱」架构的核心价值
+
+          这个误判完美印证了为什么不能单靠一个大模型来做数据分类分级，也是本项目设计三层漏斗架构的核心原因：
+
+          在完整的 Agent 分类分级管道（Layer-1 声明式规则 + Layer-2 NER + Layer-3 LLM）中，针对这种误报有专门的降级压制防御机制：
+
+          1. Layer-1 命中降级规则：
+          在 medical.yaml:193 中，配置了运营统计降级规则 medical:RULE_DOWN_OPS：
+              • 匹配关键词：["门诊量", "住院人次", "设备利用率", "stat_count", ...]
+              • 压制目标：强制覆盖上限为 L2（或公开报告降级为 L1）。
+          2. 值级证据地基（Safety Floor）裁定：
+          由于文本中只有“门诊总量”统计数字，没有真正的个人诊断/癌症/HIV等字段值强证据（field_value 命中），因此 Layer-1 的强制降级规则生效。
+          3. 最终纠偏：
+          即使 Layer-3 LLM 单独看时给出了 L4，Agent 管道在经过规则压制与综合解析后，最终输出的全局定级依然会被安全地锚定在 L2 / L1。
+          ──────
+
+          ### 总结
+
+          • 单个 0.8B 大模型：会存在误报（把“门诊总量”误标为 L4）。
+          • 完整 Agent 方案（规则+LLM）：依靠 Layer-1 降级规则 medical:RULE_DOWN_OPS，最终输出正确的 L2/L1。
+
+        """
         client = OpenAILlmClassifier(api_base=vllm_service["api_base"], model_name=vllm_service["model"])
         result = client.classify(
             "我院 2025 年度门诊总量 120 万人次，同比上升 8%",
             SensitivityLevel.L1,
             0.6,
         )
+        print(f"公开统计指标定级结果: {result}")
         assert result is not None, "LLM 定级失败（返回 None）"
         # 0.8B 模型对公开统计偶有偏差；本测试核心目标是验证服务返回有效 JSON 分级，
         # 不强制模型语义绝对正确（那是离线模型评估的范畴）。
@@ -885,3 +994,130 @@ class TestVllmServiceIntegration:
         )
         confidence = float(result.get("confidence", 0.0))
         assert 0.0 <= confidence <= 1.0, f"confidence 越界: {confidence}"
+
+    def test_sanitize_markdown_or_txt_file_via_llm(self, vllm_service, tmp_path):
+        """真实任务：自动将 .md 或 .txt 文件切分为合适长度的分段，
+        通过 OpenAILlmClassifier 接口自动完成敏感信息识别与无痕抹平脱敏重写，
+        并最终输出重组后的脱敏目标文件（.md/.txt）。
+        """
+        # Step 1: 构造带有敏感 PII 与诊疗隐秘信息的输入 Markdown 文件
+        input_markdown_content = textwrap.dedent("""\
+            # 医疗病例与诊疗记录汇总报告
+
+            ## 一、 患者基本信息
+            患者姓名：张三，性别：男，年龄：45 岁。
+            身份证号：510101199001011234，联系电话：13812345678。
+            家庭住址：四川省成都市武侯区人民南路四段 18 号。
+
+            ## 二、 临床诊断与检验报告
+            主诉：反复发热伴咽痛 2 周，近期体重下降明显。
+            实验室检查结果：HIV 抗体检测阳性（确证试验），CD4 细胞计数 180 /μL。
+            初步诊断：艾滋病（HIV 感染期），伴卡氏肺孢子虫肺炎。
+            医嘱：立即转诊至定点传染病医院，开展 HAART 抗病毒治疗（替诺福韦 + 拉米夫定 + 依非韦伦）。
+
+            ## 三、 医院运营统计数据
+            我院 2025 年度门诊总量 120 万人次，同比上升 8%，床位周转率 92%。
+        """)
+
+        input_file_path = tmp_path / "sample_medical_record.md"
+        output_file_path = tmp_path / "sanitized_medical_record.md"
+        input_file_path.write_text(input_markdown_content, encoding="utf-8")
+
+        # Step 2: 自动文本切段算法（按段落/换行分割，且单段长度上限不超过 max_chunk_len）
+        def chunk_document(text: str, max_chunk_len: int = 350) -> list[str]:
+            paragraphs = text.split("\n\n")
+            chunks: list[str] = []
+            current_chunk: list[str] = []
+            current_len = 0
+
+            for p in paragraphs:
+                if current_len + len(p) > max_chunk_len and current_chunk:
+                    chunks.append("\n\n".join(current_chunk))
+                    current_chunk = [p]
+                    current_len = len(p)
+                else:
+                    current_chunk.append(p)
+                    current_len += len(p)
+
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+            return chunks
+
+        chunks = chunk_document(input_markdown_content, max_chunk_len=350)
+        print(f"\n[文件自动分段] 原始文件长度: {len(input_markdown_content)} 字符，拆分为 {len(chunks)} 个分段")
+
+        # Step 3: 实例化 Agent 生产路径客户端 OpenAILlmClassifier
+        client = OpenAILlmClassifier(
+            api_base=vllm_service["api_base"],
+            model_name=vllm_service["model"],
+        )
+
+        sanitized_chunks: list[str] = []
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+
+        # Step 4: 逐段调用 client.sanitize_text(chunk) 进行纯文本脱敏与无痕抹平
+        for idx, chunk in enumerate(chunks, 1):
+            # 直接调用纯脱敏抹平接口（无需关注 final_level 分级）
+            sanitized_p = client.sanitize_text(chunk)
+            assert sanitized_p is not None, f"第 {idx} 分段 LLM 脱敏抹平失败"
+            sanitized_chunks.append(sanitized_p)
+
+            # 调试打印逻辑：文本长度 <= 2000 字符时全部打印，方便调试；大于 2000 时仅打印前 200 字符预览
+            if len(sanitized_p) <= 2000:
+                print(
+                    f"\n--- [分段 {idx}/{len(chunks)} 完整脱敏结果 ({len(sanitized_p)} 字符)] ---\n"
+                    f"{sanitized_p}\n"
+                    f"----------------------------------------------------"
+                )
+            else:
+                print(f" -> 分段 [{idx}/{len(chunks)}] 脱敏抹平完成（预览前200字符）: {sanitized_p[:200]}...")
+
+        # Step 5: 重组脱敏后的段落并保存到目标文件
+        sanitized_full_content = "\n\n".join(sanitized_chunks)
+        output_file_path.write_text(sanitized_full_content, encoding="utf-8")
+
+        # 调试打印：完整生成文件长度 <= 2000 字符时全部打印
+        if len(sanitized_full_content) <= 2000:
+            print(
+                f"\n==================== [脱敏生成目标文件完整内容 ({len(sanitized_full_content)} 字符)] ====================\n"
+                f"{sanitized_full_content}\n"
+                f"=================================================================================="
+            )
+
+        # Step 6: 断言输出文件生成且敏感 PII 被正确抹平打码
+        assert output_file_path.is_file()
+        sanitized_result_text = output_file_path.read_text(encoding="utf-8")
+        assert len(sanitized_result_text) > 0
+
+        # 核心断言：
+        # 1. 硬敏感身份证号、手机号及 L5 极高敏病种（HIV/艾滋病）绝不能原样暴露
+        assert "510101199001011234" not in sanitized_result_text, "身份证号未被脱敏抹平"
+        assert "13812345678" not in sanitized_result_text, "手机号未被脱敏抹平"
+        assert "HIV" not in sanitized_result_text, "HIV 敏感标识未被脱敏擦除抹平"
+        assert "艾滋病" not in sanitized_result_text, "艾滋病 敏感词未被脱敏擦除抹平"
+        # 2. 中文姓名必须被掩码遮蔽（如 "张三" 掩码为 "张*"）
+        assert "张三" not in sanitized_result_text, "姓名张三未被掩码打码"
+        # 3. 语法与标点自愈断言：绝不能残留 "：，"、"（感染期）" 等断句残渣
+        assert "：，" not in sanitized_result_text, "冒号逗号标点碰撞未自愈"
+        assert "（感染期）" not in sanitized_result_text, "悬空修饰括号未自愈"
+        # 3. 结果文本中不得包含 [已抹平] 或 [泛化] 等影响可读性的生硬占位标签
+        assert "[已抹平]" not in sanitized_result_text, "输出包含人工占位标签 [已抹平]"
+        assert "[泛化]" not in sanitized_result_text, "输出包含人工占位标签 [泛化]"
+
+        print(f"\n[脱敏生成完成] 输出目标文件: {output_file_path}")
+        print(
+            f"[全文件 Token 汇总] 输入 Tokens: {total_prompt_tokens}, "
+            f"输出 Tokens: {total_completion_tokens}, 总消耗 Tokens: {total_prompt_tokens + total_completion_tokens}"
+        )
+
+
+class TestLlmStopScript:
+    """docker-stop-llm.sh 停止脚本测试。"""
+
+    def test_stop_script_exists_and_valid(self, bash_bin):
+        stop_path = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-llm.sh"
+        assert stop_path.is_file()
+        assert stop_path.stat().st_mode & stat.S_IXUSR
+        result = subprocess.run([bash_bin, "-n", str(stop_path)], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr

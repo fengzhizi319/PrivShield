@@ -3,7 +3,7 @@
 # 【Docker 模式】启动 Layer-3 LLM 推理服务 (vLLM / GPU 加速)
 # Launch vLLM Layer-3 LLM inference container
 #
-# 用法 / Usage: ./console/scripts/docker-start-llm.sh
+# 用法 / Usage: ./scripts/dev/docker-start-llm.sh
 # ============================================================================
 
 set -euo pipefail

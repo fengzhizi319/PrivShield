@@ -745,6 +745,36 @@ def test_ascii_term_word_boundary_no_false_positive() -> None:
     assert "CD4" not in redact_medical_text("CD4计数180个/μL")
 
 
+def test_syntax_self_healing_rules() -> None:
+    """测试规则引擎的全套语法自愈能力：
+    1. 消除冒号与逗号碰撞 (初步诊断：， -> 初步诊断：)
+    2. 消除多药联合处方擦除后的运算符与空括号残渣 (( + + ) -> "")
+    3. 消除孤立分期/试验括号 ((HIV 感染期) -> "")
+    4. 中文姓名掩码 (张三 -> 张*)
+    """
+    # Case 1: 标点碰撞与孤立分期括号自愈
+    case1 = "初步诊断：艾滋病（HIV 感染期），伴卡氏肺孢子虫肺炎。"
+    out1 = redact_medical_text(case1)
+    assert "：，" not in out1, f"标点碰撞未自愈: {out1}"
+    assert "（感染期）" not in out1, f"孤立分期括号未自愈: {out1}"
+    assert "HIV" not in out1 and "艾滋病" not in out1
+    assert "初步诊断：伴卡氏肺孢子虫肺炎。" in out1
+
+    # Case 2: 用药处方、多重空格与运算符自愈
+    case2 = "医嘱：立即转诊至定点传染病医院，开展 HAART 抗病毒治疗（替诺福韦 + 拉米夫定 + 依非韦伦）。"
+    out2 = redact_medical_text(case2)
+    assert "+" not in out2 and "(" not in out2 and "（" not in out2, f"运算符/空括号未清理: {out2}"
+    assert "  " not in out2, f"多重空格未消除: {out2}"
+    assert "替诺福韦" not in out2 and "拉米夫定" not in out2 and "依非韦伦" not in out2
+    assert "医嘱：遵医嘱常规治疗与健康管理。" in out2
+
+    # Case 3: 包含高敏词汇与 PII 时，触发全流程语法自愈与姓名遮蔽打码
+    case3 = "患者姓名：张三，确诊为艾滋病，身份证号 510101199001011234。"
+    out3 = redact_medical_text(case3)
+    assert "张三" not in out3, f"姓名未掩码: {out3}"
+    assert "张*" in out3, f"姓名未正确格式化遮蔽: {out3}"
+
+
 def test_ner_fallback_preserves_clean_text() -> None:
     """NER 未检出高敏实体时的规则降级路径，对干净文本必须零篡改。
 

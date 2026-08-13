@@ -40,10 +40,10 @@ bash ./console/scripts/dev-start-all.sh
 
 ```bash
 # 1. 单独在 Docker 中运行 Agent (Core / ML 镜像)
-bash ./console/scripts/docker-start-agent.sh [core|ml]
+bash ./scripts/dev/docker-start-agent.sh [core|ml]
 
 # 2. 启动 vLLM 大模型推理容器 (GPU 加速)
-bash ./console/scripts/docker-start-llm.sh
+bash ./scripts/dev/docker-start-llm.sh
 
 # 3. 启动 Agent + Go 代理 + React Web UI 容器套件
 bash ./console/scripts/docker-start-go.sh
