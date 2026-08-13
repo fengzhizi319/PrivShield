@@ -27,36 +27,62 @@
 #   - LLM 升级/重启        → core 零感知（HTTP 短连接，自动重试）
 #   - LLM 挂掉/OOM         → core 自动降级 Layer-1 规则 + Layer-2 NER，REST/gRPC 不受影响
 #   - LLM 依赖变更          → 只重建 vllm 容器，core 镜像永不重建
+#
+# 环境变量替换语法 / Env var substitution:
+#   ${VAR:-default}  → VAR 未设置或为空时使用 default（本文件中 VLLM_IMAGE_TAG、GRAFANA_ADMIN_PASSWORD 采用此语法）
+#   ${VAR:?err}      → VAR 未设置时直接报错退出（强制必填项时使用）
+#   ${VAR-default}   → 仅 VAR 未设置时使用 default（空字符串也生效）
+#
+# 命令说明 / Commands:
+#   up -d              创建并启动服务；修改本文件或 .env 后必须用它重建变更容器（配置才生效）
+#   restart <service>  仅 stop+start 现有容器，不重建、不重新解析本文件（配置变更不生效）
+#   restart/up/down 等命令的实现位于 compose CLI 程序本身（/snap/bin/docker-compose），非本仓库代码
+#   详见 docs/deployment/ops.md §5.2.8
 # =============================================================================
 
 # =============================================================================
 # 网络定义 / Networks
 # =============================================================================
 networks:
-  # 前端网络：Web UI 访问
+  # 前端网络：Web UI 访问（Nginx / 控制台代理对外提供服务）
   # Frontend network: Web UI access
   frontend:
+    # driver: 网络驱动类型
+    #   bridge（默认）: 默认桥接网络，容器间通过 DNS 名称通信，可映射端口到宿主机
+    #   host          : 容器直接使用宿主机网络栈（无端口隔离，性能最好）
+    #   none          : 容器无网络（仅本地回环）
+    #   overlay       : 跨主机集群网络（docker swarm 模式）
     driver: bridge
 
-  # 后端网络：Agent 核心服务与后端代理通信
+  # 后端网络：Agent 核心服务与后端代理通信（不直接暴露到宿主机）
   # Backend network: Agent core service and backend proxy communication
   backend:
     driver: bridge
+    # internal: 是否完全禁止外部访问（不映射任何外部端口）
+    #   true  : 仅容器间内部通信，宿主机/外部无法直接访问（安全隔离）
+    #   false : 允许通过端口映射对外暴露
     internal: true  # 不对外暴露，仅内部通信
 
-  # LLM 网络：大模型推理服务（可选）
-  # LLM network: Large model inference service (optional)
+  # LLM 网络：大模型推理服务（可选，core 与 vllm 容器使用）
+  # 注意：内部网络（internal: true）会阻止端口映射到宿主机，
+  # 因此 vllm 调试端口需要该网络非 internal；core 与 vllm 仍通过此网络通信。
+  # LLM network: Large model inference service (optional, used by core and vllm).
+  # Note: internal networks block host port mapping, so this must be non-internal
+  # to expose the vLLM debug port; core still reaches vllm over this network.
   llm:
     driver: bridge
-    internal: true
+    internal: false
 
 # =============================================================================
 # 持久化卷定义 / Volumes
 # =============================================================================
 volumes:
-  # 隐私预算数据库（SQLite）
+  # 隐私预算数据库（SQLite）——容器删除后数据仍保留
   # Privacy budget database (SQLite)
   budget-db:
+    # driver: 卷驱动类型
+    #   local（默认）: 存储在宿主机本地 /var/lib/docker/volumes/
+    #   nfs / azure_file / rook-ceph 等: 第三方分布式存储驱动（生产多机共享场景）
     driver: local
 
   # 审计日志持久化
@@ -64,12 +90,12 @@ volumes:
   audit-logs:
     driver: local
 
-  # Prometheus 持久化数据
+  # Prometheus 持久化数据（时序数据，容器重建不丢历史）
   # Prometheus persisted data
   prometheus-data:
     driver: local
 
-  # Grafana 持久化数据
+  # Grafana 持久化数据（面板配置、用户与数据源授权）
   # Grafana persisted data
   grafana-data:
     driver: local
@@ -84,145 +110,235 @@ services:
   #    REST: 8079 | gRPC: 50051
   # ===========================================================================
   privacy-local-agent:
+    # build: 本地构建镜像的配置段（配置了 build 且本地无该镜像时自动构建）
     build:
+      # context: 构建上下文目录（Dockerfile 中 COPY 相对路径的根）
+      # 此处指向项目根目录，使 Dockerfile 可 COPY 整个仓库
       context: ../..
+      # dockerfile: 指定 Dockerfile 文件名（相对于 context）
       dockerfile: Dockerfile
+      # target: 多阶段构建目标阶段
+      #   core（默认推荐）: 轻量运行时镜像（无 torch/transformers，纯 REST/gRPC 核心能力）
+      #   ml              : 完整 ML 镜像（含 PyTorch、Transformers、ONNX Runtime，Layer-2/3 在进程内推理）
       target: core
+    # image: 构建产物/运行使用的镜像名:tag
+    #   若本地不存在该标签，compose 会尝试从远端仓库（Docker Hub）拉取
     image: privacy-local-agent:0.1.0
+    # container_name: 指定容器名称（同一宿主机全局唯一）
+    #   不设置时 compose 自动生成 "<项目名>-<服务名>-<序号>" 格式名称
     container_name: privacy-local-agent
-    # 读取项目根目录 .env 作为基础配置（运维统一入口）
-    # Load project root .env as base config (single ops entry point)
+    # env_file: 从外部文件批量注入环境变量（比逐个写 environment 更易维护）
+    #   多个 env_file 按顺序合并，后声明的覆盖先声明的；environment 段优先级最高
     env_file:
       - path: ../../.env
+        # required: 该文件是否必须存在
+        #   true : 文件缺失则 compose 启动直接报错（强制配置）
+        #   false: 文件缺失则忽略该文件，仅告警（开发环境容错）
         required: false
+    # ports: 端口映射，格式 "宿主机地址:宿主机端口:容器端口"
+    #   可选形式：
+    #     "8079:8079"             → 绑定宿主机所有网卡的 8079 到容器 8079（本文件用法）
+    #     "127.0.0.1:8079:8079"   → 仅绑定回环地址（外部网络不可达，更安全）
+    #     "8079"                  → 随机映射一个宿主机端口到容器 8079（避免冲突）
+    #     "8079:8079/udp"         → 指定 UDP 协议（默认 TCP）
     ports:
-      - "8079:8079"   # REST API
-      - "50051:50051" # gRPC
+      - "8079:8079"   # REST API（FastAPI /docs 交互文档、脱敏/DP/K匿名/分类接口）
+      - "50051:50051" # gRPC（高性能 RPC 接口，console-backend-go 走此通道）
+    # environment: 直接声明环境变量（覆盖 env_file 中的同名变量）
     environment:
       # ── 容器覆盖项 / Container overrides ──
       # 容器内必须绑定 0.0.0.0（.env 中的 127.0.0.1 仅适用于宿主机开发）
       # Must bind 0.0.0.0 inside container (.env 127.0.0.1 is for host dev only)
+      # PRIVACY_REST_HOST: REST 服务监听地址
+      #   "0.0.0.0"（本配置）: 监听所有网卡，容器外（其他容器/宿主机）可访问
+      #   "127.0.0.1"         : 仅本容器内可访问（对外不可达）
       PRIVACY_REST_HOST: "0.0.0.0"
+      # PRIVACY_GRPC_HOST: gRPC 服务监听地址（取值同上）
       PRIVACY_GRPC_HOST: "0.0.0.0"
-      # 容器环境推荐 JSON 日志格式
-      # JSON log format recommended for container environments
+      # PRIVACY_LOG_FORMAT: 日志输出格式
+      #   "json": 结构化 JSON 日志（推荐容器环境，便于 Loki/ELK/云日志采集解析）
+      #   "text": 人类可读的纯文本日志（适合本地开发调试）
       PRIVACY_LOG_FORMAT: "json"
-      # 容器内 profile 配置挂载路径（通过 volume 映射）
-      # Profile config mount path inside container (via volume mount)
+      # PRIVACY_PROFILE: YAML 参数 profile 文件路径（脱敏策略/DP 参数等）
+      #   容器内路径由下方 volumes 挂载映射到宿主机的 ./privacy-profile.yaml
       PRIVACY_PROFILE: "/etc/privacy-local-agent/privacy-profile.yaml"
-      # 持久化预算数据库路径
-      # Persisted budget database path
+      # PRIVACY_BUDGET_DB: 分布式隐私预算数据库（SQLite）文件路径
+      #   设置为路径则预算跨进程/跨实例持久化；不设置则使用进程内存（单实例场景）
+      #   目录由下方 budget-db 命名卷挂载，保证容器重建预算不丢失
       PRIVACY_BUDGET_DB: "/data/budget/budget.db"
       # ── Layer-3 LLM 推理服务连接（运行时解耦）──
       # vLLM 独立容器（服务名 vllm:8000）承载 LLM 推理，core 通过 OpenAI 兼容 HTTP 调用：
       #   - LLM 升级/重启 → core 零感知（短连接自动重试）
       #   - LLM 挂掉/OOM  → core 自动降级 Layer-1+Layer-2（信号量等待/内存阈值兜底）
       # 如业务不需要 LLM（纯 core 模式），注释掉以下 4 行即可
+      # PRIVACY_LLM_PROVIDER: LLM 推理后端提供方
+      #   "vllm"  : 独立 vLLM 服务（本 compose 默认，GPU 高并发）
+      #   "qwen3" : 本地 Transformers 直接推理（进程内，需 ml 镜像）
+      #   "mlx"   : Apple Silicon MLX 后端（macOS 本机开发）
+      #   "openai": 外部 OpenAI 兼容云端 API（需真实 API Key）
       PRIVACY_LLM_PROVIDER: "vllm"
+      # PRIVACY_LLM_API_BASE: OpenAI 兼容 API 基地址
+      #   指向 compose 内部 DNS 服务名 vllm + 容器端口 8000 + /v1 前缀
+      #   若改用外部云服务则替换为 https://api.xxx.com/v1
       PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
+      # PRIVACY_LLM_MODEL_NAME: 请求模型名
+      #   必须与 vllm 服务 --served-model-name 参数一致（见下方 vllm 服务）
       PRIVACY_LLM_MODEL_NAME: "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      # PRIVACY_LLM_API_KEY: 调用 LLM 服务的认证 Key
+      #   本地 vLLM 无需鉴权，固定 "EMPTY"；对接 OpenAI 等云服务时填真实 Key
       PRIVACY_LLM_API_KEY: "EMPTY"
       # ── 可选：安全配置 / Optional: security config ──
       # 生产环境请在 .env 中取消注释 TLS/Auth/RateLimit 配置
       # For production, uncomment TLS/Auth/RateLimit in .env
-      # PRIVACY_TLS_ENABLED: "true"
-      # PRIVACY_TLS_CERT_FILE: "/certs/tls.crt"
-      # PRIVACY_TLS_KEY_FILE: "/certs/tls.key"
-      # PRIVACY_AUTH_ENABLED: "true"
+      # PRIVACY_TLS_ENABLED: "true"                  # 启用 TLS（REST/gRPC 双向证书加密）
+      # PRIVACY_TLS_CERT_FILE: "/certs/tls.crt"      # 服务端证书路径（需挂载证书卷）
+      # PRIVACY_TLS_KEY_FILE: "/certs/tls.key"       # 服务端私钥路径（需挂载证书卷）
+      # PRIVACY_AUTH_ENABLED: "true"                 # 启用 API Key 鉴权
+    # volumes: 目录/文件挂载，短语法格式 "宿主资源:容器路径:选项"
+    #   选项可省略（默认 rw）：
+    #     ro: 只读挂载（配置类文件推荐，防止容器内误改）
+    #     rw: 读写挂载
+    #   "host:container" 双向冒号形式为 bind mount（引用宿主机绝对/相对路径）
+    #   "卷名:container" 单冒号形式为 named volume（由上方 volumes 段声明）
     volumes:
-      - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro
-      - budget-db:/data/budget
-      - audit-logs:/var/log/privacy
+      - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro  # 参数 profile 只读挂载
+      - budget-db:/data/budget          # 预算数据库持久化命名卷
+      - audit-logs:/var/log/privacy     # 审计日志持久化命名卷
+    # networks: 容器加入的网络（可多选；服务名即网络内 DNS 名称）
     networks:
-      - backend
-      - llm  # 允许访问 LLM 服务
+      - backend                        # 核心服务网络：供 console 后端代理访问
+      - llm  # 允许访问 LLM 服务（core → vllm 的 OpenAI 兼容 HTTP 调用）
+    # healthcheck: 容器健康检查（供 depends_on: condition: service_healthy 依赖）
     healthcheck:
+      # test: 健康检查命令
+      #   ["CMD", ...]       → 直接执行，不经 shell（参数安全，推荐）
+      #   ["CMD-SHELL", ...] → 经 /bin/sh 执行（支持管道/重定向/变量）
+      #   ["NONE"]           → 禁用健康检查
       test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
+      # interval: 两次检查之间的间隔时长
       interval: 10s
+      # timeout: 单次检查允许的最长执行时间，超时即视为失败
       timeout: 5s
+      # retries: 连续失败达到该次数后容器标记为 unhealthy
       retries: 3
+      # start_period: 启动宽限期（期间失败不计入 retries，避免启动慢被误判）
       start_period: 10s
-    # 资源限制 / Resource limits
+    # deploy: 资源限制/调度配置（compose 亦支持）
     deploy:
       resources:
+        # limits: 硬性上限——超过后 CPU 被节流、内存触发 OOMKill
         limits:
-          cpus: "2.0"
-          memory: 2G
+          cpus: "2.0"        # 最多使用 2 个 CPU 核
+          memory: 2G         # 最多占用 2GB 内存（可写 512M/1G/2G 等）
+        # reservations: 软性预留——调度器尽力保证，低于此值的部署会告警/拒绝
         reservations:
-          cpus: "0.5"
-          memory: 512M
-    # 日志配置 / Logging configuration
+          cpus: "0.5"        # 预留 0.5 核 CPU
+          memory: 512M       # 预留 512MB 内存
+    # logging: 容器日志采集配置
     logging:
+      # driver: 日志驱动
+      #   json-file（默认）: 本地 JSON 文件轮转（本配置）
+      #   syslog / journald: 写入系统日志
+      #   gelf / fluentd / awslogs / splunk: 推送集中式日志平台
+      #   none              : 完全禁用日志
       driver: json-file
       options:
+        # max-size: 单个日志文件滚动阈值（超过即切割新文件，防止磁盘打满）
         max-size: "50m"
+        # max-file: 保留的日志文件最大数量（超出后删除最旧文件）
         max-file: "5"
+    # restart: 容器退出后的重启策略
+    #   no（默认）          : 不自动重启
+    #   always              : 任何退出都重启（含 daemon 启动时）
+    #   on-failure[:3]      : 仅非零退出码时重启（可带最大重试次数）
+    #   unless-stopped      : 除非手动 stop，否则总是重启（本配置，兼顾手动停止需求）
     restart: unless-stopped
 
   # ===========================================================================
   # 2. Console Go 后端代理服务 (Go gRPC / REST 高性能代理)
   #    PORT: 8081
+  #    作用: 为 Web UI 提供 gRPC→REST 转换与转发，屏蔽 agent 的 gRPC 细节
   # ===========================================================================
   console-backend-go:
+    # build: 从 console/backend-go 目录的 Dockerfile 构建（Go 编译型镜像，无源码运行）
     build:
-      context: ../../console/backend-go
-      dockerfile: Dockerfile
+      context: ../../console/backend-go  # 构建上下文 = Go 后端源码目录
+      dockerfile: Dockerfile             # 多阶段：Go 编译 → scratch/alpine 运行
     image: privacy-console-backend-go:0.1.0
     container_name: privacy-console-backend-go
     ports:
-      - "8081:8081"
+      - "8081:8081"  # 对外暴露 Go 代理 HTTP 端口（前端 dev/prod 均转发至此）
     environment:
+      # PRIVACY_CONSOLE_HOST: Go 代理自身 HTTP 监听地址
+      #   "0.0.0.0": 监听所有网卡（容器内必须，供 console-web 等访问）
+      #   "127.0.0.1": 仅本机
       PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      # PRIVACY_CONSOLE_PORT: Go 代理自身监听端口（与上方 ports 容器端口一致）
       PRIVACY_CONSOLE_PORT: "8081"
+      # PRIVACY_AGENT_GRPC_HOST: 上游 agent 的 gRPC 主机名
+      #   使用 compose 内部 DNS 服务名 privacy-local-agent（同网络 backend 内自动解析）
+      #   若 agent 部署在其他主机，改为其 IP 或外部域名
       PRIVACY_AGENT_GRPC_HOST: "privacy-local-agent"
+      # PRIVACY_AGENT_GRPC_PORT: 上游 agent 的 gRPC 端口（与 agent 的 50051 一致）
       PRIVACY_AGENT_GRPC_PORT: "50051"
+    # depends_on: 服务启动顺序依赖
+    #   condition 可选值：
+    #     service_started                → 仅等待容器启动（默认）
+    #     service_healthy                → 等待健康检查通过后再启动（本配置，保证 agent 就绪）
+    #     service_completed_successfully → 等待一次性任务成功退出（仅用于批处理服务）
     depends_on:
       privacy-local-agent:
         condition: service_healthy
     networks:
-      - frontend
-      - backend
+      - frontend   # 供 console-web / 外部访问
+      - backend    # 用于访问 privacy-local-agent 的 gRPC
     healthcheck:
+      # 探测 /health 端点；curl 不可用时可换 wget --spider 方式（见 console-web）
       test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
+      interval: 30s    # 每 30s 检查一次（较宽松，代理为轻量服务）
+      timeout: 5s       # 单次检查 5s 超时
+      retries: 3        # 连续 3 次失败标记 unhealthy
+      start_period: 5s  # 5s 启动宽限
     # 资源限制 / Resource limits
     deploy:
       resources:
-        limits:
+        limits:           # 硬上限：Go 代理轻量，1 核 512M 足够
           cpus: "1.0"
           memory: 512M
-        reservations:
+        reservations:     # 软预留
           cpus: "0.1"
           memory: 64M
     logging:
       driver: json-file
       options:
-        max-size: "20m"
-        max-file: "3"
+        max-size: "20m"   # 单日志文件 20MB 滚动
+        max-file: "3"     # 保留 3 个
     restart: unless-stopped
 
   # ===========================================================================
   # 3. Console Python 后端代理服务 (Python FastAPI REST 代理)
   #    PORT: 8080
+  #    作用: 备选/兼容通道——以 HTTP 转发到 agent 的 REST 8079（Go 代理之外的 Python 实现）
   # ===========================================================================
   console-backend-python:
     build:
-      context: ../../console/backend
+      context: ../../console/backend   # 构建上下文 = Python FastAPI 代理源码目录
       dockerfile: Dockerfile
     image: privacy-console-backend-python:0.1.0
     container_name: privacy-console-backend-python
     ports:
-      - "8080:8080"
+      - "8080:8080"  # 对外暴露 Python 代理 HTTP 端口
     environment:
+      # PRIVACY_CONSOLE_HOST: Python 代理监听地址（同上，容器内必须 0.0.0.0）
       PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      # PRIVACY_CONSOLE_PORT: Python 代理监听端口
       PRIVACY_CONSOLE_PORT: "8080"
+      # PRIVACY_AGENT_URL: 上游 agent 的 REST 基地址（FastAPI 代理仅走 HTTP）
+      #   格式 http://<服务名>:<REST端口>；跨主机部署时替换为 agent 实际地址
       PRIVACY_AGENT_URL: "http://privacy-local-agent:8079"
     depends_on:
       privacy-local-agent:
-        condition: service_healthy
+        condition: service_healthy  # 等待 agent 健康就绪（同服务 2 说明）
     networks:
       - frontend
       - backend
@@ -235,7 +351,7 @@ services:
     # 资源限制 / Resource limits
     deploy:
       resources:
-        limits:
+        limits:           # 硬上限：Python 运行时略重，仍 1 核 512M
           cpus: "1.0"
           memory: 512M
         reservations:
@@ -251,21 +367,24 @@ services:
   # ===========================================================================
   # 4. Console React 单页测试控制台 Web UI (Nginx 静态服务)
   #    PORT: 5173
+  #    作用: 前端测试控制台，静态资源由 Nginx 托管；API 请求经后端代理转发
   # ===========================================================================
   console-web:
     build:
-      context: ../../console/web
+      context: ../../console/web   # 构建上下文 = React 前端源码目录（构建产物打入 Nginx 镜像）
       dockerfile: Dockerfile
     image: privacy-console-web:0.1.0
     container_name: privacy-console-web
     ports:
-      - "5173:5173"
+      - "5173:5173"  # 对外暴露前端访问端口（与 vite 开发端口保持一致，切换开发/生产无感）
+    # 说明: 前端仅需访问 Go/Python 代理，无需直连 agent，故仅挂 frontend 网络
     depends_on:
       privacy-local-agent:
-        condition: service_healthy
+        condition: service_healthy  # 等核心就绪（避免首屏请求 502）
     networks:
       - frontend
     healthcheck:
+      # wget 探测首页（Nginx 镜像无 curl，用 wget --spider 发 HEAD 请求）
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5173/ || exit 1"]
       interval: 30s
       timeout: 5s
@@ -274,7 +393,7 @@ services:
     # 资源限制 / Resource limits
     deploy:
       resources:
-        limits:
+        limits:           # 纯静态文件服务，0.5 核 128M 即可
           cpus: "0.5"
           memory: 128M
         reservations:
@@ -283,8 +402,8 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "2"
+        max-size: "10m"   # 访问日志量大，单文件 10MB 滚动
+        max-file: "2"     # 仅保留 2 个
     restart: unless-stopped
 
   # ===========================================================================
@@ -294,36 +413,50 @@ services:
   #    独立运维：升级/重启只影响 LLM 层，core 自动降级，互不干扰
   # ===========================================================================
   vllm:
+    # profiles: 服务所属的 profile 列表——仅当启动命令带对应 --profile 时才创建
+    #   docker compose up -d          → 不启动本服务（纯 core 模式）
+    #   docker compose --profile llm up -d  → 启动本服务
+    #   可同时属于多个 profile：profiles: ["llm", "gpu"]
     profiles: ["llm"]
+    # image: vLLM 官方推理镜像
+    #   ${VLLM_IMAGE_TAG:-latest}: 可用环境变量 VLLM_IMAGE_TAG 固定版本（生产建议固定 v0.26.x）
     # Qwen3.5 为混合注意力架构（Gated Delta Net + Full Attention），需较新 vLLM：
     #   - llmlora 评估环境实测 vLLM 0.26+（见 docs/llmlora/finetuning_and_eval_guide.md §2.2）
     #   - 旧镜像 v0.6.3（2024 年）无法加载 Qwen3.5，此处默认 latest
     #   - 生产环境建议固定 tag（如 ${VLLM_IMAGE_TAG} 指定 v0.26.x）保证可复现
     image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
     container_name: privacy-local-agent-vllm
+    # command: 覆盖镜像默认 CMD，逐项解释如下（均为 vLLM OpenAI 服务端参数）
     command:
-      - "--model"
+      - "--model"                        # 模型权重目录（容器内路径，由下方 volumes 挂载 .models）
       - "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
-      - "--served-model-name"
+      - "--served-model-name"            # 对外暴露的模型名——core 端 PRIVACY_LLM_MODEL_NAME 必须与此一致
       - "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
-      - "--trust-remote-code"
-      - "--gpu-memory-utilization"
-      - "0.85"
-      - "--max-model-len"
-      - "4096"
-      - "--host"
+      - "--trust-remote-code"            # 信任模型仓库自定义代码（Qwen 系列使用 modeling_*.py 必需）
+      - "--gpu-memory-utilization"       # GPU 显存利用率上限（0~1 浮点）
+      - "0.85"                           # 0.85 = 最多用 85% 显存，留 15% 给 CUDA context/其他进程
+      - "--max-model-len"                # 最大上下文长度（输入+输出 token 总数上限）
+      - "4096"                           # 4096 约覆盖医疗文本+指令；越大越吃显存
+      - "--host"                         # 服务监听地址（容器内 0.0.0.0，供 core 跨容器调用）
       - "0.0.0.0"
-      - "--port"
+      - "--port"                         # 服务监听端口（OpenAI 兼容 API）
       - "8000"
+      # ── 其他常用可选参数（按需追加）──
+      # --tensor-parallel-size 2      → 多卡张量并行（2 卡推理）
+      # --dtype bfloat16              → 推理精度（Qwen3.5 建议 bfloat16；float16 易溢出）
+      # --quantization awq/gptq       → 量化推理（显存不足时）
+      # --enforce-eager               → 禁用 CUDA graph（显存紧张/兼容性调试）
+      # --max-num-seqs 32             → 并发序列上限（控制吞吐与显存）
     volumes:
+      # 挂载宿主 .models 目录为只读，模型文件不打包进镜像（模型大且常更新）
       - ../../.models:/models:ro
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # 仅绑定回环地址，宿主机调试/测试用；core 走内部 llm 网络
     networks:
-      - llm
+      - llm          # core 与 vllm 内部通信（llm 网络非 internal 以支持宿主机调试端口映射）
     healthcheck:
-      # vLLM OpenAI 兼容 /health 端点（容器内 python 探测，无需额外安装 curl）
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      # vLLM OpenAI 兼容 /health 端点（vllm 镜像只有 python3，无 python 命令）
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -331,46 +464,51 @@ services:
     deploy:
       resources:
         reservations:
+          # devices: 声明需要直通的设备
           devices:
+            # driver: 设备驱动（nvidia 需宿主机预装 NVIDIA 驱动 + nvidia-container-toolkit）
             - driver: nvidia
+              # count: 需要的设备数量（也可用 device_ids: ["0"] 精确指定某张卡）
               count: 1  # 限制为 1 张 GPU，支持多租户
+              # capabilities: 设备能力要求（[gpu] 为最小必需；可扩展 [gpu,utility]）
               capabilities: [gpu]
         limits:
-          memory: 8G
+          memory: 8G   # 容器内存上限 8GB（模型权重 + KV cache + 运行时）
     logging:
       driver: json-file
       options:
-        max-size: "100m"
+        max-size: "100m"  # vLLM 日志含推理统计较庞大，单文件 100MB
         max-file: "3"
     restart: unless-stopped
 
   # ===========================================================================
-  # 6. 可选：Prometheus 监控服务
+  # 6. 可选：Prometheus 监控服务（抓取 agent /metrics 指标）
   #     PORT: 9090
   #     启用：docker compose --profile monitoring up -d
   # ===========================================================================
   prometheus:
-    profiles: ["monitoring"]
-    image: prom/prometheus:v2.54.1
+    profiles: ["monitoring"]   # 仅 --profile monitoring 时启动
+    image: prom/prometheus:v2.54.1  # 固定版本镜像（生产可复现）
     container_name: privacy-local-agent-prometheus
     ports:
-      - "9090:9090"
+      - "9090:9090"  # Prometheus Web UI / API 端口
     volumes:
-      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ../prometheus/alerts.yml:/etc/prometheus/rules/privacy-local-agent-alerts.yml:ro
-      - prometheus-data:/prometheus
+      # 抓取规则与告警规则均为只读挂载（配置从宿主机 hot-reload）
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro        # 主配置（抓取目标等）
+      - ../prometheus/alerts.yml:/etc/prometheus/rules/privacy-local-agent-alerts.yml:ro  # 告警规则
+      - prometheus-data:/prometheus   # 时序数据持久化（named volume）
     networks:
-      - backend
-      - frontend
+      - backend    # 通过 backend 网络抓取 agent 指标（internal 网络内可达）
+      - frontend   # 供宿主机 9090 端口访问 UI（frontend 对外映射）
     command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=15d"
-      - "--web.enable-lifecycle"
+      - "--config.file=/etc/prometheus/prometheus.yml"  # 指定主配置文件路径
+      - "--storage.tsdb.retention.time=15d"             # 数据保留时长（可选 1h/24h/15d/1y；越长越占磁盘）
+      - "--web.enable-lifecycle"                        # 启用 /-/reload 热加载配置（免重启生效）
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 1G   # TSDB 内存占用随采集量增长，必要时上调
     logging:
       driver: json-file
       options:
@@ -379,27 +517,35 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 7. 可选：Grafana 可视化面板
+  # 7. 可选：Grafana 可视化面板（对接 Prometheus 数据源）
   #     PORT: 3000
   #     启用：docker compose --profile monitoring up -d
   # ===========================================================================
   grafana:
-    profiles: ["monitoring"]
-    image: grafana/grafana:11.2.0
+    profiles: ["monitoring"]   # 仅 --profile monitoring 时启动
+    image: grafana/grafana:11.2.0  # 固定版本镜像
     container_name: privacy-local-agent-grafana
     ports:
-      - "3000:3000"
+      - "3000:3000"  # Grafana Web UI 端口（浏览器访问 http://localhost:3000）
     environment:
+      # GF_SECURITY_ADMIN_USER: 初始管理员用户名（默认 admin）
       GF_SECURITY_ADMIN_USER: admin
+      # GF_SECURITY_ADMIN_PASSWORD: 初始管理员密码
+      #   ${GRAFANA_ADMIN_PASSWORD:-changeme}: 优先取宿主 .env 的 GRAFANA_ADMIN_PASSWORD，
+      #   未设置时回退为 changeme——生产环境必须通过 .env 显式设置！
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-changeme}"  # 必须通过 .env 或环境变量设置！
+      # GF_USERS_ALLOW_SIGN_UP: 是否允许用户自助注册
+      #   "true" : 任何人可注册登录（仅内网演示环境）
+      #   "false": 禁止注册，仅管理员创建账号（安全推荐，本配置）
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
+      # 数据源/仪表盘自动配置目录（只读挂载，containers 目录下 yml 自动生效）
       - ../grafana:/etc/grafana/provisioning:ro
-      - grafana-data:/var/lib/grafana
+      - grafana-data:/var/lib/grafana   # Grafana 数据持久化（面板、用户、授权）
     networks:
-      - frontend
+      - frontend   # 仅暴露到宿主机访问
     depends_on:
-      - prometheus
+      - prometheus   # 先启动 Prometheus（数据源依赖；无 condition 即默认 service_started）
     deploy:
       resources:
         limits:

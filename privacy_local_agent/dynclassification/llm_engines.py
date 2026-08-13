@@ -861,6 +861,17 @@ class OpenAILlmClassifier(LlmClassifier):
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vllm-http-infer")
 
+    def _is_finetuned_model(self) -> bool:
+        """判断当前请求的模型是否为项目微调的 Privacy-Classifier-Smoother 模型。
+
+        当 model_name 匹配微调模型名时，使用与训练侧一致的 system prompt 和
+        裸用户文本，避免 0.8B 小模型因 prompt 分布漂移导致 JSON 截断/定级错误。
+        """
+        if self._classify_prompt_template is not None:
+            return False
+        base = os.path.basename(self.model_name.rstrip("/"))
+        return base == _DEFAULT_MODEL_DIR
+
     @property
     def is_ready(self) -> bool:
         """服务器是否已就绪。"""
@@ -916,6 +927,10 @@ class OpenAILlmClassifier(LlmClassifier):
                     "- L1 (公开级): 年度门诊总量等医院公开宣传、无任何敏感特征的统计指标。"
                 ),
             )
+        elif self._is_finetuned_model():
+            # 微调模型：必须与训练侧（llmlora/src/dataset/loader.py）的 system prompt
+            # 以及裸用户文本保持一致，否则 0.8B 小模型会生成漂移/提前 EOS。
+            system_prompt = _FINETUNED_SYSTEM_PROMPT
         else:
             system_prompt = (
                 "你是一个医疗数据分类分级领域的资深安全专家。请对输入的医疗数据进行敏感等级评估。\n"
@@ -935,7 +950,12 @@ class OpenAILlmClassifier(LlmClassifier):
                 "}"
             )
 
-        user_text = f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"
+        # 微调模型：user 消息必须是裸文本，与训练样本一致；非微调模型保留注入防护包装。
+        if self._is_finetuned_model():
+            user_text = sanitize_for_prompt(text)
+        else:
+            user_text = f"请评估以下文本数据的敏感数据等级：\n{wrap_untrusted_text(text)}"
+
         payload = {
             "model": self.model_name,
             "messages": [

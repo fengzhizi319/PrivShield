@@ -7,6 +7,7 @@
   - [2.1 多阶段构建架构](#21-多阶段构建架构)
   - [2.2 构建命令](#22-构建命令)
   - [2.3 依赖清单](#23-依赖清单)
+  - [2.4 镜像备份与分享（Backup & Share）](#24-backup-share)
 - [3. Helm 部署](#3-helm-部署)
   - [3.1 Chart 结构](#31-chart-结构)
   - [3.2 默认安装（开发/测试）](#32-默认安装开发测试)
@@ -18,6 +19,22 @@
   - [4.1 资源清单](#41-资源清单)
   - [4.2 部署步骤](#42-部署步骤)
 - [5. Docker Compose 部署](#5-docker-compose-部署)
+  - [5.0 小白快速上手（前置条件 + 名词简释）](#50-小白快速上手前置条件--名词简释)
+  - [5.1 Docker Compose 全栈服务编排](#51-docker-compose-全栈服务编排)
+  - [5.2 服务启动流程详解](#52-服务启动流程详解)
+    - [5.2.1 命令拆解](#521-命令拆解)
+    - [5.2.2 完整执行流程](#522-完整执行流程)
+    - [5.2.3 实际解析结果](#523-实际解析结果)
+    - [5.2.4 环境变量三来源机制](#524-环境变量三来源机制)
+    - [5.2.5 多环境修改环境变量的建议](#525-多环境修改环境变量的建议)
+    - [5.2.6 vllm 容器启动细节](#526-vllm-容器启动细节)
+    - [5.2.7 启动后的 core ↔ vllm 联动](#527-启动后的-core--vllm-联动)
+    - [5.2.8 compose 命令的实现位置与 restart/up 区别](#528-compose-命令的实现位置与-restartup-区别)
+    - [5.2.9 --profile 从哪里找服务（小白澄清）](#529---profile-从哪里找服务小白澄清)
+    - [5.2.10 镜像构建策略：不是每次 up 都构建（小白澄清）](#5210-镜像构建策略不是每次-up-都构建小白澄清)
+  - [5.3 自动化 Docker 脚本运行集](#53-自动化-docker-脚本运行集)
+  - [5.4 Docker Compose 常用命令速查](#54-docker-compose-常用命令速查)
+  - [5.5 常见配置需求速查（想改 X → 改哪里）](#55-常见配置需求速查想改-x--改哪里)
 - [6. LLM 推理服务部署（集成模式 / 解耦模式）](#6-llm-推理服务部署集成模式--解耦模式)
 - [7. 安全配置](#7-安全配置)
   - [7.1 TLS / mTLS](#71-tls--mtls)
@@ -32,9 +49,14 @@
   - [10.4 ServiceMonitor（Prometheus Operator）](#104-servicemonitorprometheus-operator)
 - [11. 自动伸缩（HPA）](#11-自动伸缩hpa)
 - [12. 网络策略（NetworkPolicy）](#12-网络策略networkpolicy)
-- [13. 环境变量参考](#13-环境变量参考)
+- [13. 配置体系与环境变量参考](#13-配置体系与环境变量参考)
+  - [13.1 配置体系总览](#131-配置体系总览)
+  - [13.2 环境变量参考](#132-环境变量参考)
 - [14. 验证与冒烟测试](#14-验证与冒烟测试)
 - [15. 故障排查](#15-故障排查)
+  - [15.1 Docker Compose 常见故障](#151-docker-compose)
+    - [15.1.1 vLLM Docker 服务测试失败排查案例](#1511-vllm-docker-服务测试失败排查案例)
+  - [15.2 WSL 中 Docker GPU 失效（真实排查案例）](#152-wsl-docker-gpu)
 - [16. 日常运维操作](#16-日常运维操作)
 
 ---
@@ -125,6 +147,50 @@ make docker-ml            # 等价于 --target ml
 | onnxruntime | >= 1.17.0 | NER ONNX 推理 |
 | modelscope | >= 1.20.0 | ModelScope NER 管道 |
 | datasets | >= 4.0.0, <= 4.8.4 | ModelScope 运行时依赖 |
+
+### 2.4 镜像备份与分享（Backup & Share）
+
+**核心概念**：镜像的"真名"是 `IMAGE ID`（sha256），`tag` 只是指针/别名，**一个镜像可以同时有多个 tag**。`latest` 是官方仓库的滚动标签，会随官方更新变化。
+
+**命名规范**：保留官方 tag 不动（`docker-compose.yml`、`docker-start-llm.sh`、测试都引用它），另加自定义 tag 记录存档/交付版本，格式 `<项目>-<日期>` 或 `<版本号>`：
+
+```bash
+# 两个 tag 指向同一个 IMAGE ID，docker images 会显示两行
+docker tag vllm/vllm-openai:latest vllm/vllm-openai:pla-20260813
+```
+
+**方式一：离线导出 / 导入**（U 盘、网盘、内网传输）
+
+```bash
+# 导出（本机实测：vllm 镜像 8.5G，保存约 1 分钟）
+docker save vllm/vllm-openai:latest -o ~/vllm-image.tar
+
+# 导入（目标机器上，8.5G 加载约 1~2 分钟）
+docker load -i ~/vllm-image.tar
+```
+
+> **踩坑**：保存路径必须选磁盘空间充足的分区。`/tmp` 通常是 tmpfs（内存盘），本机仅 7.7G < 镜像 8.5G，`docker save` 直接报 `no space left on device`；保存到家目录（磁盘分区）即可。
+
+**方式二：推送到镜像仓库**（多人/多机协作）
+
+```bash
+# 1. 打上仓库前缀 tag（myregistry 换成 Docker Hub 用户名或私有仓库地址）
+docker tag privacy-local-agent:0.1.0 myregistry/privacy-local-agent:0.1.0
+
+# 2. 登录并推送
+docker login
+docker push myregistry/privacy-local-agent:0.1.0
+
+# 3. 目标机器拉取
+docker pull myregistry/privacy-local-agent:0.1.0
+```
+
+> 国内网络 pull 官方镜像慢时，可用 daemon.json 里配置的 registry-mirrors（如 `docker.m.daocloud.io`）加速，或从镜像站/私有仓库导入。
+
+**本项目注意**：
+
+- `docker-compose.yml`、`docker-start-llm.sh`、集成测试都引用 `vllm/vllm-openai:latest`，改 tag 名需同步修改所有引用处。
+- 换 daemon（如 snap docker → docker.io）后原镜像不互通，必须 `docker save` + `docker load` 迁移（详见 15.2 节）。
 
 ---
 
@@ -333,6 +399,59 @@ volumeMounts:
 
 适用于本地快速联调、完整容器化测试及单机一键部署。
 
+### 5.0 小白快速上手：第一次跑通全栈
+
+> 本节给第一次接触 Docker 的读者一条完整路径，每步的命令与"为什么"都给出说明。已熟悉的读者可跳过。
+
+**第 0 步：前置条件检查**（首次使用前）：
+
+| 项 | 要求 | 如何验证 |
+|---|---|---|
+| Docker | Docker Desktop（Windows/Mac）或 Docker Engine（Linux） | `docker --version` |
+| Docker Compose | compose 插件或独立二进制二选一 | `docker compose version` 或 `docker-compose version` |
+| 国内网络（可选） | 配置镜像加速或代理 | 拉镜像超时见 [6.2](#62-解耦模式外部独立-vllm-服务) 的备选方案 |
+| NVIDIA GPU + nvidia-container-toolkit | 仅跑 vllm 需要；无 GPU 则跳过 `--profile llm` | `nvidia-smi` |
+
+**第 1 步：启动核心服务**
+
+```bash
+cd deploy/docker-compose
+docker compose up -d
+```
+
+首次运行会自动**构建** agent/console 镜像并**拉取**基础镜像，需要几分钟属正常现象。
+
+**第 2 步：确认服务就绪**
+
+```bash
+docker compose ps              # 状态应为 Up (healthy)
+curl http://localhost:8079/health   # 期望：{"status":"ok",...}
+```
+
+**第 3 步：验证功能**
+
+浏览器打开 `http://localhost:5173`（Web 控制台）；或用 [14.3](#143-docker-compose-验证) 的 curl 冒烟命令直接测脱敏/DP 接口。
+
+**第 4 步：停止服务**
+
+```bash
+docker compose down        # 停止并移除容器/网络（数据卷保留，预算/日志还在）
+docker compose down -v     # 连数据卷一起删（慎用！预算与日志会丢失）
+```
+
+**名词简释**（第一次接触时先看这个）：
+
+| 名词 | 一句话解释 | 本项目的例子 |
+|---|---|---|
+| 镜像 image | 打包好的"安装包"（只读模板），由 Dockerfile 构建 | `privacy-local-agent:0.1.0`、`vllm/vllm-openai:latest` |
+| 容器 container | 镜像的运行实例，一个隔离的进程环境 | 7 个服务对应 7 个容器 |
+| 服务 service | compose 文件里对一组容器的声明 | `privacy-local-agent`、`vllm` |
+| 网络 network | 容器间的虚拟局域网，内部按服务名 DNS 互访 | `backend` / `llm` / `frontend` |
+| 卷 volume | 容器外的持久化存储（容器删除数据仍在） | `budget-db`、`audit-logs` |
+| profile | compose 的"开关"，按需启停可选服务 | `--profile llm` 才启动 vllm |
+| healthcheck | 容器自检命令，供依赖方等待就绪 | agent 探测 `/readyz` |
+| build | 从源码构建镜像的配置（有 build 段则本地构建而非拉取） | agent/console 三个服务 |
+
 ### 5.1 Docker Compose 全栈服务编排
 
 `deploy/docker-compose/docker-compose.yml` 提供了涵盖 Agent、双 Console 代理后端、React Web UI 及 vLLM 大模型的完整服务编排：
@@ -355,7 +474,280 @@ docker compose up -d
 docker compose --profile llm up -d
 ```
 
-### 5.2 自动化 Docker 脚本运行集 (`console/scripts/docker-*.sh`)
+### 5.2 服务启动流程详解（以 `docker compose --profile llm up -d` 为例）
+
+本节面向不熟悉 Compose 的读者，完整讲解一条启动命令从输入到服务就绪的全过程。
+
+#### 5.2.1 命令拆解
+
+| 命令片段 | 作用 |
+|---|---|
+| `docker` | Docker CLI 入口 |
+| `compose` | 进入 Compose 子命令（若 docker 未安装 compose 插件，可用独立二进制 `docker-compose` 等价替代） |
+| `--profile llm` | 启用 `llm` profile：仅启动带 `profiles: ["llm"]` 的服务（vllm）+ 所有不带 profiles 的服务 |
+| `up` | 创建并启动服务（自动创建网络/卷/镜像） |
+| `-d` | detached：容器后台运行，命令完成后即返回 |
+
+> 需在 `deploy/docker-compose/` 目录执行（compose 默认在此目录查找 `docker-compose.yml`）；也可用 `-f deploy/docker-compose/docker-compose.yml` 从任意目录指定。
+
+#### 5.2.2 完整执行流程
+
+```text
+┌───────────────────────── 解析阶段（生成最终配置） ─────────────────────────┐
+│ ① 定位文件      CWD 查找 docker-compose.yml（即 deploy/docker-compose/）    │
+│ ② 变量替换      ${VLLM_IMAGE_TAG:-latest} → latest（CWD 无 .env → 用默认值）│
+│ ③ YAML 解析     校验 services/networks/volumes 结构                        │
+│ ④ Profile 过滤  启用 llm → 5 个服务（无 profile 的 4 个 + vllm）            │
+│ ⑤ 依赖图构建    console-* 依赖 privacy-local-agent（condition: healthy）    │
+│ ⑥ 路径规范化    build context、bind mount 源转为绝对路径                    │
+│ ⑦ env_file 合并 agent 的 ../../.env 展开合并进容器 environment             │
+└───────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────── 执行阶段（up -d） ───────────────────────────────┐
+│ ⑧ 创建网络/卷   3 网络 + 2 卷（名称加项目前缀，如 docker-compose_llm）      │
+│ ⑨ 镜像准备      vllm 从 Docker Hub 拉取；agent/console 有 build 段→本地构建 │
+│ ⑩ 启动容器      按依赖拓扑：agent 先启动，vllm 无依赖可并行                 │
+│ ⑪ 健康检查      agent /readyz 通过后，console-* 才启动（service_healthy）   │
+│ ⑫ DNS 就绪      网络内以服务名互访（vllm:8000、privacy-local-agent:8079）  │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 5.2.3 实际解析结果（`docker-compose --profile llm config` 实测）
+
+| 验证点 | 结果 |
+|---|---|
+| 无 profile 的服务 | `privacy-local-agent`、`console-backend-go`、`console-backend-python`、`console-web`（4 个） |
+| `--profile llm` 追加 | + `vllm`（共 5 个） |
+| vllm 镜像 | `vllm/vllm-openai:latest`（`${VLLM_IMAGE_TAG:-latest}` 替换生效） |
+| env_file 合并 | agent 容器环境含根目录 `.env` 的值：`PRIVACY_ENV_PROFILE=qwen3`、`PRIVACY_LOG_LEVEL=INFO`、`PRIVACY_REST_PORT=8079` 等 |
+| 网络 | `docker-compose_backend`（internal）、`docker-compose_llm`（internal）、`docker-compose_frontend` |
+| 挂载 | 根目录 `.models` → `/models`（只读）；`privacy-profile.yaml`（只读） |
+
+#### 5.2.4 环境变量三来源机制（易混淆，重点）
+
+`docker-compose.yml` 中所有环境变量来自三个独立机制，理解它们才能知道"改哪里生效"：
+
+| 机制 | 作用对象 | 是否依赖 `.env` | 生效时机 |
+|---|---|---|---|
+| `environment` 段硬编码 | agent 9 个核心变量（监听地址、LLM 连接）、双 console 后端全部变量、grafana 的 GF_* | ❌ 不依赖（写死在 yml） | 容器创建时 |
+| `env_file` 注入 | 仅 `privacy-local-agent`（`../../.env` → 根目录 `.env`） | ✅ 唯一依赖点（`required: false`） | 容器创建时 |
+| `${VAR:-default}` 变量替换 | `vllm` 镜像 tag、`grafana` 密码 | ⚠️ 解析时查 **CWD**（`deploy/docker-compose/.env`），与根目录 `.env` 无关 | 解析阶段 |
+
+**优先级**：`environment` > `env_file` > 镜像内默认值（Dockerfile ENV/CMD）。
+
+按服务归类：
+
+| 服务 | 环境变量来源 |
+|---|---|
+| `privacy-local-agent` | env_file（根目录 `.env` 其余项）+ environment 覆盖 9 项（容器必须 0.0.0.0、LLM 连接等） |
+| `console-backend-go` / `console-backend-python` / `console-web` | 全部 environment 硬编码（compose 内部 DNS 服务名，跨环境不变） |
+| `vllm` | 无环境变量；仅 `image` 的 `${VLLM_IMAGE_TAG:-latest}` 编排替换 |
+| `grafana` | GF_* 硬编码 + `${GRAFANA_ADMIN_PASSWORD:-changeme}` 替换 |
+
+> **结论**：删掉根目录 `.env`，`docker compose up -d` 依然能启动全部服务（硬编码值 + 镜像默认值兜底）。`.env` 不是编排必需，而是 agent **业务参数**的运维主控入口（LLM provider、预算、TLS/Auth 等 8 大类 230 项）。
+
+> **运维提示**：`deploy/docker-compose/` 目录下没有 `.env`，所以 `${VLLM_IMAGE_TAG:-latest}` 等替换总是用默认值。想固定 vLLM 镜像版本，需在 `deploy/docker-compose/.env` 写入 `VLLM_IMAGE_TAG=v0.26.x`，或执行时临时指定：`VLLM_IMAGE_TAG=v0.26.x docker compose --profile llm up -d`。**只修改根目录 `.env` 不会影响变量替换**——根目录 `.env` 仅经 `env_file` 注入容器运行时。
+
+#### 5.2.5 多环境修改环境变量的建议（不用每个文件都改）
+
+**结论先行：不麻烦**。环境差异项其实收敛在极少数文件，compose 里"写死的"多是环境无关的固定值。
+
+1. **分清"固定值"与"环境差异值"**
+
+   - compose 硬编码项（监听地址 `0.0.0.0`、`privacy-local-agent`/`vllm` 服务名、端口）是**环境无关的编排固定值**——本地/测试/生产容器里都相同，无需改动；只有跨主机部署（agent 在别的主机、LLM 用云 API）才需要动
+   - 真正因环境而异的项：LLM provider、日志级别、预算窗口、TLS/Auth 开关、镜像 tag、Grafana 密码等
+
+2. **90% 的场景只改一个文件：根目录 `.env`**
+
+   - agent 容器运行时行为（`PRIVACY_ENV_PROFILE`、`PRIVACY_LOG_LEVEL`、`PRIVACY_BUDGET_*`、TLS/Auth…）→ 改根目录 `.env` 即可，经 `env_file` 自动注入
+   - 编排值（vLLM tag、Grafana 密码）→ 改 `deploy/docker-compose/.env`（仅 2 处，均有默认值兜底，不写也不影响启动）
+
+3. **多套环境并存的三种方案**（按复杂度递增）
+
+   | 方案 | 做法 | 适用场景 |
+   |---|---|---|
+   | A. 多 `.env` 文件切换 | 复制根目录 `.env` 为 `.env.dev` / `.env.prod`，用 `docker compose --env-file .env.prod up -d` 指定 | 环境数量少（2~3 套） |
+   | B. 变量替换 + 单 `.env` | compose 中可变项写成 `${VAR:-default}`，各环境在 `deploy/docker-compose/.env` 覆盖 | 差异项集中在编排层 |
+   | C. compose override | 新增 `docker-compose.override.yml` 只写差异项，compose 自动合并；生产用 `-f` 显式指定多文件 | 差异项多、需复用同一份主文件 |
+
+   方案 C 示例（`docker-compose.override.yml` 与 `docker-compose.yml` 同目录，`up` 时自动合并，无需改主文件）：
+
+   ```yaml
+   services:
+     privacy-local-agent:
+       environment:
+         PRIVACY_LOG_LEVEL: "DEBUG"
+   ```
+
+4. **真正需要"多处同步改"的场景**：跨主机部署（agent/后端/vLLM 分处不同机器或云 API）——需同步改 compose 的地址项 + `.env` 业务项。此类多环境场景建议直接走 K8s/Helm（`deploy/k8s/`、`deploy/helm/`），环境差异收敛到 `values.yaml` 一个文件（见第 3、4 章）。
+
+#### 5.2.6 vllm 容器启动细节
+
+1. **GPU 注入**：`deploy.resources.reservations.devices`（driver: nvidia、count: 1、capabilities: [gpu]）——要求宿主机安装 NVIDIA 驱动 + `nvidia-container-toolkit`
+2. **启动参数**（`command` 覆盖镜像默认 CMD）：`--model /models/Qwen3.5-0.8B-Privacy-Classifier-Smoother` → `--served-model-name`（须与 agent 的 `PRIVACY_LLM_MODEL_NAME` 一致）→ `--trust-remote-code` → `--gpu-memory-utilization 0.85` → `--max-model-len 4096` → `--host 0.0.0.0 --port 8000`
+3. **模型加载**：从只读挂载的根目录 `.models/` 读取权重（Qwen3.5 为混合注意力架构，需 vLLM 0.26+，故默认 `latest`）
+4. **健康检查**：容器内 `python3` 探测 `http://127.0.0.1:8000/health`，`start_period: 60s`（首次加载模型约 22s+，期间失败不计入 retries）。**注意**：vllm 官方镜像基于 Ubuntu 24.04，只有 `python3` 没有 `python`，健康检查命令务必写成 `python3`，否则容器会一直处于 `unhealthy`。
+5. **端口映射**：vllm 容器存在**两条互不干扰的端口通道**，理解它们的区别是改端口的前提——
+
+   | 通道 | 定义位置 | 访问方 | 端口值 |
+   |---|---|---|---|
+   | ① 容器内监听 | `command:` 段的 `--host 0.0.0.0 --port 8000` | 同网络内其他容器（agent） | 容器内 8000 |
+   | ② 宿主机映射 | `ports:` 段的 `"127.0.0.1:8000:8000"` | 宿主机调试 / 压测 | 宿主 8000 → 容器 8000 |
+
+   - agent 容器经内部 `llm` 网络以服务名直连 `http://vllm:8000/v1`（即 `PRIVACY_LLM_API_BASE`），**走的是通道①，不经过宿主机端口映射**——通道②仅为宿主机直接访问 vLLM（`curl localhost:8000`、压测）而设
+   - **关键坑点**：在 Docker Compose 中，若服务只 attached 到 `internal: true` 的网络，即使写了 `ports:` 也不会创建宿主机端口映射，`docker inspect` 会显示 `"8000/tcp": null`，宿主机 `curl 127.0.0.1:8000` 会无响应。因此 `llm` 网络必须设为 `internal: false`（或让 vllm 同时属于一个非 internal 网络），才能通过 `ports:` 暴露调试端口。
+   - 映射格式 `"宿主机IP:宿主机端口:容器端口"`（省略 IP 表示绑定宿主机所有网卡；如 `"127.0.0.1:8000:8000"` 仅回环可访问，更安全）
+
+   **只改对外端口（推荐做法）**：宿主机 8000 被占用或想换对外端口时，只改 `ports:` 左侧即可，agent 内部调用完全不受影响：
+
+   ```yaml
+   ports:
+     - "9000:8000"   # 宿主机 9000 → 容器 8000（右侧容器端口不能动，动了要同步三处，见下）
+   ```
+
+   改完必须 `docker compose up -d vllm` **重建容器**才生效（`docker compose restart` 不重新解析 yml，配置变更不生效，见 5.2.8）。验证：
+
+   ```bash
+   docker compose port vllm 8000          # → 输出 0.0.0.0:9000，即映射生效
+   curl http://localhost:9000/v1/models   # → 返回模型列表（含 Qwen3.5-...-Smoother）
+   ```
+
+   **如需连容器端口一起改**（极端场景，如内部端口也想换），必须同步以下 **3 处**，漏一处就断连：
+
+   | 同步位置 | 示例改动 |
+   |---|---|
+   | ① `command:` 段 `--port` | `--port 8000` → `--port 9000`（vLLM 进程监听新端口） |
+   | ② `ports:` 段右侧 | `"8000:9000"`（宿主端口 → 新容器端口） |
+   | ③ agent 的 `PRIVACY_LLM_API_BASE` | `http://vllm:8000/v1` → `http://vllm:9000/v1`（**不改成 agent 连不上 vLLM**） |
+
+   > **踩坑**：daemon 29.x 的 `docker inspect` 中 PortBindings 可能显示 `{invalid IP 8000}`，这是**显示层 bug**，不代表端口发布失败——以 `docker port <容器名>` / `ss -ltn | grep 8000` 为准。WSL2 下 WSL 内端口未监听时，`curl localhost:<port>` 会被转发到 Windows 侧返回 502（连不上而非拒绝），排查时先确认 `ss` 有监听再 curl。
+
+#### 5.2.7 启动后的 core ↔ vllm 联动
+
+- agent 容器内 `PRIVACY_LLM_PROVIDER=vllm` + `PRIVACY_LLM_API_BASE=http://vllm:8000/v1`（compose `environment:` 段覆盖），经 `llm` 网络（专供 core ↔ vllm，现已设为非 internal 以支持宿主机调试端口映射）以服务名 `vllm` 解析
+- 分类请求进入 Layer-3 时，agent 以 OpenAI 兼容 HTTP 调用 vllm
+- vllm 挂掉/OOM → agent 自动降级 Layer-1 规则 + Layer-2 NER，REST/gRPC 不受影响（运行时解耦）
+- 升级 vllm 只需 `docker compose up -d vllm`，core 容器无需重建
+
+#### 5.2.8 compose 命令的实现位置与 `restart`/`up` 区别
+
+**关键认知**：`docker compose restart / up / down` 等命令的**代码不在项目仓库中**——它们由 Docker Compose 程序本身内置（本机为 snap 安装的独立二进制 `/snap/bin/docker-compose`，等价于 `docker compose` 插件；开源实现见 GitHub `docker/compose`，每个子命令对应 `cmd/compose/` 下一个源码文件）。`docker-compose.yml` 只**声明**“服务长什么样”（声明式），不含任何命令行为逻辑（命令式）。
+
+| 层次 | 代码位置 | 职责 |
+|---|---|---|
+| 命令实现 | compose CLI 内置（`/snap/bin/docker-compose`） | `restart`/`up`/`down` 等子命令的调度逻辑 |
+| 服务定义 | 项目的 `docker-compose.yml` | 声明镜像、环境变量、挂载、健康检查等 |
+| 底层执行 | Docker daemon（dockerd） | 真正停/启容器（Engine API `POST /containers/{id}/restart`） |
+
+**两个易混淆的 “restart”**：
+
+| 形式 | 类型 | 触发方式 | 行为 |
+|---|---|---|---|
+| `restart: unless-stopped`（yml 字段，见 5.2.6） | 重启策略 | 容器异常退出时由 daemon **自动**重启 | 无人值守，按策略拉起 |
+| `docker compose restart vllm`（命令） | 手动操作 | 运维执行 | stop + start **现有容器**；不重建、不重新解析 yml |
+
+> **运维要点**：修改 `docker-compose.yml` 或 `.env` 后，必须 `docker compose up -d`（对比并重建有变更的容器）才生效；`restart` 只重启现有容器，**配置变更不会生效**。`console/scripts/docker-*.sh` 只是命令的封装，不包含实现。
+
+#### 5.2.9 `--profile llm` 从哪里找服务（小白澄清）
+
+**结论先行**：`--profile llm` **不是镜像的启动参数**，也**不进入容器内部**——它是 **Compose CLI 的命令行参数**，只在宿主机解析阶段起作用：从 `docker-compose.yml` 的服务定义里，把声明了 `profiles: ["llm"]` 的服务“放行”进本次启动的服务集合。
+
+**数据来源 = `docker-compose.yml` 中的 `profiles:` 字段**（每个服务的归属标记）：
+
+```yaml
+vllm:
+  profiles: ["llm"]   # ← 归属标记：这个服务属于 llm 组
+  image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
+```
+
+**匹配流程**（在 compose CLI 进程内完成，容器感知不到）：
+
+```text
+命令行 --profile llm（宿主机，compose CLI 解析）
+        │
+        ▼
+读取 docker-compose.yml 的 7 个服务，逐个检查 profiles 字段
+  无 profiles            → 无条件启用（agent / console 共 4 个）
+  profiles: ["llm"]     → 与 --profile llm 匹配 → 启用（vllm）
+  profiles: ["monitoring"] → 不匹配 → 过滤（prometheus / grafana）
+        │
+        ▼
+生成候选集合（5 个）→ up vllm 从其中只选 vllm 执行
+        │
+        ▼
+容器启动（vllm 进程） ← 完全感知不到 profile 的存在
+```
+
+**实测证据**（本机 compose v5.3.1）：
+
+```bash
+docker compose config --services             # → 4 个（无 vllm）
+docker compose --profile llm config --services  # → 5 个（含 vllm）
+```
+
+**与“镜像启动参数”的区别**（小白最容易混淆的点）：
+
+| 项 | `--profile llm` | vllm 的 `command:` 段（如 `--model ... --port 8000`） |
+|---|---|---|
+| 是什么 | compose CLI 命令行参数 | 镜像/容器的启动参数 |
+| 由谁处理 | compose CLI（宿主机解析阶段） | dockerd → 容器内主进程（vllm） |
+| 作用 | 决定“哪些服务被启动” | 决定“容器进程怎么运行” |
+| 是否进入容器 | ❌ 不进（容器内无感知） | ✅ 进（容器主进程的命令行） |
+| 写在哪里 | 命令行 / shell 脚本 | docker-compose.yml 的 `command:` 段 |
+
+> **一句话总结**：`--profile` 是“选服务”的开关（compose 层，从 yml 的服务定义匹配）；`command:` 是“容器跑什么”的参数（镜像层，传给容器内进程）。两者互不干扰。
+
+#### 5.2.10 镜像构建策略：不是每次 up 都构建（小白澄清）
+
+**结论先行**：`docker compose up -d` **不是每次都会执行 build**。compose 采用“镜像优先”策略——本地已有 `privacy-local-agent:0.1.0` 就直接复用（**哪怕你刚改了源码/Dockerfile，也不会自动重建**）；只有镜像不存在时才尝试拉取/构建。
+
+**决策链**（`privacy-local-agent` 服务同时声明了 `build:` 与 `image:`，见 5.1）：
+
+```text
+docker compose up -d privacy-local-agent
+        │
+        ▼
+① 本地已有 privacy-local-agent:0.1.0 ？
+   ├─ 是 → 直接使用，跳过构建和拉取（最快路径）
+   └─ 否 ↓
+② 尝试从远端仓库 pull 该 tag
+   ├─ 成功 → 使用拉取的镜像
+   └─ 失败（无网络 / 私有仓库不可达）↓
+③ 回退用 build: 段本地构建
+```
+
+**关键认知：compose 从不对比 Dockerfile/源码是否修改**，它只认“镜像名:tag 是否存在”。所以**改了代码后直接 `up -d` 不会重建**，容器里跑的还是旧代码！
+
+**实测证据**（本机 compose v5.3.1，本地无该镜像时的 dry-run 输出）：
+
+```text
+Image privacy-local-agent:0.1.0 Pulling            ← ② 先尝试拉取
+Image privacy-local-agent:0.1.0 connection refused ← 无远端仓库，失败
+Image privacy-local-agent:0.1.0 Building           ← ③ 自动回退本地构建
+writing image dryRun-... 
+naming to privacy-local-agent:0.1.0                ← 构建出同名镜像
+```
+
+**改了代码后，三种强制重建方式**：
+
+| 方式 | 命令 | 适用场景 |
+|---|---|---|
+| ① 两步走（推荐） | `docker compose build privacy-local-agent` → `docker compose up -d` | 步骤清晰，可先看构建结果 |
+| ② 一步到位 | `docker compose up -d --build privacy-local-agent` | 构建+重建容器一条命令 |
+| ③ 完全不用缓存 | `docker compose build --no-cache privacy-local-agent` | 改了基础镜像/依赖源，需彻底重装 |
+
+> ①/② 构建后镜像 ID 变化，`up -d` 检测到差异会**自动重建容器**，无需手动删容器。
+
+**与项目脚本的差异**：`console/scripts/docker-start-agent.sh` 走裸 `docker build`（每次运行都重新构建，适合开发期频繁改代码）；compose `up -d` 是“有镜像就复用”（适合稳定期省时间）。两者行为不同，按场景选用。
+
+**按改动类型选命令（心法表）**：
+
+| 我改了什么 | 用哪条命令 | 原因 |
+|---|---|---|
+| Python 源码 / Dockerfile | `docker compose up -d --build` | 必须重建镜像才包含新代码 |
+| 只改 `.env` / `privacy-profile.yaml` 等配置 | `docker compose up -d` | 无需构建；配置变化会重建容器 |
+| 只是服务卡死想重启 | `docker compose restart` | 镜像、配置都不变，最轻量 |
+
+### 5.3 自动化 Docker 脚本运行集 (`console/scripts/docker-*.sh`)
 
 为简化容器化运维与测试，项目在 `console/scripts/` 中内置了一套便捷的 Docker 脚本：
 
@@ -424,6 +816,44 @@ volumes:
 ```bash
 docker compose down
 ```
+
+### 5.4 Docker Compose 常用命令速查（小白学习用）
+
+| 命令 | 作用 | 常用场景 |
+|---|---|---|
+| `docker compose up -d` | 创建+启动全部服务（后台） | 第一次部署 / 修改配置或源码后重建 |
+| `docker compose --profile llm up -d` | 启动含 vLLM 的全栈 | 需要大模型推理时 |
+| `docker compose ps` | 查看服务状态与健康检查 | 确认是否启动成功 |
+| `docker compose logs -f <服务名>` | 查看服务日志（`-f` 实时跟随） | 排查启动失败/报错 |
+| `docker compose restart <服务名>` | 重启现有容器（**不重建、不重新解析配置**） | 服务卡死时的临时恢复 |
+| `docker compose stop` / `start` | 暂停 / 恢复全部服务（保留容器） | 暂时不用但不想删 |
+| `docker compose down` | 停止并删除容器+网络（**保留数据卷**） | 结束一次部署 |
+| `docker compose down -v` | 连数据卷一起删除 | 想从零开始（**数据会丢！**） |
+| `docker compose exec <服务名> sh` | 进入容器内部命令行 | 容器内排查问题 |
+| `docker compose build <服务名>` | 重新构建镜像 | 改了源码后重建 |
+| `docker compose up -d --build <服务名>` | 重新构建镜像并启动（一步到位） | 改源码后重建，最常用 |
+| `docker compose build --no-cache <服务名>` | 不用缓存层彻底重建 | 改了基础镜像/依赖源 |
+| `docker compose pull` | 只拉取镜像不启动 | 预下载镜像 |
+| `docker compose config` | 查看解析合并后的最终配置 | 检查变量替换/合并是否正确 |
+| `docker compose up -d <服务名>` | 只启动/升级某个服务 | 单独升级 vllm（core 无感知） |
+| `docker compose top` | 查看容器内运行的进程 | 确认进程是否存活 |
+
+### 5.5 常见配置需求速查（想改 X → 改哪里）
+
+| 我的需求 | 修改位置 | 生效方式 |
+|---|---|---|
+| 换 LLM 推理后端（vllm/qwen3/mlx/openai） | 根目录 `.env` 的 `PRIVACY_ENV_PROFILE` | 本地重启进程；容器 `docker compose up -d` |
+| 改监听端口 8079 / 50051 | 根目录 `.env`（agent 行为）+ compose `ports:`（映射） | `docker compose up -d` |
+| 改 vLLM 对外端口 | compose 的 vllm `ports:`（如 `"9000:8000"`，只改左侧宿主端口） | `docker compose up -d vllm`（详见 5.2.6） |
+| 开 TLS / API Key 认证 | 根目录 `.env` 取消注释（本地）；compose `environment:` 取消注释（容器） | 重建容器 |
+| 固定 vLLM 镜像版本 | `deploy/docker-compose/.env` 写 `VLLM_IMAGE_TAG=v0.26.x` | `docker compose --profile llm up -d vllm` |
+| 改 Grafana 密码 | `deploy/docker-compose/.env` 写 `GRAFANA_ADMIN_PASSWORD=...` | `docker compose --profile monitoring up -d grafana` |
+| 调脱敏/DP/K匿名参数 | 容器：`deploy/docker-compose/privacy-profile.yaml`；本地：`config/sample-privacy-profile.yaml` | 重建容器 / 重启进程 |
+| 看更详细的日志 | 根目录 `.env` 的 `PRIVACY_LOG_LEVEL=DEBUG` | 重启生效 |
+| 升级 agent 版本 | 改 compose `image:` tag 或重新 `build` | `docker compose up -d` |
+| 改 agent 源码（如 `privacy_local_agent/*.py`） | 无需改配置，直接重新构建镜像 | `docker compose up -d --build privacy-local-agent` |
+| 清理容器日志占用的磁盘 | compose 已有 max-size 自动轮转；想手动清可 `docker compose logs --tail=0` | 即时 |
+| 想用监控栈（Prometheus+Grafana） | 无需改配置，加 `--profile monitoring` 即可 | `docker compose --profile monitoring up -d` |
 
 ---
 
@@ -496,6 +926,19 @@ python run_vllm_server.py          # 宿主机方式启动 vLLM
 # 或 Docker 方式（官方镜像，零构建）：
 docker compose --profile llm up -d vllm
 ```
+
+**国内网络拉取 `vllm/vllm-openai` 镜像超时的备选方案**（`docker pull` 报 `i/o timeout` / 连接 `registry-1.docker.io` 失败时）：
+
+Docker 守护进程不继承 shell 的 HTTP(S)_PROXY 代理环境变量，且默认未配置国内镜像加速器时直连 Docker Hub 会超时。可先从 DaoCloud 镜像源拉取，再打回官方 tag（compose 仍按 `vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}` 解析，无需改动编排）：
+
+```bash
+# 从 DaoCloud 镜像源拉取（其他可选源：docker.1ms.run / dockerproxy.net / hub.rat.dev，前缀替换同上）
+docker pull docker.m.daocloud.io/vllm/vllm-openai:latest
+# 打回官方 tag，使 compose 与 docker-start-llm.sh 无需修改即可命中本地镜像
+docker tag docker.m.daocloud.io/vllm/vllm-openai:latest vllm/vllm-openai:latest
+```
+
+> 长期方案：配置 `/etc/docker/daemon.json` 的 `registry-mirrors` 国内镜像加速器，或为 docker 服务（systemd drop-in）显式配置 `HTTP_PROXY`/`HTTPS_PROXY` 代理；生产环境建议固定镜像 tag（如 `VLLM_IMAGE_TAG` 指定 v0.26.x）保证可复现。
 
 **Helm 部署** —— 方式一：**Helm 全托管**（一条命令同时创建 core + LLM Deployment）：
 
@@ -825,7 +1268,77 @@ networkPolicy:
 
 ---
 
-## 13. 环境变量参考
+## 13. 配置体系与环境变量参考
+
+### 13.1 配置体系总览
+
+项目运行时配置采用**「分层级联」**机制：**运行时参数统一收口在根目录 `.env`（本地开发）或 Deployment/values（容器环境），编排差异由 Docker Compose / K8s / Helm 三套独立文件承载**。
+
+#### 13.1.1 本地开发环境配置
+
+本地运行时配置以根目录 `.env` 为**运维主控入口**（由 `env_loader.py` 启动时自动加载），共 8 大类（场景 Profile、网络监听、日志、安全、隐私预算、分类漏斗、LLM 资源保护、图片打码/网关），每项均有中英文注释与生产推荐值。
+
+加载顺序（优先级递增）：
+
+```text
+1. .env                                 ← 基础配置（根目录，运维主控入口）
+2. config/env/<PRIVACY_ENV_PROFILE>.env ← 场景覆盖（vllm / qwen3 / mlx / openai）
+3. 系统环境变量 / Docker / K8s 注入      ← 最高优先级
+```
+
+配套配置文件：
+
+| 文件 | 作用 |
+|---|---|
+| `.env` | 基础环境变量主控入口（网络监听 / 日志 / 安全 / 预算 / 分类 / LLM 等 8 大类） |
+| `config/env/<profile>.env` | 按 `PRIVACY_ENV_PROFILE` 级联加载的场景覆盖（vllm / qwen3 / mlx / openai 四套） |
+| `config/sample-privacy-profile.yaml` | 参数 Profile 模板（脱敏 / DP / K匿名 等参数），通过 `PRIVACY_PROFILE` 变量引用 |
+| `config/personalized-profiles.yaml` | 个性化推荐参数文件（`PRIVACY_PERSONALIZED_PROFILE`） |
+
+> **切换 LLM 推理后端只需修改 `PRIVACY_ENV_PROFILE` 一行**，自动级联加载对应场景覆盖文件。
+
+#### 13.1.2 Docker Compose 配置
+
+`deploy/docker-compose/docker-compose.yml` 负责**服务编排**（7 个服务、网络、卷、健康检查、资源限制），但它与根目录 `.env` 是**联动关系**，而非独立配置源：
+
+- compose 自动读取根目录 `.env` 进行**变量替换**（如 `${VLLM_IMAGE_TAG:-latest}`、`${GRAFANA_ADMIN_PASSWORD:-changeme}`）；
+- agent 服务通过 `env_file: ../../.env` **显式引入**根目录 `.env`；
+- `environment:` 段仅做**容器化必要覆盖**（如 `PRIVACY_REST_HOST: "0.0.0.0"` 覆盖本地的 `127.0.0.1`）。
+
+配套文件：
+
+| 文件 | 作用 |
+|---|---|
+| `deploy/docker-compose/docker-compose.yml` | 全栈服务编排（Agent / 双 Console 后端 / Web / vLLM / 监控） |
+| `deploy/docker-compose/privacy-profile.yaml` | 容器内参数 Profile（只读挂载到 `/etc/privacy-local-agent/`） |
+| `deploy/prometheus/`、`deploy/grafana/` | 监控栈配置（Prometheus 抓取/告警规则、Grafana provisioning） |
+
+#### 13.1.3 Kubernetes 配置
+
+K8s 配置独立存放于 `deploy/k8s/`（原生 YAML）与 `deploy/helm/`（Helm Chart），**不依赖根目录 `.env`**，环境变量直接内联在 Deployment 或 values 中：
+
+| 文件 | 职责 |
+|---|---|
+| `deploy/k8s/deployment.yaml` | 环境变量直接内联在 `spec.containers[].env`；TLS / Auth / LLM 以注释形式给出开启模板 |
+| `deploy/k8s/configmap.yaml` | 参数 Profile（`privacy-profile.yaml`）→ ConfigMap，挂载到 `/etc/privacy-local-agent` |
+| `deploy/k8s/llm-deployment.yaml` + `llm-service.yaml` | 独立 vLLM 推理服务（运行时解耦，LLM 挂掉 core 自动降级） |
+| `deploy/k8s/secret.example.yaml` | API Key / TLS 证书 Secret 示例 |
+| `deploy/k8s/kustomization.yaml` | `kubectl apply -k` 一键部署入口 |
+| `deploy/helm/privacy-local-agent/` | Helm Chart（`values.yaml` / `values-production.yaml` / `values-ml.yaml`，生产推荐） |
+
+#### 13.1.4 三环境配置差异速览
+
+| 维度 | 本地开发 | Docker Compose | Kubernetes |
+|---|---|---|---|
+| 编排文件 | — | `deploy/docker-compose/docker-compose.yml` | `deploy/k8s/*.yaml` 或 `deploy/helm/privacy-local-agent/` |
+| 环境变量来源 | 根目录 `.env` + `config/env/<profile>.env` | 根目录 `.env`（env_file + 变量替换）+ `environment:` 覆盖 | Deployment `env` 段内联 / Helm `extraEnv` + `values.yaml` |
+| 参数 Profile | `PRIVACY_PROFILE` 指向本地 YAML | `privacy-profile.yaml` 只读挂载 | ConfigMap 挂载 `/etc/privacy-local-agent` |
+| 监听地址 | 默认 `127.0.0.1`（仅本机） | 必须 `0.0.0.0`（容器内） | 必须 `0.0.0.0`（容器内） |
+| 安全配置 | 默认关闭 | 取消注释或经 `.env` 注入 | values 开关 + Secret |
+
+---
+
+### 13.2 环境变量参考
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -959,6 +1472,97 @@ curl http://localhost:8079/health
 | 分类延迟过高 | LLM 推理慢 / 模型未预热 | 启用 `PRIVACY_WARMUP_LLM=true`；查看 `privacy_classification_llm_duration_seconds` |
 | 多实例预算不一致 | 使用内存预算后端 | 配置 `PRIVACY_BUDGET_DB` 使用 SQLite 持久化 |
 
+### 15.1 Docker Compose 常见故障（本地/单机场景）
+
+| 现象 | 可能原因 | 排查/解决 |
+|---|---|---|
+| `docker compose up` 报 `no such file` | 当前目录不在 `deploy/docker-compose/` | `cd deploy/docker-compose`，或加 `-f deploy/docker-compose/docker-compose.yml` |
+| 拉镜像超时 `i/o timeout` | 国内网络直连 Docker Hub 失败 | 见 [6.2](#62-解耦模式外部独立-vllm-服务) 的 DaoCloud 拉取方案或配置镜像加速器 |
+| 容器反复重启（Restarting 状态） | 启动参数错误 / 端口被占 / 健康检查失败 | `docker compose logs <服务名>` 看报错；`docker compose ps` 看状态 |
+| 端口被占 `address already in use` | 宿主机已有进程占用 8079 等端口 | `ss -tlnp | grep 8079` 找占用进程；或改 compose `ports:` 映射 |
+| vllm 启动失败 `CUDA error` / `no GPU` | 未装 NVIDIA 驱动 / nvidia-container-toolkit / 无 GPU | `nvidia-smi` 验证；无 GPU 时不要加 `--profile llm` |
+| vllm 返回 404 `model not found` | `--served-model-name` 与 `PRIVACY_LLM_MODEL_NAME` 不一致 | 两处改为完全一致后 `docker compose up -d vllm` |
+| agent 健康检查一直失败 | `/readyz` 503：`PRIVACY_PROFILE` 路径未正确挂载 | `docker compose exec privacy-local-agent ls /etc/privacy-local-agent` |
+| 改了 `.env` 但不生效 | 只 restart 未重建容器 | `docker compose up -d`（restart 不会重新注入环境变量） |
+| Web 控制台 502 | agent 未就绪或后端代理未启动 | 等 healthcheck 通过；`docker compose ps` 看全部状态 |
+| 磁盘被日志/卷占满 | 日志轮转 max-size 偏大或卷增长 | 日志：调小 `logging.options.max-size`；卷：确认数据可备份后 `down -v` |
+| `curl 127.0.0.1:8000` 无响应 / 连接代理后 502 | ① `llm` 网络为 `internal: true` 导致 `ports:` 未映射；② 宿主机 `http_proxy` 把 localhost 请求转发到代理 | ① `llm` 网络改为 `internal: false`，`ports` 改为 `127.0.0.1:8000:8000`；② 访问本地地址时绕过代理（如 `no_proxy=127.0.0.1,localhost` 或代码显式禁用代理） |
+| vllm 容器状态 `unhealthy` | 健康检查命令用了 `python` 而非 `python3` | 检查 `docker-compose.yml` healthcheck 的 `test` 数组，确保使用 `python3`；`docker inspect <容器> --format '{{.State.Health}}'` 查看失败日志 |
+
+#### 15.1.1 vLLM Docker 服务测试失败排查案例
+
+> 适用场景：运行 `tests/scripts/test_docker_start_llm.py` 的 integration 测试时，vLLM 容器虽已启动，但 `_wait_vllm_ready()` 在 600s 内始终未等到 `/v1/models` 响应；或测试通过容器启动阶段，却在真实 chat/classify 任务中失败。
+
+**现象**：
+
+- `docker ps` 显示 vLLM 容器 `Up ... (unhealthy)`，且 `docker inspect` 中 `State.Health.Status` 为 `unhealthy`，失败日志反复出现 `exec: "python": executable file not found in $PATH`
+- `docker inspect <容器> --format '{{json .NetworkSettings.Ports}}'` 输出 `"8000/tcp": null`，宿主机 `curl 127.0.0.1:8000/v1/models` 无响应或经过本地代理返回 502
+- 集成测试在 `TestVllmServiceIntegration` 阶段报 `vLLM 服务未在 600s 内就绪`，或 LLM 定级结果不符合预期（如缺少 `confidence`、HIV 文本被定级为 L3、公开统计被定级为 L4）
+
+**根因分析**（按发现顺序）：
+
+| 序号 | 根因 | 说明 |
+|---|---|---|
+| 1 | `llm` 网络设为 `internal: true` | Docker Compose 中，服务若**只** attached 到 `internal: true` 的网络，即使写了 `ports:` 也不会创建宿主机端口映射，导致 `127.0.0.1:8000` 无法访问 |
+| 2 | healthcheck 使用 `python` | `vllm/vllm-openai:latest` 基于 Ubuntu 24.04，镜像内只有 `python3`，没有 `python` 命令；错误的 healthcheck 让容器永远 `unhealthy` |
+| 3 | 宿主机 `http_proxy` 劫持 localhost | 测试脚本用 `urllib.request` 访问 `127.0.0.1:8000` 时，如果环境变量 `http_proxy` 已设置，请求会被转发到本地代理（如 127.0.0.1:7897），代理再连 127.0.0.1:8000 失败返回 502 |
+| 4 | 测试 fixture 清理不够健壮 | 原 fixture 在 `_wait_vllm_ready()` 失败后虽尝试 `docker rm -f`，但未检查返回值，失败时容器残留，可能污染后续测试 |
+| 5 | `OpenAILlmClassifier` prompt 与微调模型不一致 | 通过 HTTP 调用 vLLM 时默认使用通用 prompt，而项目微调的 `Qwen3.5-0.8B-Privacy-Classifier-Smoother` 需要与训练侧一致的 system prompt 和裸用户文本，否则输出 JSON 字段缺失或定级漂移 |
+
+**排查过程**（可复现）：
+
+```bash
+# 1. 确认端口是否真的映射到了宿主机
+ docker inspect --format='{{json .NetworkSettings.Ports}}' privacy-local-agent-vllm
+ # 正常应显示：{"8000/tcp":[{"HostIp":"127.0.0.1","HostPort":"8000"}]}
+ # 若为 null，说明 internal 网络阻止了映射
+
+# 2. 确认网络是否为 internal
+ cd deploy/docker-compose
+ docker compose --profile llm config | grep -A3 'llm:'
+
+# 3. 确认健康检查命令
+ docker inspect --format='{{json .State.Health}}' privacy-local-agent-vllm | python3 -m json.tool
+ # 若日志里有 "python": executable file not found → 需改成 python3
+
+# 4. 确认本地代理是否干扰
+ env | grep -i proxy
+ curl -v --max-time 5 http://127.0.0.1:8000/v1/models
+ # 若看到 Trying 127.0.0.1:7897 或 502 Bad Gateway → 代理在转发 localhost
+
+# 5. 直接测试 vLLM 容器内服务是否已就绪
+ docker exec privacy-local-agent-vllm python3 -c \
+   "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status)"
+```
+
+**解决方案**（对应上述根因）：
+
+| 序号 | 修改文件 | 修改内容 |
+|---|---|---|
+| 1 | `deploy/docker-compose/docker-compose.yml` | 将 `llm` 网络 `internal: true` 改为 `internal: false`；将 vllm `ports` 从 `"8000:8000"` 改为 `"127.0.0.1:8000:8000"` |
+| 2 | `deploy/docker-compose/docker-compose.yml` | healthcheck `test` 数组中 `python` 改为 `python3` |
+| 3 | `tests/scripts/test_docker_start_llm.py` | `_http_get_json` / `_http_post_json` 使用 `urllib.request.build_opener(urllib.request.ProxyHandler({}))` 显式禁用代理 |
+| 4 | `tests/scripts/test_docker_start_llm.py` | 重构 `vllm_service` fixture：使用 `try/finally`、检查容器删除结果、端口映射失败时附加日志诊断 |
+| 5 | `privacy_local_agent/dynclassification/llm_engines.py` | `OpenAILlmClassifier` 新增 `_is_finetuned_model()`，匹配微调模型名时复用 `_FINETUNED_SYSTEM_PROMPT` 和裸用户文本 |
+
+**验证命令**：
+
+```bash
+# 非集成测试（无 Docker/GPU 依赖）
+PYTHONPATH=. pytest tests/scripts/test_docker_start_llm.py -m "not integration" -v
+
+# 全量测试（含 Docker + GPU + 真实 vLLM 推理）
+PYTHONPATH=. pytest tests/scripts/test_docker_start_llm.py -v
+# 预期结果：28 passed
+```
+
+**要点**：
+
+- Docker 的 `internal` 网络是“禁止容器主动访问外部”的语义，但它同时会阻止 Docker 为该服务创建**宿主机端口映射**；如果业务上需要宿主机调试端口，必须让服务所在网络为非 internal，或让服务同时属于一个非 internal 网络。
+- 容器镜像的 `/usr/bin/python` 软链接在新版基础镜像中可能被移除，任何进入容器执行的命令（healthcheck、自定义入口、测试探测）都应显式使用 `python3`。
+- 宿主机代理环境变量对 `127.0.0.1` / `localhost` 的处理因客户端而异：curl 可能绕过，Python `urllib.request` 可能不绕过；访问本地容器端口时应在代码中显式禁用代理，或设置 `no_proxy=127.0.0.1,localhost`。
+- 0.8B 微调模型对 prompt 分布非常敏感，HTTP 调用时应使用与训练样本一致的 system prompt，否则会出现 JSON 字段缺失或定级漂移。
+
 **常用诊断命令**：
 
 ```bash
@@ -978,6 +1582,67 @@ kubectl get configmap privacy-local-agent-config -n privacy-local-agent -o yaml
 # 查看 Secret（base64 编码）
 kubectl get secret pla-tls -n privacy-local-agent -o yaml
 ```
+
+### 15.2 WSL 中 Docker GPU 失效（真实排查案例）
+
+> 适用场景：WSL2 + Ubuntu，`docker run --gpus 1 ...` 报错，但宿主机 `nvidia-smi` 完全正常。
+
+**现象**：
+
+- `docker run --gpus 1 ...` 报错：`nvidia-container-cli: initialization error: load library failed: libnvidia-ml.so.1: cannot open shared object file`
+- 带 GPU 前置条件的测试自动 skip（例如 `tests/scripts/test_docker_start_llm.py` 的集成测试）
+- 宿主机 `nvidia-smi` 正常、`ldconfig -p | grep libnvidia-ml` 能找到驱动库 → 驱动本身没坏
+
+**根因**：Docker 是通过 **snap** 安装的（`snap list docker`）。snap 严格沙箱内自带的 `nvidia-container-cli`（位于 `/snap/docker/<rev>/usr/bin/`）**无法读取 WSL 的 GPU 驱动目录 `/usr/lib/wsl/lib`**——`snap connections docker` 显示 `gpu-2404` / `graphics-core22` 接口的 slot 均为空（WSL 下没有 GPU provider snap）。与容器镜像无关，换任何镜像都一样报错。
+
+**排查命令**（按序执行可复现定位）：
+
+```bash
+# 1. Docker 是否注册了 nvidia runtime？→ 只有 runc，没有 nvidia
+docker info | grep -A3 Runtimes
+
+# 2. Docker 是不是 snap 装的？
+snap list docker
+
+# 3. snap 的 GPU 接口是否可用？→ slot 为空 = snap 无法接触 GPU
+snap connections docker
+
+# 4. nvidia-container-cli 在哪？→ 只存在于 snap 沙箱目录内
+find /usr -name "nvidia-container-cli*"
+
+# 5. 宿主驱动是否正常？→ 正常，说明问题在 Docker 沙箱而不是驱动
+nvidia-smi
+ls /usr/lib/wsl/lib/          # WSL 驱动库存在（libnvidia-ml.so.1 等）
+ldconfig -p | grep libnvidia-ml
+```
+
+**解决**（snap docker → docker.io daemon + nvidia-container-toolkit）：
+
+| 步骤 | 命令 | 说明 |
+|---|---|---|
+| 1 | `docker save vllm/vllm-openai:latest -o ~/vllm-image.tar` | 先备份镜像资产到新 daemon 能读到的地方。**踩坑**：保存路径必须有足够磁盘空间——`/tmp` 是 tmpfs（仅 7.7G），vllm 镜像约 8.5G，`docker save` 会报 `no space left on device`，应保存到磁盘分区（如家目录，`df -h` 先确认） |
+| 2 | `sudo snap stop docker && sudo snap disable docker` | 停用 snap daemon，释放 `/var/run/docker.sock` |
+| 3 | `sudo apt-get install -y nvidia-container-toolkit docker-compose-v2` | 安装 GPU 注入工具链与 compose 插件（Ubuntu 官方源自带，无需加第三方源） |
+| 4 | `sudo nvidia-ctk runtime configure --runtime=docker` | 把 `nvidia` runtime 注册进 `/etc/docker/daemon.json` |
+| 5 | `sudo systemctl start docker` | 启动 docker.io daemon；`docker version` 的 Server 版本应变回 apt 版本（如 29.1.3） |
+| 6 | `docker load -i ~/vllm-image.tar` | 把镜像恢复到新 daemon |
+| 7 | `docker run --rm --gpus 1 --entrypoint python3 vllm/vllm-openai:latest -c "import torch; print(torch.cuda.is_available())"` | 验证 GPU 注入，输出 `True` 即成功（注意用 `python3`，新版 vllm 镜像无 `python` 命令） |
+
+**验证三连**：
+
+```bash
+docker version --format "Server: {{.Server.Version}}"   # 应为 apt 版（如 29.1.3）而非 snap 版（29.6.1）
+docker info | grep -A3 Runtimes                          # 应出现 nvidia runtime
+docker run --rm --gpus 1 <镜像> python3 -c "import torch; print(torch.cuda.is_available())"   # → True
+```
+
+**要点**：
+
+- docker.io 与 snap docker 的**数据目录不同**（`/var/lib/docker` vs `/var/snap/docker/...`），**容器不互通**；镜像用 save/load 迁移，运行中的容器需另行重建。
+- 安装 `docker-compose-v2` 后 `docker compose`（空格版）直接可用；之前用软链（`~/.docker/cli-plugins/docker-compose` → snap 版）只是临时方案，修复后应移除。
+- WSL 的 GPU 驱动库在宿主 `/usr/lib/wsl/lib`，docker.io daemon 没有 snap 沙箱限制，配合 nvidia-container-toolkit 即可正常注入 GPU。
+- **新版 vllm 官方镜像（Ubuntu 24.04 base）只有 `python3`、没有 `python` 命令**，用 `--entrypoint python` 会报 `exec: "python": executable file not found in $PATH`；GPU 探测、自定义入口统一用 `python3`（本机实测 `CUDA: True`）。
+- **根因判定线索**（防误判）：驱动/CUDA 全正常、唯独容器内拿不到 GPU → 优先怀疑 Docker 运行时的沙箱限制，而不是镜像或驱动问题。
 
 ---
 
