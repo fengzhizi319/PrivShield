@@ -92,8 +92,19 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _get_default_llm_concurrency() -> int:
+    """根据 LLM 后端提供方自动获取默认推理并发数。
+    
+    远程 HTTP/vLLM 服务可承载高并发（默认 16）；本地 PyTorch/MLX 为防止 GPU/CPU 显存打满默认串行化 (1)。
+    """
+    provider = os.environ.get("PRIVACY_LLM_PROVIDER", os.environ.get("PRIVACY_LLM_BACKEND", "")).strip().lower()
+    if provider in ("vllm", "openai") or os.environ.get("PRIVACY_LLM_API_BASE") or os.environ.get("PRIVACY_VLLM_URL"):
+        return 16
+    return 1
+
+
 _LLM_INFER_SEMAPHORE = threading.Semaphore(
-    max(1, _env_int("PRIVACY_LLM_MAX_CONCURRENCY", 1))
+    max(1, _env_int("PRIVACY_LLM_MAX_CONCURRENCY", _get_default_llm_concurrency()))
 )
 
 # 信号量排队等待超时（秒）：并发请求超过上限时，等待超时后直接降级跳过 LLM 层，
@@ -421,6 +432,25 @@ class LlmAdapter:
             # 使用当前最高等级作为 upstream_level（支持 L1~L5 和 C1~C4）
             current_max = taxonomy.max_level(*(t.level for t in conflict_tags))
             level_enum = SensitivityLevel.from_string(current_max)
+
+            # 对于未设置自定义 prompt 模板的微调小模型，直接将包含字段名与字段值的语义文本传入分类器，
+            # 契合其训练分布；对于设置了自定义模板或通用大模型，传入完整的仲裁上下文。
+            is_finetuned = (
+                not prompt_template
+                and hasattr(self._classifier, "_is_finetuned_model")
+                and getattr(self._classifier, "_is_finetuned_model")() is True
+            )
+            if is_finetuned:
+                eval_text = f"{safe_field_name}: {safe_value}" if safe_field_name else safe_value
+                result = self._classifier.classify(eval_text, level_enum, 0.5)
+                if result and "final_level" in result:
+                    matched_tag = next((t for t in conflict_tags if t.level == result["final_level"]), None)
+                    reason = f"LLM语义裁定字段敏感度为 {result['final_level']}"
+                    if matched_tag:
+                        reason += f"（支持规则 {matched_tag.rule_id}）"
+                    result["reasoning"] = reason
+                return result
+
             result = self._classifier.classify(arbitration_text, level_enum, 0.5)
             return result
 

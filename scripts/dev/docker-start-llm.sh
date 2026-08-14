@@ -15,6 +15,14 @@ echo "==========================================================================
 echo "🤖 [Docker Mode] 正在使用 Docker Compose 启动 vLLM 本地大模型服务..."
 echo "============================================================================"
 
+MODEL_DIR="$PROJECT_ROOT/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+if [ ! -d "$MODEL_DIR" ]; then
+    echo "⚠️  [提示] 本地大模型权重目录不存在: $MODEL_DIR"
+    echo "   建议先执行模型下载命令以获取微调权重:"
+    echo "   python -m privacy_local_agent.privacy.download_model"
+    echo ""
+fi
+
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
 # 使用 compose profile 'llm' 启动 vLLM 服务

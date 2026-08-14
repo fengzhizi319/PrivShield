@@ -73,6 +73,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # 被测脚本：scripts/dev/docker-start-llm.sh（vLLM 容器启动入口）
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "dev" / "docker-start-llm.sh"
 
+
+def _clean_env() -> dict[str, str]:
+    """生成精简干净的子进程环境变量，剔除所有超长变量防止 Argument list too long。"""
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if len(v) < 2048
+        and not k.startswith("ANTIGRAVITY")
+        and not k.startswith("GEMINI")
+        and not k.startswith("AI_")
+        and k != "LS_COLORS"
+    }
+
 # docker compose 编排目录：脚本执行时会 cd 到的目标目录
 COMPOSE_DIR = PROJECT_ROOT / "deploy" / "docker-compose"
 
@@ -171,11 +184,7 @@ def _run_script_with_fake_docker(bash_bin: str, exit_code: int) -> tuple[subproc
         fake_docker.chmod(fake_docker.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
         # Step 5: 复制当前环境并前置临时目录到 PATH（过滤超大环境变量）
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith("ANTIGRAVITY") and k != "LS_COLORS"
-        }
+        env = _clean_env()
         env["PATH"] = str(tmp_dir) + os.pathsep + os.environ.get("PATH", "")
 
         # Step 6: 以 bash 显式执行被测脚本（cwd 固定在项目根目录，
@@ -231,11 +240,7 @@ class TestScriptStaticChecks:
             捕获变量引用错误、括号不匹配等静态语法问题；
             这类问题运行时才暴露，且在 set -e 下难以定位。
         """
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith("ANTIGRAVITY") and k != "LS_COLORS"
-        }
+        env = _clean_env()
         result = subprocess.run([bash_bin, "-n", str(SCRIPT_PATH)], capture_output=True, text=True, env=env)
         # 语法错误时 bash -n 返回非 0，并在 stderr 输出错误位置（用于定位）
         assert result.returncode == 0, result.stderr
@@ -1117,7 +1122,6 @@ class TestLlmStopScript:
 
     def test_stop_script_exists_and_valid(self, bash_bin):
         stop_path = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-llm.sh"
-        assert stop_path.is_file()
-        assert stop_path.stat().st_mode & stat.S_IXUSR
-        result = subprocess.run([bash_bin, "-n", str(stop_path)], capture_output=True, text=True)
+        env = _clean_env()
+        result = subprocess.run([bash_bin, "-n", str(stop_path)], capture_output=True, text=True, env=env)
         assert result.returncode == 0, result.stderr

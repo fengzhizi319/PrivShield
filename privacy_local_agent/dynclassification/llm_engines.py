@@ -507,6 +507,12 @@ class Qwen3Classifier(LlmClassifier):
         sanitize: bool = False,
     ) -> dict[str, Any] | None:
         """使用本地 Qwen3.5 微调模型对输入进行分类。"""
+        # 检测图片输入：纯文本模型不支持图像，直接返回 None 触发降级
+        from .image_redaction import is_image_input
+        if is_image_input(text):
+            logger.debug("qwen3_skip_image_input", extra={"reason": "text_only_model"})
+            return None
+
         try:
             self._lazy_init()
         except Exception:
@@ -795,25 +801,42 @@ class Qwen3Classifier(LlmClassifier):
         # 先剥离 Qwen3.5 等思考模型可能输出的 <think>...</think> 思考链
         cleaned_text = re.sub(r"<think>.*?</think>", "", output_text, flags=re.DOTALL).strip()
 
-        # 使用正则表达式提取第一个 {} 包裹的 JSON 内容（DOTALL 匹配跨行）
+        # 使用正则表达式提取 {} 包裹的 JSON 内容
         json_match = re.search(r"(\{.*\})", cleaned_text, re.DOTALL)
         json_str = json_match.group(1) if json_match else cleaned_text
 
         try:
-            # 尝试解析 JSON 字符串为 Python 字典
             res = json.loads(json_str)
-            # 校验关键字段 final_level 是否存在
-            if isinstance(res, dict) and "final_level" in res:
-                # 兼容训练/推理字段契约：统一补全 category 与 sub_category
-                cat = res.get("category") or res.get("sub_category") or "GENERAL"
-                res["category"] = cat
-                res["sub_category"] = cat
-                return cast("dict[str, Any]", res)
-        except Exception as e:
-            logger.warning(
-                "llm_json_parse_failed",
-                extra={"error": str(e)},
-            )
+            if isinstance(res, dict):
+                if "final_level" not in res and "level" in res:
+                    res["final_level"] = res["level"]
+                if "confidence" not in res:
+                    res["confidence"] = 0.9
+                if "final_level" in res:
+                    cat = res.get("category") or res.get("sub_category") or "GENERAL"
+                    res["category"] = cat
+                    res["sub_category"] = cat
+                    return cast("dict[str, Any]", res)
+        except Exception:
+            try:
+                short_match = re.search(r"(\{[^{}]+\})", cleaned_text, re.DOTALL)
+                if short_match:
+                    res = json.loads(short_match.group(1))
+                    if isinstance(res, dict):
+                        if "final_level" not in res and "level" in res:
+                            res["final_level"] = res["level"]
+                        if "confidence" not in res:
+                            res["confidence"] = 0.9
+                        if "final_level" in res:
+                            cat = res.get("category") or res.get("sub_category") or "GENERAL"
+                            res["category"] = cat
+                            res["sub_category"] = cat
+                            return cast("dict[str, Any]", res)
+            except Exception as e:
+                logger.warning(
+                    "llm_json_parse_failed",
+                    extra={"error": str(e)},
+                )
 
         return None
 
@@ -883,7 +906,8 @@ class OpenAILlmClassifier(LlmClassifier):
         self._initialized = True
         self._init_error: Exception | None = None
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vllm-http-infer")
+        max_http_workers = int(os.environ.get("PRIVACY_LLM_HTTP_WORKERS", "16"))
+        self._executor = ThreadPoolExecutor(max_workers=max_http_workers, thread_name_prefix="vllm-http-infer")
 
     def _is_finetuned_model(self) -> bool:
         """判断当前请求的模型是否为项目微调的 Privacy-Classifier-Smoother 模型。
@@ -913,6 +937,12 @@ class OpenAILlmClassifier(LlmClassifier):
         sanitize: bool = False,
     ) -> dict[str, Any] | None:
         """通过 HTTP 调用 vLLM / OpenAI 服务对文本进行定级。"""
+        # 检测图片输入：纯文本模型不支持图像，直接返回 None 触发降级
+        from .image_redaction import is_image_input
+        if is_image_input(text):
+            logger.debug("openai_llm_skip_image_input", extra={"reason": "text_only_model"})
+            return None
+
         start_time = time.monotonic()
         try:
             future = self._executor.submit(

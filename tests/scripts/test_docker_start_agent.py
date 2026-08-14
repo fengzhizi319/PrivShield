@@ -27,8 +27,21 @@ def bash_bin() -> str:
     return bash
 
 
+def _clean_env() -> dict[str, str]:
+    """生成精简干净的子进程环境变量，剔除所有超长变量防止 Argument list too long。"""
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if len(v) < 2048
+        and not k.startswith("ANTIGRAVITY")
+        and not k.startswith("GEMINI")
+        and not k.startswith("AI_")
+        and k != "LS_COLORS"
+    }
+
+
 def _run_script_with_fake_docker(
-    bash_bin: str, exit_code: int = 0, target: str = "core"
+    bash_bin: str, exit_code: int = 0, target: str | None = None
 ) -> tuple[subprocess.CompletedProcess, str]:
     with tempfile.TemporaryDirectory(prefix="fake-docker-agent-") as tmp:
         tmp_dir = Path(tmp)
@@ -50,12 +63,7 @@ def _run_script_with_fake_docker(
             fake_docker.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
         )
 
-        # 清理由 Agent 环境注入的超长变量，防范 OSError: [Errno 7] Argument list too long
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith("ANTIGRAVITY") and k != "LS_COLORS"
-        }
+        env = _clean_env()
         env["PATH"] = str(tmp_dir) + os.pathsep + os.environ.get("PATH", "")
 
         cmd = [bash_bin, str(SCRIPT_PATH)]
@@ -88,11 +96,7 @@ class TestAgentScriptStaticChecks:
         assert first_line == "#!/usr/bin/env bash"
 
     def test_script_syntax_valid(self, bash_bin):
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith("ANTIGRAVITY") and k != "LS_COLORS"
-        }
+        env = _clean_env()
         result = subprocess.run([bash_bin, "-n", str(SCRIPT_PATH)], capture_output=True, text=True, env=env)
         assert result.returncode == 0, result.stderr
 
@@ -125,5 +129,6 @@ class TestAgentStopScript:
         stop_path = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-agent.sh"
         assert stop_path.is_file()
         assert stop_path.stat().st_mode & stat.S_IXUSR
-        result = subprocess.run([bash_bin, "-n", str(stop_path)], capture_output=True, text=True)
+        env = _clean_env()
+        result = subprocess.run([bash_bin, "-n", str(stop_path)], capture_output=True, text=True, env=env)
         assert result.returncode == 0, result.stderr

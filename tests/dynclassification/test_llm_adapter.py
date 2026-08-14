@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -159,8 +160,8 @@ class TestQwen2VLClassifier:
         parsed = classifier._parse_json_result(invalid_text, SensitivityLevel.L3, 0.5)
         assert parsed is None
 
-    def test_select_device_prefers_cuda_when_vram_sufficient(self):
-        """显存充足时 _select_device 选择 cuda。"""
+    def test_select_device_detects_cuda(self):
+        """测试自动检测 CUDA 设备。"""
         import torch
 
         mock_torch = MagicMock()
@@ -172,7 +173,8 @@ class TestQwen2VLClassifier:
         mock_torch.backends = torch.backends
 
         classifier = Qwen2VLClassifier()
-        assert classifier._select_device(mock_torch) == "cuda"
+        with patch.dict(os.environ, {}, clear=True):
+            assert classifier._select_device(mock_torch) == "cuda"
 
     def test_select_device_fallback_cpu_when_vram_insufficient(self):
         """显存不足时 _select_device 回退到 cpu（无 MPS 时）。"""
@@ -186,7 +188,7 @@ class TestQwen2VLClassifier:
         mock_torch.backends.mps.is_available.return_value = False
 
         classifier = Qwen2VLClassifier()
-        with patch.object(Qwen2VLClassifier, "_is_cuda_compatible", return_value=True):
+        with patch.dict(os.environ, {}, clear=True), patch.object(Qwen2VLClassifier, "_is_cuda_compatible", return_value=True):
             assert classifier._select_device(mock_torch) == "cpu"
 
     def test_select_device_fallback_cpu_when_no_cuda(self):
@@ -199,8 +201,9 @@ class TestQwen2VLClassifier:
         mock_torch.backends = torch.backends
 
         classifier = Qwen2VLClassifier()
-        device = classifier._select_device(mock_torch)
-        assert device in ("cpu", "mps")
+        with patch.dict(os.environ, {}, clear=True):
+            device = classifier._select_device(mock_torch)
+            assert device in ("cpu", "mps")
 
     def test_classify_with_single_pass_sanitize(self):
         """测试 LlmAdapter.classify 开启 sanitize=True 时的单次融合脱敏转发出参。"""

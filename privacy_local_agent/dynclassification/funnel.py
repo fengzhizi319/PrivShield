@@ -198,48 +198,49 @@ class ClassificationFunnel:
         # ===== Step 1: Layer-1 规则引擎评估 =====
         tags, suppressed_tags = self.engine.evaluate(field_name, value)
 
-        # 补全高敏病史扫描：当文本命中 L5/L4 医疗模式时，确保生成对应的顶级/次高级 SecurityTag
-        try:
-            from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS, normalize_fullwidth_alphanumeric
-            norm_val = normalize_fullwidth_alphanumeric(str_value)
-            stripped_val = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_val)
-            scan_targets = {str_value, norm_val, stripped_val}
+        # 补全高敏病史扫描：仅在医疗领域或默认体系下触发（Domain-Aware Safety Floor）
+        if self.taxonomy.domain in ("medical", "sc_health_db51", "default"):
+            try:
+                from ..medical_pipeline.rules import L4_PATTERNS, L5_PATTERNS, normalize_fullwidth_alphanumeric
+                norm_val = normalize_fullwidth_alphanumeric(str_value)
+                stripped_val = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_val)
+                scan_targets = {str_value, norm_val, stripped_val}
 
-            # 动态适配当前 taxonomy 的最高 rank 与次高 rank level
-            sorted_levels = sorted(
-                self.taxonomy.levels.items(),
-                key=lambda item: item[1].rank,
-                reverse=True,
-            )
-            top_level = sorted_levels[0][0] if sorted_levels else "L5"
-            second_top_level = sorted_levels[1][0] if len(sorted_levels) > 1 else top_level
+                # 动态适配当前 taxonomy 的最高 rank 与次高 rank level
+                sorted_levels = sorted(
+                    self.taxonomy.levels.items(),
+                    key=lambda item: item[1].rank,
+                    reverse=True,
+                )
+                top_level = sorted_levels[0][0] if sorted_levels else "L5"
+                second_top_level = sorted_levels[1][0] if len(sorted_levels) > 1 else top_level
 
-            is_l5 = False
-            for pat, _rep in L5_PATTERNS:
-                if any(pat.search(t) for t in scan_targets):
-                    tags.append(SecurityTag(
-                        level=top_level, category="HIGH_RISK_MEDICAL_L5", confidence=0.99,
-                        source_engine="RULE", rule_id="MEDICAL_L5_STRICT_RULE",
-                        domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
-                        needs_human_review=True,
-                        match_target="field_value",
-                    ))
-                    is_l5 = True
-                    break
-
-            if not is_l5:
-                for pat, _rep in L4_PATTERNS:
+                is_l5 = False
+                for pat, _rep in L5_PATTERNS:
                     if any(pat.search(t) for t in scan_targets):
                         tags.append(SecurityTag(
-                            level=second_top_level, category="HIGH_RISK_MEDICAL_L4", confidence=0.95,
-                            source_engine="RULE", rule_id="MEDICAL_L4_STRICT_RULE",
+                            level=top_level, category="HIGH_RISK_MEDICAL_L5", confidence=0.99,
+                            source_engine="RULE", rule_id="MEDICAL_L5_STRICT_RULE",
                             domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
-                            needs_human_review=False,
+                            needs_human_review=True,
                             match_target="field_value",
                         ))
+                        is_l5 = True
                         break
-        except Exception:
-            pass
+
+                if not is_l5:
+                    for pat, _rep in L4_PATTERNS:
+                        if any(pat.search(t) for t in scan_targets):
+                            tags.append(SecurityTag(
+                                level=second_top_level, category="HIGH_RISK_MEDICAL_L4", confidence=0.95,
+                                source_engine="RULE", rule_id="MEDICAL_L4_STRICT_RULE",
+                                domain=self.taxonomy.domain, standard_id=self.taxonomy.standard_id,
+                                needs_human_review=False,
+                                match_target="field_value",
+                            ))
+                            break
+            except (ImportError, Exception):
+                pass
 
         # 取所有命中标签的最大置信度（规则标签恒为确定性 1.0，L5/L4 补全扫描为 0.99/0.95）
         # Use max confidence from matched tags (rule tags are deterministic 1.0)
@@ -409,7 +410,7 @@ class ClassificationFunnel:
                 reasoning += " | 规则冲突(置信度衰减)"
 
         elif self._is_image_field_or_value(field_name, value) and self.policy.auto_llm_on_image and self.llm is not None and self.llm.is_available:
-            # 场景 C: 运维优化动态识别：包含图像/图片病例时，自动强制触发 Layer-3 多模态 LLM 视觉深度分析
+            # 场景 C: 图像/图片病例/医学影像识别处理
             current_level = self._resolve_level(tags)
             llm_result = self.llm.classify(str_value, current_level, confidence, sanitize=sanitize)
             if llm_result:
@@ -418,8 +419,6 @@ class ClassificationFunnel:
                 )
                 llm_level = llm_result.get("final_level", "")
                 if llm_level and llm_level in self.taxonomy.levels:
-                    # 安全地板校验：LLM 无权将等级降到规则/上游已判定等级之下
-                    # （防止 Prompt 注入或模型幻觉导致的降级放行）。
                     if self.taxonomy.get_level_rank(llm_level) < self.taxonomy.get_level_rank(current_level):
                         needs_human_review = True
                         reasoning += " | 多模态LLM降级裁定被拒绝(低于规则/上游等级,待人工复核)"
@@ -438,7 +437,7 @@ class ClassificationFunnel:
                         llm_adjudicated_level = llm_level
                         tags.append(SecurityTag(
                             level=llm_level,
-                            category="MULTIMODAL_IMAGE_ANALYSIS",
+                            category="MEDICAL_IMAGE",
                             confidence=confidence,
                             source_engine="LLM",
                             rule_id="LLM_MULTIMODAL_IMAGE",
@@ -446,15 +445,66 @@ class ClassificationFunnel:
                             standard_id=self.taxonomy.standard_id,
                         ))
                 else:
-                    # 安全地板兜底：LLM 未返回合法等级（可能来自 Prompt 注入/模型幻觉），
-                    # 视为无效裁定——不刷新置信度、不归属 L3，保留上游结果并强制人工复核，
-                    # 防止"高置信度 + 无等级"输出静默抬高整体置信度。
                     needs_human_review = True
                     reasoning += " | 多模态LLM未返回有效等级(保留上游结果,待人工复核)"
                     logger.warning(
                         "funnel_llm_no_valid_level",
                         extra={"field_name": field_name, "scenario": "C"},
                     )
+            else:
+                # LLM 不可用或为纯文本模型跳过图像时，直接按高敏医学影像数据保护 (L4/C4)
+                sorted_levels = sorted(
+                    self.taxonomy.levels.items(),
+                    key=lambda item: item[1].rank,
+                    reverse=True,
+                )
+                top_level = sorted_levels[0][0] if sorted_levels else "L5"
+                second_top_level = sorted_levels[1][0] if len(sorted_levels) > 1 else top_level
+                target_img_level = second_top_level
+
+                if self.taxonomy.get_level_rank(current_level) > self.taxonomy.get_level_rank(target_img_level):
+                    target_img_level = current_level
+
+                confidence = max(confidence, 0.95)
+                reasoning += " | 识别为图像病例/医学影像数据(高敏感图像级保护)"
+                engine_layer = EngineLayer.L1_RULE
+                tags.append(SecurityTag(
+                    level=target_img_level,
+                    category="MEDICAL_IMAGE",
+                    confidence=0.95,
+                    source_engine="RULE",
+                    rule_id="IMAGE_CASE_RULE",
+                    domain=self.taxonomy.domain,
+                    standard_id=self.taxonomy.standard_id,
+                ))
+
+        elif self._is_image_field_or_value(field_name, value):
+            # 图像输入默认高敏保护
+            sorted_levels = sorted(
+                self.taxonomy.levels.items(),
+                key=lambda item: item[1].rank,
+                reverse=True,
+            )
+            top_level = sorted_levels[0][0] if sorted_levels else "L5"
+            second_top_level = sorted_levels[1][0] if len(sorted_levels) > 1 else top_level
+            target_img_level = second_top_level
+
+            current_level = self._resolve_level(tags)
+            if self.taxonomy.get_level_rank(current_level) > self.taxonomy.get_level_rank(target_img_level):
+                target_img_level = current_level
+
+            confidence = max(confidence, 0.95)
+            reasoning += " | 识别为图像病例/医学影像数据(高敏感图像级保护)"
+            engine_layer = EngineLayer.L1_RULE
+            tags.append(SecurityTag(
+                level=target_img_level,
+                category="MEDICAL_IMAGE",
+                confidence=0.95,
+                source_engine="RULE",
+                rule_id="IMAGE_CASE_RULE",
+                domain=self.taxonomy.domain,
+                standard_id=self.taxonomy.standard_id,
+            ))
 
         elif confidence < self.policy.llm_confidence_threshold:
             # 场景 B: 低置信度兜底（无冲突但置信度不足）

@@ -23,12 +23,14 @@ import json
 import math
 import os
 import re
+import threading
 import time
 from typing import Any
 
 from ..observability.logging_config import get_logger
 from ..observability.metrics import (
     CLASSIFICATION_LLM_DURATION,
+    CLASSIFICATION_LLM_TOKENS_TOTAL,
     CLASSIFICATION_LLM_TOTAL,
 )
 from .base import LlmClassifier, SensitivityLevel
@@ -183,6 +185,7 @@ class MLXLlmClassifier(LlmClassifier):
         self._tokenizer: Any = None
         self._initialized = False
         self._init_error: Exception | None = None
+        self._lock = threading.Lock()
 
     @property
     def is_ready(self) -> bool:
@@ -462,11 +465,26 @@ class MLXLlmClassifier(LlmClassifier):
             )
             prompt_ids = self._tokenizer.encode(prompt_text)
 
-            # 生成
-            output_text = self._generate(prompt_ids, max_new_tokens=self._max_new_tokens)
+            # 在线程锁保护下执行 Metal GPU 生成（防止多线程并发破坏 KV Cache）
+            with self._lock:
+                output_text = self._generate(prompt_ids, max_new_tokens=self._max_new_tokens)
+
+            prompt_tokens = len(prompt_ids)
+            completion_tokens = len(self._tokenizer.encode(output_text)) if output_text else 0
+            total_tokens = prompt_tokens + completion_tokens
+
+            CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="prompt", engine="mlx").inc(prompt_tokens)
+            CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="completion", engine="mlx").inc(completion_tokens)
+            CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="total", engine="mlx").inc(total_tokens)
 
             # 解析 JSON 结果
             result = self._parse_json_result(output_text)
+            if result is not None:
+                result["usage"] = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                }
 
             duration = time.monotonic() - start_time
             CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
