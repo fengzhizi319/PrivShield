@@ -32,6 +32,13 @@ docker-start-agent.sh & docker-stop-agent.sh Script Tests & Agent-to-LLM Communi
     第 6 层 Docker Agent 与 Docker LLM 真实通信集成测试（integration marker）:
         - 启动（或复用）真实 Docker vLLM 推理容器（127.0.0.1:8000/v1）
         - 验证 Agent 动态分类服务直连 Docker LLM 完成字段分类、仲裁裁定与长文书无痕抹平
+    第 7 层 Docker Agent 端点协议与接口测试（TestClient）:
+        - 验证 Agent 健康检查探针 (/health 与 /readyz)
+        - 验证单字段/整记录脱敏与动态分类分级评估接口协议
+    第 8 层 真实执行 bash scripts/dev/docker-start-agent.sh core 拉起容器交互测试:
+        - 真实执行启动脚本拉起物理容器并验证 docker ps 状态
+        - 通过真实网络 Socket 发送 HTTP 脱敏、分类分级与健康探针请求
+        - 验证 docker-stop-agent.sh 能够干净停机并清理容器
 =====================================================================
 """
 
@@ -99,18 +106,35 @@ VLLM_READY_POLL_INTERVAL_S = 3
 def _clean_env() -> dict[str, str]:
     """生成精简干净的子进程环境变量，剔除超长变量防止 Argument list too long。
 
+    子进程在启动时会继承父进程的完整环境变量。当某些环境变量（如
+    `LS_COLORS`、AI 相关工具注入的巨型 JSON 或路径列表）体积过大时，
+    可能导致 `execve` 系统调用超出参数长度上限（通常为 128KB 或 2MB），
+    从而抛出 `OSError: [Errno 7] Argument list too long`。
+
+    本函数通过以下规则过滤环境变量：
+        1. 值长度 < 2048：剔除超长变量，保留常用配置。
+        2. 排除 `ANTIGRAVITY*`、`GEMINI*`、`AI_*`：这些前缀通常由 AI
+           辅助开发工具或 IDE 插件注入，包含大量内部状态或提示词，
+           对子进程无意义且体积庞大。
+        3. 排除 `LS_COLORS`：`dircolors` 生成的颜色配置往往超过数 KB，
+           对子进程编译/运行无实际用途。
+
     Returns:
-        过滤后的安全环境变量字典。
+        过滤后的安全环境变量字典，可直接传给 `subprocess.run(env=...)`。
     """
     return {
         k: v
         for k, v in os.environ.items()
+        # 硬性长度限制：防止单条变量本身即接近系统上限
         if len(v) < 2048
+        # 排除已知的大体积 AI 工具注入变量
         and not k.startswith("ANTIGRAVITY")
         and not k.startswith("GEMINI")
         and not k.startswith("AI_")
+        # 排除 dircolors 生成的巨型颜色配置
         and k != "LS_COLORS"
     }
+
 
 
 @pytest.fixture(scope="module")
@@ -221,7 +245,7 @@ class TestAgentScriptStaticChecks:
         assert first_line == "#!/usr/bin/env bash", f"无效的 Shebang: {first_line}"
 
     def test_script_syntax_valid(self, bash_bin: str):
-        """【静态检查】使用 bash -n 解析脚本语法，确保无语法错误。
+        """【静态检查】使用 bash -n 解析脚本语法，确保无语法错误。如果没有-n的参数，就会实际执行
 
         测试目的：在不实际运行容器的情况下，捕获语法拼写、括号不匹配等潜在错误。
         """
@@ -353,12 +377,39 @@ class TestDockerAgentLlmComposeTopology:
         """【网络拓扑】验证 privacy-local-agent 与 vllm 服务均加入了 llm 共享网络。
 
         测试目的：确保 Agent 容器能够通过容器名 DNS（http://vllm:8000/v1）跨容器访问 LLM 推理服务。
+
+        为何通过容器名就能跨容器访问（Why container-name DNS works across containers）:
+            1. Docker Compose 会为每个显式声明的网络（本配置中的 llm，driver: bridge）创建
+               一个独立的虚拟二层网段；加入同一网络的所有容器共享该网段，彼此二层可达；
+            2. Docker 在每个容器内运行内嵌 DNS 服务（127.0.0.11），它会把同一网络内的
+               容器名/服务名（vllm）自动解析为该容器的动态 IP（即 Docker 的服务发现机制）；
+            3. 因此 Agent 内访问 http://vllm:8000/v1 等价于访问 vllm 容器的 8000 端口，
+               无需关心容器 IP——IP 会随容器重建而变化，而服务名恒定，跨容器访问始终成立；
+            4. 网络同时是隔离边界：未加入 llm 网络的容器既解析不到 vllm 也无法访问它，
+               故本测试必须同时断言双方都挂载了 llm 网络。
         """
+        # 取出 compose 文件中的 services 顶层映射（key 为服务名，value 为服务配置字典）
+        # Extract the top-level "services" mapping from the compose config (keyed by service name)
         services = compose_config.get("services", {})
+
+        # 读取 Agent 服务声明的网络列表（networks 字段，本配置为显式列表形式）
+        # Read the network list declared by the agent service (explicit list form in this config)
         agent_networks = services["privacy-local-agent"].get("networks", [])
+
+        # 读取 vllm 服务声明的网络列表
+        # Read the network list declared by the vllm service
         vllm_networks = services["vllm"].get("networks", [])
 
+        # Agent 必须加入 llm 网络：只有同一网络内的容器才能被内嵌 DNS 解析并互通，
+        # 否则 PRIVACY_LLM_API_BASE=http://vllm:8000/v1 会解析失败，LLM 层只能降级
+        # The agent MUST join the "llm" network: only containers on the same network are
+        # resolvable and reachable, otherwise PRIVACY_LLM_API_BASE=http://vllm:8000/v1 fails
         assert "llm" in agent_networks, "privacy-local-agent 未加入 llm 网络"
+
+        # vllm 必须加入同一网络：内嵌 DNS 只为“加入了该网络的容器”注册服务名记录，
+        # 若 vllm 不在 llm 网络内，Agent 侧将无法解析 vllm 这个服务名
+        # The vllm service MUST join the same network: the embedded DNS only registers
+        # service-name records for containers attached to that network
         assert "llm" in vllm_networks, "vllm 未加入 llm 网络"
 
     def test_compose_agent_llm_environment_variables(self, compose_config: dict[str, Any]):
@@ -373,12 +424,26 @@ class TestDockerAgentLlmComposeTopology:
         agent_env = services["privacy-local-agent"].get("environment", {})
 
         assert agent_env.get("PRIVACY_LLM_PROVIDER") == "vllm", "Agent LLM Provider 应为 vllm"
-        assert agent_env.get("PRIVACY_LLM_API_BASE") == "http://vllm:8000/v1", (
-            "Agent LLM API Base 应指向 http://vllm:8000/v1"
+
+        # LLM_API_BASE 已参数化为 ${LLM_API_BASE:-http://vllm:8000/v1}：
+        # 未设置变量时默认指向 compose 内部 DNS 服务名 vllm:8000（同机部署零配置）；
+        # 跨主机部署经 deploy/docker-compose/.env 的 LLM_API_BASE 覆盖（见 ops.md §5.2.11 ④）。
+        # 此处从 yml 字面量中提取 `:-` 后的默认值进行断言，兼容两种写法。
+        llm_api_base = agent_env.get("PRIVACY_LLM_API_BASE", "")
+        match = re.fullmatch(r"\$\{LLM_API_BASE:-(.+)\}", llm_api_base)
+        effective_base = match.group(1) if match else llm_api_base
+        assert effective_base == "http://vllm:8000/v1", (
+            f"Agent LLM API Base 默认值应指向 http://vllm:8000/v1: {llm_api_base}"
         )
         assert agent_env.get("PRIVACY_LLM_MODEL_NAME") == VLLM_SERVED_MODEL_NAME, (
             f"Agent 模型名与 vllm 服务名不一致: {agent_env.get('PRIVACY_LLM_MODEL_NAME')}"
         )
+
+        # PRIVACY_LLM_API_KEY 已参数化为 ${LLM_API_KEY:-EMPTY}
+        llm_api_key = agent_env.get("PRIVACY_LLM_API_KEY", "")
+        key_match = re.fullmatch(r"\$\{LLM_API_KEY:-(.+)\}", llm_api_key)
+        effective_key = key_match.group(1) if key_match else llm_api_key
+        assert effective_key == "EMPTY", f"Agent LLM API Key 默认值应为 EMPTY: {llm_api_key}"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -849,4 +914,160 @@ class TestDockerAgentContainerEndpoints:
         assert table_res is not None
         assert table_res.get("finalLevel") in ("L1", "L2", "L3", "L4", "L5")
         assert len(table_res.get("recordResults", [])) == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 8 层：真实执行 bash scripts/dev/docker-start-agent.sh core 拉起容器交互测试
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture(scope="class")
+def live_docker_agent_service(bash_bin: str, docker_available: bool):
+    """通过执行真实 scripts/dev/docker-start-agent.sh core 启动容器，并在测试结束后清理。
+
+    Yields:
+        容器服务的基础 URL (http://127.0.0.1:8079)
+    """
+    if not docker_available:
+        pytest.skip("Docker daemon 不可用，跳过真实物理容器启动测试")
+
+    start_script = PROJECT_ROOT / "scripts" / "dev" / "docker-start-agent.sh"
+    stop_script = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-agent.sh"
+
+    # 1. 真实运行启动脚本构建并拉起 core 容器
+    res = subprocess.run(
+        [bash_bin, str(start_script), "core"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if res.returncode != 0:
+        pytest.fail(f"执行 docker-start-agent.sh core 失败:\n{res.stderr or res.stdout}")
+
+    base_url = "http://127.0.0.1:8079"
+
+    # 2. 轮询健康探针等待容器内的 FastAPI 服务就绪（最多 30 秒）
+    ready = False
+    start_time = time.time()
+    while time.time() - start_time < 30:
+        try:
+            req = urllib.request.Request(f"{base_url}/health", method="GET")
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                if resp.status == 200:
+                    ready = True
+                    break
+        except Exception:
+            time.sleep(0.5)
+
+    if not ready:
+        pytest.fail(f"Agent 容器在 30 秒内未成功就绪 (http://127.0.0.1:8079/health)")
+
+    try:
+        yield base_url
+    finally:
+        # 3. 测试类全部执行完成后执行停止脚本清理容器
+        subprocess.run(
+            [bash_bin, str(stop_script)],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+
+@pytest.mark.integration
+class TestRealDockerAgentScriptLifecycle:
+    """真实执行 bash scripts/dev/docker-start-agent.sh core 启动物理容器并进行网络交互测试。
+
+    测试覆盖：
+        1. 验证真实 privacy-local-agent 容器启动成功并在 docker ps 中运行
+        2. 通过真实网络 Socket 向物理容器发送健康与就绪探针 (/health, /readyz)
+        3. 通过真实 HTTP POST 请求调用物理容器执行单字段脱敏与整记录脱敏
+        4. 通过真实 HTTP POST 请求调用物理容器执行单字段与整记录动态分类分级
+        5. 测试完成后由 fixture 执行 docker-stop-agent.sh 验证容器干净卸载
+    """
+
+    def test_real_container_is_running_in_docker_ps(self, live_docker_agent_service: str):
+        """【真实容器状态】验证 privacy-local-agent 容器真实存在于 docker ps 输出中。"""
+        ps = subprocess.run(
+            ["docker", "ps", "--filter", "name=privacy-local-agent", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert ps.returncode == 0
+        assert "privacy-local-agent" in ps.stdout
+
+    def test_real_container_health_probes(self, live_docker_agent_service: str):
+        """【真实网络交互】向物理容器发送 GET /health 与 GET /readyz 探针。"""
+        # 1. 验证健康检查
+        req_health = urllib.request.Request(f"{live_docker_agent_service}/health", method="GET")
+        with urllib.request.urlopen(req_health, timeout=3.0) as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode("utf-8"))
+            assert data.get("status") == "ok"
+
+        # 2. 验证就绪探针
+        req_readyz = urllib.request.Request(f"{live_docker_agent_service}/readyz", method="GET")
+        with urllib.request.urlopen(req_readyz, timeout=3.0) as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode("utf-8"))
+            assert data.get("status") == "ready"
+
+    def test_real_container_masking_interactions(self, live_docker_agent_service: str):
+        """【真实网络交互】向物理容器发送单字段与整记录脱敏 HTTP 请求。"""
+        # 1. 单字段手机号脱敏
+        payload_phone = {"field_name": "mobile", "value": "13812345678", "context": ""}
+        resp_phone = _http_post_json(f"{live_docker_agent_service}/v1/privacy/mask", payload_phone)
+        assert resp_phone is not None
+        assert resp_phone.get("result") == "138****5678"
+
+        # 2. 整条记录多字段批量脱敏
+        payload_record = {
+            "record": {
+                "name": "张三丰",
+                "mobile": "13812345678",
+                "id_card": "510101199001011234",
+                "address": "成都市武侯区人民南路四段18号",
+            },
+            "context": "",
+        }
+        resp_record = _http_post_json(f"{live_docker_agent_service}/v1/privacy/mask_record", payload_record)
+        assert resp_record is not None
+        result_record = resp_record.get("result", {})
+        print(f"\n[真实 Docker Agent 容器脱敏响应]: {result_record}")
+        assert result_record.get("mobile") == "138****5678"
+        assert result_record.get("id_card") == "510101********1234"
+        assert result_record.get("name") in ("张*丰", "张**丰", "张*")
+
+    def test_real_container_classification_interactions(self, live_docker_agent_service: str):
+        """【真实网络交互】向物理容器发送动态分类分级评估 HTTP 请求。"""
+        # 1. 单字段分类评估
+        payload_eval = {
+            "fieldName": "id_card",
+            "value": "510101199001011234",
+            "domain": "sc_health_db51",
+        }
+        resp_eval = _http_post_json(f"{live_docker_agent_service}/v1/dynclassification/eval", payload_eval)
+        assert resp_eval is not None
+        field_res = resp_eval.get("fieldResult", {})
+        assert field_res.get("finalLevel") == "L3"
+        assert field_res.get("fieldName") == "id_card"
+
+        # 2. 整记录复合分类评估
+        payload_rec_eval = {
+            "record": {
+                "name": "李四",
+                "id_card": "510101199001011234",
+                "mobile": "13800138000",
+                "diagnosis": "HIV抗体阳性",
+            },
+            "domain": "medical",
+        }
+        resp_rec_eval = _http_post_json(f"{live_docker_agent_service}/v1/dynclassification/eval_record", payload_rec_eval)
+        assert resp_rec_eval is not None
+        record_res = resp_rec_eval.get("recordResult", {})
+        assert record_res.get("finalLevel") in ("L4", "L5")
+
 

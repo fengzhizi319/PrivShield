@@ -178,15 +178,19 @@ services:
       #   "openai": 外部 OpenAI 兼容云端 API（需真实 API Key）
       PRIVACY_LLM_PROVIDER: "vllm"
       # PRIVACY_LLM_API_BASE: OpenAI 兼容 API 基地址
-      #   指向 compose 内部 DNS 服务名 vllm + 容器端口 8000 + /v1 前缀
+      #   ${LLM_API_BASE:-http://vllm:8000/v1}: 默认指向 compose 内部 DNS 服务名 vllm + 容器端口 8000 + /v1 前缀
+      #   - 同机部署（core 与 vllm 同主机）：不设置 LLM_API_BASE，零配置使用默认值
+      #   - 跨主机部署（core 与 vllm 分机）：在 deploy/docker-compose/.env 写
+      #     LLM_API_BASE=http://<vllm主机IP>:8000/v1（详见 ops.md §5.2.11 ④）
       #   若改用外部云服务则替换为 https://api.xxx.com/v1
-      PRIVACY_LLM_API_BASE: "http://vllm:8000/v1"
+      PRIVACY_LLM_API_BASE: "${LLM_API_BASE:-http://vllm:8000/v1}"
       # PRIVACY_LLM_MODEL_NAME: 请求模型名
       #   必须与 vllm 服务 --served-model-name 参数一致（见下方 vllm 服务）
       PRIVACY_LLM_MODEL_NAME: "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
       # PRIVACY_LLM_API_KEY: 调用 LLM 服务的认证 Key
-      #   本地 vLLM 无需鉴权，固定 "EMPTY"；对接 OpenAI 等云服务时填真实 Key
-      PRIVACY_LLM_API_KEY: "EMPTY"
+      #   ${LLM_API_KEY:-EMPTY}: 本地 vLLM 无需鉴权，默认 "EMPTY"；跨主机或对接 OpenAI/云服务时在
+      #   deploy/docker-compose/.env 中配置 LLM_API_KEY=sk-xxxx（详见 ops.md §5.2.11 ④）
+      PRIVACY_LLM_API_KEY: "${LLM_API_KEY:-EMPTY}"
       # ── 可选：安全配置 / Optional: security config ──
       # 生产环境请在 .env 中取消注释 TLS/Auth/RateLimit 配置
       # For production, uncomment TLS/Auth/RateLimit in .env

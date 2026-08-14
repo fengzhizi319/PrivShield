@@ -32,6 +32,7 @@
     - [5.2.8 compose 命令的实现位置与 restart/up 区别](#528-compose-命令的实现位置与-restartup-区别)
     - [5.2.9 --profile 从哪里找服务（小白澄清）](#529---profile-从哪里找服务小白澄清)
     - [5.2.10 镜像构建策略：不是每次 up 都构建（小白澄清）](#5210-镜像构建策略不是每次-up-都构建小白澄清)
+    - [5.2.11 llm 网络在哪里配置、由谁实现（小白澄清）](#5211-llm-网络在哪里配置由谁实现小白澄清)
   - [5.3 自动化 Docker 脚本运行集](#53-自动化-docker-脚本运行集)
   - [5.4 Docker Compose 常用命令速查](#54-docker-compose-常用命令速查)
   - [5.5 常见配置需求速查（想改 X → 改哪里）](#55-常见配置需求速查想改-x--改哪里)
@@ -519,7 +520,7 @@ docker compose --profile llm up -d
 | `--profile llm` 追加 | + `vllm`（共 5 个） |
 | vllm 镜像 | `vllm/vllm-openai:latest`（`${VLLM_IMAGE_TAG:-latest}` 替换生效） |
 | env_file 合并 | agent 容器环境含根目录 `.env` 的值：`PRIVACY_ENV_PROFILE=qwen3`、`PRIVACY_LOG_LEVEL=INFO`、`PRIVACY_REST_PORT=8079` 等 |
-| 网络 | `docker-compose_backend`（internal）、`docker-compose_llm`（internal）、`docker-compose_frontend` |
+| 网络 | `docker-compose_backend`（internal）、`docker-compose_llm`（非 internal，支持宿主机调试端口映射）、`docker-compose_frontend` |
 | 挂载 | 根目录 `.models` → `/models`（只读）；`privacy-profile.yaml`（只读） |
 
 #### 5.2.4 环境变量三来源机制（易混淆，重点）
@@ -528,9 +529,9 @@ docker compose --profile llm up -d
 
 | 机制 | 作用对象 | 是否依赖 `.env` | 生效时机 |
 |---|---|---|---|
-| `environment` 段硬编码 | agent 9 个核心变量（监听地址、LLM 连接）、双 console 后端全部变量、grafana 的 GF_* | ❌ 不依赖（写死在 yml） | 容器创建时 |
+| `environment` 段硬编码 | agent 8 个核心变量（监听地址、LLM provider/模型名/Key）、双 console 后端全部变量、grafana 的 GF_* | ❌ 不依赖（写死在 yml） | 容器创建时 |
 | `env_file` 注入 | 仅 `privacy-local-agent`（`../../.env` → 根目录 `.env`） | ✅ 唯一依赖点（`required: false`） | 容器创建时 |
-| `${VAR:-default}` 变量替换 | `vllm` 镜像 tag、`grafana` 密码 | ⚠️ 解析时查 **CWD**（`deploy/docker-compose/.env`），与根目录 `.env` 无关 | 解析阶段 |
+| `${VAR:-default}` 变量替换 | `vllm` 镜像 tag、`grafana` 密码、agent 的 `LLM_API_BASE` 与 `LLM_API_KEY`（默认 `http://vllm:8000/v1` 和 `EMPTY`，跨主机部署时覆盖为 GPU 主机端点与鉴权密钥） | ⚠️ 解析时查 **CWD**（`deploy/docker-compose/.env`），与根目录 `.env` 无关 | 解析阶段 |
 
 **优先级**：`environment` > `env_file` > 镜像内默认值（Dockerfile ENV/CMD）。
 
@@ -538,7 +539,7 @@ docker compose --profile llm up -d
 
 | 服务 | 环境变量来源 |
 |---|---|
-| `privacy-local-agent` | env_file（根目录 `.env` 其余项）+ environment 覆盖 9 项（容器必须 0.0.0.0、LLM 连接等） |
+| `privacy-local-agent` | env_file（根目录 `.env` 其余项）+ environment 覆盖 8 项（容器必须 0.0.0.0、LLM provider 等）+ `${LLM_API_BASE}` / `${LLM_API_KEY}` 变量替换（跨主机部署用） |
 | `console-backend-go` / `console-backend-python` / `console-web` | 全部 environment 硬编码（compose 内部 DNS 服务名，跨环境不变） |
 | `vllm` | 无环境变量；仅 `image` 的 `${VLLM_IMAGE_TAG:-latest}` 编排替换 |
 | `grafana` | GF_* 硬编码 + `${GRAFANA_ADMIN_PASSWORD:-changeme}` 替换 |
@@ -643,7 +644,7 @@ docker compose --profile llm up -d
 
 #### 5.2.7 启动后的 core ↔ vllm 联动
 
-- agent 容器内 `PRIVACY_LLM_PROVIDER=vllm` + `PRIVACY_LLM_API_BASE=http://vllm:8000/v1`（compose `environment:` 段覆盖），经 `llm` 网络（专供 core ↔ vllm，现已设为非 internal 以支持宿主机调试端口映射）以服务名 `vllm` 解析
+- agent 容器内 `PRIVACY_LLM_PROVIDER=vllm` + `PRIVACY_LLM_API_BASE=http://vllm:8000/v1`（compose `${LLM_API_BASE:-http://vllm:8000/v1}` 默认值，跨主机部署可经 `deploy/docker-compose/.env` 的 `LLM_API_BASE` 覆盖，见 5.2.11 ④），经 `llm` 网络（专供 core ↔ vllm，现已设为非 internal 以支持宿主机调试端口映射）以服务名 `vllm` 解析
 - 分类请求进入 Layer-3 时，agent 以 OpenAI 兼容 HTTP 调用 vllm
 - vllm 挂掉/OOM → agent 自动降级 Layer-1 规则 + Layer-2 NER，REST/gRPC 不受影响（运行时解耦）
 - 升级 vllm 只需 `docker compose up -d vllm`，core 容器无需重建
@@ -654,7 +655,7 @@ docker compose --profile llm up -d
 |---|---|---|
 | 同机、不同部署（无共享网络） | A. 建共享网络（推荐，等同 compose 效果） | `docker network create llm-net`；vllm 启动加 `--network llm-net --network-alias vllm`；core 加 `--network llm-net`，`PRIVACY_LLM_API_BASE=http://vllm:8000/v1` 不变，仍走内部直连 |
 | 同机、不同部署 | B. 走宿主机端口映射 | vllm `ports:` 绑定 `0.0.0.0:8000:8000`（**不能绑 127.0.0.1**，否则其他容器访问不到）；core 容器内写 `http://host.docker.internal:8000/v1` + `extra_hosts: ["host.docker.internal:host-gateway"]` |
-| 跨主机部署 | 只能走映射 + 实际 IP | vllm 映射 `0.0.0.0:8000:8000`；core 写 `http://<vllm主机IP>:8000/v1`（`host.docker.internal` 跨主机失效，需写实际 IP） |
+| 跨主机部署 | 只能走映射 + 实际 IP（多方案对比见 5.2.11 ④） | vllm 映射 `0.0.0.0:8000:8000`；core 写 `http://<vllm主机IP>:8000/v1`（`host.docker.internal` 跨主机失效，需写实际 IP） |
 
 > **坑点**：core 容器内 `127.0.0.1` 指的是 **core 容器自己**，不是宿主机；容器内访问宿主机必须用 `host.docker.internal`（Linux 需 `extra_hosts` 或 `--network host`）或宿主机实际 IP。
 
@@ -777,6 +778,89 @@ naming to privacy-local-agent:0.1.0                ← 构建出同名镜像
 | 只改 `.env` / `privacy-profile.yaml` 等配置 | `docker compose up -d` | 无需构建；配置变化会重建容器 |
 | 只是服务卡死想重启 | `docker compose restart` | 镜像、配置都不变，最轻量 |
 
+#### 5.2.11 `llm` 网络在哪里配置、由谁实现（小白澄清）
+
+**结论先行**：`llm` 网络是**在 `docker-compose.yml` 里声明**的（配置位置），但**创建与实现是 Docker daemon（dockerd）的 bridge 网络驱动**完成的（实现位置）。compose CLI 只负责把 yml 的声明翻译成对 Docker Engine API 的调用；项目代码中不存在任何网络实现逻辑。
+
+**① 配置位置：`deploy/docker-compose/docker-compose.yml` 顶层 `networks:` 段**
+
+```yaml
+networks:
+  llm:
+    driver: bridge      # 桥接驱动：创建独立虚拟二层交换网络
+    internal: false     # 非 internal：允许 ports 端口映射到宿主机（供 vllm 调试端口用）
+```
+
+- `driver: bridge` 是核心声明——告诉 daemon「用 Linux 网桥创建一个独立的虚拟二层网络」
+- 服务侧通过 `networks:` 字段“接线”，**两个服务都挂载 `llm` 才互通**：
+  - `privacy-local-agent` → `networks: [backend, llm]`
+  - `vllm` → `networks: [llm]`
+- 未显式声明 `networks:` 的服务会自动加入 compose 默认网络（`<项目名>_default`），与 `llm` 网络互不相通；因此 `http://vllm:8000/v1` 能解析的前提，正是两个服务都显式挂载了 `llm` 网络
+
+**② 实现位置：dockerd 的 bridge 网络驱动（libnetwork）**
+
+compose 把 yml 翻译成 Engine API 调用后，真正“施工”的是 dockerd，实际发生的事：
+
+```text
+compose CLI（声明解析）                       dockerd（真正实现）
+──────────────────────────────   ────────────────────────────────────────────
+读取 yml 的 networks.llm         →  ① 创建 Linux 网桥 br-<hash>（虚拟交换机）
+  driver: bridge                 →  ② IPAM 为该网络分配私有子网（如 172.20.0.0/16）
+服务挂载 networks: [llm]         →  ③ 为每个容器创建 veth pair 并接入网桥
+                                 →  ④ 启动内嵌 DNS（127.0.0.11）注册服务名
+```
+
+| 步骤 | 实现者 | 产物 / 效果 |
+|---|---|---|
+| ① 建网桥 | dockerd bridge driver | 宿主机出现 `br-<hash>` 网桥设备，相当于一台虚拟二层交换机，构成独立广播域（即“虚拟二层网段”） |
+| ② 分配子网/IP | dockerd IPAM | 该网络独占一个私有子网（`docker network inspect` 的 `IPAM.Config` 可查），容器自动获得同网段动态 IP |
+| ③ 接线 veth pair | dockerd（容器网络命名空间） | 每个容器一对虚拟“网线”：容器内一端是 `eth0`，另一端插到网桥上 → 同网桥容器二层互通 |
+| ④ 内嵌 DNS | dockerd（DNS 代理） | 容器内 `vllm` 被解析为该容器的动态 IP（服务发现）；**IP 随容器重建而变化，服务名恒定**，故跨容器访问始终成立 |
+| ⑤ 网络隔离 | 不同网桥 | 不同网络 = 不同网桥，默认互不相通（`llm` 与 `backend`/`frontend` 各自独立），网络同时是安全边界 |
+
+**③ 在宿主机上可观察到的证据**：
+
+```bash
+docker network ls                            # 看到 docker-compose_llm（compose 网络名带项目前缀）
+docker network inspect docker-compose_llm    # Driver: bridge；IPAM 子网；Containers 列出 agent 与 vllm 的 IP
+docker exec privacy-local-agent getent hosts vllm   # 容器内解析服务名 → 返回 vllm 容器 IP（如 172.20.0.5）
+```
+
+> **一句话总结**：yml 的 `networks:` 段是“图纸”，dockerd 的 bridge 驱动是“施工队”——它建网桥（虚拟交换机）、发 IP、接线（veth pair）、跑 DNS，最终让 agent 与 vllm 在同一个虚拟二层网段里用服务名互访。
+
+**④ 跨主机部署：`llm` 网络为何失效与替代方案（按部署拓扑选型）**
+
+实际部署中 vllm 需要 **GPU 主机**，而 core 是无 torch 的轻量 Sidecar、任何主机都能跑，因此存在两种典型拓扑，`llm` 网络的可用性完全取决于此：
+
+**场景 A：同机部署（core 与 vllm 在同一台主机）——`llm` 网络直接可用**
+
+- 即默认 compose 编排：GPU 主机同时跑 core + vllm，走 ①② 的 bridge 网络，容器名直连 `http://vllm:8000/v1`，**零额外配置**
+- core 镜像不含 torch、内存占用小（deploy 上限 2G），与 vllm 同机几乎不互相影响；无 GPU 的主机则跳过 `--profile llm` 纯跑 core
+
+**场景 B：跨主机部署（core 在普通主机、vllm 在 GPU 主机）——`llm` 网络失效**
+
+失效原因即 ③ 所述：bridge 网络是本机概念——两台机器的网桥互不相通，且容器名 DNS 只在**本机 daemon** 内注册，core 主机上解析不到 GPU 主机上的 `vllm`。此时无论怎么配置 `networks: llm` 都不跨机器生效，必须选用替代方案：
+
+| 方案 | 配置要点 | 优点 | 风险 / 成本 | 适用场景 |
+|---|---|---|---|---|
+| B1 端口映射 + 实际 IP | GPU 主机：vllm 映射 `0.0.0.0:8000:8000`；core 主机：`deploy/docker-compose/.env` 写 `LLM_API_BASE=http://<vllm主机IP>:8000/v1` 与 `LLM_API_KEY=<key>`（未设置时默认 `http://vllm:8000/v1` 与 `EMPTY`，零配置） | 零改造、最快打通 | 端口直裸公网有安全风险（vllm 默认无鉴权、API Key 为 `EMPTY`）；IP 变化需改配置 | 内网互通 / 快速验证 |
+| B2 组网（WireGuard / Tailscale） | 两台主机接入同一虚拟内网（Tailscale 分配 100.x 地址）；vllm 监听 `0.0.0.0:8000`；core 写 `http://<vllm虚拟内网IP>:8000/v1` | 不暴露公网端口、虚拟 IP 稳定，安全 | 需安装维护组网工具 | 生产推荐（公网环境安全访问） |
+| B3 Swarm overlay 网络 | 两台主机 `docker swarm join` 加入同一集群，`docker network create -d overlay llm`，服务名跨节点由 swarm 内置 DNS 解析 | 服务名直连体验与 bridge 一致 | 需将 compose 迁移为 `docker stack deploy`（服务需补 `deploy:` 段） | 已采用 Swarm 的团队 |
+| B4 K8s（本项目正式形态） | 见 §6.2：Helm `llm.enabled=true` 自动创建 `-llm` Deployment + Service，core 用 `http://<fullname>-llm:8000/v1` 跨节点访问 | 跨节点 DNS、多副本、自动恢复、GPU 调度 | 需要 K8s 集群运维能力 | 生产多副本 / 大规模 |
+
+**选型速查**：
+
+| 我的部署形态 | 直接选 |
+|---|---|
+| 单台 GPU 主机，core + vllm 同机 | 默认 `networks: llm`（零改动） |
+| 两台主机内网互通（如同机房） | B1 端口映射（配合防火墙限制来源 IP） |
+| 两台主机公网隔离（不同公网 IP） | B2 组网（推荐）或 B4 K8s |
+| 已上容器集群 | B3 Swarm 或 B4 K8s |
+
+> **安全与网络调优提醒**：
+> 1. **鉴权安全**：B1 若必须暴露公网，vllm 默认无鉴权（`PRIVACY_LLM_API_KEY=EMPTY`），务必用防火墙/安全组把 8000 端口限制为仅 core 主机 IP 可访问，若通过网关加了 Token 鉴权，可在 `deploy/docker-compose/.env` 配置 `LLM_API_KEY=sk-xxxx`；跨公网方案应优先考虑 B2 组网，避免端口直裸。
+> 2. **网络延迟与超时**：跨主机/跨云网络延迟（10~50ms）高于本机网桥（<0.5ms）。在大流量或长文本生成场景下，若网络波动引起偶发超时，可在根目录 `.env` 中按需调大 `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` 或配置专线加速。
+
 ### 5.3 自动化 Docker 脚本运行集
 
 为简化容器化运维与测试，项目在 `scripts/dev/`（侧边栏/LLM 单组分）与 `console/scripts/`（全栈/控制台）中内置了一套便捷的 Docker 脚本：
@@ -803,51 +887,24 @@ naming to privacy-local-agent:0.1.0                ← 构建出同名镜像
 ./console/scripts/docker-stop.sh
 ```
 
-```yaml
-services:
-  privacy-local-agent:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-      target: core                    # 使用 core 镜像
-    ports:
-      - "8079:8079"                   # REST
-      - "50051:50051"                 # gRPC
-    environment:
-      PRIVACY_REST_HOST: "0.0.0.0"
-      PRIVACY_GRPC_HOST: "0.0.0.0"
-      PRIVACY_PROFILE: "/etc/privacy-local-agent/privacy-profile.yaml"
-      PRIVACY_LOG_LEVEL: "INFO"
-      PRIVACY_LOG_FORMAT: "text"
-    volumes:
-      - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
-```
+| 脚本文件 | 适用场景与功能 | 默认端口 / 网络 | 对应自动化测试套件 |
+|---|---|---|---|
+| `scripts/dev/docker-start-agent.sh` | 单独启动 Agent 容器（支持 `core` / `ml` 镜像） | REST: 8079, gRPC: 50051 | `tests/scripts/test_docker_start_agent.py` |
+| `scripts/dev/docker-stop-agent.sh` | 停止并删除 Agent 单容器 | — | `tests/scripts/test_docker_start_agent.py` |
+| `scripts/dev/docker-start-llm.sh` | 启动独立 vLLM 大模型 GPU 推理容器 | HTTP: 8000 (OpenAI 兼容) | `tests/scripts/test_docker_start_llm.py` |
+| `scripts/dev/docker-stop-llm.sh` | 停止并删除 vLLM 大模型容器 | — | `tests/scripts/test_docker_start_llm.py` |
+| `console/scripts/docker-start-all.sh` | 一键拉起 Agent + 双代理后端 + Web UI（可选 `--with-llm`） | Web: 5173, Go: 8081, Py: 8080 | Docker Compose 全栈编排 |
+| `console/scripts/docker-stop.sh` | 一键停止并清理所有全栈 Compose 容器 | — | 执行 `docker compose down` |
 
-**启用 TLS + 认证**（取消 docker-compose.yml 中的注释）：
-
-```yaml
-environment:
-  PRIVACY_TLS_ENABLED: "true"
-  PRIVACY_TLS_CERT_FILE: "/certs/tls.crt"
-  PRIVACY_TLS_KEY_FILE: "/certs/tls.key"
-  PRIVACY_AUTH_ENABLED: "true"
-  PRIVACY_AUTH_EXTERNAL_KEYS_JSON: '{"dev-key":{"name":"local","scopes":["*"]}}'
-volumes:
-  - ./certs:/certs:ro
-```
-
-**停止服务**：
-
-```bash
-docker compose down
-```
+> **自动化测试建议**：
+> 运行以下命令可自动验证启动脚本、网络拓扑与真实容器的生命周期：
+> ```bash
+> # 运行 Agent 脚本、Compose 拓扑与 Docker 容器全套测试（30 用例）
+> .venv/bin/pytest tests/scripts/test_docker_start_agent.py -v -s
+>
+> # 运行 vLLM 大模型脚本与 OpenAI 兼容推理测试
+> .venv/bin/pytest tests/scripts/test_docker_start_llm.py -v -s
+> ```
 
 ### 5.4 Docker Compose 常用命令速查（小白学习用）
 
@@ -875,6 +932,7 @@ docker compose down
 | 我的需求 | 修改位置 | 生效方式 |
 |---|---|---|
 | 换 LLM 推理后端（vllm/qwen3/mlx/openai） | 根目录 `.env` 的 `PRIVACY_ENV_PROFILE` | 本地重启进程；容器 `docker compose up -d` |
+| core 与 vllm 跨主机部署（分机/跨云） | `deploy/docker-compose/.env` 写 `LLM_API_BASE=http://<vllm主机IP>:8000/v1` 与 `LLM_API_KEY=sk-xxx`（详见 5.2.11 ④） | `docker compose up -d` |
 | 改监听端口 8079 / 50051 | 根目录 `.env`（agent 行为）+ compose `ports:`（映射） | `docker compose up -d` |
 | 改 vLLM 对外端口 | compose 的 vllm `ports:`（如 `"9000:8000"`，只改左侧宿主端口） | `docker compose up -d vllm`（详见 5.2.6） |
 | 开 TLS / API Key 认证 | 根目录 `.env` 取消注释（本地）；compose `environment:` 取消注释（容器） | 重建容器 |

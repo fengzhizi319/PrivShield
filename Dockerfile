@@ -12,9 +12,9 @@
 #        │
 #        ▼
 #   ┌─────────────────────────── [base] ───────────────────────────┐
-#   │ ① 安装系统工具（curl + ca-certificates）                      │
-#   │ ② 创建非 root 运行用户 privacy（安全最佳实践）                 │
-#   │ ③ 安装核心依赖 requirements-core.txt（利用分层缓存）           │
+#   │ ① 安装系统工具（curl + ca-certificates）                        │
+#   │ ② 创建非 root 运行用户 privacy（安全最佳实践）                     │
+#   │ ③ 安装核心依赖 requirements-core.txt（利用分层缓存）               │
 #   └──────────────────────────────────────────────────────────────┘
 #        │
 #        ├───────────────► [core] 默认轻量运行镜像（推荐）
@@ -45,7 +45,7 @@
 # ==============================================================================
 # 基础镜像选型：
 #   - python:3.13.13        : 与本地开发/ML 推理环境（conda pygpu、项目 .venv 均为 Python 3.13）一致；
-#                              Qwen3.5 推理链路（transformers>=5.14 / fla-core>=0.5.2）实测验证于 3.13，
+#                              Qwen3.5 推理链路（transformers>=5.14 / fla-core>=0.5.2）实测验证于 3.13
 #                              避免镜像与验证环境版本错位
 #   - slim-bookworm         : Debian 精简版，减小镜像体积与攻击面
 #   - 精确 tag（非 3.13 大版本号）: 锁定具体版本，保证构建可追溯、可复现
@@ -72,7 +72,7 @@ RUN apt-get update \
 #   - requirements-core.txt 仅含核心运行依赖（FastAPI/gRPC/隐私原语/规则引擎），
 #     重型 ML 依赖（torch/transformers/onnxruntime）不进入默认镜像
 COPY requirements-core.txt .
-RUN pip install --no-cache-dir -r requirements-core.txt
+RUN pip install --no-cache-dir -r requirements-core.txt -i https://mirrors.aliyun.com/pypi/simple/ --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # ==============================================================================
 # Stage 2: core —— 默认轻量运行镜像（推荐）
@@ -153,7 +153,7 @@ COPY requirements-ml.txt .
 #   - --no-cache-dir : 不缓存下载的 wheel 包，减小镜像体积
 #   - find -exec rm  : 清理 site-packages 下的 __pycache__（体积优化，
 #                      find 失败不影响构建——2>/dev/null + || true 容错）
-RUN pip install --no-cache-dir -r requirements-ml.txt \
+RUN pip install --no-cache-dir -r requirements-ml.txt -i https://mirrors.aliyun.com/pypi/simple/ --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple \
     && find /usr/local/lib/python*/site-packages -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 # 重新切回非 root 用户（与 core 阶段的安全基线保持一致）
 USER privacy
