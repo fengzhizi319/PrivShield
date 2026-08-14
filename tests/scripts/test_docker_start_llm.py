@@ -1068,6 +1068,13 @@ class TestVllmServiceIntegration:
             assert sanitized_p is not None, f"第 {idx} 分段 LLM 脱敏抹平失败"
             sanitized_chunks.append(sanitized_p)
 
+            # 汇总每段的 Token 消耗
+            if hasattr(client, "last_usage") and client.last_usage:
+                chunk_prompt_tokens = client.last_usage.get("prompt_tokens", 0)
+                chunk_completion_tokens = client.last_usage.get("completion_tokens", 0)
+                total_prompt_tokens += chunk_prompt_tokens
+                total_completion_tokens += chunk_completion_tokens
+
             # 调试打印逻辑：文本长度 <= 2000 字符时全部打印，方便调试；大于 2000 时仅打印前 200 字符预览
             if len(sanitized_p) <= 2000:
                 print(
@@ -1109,6 +1116,14 @@ class TestVllmServiceIntegration:
         # 3. 结果文本中不得包含 [已抹平] 或 [泛化] 等影响可读性的生硬占位标签
         assert "[已抹平]" not in sanitized_result_text, "输出包含人工占位标签 [已抹平]"
         assert "[泛化]" not in sanitized_result_text, "输出包含人工占位标签 [泛化]"
+
+        # 全局 cumulative_usage 兜底校验
+        if hasattr(client, "cumulative_usage") and client.cumulative_usage:
+            cum_prompt = client.cumulative_usage.get("prompt_tokens", 0)
+            cum_completion = client.cumulative_usage.get("completion_tokens", 0)
+            if cum_prompt > 0 or cum_completion > 0:
+                total_prompt_tokens = cum_prompt
+                total_completion_tokens = cum_completion
 
         print(f"\n[脱敏生成完成] 输出目标文件: {output_file_path}")
         print(

@@ -186,6 +186,8 @@ class MLXLlmClassifier(LlmClassifier):
         self._initialized = False
         self._init_error: Exception | None = None
         self._lock = threading.Lock()
+        self.last_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.cumulative_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     @property
     def is_ready(self) -> bool:
@@ -473,6 +475,15 @@ class MLXLlmClassifier(LlmClassifier):
             completion_tokens = len(self._tokenizer.encode(output_text)) if output_text else 0
             total_tokens = prompt_tokens + completion_tokens
 
+            self.last_usage = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            }
+            self.cumulative_usage["prompt_tokens"] += prompt_tokens
+            self.cumulative_usage["completion_tokens"] += completion_tokens
+            self.cumulative_usage["total_tokens"] += total_tokens
+
             CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="prompt", engine="mlx").inc(prompt_tokens)
             CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="completion", engine="mlx").inc(completion_tokens)
             CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="total", engine="mlx").inc(total_tokens)
@@ -480,11 +491,7 @@ class MLXLlmClassifier(LlmClassifier):
             # 解析 JSON 结果
             result = self._parse_json_result(output_text)
             if result is not None:
-                result["usage"] = {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                }
+                result["usage"] = dict(self.last_usage)
 
             duration = time.monotonic() - start_time
             CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()

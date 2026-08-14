@@ -190,6 +190,8 @@ class Qwen3Classifier(LlmClassifier):
         # 即使推理卡死也不会永久阻塞 gRPC 工作线程。
         # max_workers=1 确保同一时刻只有一个推理任务在执行（串行化）。
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-infer")
+        self.last_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.cumulative_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     def _lazy_init(self):
         """延迟初始化模型 / Lazy-Initialize Model.
@@ -738,6 +740,15 @@ class Qwen3Classifier(LlmClassifier):
                 completion_tokens = len(generated_ids_trimmed[0])
                 total_tokens = prompt_tokens + completion_tokens
 
+                self.last_usage = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                }
+                self.cumulative_usage["prompt_tokens"] += prompt_tokens
+                self.cumulative_usage["completion_tokens"] += completion_tokens
+                self.cumulative_usage["total_tokens"] += total_tokens
+
                 CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="prompt", engine="qwen3").inc(prompt_tokens)
                 CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="completion", engine="qwen3").inc(completion_tokens)
                 CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="total", engine="qwen3").inc(total_tokens)
@@ -753,11 +764,7 @@ class Qwen3Classifier(LlmClassifier):
 
                 result = self._parse_json_result(output_text, upstream_level, upstream_confidence)
                 if result is not None:
-                    result["usage"] = {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                    }
+                    result["usage"] = dict(self.last_usage)
                 CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
                 return result
             finally:
@@ -908,6 +915,8 @@ class OpenAILlmClassifier(LlmClassifier):
         self._lock = threading.Lock()
         max_http_workers = int(os.environ.get("PRIVACY_LLM_HTTP_WORKERS", "16"))
         self._executor = ThreadPoolExecutor(max_workers=max_http_workers, thread_name_prefix="vllm-http-infer")
+        self.last_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.cumulative_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     def _is_finetuned_model(self) -> bool:
         """判断当前请求的模型是否为项目微调的 Privacy-Classifier-Smoother 模型。
@@ -1146,7 +1155,16 @@ class OpenAILlmClassifier(LlmClassifier):
                 usage = resp_json.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
-                total_tokens = usage.get("total_tokens", 0)
+                total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+
+                self.last_usage = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                }
+                self.cumulative_usage["prompt_tokens"] += prompt_tokens
+                self.cumulative_usage["completion_tokens"] += completion_tokens
+                self.cumulative_usage["total_tokens"] += total_tokens
 
                 if prompt_tokens:
                     CLASSIFICATION_LLM_TOKENS_TOTAL.labels(type="prompt", engine="vllm").inc(prompt_tokens)
@@ -1166,8 +1184,7 @@ class OpenAILlmClassifier(LlmClassifier):
 
                 result = self._parse_json_result(content, upstream_level, upstream_confidence)
                 if result:
-                    if usage:
-                        result["usage"] = usage
+                    result["usage"] = dict(self.last_usage)
                     CLASSIFICATION_LLM_TOTAL.labels(status="success").inc()
                 else:
                     CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
@@ -1180,14 +1197,32 @@ class OpenAILlmClassifier(LlmClassifier):
     def _parse_json_result(
         self, output_text: str, upstream_level: SensitivityLevel, upstream_confidence: float
     ) -> dict[str, Any] | None:
-        json_match = re.search(r"(\{.*\})", output_text, re.DOTALL)
-        json_str = json_match.group(1) if json_match else output_text
+        cleaned_text = re.sub(r"<think>.*?</think>", "", output_text, flags=re.DOTALL).strip()
+        json_match = re.search(r"(\{.*\})", cleaned_text, re.DOTALL)
+        json_str = json_match.group(1) if json_match else cleaned_text
         try:
             res = json.loads(json_str)
-            if "final_level" in res:
-                return cast("dict[str, Any]", res)
-        except Exception as e:
-            logger.warning("llm_json_parse_failed", extra={"error": str(e)})
+            if isinstance(res, dict):
+                if "final_level" not in res and "level" in res:
+                    res["final_level"] = res["level"]
+                if "confidence" not in res:
+                    res["confidence"] = 0.9
+                if "final_level" in res:
+                    return cast("dict[str, Any]", res)
+        except Exception:
+            try:
+                short_match = re.search(r"(\{[^{}]+\})", cleaned_text, re.DOTALL)
+                if short_match:
+                    res = json.loads(short_match.group(1))
+                    if isinstance(res, dict):
+                        if "final_level" not in res and "level" in res:
+                            res["final_level"] = res["level"]
+                        if "confidence" not in res:
+                            res["confidence"] = 0.9
+                        if "final_level" in res:
+                            return cast("dict[str, Any]", res)
+            except Exception as e:
+                logger.warning("llm_json_parse_failed", extra={"error": str(e)})
         return None
 
 
