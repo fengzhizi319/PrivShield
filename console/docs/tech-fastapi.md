@@ -69,8 +69,8 @@ async def health():
 
 @app.post("/api/proxy")
 async def proxy(req: ProxyRequest):
-    """通用代理：转发请求到 privacy-local-agent。
-    Generic proxy: forward request to privacy-local-agent."""
+    """通用代理：转发请求到 PrivShield。
+    Generic proxy: forward request to PrivShield."""
     ...
 
 @app.post("/api/batch")
@@ -1382,7 +1382,7 @@ uvicorn.run(
 # 开发环境 / Development
 docker run -p 8079:8079 \
   -e PRIVACY_LOG_LEVEL=debug \
-  privacy-local-agent:0.1.0
+  PrivShield:0.1.0
 
 # 生产环境 / Production
 docker run -d \
@@ -1396,7 +1396,7 @@ docker run -d \
   --memory=512m \
   --cpus=2 \
   --restart=unless-stopped \
-  privacy-local-agent:0.1.0
+  PrivShield:0.1.0
 ```
 
 ### 16.3 性能调优策略 / Performance Tuning Strategies
@@ -1422,14 +1422,14 @@ python -m privacy_local_agent.server
 # REST: http://127.0.0.1:8079 | gRPC: 127.0.0.1:50051
 
 # 2. Docker 单容器 / Docker single container
-docker build --target core -t privacy-local-agent:0.1.0 .
-docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker build --target core -t PrivShield:0.1.0 .
+docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 
 # 3. Docker Compose (含代理) / Docker Compose (with proxy)
 cd deploy/docker-compose && docker-compose up -d
 
 # 4. Kubernetes + Helm
-helm install pla ./deploy/helm/privacy-local-agent \
+helm install pla ./deploy/helm/PrivShield \
   -f values-production.yaml
 
 # 5. Sidecar 模式 / Sidecar mode

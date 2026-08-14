@@ -32,7 +32,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy-local-agent` 可观测性模块的技术架构、设计原理与实现细节。该模块为生产环境提供结构化日志、Prometheus 指标与分布式追踪能力。
+本文档定义 `PrivShield` 可观测性模块的技术架构、设计原理与实现细节。该模块为生产环境提供结构化日志、Prometheus 指标与分布式追踪能力。
 
 ## 2. 设计目标
 
@@ -72,7 +72,7 @@ graph TD
 def configure_logging(
     log_level: str = "INFO",
     json_format: bool = False,
-    service_name: str = "privacy-local-agent",
+    service_name: str = "PrivShield",
 ) -> None
 ```
 

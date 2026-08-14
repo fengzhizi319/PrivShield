@@ -2050,7 +2050,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       backend:
-        image: privacy-local-agent:latest
+        image: PrivShield:latest
         ports: ['8079:8079']
     steps:
       - uses: actions/checkout@v4

@@ -1,6 +1,6 @@
 # 动态分类分级测试指南
 
-本文档描述 `privacy-local-agent` 动态分类分级模块的测试策略、单元测试方法、影子模式（Shadow Mode）对比测试与规则 Schema 自动化校验。
+本文档描述 `PrivShield` 动态分类分级模块的测试策略、单元测试方法、影子模式（Shadow Mode）对比测试与规则 Schema 自动化校验。
 
 ---
 
@@ -152,7 +152,7 @@ def test_ner_custom_sensitive_keywords(taxonomy, engine_conflict):
 ### 校验命令
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 PYTHONPATH=. python -m pytest tests/dynclassification/ -v
 ```
 
@@ -191,7 +191,7 @@ def test_validate_standards(yaml_file):
 ## 5. 运行全套单元测试
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 PYTHONPATH=. pytest tests/dynclassification/ -v
 ```
 

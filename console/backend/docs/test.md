@@ -17,7 +17,7 @@ pytest tests -q
 
 ## 2. 测试策略
 
-单元测试**不依赖**运行中的 `privacy-local-agent`，核心手段有二：
+单元测试**不依赖**运行中的 `PrivShield`，核心手段有二：
 
 1. **`fastapi.testclient.TestClient`**：直接包裹 FastAPI 应用发起内存请求，无需真实监听端口；
 2. **`unittest.mock.AsyncMock` 打桩**：对上游客户端的异步方法打桩，隔离对真实 agent 的网络依赖：
@@ -73,11 +73,11 @@ pytest tests -k "lb_test" -v
 
 ### 前置条件
 
-后端（8080）与 `privacy-local-agent`（8079）均已启动：
+后端（8080）与 `PrivShield`（8079）均已启动：
 
 ```bash
 # 终端一：启动 agent
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 python -m privacy_local_agent.server
 
 # 终端二：启动后端
@@ -112,7 +112,7 @@ cd console/backend
 ### 使用一键脚本（同时启动 agent 与后端）
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 ./console/scripts/dev-start.sh       # 启动
 ./console/scripts/dev-stop.sh        # 停止
 ```

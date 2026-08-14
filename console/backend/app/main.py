@@ -7,9 +7,9 @@ FastAPI backend entry point for the Privacy Test Console.
        Mounts the built React SPA (``web/dist``) as static assets, enabling browsers
        to access the console UI directly through this backend;
     2. 作为“代理层”，把前端发来的 ``/api/proxy`` / ``/api/batch`` 请求
-       透明转发到运行中的 ``privacy-local-agent`` REST 服务；
+       透明转发到运行中的 ``PrivShield`` REST 服务；
        Acts as a "proxy layer", transparently forwarding ``/api/proxy`` / ``/api/batch``
-       requests from the frontend to the running ``privacy-local-agent`` REST service;
+       requests from the frontend to the running ``PrivShield`` REST service;
     3. 提供 ``/api/health``（连通性检查）与 ``/api/samples``（示例数据）两个辅助接口。
        Provides ``/api/health`` (connectivity check) and ``/api/samples`` (sample data) auxiliary endpoints.
 
@@ -303,7 +303,7 @@ async def samples():
 
 @app.post("/api/proxy")
 async def proxy(req: ProxyRequest):
-    """通用代理：把一个请求转发到 privacy-local-agent REST 服务。
+    """通用代理：把一个请求转发到 PrivShield REST 服务。
 
     处理流程：
         1. 若携带 ``raw_payload_b64``，先 base64 解码为二进制载荷

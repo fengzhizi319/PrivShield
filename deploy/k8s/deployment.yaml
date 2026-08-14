@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: privacy-local-agent
-  namespace: privacy-local-agent
+  name: PrivShield
+  namespace: PrivShield
   labels:
-    app: privacy-local-agent
+    app: PrivShield
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: privacy-local-agent
+      app: PrivShield
   template:
     metadata:
       labels:
-        app: privacy-local-agent
+        app: PrivShield
     spec:
       containers:
         - name: agent
-          image: privacy-local-agent:0.1.0
+          image: PrivShield:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -34,7 +34,7 @@ spec:
             - name: PRIVACY_GRPC_PORT
               value: "50051"
             - name: PRIVACY_PROFILE
-              value: "/etc/privacy-local-agent/privacy-profile.yaml"
+              value: "/etc/PrivShield/privacy-profile.yaml"
             - name: PRIVACY_LOG_LEVEL
               value: "INFO"
             - name: PRIVACY_LOG_FORMAT
@@ -52,7 +52,7 @@ spec:
             # - name: PRIVACY_AUTH_EXTERNAL_KEYS_JSON
             #   valueFrom:
             #     secretKeyRef:
-            #       name: privacy-local-agent-apikeys
+            #       name: PrivShield-apikeys
             #       key: api-keys.json
             # 如需启用 Layer-3 LLM 独立推理服务（运行时解耦），取消下面注释并部署
             # llm-deployment.yaml / llm-service.yaml（LLM 挂掉时 core 自动降级 Layer-1+2）：
@@ -66,7 +66,7 @@ spec:
             #   value: "EMPTY"
           volumeMounts:
             - name: config
-              mountPath: /etc/privacy-local-agent
+              mountPath: /etc/PrivShield
               readOnly: true
             # - name: tls-certs
             #   mountPath: /certs
@@ -94,7 +94,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: privacy-local-agent-config
+            name: PrivShield-config
         # - name: tls-certs
         #   secret:
-        #     secretName: privacy-local-agent-tls
+        #     secretName: PrivShield-tls

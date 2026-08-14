@@ -62,7 +62,7 @@ PRIVACY_GATEWAY_CONFIG=gateway-config.yaml PYTHONPATH=. .venv/bin/python -m priv
 ```
 
 ### 2.2 Docker 部署 (多容器扩容场景)
-在一台或多台机器上分别部署多个 `privacy-local-agent` 容器作为 Worker，并启动一个网关容器分发流量。
+在一台或多台机器上分别部署多个 `PrivShield` 容器作为 Worker，并启动一个网关容器分发流量。
 
 **Docker Compose 快速编排示例 (`docker-compose.yaml`)**：
 ```yaml

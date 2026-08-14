@@ -24,7 +24,7 @@
 验证代理转发与负载均衡网关 (Gateway / Load Balancer) 的正确性、可用性与健壮性，确保其能够在高并发环境下正确分发 REST HTTP 和 gRPC 流量，并平滑处理后端节点的健康状态更替与故障转移。
 
 ### 1.2 测试策略
-- **集成测试 (Integration Testing)**：不使用繁琐的 Mock 数据，而是通过测试夹具 (pytest fixture) 在后台线程中真实启动 `privacy-local-agent` 服务（同时监听动态分配的空闲 REST 和 gRPC 端口）。
+- **集成测试 (Integration Testing)**：不使用繁琐的 Mock 数据，而是通过测试夹具 (pytest fixture) 在后台线程中真实启动 `PrivShield` 服务（同时监听动态分配的空闲 REST 和 gRPC 端口）。
 - **动态端口分配**：通过 socket 自动获取系统空闲端口，彻底规避并行测试或不同机器上的端口冲突问题。
 - **双协议验证**：
   - REST：使用 FastAPI `TestClient` 发送 HTTP 请求给网关，验证网关代理的透传率、正确率及异常响应 (503)。

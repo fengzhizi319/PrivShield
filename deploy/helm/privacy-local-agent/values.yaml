@@ -9,7 +9,7 @@ namespace:
 flavor: core
 
 image:
-  repository: privacy-local-agent
+  repository: PrivShield
   pullPolicy: IfNotPresent
   # 留空时默认使用 Chart.appVersion
   tag: ""
@@ -53,7 +53,7 @@ service:
 agent:
   logLevel: info
   logFormat: text
-  # privacy-profile.yaml 内容（挂载到 /etc/privacy-local-agent/privacy-profile.yaml）。
+  # privacy-profile.yaml 内容（挂载到 /etc/PrivShield/privacy-profile.yaml）。
   # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
   # primitives.<primitive> 覆盖内置默认参数；其他顶层键（如 server:/privacy:）
   # 不会被解析。监听地址等请改用 extraEnv 设置 PRIVACY_* 环境变量。
@@ -177,7 +177,7 @@ ingress:
   className: ""
   annotations: {}
   hosts:
-    - host: privacy-local-agent.local
+    - host: PrivShield.local
       paths:
         - path: /
           pathType: Prefix

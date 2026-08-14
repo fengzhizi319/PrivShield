@@ -1,4 +1,4 @@
-# privacy-local-agent 隐私参数配置（docker-compose 挂载用）
+# PrivShield 隐私参数配置（docker-compose 挂载用）
 #
 # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
 # primitives.<primitive> 覆盖内置默认参数；其他顶层键（如 server:/privacy:）

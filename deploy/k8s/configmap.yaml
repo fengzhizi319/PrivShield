@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: privacy-local-agent-config
-  namespace: privacy-local-agent
+  name: PrivShield-config
+  namespace: PrivShield
 data:
   # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
   # primitives.<primitive> 覆盖内置默认参数；其他顶层键（如 server:/privacy:）

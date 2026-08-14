@@ -56,10 +56,10 @@ go test ./internal/handlers -v
 
 ### 前置条件
 
-集成测试需要真实启动 `privacy-local-agent`：
+集成测试需要真实启动 `PrivShield`：
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 python -m privacy_local_agent.server
 ```
 
@@ -160,7 +160,7 @@ go run ./cmd/server
 或使用仓库根目录的一键脚本（同时启动 agent 与 Go 代理）：
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 ./console/scripts/dev-start-go.sh
 ./console/scripts/dev-stop.sh    # 在另一个终端停止
 ```

@@ -22,7 +22,7 @@
 
 ## 1. 项目全景：你在学什么
 
-本项目 `privacy-local-agent` 是一个**隐私计算 Sidecar**，整体架构分三层：
+本项目 `PrivShield` 是一个**隐私计算 Sidecar**，整体架构分三层：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -589,10 +589,10 @@ cd console/web && corepack pnpm dev
 
 ```bash
 # 构建 agent 镜像
-docker build --target core -t privacy-local-agent:0.1.0 .
+docker build --target core -t PrivShield:0.1.0 .
 
 # 运行
-docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 ```
 
 ### 7.4 环境变量速查

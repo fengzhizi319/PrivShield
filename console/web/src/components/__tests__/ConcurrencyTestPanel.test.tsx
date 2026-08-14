@@ -96,9 +96,9 @@ describe('ConcurrencyTestPanel', () => {
     render(<ConcurrencyTestPanel />);
     // 点击 DP Count 预设
     fireEvent.click(screen.getByText('DP Count'));
-    // 路径输入框应变为 /v1/privacy/dp_count
+    // 路径输入框应变为 /v1/privacy/dp/count
     const pathInput = screen.getByPlaceholderText('/v1/privacy/mask');
-    expect(pathInput).toHaveValue('/v1/privacy/dp_count');
+    expect(pathInput).toHaveValue('/v1/privacy/dp/count');
   });
 
   it('点击 Health Check 预设切换为 GET 方法并清空请求体', () => {

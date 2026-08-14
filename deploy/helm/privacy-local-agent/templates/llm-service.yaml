@@ -4,14 +4,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "privacy-local-agent.fullname" . }}-llm
+  name: {{ include "PrivShield.fullname" . }}-llm
   labels:
-    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    {{- include "PrivShield.labels" . | nindent 4 }}
     app.kubernetes.io/component: llm
 spec:
   type: ClusterIP
   selector:
-    {{- include "privacy-local-agent.selectorLabels" . | nindent 4 }}
+    {{- include "PrivShield.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: llm
   ports:
     - name: http

@@ -129,7 +129,7 @@ def generate_self_signed_certs(tmp_dir: Path) -> dict[str, Path]:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     ca_key = _generate_key()
-    ca_cert = _make_ca("privacy-local-agent-example-ca", ca_key)
+    ca_cert = _make_ca("PrivShield-example-ca", ca_key)
 
     server_key = _generate_key()
     server_cert = _make_end_entity(

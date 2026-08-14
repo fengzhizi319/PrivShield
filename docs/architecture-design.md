@@ -447,8 +447,8 @@ FROM core AS ml                        # 完整镜像：--target ml，叠加 req
 ```
 
 ```bash
-docker build --target core -t privacy-local-agent:0.1.0 .
-docker build --target ml   -t privacy-local-agent:0.1.0-ml .
+docker build --target core -t PrivShield:0.1.0 .
+docker build --target ml   -t PrivShield:0.1.0-ml .
 ```
 
 依赖拆分为 `requirements-core.txt` 与 `requirements-ml.txt`；`base` 先装核心依赖以最大化镜像层缓存命中。

@@ -56,7 +56,7 @@ def _make_json_formatter() -> logging.Formatter:
 def configure_logging(
     log_level: str = "INFO",
     json_format: bool = False,
-    service_name: str = "privacy-local-agent",
+    service_name: str = "PrivShield",
 ) -> None:
     """Configure root logging.
 

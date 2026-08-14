@@ -37,7 +37,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy-local-agent` 的部署架构、交付形式与配置管理策略。通过 Helm Chart、原生 K8s manifests 与 Docker Compose 三种形式，覆盖从本地联调到 Kubernetes 生产部署的完整场景。
+本文档定义 `PrivShield` 的部署架构、交付形式与配置管理策略。通过 Helm Chart、原生 K8s manifests 与 Docker Compose 三种形式，覆盖从本地联调到 Kubernetes 生产部署的完整场景。
 
 ## 2. 设计目标
 
@@ -258,7 +258,7 @@ deploy/helm/privacy-local-agent/
 
 ```yaml
 image:
-  repository: privacy-local-agent
+  repository: PrivShield
   tag: ""  # 默认使用 Chart.appVersion
   pullPolicy: IfNotPresent
 
@@ -460,14 +460,14 @@ LLM 推理进程内置三道护栏（`llm_adapter.py`，模块级全局，所有
 
 ```bash
 # 1. 构建镜像（core）
-docker build --target core -t privacy-local-agent:0.1.0 .
+docker build --target core -t PrivShield:0.1.0 .
 
 # 2. 安装 Helm chart（开发模式）
-helm install privacy-local-agent ./deploy/helm/privacy-local-agent
+helm install PrivShield ./deploy/helm/PrivShield
 
 # 3. 生产模式 + 自管证书
-helm install privacy-local-agent ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm install PrivShield ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=my-tls-secret \
   --set security.auth.apiKeysSecret=my-apikeys-secret
 
@@ -532,32 +532,32 @@ podDisruptionBudget:
 
 ```bash
 # 查看发布历史 / View release history
-helm history privacy-local-agent
+helm history PrivShield
 
 # 回滚到上一版本 / Rollback to previous version
-helm rollback privacy-local-agent
+helm rollback PrivShield
 
 # 回滚到指定版本 / Rollback to specific revision
-helm rollback privacy-local-agent 3
+helm rollback PrivShield 3
 
 # 回滚并等待完成 / Rollback and wait for completion
-helm rollback privacy-local-agent --wait --timeout 5m
+helm rollback PrivShield --wait --timeout 5m
 ```
 
 #### 11.2.2 原生 K8s 回滚
 
 ```bash
 # 查看 Deployment 历史 / View deployment history
-kubectl rollout history deployment/privacy-local-agent
+kubectl rollout history deployment/PrivShield
 
 # 回滚到上一版本 / Rollback to previous version
-kubectl rollout undo deployment/privacy-local-agent
+kubectl rollout undo deployment/PrivShield
 
 # 回滚到指定版本 / Rollback to specific revision
-kubectl rollout undo deployment/privacy-local-agent --to-revision=3
+kubectl rollout undo deployment/PrivShield --to-revision=3
 
 # 查看回滚状态 / Watch rollback status
-kubectl rollout status deployment/privacy-local-agent
+kubectl rollout status deployment/PrivShield
 ```
 
 #### 11.2.3 自动回滚触发条件 / Auto-Rollback Triggers
@@ -579,18 +579,18 @@ kubectl rollout status deployment/privacy-local-agent
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
-  name: privacy-local-agent
+  name: PrivShield
 spec:
   replicas: 3
   strategy:
     blueGreen:
-      activeService: privacy-local-agent-active
-      previewService: privacy-local-agent-preview
+      activeService: PrivShield-active
+      previewService: PrivShield-preview
       autoPromotionEnabled: false  # 手动确认切换
       abortScaleDownDelaySeconds: 30
   selector:
     matchLabels:
-      app: privacy-local-agent
+      app: PrivShield
   template:
     # ... Pod template spec
 ```
@@ -605,10 +605,10 @@ kubectl apply -f rollout.yaml
 curl http://privacy-local-agent-preview:8079/health
 
 # 3. 手动确认切换
-kubectl argo rollouts promote privacy-local-agent
+kubectl argo rollouts promote PrivShield
 
 # 4. 如有问题，快速回滚
-kubectl argo rollouts abort privacy-local-agent
+kubectl argo rollouts abort PrivShield
 ```
 
 ### 11.4 金丝雀发布（可选）/ Canary Release (Optional)

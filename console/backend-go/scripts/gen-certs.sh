@@ -4,9 +4,9 @@
 #
 # Purpose / 用途：
 #   Generate a set of self-signed test certificates for mTLS mutual authentication
-#   between the Go gRPC proxy (client) and privacy-local-agent (gRPC server),
+#   between the Go gRPC proxy (client) and PrivShield (gRPC server),
 #   facilitating local integration testing.
-#   为 Go gRPC 代理（客户端）与 privacy-local-agent（gRPC 服务端）之间的
+#   为 Go gRPC 代理（客户端）与 PrivShield（gRPC 服务端）之间的
 #   mTLS 双向认证生成一套自签名测试证书，方便本地联调与集成测试。
 #
 # Generated files (default output: console/backend-go/certs/) / 生成的文件：

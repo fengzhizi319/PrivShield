@@ -1,6 +1,6 @@
 # PyTorch CUDA (Blackwell sm_120 / RTX 50 系列) 环境构建与避坑全指南
 
-本文档详细记录了在 **NVIDIA GeForce RTX 50 系列 (RTX 5060 / 5070 / 5080 / 5090)** 等基于 **Blackwell 架构 (`sm_120`)** 的硬件环境上，如何成功安装配置 CUDA 12.8 加速的 PyTorch 环境，并在 `privacy-local-agent` 侧边栏中运行 PyTorch / ModelScope 版 Layer-2 Small-NER 实体识别。
+本文档详细记录了在 **NVIDIA GeForce RTX 50 系列 (RTX 5060 / 5070 / 5080 / 5090)** 等基于 **Blackwell 架构 (`sm_120`)** 的硬件环境上，如何成功安装配置 CUDA 12.8 加速的 PyTorch 环境，并在 `PrivShield` 侧边栏中运行 PyTorch / ModelScope 版 Layer-2 Small-NER 实体识别。
 
 ---
 

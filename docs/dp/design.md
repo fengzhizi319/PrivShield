@@ -71,7 +71,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy-local-agent` 差分隐私（DP）模块的算法原理、技术架构与实现细节。DP 模块为 count、sum、mean 等聚合查询提供校准噪声注入能力，并通过 BudgetAccountant 追踪累计隐私预算消耗。
+本文档定义 `PrivShield` 差分隐私（DP）模块的算法原理、技术架构与实现细节。DP 模块为 count、sum、mean 等聚合查询提供校准噪声注入能力，并通过 BudgetAccountant 追踪累计隐私预算消耗。
 
 ## 2. 设计目标
 

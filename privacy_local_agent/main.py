@@ -150,7 +150,7 @@ async def lifespan(app: FastAPI):
     configure_logging(
         log_level=os.environ.get("PRIVACY_LOG_LEVEL", "INFO"),
         json_format=os.environ.get("PRIVACY_LOG_FORMAT", "text").lower() == "json",
-        service_name=os.environ.get("PRIVACY_SERVICE_NAME", "privacy-local-agent"),
+        service_name=os.environ.get("PRIVACY_SERVICE_NAME", "PrivShield"),
     )
 
     # Initialize OpenTelemetry distributed tracing (optional).
@@ -163,7 +163,7 @@ async def lifespan(app: FastAPI):
         endpoint=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"),
         service_name=os.environ.get(
             "OTEL_SERVICE_NAME",
-            os.environ.get("PRIVACY_SERVICE_NAME", "privacy-local-agent"),
+            os.environ.get("PRIVACY_SERVICE_NAME", "PrivShield"),
         ),
     )
 
@@ -193,7 +193,9 @@ async def lifespan(app: FastAPI):
 # （缩小攻击面）。
 _auth_enabled = get_security_settings().auth_enabled
 app = FastAPI(
-    title="SecretFlow Local Privacy Agent",
+    title="数盾 (PrivShield) 隐私治理边车",
+    description="数联天下企业级数据隐私计算、多原语脱敏与三层动态分类分级治理服务 (PrivShield Privacy Governance Sidecar)",
+    version="0.1.0",
     lifespan=lifespan,
     # docs_url=None disables Swagger UI; openapi_url=None disables the schema endpoint
     # docs_url=None 禁用 Swagger UI；openapi_url=None 禁用 schema 端点

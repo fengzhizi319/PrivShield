@@ -34,7 +34,7 @@
 
 数据分类分级通常需要遵循国家标准（如 GB/T 43697、GB/T 35273）、行业标准（如金融行业 JR/T 0197）或地方标准（如四川省 DB51/T 2989）。手动将文本格式的标准规范翻译为系统可执行的匹配规则 YAML 文件不仅繁琐，而且容易出错。
 
-`standard_profile_generator.py` 提供了 **`StandardProfileGenerator`** 工具类与 CLI 命令行工具，旨在将 Markdown 格式的分类分级标准文档自动解析并转化为 `privacy-local-agent` 动态分类分级引擎所需的三套标准 YAML 配置文件：
+`standard_profile_generator.py` 提供了 **`StandardProfileGenerator`** 工具类与 CLI 命令行工具，旨在将 Markdown 格式的分类分级标准文档自动解析并转化为 `PrivShield` 动态分类分级引擎所需的三套标准 YAML 配置文件：
 
 1. **`taxonomies/<standard_id>.yaml`**：分类树架构与敏感度等级元数据定义 (`DomainTaxonomy`)
 2. **`domains/<standard_id>.yaml`**：匹配规则包与敏感度降级压制规则定义 (`RuleProfile`)

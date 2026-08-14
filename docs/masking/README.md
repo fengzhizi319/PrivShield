@@ -1,6 +1,6 @@
 # 数据脱敏（Masking）文档索引
 
-本目录包含 `privacy-local-agent` 数据脱敏模块的全套 SDLC 文档。
+本目录包含 `PrivShield` 数据脱敏模块的全套 SDLC 文档。
 
 
 ## 目录 (Table of Contents)

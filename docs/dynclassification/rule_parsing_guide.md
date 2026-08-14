@@ -669,9 +669,9 @@ ENV PRIVACY_DYNCLASSIFICATION_RULES_DIR=/app/rules
 services:
   privacy-local-agent:
     environment:
-      PRIVACY_DYNCLASSIFICATION_RULES_DIR: "/etc/privacy-local-agent/rules"
+      PRIVACY_DYNCLASSIFICATION_RULES_DIR: "/etc/PrivShield/rules"
     volumes:
-      - ./rules:/etc/privacy-local-agent/rules:ro
+      - ./rules:/etc/PrivShield/rules:ro
 ```
 
 #### 场景四：Kubernetes / Helm 部署
@@ -680,7 +680,7 @@ services:
 # values.yaml
 extraEnv:
   - name: PRIVACY_DYNCLASSIFICATION_RULES_DIR
-    value: /etc/privacy-local-agent/rules
+    value: /etc/PrivShield/rules
 
 extraVolumes:
   - name: dynclassification-rules
@@ -689,7 +689,7 @@ extraVolumes:
 
 extraVolumeMounts:
   - name: dynclassification-rules
-    mountPath: /etc/privacy-local-agent/rules
+    mountPath: /etc/PrivShield/rules
     readOnly: true
 ```
 

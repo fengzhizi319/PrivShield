@@ -1,6 +1,6 @@
 # 从本地代码到 Kubernetes：privacy-local-agent 部署入门
 
-> 目标读者：刚接触 K8s / Helm，希望把本地跑通的 `privacy-local-agent` 代码部署到 Kubernetes 的同学。
+> 目标读者：刚接触 K8s / Helm，希望把本地跑通的 `PrivShield` 代码部署到 Kubernetes 的同学。
 > 读完本文，你应该能：
 > 1. 理解“本地 Python 代码 → 容器镜像 → K8s Pod” 的完整链路；
 > 2. 用 Helm 或原生 manifests 把服务跑在 K8s 上；
@@ -38,7 +38,7 @@
 
 ## 1. 一句话总结
 
-`privacy-local-agent` 本质是一个 Python 服务。本地开发时你直接运行 Python；部署到 K8s 时，我们先把代码和依赖打包进 Docker 镜像，再通过 **Deployment** 让 K8s 运行这个镜像的多个副本，用 **Service** 暴露 REST/gRPC 端口，用 **ConfigMap/Secret** 注入配置和证书。
+`PrivShield` 本质是一个 Python 服务。本地开发时你直接运行 Python；部署到 K8s 时，我们先把代码和依赖打包进 Docker 镜像，再通过 **Deployment** 让 K8s 运行这个镜像的多个副本，用 **Service** 暴露 REST/gRPC 端口，用 **ConfigMap/Secret** 注入配置和证书。
 
 ```text
 本地代码
@@ -100,10 +100,10 @@ base（安装系统依赖 + 核心 Python 依赖）
 
 ```bash
 # 构建 core 镜像（推荐默认）
-docker build --target core -t privacy-local-agent:0.1.0 .
+docker build --target core -t PrivShield:0.1.0 .
 
 # 构建 ml 镜像
-docker build --target ml -t privacy-local-agent:0.1.0-ml .
+docker build --target ml -t PrivShield:0.1.0-ml .
 
 # 也可以用 Makefile
 make docker-core
@@ -113,14 +113,14 @@ make docker-ml
 构建完成后查看镜像：
 
 ```bash
-docker images | grep privacy-local-agent
+docker images | grep PrivShield
 ```
 
 ### 3.3 本地运行验证
 
 ```bash
 # 本地运行 core 镜像
-docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 
 # 另开一个终端测试健康检查
 curl http://localhost:8079/health
@@ -153,7 +153,7 @@ K8s 节点要从某个地方拉取镜像，通常有两种方式：
 eval $(minikube docker-env)
 
 # 重新构建镜像（此时镜像会存在 minikube 内部）
-docker build --target core -t privacy-local-agent:0.1.0 .
+docker build --target core -t PrivShield:0.1.0 .
 
 # 退出 minikube docker-env 后，kubectl 就能看到镜像
 ```
@@ -161,17 +161,17 @@ docker build --target core -t privacy-local-agent:0.1.0 .
 如果你用 kind：
 
 ```bash
-kind load docker-image privacy-local-agent:0.1.0 --name <你的集群名>
+kind load docker-image PrivShield:0.1.0 --name <你的集群名>
 ```
 
 ### 4.3 真实集群：推送镜像
 
 ```bash
 # 1. 给镜像打仓库标签
-docker tag privacy-local-agent:0.1.0 myregistry.example.com/privacy-local-agent:0.1.0
+docker tag PrivShield:0.1.0 myregistry.example.com/PrivShield:0.1.0
 
 # 2. 推送
-docker push myregistry.example.com/privacy-local-agent:0.1.0
+docker push myregistry.example.com/PrivShield:0.1.0
 ```
 
 在 K8s 部署时，把 `image.repository` 和 `image.tag` 改成这个地址。
@@ -259,14 +259,14 @@ TLS 证书和 API Key 属于敏感信息，不应该写进镜像或 ConfigMap，
 # 1. 确保镜像已在集群可用（minikube docker-env / kind load / push 到仓库）
 
 # 2. 一键部署
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 kubectl apply -k deploy/k8s/
 
 # 3. 查看 Pod 状态
-kubectl get pods -n privacy-local-agent -w
+kubectl get pods -n PrivShield -w
 
 # 4. 等 Pod Running 后，端口转发到本地测试
-kubectl port-forward -n privacy-local-agent svc/privacy-local-agent 8079:8079 50051:50051
+kubectl port-forward -n PrivShield svc/PrivShield 8079:8079 50051:50051
 
 # 5. 本地测试
 curl http://localhost:8079/health
@@ -307,11 +307,11 @@ deploy/helm/privacy-local-agent/
 ```bash
 # 1. 构建镜像并确保集群能访问
 # 2. 安装 Chart
-helm install pla ./deploy/helm/privacy-local-agent
+helm install pla ./deploy/helm/PrivShield
 
 # 查看状态
 helm list
-kubectl get pods -l app.kubernetes.io/name=privacy-local-agent
+kubectl get pods -l app.kubernetes.io/name=PrivShield
 ```
 
 默认行为：
@@ -328,7 +328,7 @@ kubectl get pods -l app.kubernetes.io/name=privacy-local-agent
 kubectl create secret tls pla-tls \
   --cert=path/to/tls.crt \
   --key=path/to/tls.key \
-  -n privacy-local-agent
+  -n PrivShield
 
 # 2. 创建 API Key Secret
 # 文件 api-keys.json 示例：
@@ -337,14 +337,14 @@ kubectl create secret tls pla-tls \
 # }
 kubectl create secret generic pla-apikeys \
   --from-file=api-keys.json=path/to/api-keys.json \
-  -n privacy-local-agent
+  -n PrivShield
 
 # 3. 使用生产 values 安装
-helm install pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm install pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=pla-tls \
   --set security.auth.apiKeysSecret=pla-apikeys \
-  --set image.repository=myregistry.example.com/privacy-local-agent \
+  --set image.repository=myregistry.example.com/PrivShield \
   --set image.tag=0.1.0
 ```
 
@@ -361,8 +361,8 @@ helm install pla ./deploy/helm/privacy-local-agent \
 
 ```bash
 # 升级镜像版本
-helm upgrade pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm upgrade pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set image.tag=0.2.0
 
 # 查看历史
@@ -388,8 +388,8 @@ curl http://localhost:8079/metrics | head -20
 如果使用 Prometheus Operator，在 Helm 安装时启用 ServiceMonitor：
 
 ```bash
-helm install pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm install pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set serviceMonitor.enabled=true
 ```
 
@@ -428,13 +428,13 @@ docker compose --profile monitoring up -d
 
 ```bash
 # 1. 看 Pod 事件
-kubectl describe pod -n privacy-local-agent -l app=privacy-local-agent
+kubectl describe pod -n PrivShield -l app=PrivShield
 
 # 2. 看日志
-kubectl logs -n privacy-local-agent deploy/privacy-local-agent
+kubectl logs -n PrivShield deploy/PrivShield
 
 # 3. 进容器内部验证
-kubectl exec -it -n privacy-local-agent deploy/privacy-local-agent -- /bin/sh
+kubectl exec -it -n PrivShield deploy/PrivShield -- /bin/sh
 curl http://localhost:8079/health
 ```
 
@@ -444,24 +444,24 @@ curl http://localhost:8079/health
 
 ```bash
 # ── 镜像构建 ──
-docker build --target core -t privacy-local-agent:0.1.0 .
-docker build --target ml -t privacy-local-agent:0.1.0-ml .
+docker build --target core -t PrivShield:0.1.0 .
+docker build --target ml -t PrivShield:0.1.0-ml .
 
 # ── 本地运行 ──
-docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 
 # ── 镜像推送 ──
-docker tag privacy-local-agent:0.1.0 myregistry/privacy-local-agent:0.1.0
-docker push myregistry/privacy-local-agent:0.1.0
+docker tag PrivShield:0.1.0 myregistry/PrivShield:0.1.0
+docker push myregistry/PrivShield:0.1.0
 
 # ── 原生 K8s ──
 kubectl apply -k deploy/k8s/
-kubectl get pods -n privacy-local-agent -w
-kubectl port-forward -n privacy-local-agent svc/privacy-local-agent 8079:8079
+kubectl get pods -n PrivShield -w
+kubectl port-forward -n PrivShield svc/PrivShield 8079:8079
 
 # ── Helm ──
-helm install pla ./deploy/helm/privacy-local-agent
-helm upgrade pla ./deploy/helm/privacy-local-agent -f ./deploy/helm/privacy-local-agent/values-production.yaml
+helm install pla ./deploy/helm/PrivShield
+helm upgrade pla ./deploy/helm/PrivShield -f ./deploy/helm/PrivShield/values-production.yaml
 helm rollback pla
 
 # ── 验证 ──

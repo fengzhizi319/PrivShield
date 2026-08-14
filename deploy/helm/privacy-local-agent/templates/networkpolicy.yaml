@@ -2,13 +2,13 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "privacy-local-agent.fullname" . }}
+  name: {{ include "PrivShield.fullname" . }}
   labels:
-    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "privacy-local-agent.selectorLabels" . | nindent 6 }}
+      {{- include "PrivShield.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:

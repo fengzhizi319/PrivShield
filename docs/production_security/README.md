@@ -1,6 +1,6 @@
 # 生产安全加固文档索引
 
-本目录包含 `privacy-local-agent` 生产安全模块的全套 SDLC 文档，覆盖 REST/gRPC 的 TLS/mTLS、认证鉴权与速率限制。
+本目录包含 `PrivShield` 生产安全模块的全套 SDLC 文档，覆盖 REST/gRPC 的 TLS/mTLS、认证鉴权与速率限制。
 
 
 ## 目录 (Table of Contents)
@@ -36,7 +36,7 @@
 ## 运行示例
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 source .venv/bin/activate
 PYTHONPATH=. python docs/production_security/examples/security_usage.py
 ```

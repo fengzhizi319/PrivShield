@@ -20,7 +20,7 @@ cd "$PROJECT_ROOT/deploy/docker-compose"
 docker compose --profile llm down --remove-orphans 2>/dev/null || true
 
 # 2. 清理单独使用 docker run 启动的独立容器
-docker rm -f privacy-local-agent privacy-local-agent-vllm privacy-console-web privacy-console-backend-go privacy-console-backend-python 2>/dev/null || true
+docker rm -f PrivShield PrivShield-vllm privacy-console-web privacy-console-backend-go privacy-console-backend-python 2>/dev/null || true
 
 echo "✅ 所有 Docker 容器已成功停止与清理！"
 echo "============================================================================"

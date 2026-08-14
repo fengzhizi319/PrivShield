@@ -29,7 +29,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy-local-agent` 部署包的验证策略、测试命令与验收标准，覆盖 Helm Chart、原生 Kubernetes manifests 与 Docker Compose 三种交付形式。所有命令均可在本地或 CI 环境中直接执行。
+本文档定义 `PrivShield` 部署包的验证策略、测试命令与验收标准，覆盖 Helm Chart、原生 Kubernetes manifests 与 Docker Compose 三种交付形式。所有命令均可在本地或 CI 环境中直接执行。
 
 ## 2. 测试目标
 
@@ -54,14 +54,14 @@
 ### 4.1 Lint 检查
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 make helm-lint
 ```
 
 等效命令：
 
 ```bash
-helm lint deploy/helm/privacy-local-agent
+helm lint deploy/helm/PrivShield
 ```
 
 **预期结果**：无 ERROR，提示 `1 chart(s) linted, 0 chart(s) failed`。
@@ -69,14 +69,14 @@ helm lint deploy/helm/privacy-local-agent
 ### 4.2 模板渲染
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 make helm-template
 ```
 
 等效命令：
 
 ```bash
-helm template test deploy/helm/privacy-local-agent
+helm template test deploy/helm/PrivShield
 ```
 
 **预期结果**：成功输出渲染后的 Kubernetes YAML，无渲染错误。
@@ -84,8 +84,8 @@ helm template test deploy/helm/privacy-local-agent
 ### 4.3 生产配置渲染验证
 
 ```bash
-helm template prod deploy/helm/privacy-local-agent \
-  -f deploy/helm/privacy-local-agent/values-production.yaml \
+helm template prod deploy/helm/PrivShield \
+  -f deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=pla-tls \
   --set security.auth.apiKeysSecret=pla-apikeys
 ```
@@ -99,8 +99,8 @@ helm template prod deploy/helm/privacy-local-agent \
 ### 4.4 ML 配置渲染验证
 
 ```bash
-helm template ml deploy/helm/privacy-local-agent \
-  -f deploy/helm/privacy-local-agent/values-ml.yaml
+helm template ml deploy/helm/PrivShield \
+  -f deploy/helm/PrivShield/values-ml.yaml
 ```
 
 **检查项**：
@@ -112,7 +112,7 @@ helm template ml deploy/helm/privacy-local-agent \
 ### 5.1 Dry Run
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 kubectl apply -k deploy/k8s/ --dry-run=client
 ```
 
@@ -128,13 +128,13 @@ kubectl apply -k deploy/k8s/
 
 ```bash
 # 查看命名空间下所有资源
-kubectl get all -n privacy-local-agent
+kubectl get all -n PrivShield
 
 # 查看 Pod 日志
-kubectl logs -n privacy-local-agent deployment/privacy-local-agent
+kubectl logs -n PrivShield deployment/PrivShield
 
 # 端口转发测试 REST
-kubectl port-forward -n privacy-local-agent svc/privacy-local-agent 8079:8079
+kubectl port-forward -n PrivShield svc/PrivShield 8079:8079
 
 # 健康检查
 curl http://localhost:8079/health
@@ -153,7 +153,7 @@ docker compose up -d
 
 ```bash
 docker compose ps
-docker compose logs -f privacy-local-agent
+docker compose logs -f PrivShield
 ```
 
 ### 6.3 健康检查
@@ -171,7 +171,7 @@ docker compose down
 ## 7. 镜像构建验证
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 # core 镜像
 make docker-core

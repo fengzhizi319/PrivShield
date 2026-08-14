@@ -2,14 +2,14 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "privacy-local-agent.fullname" . }}
+  name: {{ include "PrivShield.fullname" . }}
   labels:
-    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "privacy-local-agent.fullname" . }}
+    name: {{ include "PrivShield.fullname" . }}
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:

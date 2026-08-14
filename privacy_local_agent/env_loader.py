@@ -1,4 +1,4 @@
-"""Environment variable loader for privacy-local-agent with Profile Cascade Support.
+"""Environment variable loader for PrivShield with Profile Cascade Support.
 
 Auto-detects and loads .env and profile-specific sub-config from config/env/ or project root
 without requiring hardcoded logic in app code.

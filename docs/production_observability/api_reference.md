@@ -34,7 +34,7 @@
 configure_logging(
     log_level: str = "INFO",
     json_format: bool = False,
-    service_name: str = "privacy-local-agent",
+    service_name: str = "PrivShield",
 ) -> None
 ```
 
@@ -100,7 +100,7 @@ RequestContext(
 ```python
 init_tracing(
     endpoint: str | None = None,
-    service_name: str = "privacy-local-agent",
+    service_name: str = "PrivShield",
 ) -> Any
 ```
 
@@ -210,7 +210,7 @@ curl http://127.0.0.1:8079/metrics
 |---|---|---|
 | `PRIVACY_LOG_LEVEL` | `INFO` | 日志级别 |
 | `PRIVACY_LOG_FORMAT` | `text` | `text` 或 `json` |
-| `PRIVACY_SERVICE_NAME` | `privacy-local-agent` | 服务名 |
+| `PRIVACY_SERVICE_NAME` | `PrivShield` | 服务名 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP HTTP endpoint；设置后启用 tracing |
 | `OTEL_SERVICE_NAME` | — | OpenTelemetry 服务名；未设置时使用 `PRIVACY_SERVICE_NAME` |
 

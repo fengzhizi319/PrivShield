@@ -1119,14 +1119,14 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = No
     configure_logging(
         log_level=os.environ.get("PRIVACY_LOG_LEVEL", "INFO"),       # 日志级别
         json_format=os.environ.get("PRIVACY_LOG_FORMAT", "text").lower() == "json",  # 是否 JSON 格式
-        service_name=os.environ.get("PRIVACY_SERVICE_NAME", "privacy-local-agent"),  # 服务标识
+        service_name=os.environ.get("PRIVACY_SERVICE_NAME", "PrivShield"),  # 服务标识
     )
     # 初始化 OpenTelemetry 链路追踪：若配置了 OTLP endpoint 则启用导出
     init_tracing(
         endpoint=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"),  # OTLP 收集器地址
         service_name=os.environ.get(
             "OTEL_SERVICE_NAME",  # 优先使用 OTEL 标准变量
-            os.environ.get("PRIVACY_SERVICE_NAME", "privacy-local-agent"),  # 回退到项目变量
+            os.environ.get("PRIVACY_SERVICE_NAME", "PrivShield"),  # 回退到项目变量
         ),
     )
 

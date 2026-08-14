@@ -1,6 +1,6 @@
 # 动态分类分级运维与部署指南
 
-本文档介绍 `privacy-local-agent` 动态分类分级模块的规则配置挂载、热重载运维、Prometheus 可观测性监控与故障排查处理流程。
+本文档介绍 `PrivShield` 动态分类分级模块的规则配置挂载、热重载运维、Prometheus 可观测性监控与故障排查处理流程。
 
 ---
 
@@ -61,7 +61,7 @@
 在 Helm `values.yaml` 中增加规则挂载配置：
 
 ```yaml
-# deploy/helm/privacy-local-agent/values.yaml
+# deploy/helm/PrivShield/values.yaml
 classification:
   dynamic:
     enabled: true
@@ -375,7 +375,7 @@ PYTHONPATH=. pytest 'tests/dynclassification/test_real_models.py::TestRealLlmAda
 
 ## 7. 零停机在线无痛升级指南 (Zero-Downtime Hot Upgrade)
 
-在生产环境中，升级 `privacy-local-agent` 或其内部的算法规则与大模型时，必须保障业务连续性。本项目支持分层的零停机时间（Zero-Downtime）平滑在线热升级能力。
+在生产环境中，升级 `PrivShield` 或其内部的算法规则与大模型时，必须保障业务连续性。本项目支持分层的零停机时间（Zero-Downtime）平滑在线热升级能力。
 
 ---
 
@@ -475,7 +475,7 @@ graph LR
 #### 2. K8s 容器部署：RollingUpdate + PreStop 优雅摘除
 在 Helm Chart 的 `values.yaml` 中已配置标准的滚动更新策略：
 ```yaml
-# deploy/helm/privacy-local-agent/values.yaml
+# deploy/helm/PrivShield/values.yaml
 deployment:
   strategy:
     type: RollingUpdate
@@ -486,7 +486,7 @@ deployment:
 ```
 部署升级时执行：
 ```bash
-helm upgrade pla ./deploy/helm/privacy-local-agent -f values.yaml
+helm upgrade pla ./deploy/helm/PrivShield -f values.yaml
 ```
 Kubernetes 会先拉起 1 个新 Pod 并完成健康探测（`GET /health` 为 200 OK），随后才将 Service 流量切至新 Pod 并安全终止旧 Pod。
 

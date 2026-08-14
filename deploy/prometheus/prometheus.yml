@@ -1,7 +1,7 @@
 # Privacy Local Agent - Prometheus scrape configuration
 # 隐私本地代理 - Prometheus 抓取配置
 #
-# 默认抓取本项目中 privacy-local-agent 的 /metrics 端点；
+# 默认抓取本项目中 PrivShield 的 /metrics 端点；
 # 如 Agent 开启 TLS，请改用 https://... 并配置 tls_config。
 
 global:
@@ -9,12 +9,12 @@ global:
   evaluation_interval: 15s
 
 rule_files:
-  - /etc/prometheus/rules/privacy-local-agent-alerts.yml
+  - /etc/prometheus/rules/PrivShield-alerts.yml
 
 scrape_configs:
-  - job_name: "privacy-local-agent"
+  - job_name: "PrivShield"
     static_configs:
       - targets:
-          - "privacy-local-agent:8079"
+          - "PrivShield:8079"
     metrics_path: "/metrics"
     scheme: http

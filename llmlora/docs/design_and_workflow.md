@@ -11,7 +11,7 @@
 
 ## 1. 方案定位与架构图
 
-在 `privacy-local-agent` 的三层漏斗架构（Layer-1 规则 → Layer-2 Small-NER → Layer-3 LLM）中，Layer-3 负责处理复杂长文本语义理解、规则冲突仲裁、隐式敏感信息提取以及**脱敏后的文本无痕抹平**。
+在 `PrivShield` 的三层漏斗架构（Layer-1 规则 → Layer-2 Small-NER → Layer-3 LLM）中，Layer-3 负责处理复杂长文本语义理解、规则冲突仲裁、隐式敏感信息提取以及**脱敏后的文本无痕抹平**。
 
 传统通用大模型（如 Qwen2-VL 2B/7B）显存占用高（4~14GB）、推理延迟长（300ms~2000ms）。本方案基于 **CMeEE-Merged 0.8B 基座** 进行二阶段 LoRA 专精 SFT，目标：
 
@@ -206,7 +206,7 @@ llmlora/
 ## 7. 运行指令
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 # 1. 生成训练/验证/测试数据（规则引擎打标 + 零泄漏 QA，输出到 llmlora/data/）
 llmlora/.venv/bin/python -m llmlora.scripts.generate_data --train-size 1000 --dev-size 100 --test-size 50

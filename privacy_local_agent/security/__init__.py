@@ -1,4 +1,4 @@
-"""Security layer for privacy-local-agent.
+"""Security layer for PrivShield.
 
 Provides TLS, authentication/authorization, and rate limiting shared between the
 REST (FastAPI) and gRPC servers.

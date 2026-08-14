@@ -1,11 +1,11 @@
 """Agent 优化特性单元测试 / Agent Optimization Feature Unit Tests.
 
 中文说明：
-验证 privacy-local-agent 的核心优化特性：
+验证 PrivShield 的核心优化特性：
 - ParameterResolver 缓存复用：相同路径的解析器实例应复用，避免重复解析 YAML。
 
 English Description:
-Tests for core optimization features of privacy-local-agent:
+Tests for core optimization features of PrivShield:
 - ParameterResolver caching: same path should reuse resolver instance.
 """
 

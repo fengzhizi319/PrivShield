@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ include "privacy-local-agent.fullname" . }}
+  name: {{ include "PrivShield.fullname" . }}
   labels:
-    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    {{- include "PrivShield.labels" . | nindent 4 }}
 {{- end }}

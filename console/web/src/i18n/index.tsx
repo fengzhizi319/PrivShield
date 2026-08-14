@@ -36,9 +36,11 @@ export type Lang = 'zh' | 'en';
  */
 const zh: Record<string, string> = {
   // Header
+  'header.brand_title': '数盾 PrivShield 控制台',
+  'header.brand_subtitle': '数联天下 · 隐私治理边车 (Sidecar)',
   'header.detecting': '检测中…',
-  'header.agent_ok': 'Agent 正常',
-  'header.agent_down': 'Agent 不可达',
+  'header.agent_ok': '数盾服务 正常',
+  'header.agent_down': '数盾服务 不可达',
   'header.back_home': '返回总览',
 
   // Sidebar
@@ -354,9 +356,11 @@ const zh: Record<string, string> = {
  */
 const en: Record<string, string> = {
   // Header
+  'header.brand_title': 'PrivShield Console',
+  'header.brand_subtitle': 'Shulian Tianxia · Privacy Governance Sidecar',
   'header.detecting': 'Checking…',
-  'header.agent_ok': 'Agent OK',
-  'header.agent_down': 'Agent Unreachable',
+  'header.agent_ok': 'PrivShield OK',
+  'header.agent_down': 'PrivShield Unreachable',
   'header.back_home': 'Back to Overview',
 
   // Sidebar

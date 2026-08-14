@@ -2,7 +2,7 @@
 
 本目录包含 Privacy 测试控制台 **Python 后端**（`console/backend`）的全套 SDLC 文档。
 
-该后端是一个基于 **FastAPI** 的轻量代理层：一方面把构建好的 React SPA 以静态资源形式对外提供，另一方面把前端发来的请求透明转发到运行中的 `privacy-local-agent` REST 服务，并统一响应格式、解析二进制载荷（如 Arrow IPC）。它本身**不实现任何隐私算法**，仅负责转发与格式适配。
+该后端是一个基于 **FastAPI** 的轻量代理层：一方面把构建好的 React SPA 以静态资源形式对外提供，另一方面把前端发来的请求透明转发到运行中的 `PrivShield` REST 服务，并统一响应格式、解析二进制载荷（如 Arrow IPC）。它本身**不实现任何隐私算法**，仅负责转发与格式适配。
 
 ## 文档清单
 
@@ -25,7 +25,7 @@
 ## 本地运行
 
 ```bash
-# 1. 启动 privacy-local-agent（REST: 8079 / gRPC: 50051）
+# 1. 启动 PrivShield（REST: 8079 / gRPC: 50051）
 python -m privacy_local_agent.server
 
 # 2. 启动控制台后端（默认监听 127.0.0.1:8080）

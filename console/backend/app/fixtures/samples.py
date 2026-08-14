@@ -1,5 +1,5 @@
-"""privacy-local-agent 所有 REST 端点的示例请求载荷。
-Sample request payloads for all privacy-local-agent REST endpoints.
+"""PrivShield 所有 REST 端点的示例请求载荷。
+Sample request payloads for all PrivShield REST endpoints.
 
 示例数据刻意保持**最小化与确定性**：只用于验证连通性、展示合法的
 请求形状。用户可以在 UI 中编辑后再发送。
@@ -53,8 +53,8 @@ def _arrow_ipc_payload() -> str:
 
 
 class EndpointSample:
-    """单个 privacy-local-agent 端点的元数据与示例载荷。
-    Metadata and sample payload for a single privacy-local-agent endpoint.
+    """单个 PrivShield 端点的元数据与示例载荷。
+    Metadata and sample payload for a single PrivShield endpoint.
 
     属性说明 / Attribute Descriptions：
         - ``method`` / ``path``：HTTP 方法与端点路径 / HTTP method and endpoint path;

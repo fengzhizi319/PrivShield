@@ -25,8 +25,8 @@ httpx is a fully-featured Python HTTP client library supporting both sync and as
 import httpx
 
 class PrivacyAgentClient:
-    """转发请求到 privacy-local-agent 的异步客户端。
-    Async client forwarding requests to privacy-local-agent."""
+    """转发请求到 PrivShield 的异步客户端。
+    Async client forwarding requests to PrivShield."""
 
     async def _get_client(self) -> httpx.AsyncClient:
         """懒初始化连接池客户端 / Lazy-init pooled client"""

@@ -1,12 +1,12 @@
 {{- if .Values.ingress.enabled -}}
-{{- $fullName := include "privacy-local-agent.fullname" . -}}
+{{- $fullName := include "PrivShield.fullname" . -}}
 {{- $svcPort := .Values.service.restPort -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ $fullName }}
   labels:
-    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    {{- include "PrivShield.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}

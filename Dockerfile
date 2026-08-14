@@ -1,5 +1,5 @@
 # ==============================================================================
-# privacy-local-agent 多阶段构建（Multi-stage Build）
+# PrivShield 多阶段构建（Multi-stage Build）
 # ==============================================================================
 # 为什么采用多阶段构建：
 #   1. 分层缓存：base 层锁定基础镜像与核心依赖，业务代码变更不触发依赖重装，构建加速
@@ -37,8 +37,8 @@
 #                             CMD：与 core 相同的启动命令
 #
 # 示例：
-#   docker build --target core -t privacy-local-agent:0.1.0 .
-#   docker build --target ml -t privacy-local-agent:0.1.0-ml .
+#   docker build --target core -t PrivShield:0.1.0 .
+#   docker build --target ml -t PrivShield:0.1.0-ml .
 
 # ==============================================================================
 # Stage 1: base —— 公共基础层（core / ml 两个目标共享）
@@ -112,7 +112,7 @@ EXPOSE 8079 50051
 # 容器级健康检查（Docker HEALTHCHECK）：
 #   - 每 30s 探测 /health，超时 5s，启动宽限 10s，连续失败 3 次标记 unhealthy
 #   - 职责定位：服务于 docker run 单容器场景；K8s 部署时由 liveness/readiness
-#     探针接管（见 deploy/helm/privacy-local-agent/values.yaml 的 probes 节）
+#     探针接管（见 deploy/helm/PrivShield/values.yaml 的 probes 节）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8079/health || exit 1
 

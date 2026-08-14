@@ -1,7 +1,7 @@
 # 生产环境 values
 # 使用说明：
-#   helm install pla ./deploy/helm/privacy-local-agent \
-#     -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+#   helm install pla ./deploy/helm/PrivShield \
+#     -f ./deploy/helm/PrivShield/values-production.yaml \
 #     --set security.tls.existingSecret=your-tls-secret \
 #     --set security.auth.apiKeysSecret=your-apikeys-secret
 
@@ -44,7 +44,7 @@ networkPolicy:
     from:
       - podSelector:
           matchLabels:
-            app.kubernetes.io/part-of: privacy-local-agent
+            app.kubernetes.io/part-of: PrivShield
 
 serviceMonitor:
   enabled: true

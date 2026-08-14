@@ -1,6 +1,6 @@
 # 差分隐私模块 API 参考
 
-本文档汇总 `privacy-local-agent` 差分隐私（DP）模块的算法设计、API 签名、REST/gRPC 接口定义与使用场景。实现细节与数学证明请参阅 [design.md](./design.md)。
+本文档汇总 `PrivShield` 差分隐私（DP）模块的算法设计、API 签名、REST/gRPC 接口定义与使用场景。实现细节与数学证明请参阅 [design.md](./design.md)。
 
 
 ## 目录 (Table of Contents)

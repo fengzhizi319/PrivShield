@@ -1,6 +1,8 @@
-# privacy-local-agent
+# 数盾 PrivShield (Data & Privacy Shield)
 
-> Python 本地隐私保护 Sidecar Agent，全面落地 **「三层四柱五御六类」医疗数据安全与隐私治理架构**，提供 REST + gRPC 双协议高可用服务。
+> **数联天下 · 数盾 (PrivShield)** —— 企业级数据隐私计算、多原语脱敏与三层动态分类分级治理边车 (Privacy Governance Sidecar)，全面落地 **「三层四柱五御六类」数据安全与隐私治理架构**，提供 REST + gRPC 双协议高可用服务。
+>
+> 🌐 **GitHub Repository**: [https://github.com/fengzhizi319/PrivShield](https://github.com/fengzhizi319/PrivShield)
 
 
 ## 目录 (Table of Contents)
@@ -64,11 +66,11 @@ python -m privacy_local_agent.server
 
 ```bash
 # core 镜像（默认推荐，不含 torch/transformers/onnxruntime）
-docker build --target core -t privacy-local-agent:0.1.0 .
-docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker build --target core -t PrivShield:0.1.0 .
+docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 
 # ml 镜像（含完整本地分类模型依赖）
-docker build --target ml -t privacy-local-agent:0.1.0-ml .
+docker build --target ml -t PrivShield:0.1.0-ml .
 ```
 
 #### Docker Compose 全栈编排
@@ -334,11 +336,11 @@ make docker-core
 make docker-ml
 
 # 运行（非 root 用户，内置健康检查）
-docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 
 # 挂载自定义配置文件
-docker run -v ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro \
-  -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker run -v ./privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro \
+  -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 ```
 
 **镜像安全特性：**

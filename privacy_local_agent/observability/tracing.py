@@ -33,7 +33,7 @@ _tracer: Any = None
 
 def init_tracing(
     endpoint: str | None = None,
-    service_name: str = "privacy-local-agent",
+    service_name: str = "PrivShield",
 ) -> Any:
     """Initialize OpenTelemetry tracing if endpoint is provided and library exists.
 
@@ -57,7 +57,7 @@ def init_tracing(
         return _tracer
 
     provider = TracerProvider(
-        resource=Resource({"service.name": service_name or "privacy-local-agent"})
+        resource=Resource({"service.name": service_name or "PrivShield"})
     )
     exporter = OTLPSpanExporter(endpoint=endpoint)
     provider.add_span_processor(BatchSpanProcessor(exporter))

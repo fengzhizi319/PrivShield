@@ -2,7 +2,7 @@
 
 ## 1. 背景与选型原因
 
-`privacy-local-agent` 的核心服务基于 gRPC 暴露所有隐私原语（脱敏、差分隐私、K-匿名、查询混淆、数据分类）。
+`PrivShield` 的核心服务基于 gRPC 暴露所有隐私原语（脱敏、差分隐私、K-匿名、查询混淆、数据分类）。
 前端测试控制台（React）已经通过统一的 JSON 契约与 Python REST 代理后端交互。
 为了复用同一套前端代码，并验证 Go 作为网关/代理层的可行性，我们新增了 Go gRPC 代理后端。
 
@@ -25,7 +25,7 @@ Go 代理后端本身不实现隐私算法，只负责：
 
 1. 接收前端的 HTTP/JSON 请求；
 2. 通过 `internal/mapper` 将 REST 路径与 JSON 体映射为对应的 protobuf 请求；
-3. 调用 `privacy-local-agent` 的 gRPC 方法；
+3. 调用 `PrivShield` 的 gRPC 方法；
 4. 将 protobuf 响应转换为前端可展示的 JSON；
 5. 可选：挂载前端构建产物（`web/dist`）直接提供 Console UI，无需依赖 Python 后端。
 

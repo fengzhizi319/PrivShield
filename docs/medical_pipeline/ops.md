@@ -12,7 +12,7 @@
 用于生成高仿真医疗记录 `kangyang.csv`（脚本默认 20 条；仓库内各样例目录中预置的 `kangyang.csv` 均为 **100 条**）：
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 # 生成 100 条数据保存到 data/kangyang.csv (默认 seed 2026，与仓库预置样例一致)
 python scripts/data/generate_medical_data.py --output data/kangyang.csv --count 100
@@ -88,7 +88,7 @@ go run cmd/server/main.go
 ## 4. 常见问题排查 (Troubleshooting)
 
 ### Q1: 前端请求 `/api/medical_pipeline` 返回 502 Bad Gateway
-- **原因**: 控制台代理后端无法连接上游 `privacy-local-agent` REST 服务 (默认 `127.0.0.1:8079`)。
+- **原因**: 控制台代理后端无法连接上游 `PrivShield` REST 服务 (默认 `127.0.0.1:8079`)。
 - **解决**:
   1. 确认 `python -m privacy_local_agent.server` 正常启动并在 `8079` 监听。
   2. 检查 `PRIVACY_REST_HOST` 与 `PRIVACY_REST_PORT` 配置。

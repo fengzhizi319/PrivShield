@@ -34,7 +34,7 @@ import yaml
 # 项目根目录（从测试文件位置向上 3 层）/ Project root (3 levels up from test file)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 # Helm chart 目录 / Helm chart directory
-HELM_DIR = PROJECT_ROOT / "deploy" / "helm" / "privacy-local-agent"
+HELM_DIR = PROJECT_ROOT / "deploy" / "helm" / "PrivShield"
 # 原生 K8s manifests 目录 / Raw K8s manifests directory
 K8S_DIR = PROJECT_ROOT / "deploy" / "k8s"
 

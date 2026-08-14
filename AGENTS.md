@@ -1,8 +1,8 @@
-# Privacy Local Agent — Agent Guide
+# 数盾 PrivShield (Data & Privacy Shield) — Agent Guide
 
-> AI coding agent guide for the `privacy-local-agent` project. Read this before modifying code.
+> AI coding agent guide for the **数联天下 · 数盾 (`PrivShield`)** project. Read this before modifying code.
 
-`privacy-local-agent` is a Python sidecar implementing the **「三层四柱五御六类」医疗数据安全与隐私治理架构** (3-Funnel, 4-Pillar, 5-Protection, 6-Category Architecture), exposing privacy primitives (masking, differential privacy, K-anonymity, query obfuscation) and a 3-layer data classification funnel over REST and gRPC.
+`PrivShield` is an enterprise privacy-preserving governance sidecar implementing the **「三层四柱五御六类」数据安全与隐私治理架构** (3-Funnel, 4-Pillar, 5-Protection, 6-Category Architecture), exposing privacy primitives (masking, differential privacy, K-anonymity, query obfuscation) and a 3-layer data classification funnel over REST and gRPC.
 
 ---
 
@@ -100,7 +100,7 @@ privacy-local-agent/
 ## 4. Build & Test Commands
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 # Install in editable mode
 pip install -e .
@@ -169,7 +169,7 @@ Key environment variables:
 | `PRIVACY_BUDGET_WINDOW_SECONDS` | — | Time window for automatic privacy budget reset |
 | `PRIVACY_LOG_LEVEL` | `INFO` | Logging level |
 | `PRIVACY_LOG_FORMAT` | `text` | `text` or `json` |
-| `PRIVACY_SERVICE_NAME` | `privacy-local-agent` | Service name in logs/traces |
+| `PRIVACY_SERVICE_NAME` | `PrivShield` | Service name in logs/traces |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Optional OpenTelemetry OTLP endpoint |
 | `PRIVACY_TLS_ENABLED` | `false` | Enable TLS on REST/gRPC |
 | `PRIVACY_AUTH_ENABLED` | `false` | Enable API key auth |
@@ -261,22 +261,22 @@ Key environment variables:
 
 ```bash
 # core 镜像（默认推荐）
-docker build --target core -t privacy-local-agent:0.1.0 .
+docker build --target core -t PrivShield:0.1.0 .
 
 # ml 镜像（含 torch/transformers/onnxruntime）
-docker build --target ml -t privacy-local-agent:0.1.0-ml .
+docker build --target ml -t PrivShield:0.1.0-ml .
 
-docker run -p 8079:8079 -p 50051:50051 privacy-local-agent:0.1.0
+docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 ```
 
 ### Helm
 
 ```bash
-helm install pla ./deploy/helm/privacy-local-agent
+helm install pla ./deploy/helm/PrivShield
 
 # 生产模式（需自管 TLS/API Key Secret）
-helm install pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm install pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=your-tls-secret \
   --set security.auth.apiKeysSecret=your-apikeys-secret
 ```

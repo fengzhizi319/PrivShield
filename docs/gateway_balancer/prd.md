@@ -19,7 +19,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy-local-agent` 代理转发与负载均衡网关（API Gateway & Load Balancer）的产品需求与验收标准。该网关作为统一的请求入口，将 REST 与 gRPC 流量分发到后端多个健康的工作节点，实现水平扩展与高可用。
+本文档定义 `PrivShield` 代理转发与负载均衡网关（API Gateway & Load Balancer）的产品需求与验收标准。该网关作为统一的请求入口，将 REST 与 gRPC 流量分发到后端多个健康的工作节点，实现水平扩展与高可用。
 
 ## 2. 设计目标
 

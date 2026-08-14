@@ -415,13 +415,8 @@ class TestComposeDefinition:
         assert command[command.index("--model") + 1] == f"/models/{model_name}"
 
     def test_vllm_container_name(self, compose_config):
-        """容器名必须与脚本输出提示的日志容器名一致（privacy-local-agent-vllm）。
-
-        作用 / Purpose:
-            运维按脚本提示执行 docker logs -f <name> 查看日志，
-            容器名不一致将导致日志命令失效。
-        """
-        assert compose_config["services"]["vllm"].get("container_name") == VLLM_CONTAINER_NAME
+        """容器名必须与脚本输出提示的日志容器名一致（privacy-local-agent-vllm）。"""
+        assert compose_config["services"]["vllm"].get("container_name") == "privacy-local-agent-vllm"
 
     def test_vllm_healthcheck_uses_python3(self, compose_config):
         """健康检查命令必须使用 python3；vllm/vllm-openai 镜像没有 python 命令。

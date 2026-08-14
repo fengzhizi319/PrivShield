@@ -19,7 +19,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy-local-agent` 生产部署的产品需求与验收标准。通过 Helm Chart、原生 K8s manifests 与 Docker Compose 三种交付形式，覆盖从本地联调到 Kubernetes 生产部署的完整场景。
+本文档定义 `PrivShield` 生产部署的产品需求与验收标准。通过 Helm Chart、原生 K8s manifests 与 Docker Compose 三种交付形式，覆盖从本地联调到 Kubernetes 生产部署的完整场景。
 
 ## 2. 设计目标
 

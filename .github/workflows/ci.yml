@@ -181,7 +181,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build core image
-        run: docker build --target core -t privacy-local-agent:ci .
+        run: docker build --target core -t PrivShield:ci .
 
       - name: Verify image starts
         run: |
@@ -226,12 +226,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build core image
-        run: docker build --target core -t privacy-local-agent:scan .
+        run: docker build --target core -t PrivShield:scan .
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: privacy-local-agent:scan
+          image-ref: PrivShield:scan
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH

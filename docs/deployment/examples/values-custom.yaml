@@ -10,7 +10,7 @@ namespace:
 flavor: core
 
 image:
-  repository: myregistry.example.com/privacy-local-agent
+  repository: myregistry.example.com/PrivShield
   pullPolicy: IfNotPresent
   # 留空时默认使用 Chart.appVersion
   tag: ""
@@ -122,7 +122,7 @@ networkPolicy:
     from:
       - podSelector:
           matchLabels:
-            app.kubernetes.io/part-of: privacy-local-agent
+            app.kubernetes.io/part-of: PrivShield
 
 serviceMonitor:
   enabled: true

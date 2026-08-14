@@ -22,7 +22,7 @@
 
 ### 1.1 现状分析
 
-`privacy-local-agent` 当前采用单进程双协议架构：
+`PrivShield` 当前采用单进程双协议架构：
 
 - **REST**：单 Uvicorn worker（单线程事件循环 + 多线程 worker pool）
 - **gRPC**：单 `grpc.server` 实例，默认 `ThreadPoolExecutor(max_workers=10)`
@@ -1473,7 +1473,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 ## 12. 总结
 
-本文档聚焦 `privacy-local-agent` 自身架构，系统梳理了 Python 生态中所有主流的高并发方案：
+本文档聚焦 `PrivShield` 自身架构，系统梳理了 Python 生态中所有主流的高并发方案：
 
 **四大主方案**：
 1. **方案一（多进程 + 端口共享）**：SO_REUSEPORT 多进程绕过 GIL，改动较小
@@ -1499,7 +1499,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 ### 13.1 多维对比分析
 
-| 评估维度 | 现有的 Python 实现 (`privacy-local-agent`) | Go 语言重构 / 实现 |
+| 评估维度 | 现有的 Python 实现 (`PrivShield`) | Go 语言重构 / 实现 |
 |---|---|---|
 | **开发与重构成成本** | **极方便 (零重构成本)**<br>• 完全保留现有所有脱敏、DP 差分隐私、K-匿名 Mondrian 算法及规则引擎。<br>• 现有的 100+ pytest 测试套件无缝复用。 | **成本高 (需完全重写)**<br>• 需要用 Go 重新实现所有脱敏、DP 算法、K-匿名算法、 compliance 模板与规则解析。<br>• 算法逻辑与测试用例验证工作量大。 |
 | **AI / ML 模型生态** | **原生第一支持 (极方便)**<br>• 对 L2 Small-NER (ONNX) 和 L3 LLM (PyTorch/Transformers/Qwen3.5) 支持极佳。<br>• 模型加载、Prompt 构造、流式输出、GPU 加速生态最成熟。 | **生态较弱 (复杂)**<br>• Go 缺乏成熟的 PyTorch/Transformers 第一方生态。<br>• 运行 AI 模型需依赖 CGO 调用 `onnxruntime-c` 或 `libtorch`，编译复杂，驱动适配困难。 |

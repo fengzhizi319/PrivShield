@@ -2,7 +2,7 @@
 
 React 18 + TypeScript + Vite + Tailwind CSS 实现的前端测试控制台。
 
-以三栏布局（顶部导航 + 侧边导航 + 主区域）组织 `privacy-local-agent` 的全部可测试接口，支持示例加载、请求编辑、JSON 高亮响应、cURL 导出、请求历史与批量测试。
+以三栏布局（顶部导航 + 侧边导航 + 主区域）组织 `PrivShield` 的全部可测试接口，支持示例加载、请求编辑、JSON 高亮响应、cURL 导出、请求历史与批量测试。
 
 前端模式与部署差异说明见 [`../docs/modes.md`](../docs/modes.md)，Vite 的原理、结构与项目用法说明见 [`../docs/vite.md`](../docs/vite.md)。
 

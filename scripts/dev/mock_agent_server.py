@@ -18,7 +18,7 @@ PORT = 8079
 
 
 class MockAgentRequestHandler(BaseHTTPRequestHandler):
-    """模拟 privacy-local-agent REST API 的通用 RequestHandler (全覆盖 200 OK)"""
+    """模拟 PrivShield REST API 的通用 RequestHandler (全覆盖 200 OK)"""
 
     def _set_headers(self, status_code: int = 200, content_type: str = "application/json"):
         self.send_response(status_code)

@@ -1,6 +1,6 @@
 # Python REST 代理后端 HTTP API 文档
 
-本后端为前端测试控制台提供统一的 HTTP/JSON 接口，所有 agent 操作都通过 `/api/proxy` 转发到 `privacy-local-agent` 的 REST 服务。
+本后端为前端测试控制台提供统一的 HTTP/JSON 接口，所有 agent 操作都通过 `/api/proxy` 转发到 `PrivShield` 的 REST 服务。
 
 默认监听地址：`http://127.0.0.1:8080`
 

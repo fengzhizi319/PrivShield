@@ -1,6 +1,6 @@
 # K-匿名（K-Anonymity）文档索引
 
-本目录包含 `privacy-local-agent` K-匿名模块的全套 SDLC 文档。该模块同时提供**单记录启发式泛化**与**数据集级 Mondrian 泛化**两种能力，用于降低准标识符组合带来的重识别风险。
+本目录包含 `PrivShield` K-匿名模块的全套 SDLC 文档。该模块同时提供**单记录启发式泛化**与**数据集级 Mondrian 泛化**两种能力，用于降低准标识符组合带来的重识别风险。
 
 
 ## 目录 (Table of Contents)
@@ -35,7 +35,7 @@
 ## 运行示例
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 source .venv/bin/activate
 PYTHONPATH=. python docs/k_anonymity/examples/kano_usage.py
 ```

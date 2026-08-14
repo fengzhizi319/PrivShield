@@ -2,9 +2,9 @@
 """
 llmlora 推理引擎模块 / Inference engine (QwenPrivacyLoRAEngine).
 
-供 privacy-local-agent Layer-3 调用的纯文本隐私分类分级与无痕抹平推理接口。
+供 PrivShield Layer-3 调用的纯文本隐私分类分级与无痕抹平推理接口。
 Pure-text privacy classification & smoothing inference API for Layer-3 of
-privacy-local-agent.
+PrivShield.
 
 特性 / Features:
 - 延迟加载（首次推理才加载权重） / Lazy loading (weights load on first call).

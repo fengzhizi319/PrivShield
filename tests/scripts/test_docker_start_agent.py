@@ -23,7 +23,7 @@ docker-start-agent.sh & docker-stop-agent.sh Script Tests & Agent-to-LLM Communi
     第 3 层 停止脚本测试（仅需 bash）:
         - docker-stop-agent.sh 存在性、权限、语法及 fake docker 调用逻辑
     第 4 层 Compose 拓扑与 Agent-LLM 通信配置校验（仅需解析 YAML）:
-        - 验证 docker-compose.yml 中 privacy-local-agent 与 vllm 服务拓扑
+        - 验证 docker-compose.yml 中 PrivShield 与 vllm 服务拓扑
         - 验证双方加入共同的 llm 网络以及 PRIVACY_LLM_API_BASE=http://vllm:8000/v1
     第 5 层 Agent 与 LLM 通信模拟单元测试（mock HTTP，无需 GPU/Docker）:
         - 验证 Agent 服务层在配置 vLLM 后端时的 OpenAILlmClassifier 适配与调用
@@ -295,7 +295,7 @@ class TestAgentScriptFakeExecution:
 
         测试目的：
             1. 验证默认目标分支为 core；
-            2. 验证构建命令包含 `--target core` 与标签 `privacy-local-agent:0.1.0`；
+            2. 验证构建命令包含 `--target core` 与标签 `PrivShield:0.1.0`；
             3. 验证终端输出启动成功友好提示。
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
@@ -1156,7 +1156,7 @@ class TestRealDockerAgentScriptLifecycle:
     """真实执行 bash scripts/dev/docker-start-agent.sh core 启动物理容器并进行网络交互测试。
 
     测试覆盖：
-        1. 验证真实 privacy-local-agent 容器启动成功并在 docker ps 中运行
+        1. 验证真实 PrivShield 容器启动成功并在 docker ps 中运行
         2. 通过真实网络 Socket 向物理容器发送健康与就绪探针 (/health, /readyz)
         3. 通过真实 HTTP POST 请求调用物理容器执行单字段脱敏与整记录脱敏
         4. 通过真实 HTTP POST 请求调用物理容器执行单字段与整记录动态分类分级
@@ -1166,13 +1166,13 @@ class TestRealDockerAgentScriptLifecycle:
     def test_real_container_is_running_in_docker_ps(self, live_docker_agent_service: str):
         """【真实容器状态】验证 privacy-local-agent 容器真实存在于 docker ps 输出中。"""
         ps = subprocess.run(
-            ["docker", "ps", "--filter", "name=privacy-local-agent", "--format", "{{.Names}}"],
+            ["docker", "ps", "--filter", f"name={AGENT_CONTAINER_NAME}", "--format", "{{.Names}}"],
             capture_output=True,
             text=True,
             timeout=10,
         )
         assert ps.returncode == 0
-        assert "privacy-local-agent" in ps.stdout
+        assert AGENT_CONTAINER_NAME in ps.stdout
 
     def test_real_container_health_probes(self, live_docker_agent_service: str):
         """【真实网络交互】向物理容器发送 GET /health 与 GET /readyz 探针。"""

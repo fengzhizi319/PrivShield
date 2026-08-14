@@ -3,10 +3,16 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "privacy-local-agent"
+name = "privshield"
 version = "0.1.0"
-description = "Local REST/gRPC agent for privacy primitives"
+description = "数盾 (PrivShield): 数联天下企业级数据隐私计算、多原语脱敏与三层动态分类分级治理边车 (Privacy Governance Sidecar)"
+readme = "README.md"
 requires-python = ">=3.13"
+
+[project.urls]
+Homepage = "https://github.com/fengzhizi319/PrivShield"
+Repository = "https://github.com/fengzhizi319/PrivShield.git"
+Documentation = "https://github.com/fengzhizi319/PrivShield#readme"
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",

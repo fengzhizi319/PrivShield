@@ -285,7 +285,7 @@ class TestAuditLoggerKey:
             logger1 = BudgetAuditLogger(log_file=str(tmp_path / "a1.log"))
             logger2 = BudgetAuditLogger(log_file=str(tmp_path / "a2.log"))
         # 不再是随源码公开的硬编码密钥
-        assert logger1.secret_key != b"privacy-local-agent-default-audit-key"
+        assert logger1.secret_key != b"PrivShield-default-audit-key"
         # 每次生成均不同（进程级随机）
         assert logger1.secret_key != logger2.secret_key
         assert len(logger1.secret_key) == 64  # token_hex(32) 的 hex 长度

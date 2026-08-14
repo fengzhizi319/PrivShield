@@ -139,7 +139,7 @@ llmlora/
 ### 3.6 等价的原生命令（不用脚本时）
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 llmlora/.venv/bin/python -m llmlora.scripts.generate_data --train-size 1000 --dev-size 100 --test-size 50
 llmlora/.venv/bin/python -m llmlora.scripts.train --epochs 3 --batch-size 4

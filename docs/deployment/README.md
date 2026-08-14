@@ -1,6 +1,6 @@
 # 部署文档索引
 
-本目录包含 `privacy-local-agent` 部署模块的全套 SDLC 文档，覆盖 Helm Chart、原生 Kubernetes manifests 与 Docker Compose 三种交付形式。
+本目录包含 `PrivShield` 部署模块的全套 SDLC 文档，覆盖 Helm Chart、原生 Kubernetes manifests 与 Docker Compose 三种交付形式。
 
 
 ## 目录 (Table of Contents)
@@ -35,14 +35,14 @@
 ## 运行示例
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 # Helm 开发模式一键部署
-helm install pla ./deploy/helm/privacy-local-agent
+helm install pla ./deploy/helm/PrivShield
 
 # 生产模式（需提前创建 TLS 与 API Key Secret）
-helm install pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm install pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=pla-tls \
   --set security.auth.apiKeysSecret=pla-apikeys
 

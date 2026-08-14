@@ -1,4 +1,4 @@
-"""Observability layer for privacy-local-agent.
+"""Observability layer for PrivShield.
 
 提供结构化日志、Prometheus metrics、可选 OpenTelemetry tracing 以及 REST/gRPC 中间件。
 Provides structured logging, Prometheus metrics, optional OpenTelemetry tracing,

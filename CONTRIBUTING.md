@@ -7,7 +7,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 ```bash
 # Clone and enter the repo
 git clone https://github.com/fengzhizi319/privacy-local-agent.git
-cd privacy-local-agent
+cd PrivShield
 
 # Create virtual environment
 python -m venv .venv

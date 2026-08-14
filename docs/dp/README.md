@@ -1,6 +1,6 @@
 # 差分隐私（DP）文档索引
 
-本目录包含 `privacy-local-agent` 差分隐私模块的全套 SDLC 文档。
+本目录包含 `PrivShield` 差分隐私模块的全套 SDLC 文档。
 
 
 ## 目录 (Table of Contents)
@@ -36,7 +36,7 @@
 ## 运行示例
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 source .venv/bin/activate
 PYTHONPATH=. python docs/dp/examples/dp_usage.py
 ```

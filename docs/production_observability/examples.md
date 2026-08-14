@@ -111,7 +111,7 @@ curl -s http://127.0.0.1:8079/metrics | grep 'privacy_budget_remaining'
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector:4318/v1/traces
-export OTEL_SERVICE_NAME=privacy-local-agent
+export OTEL_SERVICE_NAME=PrivShield
 python -m privacy_local_agent.main
 ```
 
@@ -125,7 +125,7 @@ from privacy_local_agent.observability import init_tracing, start_span
 # 未设置 endpoint 时返回 NoOp tracer，不会报错
 tracer = init_tracing(
     endpoint="http://localhost:4318/v1/traces",
-    service_name="privacy-local-agent",
+    service_name="PrivShield",
 )
 
 with start_span("process_request", attributes={"path": "/v1/privacy/mask"}) as span:

@@ -24,7 +24,7 @@
 |---|---|---|
 | `PRIVACY_LOG_LEVEL` | `INFO` | 日志级别：DEBUG/INFO/WARNING/ERROR/CRITICAL。 |
 | `PRIVACY_LOG_FORMAT` | `text` | `text` 或 `json`。 |
-| `PRIVACY_SERVICE_NAME` | `privacy-local-agent` | 日志/tracing 中的服务名。 |
+| `PRIVACY_SERVICE_NAME` | `PrivShield` | 日志/tracing 中的服务名。 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | 设置后启用 OpenTelemetry OTLP 导出，例 `http://jaeger:4317`。 |
 | `OTEL_SERVICE_NAME` | — | OpenTelemetry service name；未设置时使用 `PRIVACY_SERVICE_NAME`。 |
 
@@ -77,11 +77,11 @@ K8s ServiceMonitor 示例：
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: privacy-local-agent
+  name: PrivShield
 spec:
   selector:
     matchLabels:
-      app: privacy-local-agent
+      app: PrivShield
   endpoints:
     - port: rest
       path: /metrics
@@ -110,7 +110,7 @@ spec:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector:4317
-export OTEL_SERVICE_NAME=privacy-local-agent
+export OTEL_SERVICE_NAME=PrivShield
 python -m privacy_local_agent.server
 ```
 

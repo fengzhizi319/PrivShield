@@ -2,12 +2,12 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "privacy-local-agent.fullname" . }}
+  name: {{ include "PrivShield.fullname" . }}
   labels:
-    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   selector:
     matchLabels:
-      {{- include "privacy-local-agent.selectorLabels" . | nindent 6 }}
+      {{- include "PrivShield.selectorLabels" . | nindent 6 }}
 {{- end }}

@@ -5,7 +5,7 @@
 
 运行方式：
 
-    cd /home/charles/code/sfwork/privacy-local-agent
+    cd /home/charles/code/sfwork/PrivShield
     source .venv/bin/activate
     PYTHONPATH=. python docs/gateway_balancer/examples/gateway_usage.py
 """

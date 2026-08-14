@@ -1078,7 +1078,7 @@ class PrivacyAgentSettings(BaseSettings):
     # 可观测性 / Observability
     log_level: str = "INFO"             # PRIVACY_LOG_LEVEL
     log_format: str = "text"            # PRIVACY_LOG_FORMAT
-    service_name: str = "privacy-local-agent"  # PRIVACY_SERVICE_NAME
+    service_name: str = "PrivShield"  # PRIVACY_SERVICE_NAME
 
     # 可选路径 / Optional paths
     profile_path: Optional[Path] = None  # PRIVACY_PROFILE

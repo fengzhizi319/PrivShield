@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "privacy-local-agent.fullname" . }}
+  name: {{ include "PrivShield.fullname" . }}
   labels:
-    {{- include "privacy-local-agent.labels" . | nindent 4 }}
+    {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
@@ -14,7 +14,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "privacy-local-agent.selectorLabels" . | nindent 6 }}
+      {{- include "PrivShield.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -22,13 +22,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "privacy-local-agent.selectorLabels" . | nindent 8 }}
+        {{- include "PrivShield.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "privacy-local-agent.serviceAccountName" . }}
+      serviceAccountName: {{ include "PrivShield.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.terminationGracePeriodSeconds }}
@@ -38,7 +38,7 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ include "privacy-local-agent.imageTag" . }}"
+          image: "{{ .Values.image.repository }}:{{ include "PrivShield.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -57,13 +57,13 @@ spec:
             - name: PRIVACY_GRPC_PORT
               value: "{{ .Values.service.grpcPort }}"
             - name: PRIVACY_PROFILE
-              value: "/etc/privacy-local-agent/privacy-profile.yaml"
+              value: "/etc/PrivShield/privacy-profile.yaml"
             - name: PRIVACY_LOG_LEVEL
               value: {{ .Values.agent.logLevel | upper | quote }}
             - name: PRIVACY_LOG_FORMAT
               value: {{ .Values.agent.logFormat | quote }}
             - name: PRIVACY_SERVICE_NAME
-              value: {{ include "privacy-local-agent.fullname" . | quote }}
+              value: {{ include "PrivShield.fullname" . | quote }}
             {{- with .Values.agent.serviceName }}
             - name: OTEL_SERVICE_NAME
               value: {{ . | quote }}
@@ -106,7 +106,7 @@ spec:
             - name: PRIVACY_AUTH_EXTERNAL_KEYS_JSON
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "privacy-local-agent.fullname" . }}-secrets
+                  name: {{ include "PrivShield.fullname" . }}-secrets
                   key: api-keys.json
             {{- end }}
             {{- end }}
@@ -115,7 +115,7 @@ spec:
               value: "true"
             {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
             - name: PRIVACY_AUTH_MTLS_WHITELIST_FILE
-              value: "/etc/privacy-local-agent/mtls-whitelist.yaml"
+              value: "/etc/PrivShield/mtls-whitelist.yaml"
             {{- else if .Values.security.auth.internalMtls.allowedCns }}
             - name: PRIVACY_AUTH_MTLS_ALLOWED_CNS
               value: {{ .Values.security.auth.internalMtls.allowedCns | quote }}
@@ -144,7 +144,7 @@ spec:
             - name: PRIVACY_LLM_PROVIDER
               value: {{ .Values.llm.provider | default "vllm" | quote }}
             - name: PRIVACY_LLM_API_BASE
-              value: "http://{{ include "privacy-local-agent.fullname" . }}-llm:{{ .Values.llm.port }}/v1"
+              value: "http://{{ include "PrivShield.fullname" . }}-llm:{{ .Values.llm.port }}/v1"
             - name: PRIVACY_LLM_MODEL_NAME
               value: {{ .Values.llm.servedModelName | quote }}
             - name: PRIVACY_LLM_API_KEY
@@ -155,7 +155,7 @@ spec:
             {{- end }}
           volumeMounts:
             - name: config
-              mountPath: /etc/privacy-local-agent
+              mountPath: /etc/PrivShield
               readOnly: true
             {{- if .Values.security.tls.enabled }}
             - name: tls-certs
@@ -170,7 +170,7 @@ spec:
             {{- end }}
             {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
             - name: mtls-whitelist
-              mountPath: /etc/privacy-local-agent/mtls-whitelist.yaml
+              mountPath: /etc/PrivShield/mtls-whitelist.yaml
               subPath: mtls-whitelist.yaml
               readOnly: true
             {{- end }}
@@ -217,14 +217,14 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "privacy-local-agent.fullname" . }}-config
+            name: {{ include "PrivShield.fullname" . }}-config
         {{- if .Values.security.tls.enabled }}
         - name: tls-certs
           secret:
             {{- if .Values.security.tls.existingSecret }}
             secretName: {{ .Values.security.tls.existingSecret | quote }}
             {{- else }}
-            secretName: {{ include "privacy-local-agent.fullname" . }}-secrets
+            secretName: {{ include "PrivShield.fullname" . }}-secrets
             {{- end }}
         {{- if .Values.security.tls.caSecret }}
         - name: ca-cert

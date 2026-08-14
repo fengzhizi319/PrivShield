@@ -2,7 +2,7 @@
 """
 训练数据自动生成与蒸馏脚本（规则驱动版） / Rule-driven SFT data generation.
 
-数据管道完全基于 privacy-local-agent 的 Layer-1 可配置规则引擎：
+数据管道完全基于 PrivShield 的 Layer-1 可配置规则引擎：
 The pipeline is fully grounded in the project's Layer-1 configurable rule engine:
 
 1. Faker 伪造工厂 + 领域模板合成含敏感实体的文本 /

@@ -1,6 +1,6 @@
 # 动态分类分级（多标准适配）API 参考手册
 
-本文档提供 `privacy-local-agent` 动态分类分级模块的 Python SDK、REST API 以及 gRPC 接口的完整参考指南。
+本文档提供 `PrivShield` 动态分类分级模块的 Python SDK、REST API 以及 gRPC 接口的完整参考指南。
 
 ---
 

@@ -13,21 +13,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: privacy-local-agent-llm
-  namespace: privacy-local-agent
+  name: PrivShield-llm
+  namespace: PrivShield
   labels:
-    app: privacy-local-agent-llm
+    app: PrivShield-llm
 spec:
   # LLM 为 GPU 有状态推理服务，默认单副本；
   # 多副本需按显存规划调整（tensor-parallel 或独立 GPU 分配）
   replicas: 1
   selector:
     matchLabels:
-      app: privacy-local-agent-llm
+      app: PrivShield-llm
   template:
     metadata:
       labels:
-        app: privacy-local-agent-llm
+        app: PrivShield-llm
     spec:
       containers:
         - name: vllm
@@ -88,7 +88,7 @@ spec:
           # 单机测试：hostPath 指向宿主 .models 目录；
           # 生产环境请改用 PVC（将模型 COPY 进 PVC 后挂载）
           hostPath:
-            path: /home/charles/code/sfwork/privacy-local-agent/.models
+            path: /home/charles/code/sfwork/PrivShield/.models
             type: Directory
       # GPU 节点调度：如集群使用节点标签，取消下面注释
       # nodeSelector:

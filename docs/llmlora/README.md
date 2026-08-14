@@ -1,6 +1,6 @@
 # Qwen3.5-0.8B LoRA 专精模型微调与数据蒸馏方案概览
 
-> 本文档针对在 `privacy-local-agent` Sidecar 架构中引入 **Qwen3.5-0.8B**（基座 `llmlora/basemodels/qwen3.5-0.8b` / `cmeee_merged`，约 752M 参数）替换 Layer-3 大模型（分类分级仲裁、脱敏与文本无痕抹平）进行全面效果评估，并提供基于 Layer-1 规则漏斗自动蒸馏训练数据的完整方案。
+> 本文档针对在 `PrivShield` Sidecar 架构中引入 **Qwen3.5-0.8B**（基座 `llmlora/basemodels/qwen3.5-0.8b` / `cmeee_merged`，约 752M 参数）替换 Layer-3 大模型（分类分级仲裁、脱敏与文本无痕抹平）进行全面效果评估，并提供基于 Layer-1 规则漏斗自动蒸馏训练数据的完整方案。
 >
 > **本方案不考虑图片 OCR，仅针对纯文本分类分级与脱敏场景。**
 
@@ -10,7 +10,7 @@
 
 ### 1.1 场景背景
 
-在 `privacy-local-agent` 的三层漏斗架构（Layer-1 规则引擎 -> Layer-2 Small-NER -> Layer-3 LLM）中：
+在 `PrivShield` 的三层漏斗架构（Layer-1 规则引擎 -> Layer-2 Small-NER -> Layer-3 LLM）中：
 - **Layer-1 规则引擎**（`ConfigurableRuleEngine`）：处理确定性强、高频的标准字段（如身份证、手机号、IP 地址、银行卡），毫秒级响应，精度 100%。
 - **Layer-2 Small-NER**（`NerAdapter`）：ONNX 实体识别，处理未命中规则但含实体的文本。
 - **Layer-3 LLM**（`LlmAdapter` → `Qwen3Classifier`）：处理复杂长文本语义理解、规则冲突仲裁、非结构化敏感信息提取以及**脱敏后的文本无痕抹平（Context Smoothing / Natural Rewriting）**。

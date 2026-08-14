@@ -1664,7 +1664,7 @@ spec:
       
       containers:
         - name: privacy-agent
-          image: privacy-local-agent:0.1.0
+          image: PrivShield:0.1.0
           ports:
             - containerPort: 8079
               name: http

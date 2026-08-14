@@ -2,10 +2,10 @@
  * cURL 命令生成模块 / cURL Command Generator Module
  *
  * 功能：将当前请求导出为可直接在终端执行的 cURL 命令，
- * 目标为 privacy-local-agent 的 REST API（默认 http://127.0.0.1:8079）。
+ * 目标为 PrivShield 的 REST API（默认 http://127.0.0.1:8079）。
  *
  * Function: Export the current request as a ready-to-run cURL command,
- * targeting the privacy-local-agent REST API (default http://127.0.0.1:8079).
+ * targeting the PrivShield REST API (default http://127.0.0.1:8079).
  *
  * 使用场景 / Usage Scenarios：
  *   - EndpointView 中点击 "cURL" 按钮复制命令到剪贴板；

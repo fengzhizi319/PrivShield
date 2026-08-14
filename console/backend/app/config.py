@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     default ``127.0.0.1:8079``). Fields map to env var names via ``alias``.
     """
 
-    # 下游 privacy-local-agent 的 REST 基地址 / Downstream privacy-local-agent REST base URL
+    # 下游 PrivShield 的 REST 基地址 / Downstream PrivShield REST base URL
     privacy_agent_url: str = Field(default="http://127.0.0.1:8079", alias="PRIVACY_AGENT_URL")
     # 可选的认证 API Key（agent 开启 auth 时必填）/ Optional auth API Key (required when agent auth is enabled)
     privacy_agent_api_key: str | None = Field(default=None, alias="PRIVACY_AGENT_API_KEY")

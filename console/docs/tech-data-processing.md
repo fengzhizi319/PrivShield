@@ -1204,7 +1204,7 @@ record = ProcessingRecord(
     record_id="proc_20240115_001",
     source="users_db.raw_users",
     destination="analytics.masked_users",
-    operator="privacy-local-agent",
+    operator="PrivShield",
     operator_version="0.1.0",
     fields_affected=[
         FieldLineage(

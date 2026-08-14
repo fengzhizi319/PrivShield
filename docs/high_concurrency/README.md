@@ -1,6 +1,6 @@
 # 高并发与多连接架构 (High Concurrency Architecture)
 
-本目录包含 `privacy-local-agent` 支持万级并发请求 (10,000+ QPS) 和海量长连接的技术设计与实现方案。
+本目录包含 `PrivShield` 支持万级并发请求 (10,000+ QPS) 和海量长连接的技术设计与实现方案。
 
 ## 目录 (Table of Contents)
 

@@ -146,8 +146,8 @@ export default function Header({ backend, onBackendChange, health, loading, onHo
         </div>
         {/* 品牌文字：主标题 + 副标题 / Brand text: main title + subtitle */}
         <div className="leading-tight">
-          <div className="text-sm font-semibold text-gray-900">Privacy Test Console</div>
-          <div className="text-[11px] text-gray-400">privacy-local-agent</div>
+          <div className="text-sm font-semibold text-gray-900">{t('header.brand_title')}</div>
+          <div className="text-[11px] text-gray-400">{t('header.brand_subtitle')}</div>
         </div>
       </button>
 

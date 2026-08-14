@@ -107,10 +107,10 @@ base (python:3.13.13-slim-bookworm)
 ```bash
 # 在仓库根目录执行
 # core 镜像（推荐生产默认）
-docker build --target core -t privacy-local-agent:0.1.0 .
+docker build --target core -t PrivShield:0.1.0 .
 
 # ml 镜像（含 torch/transformers/onnxruntime，用于完整三层分类）
-docker build --target ml -t privacy-local-agent:0.1.0-ml .
+docker build --target ml -t PrivShield:0.1.0-ml .
 
 # 也可使用 Makefile 快捷命令
 make docker-core          # 等价于 --target core
@@ -176,14 +176,14 @@ docker load -i ~/vllm-image.tar
 
 ```bash
 # 1. 打上仓库前缀 tag（myregistry 换成 Docker Hub 用户名或私有仓库地址）
-docker tag privacy-local-agent:0.1.0 myregistry/privacy-local-agent:0.1.0
+docker tag PrivShield:0.1.0 myregistry/PrivShield:0.1.0
 
 # 2. 登录并推送
 docker login
-docker push myregistry/privacy-local-agent:0.1.0
+docker push myregistry/PrivShield:0.1.0
 
 # 3. 目标机器拉取
-docker pull myregistry/privacy-local-agent:0.1.0
+docker pull myregistry/PrivShield:0.1.0
 ```
 
 > 国内网络 pull 官方镜像慢时，可用 daemon.json 里配置的 registry-mirrors（如 `docker.m.daocloud.io`）加速，或从镜像站/私有仓库导入。
@@ -222,7 +222,7 @@ deploy/helm/privacy-local-agent/
 ### 3.2 默认安装（开发/测试）
 
 ```bash
-helm install pla ./deploy/helm/privacy-local-agent
+helm install pla ./deploy/helm/PrivShield
 ```
 
 默认配置要点：
@@ -239,7 +239,7 @@ helm install pla ./deploy/helm/privacy-local-agent
 # 1. 准备 TLS Secret（包含 tls.crt 和 tls.key）
 kubectl create secret tls pla-tls \
   --cert=path/to/tls.crt --key=path/to/tls.key \
-  -n privacy-local-agent
+  -n PrivShield
 
 # 2. 准备 API Key Secret（包含 api-keys.json 文件）
 # api-keys.json 格式示例：
@@ -249,14 +249,14 @@ kubectl create secret tls pla-tls \
 # }
 kubectl create secret generic pla-apikeys \
   --from-file=api-keys.json=path/to/api-keys.json \
-  -n privacy-local-agent
+  -n PrivShield
 
 # 3. 安装（使用生产 values 覆盖）
-helm install pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm install pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=pla-tls \
   --set security.auth.apiKeysSecret=pla-apikeys \
-  --set image.repository=myregistry/privacy-local-agent \
+  --set image.repository=myregistry/PrivShield \
   --set image.tag=0.1.0
 ```
 
@@ -278,9 +278,9 @@ helm install pla ./deploy/helm/privacy-local-agent \
 ### 3.4 ML 镜像部署
 
 ```bash
-helm install pla-ml ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-ml.yaml \
-  --set image.repository=myregistry/privacy-local-agent \
+helm install pla-ml ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-ml.yaml \
+  --set image.repository=myregistry/PrivShield \
   --set image.tag=0.1.0-ml
 ```
 
@@ -299,8 +299,8 @@ helm install pla-ml ./deploy/helm/privacy-local-agent \
 
 ```bash
 # 升级（修改 values 或镜像版本后）
-helm upgrade pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm upgrade pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set image.tag=0.2.0
 
 # 查看历史版本
@@ -319,7 +319,7 @@ helm rollback pla 2
 helm uninstall pla
 
 # 如需同时清理 PVC / Secret 等手动创建的资源
-kubectl delete secret pla-tls pla-apikeys -n privacy-local-agent
+kubectl delete secret pla-tls pla-apikeys -n PrivShield
 ```
 
 ---
@@ -332,7 +332,7 @@ kubectl delete secret pla-tls pla-apikeys -n privacy-local-agent
 
 | 文件 | Kind | 说明 |
 |---|---|---|
-| `namespace.yaml` | Namespace | 创建 `privacy-local-agent` 命名空间 |
+| `namespace.yaml` | Namespace | 创建 `PrivShield` 命名空间 |
 | `configmap.yaml` | ConfigMap | 注入 `privacy-profile.yaml` 配置 |
 | `deployment.yaml` | Deployment | 主工作负载（含探针、资源限制） |
 | `service.yaml` | Service | ClusterIP，暴露 8079（REST）+ 50051（gRPC） |
@@ -354,8 +354,8 @@ cp deploy/k8s/secret.example.yaml deploy/k8s/secret.yaml
 kubectl apply -k deploy/k8s/
 
 # 4. 验证
-kubectl get pods -n privacy-local-agent
-kubectl get svc -n privacy-local-agent
+kubectl get pods -n PrivShield
+kubectl get svc -n PrivShield
 ```
 
 **Deployment 关键配置说明**：
@@ -390,7 +390,7 @@ resources:
 # 配置挂载
 volumeMounts:
   - name: config
-    mountPath: /etc/privacy-local-agent
+    mountPath: /etc/PrivShield
     readOnly: true
 ```
 
@@ -446,7 +446,7 @@ docker compose down -v     # 连数据卷一起删（慎用！预算与日志会
 |---|---|---|
 | 镜像 image | 打包好的"安装包"（只读模板），由 Dockerfile 构建 | `privacy-local-agent:0.1.0`、`vllm/vllm-openai:latest` |
 | 容器 container | 镜像的运行实例，一个隔离的进程环境 | 7 个服务对应 7 个容器 |
-| 服务 service | compose 文件里对一组容器的声明 | `privacy-local-agent`、`vllm` |
+| 服务 service | compose 文件里对一组容器的声明 | `PrivShield`、`vllm` |
 | 网络 network | 容器间的虚拟局域网，内部按服务名 DNS 互访 | `backend` / `llm` / `frontend` |
 | 卷 volume | 容器外的持久化存储（容器删除数据仍在） | `budget-db`、`audit-logs` |
 | profile | compose 的"开关"，按需启停可选服务 | `--profile llm` 才启动 vllm |
@@ -459,7 +459,7 @@ docker compose down -v     # 连数据卷一起删（慎用！预算与日志会
 
 | 服务组件 | 镜像 / 构建目标 | 容器端口 | 功能说明 |
 |---|---|---|---|
-| `privacy-local-agent` | `Dockerfile` (`target: core`) | 8079 (REST) / 50051 (gRPC) | 隐私 Agent 核心 Sidecar 服务 |
+| `PrivShield` | `Dockerfile` (`target: core`) | 8079 (REST) / 50051 (gRPC) | 隐私 Agent 核心 Sidecar 服务 |
 | `console-backend-go` | `console/backend-go/Dockerfile` | 8081 | Go gRPC 高性能代理后端 |
 | `console-backend-python` | `console/backend/Dockerfile` | 8080 | Python FastAPI REST 代理后端 |
 | `console-web` | `console/web/Dockerfile` | 5173 | React 单页控制台 Nginx 静态服务 |
@@ -516,7 +516,7 @@ docker compose --profile llm up -d
 
 | 验证点 | 结果 |
 |---|---|
-| 无 profile 的服务 | `privacy-local-agent`、`console-backend-go`、`console-backend-python`、`console-web`（4 个） |
+| 无 profile 的服务 | `PrivShield`、`console-backend-go`、`console-backend-python`、`console-web`（4 个） |
 | `--profile llm` 追加 | + `vllm`（共 5 个） |
 | vllm 镜像 | `vllm/vllm-openai:latest`（`${VLLM_IMAGE_TAG:-latest}` 替换生效） |
 | env_file 合并 | agent 容器环境含根目录 `.env` 的值：`PRIVACY_ENV_PROFILE=qwen3`、`PRIVACY_LOG_LEVEL=INFO`、`PRIVACY_REST_PORT=8079` 等 |
@@ -530,7 +530,7 @@ docker compose --profile llm up -d
 | 机制 | 作用对象 | 是否依赖 `.env` | 生效时机 |
 |---|---|---|---|
 | `environment` 段硬编码 | agent 8 个核心变量（监听地址、LLM provider/模型名/Key）、双 console 后端全部变量、grafana 的 GF_* | ❌ 不依赖（写死在 yml） | 容器创建时 |
-| `env_file` 注入 | 仅 `privacy-local-agent`（`../../.env` → 根目录 `.env`） | ✅ 唯一依赖点（`required: false`） | 容器创建时 |
+| `env_file` 注入 | 仅 `PrivShield`（`../../.env` → 根目录 `.env`） | ✅ 唯一依赖点（`required: false`） | 容器创建时 |
 | `${VAR:-default}` 变量替换 | `vllm` 镜像 tag、`grafana` 密码、agent 的 `LLM_API_BASE` 与 `LLM_API_KEY`（默认 `http://vllm:8000/v1` 和 `EMPTY`，跨主机部署时覆盖为 GPU 主机端点与鉴权密钥） | ⚠️ 解析时查 **CWD**（`deploy/docker-compose/.env`），与根目录 `.env` 无关 | 解析阶段 |
 
 **优先级**：`environment` > `env_file` > 镜像内默认值（Dockerfile ENV/CMD）。
@@ -539,7 +539,7 @@ docker compose --profile llm up -d
 
 | 服务 | 环境变量来源 |
 |---|---|
-| `privacy-local-agent` | env_file（根目录 `.env` 其余项）+ environment 覆盖 8 项（容器必须 0.0.0.0、LLM provider 等）+ `${LLM_API_BASE}` / `${LLM_API_KEY}` 变量替换（跨主机部署用） |
+| `PrivShield` | env_file（根目录 `.env` 其余项）+ environment 覆盖 8 项（容器必须 0.0.0.0、LLM provider 等）+ `${LLM_API_BASE}` / `${LLM_API_KEY}` 变量替换（跨主机部署用） |
 | `console-backend-go` / `console-backend-python` / `console-web` | 全部 environment 硬编码（compose 内部 DNS 服务名，跨环境不变） |
 | `vllm` | 无环境变量；仅 `image` 的 `${VLLM_IMAGE_TAG:-latest}` 编排替换 |
 | `grafana` | GF_* 硬编码 + `${GRAFANA_ADMIN_PASSWORD:-changeme}` 替换 |
@@ -554,7 +554,7 @@ docker compose --profile llm up -d
 
 1. **分清"固定值"与"环境差异值"**
 
-   - compose 硬编码项（监听地址 `0.0.0.0`、`privacy-local-agent`/`vllm` 服务名、端口）是**环境无关的编排固定值**——本地/测试/生产容器里都相同，无需改动；只有跨主机部署（agent 在别的主机、LLM 用云 API）才需要动
+   - compose 硬编码项（监听地址 `0.0.0.0`、`PrivShield`/`vllm` 服务名、端口）是**环境无关的编排固定值**——本地/测试/生产容器里都相同，无需改动；只有跨主机部署（agent 在别的主机、LLM 用云 API）才需要动
    - 真正因环境而异的项：LLM provider、日志级别、预算窗口、TLS/Auth 开关、镜像 tag、Grafana 密码等
 
 2. **90% 的场景只改一个文件：根目录 `.env`**
@@ -731,7 +731,7 @@ docker compose --profile llm config --services  # → 5 个（含 vllm）
 
 **结论先行**：`docker compose up -d` **不是每次都会执行 build**。compose 采用“镜像优先”策略——本地已有 `privacy-local-agent:0.1.0` 就直接复用（**哪怕你刚改了源码/Dockerfile，也不会自动重建**）；只有镜像不存在时才尝试拉取/构建。
 
-**决策链**（`privacy-local-agent` 服务同时声明了 `build:` 与 `image:`，见 5.1）：
+**决策链**（`PrivShield` 服务同时声明了 `build:` 与 `image:`，见 5.1）：
 
 ```text
 docker compose up -d privacy-local-agent
@@ -793,7 +793,7 @@ networks:
 
 - `driver: bridge` 是核心声明——告诉 daemon「用 Linux 网桥创建一个独立的虚拟二层网络」
 - 服务侧通过 `networks:` 字段“接线”，**两个服务都挂载 `llm` 才互通**：
-  - `privacy-local-agent` → `networks: [backend, llm]`
+  - `PrivShield` → `networks: [backend, llm]`
   - `vllm` → `networks: [llm]`
 - 未显式声明 `networks:` 的服务会自动加入 compose 默认网络（`<项目名>_default`），与 `llm` 网络互不相通；因此 `http://vllm:8000/v1` 能解析的前提，正是两个服务都显式挂载了 `llm` 网络
 
@@ -823,7 +823,7 @@ compose CLI（声明解析）                       dockerd（真正实现）
 ```bash
 docker network ls                            # 看到 docker-compose_llm（compose 网络名带项目前缀）
 docker network inspect docker-compose_llm    # Driver: bridge；IPAM 子网；Containers 列出 agent 与 vllm 的 IP
-docker exec privacy-local-agent getent hosts vllm   # 容器内解析服务名 → 返回 vllm 容器 IP（如 172.20.0.5）
+docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回 vllm 容器 IP（如 172.20.0.5）
 ```
 
 > **一句话总结**：yml 的 `networks:` 段是“图纸”，dockerd 的 bridge 驱动是“施工队”——它建网桥（虚拟交换机）、发 IP、接线（veth pair）、跑 DNS，最终让 agent 与 vllm 在同一个虚拟二层网段里用服务名互访。
@@ -975,8 +975,8 @@ PRIVACY_NER_ENABLE=true          # Layer-2 Small-NER
 **Helm 部署**（`llm.enabled` 保持 false，**勿开启**——那是解耦模式）：
 
 ```bash
-helm install pla-ml ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-ml.yaml \
+helm install pla-ml ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-ml.yaml \
   --set image.tag=0.1.0-ml
 ```
 
@@ -1033,7 +1033,7 @@ docker tag docker.m.daocloud.io/vllm/vllm-openai:latest vllm/vllm-openai:latest
 **Helm 部署** —— 方式一：**Helm 全托管**（一条命令同时创建 core + LLM Deployment）：
 
 ```bash
-helm install pla ./deploy/helm/privacy-local-agent --set llm.enabled=true
+helm install pla ./deploy/helm/PrivShield --set llm.enabled=true
 ```
 
 - 自动创建 `-llm` Deployment（vLLM + GPU 预留）+ ClusterIP Service
@@ -1259,7 +1259,7 @@ docker compose --profile llm up -d  # 解耦模式（core + 独立 vLLM）
 ```yaml
 # prometheus.yml
 rule_files:
-  - /etc/prometheus/rules/privacy-local-agent-alerts.yml
+  - /etc/prometheus/rules/PrivShield-alerts.yml
 ```
 
 **告警规则汇总**：
@@ -1305,7 +1305,7 @@ Helm 安装时设置 `serviceMonitor.enabled=true` 即可自动创建 ServiceMon
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: privacy-local-agent
+      app.kubernetes.io/name: PrivShield
   endpoints:
     - port: http
       path: /metrics
@@ -1348,7 +1348,7 @@ networkPolicy:
     from:
       - podSelector:
           matchLabels:
-            app.kubernetes.io/part-of: privacy-local-agent
+            app.kubernetes.io/part-of: PrivShield
 ```
 
 **生成的 NetworkPolicy 行为**：
@@ -1442,7 +1442,7 @@ K8s 配置独立存放于 `deploy/k8s/`（原生 YAML）与 `deploy/helm/`（Hel
 | `PRIVACY_BUDGET_WINDOW_SECONDS` | — | 预算自动重置时间窗口 |
 | `PRIVACY_LOG_LEVEL` | `INFO` | 日志级别 |
 | `PRIVACY_LOG_FORMAT` | `text` | 日志格式：`text` / `json` |
-| `PRIVACY_SERVICE_NAME` | `privacy-local-agent` | 服务名（日志/Tracing） |
+| `PRIVACY_SERVICE_NAME` | `PrivShield` | 服务名（日志/Tracing） |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OpenTelemetry OTLP 端点 |
 | `OTEL_SERVICE_NAME` | — | Tracing 服务名（覆盖 PRIVACY_SERVICE_NAME） |
 | `PRIVACY_TLS_ENABLED` | `false` | 启用 TLS |
@@ -1482,13 +1482,13 @@ K8s 配置独立存放于 `deploy/k8s/`（原生 YAML）与 `deploy/helm/`（Hel
 
 ```bash
 # 查看 Pod 状态
-kubectl get pods -n privacy-local-agent -l app=privacy-local-agent
+kubectl get pods -n PrivShield -l app=PrivShield
 
 # 查看启动日志
-kubectl logs -n privacy-local-agent deploy/privacy-local-agent -f
+kubectl logs -n PrivShield deploy/PrivShield -f
 
 # 端口转发
-kubectl port-forward -n privacy-local-agent svc/privacy-local-agent 8079:8079 50051:50051
+kubectl port-forward -n PrivShield svc/PrivShield 8079:8079 50051:50051
 
 # 健康检查
 curl http://localhost:8079/health
@@ -1538,7 +1538,7 @@ cd deploy/docker-compose
 docker compose ps
 
 # 查看日志
-docker compose logs -f privacy-local-agent
+docker compose logs -f PrivShield
 
 # 冒烟测试
 curl http://localhost:8079/health
@@ -1603,7 +1603,7 @@ curl http://localhost:8079/health
 
 ```bash
 # 1. 确认端口是否真的映射到了宿主机
- docker inspect --format='{{json .NetworkSettings.Ports}}' privacy-local-agent-vllm
+ docker inspect --format='{{json .NetworkSettings.Ports}}' PrivShield-vllm
  # 正常应显示：{"8000/tcp":[{"HostIp":"127.0.0.1","HostPort":"8000"}]}
  # 若为 null，说明 internal 网络阻止了映射
 
@@ -1612,7 +1612,7 @@ curl http://localhost:8079/health
  docker compose --profile llm config | grep -A3 'llm:'
 
 # 3. 确认健康检查命令
- docker inspect --format='{{json .State.Health}}' privacy-local-agent-vllm | python3 -m json.tool
+ docker inspect --format='{{json .State.Health}}' PrivShield-vllm | python3 -m json.tool
  # 若日志里有 "python": executable file not found → 需改成 python3
 
 # 4. 确认本地代理是否干扰
@@ -1621,7 +1621,7 @@ curl http://localhost:8079/health
  # 若看到 Trying 127.0.0.1:7897 或 502 Bad Gateway → 代理在转发 localhost
 
 # 5. 直接测试 vLLM 容器内服务是否已就绪
- docker exec privacy-local-agent-vllm python3 -c \
+ docker exec PrivShield-vllm python3 -c \
    "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status)"
 ```
 
@@ -1657,20 +1657,20 @@ PYTHONPATH=. pytest tests/scripts/test_docker_start_llm.py -v
 
 ```bash
 # 查看 Pod 事件
-kubectl describe pod -n privacy-local-agent -l app=privacy-local-agent
+kubectl describe pod -n PrivShield -l app=PrivShield
 
 # 进入容器调试
-kubectl exec -it -n privacy-local-agent deploy/privacy-local-agent -- /bin/sh
+kubectl exec -it -n PrivShield deploy/PrivShield -- /bin/sh
 
 # 容器内测试端口
 curl http://localhost:8079/health
 curl http://localhost:8079/metrics | grep privacy_budget
 
 # 查看 ConfigMap 内容
-kubectl get configmap privacy-local-agent-config -n privacy-local-agent -o yaml
+kubectl get configmap PrivShield-config -n PrivShield -o yaml
 
 # 查看 Secret（base64 编码）
-kubectl get secret pla-tls -n privacy-local-agent -o yaml
+kubectl get secret pla-tls -n PrivShield -o yaml
 ```
 
 ### 15.2 WSL 中 Docker GPU 失效（真实排查案例）
@@ -1742,35 +1742,35 @@ docker run --rm --gpus 1 <镜像> python3 -c "import torch; print(torch.cuda.is_
 
 ```bash
 # 手动扩容（HPA 关闭时）
-kubectl scale deploy/privacy-local-agent -n privacy-local-agent --replicas=3
+kubectl scale deploy/PrivShield -n PrivShield --replicas=3
 
 # 查看 HPA 状态（HPA 开启时）
-kubectl get hpa -n privacy-local-agent
+kubectl get hpa -n PrivShield
 ```
 
 ### 16.2 滚动更新
 
 ```bash
 # 更新镜像版本
-kubectl set image deploy/privacy-local-agent \
-  agent=myregistry/privacy-local-agent:0.2.0 \
-  -n privacy-local-agent
+kubectl set image deploy/PrivShield \
+  agent=myregistry/PrivShield:0.2.0 \
+  -n PrivShield
 
 # 查看滚动状态
-kubectl rollout status deploy/privacy-local-agent -n privacy-local-agent
+kubectl rollout status deploy/PrivShield -n PrivShield
 
 # 回滚
-kubectl rollout undo deploy/privacy-local-agent -n privacy-local-agent
+kubectl rollout undo deploy/PrivShield -n PrivShield
 ```
 
 ### 16.3 配置变更
 
 ```bash
 # 编辑 ConfigMap
-kubectl edit configmap privacy-local-agent-config -n privacy-local-agent
+kubectl edit configmap PrivShield-config -n PrivShield
 
 # 重启 Pod 使配置生效（ConfigMap 更新不会自动触发滚动）
-kubectl rollout restart deploy/privacy-local-agent -n privacy-local-agent
+kubectl rollout restart deploy/PrivShield -n PrivShield
 ```
 
 ### 16.4 证书轮换
@@ -1779,23 +1779,23 @@ kubectl rollout restart deploy/privacy-local-agent -n privacy-local-agent
 # 更新 TLS Secret
 kubectl create secret tls pla-tls \
   --cert=new-tls.crt --key=new-tls.key \
-  -n privacy-local-agent --dry-run=client -o yaml | kubectl apply -f -
+  -n PrivShield --dry-run=client -o yaml | kubectl apply -f -
 
 # 重启 Pod 加载新证书
-kubectl rollout restart deploy/privacy-local-agent -n privacy-local-agent
+kubectl rollout restart deploy/PrivShield -n PrivShield
 ```
 
 ### 16.5 日志查看
 
 ```bash
 # 实时日志
-kubectl logs -f -n privacy-local-agent deploy/privacy-local-agent
+kubectl logs -f -n PrivShield deploy/PrivShield
 
 # 最近 100 行
-kubectl logs --tail=100 -n privacy-local-agent deploy/privacy-local-agent
+kubectl logs --tail=100 -n PrivShield deploy/PrivShield
 
 # JSON 格式日志过滤（生产模式 logFormat=json）
-kubectl logs -n privacy-local-agent deploy/privacy-local-agent | jq '.level == "error"'
+kubectl logs -n PrivShield deploy/PrivShield | jq '.level == "error"'
 ```
 
 ### 16.6 Helm 预检查（CI/CD）
@@ -1808,7 +1808,7 @@ make helm-lint
 make helm-template
 
 # 自定义 values 渲染
-helm template pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm template pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=pla-tls
 ```

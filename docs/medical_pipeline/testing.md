@@ -28,7 +28,7 @@
 ### 2.1 运行医疗 Pipeline 测试集
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 PYTHONPATH=. pytest tests/test_medical_pipeline.py -v
 ```
 

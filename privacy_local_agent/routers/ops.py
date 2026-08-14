@@ -651,7 +651,7 @@ def diagnostics(
         "status": "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": {
-            "name": os.environ.get("PRIVACY_SERVICE_NAME", "privacy-local-agent"),
+            "name": os.environ.get("PRIVACY_SERVICE_NAME", "PrivShield"),
             "namespace": NAMESPACE,
             "python_version": platform.python_version(),
             "rest_port": int(os.environ.get("PRIVACY_REST_PORT", "8079")),

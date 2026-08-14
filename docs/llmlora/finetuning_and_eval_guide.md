@@ -1,6 +1,6 @@
 # Qwen3.5-0.8B LoRA 微调、导出与评估指南
 
-> 本指南针对在 `privacy-local-agent` Sidecar 架构中针对 **Qwen3.5-0.8B**（基座 `llmlora/basemodels/qwen3.5-0.8b` / `cmeee_merged`，约 752M 参数）进行 LoRA 微调、模型导出与合并、与 `LlmAdapter` / `QwenPrivacyLoRAEngine` 集成、灰度部署与降级熔断、以及 Benchmark 验证进行详细说明。
+> 本指南针对在 `PrivShield` Sidecar 架构中针对 **Qwen3.5-0.8B**（基座 `llmlora/basemodels/qwen3.5-0.8b` / `cmeee_merged`，约 752M 参数）进行 LoRA 微调、模型导出与合并、与 `LlmAdapter` / `QwenPrivacyLoRAEngine` 集成、灰度部署与降级熔断、以及 Benchmark 验证进行详细说明。
 >
 > **本方案仅面向纯文本分类分级与脱敏场景，不涉及图片 OCR。**
 
@@ -265,4 +265,4 @@ Sidecar 内置多重保护措施，当发生以下异常时自动放弃 LLM 结�
 - **解决办法**：`train.py` 在导出时已自动补齐兼容性配置文件及 `model.visual.*` 权重占位。请确保使用 `llmlora/output/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother` 导出的模型目录。
 
 ### Q4: 如何验证 Layer-3 LLM 引擎是否生效？
-- **验证方式**：在 `privacy-local-agent` 启动时观察日志 `qwen3_classifier_initialized`，发送包含复杂冲突逻辑的请求（如病历与排除诊断混写），检查返回结果中的 `llm_arbitrated: true` 以及 `smoothed_text` 文本。
+- **验证方式**：在 `PrivShield` 启动时观察日志 `qwen3_classifier_initialized`，发送包含复杂冲突逻辑的请求（如病历与排除诊断混写），检查返回结果中的 `llm_arbitrated: true` 以及 `smoothed_text` 文本。

@@ -161,7 +161,7 @@ services:
       PRIVACY_LOG_FORMAT: "json"
       # PRIVACY_PROFILE: YAML 参数 profile 文件路径（脱敏策略/DP 参数等）
       #   容器内路径由下方 volumes 挂载映射到宿主机的 ./privacy-profile.yaml
-      PRIVACY_PROFILE: "/etc/privacy-local-agent/privacy-profile.yaml"
+      PRIVACY_PROFILE: "/etc/PrivShield/privacy-profile.yaml"
       # PRIVACY_BUDGET_DB: 分布式隐私预算数据库（SQLite）文件路径
       #   设置为路径则预算跨进程/跨实例持久化；不设置则使用进程内存（单实例场景）
       #   目录由下方 budget-db 命名卷挂载，保证容器重建预算不丢失
@@ -205,7 +205,7 @@ services:
     #   "host:container" 双向冒号形式为 bind mount（引用宿主机绝对/相对路径）
     #   "卷名:container" 单冒号形式为 named volume（由上方 volumes 段声明）
     volumes:
-      - ./privacy-profile.yaml:/etc/privacy-local-agent/privacy-profile.yaml:ro  # 参数 profile 只读挂载
+      - ./privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro  # 参数 profile 只读挂载
       - budget-db:/data/budget          # 预算数据库持久化命名卷
       - audit-logs:/var/log/privacy     # 审计日志持久化命名卷
     # networks: 容器加入的网络（可多选；服务名即网络内 DNS 名称）
@@ -280,9 +280,9 @@ services:
       # PRIVACY_CONSOLE_PORT: Go 代理自身监听端口（与上方 ports 容器端口一致）
       PRIVACY_CONSOLE_PORT: "8081"
       # PRIVACY_AGENT_GRPC_HOST: 上游 agent 的 gRPC 主机名
-      #   使用 compose 内部 DNS 服务名 privacy-local-agent（同网络 backend 内自动解析）
+      #   使用 compose 内部 DNS 服务名 PrivShield（同网络 backend 内自动解析）
       #   若 agent 部署在其他主机，改为其 IP 或外部域名
-      PRIVACY_AGENT_GRPC_HOST: "privacy-local-agent"
+      PRIVACY_AGENT_GRPC_HOST: "PrivShield"
       # PRIVACY_AGENT_GRPC_PORT: 上游 agent 的 gRPC 端口（与 agent 的 50051 一致）
       PRIVACY_AGENT_GRPC_PORT: "50051"
     # depends_on: 服务启动顺序依赖
@@ -295,7 +295,7 @@ services:
         condition: service_healthy
     networks:
       - frontend   # 供 console-web / 外部访问
-      - backend    # 用于访问 privacy-local-agent 的 gRPC
+      - backend    # 用于访问 PrivShield 的 gRPC
     healthcheck:
       # 探测 /health 端点；curl 不可用时可换 wget --spider 方式（见 console-web）
       test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
@@ -493,13 +493,13 @@ services:
   prometheus:
     profiles: ["monitoring"]   # 仅 --profile monitoring 时启动
     image: prom/prometheus:v2.54.1  # 固定版本镜像（生产可复现）
-    container_name: privacy-local-agent-prometheus
+    container_name: PrivShield-prometheus
     ports:
       - "9090:9090"  # Prometheus Web UI / API 端口
     volumes:
       # 抓取规则与告警规则均为只读挂载（配置从宿主机 hot-reload）
       - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro        # 主配置（抓取目标等）
-      - ../prometheus/alerts.yml:/etc/prometheus/rules/privacy-local-agent-alerts.yml:ro  # 告警规则
+      - ../prometheus/alerts.yml:/etc/prometheus/rules/PrivShield-alerts.yml:ro  # 告警规则
       - prometheus-data:/prometheus   # 时序数据持久化（named volume）
     networks:
       - backend    # 通过 backend 网络抓取 agent 指标（internal 网络内可达）
@@ -528,7 +528,7 @@ services:
   grafana:
     profiles: ["monitoring"]   # 仅 --profile monitoring 时启动
     image: grafana/grafana:11.2.0  # 固定版本镜像
-    container_name: privacy-local-agent-grafana
+    container_name: PrivShield-grafana
     ports:
       - "3000:3000"  # Grafana Web UI 端口（浏览器访问 http://localhost:3000）
     environment:

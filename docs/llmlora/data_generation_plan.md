@@ -1,6 +1,6 @@
 # 基于 Layer-1 规则漏斗的训练数据自动生成与蒸馏方案
 
-> 本方案旨在利用 `privacy-local-agent` 现有的 Layer-1 规则引擎（`ConfigurableRuleEngine`，含正则表达、敏感词库、掩码策略与行业合规模板），构建一套零人工成本、自动化的高质量合成数据生成管道（Data Generation Pipeline），用于微调 Qwen3.5-0.8B 轻量大模型。
+> 本方案旨在利用 `PrivShield` 现有的 Layer-1 规则引擎（`ConfigurableRuleEngine`，含正则表达、敏感词库、掩码策略与行业合规模板），构建一套零人工成本、自动化的高质量合成数据生成管道（Data Generation Pipeline），用于微调 Qwen3.5-0.8B 轻量大模型。
 
 ---
 
@@ -440,7 +440,7 @@ def validate_sample(sample: dict, engine: ConfigurableRuleEngine) -> bool:
 
 ```bash
 # 生成完整 SFT 数据集
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 python scripts/data/generate_llm_lora_dataset.py \
     --train-size 50000 \
     --val-size 5000 \

@@ -176,7 +176,7 @@ def generate_test_certs(tmp_dir: Path) -> dict[str, Path]:
 
     # 受信 CA（用于签发服务端/客户端证书）
     ca_key = _generate_key()
-    ca_cert = _make_ca("privacy-local-agent-test-ca", ca_key)
+    ca_cert = _make_ca("PrivShield-test-ca", ca_key)
 
     # 服务端证书（含 localhost / 127.0.0.1 SAN，用于 TLS 服务端认证）
     server_key = _generate_key()

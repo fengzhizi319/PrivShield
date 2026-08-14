@@ -3,14 +3,14 @@ import os
 import sys
 
 os.environ["PRIVACY_ENV_PROFILE"] = ""
-sys.path.insert(0, "/home/charles/code/sfwork/privacy-local-agent")
+sys.path.insert(0, "/home/charles/code/sfwork/PrivShield")
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from privacy_local_agent.dynclassification.utils import wrap_untrusted_text
 
-mp = "/home/charles/code/sfwork/privacy-local-agent/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+mp = "/home/charles/code/sfwork/PrivShield/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
 tok = AutoTokenizer.from_pretrained(mp, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(
     mp, dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True

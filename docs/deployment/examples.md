@@ -25,7 +25,7 @@
 
 ## 1. 概述
 
-本文档提供 `privacy-local-agent` 的完整部署示例，包括 Helm 安装、Kubernetes 原生部署与 Docker Compose 启动。示例覆盖 `core` / `ml` 两种镜像选择、TLS 证书注入与 API Key Secret 配置，可直接用于本地联调与生产部署参考。
+本文档提供 `PrivShield` 的完整部署示例，包括 Helm 安装、Kubernetes 原生部署与 Docker Compose 启动。示例覆盖 `core` / `ml` 两种镜像选择、TLS 证书注入与 API Key Secret 配置，可直接用于本地联调与生产部署参考。
 
 ## 2. 镜像选择
 
@@ -41,16 +41,16 @@ Helm Chart 通过 `flavor: core` 或 `flavor: ml` 自动选择镜像标签；当
 ### 3.1 开发模式（默认关闭 TLS/认证）
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 # 构建 core 镜像
-docker build --target core -t privacy-local-agent:0.1.0 .
+docker build --target core -t PrivShield:0.1.0 .
 
 # 安装 Chart
-helm install pla ./deploy/helm/privacy-local-agent
+helm install pla ./deploy/helm/PrivShield
 
 # 验证 Pod 状态
-kubectl get pods -l app.kubernetes.io/name=privacy-local-agent
+kubectl get pods -l app.kubernetes.io/name=PrivShield
 ```
 
 ### 3.2 生产模式（启用 TLS + API Key 认证）
@@ -75,11 +75,11 @@ kubectl create secret generic pla-apikeys \
   --from-file=api-keys.json
 
 # 3. 使用生产 values 安装，并传入 Secret 名称
-helm install pla ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-production.yaml \
+helm install pla ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=pla-tls \
   --set security.auth.apiKeysSecret=pla-apikeys \
-  --set image.repository=privacy-local-agent \
+  --set image.repository=PrivShield \
   --set image.tag=0.1.0
 ```
 
@@ -87,19 +87,19 @@ helm install pla ./deploy/helm/privacy-local-agent \
 
 ```bash
 # 构建 ml 镜像
-docker build --target ml -t privacy-local-agent:0.1.0-ml .
+docker build --target ml -t PrivShield:0.1.0-ml .
 
 # 使用 values-ml.yaml，并指定仓库地址
-helm install pla-ml ./deploy/helm/privacy-local-agent \
-  -f ./deploy/helm/privacy-local-agent/values-ml.yaml \
-  --set image.repository=privacy-local-agent \
+helm install pla-ml ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-ml.yaml \
+  --set image.repository=PrivShield \
   --set image.tag=0.1.0-ml
 ```
 
 ### 3.4 引用自定义 values 文件
 
 ```bash
-helm install pla ./deploy/helm/privacy-local-agent \
+helm install pla ./deploy/helm/PrivShield \
   -f docs/deployment/examples/values-custom.yaml
 ```
 
@@ -108,13 +108,13 @@ helm install pla ./deploy/helm/privacy-local-agent \
 ### 4.1 基础部署
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 
 # 直接 apply kustomization 组织的 manifests
 kubectl apply -k ./deploy/k8s/
 
 # 查看资源
-kubectl get all -n privacy-local-agent
+kubectl get all -n PrivShield
 ```
 
 ### 4.2 启用 TLS 与认证
@@ -156,7 +156,7 @@ cd deploy/docker-compose
 docker compose up -d
 
 # 查看日志
-docker compose logs -f privacy-local-agent
+docker compose logs -f PrivShield
 
 # 测试健康检查
 curl http://localhost:8079/health

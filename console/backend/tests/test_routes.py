@@ -5,9 +5,9 @@ Unit tests for the Python FastAPI proxy backend.
     - 使用 ``fastapi.testclient.TestClient`` 直接调用应用路由，无需真实启动服务；
       Uses ``fastapi.testclient.TestClient`` to invoke routes directly, no real server needed;
     - 通过 ``unittest.mock`` 对上游 ``agent_client.request`` 打桩，
-      因此**不需要**运行中的 privacy-local-agent；
+      因此**不需要**运行中的 PrivShield；
       Stubs upstream ``agent_client.request`` via ``unittest.mock``,
-      so a running privacy-local-agent is **not required**;
+      so a running PrivShield is **not required**;
     - 覆盖公开 API 面：``/api/health``、``/api/samples``、``/api/proxy`` 的
       正常、上游不可达、参数校验与上游错误透传等场景。
       Covers public API surface: normal, upstream-unreachable, validation,

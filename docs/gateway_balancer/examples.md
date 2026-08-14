@@ -28,14 +28,14 @@
 
 ## 1. 概述
 
-本文档提供网关的常用启动方式、Python SDK 示例与 REST API 示例，帮助开发者快速将请求通过网关转发到后端 `privacy-local-agent` 工作节点。
+本文档提供网关的常用启动方式、Python SDK 示例与 REST API 示例，帮助开发者快速将请求通过网关转发到后端 `PrivShield` 工作节点。
 
 ## 2. 命令行启动示例
 
 ### 2.1 使用环境变量启动
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 source .venv/bin/activate
 
 export GATEWAY_REST_PORT=8000

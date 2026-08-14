@@ -1,6 +1,6 @@
 # 动态分类分级使用示例与最佳实践
 
-本文档提供 `privacy-local-agent` 动态分类分级模块的自动配置生成、Python 代码示例、自定义算子扩展及 REST API 调用用例。
+本文档提供 `PrivShield` 动态分类分级模块的自动配置生成、Python 代码示例、自定义算子扩展及 REST API 调用用例。
 
 ---
 
@@ -28,7 +28,7 @@
 ### 1.1 CLI 命令行方式一键生成
 
 ```bash
-cd /path/to/privacy-local-agent
+cd /path/to/PrivShield
 PYTHONPATH=. python -m privacy_local_agent.dynclassification.standard_profile_generator \
   --doc docs/standard/四川省健康医疗大数据应用指南.md \
   --output rules/

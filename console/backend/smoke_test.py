@@ -1,8 +1,8 @@
 """Smoke test: invoke all sample endpoints sequentially via the backend proxy.
 烟雾测试：通过后端代理逐个调用所有示例端点。
 
-Prerequisites: backend (8080) and privacy-local-agent must both be running:
-运行前提：后端（8080）与 privacy-local-agent 均已启动：
+Prerequisites: backend (8080) and PrivShield must both be running:
+运行前提：后端（8080）与 PrivShield 均已启动：
 
     cd console/backend
     source .venv/bin/activate

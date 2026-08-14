@@ -291,7 +291,7 @@ python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_pyt
 
 ```python
 # 默认密钥仅用于开发，生产必须设置 PRIVACY_AUDIT_KEY
-self.secret_key = b"privacy-local-agent-default-audit-key"  # 不安全！
+self.secret_key = b"PrivShield-default-audit-key"  # 不安全！
 ```
 **注意**：K8s 部署时通过 Secret 注入，不要硬编码。
 

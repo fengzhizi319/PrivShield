@@ -76,7 +76,7 @@ curl http://127.0.0.1:8080/api/health
 
 ## 4. POST /api/proxy
 
-通用代理：把一个请求转发到 `privacy-local-agent` REST 服务。
+通用代理：把一个请求转发到 `PrivShield` REST 服务。
 
 **请求体（`ProxyRequest`）**：
 

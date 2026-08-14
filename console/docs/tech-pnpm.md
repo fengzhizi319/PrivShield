@@ -1426,7 +1426,7 @@ packages:
 ```json
 // ===== 根 package.json =====
 {
-  "name": "privacy-local-agent-monorepo",
+  "name": "PrivShield-monorepo",
   "private": true,
   "scripts": {
     // 在所有包中运行 / Run in all packages
