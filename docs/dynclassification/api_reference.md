@@ -8,7 +8,7 @@
 ## 目录 (Table of Contents)
 
 - [1. Python SDK 参考](#1-python-sdk-参考)
-  - [1.1 `models.py` - 元数据模型](#11-modelspy---元数据模型)
+  - [1.1 `models.py` - 元数据与结果模型](#11-modelspy---元数据与结果模型)
   - [1.2 `operator_registry.py` - 算子注册表](#12-operator_registrypy---算子注册表)
   - [1.3 `engine.py` - 通用规则引擎](#13-enginepy---通用规则引擎)
   - [1.4 `profile_loader.py` - 配置加载与管理](#14-profile_loaderpy---配置加载与管理)
@@ -23,7 +23,7 @@
 
 ## 1. Python SDK 参考
 
-### 1.1 `models.py` - 元数据模型
+### 1.1 `models.py` - 元数据与结果模型
 
 #### `SensitivityLevelDef`
 动态敏感度等级定义模型。
@@ -45,6 +45,22 @@ class CategoryDef(BaseModel):
     name: str                  # 分类名称（如 "个人基本信息"）
     parent_id: Optional[str] = None # 父分类 ID（支持层级树形结构）
     description: Optional[str] = None
+```
+
+#### `ConfidencePolicy`
+置信度衰减与 LLM 触发策略配置。定义多层引擎之间的冲突判定规则、置信度衰减系数，以及触发 Layer-2 NER 和 Layer-3 LLM 的置信度阈值。支持从环境变量进行全局运维配置控制。
+
+```python
+class ConfidencePolicy(BaseModel):
+    conflict_confidence: float = 0.5        # 冲突时的降级置信度 (alias: conflictConfidence)
+    conflict_needs_review: bool = True      # 冲突时是否标记人工复核 (alias: conflictNeedsReview)
+    enable_llm_arbitration: bool = True     # 是否启用 LLM 仲裁（默认读 PRIVACY_LLM_ENABLE_ARBITRATION）
+    llm_confidence_threshold: float = 0.75  # LLM 触发阈值：置信度低于此值触发（默认读 PRIVACY_LLM_CONFIDENCE_THRESHOLD）
+    enable_ner: bool = False                # 是否启用 NER 层（默认读 PRIVACY_NER_ENABLE）
+    enable_llm: bool = False                # 是否显式启用 LLM 层（默认读 PRIVACY_LLM_ENABLE）
+    auto_llm_on_image: bool = True          # 检测到图片病例/图像字段时自动触发多模态 LLM 层（默认读 PRIVACY_LLM_AUTO_ON_IMAGE）
+    ner_trigger_max_rank: int = 3           # NER 触发阈值：当前等级 rank <= 此值时触发
+    min_tag_confidence: float = 0.5         # 参与最终等级裁定的最低标签置信度（低于此值的标签仅作审计记录）
 ```
 
 #### `DomainTaxonomy`
@@ -73,6 +89,94 @@ class DomainTaxonomy(BaseModel):
 
     def get_category_path(self, category_id: str) -> list[str]:
         """获取指定分类从根到节点的完整路径。"""
+```
+
+#### `SecurityTag`
+安全标签，描述单次规则/算子命中的分类结果，用于审计追溯。
+
+```python
+class SecurityTag(BaseModel):
+    level: str                          # 敏感度等级 ID（如 "L3", "C4"）
+    category: str                       # 分类类别 ID（如 "PII_ID_CARD", "GENOMIC"）
+    confidence: float = 1.0             # 置信度 [0,1]（规则引擎确定性命中恒为 1.0）
+    source_engine: str = "RULE"         # 来源引擎标识: RULE | COMPOSITE (alias: sourceEngine)
+    rule_id: str = ""                   # 触发的规则 ID（审计用） (alias: ruleId)
+    domain: str = ""                    # 所属领域
+    standard_id: str = ""               # 所属标准 (alias: standardId)
+    version: str = "1.0.0"              # 标签 schema 版本
+    needs_human_review: bool = False    # 是否需人工复核（如低置信 ML 结果） (alias: needsHumanReview)
+    is_override: bool = False           # 是否为覆盖型降级标签（可压制低 rank 普通标签） (alias: isOverride)
+    is_downgrade: bool = False          # 是否由降级规则产生 (alias: isDowngrade)
+    match_target: str = "field_name"    # 匹配目标: field_name | field_value（值级命中豁免覆盖压制） (alias: matchTarget)
+```
+
+#### `FieldClassificationResult`
+单个字段（列）的完整分类结果。
+
+```python
+class FieldClassificationResult(BaseModel):
+    field_name: str                     # 字段名称 (alias: fieldName)
+    field_value: Optional[str] = None   # 字段示例值（展示/调试用，可能截断） (alias: fieldValue)
+    tags: list[SecurityTag]             # 所有命中的安全标签列表
+    final_level: str                    # 最终裁定的敏感度等级 (alias: finalLevel)
+    confidence: float = 0.0             # 综合置信度（冲突衰减或 LLM 修正后） [0,1]
+    needs_human_review: bool = False    # 是否需人工复核 (alias: needsHumanReview)
+    engine_layer: str = "L1_RULE"       # 产出最终决策的引擎层级: L1_RULE | L2_SMALL_NER | L3_LLM (alias: engineLayer)
+    reasoning: str = ""                 # 分类推理说明（LLM 层填充详细推理过程）
+    sanitized_value: Optional[str] = None  # 智能抹平/脱敏后的字段值（sanitize=True 时填充） (alias: sanitizedValue)
+    suppressed_tags: list[SecurityTag]  # 被 override 压制的标签列表（审计用） (alias: suppressedTags)
+```
+
+#### `RecordClassificationResult`
+单条记录（多字段）的分类结果。
+
+```python
+class RecordClassificationResult(BaseModel):
+    record_index: int = 0               # 记录在批次/表中的零基索引 (alias: recordIndex)
+    field_results: dict[str, FieldClassificationResult]  # 各字段结果: field_name -> FieldClassificationResult (alias: fieldResults)
+    aggregated_tags: list[SecurityTag]  # 全字段聚合标签 + 复合规则标签 (alias: aggregatedTags)
+    final_level: str                    # 记录级最终等级（各字段 final_level 取 max + 复合升级） (alias: finalLevel)
+    confidence: float = 0.0             # 记录级综合置信度 [0,1]
+    needs_human_review: bool = False    # 任一字段或复合标签需人工复核 (alias: needsHumanReview)
+```
+
+#### `TableClassificationResult`
+整张表/批次的分类结果。
+
+```python
+class TableClassificationResult(BaseModel):
+    schema_: list[str]                  # 表列名（schema） (alias: schema)
+    record_results: list[RecordClassificationResult]  # 所有行的记录级结果 (alias: recordResults)
+    aggregated_tags: list[SecurityTag]  # 跨记录聚合标签 (alias: aggregatedTags)
+    final_level: str                    # 表级最终敏感等级（各记录 final_level 取 max） (alias: finalLevel)
+    confidence: float = 0.0             # 表级综合置信度 [0,1]
+    needs_human_review: bool = False    # 任一记录需人工复核 (alias: needsHumanReview)
+```
+
+#### `AuditInfo`
+审计信息，记录分类请求的执行元数据。
+
+```python
+class AuditInfo(BaseModel):
+    version: str = "1.0.0"              # 审计结构 schema 版本
+    domain: str = ""                    # 分类时的领域上下文
+    standard_id: str = ""               # 分类时的标准上下文 (alias: standardId)
+    timestamp: str = "ISO8601 UTC"      # 分类执行时间（UTC）
+    rule_set_version: str = "1.0.0"     # 评估所用规则集版本 (alias: ruleSetVersion)
+    rules_evaluated: int = 0            # 本次请求评估的规则总数 (alias: rulesEvaluated)
+    rules_hit: int = 0                  # 实际命中的规则数 (alias: rulesHit)
+    duration_ms: float = 0.0            # 执行耗时（毫秒） (alias: durationMs)
+```
+
+#### `ClassificationResponse`
+分类响应包装器，根据请求粒度恰好包装 field_result / record_result / table_result 中的一个。
+
+```python
+class ClassificationResponse(BaseModel):
+    field_result: Optional[FieldClassificationResult] = None   # 字段级请求 (alias: fieldResult)
+    record_result: Optional[RecordClassificationResult] = None # 记录级请求 (alias: recordResult)
+    table_result: Optional[TableClassificationResult] = None   # 表级请求 (alias: tableResult)
+    audit_info: AuditInfo = AuditInfo()                        # 执行元数据（恒存在） (alias: auditInfo)
 ```
 
 ---
@@ -118,6 +222,7 @@ class OperatorRegistry:
 | `ip_address` | IP 地址正则匹配算子 | 无 |
 | `mac_address` | MAC 地址匹配算子 | 无 |
 | `chinese_name` | 中文姓名校验匹配算子 | 无 |
+| `email` | 邮箱地址正则匹配算子 | 无 |
 
 ---
 
@@ -193,6 +298,10 @@ class ProfileLoader:
         "ruleId": "RULE_PII_IDCARD",
         "domain": "general-pii",
         "standardId": "gbt35273",
+        "version": "1.0.0",
+        "needsHumanReview": false,
+        "isOverride": false,
+        "isDowngrade": false,
         "matchTarget": "field_value"
       }
     ],
@@ -200,11 +309,17 @@ class ProfileLoader:
     "confidence": 1.0,
     "needsHumanReview": false,
     "engineLayer": "L1_RULE",
-    "reasoning": "命中规则: RULE_PII_IDCARD"
+    "reasoning": "命中规则: RULE_PII_IDCARD",
+    "sanitizedValue": null,
+    "suppressedTags": []
   },
+  "recordResult": null,
+  "tableResult": null,
   "auditInfo": {
+    "version": "1.0.0",
     "domain": "general-pii",
     "standardId": "gbt35273",
+    "timestamp": "2026-08-14T00:00:00+00:00",
     "ruleSetVersion": "1.0.0",
     "rulesEvaluated": 12,
     "rulesHit": 1,
@@ -212,6 +327,38 @@ class ProfileLoader:
   }
 }
 ```
+
+> 说明：响应体为 `ClassificationResponse` 包装器，`fieldResult` / `recordResult` / `tableResult` 三者恰好返回一个（取决于请求粒度），`auditInfo` 恒存在。所有字段采用 camelCase alias 输出（如 `finalLevel`、`needsHumanReview`）。
+
+##### 记录级求值
+- **Endpoint**: `POST /v1/dynclassification/eval_record`
+
+```json
+{
+  "record": { "user_id_card": "510104199003072345", "age": 35, "diagnosis": "高血压" },
+  "domain": "general-pii",
+  "standard": "gbt35273"
+}
+```
+
+响应中 `recordResult` 填充 `RecordClassificationResult`（含 `fieldResults`、`recordIndex`、`aggregatedTags`、`finalLevel` 等）。
+
+##### 表级求值
+- **Endpoint**: `POST /v1/dynclassification/eval_table`
+
+```json
+{
+  "schema": ["user_id_card", "age", "diagnosis"],
+  "rows": [
+    { "user_id_card": "510104199003072345", "age": 35, "diagnosis": "高血压" },
+    { "user_id_card": "510104199003072346", "age": 42, "diagnosis": "糖尿病" }
+  ],
+  "domain": "general-pii",
+  "standard": "gbt35273"
+}
+```
+
+响应中 `tableResult` 填充 `TableClassificationResult`（含 `recordResults`、`schema`、`aggregatedTags`、`finalLevel` 等）。
 
 ---
 
@@ -272,10 +419,13 @@ class ProfileLoader:
     "exact_match",
     "ip_address",
     "mac_address",
-    "chinese_name"
+    "chinese_name",
+    "email"
   ]
 }
 ```
+
+> 说明：以上为完整算子清单（与 `operators.py` 中注册的 14 个算子一致）；实际以接口实时返回为准。
 
 ---
 
