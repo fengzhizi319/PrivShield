@@ -168,13 +168,10 @@ confidence_policy:
 
 字段同时支持 camelCase 别名（如 `conflictConfidence`）与 snake_case 双向填充
 （`populate_by_name=True`），布尔/数值类字段支持环境变量全局运维覆盖。
-当前 `rules/taxonomies/` 下共四个已发布配置：default / gd_health / finance_jrt0197
-均采用 `conflict_confidence: 0.7`、`llm_confidence_threshold: 0.6`、
-`enable_llm_arbitration: false` 的保守配置；金融/广东医疗体系额外设置
-`ner_trigger_max_rank: 2` 限制 NER 仅在低等级时触发。
-第四个配置 `sc_health_db51.yaml`（四川医疗 DB51）**未定义 `confidence_policy` 节**，
-运行时全部使用代码默认值——新增 taxonomy 时应显式补齐该节，避免隐式继承
-`enable_llm_arbitration: true` 等代码默认行为。
+当前 `rules/taxonomies/` 下共四个已发布配置：`default` / `gd_health` / `finance_jrt0197` / `sc_health_db51`
+均已按 AGENTS.md §9.3 显式定义 `confidence_policy` 节，采用 `conflict_confidence: 0.7`、`llm_confidence_threshold: 0.6`、
+`enable_llm_arbitration: false` 的生产保守配置；金融/广东医疗体系额外设置
+`ner_trigger_max_rank: 2` 限制 NER 仅在低等级时触发。新增任何自定义 taxonomy 时亦应显式定义该节。
 
 ### 2.4 Layer-3 Qwen 触发场景详解
 

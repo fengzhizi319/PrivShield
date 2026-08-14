@@ -443,9 +443,15 @@ class DynClassificationService:
         composite_tags = composite_engine.evaluate(record, field_results)
         all_tags.extend(composite_tags)
 
-        record_level = self._resolve_final_level(all_tags, engine)
+        # 基准记录等级：从字段裁定等级集合中解析最高等级（保持字段级降级/仲裁裁定有效性）
+        field_levels = [fr.final_level for fr in field_results.values() if fr.final_level]
+        base_record_level = (
+            engine.taxonomy.max_level(*field_levels)
+            if field_levels
+            else engine.taxonomy.default_level
+        )
         record_level = composite_engine.apply_to_record_level(
-            record_level, composite_tags, engine.taxonomy
+            base_record_level, composite_tags, engine.taxonomy
         )
 
         duration_ms = (time.monotonic() - start) * 1000
@@ -523,7 +529,12 @@ class DynClassificationService:
 
         # Determine table-level final level (highest across all records).
         engine = self.loader.get_engine(domain=domain, standard=standard)
-        table_level = self._resolve_final_level(all_tags, engine)
+        rec_levels = [r.final_level for r in record_results if r.final_level]
+        table_level = (
+            engine.taxonomy.max_level(*rec_levels)
+            if rec_levels
+            else engine.taxonomy.default_level
+        )
 
         duration_ms = (time.monotonic() - start) * 1000
 
