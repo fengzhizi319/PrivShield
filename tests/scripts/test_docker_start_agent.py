@@ -215,7 +215,8 @@ def _run_script_with_fake_docker(
             cwd=PROJECT_ROOT,
             timeout=60,
         )
-        return result, log_file.read_text(encoding="utf-8")
+        logs = log_file.read_text(encoding="utf-8") if log_file.is_file() else ""
+        return result, logs
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -330,6 +331,20 @@ class TestAgentScriptFakeExecution:
         result, _ = _run_script_with_fake_docker(bash_bin, exit_code=1)
         assert result.returncode != 0, "docker 失败时脚本未能正确退出"
 
+    def test_script_shows_help(self, bash_bin: str):
+        """【模拟执行】验证传入 --help 或 -h 时正确输出用法帮助信息并以 0 退出。"""
+        result, _ = _run_script_with_fake_docker(bash_bin, exit_code=0, target="--help")
+        assert result.returncode == 0
+        assert "用法 / Usage" in result.stdout
+        assert "core" in result.stdout
+        assert "ml" in result.stdout
+
+    def test_script_rejects_invalid_target(self, bash_bin: str):
+        """【模拟执行】验证传入未知非法目标（如 invalid_target）时非零退出并提示错误。"""
+        result, _ = _run_script_with_fake_docker(bash_bin, exit_code=0, target="invalid_target")
+        assert result.returncode != 0
+        assert "无效的构建目标" in result.stderr
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # 第 3 层：停止脚本测试 / Stop Script Checks
@@ -360,6 +375,34 @@ class TestAgentStopScript:
         assert "rm -f privacy-local-agent" in logs
         assert "Privacy Local Agent 容器已成功停止与清理" in result.stdout
 
+    def test_windows_powershell_scripts_exist_and_valid(self):
+        """【跨平台兼容性】验证 Windows 11 原生 PowerShell 脚本结构与指令完整性。
+
+        测试目的：确保 Windows 11 用户在 PowerShell 终端下无需 bash 即可直接启动/停止容器。
+        """
+        ps_start = PROJECT_ROOT / "scripts" / "dev" / "docker-start-agent.ps1"
+        ps_stop = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-agent.ps1"
+
+        assert ps_start.is_file(), f"Windows 启动脚本不存在: {ps_start}"
+        assert ps_stop.is_file(), f"Windows 停止脚本不存在: {ps_stop}"
+
+        start_content = ps_start.read_text(encoding="utf-8")
+        assert "docker build" in start_content
+        assert "docker run" in start_content
+        assert "-p 8079:8079" in start_content
+        assert "-p 50051:50051" in start_content
+        assert "PRIVACY_REST_HOST" in start_content
+
+        stop_content = ps_stop.read_text(encoding="utf-8")
+        assert "docker rm -f privacy-local-agent" in stop_content
+
+    def test_cross_platform_os_detection_in_bash_script(self):
+        """【跨平台兼容性】验证 bash 启动脚本内置了 macOS (Darwin) 与 Windows (WSL2/GitBash) 平台检测。"""
+        content = SCRIPT_PATH.read_text(encoding="utf-8")
+        assert "Darwin" in content, "脚本缺少 macOS 识别逻辑"
+        assert "WSL2" in content or "microsoft" in content, "脚本缺少 WSL2 识别逻辑"
+        assert "MINGW" in content or "MSYS" in content, "脚本缺少 Git Bash / MSYS2 识别逻辑"
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # 第 4 层：Compose 拓扑与 Agent-LLM 通信配置校验 / Topology Tests
@@ -379,7 +422,8 @@ class TestDockerAgentLlmComposeTopology:
         assert "vllm" in services, "compose 缺少 vllm 服务定义"
 
     def test_compose_network_topology_agent_to_vllm(self, compose_config: dict[str, Any]):
-        """【网络拓扑】验证 privacy-local-agent 与 vllm 服务均加入了 llm 共享网络。
+        """【网络拓扑】验证 privacy-local-agent 与 vllm 服务均加入了 llm 共享网络
+        仅仅是对配置文件的静态结构与声明进行校验，不会在运行时真正创建或加入 Docker 的 llm 网络。
 
         测试目的：确保 Agent 容器能够通过容器名 DNS（http://vllm:8000/v1）跨容器访问 LLM 推理服务。
 
@@ -418,6 +462,37 @@ class TestDockerAgentLlmComposeTopology:
         assert "llm" in vllm_networks, "vllm 未加入 llm 网络"
 
     def test_compose_agent_llm_environment_variables(self, compose_config: dict[str, Any]):
+        """
+        虽然本系统使用的是本地部署的 LLM（如 vLLM），但在配置中依然保留并校验了 PRIVACY_LLM_API_KEY（默认值为 "EMPTY"），主要原因有以下几点：
+          ──────
+          ### 1. 遵循 OpenAI 兼容协议规范与业界惯例
+
+          Agent 的 LLM 请求层（llm_engines.py:883）采用标准 OpenAI 兼容 HTTP 接口规范，在发起请求时统一会带上 Authorization 请求头：
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            }
+
+          • vLLM、Ollama 等开源推理引擎均遵循 OpenAI API 规范。
+          • 当 vLLM 本地未开启 --api-key 鉴权时，社区标准惯例即是传递占位字符串 "EMPTY"。
+          ──────
+          ### 2. 架构解耦：支持跨主机 GPU 部署与网关鉴权
+
+          虽然默认是本地同机部署，但在生产环境中常见的场景包括：
+
+          1. 分机/跨主机部署：Agent 部署在 CPU 机器，vLLM 部署在独立的远程 GPU 服务器上，中间通常会配置安全访问密钥。
+          2. API 网关防护：在 vLLM 前方架设了反向代理或 API 网关（如 Kong、Nginx、APISIX 等）进行访问控制，需要真实的 API Key。
+          3. 无缝切云：方便在特定场景下将 PRIVACY_LLM_API_BASE 指向外部公有云/私有云大模型接口，只需在环境变量中注入 LLM_API_KEY=sk-xxxx 即可，代码和请求逻辑无需任何改动。
+          ──────
+          ### 3. 测试断言的具体目的
+
+          在 docker-compose.yml:193 中，该环境变量使用了 Compose 参数化语法：
+
+            PRIVACY_LLM_API_KEY: "${LLM_API_KEY:-EMPTY}"
+
+          test_docker_start_agent.py:421-453 进行断言的目的，是确保未显式配置 LLM_API_KEY 时，Compose 能够正确回退到安全默认值 "EMPTY"，防止因环境变量缺失或为 None 导致容器内 Agent 向本地 vLLM 发送请求时抛出异常。
+        """
         """【通信配置】验证 Agent 服务中配置了正确的 LLM 提供方与端点地址。
 
         测试目的：
@@ -602,9 +677,28 @@ def vllm_service(
 ) -> dict[str, Any]:
     """启动（或复用已有）Docker vLLM 推理容器，并等待 OpenAI 兼容 API 就绪。
 
+    执行逻辑与生命周期设计（Execution Logic & Lifecycle Design）:
+        1. 【阶段 1：前置环境准入检查 (Prerequisites Gate)】
+           - 检查系统环境是否满足真实 vLLM 运行要求：Docker CLI、NVIDIA GPU 驱动、本地模型权重目录及 vLLM 镜像。
+           - 若任一条件不满足，则调用 `pytest.skip()` 优雅跳过当前模块的集成测试，避免在 CPU/无容器环境下报错。
+        2. 【阶段 2：容器状态探测与复用决策 (Container Inspection & Reuse Strategy)】
+           - 执行 `docker inspect` 探测宿主机是否存在同名容器 `privacy-local-agent-vllm`：
+             * 若容器已存在且处于运行状态（Running=true）：直接复用已有容器（`created=False`），避免重复启动与显存浪费；
+             * 若容器已存在但已退出（Exited）：强制删除旧容器（`docker rm -f`）并标记 `created=True` 准备重新拉起；
+             * 若容器不存在：标记 `created=True` 准备新建拉起。
+        3. 【阶段 3：调用启动脚本与轮询就绪 (Launch & Ready Polling)】
+           - 若 `created=True`，调用 `scripts/dev/docker-start-llm.sh` 脚本拉起物理容器；
+           - 启动后调用 `_wait_vllm_ready()` 持续轮询 `/v1/models` 端点，直到大模型权重加载完成并返回 200 OK（最长等待 600s）。
+        4. 【阶段 4：提供服务元数据 (Yield Service Context)】
+           - 向测试用例注入 `{"api_base", "model", "created"}` 字典，供测试构建 HTTP 客户端或配置环境变量。
+        5. 【阶段 5：资源清理与环境恢复 (Teardown Cleanup)】
+           - 在 `finally` 块中判断：仅当容器是由本测试 fixture 创建拉起时（`created=True`），才在测试结束后执行 `docker rm -f` 销毁容器；
+           - 若复用的是开发者原先已启动的环境（`created=False`），则绝不删除，保护外部工作环境不被意外破坏。
+
     Returns:
         包含 {"api_base", "model", "created"} 的服务描述字典。
     """
+    # ── 阶段 1：前置条件检查（任一不满足即跳过集成测试）──
     if not docker_available:
         pytest.skip("docker 不可用")
     if not gpu_available:
@@ -616,6 +710,7 @@ def vllm_service(
 
     created = False
     try:
+        # ── 阶段 2：探测容器当前状态，决策是复用还是重建 ──
         inspect = subprocess.run(
             ["docker", "inspect", VLLM_CONTAINER_NAME],
             capture_output=True,
@@ -623,6 +718,7 @@ def vllm_service(
             timeout=30,
         )
         if inspect.returncode == 0:
+            # 容器已存在，进一步检查是否正在运行
             running = subprocess.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}", VLLM_CONTAINER_NAME],
                 capture_output=True,
@@ -630,24 +726,37 @@ def vllm_service(
                 timeout=30,
             )
             if running.stdout.strip() == "true":
-                pass  # 复用已有正在运行的容器
+                # 宿主机已有同名容器且正在运行：直接复用，不重复创建，teardown 阶段也不予删除
+                pass
             else:
+                # 容器处于非运行状态（已退出/失败）：清理残留容器后重新拉起
                 subprocess.run(["docker", "rm", "-f", VLLM_CONTAINER_NAME], capture_output=True)
                 created = True
         else:
+            # 容器不存在：标记需要新建
             created = True
 
+        # ── 阶段 3：执行启动脚本拉起物理容器 ──
         if created:
             start_script = PROJECT_ROOT / "scripts" / "dev" / "docker-start-llm.sh"
-            res = subprocess.run([bash_bin, str(start_script)], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=1800)
+            res = subprocess.run(
+                [bash_bin, str(start_script)],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=1800,
+            )
             if res.returncode != 0:
                 pytest.fail(f"docker-start-llm.sh 启动失败: {res.stderr or res.stdout}")
 
+        # 轮询等待 OpenAI /v1/models 就绪探针返回可用模型列表
         if not _wait_vllm_ready():
             pytest.fail(f"vLLM 服务未在 {VLLM_READY_TIMEOUT_S}s 内就绪")
 
+        # ── 阶段 4：Yield 服务元数据给测试用例 ──
         yield {"api_base": VLLM_API_BASE, "model": VLLM_SERVED_MODEL_NAME, "created": created}
     finally:
+        # ── 阶段 5：清理回收资源（仅清理本 fixture 创建的容器，避免干扰已有环境）──
         if created:
             subprocess.run(["docker", "rm", "-f", VLLM_CONTAINER_NAME], capture_output=True)
 
@@ -664,8 +773,32 @@ class TestDockerAgentToLlmIntegration:
             2. 向 Agent 发送一段未在规则表硬编码的非结构化复杂临床主诉；
             3. Agent 规则层判定低置信度，自动触发 Layer-3 向 Docker vLLM 容器发起 HTTP 请求；
             4. 验证 Agent 正确获取并整合 Docker LLM 返回的最终评级 (L1~L5) 与推理依据。
+
+        通信端口配置与网络链路说明（Port Configuration & Network Topology）:
+            1. 【通信端口配置来源】：
+               - 测试侧：通过 fixture 注入 `vllm_service["api_base"]`（即顶部常量 `VLLM_API_BASE = "http://127.0.0.1:8000/v1"`，端口为 8000）；
+               - Compose 编排侧：对应 `deploy/docker-compose/docker-compose.yml` 中的端口映射 `ports: ["127.0.0.1:8000:8000"]`；
+               - 容器内部侧：对应 vLLM 镜像启动参数 `--port 8000 --host 0.0.0.0`。
+
+            2. 【连接本地原生进程 vLLM vs 连接 Docker 容器 vLLM 的区别】：
+               - 模式 A（本地原生 Python 进程 vLLM）：
+                 * 运行形态：vLLM 直接在宿主机 Python/Conda 中运行，Agent 也是宿主机普通进程；
+                 * 网络流向：宿主机 Loopback 直连 `127.0.0.1:8000`，无 Docker NAT 或虚拟网卡中转；
+                 * 配置参数：`PRIVACY_LLM_API_BASE=http://127.0.0.1:8000/v1`，`PRIVACY_LLM_API_KEY=EMPTY`。
+               - 模式 B（宿主机 Agent 访问 Docker vLLM，即本测试运行场景）：
+                 * 运行形态：pytest 测试进程运行在宿主机，vLLM 运行在独立 Docker 容器内；
+                 * 网络流向：宿主机 pytest -> 宿主机 `127.0.0.1:8000` -> Docker 端口映射转发 -> 容器内 `8000`；
+                 * 配置参数：`PRIVACY_LLM_API_BASE=http://127.0.0.1:8000/v1`（与本地原生模式配置完全一致）。
+               - 模式 C（全栈 Docker Compose 容器化部署）：
+                 * 运行形态：Agent (`privacy-local-agent`) 与 vLLM (`vllm`) 均在独立 Docker 容器内；
+                 * 网络流向：Agent 容器 -> Docker 内部 `llm` 桥接网络 -> Docker 内嵌 DNS 解析服务名 `vllm:8000`（不经过宿主机端口转发）；
+                 * 配置参数：`PRIVACY_LLM_API_BASE=http://vllm:8000/v1`。
+               - 模式 D（跨主机 / 远程 GPU 节点部署）：
+                 * 运行形态：Agent 在业务机，vLLM 在远程专用 GPU 服务器；
+                 * 网络流向：跨主机局域网/公网 IP 路由，通常经过 API 网关或防火墙；
+                 * 配置参数：`PRIVACY_LLM_API_BASE=http://<GPU_HOST_IP>:8000/v1`，`PRIVACY_LLM_API_KEY=sk-xxxx`。
         """
-        # 设置环境指向运行中的 Docker vLLM 服务
+        # 设置环境指向运行中的 Docker vLLM 服务（宿主机通过 127.0.0.1:8000 端口映射访问容器）
         os.environ["PRIVACY_ENV_PROFILE"] = "vllm"
         os.environ["PRIVACY_LLM_PROVIDER"] = "vllm"
         os.environ["PRIVACY_LLM_API_BASE"] = vllm_service["api_base"]
@@ -768,7 +901,18 @@ class TestDockerAgentContainerEndpoints:
 
     @pytest.fixture(autouse=True)
     def setup_client(self):
-        """初始化测试客户端（优先使用 FastAPI TestClient，当外部容器运行时支持网络互通）。"""
+        """初始化测试客户端（基于 FastAPI TestClient 的进程内 ASGI 内存调用机制）。
+
+        通信机制说明（In-Memory ASGI Dispatch vs Physical Socket）:
+            1. 【本类（第 7 层）测试机制】：
+               - 本类使用 `TestClient(app)` 执行接口协议与业务契约测试；
+               - `self.client.get(...)` / `self.client.post(...)` 是纯进程内 ASGI 内存事件调用；
+               - 不会启动 Uvicorn 服务器，不会占用或请求宿主机 `8079` 物理端口，请求默认派发至虚拟基地址 `http://testserver`；
+               - 具备毫秒级响应、零外部依赖、无需预先拉起 Docker 容器等优势。
+            2. 【第 8 层物理容器真实 Socket 测试区别】：
+               - 真正向物理端口 `http://127.0.0.1:8079` 发起真实 TCP 网络请求的测试位于第 8 层 `TestRealDockerAgentScriptLifecycle`；
+               - 第 8 层会真实执行 `docker-start-agent.sh core` 拉起物理容器，并使用 `urllib.request` 经由物理网卡向 `http://127.0.0.1:8079` 发送 Socket 请求。
+        """
         from fastapi.testclient import TestClient
         from privacy_local_agent.main import app
 
@@ -778,17 +922,43 @@ class TestDockerAgentContainerEndpoints:
     def test_agent_connection_and_health_probes(self):
         """【建立连接】向 Agent 服务发送 GET /health 与 GET /readyz 探针请求。
 
-        测试目的：验证与 Agent 服务建立 HTTP 连接成功，服务处于健康就绪状态。
+        测试目的与设计背景（Test Objective & Design Background）:
+            在容器化部署与微服务编排（如 K8s / Docker Compose / 负载均衡网关）场景下，
+            Agent 必须提供标准的存活（Liveness）与就绪（Readiness）健康检查接口。
+            本测试旨在验证：
+            1. 客户端能够成功与 Agent 建立 HTTP 连接；
+            2. 基础路由与全局中间件（安全响应头、链路追踪、访问日志）正常运转；
+            3. Agent 核心服务依赖（配置解析器、隐私预算持久化存储等）就绪可用。
+
+        通信机制与请求目标说明（Dispatch Mechanism & Target URL）:
+            - 此处的 `self.client.get("/health")` 是通过 TestClient 在进程内存中直接派发至 `FastAPI app`，
+              请求目标实际为 `http://testserver/health`，不经过物理端口 `http://127.0.0.1:8079`。
+            - 针对宿主机真实暴露端口 `http://127.0.0.1:8079` 的物理 Socket 探测，请参见第 8 层测试。
+
+        执行逻辑与分步流程（Execution Logic & Step-by-Step Flow）:
+            【步骤 1：验证 /health 存活探针 (Liveness Check)】
+                - 发送 HTTP GET 请求到 `/health`；
+                - 断言 HTTP 状态码为 200（表示 ASGI 进程存活且端口可达）；
+                - 断言 JSON 响应包含 `{"status": "ok"}`（表示健康检查通过）。
+
+            【步骤 2：验证 /readyz 业务就绪探针 (Readiness Check)】
+                - 发送 HTTP GET 请求到 `/readyz`；
+                - 断言 HTTP 状态码为 200（表示依赖服务如 service.resolver、SQLite 预算库均正常连接）；
+                - 断言 JSON 响应包含 `{"status": "ready"}`（表示 Agent 已具备处理脱敏与分类请求的全部条件，可正式接入外部流量）。
         """
-        # 1. 验证健康检查探针
+        # ── 步骤 1：验证 /health 存活探针（检验基础进程存活与路由可达性，内存派发至 http://testserver/health）──
         resp_health = self.client.get("/health")
         assert resp_health.status_code == 200, f"/health 响应失败: {resp_health.status_code}"
-        assert resp_health.json().get("status") == "ok"
+        assert resp_health.json().get("status") == "ok", (
+            f"/health 响应内容不符合预期: {resp_health.text}"
+        )
 
-        # 2. 验证就绪探针
+        # ── 步骤 2：验证 /readyz 业务就绪探针（检验核心服务与预算存储是否就绪）──
         resp_readyz = self.client.get("/readyz")
         assert resp_readyz.status_code == 200, f"/readyz 响应失败: {resp_readyz.status_code}"
-        assert resp_readyz.json().get("status") == "ready"
+        assert resp_readyz.json().get("status") == "ready", (
+            f"/readyz 响应内容不符合预期: {resp_readyz.text}"
+        )
 
     def test_agent_mask_single_field_request(self):
         """【脱敏请求】向 Agent 发送单字段脱敏请求 (POST /v1/privacy/mask)。

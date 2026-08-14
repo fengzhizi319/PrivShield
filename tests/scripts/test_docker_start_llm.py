@@ -139,34 +139,35 @@ def bash_bin() -> str:
     return bash
 
 
-def _run_script_with_fake_docker(bash_bin: str, exit_code: int) -> tuple[subprocess.CompletedProcess, str]:
-    """在临时 PATH 中注入 fake docker 命令后运行脚本。
+def _run_script_with_fake_docker(
+    bash_bin: str,
+    exit_code: int = 0,
+    args: list[str] | None = None,
+) -> tuple[subprocess.CompletedProcess, str]:
+    """使用临时 fake docker 隔离执行启动脚本，记录调用参数与工作目录。
 
-    核心思想 / Core Idea:
-        脚本内部调用的是裸命令 `docker`。通过把 PATH 前置指向临时目录、
-        并在该目录放置同名可执行脚本，即可"劫持" docker 调用——
-        无需真实 Docker 即可验证脚本的完整执行流程。
+    原理 / Mechanism:
+        1. 在系统临时目录创建可执行的 fake docker 脚本；
+        2. 将该临时目录放在 PATH 最前面；
+        3. 被测脚本调用 docker 时实际命中 fake docker；
+        4. fake docker 把实际参数 ($*) 与当前目录 (pwd) 追加写入日志文件，
+           随后以预设的 exit_code 退出；
+        5. 测试通过解析日志文件断言脚本是否发出了预期的 docker 命令。
 
-    Args:
-        bash_bin: bash 解释器路径（来自 bash_bin fixture）
-        exit_code: fake docker 的退出码；0 模拟成功，1 模拟 docker 命令失败
+    参数 / Args:
+        bash_bin: bash 解释器绝对路径
+        exit_code: fake docker 的预设退出码（0 模拟成功，非 0 模拟失败）
+        args: 传递给脚本的可选参数列表
 
-    Returns:
-        (运行结果, fake docker 调用日志)。
-        日志由 fake docker 逐条追加写入，含 args（调用参数）与 cwd（当前工作目录），
-        用于断言脚本"调用了什么、在哪个目录调用的"。
+    返回 / Returns:
+        (CompletedProcess, log_content) 元组
     """
-    # Step 1: 创建临时目录，用于存放 fake docker 脚本与调用日志
-    with tempfile.TemporaryDirectory(prefix="fake-docker-") as tmp:
-        tmp_dir = Path(tmp)
+    with tempfile.TemporaryDirectory(prefix="fake-docker-") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        log_file = tmp_path / "docker-calls.log"
 
-        # Step 2: 日志文件路径（fake docker 将调用参数与 cwd 追加写入）
-        log_file = tmp_dir / "docker-calls.log"
-
-        # Step 3: 生成 fake docker 可执行脚本。
-        # 脚本逻辑：记录 args 与 cwd 到日志文件，然后按指定退出码退出；
-        # textwrap.dedent 用于去除 f-string 多行内容的前导缩进
-        fake_docker = tmp_dir / "docker"
+        # Step 3: 创建 fake docker 脚本（使用 /bin/bash 保证跨平台行为一致）
+        fake_docker = tmp_path / "docker"
         fake_docker.write_text(
             textwrap.dedent(
                 f"""\
@@ -185,12 +186,16 @@ def _run_script_with_fake_docker(bash_bin: str, exit_code: int) -> tuple[subproc
 
         # Step 5: 复制当前环境并前置临时目录到 PATH（过滤超大环境变量）
         env = _clean_env()
-        env["PATH"] = str(tmp_dir) + os.pathsep + os.environ.get("PATH", "")
+        env["PATH"] = str(tmp_path) + os.pathsep + os.environ.get("PATH", "")
+
+        cmd = [bash_bin, str(SCRIPT_PATH)]
+        if args:
+            cmd.extend(args)
 
         # Step 6: 以 bash 显式执行被测脚本（cwd 固定在项目根目录，
         # 验证脚本内部自身的 cd 逻辑）；60s 超时兜底防止脚本挂死
         result = subprocess.run(
-            [bash_bin, str(SCRIPT_PATH)],
+            cmd,
             capture_output=True,
             text=True,
             env=env,
@@ -199,7 +204,8 @@ def _run_script_with_fake_docker(bash_bin: str, exit_code: int) -> tuple[subproc
         )
 
         # Step 7: 返回运行结果与调用日志（测试据此断言脚本执行流程）
-        return result, log_file.read_text(encoding="utf-8")
+        logs = log_file.read_text(encoding="utf-8") if log_file.is_file() else ""
+        return result, logs
 
 
 class TestScriptStaticChecks:
@@ -294,14 +300,44 @@ class TestScriptExecutionFlow:
 
         断言逻辑 / Assertions:
             1. 退出码非 0：docker 失败必须向上传播，脚本不得"假成功"
-            2. docker 仍被调用：失败路径同样经过核心启动命令
+            2. docker 仍被调用：失败路径拦截并终止
         """
         # fake docker 以退出码 1 模拟 docker 调用失败
         result, log = _run_script_with_fake_docker(bash_bin, exit_code=1)
         # 断言 1：set -e 生效，脚本在 docker 行立即非零退出
         assert result.returncode != 0
-        # 断言 2：失败路径同样经过核心启动命令
-        assert "[FAKE-DOCKER] args: compose --profile llm up -d vllm" in log
+        # 断言 2：docker 仍被调用（在前置检测或 compose 启动时失败并退出）
+        assert "FAKE-DOCKER" in log
+
+    def test_script_shows_help(self, bash_bin):
+        """【帮助信息】验证脚本传入 --help 或 -h 时输出用法说明并正常退出。"""
+        result, _ = _run_script_with_fake_docker(bash_bin, exit_code=0, args=["--help"])
+        assert result.returncode == 0
+        assert "用法 / Usage" in result.stdout
+        assert "vllm" in result.stdout or "vLLM" in result.stdout
+
+    def test_windows_powershell_scripts_exist_and_valid(self):
+        """【跨平台兼容性】验证 Windows 11 原生 PowerShell 脚本结构完整性。"""
+        ps_start = PROJECT_ROOT / "scripts" / "dev" / "docker-start-llm.ps1"
+        ps_stop = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-llm.ps1"
+
+        assert ps_start.is_file(), f"Windows 启动脚本不存在: {ps_start}"
+        assert ps_stop.is_file(), f"Windows 停止脚本不存在: {ps_stop}"
+
+        start_content = ps_start.read_text(encoding="utf-8")
+        assert "docker compose --profile llm up -d vllm" in start_content
+        assert "docker info" in start_content
+
+        stop_content = ps_stop.read_text(encoding="utf-8")
+        assert "docker compose --profile llm stop vllm" in stop_content
+        assert "docker rm -f privacy-local-agent-vllm" in stop_content
+
+    def test_cross_platform_os_detection_in_bash_script(self):
+        """【跨平台兼容性】验证 bash 启动脚本内置了 macOS (Darwin) 与 Windows (WSL2/GitBash) 平台检测。"""
+        content = SCRIPT_PATH.read_text(encoding="utf-8")
+        assert "Darwin" in content, "脚本缺少 macOS 识别逻辑"
+        assert "WSL2" in content or "microsoft" in content, "脚本缺少 WSL2 识别逻辑"
+        assert "MINGW" in content or "MSYS" in content, "脚本缺少 Git Bash / MSYS2 识别逻辑"
 
 
 class TestComposeDefinition:
