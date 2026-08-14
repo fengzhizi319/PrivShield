@@ -1000,6 +1000,7 @@ class TestVllmServiceIntegration:
         confidence = float(result.get("confidence", 0.0))
         assert 0.0 <= confidence <= 1.0, f"confidence 越界: {confidence}"
 
+    # .venv/bin/pytest tests/scripts/test_docker_start_llm.py -k test_sanitize_markdown_or_txt_file_via_llm -s
     def test_sanitize_markdown_or_txt_file_via_llm(self, vllm_service, tmp_path):
         """真实任务：自动将 .md 或 .txt 文件切分为合适长度的分段，
         通过 OpenAILlmClassifier 接口自动完成敏感信息识别与无痕抹平脱敏重写，

@@ -19,6 +19,7 @@ coverage.xml
 .idea/
 *.iml
 .vscode/
+.qoder/
 
 # OS
 .DS_Store

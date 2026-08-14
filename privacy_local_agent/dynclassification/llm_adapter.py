@@ -177,10 +177,11 @@ class LlmAdapter:
                 os.environ.get("PRIVACY_LLM_BACKEND", "auto")
             ).strip().lower()
 
-            # 模式 A: 未指定本地 model_path 且 provider 为 vllm/openai (或 auto 并且配置了 API URL)
-            if not self._model_path and (
-                provider in ("vllm", "openai")
-                or (provider == "auto" and (os.environ.get("PRIVACY_LLM_API_BASE") or os.environ.get("PRIVACY_VLLM_URL")))
+            # 模式 A: 显式指定 provider 为 vllm/openai (或 auto 且配置了 API URL)
+            if provider in ("vllm", "openai") or (
+                provider == "auto"
+                and not self._model_path
+                and (os.environ.get("PRIVACY_LLM_API_BASE") or os.environ.get("PRIVACY_VLLM_URL"))
             ):
                 try:
                     from .llm_engines import OpenAILlmClassifier

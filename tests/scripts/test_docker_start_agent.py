@@ -1,34 +1,107 @@
-"""scripts/dev/docker-start-agent.sh 启动脚本测试 / docker-start-agent.sh Script Tests.
+"""scripts/dev/docker-start-agent.sh 启动脚本与 Agent-LLM 通信测试.
+docker-start-agent.sh & docker-stop-agent.sh Script Tests & Agent-to-LLM Communication Tests.
 
-验证 scripts/dev/docker-start-agent.sh（Docker 方式单组分启动 Privacy Local Agent 容器）
-静态检查与 Fake Docker 模拟执行。
+=====================================================================
+测试目标 / Test Goal:
+    1. 验证 scripts/dev/docker-start-agent.sh（Docker 方式单组分启动 Privacy Local Agent 容器）
+       与 scripts/dev/docker-stop-agent.sh 停止脚本的正确性、健壮性与防回归机制。
+    2. 验证 Docker 编排架构中 Privacy Local Agent (Sidecar) 与 Docker LLM (vLLM)
+       容器之间的通信机制、配置一致性、安全地板约束以及真实端到端推理协同。
+
+测试分层设计 / Layered Test Design（由浅入深，外部依赖逐层增加）:
+    第 1 层 静态检查（无外部依赖）:
+        - 脚本文件存在性、用户可执行权限位 (chmod +x)
+        - Shebang 规范 (#!/usr/bin/env bash) 与 bash -n 静态语法解析
+        - 核心关键指令防回归（set -euo pipefail / docker build / docker run / docker rm）
+        - 默认监听端口 (8079/50051) 与关键环境变量校验
+    第 2 层 模拟执行（仅需 bash，无需真实 Docker）:
+        - 通过 PATH 注入 fake docker 命令，验证脚本执行流程：
+          * 默认 target (core 镜像) 构建与启动
+          * 显式 target (ml 镜像) 构建与启动
+          * 启动前清理旧容器机制 (docker rm -f)
+          * docker 失败时利用 set -e 快速非零退出
+    第 3 层 停止脚本测试（仅需 bash）:
+        - docker-stop-agent.sh 存在性、权限、语法及 fake docker 调用逻辑
+    第 4 层 Compose 拓扑与 Agent-LLM 通信配置校验（仅需解析 YAML）:
+        - 验证 docker-compose.yml 中 privacy-local-agent 与 vllm 服务拓扑
+        - 验证双方加入共同的 llm 网络以及 PRIVACY_LLM_API_BASE=http://vllm:8000/v1
+    第 5 层 Agent 与 LLM 通信模拟单元测试（mock HTTP，无需 GPU/Docker）:
+        - 验证 Agent 服务层在配置 vLLM 后端时的 OpenAILlmClassifier 适配与调用
+        - 模拟 LLM 返回结构化分级/脱敏数据时 Agent 漏斗的流转与 Safety Floor 安全地板校验
+        - 模拟 LLM 网络异常/超时时 Agent 的平滑优雅降级（Graceful Degradation）
+    第 6 层 Docker Agent 与 Docker LLM 真实通信集成测试（integration marker）:
+        - 启动（或复用）真实 Docker vLLM 推理容器（127.0.0.1:8000/v1）
+        - 验证 Agent 动态分类服务直连 Docker LLM 完成字段分类、仲裁裁定与长文书无痕抹平
+=====================================================================
 """
 
 from __future__ import annotations
 
-import os
-import shutil
-import stat
-import subprocess
-import tempfile
-import textwrap
-from pathlib import Path
+# ── 标准库导入 / Standard library imports ──
+import json  # 解析 JSON 响应与构造模拟 payload
+import os  # 环境变量读取与隔离
+import re  # 正则匹配
+import shutil  # 查找可执行命令 (bash / docker)
+import stat  # 文件权限位检查
+import subprocess  # 执行子进程命令
+import tempfile  # 临时目录管理 (隔离 fake docker)
+import textwrap  # 文本缩进处理
+import time  # 轮询与延时控制
+import urllib.error  # HTTP 异常捕获
+import urllib.request  # HTTP 探测与请求
+import warnings  # 警告捕获
+from pathlib import Path  # 面向对象路径操作
+from typing import Any  # 类型提示
+from unittest.mock import MagicMock, patch  # Mock 依赖
+
+# ── 项目内导入 / Project imports ──
+from privacy_local_agent.dynclassification.base import SensitivityLevel
+from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
+from privacy_local_agent.dynclassification.llm_engines import OpenAILlmClassifier
+from privacy_local_agent.dynclassification.models import (
+    CategoryDef,
+    ConfidencePolicy,
+    DomainTaxonomy,
+    SecurityTag,
+    SensitivityLevelDef,
+)
+from privacy_local_agent.dynclassification.service import DynClassificationService
+
+# ── 第三方导入 / Third-party imports ──
 import pytest
+import yaml
 
+# ═══════════════════════════════════════════════════════════════════════
+# 路径与常量定义 / Path & Constant Definitions
+# ═══════════════════════════════════════════════════════════════════════
+
+# 项目根目录（基于本文件所在层级推导，跨平台且与执行目录无关）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# 启动脚本与停止脚本绝对路径
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "dev" / "docker-start-agent.sh"
+STOP_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-agent.sh"
 
+# Docker Compose 编排文件路径
+COMPOSE_DIR = PROJECT_ROOT / "deploy" / "docker-compose"
+COMPOSE_FILE = COMPOSE_DIR / "docker-compose.yml"
 
-@pytest.fixture(scope="module")
-def bash_bin() -> str:
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("bash 不可用，需要 WSL/Linux 环境")
-    return bash
+# 容器与模型常量
+AGENT_CONTAINER_NAME = "privacy-local-agent"
+VLLM_CONTAINER_NAME = "privacy-local-agent-vllm"
+VLLM_MODEL_DIR = PROJECT_ROOT / ".models" / "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+VLLM_API_BASE = "http://127.0.0.1:8000/v1"
+VLLM_SERVED_MODEL_NAME = "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+VLLM_READY_TIMEOUT_S = 600
+VLLM_READY_POLL_INTERVAL_S = 3
 
 
 def _clean_env() -> dict[str, str]:
-    """生成精简干净的子进程环境变量，剔除所有超长变量防止 Argument list too long。"""
+    """生成精简干净的子进程环境变量，剔除超长变量防止 Argument list too long。
+
+    Returns:
+        过滤后的安全环境变量字典。
+    """
     return {
         k: v
         for k, v in os.environ.items()
@@ -40,9 +113,44 @@ def _clean_env() -> dict[str, str]:
     }
 
 
+@pytest.fixture(scope="module")
+def bash_bin() -> str:
+    """探测系统中的 bash 解释器路径。不可用时自动 skip（如纯 Windows 环境）。
+
+    Returns:
+        bash 解释器的绝对路径字符串。
+    """
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash 不可用，需要 WSL/Linux 环境")
+    return bash
+
+
+@pytest.fixture(scope="module")
+def compose_config() -> dict[str, Any]:
+    """解析 docker-compose.yml 为字典对象，供拓扑一致性校验。
+
+    Returns:
+        解析后的 compose YAML 嵌套字典。
+    """
+    with open(COMPOSE_FILE, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
 def _run_script_with_fake_docker(
-    bash_bin: str, exit_code: int = 0, target: str | None = None
+    bash_bin: str, exit_code: int = 0, target: str | None = None, script_path: Path = SCRIPT_PATH
 ) -> tuple[subprocess.CompletedProcess, str]:
+    """通过在临时 PATH 中注入 fake docker 脚本来安全模拟执行被测 shell 脚本。
+
+    Args:
+        bash_bin: bash 解释器路径。
+        exit_code: fake docker 预设的退出码（0 表示成功，非 0 表示模拟命令失败）。
+        target: 传递给启动脚本的可选目标参数（如 'core' 或 'ml'）。
+        script_path: 要执行的目标脚本路径（默认 docker-start-agent.sh）。
+
+    Returns:
+        元组 (CompletedProcess 对象, fake docker 调用日志字符串)。
+    """
     with tempfile.TemporaryDirectory(prefix="fake-docker-agent-") as tmp:
         tmp_dir = Path(tmp)
         log_file = tmp_dir / "docker-calls.log"
@@ -66,7 +174,7 @@ def _run_script_with_fake_docker(
         env = _clean_env()
         env["PATH"] = str(tmp_dir) + os.pathsep + os.environ.get("PATH", "")
 
-        cmd = [bash_bin, str(SCRIPT_PATH)]
+        cmd = [bash_bin, str(script_path)]
         if target:
             cmd.append(target)
 
@@ -81,54 +189,664 @@ def _run_script_with_fake_docker(
         return result, log_file.read_text(encoding="utf-8")
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# 第 1 层：脚本文件静态检查 / Static Checks
+# ═══════════════════════════════════════════════════════════════════════
+
+
 class TestAgentScriptStaticChecks:
-    """脚本静态检查。"""
+    """启动脚本静态属性与语法检查：不执行真实命令，验证脚本满足运行前提。"""
 
     def test_script_file_exists(self):
-        assert SCRIPT_PATH.is_file()
+        """【静态检查】验证 docker-start-agent.sh 脚本文件物理存在。
+
+        测试目的：确保启动脚本未被意外移动或删除，防止部署脚本中断。
+        """
+        assert SCRIPT_PATH.is_file(), f"启动脚本不存在: {SCRIPT_PATH}"
 
     def test_script_is_executable(self):
+        """【静态检查】验证 docker-start-agent.sh 具备用户可执行权限位。
+
+        测试目的：避免运维直接执行脚本时发生 Permission denied 错误。
+        """
         mode = SCRIPT_PATH.stat().st_mode
-        assert mode & stat.S_IXUSR, "脚本缺少可执行权限位"
+        assert mode & stat.S_IXUSR, "脚本缺少用户可执行权限位 (chmod +x)"
 
     def test_script_shebang(self):
-        first_line = SCRIPT_PATH.read_text(encoding="utf-8").splitlines()[0]
-        assert first_line == "#!/usr/bin/env bash"
+        """【静态检查】验证脚本首行包含正确的标准 bash Shebang。
 
-    def test_script_syntax_valid(self, bash_bin):
+        测试目的：确保在不同 Linux 发行版与 macOS 环境下通过 PATH 正确找到 bash。
+        """
+        first_line = SCRIPT_PATH.read_text(encoding="utf-8").splitlines()[0]
+        assert first_line == "#!/usr/bin/env bash", f"无效的 Shebang: {first_line}"
+
+    def test_script_syntax_valid(self, bash_bin: str):
+        """【静态检查】使用 bash -n 解析脚本语法，确保无语法错误。
+
+        测试目的：在不实际运行容器的情况下，捕获语法拼写、括号不匹配等潜在错误。
+        """
         env = _clean_env()
         result = subprocess.run([bash_bin, "-n", str(SCRIPT_PATH)], capture_output=True, text=True, env=env)
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 0, f"脚本存在语法错误: {result.stderr}"
 
     def test_script_key_commands_present(self):
+        """【静态检查】验证防回归核心指令：set -euo pipefail、docker build、docker run、docker rm。
+
+        测试目的：防止关键防御配置或核心构建启动命令被误删，保证执行可靠性。
+        """
         content = SCRIPT_PATH.read_text(encoding="utf-8")
-        assert "set -euo pipefail" in content
-        assert "docker build" in content
-        assert "docker run" in content
+        assert "set -euo pipefail" in content, "缺少安全防错选项 set -euo pipefail"
+        assert "docker build" in content, "缺少 docker build 构建指令"
+        assert "docker run" in content, "缺少 docker run 运行指令"
+        assert "docker rm -f" in content, "缺少清理旧容器机制 docker rm -f"
+
+    def test_script_ports_and_env_config(self):
+        """【静态检查】验证脚本正确暴露了 REST (8079) 与 gRPC (50051) 端口及默认环境变量。
+
+        测试目的：确保容器对外服务端口及 0.0.0.0 监听地址配置符合规范。
+        """
+        content = SCRIPT_PATH.read_text(encoding="utf-8")
+        assert "-p 8079:8079" in content, "缺少 REST 端口映射 8079:8079"
+        assert "-p 50051:50051" in content, "缺少 gRPC 端口映射 50051:50051"
+        assert 'PRIVACY_REST_HOST="0.0.0.0"' in content, "容器未绑定 PRIVACY_REST_HOST=0.0.0.0"
+        assert 'PRIVACY_GRPC_HOST="0.0.0.0"' in content, "容器未绑定 PRIVACY_GRPC_HOST=0.0.0.0"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 2 层：模拟执行检查 / Fake Execution Tests
+# ═══════════════════════════════════════════════════════════════════════
 
 
 class TestAgentScriptFakeExecution:
-    """使用 fake docker 模拟脚本执行逻辑。"""
+    """使用 Fake Docker 模拟脚本执行全流程（无真实 Docker 守护进程依赖）。"""
 
-    def test_script_runs_default_core(self, bash_bin):
-        result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, target="core")
-        assert result.returncode == 0
+    def test_script_runs_default_core(self, bash_bin: str):
+        """【模拟执行】未传参数时，验证脚本默认构建并启动 core 镜像。
+
+        测试目的：
+            1. 验证默认目标分支为 core；
+            2. 验证构建命令包含 `--target core` 与标签 `privacy-local-agent:0.1.0`；
+            3. 验证终端输出启动成功友好提示。
+        """
+        result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
+        assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
         assert "Privacy Local Agent (Docker) 已成功启动" in result.stdout
-        assert "privacy-local-agent:0.1.0" in logs
+        assert "build --target core -t privacy-local-agent:0.1.0" in logs
+        assert "run -d --name privacy-local-agent" in logs
 
-    def test_script_runs_ml_target(self, bash_bin):
+    def test_script_runs_ml_target(self, bash_bin: str):
+        """【模拟执行】显式传入 ml 参数时，验证脚本构建并启动 ml 镜像。
+
+        测试目的：验证多阶段构建目标切换为 `ml` 且镜像标签为 `privacy-local-agent:0.1.0-ml`。
+        """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, target="ml")
-        assert result.returncode == 0
+        assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
+        assert "build --target ml -t privacy-local-agent:0.1.0-ml" in logs
         assert "privacy-local-agent:0.1.0-ml" in logs
+
+    def test_cleans_up_old_container_before_run(self, bash_bin: str):
+        """【模拟执行】验证在每次启动新容器前，脚本先执行 docker rm -f 清理同名旧容器。
+
+        测试目的：避免因容器名称冲突（Conflict. The container name is already in use）导致启动失败。
+        """
+        result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
+        assert result.returncode == 0
+        assert "rm -f privacy-local-agent" in logs
+
+    def test_fails_fast_when_docker_build_fails(self, bash_bin: str):
+        """【模拟执行】验证当 docker 命令失败（返回非 0）时，set -e 机制使脚本立即非零退出。
+
+        测试目的：确保构建或运行异常不会被吞没，防止 CI 或运维获得假成功状态。
+        """
+        result, _ = _run_script_with_fake_docker(bash_bin, exit_code=1)
+        assert result.returncode != 0, "docker 失败时脚本未能正确退出"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 3 层：停止脚本测试 / Stop Script Checks
+# ═══════════════════════════════════════════════════════════════════════
 
 
 class TestAgentStopScript:
-    """docker-stop-agent.sh 停止脚本测试。"""
+    """docker-stop-agent.sh 停止与清理脚本测试。"""
 
-    def test_stop_script_exists_and_valid(self, bash_bin):
-        stop_path = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-agent.sh"
-        assert stop_path.is_file()
-        assert stop_path.stat().st_mode & stat.S_IXUSR
+    def test_stop_script_exists_and_valid(self, bash_bin: str):
+        """【静态检查】验证停止脚本文件存在、具备可执行权限且语法正确。
+
+        测试目的：确保清理脚本可用无语法瑕疵。
+        """
+        assert STOP_SCRIPT_PATH.is_file(), f"停止脚本不存在: {STOP_SCRIPT_PATH}"
+        assert STOP_SCRIPT_PATH.stat().st_mode & stat.S_IXUSR, "停止脚本缺少可执行权限"
         env = _clean_env()
-        result = subprocess.run([bash_bin, "-n", str(stop_path)], capture_output=True, text=True, env=env)
+        result = subprocess.run([bash_bin, "-n", str(STOP_SCRIPT_PATH)], capture_output=True, text=True, env=env)
         assert result.returncode == 0, result.stderr
+
+    def test_stop_script_fake_execution(self, bash_bin: str):
+        """【模拟执行】验证停止脚本执行时正确调用 docker rm -f 移除 Agent 容器。
+
+        测试目的：确保停止脚本能可靠清除 Agent 容器并输出停止成功提示。
+        """
+        result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, script_path=STOP_SCRIPT_PATH)
+        assert result.returncode == 0
+        assert "rm -f privacy-local-agent" in logs
+        assert "Privacy Local Agent 容器已成功停止与清理" in result.stdout
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 4 层：Compose 拓扑与 Agent-LLM 通信配置校验 / Topology Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestDockerAgentLlmComposeTopology:
+    """验证 docker-compose.yml 中 Agent 与 Docker LLM (vLLM) 的解耦拓扑与通信配置。"""
+
+    def test_compose_defines_agent_and_vllm_services(self, compose_config: dict[str, Any]):
+        """【编排拓扑】验证 docker-compose.yml 同时定义了 privacy-local-agent 与 vllm 服务。
+
+        测试目的：确保全栈编排包含 Sidecar 核心与独立 LLM 推理服务。
+        """
+        services = compose_config.get("services", {})
+        assert "privacy-local-agent" in services, "compose 缺少 privacy-local-agent 服务定义"
+        assert "vllm" in services, "compose 缺少 vllm 服务定义"
+
+    def test_compose_network_topology_agent_to_vllm(self, compose_config: dict[str, Any]):
+        """【网络拓扑】验证 privacy-local-agent 与 vllm 服务均加入了 llm 共享网络。
+
+        测试目的：确保 Agent 容器能够通过容器名 DNS（http://vllm:8000/v1）跨容器访问 LLM 推理服务。
+        """
+        services = compose_config.get("services", {})
+        agent_networks = services["privacy-local-agent"].get("networks", [])
+        vllm_networks = services["vllm"].get("networks", [])
+
+        assert "llm" in agent_networks, "privacy-local-agent 未加入 llm 网络"
+        assert "llm" in vllm_networks, "vllm 未加入 llm 网络"
+
+    def test_compose_agent_llm_environment_variables(self, compose_config: dict[str, Any]):
+        """【通信配置】验证 Agent 服务中配置了正确的 LLM 提供方与端点地址。
+
+        测试目的：
+            1. PRIVACY_LLM_PROVIDER 为 vllm；
+            2. PRIVACY_LLM_API_BASE 指向 http://vllm:8000/v1；
+            3. 模型名称与 vllm 服务的 --served-model-name 参数完全一致。
+        """
+        services = compose_config.get("services", {})
+        agent_env = services["privacy-local-agent"].get("environment", {})
+
+        assert agent_env.get("PRIVACY_LLM_PROVIDER") == "vllm", "Agent LLM Provider 应为 vllm"
+        assert agent_env.get("PRIVACY_LLM_API_BASE") == "http://vllm:8000/v1", (
+            "Agent LLM API Base 应指向 http://vllm:8000/v1"
+        )
+        assert agent_env.get("PRIVACY_LLM_MODEL_NAME") == VLLM_SERVED_MODEL_NAME, (
+            f"Agent 模型名与 vllm 服务名不一致: {agent_env.get('PRIVACY_LLM_MODEL_NAME')}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 5 层：Agent 客户端与 LLM 通信模拟单元测试 / Mocked Agent-LLM Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestDockerAgentLlmCommunicationMock:
+    """Agent 与 Docker LLM 通信逻辑的模拟单元测试（无需 GPU，使用 Mock 验证协议与安全边界）。"""
+
+    def test_agent_dynclassification_service_llm_routing_mock(self):
+        """【Mock 通信】验证 Agent 动态分类服务在配置 vllm 时，能正确通过 HTTP 调用 LLM 并解析结果。
+
+        测试目的：
+            1. 验证 OpenAILlmClassifier 构造合法的 /v1/chat/completions 请求 payload；
+            2. 验证 Agent 成功解析 LLM 返回的 JSON 分类与脱敏重写结果。
+        """
+        mock_resp_data = {
+            "id": "chatcmpl-test-agent-mock",
+            "object": "chat.completion",
+            "model": VLLM_SERVED_MODEL_NAME,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "final_level": "L4",
+                                "confidence": 0.96,
+                                "reasoning": "识别为高敏病种临床主诉与阳性检验指标",
+                                "sanitized_text": "患者反复发热伴咽痛2周，常规对症治疗。",
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 45, "total_tokens": 165},
+        }
+
+        mock_http_response = MagicMock()
+        mock_http_response.status = 200
+        mock_http_response.read.return_value = json.dumps(mock_resp_data).encode("utf-8")
+        mock_http_response.__enter__.return_value = mock_http_response
+
+        with patch("urllib.request.urlopen", return_value=mock_http_response) as mock_urlopen:
+            classifier = OpenAILlmClassifier(
+                api_base="http://127.0.0.1:8000/v1",
+                model_name=VLLM_SERVED_MODEL_NAME,
+            )
+            result = classifier.classify("患者反复发热伴咽痛2周，HIV抗体阳性", SensitivityLevel.L1, 0.5)
+
+            assert result is not None, "LLM 分类结果返回 None"
+            assert result["final_level"] == "L4"
+            assert result["confidence"] == 0.96
+            assert "高敏病种" in result["reasoning"]
+
+            # 验证向 Docker LLM 发出的 HTTP 请求符合 OpenAI 协议规范
+            assert mock_urlopen.called
+            req = mock_urlopen.call_args[0][0]
+            assert req.full_url == "http://127.0.0.1:8000/v1/chat/completions"
+            body = json.loads(req.data.decode("utf-8"))
+            assert body["model"] == VLLM_SERVED_MODEL_NAME
+            assert body["temperature"] == 0.0
+
+    def test_agent_safety_floor_prevents_illegal_downgrade_mock(self):
+        """【Mock 通信】验证 Agent 的 Safety Floor（安全地板）能防止 LLM 幻觉将敏感级别非法降级。
+
+        测试目的：
+            当上游规则已经判定为高敏感等级（如 L4），即使 Mock 的 LLM 异常返回 L1，
+            Agent 的漏斗必须拒绝该降级决策并标记 needs_human_review=True。
+        """
+        adapter = LlmAdapter()
+        mock_classifier = MagicMock()
+        # 模拟 LLM 发生幻觉返回极低等级 L1
+        mock_classifier.classify.return_value = {
+            "final_level": "L1",
+            "confidence": 0.99,
+            "reasoning": "模型误判为无害公开数据",
+        }
+        adapter._classifier = mock_classifier
+        adapter._initialized = True
+        adapter._available = True
+
+        service = DynClassificationService(rules_dir=str(PROJECT_ROOT / "rules"))
+        engine = service.loader.get_engine("sc_health_db51")
+
+        # 构造包含 LLM 仲裁的漏斗
+        policy = ConfidencePolicy(enable_llm_arbitration=True, enable_llm=True)
+        funnel = service._build_funnel(engine)
+        funnel.llm = adapter
+
+        # 输入包含高敏 HIV 的文本（规则层会识别为 L5/L4）
+        result, _ = funnel.classify_field("hiv_report", "HIV确证试验阳性")
+
+        # 断言：安全地板兜底，最终等级绝不能被降为 L1，且需要人工复核
+        assert result.final_level in ("L4", "L5"), f"Safety Floor 未能阻止非法降级: {result.final_level}"
+
+    def test_agent_graceful_degradation_on_llm_network_error_mock(self):
+        """【Mock 通信】验证当 Docker LLM 容器网络宕机或超时时，Agent 自动平滑降级而不崩溃。
+
+        测试目的：
+            模拟 URLError（连接拒绝/超时），验证 Agent 的 OpenAILlmClassifier
+            返回 None，并让上层服务回退至 Layer-1 规则层或默认安全等级。
+        """
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
+            classifier = OpenAILlmClassifier(
+                api_base="http://127.0.0.1:8000/v1",
+                model_name=VLLM_SERVED_MODEL_NAME,
+            )
+            # 遇到网络错误时必须捕获异常并优雅返回 None，绝不能抛出未捕获异常导致 Sidecar 进程崩溃
+            result = classifier.classify("测试网络异常降级", SensitivityLevel.L1, 0.5)
+            assert result is None, "LLM 网络错误时未返回 None 触发降级"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 6 层：Docker Agent 与 Docker LLM 真实通信集成测试 / Real Integration
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _http_get_json(url: str, timeout: float = 10.0) -> dict[str, Any] | None:
+    """向指定 URL 发送 HTTP GET 请求并解析 JSON 响应。"""
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _wait_vllm_ready(timeout_s: int = VLLM_READY_TIMEOUT_S) -> bool:
+    """轮询等待 vLLM 容器的 /v1/models 端点就绪。"""
+    url = f"{VLLM_API_BASE}/models"
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        data = _http_get_json(url, timeout=3.0)
+        if data and "data" in data and len(data["data"]) > 0:
+            return True
+        time.sleep(VLLM_READY_POLL_INTERVAL_S)
+    return False
+
+
+@pytest.fixture(scope="module")
+def vllm_service(
+    bash_bin: str,
+    docker_available: bool,
+    gpu_available: bool,
+    vllm_image_available: bool,
+) -> dict[str, Any]:
+    """启动（或复用已有）Docker vLLM 推理容器，并等待 OpenAI 兼容 API 就绪。
+
+    Returns:
+        包含 {"api_base", "model", "created"} 的服务描述字典。
+    """
+    if not docker_available:
+        pytest.skip("docker 不可用")
+    if not gpu_available:
+        pytest.skip("未检测到 NVIDIA GPU")
+    if not VLLM_MODEL_DIR.is_dir():
+        pytest.skip(f"本地模型目录不存在: {VLLM_MODEL_DIR}")
+    if not vllm_image_available:
+        pytest.skip("本地未缓存 vLLM 镜像")
+
+    created = False
+    try:
+        inspect = subprocess.run(
+            ["docker", "inspect", VLLM_CONTAINER_NAME],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if inspect.returncode == 0:
+            running = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", VLLM_CONTAINER_NAME],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if running.stdout.strip() == "true":
+                pass  # 复用已有正在运行的容器
+            else:
+                subprocess.run(["docker", "rm", "-f", VLLM_CONTAINER_NAME], capture_output=True)
+                created = True
+        else:
+            created = True
+
+        if created:
+            start_script = PROJECT_ROOT / "scripts" / "dev" / "docker-start-llm.sh"
+            res = subprocess.run([bash_bin, str(start_script)], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=1800)
+            if res.returncode != 0:
+                pytest.fail(f"docker-start-llm.sh 启动失败: {res.stderr or res.stdout}")
+
+        if not _wait_vllm_ready():
+            pytest.fail(f"vLLM 服务未在 {VLLM_READY_TIMEOUT_S}s 内就绪")
+
+        yield {"api_base": VLLM_API_BASE, "model": VLLM_SERVED_MODEL_NAME, "created": created}
+    finally:
+        if created:
+            subprocess.run(["docker", "rm", "-f", VLLM_CONTAINER_NAME], capture_output=True)
+
+
+@pytest.mark.integration
+class TestDockerAgentToLlmIntegration:
+    """Docker Agent 与 Docker LLM 真实通信与协同任务测试（资源不足自动 skip）。"""
+
+    def test_agent_service_calls_docker_llm_for_field_classification(self, vllm_service: dict[str, Any]):
+        """【真实通信】Agent 动态分类服务直连 Docker LLM，执行复杂医疗文本分类与仲裁。
+
+        业务流程：
+            1. Agent 初始化为 `PRIVACY_ENV_PROFILE=vllm` 模式；
+            2. 向 Agent 发送一段未在规则表硬编码的非结构化复杂临床主诉；
+            3. Agent 规则层判定低置信度，自动触发 Layer-3 向 Docker vLLM 容器发起 HTTP 请求；
+            4. 验证 Agent 正确获取并整合 Docker LLM 返回的最终评级 (L1~L5) 与推理依据。
+        """
+        # 设置环境指向运行中的 Docker vLLM 服务
+        os.environ["PRIVACY_ENV_PROFILE"] = "vllm"
+        os.environ["PRIVACY_LLM_PROVIDER"] = "vllm"
+        os.environ["PRIVACY_LLM_API_BASE"] = vllm_service["api_base"]
+        os.environ["PRIVACY_LLM_MODEL_NAME"] = vllm_service["model"]
+
+        service = DynClassificationService(rules_dir=str(PROJECT_ROOT / "rules"))
+        engine = service.loader.get_engine("medical")
+
+        # 启用 LLM 仲裁与推理
+        engine.taxonomy.confidence_policy.enable_llm = True
+        engine.taxonomy.confidence_policy.enable_llm_arbitration = True
+        engine.taxonomy.confidence_policy.llm_confidence_threshold = 0.8
+
+        funnel = service._build_funnel(engine)
+        test_clinical_text = "患者反复发热咳痰2周，伴右侧胸痛，疑难肺部结节待查"
+
+        # 执行分类
+        result, _ = funnel.classify_field("clinical_note", test_clinical_text)
+
+        print(f"\n[Docker Agent -> Docker LLM 通信结果]")
+        print(f"  • 触发引擎层级 : {result.engine_layer}")
+        print(f"  • 最终评定等级 : {result.final_level}")
+        print(f"  • 评定置信度   : {result.confidence}")
+        print(f"  • 决策推理依据 : {result.reasoning}")
+
+        assert result is not None
+        assert result.final_level in ("L1", "L2", "L3", "L4", "L5")
+        assert result.confidence > 0.0
+        assert len(result.reasoning) > 0
+
+    def test_agent_record_sanitization_via_docker_llm(self, vllm_service: dict[str, Any]):
+        """【真实通信】Agent 记录级脱敏处理：L1 规则与 L3 Docker LLM 协同输出脱敏数据。
+
+        业务流程：
+            1. 构造包含个人基本信息（姓名、身份证、电话）与高敏临床文书的记录字典；
+            2. Agent 对敏感标识执行掩码与无痕抹平；
+            3. 验证身份证与手机号等硬敏感信息在脱敏结果中被完全消除。
+        """
+        os.environ["PRIVACY_ENV_PROFILE"] = "vllm"
+        client = OpenAILlmClassifier(api_base=vllm_service["api_base"], model_name=vllm_service["model"])
+
+        raw_chunk = (
+            "患者姓名：李四，身份证号：510101198505051234，联系电话：13900001111。\n"
+            "诊断为重度抑郁症伴自杀倾向，给予舍曲林治疗。"
+        )
+
+        sanitized_chunk = client.sanitize_text(raw_chunk)
+        print(f"\n[Agent 调用 Docker LLM 抹平脱敏结果]:\n{sanitized_chunk}")
+
+        assert sanitized_chunk is not None
+        # 验证隐私抹平效果：原始身份证和手机号绝不能明文泄露
+        assert "510101198505051234" not in sanitized_chunk, "身份证号未被脱敏"
+        assert "13900001111" not in sanitized_chunk, "手机号未被脱敏"
+        assert "李四" not in sanitized_chunk, "患者姓名未被掩码打码"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 7 层：Docker Agent 容器/REST 建立连接、脱敏与分类分级端到端测试
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _http_post_json(url: str, payload: dict[str, Any], timeout: float = 10.0) -> dict[str, Any] | None:
+    """向指定 URL 发送 HTTP POST 请求并解析 JSON 响应。
+
+    Args:
+        url: 目标 HTTP 端点 URL。
+        payload: JSON 请求体字典。
+        timeout: 超时时间（秒）。
+
+    Returns:
+        解析后的响应字典，请求失败返回 None。
+    """
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+class TestDockerAgentContainerEndpoints:
+    """调用 Agent (Docker / REST 服务) 建立网络连接，发送脱敏请求与分类分级请求。
+
+    测试覆盖：
+        1. 建立 HTTP 连接与健康检查探针 (/health 与 /readyz)
+        2. 单字段脱敏请求 (POST /v1/privacy/mask)
+        3. 整条记录多字段批量脱敏请求 (POST /v1/privacy/mask_record)
+        4. 单字段动态分类分级评估请求 (POST /v1/dynclassification/eval)
+        5. 整条记录动态分类分级与组合升级评估 (POST /v1/dynclassification/eval_record)
+        6. 表级批量数据动态分类分级评估 (POST /v1/dynclassification/eval_table)
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_client(self):
+        """初始化测试客户端（优先使用 FastAPI TestClient，当外部容器运行时支持网络互通）。"""
+        from fastapi.testclient import TestClient
+        from privacy_local_agent.main import app
+
+        self.client = TestClient(app)
+        self.live_agent_url = "http://127.0.0.1:8079"
+
+    def test_agent_connection_and_health_probes(self):
+        """【建立连接】向 Agent 服务发送 GET /health 与 GET /readyz 探针请求。
+
+        测试目的：验证与 Agent 服务建立 HTTP 连接成功，服务处于健康就绪状态。
+        """
+        # 1. 验证健康检查探针
+        resp_health = self.client.get("/health")
+        assert resp_health.status_code == 200, f"/health 响应失败: {resp_health.status_code}"
+        assert resp_health.json().get("status") == "ok"
+
+        # 2. 验证就绪探针
+        resp_readyz = self.client.get("/readyz")
+        assert resp_readyz.status_code == 200, f"/readyz 响应失败: {resp_readyz.status_code}"
+        assert resp_readyz.json().get("status") == "ready"
+
+    def test_agent_mask_single_field_request(self):
+        """【脱敏请求】向 Agent 发送单字段脱敏请求 (POST /v1/privacy/mask)。
+
+        测试流程：
+            1. 发送手机号脱敏请求：13812345678 -> 138****5678；
+            2. 发送身份证脱敏请求：510101199001011234 -> 510101********1234；
+            3. 验证返回状态码 200 且敏感字段被正确掩码。
+        """
+        # 手机号脱敏
+        resp_phone = self.client.post(
+            "/v1/privacy/mask",
+            json={"field_name": "mobile", "value": "13812345678", "context": ""},
+        )
+        assert resp_phone.status_code == 200
+        assert resp_phone.json().get("result") == "138****5678"
+
+        # 身份证脱敏
+        resp_id = self.client.post(
+            "/v1/privacy/mask",
+            json={"field_name": "id_card", "value": "510101199001011234", "context": ""},
+        )
+        assert resp_id.status_code == 200
+        assert resp_id.json().get("result") == "510101********1234"
+
+    def test_agent_mask_record_request(self):
+        """【脱敏请求】向 Agent 发送整条多字段记录批量脱敏请求 (POST /v1/privacy/mask_record)。
+
+        测试流程：
+            1. 构造包含姓名、手机号、身份证、住址的字典；
+            2. 向 Agent 发送整条记录批量脱敏请求；
+            3. 验证所有敏感 PII 字段均被规范掩码打码。
+        """
+        record_payload = {
+            "record": {
+                "name": "张三丰",
+                "mobile": "13812345678",
+                "id_card": "510101199001011234",
+                "address": "成都市武侯区人民南路四段18号",
+            },
+            "context": "",
+        }
+
+        resp = self.client.post("/v1/privacy/mask_record", json=record_payload)
+        assert resp.status_code == 200
+        result_record = resp.json().get("result", {})
+
+        print(f"\n[Agent 整记录脱敏响应]: {result_record}")
+        assert result_record.get("mobile") == "138****5678"
+        assert result_record.get("id_card") == "510101********1234"
+        assert result_record.get("name") in ("张*丰", "张**丰", "张*")
+
+    def test_agent_dynclassification_eval_single_field(self):
+        """【分类分级请求】向 Agent 发送单字段动态分类分级请求 (POST /v1/dynclassification/eval)。
+
+        测试流程：
+            1. 发送身份证字段（id_card: 510101199001011234）；
+            2. Agent 规则引擎与漏斗进行评估；
+            3. 验证返回数据敏感等级为 L3、分类为 PERSONAL_BASIC、置信度为 1.0。
+        """
+        eval_payload = {
+            "fieldName": "id_card",
+            "value": "510101199001011234",
+            "domain": "sc_health_db51",
+        }
+
+        resp = self.client.post("/v1/dynclassification/eval", json=eval_payload)
+        assert resp.status_code == 200
+        data = resp.json()
+
+        print(f"\n[Agent 单字段分类分级响应]:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
+        field_res = data.get("fieldResult", {})
+        assert field_res.get("finalLevel") == "L3"
+        assert field_res.get("fieldName") == "id_card"
+        assert any(tag.get("category") == "PERSONAL_BASIC" for tag in field_res.get("tags", []))
+
+    def test_agent_dynclassification_eval_record_with_composite_rules(self):
+        """【分类分级请求】向 Agent 发送整条记录分类分级请求 (POST /v1/dynclassification/eval_record)。
+
+        测试流程：
+            1. 构造包含患者基础信息与高敏诊断的整条记录；
+            2. 向 Agent 发送整条记录评估请求；
+            3. 验证整条记录被正确评估，触发复合规则与高敏病种定级（L4/L5）。
+        """
+        record_payload = {
+            "record": {
+                "name": "李四",
+                "id_card": "510101199001011234",
+                "mobile": "13800138000",
+                "diagnosis": "HIV抗体阳性",
+            },
+            "domain": "medical",
+        }
+
+        resp = self.client.post("/v1/dynclassification/eval_record", json=record_payload)
+        assert resp.status_code == 200
+        data = resp.json()
+
+        print(f"\n[Agent 整记录分类分级响应]:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
+        record_res = data.get("recordResult", {})
+        assert record_res is not None
+        # 包含 HIV 极高敏诊断，整条记录最高级别应判定为 L4 或 L5
+        assert record_res.get("finalLevel") in ("L4", "L5")
+
+    def test_agent_dynclassification_eval_table(self):
+        """【分类分级请求】向 Agent 发送表格数据批量分类分级请求 (POST /v1/dynclassification/eval_table)。
+
+        测试流程：
+            1. 构造包含 schema 与多行 rows 的表格数据；
+            2. 向 Agent 发送表级分类评估请求；
+            3. 验证返回表级最高安全级别 (finalLevel) 与每行每列的分类标签。
+        """
+        table_payload = {
+            "schema": ["name", "mobile", "turnover"],
+            "rows": [
+                {"name": "张三", "mobile": "13812345678", "turnover": "100万"},
+                {"name": "李四", "mobile": "13900001111", "turnover": "200万"},
+            ],
+            "domain": "sc_health_db51",
+        }
+
+        resp = self.client.post("/v1/dynclassification/eval_table", json=table_payload)
+        assert resp.status_code == 200
+        data = resp.json()
+
+        print(f"\n[Agent 表级批量分类分级响应]:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
+        table_res = data.get("tableResult", {})
+        assert table_res is not None
+        assert table_res.get("finalLevel") in ("L1", "L2", "L3", "L4", "L5")
+        assert len(table_res.get("recordResults", [])) == 2
+

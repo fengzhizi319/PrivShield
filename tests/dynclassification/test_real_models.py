@@ -47,7 +47,7 @@ class TestRealLlmAdapter:
         # 清空 PRIVACY_ENV_PROFILE 阻止 load_env_file() 加载 config/env/vllm.env，
         # 重置 env loader 缓存，防止 load_env_file() 覆盖 monkeypatch 的值。
         import privacy_local_agent.env_loader as _env_mod
-        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "")
+        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "qwen3")
         monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "qwen3")
         _env_mod._ENV_LOADED = False
 
@@ -68,7 +68,7 @@ class TestRealLlmAdapter:
     def test_real_llm_arbitrate_returns_structured_result(self, monkeypatch):
         """LlmAdapter.arbitrate 应能组装冲突上下文并返回裁定结果。"""
         import privacy_local_agent.env_loader as _env_mod
-        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "")
+        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "qwen3")
         monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "qwen3")
         _env_mod._ENV_LOADED = False
 
