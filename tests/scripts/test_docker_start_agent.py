@@ -39,6 +39,11 @@ docker-start-agent.sh & docker-stop-agent.sh Script Tests & Agent-to-LLM Communi
         - 真实执行启动脚本拉起物理容器并验证 docker ps 状态
         - 通过真实网络 Socket 发送 HTTP 脱敏、分类分级与健康探针请求
         - 验证 docker-stop-agent.sh 能够干净停机并清理容器
+    第 9 层 多主机 / 跨主机部署与远程 LLM 通信测试（Cross-Host Deployment Tests）:
+        - 验证 Compose 环境变量在跨主机端点与 API Key 注入时的变量替换渲染
+        - 验证跨主机远程 HTTP 请求路由与 Authorization: Bearer 凭据传递
+        - 验证跨主机网络超时、网关 502/504 异常捕获与 Layer-1/2 优雅降级机制
+        - 验证同机模式 vs 跨主机模式的配置隔离与动态切换
 =====================================================================
 """
 
@@ -1069,5 +1074,222 @@ class TestRealDockerAgentScriptLifecycle:
         assert resp_rec_eval is not None
         record_res = resp_rec_eval.get("recordResult", {})
         assert record_res.get("finalLevel") in ("L4", "L5")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 第 9 层：多主机 / 跨主机部署与远程 LLM 通信测试 / Multi-Host Deployment Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestDockerAgentMultiHostDeployment:
+    """多主机与跨主机部署拓扑专项测试（包含跨网络 LLM 调用、鉴权注入、超时降级与配置隔离）。"""
+
+    def test_compose_cross_host_variable_substitution_render(self):
+        """【多主机编排】验证 Compose 在跨主机部署时能够正确将变量替换为远程端点与 API Key。
+
+        测试场景：
+            - 当部署在多主机环境时（Agent 运行在 CPU 节点，vLLM 运行在 GPU 节点），
+            - deploy/docker-compose/.env 中配置了跨主机地址（如 LLM_API_BASE=http://192.168.10.50:8000/v1）
+              以及访问凭据（LLM_API_KEY=sk-remote-gpu-host-key-999）。
+            - 验证变量替换逻辑能够正确渲染出跨主机配置，而非同机内部 DNS。
+        """
+        compose_content = COMPOSE_FILE.read_text(encoding="utf-8")
+
+        # 模拟 Compose 变量替换引擎（使用自定义跨主机环境变量）
+        mock_env = {
+            "LLM_API_BASE": "http://192.168.10.50:8000/v1",
+            "LLM_API_KEY": "sk-remote-gpu-host-key-999",
+        }
+
+        def _substitute(match: re.Match) -> str:
+            var_name = match.group(1)
+            default_val = match.group(2) if match.group(2) is not None else ""
+            return mock_env.get(var_name, default_val)
+
+        rendered_compose = re.sub(r"\$\{([A-Za-z0-9_]+)(?::-([^}]+))?\}", _substitute, compose_content)
+        parsed_config = yaml.safe_load(rendered_compose)
+
+        agent_service = parsed_config.get("services", {}).get("privacy-local-agent", {})
+        agent_env = agent_service.get("environment", {})
+
+        # 验证跨主机地址与密钥成功注入
+        assert agent_env.get("PRIVACY_LLM_API_BASE") == "http://192.168.10.50:8000/v1"
+        assert agent_env.get("PRIVACY_LLM_API_KEY") == "sk-remote-gpu-host-key-999"
+        assert agent_env.get("PRIVACY_REST_HOST") == "0.0.0.0"
+        assert agent_env.get("PRIVACY_GRPC_HOST") == "0.0.0.0"
+
+    def test_agent_cross_host_remote_request_and_bearer_auth(self):
+        """【跨主机通信】验证 Agent 调用远程 LLM 服务时正确路由目标 URL 并注入 Bearer 鉴权头。
+
+        测试场景：
+            - 远程 GPU 机器 IP 为 10.240.0.50:8000，且配置了 API Key 访问控制；
+            - 验证 OpenAILlmClassifier 发出的 HTTP POST 请求地址为 http://10.240.0.50:8000/v1/chat/completions；
+            - 验证 Header 中携带 Authorization: Bearer sk-remote-cloud-gpu-key-999；
+            - 验证能够正确解析远程服务返回的标准 OpenAI JSON 格式。
+        """
+        classifier = OpenAILlmClassifier(
+            api_base="http://10.240.0.50:8000/v1",
+            api_key="sk-remote-cloud-gpu-key-999",
+            model_name="Qwen3.5-0.8B-Privacy-Classifier-Smoother",
+        )
+
+        remote_json_reply = {
+            "id": "chatcmpl-cross-host-test",
+            "object": "chat.completion",
+            "created": 1723620000,
+            "model": "Qwen3.5-0.8B-Privacy-Classifier-Smoother",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps({
+                            "final_level": "L3",
+                            "confidence": 0.96,
+                            "reasoning": "跨主机远程GPU大模型仲裁: 命中敏感个人身份信息",
+                            "sanitized_text": "身份证号：510101********1234",
+                            "category": "PERSONAL_BASIC",
+                            "sub_category": "ID_CARD",
+                        }),
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 128,
+                "completion_tokens": 52,
+                "total_tokens": 180,
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(remote_json_reply).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.__exit__.return_value = False
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            result = classifier.classify(
+                text="身份证号：510101199001011234",
+                upstream_level=SensitivityLevel.L3,
+                upstream_confidence=0.6,
+                sanitize=True,
+            )
+
+            # 1. 验证目标 URL 跨主机正确拼接
+            assert mock_urlopen.call_count == 1
+            req_obj = mock_urlopen.call_args[0][0]
+            assert req_obj.full_url == "http://10.240.0.50:8000/v1/chat/completions"
+
+            # 2. 验证 Bearer 鉴权头正确注入
+            assert req_obj.get_header("Authorization") == "Bearer sk-remote-cloud-gpu-key-999"
+            assert req_obj.get_header("Content-type") == "application/json"
+
+            # 3. 验证分类与脱敏结果解析正确
+            assert result is not None
+            assert result.get("final_level") == "L3"
+            assert result.get("confidence") == 0.96
+            assert result.get("sanitized_text") == "身份证号：510101********1234"
+            assert result.get("usage", {}).get("total_tokens") == 180
+
+    def test_agent_cross_host_network_timeout_and_graceful_degradation(self, monkeypatch):
+        """【跨主机容灾】验证当跨主机网络超时（如网络断开/远程主机未就绪）时，Agent 平滑降级。
+
+        测试目的：
+            - 多主机部署中跨机网络可能出现抖动或连接超时；
+            - 验证捕获 URLError / TimeoutError 后返回 None 并触发 Layer-1 规则平滑降级；
+            - 确保整个 Agent 进程不因跨主机网络异常而崩溃。
+        """
+        import privacy_local_agent.env_loader as _env_mod
+        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "vllm")
+        monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "vllm")
+        monkeypatch.setenv("PRIVACY_LLM_API_BASE", "http://10.240.0.99:8000/v1")
+        monkeypatch.setenv("PRIVACY_LLM_API_KEY", "sk-test-token")
+        _env_mod._ENV_LOADED = True
+
+        # 模拟跨主机网络连接超时
+        timeout_error = urllib.error.URLError(TimeoutError("Connection to 10.240.0.99:8000 timed out after 30s"))
+
+        with patch("urllib.request.urlopen", side_effect=timeout_error):
+            # 1. 验证分类器捕获超时返回 None
+            classifier = OpenAILlmClassifier(api_base="http://10.240.0.99:8000/v1")
+            result = classifier.classify("测试文本", SensitivityLevel.L3, 0.5)
+            assert result is None, "网络超时应当返回 None 触发降级"
+
+            # 2. 验证业务服务层在跨主机网络超时时平滑回退至 Layer-1 规则引擎
+            service = DynClassificationService()
+            eval_res = service.classify_field("id_card", "510101199001011234", domain="sc_health_db51")
+            assert eval_res is not None
+            # 规则引擎判定为 L3（命中身份证规则），服务正常响应且不抛出异常
+            assert eval_res.field_result is not None
+            assert eval_res.field_result.final_level == "L3"
+
+    def test_agent_cross_host_gateway_http_502_504_handling(self):
+        """【网关异常处理】验证跨主机反向代理/网关返回 502/504 时 Agent 优雅处理。"""
+        classifier = OpenAILlmClassifier(api_base="http://api-gateway.company.internal:8000/v1")
+
+        # 模拟反向代理网关返回 HTTP 504 Gateway Timeout
+        http_504_error = urllib.error.HTTPError(
+            url="http://api-gateway.company.internal:8000/v1/chat/completions",
+            code=504,
+            msg="Gateway Timeout",
+            hdrs=MagicMock(),
+            fp=None,
+        )
+
+        with patch("urllib.request.urlopen", side_effect=http_504_error):
+            result = classifier.classify("测试文本", SensitivityLevel.L2, 0.5)
+            assert result is None, "HTTP 504 网关超时应返回 None 触发降级"
+
+    def test_agent_cross_host_empty_api_key_header_handling(self):
+        """【默认凭据模式】验证当远程 LLM 服务使用默认 EMPTY Key 时发送标准 Bearer EMPTY 鉴权头。"""
+        classifier = OpenAILlmClassifier(
+            api_base="http://192.168.1.100:8000/v1",
+            api_key="EMPTY",
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({
+            "choices": [{"message": {"content": "{\"final_level\": \"L2\", \"confidence\": 0.9}"}}],
+            "usage": {},
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.__exit__.return_value = False
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            classifier.classify("测试", SensitivityLevel.L2, 0.9)
+            req_obj = mock_urlopen.call_args[0][0]
+            auth_header = req_obj.get_header("Authorization")
+            assert auth_header == "Bearer EMPTY", f"预期发送 Bearer EMPTY 鉴权头，实际为: {auth_header}"
+
+    def test_cross_host_environment_switching_isolation(self, monkeypatch):
+        """【拓扑切换隔离】验证在运行时从同机模式动态切换为跨主机模式时配置完全隔离。"""
+        import privacy_local_agent.env_loader as _env_mod
+
+        # 1. 模拟同机模式
+        monkeypatch.setenv("PRIVACY_ENV_PROFILE", "vllm")
+        monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "vllm")
+        monkeypatch.setenv("PRIVACY_LLM_API_BASE", "http://vllm:8000/v1")
+        monkeypatch.setenv("PRIVACY_LLM_API_KEY", "EMPTY")
+        _env_mod._ENV_LOADED = True
+
+        adapter_local = LlmAdapter()
+        adapter_local._lazy_init()
+        assert adapter_local.is_available is True
+        assert adapter_local._classifier.api_base == "http://vllm:8000/v1"
+        assert adapter_local._classifier.api_key == "EMPTY"
+
+        # 2. 动态切换为跨主机生产模式
+        monkeypatch.setenv("PRIVACY_LLM_API_BASE", "https://remote-gpu-cloud.corp.com:8443/v1")
+        monkeypatch.setenv("PRIVACY_LLM_API_KEY", "sk-cloud-prod-token-xyz")
+        _env_mod._ENV_LOADED = True
+
+        adapter_remote = LlmAdapter()
+        adapter_remote._lazy_init()
+        assert adapter_remote.is_available is True
+        assert adapter_remote._classifier.api_base == "https://remote-gpu-cloud.corp.com:8443/v1"
+        assert adapter_remote._classifier.api_key == "sk-cloud-prod-token-xyz"
+
 
 
