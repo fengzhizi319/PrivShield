@@ -15,9 +15,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
-from privacy_local_agent.dynclassification.llm_engines import Qwen2VLClassifier
-from privacy_local_agent.dynclassification.models import (
+from PrivShield.dynclassification.llm_adapter import LlmAdapter
+from PrivShield.dynclassification.llm_engines import Qwen2VLClassifier
+from PrivShield.dynclassification.models import (
     CategoryDef,
     DomainTaxonomy,
     SecurityTag,
@@ -123,7 +123,7 @@ class TestQwen2VLClassifier:
 
     def test_parse_json_response_clean_json(self):
         """测试解析纯 JSON 串。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         classifier = Qwen2VLClassifier()
         raw_json = '{"final_level": "L3", "confidence": 0.9, "reasoning": "纯文本诊断"}'
@@ -134,7 +134,7 @@ class TestQwen2VLClassifier:
 
     def test_parse_json_response_markdown_codeblock(self):
         """测试解析带有 markdown 块标记 (```json ... ```) 的 LLM 文本响应。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         classifier = Qwen2VLClassifier()
         raw_text = """依据标准评估，分析结果如下：
@@ -153,7 +153,7 @@ class TestQwen2VLClassifier:
 
     def test_parse_json_response_invalid_json_returns_none(self):
         """测试当 LLM 响应不符合 JSON 语法时优雅兜底返回 None。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         classifier = Qwen2VLClassifier()
         invalid_text = "抱歉，由于上下文不足，我无法以 JSON 格式输出结果。"
@@ -232,7 +232,7 @@ class TestQwen2VLClassifier:
         """测试 DynClassificationService 对 100 条扩充模拟记录执行批量分类评测。"""
         import csv
         from pathlib import Path
-        from privacy_local_agent.dynclassification import DynClassificationService
+        from PrivShield.dynclassification import DynClassificationService
 
         csv_path = Path("data/kangyang.csv")
         if not csv_path.exists():

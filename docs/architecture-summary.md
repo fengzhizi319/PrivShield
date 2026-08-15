@@ -1,6 +1,6 @@
-# privacy-local-agent 设计实现总结
+# PrivShield 设计实现总结
 
-> 本文档总结 privacy-local-agent 的架构设计、工程实践与注意事项，供其他项目参照。
+> 本文档总结 PrivShield 的架构设计、工程实践与注意事项，供其他项目参照。
 
 ---
 
@@ -56,7 +56,7 @@ Python REST + gRPC 双协议隐私计算 Sidecar，以独立进程/容器形式�
 ### 2.1 分层架构
 
 ```
-privacy_local_agent/
+PrivShield/
 ├── privacy/           → 核心隐私原语 (dp, masking, kano, qol, budget)
 ├── dynclassification/ → 动态分类分级 (3-layer funnel: Rule -> NER -> LLM)
 ├── security/          → 安全层 (auth, ratelimit, tls, identity, config)
@@ -272,14 +272,14 @@ class Mechanism(str, Enum):
 ```toml
 # pyproject.toml
 [tool.mypy]
-exclude = ["privacy_local_agent/privacy_pb2.*"]
+exclude = ["PrivShield/privacy_pb2.*"]
 
 [tool.ruff.lint]
 # protobuf 生成文件豁免
 ```
 **注意**：修改 `proto/privacy.proto` 后需重新生成：
 ```bash
-python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto
+python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto
 ```
 
 ### 4.2 预算时间窗口重置

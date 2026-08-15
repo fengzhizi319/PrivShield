@@ -68,7 +68,7 @@
 
 ```mermaid
 graph TD
-    subgraph privacy-local-agent
+    subgraph PrivShield
         REST[FastAPI<br/>REST]
         GRPC[gRPC Server]
         SEC[Security Layer<br/>config/tls/auth/rl]
@@ -490,7 +490,7 @@ REST 应用层目前仍通过 `Authorization: Bearer <token>` 进行 API Key 认
 #### 证书链结构
 
 ```
-Root CA (privacy-local-agent-test-ca)
+Root CA (PrivShield-test-ca)
 ├── Server Certificate (CN=localhost, SAN: localhost/127.0.0.1, EKU: serverAuth)
 │   → 部署在 Python agent 服务端
 └── Client Certificate (CN=privacy-console-go-client, EKU: clientAuth)

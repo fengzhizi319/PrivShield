@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from privacy_local_agent.privacy.budget import (
+from PrivShield.privacy.budget import (
     BudgetAccountant,
     BudgetRegistry,
     PrivacyBudgetExhausted,
@@ -152,7 +152,7 @@ def test_budget_registry_crud_and_warning(caplog):
     assert acct1.epsilon_total == 10.0
     assert registry.get("hr") is acct1
 
-    with caplog.at_level(logging.WARNING, logger="privacy_local_agent.privacy.budget"):
+    with caplog.at_level(logging.WARNING, logger="PrivShield.privacy.budget"):
         acct2 = registry.get_or_create("hr", epsilon_total=999.0, delta_total=1e-4)
     assert any("budget_registry_params_ignored" in r.message for r in caplog.records)
 
@@ -161,7 +161,7 @@ def test_budget_registry_crud_and_warning(caplog):
 
     caplog.clear()
     acct3 = registry.get_or_create("window-ns", epsilon_total=5.0, window_seconds=60.0)
-    with caplog.at_level(logging.WARNING, logger="privacy_local_agent.privacy.budget"):
+    with caplog.at_level(logging.WARNING, logger="PrivShield.privacy.budget"):
         acct4 = registry.get_or_create("window-ns", window_seconds=120.0)
     assert any("budget_registry_params_ignored" in r.message for r in caplog.records)
     assert acct4 is acct3
@@ -189,7 +189,7 @@ def test_get_or_create_no_warning_when_params_omitted(caplog):
 
     registry = BudgetRegistry()
     registry.get_or_create("ns-no-warn", epsilon_total=100.0, delta_total=1e-3)
-    with caplog.at_level(logging.WARNING, logger="privacy_local_agent.privacy.budget"):
+    with caplog.at_level(logging.WARNING, logger="PrivShield.privacy.budget"):
         registry.get_or_create("ns-no-warn")
     assert not any("budget_registry_params_ignored" in r.message for r in caplog.records)
 

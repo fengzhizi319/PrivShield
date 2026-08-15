@@ -88,7 +88,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_gateway.py
 ```text
 ============================= test session starts ==============================
 platform linux -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0
-rootdir: /path/to/privacy-local-agent
+rootdir: /path/to/PrivShield
 configfile: pyproject.toml
 plugins: anyio-4.14.1
 collecting ... collected 6 items                                                              
@@ -97,7 +97,7 @@ tests/test_gateway.py ......                                             [100%]
 
 =============================== warnings summary ===============================
 .venv/lib/python3.13/site-packages/fastapi/testclient.py:1
-  /path/to/privacy-local-agent/.venv/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  /path/to/PrivShield/.venv/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

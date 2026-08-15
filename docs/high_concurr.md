@@ -2,7 +2,7 @@
 
 ## 1. 请求路径
 
-生产流量应使用 `privacy_local_agent.gateway`。Gateway 负责节点选择、健康检查、熔断和协议转发；`console/backend` 与 `console/backend-go` 的 `/api/lb_test` 仅是测试探测器，不代表生产 Gateway 的调度结果。
+生产流量应使用 `PrivShield.gateway`。Gateway 负责节点选择、健康检查、熔断和协议转发；`console/backend` 与 `console/backend-go` 的 `/api/lb_test` 仅是测试探测器，不代表生产 Gateway 的调度结果。
 
 ```text
 Client -> Gateway -> healthy Agent node

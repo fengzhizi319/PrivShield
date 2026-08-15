@@ -73,7 +73,7 @@ classification:
 volumes:
   - name: classification-rules
     configMap:
-      name: pla-classification-rules-config
+      name: privshield-classification-rules-config
 volumeMounts:
   - name: classification-rules
     mountPath: /etc/privacy-agent/rules
@@ -142,7 +142,7 @@ Layer-2 实体识别模型相关文件统一存放在项目根目录的 `.models
 
 | 产物文件 | 说明 | 生成 / 保存位置 |
 |---|---|---|
-| `.models/raner_cmeee/` | ModelScope 完整模型仓库 | `python -m privacy_local_agent.privacy.download_ner_model` 时下载 |
+| `.models/raner_cmeee/` | ModelScope 完整模型仓库 | `python -m PrivShield.privacy.download_ner_model` 时下载 |
 | `.models/raner_cmeee.onnx` | 轻量化 ONNX 模型 | 用于 ONNX Runtime 与 TensorRT 导入 |
 | `.models/vocab.txt` | BERT 中文词表文件 | 用于纯 C++/Python Tokenizer 分词 |
 | `.models/raner_cmeee.onnx.engine` | **TensorRT C++ 编译硬件优化引擎** | **`TensorRTSmallNerEngine` 首次运行时由 TensorRT 驱动自动生成并保存在 `.models/` 下** |
@@ -180,7 +180,7 @@ Layer-2 实体识别模型相关文件统一存放在项目根目录的 `.models
 - **排查步骤**：
   1. 使用内置校验脚本检查 YAML：
      ```bash
-     PYTHONPATH=. python -m privacy_local_agent.dynclassification validate /etc/privacy-agent/rules
+     PYTHONPATH=. python -m PrivShield.dynclassification validate /etc/privacy-agent/rules
      ```
   2. 修复配置文件语法与语义错误后重新 reload。
 
@@ -464,7 +464,7 @@ graph LR
 
 1. **拉起新版 Agent 进程**（内核会自动在 8079 / 50051 端口上进行平滑分流）：
    ```bash
-   python -m privacy_local_agent.server
+   python -m PrivShield.server
    ```
 2. **向旧版 Agent 发送优雅退出信号**：
    ```bash
@@ -486,7 +486,7 @@ deployment:
 ```
 部署升级时执行：
 ```bash
-helm upgrade pla ./deploy/helm/PrivShield -f values.yaml
+helm upgrade privshield ./deploy/helm/PrivShield -f values.yaml
 ```
 Kubernetes 会先拉起 1 个新 Pod 并完成健康探测（`GET /health` 为 200 OK），随后才将 Service 流量切至新 Pod 并安全终止旧 Pod。
 
@@ -518,7 +518,7 @@ Kubernetes 会先拉起 1 个新 Pod 并完成健康探测（`GET /health` 为 2
    将 `config/env/vllm.env` 中的 `PRIVACY_LLM_API_BASE` 瞬间重置回旧端口 `http://127.0.0.1:8000/v1`（1 秒完成回退）。
 3. **K8s 快速回退**：
    ```bash
-   helm rollback pla
+   helm rollback privshield
    ```
 
 

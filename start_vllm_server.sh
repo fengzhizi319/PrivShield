@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# vLLM Server Launcher for Privacy Local Agent
+# vLLM Server Launcher for PrivShield
 # 项目根目录 vLLM 服务启动脚本
 # ==============================================================================
 set -e

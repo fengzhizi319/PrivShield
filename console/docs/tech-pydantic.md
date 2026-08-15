@@ -1049,7 +1049,7 @@ from pathlib import Path
 from typing import Optional
 
 class PrivacyAgentSettings(BaseSettings):
-    """隐私代理服务配置 / Privacy agent service settings.
+    """隐私代理服务配置 / PrivShield Agent service settings.
 
     配置优先级（从高到低）/ Config priority (high to low):
     1. 环境变量 / Environment variables

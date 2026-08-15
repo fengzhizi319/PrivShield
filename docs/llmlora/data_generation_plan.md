@@ -192,7 +192,7 @@
 import json
 import random
 from faker import Faker
-from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
+from PrivShield.dynclassification.engine import ConfigurableRuleEngine
 
 fake = Faker("zh_CN")
 
@@ -290,7 +290,7 @@ def generate_sample(domain: str | None = None):
 
 ### 4.2 基于 Layer-1 规则计算 Ground Truth
 
-使用 `privacy_local_agent` 内部的 `ConfigurableRuleEngine` 对生成的 `raw_text` 进行规则扫描，获取准确无误的实体位置、类型与数据密级：
+使用 `PrivShield` 内部的 `ConfigurableRuleEngine` 对生成的 `raw_text` 进行规则扫描，获取准确无误的实体位置、类型与数据密级：
 
 ```python
 def process_ground_truth(engine: ConfigurableRuleEngine, raw_text: str) -> dict:

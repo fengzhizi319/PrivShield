@@ -2,7 +2,7 @@
 
 > **文档版本**: 1.1 (已实操落盘与全栈贯通)  
 > **关联文档**: [`docs/pipeline/prd.md`](prd.md)  
-> **关键组件**: `scripts/data/generate_medical_data.py`, `privacy_local_agent/pipeline`, `privacy_local_agent/medical_pipeline`, `console/backend`, `console/backend-go`, `console/web`
+> **关键组件**: `scripts/data/generate_medical_data.py`, `PrivShield/pipeline`, `PrivShield/medical_pipeline`, `console/backend`, `console/backend-go`, `console/web`
 
 ---
 
@@ -73,7 +73,7 @@ flowchart TD
 ### 3.1 代码文件分布
 
 ```text
-privacy_local_agent/
+PrivShield/
 ├── pipeline/
 │   ├── __init__.py           # 导出 PipelineService, PipelineResult, classify_records, mask_records, router
 │   ├── models.py             # Pydantic 契约模型 (PipelineResult, ClassificationSummary, etc.)

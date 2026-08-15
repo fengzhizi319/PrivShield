@@ -62,7 +62,7 @@ graph TD
 
 ```python
 import pytest
-from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
+from PrivShield.dynclassification.operator_registry import OperatorRegistry
 
 def test_operator_registry_register_and_get():
     @OperatorRegistry.register("test_dummy_op")
@@ -85,9 +85,9 @@ def test_operator_not_found():
 ### 3.2 `ConfigurableRuleEngine` 评估引擎测试
 
 ```python
-from privacy_local_agent.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef
-from privacy_local_agent.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
-from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
+from PrivShield.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef
+from PrivShield.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
+from PrivShield.dynclassification.engine import ConfigurableRuleEngine
 
 def test_configurable_engine_evaluation():
     taxonomy = DomainTaxonomy(
@@ -162,8 +162,8 @@ PYTHONPATH=. python -m pytest tests/dynclassification/ -v
 from pathlib import Path
 import yaml
 import pytest
-from privacy_local_agent.dynclassification.models import DomainTaxonomy
-from privacy_local_agent.dynclassification.rule_schema import RuleProfile, StandardDef
+from PrivShield.dynclassification.models import DomainTaxonomy
+from PrivShield.dynclassification.rule_schema import RuleProfile, StandardDef
 
 RULES_DIR = Path("rules")
 

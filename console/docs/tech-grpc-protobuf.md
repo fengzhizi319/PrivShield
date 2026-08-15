@@ -27,7 +27,7 @@ Protocol Buffers is Google's language-neutral, platform-neutral serialization da
 
 ```
 React 前端 ──HTTP/JSON──▶ Go 代理后端(Gin) ──gRPC/protobuf──▶ Python agent(FastAPI+gRPC)
-                          console/backend-go                   privacy_local_agent
+                          console/backend-go                   PrivShield
 ```
 
 Go 代理后端作为"协议转换网关"：
@@ -1197,7 +1197,7 @@ openssl x509 -req -in client.csr -days 365 \
 │                          ▼                                      │
 │  gRPC 服务器 / gRPC Server                                     │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  privacy-local-agent (Python grpcio)                │   │
+│  │  PrivShield (Python grpcio)                │   │
 │  │  - 标准 gRPC 服务 / Standard gRPC service           │   │
 │  │  - 无需修改 / No modification needed                │   │
 │  └─────────────────────────────────────────────────────┘   │
@@ -1339,7 +1339,7 @@ gRPC 使用 HTTP/2 长连接，传统 L4 负载均衡无法有效分配请求：
 
 ```python
 # ===== 本项目网关负载均衡 / This Project's Gateway LB =====
-# privacy_local_agent/gateway/balancer.py
+# PrivShield/gateway/balancer.py
 
 from enum import Enum
 from typing import List

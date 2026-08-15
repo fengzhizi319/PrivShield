@@ -41,6 +41,6 @@ USER privacy
 ENV PYTHONUNBUFFERED=1
 ENV PRIVACY_CONSOLE_HOST=0.0.0.0
 ENV PRIVACY_CONSOLE_PORT=8080
-ENV PRIVACY_AGENT_URL=http://privacy-local-agent:8079
+ENV PRIVACY_AGENT_URL=http://PrivShield:8079
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

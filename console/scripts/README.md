@@ -1,6 +1,6 @@
 # Console 自动化运行脚本说明指南
 
-> 本目录（`console/scripts/`）包含了管理 **Privacy Local Agent 控制台** 及其 **代理后端与前台 Web UI** 的全套自动化 Bash 脚本。
+> 本目录（`console/scripts/`）包含了管理 **PrivShield 控制台** 及其 **代理后端与前台 Web UI** 的全套自动化 Bash 脚本。
 > 支持三种运行姿态：**开发热重载模式 (`dev-*.sh`)**、**生产静态托管模式 (`prod-*.sh`)** 以及 **Docker 容器编排模式 (`docker-*.sh`)**。
 
 ---
@@ -24,7 +24,7 @@
 #### 1. `./console/scripts/dev-start.sh`
 - **作用**：一键启动 **Python REST 代理模式** 开发环境。
 - **启动组件**：
-  - Privacy Local Agent (REST: `http://127.0.0.1:8079`)
+  - PrivShield (REST: `http://127.0.0.1:8079`)
   - Console Python REST 代理后端 (API: `http://127.0.0.1:8080`)
   - Vite 前端开发服务器 (UI: `http://localhost:5173`)
 - **用法**：
@@ -40,7 +40,7 @@
 #### 2. `./console/scripts/dev-start-go.sh`
 - **作用**：一键启动 **Go gRPC 代理模式** 开发环境。
 - **启动组件**：
-  - Privacy Local Agent (REST: `8079` + gRPC: `50051`)
+  - PrivShield (REST: `8079` + gRPC: `50051`)
   - Console Go gRPC 代理后端 (API: `http://127.0.0.1:8081`)
   - Vite 前端开发服务器 (UI: `http://localhost:5173`)
 - **用法**：
@@ -51,7 +51,7 @@
 #### 3. `./console/scripts/dev-start-all.sh`
 - **作用**：一键启动 **双后端模式** 开发环境。
 - **启动组件**：
-  - Privacy Local Agent (REST: `8079` + gRPC: `50051`)
+  - PrivShield (REST: `8079` + gRPC: `50051`)
   - Console Python REST 代理后端 (API: `http://127.0.0.1:8080`)
   - Console Go gRPC 代理后端 (API: `http://127.0.0.1:8081`)
   - Vite 前端开发服务器 (UI: `http://localhost:5173`)
@@ -128,10 +128,10 @@
 
 #### 1. `./scripts/dev/docker-start-agent.sh`
 - **说明**：此脚本属于 Agent Core 服务组件，已从 `console/scripts/` 迁移至 `./scripts/dev/docker-start-agent.sh`。
-- **作用**：在独立 Docker 容器中构建并启动 Privacy Local Agent 核心 Sidecar 服务。
+- **作用**：在独立 Docker 容器中构建并启动 PrivShield 核心 Sidecar 服务。
 - **参数**：
-  - `core`（默认）：构建轻量级原语镜像 (`privacy-local-agent:0.1.0`)。
-  - `ml`：构建全量包含 PyTorch / Transformers / ONNX Runtime 的 ML 镜像 (`privacy-local-agent:0.1.0-ml`)。
+  - `core`（默认）：构建轻量级原语镜像 (`PrivShield:0.1.0`)。
+  - `ml`：构建全量包含 PyTorch / Transformers / ONNX Runtime 的 ML 镜像 (`PrivShield:0.1.0-ml`)。
 - **服务端口**：REST `http://127.0.0.1:8079` | gRPC `127.0.0.1:50051`。
 - **用法**：
   ```bash

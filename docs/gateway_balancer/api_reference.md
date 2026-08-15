@@ -30,7 +30,7 @@
 
 ### `LoadBalancer`
 
-位置：`privacy_local_agent.gateway.balancer.LoadBalancer`
+位置：`PrivShield.gateway.balancer.LoadBalancer`
 
 负载均衡调度器，维护后端节点列表并提供协程安全的节点选择。
 
@@ -66,7 +66,7 @@ LoadBalancer(strategy: str = "round_robin")
 
 ### `BackendNode`
 
-位置：`privacy_local_agent.gateway.balancer.BackendNode`
+位置：`PrivShield.gateway.balancer.BackendNode`
 
 单个后端工作节点的封装。
 
@@ -83,7 +83,7 @@ LoadBalancer(strategy: str = "round_robin")
 
 ### `health_check_loop`
 
-位置：`privacy_local_agent.gateway.balancer.health_check_loop`
+位置：`PrivShield.gateway.balancer.health_check_loop`
 
 ```python
 async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0)
@@ -100,7 +100,7 @@ async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0)
 
 ### `create_http_gateway_app`
 
-位置：`privacy_local_agent.gateway.http_proxy.create_http_gateway_app`
+位置：`PrivShield.gateway.http_proxy.create_http_gateway_app`
 
 ```python
 def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI
@@ -116,7 +116,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI
 
 ### `start_grpc_gateway`
 
-位置：`privacy_local_agent.gateway.grpc_proxy.start_grpc_gateway`
+位置：`PrivShield.gateway.grpc_proxy.start_grpc_gateway`
 
 ```python
 async def start_grpc_gateway(

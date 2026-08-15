@@ -1,4 +1,4 @@
-# privacy-local-agent 常用命令
+# PrivShield 常用命令
 #
 # 这个 Makefile 的目标是把“开发、测试、打包、部署、文档”入口统一到一处，
 # 方便贡献者快速找到该跑什么命令：
@@ -10,7 +10,7 @@
         helm-lint helm-template docker-core docker-ml clean docs-serve docs-build docs-clean
 
 VERSION ?= 0.1.0
-HELM_DIR = deploy/helm/privacy-local-agent
+HELM_DIR = deploy/helm/PrivShield
 
 help:
 	@echo "Available targets:"
@@ -51,14 +51,14 @@ help:
 # ── Quality ──────────────────────────────────────────────────
 
 lint:
-	ruff check privacy_local_agent/ tests/ console/backend/
+	ruff check PrivShield/ tests/ console/backend/
 
 lint-console:
 	ruff check console/backend/
 
 format:
-	ruff format privacy_local_agent/ tests/ console/backend/
-	ruff check --fix privacy_local_agent/ tests/ console/backend/
+	ruff format PrivShield/ tests/ console/backend/
+	ruff check --fix PrivShield/ tests/ console/backend/
 
 format-console:
 	ruff format console/backend/
@@ -94,7 +94,7 @@ test-go:
 
 test-cov:
 	pytest tests/ -q --tb=short \
-		--cov=privacy_local_agent \
+		--cov=PrivShield \
 		--cov-report=term-missing \
 		-m "not integration and not slow"
 
@@ -102,7 +102,7 @@ cover: test-cov
 
 cover-html:
 	pytest tests/ -q --tb=short \
-		--cov=privacy_local_agent \
+		--cov=PrivShield \
 		--cov-report=html \
 		-m "not integration and not slow"
 	@echo "Open htmlcov/index.html"
@@ -121,12 +121,12 @@ helm-template:
 
 docker-core:
 	# core 镜像仅包含运行主服务所需的基础依赖，体积更小、启动更快。
-	docker build --target core -t privacy-local-agent:$(VERSION) .
+	docker build --target core -t privshield:$(VERSION) .
 
 docker-ml:
 	# ml 镜像额外包含 torch / transformers / onnxruntime 等重依赖，
 	# 适合需要 NER / VLM / LLM 功能的环境。
-	docker build --target ml -t privacy-local-agent:$(VERSION)-ml .
+	docker build --target ml -t privshield:$(VERSION)-ml .
 
 # ── Docs ─────────────────────────────────────────────────────
 
@@ -177,7 +177,7 @@ prod-stop:
 # ── Other ────────────────────────────────────────────────────
 
 proto-gen:
-	python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto
+	python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto
 
 clean:
 	rm -rf .pytest_cache __pycache__ .bin htmlcov .coverage coverage.xml

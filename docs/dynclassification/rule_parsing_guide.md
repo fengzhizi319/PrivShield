@@ -79,7 +79,7 @@
 入口方法：`ProfileLoader.load_profile("medical")`
 
 ```python
-# privacy_local_agent/dynclassification/profile_loader.py
+# PrivShield/dynclassification/profile_loader.py
 path = self.rules_dir / "domains" / "medical.yaml"
 data = yaml.safe_load(path.read_text(encoding="utf-8"))
 ```
@@ -119,7 +119,7 @@ RuleProfile
 └── composite_rules: list[CompositeRuleDef]
 ```
 
-涉及的模型定义位于 `privacy_local_agent/dynclassification/rule_schema.py`：
+涉及的模型定义位于 `PrivShield/dynclassification/rule_schema.py`：
 
 | 模型类 | 职责 |
 |---|---|
@@ -134,7 +134,7 @@ RuleProfile
 `ConfigurableRuleEngine` 构造时合并所有 Profile 的规则：
 
 ```python
-# privacy_local_agent/dynclassification/engine.py
+# PrivShield/dynclassification/engine.py
 def _merge_rules(self, profiles: list[RuleProfile]) -> list[RuleDef]:
     all_rules = []
     for profile in profiles:
@@ -217,7 +217,7 @@ def normalize_result(raw: bool | OperatorResult | tuple) -> OperatorResult:
 ### 3.3 `keyword_contains` 算子实现
 
 ```python
-# privacy_local_agent/dynclassification/operators.py
+# PrivShield/dynclassification/operators.py
 @OperatorRegistry.register("keyword_contains")
 def keyword_contains_matcher(value: Any, params: dict[str, Any]) -> bool:
     keywords = params.get("keywords", [])
@@ -542,7 +542,7 @@ SecurityTag(
 所有算子通过 `OperatorRegistry` 类进行统一管理：
 
 ```python
-# privacy_local_agent/dynclassification/operator_registry.py
+# PrivShield/dynclassification/operator_registry.py
 class OperatorRegistry:
     _operators: dict[str, MatcherOperator] = {}
 
@@ -615,7 +615,7 @@ category = dynamic_category if dynamic_category is not None else rule.category
 ### 5.1 路径解析逻辑
 
 ```python
-# privacy_local_agent/dynclassification/profile_loader.py
+# PrivShield/dynclassification/profile_loader.py
 env_rules_dir = os.environ.get("PRIVACY_DYNCLASSIFICATION_RULES_DIR", "rules")
 target_dir = rules_dir if rules_dir is not None else env_rules_dir
 self.rules_dir = Path(target_dir)
@@ -651,7 +651,7 @@ rules/                              # 规则配置根目录
 ```dockerfile
 WORKDIR /app
 COPY . .
-CMD ["python", "-m", "privacy_local_agent.server"]
+CMD ["python", "-m", "PrivShield.server"]
 ```
 
 #### 场景二：打包为可执行文件（PyInstaller 等）
@@ -667,7 +667,7 @@ ENV PRIVACY_DYNCLASSIFICATION_RULES_DIR=/app/rules
 ```yaml
 # docker-compose.yml
 services:
-  privacy-local-agent:
+  PrivShield:
     environment:
       PRIVACY_DYNCLASSIFICATION_RULES_DIR: "/etc/PrivShield/rules"
     volumes:

@@ -13,7 +13,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WITH_LLM="${1:-}"
 
 echo "============================================================================"
-echo "🌟 [Docker Mode] 正在启动 Privacy Local Agent 全栈容器套件..."
+echo "🌟 [Docker Mode] 正在启动 PrivShield 全栈容器套件..."
 echo "============================================================================"
 
 cd "$PROJECT_ROOT/deploy/docker-compose"

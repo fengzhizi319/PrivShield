@@ -1,4 +1,4 @@
-# privacy-local-agent 生产安全运维手册
+# PrivShield 生产安全运维手册
 
 > Scope: P0 — TLS/mTLS、认证鉴权、速率限制的部署与运维。
 > 对应 PRD/设计: `docs/production_security/prd.md`, `design.md`
@@ -96,12 +96,12 @@ PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON='{
 # 1. 生成 CA
 openssl genrsa -out ca.key 2048
 openssl req -x509 -new -nodes -key ca.key -sha256 -days 365 -out ca.crt \
-  -subj "/CN=privacy-local-agent-ca"
+  -subj "/CN=PrivShield-ca"
 
 # 2. 生成服务器证书
 openssl genrsa -out server.key 2048
 openssl req -new -key server.key -out server.csr \
-  -subj "/CN=privacy-local-agent"
+  -subj "/CN=PrivShield"
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out server.crt -days 365 -sha256
 
@@ -123,7 +123,7 @@ openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
 export PRIVACY_TLS_ENABLED=true
 export PRIVACY_TLS_CERT_FILE=./certs/server.crt
 export PRIVACY_TLS_KEY_FILE=./certs/server.key
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 REST: `https://127.0.0.1:8079`
@@ -157,7 +157,7 @@ export PRIVACY_RATE_LIMIT_DEFAULT_RPS=10
 export PRIVACY_RATE_LIMIT_DEFAULT_BURST=20
 export PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON='{"/v1/privacy/dp/count":{"rps":2,"burst":5}}'
 
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 ---
@@ -189,7 +189,7 @@ curl --cacert certs/ca.crt \
 
 ```python
 import grpc
-from privacy_local_agent import privacy_pb2, privacy_pb2_grpc
+from PrivShield import privacy_pb2, privacy_pb2_grpc
 
 with open("certs/ca.crt", "rb") as f:
     ca = f.read()

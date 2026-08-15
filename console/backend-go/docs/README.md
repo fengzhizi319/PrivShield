@@ -26,7 +26,7 @@
 
 ```bash
 # 1. 启动 PrivShield（REST: 8079 / gRPC: 50051）
-python -m privacy_local_agent.server
+python -m PrivShield.server
 
 # 2. 启动控制台后端（默认监听 127.0.0.1:8080）
 cd console/backend

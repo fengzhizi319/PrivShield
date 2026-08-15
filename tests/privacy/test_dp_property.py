@@ -17,8 +17,8 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from privacy_local_agent.privacy.budget import default_registry
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.budget import default_registry
+from PrivShield.privacy.dp import DPApi
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers

@@ -38,8 +38,8 @@ Core dependencies are pinned in `pyproject.toml`. Heavy ML dependencies are **no
 ## 3. Repository Layout
 
 ```text
-privacy-local-agent/
-├── privacy_local_agent/           # Main package
+PrivShield/
+├── PrivShield/           # Main package
 │   ├── main.py                    # FastAPI REST entrypoint
 │   ├── grpc_server.py             # gRPC servicer
 │   ├── server.py                  # REST + gRPC combined launcher
@@ -118,8 +118,8 @@ PYTHONPATH=. pytest tests/api/test_rest.py -v
 PYTHONPATH=. python tests/benchmark_primitives.py
 
 # Download models (optional, required for LLM/NER layers)
-python -m privacy_local_agent.privacy.download_model
-python -m privacy_local_agent.privacy.download_ner_model
+python -m PrivShield.privacy.download_model
+python -m PrivShield.privacy.download_ner_model
 ```
 
 ## 5. Running Locally
@@ -127,7 +127,7 @@ python -m privacy_local_agent.privacy.download_ner_model
 ### REST + gRPC in one process
 
 ```bash
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 Defaults:
@@ -137,19 +137,19 @@ Defaults:
 ### REST only
 
 ```bash
-python -m privacy_local_agent.main
+python -m PrivShield.main
 ```
 
 ### gRPC only
 
 ```bash
-python -m privacy_local_agent.grpc_server
+python -m PrivShield.grpc_server
 ```
 
 ### Gateway + worker pool
 
 ```bash
-python -m privacy_local_agent.gateway.server
+python -m PrivShield.gateway.server
 ```
 
 ## 6. Configuration
@@ -190,8 +190,8 @@ Key environment variables:
 | `PRIVACY_CLASSIFICATION_CACHE_SIZE` | `10000` | DynClassificationService result LRU cache capacity |
 | `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 图片打码允许读取的目录白名单（os.pathsep 分隔）；路径 resolve 后必须位于白名单内，拒绝目录穿越与 symlink 逃逸 |
 
-> 注意：三个入口的默认监听地址不同 —— `python -m privacy_local_agent.main` 仅绑定 `127.0.0.1`（REST-only），
-> 而 `python -m privacy_local_agent.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`。
+> 注意：三个入口的默认监听地址不同 —— `python -m PrivShield.main` 仅绑定 `127.0.0.1`（REST-only），
+> 而 `python -m PrivShield.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`。
 > 生产部署请显式设置 `PRIVACY_REST_HOST` / `PRIVACY_GRPC_HOST` 并配合 TLS/Auth。
 
 ## 7. Code Conventions
@@ -209,16 +209,16 @@ Key environment variables:
 
 ## 8. Adding a New Privacy Primitive
 
-1. Implement the algorithm in `privacy_local_agent/privacy/<primitive>.py`.
-2. Add a Pydantic request/response model in `privacy_local_agent/schemas.py` or a new models file.
+1. Implement the algorithm in `PrivShield/privacy/<primitive>.py`.
+2. Add a Pydantic request/response model in `PrivShield/schemas.py` or a new models file.
 3. Expose it in:
-   - `privacy_local_agent/service.py` (business logic)
-   - `privacy_local_agent/routers/<primitive>.py` (REST sub-router, mounted by `main.py`)
-   - `privacy_local_agent/grpc_server.py` (gRPC method)
+   - `PrivShield/service.py` (business logic)
+   - `PrivShield/routers/<primitive>.py` (REST sub-router, mounted by `main.py`)
+   - `PrivShield/grpc_server.py` (gRPC method)
 4. Add tests in `tests/api/test_rest.py` and/or `tests/test_<primitive>.py`.
 5. Update `proto/privacy.proto` and regenerate stubs if adding gRPC:
    ```bash
-   python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto
+   python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto
    ```
 
 ## 9. Adding a Classification Rule / Composite Rule / Taxonomy
@@ -261,21 +261,21 @@ Key environment variables:
 
 ```bash
 # core 镜像（默认推荐）
-docker build --target core -t PrivShield:0.1.0 .
+docker build --target core -t privshield:0.1.0 .
 
 # ml 镜像（含 torch/transformers/onnxruntime）
-docker build --target ml -t PrivShield:0.1.0-ml .
+docker build --target ml -t privshield:0.1.0-ml .
 
-docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
+docker run -p 8079:8079 -p 50051:50051 privshield:0.1.0
 ```
 
 ### Helm
 
 ```bash
-helm install pla ./deploy/helm/PrivShield
+helm install privshield ./deploy/helm/PrivShield
 
 # 生产模式（需自管 TLS/API Key Secret）
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=your-tls-secret \
   --set security.auth.apiKeysSecret=your-apikeys-secret
@@ -362,12 +362,12 @@ Address these before any hardened production deployment.
 | Run Prod Console (Dual Backend + Static) | `bash ./console/scripts/prod-start-all.sh` |
 | Stop Dev Console | `bash ./console/scripts/dev-stop.sh` |
 | Stop Prod Console | `bash ./console/scripts/prod-stop.sh` |
-| Run REST + gRPC | `python -m privacy_local_agent.server` |
+| Run REST + gRPC | `python -m PrivShield.server` |
 | Run test console backend | `cd console/backend && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |
-| Run gateway | `python -m privacy_local_agent.gateway.server` |
-| Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=privacy_local_agent --grpc_python_out=privacy_local_agent proto/privacy.proto` |
+| Run gateway | `python -m PrivShield.gateway.server` |
+| Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto` |
 | Build docs | `make docs-build` |
 | Serve docs | `make docs-serve` |
-| Download LLM | `python -m privacy_local_agent.privacy.download_model` |
-| Download NER | `python -m privacy_local_agent.privacy.download_ner_model` |
+| Download LLM | `python -m PrivShield.privacy.download_model` |
+| Download NER | `python -m PrivShield.privacy.download_ner_model` |

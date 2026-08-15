@@ -36,7 +36,7 @@
 
 ### `k_anonymize_table`
 
-位置：`privacy_local_agent.privacy.kano_table.k_anonymize_table`
+位置：`PrivShield.privacy.kano_table.k_anonymize_table`
 
 对整张表执行 Mondrian 多维分区 K-匿名泛化。
 
@@ -72,7 +72,7 @@ def k_anonymize_table(
 
 ### `k_anonymize_dataframe`
 
-位置：`privacy_local_agent.privacy.kano_table.k_anonymize_dataframe`
+位置：`PrivShield.privacy.kano_table.k_anonymize_dataframe`
 
 对 DataFrame 执行 Mondrian 多维分区 K-匿名泛化。
 
@@ -98,7 +98,7 @@ def k_anonymize_dataframe(
 
 ### `anonymize_record`
 
-位置：`privacy_local_agent.privacy.kano.anonymize_record`
+位置：`PrivShield.privacy.kano.anonymize_record`
 
 对单条记录按内置泛化层次结构进行启发式泛化。
 
@@ -126,7 +126,7 @@ def anonymize_record(
 
 ### `BUILTIN_HIERARCHIES`
 
-位置：`privacy_local_agent.privacy.kano.BUILTIN_HIERARCHIES`
+位置：`PrivShield.privacy.kano.BUILTIN_HIERARCHIES`
 
 内置准标识符泛化层次结构映射表，包含 `age`、`zipcode`、`gender` 三个字段。
 
@@ -301,7 +301,7 @@ def anonymize_record(
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.kano_table import k_anonymize_table
+from PrivShield.privacy.kano_table import k_anonymize_table
 import pandas as pd
 
 # 原始患者数据
@@ -366,7 +366,7 @@ assert min(groups.values()) >= 5, "不满足 5-匿名要求！"
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.kano_table import k_anonymize_dataframe
+from PrivShield.privacy.kano_table import k_anonymize_dataframe
 import pandas as pd
 
 # 从数据库加载客户数据
@@ -390,7 +390,7 @@ anonymized_df.to_csv("customers_anonymized.csv", index=False)
 
 **组合差分隐私**：
 ```python
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 # 在 K-匿名基础上，对聚合统计再加一层 DP 噪声
 dp = DPApi(namespace="customer_stats")
@@ -428,7 +428,7 @@ for city in anonymized_df["city"].unique():
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.kano import anonymize_record, BUILTIN_HIERARCHIES
+from PrivShield.privacy.kano import anonymize_record, BUILTIN_HIERARCHIES
 import time
 
 def process_stream_event(event):
@@ -461,7 +461,7 @@ for event in event_stream:
 
 **改进方案：微批处理**（推荐）：
 ```python
-from privacy_local_agent.privacy.kano_table import k_anonymize_table
+from PrivShield.privacy.kano_table import k_anonymize_table
 
 class MicroBatchProcessor:
     def __init__(self, batch_size=100, timeout_seconds=10):
@@ -523,7 +523,7 @@ for event in event_stream:
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.kano_table import k_anonymize_table
+from PrivShield.privacy.kano_table import k_anonymize_table
 import json
 
 # 加载调查数据
@@ -611,7 +611,7 @@ print(json.dumps(report, indent=2))
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.kano_table import k_anonymize_dataframe
+from PrivShield.privacy.kano_table import k_anonymize_dataframe
 import pandas as pd
 
 # 加载普查数据（假设已清洗）
@@ -662,7 +662,7 @@ print(f"省份数量: {census_anonymized['province'].nunique()}")
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.kano_table import k_anonymize_dataframe
+from PrivShield.privacy.kano_table import k_anonymize_dataframe
 import pandas as pd
 
 # HR 数据
@@ -821,7 +821,7 @@ for depth in [5, 8, 10, 15]:
 
 **自定义层次**（当前 MVP 版本预留接口，尚未完全支持）：
 ```python
-from privacy_local_agent.privacy.kano import GeneralizationHierarchy
+from PrivShield.privacy.kano import GeneralizationHierarchy
 
 # 示例：自定义年龄泛化层次
 def custom_age_hierarchy(value: str, level: int) -> str:
@@ -866,7 +866,7 @@ def custom_age_hierarchy(value: str, level: int) -> str:
    pip install pandas
    
    # 直接使用 DataFrame 接口
-   from privacy_local_agent.privacy.kano_table import k_anonymize_dataframe
+   from PrivShield.privacy.kano_table import k_anonymize_dataframe
    result = k_anonymize_dataframe(df, qi_cols, k=5)  # 内部自动使用向量化优化
    ```
 

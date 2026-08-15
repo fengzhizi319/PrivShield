@@ -10,8 +10,8 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from privacy_local_agent.main import app
-from privacy_local_agent.observability.logging_config import configure_logging
+from PrivShield.main import app
+from PrivShield.observability.logging_config import configure_logging
 
 client = TestClient(app)
 
@@ -20,7 +20,7 @@ client = TestClient(app)
 def _reset_logging(monkeypatch):
     """Ensure logging is reconfigurable across tests."""
     # Force configure_logging to re-run by resetting its guard.
-    import privacy_local_agent.observability.logging_config as lc
+    import PrivShield.observability.logging_config as lc
 
     lc._logging_configured = False
     yield
@@ -130,7 +130,7 @@ def test_auth_denial_metric_recorded(monkeypatch):
 
 def test_unmatched_route_uses_bounded_label():
     """404 路径不得产生无界 label：统一归入 path="unmatched"。"""
-    import privacy_local_agent.observability.metrics as metrics_module
+    import PrivShield.observability.metrics as metrics_module
 
     probe_path = "/definitely-not-a-route-7f3a9c"
     counter = metrics_module.REQUESTS_TOTAL.labels(method="GET", path="unmatched", status="404")
@@ -168,7 +168,7 @@ def test_traffic_metrics_recorded():
 
 def test_traffic_request_size_positive():
     """请求体越大，request traffic 指标累计值应越大。"""
-    import privacy_local_agent.observability.metrics as metrics_module
+    import PrivShield.observability.metrics as metrics_module
 
     counter = metrics_module.TRAFFIC_BYTES_TOTAL.labels(
         method="POST", path="/v1/privacy/mask", direction="request"

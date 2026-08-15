@@ -18,7 +18,7 @@
 ```mermaid
 graph LR
     A[React 前端<br/>测试控制台] -->|HTTP/JSON| B[Go gRPC 代理后端<br/>console/backend-go]
-    B -->|gRPC - Python| C[privacy-local-agent]
+    B -->|gRPC - Python| C[PrivShield]
 ```
 
 Go 代理后端本身不实现隐私算法，只负责：

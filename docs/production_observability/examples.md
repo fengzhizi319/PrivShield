@@ -23,7 +23,7 @@
 
 ## 1. 概述
 
-本文档提供 `privacy_local_agent.observability` 的典型使用示例，涵盖结构化日志配置、Prometheus 指标抓取以及 OpenTelemetry tracing 初始化。
+本文档提供 `PrivShield.observability` 的典型使用示例，涵盖结构化日志配置、Prometheus 指标抓取以及 OpenTelemetry tracing 初始化。
 
 ## 2. 配置 JSON 日志
 
@@ -32,7 +32,7 @@
 启动 REST 服务时设置 `PRIVACY_LOG_FORMAT=json`：
 
 ```bash
-PRIVACY_LOG_FORMAT=json PRIVACY_LOG_LEVEL=INFO python -m privacy_local_agent.main
+PRIVACY_LOG_FORMAT=json PRIVACY_LOG_LEVEL=INFO python -m PrivShield.main
 ```
 
 访问任意接口后，控制台将输出 JSON：
@@ -41,7 +41,7 @@ PRIVACY_LOG_FORMAT=json PRIVACY_LOG_LEVEL=INFO python -m privacy_local_agent.mai
 {
   "timestamp": "2026-07-11T14:30:27.123Z",
   "level": "INFO",
-  "logger": "privacy_local_agent.observability.middleware",
+  "logger": "PrivShield.observability.middleware",
   "message": "POST /v1/privacy/mask 200 1.234ms identity=anonymous",
   "request_id": "a1b2c3d4e5f67890",
   "identity_name": "",
@@ -55,7 +55,7 @@ PRIVACY_LOG_FORMAT=json PRIVACY_LOG_LEVEL=INFO python -m privacy_local_agent.mai
 ### 2.2 通过代码配置
 
 ```python
-from privacy_local_agent.observability import configure_logging, get_logger
+from PrivShield.observability import configure_logging, get_logger
 
 configure_logging(log_level="INFO", json_format=True)
 logger = get_logger(__name__)
@@ -112,7 +112,7 @@ curl -s http://127.0.0.1:8079/metrics | grep 'privacy_budget_remaining'
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector:4318/v1/traces
 export OTEL_SERVICE_NAME=PrivShield
-python -m privacy_local_agent.main
+python -m PrivShield.main
 ```
 
 > 需先安装可选依赖：`pip install -e ".[observability]"`
@@ -120,7 +120,7 @@ python -m privacy_local_agent.main
 ### 4.2 通过代码初始化
 
 ```python
-from privacy_local_agent.observability import init_tracing, start_span
+from PrivShield.observability import init_tracing, start_span
 
 # 未设置 endpoint 时返回 NoOp tracer，不会报错
 tracer = init_tracing(
@@ -136,7 +136,7 @@ with start_span("process_request", attributes={"path": "/v1/privacy/mask"}) as s
 ### 4.3 在未安装 opentelemetry 的环境中使用
 
 ```python
-from privacy_local_agent.observability import init_tracing, start_span
+from PrivShield.observability import init_tracing, start_span
 
 # 即使未安装 opentelemetry，也能正常返回 no-op tracer
 tracer = init_tracing()
@@ -150,7 +150,7 @@ with start_span("noop_span") as span:
 在业务代码中直接引入并更新预定义指标：
 
 ```python
-from privacy_local_agent.observability import (
+from PrivShield.observability import (
     DP_QUERIES_TOTAL,
     BUDGET_REMAINING,
     CLASSIFICATION_TOTAL,
@@ -174,7 +174,7 @@ AUTH_DENIALS_TOTAL.labels(reason="unauthenticated").inc()
 
 ```python
 from fastapi.testclient import TestClient
-from privacy_local_agent.main import app
+from PrivShield.main import app
 
 client = TestClient(app)
 

@@ -25,7 +25,7 @@ This module provides global fixtures and compatibility patches for the test suit
 
 import pytest
 
-from privacy_local_agent.privacy.budget import default_registry
+from PrivShield.privacy.budget import default_registry
 
 # ---------------------------------------------------------------------------
 # scipy/torch 兼容性补丁 / scipy/torch compatibility patch
@@ -108,7 +108,7 @@ def reset_all_budgets():
     # Step 2: The REST global singleton service (if already imported) needs to
     # re-acquire its budget instance from the registry, avoiding stale references.
     try:
-        from privacy_local_agent.main import service
+        from PrivShield.main import service
         if hasattr(service, "dp_api"):
             service.dp_api.budget = default_registry.get_or_create(service.namespace)
     except (ImportError, AttributeError):

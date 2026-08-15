@@ -1,4 +1,4 @@
-# Privacy Local Agent 全项目安全、正确性审计与漏洞整改报告（教科书级全量归档版）
+# PrivShield 全项目安全、正确性审计与漏洞整改报告（教科书级全量归档版）
 
 > **报告版本**：v6.0.0（在 v5.0.0 复核版基础上，完成第四轮残留项清零修复）  
 > **归档时间**：2026-08-10  
@@ -378,7 +378,7 @@ PYTHONPATH=. pytest tests -k "not test_real_ and not test_modelscope_cuda and no
 | 5 | P2 | **`sc_health_db51.yaml` 仍缺 `confidence_policy` 节**（违反 AGENTS.md §9.3 显式补齐要求，回落到代码默认与其他标准不一致） | `rules/taxonomies/sc_health_db51.yaml` | ✅ 第四轮已修复：按 default 体系保守默认显式补齐该节 |
 | 6 | P2 | **`equivalence_classes_count` 仍是估计值** `len(res_list)//k`，非真实等价类数 | `kano_table.py:273` | ✅ 第四轮已修复：pandas 与纯 Python 两路径均改为按泛化后准标识符组合的真实分组计数 |
 | 7 | P2 | **无日志轮转**：`.logs/agent_server.log` 无限增长 | `scripts/dev/start_all_services.sh:54`、`observability/logging_config.py` | ✅ 第四轮已修复：start_all_services.sh 增加启动时轮转（保留最近 5 份），注释指引生产用 logrotate；顺带修正"尝试停止已有实例"的不实注释 |
-| 8 | P2 | **`launcher.py`（SO_REUSEPORT 多进程启动器）仍无测试** | `privacy_local_agent/launcher.py` | ✅ 第四轮已修复：新增 `tests/test_launcher.py` 9 项用例（socket 共享端口、worker 拉起、两段式终止、参数解析），并借此确认 #3 揪出的 NameError 已修复 |
+| 8 | P2 | **`launcher.py`（SO_REUSEPORT 多进程启动器）仍无测试** | `PrivShield/launcher.py` | ✅ 第四轮已修复：新增 `tests/test_launcher.py` 9 项用例（socket 共享端口、worker 拉起、两段式终止、参数解析），并借此确认 #3 揪出的 NameError 已修复 |
 | 9 | P3 | **llmlora 跨分割仅完全相同样本去重**：同模板不同值的近重复仍存在，test 指标仍偏乐观（已部分缓解） | `llmlora/scripts/generate_data.py` | ✅ 第四轮已修复：新增结构签名（领域+模板+实体语义槽位）去重，dev/test 分割排除与先行分割的近重复；实测 train=1000/dev=150/test=80 全量填满且近重复泄漏为 0 |
 | 10 | 已知限制 | **网关→后端 TLS 回源未实现**（已在 `balancer.py:12` docstring 文档化：后端开 TLS 则网关不可用） | `gateway/balancer.py:152` | ✅ 第四轮已实现：`PRIVACY_GATEWAY_BACKEND_TLS_ENABLED` + `..._CA`（+ 可选 mTLS 客户端证书），gRPC 回源切 `secure_channel`，健康检查与 HTTP 转发按 CA 校验，配置缺失 fail-fast；新增 `tests/gateway/test_backend_tls.py` 8 项用例 |
 

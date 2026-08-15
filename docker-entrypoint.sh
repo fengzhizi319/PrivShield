@@ -1,6 +1,6 @@
 #!/bin/sh
-# docker-entrypoint.sh - Privacy Local Agent 容器启动入口脚本
-# Docker container entrypoint script for Privacy Local Agent
+# docker-entrypoint.sh - PrivShield 容器启动入口脚本
+# Docker container entrypoint script for PrivShield
 #
 # 功能 / Features:
 #   - 启动前配置校验（配置文件存在性、端口可用性）
@@ -47,7 +47,7 @@ export PRIVACY_LOG_FORMAT="${PRIVACY_LOG_FORMAT:-json}"
 # 启动信息输出 / Startup Banner
 # ============================================================================
 
-echo "[entrypoint] Privacy Local Agent starting..."
+echo "[entrypoint] PrivShield starting..."
 echo "[entrypoint]   REST: ${PRIVACY_REST_HOST}:${PRIVACY_REST_PORT:-8079}"
 echo "[entrypoint]   gRPC: ${PRIVACY_GRPC_HOST}:${PRIVACY_GRPC_PORT:-50051}"
 echo "[entrypoint]   Log:  ${PRIVACY_LOG_FORMAT} / ${PRIVACY_LOG_LEVEL:-INFO}"

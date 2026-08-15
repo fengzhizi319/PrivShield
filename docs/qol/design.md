@@ -100,7 +100,7 @@ logger.info(
 提供 `ObfuscationDomain` 和 `ObfuscationStrategy` 枚举用于类型安全：
 
 ```python
-from privacy_local_agent.privacy.qol import ObfuscationDomain, ObfuscationStrategy
+from PrivShield.privacy.qol import ObfuscationDomain, ObfuscationStrategy
 
 assert ObfuscationDomain.MEDICAL == "medical"
 assert ObfuscationStrategy.SLOT_FILLING == "slot_filling"
@@ -118,9 +118,9 @@ assert ObfuscationStrategy.SLOT_FILLING == "slot_filling"
 
 ## 8. 模块设计
 
-- `privacy_local_agent/privacy/qol.py`：核心混淆逻辑。
-- `privacy_local_agent/service.py`：`PrivacyService` 封装。
-- `privacy_local_agent/main.py` / `grpc_server.py`：REST / gRPC 接口。
+- `PrivShield/privacy/qol.py`：核心混淆逻辑。
+- `PrivShield/service.py`：`PrivacyService` 封装。
+- `PrivShield/main.py` / `grpc_server.py`：REST / gRPC 接口。
 
 ## 9. 测试策略
 

@@ -911,13 +911,13 @@ export default tseslint.config(
 ```text
 多项目 Lint 配置策略 / Multi-project lint config strategy:
 
-privacy-local-agent/
+PrivShield/
 ├── console/
 │   └── web/                  ← 前端 ESLint / Frontend ESLint
 │       ├── eslint.config.js  ← 独立配置 / Independent config
 │       ├── package.json      ← 独立依赖 / Independent deps
 │       └── src/
-├── privacy_local_agent/      ← Python（无 ESLint）/ Python (no ESLint)
+├── PrivShield/      ← Python（无 ESLint）/ Python (no ESLint)
 └── console/backend-go/       ← Go（无 ESLint）/ Go (no ESLint)
 
 本项目结构特点 / This project's structure:
@@ -956,7 +956,7 @@ pnpm lint:fix          # 自动修复 / Auto-fix
 - name: Lint backend
   run: |
     pip install ruff
-    ruff check privacy_local_agent/
+    ruff check PrivShield/
 
 # Go 质量检查（非 ESLint）/ Go quality (not ESLint)
 - name: Lint Go backend

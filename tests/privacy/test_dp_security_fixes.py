@@ -23,12 +23,12 @@ import time
 import numpy as np
 import pytest
 
-from privacy_local_agent.privacy.budget import (
+from PrivShield.privacy.budget import (
     BudgetAuditLogger,
     BudgetRegistry,
     default_registry,
 )
-from privacy_local_agent.privacy.dp import DPApi, DPResult, LocalDPApi
+from PrivShield.privacy.dp import DPApi, DPResult, LocalDPApi
 
 
 def _make_api(ns: str, epsilon_total: float = 100.0, delta_total: float = 10.0) -> DPApi:
@@ -281,7 +281,7 @@ class TestAuditLoggerKey:
 
     def test_default_key_is_random_not_hardcoded(self, tmp_path, monkeypatch, caplog):
         monkeypatch.delenv("PRIVACY_AUDIT_KEY", raising=False)
-        with caplog.at_level(logging.WARNING, logger="privacy_local_agent.privacy.budget"):
+        with caplog.at_level(logging.WARNING, logger="PrivShield.privacy.budget"):
             logger1 = BudgetAuditLogger(log_file=str(tmp_path / "a1.log"))
             logger2 = BudgetAuditLogger(log_file=str(tmp_path / "a2.log"))
         # 不再是随源码公开的硬编码密钥
@@ -458,7 +458,7 @@ class TestAccumulatorClipWarning:
     def test_create_accumulator_without_clip_warns(self, caplog):
         ns = "test-acc-warn"
         api = _make_api(ns)
-        with caplog.at_level(logging.WARNING, logger="privacy_local_agent.privacy.dp"):
+        with caplog.at_level(logging.WARNING, logger="PrivShield.privacy.dp"):
             acc = api.create_accumulator([1.0, 2.0, 3.0])
         assert acc.sensitivity == 1.0
         assert any(
@@ -468,7 +468,7 @@ class TestAccumulatorClipWarning:
     def test_create_accumulator_with_clip_no_warning(self, caplog):
         ns = "test-acc-no-warn"
         api = _make_api(ns)
-        with caplog.at_level(logging.WARNING, logger="privacy_local_agent.privacy.dp"):
+        with caplog.at_level(logging.WARNING, logger="PrivShield.privacy.dp"):
             acc = api.create_accumulator([1.0, 2.0], clip_lower=0.0, clip_upper=10.0)
         assert acc.sensitivity == 10.0
         assert not any(

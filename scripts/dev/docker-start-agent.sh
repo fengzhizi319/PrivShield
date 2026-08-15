@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【Docker 模式】单组分启动 Privacy Local Agent (支持 Linux / macOS / Windows WSL2)
-# Launch Privacy Local Agent in Docker container (Supports Linux / macOS / Windows WSL2)
+# 【Docker 模式】单组分启动 PrivShield (支持 Linux / macOS / Windows WSL2)
+# Launch PrivShield in Docker container (Supports Linux / macOS / Windows WSL2)
 #
 # 用法 / Usage: ./scripts/dev/docker-start-agent.sh [core|ml]
 # ============================================================================
@@ -67,7 +67,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "============================================================================"
-echo "🚀 [Docker Mode] 正在构建并启动 Privacy Local Agent"
+echo "🚀 [Docker Mode] 正在构建并启动 PrivShield"
 echo "   • 平台环境 : $PLATFORM_NAME"
 echo "   • 构建目标 : $TARGET"
 echo "============================================================================"
@@ -77,20 +77,20 @@ cd "$PROJECT_ROOT"
 # ── 4. 镜像构建 ──
 if [[ "$TARGET" == "ml" ]]; then
     echo "📦 构建含有 PyTorch / Transformers / ONNX 的 ML 镜像..."
-    docker build --target ml -t privacy-local-agent:0.1.0-ml .
-    IMAGE_NAME="privacy-local-agent:0.1.0-ml"
+    docker build --target ml -t privshield:0.1.0-ml .
+    IMAGE_NAME="privshield:0.1.0-ml"
 else
     echo "📦 构建轻量 Core 镜像..."
-    docker build --target core -t privacy-local-agent:0.1.0 .
-    IMAGE_NAME="privacy-local-agent:0.1.0"
+    docker build --target core -t privshield:0.1.0 .
+    IMAGE_NAME="privshield:0.1.0"
 fi
 
 # ── 5. 停止并清理旧容器（防止名称冲突）──
-docker rm -f privacy-local-agent 2>/dev/null || true
+docker rm -f PrivShield 2>/dev/null || true
 
 # ── 6. 启动物理容器 ──
 docker run -d \
-  --name privacy-local-agent \
+  --name PrivShield \
   -p 8079:8079 \
   -p 50051:50051 \
   -e PRIVACY_REST_HOST="0.0.0.0" \
@@ -99,10 +99,10 @@ docker run -d \
   "$IMAGE_NAME"
 
 echo ""
-echo "✅ Privacy Local Agent (Docker) 已成功启动！"
+echo "✅ PrivShield (Docker) 已成功启动！"
 echo "   - REST API : http://127.0.0.1:8079"
 echo "   - gRPC RPC : 127.0.0.1:50051"
-echo "   - 查看日志 : docker logs -f privacy-local-agent"
+echo "   - 查看日志 : docker logs -f PrivShield"
 echo "============================================================================"
 
 

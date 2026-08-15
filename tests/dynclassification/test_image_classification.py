@@ -32,7 +32,7 @@ import pytest
 
 pytestmark = pytest.mark.skip(reason="Multimodal image and OCR support removed per architecture deprecation")
 
-from privacy_local_agent.dynclassification.llm_engines import Qwen3Classifier as Qwen2VLClassifier
+from PrivShield.dynclassification.llm_engines import Qwen3Classifier as Qwen2VLClassifier
 
 # --------------------------------------------------------------------------- #
 # 辅助工具
@@ -281,7 +281,7 @@ class TestImageClassificationFlow:
 
         classifier = self._make_classifier_with_mock_model()
 
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = classifier._classify_inner(
             str(img_file), SensitivityLevel.L3, 0.5
@@ -309,7 +309,7 @@ class TestImageClassificationFlow:
 
         classifier = self._make_classifier_with_mock_model()
 
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = classifier._classify_inner(b64_str, SensitivityLevel.L3, 0.6)
         assert result is not None
@@ -323,7 +323,7 @@ class TestImageClassificationFlow:
 
         classifier = self._make_classifier_with_mock_model()
 
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = classifier._classify_inner(data_uri, SensitivityLevel.L4, 0.7)
         assert result is not None
@@ -333,7 +333,7 @@ class TestImageClassificationFlow:
         """纯文本输入应走文本分类流程（images=None）。"""
         classifier = self._make_classifier_with_mock_model()
 
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = classifier._classify_inner(
             "身份证号：510101199001011234", SensitivityLevel.L3, 0.5
@@ -367,7 +367,7 @@ class TestImageClassificationFlow:
             mock_future.result.side_effect = FuturesTimeoutError()
             mock_submit.return_value = mock_future
 
-            from privacy_local_agent.dynclassification.base import SensitivityLevel
+            from PrivShield.dynclassification.base import SensitivityLevel
 
             result = classifier.classify(str(img_file), SensitivityLevel.L3, 0.5)
             assert result is None
@@ -485,7 +485,7 @@ class TestRealImageClassification:
     @pytest.fixture(scope="class")
     def llm_adapter(self):
         """加载真实 LLM 适配器。"""
-        from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
+        from PrivShield.dynclassification.llm_adapter import LlmAdapter
 
         adapter = LlmAdapter()
         assert adapter.is_available, "LLM 初始化失败，请检查模型文件与依赖"
@@ -561,8 +561,8 @@ class TestImageRedactionAndSymmetry:
 
     def test_image_file_path_redaction_returns_sanitized_file_path(self, tmp_path):
         """测试图片文件路径入参时，脱敏输出同格式的新图片文件路径。"""
-        from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
-        from privacy_local_agent.dynclassification import DynClassificationService
+        from PrivShield.dynclassification.image_redaction import sanitize_image_input
+        from PrivShield.dynclassification import DynClassificationService
 
         # 1. 构造一个包含 L4 性病/肿瘤图像病例的临时图片
         img_bytes = _make_test_image(text="一期梅毒与RPR阳性诊断图片")
@@ -589,8 +589,8 @@ class TestImageRedactionAndSymmetry:
 
     def test_base64_image_redaction_returns_base64_data_uri(self):
         """测试 Base64 Data URI 图片入参时，脱敏输出同格式的 Base64 Data URI。"""
-        from privacy_local_agent.dynclassification.image_redaction import sanitize_image_input
-        from privacy_local_agent.dynclassification import DynClassificationService
+        from PrivShield.dynclassification.image_redaction import sanitize_image_input
+        from PrivShield.dynclassification import DynClassificationService
 
         # 1. 构造 Base64 Data URI
         img_bytes = _make_jpeg_image()
@@ -613,7 +613,7 @@ class TestImageRedactionAndSymmetry:
 
     def test_text_case_input_returns_sanitized_text_symmetry(self):
         """测试纯文本病例入参时，脱敏输出同格式的文本病例。"""
-        from privacy_local_agent.dynclassification import DynClassificationService
+        from PrivShield.dynclassification import DynClassificationService
 
         service = DynClassificationService()
         raw_text = "患者自述外阴溃疡，RPR 1:16 阳性，确诊一期梅毒。"

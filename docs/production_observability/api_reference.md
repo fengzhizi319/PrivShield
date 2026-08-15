@@ -26,7 +26,7 @@
 
 ### `configure_logging`
 
-位置：`privacy_local_agent.observability.logging_config.configure_logging`
+位置：`PrivShield.observability.logging_config.configure_logging`
 
 统一配置 root logger，支持文本或 JSON 格式，并自动注入请求上下文字段。
 
@@ -50,7 +50,7 @@ configure_logging(
 
 ### `get_logger`
 
-位置：`privacy_local_agent.observability.logging_config.get_logger`
+位置：`PrivShield.observability.logging_config.get_logger`
 
 返回指定名称的 `logging.Logger` 实例，共享 `configure_logging` 配置的 root handler。
 
@@ -62,7 +62,7 @@ get_logger(name: str) -> logging.Logger
 
 ### `RequestContext`
 
-位置：`privacy_local_agent.observability.context.RequestContext`
+位置：`PrivShield.observability.context.RequestContext`
 
 通过 `contextvars` 在异步/线程上下文中透传请求级元数据。
 
@@ -93,7 +93,7 @@ RequestContext(
 
 ### `init_tracing`
 
-位置：`privacy_local_agent.observability.tracing.init_tracing`
+位置：`PrivShield.observability.tracing.init_tracing`
 
 可选初始化 OpenTelemetry tracing。未安装 `opentelemetry` 或环境变量未设置时返回 NoOp tracer，零开销。
 
@@ -113,7 +113,7 @@ init_tracing(
 
 ### `start_span`
 
-位置：`privacy_local_agent.observability.tracing.start_span`
+位置：`PrivShield.observability.tracing.start_span`
 
 创建 span 的上下文管理器，未启用 OpenTelemetry 时等价于 no-op。
 
@@ -128,7 +128,7 @@ start_span(
 
 ### `make_asgi_app`
 
-位置：`privacy_local_agent.observability.metrics.make_asgi_app`
+位置：`PrivShield.observability.metrics.make_asgi_app`
 
 返回 Prometheus metrics 的 ASGI 应用，可直接挂载到 FastAPI。
 

@@ -20,7 +20,7 @@
 - **六类 (6-Category Matrix)**：覆盖 **身份标识、联系方式、诊疗信息、检验检查、财务信息、生物特征** 6 类字段矩阵。
 
 1. **数据模拟生成 (`scripts/data/generate_medical_data.py`)**：自动生成 100 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、以及 L4/L5 级敏感病史的高仿真 `kangyang.csv`。
-2. **算法处理核心 (`privacy_local_agent/medical_pipeline/`)**：
+2. **算法处理核心 (`PrivShield/medical_pipeline/`)**：
    - 彻底与 `dynclassification` 统一合并：直接调用 `DynClassificationService.classify_field(..., sanitize=True)` 3 层漏斗 (Rule -> Small-NER -> Qwen3.5 LLM) 完成 27 个字段及文本病历的 L1~L5 风险分级标注。
    - **智能抹平与格式对称**：对 PII 及 L4/L5 级高敏感诊断执行自动抹平，输出语义连贯的无痕重写文本，强制保障输出数据中**绝对不包含任何 L4/L5 级原始敏感内容**。
    - **多线程安全与缓存复用**：`MedicalPrivacyPipeline` 内部挂载 `self._lock = threading.Lock()` 保护 `_sanitized_cache` 读写，避免并发数据竞态。
@@ -40,7 +40,7 @@ flowchart TD
         SG[scripts/data/generate_medical_data.py] -->|生成合规高仿真数据| D1[kangyang.csv]
     end
 
-    subgraph AgentPipeline [privacy_local_agent/medical_pipeline]
+    subgraph AgentPipeline [PrivShield/medical_pipeline]
         D1 --> MP[MedicalPrivacyPipeline]
         MP -->|调用 dynclassification| DC[3-Layer 分类分级引擎]
         DC -->|标注 L1~L5 等级与 Tag| CR[1. 分级结果数据 (Classification Report)]
@@ -110,11 +110,11 @@ flowchart TD
 
 ---
 
-### 3.3 核心算法 Pipeline (`privacy_local_agent/medical_pipeline/`)
+### 3.3 核心算法 Pipeline (`PrivShield/medical_pipeline/`)
 
 包结构定义：
 ```text
-privacy_local_agent/medical_pipeline/
+PrivShield/medical_pipeline/
 ├── __init__.py
 ├── pipeline.py          # 医疗数据治理 Pipeline 主逻辑 (MedicalPrivacyPipeline)
 ├── rules.py             # 医疗专属分级规则、PII 别名、L4/L5 关键词字典与 ICD-10 高危编码段治理
@@ -159,7 +159,7 @@ class MedicalPrivacyPipeline:
 | `service.py` | `DynClassificationService._compute_sanitized_value()` | 动态分类内核脱敏算子，挂载 Fail-Safe 门禁并返回安全 sanitized_value |
 | `ner_engines.py` | `_chunk_text(text, max_chunk_len=120)` | 超长文本分句切片静态工具，基于自然标点分句与 120 字符带 20 字符重叠的滑动窗口 |
 
-#### 2. 底层预编译正则表达式对象 (`privacy_local_agent/medical_pipeline/rules.py`)
+#### 2. 底层预编译正则表达式对象 (`PrivShield/medical_pipeline/rules.py`)
 
 代码中将高频句法规则预编译为全局 `Pattern` 对象，以实现微秒级高性能匹配：
 
@@ -188,7 +188,7 @@ class MedicalPrivacyPipeline:
 ### 3.4 代理后端与 Frontend 跑通路线
 
 1. **Agent 接口层**：
-   - REST 路由: `POST /v1/medical/process`（已实现，`privacy_local_agent/routers/medical.py`）
+   - REST 路由: `POST /v1/medical/process`（已实现，`PrivShield/routers/medical.py`）
    - gRPC 接口: ~~在 `proto/privacy.proto` 补充 `MedicalProcessRequest` 与 `MedicalProcessResponse`~~ **（未实现，规划中）**——当前 `proto/privacy.proto` 与 `grpc_server.py` 均无医疗 Pipeline 消息与方法；Go 控制台的 `/api/medical_pipeline` 实际走 REST 代理通道。
 2. **Go & Python 控制台后端**：
    - Python: 在 `console/backend/app/main.py` 增加 `POST /api/medical_pipeline`。

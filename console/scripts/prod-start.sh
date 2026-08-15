@@ -178,18 +178,18 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-check_port_available 8079 "privacy_local_agent REST"
+check_port_available 8079 "PrivShield REST"
 check_port_available 8080 "Python REST 代理后端"
 
 launch_agent() {
     local agent_log="$PROJECT_ROOT/.logs/agent_py.log"
     mkdir -p "$PROJECT_ROOT/.logs"
-    echo "启动 privacy_local_agent (REST: $AGENT_URL)，日志: $agent_log..."
+    echo "启动 PrivShield (REST: $AGENT_URL)，日志: $agent_log..."
     (
         source "$AGENT_VENV/bin/activate"
         cd "$PROJECT_ROOT"
         # 日志持久化到 .logs/agent_py.log，agent 崩溃/重启后可回溯根因
-        exec python -m privacy_local_agent.server >> "$agent_log" 2>&1
+        exec python -m PrivShield.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"
@@ -226,7 +226,7 @@ wait_for_service() {
     return 1
 }
 
-wait_for_service "$AGENT_URL/health" "privacy_local_agent"
+wait_for_service "$AGENT_URL/health" "PrivShield"
 wait_for_service "$CONSOLE_URL/api/health" "测试控制台后端"
 
 echo ""
@@ -252,7 +252,7 @@ while [[ "$STOPPING" != "true" ]]; do
         break
     fi
     launch_agent
-    if ! wait_for_service "$AGENT_URL/health" "重启后的 privacy_local_agent"; then
+    if ! wait_for_service "$AGENT_URL/health" "重启后的 PrivShield"; then
         echo "[watchdog] 警告：agent 重启后未在 30 秒内就绪（REST）。"
     fi
     set +e

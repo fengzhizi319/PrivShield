@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import pytest
 
-from privacy_local_agent.dynclassification import (
+from PrivShield.dynclassification import (
     ConfigurableRuleEngine,
     DomainTaxonomy,
     SecurityTag,
 )
-from privacy_local_agent.dynclassification.rule_schema import (
+from PrivShield.dynclassification.rule_schema import (
     DowngradeRuleDef,
     MatcherDef,
     RuleDef,

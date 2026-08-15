@@ -48,7 +48,7 @@ echo ">> 服务端 CN: ${SERVER_CN}"
 echo ">> [1/3] 生成根 CA..."
 openssl genrsa -out ca.key 4096
 openssl req -x509 -new -nodes -key ca.key -sha256 -days "$DAYS" \
-    -subj "/CN=privacy-local-agent-test-ca" \
+    -subj "/CN=PrivShield-test-ca" \
     -out ca.crt
 
 # ── 2. 服务端证书（Python agent gRPC 服务端）──────────────────────────

@@ -1,6 +1,6 @@
-# Privacy Local Agent
+# 数盾 PrivShield
 
-Welcome to the **Privacy Local Agent** documentation.
+Welcome to the **数盾 PrivShield** documentation.
 
 `PrivShield` is a Python sidecar implementing the **「三层四柱五御六类」医疗数据安全与隐私治理架构** (3-Funnel, 4-Pillar, 5-Protection, 6-Category Architecture), exposing privacy primitives (masking, differential privacy, K-anonymity, query obfuscation) and a 3-layer data classification funnel over REST and gRPC.
 

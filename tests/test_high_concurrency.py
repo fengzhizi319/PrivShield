@@ -34,7 +34,7 @@ class TestSQLiteWALMode:
         os.environ["PRIVACY_BUDGET_DB"] = db_path
 
         try:
-            from privacy_local_agent.privacy.budget import BudgetAccountant, default_registry
+            from PrivShield.privacy.budget import BudgetAccountant, default_registry
 
             # 清理全局注册表以避免测试间干扰
             default_registry.reset()
@@ -63,7 +63,7 @@ class TestSQLiteWALMode:
         os.environ["PRIVACY_BUDGET_DB"] = db_path
 
         try:
-            from privacy_local_agent.privacy.budget import BudgetAccountant, default_registry
+            from PrivShield.privacy.budget import BudgetAccountant, default_registry
 
             default_registry.reset()
 
@@ -80,7 +80,7 @@ class TestSQLiteWALMode:
             def worker_spend(worker_id: int):
                 """每个 worker 独立创建 BudgetAccountant 并 spend。"""
                 # 每个进程需要自己的 registry 实例
-                from privacy_local_agent.privacy.budget import BudgetRegistry
+                from PrivShield.privacy.budget import BudgetRegistry
 
                 reg = BudgetRegistry()
                 local_acct = reg.get_or_create(
@@ -123,7 +123,7 @@ class TestReusePortSocket:
 
     def test_create_reuse_port_socket(self):
         """验证 create_reuse_port_socket 创建可绑定的 socket。"""
-        from privacy_local_agent.launcher import create_reuse_port_socket
+        from PrivShield.launcher import create_reuse_port_socket
 
         # 使用随机高端口避免冲突
         import socket
@@ -194,7 +194,7 @@ class TestGrpcServerConfig:
         """验证 serve() 函数签名支持 max_workers=None。"""
         import inspect
 
-        from privacy_local_agent.grpc_server import serve
+        from PrivShield.grpc_server import serve
 
         sig = inspect.signature(serve)
         params = sig.parameters
@@ -270,7 +270,7 @@ class TestDpJit:
     def test_laplace_noise_batch_shape(self):
         """验证 Laplace 噪声采样输出形状与输入一致。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import laplace_noise_batch
+        from PrivShield.privacy.dp_jit import laplace_noise_batch
 
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         result = laplace_noise_batch(values, sensitivity=1.0, epsilon=1.0)
@@ -281,7 +281,7 @@ class TestDpJit:
     def test_laplace_noise_batch_invalid_epsilon(self):
         """验证 epsilon <= 0 时抛出异常。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import laplace_noise_batch
+        from PrivShield.privacy.dp_jit import laplace_noise_batch
 
         with pytest.raises(ValueError, match="epsilon must be positive"):
             laplace_noise_batch(np.array([1.0]), sensitivity=1.0, epsilon=0.0)
@@ -289,7 +289,7 @@ class TestDpJit:
     def test_gaussian_noise_batch_shape(self):
         """验证 Gaussian 噪声采样输出形状。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import gaussian_noise_batch
+        from PrivShield.privacy.dp_jit import gaussian_noise_batch
 
         # 大样本使均值标准误降至 sigma/sqrt(n)，消除小样本下均值断言的偶发失败
         values = np.zeros(5000)
@@ -301,7 +301,7 @@ class TestDpJit:
     def test_gaussian_noise_batch_invalid_delta(self):
         """验证 delta <= 0 时抛出异常。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import gaussian_noise_batch
+        from PrivShield.privacy.dp_jit import gaussian_noise_batch
 
         with pytest.raises(ValueError, match="delta must be positive"):
             gaussian_noise_batch(np.array([1.0]), sensitivity=1.0, epsilon=1.0, delta=0.0)
@@ -309,7 +309,7 @@ class TestDpJit:
     def test_clip_values(self):
         """验证值截断功能。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import clip_values
+        from PrivShield.privacy.dp_jit import clip_values
 
         values = np.array([-5.0, -1.0, 0.0, 0.5, 1.0, 10.0])
         result = clip_values(values, lower=-1.0, upper=1.0)
@@ -320,7 +320,7 @@ class TestDpJit:
     def test_clip_and_sum(self):
         """验证截断 + 求和合并操作。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import clip_and_sum
+        from PrivShield.privacy.dp_jit import clip_and_sum
 
         values = np.array([-10.0, 1.0, 2.0, 3.0, 100.0])
         clipped_sum, count = clip_and_sum(values, clip_lower=0.0, clip_upper=10.0)
@@ -331,7 +331,7 @@ class TestDpJit:
     def test_l2_norm_clip(self):
         """验证 L2 范数批量截断。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import l2_norm_clip
+        from PrivShield.privacy.dp_jit import l2_norm_clip
 
         # 两个向量: [3, 4] (norm=5) 和 [1, 0] (norm=1)
         vectors = np.array([[3.0, 4.0], [1.0, 0.0]])
@@ -344,7 +344,7 @@ class TestDpJit:
     def test_l2_norm_clip_invalid_dim(self):
         """验证非 2D 数组抛出异常。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import l2_norm_clip
+        from PrivShield.privacy.dp_jit import l2_norm_clip
 
         with pytest.raises(ValueError, match="Expected 2D"):
             l2_norm_clip(np.array([1.0, 2.0]), max_norm=1.0)
@@ -352,7 +352,7 @@ class TestDpJit:
     def test_clip_and_sum_columns(self):
         """验证按列截断求和。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import clip_and_sum_columns
+        from PrivShield.privacy.dp_jit import clip_and_sum_columns
 
         matrix = np.array([[1.0, 100.0], [2.0, -50.0], [3.0, 5.0]])
         col_sums, row_count = clip_and_sum_columns(matrix, clip_lower=0.0, clip_upper=10.0)
@@ -363,13 +363,13 @@ class TestDpJit:
 
     def test_has_numba_flag(self):
         """验证 HAS_NUMBA 标志存在且为 bool。"""
-        from privacy_local_agent.privacy.dp_jit import HAS_NUMBA
+        from PrivShield.privacy.dp_jit import HAS_NUMBA
         assert isinstance(HAS_NUMBA, bool)
 
     def test_laplace_noise_batch_no_infinite_values(self):
         """大样本采样下不得出现 ±inf（log(0) 边界已钳制）。"""
         import numpy as np
-        from privacy_local_agent.privacy.dp_jit import laplace_noise_batch
+        from PrivShield.privacy.dp_jit import laplace_noise_batch
 
         # 大样本提高命中极小概率区间的机会，验证边界钳制有效
         result = laplace_noise_batch(np.zeros(20000), sensitivity=1.0, epsilon=1.0)
@@ -386,7 +386,7 @@ class TestNoisePool:
 
     def test_sample_returns_correct_size(self):
         """验证采样返回正确大小。"""
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=100, scale=1.0)
         samples = pool.sample(10)
@@ -394,7 +394,7 @@ class TestNoisePool:
 
     def test_remaining_decreases(self):
         """验证采样后剩余量减少。"""
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=100, scale=1.0)
         assert pool.remaining == 100
@@ -403,7 +403,7 @@ class TestNoisePool:
 
     def test_auto_refill(self):
         """验证池耗尽时自动 refill。"""
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=10, scale=1.0, auto_refill=True)
         # 取超过池容量的样本
@@ -412,7 +412,7 @@ class TestNoisePool:
 
     def test_no_auto_refill_raises(self):
         """验证 auto_refill=False 时池耗尽抛出异常。"""
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=5, scale=1.0, auto_refill=False)
         with pytest.raises(RuntimeError, match="exhausted"):
@@ -420,7 +420,7 @@ class TestNoisePool:
 
     def test_gaussian_mechanism(self):
         """验证 Gaussian 噪声池。"""
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=100, mechanism="gaussian", sigma=0.5)
         samples = pool.sample(50)
@@ -429,7 +429,7 @@ class TestNoisePool:
     def test_gaussian_sigma_zero(self):
         """验证 sigma=0.0 时生成零噪声（不是回退到 scale）。"""
         import numpy as np
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=100, mechanism="gaussian", sigma=0.0)
         samples = pool.sample(50)
@@ -438,7 +438,7 @@ class TestNoisePool:
 
     def test_stats(self):
         """验证统计信息。"""
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=100, scale=2.0)
         stats = pool.stats
@@ -449,7 +449,7 @@ class TestNoisePool:
 
     def test_thread_safety(self):
         """验证多线程采样安全性。"""
-        from privacy_local_agent.privacy.high_concurrency import NoisePool
+        from PrivShield.privacy.high_concurrency import NoisePool
 
         pool = NoisePool(pool_size=10000, scale=1.0, auto_refill=True)
         results = []
@@ -480,7 +480,7 @@ class TestConcurrencyThrottle:
         """超时未获取到信号量时不得 release，避免容量越限。"""
         import asyncio
 
-        from privacy_local_agent.privacy.high_concurrency import ConcurrencyThrottle
+        from PrivShield.privacy.high_concurrency import ConcurrencyThrottle
 
         async def run():
             throttle = ConcurrencyThrottle(max_concurrency=1)
@@ -502,7 +502,7 @@ class TestConcurrencyThrottle:
         """正常获取/释放路径容量守恒。"""
         import asyncio
 
-        from privacy_local_agent.privacy.high_concurrency import ConcurrencyThrottle
+        from PrivShield.privacy.high_concurrency import ConcurrencyThrottle
 
         async def run():
             throttle = ConcurrencyThrottle(max_concurrency=2)
@@ -524,8 +524,8 @@ class TestBatchedBudgetSpend:
 
     def test_batch_flush(self):
         """验证批量 spend 合并后正确扣减。"""
-        from privacy_local_agent.privacy.budget import BudgetRegistry
-        from privacy_local_agent.privacy.high_concurrency import BatchedBudgetSpend
+        from PrivShield.privacy.budget import BudgetRegistry
+        from PrivShield.privacy.high_concurrency import BatchedBudgetSpend
 
         reg = BudgetRegistry()
         acct = reg.get_or_create("test-batch", epsilon_total=10.0, delta_total=1.0)
@@ -554,8 +554,8 @@ class TestBatchedBudgetSpend:
 
     def test_batch_exceeds_budget(self):
         """验证批量 spend 超出预算时正确报告失败。"""
-        from privacy_local_agent.privacy.budget import BudgetRegistry
-        from privacy_local_agent.privacy.high_concurrency import BatchedBudgetSpend
+        from PrivShield.privacy.budget import BudgetRegistry
+        from PrivShield.privacy.high_concurrency import BatchedBudgetSpend
 
         reg = BudgetRegistry()
         acct = reg.get_or_create("test-batch-exhaust", epsilon_total=1.0, delta_total=1.0)
@@ -593,11 +593,11 @@ class TestBatchedBudgetSpend:
 
     def test_spend_future_result_raises_on_failure(self):
         """验证 _SpendFuture.result() 在失败时抛出 RuntimeError。"""
-        from privacy_local_agent.privacy.budget import (
+        from PrivShield.privacy.budget import (
             BudgetRegistry,
             PrivacyBudgetExhaustedError,
         )
-        from privacy_local_agent.privacy.high_concurrency import BatchedBudgetSpend
+        from PrivShield.privacy.high_concurrency import BatchedBudgetSpend
 
         reg = BudgetRegistry()
         acct = reg.get_or_create("test-future-error", epsilon_total=0.5, delta_total=1.0)
@@ -616,8 +616,8 @@ class TestBatchedBudgetSpend:
 
     def test_spend_after_stop_sync_exec(self):
         """验证 stop() 后 spend() 直接同步执行，不会永久挂起。"""
-        from privacy_local_agent.privacy.budget import BudgetRegistry
-        from privacy_local_agent.privacy.high_concurrency import BatchedBudgetSpend
+        from PrivShield.privacy.budget import BudgetRegistry
+        from PrivShield.privacy.high_concurrency import BatchedBudgetSpend
 
         reg = BudgetRegistry()
         acct = reg.get_or_create("test-after-stop", epsilon_total=10.0, delta_total=1.0)
@@ -651,7 +651,7 @@ class TestUvicornOptimizations:
 
     def test_gzip_middleware_registered(self):
         """验证 GZip 中间件已注册到 FastAPI app。"""
-        from privacy_local_agent.main import app
+        from PrivShield.main import app
 
         middleware_classes = [m.cls.__name__ for m in app.user_middleware]
         assert "GZipMiddleware" in middleware_classes
@@ -659,7 +659,7 @@ class TestUvicornOptimizations:
     def test_server_uvloop_detection(self):
         """验证 server.py 的 uvloop 检测逻辑。"""
         # 导入模块不应报错（无论 uvloop 是否安装）
-        from privacy_local_agent import server as srv
+        from PrivShield import server as srv
         # _UVICORN_LOOP_KWARG 应为 dict
         assert isinstance(srv._UVICORN_LOOP_KWARG, dict)
 
@@ -684,7 +684,7 @@ class TestLaunchWithWarmup:
 
     def test_launch_with_warmup_function_exists(self):
         """验证 launch_with_warmup 函数存在且可导入。"""
-        from privacy_local_agent.launcher import launch_with_warmup
+        from PrivShield.launcher import launch_with_warmup
         import inspect
         sig = inspect.signature(launch_with_warmup)
         params = sig.parameters
@@ -697,19 +697,19 @@ class TestLaunchWithWarmup:
 
     def test_launcher_cli_warmup_flag(self):
         """验证命令行入口支持 --warmup 参数。"""
-        from privacy_local_agent.launcher import main
+        from PrivShield.launcher import main
         # 验证 main 函数存在
         assert callable(main)
 
     def test_monitor_and_terminate_helpers_exist(self):
         """验证公共监控/关闭辅助函数存在。"""
-        from privacy_local_agent.launcher import _monitor_workers, _terminate_workers
+        from PrivShield.launcher import _monitor_workers, _terminate_workers
         assert callable(_monitor_workers)
         assert callable(_terminate_workers)
 
     def test_worker_entry_uvloop_kwarg_importable(self):
         """验证 launcher worker 复用 server 的 uvloop/httptools 检测结果。"""
-        from privacy_local_agent.launcher import _worker_entry
+        from PrivShield.launcher import _worker_entry
         import inspect
 
         source = inspect.getsource(_worker_entry)
@@ -729,7 +729,7 @@ class TestPreloadedAdapterRegistry:
 
     def test_register_and_consume(self):
         """验证注册后可消费同一实例。"""
-        from privacy_local_agent.dynclassification import service as svc
+        from PrivShield.dynclassification import service as svc
 
         adapter = object()
         svc.register_preloaded_adapter("ner", adapter)
@@ -740,13 +740,13 @@ class TestPreloadedAdapterRegistry:
 
     def test_consume_missing_returns_none(self):
         """验证未注册时返回 None。"""
-        from privacy_local_agent.dynclassification import service as svc
+        from PrivShield.dynclassification import service as svc
 
         assert svc.consume_preloaded_adapter("llm") is None
 
     def test_reuse_matches_model_path(self):
         """验证 _build_funnel 在 model_path 匹配时复用预加载适配器。"""
-        from privacy_local_agent.dynclassification import service as svc
+        from PrivShield.dynclassification import service as svc
 
         class FakeAdapter:
             def __init__(self, path):
@@ -758,7 +758,7 @@ class TestPreloadedAdapterRegistry:
         try:
             svc_inst = svc.DynClassificationService(rules_dir="rules")
             # 直接验证匹配逻辑：路径一致 → 复用；不一致 → 不复用
-            from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
+            from PrivShield.dynclassification.llm_adapter import LlmAdapter
 
             reused = svc.consume_preloaded_adapter("llm")
             assert reused is preloaded
@@ -771,11 +771,11 @@ class TestPreloadedAdapterRegistry:
 
     def test_batched_budget_spend_propagates_privacy_budget_exhausted_error(self):
         """验证 BatchedBudgetSpend 在预算耗尽时传播原始 PrivacyBudgetExhaustedError。"""
-        from privacy_local_agent.privacy.budget import (
+        from PrivShield.privacy.budget import (
             BudgetRegistry,
             PrivacyBudgetExhaustedError,
         )
-        from privacy_local_agent.privacy.high_concurrency import BatchedBudgetSpend
+        from PrivShield.privacy.high_concurrency import BatchedBudgetSpend
 
         registry = BudgetRegistry()
         accountant = registry.get_or_create("test_batch_exc", epsilon_total=1.0)

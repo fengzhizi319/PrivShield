@@ -1,4 +1,4 @@
-# privacy-local-agent 可观测性运维手册
+# PrivShield 可观测性运维手册
 
 > 对应 PRD/设计: `docs/production_observability/prd.md`, `design.md`
 
@@ -35,20 +35,20 @@
 ### 文本格式（默认）
 
 ```text
-2026-07-11 14:30:27,123 [INFO] privacy_local_agent.main: POST /v1/privacy/mask 200 1.2ms request=45B response=32B request_id=abc identity=portal
+2026-07-11 14:30:27,123 [INFO] PrivShield.main: POST /v1/privacy/mask 200 1.2ms request=45B response=32B request_id=abc identity=portal
 ```
 
 ### JSON 格式
 
 ```bash
-PRIVACY_LOG_FORMAT=json python -m privacy_local_agent.server
+PRIVACY_LOG_FORMAT=json python -m PrivShield.server
 ```
 
 ```json
 {
   "timestamp": "2026-07-11T14:30:27.123Z",
   "level": "INFO",
-  "logger": "privacy_local_agent.main",
+  "logger": "PrivShield.main",
   "message": "POST /v1/privacy/mask 200 1.2ms",
   "request_id": "abc",
   "method": "POST",
@@ -111,7 +111,7 @@ spec:
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector:4317
 export OTEL_SERVICE_NAME=PrivShield
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 需先安装可选依赖：

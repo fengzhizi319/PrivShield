@@ -86,8 +86,8 @@ helm template test deploy/helm/PrivShield
 ```bash
 helm template prod deploy/helm/PrivShield \
   -f deploy/helm/PrivShield/values-production.yaml \
-  --set security.tls.existingSecret=pla-tls \
-  --set security.auth.apiKeysSecret=pla-apikeys
+  --set security.tls.existingSecret=privshield-tls \
+  --set security.auth.apiKeysSecret=privshield-apikeys
 ```
 
 **检查项**：
@@ -182,7 +182,7 @@ make docker-ml
 
 **检查项**：
 - 镜像构建成功，无阶段错误。
-- `docker images | grep privacy-local-agent` 显示 `0.1.0` 与 `0.1.0-ml`。
+- `docker images | grep PrivShield` 显示 `0.1.0` 与 `0.1.0-ml`。
 
 ## 8. 功能冒烟测试
 
@@ -232,8 +232,8 @@ curl -s -H "X-API-Key: my-api-key" http://localhost:8079/health
 
 ## 10. 验收检查清单
 
-- [ ] `helm lint deploy/helm/privacy-local-agent` 通过。
-- [ ] `helm template test deploy/helm/privacy-local-agent` 成功渲染。
+- [ ] `helm lint deploy/helm/PrivShield` 通过。
+- [ ] `helm template test deploy/helm/PrivShield` 成功渲染。
 - [ ] 生产 values + TLS/认证 Secret 可正确渲染。
 - [ ] `kubectl apply -k deploy/k8s/ --dry-run=client` 通过。
 - [ ] `docker compose up -d` 能启动服务并通过 `/health` 检查。

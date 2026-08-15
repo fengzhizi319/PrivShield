@@ -1,4 +1,4 @@
-# 从本地代码到 Kubernetes：privacy-local-agent 部署入门
+# 从本地代码到 Kubernetes：PrivShield 部署入门
 
 > 目标读者：刚接触 K8s / Helm，希望把本地跑通的 `PrivShield` 代码部署到 Kubernetes 的同学。
 > 读完本文，你应该能：
@@ -92,7 +92,7 @@ base（安装系统依赖 + 核心 Python 依赖）
 关键行为：
 
 - 容器内默认监听 `0.0.0.0:8079`（REST）和 `0.0.0.0:50051`（gRPC）。
-- 入口脚本是 `docker-entrypoint.sh`，最终执行 `python -m privacy_local_agent.server`。
+- 入口脚本是 `docker-entrypoint.sh`，最终执行 `python -m PrivShield.server`。
 
 ### 3.2 构建镜像
 
@@ -184,7 +184,7 @@ docker push myregistry.example.com/PrivShield:0.1.0
 
 | 方式 | 路径 | 适用场景 | 难度 |
 |---|---|---|---|
-| **Helm Chart** | `deploy/helm/privacy-local-agent/` | 生产/需要灵活配置 | 中 |
+| **Helm Chart** | `deploy/helm/PrivShield/` | 生产/需要灵活配置 | 中 |
 | **原生 K8s manifests** | `deploy/k8s/` | 学习/最小化/不想用 Helm | 低 |
 | **Docker Compose** | `deploy/docker-compose/` | 本地联调，不是 K8s | 低 |
 
@@ -204,7 +204,7 @@ docker push myregistry.example.com/PrivShield:0.1.0
 
 ```text
 deploy/k8s/
-├── namespace.yaml          # 创建 privacy-local-agent 命名空间
+├── namespace.yaml          # 创建 PrivShield 命名空间
 ├── configmap.yaml          # 挂载 privacy-profile.yaml（非敏感配置）
 ├── deployment.yaml         # 运行 Pod：镜像、端口、环境变量、探针
 ├── service.yaml            # ClusterIP：暴露 8079/50051
@@ -218,7 +218,7 @@ deploy/k8s/
 
 #### ConfigMap
 
-把 `privacy-profile.yaml` 内容放进 ConfigMap，再挂载到容器 `/etc/privacy-local-agent/`。
+把 `privacy-profile.yaml` 内容放进 ConfigMap，再挂载到容器 `/etc/PrivShield/`。
 
 > 注意：代码只读取 `primitives:` 段，其他顶层键（如 `server:`）无效。
 
@@ -240,13 +240,13 @@ deploy/k8s/
 REST 调用：
 
 ```text
-privacy-local-agent.privacy-local-agent.svc:8079
+PrivShield.PrivShield.svc:8079
 ```
 
 gRPC 调用：
 
 ```text
-privacy-local-agent.privacy-local-agent.svc:50051
+PrivShield.PrivShield.svc:50051
 ```
 
 #### Secret（可选）
@@ -282,7 +282,7 @@ Helm 把 K8s 资源模板化，允许你通过 `values.yaml` 灵活配置，而�
 ### 7.1 Helm Chart 结构
 
 ```text
-deploy/helm/privacy-local-agent/
+deploy/helm/PrivShield/
 ├── Chart.yaml              # Chart 元数据
 ├── values.yaml             # 默认值（开发模式）
 ├── values-production.yaml  # 生产覆盖值
@@ -307,7 +307,7 @@ deploy/helm/privacy-local-agent/
 ```bash
 # 1. 构建镜像并确保集群能访问
 # 2. 安装 Chart
-helm install pla ./deploy/helm/PrivShield
+helm install privshield ./deploy/helm/PrivShield
 
 # 查看状态
 helm list
@@ -325,7 +325,7 @@ kubectl get pods -l app.kubernetes.io/name=PrivShield
 
 ```bash
 # 1. 创建 TLS Secret（包含 tls.crt / tls.key）
-kubectl create secret tls pla-tls \
+kubectl create secret tls privshield-tls \
   --cert=path/to/tls.crt \
   --key=path/to/tls.key \
   -n PrivShield
@@ -335,15 +335,15 @@ kubectl create secret tls pla-tls \
 # {
 #   "my-api-key": { "name": "gateway", "scopes": ["*"] }
 # }
-kubectl create secret generic pla-apikeys \
+kubectl create secret generic privshield-apikeys \
   --from-file=api-keys.json=path/to/api-keys.json \
   -n PrivShield
 
 # 3. 使用生产 values 安装
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set security.tls.existingSecret=pla-tls \
-  --set security.auth.apiKeysSecret=pla-apikeys \
+  --set security.tls.existingSecret=privshield-tls \
+  --set security.auth.apiKeysSecret=privshield-apikeys \
   --set image.repository=myregistry.example.com/PrivShield \
   --set image.tag=0.1.0
 ```
@@ -361,15 +361,15 @@ helm install pla ./deploy/helm/PrivShield \
 
 ```bash
 # 升级镜像版本
-helm upgrade pla ./deploy/helm/PrivShield \
+helm upgrade privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
   --set image.tag=0.2.0
 
 # 查看历史
-helm history pla
+helm history privshield
 
 # 回滚到上一版本
-helm rollback pla
+helm rollback privshield
 ```
 
 ---
@@ -388,7 +388,7 @@ curl http://localhost:8079/metrics | head -20
 如果使用 Prometheus Operator，在 Helm 安装时启用 ServiceMonitor：
 
 ```bash
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
   --set serviceMonitor.enabled=true
 ```
@@ -416,10 +416,10 @@ docker compose --profile monitoring up -d
 
 | 现象 | 可能原因 | 排查命令 |
 |---|---|---|
-| `ImagePullBackOff` | 镜像未推送到仓库 / 标签错误 | `kubectl describe pod -n privacy-local-agent <pod>` |
-| `CrashLoopBackOff` | 配置文件路径错误 / TLS 证书缺失 | `kubectl logs -n privacy-local-agent deploy/privacy-local-agent` |
+| `ImagePullBackOff` | 镜像未推送到仓库 / 标签错误 | `kubectl describe pod -n PrivShield <pod>` |
+| `CrashLoopBackOff` | 配置文件路径错误 / TLS 证书缺失 | `kubectl logs -n PrivShield deploy/PrivShield` |
 | 健康检查失败 | 端口未监听 / 探针路径错误 | 确认 `PRIVACY_HEALTH_NO_AUTH=true`，Service 暴露 8079 |
-| 就绪探针 503 | `PRIVACY_PROFILE` 未挂载 / SQLite DB 不可写 | `kubectl get configmap -n privacy-local-agent` |
+| 就绪探针 503 | `PRIVACY_PROFILE` 未挂载 / SQLite DB 不可写 | `kubectl get configmap -n PrivShield` |
 | 认证 401 | API Key 不匹配 | 检查 Secret 中的 `api-keys.json`，请求头 `X-API-Key` |
 | 速率限制 429 | RPS 超过限制 | 调大 `PRIVACY_RATE_LIMIT_DEFAULT_RPS` |
 | OOMKilled | 内存不足 | 调大 `resources.limits.memory`；ml 镜像建议 ≥8Gi |
@@ -460,9 +460,9 @@ kubectl get pods -n PrivShield -w
 kubectl port-forward -n PrivShield svc/PrivShield 8079:8079
 
 # ── Helm ──
-helm install pla ./deploy/helm/PrivShield
-helm upgrade pla ./deploy/helm/PrivShield -f ./deploy/helm/PrivShield/values-production.yaml
-helm rollback pla
+helm install privshield ./deploy/helm/PrivShield
+helm upgrade privshield ./deploy/helm/PrivShield -f ./deploy/helm/PrivShield/values-production.yaml
+helm rollback privshield
 
 # ── 验证 ──
 curl http://localhost:8079/health

@@ -1,0 +1,284 @@
+# 默认开发 values，TLS/auth 关闭，便于本地测试。
+
+replicaCount: 1
+
+namespace:
+  create: false
+
+# 镜像选择：core 为轻量镜像，ml 包含 torch/transformers/onnxruntime
+flavor: core
+
+image:
+  repository: privshield
+  pullPolicy: IfNotPresent
+  # 留空时默认使用 Chart.appVersion
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # 是否创建 ServiceAccount
+  create: true
+  # 自定义 ServiceAccount 名称
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  restPort: 8079
+  grpcPort: 50051
+  # REST/gRPC 是否在同一 Service 中暴露
+  exposeGrpc: true
+  annotations: {}
+
+# 应用配置
+agent:
+  logLevel: info
+  logFormat: text
+  # privacy-profile.yaml 内容（挂载到 /etc/PrivShield/privacy-profile.yaml）。
+  # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
+  # primitives.<primitive> 覆盖内置默认参数；其他顶层键（如 server:/privacy:）
+  # 不会被解析。监听地址等请改用 extraEnv 设置 PRIVACY_* 环境变量。
+  # 下方取值与代码内置默认值一致（行为中性，仅作显式示例）：
+  # dp: epsilon=1.0, delta=0.0, mechanism=laplace
+  # k_anonymity: k=5, l=2, t=0.2, max_depth=10；sanitization: engine=mask
+  profile: |
+    primitives:
+      dp:
+        epsilon: 1.0
+        delta: 0.0
+        mechanism: "laplace"
+      k_anonymity:
+        k: 5
+        l: 2
+        t: 0.2
+        max_depth: 10
+      sanitization:
+        engine: "mask"
+
+# 安全开关（TLS、认证、限速分别控制，均默认关闭便于本地测试）
+security:
+  tls:
+    enabled: false
+    # 用户自管 TLS Secret（包含 tls.crt / tls.key）
+    existingSecret: ""
+    # 也可直接填写证书内容（不推荐用于生产）
+    cert: ""
+    key: ""
+    certFile: /certs/tls.crt
+    keyFile: /certs/tls.key
+    # mTLS 客户端证书校验模式：none / optional / require
+    clientAuth: none
+    # CA 证书 Secret（包含 ca.crt），clientAuth 为 optional/require 时必填
+    caSecret: ""
+    caFile: /certs/ca.crt
+    # 私钥加密口令 Secret（可选，Secret 中须包含名为 key-password 的数据键）
+    keyPasswordSecret: ""
+  auth:
+    enabled: false
+    # 用户自管 API Key Secret（Secret 中须包含名为 api-keys.json 的数据键，
+    # 内容为 JSON：{"<api-key>": {"name": "...", "scopes": [...]}}）
+    apiKeysSecret: ""
+    # 也可直接填写 api-keys.json 文件内容（不推荐用于生产），
+    # Chart 会生成 <fullname>-secrets Secret 并以 api-keys.json 键挂载
+    apiKeys: ""
+    # 内部 mTLS 客户端证书认证（默认关闭，fail-closed）
+    internalMtls:
+      enabled: false
+      # mTLS CN 白名单 YAML ConfigMap 名称（包含 mtls-whitelist.yaml 键）。
+      # 设置后 PRIVACY_AUTH_MTLS_ALLOWED_CNS 被忽略。
+      whitelistConfigMap: ""
+      # 回退：静态 CN 列表（逗号分隔），当 whitelistConfigMap 未设置时使用
+      allowedCns: ""
+  # 速率限制
+  rateLimit:
+    enabled: false
+    defaultRps: 10
+    defaultBurst: 20
+    # 分布式限速后端 Redis URL（不设置则进程内限速）
+    redisUrl: ""
+    # 按端点覆盖，JSON 对象字符串
+    perEndpointJson: ""
+  # 哪些路径可跳过认证，建议保留 /health
+  publicPaths:
+    - /health
+
+# 资源限制
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# 滚动更新策略
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+# Pod 优雅终止宽限期（秒），未设置则使用 K8s 默认值 30
+terminationGracePeriodSeconds: 30
+
+# PodDisruptionBudget（可选，生产环境可启用以保证最小可用副本）
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# 探针
+# liveness 使用 /health（轻量存活检查），readiness 使用 /readyz
+# （/readyz 额外校验配置解析器与隐私预算 DB 连通性，未就绪时不接流量）。
+probes:
+  liveness:
+    path: /health
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 3
+
+# HPA
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+  behavior: {}
+
+# Ingress
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: PrivShield.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# NetworkPolicy
+networkPolicy:
+  enabled: false
+  ingress:
+    # 允许访问的 Pod label selector 列表
+    from: []
+
+# Prometheus ServiceMonitor
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  # security.tls.enabled=true 时自动以 scheme=https 抓取 /metrics，并使用下方 tlsConfig。
+  # 自签名证书场景默认 insecureSkipVerify；如需校验服务端证书，改为 CA 引用，例如：
+  # tlsConfig:
+  #   caFile: /etc/prometheus/secrets/<tls-secret-name>/tls.crt
+  tlsConfig:
+    insecureSkipVerify: true
+
+# ── Layer-3 LLM 独立推理服务（运行时解耦）─────────────────────────────
+# 启用后在独立 Deployment 中运行 vLLM 容器，core 通过 Service（<fullname>-llm:8000）
+# 以 OpenAI 兼容 HTTP 调用 LLM（PRIVACY_LLM_PROVIDER=vllm 走 HTTP 引擎，无需 torch）：
+#   - LLM 升级/重启 → 滚动更新 llm Deployment，core 零感知
+#   - LLM 挂掉/OOM  → core 自动降级 Layer-1 规则 + Layer-2 NER，主服务不受影响
+#   - 启用方式：helm install ... --set llm.enabled=true
+llm:
+  enabled: false
+  # core 侧 LLM 后端类型（vllm / openai），对应 PRIVACY_LLM_PROVIDER
+  provider: vllm
+  # core 侧调用密钥，对应 PRIVACY_LLM_API_KEY
+  apiKey: EMPTY
+  # LLM 服务端口（Service/容器内监听）
+  port: 8000
+  image:
+    # Qwen3.5 为混合注意力架构（Gated Delta Net + Full Attention），需较新 vLLM：
+    # llmlora 评估环境实测 vLLM 0.26+（见 docs/llmlora/finetuning_and_eval_guide.md §2.2）；
+    # 生产环境建议固定版本 tag（如 v0.26.x）保证可复现。
+    repository: vllm/vllm-openai
+    tag: latest
+    pullPolicy: IfNotPresent
+  # vLLM 模型加载参数
+  modelPath: /models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+  servedModelName: Qwen3.5-0.8B-Privacy-Classifier-Smoother
+  gpuMemoryUtilization: "0.85"
+  maxModelLen: "4096"
+  storage:
+    # 模型权重来源（二选一）：
+    #   hostPath: 指向宿主 .models 目录（单节点测试）；
+    #   existingClaim: 已有 PVC 名称（生产推荐，先将模型 COPY 进 PVC）
+    hostPath: ""
+    existingClaim: ""
+  # GPU 节点调度（需集群安装 NVIDIA device plugin；
+  # 例：nodeSelector: {nvidia.com/gpu: "true"}）
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # vLLM 容器资源（nvidia.com/gpu 为 GPU 扩展资源，requests/limits 需一致）
+  resources:
+    limits:
+      cpu: "8"
+      memory: 8Gi
+      nvidia.com/gpu: 1
+    requests:
+      cpu: "1"
+      memory: 2Gi
+      nvidia.com/gpu: 1
+  # 探针（vLLM /health；首次加载模型约 22s+，initialDelay 给足宽限）
+  probes:
+    liveness:
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      failureThreshold: 3
+  # vLLM 容器额外环境变量（如 HF_HOME、VLLM_ENABLE_CUDA_COMPATIBILITY 等）
+  extraEnv: []
+  # 额外 volume/volumeMounts（如模型部分文件挂载）
+  extraVolumes: []
+  extraVolumeMounts: []
+  # vLLM 官方镜像默认以 root 运行（模型缓存/共享内存）；
+  # 如需非 root 加固，设置 podSecurityContext / securityContext（默认空=镜像原样）
+  podSecurityContext: {}
+  securityContext: {}
+
+# 节点亲和/容忍
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# 额外环境变量
+extraEnv: []
+
+# 额外 volume/volumeMounts
+extraVolumes: []
+extraVolumeMounts: []

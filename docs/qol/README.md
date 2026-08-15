@@ -24,7 +24,7 @@
 ## 快速开始
 
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query
+from PrivShield.privacy.qol import obfuscate_query
 
 result = obfuscate_query("张三糖尿病患者用药趋势", num_dummies=3, seed=42)
 print(result)

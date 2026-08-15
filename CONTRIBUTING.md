@@ -1,4 +1,4 @@
-# Contributing to privacy-local-agent
+# Contributing to PrivShield
 
 Thank you for your interest in contributing! This guide will help you get started.
 
@@ -6,7 +6,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 
 ```bash
 # Clone and enter the repo
-git clone https://github.com/fengzhizi319/privacy-local-agent.git
+git clone https://github.com/fengzhizi319/PrivShield.git
 cd PrivShield
 
 # Create virtual environment
@@ -84,7 +84,7 @@ perf: optimize histogram with numpy vectorization
 ## Architecture
 
 ```
-privacy_local_agent/
+PrivShield/
 ├── privacy/          # Core privacy primitives (DP, masking, K-anon, QoL, classification)
 ├── security/         # Auth, RBAC, rate limiting, TLS
 ├── observability/    # Prometheus metrics, OTel tracing, structured logging

@@ -69,7 +69,7 @@ MODEL_DIR="$PROJECT_ROOT/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
 if [ ! -d "$MODEL_DIR" ]; then
     echo "⚠️  [提示] 本地大模型权重目录不存在: $MODEL_DIR"
     echo "   建议先执行模型下载命令以获取微调权重:"
-    echo "   python -m privacy_local_agent.privacy.download_model"
+    echo "   python -m PrivShield.privacy.download_model"
     echo ""
 fi
 
@@ -81,6 +81,6 @@ docker compose --profile llm up -d vllm
 echo ""
 echo "✅ vLLM 大模型推理容器已启动！"
 echo "   - OpenAI 兼容接口 : http://127.0.0.1:8000/v1"
-echo "   - 查看日志        : docker logs -f privacy-local-agent-vllm"
+echo "   - 查看日志        : docker logs -f PrivShield-vllm"
 echo "============================================================================"
 

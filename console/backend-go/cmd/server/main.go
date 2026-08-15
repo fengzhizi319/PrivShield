@@ -4,8 +4,8 @@
 // 执行流程 / Execution flow:
 //   1. 从环境变量加载配置（agent 地址、监听端口、API Key 等）
 //      Load configuration from env vars (agent address, listen port, API Key, etc.)
-//   2. 创建到 privacy-local-agent Python gRPC 服务的客户端连接
-//      Create gRPC client connection to privacy-local-agent Python service
+//   2. 创建到 PrivShield Python gRPC 服务的客户端连接
+//      Create gRPC client connection to PrivShield Python service
 //   3. 初始化 Gin HTTP 路由，注册所有 REST 代理接口与静态 UI 托管
 //      Initialize Gin HTTP routes, register all REST proxy endpoints and static UI hosting
 //   4. 启动 HTTP 服务器，监听前端请求
@@ -14,8 +14,8 @@
 //      Listen for system signals (SIGINT/SIGTERM), perform graceful shutdown on receipt
 //
 // 整体架构 / Overall architecture:
-//   React 前端  ──HTTP/JSON──▶  本程序(Go)  ──gRPC──▶  privacy-local-agent(Python)
-//   React frontend  ──HTTP/JSON──▶  This program(Go)  ──gRPC──▶  privacy-local-agent(Python)
+//   React 前端  ──HTTP/JSON──▶  本程序(Go)  ──gRPC──▶  PrivShield(Python)
+//   React frontend  ──HTTP/JSON──▶  This program(Go)  ──gRPC──▶  PrivShield(Python)
 package main
 
 import (
@@ -39,12 +39,12 @@ import (
 	// gin：高性能 HTTP Web 框架，用于构建 REST API 路由
 	"github.com/gin-gonic/gin"
 
-	// agent：封装到 privacy-local-agent 的 gRPC 客户端连接
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/agent"
+	// agent：封装到 PrivShield 的 gRPC 客户端连接
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"
 	// config：从环境变量加载代理后端配置
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/config"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
 	// handlers：HTTP 处理器与路由注册，负责将 REST 请求转发为 gRPC 调用
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/handlers"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/handlers"
 )
 
 // main 是程序入口函数，按以下步骤顺序执行：
@@ -61,7 +61,7 @@ func main() {
 	cfg := config.Load()
 
 	// ── 步骤 2：创建 gRPC 客户端 ─────────────────────────────────────
-	// 根据配置建立到 privacy-local-agent 的 gRPC 连接。
+	// 根据配置建立到 PrivShield 的 gRPC 连接。
 	// 如果配置了 API Key，会自动附加 authorization 元数据。
 	// 连接失败时打印错误并立即退出进程（log.Fatalf）。
 	client, err := agent.New(cfg)

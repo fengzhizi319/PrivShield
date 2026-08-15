@@ -16,8 +16,8 @@ from typing import Any, Dict
 import httpx
 from fastapi import FastAPI, Request
 
-from privacy_local_agent.gateway.balancer import LoadBalancer
-from privacy_local_agent.gateway.http_proxy import create_http_gateway_app
+from PrivShield.gateway.balancer import LoadBalancer
+from PrivShield.gateway.http_proxy import create_http_gateway_app
 
 
 # ---------------------------------------------------------------------------

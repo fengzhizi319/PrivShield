@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    【Docker 模式】单组分启动 Privacy Local Agent (Windows 11 PowerShell 原生支持)
-    Launch Privacy Local Agent in Docker container for Windows 11 / PowerShell
+    【Docker 模式】单组分启动 PrivShield (Windows 11 PowerShell 原生支持)
+    Launch PrivShield in Docker container for Windows 11 / PowerShell
 
 .DESCRIPTION
-    构建并启动 Privacy Local Agent 容器 (core 或 ml 镜像)，暴露 REST (8079) 与 gRPC (50051) 端口。
+    构建并启动 PrivShield 容器 (core 或 ml 镜像)，暴露 REST (8079) 与 gRPC (50051) 端口。
 
 .PARAMETER Target
     构建目标: 'core' (默认轻量版) 或 'ml' (含 PyTorch/Transformers/ONNX 完整版)
@@ -56,7 +56,7 @@ try {
 }
 
 Write-Host "============================================================================" -ForegroundColor Cyan
-Write-Host "🚀 [Docker Mode] 正在构建并启动 Privacy Local Agent" -ForegroundColor Cyan
+Write-Host "🚀 [Docker Mode] 正在构建并启动 PrivShield" -ForegroundColor Cyan
 Write-Host "   • 平台环境 : Windows 11 (PowerShell / Docker Desktop)" -ForegroundColor Cyan
 Write-Host "   • 构建目标 : $Target" -ForegroundColor Cyan
 Write-Host "============================================================================" -ForegroundColor Cyan
@@ -66,22 +66,22 @@ Set-Location $ProjectRoot
 # 3. 构建镜像
 if ($Target -eq "ml") {
     Write-Host "📦 构建含有 PyTorch / Transformers / ONNX 的 ML 镜像..." -ForegroundColor Yellow
-    & docker build --target ml -t privacy-local-agent:0.1.0-ml .
+    & docker build --target ml -t privshield:0.1.0-ml .
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $ImageName = "privacy-local-agent:0.1.0-ml"
+    $ImageName = "privshield:0.1.0-ml"
 } else {
     Write-Host "📦 构建轻量 Core 镜像..." -ForegroundColor Yellow
-    & docker build --target core -t privacy-local-agent:0.1.0 .
+    & docker build --target core -t privshield:0.1.0 .
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $ImageName = "privacy-local-agent:0.1.0"
+    $ImageName = "privshield:0.1.0"
 }
 
 # 4. 清理旧同名容器
-& docker rm -f privacy-local-agent 2>$null | Out-Null
+& docker rm -f PrivShield 2>$null | Out-Null
 
 # 5. 启动容器
 & docker run -d `
-  --name privacy-local-agent `
+  --name PrivShield `
   -p 8079:8079 `
   -p 50051:50051 `
   -e PRIVACY_REST_HOST="0.0.0.0" `
@@ -95,8 +95,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "✅ Privacy Local Agent (Docker) 已成功启动！" -ForegroundColor Green
+Write-Host "✅ PrivShield (Docker) 已成功启动！" -ForegroundColor Green
 Write-Host "   - REST API : http://127.0.0.1:8079" -ForegroundColor Green
 Write-Host "   - gRPC RPC : 127.0.0.1:50051" -ForegroundColor Green
-Write-Host "   - 查看日志 : docker logs -f privacy-local-agent" -ForegroundColor Green
+Write-Host "   - 查看日志 : docker logs -f PrivShield" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Cyan

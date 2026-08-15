@@ -4,13 +4,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator, main as generator_main
-from privacy_local_agent.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef, SecurityTag
-from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
-from privacy_local_agent.dynclassification.profile_loader import ProfileLoader
-from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
-from privacy_local_agent.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
-from privacy_local_agent.dynclassification.service import DynClassificationService
+from PrivShield.dynclassification.standard_profile_generator import StandardProfileGenerator, main as generator_main
+from PrivShield.dynclassification.models import DomainTaxonomy, SensitivityLevelDef, CategoryDef, SecurityTag
+from PrivShield.dynclassification.operator_registry import OperatorRegistry
+from PrivShield.dynclassification.profile_loader import ProfileLoader
+from PrivShield.dynclassification.engine import ConfigurableRuleEngine
+from PrivShield.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
+from PrivShield.dynclassification.service import DynClassificationService
 
 
 
@@ -177,7 +177,7 @@ class TestEngineAndServiceCoverage:
         def buggy_op(val, params):
             raise RuntimeError("算子运行崩溃测试")
 
-        from privacy_local_agent.dynclassification.rule_schema import RuleDef, MatcherDef
+        from PrivShield.dynclassification.rule_schema import RuleDef, MatcherDef
         profile = RuleProfile(
             domain="buggy",
             rules=[

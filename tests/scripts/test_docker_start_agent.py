@@ -3,9 +3,9 @@ docker-start-agent.sh & docker-stop-agent.sh Script Tests & Agent-to-LLM Communi
 
 =====================================================================
 测试目标 / Test Goal:
-    1. 验证 scripts/dev/docker-start-agent.sh（Docker 方式单组分启动 Privacy Local Agent 容器）
+    1. 验证 scripts/dev/docker-start-agent.sh（Docker 方式单组分启动 PrivShield 容器）
        与 scripts/dev/docker-stop-agent.sh 停止脚本的正确性、健壮性与防回归机制。
-    2. 验证 Docker 编排架构中 Privacy Local Agent (Sidecar) 与 Docker LLM (vLLM)
+    2. 验证 Docker 编排架构中 PrivShield (Sidecar) 与 Docker LLM (vLLM)
        容器之间的通信机制、配置一致性、安全地板约束以及真实端到端推理协同。
 
 测试分层设计 / Layered Test Design（由浅入深，外部依赖逐层增加）:
@@ -67,17 +67,17 @@ from typing import Any  # 类型提示
 from unittest.mock import MagicMock, patch  # Mock 依赖
 
 # ── 项目内导入 / Project imports ──
-from privacy_local_agent.dynclassification.base import SensitivityLevel
-from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
-from privacy_local_agent.dynclassification.llm_engines import OpenAILlmClassifier
-from privacy_local_agent.dynclassification.models import (
+from PrivShield.dynclassification.base import SensitivityLevel
+from PrivShield.dynclassification.llm_adapter import LlmAdapter
+from PrivShield.dynclassification.llm_engines import OpenAILlmClassifier
+from PrivShield.dynclassification.models import (
     CategoryDef,
     ConfidencePolicy,
     DomainTaxonomy,
     SecurityTag,
     SensitivityLevelDef,
 )
-from privacy_local_agent.dynclassification.service import DynClassificationService
+from PrivShield.dynclassification.service import DynClassificationService
 
 # ── 第三方导入 / Third-party imports ──
 import pytest
@@ -99,8 +99,8 @@ COMPOSE_DIR = PROJECT_ROOT / "deploy" / "docker-compose"
 COMPOSE_FILE = COMPOSE_DIR / "docker-compose.yml"
 
 # 容器与模型常量
-AGENT_CONTAINER_NAME = "privacy-local-agent"
-VLLM_CONTAINER_NAME = "privacy-local-agent-vllm"
+AGENT_CONTAINER_NAME = "PrivShield"
+VLLM_CONTAINER_NAME = "PrivShield-vllm"
 VLLM_MODEL_DIR = PROJECT_ROOT / ".models" / "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
 VLLM_API_BASE = "http://127.0.0.1:8000/v1"
 VLLM_SERVED_MODEL_NAME = "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
@@ -295,24 +295,24 @@ class TestAgentScriptFakeExecution:
 
         测试目的：
             1. 验证默认目标分支为 core；
-            2. 验证构建命令包含 `--target core` 与标签 `PrivShield:0.1.0`；
+            2. 验证构建命令包含 `--target core` 与标签 `privshield:0.1.0`；
             3. 验证终端输出启动成功友好提示。
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
         assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
-        assert "Privacy Local Agent (Docker) 已成功启动" in result.stdout
-        assert "build --target core -t privacy-local-agent:0.1.0" in logs
-        assert "run -d --name privacy-local-agent" in logs
+        assert "PrivShield (Docker) 已成功启动" in result.stdout
+        assert "build --target core -t privshield:0.1.0" in logs
+        assert "run -d --name PrivShield" in logs
 
     def test_script_runs_ml_target(self, bash_bin: str):
         """【模拟执行】显式传入 ml 参数时，验证脚本构建并启动 ml 镜像。
 
-        测试目的：验证多阶段构建目标切换为 `ml` 且镜像标签为 `privacy-local-agent:0.1.0-ml`。
+        测试目的：验证多阶段构建目标切换为 `ml` 且镜像标签为 `privshield:0.1.0-ml`。
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, target="ml")
         assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
-        assert "build --target ml -t privacy-local-agent:0.1.0-ml" in logs
-        assert "privacy-local-agent:0.1.0-ml" in logs
+        assert "build --target ml -t privshield:0.1.0-ml" in logs
+        assert "privshield:0.1.0-ml" in logs
 
     def test_cleans_up_old_container_before_run(self, bash_bin: str):
         """【模拟执行】验证在每次启动新容器前，脚本先执行 docker rm -f 清理同名旧容器。
@@ -321,7 +321,7 @@ class TestAgentScriptFakeExecution:
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
         assert result.returncode == 0
-        assert "rm -f privacy-local-agent" in logs
+        assert "rm -f PrivShield" in logs
 
     def test_fails_fast_when_docker_build_fails(self, bash_bin: str):
         """【模拟执行】验证当 docker 命令失败（返回非 0）时，set -e 机制使脚本立即非零退出。
@@ -372,8 +372,8 @@ class TestAgentStopScript:
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, script_path=STOP_SCRIPT_PATH)
         assert result.returncode == 0
-        assert "rm -f privacy-local-agent" in logs
-        assert "Privacy Local Agent 容器已成功停止与清理" in result.stdout
+        assert "rm -f PrivShield" in logs
+        assert "PrivShield 容器已成功停止与清理" in result.stdout
 
     def test_windows_powershell_scripts_exist_and_valid(self):
         """【跨平台兼容性】验证 Windows 11 原生 PowerShell 脚本结构与指令完整性。
@@ -394,7 +394,7 @@ class TestAgentStopScript:
         assert "PRIVACY_REST_HOST" in start_content
 
         stop_content = ps_stop.read_text(encoding="utf-8")
-        assert "docker rm -f privacy-local-agent" in stop_content
+        assert "docker rm -f PrivShield" in stop_content
 
     def test_cross_platform_os_detection_in_bash_script(self):
         """【跨平台兼容性】验证 bash 启动脚本内置了 macOS (Darwin) 与 Windows (WSL2/GitBash) 平台检测。"""
@@ -413,16 +413,16 @@ class TestDockerAgentLlmComposeTopology:
     """验证 docker-compose.yml 中 Agent 与 Docker LLM (vLLM) 的解耦拓扑与通信配置。"""
 
     def test_compose_defines_agent_and_vllm_services(self, compose_config: dict[str, Any]):
-        """【编排拓扑】验证 docker-compose.yml 同时定义了 privacy-local-agent 与 vllm 服务。
+        """【编排拓扑】验证 docker-compose.yml 同时定义了 PrivShield 与 vllm 服务。
 
         测试目的：确保全栈编排包含 Sidecar 核心与独立 LLM 推理服务。
         """
         services = compose_config.get("services", {})
-        assert "privacy-local-agent" in services, "compose 缺少 privacy-local-agent 服务定义"
+        assert "PrivShield" in services, "compose 缺少 PrivShield 服务定义"
         assert "vllm" in services, "compose 缺少 vllm 服务定义"
 
     def test_compose_network_topology_agent_to_vllm(self, compose_config: dict[str, Any]):
-        """【网络拓扑】验证 privacy-local-agent 与 vllm 服务均加入了 llm 共享网络
+        """【网络拓扑】验证 PrivShield 与 vllm 服务均加入了 llm 共享网络
         仅仅是对配置文件的静态结构与声明进行校验，不会在运行时真正创建或加入 Docker 的 llm 网络。
 
         测试目的：确保 Agent 容器能够通过容器名 DNS（http://vllm:8000/v1）跨容器访问 LLM 推理服务。
@@ -443,7 +443,7 @@ class TestDockerAgentLlmComposeTopology:
 
         # 读取 Agent 服务声明的网络列表（networks 字段，本配置为显式列表形式）
         # Read the network list declared by the agent service (explicit list form in this config)
-        agent_networks = services["privacy-local-agent"].get("networks", [])
+        agent_networks = services["PrivShield"].get("networks", [])
 
         # 读取 vllm 服务声明的网络列表
         # Read the network list declared by the vllm service
@@ -453,7 +453,7 @@ class TestDockerAgentLlmComposeTopology:
         # 否则 PRIVACY_LLM_API_BASE=http://vllm:8000/v1 会解析失败，LLM 层只能降级
         # The agent MUST join the "llm" network: only containers on the same network are
         # resolvable and reachable, otherwise PRIVACY_LLM_API_BASE=http://vllm:8000/v1 fails
-        assert "llm" in agent_networks, "privacy-local-agent 未加入 llm 网络"
+        assert "llm" in agent_networks, "PrivShield 未加入 llm 网络"
 
         # vllm 必须加入同一网络：内嵌 DNS 只为“加入了该网络的容器”注册服务名记录，
         # 若 vllm 不在 llm 网络内，Agent 侧将无法解析 vllm 这个服务名
@@ -501,7 +501,7 @@ class TestDockerAgentLlmComposeTopology:
             3. 模型名称与 vllm 服务的 --served-model-name 参数完全一致。
         """
         services = compose_config.get("services", {})
-        agent_env = services["privacy-local-agent"].get("environment", {})
+        agent_env = services["PrivShield"].get("environment", {})
 
         assert agent_env.get("PRIVACY_LLM_PROVIDER") == "vllm", "Agent LLM Provider 应为 vllm"
 
@@ -682,7 +682,7 @@ def vllm_service(
            - 检查系统环境是否满足真实 vLLM 运行要求：Docker CLI、NVIDIA GPU 驱动、本地模型权重目录及 vLLM 镜像。
            - 若任一条件不满足，则调用 `pytest.skip()` 优雅跳过当前模块的集成测试，避免在 CPU/无容器环境下报错。
         2. 【阶段 2：容器状态探测与复用决策 (Container Inspection & Reuse Strategy)】
-           - 执行 `docker inspect` 探测宿主机是否存在同名容器 `privacy-local-agent-vllm`：
+           - 执行 `docker inspect` 探测宿主机是否存在同名容器 `PrivShield-vllm`：
              * 若容器已存在且处于运行状态（Running=true）：直接复用已有容器（`created=False`），避免重复启动与显存浪费；
              * 若容器已存在但已退出（Exited）：强制删除旧容器（`docker rm -f`）并标记 `created=True` 准备重新拉起；
              * 若容器不存在：标记 `created=True` 准备新建拉起。
@@ -790,7 +790,7 @@ class TestDockerAgentToLlmIntegration:
                  * 网络流向：宿主机 pytest -> 宿主机 `127.0.0.1:8000` -> Docker 端口映射转发 -> 容器内 `8000`；
                  * 配置参数：`PRIVACY_LLM_API_BASE=http://127.0.0.1:8000/v1`（与本地原生模式配置完全一致）。
                - 模式 C（全栈 Docker Compose 容器化部署）：
-                 * 运行形态：Agent (`privacy-local-agent`) 与 vLLM (`vllm`) 均在独立 Docker 容器内；
+                 * 运行形态：Agent (`PrivShield`) 与 vLLM (`vllm`) 均在独立 Docker 容器内；
                  * 网络流向：Agent 容器 -> Docker 内部 `llm` 桥接网络 -> Docker 内嵌 DNS 解析服务名 `vllm:8000`（不经过宿主机端口转发）；
                  * 配置参数：`PRIVACY_LLM_API_BASE=http://vllm:8000/v1`。
                - 模式 D（跨主机 / 远程 GPU 节点部署）：
@@ -914,7 +914,7 @@ class TestDockerAgentContainerEndpoints:
                - 第 8 层会真实执行 `docker-start-agent.sh core` 拉起物理容器，并使用 `urllib.request` 经由物理网卡向 `http://127.0.0.1:8079` 发送 Socket 请求。
         """
         from fastapi.testclient import TestClient
-        from privacy_local_agent.main import app
+        from PrivShield.main import app
 
         self.client = TestClient(app)
         self.live_agent_url = "http://127.0.0.1:8079"
@@ -1164,7 +1164,7 @@ class TestRealDockerAgentScriptLifecycle:
     """
 
     def test_real_container_is_running_in_docker_ps(self, live_docker_agent_service: str):
-        """【真实容器状态】验证 privacy-local-agent 容器真实存在于 docker ps 输出中。"""
+        """【真实容器状态】验证 PrivShield 容器真实存在于 docker ps 输出中。"""
         ps = subprocess.run(
             ["docker", "ps", "--filter", f"name={AGENT_CONTAINER_NAME}", "--format", "{{.Names}}"],
             capture_output=True,
@@ -1279,7 +1279,7 @@ class TestDockerAgentMultiHostDeployment:
         rendered_compose = re.sub(r"\$\{([A-Za-z0-9_]+)(?::-([^}]+))?\}", _substitute, compose_content)
         parsed_config = yaml.safe_load(rendered_compose)
 
-        agent_service = parsed_config.get("services", {}).get("privacy-local-agent", {})
+        agent_service = parsed_config.get("services", {}).get("PrivShield", {})
         agent_env = agent_service.get("environment", {})
 
         # 验证跨主机地址与密钥成功注入
@@ -1370,7 +1370,7 @@ class TestDockerAgentMultiHostDeployment:
             - 验证捕获 URLError / TimeoutError 后返回 None 并触发 Layer-1 规则平滑降级；
             - 确保整个 Agent 进程不因跨主机网络异常而崩溃。
         """
-        import privacy_local_agent.env_loader as _env_mod
+        import PrivShield.env_loader as _env_mod
         monkeypatch.setenv("PRIVACY_ENV_PROFILE", "vllm")
         monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "vllm")
         monkeypatch.setenv("PRIVACY_LLM_API_BASE", "http://10.240.0.99:8000/v1")
@@ -1435,7 +1435,7 @@ class TestDockerAgentMultiHostDeployment:
 
     def test_cross_host_environment_switching_isolation(self, monkeypatch):
         """【拓扑切换隔离】验证在运行时从同机模式动态切换为跨主机模式时配置完全隔离。"""
-        import privacy_local_agent.env_loader as _env_mod
+        import PrivShield.env_loader as _env_mod
 
         # 1. 模拟同机模式
         monkeypatch.setenv("PRIVACY_ENV_PROFILE", "vllm")

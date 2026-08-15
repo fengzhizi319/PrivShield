@@ -22,7 +22,7 @@
 ## 1. 优雅关闭 (Graceful Shutdown)
 
 ### 1.1 现状与问题
-当前双协议启动入口 `privacy_local_agent/server.py` 将 FastAPI REST 放在守护线程（`daemon=True`）启动，主线程运行 gRPC 并阻塞。
+当前双协议启动入口 `PrivShield/server.py` 将 FastAPI REST 放在守护线程（`daemon=True`）启动，主线程运行 gRPC 并阻塞。
 在接收到系统关闭信号（如 `SIGTERM` / `SIGINT`）时：
 1. 主线程的 gRPC 收到信号退出。
 2. 守护线程 REST 被瞬间强行终结，正在处理中的 HTTP 请求被截断，引发客户端错误。
@@ -45,7 +45,7 @@
 * **就绪探针** 还需要确认该容器是否能够正常服务（如：配置文件是否正确解析、隐私预算数据库是否可以读写、重型 ML 模型是否已经成功加载）。如果只是单 `/health` 返回 ok，Kubernetes 可能会将流量导入到一个模型尚未加载完毕或数据库不可用的 Container，造成调用超时和 502/500 错误。
 
 ### 2.2 改进方案（已部分实现）
-在 `privacy_local_agent/main.py` 中新增并细化以下端点：
+在 `PrivShield/main.py` 中新增并细化以下端点：
 1. **`/livez`**：存活检查。仅返回 `{"status": "alive"}`，不进行复杂的依赖检测。响应迅速，作为 Liveness Probe。
 2. **`/readyz`**：就绪检查。检查关键依赖是否就绪：
    - 验证 `BudgetAccountant` 对应的存储后端（SQLite 文件/内存锁）是否健康。
@@ -63,11 +63,11 @@
 ## 3. 可配置的查询混淆（QoL）Dummy 查询池
 
 ### 3.1 现状与问题
-虚假查询模板（`MEDICAL_DUMMY`、`GENERIC_DUMMY`）被硬编码在 `privacy_local_agent/privacy/qol.py` 内部。
+虚假查询模板（`MEDICAL_DUMMY`、`GENERIC_DUMMY`）被硬编码在 `PrivShield/privacy/qol.py` 内部。
 不同业务在不同行业（如金融、电商）落地时，需要混入与自己行业高度相关的虚假词典才能起到混淆效果，硬编码导致用户无法自行调整。
 
 ### 3.2 改进方案
 将虚假词典池纳入隐私配置文件中，并支持请求参数级覆盖：
-1. **扩展默认参数**：在 `privacy_local_agent/privacy/profile.py` 中，为 `qol` 原语的默认参数增加 `medical_pool` 与 `generic_pool` 默认列表。
-2. **参数透传与覆盖**：在 [qol.py](../privacy_local_agent/privacy/qol.py) 中，使 `obfuscate_query` 接收可选的 `medical_pool` 与 `generic_pool` 参数。若传入，则覆盖硬编码的静态列表。
-3. **服务层解析**：在 [service.py](../privacy_local_agent/service.py) 调用 `obfuscate_query` 时，先从 `resolver` 中解析出 profile 中的配置或请求体覆盖的词典列表，最终传给算法层。
+1. **扩展默认参数**：在 `PrivShield/privacy/profile.py` 中，为 `qol` 原语的默认参数增加 `medical_pool` 与 `generic_pool` 默认列表。
+2. **参数透传与覆盖**：在 [qol.py](../PrivShield/privacy/qol.py) 中，使 `obfuscate_query` 接收可选的 `medical_pool` 与 `generic_pool` 参数。若传入，则覆盖硬编码的静态列表。
+3. **服务层解析**：在 [service.py](../PrivShield/service.py) 调用 `obfuscate_query` 时，先从 `resolver` 中解析出 profile 中的配置或请求体覆盖的词典列表，最终传给算法层。

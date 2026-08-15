@@ -3,8 +3,8 @@
 直接调用 PrivacyServicer 方法验证 DP、K-匿名等接口的参数解析与响应序列化。
 """
 
-from privacy_local_agent import privacy_pb2
-from privacy_local_agent.grpc_server import PrivacyServicer
+from PrivShield import privacy_pb2
+from PrivShield.grpc_server import PrivacyServicer
 
 
 def test_grpc_dp_count():

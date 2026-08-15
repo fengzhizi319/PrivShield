@@ -31,7 +31,7 @@
 
 | 编号 | 需求 | 优先级 |
 |---|---|---|
-| F-2.1 | 在 `privacy_local_agent/` 下新建 `pipeline/` 目录 | P0 |
+| F-2.1 | 在 `PrivShield/` 下新建 `pipeline/` 目录 | P0 |
 | F-2.2 | 调用 `dynclassification` 对 CSV 数据进行分类分级 | P0 |
 | F-2.3 | 调用 `privacy/masking` 对 L4/L5 级数据进行脱敏处理 | P0 |
 | F-2.4 | 输出两部分结果：① 分级数据（各级别分布、字段明细）② 脱敏后数据 | P0 |

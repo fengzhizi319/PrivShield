@@ -48,7 +48,7 @@ graph TD
         Config --> Static
     end
 
-    Client -- httpx.AsyncClient 连接池 --> Agent[privacy-local-agent REST :8079]
+    Client -- httpx.AsyncClient 连接池 --> Agent[PrivShield REST :8079]
     Static -- web/dist --> Browser
 ```
 

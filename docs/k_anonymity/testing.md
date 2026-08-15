@@ -22,7 +22,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy_local_agent/privacy/kano.py` 与 `privacy_local_agent/privacy/kano_table.py` 的测试策略、测试范围与可执行示例。K-匿名模块的测试需覆盖单记录泛化正确性、Mondrian 算法正确性、等价组大小约束、敏感字段不变性以及 REST/gRPC 接口一致性。
+本文档定义 `PrivShield/privacy/kano.py` 与 `PrivShield/privacy/kano_table.py` 的测试策略、测试范围与可执行示例。K-匿名模块的测试需覆盖单记录泛化正确性、Mondrian 算法正确性、等价组大小约束、敏感字段不变性以及 REST/gRPC 接口一致性。
 
 ## 2. 测试目标
 
@@ -41,7 +41,7 @@
 ### 3.1 单记录泛化测试
 
 ```python
-from privacy_local_agent.privacy.kano import (
+from PrivShield.privacy.kano import (
     BUILTIN_HIERARCHIES,
     age_hierarchy,
     anonymize_record,
@@ -76,7 +76,7 @@ def test_anonymize_record_does_not_mutate_input():
 
 ```python
 import pytest
-from privacy_local_agent.privacy.kano_table import k_anonymize_table
+from PrivShield.privacy.kano_table import k_anonymize_table
 
 
 def test_numeric_qi_generalizes_to_intervals():
@@ -120,7 +120,7 @@ def test_missing_qi_cols_raises():
 
 ```python
 from fastapi.testclient import TestClient
-from privacy_local_agent.main import app
+from PrivShield.main import app
 
 client = TestClient(app)
 
@@ -166,7 +166,7 @@ def test_rest_k_anonymize_table():
 
 ```python
 import pandas as pd
-from privacy_local_agent.privacy.kano_table import k_anonymize_dataframe
+from PrivShield.privacy.kano_table import k_anonymize_dataframe
 
 
 def test_k_anonymize_dataframe():
@@ -184,7 +184,7 @@ def test_k_anonymize_dataframe():
 
 ```python
 from prometheus_client import REGISTRY
-from privacy_local_agent.privacy.kano_table import k_anonymize_table
+from PrivShield.privacy.kano_table import k_anonymize_table
 
 
 def test_kano_metric():
@@ -204,8 +204,8 @@ def test_kano_metric():
 
 ```python
 import grpc
-from privacy_local_agent.grpc_server import PrivacyServicer
-from privacy_local_agent.proto import privacy_pb2, privacy_pb2_grpc
+from PrivShield.grpc_server import PrivacyServicer
+from PrivShield.proto import privacy_pb2, privacy_pb2_grpc
 
 
 def test_grpc_k_anonymize_table():

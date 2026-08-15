@@ -1,6 +1,6 @@
 // Package samples provides minimal, deterministic request payloads for every
-// gRPC method exposed by privacy-local-agent.
-// Package samples 为 privacy-local-agent 暴露的每个 gRPC 方法提供最小化、确定性的请求负载。
+// gRPC method exposed by PrivShield.
+// Package samples 为 PrivShield 暴露的每个 gRPC 方法提供最小化、确定性的请求负载。
 //
 // These sample payloads directly correspond to gRPC request message structures
 // (rather than REST's params wrapper style). After frontend loads them, the Go
@@ -16,7 +16,7 @@ import (
 
 	// models：与前端共享的 EndpointSample 结构定义
 	// models: shared EndpointSample struct definition with frontend
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/models"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/models"
 )
 
 // raw is a small helper that converts a string literal to json.RawMessage.

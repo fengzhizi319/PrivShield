@@ -1281,7 +1281,7 @@ async def mask_via_aiohttp(payload: dict) -> dict:
 
 ### 17.1 Sidecar 代理模式 / Sidecar Proxy Pattern
 
-本项目中 Console Backend 作为 Sidecar 代理转发请求到 Privacy Agent：
+本项目中 Console Backend 作为 Sidecar 代理转发请求到 PrivShield Agent：
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -1299,7 +1299,7 @@ async def mask_via_aiohttp(payload: dict) -> dict:
 │                                     │ REST :8079         │
 │                                     ▼                    │
 │                            ┌────────────────┐           │
-│                            │ Privacy Agent  │           │
+│                            │ PrivShield Agent  │           │
 │                            │  (FastAPI)     │           │
 │                            └────────────────┘           │
 └──────────────────────────────────────────────────────────┘
@@ -1345,8 +1345,8 @@ async def proxy_request(
     body: dict | None = None,
     headers: dict | None = None,
 ) -> httpx.Response:
-    """ 代理转发请求到 Privacy Agent """
-    """ Proxy forward request to Privacy Agent """
+    """ 代理转发请求到 PrivShield Agent """
+    """ Proxy forward request to PrivShield Agent """
     async with get_client() as client:
         response = await client.request(
             method=method,

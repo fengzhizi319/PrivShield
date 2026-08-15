@@ -29,7 +29,7 @@
    - 系统将推荐生成的参数自动保存到项目目录下的 `config/personalized-profiles.yaml` 文件中。
    - 写入时引入线程锁（Thread Lock），读取已有的 YAML 内容，更新对应 `namespace` 下的原语参数，再写回文件。
 4. **后续自动加载与应用**：
-   - 更新 [ParameterResolver](../privacy_local_agent/privacy/profile.py#L83)，使其在合并参数时，增加对 `config/personalized-profiles.yaml` 的读取。
+   - 更新 [ParameterResolver](../PrivShield/privacy/profile.py#L83)，使其在合并参数时，增加对 `config/personalized-profiles.yaml` 的读取。
    - 参数合并优先级（从低到高）：
      1. 系统内置默认值（`default_params`）
      2. 静态全局 profile 配置文件（`privacy-profile.yaml`）

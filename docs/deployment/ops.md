@@ -1,4 +1,4 @@
-# privacy-local-agent 部署运维手册
+# PrivShield 部署运维手册
 
 ## 目录
 
@@ -92,11 +92,11 @@ base (python:3.13.13-slim-bookworm)
  │     ├── COPY 全部源码
  │     ├── EXPOSE 8079 50051
  │     ├── ENV PRIVACY_REST_HOST=0.0.0.0 / PRIVACY_GRPC_HOST=0.0.0.0
- │     └── CMD python -m privacy_local_agent.server
+ │     └── CMD python -m PrivShield.server
  │
  └──► ml 目标（继承 core）
        ├── 安装 requirements-ml.txt（torch/transformers/onnxruntime 等）
-       └── CMD python -m privacy_local_agent.server
+       └── CMD python -m PrivShield.server
 ```
 
 - **core 镜像**（~350 MB）：仅含隐私原语（DP / K-匿名 / 脱敏 / 规则分类），适合绝大多数生产场景。
@@ -157,7 +157,7 @@ make docker-ml            # 等价于 --target ml
 
 ```bash
 # 两个 tag 指向同一个 IMAGE ID，docker images 会显示两行
-docker tag vllm/vllm-openai:latest vllm/vllm-openai:pla-20260813
+docker tag vllm/vllm-openai:latest vllm/vllm-openai:privshield-20260813
 ```
 
 **方式一：离线导出 / 导入**（U 盘、网盘、内网传输）
@@ -200,7 +200,7 @@ docker pull myregistry/PrivShield:0.1.0
 ### 3.1 Chart 结构
 
 ```text
-deploy/helm/privacy-local-agent/
+deploy/helm/PrivShield/
 ├── Chart.yaml                  # Chart 元数据（version: 0.1.0, appVersion: 0.1.0）
 ├── values.yaml                 # 默认 values（开发模式，TLS/Auth 关闭）
 ├── values-production.yaml      # 生产覆盖值（TLS/Auth/HPA/NetworkPolicy 开启）
@@ -222,7 +222,7 @@ deploy/helm/privacy-local-agent/
 ### 3.2 默认安装（开发/测试）
 
 ```bash
-helm install pla ./deploy/helm/PrivShield
+helm install privshield ./deploy/helm/PrivShield
 ```
 
 默认配置要点：
@@ -237,7 +237,7 @@ helm install pla ./deploy/helm/PrivShield
 
 ```bash
 # 1. 准备 TLS Secret（包含 tls.crt 和 tls.key）
-kubectl create secret tls pla-tls \
+kubectl create secret tls privshield-tls \
   --cert=path/to/tls.crt --key=path/to/tls.key \
   -n PrivShield
 
@@ -247,15 +247,15 @@ kubectl create secret tls pla-tls \
 #   "my-api-key": { "name": "gateway", "scopes": ["*"] },
 #   "readonly-key": { "name": "auditor", "scopes": ["read"] }
 # }
-kubectl create secret generic pla-apikeys \
+kubectl create secret generic privshield-apikeys \
   --from-file=api-keys.json=path/to/api-keys.json \
   -n PrivShield
 
 # 3. 安装（使用生产 values 覆盖）
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set security.tls.existingSecret=pla-tls \
-  --set security.auth.apiKeysSecret=pla-apikeys \
+  --set security.tls.existingSecret=privshield-tls \
+  --set security.auth.apiKeysSecret=privshield-apikeys \
   --set image.repository=myregistry/PrivShield \
   --set image.tag=0.1.0
 ```
@@ -278,7 +278,7 @@ helm install pla ./deploy/helm/PrivShield \
 ### 3.4 ML 镜像部署
 
 ```bash
-helm install pla-ml ./deploy/helm/PrivShield \
+helm install privshield-ml ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-ml.yaml \
   --set image.repository=myregistry/PrivShield \
   --set image.tag=0.1.0-ml
@@ -299,27 +299,27 @@ helm install pla-ml ./deploy/helm/PrivShield \
 
 ```bash
 # 升级（修改 values 或镜像版本后）
-helm upgrade pla ./deploy/helm/PrivShield \
+helm upgrade privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
   --set image.tag=0.2.0
 
 # 查看历史版本
-helm history pla
+helm history privshield
 
 # 回滚到上一版本
-helm rollback pla
+helm rollback privshield
 
 # 回滚到指定版本
-helm rollback pla 2
+helm rollback privshield 2
 ```
 
 ### 3.6 卸载
 
 ```bash
-helm uninstall pla
+helm uninstall privshield
 
 # 如需同时清理 PVC / Secret 等手动创建的资源
-kubectl delete secret pla-tls pla-apikeys -n PrivShield
+kubectl delete secret privshield-tls privshield-apikeys -n PrivShield
 ```
 
 ---
@@ -444,7 +444,7 @@ docker compose down -v     # 连数据卷一起删（慎用！预算与日志会
 
 | 名词 | 一句话解释 | 本项目的例子 |
 |---|---|---|
-| 镜像 image | 打包好的"安装包"（只读模板），由 Dockerfile 构建 | `privacy-local-agent:0.1.0`、`vllm/vllm-openai:latest` |
+| 镜像 image | 打包好的"安装包"（只读模板），由 Dockerfile 构建 | `PrivShield:0.1.0`、`vllm/vllm-openai:latest` |
 | 容器 container | 镜像的运行实例，一个隔离的进程环境 | 7 个服务对应 7 个容器 |
 | 服务 service | compose 文件里对一组容器的声明 | `PrivShield`、`vllm` |
 | 网络 network | 容器间的虚拟局域网，内部按服务名 DNS 互访 | `backend` / `llm` / `frontend` |
@@ -499,7 +499,7 @@ docker compose --profile llm up -d
 │ ② 变量替换      ${VLLM_IMAGE_TAG:-latest} → latest（CWD 无 .env → 用默认值）│
 │ ③ YAML 解析     校验 services/networks/volumes 结构                        │
 │ ④ Profile 过滤  启用 llm → 5 个服务（无 profile 的 4 个 + vllm）            │
-│ ⑤ 依赖图构建    console-* 依赖 privacy-local-agent（condition: healthy）    │
+│ ⑤ 依赖图构建    console-* 依赖 PrivShield（condition: healthy）    │
 │ ⑥ 路径规范化    build context、bind mount 源转为绝对路径                    │
 │ ⑦ env_file 合并 agent 的 ../../.env 展开合并进容器 environment             │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -508,7 +508,7 @@ docker compose --profile llm up -d
 │ ⑨ 镜像准备      vllm 从 Docker Hub 拉取；agent/console 有 build 段→本地构建 │
 │ ⑩ 启动容器      按依赖拓扑：agent 先启动，vllm 无依赖可并行                 │
 │ ⑪ 健康检查      agent /readyz 通过后，console-* 才启动（service_healthy）   │
-│ ⑫ DNS 就绪      网络内以服务名互访（vllm:8000、privacy-local-agent:8079）  │
+│ ⑫ DNS 就绪      网络内以服务名互访（vllm:8000、PrivShield:8079）  │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -574,7 +574,7 @@ docker compose --profile llm up -d
 
    ```yaml
    services:
-     privacy-local-agent:
+     PrivShield:
        environment:
          PRIVACY_LOG_LEVEL: "DEBUG"
    ```
@@ -603,7 +603,7 @@ docker compose --profile llm up -d
    ```text
    ┌─────────────────────────── llm 网络（bridge） ────────────────────────────┐
    │ 通道① 容器间直连（不走 ports）：                                          │
-   │   privacy-local-agent ──DNS: "vllm" → 容器IP──▶ vllm:8000（容器内监听）   │
+   │   PrivShield ──DNS: "vllm" → 容器IP──▶ vllm:8000（容器内监听）   │
    │                                                                          │
    │ 通道② 宿主机访问（走 ports）：                                             │
    │   宿主机 curl 127.0.0.1:8000 ──端口映射──▶ vllm 容器:8000                │
@@ -729,15 +729,15 @@ docker compose --profile llm config --services  # → 5 个（含 vllm）
 
 #### 5.2.10 镜像构建策略：不是每次 up 都构建（小白澄清）
 
-**结论先行**：`docker compose up -d` **不是每次都会执行 build**。compose 采用“镜像优先”策略——本地已有 `privacy-local-agent:0.1.0` 就直接复用（**哪怕你刚改了源码/Dockerfile，也不会自动重建**）；只有镜像不存在时才尝试拉取/构建。
+**结论先行**：`docker compose up -d` **不是每次都会执行 build**。compose 采用“镜像优先”策略——本地已有 `PrivShield:0.1.0` 就直接复用（**哪怕你刚改了源码/Dockerfile，也不会自动重建**）；只有镜像不存在时才尝试拉取/构建。
 
 **决策链**（`PrivShield` 服务同时声明了 `build:` 与 `image:`，见 5.1）：
 
 ```text
-docker compose up -d privacy-local-agent
+docker compose up -d PrivShield
         │
         ▼
-① 本地已有 privacy-local-agent:0.1.0 ？
+① 本地已有 PrivShield:0.1.0 ？
    ├─ 是 → 直接使用，跳过构建和拉取（最快路径）
    └─ 否 ↓
 ② 尝试从远端仓库 pull 该 tag
@@ -751,20 +751,20 @@ docker compose up -d privacy-local-agent
 **实测证据**（本机 compose v5.3.1，本地无该镜像时的 dry-run 输出）：
 
 ```text
-Image privacy-local-agent:0.1.0 Pulling            ← ② 先尝试拉取
-Image privacy-local-agent:0.1.0 connection refused ← 无远端仓库，失败
-Image privacy-local-agent:0.1.0 Building           ← ③ 自动回退本地构建
+Image PrivShield:0.1.0 Pulling            ← ② 先尝试拉取
+Image PrivShield:0.1.0 connection refused ← 无远端仓库，失败
+Image PrivShield:0.1.0 Building           ← ③ 自动回退本地构建
 writing image dryRun-... 
-naming to privacy-local-agent:0.1.0                ← 构建出同名镜像
+naming to PrivShield:0.1.0                ← 构建出同名镜像
 ```
 
 **改了代码后，三种强制重建方式**：
 
 | 方式 | 命令 | 适用场景 |
 |---|---|---|
-| ① 两步走（推荐） | `docker compose build privacy-local-agent` → `docker compose up -d` | 步骤清晰，可先看构建结果 |
-| ② 一步到位 | `docker compose up -d --build privacy-local-agent` | 构建+重建容器一条命令 |
-| ③ 完全不用缓存 | `docker compose build --no-cache privacy-local-agent` | 改了基础镜像/依赖源，需彻底重装 |
+| ① 两步走（推荐） | `docker compose build PrivShield` → `docker compose up -d` | 步骤清晰，可先看构建结果 |
+| ② 一步到位 | `docker compose up -d --build PrivShield` | 构建+重建容器一条命令 |
+| ③ 完全不用缓存 | `docker compose build --no-cache PrivShield` | 改了基础镜像/依赖源，需彻底重装 |
 
 > ①/② 构建后镜像 ID 变化，`up -d` 检测到差异会**自动重建容器**，无需手动删容器。
 
@@ -866,7 +866,7 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 为简化容器化运维与测试，项目在 `scripts/dev/`（侧边栏/LLM 单组分）与 `console/scripts/`（全栈/控制台）中内置了一套便捷的 Docker 脚本：
 
 ```bash
-# 1. 独立运行/停止 Privacy Agent 容器 (支持 core / ml 目标)
+# 1. 独立运行/停止 PrivShield Agent 容器 (支持 core / ml 目标)
 ./scripts/dev/docker-start-agent.sh [core|ml]
 ./scripts/dev/docker-stop-agent.sh
 
@@ -941,7 +941,7 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 | 调脱敏/DP/K匿名参数 | 容器：`deploy/docker-compose/privacy-profile.yaml`；本地：`config/sample-privacy-profile.yaml` | 重建容器 / 重启进程 |
 | 看更详细的日志 | 根目录 `.env` 的 `PRIVACY_LOG_LEVEL=DEBUG` | 重启生效 |
 | 升级 agent 版本 | 改 compose `image:` tag 或重新 `build` | `docker compose up -d` |
-| 改 agent 源码（如 `privacy_local_agent/*.py`） | 无需改配置，直接重新构建镜像 | `docker compose up -d --build privacy-local-agent` |
+| 改 agent 源码（如 `PrivShield/*.py`） | 无需改配置，直接重新构建镜像 | `docker compose up -d --build PrivShield` |
 | 清理容器日志占用的磁盘 | compose 已有 max-size 自动轮转；想手动清可 `docker compose logs --tail=0` | 即时 |
 | 想用监控栈（Prometheus+Grafana） | 无需改配置，加 `--profile monitoring` 即可 | `docker compose --profile monitoring up -d` |
 
@@ -975,7 +975,7 @@ PRIVACY_NER_ENABLE=true          # Layer-2 Small-NER
 **Helm 部署**（`llm.enabled` 保持 false，**勿开启**——那是解耦模式）：
 
 ```bash
-helm install pla-ml ./deploy/helm/PrivShield \
+helm install privshield-ml ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-ml.yaml \
   --set image.tag=0.1.0-ml
 ```
@@ -1033,7 +1033,7 @@ docker tag docker.m.daocloud.io/vllm/vllm-openai:latest vllm/vllm-openai:latest
 **Helm 部署** —— 方式一：**Helm 全托管**（一条命令同时创建 core + LLM Deployment）：
 
 ```bash
-helm install pla ./deploy/helm/PrivShield --set llm.enabled=true
+helm install privshield ./deploy/helm/PrivShield --set llm.enabled=true
 ```
 
 - 自动创建 `-llm` Deployment（vLLM + GPU 预留）+ ClusterIP Service
@@ -1080,7 +1080,7 @@ docker compose --profile llm up -d  # 解耦模式（core + 独立 vLLM）
 
 ## 7. 安全配置
 
-所有安全开关默认关闭，生产环境通过环境变量显式启用。配置由 `privacy_local_agent/security/config.py` 中的 `SecuritySettings` 统一解析。
+所有安全开关默认关闭，生产环境通过环境变量显式启用。配置由 `PrivShield/security/config.py` 中的 `SecuritySettings` 统一解析。
 
 ### 7.1 TLS / mTLS
 
@@ -1141,7 +1141,7 @@ docker compose --profile llm up -d  # 解耦模式（core + 独立 vLLM）
 
 ## 8. 服务启动与优雅关闭
 
-容器入口为 `python -m privacy_local_agent.server`，该模块实现 REST + gRPC 双协议统一启动：
+容器入口为 `python -m PrivShield.server`，该模块实现 REST + gRPC 双协议统一启动：
 
 ```text
 启动流程：
@@ -1352,7 +1352,7 @@ networkPolicy:
 ```
 
 **生成的 NetworkPolicy 行为**：
-- 仅允许同命名空间中带有 `app.kubernetes.io/part-of: privacy-local-agent` 标签的 Pod 访问。
+- 仅允许同命名空间中带有 `app.kubernetes.io/part-of: PrivShield` 标签的 Pod 访问。
 - 开放端口：REST（8079）+ gRPC（50051）。
 - 如需允许 Ingress Controller 访问，需额外添加对应的 `from` 规则。
 
@@ -1400,7 +1400,7 @@ networkPolicy:
 | 文件 | 作用 |
 |---|---|
 | `deploy/docker-compose/docker-compose.yml` | 全栈服务编排（Agent / 双 Console 后端 / Web / vLLM / 监控） |
-| `deploy/docker-compose/privacy-profile.yaml` | 容器内参数 Profile（只读挂载到 `/etc/privacy-local-agent/`） |
+| `deploy/docker-compose/privacy-profile.yaml` | 容器内参数 Profile（只读挂载到 `/etc/PrivShield/`） |
 | `deploy/prometheus/`、`deploy/grafana/` | 监控栈配置（Prometheus 抓取/告警规则、Grafana provisioning） |
 
 #### 13.1.3 Kubernetes 配置
@@ -1410,19 +1410,19 @@ K8s 配置独立存放于 `deploy/k8s/`（原生 YAML）与 `deploy/helm/`（Hel
 | 文件 | 职责 |
 |---|---|
 | `deploy/k8s/deployment.yaml` | 环境变量直接内联在 `spec.containers[].env`；TLS / Auth / LLM 以注释形式给出开启模板 |
-| `deploy/k8s/configmap.yaml` | 参数 Profile（`privacy-profile.yaml`）→ ConfigMap，挂载到 `/etc/privacy-local-agent` |
+| `deploy/k8s/configmap.yaml` | 参数 Profile（`privacy-profile.yaml`）→ ConfigMap，挂载到 `/etc/PrivShield` |
 | `deploy/k8s/llm-deployment.yaml` + `llm-service.yaml` | 独立 vLLM 推理服务（运行时解耦，LLM 挂掉 core 自动降级） |
 | `deploy/k8s/secret.example.yaml` | API Key / TLS 证书 Secret 示例 |
 | `deploy/k8s/kustomization.yaml` | `kubectl apply -k` 一键部署入口 |
-| `deploy/helm/privacy-local-agent/` | Helm Chart（`values.yaml` / `values-production.yaml` / `values-ml.yaml`，生产推荐） |
+| `deploy/helm/PrivShield/` | Helm Chart（`values.yaml` / `values-production.yaml` / `values-ml.yaml`，生产推荐） |
 
 #### 13.1.4 三环境配置差异速览
 
 | 维度 | 本地开发 | Docker Compose | Kubernetes |
 |---|---|---|---|
-| 编排文件 | — | `deploy/docker-compose/docker-compose.yml` | `deploy/k8s/*.yaml` 或 `deploy/helm/privacy-local-agent/` |
+| 编排文件 | — | `deploy/docker-compose/docker-compose.yml` | `deploy/k8s/*.yaml` 或 `deploy/helm/PrivShield/` |
 | 环境变量来源 | 根目录 `.env` + `config/env/<profile>.env` | 根目录 `.env`（env_file + 变量替换）+ `environment:` 覆盖 | Deployment `env` 段内联 / Helm `extraEnv` + `values.yaml` |
-| 参数 Profile | `PRIVACY_PROFILE` 指向本地 YAML | `privacy-profile.yaml` 只读挂载 | ConfigMap 挂载 `/etc/privacy-local-agent` |
+| 参数 Profile | `PRIVACY_PROFILE` 指向本地 YAML | `privacy-profile.yaml` 只读挂载 | ConfigMap 挂载 `/etc/PrivShield` |
 | 监听地址 | 默认 `127.0.0.1`（仅本机） | 必须 `0.0.0.0`（容器内） | 必须 `0.0.0.0`（容器内） |
 | 安全配置 | 默认关闭 | 取消注释或经 `.env` 注入 | values 开关 + Secret |
 
@@ -1550,7 +1550,7 @@ curl http://localhost:8079/health
 
 | 现象 | 可能原因 | 排查步骤 |
 |---|---|---|
-| Pod CrashLoopBackOff | TLS 证书路径错误或 Profile YAML 语法错误 | `kubectl logs deploy/privacy-local-agent` 查看启动异常 |
+| Pod CrashLoopBackOff | TLS 证书路径错误或 Profile YAML 语法错误 | `kubectl logs deploy/PrivShield` 查看启动异常 |
 | Pod Pending | 资源不足 / 节点亲和不满足 | `kubectl describe pod <name>` 查看 Events |
 | 健康检查失败（liveness） | 端口未监听 / 安全中间件拦截 | 确认 `/health` 在 `publicPaths` 白名单中；检查 `PRIVACY_HEALTH_NO_AUTH=true` |
 | 就绪探针 503 | 配置解析器未初始化 / SQLite DB 不可达 | 检查 `PRIVACY_PROFILE` 路径是否正确挂载；检查 `PRIVACY_BUDGET_DB` 文件权限 |
@@ -1572,7 +1572,7 @@ curl http://localhost:8079/health
 | 端口被占 `address already in use` | 宿主机已有进程占用 8079 等端口 | `ss -tlnp | grep 8079` 找占用进程；或改 compose `ports:` 映射 |
 | vllm 启动失败 `CUDA error` / `no GPU` | 未装 NVIDIA 驱动 / nvidia-container-toolkit / 无 GPU | `nvidia-smi` 验证；无 GPU 时不要加 `--profile llm` |
 | vllm 返回 404 `model not found` | `--served-model-name` 与 `PRIVACY_LLM_MODEL_NAME` 不一致 | 两处改为完全一致后 `docker compose up -d vllm` |
-| agent 健康检查一直失败 | `/readyz` 503：`PRIVACY_PROFILE` 路径未正确挂载 | `docker compose exec privacy-local-agent ls /etc/privacy-local-agent` |
+| agent 健康检查一直失败 | `/readyz` 503：`PRIVACY_PROFILE` 路径未正确挂载 | `docker compose exec PrivShield ls /etc/PrivShield` |
 | 改了 `.env` 但不生效 | 只 restart 未重建容器 | `docker compose up -d`（restart 不会重新注入环境变量） |
 | Web 控制台 502 | agent 未就绪或后端代理未启动 | 等 healthcheck 通过；`docker compose ps` 看全部状态 |
 | 磁盘被日志/卷占满 | 日志轮转 max-size 偏大或卷增长 | 日志：调小 `logging.options.max-size`；卷：确认数据可备份后 `down -v` |
@@ -1633,7 +1633,7 @@ curl http://localhost:8079/health
 | 2 | `deploy/docker-compose/docker-compose.yml` | healthcheck `test` 数组中 `python` 改为 `python3` |
 | 3 | `tests/scripts/test_docker_start_llm.py` | `_http_get_json` / `_http_post_json` 使用 `urllib.request.build_opener(urllib.request.ProxyHandler({}))` 显式禁用代理 |
 | 4 | `tests/scripts/test_docker_start_llm.py` | 重构 `vllm_service` fixture：使用 `try/finally`、检查容器删除结果、端口映射失败时附加日志诊断 |
-| 5 | `privacy_local_agent/dynclassification/llm_engines.py` | `OpenAILlmClassifier` 新增 `_is_finetuned_model()`，匹配微调模型名时复用 `_FINETUNED_SYSTEM_PROMPT` 和裸用户文本 |
+| 5 | `PrivShield/dynclassification/llm_engines.py` | `OpenAILlmClassifier` 新增 `_is_finetuned_model()`，匹配微调模型名时复用 `_FINETUNED_SYSTEM_PROMPT` 和裸用户文本 |
 
 **验证命令**：
 
@@ -1670,7 +1670,7 @@ curl http://localhost:8079/metrics | grep privacy_budget
 kubectl get configmap PrivShield-config -n PrivShield -o yaml
 
 # 查看 Secret（base64 编码）
-kubectl get secret pla-tls -n PrivShield -o yaml
+kubectl get secret privshield-tls -n PrivShield -o yaml
 ```
 
 ### 15.2 WSL 中 Docker GPU 失效（真实排查案例）
@@ -1777,7 +1777,7 @@ kubectl rollout restart deploy/PrivShield -n PrivShield
 
 ```bash
 # 更新 TLS Secret
-kubectl create secret tls pla-tls \
+kubectl create secret tls privshield-tls \
   --cert=new-tls.crt --key=new-tls.key \
   -n PrivShield --dry-run=client -o yaml | kubectl apply -f -
 
@@ -1808,7 +1808,7 @@ make helm-lint
 make helm-template
 
 # 自定义 values 渲染
-helm template pla ./deploy/helm/PrivShield \
+helm template privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set security.tls.existingSecret=pla-tls
+  --set security.tls.existingSecret=privshield-tls
 ```

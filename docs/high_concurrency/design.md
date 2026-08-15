@@ -95,7 +95,7 @@ Agent 启动 N 个 worker 进程，所有进程绑定同一 IP:Port（`SO_REUSEP
 
 #### 3.2.1 SO_REUSEPORT 多进程启动器
 
-新增 `privacy_local_agent/launcher.py` 多进程启动模块：
+新增 `PrivShield/launcher.py` 多进程启动模块：
 
 ```python
 """多进程启动器：fork N 个 worker 共享同一端口。"""
@@ -111,7 +111,7 @@ def _worker_entry(worker_id: int, port_rest: int, port_grpc: int):
     setproctitle.setproctitle(f"privacy-agent-worker-{worker_id}")
 
     # 每个 worker 独立创建 socket 并设置 SO_REUSEPORT
-    from privacy_local_agent.server import serve_with_socket
+    from PrivShield.server import serve_with_socket
     serve_with_socket(
         rest_port=port_rest,
         grpc_port=port_grpc,
@@ -585,7 +585,7 @@ graph TD
 使用 PyO3 构建 Rust 扩展，作为 Python 包的可选子模块：
 
 ```
-privacy_local_agent/
+PrivShield/
 ├── rust_ext/
 │   ├── Cargo.toml
 │   ├── pyproject.toml
@@ -992,7 +992,7 @@ def l2_norm_clip(vectors: np.ndarray, max_norm: float) -> np.ndarray:
 在 `dp.py` 等模块中按需引入 Numba 加速函数：
 
 ```python
-# privacy_local_agent/privacy/dp.py
+# PrivShield/privacy/dp.py
 try:
     from numba import jit
     HAS_NUMBA = True
@@ -1467,7 +1467,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 | 多进程预算竞争 | 超卖或拒绝 | Lua 脚本原子扣减 + 预扣批量模式 |
 | gevent monkey-patch 副作用 | 第三方库行为异常 | 充分测试 + `patch_all(thread=False)` 限制范围 |
 | Numba 首次编译延迟 | 首个请求延迟 ~200ms | 启动时预热 `@jit` 函数 + `cache=True` 持久化编译结果 |
-| Numba 安装包体积大 | 镜像增加 ~300MB | 设为可选依赖 `pip install privacy-local-agent[numba]` |
+| Numba 安装包体积大 | 镜像增加 ~300MB | 设为可选依赖 `pip install PrivShield[numba]` |
 
 ---
 

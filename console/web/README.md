@@ -70,8 +70,8 @@ npm run build
 
 前端顶部的 Backend Selector 主要切换的是 **API 的上游后端**，不是切换前端本身：
 
-- `Python REST`：前端请求发到 Python 后端，再由它转发到 `privacy_local_agent`
-- `Go gRPC`：前端请求发到 Go 后端，再由它通过 gRPC 转发到 `privacy_local_agent`
+- `Python REST`：前端请求发到 Python 后端，再由它转发到 `PrivShield`
+- `Go gRPC`：前端请求发到 Go 后端，再由它通过 gRPC 转发到 `PrivShield`
 
 在开发模式下，切换后端通常意味着不同端口之间的跨域请求；在商业化产品模式下，最好把它们都收敛到同一个对外入口，避免浏览器端感知多个后端地址。
 

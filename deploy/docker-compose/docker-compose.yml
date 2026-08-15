@@ -1,6 +1,6 @@
 # =============================================================================
-# Privacy Local Agent - Docker Compose 全栈编排
-# Privacy Local Agent - Full Stack Docker Compose Orchestration
+# PrivShield - Docker Compose 全栈编排
+# PrivShield - Full Stack Docker Compose Orchestration
 #
 # 服务拓扑 / Service Topology:
 #   ┌─────────────────┐     ┌────────────────────┐
@@ -10,7 +10,7 @@
 #   └─────────────────┘     └─────────┬──────────┘
 #                                      │
 #                            ┌─────────▼──────────┐
-#                            │ Privacy Local Agent │
+#                            │ PrivShield │
 #                            │   REST:8079 gRPC    │
 #                            │      :50051         │
 #                            └─────────────────────┘
@@ -106,10 +106,10 @@ volumes:
 services:
 
   # ===========================================================================
-  # 1. Privacy Local Agent 核心 Sidecar 服务
+  # 1. PrivShield 核心 Sidecar 服务
   #    REST: 8079 | gRPC: 50051
   # ===========================================================================
-  privacy-local-agent:
+  PrivShield:
     # build: 本地构建镜像的配置段（配置了 build 且本地无该镜像时自动构建）
     build:
       # context: 构建上下文目录（Dockerfile 中 COPY 相对路径的根）
@@ -123,10 +123,10 @@ services:
       target: core
     # image: 构建产物/运行使用的镜像名:tag
     #   若本地不存在该标签，compose 会尝试从远端仓库（Docker Hub）拉取
-    image: privacy-local-agent:0.1.0
+    image: privshield:0.1.0
     # container_name: 指定容器名称（同一宿主机全局唯一）
     #   不设置时 compose 自动生成 "<项目名>-<服务名>-<序号>" 格式名称
-    container_name: privacy-local-agent
+    container_name: PrivShield
     # env_file: 从外部文件批量注入环境变量（比逐个写 environment 更易维护）
     #   多个 env_file 按顺序合并，后声明的覆盖先声明的；environment 段优先级最高
     env_file:
@@ -291,7 +291,7 @@ services:
     #     service_healthy                → 等待健康检查通过后再启动（本配置，保证 agent 就绪）
     #     service_completed_successfully → 等待一次性任务成功退出（仅用于批处理服务）
     depends_on:
-      privacy-local-agent:
+      PrivShield:
         condition: service_healthy
     networks:
       - frontend   # 供 console-web / 外部访问
@@ -339,9 +339,9 @@ services:
       PRIVACY_CONSOLE_PORT: "8080"
       # PRIVACY_AGENT_URL: 上游 agent 的 REST 基地址（FastAPI 代理仅走 HTTP）
       #   格式 http://<服务名>:<REST端口>；跨主机部署时替换为 agent 实际地址
-      PRIVACY_AGENT_URL: "http://privacy-local-agent:8079"
+      PRIVACY_AGENT_URL: "http://PrivShield:8079"
     depends_on:
-      privacy-local-agent:
+      PrivShield:
         condition: service_healthy  # 等待 agent 健康就绪（同服务 2 说明）
     networks:
       - frontend
@@ -383,7 +383,7 @@ services:
       - "5173:5173"  # 对外暴露前端访问端口（与 vite 开发端口保持一致，切换开发/生产无感）
     # 说明: 前端仅需访问 Go/Python 代理，无需直连 agent，故仅挂 frontend 网络
     depends_on:
-      privacy-local-agent:
+      PrivShield:
         condition: service_healthy  # 等核心就绪（避免首屏请求 502）
     networks:
       - frontend
@@ -429,7 +429,7 @@ services:
     #   - 旧镜像 v0.6.3（2024 年）无法加载 Qwen3.5，此处默认 latest
     #   - 生产环境建议固定 tag（如 ${VLLM_IMAGE_TAG} 指定 v0.26.x）保证可复现
     image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
-    container_name: privacy-local-agent-vllm
+    container_name: PrivShield-vllm
     # command: 覆盖镜像默认 CMD，逐项解释如下（均为 vLLM OpenAI 服务端参数）
     command:
       - "--model"                        # 模型权重目录（容器内路径，由下方 volumes 挂载 .models）

@@ -30,7 +30,7 @@ Pandas is the core library for Python data analysis, providing DataFrame/Series 
 ### 2.1 架构角色 / Architecture Role
 
 ```
-前端 React ──HTTP/JSON──▶ Python 代理后端 ──HTTP/REST──▶ privacy-local-agent
+前端 React ──HTTP/JSON──▶ Python 代理后端 ──HTTP/REST──▶ PrivShield
                               │                              │
                               │    ◀── Arrow IPC 二进制流 ────┘
                               │         (application/vnd.apache.arrow.stream)
@@ -853,7 +853,7 @@ def apply_masking_to_batch(batch: pa.RecordBatch) -> pa.Table:
 
 ```python
 # 1. JSON：REST API 交互 / REST API interaction
-# 前端 → Console Backend → Privacy Agent
+# 前端 → Console Backend → PrivShield Agent
 import json
 
 request_payload = {
@@ -864,7 +864,7 @@ request_payload = {
 # Content-Type: application/json
 
 # 2. Protocol Buffers：gRPC 通信 / gRPC communication
-# Console Backend-Go → Privacy Agent (gRPC)
+# Console Backend-Go → PrivShield Agent (gRPC)
 # proto/privacy.proto 定义消息结构 / Defines message structure
 
 # 3. Arrow IPC：内部数据处理 / Internal data processing

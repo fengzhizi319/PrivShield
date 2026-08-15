@@ -131,7 +131,7 @@ class TestViterbiDecode:
 
     def test_viterbi_simple_sequence(self):
         """简单序列应返回最优路径。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import _viterbi_decode
+        from PrivShield.dynclassification.mlx_ner_engine import _viterbi_decode
 
         # 3 个时间步，2 个标签
         emissions = [
@@ -148,7 +148,7 @@ class TestViterbiDecode:
 
     def test_viterbi_transition_bias(self):
         """转移分数应影响最优路径。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import _viterbi_decode
+        from PrivShield.dynclassification.mlx_ner_engine import _viterbi_decode
 
         # 发射分数相同，但转移分数偏好 0→1→1
         emissions = [
@@ -169,7 +169,7 @@ class TestViterbiDecode:
 
     def test_viterbi_single_step(self):
         """单步序列应直接选择最高发射分数。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import _viterbi_decode
+        from PrivShield.dynclassification.mlx_ner_engine import _viterbi_decode
 
         emissions = [[0.1, 0.9, 0.3]]
         start_transitions = [0.0, 0.0, 0.0]
@@ -191,7 +191,7 @@ class TestBIOESParsing:
     @pytest.fixture()
     def engine(self):
         """创建 MLX NER 引擎实例（不初始化模型）。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         return MLXSmallNerEngine(model_dir="/tmp/fake")
 
     def test_single_entity(self, engine):
@@ -257,14 +257,14 @@ class TestMLXNerEngineInit:
 
     def test_init_model_not_found(self, mlx_available):
         """模型目录不存在时应抛出 FileNotFoundError。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir="/nonexistent/model-mlx")
         with pytest.raises(FileNotFoundError):
             engine._lazy_init()
 
     def test_init_error_caching(self, mlx_available):
         """初始化失败后再次调用应直接抛出缓存的错误。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir="/nonexistent/model-mlx")
         with pytest.raises(FileNotFoundError):
             engine._lazy_init()
@@ -273,14 +273,14 @@ class TestMLXNerEngineInit:
 
     def test_extract_init_failure_returns_empty(self, mlx_available):
         """初始化失败时 extract 应返回空列表。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir="/nonexistent/model-mlx")
         result = engine.extract("测试文本")
         assert result == []
 
     def test_init_with_real_model(self, mlx_available, ner_model_available):
         """使用真实转换模型应成功初始化。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir=str(MLX_NER_MODEL_DIR))
         engine._lazy_init()
         assert engine._initialized is True
@@ -298,7 +298,7 @@ class TestMLXNerEngineInference:
 
     def test_extract_medical_text(self, mlx_available, ner_model_available):
         """医疗文本应能提取出实体。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir=str(MLX_NER_MODEL_DIR))
         entities = engine.extract("患者诊断为急性心肌梗死，给予阿司匹林治疗")
         # 应至少提取出一个实体
@@ -312,8 +312,8 @@ class TestMLXNerEngineInference:
 
     def test_extract_returns_mapped_labels(self, mlx_available, ner_model_available):
         """提取的实体标签应经过映射。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
-        from privacy_local_agent.dynclassification.ner_engines import DEFAULT_NER_LABEL_MAPPING
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.ner_engines import DEFAULT_NER_LABEL_MAPPING
 
         engine = MLXSmallNerEngine(model_dir=str(MLX_NER_MODEL_DIR))
         entities = engine.extract("糖尿病患者口服二甲双胍")
@@ -325,14 +325,14 @@ class TestMLXNerEngineInference:
 
     def test_extract_empty_text(self, mlx_available, ner_model_available):
         """空文本不应崩溃。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir=str(MLX_NER_MODEL_DIR))
         entities = engine.extract("")
         assert isinstance(entities, list)
 
     def test_extract_long_text(self, mlx_available, ner_model_available):
         """超长文本应被截断处理，不崩溃。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir=str(MLX_NER_MODEL_DIR))
         long_text = "糖尿病患者" * 100
         entities = engine.extract(long_text)
@@ -341,7 +341,7 @@ class TestMLXNerEngineInference:
     def test_metal_gpu_inference_speed(self, mlx_available, ner_model_available):
         """Metal GPU 推理应在合理时间内完成（< 5s）。"""
         import time
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         engine = MLXSmallNerEngine(model_dir=str(MLX_NER_MODEL_DIR))
         # 预热
         engine.extract("测试")
@@ -362,14 +362,14 @@ class TestMLXLlmClassifierInit:
 
     def test_init_model_not_found(self, mlx_available):
         """模型目录不存在时应抛出 FileNotFoundError。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
         classifier = MLXLlmClassifier(model_dir="/nonexistent/model-mlx")
         with pytest.raises(FileNotFoundError):
             classifier._lazy_init()
 
     def test_init_error_caching(self, mlx_available):
         """初始化失败后再次调用应直接抛出缓存的错误。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
         classifier = MLXLlmClassifier(model_dir="/nonexistent/model-mlx")
         with pytest.raises(FileNotFoundError):
             classifier._lazy_init()
@@ -378,15 +378,15 @@ class TestMLXLlmClassifierInit:
 
     def test_classify_init_failure_returns_none(self, mlx_available):
         """初始化失败时 classify 应返回 None。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.base import SensitivityLevel
         classifier = MLXLlmClassifier(model_dir="/nonexistent/model-mlx")
         result = classifier.classify("测试", SensitivityLevel.L3, 0.5)
         assert result is None
 
     def test_is_ready_false_before_init(self, mlx_available):
         """未初始化时 is_ready 应为 False。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
         classifier = MLXLlmClassifier(model_dir="/tmp/fake")
         assert classifier.is_ready is False
 
@@ -402,7 +402,7 @@ class TestMLXLlmHelpers:
     def test_rms_norm(self, mlx_available):
         """RMSNorm 应正确归一化。"""
         import mlx.core as mx
-        from privacy_local_agent.dynclassification.mlx_llm_engine import _rms_norm
+        from PrivShield.dynclassification.mlx_llm_engine import _rms_norm
 
         x = mx.array([[1.0, 2.0, 3.0]])
         w = mx.array([1.0, 1.0, 1.0])
@@ -415,7 +415,7 @@ class TestMLXLlmHelpers:
     def test_silu_activation(self, mlx_available):
         """SiLU 激活函数应正确计算。"""
         import mlx.core as mx
-        from privacy_local_agent.dynclassification.mlx_llm_engine import _silu
+        from PrivShield.dynclassification.mlx_llm_engine import _silu
 
         x = mx.array([0.0, 1.0, -1.0])
         out = _silu(x)
@@ -428,7 +428,7 @@ class TestMLXLlmHelpers:
     def test_rope_freqs_shape(self, mlx_available):
         """RoPE 频率矩阵形状应正确。"""
         import mlx.core as mx
-        from privacy_local_agent.dynclassification.mlx_llm_engine import _rope_freqs
+        from PrivShield.dynclassification.mlx_llm_engine import _rope_freqs
 
         angles = _rope_freqs(dim=128, seq_len=10)
         mx.eval(angles)
@@ -437,7 +437,7 @@ class TestMLXLlmHelpers:
     def test_apply_rope_shape(self, mlx_available):
         """应用 RoPE 后形状应不变。"""
         import mlx.core as mx
-        from privacy_local_agent.dynclassification.mlx_llm_engine import _apply_rope, _rope_freqs
+        from PrivShield.dynclassification.mlx_llm_engine import _apply_rope, _rope_freqs
 
         x = mx.random.normal((12, 10, 128))  # (num_heads, seq_len, head_dim)
         angles = _rope_freqs(dim=128, seq_len=10)
@@ -447,7 +447,7 @@ class TestMLXLlmHelpers:
 
     def test_parse_json_result_valid(self, mlx_available):
         """有效 JSON 应正确解析。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
 
         text = '{"final_level": "L3", "confidence": 0.85, "reasoning": "PII"}'
         result = MLXLlmClassifier._parse_json_result(text)
@@ -456,7 +456,7 @@ class TestMLXLlmHelpers:
 
     def test_parse_json_result_with_surrounding_text(self, mlx_available):
         """JSON 前后有额外文字时应正确提取。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
 
         text = '分析结果：{"final_level": "L4", "confidence": 0.9} 以上。'
         result = MLXLlmClassifier._parse_json_result(text)
@@ -465,14 +465,14 @@ class TestMLXLlmHelpers:
 
     def test_parse_json_result_invalid(self, mlx_available):
         """无效 JSON 应返回 None。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
 
         result = MLXLlmClassifier._parse_json_result("这不是JSON")
         assert result is None
 
     def test_parse_json_result_missing_final_level(self, mlx_available):
         """缺少 final_level 字段应返回 None。"""
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
 
         result = MLXLlmClassifier._parse_json_result('{"confidence": 0.9}')
         assert result is None
@@ -488,19 +488,19 @@ class TestNerAdapterMLXFallback:
 
     def test_mlx_preferred_on_macos(self, mlx_available, ner_model_available):
         """macOS 上 MLX 引擎应被优先选择。"""
-        from privacy_local_agent.dynclassification.ner_adapter import NerAdapter
+        from PrivShield.dynclassification.ner_adapter import NerAdapter
         adapter = NerAdapter()
         adapter._lazy_init()
         assert adapter._available is True
         assert adapter._engine is not None
         # 验证使用的是 MLX 引擎
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
         assert isinstance(adapter._engine, MLXSmallNerEngine)
 
     def test_fallback_when_mlx_model_missing(self, mlx_available):
         """MLX 模型不存在时应降级到下一个引擎。"""
-        from privacy_local_agent.dynclassification.ner_adapter import NerAdapter
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.ner_adapter import NerAdapter
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
 
         with patch.object(MLXSmallNerEngine, "_lazy_init", side_effect=FileNotFoundError("no mlx model")):
             adapter = NerAdapter(model_path="/nonexistent/model.onnx")
@@ -519,8 +519,8 @@ class TestLlmAdapterMLXFallback:
 
     def test_mlx_preferred_on_macos(self, mlx_available, llm_model_available):
         """macOS 上 MLX LLM 引擎应被优先选择。"""
-        from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.llm_adapter import LlmAdapter
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
 
         adapter = LlmAdapter(model_path=str(MLX_LLM_MODEL_DIR))
         adapter._lazy_init()
@@ -529,8 +529,8 @@ class TestLlmAdapterMLXFallback:
 
     def test_fallback_to_qwen2vl_when_mlx_fails(self, mlx_available):
         """MLX 不可用时应降级到 Qwen2VL。"""
-        from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
-        from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+        from PrivShield.dynclassification.llm_adapter import LlmAdapter
+        from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
 
         with patch.object(MLXLlmClassifier, "_lazy_init", side_effect=FileNotFoundError("no mlx")):
             adapter = LlmAdapter(model_path="/nonexistent/model")

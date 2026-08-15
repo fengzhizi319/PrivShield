@@ -38,13 +38,13 @@
 cd /path/to/PrivShield
 
 # Helm 开发模式一键部署
-helm install pla ./deploy/helm/PrivShield
+helm install privshield ./deploy/helm/PrivShield
 
 # 生产模式（需提前创建 TLS 与 API Key Secret）
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set security.tls.existingSecret=pla-tls \
-  --set security.auth.apiKeysSecret=pla-apikeys
+  --set security.tls.existingSecret=privshield-tls \
+  --set security.auth.apiKeysSecret=privshield-apikeys
 
 # 原生 K8s 部署
 kubectl apply -k ./deploy/k8s/

@@ -175,5 +175,5 @@ llmlora/.venv/bin/python -m llmlora.scripts.evaluate --backend vllm --model-path
 2. **Prompt Labels Masking**：Qwen3.5 chat template 不含 `{% generation %}` 标记，官方 assistant mask 不可用；`loader.py` 采用「prompt 前缀长度定位」方案，损失仅作用于 Assistant JSON 输出。
 3. **thinking 标记处理**：训练与推理统一 `enable_thinking=False`，避免模板注入空思考块污染 JSON 输出。
 4. **LoRA 注入层**：自动探查全部 Linear 叶子层（含混合注意力的 `in_proj_*` 系列），排除 `lm_head`/`embed`/`mtp`，可训练参数约 1.42%。
-5. **Sidecar 接入**：`src/inference/engine.py` 提供 `QwenPrivacyLoRAEngine`（线程安全、延迟加载、批处理），可替换 privacy-local-agent Layer-3 的通用 LLM 引擎。
+5. **Sidecar 接入**：`src/inference/engine.py` 提供 `QwenPrivacyLoRAEngine`（线程安全、延迟加载、批处理），可替换 PrivShield Layer-3 的通用 LLM 引擎。
 6. **双推理后端**：支持 PyTorch 原生推理和 vLLM 高性能推理，通过 `--backend pytorch|vllm` 切换。vLLM 后端利用 PagedAttention 和 CUDA Graphs 实现约 7x 加速；LoRA adapter 挂载走 vLLM 0.26 正确 API（构造时 `enable_lora=True`，推理时传 `LoRARequest`）。

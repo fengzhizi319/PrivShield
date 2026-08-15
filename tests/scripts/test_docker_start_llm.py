@@ -53,8 +53,8 @@ from typing import Any  # compose 配置 dict / API JSON 的宽松类型标注
 from unittest.mock import patch  # mock HTTP 层，构造模拟响应
 
 # ── 项目内导入 / Project imports（Layer-3 真实推理路径）──
-from privacy_local_agent.dynclassification.base import SensitivityLevel
-from privacy_local_agent.dynclassification.llm_engines import OpenAILlmClassifier
+from PrivShield.dynclassification.base import SensitivityLevel
+from PrivShield.dynclassification.llm_engines import OpenAILlmClassifier
 
 # ── 第三方导入 / Third-party imports ──
 import pytest  # 测试框架：fixture / skip / mark
@@ -93,7 +93,7 @@ COMPOSE_DIR = PROJECT_ROOT / "deploy" / "docker-compose"
 COMPOSE_FILE = COMPOSE_DIR / "docker-compose.yml"
 
 # vLLM 容器名：与 compose 中 container_name 一致，集成测试据此校验/清理
-VLLM_CONTAINER_NAME = "privacy-local-agent-vllm"
+VLLM_CONTAINER_NAME = "PrivShield-vllm"
 
 # 本地模型目录：compose 将 .models 挂载为 /models，--model 指向其子目录
 VLLM_MODEL_DIR = PROJECT_ROOT / ".models" / "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
@@ -330,7 +330,7 @@ class TestScriptExecutionFlow:
 
         stop_content = ps_stop.read_text(encoding="utf-8")
         assert "docker compose --profile llm stop vllm" in stop_content
-        assert "docker rm -f privacy-local-agent-vllm" in stop_content
+        assert "docker rm -f PrivShield-vllm" in stop_content
 
     def test_cross_platform_os_detection_in_bash_script(self):
         """【跨平台兼容性】验证 bash 启动脚本内置了 macOS (Darwin) 与 Windows (WSL2/GitBash) 平台检测。"""
@@ -415,8 +415,8 @@ class TestComposeDefinition:
         assert command[command.index("--model") + 1] == f"/models/{model_name}"
 
     def test_vllm_container_name(self, compose_config):
-        """容器名必须与脚本输出提示的日志容器名一致（privacy-local-agent-vllm）。"""
-        assert compose_config["services"]["vllm"].get("container_name") == "privacy-local-agent-vllm"
+        """容器名必须与脚本输出提示的日志容器名一致（PrivShield-vllm）。"""
+        assert compose_config["services"]["vllm"].get("container_name") == "PrivShield-vllm"
 
     def test_vllm_healthcheck_uses_python3(self, compose_config):
         """健康检查命令必须使用 python3；vllm/vllm-openai 镜像没有 python 命令。
@@ -898,7 +898,7 @@ class TestVllmServiceIntegration:
         """真实任务：从 rules/domains/medical.yaml 与 rules/taxonomies/default.yaml 动态解析分类分级指南及脱敏抹平/泛化治理策略，
         注入 System Prompt 传给 vLLM，验证模型能否精准输出 L1~L5 结构化 JSON 及脱敏抹平结果。
         """
-        from privacy_local_agent.dynclassification.llm_engines import (
+        from PrivShield.dynclassification.llm_engines import (
             build_prompt_from_domain_and_taxonomy_yaml,
         )
 

@@ -8,7 +8,7 @@
 
 ## Reporting a Vulnerability
 
-We take the security of privacy-local-agent seriously. If you believe you have found a
+We take the security of PrivShield seriously. If you believe you have found a
 security vulnerability, please report it responsibly.
 
 **Please do NOT open a public GitHub issue for security vulnerabilities.**

@@ -1,7 +1,7 @@
 """数据格式适配器单元测试 / Data Format Adapter Unit Tests.
 
 中文说明：
-覆盖 privacy_local_agent.privacy.data_adapters 中的纯函数与多格式提取逻辑，
+覆盖 PrivShield.privacy.data_adapters 中的纯函数与多格式提取逻辑，
 包括 numpy/pandas/序列/稀疏矩阵/PyArrow IPC/duck-typing 等路径，以及
 to_records/from_records 记录转换。SecretFlow 为可选依赖，未安装时相关分支跳过。
 
@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from privacy_local_agent.privacy import data_adapters as da
+from PrivShield.privacy import data_adapters as da
 
 
 class TestToNumpyArray:

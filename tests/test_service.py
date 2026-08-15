@@ -10,10 +10,10 @@ import tempfile
 import pytest
 import yaml
 
-from privacy_local_agent.privacy.budget import BudgetAccountant, BudgetRegistry
-from privacy_local_agent.privacy.dp import DPApi, LocalDPApi
-from privacy_local_agent.privacy.profile import ParameterResolver
-from privacy_local_agent.service import PrivacyService
+from PrivShield.privacy.budget import BudgetAccountant, BudgetRegistry
+from PrivShield.privacy.dp import DPApi, LocalDPApi
+from PrivShield.privacy.profile import ParameterResolver
+from PrivShield.service import PrivacyService
 
 
 # ---------------------------------------------------------------------------

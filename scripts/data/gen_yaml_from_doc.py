@@ -32,7 +32,7 @@ import yaml
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
-from privacy_local_agent.observability.logging_config import get_logger
+from PrivShield.observability.logging_config import get_logger
 
 logger = get_logger("gen_yaml_from_doc")
 
@@ -209,7 +209,7 @@ def call_llm_api(prompt: str, api_key: str, api_base: str, model: str) -> dict[s
 def call_local_llm(prompt: str) -> dict[str, Any] | None:
     """尝试调用项目内置本地 LlmAdapter / Invoke project local LlmAdapter."""
     try:
-        from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
+        from PrivShield.dynclassification.llm_adapter import LlmAdapter
 
         adapter = LlmAdapter()
         if adapter.is_available:

@@ -52,13 +52,13 @@ backends:
 ## 2. 启动方式 (How to Run)
 
 ### 2.1 本地脚本启动
-启动网关的入口为 `privacy_local_agent.gateway.server` 模块：
+启动网关的入口为 `PrivShield.gateway.server` 模块：
 ```bash
 # 1. 使用默认环境变量启动
-PYTHONPATH=. .venv/bin/python -m privacy_local_agent.gateway.server
+PYTHONPATH=. .venv/bin/python -m PrivShield.gateway.server
 
 # 2. 指定配置文件启动
-PRIVACY_GATEWAY_CONFIG=gateway-config.yaml PYTHONPATH=. .venv/bin/python -m privacy_local_agent.gateway.server
+PRIVACY_GATEWAY_CONFIG=gateway-config.yaml PYTHONPATH=. .venv/bin/python -m PrivShield.gateway.server
 ```
 
 ### 2.2 Docker 部署 (多容器扩容场景)
@@ -71,7 +71,7 @@ version: '3.8'
 services:
   # Agent 节点 1
   agent-worker-1:
-    image: privacy-local-agent:latest
+    image: PrivShield:latest
     environment:
       - PRIVACY_REST_PORT=8079
       - PRIVACY_GRPC_PORT=50051
@@ -81,7 +81,7 @@ services:
 
   # Agent 节点 2
   agent-worker-2:
-    image: privacy-local-agent:latest
+    image: PrivShield:latest
     environment:
       - PRIVACY_REST_PORT=8079
       - PRIVACY_GRPC_PORT=50051
@@ -91,8 +91,8 @@ services:
 
   # 网关负载均衡器
   gateway:
-    image: privacy-local-agent:latest
-    command: ["python", "-m", "privacy_local_agent.gateway.server"]
+    image: PrivShield:latest
+    command: ["python", "-m", "PrivShield.gateway.server"]
     environment:
       - GATEWAY_REST_PORT=8000
       - GATEWAY_GRPC_PORT=50000

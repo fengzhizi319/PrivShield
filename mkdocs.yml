@@ -1,6 +1,6 @@
-site_name: Privacy Local Agent
+site_name: PrivShield
 site_description: Privacy primitives and data classification sidecar
-repo_url: https://github.com/your-org/privacy-local-agent
+repo_url: https://github.com/fengzhizi319/PrivShield
 edit_uri: edit/main/docs/
 
 theme:
@@ -145,6 +145,7 @@ nav:
 
   - LoRA 微调:
     - 概览: llmlora/README.md
+    - 模型架构图谱: llmlora/qwen3_5_0_8b_architecture.md
     - 数据生成方案: llmlora/data_generation_plan.md
     - 微调与评估指南: llmlora/finetuning_and_eval_guide.md
 

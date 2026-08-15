@@ -26,7 +26,7 @@ Uvicorn is a high-performance ASGI web server built on `uvloop` and `httptools`,
 ### 2.1 架构角色 / Architecture Role
 
 ```
-浏览器 ──HTTP──▶ Uvicorn (port 8080) ──▶ FastAPI App ──httpx──▶ privacy-local-agent (port 8079)
+浏览器 ──HTTP──▶ Uvicorn (port 8080) ──▶ FastAPI App ──httpx──▶ PrivShield (port 8079)
                  ASGI 服务器               Python REST 代理后端
                  ASGI Server               Python REST Proxy Backend
 ```
@@ -454,7 +454,7 @@ asyncio.run(main())
 
 ### 4.3 本项目中的编程式启动 / Programmatic Startup in This Project
 
-文件 / File：`privacy_local_agent/server.py`
+文件 / File：`PrivShield/server.py`
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -904,7 +904,7 @@ async def lifespan(app: FastAPI):
 | 组件 / Component | 异步策略 / Async Strategy | 说明 / Notes |
 |---|---|---|
 | Console Backend (FastAPI) | httpx.AsyncClient | 异步转发到 Agent / Async proxy to Agent |
-| Privacy Agent (FastAPI) | 混合 / Mixed | 计算密集型用线程池 / CPU-bound uses pool |
+| PrivShield Agent (FastAPI) | 混合 / Mixed | 计算密集型用线程池 / CPU-bound uses pool |
 | gRPC Server | ThreadPoolExecutor | 同步 servicer + 线程池 / Sync servicer + pool |
 | Gateway | asyncio + httpx | 全异步代理 / Fully async proxy |
 
@@ -1020,8 +1020,8 @@ spec:
 | 组件 / Component | 关闭行为 / Shutdown Behavior | 超时 / Timeout |
 |---|---|---|
 | Console Backend | 关闭 httpx 连接池 / Close httpx pool | 30s |
-| Privacy Agent REST | 等待当前请求 / Wait current reqs | 30s |
-| Privacy Agent gRPC | server.stop(grace=5) | 5s grace |
+| PrivShield Agent REST | 等待当前请求 / Wait current reqs | 30s |
+| PrivShield Agent gRPC | server.stop(grace=5) | 5s grace |
 | Gateway | 关闭所有后端连接 / Close all backend conns | 10s |
 
 ## 11. 多进程与 Worker 管理 / Multi-Process & Worker Management
@@ -1108,8 +1108,8 @@ proc_name = "console-backend"
 | 组件 / Component | 进程模型 / Process Model | 说明 / Notes |
 |---|---|---|
 | Console Backend | 单进程 Uvicorn | 开发工具，低并发 / Dev tool, low concurrency |
-| Privacy Agent REST | 单进程 Uvicorn | 计算用线程池 / Compute uses thread pool |
-| Privacy Agent gRPC | ThreadPoolExecutor(10) | 同步 servicer / Sync servicer |
+| PrivShield Agent REST | 单进程 Uvicorn | 计算用线程池 / Compute uses thread pool |
+| PrivShield Agent gRPC | ThreadPoolExecutor(10) | 同步 servicer / Sync servicer |
 | Gateway | 单进程 asyncio | 纯 I/O 代理 / Pure I/O proxy |
 | 生产部署 / Production | Gunicorn + Workers | K8s 多 Pod 替代 / K8s multi-Pod alternative |
 
@@ -1138,7 +1138,7 @@ Uvicorn 原生支持 WebSocket，通过 ASGI 协议处理：
 ### 12.2 FastAPI WebSocket 端点 / FastAPI WebSocket Endpoint
 
 ```python
-# privacy_local_agent/routers/ws.py
+# PrivShield/routers/ws.py
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import json
@@ -1600,7 +1600,7 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # 复制应用代码 / Copy application code
-COPY privacy_local_agent/ ./privacy_local_agent/
+COPY PrivShield/ ./PrivShield/
 COPY pyproject.toml .
 
 # 设置环境变量 / Set environment variables
@@ -1624,7 +1624,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # 启动命令 / Start command
 # 使用 exec form 确保信号正确传递 / Use exec form for proper signal handling
-CMD ["python", "-m", "uvicorn", "privacy_local_agent.main:app", \
+CMD ["python", "-m", "uvicorn", "PrivShield.main:app", \
      "--host", "0.0.0.0", "--port", "8079", \
      "--workers", "2", "--loop", "uvloop", "--http", "httptools"]
 ```

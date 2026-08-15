@@ -26,5 +26,5 @@ repos:
       - id: mypy
         additional_dependencies: []
         args: [--ignore-missing-imports]
-        files: ^privacy_local_agent/
-        exclude: privacy_local_agent/privacy_pb2.*
+        files: ^PrivShield/
+        exclude: PrivShield/privacy_pb2.*

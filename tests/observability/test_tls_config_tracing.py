@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from privacy_local_agent.observability import tracing
-from privacy_local_agent.security import tls as tls_mod
-from privacy_local_agent.security import config as config_mod
-from privacy_local_agent.security.config import SecuritySettings, _load_json_env
+from PrivShield.observability import tracing
+from PrivShield.security import tls as tls_mod
+from PrivShield.security import config as config_mod
+from PrivShield.security.config import SecuritySettings, _load_json_env
 
 
 class TestUvicornSslKwargs:

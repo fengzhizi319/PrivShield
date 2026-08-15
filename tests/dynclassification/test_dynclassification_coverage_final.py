@@ -4,17 +4,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from privacy_local_agent.dynclassification.composite import CompositeRuleEngine
-from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
-from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator
-from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry
-from privacy_local_agent.dynclassification.operators import _validate_id_card, _validate_medical_card, _in_icd10_interval
-from privacy_local_agent.dynclassification.profile_loader import ProfileLoader
-from privacy_local_agent.dynclassification.models import (
+from PrivShield.dynclassification.composite import CompositeRuleEngine
+from PrivShield.dynclassification.engine import ConfigurableRuleEngine
+from PrivShield.dynclassification.standard_profile_generator import StandardProfileGenerator
+from PrivShield.dynclassification.operator_registry import OperatorRegistry
+from PrivShield.dynclassification.operators import _validate_id_card, _validate_medical_card, _in_icd10_interval
+from PrivShield.dynclassification.profile_loader import ProfileLoader
+from PrivShield.dynclassification.models import (
     DomainTaxonomy, SecurityTag, SensitivityLevelDef, CategoryDef,
 )
-from privacy_local_agent.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
-from privacy_local_agent.dynclassification.service import DynClassificationService
+from PrivShield.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
+from PrivShield.dynclassification.service import DynClassificationService
 
 
 class TestUltimateCoverageDetails:

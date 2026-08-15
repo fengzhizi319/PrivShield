@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from privacy_local_agent.dynclassification.base import SensitivityLevel
-from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
-from privacy_local_agent.dynclassification.ner_adapter import NerAdapter
+from PrivShield.dynclassification.base import SensitivityLevel
+from PrivShield.dynclassification.llm_adapter import LlmAdapter
+from PrivShield.dynclassification.ner_adapter import NerAdapter
 
 pytestmark = [pytest.mark.slow, pytest.mark.real_models]
 
@@ -46,7 +46,7 @@ class TestRealLlmAdapter:
         # （本地无 vLLM 服务会导致请求失败返回 None）。
         # 清空 PRIVACY_ENV_PROFILE 阻止 load_env_file() 加载 config/env/vllm.env，
         # 重置 env loader 缓存，防止 load_env_file() 覆盖 monkeypatch 的值。
-        import privacy_local_agent.env_loader as _env_mod
+        import PrivShield.env_loader as _env_mod
         monkeypatch.setenv("PRIVACY_ENV_PROFILE", "qwen3")
         monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "qwen3")
         _env_mod._ENV_LOADED = False
@@ -67,12 +67,12 @@ class TestRealLlmAdapter:
 
     def test_real_llm_arbitrate_returns_structured_result(self, monkeypatch):
         """LlmAdapter.arbitrate 应能组装冲突上下文并返回裁定结果。"""
-        import privacy_local_agent.env_loader as _env_mod
+        import PrivShield.env_loader as _env_mod
         monkeypatch.setenv("PRIVACY_ENV_PROFILE", "qwen3")
         monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "qwen3")
         _env_mod._ENV_LOADED = False
 
-        from privacy_local_agent.dynclassification.models import (
+        from PrivShield.dynclassification.models import (
             CategoryDef,
             DomainTaxonomy,
             SecurityTag,

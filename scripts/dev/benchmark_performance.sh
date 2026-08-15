@@ -73,7 +73,7 @@ done
 BASE_URL="http://${REST_HOST}:${REST_PORT}"
 
 echo -e "${BLUE}====================================================${NC}"
-echo -e "${BLUE} privacy-local-agent 性能基准测试与吞吐压测${NC}"
+echo -e "${BLUE} PrivShield 性能基准测试与吞吐压测${NC}"
 echo -e "${BLUE} 目标服务器 : ${BASE_URL}${NC}"
 echo -e "${BLUE} 总请求量   : ${NUM_REQUESTS} 次${NC}"
 echo -e "${BLUE} 并发并发数 : ${CONCURRENCY} 线程${NC}"

@@ -18,7 +18,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy_local_agent/privacy/masking.py` 的测试策略、测试范围与可执行示例。
+本文档定义 `PrivShield/privacy/masking.py` 的测试策略、测试范围与可执行示例。
 
 ## 2. 测试目标
 
@@ -35,7 +35,7 @@
 ### 3.1 字段脱敏测试
 
 ```python
-from privacy_local_agent.privacy.masking import mask_value
+from PrivShield.privacy.masking import mask_value
 
 
 def test_mask_mobile():
@@ -53,7 +53,7 @@ def test_mask_name():
 ### 3.2 整记录脱敏测试
 
 ```python
-from privacy_local_agent.privacy.masking import mask_record
+from PrivShield.privacy.masking import mask_record
 
 
 def test_mask_record():
@@ -67,7 +67,7 @@ def test_mask_record():
 
 ```python
 import pandas as pd
-from privacy_local_agent.privacy.masking import mask_dataframe
+from PrivShield.privacy.masking import mask_dataframe
 
 
 def test_mask_dataframe():
@@ -82,7 +82,7 @@ def test_mask_dataframe():
 ```python
 import numpy as np
 import pyarrow as pa
-from privacy_local_agent.privacy.masking import mask_dataframe, mask_record
+from PrivShield.privacy.masking import mask_dataframe, mask_record
 
 
 def test_mask_dataframe_numpy():
@@ -139,7 +139,7 @@ def test_mask_record_arrow_ipc():
 
 ```python
 from prometheus_client import REGISTRY
-from privacy_local_agent.privacy.masking import mask_value
+from PrivShield.privacy.masking import mask_value
 
 
 def test_masking_metric():

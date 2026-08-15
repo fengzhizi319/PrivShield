@@ -9,14 +9,14 @@
 
 ## 1. 定位与端口总览
 
-本后端（`console/backend-go`）是测试控制台的 **Go gRPC 代理**，基于 Gin + grpc-go，把前端的 REST 请求**转换为 gRPC 调用**转发给 `privacy_local_agent`，并可选地托管前端构建产物（SPA）。它与 Python 后端对前端暴露**一致的 JSON 契约**，二者可通过页面顶部 Backend Selector 自由切换。
+本后端（`console/backend-go`）是测试控制台的 **Go gRPC 代理**，基于 Gin + grpc-go，把前端的 REST 请求**转换为 gRPC 调用**转发给 `PrivShield`，并可选地托管前端构建产物（SPA）。它与 Python 后端对前端暴露**一致的 JSON 契约**，二者可通过页面顶部 Backend Selector 自由切换。
 
 控制台涉及的进程与默认端口：
 
 | 进程 | 默认地址 | 协议 | 说明 |
 |---|---|---|---|
-| `privacy_local_agent` | `127.0.0.1:8079` | REST | 隐私能力服务（供 Python 后端使用） |
-| `privacy_local_agent` | `127.0.0.1:50051` | gRPC | 隐私能力服务（上游，本后端调用） |
+| `PrivShield` | `127.0.0.1:8079` | REST | 隐私能力服务（供 Python 后端使用） |
+| `PrivShield` | `127.0.0.1:50051` | gRPC | 隐私能力服务（上游，本后端调用） |
 | Python REST 代理后端 | `127.0.0.1:8080` | HTTP | 另一可选后端，转发 REST + 托管 UI |
 | **Go gRPC 代理后端** | `127.0.0.1:8081` | HTTP | 本文档主角，转发 gRPC + 托管 UI |
 | Vite 开发服务器 | `localhost:5173` | HTTP | 仅前端开发模式使用 |
@@ -26,9 +26,9 @@
 ```mermaid
 graph LR
     A[React 前端] -->|HTTP/JSON| B[Go gRPC 代理 8081]
-    B -->|gRPC| C[privacy-local-agent 50051]
+    B -->|gRPC| C[PrivShield 50051]
     A -.->|可选 切换| D[Python REST 代理 8080]
-    D -->|HTTP/REST| E[privacy-local-agent 8079]
+    D -->|HTTP/REST| E[PrivShield 8079]
 ```
 
 ---
@@ -58,7 +58,7 @@ graph LR
 
 ```bash
 # 1. 启动上游 agent（REST 8079 + gRPC 50051）
-python -m privacy_local_agent.server
+python -m PrivShield.server
 
 # 2. 启动 Go 代理后端（8081）
 cd console/backend-go
@@ -99,7 +99,7 @@ corepack pnpm install
 corepack pnpm build
 
 # 2. 启动 agent
-python -m privacy_local_agent.server
+python -m PrivShield.server
 
 # 3. 预编译并启动 Go 后端
 cd console/backend-go
@@ -286,7 +286,7 @@ PRIVACY_TLS_CERT_FILE=/path/server.crt \
 PRIVACY_TLS_KEY_FILE=/path/server.key \
 PRIVACY_TLS_CA_FILE=/path/ca.crt \
 PRIVACY_TLS_CLIENT_AUTH=require \
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 **Go 代理端（gRPC 客户端）** 出示客户端证书并校验服务端：

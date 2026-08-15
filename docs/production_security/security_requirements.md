@@ -96,10 +96,10 @@
 
 | 编号 | 漏洞/隐患描述 | 严重级别 | 受影响文件 | 修复方案 |
 |---|---|---|---|---|
-| **SEC-01** | Gateway 网关管理接口 Bearer Token 校验存在时序攻击 (Timing Attack) | 中危 | `privacy_local_agent/gateway/http_proxy.py` | 替换普通字符串比较 `!=` 为 `hmac.compare_digest` 恒定时间比较 |
+| **SEC-01** | Gateway 网关管理接口 Bearer Token 校验存在时序攻击 (Timing Attack) | 中危 | `PrivShield/gateway/http_proxy.py` | 替换普通字符串比较 `!=` 为 `hmac.compare_digest` 恒定时间比较 |
 | **SEC-02** | Go 控制台代理 API Key 校验存在时序攻击 (Timing Attack) | 中危 | `console/backend-go/internal/handlers/handlers.go` | 替换字符串 `!=` 比较为 `subtle.ConstantTimeCompare` 恒定时间比较 |
-| **SEC-03** | Gateway 节点动态注册 API 缺少 URL Scheme 与格式校验 (SSRF/畸形 URL 防护) | 中危 | `privacy_local_agent/gateway/http_proxy.py` | 增加 `http_url` 的 Scheme 校验 (仅允许 `http://` 或 `https://`) |
-| **SEC-04** | REST 主服务缺少 HTTP 安全响应头 (MIME 嗅探与点击劫持防护) | 低危 | `privacy_local_agent/main.py` | 添加 `SecurityHeadersMiddleware` 中间件，自动注入 `X-Content-Type-Options`、`X-Frame-Options` 等响应头 |
+| **SEC-03** | Gateway 节点动态注册 API 缺少 URL Scheme 与格式校验 (SSRF/畸形 URL 防护) | 中危 | `PrivShield/gateway/http_proxy.py` | 增加 `http_url` 的 Scheme 校验 (仅允许 `http://` 或 `https://`) |
+| **SEC-04** | REST 主服务缺少 HTTP 安全响应头 (MIME 嗅探与点击劫持防护) | 低危 | `PrivShield/main.py` | 添加 `SecurityHeadersMiddleware` 中间件，自动注入 `X-Content-Type-Options`、`X-Frame-Options` 等响应头 |
 
 ---
 
@@ -110,7 +110,7 @@
 1. **Python 静态代码安全扫描**：
    ```bash
    pip install bandit
-   bandit -r privacy_local_agent/ console/backend/app/
+   bandit -r PrivShield/ console/backend/app/
    ```
 2. **依赖包漏洞扫描**：
    ```bash

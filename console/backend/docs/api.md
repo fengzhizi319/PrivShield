@@ -38,7 +38,7 @@ curl -s http://127.0.0.1:8080/api/health | jq
   "backend": "ok",
   "agent": "unreachable",
   "agent_url": "http://127.0.0.1:8079",
-  "error": "Unable to reach privacy agent: ...",
+  "error": "Unable to reach PrivShield Agent: ...",
   "via": "python-rest",
   "protocol": "REST"
 }
@@ -118,7 +118,7 @@ curl -s http://127.0.0.1:8080/api/samples | jq
 
 ## 3. POST /api/proxy
 
-统一代理入口，把请求转发到 privacy-local-agent REST 服务。
+统一代理入口，把请求转发到 PrivShield REST 服务。
 
 ### 请求体
 
@@ -164,7 +164,7 @@ curl -s http://127.0.0.1:8080/api/samples | jq
 ### 错误响应
 
 - **base64 解码失败（HTTP 400）**：`{"detail": "Invalid base64 payload: ..."}`
-- **上游 agent 不可达（HTTP 502）**：`{"detail": "Unable to reach privacy agent: ...", "status": 502}`
+- **上游 agent 不可达（HTTP 502）**：`{"detail": "Unable to reach PrivShield Agent: ...", "status": 502}`
 - **agent 返回非 2xx**：透传原状态码与 `detail`（如 422 参数错误）
 
 ---

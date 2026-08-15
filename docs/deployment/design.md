@@ -61,7 +61,7 @@
 
 ### 3.1 K8s 适用场景与需求说明
 
-本项目的 K8s 资产（Helm Chart `deploy/helm/privacy-local-agent/`、原生 manifests `deploy/k8s/`）为**生产级部署形态**，非实验性方案（CI 已有 `helm-lint` job：`ct lint` + kind 集群 `ct install` 验证）。以下场景明确需要 K8s：
+本项目的 K8s 资产（Helm Chart `deploy/helm/PrivShield/`、原生 manifests `deploy/k8s/`）为**生产级部署形态**，非实验性方案（CI 已有 `helm-lint` job：`ct lint` + kind 集群 `ct install` 验证）。以下场景明确需要 K8s：
 
 #### 3.1.1 多副本高可用生产部署（核心场景）
 
@@ -74,12 +74,12 @@
 #### 3.1.2 弹性扩缩容（流量波动）
 
 - HPA v2：CPU 70% / 内存 80% 阈值触发，`minReplicas 2 → maxReplicas 10` 自动横向扩展；
-- 项目具备高并发与网关负载均衡设计（`privacy_local_agent/gateway/`、`docs/high_concurrency/`），脱敏/分类请求量不恒定，LLM 层慢请求占用资源，需要按负载弹性伸缩。
+- 项目具备高并发与网关负载均衡设计（`PrivShield/gateway/`、`docs/high_concurrency/`），脱敏/分类请求量不恒定，LLM 层慢请求占用资源，需要按负载弹性伸缩。
 
 #### 3.1.3 生产安全加固
 
 - TLS 证书、API Key 经 **Secret** 注入（`security.tls.existingSecret` / `security.auth.apiKeysSecret`），可独立轮换，优于 Compose 文件挂载；
-- **NetworkPolicy**：生产 values 已启用，仅允许 `app.kubernetes.io/part-of: privacy-local-agent` 的 Pod 访问；
+- **NetworkPolicy**：生产 values 已启用，仅允许 `app.kubernetes.io/part-of: PrivShield` 的 Pod 访问；
 - PodSecurityContext：`runAsNonRoot`、`drop: ALL` capabilities、只读根文件系统；
 - mTLS CN 白名单 ConfigMap 挂载（`mtls-whitelist.yaml`），支持 per-CN scope 与热重载。
 
@@ -98,7 +98,7 @@
 
 | 场景 | 部署形态 | 说明 |
 |---|---|---|
-| 本地开发 / 联调 | 本地直跑 | `python -m privacy_local_agent.server`，`.env` + `config/env/<profile>.env` 级联加载 |
+| 本地开发 / 联调 | 本地直跑 | `python -m PrivShield.server`，`.env` + `config/env/<profile>.env` 级联加载 |
 | 内部演示 / 单机小规模 | Docker 单容器 | `docker build --target core|ml` + `docker run`，环境变量注入 |
 | 本地全栈（agent + console + vLLM + 监控） | Docker Compose | `deploy/docker-compose/docker-compose.yml` 一键拉起，`env_file: ../../.env` 注入配置 |
 
@@ -235,7 +235,7 @@ spec:
 
 如果你正在学习或准备使用 Helm，建议从 [Artifact Hub](https://artifacthub.io/) 上找一个感兴趣的官方 Chart（如 Nginx、PostgreSQL），尝试 `helm install` 和自定义 `values.yaml`，这是上手最快的方式。
 ```text
-deploy/helm/privacy-local-agent/
+deploy/helm/PrivShield/
 ├── Chart.yaml
 ├── values.yaml
 ├── values-production.yaml
@@ -295,7 +295,7 @@ autoscaling:
 
 | 环境变量 | 来源 | 说明 |
 |---|---|---|
-| `PRIVACY_PROFILE` | ConfigMap 挂载 | `/etc/privacy-local-agent/privacy-profile.yaml` |
+| `PRIVACY_PROFILE` | ConfigMap 挂载 | `/etc/PrivShield/privacy-profile.yaml` |
 | `PRIVACY_LOG_LEVEL` | values | `INFO` / `DEBUG` |
 | `PRIVACY_LOG_FORMAT` | values | `json` / `text` |
 | `PRIVACY_TLS_ENABLED` | values | `true` / `false` |
@@ -315,8 +315,8 @@ autoscaling:
 
 | 入口 | 位置 | 加载机制 | 生效场景 |
 |---|---|---|---|
-| Helm values | `deploy/helm/privacy-local-agent/values.yaml`（另有 `values-production.yaml` / `values-ml.yaml`） | Helm 模板渲染为 Pod 环境变量、ConfigMap、Secret 引用与卷挂载（`templates/deployment.yaml`、`configmap.yaml`、`secret.yaml`） | K8s 部署唯一声明式配置入口 |
-| 根目录 `.env` | 项目根目录 `.env`（模板见 `.env.example`） | `privacy_local_agent/env_loader.py` 的 `load_env_file()` 在进程启动时加载（`main.py` / `grpc_server.py` / `server.py` 模块级执行），默认 `override=False` 不覆盖已有环境变量 | 本地直跑（`python -m privacy_local_agent.server` 等） |
+| Helm values | `deploy/helm/PrivShield/values.yaml`（另有 `values-production.yaml` / `values-ml.yaml`） | Helm 模板渲染为 Pod 环境变量、ConfigMap、Secret 引用与卷挂载（`templates/deployment.yaml`、`configmap.yaml`、`secret.yaml`） | K8s 部署唯一声明式配置入口 |
+| 根目录 `.env` | 项目根目录 `.env`（模板见 `.env.example`） | `PrivShield/env_loader.py` 的 `load_env_file()` 在进程启动时加载（`main.py` / `grpc_server.py` / `server.py` 模块级执行），默认 `override=False` 不覆盖已有环境变量 | 本地直跑（`python -m PrivShield.server` 等） |
 | 场景 profile env | `config/env/<profile>.env`（`vllm` / `qwen3` / `mlx` / `openai`） | 按 `PRIVACY_ENV_PROFILE`（默认 `vllm`）级联加载，`override=True` 覆盖基础值；仅用于 LLM 推理后端场景切换 | 本地直跑 |
 
 #### 二、values → 环境变量映射
@@ -325,7 +325,7 @@ Helm Chart 通过 `templates/deployment.yaml` 把 values 中的配置渲染为 P
 
 | values.yaml 键 | 渲染产物 | 注入方式 / 对应环境变量 |
 |---|---|---|
-| `agent.profile` | ConfigMap `<fullname>-config` → `privacy-profile.yaml` | 卷挂载到 `/etc/privacy-local-agent/privacy-profile.yaml`（只读），`PRIVACY_PROFILE` 指向该路径；对应本地 `.env` 的 `PRIVACY_PROFILE` |
+| `agent.profile` | ConfigMap `<fullname>-config` → `privacy-profile.yaml` | 卷挂载到 `/etc/PrivShield/privacy-profile.yaml`（只读），`PRIVACY_PROFILE` 指向该路径；对应本地 `.env` 的 `PRIVACY_PROFILE` |
 | `agent.logLevel` / `agent.logFormat` | Pod env | `PRIVACY_LOG_LEVEL`（转大写）/ `PRIVACY_LOG_FORMAT` |
 | `service.restPort` / `service.grpcPort` | Pod env | `PRIVACY_REST_PORT` / `PRIVACY_GRPC_PORT`（REST/gRPC Host 固定 `0.0.0.0`） |
 | `security.tls.*` | Pod env + Secret 卷 | `PRIVACY_TLS_ENABLED` / `PRIVACY_TLS_CERT_FILE` / `PRIVACY_TLS_KEY_FILE` / `PRIVACY_TLS_CLIENT_AUTH`；`caSecret` → `PRIVACY_TLS_CA_FILE`；`keyPasswordSecret` → `PRIVACY_TLS_KEY_PASSWORD`（secretKeyRef） |
@@ -602,7 +602,7 @@ spec:
 kubectl apply -f rollout.yaml
 
 # 2. 验证 preview 环境
-curl http://privacy-local-agent-preview:8079/health
+curl http://PrivShield-preview:8079/health
 
 # 3. 手动确认切换
 kubectl argo rollouts promote PrivShield

@@ -93,7 +93,7 @@
 ## 6. 验收标准
 
 - [ ] 编写 `docs/production_security/prd.md`、`design.md`、`ops.md`。
-- [ ] 新增 `privacy_local_agent/security/` 模块，包含 config/tls/identity/auth/ratelimit。
+- [ ] 新增 `PrivShield/security/` 模块，包含 config/tls/identity/auth/ratelimit。
 - [ ] REST/gRPC 在开启 TLS 后仅接受 HTTPS/gRPCs 连接。
 - [ ] mTLS `require` 模式拒绝无客户端证书的调用。
 - [ ] mTLS CN 白名单：命中白名单的 CN 获得内部身份（`["*"]` scope），未命中的被拒绝。

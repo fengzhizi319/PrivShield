@@ -26,7 +26,7 @@
 #        │                    │ USER privacy（非 root 运行）
 #        │                    │ ENV 0.0.0.0 监听 + 日志无缓冲
 #        │                    ▼
-#        │                    CMD：python -m privacy_local_agent.server（REST+gRPC 一体进程）
+#        │                    CMD：python -m PrivShield.server（REST+gRPC 一体进程）
 #        │
 #        └──────────────► [ml] 完整 ML 镜像
 #                             │ USER root（安装需要 root 权限）
@@ -80,13 +80,13 @@ RUN pip install --no-cache-dir -r requirements-core.txt -i https://mirrors.aliyu
 FROM base AS core
 
 # 分层 COPY：仅复制运行时必需文件，排除测试/文档/开发产物（排除规则见 .dockerignore）：
-#   - privacy_local_agent/ : 主包源码（REST/gRPC/隐私原语/分类漏斗）
+#   - PrivShield/ : 主包源码（REST/gRPC/隐私原语/分类漏斗）
 #   - rules/               : 分类规则与体系（YAML，运行时热加载）
 #   - config/              : 运行配置（含 config/env/*.env 场景 profile；.env 已被
 #                            .dockerignore 排除，敏感配置不进入镜像）
 #   - proto/               : gRPC 协议 .proto 源（对应生成的 stub 已随主包复制）
 #   - scripts/             : 运行时辅助脚本
-COPY privacy_local_agent/ ./privacy_local_agent/
+COPY PrivShield/ ./PrivShield/
 COPY rules/ ./rules/
 COPY config/ ./config/
 COPY proto/ ./proto/
@@ -133,9 +133,9 @@ ENV PRIVACY_GRPC_HOST=0.0.0.0
 # 入口定义（镜像启动协议）：
 #   - ENTRYPOINT 固定为 entrypoint 脚本（启动前准备，一般不可被 docker run 参数覆盖）
 #   - CMD 提供默认启动命令（REST + gRPC 一体进程），可用 docker run <image> <args> 覆盖
-#     （如仅启动 gRPC：docker run <image> python -m privacy_local_agent.grpc_server）
+#     （如仅启动 gRPC：docker run <image> python -m PrivShield.grpc_server）
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["python", "-m", "privacy_local_agent.server"]
+CMD ["python", "-m", "PrivShield.server"]
 
 # ==============================================================================
 # Stage 3: ml —— 完整 ML 镜像（torch / transformers / onnxruntime）
@@ -159,4 +159,4 @@ RUN pip install --no-cache-dir -r requirements-ml.txt -i https://mirrors.aliyun.
 USER privacy
 
 # ml 镜像默认启动命令（与 core 相同：REST + gRPC 一体进程）
-CMD ["python", "-m", "privacy_local_agent.server"]
+CMD ["python", "-m", "PrivShield.server"]

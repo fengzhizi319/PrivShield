@@ -18,7 +18,7 @@
 ### 单条混淆
 
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query
+from PrivShield.privacy.qol import obfuscate_query
 
 obfuscated = obfuscate_query(
     query="张三位糖尿病患者用药趋势",
@@ -32,7 +32,7 @@ print(obfuscated)
 ### 批量混淆
 
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query_batch
+from PrivShield.privacy.qol import obfuscate_query_batch
 
 results = obfuscate_query_batch(
     queries=["张三用药记录", "李四手术预约"],

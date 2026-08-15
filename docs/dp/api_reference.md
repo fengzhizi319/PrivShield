@@ -146,7 +146,7 @@ Gaussian 机制提供 **$(\varepsilon, \delta)$-DP**，向查询结果添加正�
 
 $$M(D) = f(D) + \mathcal{N}(0, \sigma^2), \quad \sigma = \frac{\Delta_2 f \cdot \sqrt{2\ln(1.25/\delta)}}{\varepsilon}$$
 
-本模块默认采用 **Balle & Wang (2018) 解析高斯机制（Analytic Gaussian Mechanism）**，对任意 $\varepsilon > 0$、$\delta > 0$ 数值求解满足 $(\varepsilon, \delta)$-DP 的最小 $\sigma$，噪声通常小于经典公式且不受 $\varepsilon \leq 1$ 限制。实现位于 `privacy_local_agent.privacy.dp.calibrate_analytic_gaussian()`。
+本模块默认采用 **Balle & Wang (2018) 解析高斯机制（Analytic Gaussian Mechanism）**，对任意 $\varepsilon > 0$、$\delta > 0$ 数值求解满足 $(\varepsilon, \delta)$-DP 的最小 $\sigma$，噪声通常小于经典公式且不受 $\varepsilon \leq 1$ 限制。实现位于 `PrivShield.privacy.dp.calibrate_analytic_gaussian()`。
 
 **与 Laplace 的核心区别**：
 
@@ -224,7 +224,7 @@ Laplace / Gaussian 机制的完整数学推导、代码示例与实现细节请�
 
 ### 2.1 `DPApi`
 
-位置：`privacy_local_agent.privacy.dp.DPApi`
+位置：`PrivShield.privacy.dp.DPApi`
 
 差分隐私计算入口类，封装 Laplace/Gaussian 采样与预算扣减。
 
@@ -611,7 +611,7 @@ chunked_histogram(
 
 ### 2.2 `extract_values`（数据适配器）
 
-位置：`privacy_local_agent.privacy.data_adapters.extract_values`
+位置：`PrivShield.privacy.data_adapters.extract_values`
 
 ```python
 extract_values(
@@ -647,7 +647,7 @@ extract_values(
 
 ### 2.3 `LocalDPApi`
 
-位置：`privacy_local_agent.privacy.dp.LocalDPApi`
+位置：`PrivShield.privacy.dp.LocalDPApi`
 
 本地差分隐私入口类，支持单条记录的随机响应扰动与服务端的频率/直方图纠偏估计。
 
@@ -746,14 +746,14 @@ estimate_categorical_histogram(
 
 ### 2.4 `BudgetAccountant` & `BudgetRegistry`
 
-位置：`privacy_local_agent.privacy.budget.BudgetAccountant`
+位置：`PrivShield.privacy.budget.BudgetAccountant`
 
 隐私预算账户，追踪命名空间级别的累计 `(ε, δ)` 消耗。推荐通过 `get_budget()` 或 `default_registry.get_or_create()` 创建与获取。
 
 #### 推荐获取方式
 
 ```python
-from privacy_local_agent.privacy.budget import get_budget, default_registry
+from PrivShield.privacy.budget import get_budget, default_registry
 
 # 方式 1：模块级便捷函数（推荐）
 accountant = get_budget("hr_data", epsilon_total=10.0, delta_total=1e-4)
@@ -816,7 +816,7 @@ repr(accountant)
 
 ```python
 import pandas as pd
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 df = pd.read_csv("data.csv")
 api = DPApi(namespace="hr_dataset")
@@ -846,7 +846,7 @@ result = api.sum(
 SecretFlow 联邦 DataFrame 同样支持直接传入（需安装 secretflow）：
 
 ```python
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 api = DPApi(namespace="hr_dataset")
 
@@ -1442,7 +1442,7 @@ REST 侧同理：`values` 字段只包含目标列的样本值；如需指定列
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 dp = DPApi(namespace="hospital_patients_2024")
 
@@ -1497,7 +1497,7 @@ mean_result = dp.mean(
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 dp = DPApi(namespace="bank_transactions_q1")
 
@@ -1541,7 +1541,7 @@ histogram_result = dp.histogram(
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 dp = DPApi(namespace="app_daily_active_users")
 
@@ -1581,7 +1581,7 @@ feature_usage = dp.histogram(
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 dp = DPApi(namespace="federated_training_round_1")
 
@@ -1617,7 +1617,7 @@ noisy_gradient = dp.noisy_sum(
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.dp import LocalDPApi
+from PrivShield.privacy.dp import LocalDPApi
 
 # === 客户端侧（用户设备）===
 local_api = LocalDPApi()
@@ -1669,7 +1669,7 @@ print(f"估计启用率: {estimated_ratio:.2%}")
 # true_sum = aggregated.collect()[0]["true_sum"]
 
 # === Sidecar 侧（Python）===
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 
 dp = DPApi(namespace="hr_monthly_report")
 
@@ -1711,7 +1711,7 @@ print(f"带噪声平均工资: {noisy_mean:.2f}")
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.dp import DPApi
 import pandas as pd
 
 dp = DPApi(namespace="streaming_logs")
@@ -2296,7 +2296,7 @@ Rényi DP 会计：为 Gaussian 机制提供比基本组合更紧致的预算估
 **使用示例**：
 
 ```python
-from privacy_local_agent.privacy.budget import RDPAccountant
+from PrivShield.privacy.budget import RDPAccountant
 
 rdp = RDPAccountant(target_delta=1e-5)
 

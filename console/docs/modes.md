@@ -81,7 +81,7 @@ cd console/backend
 
 - `uvicorn --reload`，代码改动后自动重启；
 - 适合快速调接口、调试 JSON 结构、排查前端联调问题；
-- 可以直接连本地 `privacy_local_agent` REST 端口；
+- 可以直接连本地 `PrivShield` REST 端口；
 - CORS 往往开放得更宽松，便于浏览器直连。
 
 #### 商业化产品模式
@@ -122,12 +122,12 @@ go run ./cmd/server
 
 ## 4. agent 差异
 
-`privacy_local_agent` 是隐私原语的真正执行者，前后端都只是代理与呈现层。
+`PrivShield` 是隐私原语的真正执行者，前后端都只是代理与呈现层。
 
 ### 开发模式
 
 ```bash
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 推荐配置：
@@ -157,7 +157,7 @@ python -m privacy_local_agent.server
 
 - 前端：`console/web` + Vite dev server
 - 后端：`console/backend`（带 reload）或 `console/backend-go`（手动重启）
-- agent：本机 `privacy_local_agent.server`
+- agent：本机 `PrivShield.server`
 
 适用场景：
 

@@ -32,7 +32,7 @@ sequenceDiagram
     participant V as Vite 开发服务器
     participant R as React 前端
     participant P as 控制台后端
-    participant A as privacy local agent
+    participant A as PrivShield
 
     U->>B: 打开页面
     B->>V: 请求 index.html / src 模块
@@ -41,7 +41,7 @@ sequenceDiagram
     U->>R: 点击按钮 / 选择端点 / 发送请求
     R->>V: 发送 /api 请求
     V->>P: 开发模式下代理转发
-    P->>A: 再转发到 privacy_local_agent
+    P->>A: 再转发到 PrivShield
     A-->>P: 返回隐私能力结果
     P-->>V: 返回 JSON 响应
     V-->>R: 交给前端渲染
@@ -53,7 +53,7 @@ sequenceDiagram
 - **Vite** 主要负责前端开发服务器、模块加载和开发代理；
 - **React** 负责页面渲染、状态管理和用户交互；
 - **控制台后端** 负责把前端请求转发给真正的上游服务；
-- **`privacy_local_agent`** 才是执行隐私原语的核心服务。
+- **`PrivShield`** 才是执行隐私原语的核心服务。
 
 ### 1.1 开发模式 / 生产模式 / 双后端模式的总览对比图
 
@@ -67,7 +67,7 @@ flowchart LR
         DEV3[开发代理 /api]
         DEV4[Python 后端 8080]
         DEV5[Go 后端 8081]
-        DEV6[privacy_local_agent]
+        DEV6[PrivShield]
 
         DEV1 --> DEV2 --> DEV3
         DEV3 --> DEV4 --> DEV6
@@ -79,7 +79,7 @@ flowchart LR
         PROD2[后端或 Nginx 托管]
         PROD3[同源访问页面与 API]
         PROD4[Python 后端 8080 或 Go 后端 8081]
-        PROD5[privacy_local_agent]
+        PROD5[PrivShield]
 
         PROD1 --> PROD2 --> PROD3 --> PROD4 --> PROD5
     end
@@ -89,7 +89,7 @@ flowchart LR
         DUAL2[Python REST 8080]
         DUAL3[Go gRPC 8081]
         DUAL4[同一前端页面]
-        DUAL5[privacy_local_agent]
+        DUAL5[PrivShield]
 
         DUAL4 --> DUAL1
         DUAL1 --> DUAL2 --> DUAL5
@@ -548,7 +548,7 @@ Vite 正好负责它的：
 
 ### 9.1.1 `console/web` 请求链路图
 
-下面这张图把前端请求在两种后端之间的流向画出来。无论选 Python REST 还是 Go gRPC，前端本质上都是先把请求发到对应的控制台后端，再由后端转发到 `privacy_local_agent`：
+下面这张图把前端请求在两种后端之间的流向画出来。无论选 Python REST 还是 Go gRPC，前端本质上都是先把请求发到对应的控制台后端，再由后端转发到 `PrivShield`：
 
 ```mermaid
 flowchart LR
@@ -556,7 +556,7 @@ flowchart LR
     F[console web 前端]
     P[Python 后端 8080]
     G[Go 后端 8081]
-    A[privacy local agent]
+    A[PrivShield]
 
     U --> F
     F -->|Python REST| P
@@ -570,7 +570,7 @@ flowchart LR
 - 前端不会直接实现隐私算法；
 - 前端也不会直接和 agent 里的算法代码耦合；
 - 前端只负责把用户操作转成 API 请求；
-- 真正的隐私能力都在 `privacy_local_agent` 里执行。
+- 真正的隐私能力都在 `PrivShield` 里执行。
 
 ### 9.2 开发模式下怎么跑
 
@@ -689,7 +689,7 @@ Vite 本身并不决定你最终调用谁，它只负责：
 
 ### 10.4 后端负责
 
-- 真正执行 `privacy_local_agent` 的 API 转发；
+- 真正执行 `PrivShield` 的 API 转发；
 - 提供健康检查、示例数据等能力；
 - 生产环境时托管前端 `dist/`。
 

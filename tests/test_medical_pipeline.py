@@ -6,11 +6,11 @@ import csv
 from pathlib import Path
 import pytest
 
-from privacy_local_agent.medical_pipeline.pipeline import (
+from PrivShield.medical_pipeline.pipeline import (
     MedicalPrivacyPipeline,
     process_medical_dataset,
 )
-from privacy_local_agent.medical_pipeline.rules import (
+from PrivShield.medical_pipeline.rules import (
     L4_PATTERNS,
     L5_PATTERNS,
     redact_medical_text,
@@ -100,7 +100,7 @@ def test_medical_privacy_pipeline_no_raw_l4_l5_leak() -> None:
 
 def test_kangyang_csv_file_pipeline_execution() -> None:
     """从本地读取真实生成的 kangyang.csv 并执行全流程测试。"""
-    csv_path = Path(__file__).resolve().parent.parent / "privacy_local_agent" / "medical_pipeline" / "samples" / "kangyang.csv"
+    csv_path = Path(__file__).resolve().parent.parent / "PrivShield" / "medical_pipeline" / "samples" / "kangyang.csv"
     assert csv_path.exists()
     
     records = []
@@ -243,7 +243,7 @@ def test_empty_records_handling() -> None:
 
 def test_unified_patterns_importable_from_pipeline_masker() -> None:
     """验证 pipeline/masker.py 能正确导入统一的 L4/L5 词库。"""
-    from privacy_local_agent.pipeline.masker import L4_PATTERNS as MP_L4, L5_PATTERNS as MP_L5
+    from PrivShield.pipeline.masker import L4_PATTERNS as MP_L4, L5_PATTERNS as MP_L5
     assert len(MP_L4) == len(L4_PATTERNS)
     assert len(MP_L5) == len(L5_PATTERNS)
 
@@ -293,7 +293,7 @@ def test_redact_cause_of_death_with_complications() -> None:
 
 def test_ner_only_redacts_major_sensitive_l4_l5_entities() -> None:
     """NER 引擎应仅对 L4/L5 重大高敏疾病/用药进行抹平，保留常规慢病与常用药。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     class MockAdapter:
         def extract(self, text: str) -> list[dict[str, str]]:
@@ -315,7 +315,7 @@ def test_ner_only_redacts_major_sensitive_l4_l5_entities() -> None:
     assert "阿托伐他汀" in res_mixed
 def test_redact_pure_sensitive_symptom_clause_wiped_completely() -> None:
     """整句仅包含重大高敏症状与时间状语时，应直接抹平为空，不留标点或语病碎片。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     class MockAdapter:
         def extract(self, text: str) -> list[dict[str, str]]:
@@ -331,7 +331,7 @@ def test_redact_pure_sensitive_symptom_clause_wiped_completely() -> None:
 
 def test_redact_syphilis_case_complete_purge_and_path_sanitization() -> None:
     """梅毒与性传播疾病复杂病例：应完全擦除滴度、不洁接触史、硬下疳，去标识化图片文件名，且消除语病残渣。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     class SyphilisMockAdapter:
         def extract(self, text: str) -> list[dict[str, str]]:
@@ -361,7 +361,7 @@ def test_redact_syphilis_case_complete_purge_and_path_sanitization() -> None:
     assert "硬下疳" not in res_rule and "硬下疳" not in res_ner
 def test_redact_huntington_genetic_case_complete_purge() -> None:
     """遗传缺陷（亨廷顿舞蹈病与HTT基因CAG重复）病例：应完全擦除基因突变修饰、专用药四苯嗪、舞蹈样动作，且消除断句语病残渣。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     class HuntingtonMockAdapter:
         def extract(self, text: str) -> list[dict[str, str]]:
@@ -389,7 +389,7 @@ def test_redact_huntington_genetic_case_complete_purge() -> None:
 
 def test_redact_psychiatric_hospital_case_complete_purge() -> None:
     """重度精神障碍病例：必须完全擦除专科就诊地点（精神卫生中心）及全部重症描述，不留'曾就诊于精神卫生中心'。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     class PsychMockAdapter:
         def extract(self, text: str) -> list[dict[str, str]]:
@@ -420,7 +420,7 @@ def test_redact_psychiatric_hospital_case_complete_purge() -> None:
 
 def test_redact_family_history_death_and_paired_clause_syntax_fix() -> None:
     """家族史与死因病例：擦除恶性肿瘤与精神分裂症后，死因必须自然重构为'因病去世'，且不能残留'一弟患、'语法语病。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     class FamilyMockAdapter:
         def extract(self, text: str) -> list[dict[str, str]]:
@@ -446,7 +446,7 @@ def test_redact_family_history_death_and_paired_clause_syntax_fix() -> None:
 
 def test_redact_family_death_causes_complex() -> None:
     """复杂家族死因句法（殁于...50岁、由...破裂出血导致去世）：死因必须自然重构为'因病去世'。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     text = "外婆殁于'亨廷顿舞蹈病'(50岁)，伯父由'食管静脉曲张'破裂出血导致去世。母亲患'2型糖尿病'。"
     res_rule = redact_medical_text(text)
@@ -459,7 +459,7 @@ def test_redact_family_death_causes_complex() -> None:
 
 def test_redact_hepatitis_viral_load_and_biopsy_complete_purge() -> None:
     """病毒性肝炎病例：必须擦除 HBV-DNA 病毒载量、肝硬化、肝穿刺活检 G3S4 阶段及检测下限提示，完全抹平为记录。"""
-    from privacy_local_agent.medical_pipeline.rules import redact_medical_text_with_ner
+    from PrivShield.medical_pipeline.rules import redact_medical_text_with_ner
 
     class HepMockAdapter:
         def extract(self, text: str) -> list[dict[str, str]]:
@@ -826,10 +826,10 @@ def test_yibao_csv_pipeline_processing() -> None:
     """
     import csv
     from pathlib import Path
-    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
-    from privacy_local_agent.medical_pipeline.rules import classify_icd10_code
+    from PrivShield.medical_pipeline.pipeline import MedicalPrivacyPipeline
+    from PrivShield.medical_pipeline.rules import classify_icd10_code
 
-    yibao_csv_path = Path("privacy_local_agent/medical_pipeline/samples/yibao.csv")
+    yibao_csv_path = Path("PrivShield/medical_pipeline/samples/yibao.csv")
     assert yibao_csv_path.exists(), f"医保测试数据集 yibao.csv 不存在: {yibao_csv_path}"
 
     with open(yibao_csv_path, "r", encoding="utf-8-sig") as f:
@@ -899,7 +899,7 @@ def test_yibao_csv_pipeline_processing() -> None:
 
 def test_icd10_code_classification_and_redaction() -> None:
     """ICD-10 高危编码段定级与脱敏单元测试（rules.classify_icd10_code / redact_icd10_code）。"""
-    from privacy_local_agent.medical_pipeline.rules import (
+    from PrivShield.medical_pipeline.rules import (
         classify_icd10_code,
         redact_icd10_code,
     )
@@ -930,14 +930,14 @@ def test_icd10_code_classification_and_redaction() -> None:
         assert redact_icd10_code(code) == code, f"{code} 应原样保留"
 
     # 范畴码标签自身不得触发高敏词门禁（防二次命中整值删除）
-    from privacy_local_agent.medical_pipeline.rules import contains_high_risk_text
+    from PrivShield.medical_pipeline.rules import contains_high_risk_text
     for code in l4_cases:
         assert not contains_high_risk_text(redact_icd10_code(code))
 
 
 def test_categorical_department_field_no_false_positive() -> None:
     """枚举型科室字段豁免自由文本高敏扫描：'皮肤性病科' 不得被定级 L4 或篡改。"""
-    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+    from PrivShield.medical_pipeline.pipeline import MedicalPrivacyPipeline
 
     pipeline = MedicalPrivacyPipeline()
     res = pipeline.process_records(
@@ -953,7 +953,7 @@ def test_categorical_department_field_no_false_positive() -> None:
 
 def test_yibao_person_id_and_hospital_code_masking() -> None:
     """person_id / hospital_code 独立 PII 规则：定级 L3，格式掩码符合 §9 规约。"""
-    from privacy_local_agent.medical_pipeline.pipeline import MedicalPrivacyPipeline
+    from PrivShield.medical_pipeline.pipeline import MedicalPrivacyPipeline
 
     pipeline = MedicalPrivacyPipeline()
     res = pipeline.process_records(
@@ -999,7 +999,7 @@ def test_chinese_and_combined_field_names_support() -> None:
 
 def test_load_redaction_strategy_from_yaml() -> None:
     """验证从 YAML 加载脱敏策略配置正确解析 purge/generalization/replacement 三个节。"""
-    from privacy_local_agent.medical_pipeline.rules import load_redaction_strategy
+    from PrivShield.medical_pipeline.rules import load_redaction_strategy
 
     config = load_redaction_strategy()
     # YAML 中应定义了 purge_categories
@@ -1018,7 +1018,7 @@ def test_load_redaction_strategy_from_yaml() -> None:
 
 def test_load_redaction_strategy_fallback_on_missing_yaml() -> None:
     """验证 YAML 不存在时回退到代码内置默认值。"""
-    from privacy_local_agent.medical_pipeline.rules import load_redaction_strategy
+    from PrivShield.medical_pipeline.rules import load_redaction_strategy
 
     config = load_redaction_strategy(rules_dir="/nonexistent/path", domain="nonexistent")
     # 默认值应包含所有 L5 范畴 + STD_VENEREAL
@@ -1031,7 +1031,7 @@ def test_load_redaction_strategy_fallback_on_missing_yaml() -> None:
 
 def test_pipeline_with_custom_redaction_strategy() -> None:
     """验证 Pipeline 接受自定义 RedactionStrategyConfig 并正确编译替换标签。"""
-    from privacy_local_agent.medical_pipeline.rules import RedactionStrategyConfig
+    from PrivShield.medical_pipeline.rules import RedactionStrategyConfig
 
     custom_strategy = RedactionStrategyConfig(
         purge_categories=["HIV_AIDS"],
@@ -1049,7 +1049,7 @@ def test_pipeline_with_custom_redaction_strategy() -> None:
 
 def test_custom_strategy_controls_redaction_generalization() -> None:
     """泛化/抹平决策必须由运行时策略控制，而非固定使用代码默认规则。"""
-    from privacy_local_agent.medical_pipeline.rules import RedactionStrategyConfig, redact_medical_text
+    from PrivShield.medical_pipeline.rules import RedactionStrategyConfig, redact_medical_text
 
     default_text = redact_medical_text("母亲有恶性肿瘤家族史。")
     custom = RedactionStrategyConfig(
@@ -1072,7 +1072,7 @@ def test_custom_strategy_controls_redaction_generalization() -> None:
 
 def test_pipeline_default_strategy_matches_yaml() -> None:
     """验证默认 Pipeline（无显式策略）从 YAML 加载的策略与手动加载一致。"""
-    from privacy_local_agent.medical_pipeline.rules import load_redaction_strategy
+    from PrivShield.medical_pipeline.rules import load_redaction_strategy
 
     pipeline = MedicalPrivacyPipeline()
     yaml_config = load_redaction_strategy()
@@ -1083,7 +1083,7 @@ def test_pipeline_default_strategy_matches_yaml() -> None:
 
 def test_contains_high_risk_text_module_level_function() -> None:
     """验证模块级 contains_high_risk_text 函数与 Pipeline 实例方法行为一致。"""
-    from privacy_local_agent.medical_pipeline.rules import contains_high_risk_text
+    from PrivShield.medical_pipeline.rules import contains_high_risk_text
 
     pipeline = MedicalPrivacyPipeline()
     test_cases = [
@@ -1100,7 +1100,7 @@ def test_contains_high_risk_text_module_level_function() -> None:
 
 def test_contains_high_risk_text_accepts_custom_patterns() -> None:
     """验证 contains_high_risk_text 支持自定义 patterns 参数检测自定义替换标签。"""
-    from privacy_local_agent.medical_pipeline.rules import (
+    from PrivShield.medical_pipeline.rules import (
         RedactionStrategyConfig,
         compile_l4_l5_patterns,
         contains_high_risk_text,
@@ -1136,7 +1136,7 @@ def test_contains_high_risk_text_accepts_custom_patterns() -> None:
 
 def test_pipeline_safety_check_detects_custom_labels() -> None:
     """验证 Pipeline 的 _contains_high_risk_text 能检测自定义替换标签。"""
-    from privacy_local_agent.medical_pipeline.rules import RedactionStrategyConfig
+    from PrivShield.medical_pipeline.rules import RedactionStrategyConfig
 
     custom_strategy = RedactionStrategyConfig(
         purge_categories=["HIV_AIDS"],
@@ -1154,7 +1154,7 @@ def test_pipeline_safety_check_detects_custom_labels() -> None:
 
 def test_default_generalization_allowed_is_precomputed() -> None:
     """验证 _DEFAULT_GENERALIZATION_ALLOWED 预计算集合与规则定义一致。"""
-    from privacy_local_agent.medical_pipeline.rules import (
+    from PrivShield.medical_pipeline.rules import (
         _CATEGORY_GENERALIZATION_RULES,
         _DEFAULT_GENERALIZATION_ALLOWED,
     )

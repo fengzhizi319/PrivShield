@@ -20,7 +20,7 @@
 - **二次扫描零泄漏率 99%+**
 
 ```text
- privacy-local-agent 纯文本三层漏斗集成
+ PrivShield 纯文本三层漏斗集成
  ════════════════════════════════════════════════════════════════════════════
 
    [ 用户请求输入纯文本 ]
@@ -255,4 +255,4 @@ llmlora/.venv/bin/python -m llmlora.scripts.evaluate \
 1. **延迟**：当前未安装 flash-linear-attention / causal-conv1d，linear_attention 层回退 torch 实现，GPU 生成延迟偏高；安装后可显著加速。
 2. **BLEU 自然度指标**尚未纳入自动评估，依赖人工抽检。
 3. **KMS/密钥托管**不在本方案范围，HMAC 盐仍由调用方提供。
-4. 正式训练后需在 Sidecar（`privacy_local_agent` Layer-3）中做集成回归，验证 `QwenPrivacyLoRAEngine` 替换现有 LLM 引擎后的端到端行为。
+4. 正式训练后需在 Sidecar（`PrivShield` Layer-3）中做集成回归，验证 `QwenPrivacyLoRAEngine` 替换现有 LLM 引擎后的端到端行为。

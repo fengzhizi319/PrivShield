@@ -15,9 +15,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from privacy_local_agent.gateway import http_proxy
-from privacy_local_agent.gateway.balancer import LoadBalancer
-from privacy_local_agent.gateway.http_proxy import create_http_gateway_app
+from PrivShield.gateway import http_proxy
+from PrivShield.gateway.balancer import LoadBalancer
+from PrivShield.gateway.http_proxy import create_http_gateway_app
 
 
 @pytest.fixture

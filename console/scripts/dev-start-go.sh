@@ -7,7 +7,7 @@
 #   --force: 非交互模式，端口被占用时自动终止占用进程（CI/脚本化场景）
 #
 # 启动组件 / Launched Components:
-#   1. privacy_local_agent (REST: 8079, gRPC: 50051)
+#   1. PrivShield (REST: 8079, gRPC: 50051)
 #   2. Go gRPC 代理后端 (API: 8081)
 #   3. Vite 前端开发服务器 (UI: 5173, 支持 <50ms HMR 热重载)
 # ============================================================================
@@ -172,8 +172,8 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 # 端口预检
-check_port_available 8079 "privacy_local_agent REST"
-check_port_available 50051 "privacy_local_agent gRPC"
+check_port_available 8079 "PrivShield REST"
+check_port_available 50051 "PrivShield gRPC"
 check_port_available 8081 "Go gRPC 代理后端"
 check_port_available 5173 "Vite 前端开发服务器"
 
@@ -181,14 +181,14 @@ check_port_available 5173 "Vite 前端开发服务器"
 launch_agent() {
     local agent_log="$PROJECT_ROOT/.logs/agent_go.log"
     mkdir -p "$PROJECT_ROOT/.logs"
-    echo "启动 privacy_local_agent (REST: $AGENT_URL, gRPC: 127.0.0.1:50051)，日志: $agent_log..."
+    echo "启动 PrivShield (REST: $AGENT_URL, gRPC: 127.0.0.1:50051)，日志: $agent_log..."
     (
         source "$AGENT_VENV/bin/activate"
         cd "$PROJECT_ROOT"
         # 日志持久化到 .logs/agent_go.log（后台运行时终端不显示 agent 输出），
         # agent 崩溃/重启后可回溯根因；注意：不能用 exec ... | tee 管道，
         # 否则 $! 会指向 tee 而非 python，kill 将无法终止 agent。
-        exec python -m privacy_local_agent.server >> "$agent_log" 2>&1
+        exec python -m PrivShield.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"
@@ -215,7 +215,7 @@ wait_for_service() {
     return 1
 }
 
-wait_for_service "$AGENT_URL/health" "privacy_local_agent"
+wait_for_service "$AGENT_URL/health" "PrivShield"
 
 echo -n "等待 agent gRPC (127.0.0.1:50051) 就绪"
 for i in $(seq 1 30); do
@@ -294,7 +294,7 @@ while [[ "$STOPPING" != "true" ]]; do
         break
     fi
     launch_agent
-    if ! wait_for_service "$AGENT_URL/health" "重启后的 privacy_local_agent"; then
+    if ! wait_for_service "$AGENT_URL/health" "重启后的 PrivShield"; then
         echo "[watchdog] 警告：agent 重启后未在 30 秒内就绪（REST）。"
     fi
     # 等待 gRPC 端口就绪：避免 agent 进程已起但 gRPC 未监听时健康检查连接失败

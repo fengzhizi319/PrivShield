@@ -27,7 +27,7 @@
 
 ### `obfuscate_query`
 
-位置：`privacy_local_agent.privacy.qol.obfuscate_query`
+位置：`PrivShield.privacy.qol.obfuscate_query`
 
 ```python
 def obfuscate_query(
@@ -53,7 +53,7 @@ def obfuscate_query(
 
 ### `obfuscate_query_batch`
 
-位置：`privacy_local_agent.privacy.qol.obfuscate_query_batch`
+位置：`PrivShield.privacy.qol.obfuscate_query_batch`
 
 ```python
 def obfuscate_query_batch(
@@ -163,7 +163,7 @@ def obfuscate_query_batch(
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query
+from PrivShield.privacy.qol import obfuscate_query
 
 # 用户真实查询
 user_query = "糖尿病患者用药趋势"
@@ -193,7 +193,7 @@ for i, q in enumerate(obfuscated_queries, 1):
 
 **批量处理**：
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query_batch
+from PrivShield.privacy.qol import obfuscate_query_batch
 
 # 一批用户查询
 user_queries = [
@@ -244,7 +244,7 @@ curl -X POST http://127.0.0.1:8079/v1/privacy/qol/obfuscate \
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query
+from PrivShield.privacy.qol import obfuscate_query
 
 # 用户查询公积金提取
 user_query = "如何提取住房公积金"
@@ -302,7 +302,7 @@ obfuscated = obfuscate_query(
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query
+from PrivShield.privacy.qol import obfuscate_query
 
 # 员工查询敏感信息
 sensitive_queries = [
@@ -391,7 +391,7 @@ result = client.search("年度调薪政策")
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query
+from PrivShield.privacy.qol import obfuscate_query
 import json
 
 # 心理健康研究相关查询
@@ -466,7 +466,7 @@ print(json.dumps(privacy_statement, indent=2))
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query
+from PrivShield.privacy.qol import obfuscate_query
 
 # 用户搜索联系人
 contact_search = "张三"
@@ -517,7 +517,7 @@ def mobile_obfuscate(query: str) -> list:
 
 **示例**：
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query_batch
+from PrivShield.privacy.qol import obfuscate_query_batch
 
 # 用户搜索历史
 search_history = [
@@ -732,7 +732,7 @@ result = obfuscate_query("用户查询", num_dummies=3)  # 每次结果不同
 
 **解决方案**：使用 `obfuscate_query_batch`
 ```python
-from privacy_local_agent.privacy.qol import obfuscate_query_batch
+from PrivShield.privacy.qol import obfuscate_query_batch
 
 # ❌ 不推荐：逐条处理
 queries = ["查询1", "查询2", "查询3"]
@@ -919,7 +919,7 @@ def send_obfuscated_queries(obfuscated: list, url: str):
    obfuscated = obfuscate_query(query, num_dummies=3)
    
    # 对查询结果再加DP噪声（若结果是数值型）
-   from privacy_local_agent.privacy.dp import DPApi
+   from PrivShield.privacy.dp import DPApi
    dp = DPApi(namespace="search_analytics")
    noisy_count = dp.count(search_results, epsilon=1.0)
    ```

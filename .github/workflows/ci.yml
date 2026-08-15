@@ -33,7 +33,7 @@ jobs:
         run: make check
 
       - name: Ruff format check
-        run: ruff format --check privacy_local_agent/ tests/ console/backend/
+        run: ruff format --check PrivShield/ tests/ console/backend/
 
   test:
     name: Test
@@ -58,7 +58,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest tests/ -q --tb=short \
-            --cov=privacy_local_agent \
+            --cov=PrivShield \
             --cov-report=xml \
             --cov-report=term-missing \
             -m "not integration and not slow"
@@ -95,7 +95,7 @@ jobs:
         # S110（try-except-pass）为本仓库刻意的静默降级风格，与 S101/S104/S311/S324 一并豁免
         run: |
           pip install ruff
-          ruff check privacy_local_agent/ --select F,S --ignore S101,S104,S110,S311,S324
+          ruff check PrivShield/ --select F,S --ignore S101,S104,S110,S311,S324
 
   go-backend:
     name: Go Backend
@@ -181,12 +181,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build core image
-        run: docker build --target core -t PrivShield:ci .
+        run: docker build --target core -t privshield:ci .
 
       - name: Verify image starts
         run: |
-          docker run --rm privacy-local-agent:ci python -c \
-            "from privacy_local_agent.service import PrivacyService; print('OK')"
+          docker run --rm privshield:ci python -c \
+            "from PrivShield.service import PrivacyService; print('OK')"
 
   helm-lint:
     name: Helm Chart Testing

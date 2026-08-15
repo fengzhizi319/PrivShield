@@ -34,10 +34,10 @@ of core privacy operators: DP, masking, K-anonymity, and query obfuscation.
 import numpy as np
 import pytest
 
-from privacy_local_agent.privacy.dp import DPApi
-from privacy_local_agent.privacy.kano import KAnonApi
-from privacy_local_agent.privacy.masking import MaskingApi
-from privacy_local_agent.privacy.qol import QolApi
+from PrivShield.privacy.dp import DPApi
+from PrivShield.privacy.kano import KAnonApi
+from PrivShield.privacy.masking import MaskingApi
+from PrivShield.privacy.qol import QolApi
 
 
 @pytest.fixture

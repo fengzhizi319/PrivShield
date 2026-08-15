@@ -2,8 +2,8 @@
 
 import pytest
 from typing import Any
-from privacy_local_agent.dynclassification.operator_registry import OperatorRegistry, OperatorResult
-from privacy_local_agent.dynclassification import operators  # noqa: F401
+from PrivShield.dynclassification.operator_registry import OperatorRegistry, OperatorResult
+from PrivShield.dynclassification import operators  # noqa: F401
 
 
 class TestRegexOperator:

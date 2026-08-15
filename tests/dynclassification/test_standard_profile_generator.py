@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator
+from PrivShield.dynclassification.standard_profile_generator import StandardProfileGenerator
 
 
 @pytest.fixture()

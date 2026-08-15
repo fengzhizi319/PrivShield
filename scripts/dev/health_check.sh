@@ -26,6 +26,9 @@ REST_PORT="${PRIVACY_REST_PORT:-8079}"
 GRPC_HOST="${PRIVACY_GRPC_HOST:-127.0.0.1}"
 GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
 
+export no_proxy="127.0.0.1,localhost,${REST_HOST},${no_proxy:-}"
+export NO_PROXY="127.0.0.1,localhost,${REST_HOST},${NO_PROXY:-}"
+
 usage() {
     cat <<EOF
 使用说明: $(basename "$0") [选项]
@@ -73,7 +76,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo -e "${BLUE}====================================================${NC}"
-echo -e "${BLUE} privacy-local-agent 系统健康与环境诊断工具${NC}"
+echo -e "${BLUE} PrivShield 系统健康与环境诊断工具${NC}"
 echo -e "${BLUE} REST 目标: http://${REST_HOST}:${REST_PORT}${NC}"
 echo -e "${BLUE} gRPC 目标: ${GRPC_HOST}:${GRPC_PORT}${NC}"
 echo -e "${BLUE}====================================================${NC}"
@@ -127,7 +130,7 @@ except ImportError:
 echo -e "\n${YELLOW}[3/5] 检查 REST 服务连通性 (http://${REST_HOST}:${REST_PORT})...${NC}"
 REST_URL="http://${REST_HOST}:${REST_PORT}/health"
 if command -v curl &> /dev/null; then
-    HTTP_CODE=$(curl -s -o /tmp/pla_health_response.json -w "%{http_code}" --max-time 5 "${REST_URL}" || echo "000")
+    HTTP_CODE=$(curl --noproxy "*" -s -o /tmp/pla_health_response.json -w "%{http_code}" --max-time 5 "${REST_URL}" || echo "000")
     if [ "$HTTP_CODE" -eq 200 ]; then
         echo -e "REST 健康探针结果: ${GREEN}HTTP 200 OK${NC}"
         echo -e "返回报文内容     : $(cat /tmp/pla_health_response.json)"

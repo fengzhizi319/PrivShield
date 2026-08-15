@@ -23,7 +23,7 @@ Write-Host "====================================================================
 
 Set-Location $ComposeDir
 & docker compose --profile llm stop vllm 2>$null | Out-Null
-& docker rm -f privacy-local-agent-vllm 2>$null | Out-Null
+& docker rm -f PrivShield-vllm 2>$null | Out-Null
 
 Write-Host "✅ vLLM 大模型推理容器已成功停止与清理！" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Cyan

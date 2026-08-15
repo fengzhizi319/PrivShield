@@ -9,7 +9,7 @@
 
 ## 1. 定位与端口总览
 
-本后端（`console/backend`）是测试控制台的 **Python REST 代理**，基于 FastAPI + httpx，把前端的 REST 请求转发到 `privacy_local_agent` 的 REST 接口，并可选地托管前端构建产物（SPA）。
+本后端（`console/backend`）是测试控制台的 **Python REST 代理**，基于 FastAPI + httpx，把前端的 REST 请求转发到 `PrivShield` 的 REST 接口，并可选地托管前端构建产物（SPA）。
 
 它本身是**无状态**的薄代理——不持有数据（示例数据为内置常量），不实现隐私算法，可任意水平扩展或重启。典型部署形态有两种：
 
@@ -20,8 +20,8 @@
 
 | 进程 | 默认地址 | 协议 | 说明 |
 |---|---|---|---|
-| `privacy_local_agent` | `127.0.0.1:8079` | REST | 隐私能力服务（上游） |
-| `privacy_local_agent` | `127.0.0.1:50051` | gRPC | 隐私能力服务（供 Go 后端使用） |
+| `PrivShield` | `127.0.0.1:8079` | REST | 隐私能力服务（上游） |
+| `PrivShield` | `127.0.0.1:50051` | gRPC | 隐私能力服务（供 Go 后端使用） |
 | **Python REST 代理后端** | `127.0.0.1:8080` | HTTP | 本文档主角，转发 REST + 托管 UI |
 | Go gRPC 代理后端 | `127.0.0.1:8081` | HTTP | 另一可选后端，转发 gRPC + 托管 UI |
 | Vite 开发服务器 | `localhost:5173` | HTTP | 仅前端开发模式使用 |
@@ -31,9 +31,9 @@
 ```mermaid
 graph LR
     A[React 前端] -->|HTTP/JSON| B[Python REST 代理 8080]
-    B -->|HTTP/REST httpx| C[privacy-local-agent 8079]
+    B -->|HTTP/REST httpx| C[PrivShield 8079]
     A -.->|可选 切换| D[Go gRPC 代理 8081]
-    D -->|gRPC| E[privacy-local-agent 50051]
+    D -->|gRPC| E[PrivShield 50051]
 ```
 
 ---
@@ -78,7 +78,7 @@ pip install -r requirements.txt
 
 ```bash
 # 1. 启动上游 agent（REST 8079 + gRPC 50051）
-python -m privacy_local_agent.server
+python -m PrivShield.server
 
 # 2. 启动 Python 代理后端（8080，带热重载）
 cd console/backend
@@ -119,7 +119,7 @@ corepack pnpm install
 corepack pnpm build
 
 # 2. 启动 agent
-python -m privacy_local_agent.server
+python -m PrivShield.server
 
 # 3. 启动后端（不带 --reload）
 cd console/backend

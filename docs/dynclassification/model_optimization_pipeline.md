@@ -21,7 +21,7 @@
   - [4.2 方法 B：使用 Python `trt.Builder` 原生 API 构建](#42-方法-b使用-python-trtbuilder-原生-api-构建)
 - [5. 第四阶段：TensorRT Engine 推理与生命周期管理](#5-第四阶段tensorrt-engine-推理与生命周期管理)
   - [5.1 运行时推理调用 (`trt.Runtime`)](#51-运行时推理调用-trtruntime)
-- [6. 在 `PrivShield` 中的架构设计总结](#6-在-privacy-local-agent-中的架构设计总结)
+- [6. 在 `PrivShield` 中的架构设计总结](#6-在-PrivShield-中的架构设计总结)
 
 ---
 

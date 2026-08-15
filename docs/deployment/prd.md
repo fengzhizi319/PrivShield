@@ -80,7 +80,7 @@
 ## 6. 验收标准
 
 - [ ] `docs/deployment/{prd,design,ops}.md` 完成。
-- [ ] `deploy/helm/privacy-local-agent/` Chart 完整。
+- [ ] `deploy/helm/PrivShield/` Chart 完整。
 - [ ] `deploy/k8s/` 原生 manifests 完整。
 - [ ] `deploy/docker-compose/docker-compose.yml` 可用。
 - [ ] `helm lint` 与 `helm template` 通过。

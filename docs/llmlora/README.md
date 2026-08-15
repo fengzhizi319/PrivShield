@@ -107,6 +107,12 @@ LlmAdapter._lazy_init()
 
 本目录下包含以下详细规划与实操指南文档：
 
+- [`qwen3_5_0_8b_architecture.md`](./qwen3_5_0_8b_architecture.md): **Qwen3.5-0.8B 模型架构深度解析与结构图谱**
+  - 全局规格与超参数矩阵 (Vocab 248k, 256K Context, 1024 隐层)
+  - 24 层 3:1 Hybrid SSM-Transformer 混合堆叠排布
+  - 核心子模块：Gated Linear Attention (Conv1d + SSM)、GQA Full Attention (Partial RoPE + QK-Norm)、SwiGLU FFN
+  - MTP (Multi-Token Prediction) 与跨模态对齐层
+  - PrivShield 端侧部署与推理性能 Benchmark
 - [`data_generation_plan.md`](./data_generation_plan.md): **基于 Layer-1 规则漏斗的训练数据自动生成与蒸馏方案**
   - 数据生成架构与管道设计
   - 任务指令与 Prompt 设计（分类分级 + 脱敏无痕抹平）

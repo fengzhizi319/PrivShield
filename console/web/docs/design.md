@@ -32,7 +32,7 @@ graph TD
 
     Root --> Client[api/client.ts HTTP 封装]
     Client -- /api/* --> Backend[Python REST :8080<br/>或 Go gRPC :8081]
-    Backend --> Agent[privacy-local-agent]
+    Backend --> Agent[PrivShield]
 
     HistoryPanel --> LS[(localStorage)]
 ```

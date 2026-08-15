@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-from privacy_local_agent import launcher
+from PrivShield import launcher
 
 
 class _FakeProcess:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vLLM Server Launcher in Python for Privacy Local Agent.
+"""vLLM Server Launcher in Python for PrivShield.
 
 Loads environment variables from .env and executes vLLM entrypoint.
 Usage:
@@ -13,7 +13,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from privacy_local_agent.env_loader import load_env_file
+from PrivShield.env_loader import load_env_file
 
 
 def main() -> None:

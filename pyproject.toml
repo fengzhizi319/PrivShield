@@ -9,10 +9,6 @@ description = "数盾 (PrivShield): 数联天下企业级数据隐私计算、�
 readme = "README.md"
 requires-python = ">=3.13"
 
-[project.urls]
-Homepage = "https://github.com/fengzhizi319/PrivShield"
-Repository = "https://github.com/fengzhizi319/PrivShield.git"
-Documentation = "https://github.com/fengzhizi319/PrivShield#readme"
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
@@ -29,8 +25,12 @@ dependencies = [
     "numpy>=1.24.0,<3.0.0",
     "pandas>=2.0.0,<4.0.0",
     "pyarrow>=14.0.0,<26.0.0",
-    "python-multipart>=0.0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/fengzhizi319/PrivShield"
+Repository = "https://github.com/fengzhizi319/PrivShield.git"
+Documentation = "https://github.com/fengzhizi319/PrivShield#readme"
 
 [project.optional-dependencies]
 dev = [
@@ -94,18 +94,18 @@ docs = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["privacy_local_agent*"]
+include = ["PrivShield*"]
 
 # ── Ruff (lint + format) ─────────────────────────────────────
 [tool.ruff]
 # 这个仓库是“根级配置 + 多子项目”结构：
-# - `privacy_local_agent` 是主包
+# - `PrivShield` 是主包
 # - `tests` 是主测试集
 # - `console/backend` 是同仓库中的辅助后端
 # 因此这里将多个源码根目录一起纳入 lint/format 规则。
 target-version = "py313"
 line-length = 120
-src = ["privacy_local_agent", "tests", "console/backend"]
+src = ["PrivShield", "tests", "console/backend"]
 
 [tool.ruff.lint]
 select = [
@@ -143,12 +143,12 @@ ignore = [
 "tests/**" = ["S", "B011"]
 "console/backend/tests/**" = ["S", "B011"]
 "console/backend/app/fixtures/samples.py" = ["E501"]
-"privacy_local_agent/privacy_pb2*.py" = ["E", "F", "N", "UP"]
-"privacy_local_agent/grpc_server.py" = ["N802"]
-"privacy_local_agent/classification_grpc.py" = ["N802"]
+"PrivShield/privacy_pb2*.py" = ["E", "F", "N", "UP"]
+"PrivShield/grpc_server.py" = ["N802"]
+"PrivShield/classification_grpc.py" = ["N802"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["privacy_local_agent"]
+known-first-party = ["PrivShield"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -168,17 +168,17 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 ignore_missing_imports = true
 implicit_optional = true
-files = ["privacy_local_agent", "console/backend", "tests"]
+files = ["PrivShield", "console/backend", "tests"]
 exclude = [
-    "privacy_local_agent/privacy_pb2.*",
-    "privacy_local_agent/privacy_pb2_grpc.*",
+    "PrivShield/privacy_pb2.*",
+    "PrivShield/privacy_pb2_grpc.*",
     "console/backend/tests",
 ]
 
 [[tool.mypy.overrides]]
 # protobuf 生成模块的属性 mypy 无法识别（生成的描述符动态注入），
 # 直接跳过对这两个模块的导入分析，避免从它们导入的模块产生大量 has no attribute 错误。
-module = ["privacy_local_agent.privacy_pb2", "privacy_local_agent.privacy_pb2_grpc"]
+module = ["PrivShield.privacy_pb2", "PrivShield.privacy_pb2_grpc"]
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
@@ -190,7 +190,7 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 # privacy/dp.py 包含大量 scipy sparse / numpy ndarray 类型推断与 Union 分发问题，
 # 短期内难以逐项修复，先忽略以解决 numpy 2.x stub 兼容的阻塞问题。
-module = ["privacy_local_agent.privacy.dp"]
+module = ["PrivShield.privacy.dp"]
 ignore_errors = true
 
 # ── pytest + coverage ────────────────────────────────────────
@@ -205,16 +205,16 @@ markers = [
 addopts = "-q --tb=short"
 
 [tool.coverage.run]
-source = ["privacy_local_agent"]
+source = ["PrivShield"]
 omit = [
-    "privacy_local_agent/privacy_pb2*",
-    "privacy_local_agent/privacy_pb2_grpc*",
+    "PrivShield/privacy_pb2*",
+    "PrivShield/privacy_pb2_grpc*",
     "*/tests/*",
     # 进程入口 / 模型下载脚本：仅含启动与网络下载逻辑，无法在单测中覆盖
-    "privacy_local_agent/server.py",
-    "privacy_local_agent/gateway/server.py",
-    "privacy_local_agent/privacy/download_model.py",
-    "privacy_local_agent/privacy/download_ner_model.py",
+    "PrivShield/server.py",
+    "PrivShield/gateway/server.py",
+    "PrivShield/privacy/download_model.py",
+    "PrivShield/privacy/download_ner_model.py",
 ]
 
 [tool.coverage.report]

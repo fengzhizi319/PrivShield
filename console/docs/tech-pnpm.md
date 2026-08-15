@@ -1382,7 +1382,7 @@ pnpm 原生支持 Monorepo，通过 workspace 协议管理多包项目：
 │         pnpm Monorepo 结构 / pnpm Monorepo Structure            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  privacy-local-agent/                                           │
+│  PrivShield/                                           │
 │  ├── pnpm-workspace.yaml        ← 工作区定义 / Workspace def  │
 │  ├── package.json               ← 根配置 / Root config         │
 │  ├── pnpm-lock.yaml             ← 全局锁文件 / Global lockfile │
@@ -1400,9 +1400,9 @@ pnpm 原生支持 Monorepo，通过 workspace 协议管理多包项目：
 │  │                                                              │
 │  └── packages/                  ← 共享包 / Shared packages     │
 │      ├── ui-components/                                         │
-│      │   └── package.json       (name: @pla/ui)                 │
+│      │   └── package.json       (name: @privshield/ui)                 │
 │      └── api-client/                                            │
-│          └── package.json       (name: @pla/api-client)         │
+│          └── package.json       (name: @privshield/api-client)         │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -1435,8 +1435,8 @@ packages:
     "lint": "pnpm -r run lint",
 
     // 在特定包中运行 / Run in specific package
-    "dev:web": "pnpm --filter @pla/web run dev",
-    "build:web": "pnpm --filter @pla/web run build",
+    "dev:web": "pnpm --filter @privshield/web run dev",
+    "build:web": "pnpm --filter @privshield/web run build",
 
     // 并行运行 / Run in parallel
     "dev": "pnpm -r --parallel run dev"
@@ -1454,25 +1454,25 @@ packages:
 ```json
 // ===== packages/api-client/package.json =====
 {
-  "name": "@pla/api-client",
+  "name": "@privshield/api-client",
   "version": "1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
     // workspace 协议: 链接到本地包 / workspace protocol: link to local package
-    "@pla/types": "workspace:*",      // 任何版本 / Any version
-    "@pla/utils": "workspace:^1.0.0"  // 兼容版本 / Compatible version
+    "@privshield/types": "workspace:*",      // 任何版本 / Any version
+    "@privshield/utils": "workspace:^1.0.0"  // 兼容版本 / Compatible version
   }
 }
 
 // ===== console/web/package.json =====
 {
-  "name": "@pla/web",
+  "name": "@privshield/web",
   "dependencies": {
     "react": "^18.2.0",
     // 使用本地包 / Use local packages
-    "@pla/api-client": "workspace:*",
-    "@pla/ui": "workspace:*"
+    "@privshield/api-client": "workspace:*",
+    "@privshield/ui": "workspace:*"
   }
 }
 ```
@@ -1481,10 +1481,10 @@ packages:
 # ===== workspace 常用命令 / Common workspace Commands =====
 
 # 添加依赖到特定包 / Add dependency to specific package
-pnpm --filter @pla/web add lodash
+pnpm --filter @privshield/web add lodash
 
 # 添加内部包依赖 / Add internal package dependency
-pnpm --filter @pla/web add @pla/api-client --workspace
+pnpm --filter @privshield/web add @privshield/api-client --workspace
 
 # 在所有包中执行 / Execute in all packages
 pnpm -r exec pwd

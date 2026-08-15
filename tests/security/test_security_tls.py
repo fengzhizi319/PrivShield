@@ -22,11 +22,11 @@ import pytest
 pytestmark = pytest.mark.integration
 import uvicorn
 
-from privacy_local_agent import privacy_pb2, privacy_pb2_grpc
-from privacy_local_agent.grpc_server import PrivacyServicer
-from privacy_local_agent.main import app
-from privacy_local_agent.security.config import get_security_settings
-from privacy_local_agent.security.tls import grpc_server_credentials, uvicorn_ssl_kwargs
+from PrivShield import privacy_pb2, privacy_pb2_grpc
+from PrivShield.grpc_server import PrivacyServicer
+from PrivShield.main import app
+from PrivShield.security.config import get_security_settings
+from PrivShield.security.tls import grpc_server_credentials, uvicorn_ssl_kwargs
 from tests.security_certs import generate_test_certs
 
 if TYPE_CHECKING:

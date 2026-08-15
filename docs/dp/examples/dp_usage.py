@@ -5,8 +5,8 @@
     PYTHONPATH=. python docs/dp/examples/dp_usage.py
 """
 
-from privacy_local_agent.privacy.budget import default_registry
-from privacy_local_agent.privacy.dp import DPApi
+from PrivShield.privacy.budget import default_registry
+from PrivShield.privacy.dp import DPApi
 
 
 def main():

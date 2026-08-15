@@ -1,6 +1,6 @@
 # 标准文档 YAML 规则包自动生成器 (Standard Profile Generator) 算法与指南
 
-本文档详细说明 `privacy_local_agent.dynclassification.standard_profile_generator` 模块的设计思想、算法实现细节、流程架构图以及具体使用示例。
+本文档详细说明 `PrivShield.dynclassification.standard_profile_generator` 模块的设计思想、算法实现细节、流程架构图以及具体使用示例。
 
 ---
 
@@ -186,7 +186,7 @@ flowchart TD
 
 ```bash
 # 从四川省健康医疗地方标准 Markdown 生成 YAML 规则包
-python -m privacy_local_agent.dynclassification.standard_profile_generator \
+python -m PrivShield.dynclassification.standard_profile_generator \
     --doc docs/standard/四川省健康医疗大数据应用指南.md \
     --output rules
 ```
@@ -205,7 +205,7 @@ python -m privacy_local_agent.dynclassification.standard_profile_generator \
 
 ```python
 from pathlib import Path
-from privacy_local_agent.dynclassification.standard_profile_generator import StandardProfileGenerator
+from PrivShield.dynclassification.standard_profile_generator import StandardProfileGenerator
 
 # 1. 初始化生成器
 doc_path = "docs/standard/四川省健康医疗大数据应用指南.md"

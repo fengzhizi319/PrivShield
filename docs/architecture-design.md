@@ -1,6 +1,6 @@
-# privacy-local-agent 架构设计文档
+# PrivShield 架构设计文档
 
-> 本文档系统性介绍 privacy-local-agent 全栈所采用的架构技术，逐项解释**为何这样选择**（选型动机）与**如何设计实现**（落地方式）。
+> 本文档系统性介绍 PrivShield 全栈所采用的架构技术，逐项解释**为何这样选择**（选型动机）与**如何设计实现**（落地方式）。
 >
 > 关联文档：[architecture-summary.md](architecture-summary.md)（工程实践速览）、[index.md](index.md)（文档总入口）。
 >
@@ -25,7 +25,7 @@
 
 ### 1.1 项目定位
 
-privacy-local-agent 是一个**语言无关的隐私计算 Sidecar**：以独立进程/容器形式部署，通过 REST 与 gRPC 双协议对外暴露隐私原语（脱敏、差分隐私、K-匿名、查询混淆）与三层数据分类分级能力。任意语言的业务后端都可以像调用本地服务一样调用它，而无需嵌入特定语言的 SDK。
+PrivShield 是一个**语言无关的隐私计算 Sidecar**：以独立进程/容器形式部署，通过 REST 与 gRPC 双协议对外暴露隐私原语（脱敏、差分隐私、K-匿名、查询混淆）与三层数据分类分级能力。任意语言的业务后端都可以像调用本地服务一样调用它，而无需嵌入特定语言的 SDK。
 
 ```mermaid
 graph TB
@@ -68,7 +68,7 @@ graph TB
 代码按"关注点分离"组织为五个清晰的层次，各层职责单一、边界明确：
 
 ```
-privacy_local_agent/
+PrivShield/
 ├── privacy/           → 算法层：隐私原语 + 三层分类漏斗（无状态）
 ├── security/          → 安全层：认证 / 授权 / 限速 / TLS
 ├── observability/     → 可观测层：指标 / 追踪 / 结构化日志
@@ -84,7 +84,7 @@ privacy_local_agent/
 
 ## 二、算法与数据安全层
 
-算法层是本项目的核心，位于 `privacy_local_agent/privacy/`。其最高光的创新是**三层递进式数据分类分级漏斗**，同时配套了一组经过数学验证的经典隐私原语。
+算法层是本项目的核心，位于 `PrivShield/privacy/`。其最高光的创新是**三层递进式数据分类分级漏斗**，同时配套了一组经过数学验证的经典隐私原语。
 
 ### 2.1 三层递进式分类漏斗（3-Layer Funnel）
 
@@ -103,7 +103,7 @@ graph TB
     OUT --> REVIEW[低置信 → 人工复核队列]
 ```
 
-三层的具体分工（实现见 [classification.py](../privacy_local_agent/privacy/classification.py) 的 `_classify_field_internal`）：
+三层的具体分工（实现见 [classification.py](../PrivShield/privacy/classification.py) 的 `_classify_field_internal`）：
 
 | 层 | 引擎 | 技术 | 触发条件 | 特点 |
 |---|---|---|---|---|
@@ -151,7 +151,7 @@ if cp.enable_llm or confidence < cp.llm_confidence_threshold:
 
 #### 2.2.1 为何这样选择
 
-DP 是唯一具有**严格数学定义**的隐私量化框架（ε-DP / (ε,δ)-DP）。本项目选用**拉普拉斯机制**与**高斯机制**这两个最经典、工业界普遍认可的方案，而非实验性算法，以保证端侧执行时的**确定性与低资源消耗**。实现见 [dp.py](../privacy_local_agent/privacy/dp.py)。
+DP 是唯一具有**严格数学定义**的隐私量化框架（ε-DP / (ε,δ)-DP）。本项目选用**拉普拉斯机制**与**高斯机制**这两个最经典、工业界普遍认可的方案，而非实验性算法，以保证端侧执行时的**确定性与低资源消耗**。实现见 [dp.py](../PrivShield/privacy/dp.py)。
 
 #### 2.2.2 如何设计实现
 
@@ -171,8 +171,8 @@ DP 是唯一具有**严格数学定义**的隐私量化框架（ε-DP / (ε,δ)-
 
 K-匿名保证"任何准标识符（QI）组合至少与 k-1 条记录相同"，是抵御**链接攻击**的经典手段。本项目分两个粒度实现：
 
-- **记录级**（[kano.py](../privacy_local_agent/privacy/kano.py)）：基于**领域泛化层次**（age/zipcode/gender/salary/education 的 hierarchy 函数）对单条记录做最小泛化，适合实时、单条场景；
-- **数据集级**（[kano_table.py](../privacy_local_agent/privacy/kano_table.py)）：采用经典的 **Mondrian 多维分区算法**，对整表做全局最优划分，适合批量发布场景。
+- **记录级**（[kano.py](../PrivShield/privacy/kano.py)）：基于**领域泛化层次**（age/zipcode/gender/salary/education 的 hierarchy 函数）对单条记录做最小泛化，适合实时、单条场景；
+- **数据集级**（[kano_table.py](../PrivShield/privacy/kano_table.py)）：采用经典的 **Mondrian 多维分区算法**，对整表做全局最优划分，适合批量发布场景。
 
 #### 2.3.2 如何设计实现
 
@@ -192,7 +192,7 @@ def _mondrian_pd(sub_df, depth):
 
 #### 2.4.1 为何这样选择
 
-查询日志本身会泄露用户意图（"频繁查询某疾病"即暴露健康状态）。本项目采用**虚设查询注入（Dummy Query Injection，K-Degree 匿名化查询）**：把真实查询混入若干条虚假查询中一起发出，使观察者无法从日志中区分真伪。这是对抗**侧信道与意图分析**的轻量有效手段。实现见 [qol.py](../privacy_local_agent/privacy/qol.py)。
+查询日志本身会泄露用户意图（"频繁查询某疾病"即暴露健康状态）。本项目采用**虚设查询注入（Dummy Query Injection，K-Degree 匿名化查询）**：把真实查询混入若干条虚假查询中一起发出，使观察者无法从日志中区分真伪。这是对抗**侧信道与意图分析**的轻量有效手段。实现见 [qol.py](../PrivShield/privacy/qol.py)。
 
 #### 2.4.2 如何设计实现
 
@@ -204,11 +204,11 @@ def _mondrian_pd(sub_df, depth):
 
 ### 2.5 数据脱敏（Masking）
 
-[masking.py](../privacy_local_agent/privacy/masking.py) 提供**字段名感知**的 PII 脱敏：根据字段名（如 `phone`/`id_card`/`email`）自动选择对应的脱敏策略（部分遮盖、哈希、泛化），无需调用方逐字段指定算法。支持字段/记录/批量/DataFrame（PyArrow 列级向量化）多种粒度，是漏斗分类结果的直接执行端——"先分级、后按级脱敏"。
+[masking.py](../PrivShield/privacy/masking.py) 提供**字段名感知**的 PII 脱敏：根据字段名（如 `phone`/`id_card`/`email`）自动选择对应的脱敏策略（部分遮盖、哈希、泛化），无需调用方逐字段指定算法。支持字段/记录/批量/DataFrame（PyArrow 列级向量化）多种粒度，是漏斗分类结果的直接执行端——"先分级、后按级脱敏"。
 
 ### 2.6 向量化与零拷贝加速
 
-算法层统一通过 [data_adapters.py](../privacy_local_agent/privacy/data_adapters.py) 适配 list / ndarray / Arrow / sparse 多种输入，并在内部：
+算法层统一通过 [data_adapters.py](../PrivShield/privacy/data_adapters.py) 适配 list / ndarray / Arrow / sparse 多种输入，并在内部：
 
 - 用 `np.ascontiguousarray` 获得 C-contiguous 内存布局加速数值运算；
 - 用 **PyArrow Table** 做零拷贝数据交换（DP 结果可 `to_arrow()` 直接返回，供下游列式处理）；
@@ -220,7 +220,7 @@ def _mondrian_pd(sub_df, depth):
 
 ## 三、Python 后端层（Sidecar 引擎）
 
-Python 后端是算法能力的服务化载体，位于 `privacy_local_agent/` 根目录与 `security/`、`observability/`、`gateway/` 子包。
+Python 后端是算法能力的服务化载体，位于 `PrivShield/` 根目录与 `security/`、`observability/`、`gateway/` 子包。
 
 ### 3.1 REST + gRPC 双栈统一暴露
 
@@ -239,9 +239,9 @@ graph LR
     SVC --> P[隐私原语 privacy/]
 ```
 
-- REST 入口 [main.py](../privacy_local_agent/main.py)（FastAPI），gRPC 入口 [grpc_server.py](../privacy_local_agent/grpc_server.py)，两者都只做"协议解析 → 调用 `PrivacyService` → 协议封装"，**不含业务逻辑**；
+- REST 入口 [main.py](../PrivShield/main.py)（FastAPI），gRPC 入口 [grpc_server.py](../PrivShield/grpc_server.py)，两者都只做"协议解析 → 调用 `PrivacyService` → 协议封装"，**不含业务逻辑**；
 - Protobuf 契约定义在 [proto/privacy.proto](../proto/privacy.proto)，用 `grpc_tools.protoc` 生成 `privacy_pb2.py` / `privacy_pb2_grpc.py`；
-- [server.py](../privacy_local_agent/server.py) 在同一进程内同时拉起两个服务（REST 8079 + gRPC 50051）。
+- [server.py](../PrivShield/server.py) 在同一进程内同时拉起两个服务（REST 8079 + gRPC 50051）。
 
 ### 3.2 FastAPI + Pydantic v2
 
@@ -252,7 +252,7 @@ graph LR
 
 #### 3.2.2 如何设计实现
 
-- 请求模型集中在 [classification_models.py](../privacy_local_agent/privacy/classification_models.py) 等文件，全部为 Pydantic v2 `BaseModel`；
+- 请求模型集中在 [classification_models.py](../PrivShield/privacy/classification_models.py) 等文件，全部为 Pydantic v2 `BaseModel`；
 - 安全与限速通过 FastAPI 依赖注入挂载，与业务解耦：
 
 ```python
@@ -299,7 +299,7 @@ Sidecar 暴露的是"隐私计算"这种高敏能力，必须默认假设运行�
 
 ### 3.5 网关与负载均衡（`gateway/` 包）
 
-生产环境通常需要多副本 Agent。[gateway/balancer.py](../privacy_local_agent/gateway/balancer.py) 内置负载均衡器，支持**加权轮询 / 最少连接 / 随机**三种策略，配合异步健康检查（HTTP + gRPC）自动摘除/恢复不健康节点；[http_proxy.py](../privacy_local_agent/gateway/http_proxy.py) 与 [grpc_proxy.py](../privacy_local_agent/gateway/grpc_proxy.py) 分别代理两种协议。客户端无需感知后端拓扑。
+生产环境通常需要多副本 Agent。[gateway/balancer.py](../PrivShield/gateway/balancer.py) 内置负载均衡器，支持**加权轮询 / 最少连接 / 随机**三种策略，配合异步健康检查（HTTP + gRPC）自动摘除/恢复不健康节点；[http_proxy.py](../PrivShield/gateway/http_proxy.py) 与 [grpc_proxy.py](../PrivShield/gateway/grpc_proxy.py) 分别代理两种协议。客户端无需感知后端拓扑。
 
 ### 3.6 可选依赖分组
 
@@ -467,7 +467,7 @@ Sidecar 的最终形态是"与业务 Pod 共同部署、弹性伸缩"。Kubernet
 |---|---|---|
 | Docker Compose | `deploy/docker-compose/` | 单机本地测试 |
 | 原生 K8s + Kustomize | `deploy/k8s/` | 轻量、无需 Helm 的集群 |
-| Helm Chart | `deploy/helm/privacy-local-agent/` | 生产级参数化部署 |
+| Helm Chart | `deploy/helm/PrivShield/` | 生产级参数化部署 |
 
 Helm Chart 的 `templates/` 提供了工业级全套资源：
 
@@ -486,7 +486,7 @@ Helm Chart 的 `templates/` 提供了工业级全套资源：
 graph TB
     subgraph 业务 Pod
         BIZ[业务容器 任意语言]
-        AGT[privacy-local-agent 容器]
+        AGT[PrivShield 容器]
     end
     BIZ -->|localhost REST/gRPC| AGT
     AGT -->|可选| KMS[外部 KMS/密钥管理]

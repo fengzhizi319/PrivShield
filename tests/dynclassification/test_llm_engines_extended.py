@@ -22,9 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
-from privacy_local_agent.dynclassification.llm_engines import Qwen2VLClassifier
-from privacy_local_agent.dynclassification.models import (
+from PrivShield.dynclassification.llm_adapter import LlmAdapter
+from PrivShield.dynclassification.llm_engines import Qwen2VLClassifier
+from PrivShield.dynclassification.models import (
     CategoryDef,
     DomainTaxonomy,
     SecurityTag,
@@ -92,7 +92,7 @@ class TestQwen2VLInitLifecycle:
     def test_classify_init_failure_returns_none(self):
         """classify 时初始化失败应返回 None（优雅降级）。"""
         classifier = Qwen2VLClassifier(model_path="/nonexistent/model")
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = classifier.classify("测试文本", SensitivityLevel.L3, 0.5)
         assert result is None
@@ -187,7 +187,7 @@ class TestParseJsonResultExtended:
 
     def test_missing_final_level_returns_none(self):
         """JSON 中缺少 final_level 字段应返回 None。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         text = '{"confidence": 0.9, "reasoning": "缺少等级字段"}'
         result = self.classifier._parse_json_result(text, SensitivityLevel.L3, 0.5)
@@ -195,14 +195,14 @@ class TestParseJsonResultExtended:
 
     def test_empty_json_object_returns_none(self):
         """空 JSON 对象 {} 应返回 None。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = self.classifier._parse_json_result("{}", SensitivityLevel.L3, 0.5)
         assert result is None
 
     def test_nested_json_with_final_level(self):
         """包含嵌套结构但有 final_level 的 JSON 应正确解析。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         text = '{"final_level": "L5", "confidence": 0.99, "reasoning": "基因数据", "extra": {"key": "val"}}'
         result = self.classifier._parse_json_result(text, SensitivityLevel.L4, 0.6)
@@ -212,7 +212,7 @@ class TestParseJsonResultExtended:
 
     def test_json_with_surrounding_text(self):
         """JSON 前后有额外文字时应正确提取。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         text = '经过分析，结果如下：{"final_level": "L3", "confidence": 0.85, "reasoning": "PII"} 以上。'
         result = self.classifier._parse_json_result(text, SensitivityLevel.L3, 0.5)
@@ -221,14 +221,14 @@ class TestParseJsonResultExtended:
 
     def test_empty_string_returns_none(self):
         """空字符串应返回 None。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = self.classifier._parse_json_result("", SensitivityLevel.L3, 0.5)
         assert result is None
 
     def test_json_with_needs_human_review_field(self):
         """包含 needs_human_review 字段的 JSON 应完整保留。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         text = '{"final_level": "L4", "confidence": 0.7, "reasoning": "不确定", "needs_human_review": true}'
         result = self.classifier._parse_json_result(text, SensitivityLevel.L3, 0.5)
@@ -412,7 +412,7 @@ class TestClassifyInnerPromptTemplate:
         template = "你是{domain}领域专家。标准: {standard_id}。{levels_desc}"
         classifier = self._make_classifier_with_template(template)
 
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = classifier._classify_inner("测试文本", SensitivityLevel.L3, 0.5)
         assert result is not None
@@ -430,7 +430,7 @@ class TestClassifyInnerPromptTemplate:
         """未配置模板时应使用内置默认 prompt。"""
         classifier = self._make_classifier_with_template(None)
 
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         result = classifier._classify_inner("身份证号123", SensitivityLevel.L3, 0.5)
         assert result is not None

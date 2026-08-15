@@ -63,7 +63,7 @@ graph TD
     LB -- HTTP/gRPC --> NodeN[Agent Node N]
 ```
 
-网关代码位于 `privacy_local_agent.gateway`，保持良好内聚与低耦合。
+网关代码位于 `PrivShield.gateway`，保持良好内聚与低耦合。
 
 ## 4. 核心模块设计
 
@@ -176,7 +176,7 @@ async def proxy_http(path: str, request: Request): ...
 | 并发模型 | REST 基于 FastAPI 异步；gRPC 基于 `grpc.aio` |
 | 连接复用 | 应用级单例 HTTP 客户端连接池与 gRPC 连接池 |
 | 鲁棒性 | 优雅处理超时、重试、连接被拒绝等异常 |
-| 模块隔离 | 新增代码位于 `privacy_local_agent.gateway`，减少侵入 |
+| 模块隔离 | 新增代码位于 `PrivShield.gateway`，减少侵入 |
 
 ## 11. 测试策略
 

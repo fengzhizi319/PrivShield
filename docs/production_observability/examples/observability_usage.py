@@ -17,7 +17,7 @@ import asyncio
 import io
 import sys
 
-from privacy_local_agent.observability import (
+from PrivShield.observability import (
     AUTH_DENIALS_TOTAL,
     BUDGET_REMAINING,
     CLASSIFICATION_TOTAL,

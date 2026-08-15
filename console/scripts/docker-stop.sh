@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 echo "============================================================================"
-echo "🛑 [Docker Mode] 正在停止并清理所有 Privacy Local Agent 容器..."
+echo "🛑 [Docker Mode] 正在停止并清理所有 PrivShield 容器..."
 echo "============================================================================"
 
 # 1. 使用 Docker Compose 停止并清理 Compose 服务

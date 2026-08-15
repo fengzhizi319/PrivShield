@@ -11,7 +11,7 @@ Tests for core optimization features of PrivShield:
 
 import unittest
 
-from privacy_local_agent.privacy.profile import get_resolver
+from PrivShield.privacy.profile import get_resolver
 
 
 class TestAgentOptimizations(unittest.TestCase):

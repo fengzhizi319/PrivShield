@@ -24,11 +24,11 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from privacy_local_agent.security.config import SecuritySettings, get_security_settings
-from privacy_local_agent.security.auth import _authenticate_mtls
-from privacy_local_agent.security.identity import Identity, permission_for_rest_path
-from privacy_local_agent.security.ratelimit import Limiter
-from privacy_local_agent.security.tls import uvicorn_ssl_kwargs
+from PrivShield.security.config import SecuritySettings, get_security_settings
+from PrivShield.security.auth import _authenticate_mtls
+from PrivShield.security.identity import Identity, permission_for_rest_path
+from PrivShield.security.ratelimit import Limiter
+from PrivShield.security.tls import uvicorn_ssl_kwargs
 
 
 def _extract_bearer_token(header_value: str | None) -> str | None:

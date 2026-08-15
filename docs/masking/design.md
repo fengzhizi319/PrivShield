@@ -110,7 +110,7 @@
 模块提供 `FieldType` 枚举用于类型安全的字段类型判断：
 
 ```python
-from privacy_local_agent.privacy.masking import FieldType
+from PrivShield.privacy.masking import FieldType
 
 assert FieldType.MOBILE == "mobile"
 assert FieldType.EMAIL == "email"
@@ -259,7 +259,7 @@ logger.info(
 提供 `MaskingOperation` 枚举用于操作类型标识：
 
 ```python
-from privacy_local_agent.privacy.masking import MaskingOperation
+from PrivShield.privacy.masking import MaskingOperation
 
 assert MaskingOperation.MASK_VALUE == "mask_value"
 assert MaskingOperation.HASH_VALUE == "hash_value"
@@ -267,13 +267,13 @@ assert MaskingOperation.HASH_VALUE == "hash_value"
 
 ## 9. 模块设计
 
-- `privacy_local_agent/privacy/masking.py`：核心脱敏逻辑。
+- `PrivShield/privacy/masking.py`：核心脱敏逻辑。
   - `_mask_arrow_column`：PyArrow 列级向量化脱敏内核（`pyarrow.compute` UTF-8 算子）。
   - `_coerce_to_dict`：单行多格式输入转 dict。
   - `_convert_to_records`：多行多格式输入转记录列表。
-- `privacy_local_agent/privacy/data_adapters.py`：DataFrame 与记录列表互转。
-- `privacy_local_agent/service.py`：`PrivacyService` 封装。
-- `privacy_local_agent/main.py` / `grpc_server.py`：REST / gRPC 接口。
+- `PrivShield/privacy/data_adapters.py`：DataFrame 与记录列表互转。
+- `PrivShield/service.py`：`PrivacyService` 封装。
+- `PrivShield/main.py` / `grpc_server.py`：REST / gRPC 接口。
 
 ## 10. 测试策略
 

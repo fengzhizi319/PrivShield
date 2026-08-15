@@ -104,7 +104,7 @@ vLLM 挂载提示：
 
 ---
 
-## 3. 集成至 privacy-local-agent
+## 3. 集成至 PrivShield
 
 ### 3.1 `QwenPrivacyLoRAEngine` 核心实现
 
@@ -172,7 +172,7 @@ class QwenPrivacyLoRAEngine:
 
 ### 3.2 `Qwen3Classifier` 与 `LlmAdapter` 漏斗集成
 
-在 Sidecar 架构中，`privacy_local_agent/dynclassification/llm_engines.py` 中的 `Qwen3Classifier` 默认自动定位 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`。
+在 Sidecar 架构中，`PrivShield/dynclassification/llm_engines.py` 中的 `Qwen3Classifier` 默认自动定位 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`。
 
 ```python
 # DynClassification 漏斗在 Layer-3 触发 Qwen3Classifier 推理

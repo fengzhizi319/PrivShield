@@ -44,13 +44,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # REST 服务
-python -m privacy_local_agent.main
+python -m PrivShield.main
 
 # gRPC 服务
-python -m privacy_local_agent.grpc_server
+python -m PrivShield.grpc_server
 
 # 同时启动 REST + gRPC
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 默认端口：
@@ -126,7 +126,7 @@ PRIVACY_TLS_KEY_FILE=./certs/server.key \
 PRIVACY_AUTH_ENABLED=true \
 PRIVACY_AUTH_INTERNAL_KEYS_JSON='{"sk-internal":{"name":"secretpad","scopes":["*"]}}' \
 PRIVACY_RATE_LIMIT_ENABLED=true \
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 详细配置、证书生成和调用示例请参考：
@@ -180,8 +180,8 @@ python -m privacy_local_agent.server
 | 查询混淆 | `POST /v1/privacy/qol/obfuscate` | `ObfuscateQuery` | `PrivacyService.obfuscate_query` |
 | 隐私预算查询 | `GET /v1/privacy/budget` | `Health` | `PrivacyService.budget_remaining` |
 
-处理原语统一由 `privacy_local_agent.service.PrivacyService` 编排，
-并通过 `privacy_local_agent.main`（REST）和 `privacy_local_agent.grpc_server`（gRPC）暴露。
+处理原语统一由 `PrivShield.service.PrivacyService` 编排，
+并通过 `PrivShield.main`（REST）和 `PrivShield.grpc_server`（gRPC）暴露。
 
 #### REST 示例
 
@@ -195,7 +195,7 @@ curl -X POST http://127.0.0.1:8079/v1/privacy/mask \
 
 ```python
 import grpc
-from privacy_local_agent import privacy_pb2, privacy_pb2_grpc
+from PrivShield import privacy_pb2, privacy_pb2_grpc
 
 channel = grpc.insecure_channel("127.0.0.1:50051")
 stub = privacy_pb2_grpc.PrivacyServiceStub(channel)
@@ -213,15 +213,15 @@ print(resp.result)
 
 数据分类拥有基于 3 层漏斗（规则引擎 -> Small-NER -> Local LLM）的引擎架构：
 
-- 漏斗编排：`privacy_local_agent.dynclassification.funnel.ClassificationFunnel`
-- 服务包装：`privacy_local_agent.dynclassification.service.DynClassificationService`
-- REST 路由：`privacy_local_agent.routers.dynclassification`
-- 规则配置与加载：`privacy_local_agent.dynclassification.profile_loader.ProfileLoader`
+- 漏斗编排：`PrivShield.dynclassification.funnel.ClassificationFunnel`
+- 服务包装：`PrivShield.dynclassification.service.DynClassificationService`
+- REST 路由：`PrivShield.routers.dynclassification`
+- 规则配置与加载：`PrivShield.dynclassification.profile_loader.ProfileLoader`
 
 #### 本地 SDK
 
 ```python
-from privacy_local_agent.dynclassification import DynClassificationService
+from PrivShield.dynclassification import DynClassificationService
 
 service = DynClassificationService(rules_dir="rules")
 
@@ -286,7 +286,7 @@ curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval_table \
 ```python
 import json
 import grpc
-from privacy_local_agent import privacy_pb2, privacy_pb2_grpc
+from PrivShield import privacy_pb2, privacy_pb2_grpc
 
 channel = grpc.insecure_channel("127.0.0.1:50051")
 stub = privacy_pb2_grpc.PrivacyServiceStub(channel)
@@ -317,13 +317,13 @@ pip install build
 python -m build
 
 # 生成的文件
-# dist/privacy_local_agent-0.1.0-py3-none-any.whl  (wheel)
-# dist/privacy_local_agent-0.1.0.tar.gz            (源码包)
+# dist/PrivShield-0.1.0-py3-none-any.whl  (wheel)
+# dist/PrivShield-0.1.0.tar.gz            (源码包)
 ```
 
 其他人安装：
 ```bash
-pip install privacy_local_agent-0.1.0-py3-none-any.whl
+pip install PrivShield-0.1.0-py3-none-any.whl
 ```
 
 ### Docker 镜像

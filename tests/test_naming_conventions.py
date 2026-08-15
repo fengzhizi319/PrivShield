@@ -31,12 +31,12 @@ This module verifies that naming conventions and backward-compatible aliases wor
 # === 异常类导入 / Exception class imports ===
 # PrivacyBudgetExhausted 是旧名称（别名）/ Old name (alias)
 # PrivacyBudgetExhaustedError 是规范名称 / Canonical name
-from privacy_local_agent.privacy.budget import PrivacyBudgetExhausted, PrivacyBudgetExhaustedError
+from PrivShield.privacy.budget import PrivacyBudgetExhausted, PrivacyBudgetExhaustedError
 
 # === REST API Schema 导入 / REST API Schema imports ===
 # 每个原语提供多个别名以适应不同编码风格
 # Each primitive provides multiple aliases for different coding styles
-from privacy_local_agent.schemas import (
+from PrivShield.schemas import (
     KAnonRequest,              # 简写 / Short form
     KAnonymityRequest,         # 完整拼写别名 / Full spelling alias
     LdpPerturbBinaryRequest,   # PascalCase 风格 / PascalCase style
@@ -47,9 +47,9 @@ from privacy_local_agent.schemas import (
 )
 
 # === 动态分类引擎导入 / Dynamic classification engine imports ===
-from privacy_local_agent.dynclassification.base import SmallNerEngine, SmallNEREngine, LlmClassifier, LLMClassifier
-from privacy_local_agent.dynclassification.service import DynClassificationService, DynamicClassificationService
-from privacy_local_agent.dynclassification.models import TableClassificationResult
+from PrivShield.dynclassification.base import SmallNerEngine, SmallNEREngine, LlmClassifier, LLMClassifier
+from PrivShield.dynclassification.service import DynClassificationService, DynamicClassificationService
+from PrivShield.dynclassification.models import TableClassificationResult
 
 
 def test_exception_naming_convention():

@@ -33,8 +33,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from faker import Faker
 
-# 保证从任意工作目录运行时都能导入 llmlora 与 privacy_local_agent
-# Ensure llmlora and privacy_local_agent are importable from any cwd
+# 保证从任意工作目录运行时都能导入 llmlora 与 PrivShield
+# Ensure llmlora and PrivShield are importable from any cwd
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -42,10 +42,10 @@ if str(_REPO_ROOT) not in sys.path:
 from llmlora.src.utils.metrics import find_leaked_values  # noqa: E402
 
 # 规则引擎依赖（项目主包） / Rule engine dependencies from the main project package
-from privacy_local_agent.dynclassification.engine import (  # noqa: E402
+from PrivShield.dynclassification.engine import (  # noqa: E402
     ConfigurableRuleEngine,
 )
-from privacy_local_agent.dynclassification.profile_loader import (  # noqa: E402
+from PrivShield.dynclassification.profile_loader import (  # noqa: E402
     ProfileLoader,
 )
 

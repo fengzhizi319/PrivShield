@@ -48,14 +48,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/agent"
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/config"
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/fileparse"
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/lbtest"
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/mapper"
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/models"
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/samples"
-	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/fileparse"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/lbtest"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/mapper"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/models"
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/samples"
+	pb "github.com/fengzhizi319/PrivShield/console/backend-go/proto"
 )
 
 // 本控制台后端的身份标识常量，随每个响应下发给前端。

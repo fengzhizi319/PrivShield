@@ -169,15 +169,15 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-check_port_available 8079 "privacy_local_agent REST"
-check_port_available 50051 "privacy_local_agent gRPC (mTLS)"
+check_port_available 8079 "PrivShield REST"
+check_port_available 50051 "PrivShield gRPC (mTLS)"
 check_port_available 8081 "Go gRPC 代理后端"
 check_port_available 5173 "Vite 前端开发服务器"
 
 launch_agent() {
     local agent_log="$PROJECT_ROOT/.logs/agent_go_mtls.log"
     mkdir -p "$PROJECT_ROOT/.logs"
-    echo "启动 privacy_local_agent (gRPC mTLS: $AGENT_GRPC_ADDR, client_auth=require)，日志: $agent_log..."
+    echo "启动 PrivShield (gRPC mTLS: $AGENT_GRPC_ADDR, client_auth=require)，日志: $agent_log..."
     (
         source "$AGENT_VENV/bin/activate"
         cd "$PROJECT_ROOT"
@@ -187,7 +187,7 @@ launch_agent() {
         export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
         export PRIVACY_TLS_CLIENT_AUTH=require
         # 日志持久化到 .logs/agent_go_mtls.log，agent 崩溃/重启后可回溯根因
-        exec python -m privacy_local_agent.server >> "$agent_log" 2>&1
+        exec python -m PrivShield.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"
@@ -215,7 +215,7 @@ wait_for_service() {
 }
 
 # mTLS 模式下 REST 端口同样需要等待就绪（agent 同时监听 REST + gRPC）
-wait_for_service "$AGENT_URL/health" "privacy_local_agent" 2>/dev/null || true
+wait_for_service "$AGENT_URL/health" "PrivShield" 2>/dev/null || true
 
 echo -n "等待 agent gRPC mTLS (127.0.0.1:50051) 就绪"
 for i in $(seq 1 30); do
@@ -295,7 +295,7 @@ while [[ "$STOPPING" != "true" ]]; do
     fi
     launch_agent
     # mTLS 模式下 REST 健康检查可能因证书问题失败，静默忽略
-    wait_for_service "$AGENT_URL/health" "重启后的 privacy_local_agent" 2>/dev/null || true
+    wait_for_service "$AGENT_URL/health" "重启后的 PrivShield" 2>/dev/null || true
     # 等待 gRPC 端口就绪
     echo -n "等待重启后的 agent gRPC (127.0.0.1:50051) 就绪"
     for i in $(seq 1 30); do

@@ -22,8 +22,8 @@ from unittest.mock import MagicMock, patch, PropertyMock
 import numpy as np
 import pytest
 
-from privacy_local_agent.dynclassification.ner_adapter import NerAdapter
-from privacy_local_agent.dynclassification.ner_engines import (
+from PrivShield.dynclassification.ner_adapter import NerAdapter
+from PrivShield.dynclassification.ner_engines import (
     DEFAULT_NER_LABEL_MAPPING,
     ModelScopeSmallNerEngine,
     ONNXSmallNerEngine,
@@ -392,7 +392,7 @@ class TestNerAdapterExtended:
 
     def test_fallback_order_tensorrt_onnx_modelscope(self):
         """降级顺序应为 MLX → TensorRT → ONNX → ModelScope。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
 
         adapter = NerAdapter(model_path="/nonexistent/model.onnx")
         call_order = []
@@ -408,7 +408,7 @@ class TestNerAdapterExtended:
 
     def test_onnx_success_skips_modelscope(self):
         """ONNX 引擎成功时不应尝试 ModelScope。"""
-        from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
 
         adapter = NerAdapter()
         adapter._initialized = False
@@ -580,7 +580,7 @@ class TestBIOESAndSafetyGate:
 
     def test_dyn_service_l5_rating_and_safety_gate(self):
         """测试 dyn classification 定级一致性 (艾滋病判 L5) 与 Fail-Safe 安全门禁。"""
-        from privacy_local_agent.dynclassification.service import DynamicClassificationService
+        from PrivShield.dynclassification.service import DynamicClassificationService
 
         service = DynamicClassificationService()
         

@@ -261,9 +261,9 @@ confidence_policy:
 
 | 组件 | 文件 |
 |------|------|
-| 漏斗编排器 | `privacy_local_agent/dynclassification/funnel.py` |
-| 置信度策略模型 | `privacy_local_agent/dynclassification/models.py` → `ConfidencePolicy` |
-| 规则引擎（Layer-1） | `privacy_local_agent/dynclassification/engine.py` |
-| NER 适配器（Layer-2） | `privacy_local_agent/dynclassification/ner_adapter.py` |
-| LLM 适配器（Layer-3） | `privacy_local_agent/dynclassification/llm_adapter.py` |
+| 漏斗编排器 | `PrivShield/dynclassification/funnel.py` |
+| 置信度策略模型 | `PrivShield/dynclassification/models.py` → `ConfidencePolicy` |
+| 规则引擎（Layer-1） | `PrivShield/dynclassification/engine.py` |
+| NER 适配器（Layer-2） | `PrivShield/dynclassification/ner_adapter.py` |
+| LLM 适配器（Layer-3） | `PrivShield/dynclassification/llm_adapter.py` |
 | 单元测试 | `tests/dynclassification/test_funnel.py` |

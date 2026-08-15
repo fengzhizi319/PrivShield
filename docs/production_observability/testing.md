@@ -25,7 +25,7 @@
 
 ## 1. 概述
 
-本文档定义 `privacy_local_agent/observability/` 的测试策略、测试范围与可执行示例。可观测性模块的测试需覆盖日志格式、Prometheus 指标、`request_id` 透传、认证拒绝事件以及 OpenTelemetry 可选初始化。
+本文档定义 `PrivShield/observability/` 的测试策略、测试范围与可执行示例。可观测性模块的测试需覆盖日志格式、Prometheus 指标、`request_id` 透传、认证拒绝事件以及 OpenTelemetry 可选初始化。
 
 ## 2. 测试目标
 
@@ -46,12 +46,12 @@
 import logging
 import pytest
 
-from privacy_local_agent.observability.logging_config import configure_logging
+from PrivShield.observability.logging_config import configure_logging
 
 
 @pytest.fixture(autouse=True)
 def _reset_logging():
-    import privacy_local_agent.observability.logging_config as lc
+    import PrivShield.observability.logging_config as lc
 
     lc._logging_configured = False
     yield
@@ -76,7 +76,7 @@ def test_json_logging_formatter():
 
 ```python
 from fastapi.testclient import TestClient
-from privacy_local_agent.main import app
+from PrivShield.main import app
 
 client = TestClient(app)
 
@@ -160,7 +160,7 @@ def test_auth_denial_metric_recorded(monkeypatch):
 ### 3.8 OpenTelemetry 可选初始化测试
 
 ```python
-from privacy_local_agent.observability.tracing import init_tracing
+from PrivShield.observability.tracing import init_tracing
 
 
 def test_init_tracing_without_otel():
@@ -201,8 +201,8 @@ def test_json_log_contains_required_fields(capsys, monkeypatch):
 
 ```python
 import grpc
-from privacy_local_agent.grpc_server import PrivacyServicer
-from privacy_local_agent.proto import privacy_pb2, privacy_pb2_grpc
+from PrivShield.grpc_server import PrivacyServicer
+from PrivShield.proto import privacy_pb2, privacy_pb2_grpc
 
 
 def test_grpc_request_metrics():
@@ -222,7 +222,7 @@ PYTHONPATH=. pytest tests/test_observability.py -v
 PYTHONPATH=. pytest tests -q
 
 # 带覆盖率报告
-PYTHONPATH=. pytest tests/test_observability.py --cov=privacy_local_agent.observability --cov-report=term-missing
+PYTHONPATH=. pytest tests/test_observability.py --cov=PrivShield.observability --cov-report=term-missing
 ```
 
 ## 6. 持续集成建议

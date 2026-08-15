@@ -36,7 +36,7 @@ from __future__ import annotations
 import pytest
 from prometheus_client import REGISTRY
 
-from privacy_local_agent.privacy.kano import (
+from PrivShield.privacy.kano import (
     GeneralizationStrategy,
     KAnonymityRecordResult,
     QIType,
@@ -46,7 +46,7 @@ from privacy_local_agent.privacy.kano import (
     education_hierarchy,
     salary_hierarchy,
 )
-from privacy_local_agent.privacy.kano_table import (
+from PrivShield.privacy.kano_table import (
     k_anonymize_dataframe,
     k_anonymize_table,
 )
@@ -175,7 +175,7 @@ class TestKAnonymizeTable:
         assert after == before + 1
 
     def test_k_anonymize_table_return_details(self) -> None:
-        from privacy_local_agent.privacy.kano_table import KAnonymityResult
+        from PrivShield.privacy.kano_table import KAnonymityResult
 
         rows = [
             {"age": 25, "zipcode": "100001", "disease": "A"},
@@ -195,7 +195,7 @@ class TestKAnonymizeTable:
 
     def test_k_anonymize_dataframe_return_details(self) -> None:
         pd = pytest.importorskip("pandas")
-        from privacy_local_agent.privacy.kano_table import KAnonymityResult
+        from PrivShield.privacy.kano_table import KAnonymityResult
 
         df = pd.DataFrame(
             {
@@ -213,7 +213,7 @@ class TestKAnonymizeTable:
 
     def test_k_anonymity_result_to_arrow(self) -> None:
         pa = pytest.importorskip("pyarrow")
-        from privacy_local_agent.privacy.kano_table import KAnonymityResult
+        from PrivShield.privacy.kano_table import KAnonymityResult
 
         result = KAnonymityResult(
             value=[{"age": "[25-30]", "zipcode": "100***"}],
@@ -386,7 +386,7 @@ class TestAnonymizeRecordsBatch:
 
     def test_adaptive_age_hierarchy(self) -> None:
         """测试单条记录自适应分段年龄泛化：<60岁按3岁区间(减余数)，>=60岁按2岁精细康养区间(减余数)。"""
-        from privacy_local_agent.privacy.kano import adaptive_age_hierarchy
+        from PrivShield.privacy.kano import adaptive_age_hierarchy
 
         # < 60 岁：3 岁区间测试 (30, 31, 32 -> 30)
         assert adaptive_age_hierarchy(30, under_60_interval=3, senior_interval=2, output_format="floor") == "30"

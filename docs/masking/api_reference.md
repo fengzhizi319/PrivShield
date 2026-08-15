@@ -31,7 +31,7 @@
 
 ### `mask_value`
 
-位置：`privacy_local_agent.privacy.masking.mask_value`
+位置：`PrivShield.privacy.masking.mask_value`
 
 ```python
 def mask_value(field_name: str, value: str, context: str = "") -> str
@@ -57,7 +57,7 @@ def mask_value(field_name: str, value: str, context: str = "") -> str
 
 **示例：**
 ```python
-from privacy_local_agent.privacy.masking import mask_value
+from PrivShield.privacy.masking import mask_value
 
 # 手机号脱敏
 result = mask_value("mobile", "13812345678")
@@ -70,7 +70,7 @@ result = mask_value("name", "张三丰")
 
 ### `mask_record`
 
-位置：`privacy_local_agent.privacy.masking.mask_record`
+位置：`PrivShield.privacy.masking.mask_record`
 
 ```python
 def mask_record(record: Any, context: str = "") -> Any
@@ -99,7 +99,7 @@ def mask_record(record: Any, context: str = "") -> Any
 
 **示例：**
 ```python
-from privacy_local_agent.privacy.masking import mask_record
+from PrivShield.privacy.masking import mask_record
 
 record = {
     "mobile": "13812345678",
@@ -119,7 +119,7 @@ masked = mask_record(record)
 
 ### `mask_value_batch`
 
-位置：`privacy_local_agent.privacy.masking.mask_value_batch`
+位置：`PrivShield.privacy.masking.mask_value_batch`
 
 ```python
 def mask_value_batch(
@@ -141,7 +141,7 @@ def mask_value_batch(
 
 **示例：**
 ```python
-from privacy_local_agent.privacy.masking import mask_value_batch
+from PrivShield.privacy.masking import mask_value_batch
 
 field_names = ["mobile", "name", "id_card"]
 values = ["13812345678", "张三丰", "110101199001011234"]
@@ -152,7 +152,7 @@ results = mask_value_batch(field_names, values)
 
 ### `mask_dataframe`
 
-位置：`privacy_local_agent.privacy.masking.mask_dataframe`
+位置：`PrivShield.privacy.masking.mask_dataframe`
 
 ```python
 def mask_dataframe(
@@ -201,7 +201,7 @@ def mask_dataframe(
 ```python
 import pandas as pd
 import pyarrow as pa
-from privacy_local_agent.privacy.masking import mask_dataframe
+from PrivShield.privacy.masking import mask_dataframe
 
 # 创建示例数据
 df = pd.DataFrame({
@@ -235,7 +235,7 @@ print(result_table.column("mobile").to_pylist())
 
 ### `hash_value`
 
-位置：`privacy_local_agent.privacy.masking.hash_value`
+位置：`PrivShield.privacy.masking.hash_value`
 
 ```python
 def hash_value(value: str, salt: str) -> str
@@ -256,7 +256,7 @@ HMAC-SHA256 哈希，输出 16 位 base64 摘要。
 
 **示例：**
 ```python
-from privacy_local_agent.privacy.masking import hash_value
+from PrivShield.privacy.masking import hash_value
 
 # 使用固定盐值
 user_id_hash = hash_value("user_12345", "my_secret_salt")
@@ -268,7 +268,7 @@ assert hash_value("user_12345", "my_secret_salt") == hash_value("user_12345", "m
 
 ### `truncate`
 
-位置：`privacy_local_agent.privacy.masking.truncate`
+位置：`PrivShield.privacy.masking.truncate`
 
 ```python
 def truncate(value: str, keep_prefix: int) -> str
@@ -289,7 +289,7 @@ def truncate(value: str, keep_prefix: int) -> str
 
 **示例：**
 ```python
-from privacy_local_agent.privacy.masking import truncate
+from PrivShield.privacy.masking import truncate
 
 # 用户名截断
 result = truncate("zhangsan", 3)
@@ -557,7 +557,7 @@ print(response.result)  # "aB3dE5gH7jK9mN1p"
 
 **Python SDK：**
 ```python
-from privacy_local_agent.privacy.masking import mask_value_batch
+from PrivShield.privacy.masking import mask_value_batch
 
 try:
     # 错误示例：长度不匹配

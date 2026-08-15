@@ -41,7 +41,7 @@ import (
 // Loaded once from env vars via Load(), read-only during runtime.
 // 通过 Load() 从环境变量一次性加载，运行期间只读不修改。
 type Config struct {
-	// AgentGRPCHost：上游 privacy-local-agent gRPC 服务的主机名或 IP 地址。
+	// AgentGRPCHost：上游 PrivShield gRPC 服务的主机名或 IP 地址。
 	// 对应环境变量 PRIVACY_AGENT_GRPC_HOST，默认 "127.0.0.1"。
 	AgentGRPCHost string
 
@@ -138,7 +138,7 @@ func Load() *Config {
 	return &Config{
 		// 上游 agent gRPC 主机地址，默认 127.0.0.1（本地开发场景）
 		AgentGRPCHost: getEnv("PRIVACY_AGENT_GRPC_HOST", "127.0.0.1"),
-		// 上游 agent gRPC 端口，默认 50051（与 privacy-local-agent 默认 gRPC 端口一致）
+		// 上游 agent gRPC 端口，默认 50051（与 PrivShield 默认 gRPC 端口一致）
 		AgentGRPCPort: getEnvInt("PRIVACY_AGENT_GRPC_PORT", 50051),
 		// 认证 API Key，默认为空（不启用认证）
 		AgentAPIKey: getEnv("PRIVACY_AGENT_API_KEY", ""),

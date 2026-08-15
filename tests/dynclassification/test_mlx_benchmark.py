@@ -62,7 +62,7 @@ def ner_engine():
     """加载 MLX NER 引擎（模块级复用）。"""
     if not MLX_NER_MODEL_DIR.exists():
         pytest.skip(f"MLX NER model not found: {MLX_NER_MODEL_DIR}")
-    from privacy_local_agent.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+    from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
 
     engine = MLXSmallNerEngine(model_dir=str(MLX_NER_MODEL_DIR))
     engine._lazy_init()
@@ -74,7 +74,7 @@ def llm_classifier():
     """加载 MLX LLM 分类器（模块级复用）。"""
     if not MLX_LLM_MODEL_DIR.exists():
         pytest.skip(f"MLX LLM model not found: {MLX_LLM_MODEL_DIR}")
-    from privacy_local_agent.dynclassification.mlx_llm_engine import MLXLlmClassifier
+    from PrivShield.dynclassification.mlx_llm_engine import MLXLlmClassifier
 
     classifier = MLXLlmClassifier(model_dir=str(MLX_LLM_MODEL_DIR))
     classifier._lazy_init()
@@ -355,7 +355,7 @@ class TestLlmBenchmark:
     def test_llm_token_generation_speed(self, mlx, llm_classifier):
         """LLM token 生成速度对比（tokens/s）。"""
         mx = mlx
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         text = "患者有精神分裂症病史，长期服用奥氮平治疗"
 
@@ -439,7 +439,7 @@ class TestLlmBenchmark:
 
     def _run_llm_comparison(self, mx, classifier, text_key: str):
         """执行单个 LLM GPU vs CPU 对比。"""
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         text = self.TEST_TEXTS[text_key]
 
@@ -472,7 +472,7 @@ class TestBenchmarkSummary:
     def test_full_benchmark_report(self, mlx, ner_engine, llm_classifier):
         """生成完整 NER + LLM GPU vs CPU 性能报告。"""
         mx = mlx
-        from privacy_local_agent.dynclassification.base import SensitivityLevel
+        from PrivShield.dynclassification.base import SensitivityLevel
 
         print("\n" + "=" * 70)
         print("  Apple MLX Metal GPU vs CPU 性能对比报告")

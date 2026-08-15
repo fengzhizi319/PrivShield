@@ -110,7 +110,7 @@ class Config:
     )
 
     # Agent 主模型部署目录（训练合并后自动同步的目标路径）
-    # Target deployment directory for Privacy Local Agent
+    # Target deployment directory for PrivShield
     agent_model_dir: str = field(
         default_factory=lambda: _env(
             "LLMLORA_AGENT_MODEL_DIR",

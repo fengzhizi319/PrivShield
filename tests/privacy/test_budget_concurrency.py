@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
 
-from privacy_local_agent.privacy.budget import (
+from PrivShield.privacy.budget import (
     PrivacyBudgetExhausted,
     default_registry,
 )

@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 import pytest
 
-from privacy_local_agent.dynclassification import (
+from PrivShield.dynclassification import (
     DynClassificationService,
     OperatorRegistry,
     ProfileLoader,
@@ -176,7 +176,7 @@ class TestDowngradeRules:
             ],
         )
 
-        from privacy_local_agent.dynclassification.engine import ConfigurableRuleEngine
+        from PrivShield.dynclassification.engine import ConfigurableRuleEngine
         engine = ConfigurableRuleEngine(taxonomy, [profile])
 
         # 匹配降级关键词 "inventory"

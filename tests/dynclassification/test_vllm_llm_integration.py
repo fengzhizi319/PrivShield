@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from privacy_local_agent.env_loader import load_env_file
-from privacy_local_agent.dynclassification.base import SensitivityLevel
-from privacy_local_agent.dynclassification.llm_adapter import LlmAdapter
-from privacy_local_agent.dynclassification.llm_engines import (
+from PrivShield.env_loader import load_env_file
+from PrivShield.dynclassification.base import SensitivityLevel
+from PrivShield.dynclassification.llm_adapter import LlmAdapter
+from PrivShield.dynclassification.llm_engines import (
     OpenAILlmClassifier,
     VLLMLlmClassifier,
 )

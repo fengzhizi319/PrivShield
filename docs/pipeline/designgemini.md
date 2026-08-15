@@ -12,7 +12,7 @@
 
 本设计方案旨在构建一个完整的**医疗数据合规治理 Pipeline**：
 1. **数据模拟生成 (`scripts/data/generate_medical_data.py`)**：自动生成 20 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、图片病例引用以及 L4/L5 级敏感病史的高仿真 `kangyang.csv`。
-2. **算法处理核心 (`privacy_local_agent/medical_pipeline/`)**：
+2. **算法处理核心 (`PrivShield/medical_pipeline/`)**：
    - 接入 `dynclassification` 规则与 Funnel 引擎，完成 27 个字段及文本内容的 L1~L5 分级标注。
    - 接入 `privacy/masking` 脱敏原语，对 PII 及 L4/L5 级高敏感诊断与病历执行强脱敏与范畴化替换，强制保障输出数据中**绝对不包含任何 L4/L5 级原始敏感内容**。
    - **双重结果输出**：输出 (1) 分级报告数据 (`classification_report`) 和 (2) 脱敏后符合安全合规要求的清洗数据 (`sanitized_data`)。
@@ -31,7 +31,7 @@ flowchart TD
         SG[scripts/data/generate_medical_data.py] -->|生成合规高仿真数据| D1[kangyang.csv]
     end
 
-    subgraph AgentPipeline [privacy_local_agent/medical_pipeline]
+    subgraph AgentPipeline [PrivShield/medical_pipeline]
         D1 --> MP[MedicalPrivacyPipeline]
         MP -->|调用 dynclassification| DC[3-Layer 分类分级引擎]
         DC -->|标注 L1~L5 等级与 Tag| CR[1. 分级结果数据 (Classification Report)]
@@ -101,11 +101,11 @@ flowchart TD
 
 ---
 
-### 3.3 核心算法 Pipeline (`privacy_local_agent/medical_pipeline/`)
+### 3.3 核心算法 Pipeline (`PrivShield/medical_pipeline/`)
 
 包结构定义：
 ```text
-privacy_local_agent/medical_pipeline/
+PrivShield/medical_pipeline/
 ├── __init__.py
 ├── pipeline.py          # 医疗数据治理 Pipeline 主逻辑 (MedicalPrivacyPipeline)
 ├── rules.py             # 医疗专属分级规则与 L4/L5 关键词字典

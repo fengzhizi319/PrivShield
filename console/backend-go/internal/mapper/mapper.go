@@ -6,8 +6,8 @@
 //     维护一张 "REST 路径 → gRPC handler" 的分发表（dispatch table）
 //   - Receive frontend JSON request body, parse into corresponding protobuf messages
 //     接收前端发来的 JSON 请求体，解析为对应的 protobuf 消息
-//   - Call upstream privacy-local-agent gRPC methods
-//     调用上游 privacy-local-agent 的 gRPC 方法
+//   - Call upstream PrivShield gRPC methods
+//     调用上游 PrivShield 的 gRPC 方法
 //   - Convert protobuf responses to JSON data structures consumable by frontend
 //     将 protobuf 响应转换为前端可消费的 JSON 数据结构
 //
@@ -49,7 +49,7 @@ import (
 
 	// pb：由 proto/privacy.proto 生成的 gRPC 代码，
 	// 包含所有 RPC 方法定义（PrivacyServiceClient）和消息类型（各种 Request/Response）
-	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"
+	pb "github.com/fengzhizi319/PrivShield/console/backend-go/proto"
 )
 
 // Handler defines the function signature for a single REST path to gRPC call mapping.

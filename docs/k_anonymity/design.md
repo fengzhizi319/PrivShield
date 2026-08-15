@@ -305,7 +305,7 @@ split_idx = max(2, min(2, 4-2)) = **2**
 
 #### 数据集级 K-匿名（推荐）✅
 
-**实现模块**: `privacy_local_agent/privacy/kano_table.py`
+**实现模块**: `PrivShield/privacy/kano_table.py`
 
 **核心特性**:
 - **算法**: Mondrian 多维分区算法
@@ -324,7 +324,7 @@ split_idx = max(2, min(2, 4-2)) = **2**
 
 **使用示例**:
 ```python
-from privacy_local_agent.privacy.kano_table import k_anonymize_table
+from PrivShield.privacy.kano_table import k_anonymize_table
 
 anonymized_data = k_anonymize_table(
     rows=complete_dataset,
@@ -337,7 +337,7 @@ anonymized_data = k_anonymize_table(
 
 #### 单条记录启发式泛化（谨慎使用）⚠️
 
-**实现模块**: `privacy_local_agent/privacy/kano.py`
+**实现模块**: `PrivShield/privacy/kano.py`
 
 **核心特性**:
 - **算法**: 基于预定义泛化层次的启发式泛化
@@ -361,7 +361,7 @@ anonymized_data = k_anonymize_table(
 
 **使用示例**:
 ```python
-from privacy_local_agent.privacy.kano import anonymize_record, BUILTIN_HIERARCHIES
+from PrivShield.privacy.kano import anonymize_record, BUILTIN_HIERARCHIES
 
 anonymized = anonymize_record(
     record={"age": "25", "zipcode": "100001", "gender": "M"},
@@ -408,7 +408,7 @@ mondrian(records, qi_cols, k, depth):
 
 ## 5. 模块设计
 
-`privacy_local_agent/privacy/kano_table.py`：
+`PrivShield/privacy/kano_table.py`：
 
 | 函数 / 方法 | 作用 |
 |---|---|
@@ -424,7 +424,7 @@ mondrian(records, qi_cols, k, depth):
 - **Mondrian 向量化**：`k_anonymize_table` 同样在能成功加载 `pandas` 时，自动在内部用 `pd.DataFrame(rows)` 替代纯 Python 排序（即 `sorted(records, key=...)`）进行递归二分。这在大数据规模（例如 10 万行）下提供了数十倍的计算加速。
 - **平滑降级**：若未安装 Pandas 环境，则自动降级为原有基于 Python List 排序的 Mondrian 递归流程，保证核心逻辑在各种环境中的通用性与健壮性。
 
-`privacy_local_agent/privacy/data_adapters.py` 提供 `to_records` / `from_records`，用于在降级场景中将 pandas / SecretFlow DataFrame 与记录列表互转。
+`PrivShield/privacy/data_adapters.py` 提供 `to_records` / `from_records`，用于在降级场景中将 pandas / SecretFlow DataFrame 与记录列表互转。
 
 `PrivacyService` 新增 `k_anonymize_table` / `k_anonymize_dataframe` 方法；`main.py` / `grpc_server.py` 暴露 `KAnonymizeTable` / `KAnonymizeDataFrame` 接口。
 
@@ -509,7 +509,7 @@ logger.info(
 提供 `QIType` 和 `GeneralizationStrategy` 枚举用于类型安全：
 
 ```python
-from privacy_local_agent.privacy.kano import QIType, GeneralizationStrategy
+from PrivShield.privacy.kano import QIType, GeneralizationStrategy
 
 assert QIType.AGE == "age"
 assert QIType.SALARY == "salary"
@@ -528,7 +528,7 @@ assert GeneralizationStrategy.INTERVAL == "interval"
 新增 `anonymize_records_batch` 函数支持批量记录泛化：
 
 ```python
-from privacy_local_agent.privacy.kano import anonymize_records_batch
+from PrivShield.privacy.kano import anonymize_records_batch
 
 results = anonymize_records_batch(
     records=[{"age": "25"}, {"age": "30"}],

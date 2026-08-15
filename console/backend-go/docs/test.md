@@ -60,7 +60,7 @@ go test ./internal/handlers -v
 
 ```bash
 cd /path/to/PrivShield
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 默认会监听：

@@ -1,4 +1,4 @@
-module github.com/fengzhizi319/privacy-local-agent/console/backend-go
+module github.com/fengzhizi319/PrivShield/console/backend-go
 
 go 1.25.0
 

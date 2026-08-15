@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: PrivShield:0.1.0
+          image: privshield:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -59,7 +59,7 @@ spec:
             # - name: PRIVACY_LLM_PROVIDER
             #   value: "vllm"
             # - name: PRIVACY_LLM_API_BASE
-            #   value: "http://privacy-local-agent-llm:8000/v1"
+            #   value: "http://PrivShield-llm:8000/v1"
             # - name: PRIVACY_LLM_MODEL_NAME
             #   value: "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
             # - name: PRIVACY_LLM_API_KEY

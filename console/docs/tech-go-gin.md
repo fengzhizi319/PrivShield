@@ -1302,7 +1302,7 @@ func parseCSV(r io.Reader) ([]map[string]string, error) {
 │                          │ gRPC (protobuf)                     │
 │                          ▼                                     │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │  Privacy Agent (Python)                                │  │
+│  │  PrivShield Agent (Python)                                │  │
 │  │  ├── REST :8079  (FastAPI/Uvicorn)                     │  │
 │  │  └── gRPC :50051 (grpc.server)                         │  │
 │  └──────────────────────────────────────────────────────┘  │

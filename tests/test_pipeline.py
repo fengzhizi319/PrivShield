@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from privacy_local_agent.main import app
-from privacy_local_agent.pipeline import (
+from PrivShield.main import app
+from PrivShield.pipeline import (
     PipelineResult,
     PipelineService,
     classify_records,

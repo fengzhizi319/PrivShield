@@ -7,8 +7,8 @@
 
 from __future__ import annotations
 
-from privacy_local_agent.gateway.balancer import LoadBalancer
-from privacy_local_agent.observability.metrics import GATEWAY_HEALTHY_NODES
+from PrivShield.gateway.balancer import LoadBalancer
+from PrivShield.observability.metrics import GATEWAY_HEALTHY_NODES
 
 
 def test_remove_node_in_sync_context():

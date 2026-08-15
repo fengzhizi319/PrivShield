@@ -2,8 +2,8 @@
 // Package integration_test provides end-to-end integration tests for the Go gRPC proxy backend.
 //
 // 测试策略 / Testing Strategy:
-//   - 需要真实运行的 privacy_local_agent（gRPC 127.0.0.1:50051）；
-//     Requires a running privacy_local_agent (gRPC 127.0.0.1:50051);
+//   - 需要真实运行的 PrivShield（gRPC 127.0.0.1:50051）；
+//     Requires a running PrivShield (gRPC 127.0.0.1:50051);
 //   - 若 agent 未启动则自动跳过（t.Skip），不会导致 CI 失败；
 //     If agent is not running, tests are automatically skipped (t.Skip), won't fail CI;
 //   - 使用 httptest.NewServer 启动完整的 Gin 路由，通过真实 HTTP 请求验证端到端链路。
@@ -28,10 +28,10 @@ import (
 	"google.golang.org/grpc"                  // gRPC 客户端连接 / gRPC client connection
 	"google.golang.org/grpc/credentials/insecure" // 无 TLS 传输凭证（仅测试）/ no-TLS transport creds (test only)
 
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/agent"    // gRPC 客户端封装 / gRPC client wrapper
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/config"   // 配置结构体 / config struct
-	"github.com/fengzhizi319/privacy-local-agent/console/backend-go/internal/handlers" // HTTP 路由处理器 / HTTP route handlers
-	pb "github.com/fengzhizi319/privacy-local-agent/console/backend-go/proto"          // Protobuf 生成代码 / generated protobuf code
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"    // gRPC 客户端封装 / gRPC client wrapper
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"   // 配置结构体 / config struct
+	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/handlers" // HTTP 路由处理器 / HTTP route handlers
+	pb "github.com/fengzhizi319/PrivShield/console/backend-go/proto"          // Protobuf 生成代码 / generated protobuf code
 )
 
 // realAgentAddr 集成测试目标 agent 的 gRPC 地址（与默认配置一致）。

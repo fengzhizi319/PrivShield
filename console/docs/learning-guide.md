@@ -44,9 +44,9 @@
                              │ REST 或 gRPC
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  privacy-local-agent（核心引擎）                   │
+│                  PrivShield（核心引擎）                   │
 │   Python FastAPI + gRPC + 隐私算法                                │
-│   位置：privacy_local_agent/                                     │
+│   位置：PrivShield/                                     │
 │                                                                  │
 │   能力：脱敏 / 差分隐私 / K-匿名 / 查询混淆 / 动态分类分级         │
 └─────────────────────────────────────────────────────────────────┘
@@ -506,7 +506,7 @@ go run ./cmd/server   # 默认监听 :8080
 
 ### 6.1 Agent 是什么
 
-`privacy_local_agent` 是真正执行隐私算法的引擎。前端和后端都只是"代理"和"展示"。
+`PrivShield` 是真正执行隐私算法的引擎。前端和后端都只是"代理"和"展示"。
 
 **它提供的能力：**
 
@@ -551,7 +551,7 @@ go run ./cmd/server   # 默认监听 :8080
 pip install -e .
 
 # 启动 REST + gRPC
-python -m privacy_local_agent.server
+python -m PrivShield.server
 # REST: http://127.0.0.1:8079
 # gRPC: 127.0.0.1:50051
 ```
@@ -564,7 +564,7 @@ python -m privacy_local_agent.server
 
 ```bash
 # 终端 1：启动 agent
-python -m privacy_local_agent.server
+python -m PrivShield.server
 
 # 终端 2：启动 Go 后端
 cd console/backend-go && go run ./cmd/server

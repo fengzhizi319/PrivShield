@@ -1,4 +1,4 @@
-# Privacy Local Agent - Prometheus scrape configuration
+# PrivShield - Prometheus scrape configuration
 # 隐私本地代理 - Prometheus 抓取配置
 #
 # 默认抓取本项目中 PrivShield 的 /metrics 端点；

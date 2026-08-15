@@ -12,13 +12,13 @@ import asyncio
 import os
 import pytest
 
-from privacy_local_agent.dynclassification.service import DynClassificationService
-from privacy_local_agent.privacy.high_concurrency import (
+from PrivShield.dynclassification.service import DynClassificationService
+from PrivShield.privacy.high_concurrency import (
     AsyncDynamicBatcher,
     ConcurrencyThrottle,
     HighConcurrencyLRUCache,
 )
-from privacy_local_agent.privacy.masking import guess_field_type
+from PrivShield.privacy.masking import guess_field_type
 
 
 class TestHighConcurrencyLRUCache:

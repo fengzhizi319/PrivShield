@@ -87,7 +87,7 @@ JSON 格式：
 
 ### 2.1 `SecuritySettings`
 
-位置：`privacy_local_agent.security.config.SecuritySettings`
+位置：`PrivShield.security.config.SecuritySettings`
 
 Pydantic v2 模型，集中承载所有安全相关配置。
 
@@ -135,7 +135,7 @@ class RateLimitConfig(BaseModel):
 
 ### 2.2 `get_security_settings`
 
-位置：`privacy_local_agent.security.config.get_security_settings`
+位置：`PrivShield.security.config.get_security_settings`
 
 ```python
 def get_security_settings() -> SecuritySettings
@@ -145,7 +145,7 @@ def get_security_settings() -> SecuritySettings
 
 ### 2.3 TLS 构造器
 
-位置：`privacy_local_agent.security.tls`
+位置：`PrivShield.security.tls`
 
 #### `uvicorn_ssl_kwargs`
 
@@ -169,7 +169,7 @@ def grpc_server_credentials(settings: SecuritySettings) -> grpc.ServerCredential
 
 ### 2.4 认证依赖
 
-位置：`privacy_local_agent.security.auth`
+位置：`PrivShield.security.auth`
 
 #### `get_current_identity`
 
@@ -189,7 +189,7 @@ def require_permission(permission: str) -> Depends
 
 ```python
 from fastapi import Depends
-from privacy_local_agent.security.auth import require_permission
+from PrivShield.security.auth import require_permission
 
 @app.post("/v1/privacy/mask", dependencies=[require_permission("privacy:mask")])
 ```
@@ -213,7 +213,7 @@ gRPC server interceptor，校验 metadata / mTLS auth_context 中的身份与 sc
 
 ### 2.5 速率限制
 
-位置：`privacy_local_agent.security.ratelimit`
+位置：`PrivShield.security.ratelimit`
 
 #### `Limiter`
 
@@ -244,7 +244,7 @@ gRPC server interceptor，超限时返回 `grpc.StatusCode.RESOURCE_EXHAUSTED`�
 
 ### 2.6 身份与权限
 
-位置：`privacy_local_agent.security.identity`
+位置：`PrivShield.security.identity`
 
 #### `Identity`
 
@@ -284,7 +284,7 @@ class Identity:
 
 ### 2.7 白名单管理器
 
-位置：`privacy_local_agent.security.whitelist`
+位置：`PrivShield.security.whitelist`
 
 #### `WhitelistManager`
 

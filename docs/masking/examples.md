@@ -20,7 +20,7 @@
 ### 1.1 单字段脱敏
 
 ```python
-from privacy_local_agent.privacy.masking import mask_value
+from PrivShield.privacy.masking import mask_value
 
 print(mask_value("mobile", "13812345678"))
 # 138****5678
@@ -35,7 +35,7 @@ print(mask_value("name", "张三丰"))
 ### 1.2 整记录脱敏
 
 ```python
-from privacy_local_agent.privacy.masking import mask_record
+from PrivShield.privacy.masking import mask_record
 
 record = {
     "mobile": "13812345678",
@@ -50,7 +50,7 @@ print(mask_record(record))
 ### 1.3 批量字段脱敏
 
 ```python
-from privacy_local_agent.privacy.masking import mask_value_batch
+from PrivShield.privacy.masking import mask_value_batch
 
 print(mask_value_batch(
     ["mobile", "name", "id_card"],
@@ -63,7 +63,7 @@ print(mask_value_batch(
 
 ```python
 import pandas as pd
-from privacy_local_agent.privacy.masking import mask_dataframe
+from PrivShield.privacy.masking import mask_dataframe
 
 df = pd.DataFrame({
     "mobile": ["13812345678", "13912345678"],
@@ -82,7 +82,7 @@ print(result)
 ```python
 import numpy as np
 import pyarrow as pa
-from privacy_local_agent.privacy.masking import mask_dataframe, mask_record
+from PrivShield.privacy.masking import mask_dataframe, mask_record
 
 # numpy ndarray 输入
 arr = np.array([["13812345678", "张三"], ["13912345678", "李四"]])
@@ -128,7 +128,7 @@ print(result)
 ### 1.6 HMAC 哈希与截断
 
 ```python
-from privacy_local_agent.privacy.masking import hash_value, truncate
+from PrivShield.privacy.masking import hash_value, truncate
 
 print(hash_value("hello", "salt"))
 # 16 位 base64 摘要

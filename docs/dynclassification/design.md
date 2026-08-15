@@ -1,6 +1,6 @@
 # 动态分类分级标准适配架构设计
 
-> **状态**：本文档与 `privacy_local_agent/dynclassification/` 代码实现全面对齐（最后同步：2026-08）。
+> **状态**：本文档与 `PrivShield/dynclassification/` 代码实现全面对齐（最后同步：2026-08）。
 > 主要更新：`force_suppress`/`exempt_rules` 字段名、`OperatorResult` 返回类型、14+ 内置算子、
 > `DomainTaxonomy.confidence_policy`/`get_level_rank`、LRU 评估缓存、短路优化、`fnmatch` 豁免逻辑。
 
@@ -197,7 +197,7 @@ sequenceDiagram
 #### 4.5.2 数据模型
 
 ```python
-# privacy_local_agent/dynclassification/rule_schema.py
+# PrivShield/dynclassification/rule_schema.py
 
 class DowngradeRuleDef(BaseModel):
     """降级规则定义。
@@ -402,7 +402,7 @@ downgrade_rules:
 ### 5.2 动态分类体系模型
 
 ```python
-# privacy_local_agent/dynclassification/models.py
+# PrivShield/dynclassification/models.py
 
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -583,7 +583,7 @@ default_level: "C3"
 ### 6.1 规则模型定义
 
 ```python
-# privacy_local_agent/dynclassification/rule_schema.py
+# PrivShield/dynclassification/rule_schema.py
 
 from pydantic import BaseModel, Field
 from typing import Any, Optional
@@ -966,7 +966,7 @@ global_params:
 ### 7.1 算子签名与注册表
 
 ```python
-# privacy_local_agent/dynclassification/operator_registry.py
+# PrivShield/dynclassification/operator_registry.py
 
 from typing import Any, Callable, Protocol, Union
 from dataclasses import dataclass
@@ -1051,7 +1051,7 @@ class OperatorRegistry:
 `length_range`、`exact_match`、`ip_address`、`mac_address`、`chinese_name`、`email`。
 
 ```python
-# privacy_local_agent/dynclassification/operators.py
+# PrivShield/dynclassification/operators.py
 
 import re
 from typing import Any
@@ -1278,7 +1278,7 @@ graph TD
     Service -->|自动调度策略| Registry
 ```
 
-#### 2. 回调函数签名与协议定义 (`privacy_local_agent/dynclassification/domain_registry.py`)
+#### 2. 回调函数签名与协议定义 (`PrivShield/dynclassification/domain_registry.py`)
 
 ```python
 # 领域文本脱敏回调函数签名：(field_name, text, final_level, mode) -> sanitized_text
@@ -1305,7 +1305,7 @@ class DomainStrategyRegistry:
 ### 8.1 ConfigurableRuleEngine
 
 ```python
-# privacy_local_agent/dynclassification/engine.py
+# PrivShield/dynclassification/engine.py
 
 from typing import Any, Tuple
 from .models import DomainTaxonomy, SecurityTag
@@ -1670,7 +1670,7 @@ def icd10_range_matcher(value: Any, params: dict[str, Any]) -> OperatorResult:
 ### 9.1 ProfileLoader
 
 ```python
-# privacy_local_agent/dynclassification/profile_loader.py
+# PrivShield/dynclassification/profile_loader.py
 
 import os
 import threading
@@ -1976,7 +1976,7 @@ rules/                              # 规则配置根目录
 CI 中使用 `pydantic` 模型校验所有 YAML 文件：
 
 ```bash
-PYTHONPATH=. python -m privacy_local_agent.dynclassification.validate_rules rules/
+PYTHONPATH=. python -m PrivShield.dynclassification.validate_rules rules/
 ```
 
 ## 15. 部署与运维
@@ -1994,7 +1994,7 @@ classification:
 volumes:
   - name: classification-rules
     configMap:
-      name: pla-classification-rules
+      name: privshield-classification-rules
 ```
 
 ### 15.2 热加载机制

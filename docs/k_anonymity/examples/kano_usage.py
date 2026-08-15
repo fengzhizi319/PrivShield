@@ -5,11 +5,11 @@
     PYTHONPATH=. python docs/k_anonymity/examples/kano_usage.py
 """
 
-from privacy_local_agent.privacy.kano import (
+from PrivShield.privacy.kano import (
     BUILTIN_HIERARCHIES,
     anonymize_record,
 )
-from privacy_local_agent.privacy.kano_table import k_anonymize_table
+from PrivShield.privacy.kano_table import k_anonymize_table
 
 
 def demo_record_level() -> None:

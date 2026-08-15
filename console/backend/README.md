@@ -1,6 +1,6 @@
 # Privacy Test Console - Backend
 
-Python FastAPI 代理服务，用于转发请求到 `privacy_local_agent` 并提供示例数据。
+Python FastAPI 代理服务，用于转发请求到 `PrivShield` 并提供示例数据。
 
 ## 运行
 
@@ -21,13 +21,13 @@ pip install -r requirements.txt  # 已包含 pytest 所需依赖
 pytest tests -v
 ```
 
-测试使用 `fastapi.testclient.TestClient` 调用应用路由，并对 `app.main.agent_client.request` 进行 mock，因此**不需要**真实启动 `privacy_local_agent`。
+测试使用 `fastapi.testclient.TestClient` 调用应用路由，并对 `app.main.agent_client.request` 进行 mock，因此**不需要**真实启动 `PrivShield`。
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `PRIVACY_AGENT_URL` | `http://127.0.0.1:8079` | `privacy_local_agent` REST 地址 |
+| `PRIVACY_AGENT_URL` | `http://127.0.0.1:8079` | `PrivShield` REST 地址 |
 | `PRIVACY_AGENT_API_KEY` | - | 认证 API Key（agent 开启 auth 时） |
 | `PRIVACY_CONSOLE_HOST` | `127.0.0.1` | 后端监听地址 |
 | `PRIVACY_CONSOLE_PORT` | `8080` | 后端监听端口 |

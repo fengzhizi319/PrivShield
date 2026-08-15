@@ -1,11 +1,11 @@
 # Privacy Test Console
 
-用于与运行中的 `privacy_local_agent` 进行通信、发送测试数据并验证其全部功能的前端 + 后端测试控制台。
+用于与运行中的 `PrivShield` 进行通信、发送测试数据并验证其全部功能的前端 + 后端测试控制台。
 
 ## 目录结构
 
-- `backend/` - Python FastAPI 代理服务，统一转发请求到 `privacy_local_agent` REST 接口，并提供示例数据。
-- `backend-go/` - Go gRPC 代理服务，将前端的 REST 请求转换为 gRPC 调用转发给 `privacy_local_agent`，接口格式与 Python 后端保持一致；同时可直接挂载 `web/dist` 提供 Console UI 页面。
+- `backend/` - Python FastAPI 代理服务，统一转发请求到 `PrivShield` REST 接口，并提供示例数据。
+- `backend-go/` - Go gRPC 代理服务，将前端的 REST 请求转换为 gRPC 调用转发给 `PrivShield`，接口格式与 Python 后端保持一致；同时可直接挂载 `web/dist` 提供 Console UI 页面。
 - `web/` - React + TypeScript + Vite 前端，按功能分组展示所有端点，支持一键加载示例和发送请求。
 
 ## 文档
@@ -26,13 +26,13 @@
 
 ### 1. 一键启动（推荐）
 
-确保已安装 `privacy_local_agent` 和 `console/backend` 的虚拟环境依赖，并已构建前端（`console/web/dist` 存在），然后执行：
+确保已安装 `PrivShield` 和 `console/backend` 的虚拟环境依赖，并已构建前端（`console/web/dist` 存在），然后执行：
 
 ```bash
 bash ./console/scripts/dev-start-all.sh
 ```
 
-该脚本会同时启动 `privacy_local_agent` 和测试控制台后端，等待健康检查后输出访问地址，按 `Ctrl+C` 停止所有服务。
+该脚本会同时启动 `PrivShield` 和测试控制台后端，等待健康检查后输出访问地址，按 `Ctrl+C` 停止所有服务。
 
 ### 2. Docker 模式启动 (Docker Container & Docker Compose)
 
@@ -66,7 +66,7 @@ bash ./console/scripts/docker-stop.sh
 ./console/scripts/dev-stop.sh
 ```
 
-`dev-stop.sh` 会读取 `console/.pids/` 下记录的 PID 并安全终止 `privacy_local_agent` 与测试控制台后端。
+`dev-stop.sh` 会读取 `console/.pids/` 下记录的 PID 并安全终止 `PrivShield` 与测试控制台后端。
 
 若要通过 **Go gRPC** 后端访问同样的隐私能力，可改用：
 
@@ -80,7 +80,7 @@ bash ./console/scripts/docker-stop.sh
 ./console/scripts/dev-stop.sh
 ```
 
-该脚本会启动 `privacy_local_agent`（同时监听 REST 与 gRPC）和 `console/backend-go` 中的 Go 代理服务，访问地址为 `http://127.0.0.1:8081`。
+该脚本会启动 `PrivShield`（同时监听 REST 与 gRPC）和 `console/backend-go` 中的 Go 代理服务，访问地址为 `http://127.0.0.1:8081`。
 
 若要以 **mTLS 双向认证** 模式运行（Go 代理到 agent 的 gRPC 链路全程加密并互验证书），可执行：
 
@@ -102,14 +102,14 @@ bash ./console/scripts/docker-stop.sh
 ./console/scripts/dev-stop.sh
 ```
 
-该脚本会同时启动 `privacy_local_agent`（REST 8079 + gRPC 50051）、Python REST 代理后端（`http://127.0.0.1:8080`）与 Go gRPC 代理后端（`http://127.0.0.1:8081`）。打开任一 Console 地址，顶部 Backend Selector 即可在两个后端间自由切换。
+该脚本会同时启动 `PrivShield`（REST 8079 + gRPC 50051）、Python REST 代理后端（`http://127.0.0.1:8080`）与 Go gRPC 代理后端（`http://127.0.0.1:8081`）。打开任一 Console 地址，顶部 Backend Selector 即可在两个后端间自由切换。
 
 ### 2. 手动启动
 
 启动 agent：
 
 ```bash
-python -m privacy_local_agent.server
+python -m PrivShield.server
 ```
 
 启动 Python REST 代理后端（默认监听 `127.0.0.1:8080`）：
@@ -148,8 +148,8 @@ corepack pnpm build
 
 页面顶部的 **Backend Selector** 可以切换后端地址（默认自动选中为当前页面提供服务的后端）：
 
-- `Python REST (8080)` — 使用 Python FastAPI 后端代理，调用 `privacy_local_agent` REST 接口。
-- `Go gRPC (8081)` — 使用 Go gRPC 代理后端，将请求通过 gRPC 转发给 `privacy_local_agent`。
+- `Python REST (8080)` — 使用 Python FastAPI 后端代理，调用 `PrivShield` REST 接口。
+- `Go gRPC (8081)` — 使用 Go gRPC 代理后端，将请求通过 gRPC 转发给 `PrivShield`。
 
 每个示例卡片会显示 `backend` 标签（`rest` / `both`），标识该端点在两个后端中的可用性。
 
@@ -157,7 +157,7 @@ corepack pnpm build
 
 - `GET /api/health` - 检查后端与 agent 的连通性
 - `GET /api/samples` - 获取所有端点的示例数据
-- `POST /api/proxy` - 通用代理，将请求转发到 `privacy_local_agent`
+- `POST /api/proxy` - 通用代理，将请求转发到 `PrivShield`
 
 ## 测试
 

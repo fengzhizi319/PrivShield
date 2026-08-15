@@ -17,7 +17,7 @@ echo "==========================================================================
 
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
-docker compose up -d privacy-local-agent console-backend-python console-web
+docker compose up -d PrivShield console-backend-python console-web
 
 echo ""
 echo "✅ 容器服务已全面启动！"

@@ -47,7 +47,7 @@ cd /path/to/PrivShield
 docker build --target core -t PrivShield:0.1.0 .
 
 # 安装 Chart
-helm install pla ./deploy/helm/PrivShield
+helm install privshield ./deploy/helm/PrivShield
 
 # 验证 Pod 状态
 kubectl get pods -l app.kubernetes.io/name=PrivShield
@@ -57,7 +57,7 @@ kubectl get pods -l app.kubernetes.io/name=PrivShield
 
 ```bash
 # 1. 创建 TLS Secret（证书需为 PEM 格式）
-kubectl create secret tls pla-tls \
+kubectl create secret tls privshield-tls \
   --cert=tls.crt \
   --key=tls.key
 
@@ -71,14 +71,14 @@ cat > api-keys.json <<'EOF'
 }
 EOF
 
-kubectl create secret generic pla-apikeys \
+kubectl create secret generic privshield-apikeys \
   --from-file=api-keys.json
 
 # 3. 使用生产 values 安装，并传入 Secret 名称
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set security.tls.existingSecret=pla-tls \
-  --set security.auth.apiKeysSecret=pla-apikeys \
+  --set security.tls.existingSecret=privshield-tls \
+  --set security.auth.apiKeysSecret=privshield-apikeys \
   --set image.repository=PrivShield \
   --set image.tag=0.1.0
 ```
@@ -90,7 +90,7 @@ helm install pla ./deploy/helm/PrivShield \
 docker build --target ml -t PrivShield:0.1.0-ml .
 
 # 使用 values-ml.yaml，并指定仓库地址
-helm install pla-ml ./deploy/helm/PrivShield \
+helm install privshield-ml ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-ml.yaml \
   --set image.repository=PrivShield \
   --set image.tag=0.1.0-ml
@@ -99,7 +99,7 @@ helm install pla-ml ./deploy/helm/PrivShield \
 ### 3.4 引用自定义 values 文件
 
 ```bash
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f docs/deployment/examples/values-custom.yaml
 ```
 

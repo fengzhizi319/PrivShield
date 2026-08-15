@@ -84,7 +84,7 @@
 ### 具体实施方式
 
 **证书链结构**
-- Root CA：`privacy-local-agent-test-ca`。
+- Root CA：`PrivShield-test-ca`。
 - Server Certificate：CN=localhost，SAN 覆盖 localhost/127.0.0.1，EKU 含 serverAuth。
 - Client Certificate：CN=privacy-console-go-client，EKU 含 clientAuth。
 

@@ -59,7 +59,7 @@ $ModelDir = Join-Path $ProjectRoot ".models\Qwen3.5-0.8B-Privacy-Classifier-Smoo
 if (-not (Test-Path $ModelDir)) {
     Write-Host "⚠️  [提示] 本地大模型权重目录不存在: $ModelDir" -ForegroundColor Yellow
     Write-Host "   建议先执行模型下载命令以获取微调权重:" -ForegroundColor Yellow
-    Write-Host "   python -m privacy_local_agent.privacy.download_model" -ForegroundColor Yellow
+    Write-Host "   python -m PrivShield.privacy.download_model" -ForegroundColor Yellow
     Write-Host ""
 }
 
@@ -76,5 +76,5 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "✅ vLLM 大模型推理容器已启动！" -ForegroundColor Green
 Write-Host "   - OpenAI 兼容接口 : http://127.0.0.1:8000/v1" -ForegroundColor Green
-Write-Host "   - 查看日志        : docker logs -f privacy-local-agent-vllm" -ForegroundColor Green
+Write-Host "   - 查看日志        : docker logs -f PrivShield-vllm" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Cyan

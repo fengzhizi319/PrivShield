@@ -9,7 +9,7 @@
 需求包含三条必须闭环的链路：
 
 1. 生成 20 条具有医疗语义、包含 L4/L5 病史、个人信息和图文病例引用的仿真数据，并输出 `kangyang.csv`。
-2. 读取 CSV，调用 `privacy_local_agent.dynclassification` 完成字段/记录分类分级，再调用 `privacy_local_agent.privacy` 完成脱敏；最终同时得到“分级数据”和“不含 L4/L5 数据的脱敏数据”。
+2. 读取 CSV，调用 `PrivShield.dynclassification` 完成字段/记录分类分级，再调用 `PrivShield.privacy` 完成脱敏；最终同时得到“分级数据”和“不含 L4/L5 数据的脱敏数据”。
 3. 将同一流程接入测试控制台：React 前端可发起和查看处理结果，Python Console 后端和 Go Console 后端都能转发并跑通完整 Agent 链路。
 
 目标是形成可重复、可测试、默认不泄露原始高敏内容的测试流水线，而不是生成或接入真实患者数据。
@@ -29,10 +29,10 @@
 |---|---|---|
 | 医疗 CSV 生成与合法校验码 | `scripts/data/generate_medical_data.py` | 扩展现有脚本，不新建第二套同名数据模板 |
 | 医疗病例图片 | `scripts/data/gen_medical_images.py` | 复用 `CaseTemplate`、`TEMPLATES` 和 `render_case()` |
-| 三层分类漏斗 | `privacy_local_agent/dynclassification/service.py` | 以 `classify_record()` / `classify_table()` 为主要入口 |
-| 分类 REST API | `privacy_local_agent/routers/dynclassification.py` | Console 的动态分类请求经 `/api/proxy` 透传 |
-| 分类 gRPC API | `privacy_local_agent/grpc_server.py`、`proto/privacy.proto` | Go 对已有可映射 RPC 使用 gRPC；无映射的动态分类路径明确走 REST fallback 或补充正式 RPC |
-| 字段/记录脱敏 | `privacy_local_agent/privacy/masking.py` | 复用 `mask_value()`、`mask_record()` 或批量接口，不复制字段规则 |
+| 三层分类漏斗 | `PrivShield/dynclassification/service.py` | 以 `classify_record()` / `classify_table()` 为主要入口 |
+| 分类 REST API | `PrivShield/routers/dynclassification.py` | Console 的动态分类请求经 `/api/proxy` 透传 |
+| 分类 gRPC API | `PrivShield/grpc_server.py`、`proto/privacy.proto` | Go 对已有可映射 RPC 使用 gRPC；无映射的动态分类路径明确走 REST fallback 或补充正式 RPC |
+| 字段/记录脱敏 | `PrivShield/privacy/masking.py` | 复用 `mask_value()`、`mask_record()` 或批量接口，不复制字段规则 |
 | Python Console | `console/backend/app/main.py` | 新增专用流水线请求时保持既有 `ProxyResponse` 包装 |
 | Go Console | `console/backend-go/internal/handlers`、`internal/mapper` | 与 Python 保持相同 `/api/*` 契约；动态分类当前必须处理 REST fallback 差异 |
 | Web 动态分类页 | `console/web/src/components/DynClassificationPanel.tsx` | 新增“病例流水线”视图或 Tab，沿用现有标准选择、结果徽章和原始 JSON 展示 |
@@ -111,8 +111,8 @@ case_image_path
 建议产物：
 
 ```text
-privacy_local_agent/medical_pipeline/output/classification_result.json
-privacy_local_agent/medical_pipeline/output/classification_result.csv
+PrivShield/medical_pipeline/output/classification_result.json
+PrivShield/medical_pipeline/output/classification_result.csv
 ```
 
 JSON 作为完整结果，CSV 作为前端下载和人工查看的扁平化视图。完整结果至少包括：
@@ -157,8 +157,8 @@ JSON 作为完整结果，CSV 作为前端下载和人工查看的扁平化视�
 建议产物：
 
 ```text
-privacy_local_agent/medical_pipeline/output/masked_data.csv
-privacy_local_agent/medical_pipeline/output/masked_manifest.json
+PrivShield/medical_pipeline/output/masked_data.csv
+PrivShield/medical_pipeline/output/masked_manifest.json
 ```
 
 `masked_data.csv` 保留稳定 schema 和 L1-L3 的非空字段：
@@ -192,10 +192,10 @@ REST 调用使用动态分类路由的 camelCase alias（如 `fieldName`、`stan
 
 ## 6. `medical_pipeline` 模块设计
 
-计划在 `privacy_local_agent/medical_pipeline/` 下按职责拆分，避免把 CSV 生成、算法调用和 HTTP 路由混在一个脚本中：
+计划在 `PrivShield/medical_pipeline/` 下按职责拆分，避免把 CSV 生成、算法调用和 HTTP 路由混在一个脚本中：
 
 ```text
-privacy_local_agent/medical_pipeline/
+PrivShield/medical_pipeline/
 ├── __init__.py
 ├── models.py              # 输入行、分类结果、脱敏结果、汇总模型
 ├── generator.py           # 可复用的 20 条仿真数据生成逻辑
@@ -210,7 +210,7 @@ privacy_local_agent/medical_pipeline/
 
 ```bash
 python scripts/data/generate_medical_data.py --count 20 --seed 2026
-python -m privacy_local_agent.medical_pipeline --input .../kangyang.csv --output .../output
+python -m PrivShield.medical_pipeline --input .../kangyang.csv --output .../output
 ```
 
 如果实现阶段选择不增加包级 CLI，则必须保证 `scripts` 脚本能调用包内函数，避免测试通过执行脚本复制出第二套业务逻辑。
@@ -219,7 +219,7 @@ python -m privacy_local_agent.medical_pipeline --input .../kangyang.csv --output
 
 - 先写临时文件，校验通过后使用原子替换，避免前端读到半成品。
 - 输入 CSV 编码固定为 UTF-8 with BOM 或 UTF-8；实现时选择一种并在文档/测试中固定，中文 Excel 兼容性优先时使用 UTF-8 with BOM。
-- 输出目录默认位于 `privacy_local_agent/medical_pipeline/output/`，用户可以用 `--output` 覆盖。
+- 输出目录默认位于 `PrivShield/medical_pipeline/output/`，用户可以用 `--output` 覆盖。
 - 不覆盖原始 `kangyang.csv`；输入和输出路径必须经过 `Path.resolve()` 校验，禁止输出到项目外不可控位置（除非 CLI 明确允许）。
 - 单条记录错误记录在 manifest 中并按 `--fail-fast` 决定是否终止；安全门禁错误必须终止并清理不安全输出。
 

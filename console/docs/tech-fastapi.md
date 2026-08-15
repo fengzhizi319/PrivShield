@@ -716,7 +716,7 @@ FastAPI auto-generates OpenAPI 3.0 spec from route definitions:
 @app.post(
     "/api/proxy",
     summary="代理转发请求 / Proxy forward request",    # 摘要 / Summary
-    description="将前端请求转发到 privacy agent / Forward to agent",  # 描述 / Description
+    description="将前端请求转发到 PrivShield Agent / Forward to agent",  # 描述 / Description
     response_model=ProxyResponse,                   # 响应模型 / Response model
     tags=["proxy"],                                 # 分组标签 / Group tag
 )
@@ -767,7 +767,7 @@ router = APIRouter(
 
 @router.post("/proxy")
 async def proxy_request(req: ProxyRequest):
-    """转发请求到隐私代理 / Forward request to privacy agent"""
+    """转发请求到隐私代理 / Forward request to PrivShield Agent"""
     ...
 
 @router.get("/endpoints")
@@ -1418,7 +1418,7 @@ docker run -d \
 # ===== 本项目支持的部署方式 / Supported Deployment Modes =====
 
 # 1. 本地开发 / Local development
-python -m privacy_local_agent.server
+python -m PrivShield.server
 # REST: http://127.0.0.1:8079 | gRPC: 127.0.0.1:50051
 
 # 2. Docker 单容器 / Docker single container
@@ -1429,7 +1429,7 @@ docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
 cd deploy/docker-compose && docker-compose up -d
 
 # 4. Kubernetes + Helm
-helm install pla ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f values-production.yaml
 
 # 5. Sidecar 模式 / Sidecar mode

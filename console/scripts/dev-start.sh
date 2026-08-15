@@ -7,7 +7,7 @@
 #   --force: 非交互模式，端口被占用时自动终止占用进程（CI/脚本化场景）
 #
 # 启动组件 / Launched Components:
-#   1. privacy_local_agent (REST: 8079)
+#   1. PrivShield (REST: 8079)
 #   2. Python REST 代理后端 (API: 8080)
 #   3. Vite 前端开发服务器 (UI: 5173, 支持 <50ms HMR 热重载)
 # ============================================================================
@@ -165,20 +165,20 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-check_port_available 8079 "privacy_local_agent REST"
+check_port_available 8079 "PrivShield REST"
 check_port_available 8080 "Python REST 代理后端"
 check_port_available 5173 "Vite 前端开发服务器"
 
-# 启动 privacy_local_agent
+# 启动 PrivShield
 launch_agent() {
     local agent_log="$PROJECT_ROOT/.logs/agent_py.log"
     mkdir -p "$PROJECT_ROOT/.logs"
-    echo "启动 privacy_local_agent (REST: $AGENT_URL)，日志: $agent_log..."
+    echo "启动 PrivShield (REST: $AGENT_URL)，日志: $agent_log..."
     (
         source "$AGENT_VENV/bin/activate"
         cd "$PROJECT_ROOT"
         # 日志持久化到 .logs/agent_py.log，agent 崩溃/重启后可回溯根因
-        exec python -m privacy_local_agent.server >> "$agent_log" 2>&1
+        exec python -m PrivShield.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"
@@ -230,7 +230,7 @@ wait_for_service() {
     return 1
 }
 
-wait_for_service "$AGENT_URL/health" "privacy_local_agent"
+wait_for_service "$AGENT_URL/health" "PrivShield"
 wait_for_service "$CONSOLE_URL/api/health" "测试控制台后端"
 
 echo -n "等待 Vite 开发服务器就绪"
@@ -267,7 +267,7 @@ while [[ "$STOPPING" != "true" ]]; do
         break
     fi
     launch_agent
-    if ! wait_for_service "$AGENT_URL/health" "重启后的 privacy_local_agent"; then
+    if ! wait_for_service "$AGENT_URL/health" "重启后的 PrivShield"; then
         echo "[watchdog] 警告：agent 重启后未在 30 秒内就绪（REST）。"
     fi
     set +e

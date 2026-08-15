@@ -149,10 +149,10 @@
 
 ---
 
-## 2. Python SDK (`privacy_local_agent.pipeline`)
+## 2. Python SDK (`PrivShield.pipeline`)
 
 ```python
-from privacy_local_agent.pipeline import PipelineService, PipelineResult
+from PrivShield.pipeline import PipelineService, PipelineResult
 
 service = PipelineService(standard="jrt0197")
 

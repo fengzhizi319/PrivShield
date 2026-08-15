@@ -13,10 +13,14 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-LOG_DIR=".logs"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+LOG_DIR="$PROJECT_ROOT/.logs"
 
 echo -e "${BLUE}====================================================${NC}"
-echo -e "${BLUE} 正在优雅停止 privacy-local-agent 侧边栏服务...${NC}"
+echo -e "${BLUE} 正在优雅停止 PrivShield 侧边栏服务...${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
 # 1. 停止 Agent 侧边栏
@@ -36,7 +40,8 @@ if [ -f "${LOG_DIR}/console.pid" ]; then
 fi
 
 # 3. 按进程全名兜底清理 (确保无残留孤儿进程)
-pkill -f "privacy_local_agent.server" 2>/dev/null || true
-pkill -f "privacy_local_agent.main" 2>/dev/null || true
+pkill -f "PrivShield.server" 2>/dev/null || true
+pkill -f "PrivShield.main" 2>/dev/null || true
+pkill -f "uvicorn app.main:app" 2>/dev/null || true
 
 echo -e "${GREEN}所有相关服务实例已成功停止！${NC}"

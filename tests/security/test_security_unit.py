@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import pytest
 
-from privacy_local_agent.security import auth as auth_mod
-from privacy_local_agent.security import ratelimit as rl
-from privacy_local_agent.security import whitelist as wl_mod
-from privacy_local_agent.security.config import KeyConfig, RateLimitConfig, SecuritySettings
-from privacy_local_agent.security.identity import (
+from PrivShield.security import auth as auth_mod
+from PrivShield.security import ratelimit as rl
+from PrivShield.security import whitelist as wl_mod
+from PrivShield.security.config import KeyConfig, RateLimitConfig, SecuritySettings
+from PrivShield.security.identity import (
     ANONYMOUS_IDENTITY,
     Identity,
     is_health_path_or_method,
