@@ -663,7 +663,56 @@ flowchart TD
 
 ---
 
-### 6.2 自回归解码控制与提前截断机制 (Sampling & Early Exit)
+### 6.2 Batch 推理中多提示词分层隔离与区分机制 (Multi-Prompt Isolation Architecture)
+
+在 Batch 批处理推理中，多个业务请求的提示词并非简单地首尾拼成一条长文本，而是从 **数据结构**、**分词张量** 到 **底层的注意力计算与显存分页**，层层通过严格的**独立维度与物理边界机制**进行逻辑隔离与并发调度：
+
+```mermaid
+flowchart TD
+    subgraph L1_PY["① 第一层: Python 列表级独立对象隔离 (List[str])"]
+        PLIST["prompts = [prompt₀, prompt₁, prompt₂, prompt₃]\n每个元素为独立的 Python 字符串对象，内存物理地址互不相干"]
+    end
+
+    subgraph L2_CHATML["② 第二层: 文本内部 ChatML 结构自洽闭合"]
+        C0["prompt₀: <|im_start|>system...<|im_end|><|im_start|>user\n患者张伟确诊冠心病<|im_end|><|im_start|>assistant\n"]
+        C1["prompt₁: <|im_start|>system...<|im_end|><|im_start|>user\n血常规报告WBC升高<|im_end|><|im_start|>assistant\n"]
+        C0 & C1 --> C_TAG["角色边界标记: <|im_start|> (248043) / <|im_end|> (248044)\n单条样本结构自洽闭环，无需样本间额外连接符"]
+    end
+
+    subgraph L3_TENSOR["③ 第三层: PyTorch 2D 张量维度与注意力掩码隔离 (Batch Dim = 0)"]
+        T_MAT["input_ids: 形状 [4, max_len] 2D 矩阵\nRow 0: [pad, pad, ..., '患者张伟确诊冠心病']\nRow 1: [pad, pad, ..., '血常规报告WBC升高']\nRow 2: [pad, pad, ..., '李四预约呼吸科门诊']\nRow 3: [pad, pad, ..., '处方阿托伐他汀口服']"]
+        T_MAT --> M_MASK["自注意力行级隔离 (Row Attention Isolation):\nSoftmax 仅在同一行 (同一序列) 内部计算\n严格杜绝跨行交叉注意力 (Cross-Sample Leakage)"]
+        T_MAT --> P_POS["独立位置编码 (Position IDs):\n结合 Left Padding，每行从自身首个有效 Token 独立从 0 递增编号"]
+    end
+
+    subgraph L4_ENGINE["④ 第四层: vLLM 引擎级 Request ID 与 PagedAttention 独立块表"]
+        REQ_MGR["vLLM 为每个 prompt 分配全局唯一 request_id (req_0, req_1, ...)"]
+        REQ_MGR --> BLK_MAP["独立物理块表映射 (Block Table):\n显存按物理页 (16 tokens/block) 按需离散分配，各请求显存页完全解耦"]
+    end
+
+    classDef pyStyle fill:#EBF5FB,stroke:#2980B9,stroke-width:2px,color:#1B4F72;
+    classDef chatmlStyle fill:#FEF9E7,stroke:#D4AC0D,stroke-width:2px,color:#7D6608;
+    classDef tensorStyle fill:#E8F8F5,stroke:#16A085,stroke-width:2px,color:#0E6251;
+    classDef engineStyle fill:#FDEDEC,stroke:#C0392B,stroke-width:2px,color:#78281F;
+
+    class L1_PY pyStyle;
+    class L2_CHATML chatmlStyle;
+    class L3_TENSOR tensorStyle;
+    class L4_ENGINE engineStyle;
+```
+
+#### 6.2.1 四层隔离机制详细对照
+
+| 隔离层级 | 区分与隔离方式 | 底层实现机理 | 是否存在样本间串扰？ |
+|---|---|---|---|
+| **Python 层面** | `List[str]` 独立字符串元素 | `prompts = [prompt_0, prompt_1, ...]`，每个元素独立存储在 Python 堆内存中 | ❌ 绝对独立（不同的内存字符串对象） |
+| **文本结构** | ChatML 控制 Token 闭合 | `<|im_start|>` (248043) 与 `<|im_end|>` (248044) 构建自包含单轮/多轮消息边界 | ❌ 结构自洽，各自闭合 |
+| **PyTorch 张量** | 2D 矩阵 `[Batch, Length]`，每样本占一行 | `input_ids[i, :]` 独占第 $i$ 行；**因果自注意力掩码禁止跨行注意力计算**；各行 `position_ids` 独立从 0 计数 | ❌ 注意力仅在行内计算，零跨样本交叉 |
+| **vLLM 引擎** | 独立 `Request ID` + PagedAttention 独立块表 | 每个请求拥有独立的物理页映射表（Block Table），短请求遇到 EOS 即刻释放物理块 | ❌ 物理分页与逻辑任务完全解耦 |
+
+---
+
+### 6.3 自回归解码控制与提前截断机制 (Sampling & Early Exit)
 
 1. **确定性贪心解码与关闭 Thinking 模式**：
    设定 `temperature=0.0, do_sample=False`，消除随机性采样波动，确保相同文本在隐私定级与脱敏输出上严格具备确定性与可复现性。同时，Qwen3.5 基座模板默认注入 `<think>...</think>` 思考前缀，推理时**显式传入 `enable_thinking=False`**，避免 Assistant 输出被思考标记包裹而导致 JSON 解析失败。
@@ -677,7 +726,119 @@ flowchart TD
 
 ---
 
-### 6.3 生产级端侧 Sidecar 降级、熔断与高并发安全门禁 (Safety Floor)
+### 6.4 推理输出结果的结构化反序列化与多阶段解析流水线 (Structured Output Deserialization & Parsing Pipeline)
+
+在模型完成 Batch 前向自回归生成后，底层的 **GPU 张量 (Token IDs)** 必须经过规范的反分词解码、正则清洗、JSON 提取以及业务合法性校验，最终还原为标准业务对象：
+
+```mermaid
+flowchart TD
+    subgraph S1_TRIM["① 阶段 1: Prompt 前缀切片裁剪 (Trim Prompt Prefix)"]
+        GEN_TENSOR["模型生成张量 outputs: [B, S_in + S_out]"] --> SLICE_OP["逐行切片: generated_ids = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs['input_ids'], outputs)]\n(vLLM 模式下引擎自动完成前缀剥离)"]
+    end
+
+    subgraph S2_DEC["② 阶段 2: Token ID 逆向反分词解码 (Batch Text Decoding)"]
+        SLICE_OP --> BATCH_DEC["tokenizer.batch_decode(generated_ids, skip_special_tokens=True)\n过滤 <|im_end|> 等控制字符，还原为 UTF-8 原始自然语言文本 List[str]"]
+    end
+
+    subgraph S3_EXTRACT["③ 阶段 3: 结构化 JSON 鲁棒双重提取 (extract_json_from_text)"]
+        BATCH_DEC --> REGEX_1{"正则策略 1:\n匹配 ```json ... ``` 代码块"}
+        REGEX_1 -- "命中代码块" --> JSON_LOAD1["json.loads() 解析候选 JSON 字符串"]
+        REGEX_1 -- "未命中代码块" --> REGEX_2{"正则策略 2 (兜底):\n贪婪匹配最外层花括号 {...}"}
+        REGEX_2 -- "命中 {...}" --> JSON_LOAD2["json.loads() 兜底解析"]
+        REGEX_2 -- "未命中" --> PARSE_FAIL["解析失败返回 None (触发上层降级)"]
+    end
+
+    subgraph S4_NORM["④ 阶段 4: 4 核心字段校验、类型规范化与 Fail-Closed 安全门禁"]
+        JSON_LOAD1 & JSON_LOAD2 --> NORM_FUNC["normalize_classification_result() 校验提取:"]
+        NORM_FUNC --> F1["1. final_level: 校验在 {'L1','L2','L3','L4','L5'} 内"]
+        NORM_FUNC --> F2["2. confidence: float 类型转换并截断至 [0.0, 1.0]"]
+        NORM_FUNC --> F3["3. reasoning: 定级判别理由说明字符串"]
+        NORM_FUNC --> F4["4. sanitized_text: 语义连贯的无痕抹平脱敏重写文本"]
+        NORM_FUNC --> SAFE_SCAN{"二次安全门禁扫描:\nsanitized_text 是否残留高敏词?"}
+        SAFE_SCAN -- "存在高敏残留" --> FORCE_M["整值替换为 [L4-L5-DATA-REMOVED]"]
+        SAFE_SCAN -- "安全合格" --> FINAL_OBJ["返回最终业务结构体与 Token Usage"]
+    end
+
+    classDef s1Style fill:#EBF5FB,stroke:#2980B9,stroke-width:2px,color:#1B4F72;
+    classDef s2Style fill:#FEF9E7,stroke:#D4AC0D,stroke-width:2px,color:#7D6608;
+    classDef s3Style fill:#E8F8F5,stroke:#16A085,stroke-width:2px,color:#0E6251;
+    classDef s4Style fill:#FDEDEC,stroke:#C0392B,stroke-width:2px,color:#78281F;
+
+    class S1_TRIM s1Style;
+    class S2_DEC s2Style;
+    class S3_EXTRACT s3Style;
+    class S4_NORM s4Style;
+```
+
+#### 6.4.1 解析各阶段核心实现代码参考
+
+```python
+import json
+import re
+from typing import Any, Dict, Optional
+
+_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+_BRACE_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
+
+def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+    """从模型输出文本中鲁棒提取 JSON 对象（支持 Markdown 块与裸 JSON 字符串）"""
+    if not text:
+        return None
+
+    # 策略 1：优先匹配 ```json ... ``` 块内部内容
+    match = _FENCE_PATTERN.search(text)
+    candidate_str = match.group(1).strip() if match else text.strip()
+
+    try:
+        data = json.loads(candidate_str)
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 策略 2：兜底正则贪婪匹配最外层的大括号 {...}
+    brace_match = _BRACE_PATTERN.search(text)
+    if brace_match:
+        try:
+            data = json.loads(brace_match.group(0))
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return None
+
+def normalize_classification_result(parsed_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """对解析出的 JSON 字段进行类型清洗、范围截断与合法性校验"""
+    # 1. final_level: 密级校验 (必须为标准 L1~L5)
+    raw_level = str(parsed_dict.get("final_level", "L1")).upper().strip()
+    valid_levels = {"L1", "L2", "L3", "L4", "L5"}
+    final_level = raw_level if raw_level in valid_levels else "L1"
+
+    # 2. confidence: 置信度浮点数约束在 [0.0, 1.0]
+    try:
+        confidence = float(parsed_dict.get("confidence", 0.8))
+        confidence = max(0.0, min(1.0, confidence))
+    except (ValueError, TypeError):
+        confidence = 0.8
+
+    # 3. reasoning: 定级判别理由说明
+    reasoning = str(parsed_dict.get("reasoning", "大模型综合判定")).strip()
+
+    # 4. sanitized_text: 无痕脱敏抹平文本
+    sanitized_text = str(parsed_dict.get("sanitized_text", "")).strip()
+
+    return {
+        "final_level": final_level,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "sanitized_text": sanitized_text,
+    }
+```
+
+---
+
+### 6.5 生产级端侧 Sidecar 降级、熔断与高并发安全门禁 (Safety Floor)
 
 在端侧高并发或边缘资源受限环境下，系统设计了严密的五重防御与优雅降级链条：
 
@@ -722,6 +883,7 @@ flowchart TD
    - LLM 仲裁结果必须落在冲突标签等级集合内，且不得低于值级证据（`match_target=field_value`）的最高敏感等级；
    - `Qwen3Classifier` 是纯文本模型，遇到图像/图片输入直接返回 `None` 触发降级，由 `ClassificationFunnel` 按高敏医学影像规则保护；
    - 在 [`service.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/service.py) 服务出口处，对 `sanitized_text` 再次执行规则级高敏词扫描，若发现脱敏不彻底仍残留 L4/L5 敏感数据，强制替换为 `"[L4-L5-DATA-REMOVED]"`，实现绝对的合规兜底。
+
 
 ---
 

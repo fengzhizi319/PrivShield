@@ -105,20 +105,44 @@ def run_pytorch_benchmark(
     # 遍历待评测的 Batch Size 列表 (例如依次评测 1, 4)
     for bsize in batch_sizes:
         # =====================================================================
-        # [Batch 逻辑 2: 样本循环扩充与 Batch 集合切片组装]
-        # 若原始测试集样本数量少于当前待测的 batch_size，通过循环复制平铺样本列表，
-        # 并通过切片 [:bsize] 精准提取出包含 bsize 条记录的样本列表。
+        # [Batch 逻辑 2: 样本循环扩充与多提示词隔离机制 (Prompt Isolation Architecture)]
+        # 
+        # ❓ 核心疑问：不同的提示词组合在一起时，是如何隔开并防止混淆的？
+        # 答：不同提示词在 Batch 中绝非首尾相连拼接，而是通过 3 层机制进行绝对物理与逻辑隔离：
+        #
+        # 【隔离层 1: Python 列表级独立对象 (List[str])】
+        # prompts 并不是用逗号或换行拼成的一个大字符串，而是包含 B 个独立元素的 Python 字符串列表：
+        # prompts = [
+        #     "<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n患者张伟确诊冠心病<|im_end|>\n<|im_start|>assistant\n",
+        #     "<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n血常规报告WBC升高<|im_end|>\n<|im_start|>assistant\n",
+        #     ...
+        # ]
+        # 每个 Prompt 在 Python 内存中均是互不干扰的独立 String 对象。
+        #
+        # 【隔离层 2: 文本内部 ChatML 边界标记】
+        # 每个 Prompt 自身结构完整闭合：
+        # - <|im_start|> (248043): 标记角色开始
+        # - <|im_end|> (248044): 标记角色结束
+        # - <|im_start|>assistant\n: 触发助手生成起点，各样本独立闭环。
         # =====================================================================
         batch_items = (samples * ((bsize // len(samples)) + 2))[:bsize]
         # 使用 ChatML 对话模板渲染各样本输入，生成包含 System 提示词与 User 输入的完整 Prompt 文本列表
         prompts = [render_prompt_text(tokenizer, s["input"]) for s in batch_items]
 
         # =====================================================================
-        # [Batch 逻辑 3: 批量分词与张量对齐 (Batched Tokenization & Left Padding)]
-        # 1. 将 List[str] 批量传入 Tokenizer 进行高效 Rust BPE 并行分词；
-        # 2. padding=True 自动探查本批次中最长序列长度，对较短序列自动在左侧填充 pad_token_id；
-        # 3. return_tensors="pt" 将输出转换为 PyTorch 张量格式；
-        # 4. .to(device) 将生成的 input_ids 与 attention_mask 张量整体搬移到 GPU 显存。
+        # [Batch 逻辑 3: 批量分词与 2D 张量行级隔离 (Tensor Row Isolation & Left Padding)]
+        #
+        # 【隔离层 3: PyTorch 2D 张量维度与注意力掩码隔离 (Batch Dimension dim=0)】
+        # 1. 2D 矩阵排布: Tokenizer 将 B 个独立的字符串编码为 shape=[B, max_len] 的 2D 张量：
+        #    input_ids[0, :] -> 样本 0 的全部 Token (独占第 0 行)
+        #    input_ids[1, :] -> 样本 1 的全部 Token (独占第 1 行)
+        # 2. 零跨行注意力 (Row Attention Isolation):
+        #    在 24 层注意力算子 (GQA 与 SSM) 中，Softmax 计算仅在同一行内 (同一样本内) 进行，
+        #    严格禁止跨行 (跨样本) 发生注意力关联，样本 0 的“张伟”绝对不会看到样本 1 的“WBC”！
+        # 3. 独立位置编码 (Position IDs):
+        #    结合 Left Padding，每行样本从自身有效文本的首个 Token 独立从 0 开始递增编号。
+        # 4. padding=True 自动探查本批次中最长序列长度，较短序列统一在左侧填充 pad_token_id。
+        # 5. .to(device) 将生成的 input_ids 与 attention_mask 张量整体搬移到 GPU 显存。
         # =====================================================================
         inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
 

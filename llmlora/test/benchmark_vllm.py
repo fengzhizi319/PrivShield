@@ -129,12 +129,32 @@ def run_vllm_benchmark(
     # 遍历所有待测试的 Batch 大小 (例如 1, 4)
     for bsize in batch_sizes:
         # =====================================================================
-        # [vLLM Batch 逻辑 3: 样本集合切片与 Prompt 文本列表构建]
-        # 1. 若原始样本数小于待测的 batch_size，通过循环复制数据列表，精准切片提取出 bsize 条测试样本；
-        # 2. 使用统一的 ChatML 对话模板将各样本渲染为包含 System Prompt 与 User 输入的标准纯文本列表 List[str]。
+        # [vLLM Batch 逻辑 3: 样本集合切片与多提示词隔离机制 (Prompt Isolation Architecture)]
+        #
+        # ❓ 核心疑问：不同的提示词组合在一起时，是如何隔开并防止混淆的？
+        # 答：vLLM 中不同提示词通过 3 层机制进行严格的物理与逻辑隔离：
+        #
+        # 【隔离层 1: Python 列表级独立对象 (List[str])】
+        # prompts 并不是一个用逗号或换行拼接的大字符串，而是包含 B 个独立元素的 Python 字符串列表：
+        # prompts = [
+        #     "<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n患者张伟确诊冠心病<|im_end|>\n<|im_start|>assistant\n",
+        #     "<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n血常规报告WBC升高<|im_end|>\n<|im_start|>assistant\n",
+        #     ...
+        # ]
+        # 每个 Prompt 在 Python 内存中均是互不干扰的独立 String 对象。
+        #
+        # 【隔离层 2: 文本内部 ChatML 结构自洽闭合】
+        # 每个 Prompt 内部通过 <|im_start|> 与 <|im_end|> 形成自包含角色块，单条样本内部结构完整闭合。
+        #
+        # 【隔离层 3: vLLM 引擎级 Request ID 与 PagedAttention 物理块表隔离】
+        # 1. 独立请求句柄: vLLM 为 prompts 列表中的每个字符串分配全局唯一的 request_id；
+        # 2. 独立块表映射 (Block Table): PagedAttention 为每个请求独立维护逻辑块到 GPU 物理块的映射表；
+        # 3. 零跨请求串扰: 即使多个请求在同一个 GPU 调度 Iteration 中并发解码，它们的 KV Cache 与
+        #    SSM 状态在显存物理页与逻辑空间上完全隔离，绝不存在样本间数据交叉！
         # =====================================================================
         batch_items = (samples * ((bsize // len(samples)) + 2))[:bsize]
         prompts = [render_prompt_text(tokenizer, s["input"]) for s in batch_items]
+        print(f"  Batch Size: {bsize}, Prompts: {prompts}")
 
         # 记录批量生成开始的高精度时间戳
         start_gen = time.perf_counter()
@@ -145,7 +165,10 @@ def run_vllm_benchmark(
         # 3. 24 层 Hybrid 网络 (6 层 GQA KV Cache 与 18 层 SSM 循环隐状态) 在 GPU 上按批次高度并行执行；
         # 4. 返回 RequestOutput 列表，每个元素封装了对应单个请求的生成结果与 token_ids。
         # =====================================================================
+
         outputs = llm.generate(prompts, sampling_params)
+        print(f"  Batch Size: {bsize}, Outputs: {outputs}")
+
         # 计算本次 Batch 生成的实际物理时间 (秒)
         elapsed_sec = time.perf_counter() - start_gen
         # 将秒换算为毫秒 (ms)
