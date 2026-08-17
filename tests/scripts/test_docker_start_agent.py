@@ -65,6 +65,7 @@ import json  # 解析 JSON 响应与构造模拟 payload
 import os  # 环境变量读取与隔离
 import re  # 正则匹配
 import shutil  # 查找可执行命令 (bash / docker)
+import socket  # TCP 端口可用性检测与动态端口分配
 import stat  # 文件权限位检查
 import subprocess  # 执行子进程命令
 import sys  # 平台检测（Windows 无 bash/Docker 脚本环境）
@@ -350,8 +351,7 @@ class TestAgentScriptStaticChecks:
             .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_ports_and_env_config -v -s
         """
         content = SCRIPT_PATH.read_text(encoding="utf-8")
-        assert "-p 8079:8079" in content, "缺少 REST 端口映射 8079:8079"
-        assert "-p 50051:50051" in content, "缺少 gRPC 端口映射 50051:50051"
+        assert "8079" in content and "50051" in content, "缺少端口映射配置 8079 / 50051"
         assert 'PRIVACY_REST_HOST="0.0.0.0"' in content, "容器未绑定 PRIVACY_REST_HOST=0.0.0.0"
         assert 'PRIVACY_GRPC_HOST="0.0.0.0"' in content, "容器未绑定 PRIVACY_GRPC_HOST=0.0.0.0"
 
@@ -510,8 +510,8 @@ class TestAgentStopScript:
         start_content = ps_start.read_text(encoding="utf-8")
         assert "docker build" in start_content
         assert "docker run" in start_content
-        assert "-p 8079:8079" in start_content
-        assert "-p 50051:50051" in start_content
+        assert "8079" in start_content
+        assert "50051" in start_content
         assert "PRIVACY_REST_HOST" in start_content
 
         stop_content = ps_stop.read_text(encoding="utf-8")
@@ -1329,18 +1329,41 @@ def live_docker_agent_service(bash_bin: str, docker_available: bool):
     start_script = PROJECT_ROOT / "scripts" / "dev" / "docker-start-agent.sh"
     stop_script = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-agent.sh"
 
+    def _is_tcp_port_in_use(port: int) -> bool:
+        for host in ("0.0.0.0", "127.0.0.1"):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind((host, port))
+            except OSError:
+                return True
+        return False
+
+    def _get_free_tcp_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("0.0.0.0", 0))
+            return s.getsockname()[1]
+
+    # 若 8079 / 50051 已被宿主机本地服务（如 dev-start-all.sh）占用，自动分配空闲端口避免端口冲突
+    rest_port = 8079 if not _is_tcp_port_in_use(8079) else _get_free_tcp_port()
+    grpc_port = 50051 if not _is_tcp_port_in_use(50051) else _get_free_tcp_port()
+
+    env = os.environ.copy()
+    env["PRIVACY_REST_PORT"] = str(rest_port)
+    env["PRIVACY_GRPC_PORT"] = str(grpc_port)
+
     # 1. 真实运行启动脚本构建并拉起 core 容器
     res = subprocess.run(
         [bash_bin, str(start_script), "core"],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        env=env,
         timeout=300,
     )
     if res.returncode != 0:
         pytest.fail(f"执行 docker-start-agent.sh core 失败:\n{res.stderr or res.stdout}")
 
-    base_url = "http://127.0.0.1:8079"
+    base_url = f"http://127.0.0.1:{rest_port}"
 
     # 2. 轮询健康探针等待容器内的 FastAPI 服务就绪（最多 30 秒）
     ready = False
@@ -1408,15 +1431,23 @@ class TestRealDockerAgentScriptLifecycle:
             # 或直接调用：
             .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_health_probes -v -s
         """
-        # 1. 验证健康检查
+        # 1. 验证健康检查 / Health probe verification
+        # - urllib.request.Request: Python 标准库请求对象，用于封装目标 URL、HTTP 方法（GET/POST）与请求头等元数据。
+        #   此处构造指向容器健康检查端点 (GET http://127.0.0.1:8079/health) 的请求。
         req_health = urllib.request.Request(f"{live_docker_agent_service}/health", method="GET")
+        # - urllib.request.urlopen: 执行底层 Socket 连接并发送 HTTP 请求的核心函数。
+        #   * 第一个参数传入 Request 对象或 URL 字符串；
+        #   * timeout=3.0 设置网络超时时间（秒），避免容器网络阻塞导致测试用例挂起；
+        #   * with 上下文管理器: 保证响应读取结束后自动释放底层 Socket 与连接池资源。
         with urllib.request.urlopen(req_health, timeout=3.0) as resp:
-            assert resp.status == 200
-            data = json.loads(resp.read().decode("utf-8"))
+            assert resp.status == 200  # 校验 HTTP 状态码为 200 OK
+            data = json.loads(resp.read().decode("utf-8"))  # 读取响应字节流并反序列化为 JSON 字典
             assert data.get("status") == "ok"
 
-        # 2. 验证就绪探针
+        # 2. 验证就绪探针 / Readiness probe verification
+        # - 同样通过 Request 对象封装就绪探针 (GET /readyz)
         req_readyz = urllib.request.Request(f"{live_docker_agent_service}/readyz", method="GET")
+        # - 通过 urlopen 探测容器内部依赖（配置解析器与隐私预算 DB）就绪状态
         with urllib.request.urlopen(req_readyz, timeout=3.0) as resp:
             assert resp.status == 200
             data = json.loads(resp.read().decode("utf-8"))
@@ -1485,6 +1516,7 @@ class TestRealDockerAgentScriptLifecycle:
             "domain": "medical",
         }
         resp_rec_eval = _http_post_json(f"{live_docker_agent_service}/v1/dynclassification/eval_record", payload_rec_eval)
+        print(f"\n[真实 Docker Agent 容器分类评估响应]: {resp_rec_eval}")
         assert resp_rec_eval is not None
         record_res = resp_rec_eval.get("recordResult", {})
         assert record_res.get("finalLevel") in ("L4", "L5")

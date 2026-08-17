@@ -174,6 +174,18 @@ stop:
 prod-stop:
 	./console/scripts/prod-stop.sh
 
+prod-compose:
+	./scripts/prod/deploy-docker-compose.sh
+
+prod-compose-stop:
+	./scripts/prod/stop-docker-compose.sh
+
+prod-check:
+	./scripts/prod/prod_health_check.sh
+
+prod-backup:
+	./scripts/prod/backup_privacy_budget.sh
+
 # ── Other ────────────────────────────────────────────────────
 
 proto-gen:

@@ -82,6 +82,7 @@ PrivShield/
 ├── data/                          # Sample datasets & test data
 ├── scripts/                       # Utility scripts
 │   ├── dev/                       # Services, health check & test runners
+│   ├── prod/                      # Production deployment, health check & backup tools
 │   ├── data/                      # Data generators & rule exporters
 │   ├── env/                       # Environment installers & acceleration
 │   └── models/                    # Model downloaders & converters
@@ -371,3 +372,11 @@ Address these before any hardened production deployment.
 | Serve docs | `make docs-serve` |
 | Download LLM | `python -m PrivShield.privacy.download_model` |
 | Download NER | `python -m PrivShield.privacy.download_ner_model` |
+| Deploy Prod Compose | `bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring]` |
+| Stop Prod Compose | `bash ./scripts/prod/stop-docker-compose.sh` |
+| Deploy Prod Helm | `bash ./scripts/prod/deploy-helm.sh` |
+| Uninstall Prod Helm | `bash ./scripts/prod/uninstall-helm.sh` |
+| Deploy Prod K8s | `bash ./scripts/prod/deploy-k8s.sh` |
+| Stop Prod K8s | `bash ./scripts/prod/stop-k8s.sh` |
+| Run Prod Health Check | `bash ./scripts/prod/prod_health_check.sh` |
+| Backup Budget DB | `bash ./scripts/prod/backup_privacy_budget.sh` |

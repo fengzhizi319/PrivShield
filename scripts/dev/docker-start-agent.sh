@@ -88,11 +88,14 @@ fi
 # ── 5. 停止并清理旧容器（防止名称冲突）──
 docker rm -f PrivShield 2>/dev/null || true
 
+HOST_REST_PORT="${PRIVACY_REST_PORT:-8079}"
+HOST_GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
+
 # ── 6. 启动物理容器 ──
 docker run -d \
   --name PrivShield \
-  -p 8079:8079 \
-  -p 50051:50051 \
+  -p "${HOST_REST_PORT}:8079" \
+  -p "${HOST_GRPC_PORT}:50051" \
   -e PRIVACY_REST_HOST="0.0.0.0" \
   -e PRIVACY_GRPC_HOST="0.0.0.0" \
   -e PRIVACY_LOG_LEVEL="INFO" \
@@ -100,8 +103,8 @@ docker run -d \
 
 echo ""
 echo "✅ PrivShield (Docker) 已成功启动！"
-echo "   - REST API : http://127.0.0.1:8079"
-echo "   - gRPC RPC : 127.0.0.1:50051"
+echo "   - REST API : http://127.0.0.1:${HOST_REST_PORT}"
+echo "   - gRPC RPC : 127.0.0.1:${HOST_GRPC_PORT}"
 echo "   - 查看日志 : docker logs -f PrivShield"
 echo "============================================================================"
 

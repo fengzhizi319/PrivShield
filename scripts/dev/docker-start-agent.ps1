@@ -79,11 +79,14 @@ if ($Target -eq "ml") {
 # 4. 清理旧同名容器
 & docker rm -f PrivShield 2>$null | Out-Null
 
+$HostRestPort = if ($env:PRIVACY_REST_PORT) { $env:PRIVACY_REST_PORT } else { "8079" }
+$HostGrpcPort = if ($env:PRIVACY_GRPC_PORT) { $env:PRIVACY_GRPC_PORT } else { "50051" }
+
 # 5. 启动容器
 & docker run -d `
   --name PrivShield `
-  -p 8079:8079 `
-  -p 50051:50051 `
+  -p "${HostRestPort}:8079" `
+  -p "${HostGrpcPort}:50051" `
   -e PRIVACY_REST_HOST="0.0.0.0" `
   -e PRIVACY_GRPC_HOST="0.0.0.0" `
   -e PRIVACY_LOG_LEVEL="INFO" `
@@ -96,7 +99,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "✅ PrivShield (Docker) 已成功启动！" -ForegroundColor Green
-Write-Host "   - REST API : http://127.0.0.1:8079" -ForegroundColor Green
-Write-Host "   - gRPC RPC : 127.0.0.1:50051" -ForegroundColor Green
+Write-Host "   - REST API : http://127.0.0.1:$HostRestPort" -ForegroundColor Green
+Write-Host "   - gRPC RPC : 127.0.0.1:$HostGrpcPort" -ForegroundColor Green
 Write-Host "   - 查看日志 : docker logs -f PrivShield" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Cyan
