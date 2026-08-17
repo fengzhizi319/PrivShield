@@ -42,6 +42,7 @@ import re  # 从 LLM 输出中提取 JSON（实体提取任务）
 import shutil  # 可执行文件探测（bash / docker / nvidia-smi 是否在 PATH 中）
 import stat  # 文件权限位读写：为 fake docker 脚本添加可执行权限
 import subprocess  # 运行 bash 脚本与 docker 命令，捕获 stdout/stderr
+import sys  # 平台检测（Windows 无 bash/Docker 脚本环境）
 import tempfile  # 创建临时目录，隔离 fake docker 脚本与调用日志
 import textwrap  # dedent 去除 f-string 多行脚本的前导缩进
 import time  # 轮询 vLLM 服务就绪状态的时间控制
@@ -59,6 +60,13 @@ from PrivShield.dynclassification.llm_engines import OpenAILlmClassifier
 # ── 第三方导入 / Third-party imports ──
 import pytest  # 测试框架：fixture / skip / mark
 import yaml  # 解析 docker-compose.yml 为 dict
+
+# bash/Docker 脚本测试仅适用于 Unix 系平台（Linux/macOS）；
+# Windows 无原生 bash 与 Unix 文件权限模型，整个模块安全跳过。
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bash/Docker shell-script tests require Unix (Linux/macOS); Windows has no native bash or POSIX permissions",
+)
 
 # ═══════════════════════════════════════════════════════════════════════
 # 路径与常量定义 / Path & Constant Definitions

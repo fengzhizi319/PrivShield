@@ -1044,10 +1044,12 @@ class TestAdvancedDPFeatures:
     def test_hmac_budget_audit(self):
         # HMAC-based audit logger: creates a tamper-evident log of budget spends
         import os
+        import tempfile
 
         from PrivShield.privacy.budget import BudgetAuditLogger
 
-        audit_path = "/tmp/test_budget_audit.log"
+        # 使用 tempfile 保证跨平台兼容（Windows 无 /tmp）
+        audit_path = os.path.join(tempfile.gettempdir(), "test_budget_audit.log")
         if os.path.exists(audit_path):
             os.remove(audit_path)
 

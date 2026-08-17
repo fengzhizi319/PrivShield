@@ -67,6 +67,7 @@ import re  # 正则匹配
 import shutil  # 查找可执行命令 (bash / docker)
 import stat  # 文件权限位检查
 import subprocess  # 执行子进程命令
+import sys  # 平台检测（Windows 无 bash/Docker 脚本环境）
 import tempfile  # 临时目录管理 (隔离 fake docker)
 import textwrap  # 文本缩进处理
 import time  # 轮询与延时控制
@@ -93,6 +94,14 @@ from PrivShield.dynclassification.service import DynClassificationService
 # ── 第三方导入 / Third-party imports ──
 import pytest
 import yaml
+
+# bash/Docker 脚本测试仅适用于 Unix 系平台（Linux/macOS）；
+# Windows 无原生 bash 与 Unix 文件权限模型，即使安装了 WSL
+# 也无法正确处理 Windows 路径，整个模块安全跳过。
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bash/Docker shell-script tests require Unix (Linux/macOS); Windows has no native bash or POSIX permissions",
+)
 
 # ═══════════════════════════════════════════════════════════════════════
 # 路径与常量定义 / Path & Constant Definitions

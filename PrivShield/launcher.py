@@ -59,8 +59,9 @@ def create_reuse_port_socket(host: str, port: int) -> socket.socket:
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # SO_REUSEPORT 允许多个 socket 绑定同一地址+端口（Windows 等平台可能不支持）
-    if hasattr(socket, "SO_REUSEPORT"):
+    # SO_REUSEPORT 内核级负载均衡仅 Linux 原生支持；
+    # macOS 虽定义该常量但语义不同（无内核连接分发），Windows 未定义。
+    if sys.platform == "linux" and hasattr(socket, "SO_REUSEPORT"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.bind((host, port))
     return sock
@@ -206,7 +207,10 @@ def _monitor_workers(
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
 
-    ctx = mp.get_context("fork")
+    # fork 仅 Linux 原生支持（COW 共享内存）；
+    # macOS 自 Python 3.8+ 默认 spawn（fork 在 macOS 已弃用，可能崩溃）；
+    # Windows 仅支持 spawn。
+    ctx = mp.get_context("fork" if sys.platform == "linux" else "spawn")
     try:
         while not shutdown_event.is_set():
             for i, p in enumerate(workers):
@@ -290,8 +294,11 @@ def launch(
         },
     )
 
-    # 使用 fork 启动方式（Linux 默认），利用 COW 共享内存
-    ctx = mp.get_context("fork")
+    # 多进程启动方式按平台分支：
+    # Linux → fork（利用 COW 共享内存，性能最优）
+    # macOS → spawn（fork 在 macOS 已弃用，Python 3.8+ 默认 spawn）
+    # Windows → spawn（仅支持 spawn）
+    ctx = mp.get_context("fork" if sys.platform == "linux" else "spawn")
     workers: list[mp.Process] = []
     spawn_args = (0, host_rest, port_rest, host_grpc, port_grpc, grpc_max_workers)
 
@@ -465,8 +472,9 @@ def launch_with_warmup(
     except Exception as e:
         logger.warning("warmup_llm_skipped", extra={"reason": str(e)})
 
-    # 2. fork worker（利用 COW 共享模型只读页）
-    ctx = mp.get_context("fork")
+    # 2. fork/spawn worker（利用 COW 共享模型只读页）
+    # 多进程启动方式按平台分支：Linux → fork；macOS/Windows → spawn
+    ctx = mp.get_context("fork" if sys.platform == "linux" else "spawn")
     workers: list[mp.Process] = []
     spawn_args = (0, host_rest, port_rest, host_grpc, port_grpc, grpc_max_workers)
 

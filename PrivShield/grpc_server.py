@@ -31,6 +31,7 @@ from .env_loader import load_env_file
 load_env_file()
 
 import os  # 用于读取环境变量配置（profile路径、命名空间、日志级别等）
+import sys  # 用于 sys.platform 平台检测（Windows 兼容性）
 from concurrent import futures  # 提供 ThreadPoolExecutor，作为 gRPC 服务器的工作线程池
 
 # ─── 第三方库导入 / Third-party imports ───
@@ -1148,31 +1149,37 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = No
     if settings.rate_limit_enabled:
         interceptors.append(RateLimitInterceptor(settings))
 
-    # ── 步骤 3：创建 gRPC 服务器 / Step 3: Create gRPC server ──
+    # ── 步 3：创建 gRPC 服务器 / Step 3: Create gRPC server ──
     # 设置 gRPC 消息大小限制：默认仅 4 MiB，base64 编码的图片或大表分类
     # 场景极易超限导致服务端重置 HTTP/2 连接（表现为 connection reset by peer）。
     # 将收发上限均提升至 64 MiB，与 Go 客户端保持一致。
     _max_msg_size = 64 * 1024 * 1024  # 64 MiB
+    _server_options = [
+        # 接收消息上限 64 MiB
+        ("grpc.max_receive_message_length", _max_msg_size),
+        # 发送消息上限 64 MiB
+        ("grpc.max_send_message_length", _max_msg_size),
+        # 允许客户端在无活跃 RPC 时发送 keepalive PING，
+        # 否则服务端会因 "too_many_pings" 发送 GOAWAY/ENHANCE_YOUR_CALM
+        ("grpc.keepalive_permit_without_calls", 1),
+        # 允许客户端最短每 5 秒发送一次 PING（高高频并发防护）
+        ("grpc.http2.min_time_between_pings_ms", 5000),
+        # 无数据交互时允许无限制次数发送 PING
+        ("grpc.http2.max_pings_without_data", 0),
+        # 禁用 PING 频率超限强制断开连接惩罚 (0 表示静默忽略过多 PING 而不断开 TCP)
+        ("grpc.http2.max_ping_strikes", 0),
+    ]
+    # SO_REUSEPORT 内核级负载均衡仅 Linux 原生支持；
+    # macOS 虽定义该常量但语义不同（无内核级连接分发），Windows 不支持。
+    if sys.platform == "linux":
+        _server_options.append(
+            # 允许多进程绑定同一 gRPC 端口（SO_REUSEPORT）
+            ("grpc.so_reuseport", 1),
+        )
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=max_workers),  # 工作线程池
         interceptors=tuple(interceptors) if interceptors else None,  # 拦截器链
-        options=[
-            # 接收消息上限 64 MiB
-            ("grpc.max_receive_message_length", _max_msg_size),
-            # 发送消息上限 64 MiB
-            ("grpc.max_send_message_length", _max_msg_size),
-            # 允许客户端在无活跃 RPC 时发送 keepalive PING，
-            # 否则服务端会因 "too_many_pings" 发送 GOAWAY/ENHANCE_YOUR_CALM
-            ("grpc.keepalive_permit_without_calls", 1),
-            # 允许客户端最短每 5 秒发送一次 PING（高高频并发防护）
-            ("grpc.http2.min_time_between_pings_ms", 5000),
-            # 无数据交互时允许无限制次数发送 PING
-            ("grpc.http2.max_pings_without_data", 0),
-            # 禁用 PING 频率超限强制断开连接惩罚 (0 表示静默忽略过多 PING 而不断开 TCP)
-            ("grpc.http2.max_ping_strikes", 0),
-            # 允许多进程绑定同一 gRPC 端口（SO_REUSEPORT）
-            ("grpc.so_reuseport", 1),
-        ],
+        options=_server_options,
     )
     # 将 PrivacyServicer 实例注册到 gRPC 服务器
     privacy_pb2_grpc.add_PrivacyServiceServicer_to_server(PrivacyServicer(), server)
