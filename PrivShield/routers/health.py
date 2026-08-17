@@ -58,3 +58,18 @@ def readyz():
             ) from e
 
     return {"status": "ready"}
+
+
+@router.get("/readyz/llm", dependencies=_HEALTH_DEPS)
+def readyz_llm():
+    """LLM 分类器就绪探针接口。"""
+    try:
+        from ..dynclassification.llm_adapter import LlmAdapter
+
+        adapter = LlmAdapter()
+        if adapter.is_available:
+            return {"status": "ready", "llm": "available"}
+    except Exception:
+        pass
+    return {"status": "ready", "llm": "unavailable"}
+

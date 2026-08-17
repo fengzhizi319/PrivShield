@@ -95,13 +95,14 @@ class ProxyResponse(BaseModel):
 class BatchRequestItem(BaseModel):
     """批量请求中的单个子请求。
 
-    结构与 :class:`ProxyRequest` 类似，但批量场景只支持 JSON 请求体
-    （不支持二进制载荷），因为批量测试面向的是常规 JSON 接口。
+    结构与 :class:`ProxyRequest` 类似，支持常规 JSON 请求体及二进制载荷（如 Arrow IPC base64）。
     """
 
     method: str = Field(default="POST")
     path: str
     body: dict[str, Any] | None = Field(default=None)
+    raw_payload_b64: str | None = Field(default=None)
+    content_type: str | None = Field(default=None)
 
 
 class BatchRequest(BaseModel):
@@ -368,9 +369,33 @@ async def batch(req: BatchRequest):
         method = item.method.upper()
         # 记录该子请求的起始时刻。
         start = time.perf_counter()
+
+        raw_content: bytes | None = None
+        if item.raw_payload_b64:
+            try:
+                raw_content = base64.b64decode(item.raw_payload_b64)
+            except Exception as exc:
+                duration_ms = (time.perf_counter() - start) * 1000
+                results.append(
+                    BatchResultItem(
+                        method=method,
+                        path=item.path,
+                        status=400,
+                        duration_ms=round(duration_ms, 2),
+                        error=f"Invalid base64 payload: {exc}",
+                    )
+                )
+                continue
+
         try:
-            # 转发 JSON 请求到 agent。
-            data = await agent_client.request(method=method, path=item.path, body=item.body)
+            # 转发请求到 agent。
+            data = await agent_client.request(
+                method=method,
+                path=item.path,
+                body=item.body,
+                raw_content=raw_content,
+                content_type=item.content_type,
+            )
             # 计算该子请求耗时。
             duration_ms = (time.perf_counter() - start) * 1000
             # 成功：记录 200 与返回数据。

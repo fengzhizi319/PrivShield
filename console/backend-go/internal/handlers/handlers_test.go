@@ -369,6 +369,77 @@ func TestBatchHandler(t *testing.T) {
 	}
 }
 
+// TestBatchHandler_MixedAndRestFallback 验证批量测试支持混合 gRPC 与 REST-only 路径及回退。
+func TestBatchHandler_MixedAndRestFallback(t *testing.T) {
+	mockAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/dynclassification/standards" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"standards":["std1"]}`))
+			return
+		}
+		if r.URL.Path == "/v1/unmapped/rest" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok_from_rest"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer mockAgent.Close()
+
+	u, err := url.Parse(mockAgent.URL)
+	if err != nil {
+		t.Fatalf("parse mock agent url failed: %v", err)
+	}
+	t.Setenv("PRIVACY_REST_HOST", u.Hostname())
+	t.Setenv("PRIVACY_REST_PORT", u.Port())
+
+	grpcSrv := &testPrivacyServer{
+		MaskFunc: func(_ context.Context, req *pb.MaskRequest) (*pb.MaskResponse, error) {
+			return &pb.MaskResponse{Result: "***"}, nil
+		},
+	}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	reqBody := map[string]any{
+		"requests": []map[string]any{
+			{"method": "POST", "path": "/v1/privacy/mask", "body": map[string]string{"field_name": "email", "value": "ok"}},
+			{"method": "GET", "path": "/v1/dynclassification/standards"},
+			{"method": "POST", "path": "/v1/unmapped/rest", "body": map[string]string{"foo": "bar"}},
+		},
+	}
+	b, _ := json.Marshal(reqBody)
+	resp, err := http.Post(ts.URL+"/api/batch", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("POST /api/batch failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Total   int `json:"total"`
+		Passed  int `json:"passed"`
+		Failed  int `json:"failed"`
+		Results []struct {
+			Path   string `json:"path"`
+			Status int    `json:"status"`
+			Error  string `json:"error"`
+			Data   any    `json:"data"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if body.Total != 3 || body.Passed != 3 || body.Failed != 0 {
+		t.Fatalf("unexpected batch summary: total=%d passed=%d failed=%d (%+v)", body.Total, body.Passed, body.Failed, body.Results)
+	}
+	if body.Results[0].Status != http.StatusOK || body.Results[1].Status != http.StatusOK || body.Results[2].Status != http.StatusOK {
+		t.Fatalf("expected all results 200, got %+v", body.Results)
+	}
+}
+
 // TestStaticServingDisabled 验证 dist 目录不存在时仅提供 API（不挂载静态路由）。
 func TestStaticServingDisabled(t *testing.T) {
 	grpcSrv := &testPrivacyServer{}

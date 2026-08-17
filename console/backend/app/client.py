@@ -164,10 +164,12 @@ class PrivacyAgentClient:
 
         try:
             if raw_content is not None:
-                # 二进制载荷：显式设置 Content-Type（兑底 octet-stream），
-                # 以 content= 传递原始字节。
+                # 二进制载荷：显式设置 Content-Type（兜底 octet-stream），
+                # 以 content= 传递原始字节。如果同时提供了 body（dict 格式），
+                # 作为 URL 查询参数（query params）传递，以支持二进制端点（如 arrow_ipc）的参数配置。
                 headers["Content-Type"] = content_type or "application/octet-stream"
-                response = await client.request(method, url, content=raw_content, headers=headers)
+                params = body if isinstance(body, dict) else None
+                response = await client.request(method, url, content=raw_content, params=params, headers=headers)
             elif body is not None:
                 # JSON 载荷：httpx 自动序列化并设置 application/json。
                 response = await client.request(method, url, json=body, headers=headers)

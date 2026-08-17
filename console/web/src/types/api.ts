@@ -66,6 +66,8 @@ export interface BatchRequestItem {
   method: string;
   path: string;
   body?: Record<string, unknown> | null;
+  raw_payload_b64?: string | null;
+  content_type?: string | null;
 }
 
 /** 批量测试：单个结果项。 */

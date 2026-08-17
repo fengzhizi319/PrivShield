@@ -52,7 +52,7 @@ def permission_for_rest_path(path: str) -> str:
     generic wildcard permission for safety.
     """
     path = path.rstrip("/")
-    if path in ("/health", "/livez", "/readyz"):
+    if path in ("/health", "/livez", "/readyz", "/readyz/llm"):
         return "health:read"
     if path.startswith("/v1/privacy/mask"):
         # /v1/privacy/mask、/mask_record、/mask/batch、/mask/dataframe
@@ -142,4 +142,4 @@ def permission_for_grpc_method(method: str) -> str:
 def is_health_path_or_method(path_or_method: str) -> bool:
     """Return True if the given REST path or gRPC method is a health probe."""
     normalized = path_or_method.rstrip("/")
-    return normalized in ("/health", "/livez", "/readyz") or normalized.endswith("/Health")
+    return normalized in ("/health", "/livez", "/readyz", "/readyz/llm") or normalized.endswith("/Health")

@@ -32,13 +32,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	// encoding/json：用于 JSON 序列化/反序列化（params 解析、RecordEntry 转换）
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -407,45 +410,83 @@ func extractRestErrorDetail(body []byte, statusCode int) string {
 	return text
 }
 
-// proxyRest 辅助函数：通过 HTTP 将 REST 请求透明代理到 Agent REST 服务
-func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequest) {
-	method := strings.ToUpper(req.Method)
+// callRest 执行底层的 HTTP REST 请求并返回解析后的数据、HTTP 状态码和可能的错误。
+func (s *Server) callRest(ctx context.Context, method, path string, body json.RawMessage, rawPayloadB64, contentType string) (any, int, error) {
+	method = strings.ToUpper(method)
 	if method == "" {
 		method = "POST"
 	}
-	url := agentRestBaseURL() + req.Path
+	targetURL := agentRestBaseURL() + path
 
 	var reqBodyReader io.Reader
-	if len(req.Body) > 0 {
-		reqBodyReader = bytes.NewReader(req.Body)
+	if rawPayloadB64 != "" {
+		rawBytes, err := base64.StdEncoding.DecodeString(rawPayloadB64)
+		if err != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("invalid base64 payload: %w", err)
+		}
+		reqBodyReader = bytes.NewReader(rawBytes)
+		// 二进制请求（如 Arrow IPC）：若附带 JSON body，将其作为 URL query params 传递
+		if len(body) > 0 {
+			var paramsMap map[string]any
+			if err := json.Unmarshal(body, &paramsMap); err == nil && len(paramsMap) > 0 {
+				q := url.Values{}
+				for k, v := range paramsMap {
+					q.Set(k, fmt.Sprintf("%v", v))
+				}
+				if strings.Contains(targetURL, "?") {
+					targetURL += "&" + q.Encode()
+				} else {
+					targetURL += "?" + q.Encode()
+				}
+			}
+		}
+	} else if len(body) > 0 {
+		reqBodyReader = bytes.NewReader(body)
 	}
 
-	httpReq, err := http.NewRequestWithContext(c.Request.Context(), method, url, reqBodyReader)
+	httpReq, err := http.NewRequestWithContext(ctx, method, targetURL, reqBodyReader)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
-		return
+		return nil, http.StatusBadRequest, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		httpReq.Header.Set("Content-Type", contentType)
+	} else {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
 	if s.cfg.AgentAPIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(httpReq)
-	duration := time.Since(start).Milliseconds()
-
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"detail": fmt.Sprintf("Agent REST HTTP error: %v", err), "status": 502})
-		return
+		return nil, http.StatusBadGateway, fmt.Errorf("Agent REST HTTP error: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBytes, _ := io.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, http.StatusBadGateway, fmt.Errorf("reading REST response: %w", err)
+	}
+
 	var respData any
 	_ = json.Unmarshal(respBytes, &respData)
 
 	if resp.StatusCode >= 400 {
-		c.JSON(resp.StatusCode, gin.H{"detail": extractRestErrorDetail(respBytes, resp.StatusCode), "status": resp.StatusCode})
+		detail := extractRestErrorDetail(respBytes, resp.StatusCode)
+		return respData, resp.StatusCode, errors.New(detail)
+	}
+
+	return respData, resp.StatusCode, nil
+}
+
+// proxyRest 辅助函数：通过 HTTP 将 REST 请求透明代理到 Agent REST 服务
+func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequest) {
+	respData, statusCode, err := s.callRest(c.Request.Context(), req.Method, req.Path, req.Body, req.RawPayloadB64, req.ContentType)
+	duration := time.Since(start).Milliseconds()
+
+	if err != nil {
+		c.JSON(statusCode, gin.H{"detail": err.Error(), "status": statusCode})
 		return
 	}
 
@@ -461,40 +502,10 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 // callRestOnce 以 REST 方式向 agent 发送单个请求（不写出 HTTP 响应），
 // 供 ConcurrencyTest 压测 REST-only 路径或 gRPC 不支持路径的回退使用。
 func (s *Server) callRestOnce(method, path string, body json.RawMessage) error {
-	method = strings.ToUpper(method)
-	if method == "" {
-		method = "POST"
-	}
-	url := agentRestBaseURL() + path
-
-	var reqBodyReader io.Reader
-	if len(body) > 0 {
-		reqBodyReader = bytes.NewReader(body)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	httpReq, err := http.NewRequestWithContext(ctx, method, url, reqBodyReader)
-	if err != nil {
-		return err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if s.cfg.AgentAPIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
-	}
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("agent REST %s %s returned status %d", method, path, resp.StatusCode)
-	}
-	return nil
+	_, _, err := s.callRest(ctx, method, path, body, "", "")
+	return err
 }
 
 // Batch 逐个转发一组请求并汇总成功/失败统计。
@@ -504,7 +515,7 @@ func (s *Server) callRestOnce(method, path string, body json.RawMessage) error {
 //
 // 执行逻辑：
 //  1. 解析请求体为 BatchRequest（包含多个待转发请求）
-//  2. 逐个调用 mapper.Dispatch 转发到上游 agent
+//  2. 逐个转发请求（REST-only 路径走 REST，其它路径走 gRPC 并在 unsupported 时回退 REST）
 //  3. 每个请求独立记录成功/失败与耗时
 //  4. 汇总统计后返回 BatchResponse
 func (s *Server) Batch(c *gin.Context) {
@@ -524,29 +535,51 @@ func (s *Server) Batch(c *gin.Context) {
 	for _, item := range req.Requests {
 		// 将 HTTP 方法转为大写（如 "post" → "POST"），用于结果展示
 		method := strings.ToUpper(item.Method)
+		if method == "" {
+			method = "POST"
+		}
 		// 记录单个请求的开始时间
 		start := time.Now()
-		// 通过 mapper 转发到上游 agent 的对应 gRPC 方法。
-		// 使用 grpcCallTimeout 超时包裹：agent 重启期间请求等待连接恢复而非立即失败。
-		ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
-		data, err := s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), item.Path, item.Body)
-		cancel()
+
+		var (
+			data       any
+			statusCode int
+			callErr    error
+		)
+
+		if restOnlyPath(item.Path) {
+			data, statusCode, callErr = s.callRest(c.Request.Context(), method, item.Path, item.Body, item.RawPayloadB64, item.ContentType)
+		} else {
+			// 通过 mapper 转发到上游 agent 的对应 gRPC 方法。
+			// 使用 grpcCallTimeout 超时包裹：agent 重启期间请求等待连接恢复而非立即失败。
+			ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
+			data, callErr = s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), item.Path, item.Body)
+			cancel()
+
+			if callErr != nil && strings.Contains(callErr.Error(), "unsupported gRPC path") {
+				// gRPC 不支持该路径时回退到 REST 转发
+				data, statusCode, callErr = s.callRest(c.Request.Context(), method, item.Path, item.Body, item.RawPayloadB64, item.ContentType)
+			} else if callErr != nil {
+				statusCode = http.StatusBadRequest
+				if isUnavailable(callErr) {
+					statusCode = http.StatusBadGateway // 上游不可达返回 502
+				}
+			} else {
+				statusCode = http.StatusOK
+			}
+		}
+
 		// 计算单个请求耗时（毫秒）
 		duration := time.Since(start).Milliseconds()
 
-		if err != nil {
-			// 单个请求失败时根据错误类型决定 HTTP 状态码
-			status := http.StatusBadRequest
-			if isUnavailable(err) {
-				status = http.StatusBadGateway // 上游不可达返回 502
-			}
+		if callErr != nil {
 			// 记录失败结果，包含错误信息，继续处理下一个请求
 			results = append(results, models.BatchResultItem{
 				Method:     method,      // HTTP 方法
 				Path:       item.Path,   // 请求路径
-				Status:     status,      // HTTP 状态码
+				Status:     statusCode,  // HTTP 状态码
 				DurationMs: duration,    // 耗时（毫秒）
-				Error:      err.Error(), // 错误信息
+				Error:      callErr.Error(), // 错误信息
 			})
 			continue // 跳过后续成功逻辑，处理下一个请求
 		}
@@ -558,7 +591,7 @@ func (s *Server) Batch(c *gin.Context) {
 			Path:       item.Path,     // 请求路径
 			Status:     http.StatusOK, // 成功状态码 200
 			DurationMs: duration,      // 耗时（毫秒）
-			Data:       data,          // gRPC 响应数据
+			Data:       data,          // 响应数据
 		})
 	}
 

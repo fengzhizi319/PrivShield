@@ -105,7 +105,13 @@ export default function BatchTest({ samples, onSelectSample }: BatchTestProps) {
     try {
       // 构建批量请求体 / Build batch request body
       const res = await batchRequest(
-        targets.map((s) => ({ method: s.method, path: s.path, body: s.body ?? null })),
+        targets.map((s) => ({
+          method: s.method,
+          path: s.path,
+          body: s.body ?? null,
+          raw_payload_b64: s.rawPayloadB64 ?? null,
+          content_type: s.contentType ?? null,
+        })),
       );
       setResult(res);  // 设置结果 / Set result
     } catch (e) {
