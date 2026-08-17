@@ -44,6 +44,17 @@ docker-start-agent.sh & docker-stop-agent.sh Script Tests & Agent-to-LLM Communi
         - 验证跨主机远程 HTTP 请求路由与 Authorization: Bearer 凭据传递
         - 验证跨主机网络超时、网关 502/504 异常捕获与 Layer-1/2 优雅降级机制
         - 验证同机模式 vs 跨主机模式的配置隔离与动态切换
+
+=====================================================================
+.venv 运行测试总览 / Running Tests with .venv:
+    1. 激活虚拟环境后运行全量测试:
+       source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py -v
+    2. 或直接通过 .venv 路径运行:
+       .venv/bin/pytest tests/scripts/test_docker_start_agent.py -v
+    3. 跳过真实容器/GPU等外部依赖集成测试（仅运行单元与模拟测试）:
+       source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py -m "not integration" -v
+    4. 运行指定分层测试类示例:
+       source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks -v
 =====================================================================
 """
 
@@ -124,6 +135,12 @@ def _clean_env() -> dict[str, str]:
         3. 排除 `LS_COLORS`：`dircolors` 生成的颜色配置往往超过数 KB，
            对子进程编译/运行无实际用途。
 
+    .venv 测试验证 / Test Command:
+        # 辅助函数，在执行子进程命令时被调用，可通过执行依赖它的任一测试进行验证：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_syntax_valid -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "test_script_syntax_valid" -v -s
+
     Returns:
         过滤后的安全环境变量字典，可直接传给 `subprocess.run(env=...)`。
     """
@@ -146,6 +163,12 @@ def _clean_env() -> dict[str, str]:
 def bash_bin() -> str:
     """探测系统中的 bash 解释器路径。不可用时自动 skip（如纯 Windows 环境）。
 
+    .venv 测试验证 / Test Command:
+        # Pytest module 级 fixture，探测 bash 路径。可通过运行依赖它的测试进行验证：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_syntax_valid -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "test_script_syntax_valid" -v -s
+
     Returns:
         bash 解释器的绝对路径字符串。
     """
@@ -159,6 +182,12 @@ def bash_bin() -> str:
 def compose_config() -> dict[str, Any]:
     """解析 docker-compose.yml 为字典对象，供拓扑一致性校验。
 
+    .venv 测试验证 / Test Command:
+        # Pytest module 级 fixture，解析 compose 配置。可通过运行依赖它的测试进行验证：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmComposeTopology -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestDockerAgentLlmComposeTopology" -v -s
+
     Returns:
         解析后的 compose YAML 嵌套字典。
     """
@@ -170,6 +199,12 @@ def _run_script_with_fake_docker(
     bash_bin: str, exit_code: int = 0, target: str | None = None, script_path: Path = SCRIPT_PATH
 ) -> tuple[subprocess.CompletedProcess, str]:
     """通过在临时 PATH 中注入 fake docker 脚本来安全模拟执行被测 shell 脚本。
+
+    .venv 测试验证 / Test Command:
+        # 辅助函数，通过 fake docker 模拟执行脚本。可通过运行第 2/3 层测试进行验证：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestAgentScriptFakeExecution" -v -s
 
     Args:
         bash_bin: bash 解释器路径。
@@ -231,6 +266,11 @@ class TestAgentScriptStaticChecks:
         """【静态检查】验证 docker-start-agent.sh 脚本文件物理存在。
 
         测试目的：确保启动脚本未被意外移动或删除，防止部署脚本中断。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_file_exists -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_file_exists -v -s
         """
         assert SCRIPT_PATH.is_file(), f"启动脚本不存在: {SCRIPT_PATH}"
 
@@ -238,6 +278,11 @@ class TestAgentScriptStaticChecks:
         """【静态检查】验证 docker-start-agent.sh 具备用户可执行权限位。
 
         测试目的：避免运维直接执行脚本时发生 Permission denied 错误。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_is_executable -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_is_executable -v -s
         """
         mode = SCRIPT_PATH.stat().st_mode
         assert mode & stat.S_IXUSR, "脚本缺少用户可执行权限位 (chmod +x)"
@@ -246,6 +291,11 @@ class TestAgentScriptStaticChecks:
         """【静态检查】验证脚本首行包含正确的标准 bash Shebang。
 
         测试目的：确保在不同 Linux 发行版与 macOS 环境下通过 PATH 正确找到 bash。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_shebang -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_shebang -v -s
         """
         first_line = SCRIPT_PATH.read_text(encoding="utf-8").splitlines()[0]
         assert first_line == "#!/usr/bin/env bash", f"无效的 Shebang: {first_line}"
@@ -254,6 +304,11 @@ class TestAgentScriptStaticChecks:
         """【静态检查】使用 bash -n 解析脚本语法，确保无语法错误。如果没有-n的参数，就会实际执行
 
         测试目的：在不实际运行容器的情况下，捕获语法拼写、括号不匹配等潜在错误。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_syntax_valid -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_syntax_valid -v -s
         """
         env = _clean_env()
         result = subprocess.run([bash_bin, "-n", str(SCRIPT_PATH)], capture_output=True, text=True, env=env)
@@ -263,6 +318,11 @@ class TestAgentScriptStaticChecks:
         """【静态检查】验证防回归核心指令：set -euo pipefail、docker build、docker run、docker rm。
 
         测试目的：防止关键防御配置或核心构建启动命令被误删，保证执行可靠性。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_key_commands_present -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_key_commands_present -v -s
         """
         content = SCRIPT_PATH.read_text(encoding="utf-8")
         assert "set -euo pipefail" in content, "缺少安全防错选项 set -euo pipefail"
@@ -274,6 +334,11 @@ class TestAgentScriptStaticChecks:
         """【静态检查】验证脚本正确暴露了 REST (8079) 与 gRPC (50051) 端口及默认环境变量。
 
         测试目的：确保容器对外服务端口及 0.0.0.0 监听地址配置符合规范。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_ports_and_env_config -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptStaticChecks::test_script_ports_and_env_config -v -s
         """
         content = SCRIPT_PATH.read_text(encoding="utf-8")
         assert "-p 8079:8079" in content, "缺少 REST 端口映射 8079:8079"
@@ -297,6 +362,11 @@ class TestAgentScriptFakeExecution:
             1. 验证默认目标分支为 core；
             2. 验证构建命令包含 `--target core` 与标签 `privshield:0.1.0`；
             3. 验证终端输出启动成功友好提示。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_runs_default_core -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_runs_default_core -v -s
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
         assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
@@ -308,6 +378,11 @@ class TestAgentScriptFakeExecution:
         """【模拟执行】显式传入 ml 参数时，验证脚本构建并启动 ml 镜像。
 
         测试目的：验证多阶段构建目标切换为 `ml` 且镜像标签为 `privshield:0.1.0-ml`。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_runs_ml_target -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_runs_ml_target -v -s
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, target="ml")
         assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
@@ -318,6 +393,11 @@ class TestAgentScriptFakeExecution:
         """【模拟执行】验证在每次启动新容器前，脚本先执行 docker rm -f 清理同名旧容器。
 
         测试目的：避免因容器名称冲突（Conflict. The container name is already in use）导致启动失败。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_cleans_up_old_container_before_run -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_cleans_up_old_container_before_run -v -s
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
         assert result.returncode == 0
@@ -327,12 +407,23 @@ class TestAgentScriptFakeExecution:
         """【模拟执行】验证当 docker 命令失败（返回非 0）时，set -e 机制使脚本立即非零退出。
 
         测试目的：确保构建或运行异常不会被吞没，防止 CI 或运维获得假成功状态。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_fails_fast_when_docker_build_fails -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_fails_fast_when_docker_build_fails -v -s
         """
         result, _ = _run_script_with_fake_docker(bash_bin, exit_code=1)
         assert result.returncode != 0, "docker 失败时脚本未能正确退出"
 
     def test_script_shows_help(self, bash_bin: str):
-        """【模拟执行】验证传入 --help 或 -h 时正确输出用法帮助信息并以 0 退出。"""
+        """【模拟执行】验证传入 --help 或 -h 时正确输出用法帮助信息并以 0 退出。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_shows_help -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_shows_help -v -s
+        """
         result, _ = _run_script_with_fake_docker(bash_bin, exit_code=0, target="--help")
         assert result.returncode == 0
         assert "用法 / Usage" in result.stdout
@@ -340,7 +431,13 @@ class TestAgentScriptFakeExecution:
         assert "ml" in result.stdout
 
     def test_script_rejects_invalid_target(self, bash_bin: str):
-        """【模拟执行】验证传入未知非法目标（如 invalid_target）时非零退出并提示错误。"""
+        """【模拟执行】验证传入未知非法目标（如 invalid_target）时非零退出并提示错误。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_rejects_invalid_target -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_rejects_invalid_target -v -s
+        """
         result, _ = _run_script_with_fake_docker(bash_bin, exit_code=0, target="invalid_target")
         assert result.returncode != 0
         assert "无效的构建目标" in result.stderr
@@ -358,6 +455,11 @@ class TestAgentStopScript:
         """【静态检查】验证停止脚本文件存在、具备可执行权限且语法正确。
 
         测试目的：确保清理脚本可用无语法瑕疵。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_stop_script_exists_and_valid -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_stop_script_exists_and_valid -v -s
         """
         assert STOP_SCRIPT_PATH.is_file(), f"停止脚本不存在: {STOP_SCRIPT_PATH}"
         assert STOP_SCRIPT_PATH.stat().st_mode & stat.S_IXUSR, "停止脚本缺少可执行权限"
@@ -369,6 +471,11 @@ class TestAgentStopScript:
         """【模拟执行】验证停止脚本执行时正确调用 docker rm -f 移除 Agent 容器。
 
         测试目的：确保停止脚本能可靠清除 Agent 容器并输出停止成功提示。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_stop_script_fake_execution -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_stop_script_fake_execution -v -s
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, script_path=STOP_SCRIPT_PATH)
         assert result.returncode == 0
@@ -379,6 +486,11 @@ class TestAgentStopScript:
         """【跨平台兼容性】验证 Windows 11 原生 PowerShell 脚本结构与指令完整性。
 
         测试目的：确保 Windows 11 用户在 PowerShell 终端下无需 bash 即可直接启动/停止容器。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_windows_powershell_scripts_exist_and_valid -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_windows_powershell_scripts_exist_and_valid -v -s
         """
         ps_start = PROJECT_ROOT / "scripts" / "dev" / "docker-start-agent.ps1"
         ps_stop = PROJECT_ROOT / "scripts" / "dev" / "docker-stop-agent.ps1"
@@ -397,7 +509,13 @@ class TestAgentStopScript:
         assert "docker rm -f PrivShield" in stop_content
 
     def test_cross_platform_os_detection_in_bash_script(self):
-        """【跨平台兼容性】验证 bash 启动脚本内置了 macOS (Darwin) 与 Windows (WSL2/GitBash) 平台检测。"""
+        """【跨平台兼容性】验证 bash 启动脚本内置了 macOS (Darwin) 与 Windows (WSL2/GitBash) 平台检测。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_cross_platform_os_detection_in_bash_script -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestAgentStopScript::test_cross_platform_os_detection_in_bash_script -v -s
+        """
         content = SCRIPT_PATH.read_text(encoding="utf-8")
         assert "Darwin" in content, "脚本缺少 macOS 识别逻辑"
         assert "WSL2" in content or "microsoft" in content, "脚本缺少 WSL2 识别逻辑"
@@ -416,6 +534,11 @@ class TestDockerAgentLlmComposeTopology:
         """【编排拓扑】验证 docker-compose.yml 同时定义了 PrivShield 与 vllm 服务。
 
         测试目的：确保全栈编排包含 Sidecar 核心与独立 LLM 推理服务。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmComposeTopology::test_compose_defines_agent_and_vllm_services -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmComposeTopology::test_compose_defines_agent_and_vllm_services -v -s
         """
         services = compose_config.get("services", {})
         assert "PrivShield" in services, "compose 缺少 PrivShield 服务定义"
@@ -436,6 +559,11 @@ class TestDockerAgentLlmComposeTopology:
                无需关心容器 IP——IP 会随容器重建而变化，而服务名恒定，跨容器访问始终成立；
             4. 网络同时是隔离边界：未加入 llm 网络的容器既解析不到 vllm 也无法访问它，
                故本测试必须同时断言双方都挂载了 llm 网络。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmComposeTopology::test_compose_network_topology_agent_to_vllm -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmComposeTopology::test_compose_network_topology_agent_to_vllm -v -s
         """
         # 取出 compose 文件中的 services 顶层映射（key 为服务名，value 为服务配置字典）
         # Extract the top-level "services" mapping from the compose config (keyed by service name)
@@ -462,43 +590,34 @@ class TestDockerAgentLlmComposeTopology:
         assert "llm" in vllm_networks, "vllm 未加入 llm 网络"
 
     def test_compose_agent_llm_environment_variables(self, compose_config: dict[str, Any]):
-        """
+        """【通信配置】验证 Agent 服务中配置了正确的 LLM 提供方与端点地址，以及 API Key 默认值策略。
+
         虽然本系统使用的是本地部署的 LLM（如 vLLM），但在配置中依然保留并校验了 PRIVACY_LLM_API_KEY（默认值为 "EMPTY"），主要原因有以下几点：
           ──────
           ### 1. 遵循 OpenAI 兼容协议规范与业界惯例
-
-          Agent 的 LLM 请求层（llm_engines.py:883）采用标准 OpenAI 兼容 HTTP 接口规范，在发起请求时统一会带上 Authorization 请求头：
-
+          Agent 的 LLM 请求层（llm_engines.py）采用标准 OpenAI 兼容 HTTP 接口规范，在发起请求时统一会带上 Authorization 请求头：
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
             }
-
           • vLLM、Ollama 等开源推理引擎均遵循 OpenAI API 规范。
           • 当 vLLM 本地未开启 --api-key 鉴权时，社区标准惯例即是传递占位字符串 "EMPTY"。
           ──────
           ### 2. 架构解耦：支持跨主机 GPU 部署与网关鉴权
-
           虽然默认是本地同机部署，但在生产环境中常见的场景包括：
-
           1. 分机/跨主机部署：Agent 部署在 CPU 机器，vLLM 部署在独立的远程 GPU 服务器上，中间通常会配置安全访问密钥。
           2. API 网关防护：在 vLLM 前方架设了反向代理或 API 网关（如 Kong、Nginx、APISIX 等）进行访问控制，需要真实的 API Key。
           3. 无缝切云：方便在特定场景下将 PRIVACY_LLM_API_BASE 指向外部公有云/私有云大模型接口，只需在环境变量中注入 LLM_API_KEY=sk-xxxx 即可，代码和请求逻辑无需任何改动。
           ──────
           ### 3. 测试断言的具体目的
-
-          在 docker-compose.yml:193 中，该环境变量使用了 Compose 参数化语法：
-
+          在 docker-compose.yml 中，该环境变量使用了 Compose 参数化语法：
             PRIVACY_LLM_API_KEY: "${LLM_API_KEY:-EMPTY}"
+          断言的目的，是确保未显式配置 LLM_API_KEY 时，Compose 能够正确回退到安全默认值 "EMPTY"，防止因环境变量缺失或为 None 导致容器内 Agent 向本地 vLLM 发送请求时抛出异常。
 
-          test_docker_start_agent.py:421-453 进行断言的目的，是确保未显式配置 LLM_API_KEY 时，Compose 能够正确回退到安全默认值 "EMPTY"，防止因环境变量缺失或为 None 导致容器内 Agent 向本地 vLLM 发送请求时抛出异常。
-        """
-        """【通信配置】验证 Agent 服务中配置了正确的 LLM 提供方与端点地址。
-
-        测试目的：
-            1. PRIVACY_LLM_PROVIDER 为 vllm；
-            2. PRIVACY_LLM_API_BASE 指向 http://vllm:8000/v1；
-            3. 模型名称与 vllm 服务的 --served-model-name 参数完全一致。
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmComposeTopology::test_compose_agent_llm_environment_variables -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmComposeTopology::test_compose_agent_llm_environment_variables -v -s
         """
         services = compose_config.get("services", {})
         agent_env = services["PrivShield"].get("environment", {})
@@ -540,6 +659,11 @@ class TestDockerAgentLlmCommunicationMock:
         测试目的：
             1. 验证 OpenAILlmClassifier 构造合法的 /v1/chat/completions 请求 payload；
             2. 验证 Agent 成功解析 LLM 返回的 JSON 分类与脱敏重写结果。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmCommunicationMock::test_agent_dynclassification_service_llm_routing_mock -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmCommunicationMock::test_agent_dynclassification_service_llm_routing_mock -v -s
         """
         mock_resp_data = {
             "id": "chatcmpl-test-agent-mock",
@@ -597,6 +721,11 @@ class TestDockerAgentLlmCommunicationMock:
         测试目的：
             当上游规则已经判定为高敏感等级（如 L4），即使 Mock 的 LLM 异常返回 L1，
             Agent 的漏斗必须拒绝该降级决策并标记 needs_human_review=True。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmCommunicationMock::test_agent_safety_floor_prevents_illegal_downgrade_mock -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmCommunicationMock::test_agent_safety_floor_prevents_illegal_downgrade_mock -v -s
         """
         adapter = LlmAdapter()
         mock_classifier = MagicMock()
@@ -630,6 +759,11 @@ class TestDockerAgentLlmCommunicationMock:
         测试目的：
             模拟 URLError（连接拒绝/超时），验证 Agent 的 OpenAILlmClassifier
             返回 None，并让上层服务回退至 Layer-1 规则层或默认安全等级。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmCommunicationMock::test_agent_graceful_degradation_on_llm_network_error_mock -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentLlmCommunicationMock::test_agent_graceful_degradation_on_llm_network_error_mock -v -s
         """
         with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
             classifier = OpenAILlmClassifier(
@@ -647,7 +781,14 @@ class TestDockerAgentLlmCommunicationMock:
 
 
 def _http_get_json(url: str, timeout: float = 10.0) -> dict[str, Any] | None:
-    """向指定 URL 发送 HTTP GET 请求并解析 JSON 响应。"""
+    """向指定 URL 发送 HTTP GET 请求并解析 JSON 响应。
+
+    .venv 测试验证 / Test Command:
+        # 辅助函数，向指定 URL 发送 HTTP GET 请求。由 _wait_vllm_ready 及集成测试调用。可通过运行第 6 层测试验证：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentToLlmIntegration -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestDockerAgentToLlmIntegration" -v -s
+    """
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -657,7 +798,14 @@ def _http_get_json(url: str, timeout: float = 10.0) -> dict[str, Any] | None:
 
 
 def _wait_vllm_ready(timeout_s: int = VLLM_READY_TIMEOUT_S) -> bool:
-    """轮询等待 vLLM 容器的 /v1/models 端点就绪。"""
+    """轮询等待 vLLM 容器的 /v1/models 端点就绪。
+
+    .venv 测试验证 / Test Command:
+        # 辅助函数，轮询等待 vLLM 容器就绪。在 vllm_service fixture 中调用。可通过运行集成测试验证：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentToLlmIntegration -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestDockerAgentToLlmIntegration" -v -s
+    """
     url = f"{VLLM_API_BASE}/models"
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -676,6 +824,12 @@ def vllm_service(
     vllm_image_available: bool,
 ) -> dict[str, Any]:
     """启动（或复用已有）Docker vLLM 推理容器，并等待 OpenAI 兼容 API 就绪。
+
+    .venv 测试验证 / Test Command:
+        # Pytest module 级 fixture，启动/复用 Docker vLLM 容器。可通过运行依赖它的集成测试进行验证：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentToLlmIntegration -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestDockerAgentToLlmIntegration" -v -s
 
     执行逻辑与生命周期设计（Execution Logic & Lifecycle Design）:
         1. 【阶段 1：前置环境准入检查 (Prerequisites Gate)】
@@ -797,6 +951,11 @@ class TestDockerAgentToLlmIntegration:
                  * 运行形态：Agent 在业务机，vLLM 在远程专用 GPU 服务器；
                  * 网络流向：跨主机局域网/公网 IP 路由，通常经过 API 网关或防火墙；
                  * 配置参数：`PRIVACY_LLM_API_BASE=http://<GPU_HOST_IP>:8000/v1`，`PRIVACY_LLM_API_KEY=sk-xxxx`。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentToLlmIntegration::test_agent_service_calls_docker_llm_for_field_classification -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentToLlmIntegration::test_agent_service_calls_docker_llm_for_field_classification -v -s
         """
         # 设置环境指向运行中的 Docker vLLM 服务（宿主机通过 127.0.0.1:8000 端口映射访问容器）
         os.environ["PRIVACY_ENV_PROFILE"] = "vllm"
@@ -836,6 +995,11 @@ class TestDockerAgentToLlmIntegration:
             1. 构造包含个人基本信息（姓名、身份证、电话）与高敏临床文书的记录字典；
             2. Agent 对敏感标识执行掩码与无痕抹平；
             3. 验证身份证与手机号等硬敏感信息在脱敏结果中被完全消除。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentToLlmIntegration::test_agent_record_sanitization_via_docker_llm -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentToLlmIntegration::test_agent_record_sanitization_via_docker_llm -v -s
         """
         os.environ["PRIVACY_ENV_PROFILE"] = "vllm"
         client = OpenAILlmClassifier(api_base=vllm_service["api_base"], model_name=vllm_service["model"])
@@ -862,6 +1026,12 @@ class TestDockerAgentToLlmIntegration:
 
 def _http_post_json(url: str, payload: dict[str, Any], timeout: float = 10.0) -> dict[str, Any] | None:
     """向指定 URL 发送 HTTP POST 请求并解析 JSON 响应。
+
+    .venv 测试验证 / Test Command:
+        # 辅助函数，向指定 URL 发送 HTTP POST 请求。在第 8 层真实容器网络交互测试中调用：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestRealDockerAgentScriptLifecycle" -v -s
 
     Args:
         url: 目标 HTTP 端点 URL。
@@ -912,6 +1082,11 @@ class TestDockerAgentContainerEndpoints:
             2. 【第 8 层物理容器真实 Socket 测试区别】：
                - 真正向物理端口 `http://127.0.0.1:8079` 发起真实 TCP 网络请求的测试位于第 8 层 `TestRealDockerAgentScriptLifecycle`；
                - 第 8 层会真实执行 `docker-start-agent.sh core` 拉起物理容器，并使用 `urllib.request` 经由物理网卡向 `http://127.0.0.1:8079` 发送 Socket 请求。
+
+        .venv 测试验证 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestDockerAgentContainerEndpoints" -v -s
         """
         from fastapi.testclient import TestClient
         from PrivShield.main import app
@@ -932,7 +1107,7 @@ class TestDockerAgentContainerEndpoints:
 
         通信机制与请求目标说明（Dispatch Mechanism & Target URL）:
             - 此处的 `self.client.get("/health")` 是通过 TestClient 在进程内存中直接派发至 `FastAPI app`，
-              请求目标实际为 `http://testserver/health`，不经过物理端口 `http://127.0.0.1:8079`。
+               请求目标实际为 `http://testserver/health`，不经过物理端口 `http://127.0.0.1:8079`。
             - 针对宿主机真实暴露端口 `http://127.0.0.1:8079` 的物理 Socket 探测，请参见第 8 层测试。
 
         执行逻辑与分步流程（Execution Logic & Step-by-Step Flow）:
@@ -945,6 +1120,11 @@ class TestDockerAgentContainerEndpoints:
                 - 发送 HTTP GET 请求到 `/readyz`；
                 - 断言 HTTP 状态码为 200（表示依赖服务如 service.resolver、SQLite 预算库均正常连接）；
                 - 断言 JSON 响应包含 `{"status": "ready"}`（表示 Agent 已具备处理脱敏与分类请求的全部条件，可正式接入外部流量）。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_connection_and_health_probes -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_connection_and_health_probes -v -s
         """
         # ── 步骤 1：验证 /health 存活探针（检验基础进程存活与路由可达性，内存派发至 http://testserver/health）──
         resp_health = self.client.get("/health")
@@ -967,6 +1147,11 @@ class TestDockerAgentContainerEndpoints:
             1. 发送手机号脱敏请求：13812345678 -> 138****5678；
             2. 发送身份证脱敏请求：510101199001011234 -> 510101********1234；
             3. 验证返回状态码 200 且敏感字段被正确掩码。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_mask_single_field_request -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_mask_single_field_request -v -s
         """
         # 手机号脱敏
         resp_phone = self.client.post(
@@ -991,6 +1176,11 @@ class TestDockerAgentContainerEndpoints:
             1. 构造包含姓名、手机号、身份证、住址的字典；
             2. 向 Agent 发送整条记录批量脱敏请求；
             3. 验证所有敏感 PII 字段均被规范掩码打码。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_mask_record_request -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_mask_record_request -v -s
         """
         record_payload = {
             "record": {
@@ -1018,6 +1208,11 @@ class TestDockerAgentContainerEndpoints:
             1. 发送身份证字段（id_card: 510101199001011234）；
             2. Agent 规则引擎与漏斗进行评估；
             3. 验证返回数据敏感等级为 L3、分类为 PERSONAL_BASIC、置信度为 1.0。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_dynclassification_eval_single_field -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_dynclassification_eval_single_field -v -s
         """
         eval_payload = {
             "fieldName": "id_card",
@@ -1042,6 +1237,11 @@ class TestDockerAgentContainerEndpoints:
             1. 构造包含患者基础信息与高敏诊断的整条记录；
             2. 向 Agent 发送整条记录评估请求；
             3. 验证整条记录被正确评估，触发复合规则与高敏病种定级（L4/L5）。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_dynclassification_eval_record_with_composite_rules -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_dynclassification_eval_record_with_composite_rules -v -s
         """
         record_payload = {
             "record": {
@@ -1070,6 +1270,11 @@ class TestDockerAgentContainerEndpoints:
             1. 构造包含 schema 与多行 rows 的表格数据；
             2. 向 Agent 发送表级分类评估请求；
             3. 验证返回表级最高安全级别 (finalLevel) 与每行每列的分类标签。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_dynclassification_eval_table -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentContainerEndpoints::test_agent_dynclassification_eval_table -v -s
         """
         table_payload = {
             "schema": ["name", "mobile", "turnover"],
@@ -1099,6 +1304,12 @@ class TestDockerAgentContainerEndpoints:
 @pytest.fixture(scope="class")
 def live_docker_agent_service(bash_bin: str, docker_available: bool):
     """通过执行真实 scripts/dev/docker-start-agent.sh core 启动容器，并在测试结束后清理。
+
+    .venv 测试验证 / Test Command:
+        # Pytest class 级 fixture，真实运行 docker-start-agent.sh core 拉起容器。测试命令示例：
+        source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle -v -s
+        # 或直接调用：
+        .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestRealDockerAgentScriptLifecycle" -v -s
 
     Yields:
         容器服务的基础 URL (http://127.0.0.1:8079)
@@ -1164,7 +1375,13 @@ class TestRealDockerAgentScriptLifecycle:
     """
 
     def test_real_container_is_running_in_docker_ps(self, live_docker_agent_service: str):
-        """【真实容器状态】验证 PrivShield 容器真实存在于 docker ps 输出中。"""
+        """【真实容器状态】验证 PrivShield 容器真实存在于 docker ps 输出中。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_is_running_in_docker_ps -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_is_running_in_docker_ps -v -s
+        """
         ps = subprocess.run(
             ["docker", "ps", "--filter", f"name={AGENT_CONTAINER_NAME}", "--format", "{{.Names}}"],
             capture_output=True,
@@ -1175,7 +1392,13 @@ class TestRealDockerAgentScriptLifecycle:
         assert AGENT_CONTAINER_NAME in ps.stdout
 
     def test_real_container_health_probes(self, live_docker_agent_service: str):
-        """【真实网络交互】向物理容器发送 GET /health 与 GET /readyz 探针。"""
+        """【真实网络交互】向物理容器发送 GET /health 与 GET /readyz 探针。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_health_probes -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_health_probes -v -s
+        """
         # 1. 验证健康检查
         req_health = urllib.request.Request(f"{live_docker_agent_service}/health", method="GET")
         with urllib.request.urlopen(req_health, timeout=3.0) as resp:
@@ -1191,7 +1414,13 @@ class TestRealDockerAgentScriptLifecycle:
             assert data.get("status") == "ready"
 
     def test_real_container_masking_interactions(self, live_docker_agent_service: str):
-        """【真实网络交互】向物理容器发送单字段与整记录脱敏 HTTP 请求。"""
+        """【真实网络交互】向物理容器发送单字段与整记录脱敏 HTTP 请求。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_masking_interactions -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_masking_interactions -v -s
+        """
         # 1. 单字段手机号脱敏
         payload_phone = {"field_name": "mobile", "value": "13812345678", "context": ""}
         resp_phone = _http_post_json(f"{live_docker_agent_service}/v1/privacy/mask", payload_phone)
@@ -1217,7 +1446,13 @@ class TestRealDockerAgentScriptLifecycle:
         assert result_record.get("name") in ("张*丰", "张**丰", "张*")
 
     def test_real_container_classification_interactions(self, live_docker_agent_service: str):
-        """【真实网络交互】向物理容器发送动态分类分级评估 HTTP 请求。"""
+        """【真实网络交互】向物理容器发送动态分类分级评估 HTTP 请求。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_classification_interactions -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestRealDockerAgentScriptLifecycle::test_real_container_classification_interactions -v -s
+        """
         # 1. 单字段分类评估
         payload_eval = {
             "fieldName": "id_card",
@@ -1262,6 +1497,11 @@ class TestDockerAgentMultiHostDeployment:
             - deploy/docker-compose/.env 中配置了跨主机地址（如 LLM_API_BASE=http://192.168.10.50:8000/v1）
               以及访问凭据（LLM_API_KEY=sk-remote-gpu-host-key-999）。
             - 验证变量替换逻辑能够正确渲染出跨主机配置，而非同机内部 DNS。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_compose_cross_host_variable_substitution_render -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_compose_cross_host_variable_substitution_render -v -s
         """
         compose_content = COMPOSE_FILE.read_text(encoding="utf-8")
 
@@ -1296,6 +1536,11 @@ class TestDockerAgentMultiHostDeployment:
             - 验证 OpenAILlmClassifier 发出的 HTTP POST 请求地址为 http://10.240.0.50:8000/v1/chat/completions；
             - 验证 Header 中携带 Authorization: Bearer sk-remote-cloud-gpu-key-999；
             - 验证能够正确解析远程服务返回的标准 OpenAI JSON 格式。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_remote_request_and_bearer_auth -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_remote_request_and_bearer_auth -v -s
         """
         classifier = OpenAILlmClassifier(
             api_base="http://10.240.0.50:8000/v1",
@@ -1369,6 +1614,11 @@ class TestDockerAgentMultiHostDeployment:
             - 多主机部署中跨机网络可能出现抖动或连接超时；
             - 验证捕获 URLError / TimeoutError 后返回 None 并触发 Layer-1 规则平滑降级；
             - 确保整个 Agent 进程不因跨主机网络异常而崩溃。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_network_timeout_and_graceful_degradation -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_network_timeout_and_graceful_degradation -v -s
         """
         import PrivShield.env_loader as _env_mod
         monkeypatch.setenv("PRIVACY_ENV_PROFILE", "vllm")
@@ -1395,7 +1645,13 @@ class TestDockerAgentMultiHostDeployment:
             assert eval_res.field_result.final_level == "L3"
 
     def test_agent_cross_host_gateway_http_502_504_handling(self):
-        """【网关异常处理】验证跨主机反向代理/网关返回 502/504 时 Agent 优雅处理。"""
+        """【网关异常处理】验证跨主机反向代理/网关返回 502/504 时 Agent 优雅处理。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_gateway_http_502_504_handling -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_gateway_http_502_504_handling -v -s
+        """
         classifier = OpenAILlmClassifier(api_base="http://api-gateway.company.internal:8000/v1")
 
         # 模拟反向代理网关返回 HTTP 504 Gateway Timeout
@@ -1412,7 +1668,13 @@ class TestDockerAgentMultiHostDeployment:
             assert result is None, "HTTP 504 网关超时应返回 None 触发降级"
 
     def test_agent_cross_host_empty_api_key_header_handling(self):
-        """【默认凭据模式】验证当远程 LLM 服务使用默认 EMPTY Key 时发送标准 Bearer EMPTY 鉴权头。"""
+        """【默认凭据模式】验证当远程 LLM 服务使用默认 EMPTY Key 时发送标准 Bearer EMPTY 鉴权头。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_empty_api_key_header_handling -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_empty_api_key_header_handling -v -s
+        """
         classifier = OpenAILlmClassifier(
             api_base="http://192.168.1.100:8000/v1",
             api_key="EMPTY",
@@ -1434,7 +1696,13 @@ class TestDockerAgentMultiHostDeployment:
             assert auth_header == "Bearer EMPTY", f"预期发送 Bearer EMPTY 鉴权头，实际为: {auth_header}"
 
     def test_cross_host_environment_switching_isolation(self, monkeypatch):
-        """【拓扑切换隔离】验证在运行时从同机模式动态切换为跨主机模式时配置完全隔离。"""
+        """【拓扑切换隔离】验证在运行时从同机模式动态切换为跨主机模式时配置完全隔离。
+
+        .venv 测试命令 / Test Command:
+            source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_cross_host_environment_switching_isolation -v -s
+            # 或直接调用：
+            .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_cross_host_environment_switching_isolation -v -s
+        """
         import PrivShield.env_loader as _env_mod
 
         # 1. 模拟同机模式
