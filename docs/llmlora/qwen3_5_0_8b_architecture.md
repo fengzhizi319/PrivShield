@@ -1,22 +1,23 @@
 # Qwen3.5-0.8B 模型架构深度解析与结构图谱
 
-> 本文档针对 `PrivShield` 项目所集成的核心 Layer-3 专精大模型 **`.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`**（基于 Qwen3.5 0.8B CausalLM 架构，微调专用于隐私分类分级与文本无痕抹平），进行全面、深度的底层架构技术解析与算子级剖析。
+> 本文档针对 `PrivShield` 项目所集成的核心 Layer-3 专精大模型 **`.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`**（基于 Qwen3.5 0.8B `Qwen3_5ForConditionalGeneration` 架构，纯文本场景按 `AutoModelForCausalLM` 加载，微调专用于隐私分类分级与文本无痕抹平），进行全面、深度的底层架构技术解析与算子级剖析。
 > 文档涵盖超参数规格、24 层 3:1 混合注意力堆叠、**分词器输入编码与 Embedding 向量化转换全流程**、**GQA 全注意力机制**、**Gated Recurrent SSM 线性注意力**、**SwiGLU 前馈神经网络**、**Partial RoPE 旋转位置编码**、**QK-Norm 稳定性归一化**、**多模态视觉编码塔与跨模态投影**、**工业级 SFT 微调与 LoRA 训练全生命周期深度解析**、**生产级推理引擎、自回归解码控制与安全容灾机制**、**模型仓库目录各文件作用剖析** 以及 **Batch 推理下的五级协同缓存加速机制与端到端计算演练**。
 
 ---
 
 ## 1. 模型全局规格与超参数矩阵
 
-`.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother` 是基于阿里通义千问最新一代 **Qwen3.5** 架构深度定制的 0.8B（约 752M 总参数量）超轻量长上下文专精模型，在 `PrivShield` 中承担 Layer-3 敏感数据分类分级仲裁与脱敏无痕抹平重写（Context Smoothing）双重核心任务。
+`.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother` 是基于阿里通义千问 **Qwen3.5** 架构深度定制的 0.8B（约 **853M** 总参数量，其中文本主干约 752M，视觉塔约 101M）超轻量长上下文专精模型，在 `PrivShield` 中承担 Layer-3 敏感数据分类分级仲裁与脱敏无痕抹平重写（Context Smoothing）双重核心任务。该模型在配置文件中声明为 `Qwen3_5ForConditionalGeneration`（多模态条件生成架构），`PrivShield` 的纯文本分类场景通过 `AutoModelForCausalLM` 接口加载并自动旁路视觉塔。
 
 ### 1.1 核心超参数对照表
 
 | 维度 / 模块 | 参数项 (`config.json`) | 数值 / 配置 | 架构与工程意义 |
 |---|---|---|---|
-| **模型基础** | `architectures` | `Qwen3_5ForConditionalGeneration` | 支持纯文本因果生成及多模态条件生成 |
+| **模型基础** | `architectures` | `Qwen3_5ForConditionalGeneration` | 原生多模态条件生成架构；纯文本分类场景按 `AutoModelForCausalLM` 加载并旁路视觉塔 |
 | | `model_type` | `qwen3_5` (`qwen3_5_text`) | Qwen3.5 文本混合状态空间骨干网 |
+| | `transformers_version` | `4.57.0.dev0` | 基座 Transformers 版本（加载需 `trust_remote_code=True`） |
 | | `dtype` | `bfloat16` (`mamba_ssm_dtype: float32`) | 主干采用 bf16 高吞吐计算，SSM 循环累加采用 float32 防下溢 |
-| | **总参数量** | **~752M** (文本主干约 670M，视觉塔约 82M) | 兼顾极低显存 (<1.6GB) 与高吞吐 (vLLM 300+ QPS) |
+| | **总参数量** | **~853M** (文本主干约 752M，视觉塔约 101M) | 兼顾极低显存 (<1.7GB) 与高吞吐 (vLLM 300+ QPS) |
 | **词表与上下文** | `vocab_size` | **248,320** | 超大词表，内嵌多语言与脱敏控制特殊 Token |
 | | `max_position_embeddings` | **262,144 (256K)** | 原生支持超长文本与长文档表格分类 |
 | | `tie_word_embeddings` | `true` | 输入 Embedding 与输出 LM Head 共享 `[248320, 1024]` 权重 |
@@ -37,8 +38,14 @@
 | | `attn_output_gate` | `true` | 具备 $\text{SiLU}(Z)$ 门控的线性输出调制机制 |
 | **前馈网络 (FFN/MLP)** | `intermediate_size` | **3584** | 扩展比 $\approx 3.5 \times$ ($1024 \to 3584 \to 1024$) |
 | | `hidden_act` | `silu` (SwiGLU 架构) | 门控线性单元 (Gate + Up + Down 三矩阵投影) |
+| | `mlp_only_layers` | `[]` | 无仅使用 FFN 的旁路层 |
 | **归一化层** | `rms_norm_eps` | `1e-06` | 全局 Pre-RMSNorm 及 QK-Norm 稳定性保证 |
+| | `attention_bias` | `false` | Attention 与 FFN 均不使用偏置项 |
+| | `attention_dropout` | `0.0` | 推理/训练默认关闭注意力 Dropout |
+| | `initializer_range` | `0.02` | 权重初始化标准差 |
 | **投机预测 (MTP)** | `mtp_num_hidden_layers` | **1** | MTP 投机加速头，可单步预测多 Token |
+| | `mtp_use_dedicated_embeddings` | `false` | 复用基座 Embedding，不引入独立 MTP Embedding |
+| **训练/推理开关** | `use_cache` | `true` | 默认启用 KV Cache + SSM 状态缓存 |
 | **视觉编码塔 (Vision)** | `vision_config` | 12 层 ViT, 768 维, 3D Patch | 跨模态兼容层（纯文本场景自动旁路） |
 
 ---
@@ -80,8 +87,8 @@ flowchart TD
     subgraph OUTPUT["③ 输出归一化与预测头 (Output & Heads)"]
         L23 --> LN_F["Final RMSNorm (dim: 1024, eps: 1e-6)\nmodel.language_model.norm"]
         LN_F --> LM_HEAD["LM Head (Tied with embed_tokens.weight)\n[B, S, 1024] × [1024, 248320] → [B, S, 248320]"]
-        LM_HEAD --> MTP["MTP 投机预测头 (mtp_num_hidden_layers: 1)"]
         LM_HEAD --> PRED["最终输出: 结构化隐私分类 JSON / 无痕平滑脱敏文本"]
+        LM_HEAD -.-> MTP["MTP 投机预测头 (mtp_num_hidden_layers: 1, 训练/可选推理加速, 非主输出路径)"]
     end
 
     classDef inputStyle fill:#EBF5FB,stroke:#2980B9,stroke-width:2px,color:#1B4F72;
@@ -125,7 +132,7 @@ Qwen3.5-0.8B 的 24 层结构严格按照 **`3 × Linear Attention + 1 × Full A
 
 ### 4.1 输入分词与 Embedding 向量化转换全流程 (Text-to-Vector Pipeline)
 
-在任何深度语言模型中，计算机无法直接理解原始自然语言字符。在进入 24 层 Hybrid 混合主干网络之前，文本必须经过严格的**中和转义**、**模板渲染**、**BPE 子词切分**、**Batch 维度左填充（Left Padding）** 以及 **稠密向量查表（Embedding Lookup）**。
+在任何深度语言模型中，计算机无法直接理解原始自然语言字符。在进入 24 层 Hybrid 混合主干网络之前，文本必须经过严格的**中和转义**、**模板渲染**、**BPE 子词切分**、**Batch 维度填充与掩码（默认 Right Padding）** 以及 **稠密向量查表（Embedding Lookup）**。
 
 #### 4.1.1 文本到向量全流程拓扑图
 
@@ -140,14 +147,14 @@ flowchart TD
     subgraph STAGE2["② Fast BPE 分词与整数编码 (Tokenization)"]
         FORMATTED_STR --> REGEX_SPLIT["Rust 正则表达式预切分 (pretokenize_regex)\n按标点、空格、数字、中文字素分离"]
         REGEX_SPLIT --> BPE_MERGE["BPE 贪心合并算法 (tokenizer.json)\n基于 248,320 大词表逆向索引合并子词"]
-        BPE_MERGE --> TOKEN_IDS["原始 Token ID 序列 (1D Tensor)\n[248043, 8948, 198, ..., 248044, 248043, 77091, ...]"]
+        BPE_MERGE --> TOKEN_IDS["原始 Token ID 序列 (1D Tensor)\n[248045, 846, 198, 98612, ..., 248046, 198, 248045, ...]"]
     end
 
-    subgraph STAGE3["③ Batch 对齐与掩码生成 (Batching & Padding)"]
-        TOKEN_IDS --> BATCH_PAD["Left Padding (左侧补齐对齐最长序列)\n填充特殊 Token: pad_token_id = 248046 (<|endoftext|>)"]
+    subgraph STAGE3["③ Batch 对齐与掩码生成 (Batching & Masking)"]
+        TOKEN_IDS --> BATCH_PAD["Right Padding (默认右侧补齐，与训练侧一致)\n填充特殊 Token: pad_token_id = 248044 (<|endoftext|>)"]
         BATCH_PAD --> INPUT_TENSOR["input_ids: [B, S] (int64)"]
         BATCH_PAD --> ATTN_MASK["attention_mask: [B, S] (1=有效, 0=Pad)\n消除 Pad Token 对后续注意力的干扰"]
-        BATCH_PAD --> POS_IDS["position_ids: [B, S] (消除 Pad 偏移的位置索引)"]
+        BATCH_PAD --> POS_IDS["position_ids: [B, S] (Right Padding 下真实 Token 位置连续递增)"]
     end
 
     subgraph STAGE4["④ Embedding 向量映射与 Tie 共享 (Vector Embedding)"]
@@ -171,8 +178,9 @@ flowchart TD
 #### 4.1.2 用户输入清洗与 ChatML 模板化
 1. **防注入与清洗**：
    在 [`PrivShield/dynclassification/utils.py:wrap_untrusted_text`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/utils.py) 中，输入的脏数据（如包含未闭合引号、控制字符、尝试越狱注入的文本）首先被中和，防止 Prompt 结构遭到破坏。
-2. **ChatML 结构化构建**：
-   通过 [`chat_template.jinja`](file:///home/charles/code/sfwork/PrivShield/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother/chat_template.jinja) 组装标准对话角色消息。模板将 System 角色（固定 177 tokens 隐私分类指南）、User 角色（被分类文本）以及 Assistant 触发词渲染为标准序列：
+2. **ChatML 结构化构建与 `enable_thinking=False` 细节**：
+   通过 [`chat_template.jinja`](file:///home/charles/code/sfwork/PrivShield/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother/chat_template.jinja) 组装标准对话角色消息。Qwen3.5 基座模板默认会在 `add_generation_prompt=True` 时注入 `<think>\n\n</think>` 思考前缀，若直接生成会导致 JSON 输出被思考标记包裹而解析失败。因此 `PrivShield` 在推理与训练渲染时**显式传入 `enable_thinking=False`**，走非思考分支，保证 Assistant 直接输出 JSON。
+   模板将 System 角色（固定 **177 tokens** 隐私分类指南）、User 角色（被分类文本）以及 Assistant 触发词渲染为标准序列（为简洁省略空 think 块，实际渲染含 `<think>\n\n</think>`）：
    ```text
    <|im_start|>system
    你是一个专业的隐私安全Sidecar助手...<|im_end|>
@@ -188,18 +196,23 @@ flowchart TD
    对于任何未在词表中预设的罕见汉字、生僻医疗术语或特殊 Unicode 符号，Tokenizer 不会输出 `<unk>`，而是自动回退到 UTF-8 单字节序列（Byte-level fallback），确保**词表覆盖率达到 100%，零字符丢失**。
 3. **248,320 超大词表贪心合并**：
    采用 Byte-Pair Encoding (BPE) 算法，根据预训练统计的合并频次表（Merges）将高频连续字符对合并为单个 Token ID，使单条中文文本的 Token 压缩率提升至 **1.4 字符 / Token**。
-4. **特殊 Token 映射**：
-   - `<|im_start|>` $\to$ `248043`
-   - `<|im_end|>` $\to$ `248044`（`eos_token_id`）
-   - `<|endoftext|>` $\to$ `248046`（`pad_token_id`）
+4. **特殊 Token 映射**（以实际 `tokenizer.json` / `AutoTokenizer` 为准）：
+   - `<|im_start|>` $\to$ `248045`
+   - `<|im_end|>` $\to$ `248046`（`eos_token_id`）
+   - `<|endoftext|>` $\to$ `248044`（`pad_token_id`）
+   - `<|vision_start|>` $\to$ `248053`
+   - `<|vision_end|>` $\to$ `248054`
+   - `<|image_pad|>` $\to$ `248056`
+   - `<|video_pad|>` $\to$ `248057`
+   - 思考前缀 `<|think|>` / `<|/think|>` 分别对应 `248068` / `248069`（纯文本分类关闭 thinking）
 
-#### 4.1.4 Batch 张量对齐 (Left Padding) 与掩码生成
+#### 4.1.4 Batch 张量对齐 (Right Padding) 与掩码生成
 在批量推理（Batch Inference）时，同一个 Batch 内的请求长度各不相同：
-1. **强制 Left Padding**：
-   由于解码阶段是**自回归向右生成**，所有较短序列必须在**左侧补齐** `pad_token_id (248046)`，使每个样本的真实文本有效 Token 紧靠最右端对齐。
+1. **Padding 策略（训练与单条推理默认 Right Padding）**：
+   训练侧 `DataCollatorForSFT` 与本地 `tokenizer` 默认 `padding_side="right"`，将 `pad_token_id (248044)` 补在序列尾部，同时使用 `attention_mask` 屏蔽填充位置。单条推理（`Qwen3Classifier`）传入单条文本，实际不会发生长度补齐；Batch 高并发场景由 vLLM 的 PagedAttention / Radix Tree 自动管理前缀与 Block 分配，无需业务层手动指定 Left Padding。
 2. **Attention Mask 与 Position IDs 校正**：
    - 生成对应的 `attention_mask`（真实 Token 对应 `1`，填充位置对应 `0`），在后续 GQA 和 SSM 算子中屏蔽填充位置的梯度与注意力得分；
-   - 生成修正后的 `position_ids`，使各样本的真实文本起始位置编码均从 `0` 开始递增，消除左侧 Padding 偏移对 RoPE 相对位置编码的干扰。
+   - 生成对应的 `position_ids`；Right Padding 下真实 Token 位置连续递增，无需额外校正。
 
 #### 4.1.5 Embedding 查表投影与 Tie Embeddings 共享机制
 1. **查表映射数学原理**：
@@ -217,12 +230,12 @@ flowchart TD
 | 阶段 | 数据形态 / 张量规格 | 具体内容 / 矩阵切片 |
 |---|---|---|
 | **原始输入** | 纯文本 String | `"患者张伟确诊冠心病"` (9 个汉字) |
-| **ChatML 包装** | 结构化 String | `<|im_start|>user\n患者张伟确诊冠心病<|im_end|>\n<|im_start|>assistant\n` |
-| **BPE 分词切分** | List[str] (13 个 Token) | `['<|im_start|>', 'user', '\n', '患者', '张', '伟', '确诊', '冠', '心', '病', '<|im_end|>', '\n', '<|im_start|>', 'assistant', '\n']` |
-| **整数编码 `input_ids`**| Tensor: `[1, 13]` (int64) | `[[248043, 8948, 198, 77091, 53210, 10245, 84321, 62112, 11023, 15432, 248044, 198, 248043, 77091, 198]]` |
-| **对齐掩码 `attn_mask`**| Tensor: `[1, 13]` (int64) | `[[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]` |
-| **位置编码 `pos_ids`**  | Tensor: `[1, 13]` (int64) | `[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]]` |
-| **首层隐层向量 $H_0$**  | **Tensor: `[1, 13, 1024]` (bfloat16)** | **13 个 1024 维连续浮点向量（直接输入 Layer 0 进行前向计算）** |
+| **ChatML 包装（用户片段）** | 结构化 String | `<|im_start|>user\n患者张伟确诊冠心病<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n`（System Prompt 另含 177 tokens） |
+| **BPE 分词切分** | List[str] (16 个 Token) | `['<|im_start|>', 'user', '\n', '患者', '张', '伟', '确诊冠心病', '<|im_end|>', '\n', '<|im_start|>', 'assistant', '\n', '<think>', '\n\n', '</think>', '\n\n']` |
+| **整数编码 `input_ids`**| Tensor: `[1, 16]` (int64) | `[[248045, 846, 198, 98612, 138667, 104449, 121588, 248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271]]` |
+| **对齐掩码 `attn_mask`**| Tensor: `[1, 16]` (int64) | `[[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]` |
+| **位置编码 `pos_ids`**  | Tensor: `[1, 16]` (int64) | `[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]]` |
+| **首层隐层向量 $H_0$**  | **Tensor: `[1, 16, 1024]` (bfloat16)** | **16 个 1024 维连续浮点向量（直接输入 Layer 0 进行前向计算）** |
 
 ---
 
@@ -431,10 +444,12 @@ flowchart LR
 - **内积展开**：
   $$\langle \tilde{Q}_m, \tilde{K}_n \rangle = \underbrace{\sum_{i=0}^{31} \text{RoPE}(Q_{m, 2i:2i+1}, K_{n, 2i:2i+1})}_{\text{精确编码相对位置 } |m - n|} + \underbrace{\sum_{j=64}^{255} Q_{m, j} K_{n, j}}_{\text{编码位置无关的绝对语义相关性}}$$
 
-#### 4.5.3 MRoPE (Multimodal RoPE) 三维切分
+#### 4.5.3 MRoPE (Multimodal RoPE) 三维切分与纯文本场景
 `config.json` 中配置了 `mrope_section: [11, 11, 10]`：
-- 32 对旋转频率切分为：时间/文本序列维度 $T$（11 对，22 维）、垂直空间维度 $H$（11 对，22 维）、水平空间维度 $W$（10 对，20 维）；
-- `mrope_interleaved: true`：跨频段交织排布，为多模态表格、图像与文本的联合坐标定位提供统一的 3D 相对位置感知。
+- 32 对旋转频率切分为：时间/文本序列维度 $T$（11 对，22 维）、垂直空间维度 $H$（11 对，22 维）、水平空间维度 $W$（10 对，20 维），合计 64 维（即 $0.25 \times 256$ 的 Partial RoPE 部分）；
+- `mrope_interleaved: true`：跨频段交织排布，为多模态表格、图像与文本的联合坐标定位保留统一的 3D 相对位置感知。
+
+> **纯文本分类说明**：`PrivShield` 当前仅使用纯文本输入，视觉塔被旁路。`mrope_section` 在文本场景下退化为常规 RoPE 频率分组，模型仍只使用前 64 维旋转、后 192 维直通，不会引入 3D 空间位置。
 
 ---
 
@@ -465,16 +480,13 @@ flowchart LR
 
 #### 4.6.2 数学有界性证明
 
-经 RMSNorm 归一化后，每个头的向量 $L_2$ 范数被严格约束为 $\|\tilde{Q}_h\|_2 \approx \sqrt{d_k} = \sqrt{256} = 16$，$\|\tilde{K}_h\|_2 \approx \sqrt{d_k} = 16$。
-由 Cauchy-Schwarz 不等式：
-$$\left| \frac{\tilde{Q}_h \tilde{K}_h^T}{\sqrt{d_k}} \right| \le \frac{\|\tilde{Q}_h\|_2 \|\tilde{K}_h\|_2}{\sqrt{d_k}} = \frac{\sqrt{d_k} \sqrt{d_k}}{\sqrt{d_k}} = \sqrt{d_k} = 16$$
-点积注意力的 Logits 被数学上有界约束在 $[-16, 16]$ 区间内，彻底消除了 Softmax 梯度饱和与 fp16/bf16 溢出问题，保证在 256K 超长文本下注意力分布的平滑与稳定。
+经 RMSNorm 归一化后，每个头向量的均方根（RMS）被重新缩放至约 $1$（即 $\|\tilde{Q}_h\|_2 \approx \sqrt{d_k}$ 仅当元素分布均匀时成立，RMSNorm 的严格保证是 RMS 而非 $L_2$ 范数）。在典型元素分布下，点积注意力 Logits 被有效抑制在较窄区间，实践中可显著降低 Softmax 梯度饱和与 fp16/bf16 溢出的风险，保证在 256K 超长文本下注意力分布的平滑与稳定。
 
 ---
 
 ### 4.7 多模态与视觉编码兼容架构 (Vision Transformer & Merger)
 
-模型定义了完整的 `vision_config` 与视觉权重，使该 0.8B 模型原生具备跨模态拓展能力。
+模型定义了完整的 `vision_config` 与视觉权重，使该 0.8B 模型原生具备跨模态拓展能力。当前 `PrivShield` 生产仅使用纯文本路径，视觉塔在 `Qwen3Classifier` 中被自动旁路。
 
 #### 4.7.1 视觉塔与对齐投影结构图
 
@@ -505,7 +517,7 @@ flowchart TD
 1. **纯文本模式（当前生产默认）**：
    在 `PrivShield/dynclassification/llm_engines.py` 的 `Qwen3Classifier` 中，文本输入直接送入 Language Model 主干，**视觉编码塔被自动旁路（Bypass）**，计算耗时与显存开销为 0。
 2. **多模态就绪（未来演进）**：
-   当传入医疗图像、病理切片或 DICOM 影像时，系统可直接激活视觉塔生成视觉 Tokens，无缝执行多模态隐私判定。
+   当传入医疗图像、病理切片或 DICOM 影像时，系统可激活视觉塔生成视觉 Tokens，无缝执行多模态隐私判定。视觉塔自身参数量约 **101M**（12 层 ViT + Patch 嵌入 + Pos 嵌入 + Merger），合并后的 `model.safetensors` 中共有 153 个 `model.visual.*` 权重张量。
 
 ---
 
@@ -527,7 +539,7 @@ flowchart TD
     subgraph LORA_INJECT["② PEFT LoRA 模块自适应探查与注入"]
         BASE_M["Qwen3.5-0.8B 原版基座模型 (BF16)"] --> PROBE["_find_target_modules() 自动探查 Linear 叶子层\n排除 lm_head / embed_tokens / mtp"]
         PROBE --> LORA_CFG["LoraConfig(r=16, alpha=32, dropout=0.05)\n注入 Full Attn, Linear Attn 及 SwiGLU 关键投影"]
-        BASE_M & LORA_CFG --> PEFT_M["PEFT 包装模型 (可训练参数 ~13.5M, 占比仅 1.8%)"]
+        BASE_M & LORA_CFG --> PEFT_M["PEFT 包装模型 (可训练参数 ~13.5M, 占全模型 853M 的 ~1.58%)"]
     end
 
     subgraph TRAIN_LOOP["③ 训练循环与优化调度 (Trainer Loop)"]
@@ -540,7 +552,7 @@ flowchart TD
     subgraph EXPORT_VLLM["④ 检验自检、权重融合与 vLLM 兼容补丁导出"]
         SFT_TRAINER --> SANITY["_sanity_generate() 验证集生成自检 (JSON 解析校验)"]
         SANITY --> MERGE["merge_and_unload() 融合 LoRA 权重至基座"]
-        MERGE --> PATCH["_patch_for_vllm_compatibility():\n1. 恢复原始嵌套 config.json\n2. 合并 153 个 model.visual.* 权重"]
+        MERGE --> PATCH["_patch_for_vllm_compatibility():\n1. 用原始基座完整 config.json 覆盖（含 vision_config）\n2. 移除可能冲突的 sliding_window / use_sliding_window\n3. 合并 153 个 model.visual.* 权重"]
         PATCH --> AUTO_SYNC["自动复制至 .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"]
     end
 
@@ -560,14 +572,18 @@ flowchart TD
 ### 5.2 数据集规范与 Prompt Labels Masking（前缀损失屏蔽）
 
 1. **统一数据结构规范**：
-   训练数据集每行均为一个 JSON 对象：
+   训练数据集每行均为一个 JSON 对象。`loader.py` 兼容两种形态：
+   - 标准形态：`{"input": "...", "output": "..."}`（`instruction` 已并入 system prompt）
+   - 扩展形态：`{"instruction": "...", "input": "...", "output": "..."}`（两者拼接后作为 user 输入）
    ```json
    {
      "input": "患者张伟（身份证号510104198501011234）确诊冠心病于华西医院心内科住院。",
      "output": "{\"final_level\":\"L4\",\"confidence\":0.98,\"reasoning\":\"文本包含实名、身份证号及冠心病确诊住院病历，属于高敏感个人健康医疗信息。\",\"sanitized_text\":\"该患者（男，中年，已妥善建档）因心血管疾病于近期入住某三甲医院心血管专科。\"}"
    }
    ```
-2. **前缀长度定位法与 `-100` 掩码机制**：
+2. **关闭 thinking 模式与 Prompt 对齐**：
+   `render_prompt_text` 在构建训练/推理 Prompt 时均显式传入 `enable_thinking=False`，使 Chat Template 走非思考分支，避免 `<think>...</think>` 标记污染 Assistant 的 JSON 输出。
+3. **前缀长度定位法与 `-100` 掩码机制**：
    - **目标**：严禁对 System Prompt、分类指南和用户输入计算梯度，防止模型过拟合指令模板。
    - **实现机制**：Qwen3.5 官方 chat template 不包含 `{% generation %}` 标记，`return_assistant_tokens_mask` 恒为 0。`PrivShield` 采用了 **「推理 Prompt 前缀长度定位法」**：
      通过 [`loader.py:render_prompt_text`](file:///home/charles/code/sfwork/PrivShield/llmlora/src/dataset/loader.py#L97) 先将 Prompt 文本编码得到长度 $L_{\text{prompt}}$，再对完整样本（Prompt + Response）统一编码得到长为 $L_{\text{total}}$ 的 Token 序列：
@@ -588,7 +604,7 @@ flowchart TD
 2. **低秩矩阵数学推导与参数量**：
    对于原始冻结权重 $W_0 \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$，LoRA 引入两个低秩可训练矩阵 $A \in \mathbb{R}^{r \times d_{\text{in}}}$（高斯初始化）与 $B \in \mathbb{R}^{d_{\text{out}} \times r}$（全零初始化）：
    $$W = W_0 + \Delta W = W_0 + \frac{\alpha}{r} (B \cdot A)$$
-   配置 $r=16, \alpha=32$（缩放因子 $\frac{\alpha}{r} = 2.0$），可训练参数总量仅为 **~13.5M**（仅占全模型 752M 总参数量的 **1.8%**）。
+   配置 $r=16, \alpha=32$（缩放因子 $\frac{\alpha}{r} = 2.0$），可训练参数总量仅为 **~13.5M**（占全模型 853M 总参数量的 **~1.58%**）。
 3. **训练期显存与 KV Cache 控制**：
    在训练初始化时强制执行 `self.model.config.use_cache = False`，关闭自回归 KV Cache 分配，确保与反向传播图构建及梯度检查点（Gradient Checkpointing）完全兼容。
 
@@ -606,7 +622,7 @@ flowchart TD
    $$\text{Batch}_{\text{effective}} = \text{Batch}_{\text{per\_device}} (16) \times \text{GradAccum} (2) = \mathbf{32}$$
    Trainer 内部采用真均值（True Mean）归一化，消除了长短样本混杂时的 Loss 偏差。
 4. **梯度检查点 (Gradient Checkpointing)**：
-   仅保留各层输入激活，反向传播时重算段内激活值，使激活显存开销降低 5x~10x，确保在 8GB/12GB 显存显卡上稳定训练。
+   仅保留各层输入激活，反向传播时重算段内激活值，使激活显存开销降低 5x~10x，确保在 8GB/12GB 显存显卡上稳定训练。由于混合线性注意力/SSM 层对梯度检查点的支持因 Transformers 版本而异，代码中设置了 `use_reentrant=False` 并在异常时自动关闭，避免训练崩溃。
 
 ---
 
@@ -621,14 +637,20 @@ flowchart TD
 2. **vLLM 兼容性补丁 (`_patch_for_vllm_compatibility`)**：
    - **行业痛点**：vLLM 官方模型注册表中仅注册了多模态架构 `Qwen3_5ForConditionalGeneration`，无法直接加载拍平的纯文本 `Qwen3_5ForCausalLM` 格式；
    - **补丁步骤 1**：使用基座原始包含 `vision_config` 与 `text_config` 嵌套的完整 `config.json` 覆盖导出目录；
-   - **补丁步骤 2**：从基座 safetensors 提取 153 个 `model.visual.*` 权重注入合并后的 safetensors，补齐视觉塔结构；
-   - **补丁步骤 3**：通过 `_copy_to_agent_model_dir` 自动同步复制到主工程 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`。
+   - **补丁步骤 2**：移除 `sliding_window` / `use_sliding_window` 等可能与合并后文本模型冲突的字段；
+   - **补丁步骤 3**：从基座 safetensors 提取 153 个 `model.visual.*` 权重注入合并后的 safetensors，补齐视觉塔结构；
+   - **补丁步骤 4**：通过 `_copy_to_agent_model_dir` 自动同步复制到主工程 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`。
 
 ---
 
 ## 6. 生产级推理引擎、自回归解码控制与安全容灾机制
 
-在 `PrivShield` 端侧 Sidecar 运行时，大模型推理链路（由 [`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py) 及 [`funnel.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/funnel.py) 驱动）结合了高效解码控制与多重生产级容灾兜底。
+在 `PrivShield` 端侧 Sidecar 运行时，大模型推理链路由 `LlmAdapter`（[`llm_adapter.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_adapter.py)）统一封装，实际执行器包括：
+- **本地 PyTorch 后端**：`Qwen3Classifier`（[`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py)），通过 `AutoModelForCausalLM.from_pretrained(..., trust_remote_code=True)` 加载 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`；
+- **远程/本地 vLLM HTTP 后端**：`OpenAILlmClassifier`（[`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py)），调用 OpenAI 兼容 `/v1/chat/completions` 接口，可对接 vLLM、Ollama 或云端 API；
+- **MLX 后端**：Apple Silicon 本地 Metal 推理（可选，延迟加载）。
+
+这些后端共同与 `ClassificationFunnel`（[`funnel.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/funnel.py)）协同，实现高效解码控制与多重生产级容灾兜底。
 
 ### 6.1 Prefill 预填充与 Decode 自回归解码两阶段画像
 
@@ -637,19 +659,19 @@ flowchart TD
 | **Prefill (预填充)** | 一次性并行处理 Prompt 全量 Token (GEMM) | $\text{AI} = \frac{2 \times B \times L_{\text{prompt}} \times D^2}{2 \times D^2} = B \times L \gg \text{AI}^*$ | **Compute-Bound (算力受限)** | **Automatic Prefix Caching (APC)**、FlashAttention、Chunked Prefill |
 | **Decode (自回归解码)** | 逐步预测下一个 Token (GEMV, $L=1$) | $\text{AI} = \frac{2 \times B \times 1 \times D^2}{2 \times D^2} = B \ll \text{AI}^*$ | **Memory-Bound (显存带宽受限)** | **Batching 并发合并**、GQA 4:1 头压缩、SSM $O(1)$ 递推、CUDA Graphs |
 
-> **推理阶段强制 Left Padding 的物理原因**：在自回归生成中，模型必须依据前一时间步最右端的最后一个 Token 预测下一个 Token。若误用 Right Padding，右侧末端为 `<pad>` 填充字符，模型将把 `<pad>` 当作真实上下文，引发逻辑乱码或提前输出 `<eos>`；**Left Padding 将填充字符置于序列左侧，使所有样本的有效上下文统一靠右对齐，生成紧随真实末尾展开**。
+> **Padding 与生成正确性说明**：自回归生成中模型依据序列最右端真实 Token 预测下一个 Token。训练 Collator 使用 Right Padding 并配合 `attention_mask` 屏蔽填充位；本地单条推理传入单条文本，无 Padding 问题；vLLM Batch 场景由 PagedAttention 内部管理 Block 与位置索引，无需业务层手动 Left Padding。传统 Left Padding 适用于原生 PyTorch 静态 Batch，目的是将有效上下文统一靠右对齐。
 
 ---
 
 ### 6.2 自回归解码控制与提前截断机制 (Sampling & Early Exit)
 
-1. **确定性贪心解码**：
-   设定 `temperature=0.0, do_sample=False`，消除随机性采样波动，确保相同文本在隐私定级与脱敏输出上严格具备确定性与可复现性。
+1. **确定性贪心解码与关闭 Thinking 模式**：
+   设定 `temperature=0.0, do_sample=False`，消除随机性采样波动，确保相同文本在隐私定级与脱敏输出上严格具备确定性与可复现性。同时，Qwen3.5 基座模板默认注入 `<think>...</think>` 思考前缀，推理时**显式传入 `enable_thinking=False`**，避免 Assistant 输出被思考标记包裹而导致 JSON 解析失败。
 2. **双重提前截断终止条件 (Early Exit)**：
-   由于目标输出为固定的 4 字段 JSON，模型在输出闭合右花括号 `}` 后即可安全终止：
-   - 终止符 1：`eos_token_id: 248044`（`<|im_end|>`）；
+   由于目标输出为固定的 4 字段 JSON，模型在输出闭合右花括号 `}` 后即可安全终止。本地 PyTorch 后端调用 `model.generate(**inputs, max_new_tokens=512)`，vLLM/OpenAI 后端则通过 `max_tokens=512` + `stop=["}"]` 控制：
+   - 终止符 1：`eos_token_id: 248046`（`<|im_end|>`）；
    - 终止符 2：`stop=["}"]` 配合 `include_stop_str_in_output=True`（保留闭合符号）；
-   - 效益：相比默认的最大生成长度（`max_tokens=384`），提前截断在生成 ~45-55 个 Token 时即刻退出，**节省 40% 以上的无效 Decode 耗时**。
+   - 效益：相比默认的最大生成长度，提前截断在生成 ~45-55 个 Token 时即刻退出，**节省 40% 以上的无效 Decode 耗时**。
 3. **结构化输出约束 (Structured Outputs via xgrammar)**：
    在 vLLM 生产后端中挂载 Pydantic JSON Schema，通过语法引导（Guided Decoding）在每个时间步对 Logits 进行词表级 Mask 约束，强制模型仅能采样符合 JSON 语法的合法 Token，实现 **100% JSON 解析合法率**。
 
@@ -690,12 +712,16 @@ flowchart TD
    [`llm_engines.py:Qwen3Classifier`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py#L121) 采用双重检查锁定，首次被调用时才加载权重，避免非 LLM 场景或启动阶段的显存占用。
 2. **并发信号量控制 (Concurrency Semaphore)**：
    受 `PRIVACY_LLM_MAX_CONCURRENCY=1` 约束，多线程请求通过信号量串行化排队，防止瞬时并发请求并发加载多份前向激活造成显存爆 OOM；等待超过 30s（`PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS`）自动放弃并平滑降级。
-3. **可用显存/内存熔断守护**：
-   在执行推理前探查系统可用物理内存（`PRIVACY_LLM_MIN_FREE_MEM_MB=512`），低于安全水位时主动旁路 LLM，保证主机系统核心服务稳定性。
+3. **可用显存/内存熔断守护**（双层阈值）：
+   - 在 `LlmAdapter` 层先检查系统可用物理内存（`PRIVACY_LLM_MIN_FREE_MEM_MB=512`），低于阈值时跳过 LLM；
+   - 在 `Qwen3Classifier` 本地 CUDA 加载路径中，额外检查 GPU 可用显存（`PRIVACY_VLM_MIN_VRAM_GB=1.6`），不满足时自动回退 CPU/MPS，保证主机系统核心服务稳定性。
 4. **独立线程池与 180s 绝对超时隔离**：
    将推理运算隔离到专用单线程池 `ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-infer")`，超时（默认 180s）即刻抛出 `TimeoutError` 并返回 `None`，绝不永久锁死 gRPC 工作线程。
-5. **Fail-Closed 终极安全门禁**：
-   在 [`service.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/service.py) 服务出口处，对大模型输出的 `sanitized_text` 再次执行规则级高敏词扫描，若发现脱敏不彻底仍残留 L4/L5 敏感数据，强制替换为 `"[L4-L5-DATA-REMOVED]"`，实现绝对的合规兜底。
+5. **Fail-Closed 等级安全地板与脱敏门禁**：
+   - 在 [`funnel.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/funnel.py) 中，LLM 裁定的 `final_level` 绝不允许低于规则/上游已判定的等级（防止模型幻觉或 Prompt 注入导致降级放行），否则被拒绝并标记 `needs_human_review`；
+   - LLM 仲裁结果必须落在冲突标签等级集合内，且不得低于值级证据（`match_target=field_value`）的最高敏感等级；
+   - `Qwen3Classifier` 是纯文本模型，遇到图像/图片输入直接返回 `None` 触发降级，由 `ClassificationFunnel` 按高敏医学影像规则保护；
+   - 在 [`service.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/service.py) 服务出口处，对 `sanitized_text` 再次执行规则级高敏词扫描，若发现脱敏不彻底仍残留 L4/L5 敏感数据，强制替换为 `"[L4-L5-DATA-REMOVED]"`，实现绝对的合规兜底。
 
 ---
 
@@ -709,14 +735,14 @@ flowchart TD
 
 | 文件名称 | 文件大小 | 格式 / 类型 | 核心作用与工程机制 | 关联加载模块 |
 |---|---|---|---|---|
-| **`model.safetensors`** | **~1.70 GB** | SafeTensors 二进制张量 | **模型全量权重参数文件**。<br>1. 包含 24 层 Hybrid 混合主干网络（`model.language_model.*`）的全部线性/全注意力与 SwiGLU 权重；<br>2. 包含输入 Embedding 与输出 LM Head 的绑定权重（`embed_tokens.weight`）；<br>3. 包含微调合并时由 `_patch_for_vllm_compatibility` 注入的 153 个 `model.visual.*` 视觉兼容补丁权重（彻底消除 vLLM 加载 `Qwen3_5ForConditionalGeneration` 时的缺失报错）；<br>4. 原生支持零拷贝（Zero-Copy mmap）内存映射，加载速度提升 5x+ 且杜绝任意代码执行漏洞。 | `AutoModelForCausalLM` / `vLLM` / `MLX` |
-| **`config.json`** | **2.9 KB** | JSON 结构化配置 | **模型架构与超参数拓扑总配置文件**。<br>1. 声明顶层架构 `architectures: ["Qwen3_5ForConditionalGeneration"]`；<br>2. 定义 `text_config`（24 层 3:1 混合排布 `layer_types`、隐层 1024、中间层 3584、GQA 8Q/2KV、25% Partial RoPE、`mamba_ssm_dtype: float32`、`max_position_embeddings: 262144` 等）；<br>3. 包含 `vision_config`（12 层 ViT、768 维隐层、Patch 3D 投影参数）；<br>4. 推理框架（vLLM / Transformers）解析网络骨架与显存预分配的核心依据。 | [`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py) / `vLLM Engine` |
-| **`generation_config.json`** | **116 B** | JSON 结构化配置 | **自回归解码生成控制配置文件**。<br>1. 定义终止 Token `eos_token_id: 248044`（对应 `<|im_end|>`）；<br>2. 显式开启 `use_cache: true`，默认启用 KV Cache 与 SSM 循环状态增量解码；<br>3. 声明适配的 Transformers 框架版本（`5.14.1`）。 | `model.generate()` / `SamplingParams` |
-| **`tokenizer_config.json`** | **1.15 KB** | JSON 结构化配置 | **分词器运行参数与特殊 Token 映射表**。<br>1. 声明底层分词器类 `Qwen2Tokenizer`；<br>2. 设定最大序列长度 `model_max_length: 262144`；<br>3. 配置特殊标记：`pad_token: "<|endoftext|>"`, `eos_token: "<|im_end|>"`, `<|vision_start|>`, `<|vision_end|>`, `<|image_pad|>`, `<|video_pad|>`；<br>4. 默认 `padding_side: "right"`（注：Batch 推理时必须动态覆盖为 `left`）。 | `AutoTokenizer` / [`loader.py`](file:///home/charles/code/sfwork/PrivShield/llmlora/src/dataset/loader.py) |
+| **`model.safetensors`** | **~1.70 GB** | SafeTensors 二进制张量 | **模型全量权重参数文件**。<br>1. 包含 24 层 Hybrid 混合主干网络（`model.language_model.*`）的全部线性/全注意力与 SwiGLU 权重；<br>2. 包含输入 Embedding 与输出 LM Head 的绑定权重（`embed_tokens.weight`），词表 248320 × 1024，约 254M；<br>3. 包含 153 个 `model.visual.*` 视觉兼容权重，视觉塔参数量约 101M；<br>4. 全模型总参数量约 **853M**（文本主干约 752M + 视觉塔约 101M）；<br>5. 原生支持零拷贝（Zero-Copy mmap）内存映射，加载速度提升 5x+ 且杜绝任意代码执行漏洞。 | `AutoModelForCausalLM` / `vLLM` / `MLX` |
+| **`config.json`** | **2.9 KB** | JSON 结构化配置 | **模型架构与超参数拓扑总配置文件**。<br>1. 声明顶层架构 `architectures: ["Qwen3_5ForConditionalGeneration"]`；<br>2. 定义 `text_config`（24 层 3:1 混合排布 `layer_types`、隐层 1024、中间层 3584、GQA 8Q/2KV、25% Partial RoPE、`mamba_ssm_dtype: float32`、`max_position_embeddings: 262144` 等）；<br>3. 包含 `vision_config`（12 层 ViT、768 维隐层、12 头、`num_position_embeddings: 2304`、`patch_size: 16`、`temporal_patch_size: 2`、`spatial_merge_size: 2`、`deepstack_visual_indexes: []`）；<br>4. 推理框架（vLLM / Transformers）解析网络骨架与显存预分配的核心依据。 | [`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py) / `vLLM Engine` |
+| **`generation_config.json`** | **116 B** | JSON 结构化配置 | **自回归解码生成控制配置文件**。<br>1. 声明终止 Token `eos_token_id: 248044`（注意：实际 tokenizer 将 `<|im_end|>` 映射为 `248046`、`<|endoftext|>` 映射为 `248044`，推理时以 tokenizer 实际映射为准）；<br>2. 显式开启 `use_cache: true`，默认启用 KV Cache 与 SSM 循环状态增量解码；<br>3. 声明适配的 Transformers 框架版本（`5.14.1`）。 | `model.generate()` / `SamplingParams` |
+| **`tokenizer_config.json`** | **1.15 KB** | JSON 结构化配置 | **分词器运行参数与特殊 Token 映射表**。<br>1. 声明底层分词器类 `Qwen2Tokenizer`；<br>2. 设定最大序列长度 `model_max_length: 262144`；<br>3. 配置特殊标记：`pad_token: "<|endoftext|>"`, `eos_token: "<|im_end|>"`, `<|vision_start|>`, `<|vision_end|>`, `<|image_pad|>`, `<|video_pad|>`；<br>4. 默认 `padding_side: "right"`（与训练侧 Collator 一致；vLLM Batch 推理由引擎内部管理 Block，无需业务层手动覆盖为 `left`）。 | `AutoTokenizer` / [`loader.py`](file:///home/charles/code/sfwork/PrivShield/llmlora/src/dataset/loader.py) |
 | **`tokenizer.json`** | **~20.0 MB** | JSON 快速分词词表 | **完备的 Fast Tokenizer BPE 状态机与词表编码文件**。<br>1. 内嵌 **248,320** 个 Token 的映射表与合并规则（Merges）；<br>2. 固化正则表达式预分词规则（`pretokenize_regex`）；<br>3. 由 Rust 高性能分词后端驱动，支持微秒级批量文本到 Token ID 的双向编解码。 | `tokenizers` / `AutoTokenizer.from_pretrained` |
 | **`chat_template.jinja`** | **7.75 KB** | Jinja2 模板引擎 | **对话结构模板渲染引擎**。<br>1. 将 Python `messages` 字典列表格式化为模型微调严格对齐的标准 ChatML 提示词（`<|im_start|>role\n...<|im_end|>\n`）；<br>2. 兼容 Function/Tool Calling XML 语法（`<tool_call>`）与思考链标签（`<think>...</think>`）；<br>3. 内置多模态视觉 Token 占位符展开宏（`render_content`）。 | `tokenizer.apply_chat_template` |
-| **`preprocessor_config.json`** | **390 B** | JSON 结构化配置 | **图像多模态输入预处理器配置**。<br>1. 声明处理器类 `Qwen3VLProcessor` / `Qwen2VLImageProcessorFast`；<br>2. 设定图像动态分辨率范围（短边 $\ge 65536$，长边 $\le 16777216$ 动态适配）；<br>3. 设定 16×16 Patch 切块与 2×2 空间重排（`merge_size: 2`）；<br>4. 包含图像归一化参数（`image_mean: [0.5, 0.5, 0.5]`, `image_std: [0.5, 0.5, 0.5]`）。 | `Qwen3VLProcessor` / 视觉预处理管线 |
-| **`video_preprocessor_config.json`**| **385 B** | JSON 结构化配置 | **视频与时序序列预处理器配置**。<br>1. 声明处理器类 `Qwen3VLVideoProcessor`；<br>2. 定义时序 Patch 跨度（`temporal_patch_size: 2`）；<br>3. 针对医学时序影像（如心血管造影、动态超声）提供帧级多维切分与标准化支持。 | `Qwen3VLProcessor` (Video 模式) |
+| **`preprocessor_config.json`** | **390 B** | JSON 结构化配置 | **图像多模态输入预处理器配置**。<br>1. 声明处理器类 `Qwen3VLProcessor` / `Qwen2VLImageProcessorFast`；<br>2. 配置字段 `size.shortest_edge=65536`、`size.longest_edge=16777216`（按 Qwen2VL 处理器语义解析，而非字面像素约束）；<br>3. 设定 16×16 Patch 切块与 2×2 空间重排（`merge_size: 2`）；<br>4. 包含图像归一化参数（`image_mean: [0.5, 0.5, 0.5]`, `image_std: [0.5, 0.5, 0.5]`）。 | `Qwen3VLProcessor` / 视觉预处理管线 |
+| **`video_preprocessor_config.json`**| **385 B** | JSON 结构化配置 | **视频与时序序列预处理器配置**。<br>1. 声明处理器类 `Qwen3VLProcessor` / `Qwen3VLVideoProcessor`；<br>2. 配置字段 `size.shortest_edge=4096`、`size.longest_edge=25165824`；<br>3. 定义时序 Patch 跨度（`temporal_patch_size: 2`）与 2×2 空间重排（`merge_size: 2`）；<br>4. 针对医学时序影像（如心血管造影、动态超声）提供帧级多维切分与标准化支持。 | `Qwen3VLProcessor` (Video 模式) |
 
 ---
 
@@ -753,7 +779,7 @@ flowchart TD
     end
 
     subgraph L4_PAGED["④ Level 4: PagedAttention 显存分页与零碎片调度"]
-        GQA_KV --> PAGE_MGR["Block Table 逻辑块表映射\n(16 Tokens/Block，消除 Left Padding 显存空洞)"]
+        GQA_KV --> PAGE_MGR["Block Table 逻辑块表映射\n(16 Tokens/Block，消除 Padding 显存空洞)"]
     end
 
     subgraph L5_GRAPH["⑤ Level 5: CUDA Graphs 静态解码图捕获"]
@@ -796,7 +822,7 @@ Qwen3.5-0.8B 区别于传统 Transformer 的核心在于其 24 层中包含了 *
 1. **6 层 GQA 全注意力层（标准 KV Cache）**：
    - 采用 4:1 头压缩比（8Q / 2KV），单 Token 显存仅需：
      $$M_{\text{GQA}} = 2 \times 6 \times 2 \times 256 \times 2\text{ bytes} = 12.28\text{ KB/Token}$$
-   - 在 Batch 维度上采用 **Left Padding（左侧填充）**，新生成 Token 连续向右侧追加，KV Cache 张量直接参与批量 GEMM 广播。
+   - 在 Batch 维度上由 vLLM 的 PagedAttention 按 Block 管理，新生成 Token 连续追加，KV Cache 物理页通过 Block Table 参与批量 GEMM 广播。
 2. **18 层 Gated SSM 线性注意力层（恒定循环状态 $S_t$）**：
    - **完全不需要随上下文长度线性膨胀的 KV Cache！**
    - 每层仅维护一个维度为 $[B, 16, 128, 128]$ 的 `float32` 状态矩阵 $S_t$ 和 1D 因果卷积缓冲 $C_t \in \mathbb{R}^{B \times 6144 \times 3}$；
@@ -855,8 +881,8 @@ Qwen3.5-0.8B 区别于传统 Transformer 的核心在于其 24 层中包含了 *
 | 性能与显存维度 | 传统无缓存基线 (Native PyTorch Batch=1 串行) | 朴素 Batching (无 Prefix Cache, Batch=4) | **PrivShield 多级缓存加速 (Batch=4 + APC + Hybrid)** | 性能收益与提升比 |
 |---|---|---|---|---|
 | **Prefill 实际计算 Token 数** | $215+198+205+210 = \mathbf{828\text{ Tokens}}$ | $4 \times 215 = \mathbf{860\text{ Tokens}}$ (含 Padding) | $177 + (38+21+28+33) = \mathbf{297\text{ Tokens}}$ (首轮)<br>后续 Batch 仅需 **$120\text{ Tokens}$** | **Prefill 计算量暴降 85.5%** |
-| **Prefill 浮点运算量 (FLOPs)** | $\approx 2 \times 0.75\text{B} \times 828 \approx \mathbf{1.24\text{ TFLOPs}}$ | $\approx 2 \times 0.75\text{B} \times 860 \approx \mathbf{1.29\text{ TFLOPs}}$ | $\approx 2 \times 0.75\text{B} \times 120 \approx \mathbf{0.18\text{ TFLOPs}}$ | **节省 86% 算力** |
-| **KV Cache 显存开销** | 纯 Transformer 24 层全量分配: $\approx 162.8\text{ MB}$ | 矩形预分配 (无分页): $\approx 185.4\text{ MB}$ (含无用 Pad 块) | **PagedAttention + GQA 4:1** (仅 6 层): **$22.8\text{ MB}$**<br>18 层 SSM 状态: **$75.5\text{ MB}$** | **显存峰值降低 48%** |
+| **Prefill 浮点运算量 (FLOPs)** | $\approx 2 \times 0.85\text{B} \times 828 \approx \mathbf{1.41\text{ TFLOPs}}$ | $\approx 2 \times 0.85\text{B} \times 860 \approx \mathbf{1.46\text{ TFLOPs}}$ | $\approx 2 \times 0.85\text{B} \times 120 \approx \mathbf{0.204\text{ TFLOPs}}$ | **节省 ~86% 算力** |
+| **KV Cache 显存开销** | 传统 MHA 24 层全量估算: $\approx 80\text{ MB}$ | 矩形预分配 (无分页): $\approx 84\text{ MB}$ (含 Padding 空洞) | **PagedAttention + GQA 4:1** (仅 6 层): **$\approx 10.6\text{ MB}$**<br>18 层 SSM 状态: **$75.5\text{ MB}$** | **显存峰值降低约 50%** |
 | **首 Token 延迟 (TTFT)** | $18.5\text{ ms} \times 4 = \mathbf{74.0\text{ ms}}$ (串行总等待) | $\mathbf{21.2\text{ ms}}$ (受最长样本 215 拖累) | **$3.2\text{ ms}$** (公共前缀命中间接直通) | **TTFT 提速 6.6x** |
 | **单 Token 解码耗时 (TPOT)** | $3.5\text{ ms/token}$ (GEMV 单请求) | $2.8\text{ ms/token}$ (GEMM 4 路并发) | **$1.8\text{ ms/token}$** (CUDA Graph + SSM O(1) 递推) | **解码提速 1.94x** |
 | **端到端 4 请求总完成耗时** | $\approx 4 \times (18.5 + 50 \times 3.5) = \mathbf{774.0\text{ ms}}$ | $\approx 21.2 + 50 \times 2.8 = \mathbf{161.2\text{ ms}}$ | $\approx 3.2 + 50 \times 1.8 = \mathbf{93.2\text{ ms}}$ | **端到端提速 8.3x** |
@@ -955,12 +981,14 @@ sequenceDiagram
 ### 10.2 隐私治理实战输出
 
 #### 场景 1：分类分级仲裁输出
+
+> 核心输出字段为 `final_level`、`confidence`、`reasoning`；`sanitized_text` 在请求脱敏时返回。`matched_categories` 为可选扩展字段，可由上层规则/NER 标签聚合补充，不作为模型必出字段。
+
 ```json
 {
   "final_level": "L3",
   "confidence": 0.96,
-  "reasoning": "输入文本包含患者实名、确诊病历（HIV阳性、CD4细胞计数）以及就诊专科，属于高度敏感的个人健康医疗隐私数据，依据《GB/T 43697》和《四川省健康医疗大数据应用指南》判定为 L3 级敏感数据。",
-  "matched_categories": ["HEALTH_RECORD", "DIAGNOSIS_INFO", "PATIENT_IDENTITY"]
+  "reasoning": "输入文本包含患者实名、确诊病历（HIV阳性、CD4细胞计数）以及就诊专科，属于高度敏感的个人健康医疗隐私数据，依据《GB/T 43697》和《四川省健康医疗大数据应用指南》判定为 L3 级敏感数据。"
 }
 ```
 
@@ -973,4 +1001,4 @@ sequenceDiagram
 
 ## 11. 总结
 
-`Qwen3.5-0.8B-Privacy-Classifier-Smoother` 凭借其创新的 **24 层 3:1 Hybrid SSM-Transformer 混合骨干**、**GQA 4:1 头压缩**、**25% Partial RoPE**、**QK-Norm 稳定性约束**、**$3.5\times$ 扩展的 SwiGLU FFN**，配合 **五级协同缓存加速机制（LRU 结果缓存 + Automatic Prefix Caching + 混合双模状态缓存 + PagedAttention + CUDA Graphs）**，实现了极小参数量（0.75B）、极低显存（<1.6GB）与毫秒级超高吞吐（>300~500 QPS）的极致平衡，是 `PrivShield` 端侧数据安全与隐私治理的最佳大模型基座。
+`Qwen3.5-0.8B-Privacy-Classifier-Smoother` 凭借其创新的 **24 层 3:1 Hybrid SSM-Transformer 混合骨干**、**GQA 4:1 头压缩**、**25% Partial RoPE**、**QK-Norm 稳定性约束**、**$3.5\times$ 扩展的 SwiGLU FFN**，配合 **五级协同缓存加速机制（LRU 结果缓存 + Automatic Prefix Caching + 混合双模状态缓存 + PagedAttention + CUDA Graphs）**，实现了极小参数量（文本主干约 752M，含视觉塔约 853M）、极低显存（<1.7GB）与毫秒级超高吞吐（>300~500 QPS）的极致平衡，是 `PrivShield` 端侧数据安全与隐私治理的最佳大模型基座。
