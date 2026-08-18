@@ -1,10 +1,17 @@
 <#
 .SYNOPSIS
-    【Docker 模式】单组分启动 PrivShield (Windows 11 PowerShell 原生支持)
+    【开发模式】单组分启动 PrivShield (Windows 11 PowerShell 原生支持)
     Launch PrivShield in Docker container for Windows 11 / PowerShell
 
 .DESCRIPTION
     构建并启动 PrivShield 容器 (core 或 ml 镜像)，暴露 REST (8079) 与 gRPC (50051) 端口。
+
+    执行步骤总览：
+      1. 检查 Docker 可用性与 Docker Engine 连通性
+      2. 根据 Target 参数（core/ml）构建 Docker 镜像
+      3. 停止并清理旧有的 PrivShield 同名开发容器
+      4. 启动新容器并映射 REST (8079) 与 gRPC (50051) 端口
+      5. 输出容器状态与日志查看指引
 
 .PARAMETER Target
     构建目标: 'core' (默认轻量版) 或 'ml' (含 PyTorch/Transformers/ONNX 完整版)

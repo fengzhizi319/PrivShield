@@ -372,8 +372,10 @@ Address these before any hardened production deployment.
 | Serve docs | `make docs-serve` |
 | Download LLM | `python -m PrivShield.privacy.download_model` |
 | Download NER | `python -m PrivShield.privacy.download_ner_model` |
-| Deploy Prod Compose | `bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring]` |
+| Deploy Prod Compose | `bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--agent-only]` |
 | Stop Prod Compose | `bash ./scripts/prod/stop-docker-compose.sh` |
+| Run Prod Docker Agent | `bash ./scripts/prod/docker-start-agent.sh [core|ml]` |
+| Stop Prod Docker Agent | `bash ./scripts/prod/docker-stop-agent.sh` |
 | Deploy Prod Helm | `bash ./scripts/prod/deploy-helm.sh` |
 | Uninstall Prod Helm | `bash ./scripts/prod/uninstall-helm.sh` |
 | Deploy Prod K8s | `bash ./scripts/prod/deploy-k8s.sh` |

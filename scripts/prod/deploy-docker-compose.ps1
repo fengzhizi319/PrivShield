@@ -6,6 +6,13 @@
 .DESCRIPTION
     一键拉起 PrivShield 生产级全栈容器集群，支持可选 vLLM 大模型推理与 Prometheus 监控。
 
+    执行步骤总览：
+      1. 检查 Docker CLI 与 Docker Engine 连通性
+      2. 准备宿主机持久化数据与日志目录（.data / .logs）
+      3. 根据 -WithLlm / -WithMonitoring 组装 --profile 开关
+      4. 执行 docker compose -f docker-compose.prod.yml up -d 启动生产集群
+      5. 轮询健康探针并输出访问地址与维护命令
+
 .PARAMETER WithLlm
     启用 vLLM 大模型 GPU 推理容器
 

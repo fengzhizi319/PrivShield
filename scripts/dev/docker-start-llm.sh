@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【Docker 模式】启动 Layer-3 LLM 推理服务 (vLLM / GPU 加速 / 支持 Linux/macOS/Windows)
+# 【开发模式】启动 Layer-3 LLM 推理服务 (vLLM / GPU 加速 / 支持 Linux/macOS/Windows)
 # Launch vLLM Layer-3 LLM inference container (Supports Linux / macOS / Windows WSL2)
+#
+# 执行步骤总览：
+#   1. 解析命令行参数（帮助信息）
+#   2. 自动识别操作系统与 CPU 架构平台（Linux / macOS / Windows WSL2）
+#   3. 前置检查：Docker CLI 与 Docker Daemon 连通性
+#   4. 检查本地大模型权重目录存在性并给出下载指引
+#   5. 使用 Docker Compose profile 'llm' 启动 vLLM 独立容器（端口 8000）
 #
 # 用法 / Usage: ./scripts/dev/docker-start-llm.sh
 # ============================================================================
@@ -11,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# ── 1. 帮助信息处理 ──
+# ── 步骤 1：帮助信息处理 ──────────────────────────────────────────────────
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     echo "用法 / Usage: $0"
     echo ""
@@ -26,7 +33,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     exit 0
 fi
 
-# ── 2. 操作系统与平台环境自动识别 ──
+# ── 步骤 2：操作系统与平台环境自动识别 ────────────────────────────────────
 OS_TYPE="$(uname -s 2>/dev/null || echo "Unknown")"
 ARCH_TYPE="$(uname -m 2>/dev/null || echo "Unknown")"
 case "$OS_TYPE" in
@@ -48,7 +55,7 @@ case "$OS_TYPE" in
         ;;
 esac
 
-# ── 3. Docker 环境与 Daemon 连通性前置检查 ──
+# ── 步骤 3：Docker 环境与 Daemon 连通性前置检查 ───────────────────────────
 if ! command -v docker >/dev/null 2>&1; then
     echo "❌ [错误] 未检测到 docker 命令，请先安装 Docker: https://docs.docker.com/get-docker/" >&2
     exit 1
@@ -64,7 +71,7 @@ echo "🤖 [Docker Mode] 正在使用 Docker Compose 启动 vLLM 本地大模型
 echo "   • 平台环境 : $PLATFORM_NAME"
 echo "============================================================================"
 
-# ── 4. 检查本地大模型权重目录 ──
+# ── 步骤 4：检查本地大模型权重目录 ────────────────────────────────────────
 MODEL_DIR="$PROJECT_ROOT/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
 if [ ! -d "$MODEL_DIR" ]; then
     echo "⚠️  [提示] 本地大模型权重目录不存在: $MODEL_DIR"
@@ -75,7 +82,7 @@ fi
 
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
-# ── 5. 使用 compose profile 'llm' 启动 vLLM 服务 ──
+# ── 步骤 5：使用 compose profile 'llm' 启动 vLLM 服务 ──────────────────────
 docker compose --profile llm up -d vllm
 
 echo ""

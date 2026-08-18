@@ -3,11 +3,15 @@
 # 脚本名称: verify_console_environment.sh
 # 脚本说明: 极速开发与 CI 构建环境校验工具 (Console Web, Python Backend & Go Proxy)。
 #
-# 校验内容:
-#   1. Node.js (>= 18), pnpm/npm 工具链与前端 node_modules 依赖完整性
-#   2. Python (>= 3.10) 虚拟环境与 fastapi, pytest 依赖包
-#   3. Go (>= 1.20) 工具链 (针对 console/backend-go)
-#   4. 触发前端 TypeScript 类型检查与基础代码静态检查
+# 执行步骤总览：
+#   1. 检查 Python (>= 3.10) 运行环境与后端核心包（fastapi, httpx, pytest）
+#   2. 检查 Node.js (>= 18) 与 pnpm 前端工具链可用性
+#   3. 检查 Go 编译器 (>= 1.20) 工具链（用于 Go gRPC 代理）
+#   4. 触发 Web 前端 TypeScript 类型构建校验（npx tsc --noEmit）
+#   5. 输出环境校验综合评估与错误项清单
+#
+# 用法 / Usage:
+#   ./scripts/dev/verify_console_environment.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -24,7 +28,7 @@ echo -e "${BLUE}====================================================${NC}"
 
 ERRORS=0
 
-# 1. 检查 Python 运行环境
+# ── 步骤 1：检查 Python 运行环境 ──────────────────────────────────────────
 echo -e "\n${YELLOW}[1/4] 检查 Python 开发环境...${NC}"
 if command -v python3 &> /dev/null; then
     PY_VER=$(python3 -c "import sys; print(sys.version.split()[0])")

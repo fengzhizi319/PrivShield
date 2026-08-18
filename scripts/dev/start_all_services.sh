@@ -4,9 +4,15 @@
 # 脚本说明: 一键后台启动 PrivShield 核心侧边栏服务 (REST + gRPC)
 #           及 Web 测试控制台代理后端服务，并自动检测健康就绪探针。
 #
-# 启动组件:
-#   1. PrivShield REST + gRPC 侧边栏服务 (端口 8079 & 50051)
-#   2. Console Backend 测试控制台 API 代理服务 (端口 8000)
+# 执行步骤总览：
+#   1. 初始化工作目录与端口配置（REST: 8079, gRPC: 50051, Console: 8080）
+#   2. 检查端口占用并执行日志文件轮转备份（保留最近 5 份）
+#   3. 使用 nohup 后台拉起 PrivShield Core REST & gRPC Agent 主进程并记录 PID
+#   4. 后台拉起 Console Backend 测试控制台 API 代理服务并记录 PID
+#   5. 轮询健康探针（GET /health 最长等待 15 秒）直至服务完全就绪
+#
+# 用法 / Usage:
+#   ./scripts/dev/start_all_services.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -18,6 +24,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# ── 步骤 1：定位项目根目录与端口初始化 ────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"

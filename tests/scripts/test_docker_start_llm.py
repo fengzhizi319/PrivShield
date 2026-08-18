@@ -510,34 +510,21 @@ class TestDockerIntegration:
         if not vllm_image_available:
             pytest.skip("本地未缓存 vLLM 镜像，请先 docker pull vllm/vllm-openai:latest")
 
-        # 若同名容器已在运行，跳过以避免干扰用户既有环境；退出的旧容器可安全清理
-        inspect = subprocess.run(
-            ["docker", "inspect", VLLM_CONTAINER_NAME],
+        # 若匹配容器已在运行，跳过以避免干扰用户既有环境；退出的旧容器可安全清理
+        ps_check = subprocess.run(
+            ["docker", "ps", "-a", "--filter", f"name={VLLM_CONTAINER_NAME}", "--format", "{{.Names}}\t{{.State}}"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=10,
         )
-        if inspect.returncode == 0:
-            running = subprocess.run(
-                ["docker", "inspect", "-f", "{{.State.Running}}", VLLM_CONTAINER_NAME],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if running.returncode != 0:
-                pytest.skip("无法读取现有 vLLM 容器状态，跳过以避免干扰用户环境")
-            if running.stdout.strip() == "true":
-                pytest.skip("vLLM 容器已在运行，跳过以避免干扰用户环境")
+        existing_containers = [line.split("\t") for line in ps_check.stdout.strip().splitlines() if line.strip()]
+        for c_name, c_state in existing_containers:
+            if c_state == "running":
+                pytest.skip(f"vLLM 容器 [{c_name}] 已在运行，跳过以避免干扰用户环境")
+            else:
+                subprocess.run(["docker", "rm", "-f", c_name], capture_output=True, timeout=60)
 
-            remove_stale = subprocess.run(
-                ["docker", "rm", "-f", VLLM_CONTAINER_NAME],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if remove_stale.returncode != 0:
-                pytest.skip("无法清理已停止的 vLLM 容器，跳过以避免干扰用户环境")
-
+        actual_container_name = VLLM_CONTAINER_NAME
         try:
             # Step 1: 真实运行被测脚本
             # 1800s 超时：vLLM 首次加载模型较慢，需给足宽限
@@ -552,21 +539,29 @@ class TestDockerIntegration:
             assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
 
             # Step 2: 校验容器创建且处于运行状态
+            ps_after = subprocess.run(
+                ["docker", "ps", "--filter", f"name={VLLM_CONTAINER_NAME}", "--format", "{{.Names}}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            created_names = [n.strip() for n in ps_after.stdout.strip().splitlines() if n.strip()]
+            assert len(created_names) > 0, "容器未创建或未运行"
+            actual_container_name = created_names[0]
+
             # docker inspect -f 输出容器 State.Running 字段（true/false）
             status = subprocess.run(
-                ["docker", "inspect", "-f", "{{.State.Running}}", VLLM_CONTAINER_NAME],
+                ["docker", "inspect", "-f", "{{.State.Running}}", actual_container_name],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            # inspect 返回非 0 说明容器根本不存在（脚本未创建成功）
             assert status.returncode == 0, "容器未创建"
-            # strip 去除换行后必须为 "true"，否则容器未处于运行状态
             assert status.stdout.strip() == "true", "容器未处于运行状态"
         finally:
             # Step 3: 无论断言成败都强制删除容器，避免测试残留污染环境
             subprocess.run(
-                ["docker", "rm", "-f", VLLM_CONTAINER_NAME],
+                ["docker", "rm", "-f", actual_container_name],
                 capture_output=True,
                 text=True,
                 timeout=60,

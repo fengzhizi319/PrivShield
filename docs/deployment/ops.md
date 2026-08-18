@@ -11,6 +11,7 @@
 - [3. Helm 部署](#3-helm-部署)
   - [3.0 Helm 核心概念与选型价值](#30-helm-核心概念与选型价值)
   - [3.1 Chart 目录结构与模板全景解析](#31-chart-目录结构与模板全景解析)
+    - [3.2.1 Helm 模板渲染机制与资源生命周期](#321-helm-模板渲染机制与资源生命周期)
   - [3.2 values.yaml 核心参数全景与设计规范](#32-valuesyaml-核心参数全景与设计规范)
   - [3.3 部署实战全流程](#33-部署实战全流程)
   - [3.4 Chart 静态校验、调试与渲染预览 (Lint & Template Debugging)](#34-chart-静态校验调试与渲染预览-lint--template-debugging)
@@ -274,6 +275,69 @@ deploy/helm/PrivShield/
     ├── llm-deployment.yaml        # 可选独立 vLLM 大模型推理工作负载（当 llm.enabled=true 时启用）
     └── llm-service.yaml           # 可选独立 vLLM 内部服务（ClusterIP: 8000，供 Core 跨 Pod 联动）
 ```
+
+#### 3.2.1 Helm 模板渲染机制与资源生命周期
+
+上述 `templates/` 目录中的文件并非独立的 K8s 资源清单，而是 **Go Template 模板文件**。Helm 在执行 `helm install` / `helm upgrade` 时，模板引擎会将所有模板文件**同时读取、统一渲染**为纯 K8s YAML，然后一次性提交给 K8s API Server。
+
+**完整渲染流程：**
+
+```text
+┌─────────────────────────────── helm install ───────────────────────────────┐
+│ ① 读取配置   加载 values.yaml（默认值）+ 用户覆盖值（-f / --set）           │
+│ ② 加载模板   扫描 templates/ 下所有 .yaml / .tpl / .txt 文件               │
+│ ③ 渲染替换   将 {{ }} 占位符替换为实际值（{{ .Values.xxx }} → 具体值）      │
+│ ④ 条件求值   根据 {{- if }} 条件决定是否输出该资源块                        │
+│ ⑤ 生成纯 YAML  输出一组标准 K8s 资源定义（无模板语法）                      │
+│ ⑥ 提交 API   将渲染后的 YAML 提交给 K8s API Server（等价 kubectl apply）    │
+│ ⑦ K8s 调度   按资源依赖拓扑创建 Namespace → SA → ConfigMap → Deployment 等  │
+│ ⑧ 容器启动   kubelet 根据 env: 字段注入环境变量到容器进程                   │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+> **关键澄清**：Helm 本身不"加载"环境变量——它只负责**模板渲染**（将 values 值填入 YAML 模板）。真正将环境变量注入容器的是 **K8s kubelet**（Pod 创建时根据 `env:` 字段注入）。容器内的 Python 进程通过 `os.getenv("PRIVACY_XXX")` 读取。
+
+**各模板文件的用途与创建条件：**
+
+| 模板文件 | 生成的 K8s 资源 | 创建条件 | 说明 |
+|---|---|---|---|
+| `namespace.yaml` | Namespace | `namespace.create=true` | 自动创建专用命名空间 |
+| `serviceaccount.yaml` | ServiceAccount | `serviceAccount.create=true` | Pod 运行身份，可绑定 RBAC 角色 |
+| `configmap.yaml` | ConfigMap | **始终创建** | 挂载 `privacy-profile.yaml` 隐私参数配置 |
+| `secret.yaml` | Secret | TLS/Auth 启用 **且** 未指定外部 Secret | 存储 TLS 证书/私钥和 API Key |
+| `deployment.yaml` | Deployment | **始终创建** | PrivShield 主服务 Pod（REST + gRPC 双端口） |
+| `service.yaml` | Service | **始终创建** | 集群内部流量入口（ClusterIP） |
+| `hpa.yaml` | HPA | `autoscaling.enabled=true` | 基于 CPU/内存利用率的自动扩缩 |
+| `ingress.yaml` | Ingress | `ingress.enabled=true` | 外部流量路由（需 Ingress Controller） |
+| `networkpolicy.yaml` | NetworkPolicy | `networkPolicy.enabled=true` | 入站流量白名单控制 |
+| `poddisruptionbudget.yaml` | PDB | `podDisruptionBudget.enabled=true` | 自愿中断期间最小可用副本保障 |
+| `servicemonitor.yaml` | ServiceMonitor | `serviceMonitor.enabled=true` | Prometheus Operator 自动抓取 `/metrics` |
+| `llm-deployment.yaml` | Deployment | `llm.enabled=true` | 独立 vLLM GPU 推理服务 |
+| `llm-service.yaml` | Service | `llm.enabled=true` | vLLM 集群内部访问入口 |
+
+**特殊文件（不生成 K8s 资源）：**
+
+| 文件 | 作用 |
+|---|---|
+| `_helpers.tpl` | 定义可复用的模板函数（`PrivShield.fullname`、`PrivShield.labels` 等），被其他模板通过 `{{ include }}` 引用 |
+| `NOTES.txt` | `helm install` 成功后打印到终端的提示信息（服务地址、安全提醒等） |
+
+**资源间引用关系（通过 labels 和名称约定建立）：**
+
+```text
+ServiceAccount  ← deployment.yaml（spec.template.spec.serviceAccountName）
+ConfigMap       ← deployment.yaml（volumes + volumeMounts 挂载配置文件）
+Secret          ← deployment.yaml（volumes 挂载 TLS 证书/私钥）
+Deployment      ← service.yaml（通过 selectorLabels 关联 Pod）
+Deployment      ← hpa.yaml（scaleTargetRef 指向目标 Deployment）
+LLM Deployment  ← llm-service.yaml（通过 selectorLabels + component 标签关联）
+Deployment      → llm-deployment.yaml（通过 K8s 内部 DNS 调用 <fullname>-llm:<port>）
+```
+
+> **预览渲染结果**：可使用 `helm template` 命令在不连接集群的情况下预览渲染后的纯 YAML：
+> ```bash
+> helm template privshield ./deploy/helm/PrivShield --debug
+> ```
 
 ---
 
@@ -1279,10 +1343,14 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 
 | 脚本文件 | 适用场景与功能 | 默认端口 / 网络 | 对应自动化测试套件 |
 |---|---|---|---|
-| `scripts/dev/docker-start-agent.sh` | 单独启动 Agent 容器（支持 `core` / `ml` 镜像） | REST: 8079, gRPC: 50051 | `tests/scripts/test_docker_start_agent.py` |
-| `scripts/dev/docker-stop-agent.sh` | 停止并删除 Agent 单容器 | — | `tests/scripts/test_docker_start_agent.py` |
-| `scripts/dev/docker-start-llm.sh` | 启动独立 vLLM 大模型 GPU 推理容器 | HTTP: 8000 (OpenAI 兼容) | `tests/scripts/test_docker_start_llm.py` |
-| `scripts/dev/docker-stop-llm.sh` | 停止并删除 vLLM 大模型容器 | — | `tests/scripts/test_docker_start_llm.py` |
+| `scripts/prod/docker-start-agent.sh` | 【生产】独立启动加固 Agent 容器（支持 `core` / `ml`，含资源配额与持久化） | REST: 8079, gRPC: 50051 | `tests/scripts/test_prod_scripts.py` |
+| `scripts/prod/docker-stop-agent.sh` | 【生产】停止并清理生产级 Agent 容器 | — | `tests/scripts/test_prod_scripts.py` |
+| `scripts/prod/deploy-docker-compose.sh` | 【生产】一键拉起生产级 Compose 集群（支持 `--agent-only`、`--with-llm`） | Web: 5173, Go: 8081, Agent: 8079 | `tests/scripts/test_prod_scripts.py` |
+| `scripts/prod/stop-docker-compose.sh` | 【生产】优雅停止生产级 Compose 集群 | — | `tests/scripts/test_prod_scripts.py` |
+| `scripts/dev/docker-start-agent.sh` | 【开发】快速启动 Agent 单容器（支持 `core` / `ml` 镜像） | REST: 8079, gRPC: 50051 | `tests/scripts/test_docker_start_agent.py` |
+| `scripts/dev/docker-stop-agent.sh` | 【开发】停止并删除 Agent 单容器 | — | `tests/scripts/test_docker_start_agent.py` |
+| `scripts/dev/docker-start-llm.sh` | 【开发】启动独立 vLLM 大模型 GPU 推理容器 | HTTP: 8000 (OpenAI 兼容) | `tests/scripts/test_docker_start_llm.py` |
+| `scripts/dev/docker-stop-llm.sh` | 【开发】停止并删除 vLLM 大模型容器 | — | `tests/scripts/test_docker_start_llm.py` |
 | `console/scripts/docker-start-all.sh` | 一键拉起 Agent + 双代理后端 + Web UI（可选 `--with-llm`） | Web: 5173, Go: 8081, Py: 8080 | Docker Compose 全栈编排 |
 | `console/scripts/docker-stop.sh` | 一键停止并清理所有全栈 Compose 容器 | — | 执行 `docker compose down` |
 

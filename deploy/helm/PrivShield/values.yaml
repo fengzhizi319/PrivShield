@@ -12,21 +12,21 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # 📋 生产环境 (values-production.yaml) vs 开发环境 (values.yaml) 差异对比：
 # ─────────────────────────────────────────────────────────────────────────────
-# | 配置维度        | 开发环境默认 (values.yaml) | 生产环境 (values-production.yaml) | 生产考量与设计原因                                           |
-# |-----------------|----------------------------|-----------------------------------|--------------------------------------------------------------|
-# | 副本数 (Replicas)| replicaCount: 1            | replicaCount: 2                   | 开发节省资源；生产保证多副本高可用 (HA)，支持平滑滚动更新    |
-# | 日志格式        | logFormat: text            | logFormat: json                   | 开发便于终端阅读；生产 JSON 结构化日志便于 ELK/Loki/云日志解析 |
-# | 传输加密 (TLS)   | tls.enabled: false         | tls.enabled: true                 | 开发明文调试；生产全链路 TLS 强加密，防数据抓包与窃听        |
-# | TLS 证书来源    | 支持内联或空               | 强制 existingSecret               | 生产凭据必须通过 K8s Secret/Vault/KMS 自管，避免明文泄露     |
-# | API Key 认证    | auth.enabled: false        | auth.enabled: true                | 开发免密调试；生产强制鉴权拦截未授权请求 (401 Unauthorized)   |
-# | 认证凭据来源    | 支持内联或空               | 强制 apiKeysSecret                | 生产自管 Secret 注入 API Key 映射表，避免凭据硬编码          |
-# | 速率限制 (Rate)  | rateLimit.enabled: false   | rateLimit.enabled: true           | 开发免限流；生产开启限流防护，防止突发流量冲击与 DoS 攻击    |
-# | 资源上限 (Limit) | CPU 1000m / Memory 1Gi     | CPU 2000m / Memory 2Gi            | 生产翻倍算力与内存上限，支撑高并发隐私计算吞吐               |
-# | 资源预留 (Req)   | CPU 100m / Memory 256Mi    | CPU 500m / Memory 512Mi           | 提高调度预留，保障 Pod 稳定运行，降低 OOMKilled 风险         |
-# | 自动扩缩 (HPA)   | autoscaling.enabled: false | autoscaling.enabled: true         | 开发固定单实例；生产根据 CPU 70%/内存 80% 动态伸缩 (2~10 副本)|
-# | 网络策略        | networkPolicy: false       | networkPolicy: true               | 开发不限访问；生产零信任网络隔离，仅放行 PrivShield 关联 Pod |
-# | 指标采集监控    | serviceMonitor: false      | serviceMonitor: true (HTTPS)      | 生产自动生成 Prometheus CRD，通过 HTTPS 采集脱敏与治理指标   |
-# | 探针模式 (Probes)| httpGet 模式               | 自动切换为 HTTPS exec 模式        | TLS 开启后探针自动使用 curl/wget HTTPS，避免证书握手失败    |
+# | 配置维度          | 开发环境默认 (values.yaml)    | 生产环境 (values-production.yaml) | 生产考量与设计原因                                           |
+# |---------------- -|----------------------------|-----------------------------------|---------------------------------------------------------|
+# | 副本数 (Replicas) | replicaCount: 1            | replicaCount: 2                   | 开发节省资源；生产保证多副本高可用 (HA)，支持平滑滚动更新          |
+# | 日志格式          | logFormat: text            | logFormat: json                    | 开发便于终端阅读；生产 JSON 结构化日志便于 ELK/Loki/云日志解析   |
+# | 传输加密 (TLS)    | tls.enabled: false         | tls.enabled: true                  | 开发明文调试；生产全链路 TLS 强加密，防数据抓包与窃听             |
+# | TLS 证书来源      | 支持内联或空                 | 强制 existingSecret                 | 生产凭据必须通过 K8s Secret/Vault/KMS 自管，避免明文泄露        |
+# | API Key 认证     | auth.enabled: false        | auth.enabled: true                 | 开发免密调试；生产强制鉴权拦截未授权请求 (401 Unauthorized)      |
+# | 认证凭据来源       | 支持内联或空                 | 强制 apiKeysSecret                  | 生产自管 Secret 注入 API Key 映射表，避免凭据硬编码             |
+# | 速率限制 (Rate)   | rateLimit.enabled: false   | rateLimit.enabled: true            | 开发免限流；生产开启限流防护，防止突发流量冲击与 DoS 攻击          |
+# | 资源上限 (Limit)  | CPU 1000m / Memory 1Gi     | CPU 2000m / Memory 2Gi             | 生产翻倍算力与内存上限，支撑高并发隐私计算吞吐                    |
+# | 资源预留 (Req)    | CPU 100m / Memory 256Mi    | CPU 500m / Memory 512Mi            | 提高调度预留，保障 Pod 稳定运行，降低 OOMKilled 风险            |
+# | 自动扩缩 (HPA)    | autoscaling.enabled: false | autoscaling.enabled: true          | 开发固定单实例；生产根据 CPU 70%/内存 80% 动态伸缩 (2~10 副本)   |
+# | 网络策略          | networkPolicy: false       | networkPolicy: true                | 开发不限访问；生产零信任网络隔离，仅放行 PrivShield 关联 Pod      |
+# | 指标采集监控       | serviceMonitor: false      | serviceMonitor: true (HTTPS)       | 生产自动生成 Prometheus CRD，通过 HTTPS 采集脱敏与治理指标      |
+# | 探针模式 (Probes) | httpGet 模式                | 自动切换为 HTTPS exec 模式            | TLS 开启后探针自动使用 curl/wget HTTPS，避免证书握手失败        |
 # ─────────────────────────────────────────────────────────────────────────────
 # =============================================================================
 

@@ -3,11 +3,16 @@
 # 脚本名称: benchmark_performance.sh
 # 脚本说明: PrivShield 隐私原语与分类漏斗性能基准测试与吞吐压测工具。
 #
-# 功能说明:
-#   1. 评估数据脱敏 (Masking) REST 接口的 RPS / 响应时延 (P50, P95, P99)
-#   2. 评估差分隐私 (DP Laplace) 接口处理吞吐
-#   3. 评估三层分类漏斗 (Layer 1~3 Classification) 的压测性能
-#   4. 输出精美的性能对比报告终端看板
+# 执行步骤总览：
+#   1. 解析命令行参数（--host、--port、--requests、--concurrency）
+#   2. 初始化 Python 多线程并发 HTTP 压测执行引擎
+#   3. 对脱敏原语（/api/v1/mask）执行高并发吞吐压测并统计 P50/P95/P99 时延
+#   4. 对差分隐私原语（/api/v1/dp/laplace）执行加噪性能压测
+#   5. 对动态分类分级漏斗（/api/v1/classification/classify）执行端到端压测
+#   6. 汇总结算 RPS (Requests Per Second) 与延迟百分位数分布
+#
+# 用法 / Usage:
+#   ./scripts/dev/benchmark_performance.sh [选项]
 # ==============================================================================
 
 set -euo pipefail
@@ -19,11 +24,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# ── 步骤 1：定位默认参数与并发配置 ────────────────────────────────────────
 REST_HOST="${PRIVACY_REST_HOST:-127.0.0.1}"
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
 NUM_REQUESTS=200
 CONCURRENCY=10
 
+# ── 步骤 2：帮助说明与命令行解析 ──────────────────────────────────────────
 usage() {
     cat <<EOF
 使用说明: $(basename "$0") [选项]

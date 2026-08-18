@@ -1,10 +1,16 @@
 <#
 .SYNOPSIS
-    【Docker 模式】启动 Layer-3 LLM 推理服务 (Windows 11 PowerShell 原生支持)
+    【开发模式】启动 Layer-3 LLM 推理服务 (Windows 11 PowerShell 原生支持)
     Launch vLLM Layer-3 LLM inference container for Windows 11 / PowerShell
 
 .DESCRIPTION
     使用 Docker Compose 在独立容器中拉起 vLLM GPU 推理服务（服务名: vllm，端口: 8000）。
+
+    执行步骤总览：
+      1. 检查 Docker 可用性与 Docker Engine 连通性
+      2. 检查本地大模型权重目录存在性并输出下载指引
+      3. 使用 Docker Compose profile 'llm' 启动 vLLM 独立容器
+      4. 输出容器状态与 OpenAI 兼容接口访问地址
 
 .EXAMPLE
     .\scripts\dev\docker-start-llm.ps1

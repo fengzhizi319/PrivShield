@@ -1,7 +1,13 @@
 <#
 .SYNOPSIS
-    【Docker 模式】停止并清理 vLLM Layer-3 LLM 推理容器 (Windows 11 PowerShell 原生支持)
+    【开发模式】停止并清理 vLLM Layer-3 LLM 推理容器 (Windows 11 PowerShell 原生支持)
     Stop and remove vLLM Layer-3 LLM inference container for Windows 11 / PowerShell
+
+.DESCRIPTION
+    执行步骤总览：
+      1. 切换到 Docker Compose 编排目录
+      2. 停止并强制清理 PrivShield-vllm 容器
+      3. 输出停止与清理结果
 
 .EXAMPLE
     .\scripts\dev\docker-stop-llm.ps1

@@ -3,13 +3,16 @@
 # 脚本名称: health_check.sh
 # 脚本说明: PrivShield 侧边栏服务健康状态诊断与 GPU 运行环境巡检工具。
 #
-# 巡检内容:
-#   1. 系统与 Python 环境 (Python 版本、CPU/内存)
-#   2. GPU / CUDA / PyTorch / TensorRT 驱动及硬件可用性检查
-#   3. REST API 端口 (默认 8079) 及 HTTP /health 端点可用性探针
-#   4. gRPC 服务端口 (默认 50051) 连通性探针
-#   5. Prometheus /metrics 监控端点响应检查
-#   6. 本地 SQLite 隐私预算数据库文件状态巡检
+# 执行步骤总览：
+#   1. 解析命令行参数（--rest-host、--rest-port、--grpc-host、--grpc-port）
+#   2. 检查系统 Python 3 基础运行环境与版本
+#   3. 探测 NVIDIA GPU / CUDA / PyTorch / TensorRT 驱动及深度学习框架可用性
+#   4. 探测 REST API 端口连通性及 HTTP /health 端点报文响应
+#   5. 探测 gRPC 服务端口 TCP 连通性（nc 或 /dev/tcp）
+#   6. 巡检本地 SQLite 隐私预算数据库持久化文件状态
+#
+# 用法 / Usage:
+#   ./scripts/dev/health_check.sh [选项]
 # ==============================================================================
 
 set -euo pipefail
@@ -21,6 +24,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# ── 步骤 1：定位默认参数与环境变量 ────────────────────────────────────────
 REST_HOST="${PRIVACY_REST_HOST:-127.0.0.1}"
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
 GRPC_HOST="${PRIVACY_GRPC_HOST:-127.0.0.1}"
@@ -29,6 +33,7 @@ GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
 export no_proxy="127.0.0.1,localhost,${REST_HOST},${no_proxy:-}"
 export NO_PROXY="127.0.0.1,localhost,${REST_HOST},${NO_PROXY:-}"
 
+# ── 步骤 2：帮助说明与命令行解析 ──────────────────────────────────────────
 usage() {
     cat <<EOF
 使用说明: $(basename "$0") [选项]

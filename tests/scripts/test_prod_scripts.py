@@ -54,6 +54,8 @@ class TestProdScriptsStaticChecks:
         expected_scripts = [
             "deploy-docker-compose.sh",
             "stop-docker-compose.sh",
+            "docker-start-agent.sh",
+            "docker-stop-agent.sh",
             "deploy-helm.sh",
             "uninstall-helm.sh",
             "deploy-k8s.sh",
@@ -72,6 +74,8 @@ class TestProdScriptsStaticChecks:
         ps_scripts = [
             "deploy-docker-compose.ps1",
             "stop-docker-compose.ps1",
+            "docker-start-agent.ps1",
+            "docker-stop-agent.ps1",
         ]
         for script_name in ps_scripts:
             script_path = PROD_SCRIPTS_DIR / script_name
@@ -86,6 +90,7 @@ class TestProdScriptsHelpAndExecution:
         [
             "deploy-docker-compose.sh",
             "stop-docker-compose.sh",
+            "docker-start-agent.sh",
             "deploy-helm.sh",
             "uninstall-helm.sh",
             "deploy-k8s.sh",

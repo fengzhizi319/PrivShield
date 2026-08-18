@@ -3,10 +3,15 @@
 # 脚本名称: clean_privacy_budget_db.sh
 # 脚本说明: 差分隐私 (Differential Privacy) 预算数据库巡检、清理与重置运维工具。
 #
-# 核心功能:
-#   1. 打印本地 SQLite 隐私预算数据库中各 Namespace 消耗的 Epsilon (ε) 与 Delta (δ)
-#   2. 支持清空或重置特定 Namespace 的已用预算
-#   3. 支持完全重置并压缩 (VACUUM) 数据库文件
+# 执行步骤总览：
+#   1. 解析命令行参数（--db、--namespace、--info-only、--reset-all）
+#   2. 检查 SQLite 隐私预算数据库文件是否存在
+#   3. 查询并格式化打印各 Namespace 的 ε/δ 已消耗配额明细
+#   4. 若指定 --info-only 则查询完毕后退出
+#   5. 根据参数执行单 Namespace 清空、或全局重置并执行 SQLite VACUUM 空间回收
+#
+# 用法 / Usage:
+#   ./scripts/dev/clean_privacy_budget_db.sh [选项]
 # ==============================================================================
 
 set -euo pipefail
@@ -18,11 +23,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# ── 步骤 1：定位默认数据库路径与运行模式 ──────────────────────────────────
 BUDGET_DB="${PRIVACY_BUDGET_DB:-privacy_budget.db}"
 TARGET_NAMESPACE=""
 INFO_ONLY=false
 RESET_ALL=false
 
+# ── 步骤 2：帮助说明与命令行解析 ──────────────────────────────────────────
 usage() {
     cat <<EOF
 使用说明: $(basename "$0") [选项]

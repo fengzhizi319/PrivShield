@@ -2,6 +2,14 @@
 # ==============================================================================
 # 脚本名称: stop_all_services.sh
 # 脚本说明: 优雅关闭 PrivShield 后台拉起的所有服务实例。
+#
+# 执行步骤总览：
+#   1. 读取 .logs/agent.pid 并发送 SIGTERM 终止 Agent 主进程
+#   2. 读取 .logs/console.pid 并发送 SIGTERM 终止 Console 代理后端进程
+#   3. 通过 pkill 按进程全名进行幂等兜底清理，确保无残留后台孤儿进程
+#
+# 用法 / Usage:
+#   ./scripts/dev/stop_all_services.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -23,7 +31,7 @@ echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} 正在优雅停止 PrivShield 侧边栏服务...${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
-# 1. 停止 Agent 侧边栏
+# ── 步骤 1：停止 Agent 侧边栏主进程 ───────────────────────────────────────
 if [ -f "${LOG_DIR}/agent.pid" ]; then
     PID=$(cat "${LOG_DIR}/agent.pid")
     echo -e "正在终止 Agent 进程 (PID: ${PID})..."
@@ -31,7 +39,7 @@ if [ -f "${LOG_DIR}/agent.pid" ]; then
     rm -f "${LOG_DIR}/agent.pid"
 fi
 
-# 2. 停止 Console 控制台
+# ── 步骤 2：停止 Console 代理控制台进程 ───────────────────────────────────
 if [ -f "${LOG_DIR}/console.pid" ]; then
     PID=$(cat "${LOG_DIR}/console.pid")
     echo -e "正在终止 Console 控制台进程 (PID: ${PID})..."
@@ -39,7 +47,7 @@ if [ -f "${LOG_DIR}/console.pid" ]; then
     rm -f "${LOG_DIR}/console.pid"
 fi
 
-# 3. 按进程全名兜底清理 (确保无残留孤儿进程)
+# ── 步骤 3：按进程全名兜底清理 (确保无残留孤儿进程) ───────────────────────
 pkill -f "PrivShield.server" 2>/dev/null || true
 pkill -f "PrivShield.main" 2>/dev/null || true
 pkill -f "uvicorn app.main:app" 2>/dev/null || true

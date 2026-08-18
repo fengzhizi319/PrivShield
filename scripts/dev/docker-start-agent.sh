@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【Docker 模式】单组分启动 PrivShield (支持 Linux / macOS / Windows WSL2)
+# 【开发模式】单组分启动 PrivShield (支持 Linux / macOS / Windows WSL2)
 # Launch PrivShield in Docker container (Supports Linux / macOS / Windows WSL2)
+#
+# 执行步骤总览：
+#   1. 解析构建目标参数（core 或 ml 镜像）
+#   2. 自动识别操作系统与 CPU 架构平台（Linux / macOS / Windows WSL2）
+#   3. 前置检查：Docker CLI 与 Docker Daemon 连通性
+#   4. 使用 Dockerfile 构建指定目标（core/ml）的镜像
+#   5. 停止并清理旧有的开发同名容器（避免端口与名称冲突）
+#   6. 启动开发容器并映射 REST (8079) 与 gRPC (50051) 端口
 #
 # 用法 / Usage: ./scripts/dev/docker-start-agent.sh [core|ml]
 # ============================================================================
@@ -12,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TARGET="${1:-core}"
 
-# ── 1. 帮助信息与参数合法性白名单校验 ──
+# ── 步骤 1：帮助信息与参数合法性白名单校验 ────────────────────────────────
 if [[ "$TARGET" == "-h" || "$TARGET" == "--help" ]]; then
     echo "用法 / Usage: $0 [core|ml]"
     echo ""
@@ -33,7 +41,7 @@ if [[ "$TARGET" != "core" && "$TARGET" != "ml" ]]; then
     exit 1
 fi
 
-# ── 2. 操作系统与平台环境自动识别 ──
+# ── 步骤 2：操作系统与平台环境自动识别 ────────────────────────────────────
 OS_TYPE="$(uname -s 2>/dev/null || echo "Unknown")"
 ARCH_TYPE="$(uname -m 2>/dev/null || echo "Unknown")"
 case "$OS_TYPE" in
@@ -55,7 +63,7 @@ case "$OS_TYPE" in
         ;;
 esac
 
-# ── 3. Docker 环境与 Daemon 连通性前置检查 ──
+# ── 步骤 3：Docker 环境与 Daemon 连通性前置检查 ───────────────────────────
 if ! command -v docker >/dev/null 2>&1; then
     echo "❌ [错误] 未检测到 docker 命令，请先安装 Docker: https://docs.docker.com/get-docker/" >&2
     exit 1
@@ -74,7 +82,7 @@ echo "==========================================================================
 
 cd "$PROJECT_ROOT"
 
-# ── 4. 镜像构建 ──
+# ── 步骤 4：镜像构建 ──────────────────────────────────────────────────────
 if [[ "$TARGET" == "ml" ]]; then
     echo "📦 构建含有 PyTorch / Transformers / ONNX 的 ML 镜像..."
     docker build --target ml -t privshield:0.1.0-ml .
@@ -85,13 +93,13 @@ else
     IMAGE_NAME="privshield:0.1.0"
 fi
 
-# ── 5. 停止并清理旧容器（防止名称冲突）──
+# ── 步骤 5：停止并清理旧容器（防止名称冲突）──────────────────────────────
 docker rm -f PrivShield 2>/dev/null || true
 
 HOST_REST_PORT="${PRIVACY_REST_PORT:-8079}"
 HOST_GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
 
-# ── 6. 启动物理容器 ──
+# ── 步骤 6：启动物理容器 ──────────────────────────────────────────────────
 docker run -d \
   --name PrivShield \
   -p "${HOST_REST_PORT}:8079" \

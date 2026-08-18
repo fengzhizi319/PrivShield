@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
 """:"
-# Python 虚拟 Mock 侧边栏服务 (使用 Python 内置 http.server，零额外依赖)
-# 允许在无 GPU 硬件或无需拉起重型 ML 模型的无环境开发/CI 容器中，为 Console 模拟完全兼容的 REST 接口。
+# ==============================================================================
+# 脚本名称: mock_agent_server.py
+# 脚本说明: Python 虚拟 Mock 侧边栏服务 (使用 Python 内置 http.server，零额外依赖)。
+#           允许在无 GPU 硬件或无需拉起重型 ML 模型的无环境开发/CI 容器中，
+#           为 Console 模拟完全兼容的 REST 接口与探针。
+#
+# 执行步骤总览：
+#   1. 解析命令行监听端口参数（默认 8079）
+#   2. 继承 BaseHTTPRequestHandler 实现 CORS 预检、探针与各隐私原语 Mock 逻辑
+#   3. 拦截 GET /health、/livez、/readyz、/metrics 等系统探针并返回健康 JSON
+#   4. 拦截 POST /v1/privacy/mask、/v1/dynclassification/classify 等核心业务请求
+#   5. 启动标准 HTTP Server 并持续监听服务请求直至捕获终止信号
+#
+# 用法 / Usage:
+#   python3 ./scripts/dev/mock_agent_server.py [端口号]
+# ==============================================================================
 exec python3 "$0" "$@"
 """
 

@@ -3,13 +3,17 @@
 # 【生产模式】PrivShield 生产级全链路健康巡检与诊断工具
 # Production-Grade Health Probe, Metrics, TLS Certificate & DB Inspection Tool
 #
-# 巡检项目:
-#   1. REST API 探针: /health, /livez, /readyz, /readyz/llm
-#   2. gRPC 服务连通性与健康状态
-#   3. Prometheus /metrics 监控指标端点响应与吞吐检查
-#   4. TLS / HTTPS 证书有效性与过期剩余天数告警
-#   5. 隐私预算持久化数据库 (SQLite) 文件完整性与可用性
-#   6. 容器运行时资源占用 (CPU / 内存 / 句柄数)
+# 执行步骤总览：
+#   1. 解析命令行参数（REST/gRPC 主机与端口、TLS 开关、API Key、DB 路径）
+#   2. 探测 REST API 标准探针（/health、/livez、/readyz、/readyz/llm）
+#   3. 检查 Prometheus /metrics 可观测性指标端点有效性
+#   4. 探测 gRPC 端口 TCP 连通性（使用 nc / bash socket）
+#   5. 校验 TLS/HTTPS 证书有效期与剩余过期天数（若提供证书路径）
+#   6. 检查 SQLite 隐私预算持久化数据库文件完整性与只读读写测试
+#   7. 输出巡检综合评估结论与退出码（0: 全部通过, 1: 存在致命异常）
+#
+# 用法 / Usage:
+#   ./scripts/prod/prod_health_check.sh [选项]
 # ==============================================================================
 
 set -euo pipefail
@@ -22,6 +26,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+# ── 步骤 1：定位默认参数与环境变量 ────────────────────────────────────────
 REST_HOST="${PRIVACY_REST_HOST:-127.0.0.1}"
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
 GRPC_HOST="${PRIVACY_GRPC_HOST:-127.0.0.1}"
@@ -37,6 +42,7 @@ PASSED_CHECKS=0
 WARNINGS=0
 ERRORS=0
 
+# ── 步骤 2：帮助信息与命令行解析 ──────────────────────────────────────────
 usage() {
     cat <<EOF
 使用说明: $(basename "$0") [选项]
@@ -116,14 +122,14 @@ check_http_endpoint() {
     fi
 }
 
-# 1. REST API 探针巡检
+# ── 步骤 3：REST API 探针巡检 ─────────────────────────────────────────────
 echo -e "${BOLD}[1/5] REST API 与探针检查${NC}"
 check_http_endpoint "基础健康探针" "/health" "200"
 check_http_endpoint "K8s 存活探针" "/livez" "200"
 check_http_endpoint "K8s 就绪探针" "/readyz" "200"
 check_http_endpoint "LLM 引擎就绪探针" "/readyz/llm" "200"
 
-# 2. Prometheus Metrics 巡检
+# ── 步骤 4：Prometheus Metrics 巡检 ────────────────────────────────────────
 echo ""
 echo -e "${BOLD}[2/5] 生产可观测性 Prometheus Metrics 指标检查${NC}"
 TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
@@ -136,7 +142,7 @@ else
     WARNINGS=$((WARNINGS + 1))
 fi
 
-# 3. gRPC 端口网络连通性
+# ── 步骤 5：gRPC 端口网络连通性 ───────────────────────────────────────────
 echo ""
 echo -e "${BOLD}[3/5] gRPC 核心服务连通性检查${NC}"
 TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
@@ -155,7 +161,7 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
-# 4. TLS 证书有效性检查
+# ── 步骤 6：TLS 证书有效性检查 ─────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}[4/5] TLS 证书安全期巡检${NC}"
 if [[ -n "$CERT_FILE" && -f "$CERT_FILE" ]]; then
@@ -183,7 +189,7 @@ else
     echo -e "  [INFO] 未指定 TLS 证书文件或未开启 TLS 证书检查"
 fi
 
-# 5. 隐私预算持久化存储检查
+# ── 步骤 7：隐私预算持久化存储检查 ─────────────────────────────────────────
 echo ""
 echo -e "${BOLD}[5/5] 隐私预算存储 (SQLite) 健康度巡检${NC}"
 TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
@@ -209,7 +215,7 @@ else
     echo -e "  [INFO] 未找到本地 SQLite 预算文件 ($DB_PATH)，使用内存模式或远端 DB"
 fi
 
-# 汇总报告
+# ── 步骤 8：汇总报告输出 ──────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${CYAN}============================================================================${NC}"
 echo -e "${BOLD}巡检结果汇总:${NC}"

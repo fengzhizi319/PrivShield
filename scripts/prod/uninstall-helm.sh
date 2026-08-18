@@ -3,15 +3,22 @@
 # 【生产模式】PrivShield Kubernetes Helm Release 卸载脚本
 # Uninstall PrivShield Helm Release
 #
+# 执行步骤总览：
+#   1. 解析命令行参数（命名空间、Release 名称）
+#   2. 检查 Helm Release 存在性与状态
+#   3. 执行 helm uninstall 卸载 Release 并释放相关 Pod 与 Service
+#
 # 用法 / Usage:
 #   ./scripts/prod/uninstall-helm.sh [选项]
 # ============================================================================
 
 set -euo pipefail
 
+# ── 步骤 1：设置参数默认值 ────────────────────────────────────────────────
 NAMESPACE="privshield"
 RELEASE_NAME="privshield"
 
+# ── 步骤 2：解析命令行参数 ────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -n|--namespace)
@@ -42,6 +49,7 @@ echo "==========================================================================
 echo "🛑 正在卸载 PrivShield Helm Release [$RELEASE_NAME] (Namespace: $NAMESPACE)..."
 echo "============================================================================"
 
+# ── 步骤 3：检查并卸载 Release ────────────────────────────────────────────
 if helm status "$RELEASE_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
     helm uninstall "$RELEASE_NAME" -n "$NAMESPACE"
     echo "✅ Release [$RELEASE_NAME] 已成功卸载。"

@@ -4,12 +4,15 @@
 # 脚本说明: 一键运行 Console 控制台前后端 (Web + Python Backend + Go Proxy)
 #           的全套端到端 (E2E) 集成自动化回归测试。
 #
-# 测试链路:
-#   1. 自动开启 Mock Agent 服务 (端口 8079)
-#   2. 启动 Console Backend (端口 8080)，运行 console/backend Python 代理后端单元测试与 smoke_test
-#   3. 运行 console/backend-go Go 代理后端单元测试与集成测试
-#   4. 运行 console/web React 前端组件 Vitest 自动化测试
-#   5. 退出时清理所有后台进程并输出测试套件报告
+# 执行步骤总览：
+#   1. 启动轻量 Mock Agent 桩服务 (端口 8079)
+#   2. 运行 Console Backend (Python FastAPI) pytest 单元测试与烟雾测试
+#   3. 运行 Console Backend-Go (Go gRPC) 代理单元测试与集成测试
+#   4. 运行 Console Web (React 前端) Vitest 自动化单元与组件测试
+#   5. 捕获 EXIT 信号自动清理并释放所有后台桩服务进程
+#
+# 用法 / Usage:
+#   ./scripts/dev/run_console_e2e_tests.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -23,6 +26,7 @@ NC='\033[0m' # No Color
 MOCK_PID=""
 BACKEND_PID=""
 
+# ── 步骤 0：注册退出资源自动清理钩子 ──────────────────────────────────────
 cleanup() {
     echo -e "\n${YELLOW}[清理] 正在释放测试模拟服务与临时资源...${NC}"
     if [ -n "$BACKEND_PID" ]; then
@@ -38,7 +42,7 @@ echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} Console 端到端 (E2E) 全套自动化测试套件${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
-# 1. 启动 Mock Agent 服务 (端口 8079)
+# ── 步骤 1：启动 Mock Agent 服务 (端口 8079) ───────────────────────────────
 echo -e "\n${YELLOW}[步骤 1/4] 启动 Mock Agent 桩服务 (端口 8079)...${NC}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 "$SCRIPT_DIR/mock_agent_server.py" 8079 &

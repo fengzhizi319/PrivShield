@@ -3,6 +3,18 @@
 # =============================================================================
 # 定义 PrivShield 主容器的 Deployment，包含 REST + gRPC 双端口。
 # 环境变量通过 values.yaml 注入，敏感数据通过 Secret/ConfigMap 卷挂载。
+#
+# Helm 部署流程：
+#   1. helm install 读取 values.yaml（默认值）+ 用户覆盖值（-f / --set）
+#   2. Helm 模板引擎将 Go Template 占位符替换为实际值，渲染为纯 K8s YAML
+#   3. 渲染后的 YAML 提交给 K8s API Server（等价 kubectl apply）
+#   4. K8s 创建 Pod，kubelet 根据 env: 字段注入环境变量到容器
+#   5. 容器内 Python 进程通过 os.getenv() 读取环境变量
+#
+# 注意：Helm 本身不"加载"环境变量——它只负责模板渲染。
+#       真正注入环境变量的是 K8s kubelet（容器启动时）。
+#
+# 预览渲染结果：helm template pla ./deploy/helm/PrivShield --debug
 # =============================================================================
 apiVersion: apps/v1
 kind: Deployment

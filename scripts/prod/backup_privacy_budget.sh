@@ -3,6 +3,14 @@
 # 【生产模式】PrivShield 隐私预算持久化数据库在线热备份与归档工具
 # Online Hot Backup & Archival Tool for Privacy Budget Database
 #
+# 执行步骤总览：
+#   1. 解析命令行参数（--db-path、--backup-dir、--keep-days）
+#   2. 检查源 SQLite 数据库文件存在性
+#   3. 创建备份归档目录
+#   4. 调用 SQLite Online Backup API 执行无锁安全热备份
+#   5. Gzip -9 高比例压缩备份文件并计算 SHA256 校验和
+#   6. 自动轮转扫描并清理超过保留天数的过期备份文件
+#
 # 用法 / Usage:
 #   ./scripts/prod/backup_privacy_budget.sh [选项]
 #
@@ -15,6 +23,7 @@
 
 set -euo pipefail
 
+# ── 步骤 1：定位项目路径与默认参数初始化 ──────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -22,6 +31,7 @@ DB_PATH="${PRIVACY_BUDGET_DB:-$PROJECT_ROOT/.data/privacy_budget.db}"
 BACKUP_DIR="$PROJECT_ROOT/.data/backups"
 KEEP_DAYS=7
 
+# ── 步骤 2：解析命令行参数 ────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --db-path) DB_PATH="$2"; shift 2 ;;
@@ -51,13 +61,13 @@ echo "  • 源数据库路径 : $DB_PATH"
 echo "  • 备份目标目录 : $BACKUP_DIR"
 echo "  • 归档保留天数 : $KEEP_DAYS 天"
 
-# 1. 检查源数据库文件
+# ── 步骤 3：检查源数据库文件 ──────────────────────────────────────────────
 if [[ ! -f "$DB_PATH" ]]; then
     echo "⚠️  源数据库文件不存在: $DB_PATH (如当前运行在内存模式，无需备份)。"
     exit 0
 fi
 
-# 2. 准备备份目录
+# ── 步骤 4：准备备份目录与时间戳命名 ──────────────────────────────────────
 mkdir -p "$BACKUP_DIR"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -67,7 +77,7 @@ FINAL_BACKUP="$TEMP_BACKUP.gz"
 echo ""
 echo "⏳ 正在通过 SQLite Online Backup API 执行热备份（无读写锁阻塞）..."
 
-# 3. 使用 Python sqlite3 执行在线安全备份
+# ── 步骤 5：使用 Python sqlite3 执行在线安全备份 ──────────────────────────
 python3 -c "
 import sqlite3, sys
 
@@ -87,7 +97,7 @@ except Exception as e:
     sys.exit(1)
 "
 
-# 4. Gzip 压缩与 SHA256 校验和生成
+# ── 步骤 6：Gzip 压缩与 SHA256 校验和生成 ─────────────────────────────────
 echo "📦 正在压缩备份并生成 SHA256 校验和..."
 gzip -9 "$TEMP_BACKUP"
 
@@ -100,7 +110,7 @@ fi
 BACKUP_SIZE=$(ls -lh "$FINAL_BACKUP" | awk '{print $5}')
 echo "✅ 备份文件已生成: $FINAL_BACKUP (大小: $BACKUP_SIZE)"
 
-# 5. 自动轮转清理过期备份
+# ── 步骤 7：自动轮转清理过期备份 ──────────────────────────────────────────
 echo ""
 echo "🧹 正在清理超过 $KEEP_DAYS 天的旧备份..."
 find "$BACKUP_DIR" -name "privacy_budget_*.db.gz*" -type f -mtime "+$KEEP_DAYS" -exec rm -f {} +
