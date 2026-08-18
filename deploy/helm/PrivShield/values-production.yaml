@@ -1,43 +1,84 @@
-# 生产环境 values
-# 使用说明：
-#   helm install pla ./deploy/helm/PrivShield \
+# =============================================================================
+# 生产环境配置（values-production.yaml）
+# =============================================================================
+# 本文件作为生产环境的标准 values 配置文件，覆盖 values.yaml 中的开发默认值。
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# 📋 生产环境 (values-production.yaml) vs 开发环境 (values.yaml) 差异对比：
+# ─────────────────────────────────────────────────────────────────────────────
+# | 配置维度        | 开发环境默认 (values.yaml) | 生产环境 (values-production.yaml) | 生产考量与设计原因                                           |
+# |-----------------|----------------------------|-----------------------------------|--------------------------------------------------------------|
+# | 副本数 (Replicas)| replicaCount: 1            | replicaCount: 2                   | 开发节省资源；生产保证多副本高可用 (HA)，支持平滑滚动更新    |
+# | 日志格式        | logFormat: text            | logFormat: json                   | 开发便于终端阅读；生产 JSON 结构化日志便于 ELK/Loki/云日志解析 |
+# | 传输加密 (TLS)   | tls.enabled: false         | tls.enabled: true                 | 开发明文调试；生产全链路 TLS 强加密，防数据抓包与窃听        |
+# | TLS 证书来源    | 支持内联或空               | 强制 existingSecret               | 生产凭据必须通过 K8s Secret/Vault/KMS 自管，避免明文泄露     |
+# | API Key 认证    | auth.enabled: false        | auth.enabled: true                | 开发免密调试；生产强制鉴权拦截未授权请求 (401 Unauthorized)   |
+# | 认证凭据来源    | 支持内联或空               | 强制 apiKeysSecret                | 生产自管 Secret 注入 API Key 映射表，避免凭据硬编码          |
+# | 速率限制 (Rate)  | rateLimit.enabled: false   | rateLimit.enabled: true           | 开发免限流；生产开启限流防护，防止突发流量冲击与 DoS 攻击    |
+# | 资源上限 (Limit) | CPU 1000m / Memory 1Gi     | CPU 2000m / Memory 2Gi            | 生产翻倍算力与内存上限，支撑高并发隐私计算吞吐               |
+# | 资源预留 (Req)   | CPU 100m / Memory 256Mi    | CPU 500m / Memory 512Mi           | 提高调度预留，保障 Pod 稳定运行，降低 OOMKilled 风险         |
+# | 自动扩缩 (HPA)   | autoscaling.enabled: false | autoscaling.enabled: true         | 开发固定单实例；生产根据 CPU 70%/内存 80% 动态伸缩 (2~10 副本)|
+# | 网络策略        | networkPolicy: false       | networkPolicy: true               | 开发不限访问；生产零信任网络隔离，仅放行 PrivShield 关联 Pod |
+# | 指标采集监控    | serviceMonitor: false      | serviceMonitor: true (HTTPS)      | 生产自动生成 Prometheus CRD，通过 HTTPS 采集脱敏与治理指标   |
+# | 探针模式 (Probes)| httpGet 模式               | 自动切换为 HTTPS exec 模式        | TLS 开启后探针自动使用 curl/wget HTTPS，避免证书握手失败    |
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 🚀 生产部署示例 (Usage):
+#   helm install privshield ./deploy/helm/PrivShield \
 #     -f ./deploy/helm/PrivShield/values-production.yaml \
 #     --set security.tls.existingSecret=your-tls-secret \
 #     --set security.auth.apiKeysSecret=your-apikeys-secret
+#
+# ⚠️ 注意事项：
+#   1. TLS 证书 (existingSecret) 与 API Key (apiKeysSecret) 必须由管理员/CI 提前创建；
+#   2. 镜像建议固定明确 tag（如 0.1.0），不要在生产环境使用 latest；
+#   3. 若需要分布式多实例共享限速与隐私预算，可配置 security.rateLimit.redisUrl 与 PRIVACY_BUDGET_DB。
+# =============================================================================
 
+# 【差异 1：高可用副本数】开发环境默认 1 副本；生产环境至少 2 副本消除单点故障
 replicaCount: 2
 
+# 使用轻量 core 镜像（Layer-3 LLM 建议由独立 vLLM Deployment 承载实现运行时解耦）
 flavor: core
 
 agent:
   logLevel: info
+  # 【差异 2：结构化日志】开发环境使用 text 纯文本；生产环境使用 json 格式，便于 ELK/Loki/Promtail 自动提取字段
   logFormat: json
 
 security:
   tls:
+    # 【差异 3：传输层安全】开发环境默认关闭；生产环境强制启用 TLS 加密（REST 8079 & gRPC 50051）
     enabled: true
-    existingSecret: ""  # 必填
+    # 【差异 4：证书管理】生产环境不建议将证书写在 values 中，必须通过外部自管 Secret 注入（含 tls.crt 与 tls.key）
+    existingSecret: ""  # 必填：部署时通过 --set security.tls.existingSecret=... 指定
   auth:
+    # 【差异 5：身份认证】开发环境默认关闭；生产环境强制启用 API Key 认证，未携带有效 Key 将返回 401
     enabled: true
-    apiKeysSecret: ""   # 必填
+    # 【差异 6：认证凭据管理】必须通过外部自管 Secret 注入（包含 api-keys.json 数据键）
+    apiKeysSecret: ""   # 必填：部署时通过 --set security.auth.apiKeysSecret=... 指定
   rateLimit:
+    # 【差异 7：请求限速】开发环境默认关闭；生产环境强制启用速率限制，防止接口滥用与突发雪崩
     enabled: true
 
+# 【差异 8：资源配额提升】相比开发环境（1C/1G limit，0.1C/256M req），生产环境提供更高算力与稳定性预留
 resources:
   limits:
-    cpu: 2000m
-    memory: 2Gi
+    cpu: 2000m       # 2 核 CPU 上限
+    memory: 2Gi       # 2 GiB 内存上限
   requests:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 500m        # 0.5 核保障预留
+    memory: 512Mi     # 512 MiB 保障预留
 
+# 【差异 9：弹性扩缩容】开发环境默认关闭；生产环境启用 HPA 依据负载在 2~10 副本间自适应伸缩
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 10
-  targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
+  minReplicas: 2     # 最小 2 副本（保证高可用底线）
+  maxReplicas: 10    # 最大 10 副本（防止流量过大耗尽集群资源）
+  targetCPUUtilizationPercentage: 70    # CPU 利用率 > 70% 触发扩容
+  targetMemoryUtilizationPercentage: 80 # 内存利用率 > 80% 触发扩容
 
+# 【差异 10：零信任网络隔离】开发环境默认关闭；生产环境启用 NetworkPolicy 仅允许同命名空间或指定标签的服务访问
 networkPolicy:
   enabled: true
   ingress:
@@ -46,5 +87,6 @@ networkPolicy:
           matchLabels:
             app.kubernetes.io/part-of: PrivShield
 
+# 【差异 11：可观测性监控集成】开发环境默认关闭；生产环境自动创建 ServiceMonitor，支持 Prometheus 抓取 HTTPS 监控指标
 serviceMonitor:
   enabled: true

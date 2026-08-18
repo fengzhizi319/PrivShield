@@ -817,26 +817,52 @@ docker compose down -v     # 连数据卷一起删（慎用！预算与日志会
 | healthcheck | 容器自检命令，供依赖方等待就绪 | agent 探测 `/readyz` |
 | build | 从源码构建镜像的配置（有 build 段则本地构建而非拉取） | agent/console 三个服务 |
 
-### 5.1 Docker Compose 全栈服务编排
+### 5.1 Docker Compose 编排文件体系与全栈服务
 
-`deploy/docker-compose/docker-compose.yml` 提供了涵盖 Agent、双 Console 代理后端、React Web UI 及 vLLM 大模型的完整服务编排：
+PrivShield 在 `deploy/docker-compose/` 下提供了面向不同生命周期环境优化的一整套 Docker Compose 编排文件体系：
 
-| 服务组件 | 镜像 / 构建目标 | 容器端口 | 功能说明 |
+| 编排文件 | 适用环境 | 核心特性 | 常用启动命令 |
 |---|---|---|---|
-| `PrivShield` | `Dockerfile` (`target: core`) | 8079 (REST) / 50051 (gRPC) | 隐私 Agent 核心 Sidecar 服务 |
-| `console-backend-go` | `console/backend-go/Dockerfile` | 8081 | Go gRPC 高性能代理后端 |
-| `console-backend-python` | `console/backend/Dockerfile` | 8080 | Python FastAPI REST 代理后端 |
-| `console-web` | `console/web/Dockerfile` | 5173 | React 单页控制台 Nginx 静态服务 |
-| `vllm` | `vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}` (profile: `llm`) | 8000 | vLLM Layer-3 本地大模型推理（GPU；Qwen3.5 混合注意力架构需 vLLM 0.26+） |
+| `docker-compose.yml` | **通用基础 / 默认全栈** | 基础全栈编排，包含 Core Agent、Go/Python 代理、Web UI，支持 `--profile llm` 与 `--profile monitoring` | `docker compose up -d` |
+| `docker-compose.prod.yml` | **生产环境 (Production)** | 全链路 TLS 强加密、API Key 强鉴权、Redis 分布式限流后端、JSON 结构化日志、`restart: always`、`no-new-privileges` 安全加固、纯生产镜像运行（无源码挂载） | `docker compose -f docker-compose.prod.yml up -d` 或 `./scripts/prod/deploy-docker-compose.sh` |
+| `docker-compose.dev.yml` | **开发联调 (Development)** | 挂载宿主机源码目录（`../../PrivShield` 实时热调试）、控制台纯文本日志 (DEBUG)、关闭 TLS/Auth 免密直连、开放全部调试端口 | `docker compose -f docker-compose.dev.yml up -d` |
+| `docker-compose.test.yml` | **自动化测试 / CI (Testing)** | 包含自动化 `test-runner` 容器，等待所有被测服务就绪后执行端到端 API 冒烟测试并自动返回状态码 | `docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner` |
+
+#### 5.1.1 核心服务组件清单
+
+| 服务组件 | 镜像 / 构建目标 | 容器端口 | 适用环境 | 功能说明 |
+|---|---|---|---|---|
+| `PrivShield` | `Dockerfile` (`target: core`) | 8079 (REST) / 50051 (gRPC) | 全部 | 隐私 Agent 核心 Sidecar 服务 |
+| `redis` | `redis:7.2-alpine` | 6379 (仅内部 backend 网络) | 生产 (`.prod.yml`) | 分布式速率限制后端与缓存存储 |
+| `console-backend-go` | `console/backend-go/Dockerfile` | 8081 | 全部 | Go gRPC 高性能代理后端 |
+| `console-backend-python` | `console/backend/Dockerfile` | 8080 | 通用/开发 | Python FastAPI REST 代理后端（备选通道） |
+| `console-web` | `console/web/Dockerfile` | 5173 | 全部 | React 单页控制台 Nginx 静态服务 |
+| `vllm` | `vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}` | 8000 (profile: `llm`) | 按需开启 | vLLM Layer-3 本地大模型推理（GPU；需 vLLM 0.26+） |
+| `prometheus` | `prom/prometheus:v2.54.1` | 9090 (profile: `monitoring`) | 生产/监控 | 生产监控指标时序数据库与采集端点 |
+| `grafana` | `grafana/grafana:11.2.0` | 3000 (profile: `monitoring`) | 生产/监控 | 监控可视化仪表盘大屏 |
+| `test-runner` | `curlimages/curl:latest` | — | 测试 (`.test.yml`) | 自动化集成测试运行器，测试完成后退出 |
+
+#### 5.1.2 各环境快速启动命令
 
 ```bash
 cd deploy/docker-compose
 
-# 启动核心服务套件 (Agent + Go/Python 后端 + Web UI)
+# 1. 通用默认启动 (Core Agent + Go/Python 代理 + Web UI)
 docker compose up -d
 
-# 启动包含 vLLM 大模型 GPU 推理容器的全栈服务
-docker compose --profile llm up -d
+# 2. 生产环境启动 (TLS + API Key + Redis + Core + Go Proxy + Web UI)
+docker compose -f docker-compose.prod.yml up -d
+# 或使用封装脚本一键启动：
+./scripts/prod/deploy-docker-compose.sh
+
+# 3. 生产环境启用 vLLM GPU 推理与监控套件
+docker compose -f docker-compose.prod.yml --profile llm --profile monitoring up -d
+
+# 4. 本地开发联调启动 (挂载源码实时热调试，文本日志)
+docker compose -f docker-compose.dev.yml up -d
+
+# 5. 自动化 CI 集成测试 (运行端到端测试并退出)
+docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
 ```
 
 ### 5.2 服务启动流程详解（以 `docker compose --profile llm up -d` 为例）
@@ -1274,20 +1300,23 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 
 | 命令 | 作用 | 常用场景 |
 |---|---|---|
-| `docker compose up -d` | 创建+启动全部服务（后台） | 第一次部署 / 修改配置或源码后重建 |
-| `docker compose --profile llm up -d` | 启动含 vLLM 的全栈 | 需要大模型推理时 |
-| `docker compose ps` | 查看服务状态与健康检查 | 确认是否启动成功 |
+| `docker compose up -d` | 通用默认启动全部服务（后台运行） | 第一次基础部署 / 通用测试 |
+| `docker compose -f docker-compose.prod.yml up -d` | 启动生产加固集群（TLS+Auth+Redis） | 生产环境单机/集群部署 |
+| `docker compose -f docker-compose.prod.yml --profile llm up -d` | 生产环境拉起核心 + GPU vLLM | 生产环境启用大模型分类 |
+| `docker compose -f docker-compose.dev.yml up -d` | 启动开发联调环境（源码热挂载） | 本地修改代码免重构镜像调试 |
+| `docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner` | 运行自动化集成测试套件 | CI 流水线 / 部署前自动化验收 |
+| `docker compose ps` (或 `-f ... ps`) | 查看服务状态与健康检查 | 确认容器是否 healthy |
 | `docker compose logs -f <服务名>` | 查看服务日志（`-f` 实时跟随） | 排查启动失败/报错 |
 | `docker compose restart <服务名>` | 重启现有容器（**不重建、不重新解析配置**） | 服务卡死时的临时恢复 |
 | `docker compose stop` / `start` | 暂停 / 恢复全部服务（保留容器） | 暂时不用但不想删 |
-| `docker compose down` | 停止并删除容器+网络（**保留数据卷**） | 结束一次部署 |
+| `docker compose down` (或 `-f ... down`) | 停止并删除容器+网络（**保留数据卷**） | 结束一次部署 |
 | `docker compose down -v` | 连数据卷一起删除 | 想从零开始（**数据会丢！**） |
 | `docker compose exec <服务名> sh` | 进入容器内部命令行 | 容器内排查问题 |
 | `docker compose build <服务名>` | 重新构建镜像 | 改了源码后重建 |
 | `docker compose up -d --build <服务名>` | 重新构建镜像并启动（一步到位） | 改源码后重建，最常用 |
 | `docker compose build --no-cache <服务名>` | 不用缓存层彻底重建 | 改了基础镜像/依赖源 |
 | `docker compose pull` | 只拉取镜像不启动 | 预下载镜像 |
-| `docker compose config` | 查看解析合并后的最终配置 | 检查变量替换/合并是否正确 |
+| `docker compose config` (或 `-f ... config`) | 查看解析合并后的最终配置 | 检查变量替换/合并是否正确 |
 | `docker compose up -d <服务名>` | 只启动/升级某个服务 | 单独升级 vllm（core 无感知） |
 | `docker compose top` | 查看容器内运行的进程 | 确认进程是否存活 |
 
@@ -1942,19 +1971,18 @@ networkPolicy:
 
 #### 13.1.2 Docker Compose 配置
 
-`deploy/docker-compose/docker-compose.yml` 负责**服务编排**（7 个服务、网络、卷、健康检查、资源限制），但它与根目录 `.env` 是**联动关系**，而非独立配置源：
+`deploy/docker-compose/` 提供面向不同场景的 Compose 编排文件体系：
 
-- compose 自动读取根目录 `.env` 进行**变量替换**（如 `${VLLM_IMAGE_TAG:-latest}`、`${GRAFANA_ADMIN_PASSWORD:-changeme}`）；
-- agent 服务通过 `env_file: ../../.env` **显式引入**根目录 `.env`；
-- `environment:` 段仅做**容器化必要覆盖**（如 `PRIVACY_REST_HOST: "0.0.0.0"` 覆盖本地的 `127.0.0.1`）。
-
-配套文件：
-
-| 文件 | 作用 |
-|---|---|
-| `deploy/docker-compose/docker-compose.yml` | 全栈服务编排（Agent / 双 Console 后端 / Web / vLLM / 监控） |
-| `deploy/docker-compose/privacy-profile.yaml` | 容器内参数 Profile（只读挂载到 `/etc/PrivShield/`） |
-| `deploy/prometheus/`、`deploy/grafana/` | 监控栈配置（Prometheus 抓取/告警规则、Grafana provisioning） |
+| 文件 | 适用环境 | 核心职责 |
+|---|---|---|
+| `deploy/docker-compose/docker-compose.yml` | 通用/默认 | 全栈服务基础编排（Agent / 双 Console 后端 / Web / vLLM / 监控） |
+| `deploy/docker-compose/docker-compose.prod.yml` | 生产环境 | 全链路 TLS、API Key 强鉴权、Redis 分布式限流、JSON 日志、安全加固与 `restart: always` |
+| `deploy/docker-compose/docker-compose.dev.yml` | 开发联调 | 挂载宿主机 Python 源码目录热重载、控制台纯文本日志、免密直连 |
+| `deploy/docker-compose/docker-compose.test.yml` | 自动化测试/CI | 包含 `test-runner` 容器自动执行端到端 API 测试 |
+| `deploy/docker-compose/privacy-profile.yaml` | 通用 | 容器内隐私治理参数 Profile（只读挂载到 `/etc/PrivShield/`） |
+| `deploy/docker-compose/.env.prod.example` | 生产环境 | 生产环境变量配置模板（含 TLS/Auth/Redis/Grafana 强密码配置） |
+| `deploy/docker-compose/.env.example` | 开发环境 | 开发环境变量配置模板 |
+| `deploy/prometheus/`、`deploy/grafana/` | 监控 | 监控栈配置（Prometheus 抓取/告警规则、Grafana provisioning） |
 
 #### 13.1.3 Kubernetes 配置
 
@@ -1969,15 +1997,15 @@ K8s 配置独立存放于 `deploy/k8s/`（原生 YAML）与 `deploy/helm/`（Hel
 | `deploy/k8s/kustomization.yaml` | `kubectl apply -k` 一键部署入口 |
 | `deploy/helm/PrivShield/` | Helm Chart（`values.yaml` / `values-production.yaml` / `values-ml.yaml`，生产推荐） |
 
-#### 13.1.4 三环境配置差异速览
+#### 13.1.4 多环境配置差异速览
 
-| 维度 | 本地开发 | Docker Compose | Kubernetes |
+| 维度 | 本地开发直跑 | Docker Compose (开发/生产) | Kubernetes / Helm |
 |---|---|---|---|
-| 编排文件 | — | `deploy/docker-compose/docker-compose.yml` | `deploy/k8s/*.yaml` 或 `deploy/helm/PrivShield/` |
-| 环境变量来源 | 根目录 `.env` + `config/env/<profile>.env` | 根目录 `.env`（env_file + 变量替换）+ `environment:` 覆盖 | Deployment `env` 段内联 / Helm `extraEnv` + `values.yaml` |
+| 编排文件 | — | 开发: `docker-compose.dev.yml`<br>生产: `docker-compose.prod.yml`<br>通用: `docker-compose.yml` | 原生: `deploy/k8s/*.yaml`<br>Helm: `deploy/helm/PrivShield/` |
+| 环境变量来源 | 根目录 `.env` + `config/env/<profile>.env` | 开发: 根目录 `.env` / `docker-compose.dev.yml`<br>生产: `deploy/docker-compose/.env` (`.env.prod.example`) | Deployment `env` 段内联 / Helm `values-production.yaml` / Secret |
 | 参数 Profile | `PRIVACY_PROFILE` 指向本地 YAML | `privacy-profile.yaml` 只读挂载 | ConfigMap 挂载 `/etc/PrivShield` |
 | 监听地址 | 默认 `127.0.0.1`（仅本机） | 必须 `0.0.0.0`（容器内） | 必须 `0.0.0.0`（容器内） |
-| 安全配置 | 默认关闭 | 取消注释或经 `.env` 注入 | values 开关 + Secret |
+| 安全配置 | 默认关闭 | 开发: 关闭免密直连<br>生产: 强开启 TLS + Auth + Redis 限流 | 开发: `values.yaml` 默认关闭<br>生产: `values-production.yaml` 强制开启 |
 
 ---
 

@@ -1,16 +1,46 @@
+# =============================================================================
+# Helm Chart 元数据（Chart.yaml）
+# =============================================================================
+# Chart.yaml 是 Helm Chart 的描述文件，定义 Chart 的名称、版本、依赖等元信息。
+# 每次 helm install / helm upgrade 时，Helm 会读取此文件来确定 Chart 身份。
+# =============================================================================
+
+# apiVersion: Chart API 版本
+#   v2  → Helm 3+ 格式（支持 dependencies、type 字段等）
+#   v1  → Helm 2 格式（已废弃，不推荐）
 apiVersion: v2
+
+# name: Chart 名称（必须与目录名一致），也是 helm install 时的默认 Release 名
 name: PrivShield
+
+# description: Chart 的简短描述，helm search 时展示
 description: A Helm chart for deploying PrivShield on Kubernetes.
+
+# type: Chart 类型
+#   application → 可部署的应用程序 Chart（默认值，生成 Deployment/Service 等资源）
+#   library     → 仅提供模板函数/定义，不可直接部署（被其他 Chart 引用）
 type: application
+
+# version: Chart 自身的语义化版本号（每次发布 Chart 时递增）
+#   Helm 用此版本管理 Chart 的升级/回滚
 version: 0.1.0
+
+# appVersion: 本 Chart 部署的应用程序版本号（与 PrivShield 代码版本对应）
+#   仅作文档说明和 image tag 默认值，不影响 Chart 版本排序
 appVersion: "0.1.0"
+
+# keywords: 搜索关键词，helm search repo 时用于匹配
 keywords:
   - privacy
   - secretflow
   - sidecar
   - k-anonymity
   - differential-privacy
+
+# home: 项目主页 URL
 home: https://github.com/fengzhizi319/PrivShield
+
+# maintainers: Chart 维护者列表（helm search 展示联系方式）
 maintainers:
   - name: chen shaowei
     email: fengzhizi31923@hotmail.com

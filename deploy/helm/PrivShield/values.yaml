@@ -1,57 +1,138 @@
-# 默认开发 values，TLS/auth 关闭，便于本地测试。
+# =============================================================================
+# Helm Chart 默认值（values.yaml）
+# =============================================================================
+# values.yaml 定义 Chart 所有可配置参数的默认值。
+# 用户可通过以下方式覆盖：
+#   1. helm install -f custom-values.yaml     指定自定义 values 文件
+#   2. helm install --set key=value           命令行直接设置单个值
+#   3. 环境特定的 values 文件（如 values-production.yaml）
+#
+# 本文件为开发/测试默认值：TLS/auth 关闭，单副本，资源限制宽松。
+# 生产环境请使用 values-production.yaml 覆盖。
+# ─────────────────────────────────────────────────────────────────────────────
+# 📋 生产环境 (values-production.yaml) vs 开发环境 (values.yaml) 差异对比：
+# ─────────────────────────────────────────────────────────────────────────────
+# | 配置维度        | 开发环境默认 (values.yaml) | 生产环境 (values-production.yaml) | 生产考量与设计原因                                           |
+# |-----------------|----------------------------|-----------------------------------|--------------------------------------------------------------|
+# | 副本数 (Replicas)| replicaCount: 1            | replicaCount: 2                   | 开发节省资源；生产保证多副本高可用 (HA)，支持平滑滚动更新    |
+# | 日志格式        | logFormat: text            | logFormat: json                   | 开发便于终端阅读；生产 JSON 结构化日志便于 ELK/Loki/云日志解析 |
+# | 传输加密 (TLS)   | tls.enabled: false         | tls.enabled: true                 | 开发明文调试；生产全链路 TLS 强加密，防数据抓包与窃听        |
+# | TLS 证书来源    | 支持内联或空               | 强制 existingSecret               | 生产凭据必须通过 K8s Secret/Vault/KMS 自管，避免明文泄露     |
+# | API Key 认证    | auth.enabled: false        | auth.enabled: true                | 开发免密调试；生产强制鉴权拦截未授权请求 (401 Unauthorized)   |
+# | 认证凭据来源    | 支持内联或空               | 强制 apiKeysSecret                | 生产自管 Secret 注入 API Key 映射表，避免凭据硬编码          |
+# | 速率限制 (Rate)  | rateLimit.enabled: false   | rateLimit.enabled: true           | 开发免限流；生产开启限流防护，防止突发流量冲击与 DoS 攻击    |
+# | 资源上限 (Limit) | CPU 1000m / Memory 1Gi     | CPU 2000m / Memory 2Gi            | 生产翻倍算力与内存上限，支撑高并发隐私计算吞吐               |
+# | 资源预留 (Req)   | CPU 100m / Memory 256Mi    | CPU 500m / Memory 512Mi           | 提高调度预留，保障 Pod 稳定运行，降低 OOMKilled 风险         |
+# | 自动扩缩 (HPA)   | autoscaling.enabled: false | autoscaling.enabled: true         | 开发固定单实例；生产根据 CPU 70%/内存 80% 动态伸缩 (2~10 副本)|
+# | 网络策略        | networkPolicy: false       | networkPolicy: true               | 开发不限访问；生产零信任网络隔离，仅放行 PrivShield 关联 Pod |
+# | 指标采集监控    | serviceMonitor: false      | serviceMonitor: true (HTTPS)      | 生产自动生成 Prometheus CRD，通过 HTTPS 采集脱敏与治理指标   |
+# | 探针模式 (Probes)| httpGet 模式               | 自动切换为 HTTPS exec 模式        | TLS 开启后探针自动使用 curl/wget HTTPS，避免证书握手失败    |
+# ─────────────────────────────────────────────────────────────────────────────
+# =============================================================================
 
+# ── 副本数 / Replica count ─────────────────────────────────────────────────
+# Deployment 的 Pod 副本数。启用 HPA 后此值被忽略（由 HPA 自动管理）。
 replicaCount: 1
 
+# ── 命名空间 / Namespace ─────────────────────────────────────────────────────
 namespace:
+  # create: 是否由 Chart 自动创建命名空间
+  #   true  → helm install 时自动 kubectl create namespace
+  #   false → 需提前手动创建命名空间，或使用 --namespace 指定已有命名空间
   create: false
 
-# 镜像选择：core 为轻量镜像，ml 包含 torch/transformers/onnxruntime
+# ── 镜像风味 / Image flavor ─────────────────────────────────────────────────
+# 镜像选择：
+#   core → 轻量运行时镜像（无 torch/transformers，纯 REST/gRPC 核心能力）
+#   ml   → 完整 ML 镜像（含 PyTorch、Transformers、ONNX Runtime，Layer-2/3 进程内推理）
 flavor: core
 
+# ── 容器镜像配置 / Container image ─────────────────────────────────────────
 image:
+  # repository: 镜像仓库地址（不含 tag）
   repository: privshield
+  # pullPolicy: 镜像拉取策略
+  #   Always        → 每次启动 Pod 都拉取最新镜像（开发环境）
+  #   IfNotPresent  → 本地不存在时才拉取（推荐，减少网络开销）
+  #   Never         → 仅使用本地镜像（离线环境）
   pullPolicy: IfNotPresent
-  # 留空时默认使用 Chart.appVersion
+  # tag: 镜像标签。留空时自动使用 Chart.yaml 中的 appVersion
+  #   flavor=ml 时自动附加 -ml 后缀（由 _helpers.tpl 的 imageTag 模板处理）
   tag: ""
 
+# imagePullSecrets: 私有镜像仓库的认证 Secret 列表
+#   格式: [{ name: my-registry-secret }]
+#   需提前 kubectl create secret docker-registry 创建
 imagePullSecrets: []
+# nameOverride: 覆盖 Chart 名称（用于资源命名，留空使用 Chart.yaml 中的 name）
 nameOverride: ""
+# fullnameOverride: 完全覆盖资源名称（留空则使用 "<release>-<chart>" 格式）
 fullnameOverride: ""
 
+# ── ServiceAccount / 服务账户 ─────────────────────────────────────────────
 serviceAccount:
-  # 是否创建 ServiceAccount
+  # create: 是否创建 ServiceAccount
+  #   true  → Chart 自动创建（推荐，可绑定 RBAC 角色）
+  #   false → 使用集群已有的 ServiceAccount（由 name 指定）
   create: true
-  # 自定义 ServiceAccount 名称
+  # name: 自定义 ServiceAccount 名称。留空则使用 fullname 自动生成
   name: ""
+  # annotations: ServiceAccount 注解（常用于云厂商 IAM 绑定，如 AWS IRSA）
   annotations: {}
 
+# podAnnotations: 添加到每个 Pod 的注解（如 Prometheus scrape、Jaeger tracing 等）
 podAnnotations: {}
 
+# podSecurityContext: Pod 级别的进程安全参数（作用于 Pod 内所有容器）
 podSecurityContext:
+  # runAsNonRoot: 强制容器以非 root 用户运行（K8s 准入控制校验）
   runAsNonRoot: true
+  # runAsUser: 容器内进程的 UID（1000 = 普通用户）
   runAsUser: 1000
+  # fsGroup: Pod 内挂载的卷文件所属 GID（确保容器可读写挂载卷）
   fsGroup: 1000
 
+# securityContext: 容器级别的安全加固参数（最小权限原则）
 securityContext:
+  # allowPrivilegeEscalation: 禁止进程通过 setuid 等机制提升权限
   allowPrivilegeEscalation: false
+  # capabilities: Linux 能力集控制
   capabilities:
+    # drop: ALL → 移除所有 Linux 能力（最严格），仅保留容器运行必需的最小集
     drop:
       - ALL
+  # readOnlyRootFilesystem: 是否将容器根文件系统挂载为只读
+  #   false → 允许写入（PrivShield 需写入临时文件/预算 DB）
   readOnlyRootFilesystem: false
+  # runAsNonRoot / runAsUser: 容器级别的用户身份（与 Pod 级别一致）
   runAsNonRoot: true
   runAsUser: 1000
 
+# ── Service 配置 / Service configuration ─────────────────────────────────
 service:
+  # type: K8s Service 类型
+  #   ClusterIP    → 仅集群内部可访问（默认，推荐配合 Ingress 使用）
+  #   NodePort     → 通过节点端口对外暴露（测试用）
+  #   LoadBalancer → 云厂商负载均衡器（生产对外暴露）
   type: ClusterIP
+  # restPort: REST API 服务端口（FastAPI /docs 交互文档）
   restPort: 8079
+  # grpcPort: gRPC 服务端口（高性能 RPC 接口）
   grpcPort: 50051
-  # REST/gRPC 是否在同一 Service 中暴露
+  # exposeGrpc: 是否在同一 Service 中暴露 gRPC 端口
+  #   true  → Service 同时暴露 REST + gRPC（默认）
+  #   false → Service 仅暴露 REST（gRPC 走独立 Service 或内部直连）
   exposeGrpc: true
+  # annotations: Service 注解（如云厂商 LB 配置、external-dns 等）
   annotations: {}
 
-# 应用配置
+# ── 应用配置 / Agent configuration ─────────────────────────────────────────
 agent:
+  # logLevel: 日志级别（DEBUG / INFO / WARNING / ERROR / CRITICAL）
   logLevel: info
+  # logFormat: 日志输出格式
+  #   text → 人类可读的纯文本（适合本地开发调试）
+  #   json → 结构化 JSON 日志（推荐容器环境，便于日志采集解析）
   logFormat: text
   # privacy-profile.yaml 内容（挂载到 /etc/PrivShield/privacy-profile.yaml）。
   # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
@@ -74,128 +155,191 @@ agent:
       sanitization:
         engine: "mask"
 
-# 安全开关（TLS、认证、限速分别控制，均默认关闭便于本地测试）
+# ── 安全开关 / Security configuration ─────────────────────────────────────
+# TLS、认证、限速分别控制，均默认关闭便于本地测试
 security:
+  # ── TLS 加密传输 ──
   tls:
+    # enabled: 是否启用 TLS（REST/gRPC 双向证书加密）
     enabled: false
-    # 用户自管 TLS Secret（包含 tls.crt / tls.key）
+    # existingSecret: 用户自管的 TLS Secret 名称（包含 tls.crt / tls.key）
+    #   生产推荐：由 cert-manager 或运维手动创建 Secret，Chart 仅引用不创建
     existingSecret: ""
-    # 也可直接填写证书内容（不推荐用于生产）
+    # cert / key: 直接填写证书内容（不推荐用于生产，证书会出现在 values 中）
     cert: ""
     key: ""
+    # certFile / keyFile: 容器内证书/私钥文件的挂载路径
     certFile: /certs/tls.crt
     keyFile: /certs/tls.key
-    # mTLS 客户端证书校验模式：none / optional / require
+    # clientAuth: mTLS 客户端证书校验模式
+    #   none     → 不校验客户端证书（单向 TLS，默认）
+    #   optional → 客户端可选提供证书（有证书则校验，无证书也放行）
+    #   require  → 强制客户端提供有效证书（双向 mTLS，最严格）
     clientAuth: none
-    # CA 证书 Secret（包含 ca.crt），clientAuth 为 optional/require 时必填
+    # caSecret: CA 证书 Secret 名称（包含 ca.crt），clientAuth 为 optional/require 时必填
     caSecret: ""
+    # caFile: CA 证书在容器内的挂载路径
     caFile: /certs/ca.crt
-    # 私钥加密口令 Secret（可选，Secret 中须包含名为 key-password 的数据键）
+    # keyPasswordSecret: 私钥加密口令 Secret（可选，Secret 中须包含名为 key-password 的数据键）
     keyPasswordSecret: ""
+  # ── API Key 认证 ──
   auth:
+    # enabled: 是否启用 API Key 认证
     enabled: false
-    # 用户自管 API Key Secret（Secret 中须包含名为 api-keys.json 的数据键，
-    # 内容为 JSON：{"<api-key>": {"name": "...", "scopes": [...]}}）
+    # apiKeysSecret: 用户自管的 API Key Secret 名称
+    #   Secret 中须包含名为 api-keys.json 的数据键，内容为：
+    #   {"<api-key>": {"name": "...", "scopes": [...]}}
     apiKeysSecret: ""
-    # 也可直接填写 api-keys.json 文件内容（不推荐用于生产），
-    # Chart 会生成 <fullname>-secrets Secret 并以 api-keys.json 键挂载
+    # apiKeys: 直接填写 api-keys.json 内容（不推荐用于生产）
+    #   Chart 会自动生成 <fullname>-secrets Secret 并挂载
     apiKeys: ""
-    # 内部 mTLS 客户端证书认证（默认关闭，fail-closed）
+    # ── 内部 mTLS 客户端证书认证 ──
     internalMtls:
+      # enabled: 是否启用 gRPC 内部 mTLS 认证（fail-closed 策略）
       enabled: false
-      # mTLS CN 白名单 YAML ConfigMap 名称（包含 mtls-whitelist.yaml 键）。
-      # 设置后 PRIVACY_AUTH_MTLS_ALLOWED_CNS 被忽略。
+      # whitelistConfigMap: mTLS CN 白名单 ConfigMap 名称
+      #   包含 mtls-whitelist.yaml 键，支持热重载和按 CN 配置作用域
+      #   设置后 PRIVACY_AUTH_MTLS_ALLOWED_CNS 被忽略
       whitelistConfigMap: ""
-      # 回退：静态 CN 列表（逗号分隔），当 whitelistConfigMap 未设置时使用
+      # allowedCns: 回退方案——静态 CN 列表（逗号分隔）
+      #   当 whitelistConfigMap 未设置时使用，所有 CN 获得 ["*"] 全权限
       allowedCns: ""
-  # 速率限制
+  # ── 速率限制 / Rate limiting ──
   rateLimit:
+    # enabled: 是否启用请求速率限制
     enabled: false
+    # defaultRps: 默认每秒请求数上限（每客户端 IP）
     defaultRps: 10
+    # defaultBurst: 默认突发上限（短时间内允许的最大请求数）
     defaultBurst: 20
-    # 分布式限速后端 Redis URL（不设置则进程内限速）
+    # redisUrl: 分布式限速后端 Redis URL（不设置则使用进程内限速）
+    #   多副本部署时必须使用 Redis 保证全局一致限速
     redisUrl: ""
-    # 按端点覆盖，JSON 对象字符串
+    # perEndpointJson: 按端点覆盖限速配置，JSON 对象字符串
     perEndpointJson: ""
-  # 哪些路径可跳过认证，建议保留 /health
+  # publicPaths: 无需认证即可访问的路径列表（建议保留 /health 用于健康探测）
   publicPaths:
     - /health
 
-# 资源限制
+# ── 资源限制 / Resource limits ─────────────────────────────────────────────
+# 容器的 CPU / 内存资源请求和上限
+#   requests: K8s 调度器据此决定将 Pod 分配到哪个节点（资源预留）
+#   limits:   容器实际使用超过 limits 时会被限制（CPU 被节流，内存超限则 OOMKilled）
 resources:
   limits:
-    cpu: 1000m
-    memory: 1Gi
+    cpu: 1000m       # 1000m = 1 核 CPU
+    memory: 1Gi      # 1Gi = 1024Mi 内存
   requests:
-    cpu: 100m
-    memory: 256Mi
+    cpu: 100m        # 100m = 0.1 核（调度预留）
+    memory: 256Mi    # 256Mi（调度预留）
 
-# 滚动更新策略
+# ── 滚动更新策略 / Rolling update strategy ───────────────────────────────
 strategy:
+  # type: 更新策略类型
+  #   RollingUpdate → 滚动更新（逐步替换旧 Pod，零停机）
+  #   Recreate      → 先停止所有旧 Pod，再创建新 Pod（有停机窗口）
   type: RollingUpdate
   rollingUpdate:
+    # maxUnavailable: 更新过程中最多允许多少个 Pod 不可用
+    #   0 → 保证所有副本始终可用（最安全，但更新速度较慢）
     maxUnavailable: 0
+    # maxSurge: 更新过程中最多允许超出期望副本数的额外 Pod 数
+    #   1 → 先启动 1 个新 Pod，就绪后再停 1 个旧 Pod
     maxSurge: 1
 
-# Pod 优雅终止宽限期（秒），未设置则使用 K8s 默认值 30
+# terminationGracePeriodSeconds: Pod 优雅终止宽限期（秒）
+#   K8s 发送 SIGTERM 后等待容器自行退出的时间，超时则发送 SIGKILL 强制杀死
+#   未设置则使用 K8s 默认值 30 秒
 terminationGracePeriodSeconds: 30
 
-# PodDisruptionBudget（可选，生产环境可启用以保证最小可用副本）
+# ── PodDisruptionBudget / Pod 中断预算 ─────────────────────────────────
+# PDB 确保在自愿中断（如 kubectl drain、节点维护）期间保持最小可用副本数
 podDisruptionBudget:
+  # enabled: 是否创建 PDB（生产环境建议启用）
   enabled: false
+  # minAvailable: 中断期间至少保持可用的 Pod 数（可以是数字或百分比如 "50%"）
   minAvailable: 1
 
-# 探针
+# ── 探针 / Probes ─────────────────────────────────────────────────────
+# K8s 通过探针判断容器健康状态，决定是否发送流量或重启容器
 # liveness 使用 /health（轻量存活检查），readiness 使用 /readyz
-# （/readyz 额外校验配置解析器与隐私预算 DB 连通性，未就绪时不接流量）。
+# （/readyz 额外校验配置解析器与隐私预算 DB 连通性，未就绪时不接流量）
 probes:
+  # livenessProbe: 存活探针——失败时 K8s 重启容器（说明进程已死锁或不可恢复）
   liveness:
     path: /health
     port: http
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    failureThreshold: 3
+    initialDelaySeconds: 10   # 容器启动后延迟 10 秒再开始探测
+    periodSeconds: 10          # 每 10 秒探测一次
+    failureThreshold: 3        # 连续 3 次失败判定为不健康，触发重启
+  # readinessProbe: 就绪探针——失败时 K8s 停止向该 Pod 发送流量（但不重启）
   readiness:
     path: /readyz
     port: http
-    initialDelaySeconds: 5
-    periodSeconds: 5
-    failureThreshold: 3
+    initialDelaySeconds: 5    # 容器启动后延迟 5 秒再开始探测
+    periodSeconds: 5           # 每 5 秒探测一次
+    failureThreshold: 3        # 连续 3 次失败判定为未就绪，从 Service 端点移除
 
-# HPA
+# ── HPA 水平自动扩缩 / Horizontal Pod Autoscaler ─────────────────────────
 autoscaling:
+  # enabled: 是否启用 HPA（启用后 replicaCount 被忽略，由 HPA 自动管理副本数）
   enabled: false
+  # minReplicas: 最小副本数（HPA 不会缩容到低于此值）
   minReplicas: 1
+  # maxReplicas: 最大副本数（HPA 不会扩容到超过此值）
   maxReplicas: 5
+  # targetCPUUtilizationPercentage: 目标 CPU 利用率（超过则扩容，低于则缩容）
   targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 目标内存利用率
   targetMemoryUtilizationPercentage: 80
+  # behavior: 自定义扩缩行为（如缩容冷却时间、扩容速率限制等）
   behavior: {}
 
-# Ingress
+# ── Ingress 入口 / Ingress configuration ─────────────────────────────────
+# Ingress 定义外部流量如何路由到集群内部 Service（需集群安装 Ingress Controller）
 ingress:
+  # enabled: 是否创建 Ingress 资源
   enabled: false
+  # className: IngressClass 名称（如 nginx、traefik 等，留空使用集群默认）
   className: ""
+  # annotations: Ingress 注解（常用于配置 TLS 证书、重写规则等）
   annotations: {}
+  # hosts: 域名与路径映射规则
   hosts:
     - host: PrivShield.local
       paths:
         - path: /
+          # pathType: 路径匹配类型
+          #   Prefix        → 前缀匹配（/ 匹配所有路径）
+          #   Exact         → 精确匹配
+          #   ImplementationSpecific → 取决于 Ingress Controller 实现
           pathType: Prefix
+  # tls: Ingress TLS 配置（与 Ingress Controller 的证书管理配合）
   tls: []
 
-# NetworkPolicy
+# ── NetworkPolicy 网络策略 ─────────────────────────────────────────────
+# NetworkPolicy 控制哪些 Pod/命名空间可以访问本服务的端口（需集群安装支持 NP 的 CNI）
 networkPolicy:
+  # enabled: 是否创建 NetworkPolicy
   enabled: false
   ingress:
-    # 允许访问的 Pod label selector 列表
+    # from: 允许访问的 Pod label selector 列表
+    #   空列表 → 允许同命名空间所有 Pod 访问（仅限制端口）
+    #   非空   → 仅允许匹配的 Pod 访问
     from: []
 
-# Prometheus ServiceMonitor
+# ── Prometheus ServiceMonitor ─────────────────────────────────────────────
+# ServiceMonitor 是 Prometheus Operator 的 CRD，定义 Prometheus 如何抓取本服务的 /metrics
 serviceMonitor:
+  # enabled: 是否创建 ServiceMonitor（需集群安装 Prometheus Operator）
   enabled: false
+  # namespace: ServiceMonitor 所在命名空间（留空则与 Release 同命名空间）
   namespace: ""
+  # interval: Prometheus 抓取间隔
   interval: 30s
+  # scrapeTimeout: 单次抓取超时
   scrapeTimeout: 10s
+  # labels: 额外标签（常用于 Prometheus 的 serviceMonitorSelector 匹配）
   labels: {}
   # security.tls.enabled=true 时自动以 scheme=https 抓取 /metrics，并使用下方 tlsConfig。
   # 自签名证书场景默认 insecureSkipVerify；如需校验服务端证书，改为 CA 引用，例如：
@@ -211,12 +355,13 @@ serviceMonitor:
 #   - LLM 挂掉/OOM  → core 自动降级 Layer-1 规则 + Layer-2 NER，主服务不受影响
 #   - 启用方式：helm install ... --set llm.enabled=true
 llm:
+  # enabled: 是否启用独立的 LLM 推理 Deployment
   enabled: false
-  # core 侧 LLM 后端类型（vllm / openai），对应 PRIVACY_LLM_PROVIDER
+  # provider: core 侧 LLM 后端类型（vllm / openai），对应 PRIVACY_LLM_PROVIDER
   provider: vllm
-  # core 侧调用密钥，对应 PRIVACY_LLM_API_KEY
+  # apiKey: core 侧调用密钥，对应 PRIVACY_LLM_API_KEY
   apiKey: EMPTY
-  # LLM 服务端口（Service/容器内监听）
+  # port: LLM 服务端口（Service/容器内监听）
   port: 8000
   image:
     # Qwen3.5 为混合注意力架构（Gated Delta Net + Full Attention），需较新 vLLM：
@@ -225,10 +370,13 @@ llm:
     repository: vllm/vllm-openai
     tag: latest
     pullPolicy: IfNotPresent
-  # vLLM 模型加载参数
+  # modelPath: 模型权重在容器内的路径（由 volume 挂载）
   modelPath: /models/Qwen3.5-0.8B-Privacy-Classifier-Smoother
+  # servedModelName: 对外暴露的模型名（core 端请求时必须与此一致）
   servedModelName: Qwen3.5-0.8B-Privacy-Classifier-Smoother
+  # gpuMemoryUtilization: GPU 显存利用率上限（0.85 = 最多用 85%，留 15% 给 CUDA context）
   gpuMemoryUtilization: "0.85"
+  # maxModelLen: 最大上下文长度（输入+输出 token 总数上限）
   maxModelLen: "4096"
   storage:
     # 模型权重来源（二选一）：
@@ -236,12 +384,13 @@ llm:
     #   existingClaim: 已有 PVC 名称（生产推荐，先将模型 COPY 进 PVC）
     hostPath: ""
     existingClaim: ""
-  # GPU 节点调度（需集群安装 NVIDIA device plugin；
-  # 例：nodeSelector: {nvidia.com/gpu: "true"}）
+  # GPU 节点调度（需集群安装 NVIDIA device plugin）
+  # 例：nodeSelector: {nvidia.com/gpu: "true"}
   nodeSelector: {}
+  # tolerations: GPU 节点通常有 taint，需添加对应 toleration 才能调度
   tolerations: []
   affinity: {}
-  # vLLM 容器资源（nvidia.com/gpu 为 GPU 扩展资源，requests/limits 需一致）
+  # resources: vLLM 容器资源（nvidia.com/gpu 为 GPU 扩展资源，requests/limits 需一致）
   resources:
     limits:
       cpu: "8"
@@ -251,7 +400,7 @@ llm:
       cpu: "1"
       memory: 2Gi
       nvidia.com/gpu: 1
-  # 探针（vLLM /health；首次加载模型约 22s+，initialDelay 给足宽限）
+  # probes: vLLM 探针（首次加载模型约 22s+，initialDelay 给足宽限）
   probes:
     liveness:
       initialDelaySeconds: 60
@@ -261,9 +410,9 @@ llm:
       initialDelaySeconds: 60
       periodSeconds: 10
       failureThreshold: 3
-  # vLLM 容器额外环境变量（如 HF_HOME、VLLM_ENABLE_CUDA_COMPATIBILITY 等）
+  # extraEnv: vLLM 容器额外环境变量（如 HF_HOME、VLLM_ENABLE_CUDA_COMPATIBILITY 等）
   extraEnv: []
-  # 额外 volume/volumeMounts（如模型部分文件挂载）
+  # extraVolumes / extraVolumeMounts: 额外卷挂载（如模型部分文件挂载）
   extraVolumes: []
   extraVolumeMounts: []
   # vLLM 官方镜像默认以 root 运行（模型缓存/共享内存）；
@@ -271,14 +420,18 @@ llm:
   podSecurityContext: {}
   securityContext: {}
 
-# 节点亲和/容忍
+# ── 节点调度 / Node scheduling ─────────────────────────────────────────
+# nodeSelector: 节点标签选择器（仅调度到匹配的节点）
 nodeSelector: {}
+# tolerations: 容忍度（允许调度到有对应 taint 的节点，如 GPU 节点）
 tolerations: []
+# affinity: 亲和性规则（如 Pod 反亲和分散到不同节点）
 affinity: {}
 
-# 额外环境变量
+# ── 扩展配置 / Extension points ─────────────────────────────────────────
+# extraEnv: 额外环境变量（注入到主容器中，用于覆盖未单独暴露的配置项）
 extraEnv: []
 
-# 额外 volume/volumeMounts
+# extraVolumes / extraVolumeMounts: 额外卷和挂载点（如外部配置、证书等）
 extraVolumes: []
 extraVolumeMounts: []

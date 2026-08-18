@@ -1,17 +1,21 @@
-{{- if .Values.llm.enabled }}
-# ── Layer-3 LLM 独立推理服务（vLLM / GPU）──
+# =============================================================================
+# Layer-3 LLM 独立推理服务 Deployment（llm-deployment.yaml）
+# =============================================================================
 # 与 core Deployment 完全解耦：升级/重启只影响 LLM 层；
 # LLM 挂掉时 core 自动降级 Layer-1 规则 + Layer-2 NER（core 无需安装 torch/vllm）。
+# 仅在 llm.enabled=true 时创建。
+# =============================================================================
+{{- if .Values.llm.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "PrivShield.fullname" . }}-llm
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
+    # 组件标签：区分 LLM 和 core（同一 Release 内多组件）
     app.kubernetes.io/component: llm
 spec:
-  # LLM 为 GPU 有状态推理服务，默认单副本；
-  # 多副本需按显存规划调整（tensor-parallel 或独立 GPU 分配）
+  # LLM 为 GPU 有状态推理服务，默认单副本
   replicas: 1
   selector:
     matchLabels:
@@ -23,18 +27,19 @@ spec:
         {{- include "PrivShield.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: llm
     spec:
+      # 私有镜像仓库认证 Secret
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # vLLM 官方镜像默认以 root 运行（模型缓存/共享内存）；
-      # 如需非 root 加固，通过 llm.podSecurityContext / llm.securityContext 配置
+      # Pod 级安全上下文（vLLM 官方镜像默认 root，可选非 root 加固）
       {{- with .Values.llm.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: vllm
+          # 容器级安全上下文
           {{- with .Values.llm.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -45,6 +50,7 @@ spec:
             - name: http
               containerPort: {{ .Values.llm.port }}
               protocol: TCP
+          # vLLM 启动命令（OpenAI 兼容 API 服务器）
           command:
             - python3
             - -m
@@ -63,14 +69,17 @@ spec:
             - "0.0.0.0"
             - "--port"
             - {{ .Values.llm.port | quote }}
+          # 额外环境变量（如 HF_HOME、VLLM_ENABLE_CUDA_COMPATIBILITY 等）
           {{- with .Values.llm.extraEnv }}
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          # GPU 资源限制（nvidia.com/gpu 为 GPU 扩展资源）
           {{- with .Values.llm.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          # 存活探针（首次加载模型约 22s+，initialDelay 给足宽限）
           livenessProbe:
             httpGet:
               path: /health
@@ -78,6 +87,7 @@ spec:
             initialDelaySeconds: {{ .Values.llm.probes.liveness.initialDelaySeconds }}
             periodSeconds: {{ .Values.llm.probes.liveness.periodSeconds }}
             failureThreshold: {{ .Values.llm.probes.liveness.failureThreshold }}
+          # 就绪探针（模型加载完成后才接流量）
           readinessProbe:
             httpGet:
               path: /health
@@ -86,36 +96,45 @@ spec:
             periodSeconds: {{ .Values.llm.probes.readiness.periodSeconds }}
             failureThreshold: {{ .Values.llm.probes.readiness.failureThreshold }}
           volumeMounts:
+            # 模型权重卷（只读挂载）
             - name: model-weights
               mountPath: /models
               readOnly: true
+            # 额外卷挂载
             {{- with .Values.llm.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
+        # 模型权重来源（三选一：PVC > hostPath > emptyDir）
         - name: model-weights
           {{- if .Values.llm.storage.existingClaim }}
+          # 生产推荐：已有 PVC（先将模型 COPY 进 PVC）
           persistentVolumeClaim:
             claimName: {{ .Values.llm.storage.existingClaim }}
           {{- else if .Values.llm.storage.hostPath }}
+          # 单节点测试：宿主 .models 目录
           hostPath:
             path: {{ .Values.llm.storage.hostPath }}
             type: Directory
           {{- else }}
-          # 未配置 storage.hostPath / storage.existingClaim 时挂空目录（需先配置模型来源）
+          # 未配置时挂空目录（需先配置模型来源）
           emptyDir: {}
           {{- end }}
+        # 额外卷
         {{- with .Values.llm.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      # GPU 节点调度（需集群安装 NVIDIA device plugin）
       {{- with .Values.llm.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # GPU 节点通常有 taint，需添加对应 toleration
       {{- with .Values.llm.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # 亲和性规则（如 GPU 节点亲和、Pod 反亲和等）
       {{- with .Values.llm.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

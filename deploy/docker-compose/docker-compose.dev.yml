@@ -1,0 +1,246 @@
+# =============================================================================
+# PrivShield - 开发与本地调试 Docker Compose 编排 (Development Orchestration)
+# =============================================================================
+# 开发联调专用编排文件，特点：
+#   1. 挂载宿主机源码目录（热重载，修改代码无需重新 build 镜像）
+#   2. 纯文本控制台日志 (PRIVACY_LOG_FORMAT: text)，清晰易读
+#   3. 关闭 TLS 与 API Key 鉴权，支持浏览器 / Postman / curl 直连调试
+#   4. 暴露全部服务的 HTTP / gRPC / 调试端口
+#   5. 轻量资源配额，降低本机 CPU/内存占用
+#
+# 🚀 启动方式 / Usage:
+#   # 启动全部核心开发组件 (Agent + Go 代理 + Python 代理 + 前端 Web)
+#   docker compose -f docker-compose.dev.yml up -d
+#
+#   # 启动并启用 vLLM 本地大模型容器 (需 GPU)
+#   docker compose -f docker-compose.dev.yml --profile llm up -d
+#
+#   # 启动并启用监控套件
+#   docker compose -f docker-compose.dev.yml --profile monitoring up -d
+# =============================================================================
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: false  # 开发环境允许直接访问后端容器
+  llm:
+    driver: bridge
+    internal: false
+
+volumes:
+  budget-db-dev:
+    driver: local
+  audit-logs-dev:
+    driver: local
+  prometheus-data-dev:
+    driver: local
+  grafana-data-dev:
+    driver: local
+
+services:
+
+  # 1. PrivShield 核心 Agent (开发模式：挂载源码 + 文本日志 + 免密)
+  PrivShield:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: core
+    image: privshield:0.1.0-dev
+    container_name: PrivShield-dev
+    ports:
+      - "8079:8079"   # REST API
+      - "50051:50051" # gRPC
+    environment:
+      PRIVACY_REST_HOST: "0.0.0.0"
+      PRIVACY_REST_PORT: "8079"
+      PRIVACY_GRPC_HOST: "0.0.0.0"
+      PRIVACY_GRPC_PORT: "50051"
+      PRIVACY_SERVICE_NAME: "PrivShield-dev"
+      PRIVACY_LOG_LEVEL: "DEBUG"
+      PRIVACY_LOG_FORMAT: "text"
+      PRIVACY_PROFILE: "/etc/PrivShield/privacy-profile.yaml"
+      PRIVACY_BUDGET_DB: "/data/budget/budget.db"
+      PRIVACY_TLS_ENABLED: "false"
+      PRIVACY_AUTH_ENABLED: "false"
+      PRIVACY_RATE_LIMIT_ENABLED: "false"
+      PRIVACY_LLM_PROVIDER: "${PRIVACY_LLM_PROVIDER:-vllm}"
+      PRIVACY_LLM_API_BASE: "${LLM_API_BASE:-http://vllm:8000/v1}"
+      PRIVACY_LLM_MODEL_NAME: "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      PRIVACY_LLM_API_KEY: "EMPTY"
+    volumes:
+      - ./privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro
+      - ../../PrivShield:/app/PrivShield:ro      # 挂载 Python 源码目录供快速热调试
+      - ../../rules:/app/rules:ro                # 挂载 YAML 分类规则
+      - budget-db-dev:/data/budget
+      - audit-logs-dev:/var/log/privacy
+    networks:
+      - backend
+      - frontend
+      - llm
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # 2. Console Go 后端代理
+  console-backend-go:
+    build:
+      context: ../../console/backend-go
+      dockerfile: Dockerfile
+    image: privacy-console-backend-go:0.1.0-dev
+    container_name: privacy-console-backend-go-dev
+    ports:
+      - "8081:8081"
+    environment:
+      PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      PRIVACY_CONSOLE_PORT: "8081"
+      PRIVACY_AGENT_GRPC_HOST: "PrivShield"
+      PRIVACY_AGENT_GRPC_PORT: "50051"
+      PRIVACY_AGENT_URL: "http://PrivShield:8079"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # 3. Console Python 后端代理 (备选 REST 通道)
+  console-backend-python:
+    build:
+      context: ../../console/backend
+      dockerfile: Dockerfile
+    image: privacy-console-backend-python:0.1.0-dev
+    container_name: privacy-console-backend-python-dev
+    ports:
+      - "8080:8080"
+    environment:
+      PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      PRIVACY_CONSOLE_PORT: "8080"
+      PRIVACY_AGENT_URL: "http://PrivShield:8079"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # 4. Console 前端 Web UI (Nginx 托管)
+  console-web:
+    build:
+      context: ../../console/web
+      dockerfile: Dockerfile
+    image: privacy-console-web:0.1.0-dev
+    container_name: privacy-console-web-dev
+    ports:
+      - "5173:5173"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5173/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # 5. vLLM 大模型推理服务 (Profile: llm)
+  vllm:
+    profiles: ["llm"]
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
+    container_name: PrivShield-vllm-dev
+    command:
+      - "--model"
+      - "/models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      - "--served-model-name"
+      - "Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+      - "--trust-remote-code"
+      - "--gpu-memory-utilization"
+      - "0.85"
+      - "--max-model-len"
+      - "4096"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+    volumes:
+      - ../../.models:/models:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - llm
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # 6. Prometheus 监控 (Profile: monitoring)
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.54.1
+    container_name: PrivShield-prometheus-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/alerts.yml:/etc/prometheus/rules/PrivShield-alerts.yml:ro
+      - prometheus-data-dev:/prometheus
+    networks:
+      - backend
+      - frontend
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+
+  # 7. Grafana 可视化面板 (Profile: monitoring)
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.2.0
+    container_name: PrivShield-grafana-dev
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "true"
+    volumes:
+      - ../grafana:/etc/grafana/provisioning:ro
+      - grafana-data-dev:/var/lib/grafana
+    networks:
+      - frontend
+    depends_on:
+      - prometheus
+    restart: unless-stopped

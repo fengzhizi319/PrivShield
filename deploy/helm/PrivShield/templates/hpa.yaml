@@ -1,3 +1,9 @@
+# =============================================================================
+# PrivShield HPA 水平自动扩缩（hpa.yaml）
+# =============================================================================
+# 根据 CPU/内存利用率自动调整 Deployment 副本数。
+# 仅在 autoscaling.enabled=true 时创建，此时 deployment.yaml 中的 replicas 被忽略。
+# =============================================================================
 {{- if .Values.autoscaling.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -6,13 +12,16 @@ metadata:
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
+  # 扩缩目标：指向主 Deployment
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: {{ include "PrivShield.fullname" . }}
+  # 副本数范围
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:
+    # CPU 利用率指标（超过阈值触发扩容）
     {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
     - type: Resource
       resource:
@@ -21,6 +30,7 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
     {{- end }}
+    # 内存利用率指标
     {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
     - type: Resource
       resource:
@@ -29,6 +39,7 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
+  # 自定义扩缩行为（如缩容冷却时间、扩容速率限制等）
   {{- with .Values.autoscaling.behavior }}
   behavior:
     {{- toYaml . | nindent 4 }}

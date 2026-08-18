@@ -1,3 +1,9 @@
+# =============================================================================
+# PrivShield PodDisruptionBudget（poddisruptionbudget.yaml）
+# =============================================================================
+# PDB 确保在自愿中断（如 kubectl drain、节点维护）期间保持最小可用副本数。
+# 仅在 podDisruptionBudget.enabled=true 时创建（生产环境建议启用）。
+# =============================================================================
 {{- if .Values.podDisruptionBudget.enabled -}}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -6,7 +12,9 @@ metadata:
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
+  # 中断期间至少保持可用的 Pod 数（可以是数字或百分比如 "50%"）
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  # 作用于本 Chart 的 Pod
   selector:
     matchLabels:
       {{- include "PrivShield.selectorLabels" . | nindent 6 }}

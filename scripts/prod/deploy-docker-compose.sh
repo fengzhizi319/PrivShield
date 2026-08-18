@@ -7,6 +7,7 @@
 #   ./scripts/prod/deploy-docker-compose.sh [选项]
 #
 # 选项 / Options:
+#   -f, --file FILE      指定 Compose 配置文件 (默认: docker-compose.prod.yml)
 #   --with-llm           启用 vLLM 大模型推理容器 (需具备 NVIDIA GPU / CUDA 环境)
 #   --with-monitoring    启用生产监控栈 (Prometheus + Grafana)
 #   --build              强制重新构建容器镜像 (默认使用已有镜像)
@@ -20,29 +21,39 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_DIR="$PROJECT_ROOT/deploy/docker-compose"
 
+COMPOSE_FILE="docker-compose.prod.yml"
 WITH_LLM=false
 WITH_MONITORING=false
 BUILD_FLAG=""
 PULL_FLAG=""
 
-for arg in "$@"; do
-    case "$arg" in
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -f|--file)
+            COMPOSE_FILE="$2"
+            shift 2
+            ;;
         --with-llm)
             WITH_LLM=true
+            shift 1
             ;;
         --with-monitoring)
             WITH_MONITORING=true
+            shift 1
             ;;
         --build)
             BUILD_FLAG="--build"
+            shift 1
             ;;
         --pull)
             PULL_FLAG="--pull always"
+            shift 1
             ;;
         -h|--help)
             echo "用法 / Usage: $0 [选项]"
             echo ""
             echo "选项 / Options:"
+            echo "  -f, --file FILE      指定 Compose 配置文件 (默认: docker-compose.prod.yml)"
             echo "  --with-llm           启用 vLLM 大模型 GPU 推理容器"
             echo "  --with-monitoring    启用 Prometheus + Grafana 生产监控套件"
             echo "  --build              在启动前重新构建应用镜像"
@@ -51,7 +62,7 @@ for arg in "$@"; do
             exit 0
             ;;
         *)
-            echo "❌ [错误] 未知参数: $arg" >&2
+            echo "❌ [错误] 未知参数: $1" >&2
             echo "   请运行 $0 --help 查看帮助" >&2
             exit 1
             ;;
@@ -95,11 +106,18 @@ fi
 
 cd "$COMPOSE_DIR"
 
+if [[ ! -f "$COMPOSE_FILE" ]]; then
+    echo "⚠️  指定的 Compose 文件不存在: $COMPOSE_FILE，回退为 docker-compose.yml"
+    COMPOSE_FILE="docker-compose.yml"
+fi
+
+echo "   • 编排配置文件: $COMPOSE_FILE"
+
 # 4. 执行 Docker Compose 启动
 echo ""
 echo "🚀 正在启动生产服务容器群..."
 # shellcheck disable=SC2086
-docker compose "${PROFILES[@]}" up -d $BUILD_FLAG $PULL_FLAG
+docker compose -f "$COMPOSE_FILE" "${PROFILES[@]}" up -d $BUILD_FLAG $PULL_FLAG
 
 # 5. 等待服务就绪探针 (GET /readyz)
 echo ""
@@ -109,7 +127,8 @@ ATTEMPT=0
 READY=false
 
 while [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; do
-    if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8079/readyz" 2>/dev/null | grep -q '^200$'; then
+    if curl -s -k -o /dev/null -w "%{http_code}" "https://127.0.0.1:8079/readyz" 2>/dev/null | grep -q '^200$' || \
+       curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8079/readyz" 2>/dev/null | grep -q '^200$'; then
         READY=true
         break
     fi
@@ -121,14 +140,14 @@ done
 if [[ "$READY" == "true" ]]; then
     echo " ✅ 已就绪"
 else
-    echo " ⚠️  就绪检查等待超时，请使用 'docker compose logs' 查看容器运行状态。"
+    echo " ⚠️  就绪检查等待超时，请使用 'docker compose -f $COMPOSE_FILE logs' 查看容器运行状态。"
 fi
 
 echo ""
 echo "============================================================================"
 echo "🎉 PrivShield 生产级服务已启动完毕！"
 echo "============================================================================"
-echo "  • 核心 Agent REST API : http://127.0.0.1:8079"
+echo "  • 核心 Agent REST API : http://127.0.0.1:8079 (或 https://127.0.0.1:8079)"
 echo "  • 核心 Agent gRPC RPC : 127.0.0.1:50051"
 echo "  • Web 控制台 UI       : http://127.0.0.1:5173"
 echo "  • Go 代理后端 REST    : http://127.0.0.1:8081"
@@ -141,8 +160,8 @@ if [[ "$WITH_MONITORING" == "true" ]]; then
 fi
 echo "────────────────────────────────────────────────────────────────────────────"
 echo "  常用维护命令:"
-echo "    - 查看容器运行状态 : cd $COMPOSE_DIR && docker compose ps"
-echo "    - 实时查看服务日志 : cd $COMPOSE_DIR && docker compose logs -f"
+echo "    - 查看容器运行状态 : cd $COMPOSE_DIR && docker compose -f $COMPOSE_FILE ps"
+echo "    - 实时查看服务日志 : cd $COMPOSE_DIR && docker compose -f $COMPOSE_FILE logs -f"
 echo "    - 停止生产服务集群 : ./scripts/prod/stop-docker-compose.sh"
 echo "    - 生产健康全面巡检 : ./scripts/prod/prod_health_check.sh"
 echo "============================================================================"

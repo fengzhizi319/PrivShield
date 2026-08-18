@@ -1,3 +1,9 @@
+# =============================================================================
+# PrivShield 配置 ConfigMap（configmap.yaml）
+# =============================================================================
+# 存储 privacy-profile.yaml 配置文件，挂载到容器 /etc/PrivShield/ 目录。
+# 代码通过 PRIVACY_PROFILE 环境变量读取此文件，按 primitives 段覆盖内置默认参数。
+# =============================================================================
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -5,5 +11,6 @@ metadata:
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
 data:
+  # privacy-profile.yaml 内容（来自 values.yaml 的 agent.profile）
   privacy-profile.yaml: |
     {{- .Values.agent.profile | nindent 4 }}

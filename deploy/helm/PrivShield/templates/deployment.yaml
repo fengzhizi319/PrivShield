@@ -1,3 +1,9 @@
+# =============================================================================
+# PrivShield 主服务 Deployment（deployment.yaml）
+# =============================================================================
+# 定义 PrivShield 主容器的 Deployment，包含 REST + gRPC 双端口。
+# 环境变量通过 values.yaml 注入，敏感数据通过 Secret/ConfigMap 卷挂载。
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,9 +11,11 @@ metadata:
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
+  # HPA 启用时副本数由 HPA 自动管理，此处不设置
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  # 滚动更新策略（零停机更新）
   {{- with .Values.strategy }}
   strategy:
     {{- toYaml . | nindent 4 }}
@@ -17,6 +25,7 @@ spec:
       {{- include "PrivShield.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      # Pod 注解（如 Prometheus scrape、Jaeger tracing 等）
       {{- with .Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
@@ -24,18 +33,22 @@ spec:
       labels:
         {{- include "PrivShield.selectorLabels" . | nindent 8 }}
     spec:
+      # 私有镜像仓库认证 Secret
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "PrivShield.serviceAccountName" . }}
+      # Pod 级安全上下文（runAsNonRoot/runAsUser/fsGroup）
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # 优雅终止宽限期（SIGTERM 后等待容器自行退出）
       {{- with .Values.terminationGracePeriodSeconds }}
       terminationGracePeriodSeconds: {{ . }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
+          # 容器级安全上下文（最小权限原则）
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ include "PrivShield.imageTag" . }}"
@@ -48,6 +61,7 @@ spec:
               containerPort: {{ .Values.service.grpcPort }}
               protocol: TCP
           env:
+            # ── 基础配置 ──
             - name: PRIVACY_REST_HOST
               value: "0.0.0.0"
             - name: PRIVACY_REST_PORT
@@ -64,6 +78,7 @@ spec:
               value: {{ .Values.agent.logFormat | quote }}
             - name: PRIVACY_SERVICE_NAME
               value: {{ include "PrivShield.fullname" . | quote }}
+            # ── OpenTelemetry 可观测性（可选）──
             {{- with .Values.agent.serviceName }}
             - name: OTEL_SERVICE_NAME
               value: {{ . | quote }}
@@ -72,6 +87,7 @@ spec:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ . | quote }}
             {{- end }}
+            # ── TLS 加密传输（可选）──
             {{- if .Values.security.tls.enabled }}
             - name: PRIVACY_TLS_ENABLED
               value: "true"
@@ -93,16 +109,19 @@ spec:
                   key: key-password
             {{- end }}
             {{- end }}
+            # ── API Key 认证（可选）──
             {{- if .Values.security.auth.enabled }}
             - name: PRIVACY_AUTH_ENABLED
               value: "true"
             {{- if .Values.security.auth.apiKeysSecret }}
+            # 外部 Secret（用户自管）
             - name: PRIVACY_AUTH_EXTERNAL_KEYS_JSON
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.security.auth.apiKeysSecret | quote }}
                   key: api-keys.json
             {{- else if .Values.security.auth.apiKeys }}
+            # Chart 自动生成的 Secret
             - name: PRIVACY_AUTH_EXTERNAL_KEYS_JSON
               valueFrom:
                 secretKeyRef:
@@ -110,6 +129,7 @@ spec:
                   key: api-keys.json
             {{- end }}
             {{- end }}
+            # ── 内部 mTLS 客户端证书认证（可选）──
             {{- if .Values.security.auth.internalMtls.enabled }}
             - name: PRIVACY_AUTH_INTERNAL_MTLS_ENABLED
               value: "true"
@@ -121,6 +141,7 @@ spec:
               value: {{ .Values.security.auth.internalMtls.allowedCns | quote }}
             {{- end }}
             {{- end }}
+            # ── 速率限制（可选）──
             {{- if .Values.security.rateLimit.enabled }}
             - name: PRIVACY_RATE_LIMIT_ENABLED
               value: "true"
@@ -137,10 +158,8 @@ spec:
               value: {{ .Values.security.rateLimit.perEndpointJson | quote }}
             {{- end }}
             {{- end }}
+            # ── Layer-3 LLM 推理服务连接（可选）──
             {{- if .Values.llm.enabled }}
-            # ── Layer-3 LLM 推理服务连接（运行时解耦）──
-            # LLM 由独立 Deployment（<fullname>-llm）承载，core 通过 HTTP 调用：
-            # LLM 升级/重启不影响 core；LLM 挂掉时 core 自动降级 Layer-1+2
             - name: PRIVACY_LLM_PROVIDER
               value: {{ .Values.llm.provider | default "vllm" | quote }}
             - name: PRIVACY_LLM_API_BASE
@@ -150,33 +169,42 @@ spec:
             - name: PRIVACY_LLM_API_KEY
               value: {{ .Values.llm.apiKey | default "EMPTY" | quote }}
             {{- end }}
+            # ── 额外环境变量（用户自定义）──
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
+            # 配置文件卷（privacy-profile.yaml）
             - name: config
               mountPath: /etc/PrivShield
               readOnly: true
+            # TLS 证书卷（可选）
             {{- if .Values.security.tls.enabled }}
             - name: tls-certs
               mountPath: /certs
               readOnly: true
             {{- end }}
+            # CA 证书（可选，mTLS 场景）
             {{- if .Values.security.tls.caSecret }}
             - name: ca-cert
               mountPath: {{ .Values.security.tls.caFile }}
               subPath: ca.crt
               readOnly: true
             {{- end }}
+            # mTLS CN 白名单 ConfigMap（可选）
             {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
             - name: mtls-whitelist
               mountPath: /etc/PrivShield/mtls-whitelist.yaml
               subPath: mtls-whitelist.yaml
               readOnly: true
             {{- end }}
+            # 额外卷挂载（用户自定义）
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          # ── 探针配置 ──
+          # TLS 启用时使用 exec 探针（curl/wget 加 -k 跳过证书校验）
+          # TLS 未启用时使用 httpGet 探针（更轻量）
           {{- if .Values.security.tls.enabled }}
           livenessProbe:
             exec:
@@ -212,12 +240,16 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
           {{- end }}
+          # 资源限制（CPU/内存）
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      # ── 卷定义 ──
       volumes:
+        # 配置文件卷（从 ConfigMap 挂载 privacy-profile.yaml）
         - name: config
           configMap:
             name: {{ include "PrivShield.fullname" . }}-config
+        # TLS 证书卷（从 Secret 挂载）
         {{- if .Values.security.tls.enabled }}
         - name: tls-certs
           secret:
@@ -232,14 +264,17 @@ spec:
             secretName: {{ .Values.security.tls.caSecret | quote }}
         {{- end }}
         {{- end }}
+        # mTLS CN 白名单 ConfigMap 卷
         {{- if .Values.security.auth.internalMtls.whitelistConfigMap }}
         - name: mtls-whitelist
           configMap:
             name: {{ .Values.security.auth.internalMtls.whitelistConfigMap | quote }}
         {{- end }}
+        # 额外卷（用户自定义）
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      # ── 节点调度 ──
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

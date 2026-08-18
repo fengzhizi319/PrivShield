@@ -1,22 +1,36 @@
-# 使用完整 ML 镜像的 values
+# =============================================================================
+# ML 镜像 values（values-ml.yaml）
+# =============================================================================
+# 使用完整 ML 镜像（含 torch/transformers/onnxruntime）的部署配置。
+# 适用于需要 Layer-2 NER / Layer-3 LLM 进程内推理的场景（无需独立 vLLM 容器）。
+#
+# 使用说明：
+#   helm install pla ./deploy/helm/PrivShield \
+#     -f ./deploy/helm/PrivShield/values-ml.yaml
+#
+# 注意：ML 镜像体积较大（~4GB），启动时间较长，建议配合 HPA 和较大的资源配额。
+# =============================================================================
 
+# 使用 ML 镜像风味（包含 torch/transformers/onnxruntime）
 flavor: ml
 
-# 镜像 tag 默认附加 -ml
+# 镜像 tag 默认附加 -ml 后缀（由 _helpers.tpl 的 imageTag 模板处理）
 image:
   tag: ""
 
+# ML 镜像资源需求较大（torch + 模型加载），建议分配更多资源
 resources:
   limits:
-    cpu: 4000m
-    memory: 8Gi
+    cpu: 4000m       # 4 核 CPU（模型加载/推理密集型）
+    memory: 8Gi      # 8Gi 内存（torch + 模型权重常驻内存）
   requests:
-    cpu: 1000m
-    memory: 2Gi
+    cpu: 1000m       # 1 核（调度预留）
+    memory: 2Gi      # 2Gi（调度预留）
 
+# 启用 HPA（ML 镜像启动慢，minReplicas=1 避免冷启动问题）
 autoscaling:
   enabled: true
-  minReplicas: 1
-  maxReplicas: 3
+  minReplicas: 1     # 最少 1 副本（ML 镜像启动慢，不建议缩容到 0）
+  maxReplicas: 3     # 最多 3 副本（ML 镜像资源占用大，控制上限）
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80

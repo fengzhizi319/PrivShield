@@ -1,3 +1,9 @@
+# =============================================================================
+# PrivShield Ingress 入口（ingress.yaml）
+# =============================================================================
+# 定义外部流量如何路由到集群内部 Service（需集群安装 Ingress Controller）。
+# 仅在 ingress.enabled=true 时创建。
+# =============================================================================
 {{- if .Values.ingress.enabled -}}
 {{- $fullName := include "PrivShield.fullname" . -}}
 {{- $svcPort := .Values.service.restPort -}}
@@ -7,14 +13,17 @@ metadata:
   name: {{ $fullName }}
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
+  # Ingress 注解（常用于配置 TLS 证书、重写规则等）
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  # IngressClass 名称（如 nginx、traefik 等）
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className | quote }}
   {{- end }}
+  # Ingress TLS 配置（与 Ingress Controller 的证书管理配合）
   {{- if .Values.ingress.tls }}
   tls:
     {{- range .Values.ingress.tls }}
@@ -25,6 +34,7 @@ spec:
       secretName: {{ .secretName }}
     {{- end }}
   {{- end }}
+  # 域名与路径映射规则
   rules:
     {{- range .Values.ingress.hosts }}
     - host: {{ .host | quote }}

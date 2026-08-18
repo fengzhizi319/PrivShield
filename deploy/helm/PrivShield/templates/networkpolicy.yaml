@@ -1,3 +1,9 @@
+# =============================================================================
+# PrivShield NetworkPolicy 网络策略（networkpolicy.yaml）
+# =============================================================================
+# 控制哪些 Pod/命名空间可以访问本服务的 REST/gRPC 端口。
+# 仅在 networkPolicy.enabled=true 时创建（需集群 CNI 支持 NetworkPolicy）。
+# =============================================================================
 {{- if .Values.networkPolicy.enabled -}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -6,18 +12,21 @@ metadata:
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
 spec:
+  # 作用于本 Chart 的 Pod（通过 selectorLabels 匹配）
   podSelector:
     matchLabels:
       {{- include "PrivShield.selectorLabels" . | nindent 6 }}
+  # 策略类型：仅控制入站流量（Ingress）
   policyTypes:
     - Ingress
   ingress:
-    # 允许同命名空间所有 Pod 访问 REST/gRPC 端口
+    # 允许访问 REST/gRPC 端口
     - ports:
         - protocol: TCP
           port: {{ .Values.service.restPort }}
         - protocol: TCP
           port: {{ .Values.service.grpcPort }}
+      # 来源限制（空列表=允许同命名空间所有 Pod；非空=仅允许匹配的 Pod）
       {{- if .Values.networkPolicy.ingress.from }}
       from:
         {{- toYaml .Values.networkPolicy.ingress.from | nindent 8 }}

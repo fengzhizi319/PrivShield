@@ -1,25 +1,36 @@
+# =============================================================================
+# PrivShield 主服务 Service（service.yaml）
+# =============================================================================
+# 定义 K8s Service，为 PrivShield Pod 提供稳定的集群内部访问入口。
+# 支持 REST（HTTP）和 gRPC 双端口，通过 service.exposeGrpc 控制是否暴露 gRPC。
+# =============================================================================
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "PrivShield.fullname" . }}
   labels:
     {{- include "PrivShield.labels" . | nindent 4 }}
+  # Service 注解（如云厂商 LB 配置、external-dns 等）
   {{- with .Values.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  # Service 类型（ClusterIP/NodePort/LoadBalancer）
   type: {{ .Values.service.type }}
   ports:
+    # REST API 端口
     - port: {{ .Values.service.restPort }}
       targetPort: http
       protocol: TCP
       name: http
+    # gRPC 端口（可选，由 service.exposeGrpc 控制）
     {{- if .Values.service.exposeGrpc }}
     - port: {{ .Values.service.grpcPort }}
       targetPort: grpc
       protocol: TCP
       name: grpc
     {{- end }}
+  # 通过 selectorLabels 匹配 Pod（Deployment 和 Service 共享同一对标签）
   selector:
     {{- include "PrivShield.selectorLabels" . | nindent 4 }}

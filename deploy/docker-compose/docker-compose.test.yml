@@ -1,0 +1,164 @@
+# =============================================================================
+# PrivShield - 自动化集成测试与 CI Docker Compose 编排 (Testing Orchestration)
+# =============================================================================
+# 自动化测试与 CI 流水线专用编排文件，提供：
+#   1. 启动全套待测服务 (Agent + Go Proxy + Python Proxy)
+#   2. 内置自动化测试运行器 (test-runner 容器)，等待所有被测服务就绪后执行端到端测试
+#   3. 测试完成后 test-runner 容器退出并返回状态码 (0 为通过)
+#   4. 内存型/隔离型存储，测试结束后无脏数据残留
+#
+# 🚀 运行方式 / Usage:
+#   # 执行自动化集成测试并在测试结束时自动清理容器
+#   docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
+#
+#   # 测试完毕后销毁容器与网络
+#   docker compose -f docker-compose.test.yml down -v
+# =============================================================================
+
+networks:
+  test-net:
+    driver: bridge
+
+volumes:
+  test-budget-db:
+    driver: local
+
+services:
+
+  # 1. 被测服务：PrivShield Core Agent
+  PrivShield:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: core
+    image: privshield:0.1.0-test
+    container_name: PrivShield-test-target
+    environment:
+      PRIVACY_REST_HOST: "0.0.0.0"
+      PRIVACY_REST_PORT: "8079"
+      PRIVACY_GRPC_HOST: "0.0.0.0"
+      PRIVACY_GRPC_PORT: "50051"
+      PRIVACY_SERVICE_NAME: "PrivShield-test"
+      PRIVACY_LOG_LEVEL: "INFO"
+      PRIVACY_LOG_FORMAT: "text"
+      PRIVACY_PROFILE: "/etc/PrivShield/privacy-profile.yaml"
+      PRIVACY_BUDGET_DB: "/data/budget/test-budget.db"
+      PRIVACY_TLS_ENABLED: "false"
+      PRIVACY_AUTH_ENABLED: "false"
+      PRIVACY_RATE_LIMIT_ENABLED: "false"
+    volumes:
+      - ./privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro
+      - test-budget-db:/data/budget
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  # 2. 被测服务：Console Go 后端代理
+  console-backend-go:
+    build:
+      context: ../../console/backend-go
+      dockerfile: Dockerfile
+    image: privacy-console-backend-go:0.1.0-test
+    container_name: privacy-console-backend-go-test
+    environment:
+      PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      PRIVACY_CONSOLE_PORT: "8081"
+      PRIVACY_AGENT_GRPC_HOST: "PrivShield"
+      PRIVACY_AGENT_GRPC_PORT: "50051"
+      PRIVACY_AGENT_URL: "http://PrivShield:8079"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 3s
+
+  # 3. 被测服务：Console Python 后端代理
+  console-backend-python:
+    build:
+      context: ../../console/backend
+      dockerfile: Dockerfile
+    image: privacy-console-backend-python:0.1.0-test
+    container_name: privacy-console-backend-python-test
+    environment:
+      PRIVACY_CONSOLE_HOST: "0.0.0.0"
+      PRIVACY_CONSOLE_PORT: "8080"
+      PRIVACY_AGENT_URL: "http://PrivShield:8079"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 3s
+
+  # 4. 自动化测试运行器：等待被测服务就绪后执行端到端 API 测试
+  test-runner:
+    image: curlimages/curl:latest
+    container_name: PrivShield-test-runner
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+      console-backend-go:
+        condition: service_healthy
+      console-backend-python:
+        condition: service_healthy
+    networks:
+      - test-net
+    command:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -e
+        echo "=================================================="
+        echo "🧪 [CI Test Runner] 开始执行自动化集成冒烟测试..."
+        echo "=================================================="
+
+        echo "1. 探测 Core Agent 健康检查 /health..."
+        curl -fsS http://PrivShield:8079/health | grep -q "ok"
+        echo "   -> Core Agent /health [PASS]"
+
+        echo "2. 探测 Core Agent 就绪检查 /readyz..."
+        curl -fsS http://PrivShield:8079/readyz | grep -q "ok"
+        echo "   -> Core Agent /readyz [PASS]"
+
+        echo "3. 测试差分隐私 DP count 接口..."
+        DP_RES=$$(curl -fsS -X POST http://PrivShield:8079/v1/privacy/dp/count \
+          -H "Content-Type: application/json" \
+          -d '{"values": [1, 0, 1, 1, 0], "params": {"epsilon": 1.0}}')
+        echo "   DP Result: $$DP_RES"
+        echo "   -> DP count API [PASS]"
+
+        echo "4. 测试字段脱敏 Mask 接口..."
+        MASK_RES=$$(curl -fsS -X POST http://PrivShield:8079/v1/privacy/mask \
+          -H "Content-Type: application/json" \
+          -d '{"field_name": "mobile", "value": "13800138000", "context": "medical"}')
+        echo "   Mask Result: $$MASK_RES"
+        echo "   -> Mask API [PASS]"
+
+        echo "5. 探测 Go 代理健康检查 /health..."
+        curl -fsS http://console-backend-go:8081/health | grep -q "ok"
+        echo "   -> Console Backend Go /health [PASS]"
+
+        echo "6. 探测 Python 代理健康检查 /health..."
+        curl -fsS http://console-backend-python:8080/health | grep -q "ok"
+        echo "   -> Console Backend Python /health [PASS]"
+
+        echo "=================================================="
+        echo "🎉 [CI Test Runner] 全部集成测试执行成功！"
+        echo "=================================================="
+        exit 0
