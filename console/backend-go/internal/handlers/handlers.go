@@ -90,6 +90,7 @@ func New(client *agent.Client, cfg *config.Config) *Server {
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(corsMiddleware())
 	r.Use(securityMiddleware(s.cfg.ConsoleAPIKey, s.cfg.ConsoleRateLimit))
+	r.GET("/health", s.Health)
 	r.GET("/api/health", s.Health)
 	r.GET("/api/samples", s.Samples)
 	r.POST("/api/proxy", s.Proxy)
@@ -366,7 +367,20 @@ func restOnlyPath(path string) bool {
 // 因此默认值使用 agent REST 默认地址（127.0.0.1:8079），
 // 而非 gRPC 主机（AgentGRPCHost），避免配置不一致时路由到错误地址。
 func agentRestBaseURL() string {
-	restHost := os.Getenv("PRIVACY_REST_HOST")
+	if u := os.Getenv("PRIVACY_AGENT_URL"); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	if u := os.Getenv("PRIVACY_AGENT_REST_URL"); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+
+	restHost := os.Getenv("PRIVACY_AGENT_REST_HOST")
+	if restHost == "" {
+		restHost = os.Getenv("PRIVACY_REST_HOST")
+	}
+	if restHost == "" {
+		restHost = os.Getenv("PRIVACY_AGENT_GRPC_HOST")
+	}
 	if restHost == "" {
 		restHost = "127.0.0.1"
 	}

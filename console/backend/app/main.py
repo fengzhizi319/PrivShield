@@ -247,6 +247,7 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
 @app.get("/api/health")
 async def health():
     """检查后端自身与下游 agent 的连通性。

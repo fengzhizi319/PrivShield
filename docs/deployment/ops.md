@@ -58,6 +58,15 @@
   - [15.1 Docker Compose 常见故障](#151-docker-compose)
     - [15.1.1 vLLM Docker 服务测试失败排查案例](#1511-vllm-docker-服务测试失败排查案例)
   - [15.2 WSL 中 Docker GPU 失效（真实排查案例）](#152-wsl-docker-gpu)
+  - [15.3 本地镜像与构建拉取异常（pull_policy: build 与 Tag 规范）](#153-本地镜像与构建拉取异常pull_policy-build-与-tag-规范)
+  - [15.4 Buildx 容器驱动隔离导致镜像加速失效](#154-buildx-容器驱动隔离导致镜像加速失效)
+  - [15.5 容器构建四层全链路加速配置（APT / APK / GoProxy / NPM / Pip）](#155-容器构建四层全链路加速配置apt--apk--goproxy--npm--pip)
+  - [15.6 Go 编译工具链与高版本依赖协同（GOTOOLCHAIN=auto）](#156-go-编译工具链与高版本依赖协同gotoolchainauto)
+  - [15.7 容器非 Root 权限与命名卷初始化权限冲突（sqlite3.OperationalError）](#157-容器非-root-权限与命名卷初始化权限冲突sqlite3operationalerror)
+  - [15.8 容器探针与健康检查端点一致性（/health vs /api/health）](#158-容器探针与健康检查端点一致性health-vs-apihealth)
+  - [15.9 跨容器网络服务发现与协议回退失败](#159-跨容器网络服务发现与协议回退失败)
+  - [15.10 Linux ARG_MAX 环境变量超长导致测试与脚本崩溃](#1510-linux-arg_max-环境变量超长导致测试与脚本崩溃)
+  - [15.11 运行时业务标准文档与 .dockerignore 排除冲突（generate_profile）](#1511-运行时业务标准文档与-dockerignore-排除冲突generate_profile)
 - [16. 日常运维操作](#16-日常运维操作)
 
 ---
@@ -84,7 +93,7 @@
 Dockerfile 采用三阶段构建，通过 `--target` 选择最终镜像：
 
 ```text
-base (python:3.13.13-slim-bookworm)
+base (python:3.13-slim-bookworm)
  ├── 安装 curl / ca-certificates（K8s 探针依赖）
  ├── 安装 requirements-core.txt（核心运行时依赖）
  │
@@ -1733,6 +1742,321 @@ docker run --rm --gpus 1 <镜像> python3 -c "import torch; print(torch.cuda.is_
 - WSL 的 GPU 驱动库在宿主 `/usr/lib/wsl/lib`，docker.io daemon 没有 snap 沙箱限制，配合 nvidia-container-toolkit 即可正常注入 GPU。
 - **新版 vllm 官方镜像（Ubuntu 24.04 base）只有 `python3`、没有 `python` 命令**，用 `--entrypoint python` 会报 `exec: "python": executable file not found in $PATH`；GPU 探测、自定义入口统一用 `python3`（本机实测 `CUDA: True`）。
 - **根因判定线索**（防误判）：驱动/CUDA 全正常、唯独容器内拿不到 GPU → 优先怀疑 Docker 运行时的沙箱限制，而不是镜像或驱动问题。
+
+### 15.3 本地镜像与构建拉取异常（`pull_policy: build` 与 Tag 规范）
+
+**现象**：
+在执行 `docker compose up -d` 启动微服务套件（包含 `PrivShield`、`console-backend-go`、`console-backend-python`、`console-web`）时，终端报错：
+```text
+failed to resolve reference "docker.io/library/privacy-console-backend-python:0.1.0": unexpected status from HEAD request to https://registry-1.docker.io/v2/...
+```
+或报错：
+```text
+failed to resolve source metadata for docker.io/library/python:3.13.13-slim-bookworm: manifest unknown
+```
+
+**根因**：
+1. Compose 2.x 默认的 `pull_policy` 在本地无指定 Tag 时倾向于向远程 Registry 发起 HEAD 查询，未推送到 Docker Hub 的私有 Tag 会触发远程拉取失败；
+2. Dockerfile 中使用了非官方发布的 Patch 版本号（如 `python:3.13.13-slim-bookworm`，官方 Python 仅发布 `3.13-slim-bookworm` 或 `3.13.2-slim-bookworm`）。
+
+**排查命令**：
+```bash
+# 1. 检查 Compose 当前解析的服务拉取策略与构建配置
+cd deploy/docker-compose
+docker compose config | grep -E "(image|pull_policy|build)"
+
+# 2. 检查本地现有镜像列表与 Tag
+docker images | grep -E "(privshield|privacy-console)"
+```
+
+**解决方案**：
+1. 在 `deploy/docker-compose/docker-compose.yml` 中为所有本地构建服务添加 `pull_policy: build`：
+   ```yaml
+   console-backend-python:
+     build:
+       context: ../../console/backend
+       dockerfile: Dockerfile
+     image: privacy-console-backend-python:0.1.0
+     pull_policy: build
+   ```
+2. 统一修正各 Dockerfile 中的基础镜像 Tag 为标准规范：
+   ```dockerfile
+   FROM python:3.13-slim-bookworm
+   ```
+3. 在管理脚本（如 `console/scripts/docker-start-all.sh`）中默认传递 `--build` 参数，并提供 `--no-build` 选项。
+
+---
+
+### 15.4 Buildx 容器驱动隔离导致镜像加速失效
+
+**现象**：
+宿主机 `/etc/docker/daemon.json` 已配置国内镜像加速器，但在执行 `docker compose build` 时依然直连 `registry-1.docker.io` 并报连接重置：
+```text
+failed to do request: Head "https://registry-1.docker.io/v2/library/python/manifests/3.13-slim-bookworm": 
+read tcp 172.17.0.2:49146->23.21.28.55:443: read: connection reset by peer
+```
+
+**根因**：
+系统当前激活的 buildx 构建器实例为 `docker-container` 驱动（如因安装其他容器组件自动生成的 `kuscia` 或 `buildx_buildkit_*` 容器，网段为 `172.17.0.2`）。该构建器运行在独立网络沙箱中，**不会继承宿主机 Docker Daemon 的镜像加速配置**。
+
+**排查命令**：
+```bash
+# 1. 查看当前 buildx 构建实例及驱动类型
+docker buildx ls
+
+# 2. 观察当前带星号 (*) 的构建器是否为 docker-container 驱动
+# 示例输出：
+# kuscia * docker-container  (隔离沙箱，无 daemon.json 加速)
+# default   docker           (宿主机引擎，继承 daemon.json 加速)
+```
+
+**解决方案**：
+```bash
+# 切换回宿主机默认 Docker 引擎构建器
+docker buildx use default
+
+# 验证当前激活构建器
+docker buildx ls
+# 输出应显示：default * docker ...
+```
+
+---
+
+### 15.5 容器构建四层全链路加速配置（APT / APK / GoProxy / NPM / Pip）
+
+**现象**：
+在容器构建过程中，执行 `apt-get update`、`apk add`、`go mod download` 或 `pnpm install` 阶段极其缓慢（单次构建耗时 > 15 分钟），或因网络波动中断。
+
+**根因**：
+基础镜像内默认各语言与包管理系统仅配置了海外官方软件源。
+
+**最佳配置模板（运维基线）**：
+
+| 组件 / 层级 | Dockerfile 优化配置片段 | 说明 |
+|---|---|---|
+| **Debian (APT)** | `RUN (sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null \|\| sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null \|\| true) && apt-get update && apt-get install -y --no-install-recommends ...` | 自动兼容 Debian 12 deb822 与旧格式 sources |
+| **Alpine (APK)** | `RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories 2>/dev/null \|\| true && apk add --no-cache ...` | 替换为 Aliyun Alpine 镜像源 |
+| **Go 依赖下载** | `ENV GOPROXY=https://goproxy.cn,direct`<br>`ENV GOTOOLCHAIN=auto` | 配置国内 Go Module 代理并允许自动升级工具链 |
+| **Python (Pip)** | `RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple` | 主 Aliyun 源 + 备用清华源 |
+| **Node.js (NPM)** | `RUN npm config set registry https://registry.npmmirror.com && npm install -g pnpm && pnpm config set registry https://registry.npmmirror.com` | 配置国内 npmmirror 镜像源 |
+
+---
+
+### 15.6 Go 编译工具链与高版本依赖协同（`GOTOOLCHAIN=auto`）
+
+**现象**：
+编译 Go 代理后端（`console/backend-go`）时，`go mod download` 阶段报错中断：
+```text
+go: github.com/gin-gonic/gin@v1.12.0 requires go >= 1.25.0 (running go 1.23.4; GOTOOLCHAIN=local)
+```
+
+**根因**：
+Go 1.21+ 引入版本协同工具链机制。在 Alpine 基础镜像（如 `golang:1.23.4-alpine`）中，默认环境变量为 `GOTOOLCHAIN=local`，拒绝自动升级工具链版本以满足间接依赖库声明的最小 Go 版本要求。
+
+**解决方案**：
+在 `console/backend-go/Dockerfile` 编译阶段声明 `ENV GOTOOLCHAIN=auto`：
+```dockerfile
+FROM golang:1.23.4-alpine3.20 AS builder
+
+WORKDIR /app
+
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOTOOLCHAIN=auto  # 允许 Go 根据 go.mod 声明自动下载高版本工具链
+
+COPY go.mod go.sum ./
+RUN go mod download
+```
+
+---
+
+### 15.7 容器非 Root 权限与命名卷初始化权限冲突（`sqlite3.OperationalError`）
+
+**现象**：
+`PrivShield` Agent 容器启动时输出崩溃日志，容器健康检查持续失败并重启：
+```text
+Traceback (most recent call last):
+  ...
+  File "/app/PrivShield/privacy/budget.py", line 265, in _init_db
+    conn = sqlite3.connect(db_path, timeout=10.0)
+sqlite3.OperationalError: unable to open database file
+```
+
+**根因**：
+1. 生产安全合规要求容器必须以非 root 普通用户运行（`USER privacy`）；
+2. Docker 在挂载命名数据卷（如 `budget-db:/data/budget`）时，如果基础镜像中此前未曾创建该目录并授权给 `privacy` 用户，Docker Daemon 会默认以 `root:root` (0755) 属主创建挂载目录；
+3. 普通用户无权限在挂载目录中创建 SQLite 数据库文件及 WAL 锁日志。
+
+**排查与验证**：
+```bash
+# 检查正在运行容器内挂载目录的属主权限
+docker exec PrivShield ls -ld /data/budget /var/log/privacy
+# 异常时输出：drwxr-xr-x 2 root root 4096 ...
+# 正常应输出：drwxr-xr-x 2 privacy privacy 4096 ...
+```
+
+**解决方案**：
+1. **Dockerfile 预建并授权**（切换 `USER privacy` 前以 root 身份执行）：
+   ```dockerfile
+   # 创建数据与日志持久化挂载目录并授权 privacy 用户
+   RUN mkdir -p /data/budget /var/log/privacy \
+       && chown -R privacy:privacy /app /data /var/log/privacy
+
+   USER privacy
+   ```
+2. **业务代码上级目录递归建目录兜底**（`PrivShield/privacy/budget.py`）：
+   ```python
+   db_path = os.environ.get("PRIVACY_BUDGET_DB")
+   if db_path:
+       parent_dir = os.path.dirname(db_path)
+       if parent_dir:
+           os.makedirs(parent_dir, exist_ok=True)
+       conn = sqlite3.connect(db_path, timeout=10.0)
+   ```
+3. **已受污染卷清理**：若卷已被 root 占用，执行 `docker compose down -v` 清理旧卷后重新启动。
+
+---
+
+### 15.8 容器探针与健康检查端点一致性（`/health` vs `/api/health`）
+
+**现象**：
+`privacy-console-backend-python` 或 `privacy-console-backend-go` 容器状态长时间停留在 `(health: starting)`，最终因连续 3 次探测失败被标记为 `unhealthy`。
+
+**根因**：
+- Dockerfile / Compose 的 HEALTHCHECK 命令探测的是 `http://localhost:8080/health`；
+- 控制台代理后端路由原本仅挂载了带前缀的 `/api/health`，导致根路径 `/health` 返回 HTTP 404。
+
+**排查命令**：
+```bash
+# 测试两个不同路径的响应状态码
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/health
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/health
+```
+
+**解决方案**：
+在 Python FastAPI 与 Go Gin 代理后端中**双重注册**健康检查路由：
+```python
+# FastAPI: console/backend/app/main.py
+@app.get("/health")
+@app.get("/api/health")
+async def health(): ...
+```
+```go
+// Gin: console/backend-go/internal/handlers/handlers.go
+r.GET("/health", s.Health)
+r.GET("/api/health", s.Health)
+```
+
+---
+
+### 15.9 跨容器网络服务发现与协议回退失败
+
+**现象**：
+通过 Go 代理后端调用部分未实现 gRPC 的 REST 回退接口（如脱敏/动态分类规则热重载）时返回 HTTP 502：
+```text
+Agent REST HTTP error: Post "http://127.0.0.1:8079/v1/...": dial tcp 127.0.0.1:8079: connect: connection refused
+```
+
+**根因**：
+在 Docker Compose 桥接网络中，各微服务容器拥有独立的 Network Namespace，`127.0.0.1` 指向容器本地。跨容器网络通信必须使用 Compose 服务名（如 `PrivShield`）及内部 DNS 解析。
+
+**解决方案**：
+1. **Go 后端增加环境变量解析回退机制**（`handlers.go`）：
+   ```go
+   func agentRestBaseURL() string {
+       if u := os.Getenv("PRIVACY_AGENT_URL"); u != "" {
+           return strings.TrimRight(u, "/")
+       }
+       restHost := os.Getenv("PRIVACY_AGENT_REST_HOST")
+       if restHost == "" {
+           restHost = os.Getenv("PRIVACY_AGENT_GRPC_HOST") // 自动回退到 gRPC 服务名 (PrivShield)
+       }
+       if restHost == "" {
+           restHost = "127.0.0.1"
+       }
+       // ... 默认端口 8079
+   }
+   ```
+2. **Compose 中显式注入网络变量**：
+   ```yaml
+   console-backend-go:
+     environment:
+       PRIVACY_AGENT_GRPC_HOST: "PrivShield"
+       PRIVACY_AGENT_GRPC_PORT: "50051"
+       PRIVACY_AGENT_URL: "http://PrivShield:8079"
+   ```
+
+---
+
+### 15.10 Linux `ARG_MAX` 环境变量超长导致测试与脚本崩溃
+
+**现象**：
+自动化测试或自动化运维脚本在执行 `subprocess.run(["bash", "..."])` 时报错：
+```text
+OSError: [Errno 7] Argument list too long
+```
+
+**根因**：
+在复杂的 CI/CD、Kubernetes Runner 或带有深度上下文的 Agent 环境中，当前进程的 `os.environ` 中可能注入了超大体积的环境变量（例如数万字符的 Prompt 文本、长 Token 或完整调试 Trace）。当 Python `subprocess` 默认克隆 `env=os.environ` 时，所有键值对的合计体积超过了 Linux 内核单次 `execve` 系统调用允许的最大内存页限制（`ARG_MAX`，通常约 2MB）。
+
+**解决方案**：
+在测试框架或运维调用包装器中增加环境变量过滤清洗：
+```python
+def _clean_env() -> dict[str, str]:
+    """清洗超长上下文变量，防止触发 Linux ARG_MAX 限制"""
+    clean = {}
+    for k, v in os.environ.items():
+        # 仅保留小于 4KB 的必要环境变量，过滤超大 prompt/context 注入
+        if len(v) < 4096 and not k.startswith(("AGENT_", "CONTEXT_", "PROMPT_")):
+            clean[k] = v
+    return clean
+
+# 调用示例
+subprocess.run(["bash", script_path], env=_clean_env(), check=True)
+```
+
+---
+
+### 15.11 运行时业务标准文档与 `.dockerignore` 排除冲突（`generate_profile`）
+
+**现象**：
+控制台前端批量测试或手动调用 `POST /v1/dynclassification/generate_profile` 接口时失败，返回 HTTP 400：
+```text
+{"detail": "Failed to generate configuration from document"}
+```
+Agent 容器后台日志报错：
+```text
+{"level": "WARNING", "name": "PrivShield.routers.dynclassification", "message": "generate_profile failed", "error": "标准文档不存在: /app/docs/standard/四川省健康医疗大数据应用指南.md"}
+```
+
+**根因**：
+`.dockerignore` 将 `docs/` 与 `*.md` 作为通用文档排除了构建上下文。而动态分类分级模块的配置生成能力（`StandardProfileGenerator`）需要读取行业规范 Markdown 文档（位于 `docs/standard/`），导致运行时在容器内找不到文档源文件。
+
+**排查命令**：
+```bash
+# 检查容器内是否存在标准分类分级文档
+docker exec PrivShield ls -la /app/docs/standard/
+```
+
+**解决方案**：
+1. **`.dockerignore` 增加白名单例外**：
+   ```dockerignore
+   docs/*
+   !docs/standard/
+   !docs/standard/*.md
+   site/
+   *.md
+   !README.md
+   !docs/standard/*.md
+   ```
+2. **`Dockerfile` 显式复制标准文档**：
+   ```dockerfile
+   COPY docs/standard/ ./docs/standard/
+   ```
+3. **`docker-compose.yml` 挂载标准文档目录**：
+   ```yaml
+   volumes:
+     - ../../docs/standard:/app/docs/standard:ro
+   ```
 
 ---
 

@@ -239,6 +239,9 @@ class BudgetAccountant:
             if conn is not None:
                 with contextlib.suppress(Exception):
                     conn.close()
+            parent_dir = os.path.dirname(db_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
             conn = sqlite3.connect(db_path, timeout=10.0)
             # 高并发优化：开启 WAL 模式，读写不再互斥
             conn.execute("PRAGMA journal_mode=WAL")
@@ -262,6 +265,9 @@ class BudgetAccountant:
         """初始化共享数据库，如果设置了 PRIVACY_BUDGET_DB 持久化路径。"""
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
+            parent_dir = os.path.dirname(db_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
             conn = sqlite3.connect(db_path, timeout=10.0)
             try:
                 # 初始化阶段也开启 WAL 模式，确保数据库文件本身已切换为 WAL 格式

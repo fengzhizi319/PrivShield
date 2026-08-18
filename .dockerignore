@@ -92,10 +92,13 @@ tmp/
 # 文档与站点（运行时不需要）
 # Documentation and site (not needed at runtime)
 # ----------------------------------------------------------------------------
-docs/
+docs/*
+!docs/standard/
+!docs/standard/*.md
 site/
 *.md
 !README.md
+!docs/standard/*.md
 
 # ----------------------------------------------------------------------------
 # 测试与开发配置

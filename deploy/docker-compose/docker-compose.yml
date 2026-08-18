@@ -122,8 +122,9 @@ services:
       #   ml              : 完整 ML 镜像（含 PyTorch、Transformers、ONNX Runtime，Layer-2/3 在进程内推理）
       target: core
     # image: 构建产物/运行使用的镜像名:tag
-    #   若本地不存在该标签，compose 会尝试从远端仓库（Docker Hub）拉取
+    #   若本地不存在该标签，compose 配合 pull_policy: build 优先本地构建，避免向远端拉取失败
     image: privshield:0.1.0
+    pull_policy: build
     # container_name: 指定容器名称（同一宿主机全局唯一）
     #   不设置时 compose 自动生成 "<项目名>-<服务名>-<序号>" 格式名称
     container_name: PrivShield
@@ -206,6 +207,7 @@ services:
     #   "卷名:container" 单冒号形式为 named volume（由上方 volumes 段声明）
     volumes:
       - ./privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro  # 参数 profile 只读挂载
+      - ../../docs/standard:/app/docs/standard:ro                       # 标准分类分级 Markdown 文档（供 generate_profile 使用）
       - budget-db:/data/budget          # 预算数据库持久化命名卷
       - audit-logs:/var/log/privacy     # 审计日志持久化命名卷
     # networks: 容器加入的网络（可多选；服务名即网络内 DNS 名称）
@@ -269,6 +271,7 @@ services:
       context: ../../console/backend-go  # 构建上下文 = Go 后端源码目录
       dockerfile: Dockerfile             # 多阶段：Go 编译 → scratch/alpine 运行
     image: privacy-console-backend-go:0.1.0
+    pull_policy: build
     container_name: privacy-console-backend-go
     ports:
       - "8081:8081"  # 对外暴露 Go 代理 HTTP 端口（前端 dev/prod 均转发至此）
@@ -285,6 +288,8 @@ services:
       PRIVACY_AGENT_GRPC_HOST: "PrivShield"
       # PRIVACY_AGENT_GRPC_PORT: 上游 agent 的 gRPC 端口（与 agent 的 50051 一致）
       PRIVACY_AGENT_GRPC_PORT: "50051"
+      # PRIVACY_AGENT_URL: 上游 agent 的 REST 端口（用于回退转发非 gRPC 接口）
+      PRIVACY_AGENT_URL: "http://PrivShield:8079"
     # depends_on: 服务启动顺序依赖
     #   condition 可选值：
     #     service_started                → 仅等待容器启动（默认）
@@ -329,6 +334,7 @@ services:
       context: ../../console/backend   # 构建上下文 = Python FastAPI 代理源码目录
       dockerfile: Dockerfile
     image: privacy-console-backend-python:0.1.0
+    pull_policy: build
     container_name: privacy-console-backend-python
     ports:
       - "8080:8080"  # 对外暴露 Python 代理 HTTP 端口
@@ -378,6 +384,7 @@ services:
       context: ../../console/web   # 构建上下文 = React 前端源码目录（构建产物打入 Nginx 镜像）
       dockerfile: Dockerfile
     image: privacy-console-web:0.1.0
+    pull_policy: build
     container_name: privacy-console-web
     ports:
       - "5173:5173"  # 对外暴露前端访问端口（与 vite 开发端口保持一致，切换开发/生产无感）

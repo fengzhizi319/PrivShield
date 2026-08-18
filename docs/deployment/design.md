@@ -32,6 +32,17 @@
   - [12.2 结论](#122-结论)
   - [12.3 亮点](#123-亮点)
   - [12.4 改进建议](#124-改进建议)
+- [13. 容器化部署实战排坑与经验总结 / Deployment Pitfalls & Best Practices](#13-容器化部署实战排坑与经验总结--deployment-pitfalls--best-practices)
+  - [13.1 本地与私有镜像拉取策略（pull_policy: build）](#131-本地与私有镜像拉取策略pull_policy-build)
+  - [13.2 容器隔离构建引擎与宿主机 Daemon 代理冲突（Buildx 驱动选择）](#132-容器隔离构建引擎与宿主机-daemon-代理冲突buildx-驱动选择)
+  - [13.3 基础镜像 Tag 锁定与语义规范](#133-基础镜像-tag-锁定与语义规范)
+  - [13.4 多语言全链路容器构建加速体系（Debian / Alpine / Go / NPM）](#134-多语言全链路容器构建加速体系debian--alpine--go--npm)
+  - [13.5 Go 现代化工具链动态下载与版本协同（GOTOOLCHAIN=auto）](#135-go-现代化工具链动态下载与版本协同gotoolchainauto)
+  - [13.6 非 Root 容器安全运行与命名卷挂载权限冲突](#136-非-root-容器安全运行与命名卷挂载权限冲突)
+  - [13.7 跨组件探针与健康检查端点一致性（/health 与 /api/health）](#137-跨组件探针与健康检查端点一致性health-与-apihealth)
+  - [13.8 容器网络隔离下的服务发现与协议回退寻址](#138-容器网络隔离下的服务发现与协议回退寻址)
+  - [13.9 测试与 CI 执行环境中的 Linux ARG_MAX 限制规避](#139-测试与-ci-执行环境中的-linux-arg_max-限制规避)
+  - [13.10 运行时业务规范文档与 .dockerignore 排除冲突（generate_profile）](#1310-运行时业务规范文档与-dockerignore-排除冲突generate_profile)
 
 ---
 
@@ -670,3 +681,297 @@ strategy:
 | P2 | 添加自定义指标 HPA（基于 privacy_requests_total） | 性能 +1 |
 | P3 | 补充 Chart CHANGELOG 与版本管理策略 | 可维护性 +0.5 |
 | P3 | 集成 Argo Rollouts 实现自动化金丝雀发布 | 可靠性 +0.5 |
+
+---
+
+## 13. 容器化部署实战排坑与经验总结 / Deployment Pitfalls & Best Practices
+
+在 `PrivShield` 项目全栈微服务（Python Agent + Go gRPC 代理 + Python REST 代理 + React 前端 + vLLM GPU 推理）的容器化与多环境交付过程中，总结沉淀了以下关键技术陷阱与最佳实践方案。
+
+### 13.1 本地与私有镜像拉取策略（`pull_policy: build`）
+
+#### 陷阱场景
+执行 `docker compose up -d` 启动包含本地 Dockerfile 构建的服务时，Docker Compose 遇到未在本地缓存的自定义镜像 Tag（如 `privacy-console-backend-python:0.1.0`），默认策略仍会尝试向 Docker Hub（`docker.io`）发起 HEAD / Manifest 查询请求。在受限网络或无公共推送权限的环境下，会导致：
+```text
+failed to resolve reference "docker.io/library/privacy-console-backend-python:0.1.0": unexpected status from HEAD request
+```
+
+#### 根本原因
+Docker Compose 2.x 的 `pull_policy` 默认值为 `missing`。如果服务指定了 `image: xxx:tag` 且本地不存在该 Tag，Compose 倾向于先向远程 Registry 尝试拉取，失败后才尝试本地构建，甚至在部分网络超时场景下直接中断退出。
+
+#### 最佳实践与解法
+1. **显式声明拉取策略**：在 `docker-compose.yml` 中为所有本地构建服务显式添加 `pull_policy: build`：
+   ```yaml
+   console-backend-python:
+     build:
+       context: ../../console/backend
+       dockerfile: Dockerfile
+     image: privacy-console-backend-python:0.1.0
+     pull_policy: build  # 强制本地构建，禁止向远程 Registry 拉取未推送 Tag
+   ```
+2. **启动脚本默认注入 `--build`**：在 `docker-start-all.sh` / `docker-start-go.sh` 等脚本中，默认追加 `--build` 参数，并提供 `--no-build` 选项供快速重用。
+
+---
+
+### 13.2 容器隔离构建引擎与宿主机 Daemon 代理冲突（Buildx 驱动选择）
+
+#### 陷阱场景
+当主机上安装了其他容器化工具（如 Kuscia / Kubernetes In Docker / 独立 BuildKit 容器）时，`docker buildx` 的默认 builder 可能会被切换为 `docker-container` 驱动（如 `kuscia`，网络命名空间绑定在 `172.17.0.2`）。此时执行镜像构建：
+```text
+failed to resolve source metadata for docker.io/library/python:3.13-slim-bookworm: 
+read tcp 172.17.0.2:49146->23.21.28.55:443: read: connection reset by peer
+```
+
+#### 根本原因
+`docker-container` 驱动运行在隔离的容器网络中，其 BuildKit 守护进程不会继承宿主机 `/etc/docker/daemon.json` 中配置的 `registry-mirrors`（镜像加速器）与系统代理，而是直接向 Docker Hub 官方海外地址建连，极易被国内网络重置。
+
+#### 最佳实践与解法
+1. **切换为宿主机默认引擎**：在构建前检查并切换 buildx builder 为宿主机默认 Docker Daemon 驱动：
+   ```bash
+   # 检查当前构建器
+   docker buildx ls
+   # 切换回默认宿主机 daemon（继承 daemon.json 中的所有 mirror 与代理配置）
+   docker buildx use default
+   ```
+2. **预拉取基础镜像**：对于大型多阶段基础镜像（如 `golang:1.23.4-alpine3.20`、`python:3.13-slim-bookworm`），利用宿主机 daemon 事先 `docker pull`，利用本地缓存规避编译期拉取抖动。
+
+---
+
+### 13.3 基础镜像 Tag 锁定与语义规范
+
+#### 陷阱场景
+在 Dockerfile 中使用了非官方发布的 Patch 版本标签（例如将 Debian 12 Bookworm 基础镜像写作 `FROM python:3.13.13-slim-bookworm`），导致拉取镜像阶段报错：
+```text
+manifest unknown: manifest unknown
+```
+
+#### 根本原因
+Docker Hub 官方 Python 镜像的命名规范为 `python:<major>.<minor>-slim-<distro>`（例如 `python:3.13-slim-bookworm`）或具体的已发布微版本 `python:3.13.2-slim-bookworm`，不存在未发布的 `3.13.13`。
+
+#### 最佳实践与解法
+- 项目内各服务 Dockerfile 统一基础镜像规范，并在 `AGENTS.md` / `design.md` 中形成清单：
+  - Python 运行时：`python:3.13-slim-bookworm`
+  - Go 编译阶段：`golang:1.23.4-alpine3.20`
+  - Alpine 运行阶段：`alpine:3.20.3`
+  - Node 前端构建：`node:20.18.0-alpine3.20`
+  - Nginx 前端托管：`nginx:1.26.2-alpine`
+
+---
+
+### 13.4 多语言全链路容器构建加速体系（Debian / Alpine / Go / NPM）
+
+#### 陷阱场景
+多阶段构建中，容器内部执行 `apt-get update`、`apk add`、`go mod download`、`pnpm install`、`pip install` 时，由于容器内默认访问海外官方源，构建过程耗时常达 10~30 分钟，且容易遭遇连接重置失败。
+
+#### 最佳实践与解法
+在各语言的多阶段 Dockerfile 中，统一注入国内镜像加速源，使全量冷构建缩短至 1~2 分钟内：
+
+1. **Debian APT 加速（兼容 Debian 12 `debian.sources` 与旧 `sources.list`）**：
+   ```dockerfile
+   RUN (sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null \
+        || sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null || true) \
+       && apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+       && rm -rf /var/lib/apt/lists/*
+   ```
+2. **Alpine APK 加速**：
+   ```dockerfile
+   RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories 2>/dev/null || true \
+       && apk add --no-cache git ca-certificates curl
+   ```
+3. **Go Module 代理加速**：
+   ```dockerfile
+   ENV GOPROXY=https://goproxy.cn,direct
+   ```
+4. **Python Pip 加速**：
+   ```dockerfile
+   RUN pip install --no-cache-dir -r requirements.txt \
+       -i https://mirrors.aliyun.com/pypi/simple/ \
+       --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple
+   ```
+5. **Node.js / NPM / Pnpm 加速**：
+   ```dockerfile
+   RUN npm config set registry https://registry.npmmirror.com \
+       && npm install -g pnpm \
+       && pnpm config set registry https://registry.npmmirror.com \
+       && pnpm install --frozen-lockfile
+   ```
+
+---
+
+### 13.5 Go 现代化工具链动态下载与版本协同（`GOTOOLCHAIN=auto`）
+
+#### 陷阱场景
+当 `go.mod` 声明的依赖库（例如 `github.com/gin-gonic/gin@v1.12.0`）要求 `go >= 1.25.0`，而基础镜像为 `golang:1.23.4-alpine` 时，编译报错：
+```text
+go: github.com/gin-gonic/gin@v1.12.0 requires go >= 1.25.0 (running go 1.23.4; GOTOOLCHAIN=local)
+```
+
+#### 根本原因
+Go 1.21+ 引入了 Go Toolchain 机制。在容器环境中，默认环境变量 `GOTOOLCHAIN=local` 禁止 Go 自动下载升级所需的更高版本编译器。
+
+#### 最佳实践与解法
+在 Go 编译阶段 Dockerfile 中显式配置：
+```dockerfile
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOTOOLCHAIN=auto
+```
+`GOTOOLCHAIN=auto` 配合 `GOPROXY` 可让 Go 编译器在遇到依赖库需要更高版本时，通过国内代理自动拉取目标 toolchain 并无缝完成构建，无需反复更换底层 Docker 基础镜像。
+
+---
+
+### 13.6 非 Root 容器安全运行与命名卷挂载权限冲突
+
+#### 陷阱场景
+容器遵循安全最佳实践以非 root 用户（`USER privacy`，UID/GID 系统分配）运行。启动时初始化持久化 SQLite 预算数据库（`PRIVACY_BUDGET_DB=/data/budget/budget.db`）报错：
+```text
+sqlite3.OperationalError: unable to open database file
+```
+容器启动失败并陷入 CrashLoopBackOff 或处于 `unhealthy` 状态。
+
+#### 根本原因
+1. 当 Docker 首次初始化并挂载命名数据卷（如 `budget-db:/data/budget`）时，若镜像构建阶段未在基础镜像中预先创建该目录并赋予 `privacy` 用户权限，Docker Daemon 会默认以 `root:root` (0755) 属主创建卷目录；
+2. 容器以普通用户 `privacy` 启动后，对 `/data/budget` 仅有只读权限，无法在其下创建 SQLite 数据库文件及 WAL 锁日志。
+
+#### 最佳实践与解法
+1. **Dockerfile 预建并授权目录**：在切换 `USER privacy` 之前，以 root 身份显式预建全部数据卷挂载点并递归授权：
+   ```dockerfile
+   # 创建数据与日志持久化挂载目录并授权 privacy 用户
+   RUN mkdir -p /data/budget /var/log/privacy \
+       && chown -R privacy:privacy /app /data /var/log/privacy
+   
+   USER privacy
+   ```
+2. **应用层递归创建父目录兜底**：在 `budget.py` 中初始化 SQLite 连接前增加目录检测与创建：
+   ```python
+   db_path = os.environ.get("PRIVACY_BUDGET_DB")
+   if db_path:
+       parent_dir = os.path.dirname(db_path)
+       if parent_dir:
+           os.makedirs(parent_dir, exist_ok=True)
+       conn = sqlite3.connect(db_path, timeout=10.0)
+   ```
+
+---
+
+### 13.7 跨组件探针与健康检查端点一致性（`/health` 与 `/api/health`）
+
+#### 陷阱场景
+Docker Compose 配置的 `healthcheck` 探测 `http://localhost:8080/health` 或 `http://localhost:8081/health` 时返回 HTTP 404，导致容器一直处于 `(health: starting)` 甚至被标记为 `unhealthy` 触发依赖熔断。
+
+#### 根本原因
+控制台代理后端路由设计时将业务健康检查注册在 `/api/health`（带 `/api` 前缀以适配前端路由代理与 API 网关），而标准 Docker HEALTHCHECK 与部分 K8s Liveness 探针习惯探测根路径 `/health`。
+
+#### 最佳实践与解法
+在 Python 后端（FastAPI）与 Go 后端（Gin）中**双重注册**健康检查端点，兼顾标准容器探针与 API 代理调用：
+- **FastAPI**:
+  ```python
+  @app.get("/health")
+  @app.get("/api/health")
+  async def health(): ...
+  ```
+- **Gin**:
+  ```go
+  r.GET("/health", s.Health)
+  r.GET("/api/health", s.Health)
+  ```
+
+---
+
+### 13.8 容器网络隔离下的服务发现与协议回退寻址
+
+#### 陷阱场景
+Go gRPC 后端在处理非 gRPC 接口回退（如 `/v1/dynclassification/*` 规则热重载与评估）时，调用上游 REST 服务报错：
+```text
+Agent REST HTTP error: Post "http://127.0.0.1:8079/v1/...": dial tcp 127.0.0.1:8079: connect: connection refused
+```
+
+#### 根本原因
+在 Docker Compose 默认的桥接网络（Bridge Network）中，每个容器拥有独立的 Network Namespace。`127.0.0.1` 仅代表当前代理容器自身，跨容器访问必须使用 Docker 内部 DNS 解析的服务名（如 `PrivShield:8079`）。
+
+#### 最佳实践与解法
+1. **多层级环境回退解析**：在 Go 后端 `agentRestBaseURL()` 中支持环境变量优先覆盖与智能回退：
+   ```go
+   func agentRestBaseURL() string {
+       if u := os.Getenv("PRIVACY_AGENT_URL"); u != "" {
+           return strings.TrimRight(u, "/")
+       }
+       if u := os.Getenv("PRIVACY_AGENT_REST_URL"); u != "" {
+           return strings.TrimRight(u, "/")
+       }
+       restHost := os.Getenv("PRIVACY_AGENT_REST_HOST")
+       if restHost == "" {
+           restHost = os.Getenv("PRIVACY_REST_HOST")
+       }
+       if restHost == "" {
+           restHost = os.Getenv("PRIVACY_AGENT_GRPC_HOST") // 自动复用 gRPC 服务名（如 PrivShield）
+       }
+       if restHost == "" {
+           restHost = "127.0.0.1"
+       }
+       // ... 拼接端口
+   }
+   ```
+2. **Compose 环境变量显式声明**：在 Compose 中为代理容器注入 `PRIVACY_AGENT_URL: "http://PrivShield:8079"` 与 `PRIVACY_AGENT_GRPC_HOST: "PrivShield"`。
+
+---
+
+### 13.9 测试与 CI 执行环境中的 Linux `ARG_MAX` 限制规避
+
+#### 陷阱场景
+自动化测试套件（pytest / go test）在通过 `subprocess.run` 调用运维或部署脚本时，抛出系统级错误：
+```text
+OSError: [Errno 7] Argument list too long
+```
+
+#### 根本原因
+在现代复杂 CI/CD 或 AI Agent 执行环境中，父进程环境中可能注入了大量超长上下文变量（如数十 KB 的全量 Prompt / Transcript 日志）。当 `subprocess.run` 默认继承 `os.environ` 时，所有环境变量键值对占用的总字节数超过了 Linux 内核由 `MAX_ARG_PAGES` / `ARG_MAX` 设定的内存页限制（通常为 2MB 左右）。
+
+#### 最佳实践与解法
+在测试辅助模块中定义环境变量清洗函数 `_clean_env()`，过滤掉超长与无关上下文变量后再传递给子进程：
+```python
+def _clean_env() -> dict[str, str]:
+    """过滤超长环境变量，防止触发 Linux ARG_MAX 限制"""
+    clean = {}
+    for k, v in os.environ.items():
+        # 排除超过 4KB 的大体积变量与特定 agent 调试上下文
+        if len(v) < 4096 and not k.startswith(("AGENT_", "CONTEXT_", "PROMPT_")):
+            clean[k] = v
+    return clean
+```
+
+---
+
+### 13.10 运行时业务规范文档与 `.dockerignore` 排除冲突（`generate_profile`）
+
+#### 陷阱场景
+调用 `POST /v1/dynclassification/generate_profile` 自动解析标准 Markdown 文档并生成 YAML 分类体系时，在容器中报错：
+```text
+{"detail": "Failed to generate configuration from document"}
+# 容器内部日志：
+FileNotFoundError: [Errno 2] No such file or directory: '/app/docs/standard/四川省健康医疗大数据应用指南.md'
+```
+
+#### 根本原因
+1. 传统镜像打包习惯在 `.dockerignore` 中将 `docs/` 和 `*.md` 全局排除以缩减镜像体积；
+2. 动态分类分级模块具备从合规标准文档（`docs/standard/*.md`）一键逆向生成规则配置的核心业务能力（`StandardProfileGenerator`），运行时对标准文档有直接读取依赖。全局排除导致容器内部缺少合规标准文档资产。
+
+#### 最佳实践与解法
+1. **`.dockerignore` 精确白名单例外**：使用通配符与负向规则保留标准文档目录：
+   ```dockerignore
+   docs/*
+   !docs/standard/
+   !docs/standard/*.md
+   site/
+   *.md
+   !README.md
+   !docs/standard/*.md
+   ```
+2. **Dockerfile 显式打包标准文档**：
+   ```dockerfile
+   COPY docs/standard/ ./docs/standard/
+   ```
+3. **Docker Compose 开发期目录挂载**：
+   ```yaml
+   volumes:
+     - ../../docs/standard:/app/docs/standard:ro  # 实时感知宿主机文档更新
+   ```

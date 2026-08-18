@@ -24,6 +24,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PROD_SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "prod"
 
 
+def _clean_env() -> dict[str, str]:
+    """生成精简干净的子进程环境变量，剔除所有超长变量防止 Argument list too long。"""
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if len(v) < 2048
+        and not k.startswith("ANTIGRAVITY")
+        and not k.startswith("GEMINI")
+        and not k.startswith("AI_")
+        and k != "LS_COLORS"
+    }
+
+
 @pytest.fixture
 def bash_bin() -> str:
     """获取系统可用的 bash 解释器路径。"""
@@ -89,6 +102,7 @@ class TestProdScriptsHelpAndExecution:
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
+            env=_clean_env(),
             timeout=10,
         )
         assert res.returncode == 0
@@ -122,6 +136,7 @@ class TestProdScriptsHelpAndExecution:
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
+            env=_clean_env(),
             timeout=30,
         )
         assert res.returncode == 0, f"备份脚本执行失败: {res.stderr}"

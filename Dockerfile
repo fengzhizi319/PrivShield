@@ -44,12 +44,12 @@
 # Stage 1: base —— 公共基础层（core / ml 两个目标共享）
 # ==============================================================================
 # 基础镜像选型：
-#   - python:3.13.13        : 与本地开发/ML 推理环境（conda pygpu、项目 .venv 均为 Python 3.13）一致；
+#   - python:3.13-slim-bookworm : 与本地开发/ML 推理环境（conda pygpu、项目 .venv 均为 Python 3.13）一致；
 #                              Qwen3.5 推理链路（transformers>=5.14 / fla-core>=0.5.2）实测验证于 3.13
 #                              避免镜像与验证环境版本错位
 #   - slim-bookworm         : Debian 精简版，减小镜像体积与攻击面
-#   - 精确 tag（非 3.13 大版本号）: 锁定具体版本，保证构建可追溯、可复现
-FROM python:3.13.13-slim-bookworm AS base
+#   - 锁定 3.13-slim-bookworm : 保证构建可追溯、可复现
+FROM python:3.13-slim-bookworm AS base
 
 # 统一工作目录：后续所有 COPY/RUN 的默认路径，业务代码固定位于 /app
 WORKDIR /app
@@ -61,7 +61,8 @@ WORKDIR /app
 #   - rm -rf /var/lib/apt/lists/* : 清理 apt 索引缓存，减薄镜像层
 #   - groupadd/useradd  : 创建专用系统用户 privacy（-r 系统账户、无 shell、无 home），
 #                         容器内进程以该用户运行，防止以 root 运行放大容器逃逸风险
-RUN apt-get update \
+RUN (sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null || true) \
+    && apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r privacy \
@@ -90,6 +91,7 @@ COPY PrivShield/ ./PrivShield/
 COPY rules/ ./rules/
 COPY config/ ./config/
 COPY proto/ ./proto/
+COPY docs/standard/ ./docs/standard/
 COPY pyproject.toml requirements-core.txt ./
 COPY scripts/ ./scripts/
 
@@ -99,10 +101,11 @@ COPY scripts/ ./scripts/
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# 将 /app 目录所有权交给 privacy 用户：
-#   - 非 root 用户对工作目录必须有写权限（日志、SQLite 预算 DB、模型缓存等运行时产物）
-#   - 此处仍以 root 执行 chown（后续 ml 目标追加依赖也需要 root）
-RUN chown -R privacy:privacy /app
+# 创建数据与日志持久化挂载目录并授权 privacy 用户：
+#   - /data/budget : SQLite 预算数据库
+#   - /var/log/privacy : 审计日志
+RUN mkdir -p /data/budget /var/log/privacy \
+    && chown -R privacy:privacy /app /data /var/log/privacy
 
 # 声明容器监听端口（文档性声明，实际端口映射由运行期 -p/--expose 决定）：
 #   - 8079 : REST API（FastAPI）
