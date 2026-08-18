@@ -9,15 +9,20 @@
   - [2.3 依赖清单](#23-依赖清单)
   - [2.4 镜像备份与分享（Backup & Share）](#24-backup-share)
 - [3. Helm 部署](#3-helm-部署)
-  - [3.1 Chart 结构](#31-chart-结构)
-  - [3.2 默认安装（开发/测试）](#32-默认安装开发测试)
-  - [3.3 生产安装（TLS + 认证 + HPA）](#33-生产安装tls--认证--hpa)
-  - [3.4 ML 镜像部署](#34-ml-镜像部署)
-  - [3.5 升级与回滚](#35-升级与回滚)
-  - [3.6 卸载](#36-卸载)
-- [4. 原生 K8s 部署](#4-原生-k8s-部署)
-  - [4.1 资源清单](#41-资源清单)
-  - [4.2 部署步骤](#42-部署步骤)
+  - [3.0 Helm 核心概念与选型价值](#30-helm-核心概念与选型价值)
+  - [3.1 Chart 目录结构与模板全景解析](#31-chart-目录结构与模板全景解析)
+  - [3.2 values.yaml 核心参数全景与设计规范](#32-valuesyaml-核心参数全景与设计规范)
+  - [3.3 部署实战全流程](#33-部署实战全流程)
+  - [3.4 Chart 静态校验、调试与渲染预览 (Lint & Template Debugging)](#34-chart-静态校验调试与渲染预览-lint--template-debugging)
+  - [3.5 生产发布全生命周期管理（平滑升级、版本追踪与秒级回滚）](#35-生产发布全生命周期管理平滑升级版本追踪与秒级回滚)
+  - [3.6 Helm 常见运维问题与避坑指南](#36-helm-常见运维问题与避坑指南)
+- [4. 原生 K8s 部署 (Kubernetes Native Deployment with Kustomize)](#4-原生-k8s-部署-kubernetes-native-deployment-with-kustomize)
+  - [4.0 原生 Kubernetes 部署与 Kustomize 架构原理](#40-原生-kubernetes-部署与-kustomize-架构原理)
+  - [4.1 K8s 资源清单与拓扑结构全景](#41-k8s-资源清单与拓扑结构全景)
+  - [4.2 Deployment 核心配置行级深度剖析](#42-deployment-核心配置行级深度剖析)
+  - [4.3 部署实操指南 (Step-by-Step Deployment Walkthrough)](#43-部署实操指南-step-by-step-deployment-walkthrough)
+  - [4.4 生产级服务暴露与流量接入 (Ingress & Service Routing)](#44-生产级服务暴露与流量接入-ingress--service-routing)
+  - [4.5 原生 K8s 日常运维与故障诊断](#45-原生-k8s-日常运维与故障诊断)
 - [5. Docker Compose 部署](#5-docker-compose-部署)
   - [5.0 小白快速上手（前置条件 + 名词简释）](#50-小白快速上手前置条件--名词简释)
   - [5.1 Docker Compose 全栈服务编排](#51-docker-compose-全栈服务编排)
@@ -48,7 +53,14 @@
   - [10.2 告警规则](#102-告警规则)
   - [10.3 Grafana 仪表盘](#103-grafana-仪表盘)
   - [10.4 ServiceMonitor（Prometheus Operator）](#104-servicemonitorprometheus-operator)
-- [11. 自动伸缩（HPA）](#11-自动伸缩hpa)
+- [11. 自动伸缩（HPA - Horizontal Pod Autoscaler）](#11-自动伸缩hpa---horizontal-pod-autoscaler)
+  - [11.0 HPA 核心原理与 PrivShield 伸缩架构](#110-hpa-核心原理与-privshield-伸缩架构)
+  - [11.1 前置条件与 Metrics Server 依赖](#111-前置条件与-metrics-server-依赖)
+  - [11.2 Helm 配置与参数详解](#112-helm-配置与参数详解)
+  - [11.3 自定义伸缩行为与防抖策略 (Behavior & Stabilization)](#113-自定义伸缩行为与防抖策略-behavior--stabilization)
+  - [11.4 原生 Kubernetes HPA 资源清单](#114-原生-kubernetes-hpa-资源清单)
+  - [11.5 状态检查、压测验证与调试](#115-状态检查压测验证与调试)
+  - [11.6 常见问题排查与最佳实践](#116-常见问题排查与最佳实践)
 - [12. 网络策略（NetworkPolicy）](#12-网络策略networkpolicy)
 - [13. 配置体系与环境变量参考](#13-配置体系与环境变量参考)
   - [13.1 配置体系总览](#131-配置体系总览)
@@ -206,62 +218,129 @@ docker pull myregistry/PrivShield:0.1.0
 
 ## 3. Helm 部署
 
-### 3.1 Chart 结构
+### 3.1 Helm 核心概念与选型价值
+
+**Helm 是 Kubernetes 生态的事实标准包管理与部署编排工具**（相当于 Linux 中的 `apt` / `yum` 或 Node.js 生态中的 `npm`）。它将 PrivShield 在 Kubernetes 集群中运行所需的全部资源清单（Deployment、Service、Ingress、ConfigMap、Secret、HPA、PDB、NetworkPolicy、ServiceMonitor 等）打包为标准化的 **Chart**，实现参数化渲染、多环境分层发布、版本追踪与秒级回滚。
+
+#### 3.1.1 为什么选择 Helm 部署 PrivShield？
+
+1. **多环境参数化与分层配置（Layered Configuration）**：
+   - PrivShield 在不同环境（本地开发、集成测试、生产高可用、ML 增强分类）下的资源配额、副本数、安全防护等级（TLS / mTLS / API Key / RateLimit）与监控策略差异巨大。
+   - Helm 通过 `values.yaml` 提供统一的参数配置中心，配合 `-f values-production.yaml` 或 `-f values-ml.yaml` 进行分层按需覆盖，避免手动维护多份冗余、易出错的原生 YAML 文件。
+2. **发布版本追踪与秒级回滚（Release Tracking & Instant Rollback）**：
+   - 每次执行 `helm install` 或 `helm upgrade` 都会在集群内部记录一个不可变的 Release 版本快照（Revision）。
+   - 一旦新配置或新镜像引发线上异常，只需一条 `helm rollback privshield <revision>` 命令即可秒级回滚至上一个稳定版本，极大缩短 MTTR（平均故障恢复时间）。
+3. **全栈资源依赖与生命周期闭环管理（Unified Lifecycle Management）**：
+   - Helm 自动推导并按拓扑序创建 Namespace、ServiceAccount、RBAC 权限、ConfigMap、Secret、Deployment 以及 ServiceMonitor，避免手动 `kubectl apply` 出现的顺序依赖缺失或资源遗漏。
+   - 卸载时执行 `helm uninstall` 即可一次性安全清理所有托管资源，杜绝集群残留孤儿对象。
+4. **解耦模式与独立 LLM 模块灵活协同**：
+   - 支持通过 `llm.enabled=true` 联动拉起独立的高性能 vLLM 推理服务（`llm-deployment.yaml` / `llm-service.yaml`），实现 PrivShield Core 与 GPU 推理实例的松耦合解耦部署。
+
+#### 3.1.2 Helm 核心术语速查
+
+| 术语 | 英文 | 说明 |
+|---|---|---|
+| **Chart** | Chart | PrivShield 的打包定义包（位于 `deploy/helm/PrivShield/`），包含所有 Kubernetes 资源模板及默认配置 |
+| **Release** | Release | Chart 在具体 Kubernetes 集群中运行的实例命名（例如 `privshield` 或 `privshield-prod`） |
+| **Values** | Values | 注入模板的配置参数集合，支持 `values.yaml`、`-f custom.yaml` 以及 `--set key=value` 多层级覆盖 |
+| **Template** | Template | 位于 `templates/` 目录下的 Go Template 模板文件，由 Helm 引擎结合 Values 动态渲染为标准 K8s 资源清单 |
+
+---
+
+### 3.2 Chart 目录结构与模板全景解析
+
+PrivShield Helm Chart 源码位于 `deploy/helm/PrivShield/`，其目录拓扑与模板资源清单如下：
 
 ```text
 deploy/helm/PrivShield/
-├── Chart.yaml                  # Chart 元数据（version: 0.1.0, appVersion: 0.1.0）
-├── values.yaml                 # 默认 values（开发模式，TLS/Auth 关闭）
-├── values-production.yaml      # 生产覆盖值（TLS/Auth/HPA/NetworkPolicy 开启）
-├── values-ml.yaml              # ML 镜像覆盖值（资源上限提升）
-└── templates/
-    ├── configmap.yaml          # privacy-profile.yaml 配置注入
-    ├── deployment.yaml         # 主 Deployment（含探针、安全上下文、TLS 挂载）
-    ├── hpa.yaml                # HorizontalPodAutoscaler（autoscaling/v2）
-    ├── ingress.yaml            # 可选 Ingress
-    ├── namespace.yaml          # 可选 Namespace 创建
-    ├── networkpolicy.yaml      # 可选 NetworkPolicy
-    ├── poddisruptionbudget.yaml # 可选 PodDisruptionBudget
-    ├── secret.yaml             # 内置 Secret（TLS 证书 / API Key）
-    ├── service.yaml            # ClusterIP Service（REST 8079 + gRPC 50051）
-    ├── serviceaccount.yaml     # ServiceAccount
-    └── servicemonitor.yaml     # Prometheus Operator ServiceMonitor
+├── Chart.yaml                     # Chart 元数据（名称、版本号 version: 0.1.0、应用版本 appVersion: 0.1.0）
+├── values.yaml                    # 全局默认参数（开发/测试模式，轻量 core 镜像，安全项默认关闭）
+├── values-production.yaml         # 生产环境覆盖值（多副本、开启 TLS/Auth/限速/HPA/ServiceMonitor）
+├── values-ml.yaml                 # 进程内 ML 增强覆盖值（切换 ml 镜像，调高 CPU 与内存配额）
+└── templates/                     # 模板目录（Kubernetes 资源清单模板）
+    ├── _helpers.tpl               # Go 模板通用宏定义（应用名称、标签、ServiceAccount 命名等）
+    ├── NOTES.txt                  # 安装/升级完成后控制台输出的指引信息与冒烟测试提示
+    ├── namespace.yaml             # 可选命名空间（当 values 中 namespace.create=true 时创建）
+    ├── serviceaccount.yaml        # 运行 Pod 所需的 ServiceAccount（遵循最小特权原则）
+    ├── configmap.yaml             # 挂载 /etc/PrivShield/privacy-profile.yaml 的隐私治理参数配置
+    ├── secret.yaml                # 内置 Secret（当未指定外部 secret 时自动由 values 生成证书与 API Key）
+    ├── deployment.yaml            # PrivShield Core 主工作负载（含双端口、双探针、安全上下文与存储挂载）
+    ├── service.yaml               # ClusterIP Service（统一暴露 REST 8079 与 gRPC 50051 端口）
+    ├── ingress.yaml               # 可选 Ingress 网关路由（支持统一对外暴露 HTTP/HTTPS 流量）
+    ├── hpa.yaml                   # 水平 Pod 自动伸缩器（基于 CPU / 内存利用率自动弹性伸缩）
+    ├── poddisruptionbudget.yaml   # Pod 中断预算（PDB，防止节点维护或驱逐时服务不可用）
+    ├── networkpolicy.yaml         # 容器网络隔离策略（严格限制入站与出站通信白名单）
+    ├── servicemonitor.yaml        # Prometheus Operator 监控指标采集 CRD（自动发现 /metrics）
+    ├── llm-deployment.yaml        # 可选独立 vLLM 大模型推理工作负载（当 llm.enabled=true 时启用）
+    └── llm-service.yaml           # 可选独立 vLLM 内部服务（ClusterIP: 8000，供 Core 跨 Pod 联动）
 ```
 
-### 3.2 默认安装（开发/测试）
+---
+
+### 3.3 values.yaml 核心参数全景与设计规范
+
+`values.yaml` 是 Chart 的配置中心，核心配置段分类如下表所示：
+
+| 配置段 | 关键参数 | 默认值 | 生产建议值 | 说明 |
+|---|---|---|---|---|
+| **image** | `image.repository`<br>`image.tag`<br>`image.pullPolicy` | `privshield`<br>`""` (appVersion)<br>`IfNotPresent` | `myregistry/PrivShield`<br>`0.1.0`<br>`IfNotPresent` | 镜像仓库地址、版本标签与拉取策略 |
+| **flavor** | `flavor` | `core` | `core` (推荐) 或 `ml` | 运行镜像类型：`core` 轻量镜像；`ml` 包含 PyTorch+Transformers |
+| **replicaCount** | `replicaCount` | `1` | `2` 或结合 HPA | 基础 Pod 副本数 |
+| **agent** | `agent.logLevel`<br>`agent.logFormat`<br>`agent.profile` | `info`<br>`text`<br>*(内置 YAML)* | `INFO`<br>`json`<br>*(生产 profile)* | 应用日志级别、日志输出格式（生产推荐 JSON）与脱敏/DP 参数 Profile |
+| **security.tls** | `enabled`<br>`existingSecret`<br>`clientAuth` | `false`<br>`""`<br>`none` | `true`<br>`privshield-tls`<br>`require` (如需 mTLS) | REST 与 gRPC 双协议 TLS 开关、用户自管证书 Secret 与客户端双向认证模式 |
+| **security.auth** | `enabled`<br>`apiKeysSecret`<br>`internalMtls.enabled` | `false`<br>`""`<br>`false` | `true`<br>`privshield-apikeys`<br>`true` (零信任内网) | API Key 鉴权开关、密钥 Secret 与 gRPC 内部 mTLS 强认证 |
+| **security.rateLimit** | `enabled`<br>`defaultRps`<br>`defaultBurst`<br>`redisUrl` | `false`<br>`10`<br>`20`<br>`""` | `true`<br>`50`<br>`100`<br>`redis://...` | 接口速率限制开关、默认每秒请求数、突发缓冲量与分布式 Redis 限速后端 |
+| **resources** | `requests.cpu`<br>`requests.memory`<br>`limits.cpu`<br>`limits.memory` | `100m`<br>`256Mi`<br>`1000m`<br>`1Gi` | `500m`<br>`512Mi`<br>`2000m`<br>`2Gi` (core) / `4000m / 8Gi` (ml) | 容器资源配额，避免突发高负载抢占节点资源或引发 OOMKilled |
+| **autoscaling** | `enabled`<br>`minReplicas`<br>`maxReplicas`<br>`targetCPUUtilizationPercentage` | `false`<br>`1`<br>`5`<br>`80` | `true`<br>`2`<br>`10`<br>`75` | 基于 CPU/内存利用率的 HPA 弹性伸缩配置 |
+| **persistence** | `budget.enabled`<br>`auditLogs.enabled` | `false`<br>`false` | `true` (挂载 PVC)<br>`true` (挂载 PVC) | 隐私预算 SQLite 数据库与合规审计日志的持久化存储卷声明 |
+| **llm** | `enabled`<br>`image.repository`<br>`resources.limits.nvidia.com/gpu` | `false`<br>`vllm/vllm-openai`<br>`""` | 按需开启<br>`vllm/vllm-openai`<br>`1` | 独立 vLLM 大模型推理服务 Pod 编排与 GPU 资源分配 |
+
+---
+
+### 3.4 部署实战全流程
+
+#### 3.4.1 场景一：开发/测试环境快速体验（默认安装）
+
+无需额外准备证书或 Secret，一键安装轻量级 Core 实例：
 
 ```bash
-helm install privshield ./deploy/helm/PrivShield
+# 1. 创建专用命名空间（可选）
+kubectl create namespace PrivShield
+
+# 2. 一键安装 Chart
+helm install privshield ./deploy/helm/PrivShield -n PrivShield
+
+# 3. 检查 Pod 与 Service 状态
+kubectl get pods,svc -n PrivShield
 ```
 
-默认配置要点：
-- `replicaCount: 1`，单副本
-- `flavor: core`，使用轻量镜像
-- TLS / Auth / RateLimit 均关闭
-- 资源：requests 100m CPU / 256Mi，limits 1000m CPU / 1Gi
-- 探针：liveness `/health`（10s 间隔），readiness `/readyz`（5s 间隔，额外校验配置解析器与预算 DB 连通性）
-- HPA / Ingress / NetworkPolicy / ServiceMonitor 均关闭
+#### 3.4.2 场景二：生产高可用加固安装（TLS + API Key + HPA + 监控）
 
-### 3.3 生产安装（TLS + 认证 + HPA）
+生产环境强烈建议遵循“凭据外置”原则，先创建 Kubernetes Secret，再通过 `values-production.yaml` 引入：
 
 ```bash
-# 1. 准备 TLS Secret（包含 tls.crt 和 tls.key）
+# 步骤 1：创建生产命名空间
+kubectl create namespace PrivShield
+
+# 步骤 2：创建 TLS 证书 Secret（包含 tls.crt 与 tls.key）
 kubectl create secret tls privshield-tls \
-  --cert=path/to/tls.crt --key=path/to/tls.key \
+  --cert=deploy/k8s/certs/tls.crt \
+  --key=deploy/k8s/certs/tls.key \
   -n PrivShield
 
-# 2. 准备 API Key Secret（包含 api-keys.json 文件）
-# api-keys.json 格式示例：
+# 步骤 3：创建 API Key 鉴权 Secret（包含标准 api-keys.json 文件）
+# api-keys.json 格式定义示例：
 # {
-#   "my-api-key": { "name": "gateway", "scopes": ["*"] },
-#   "readonly-key": { "name": "auditor", "scopes": ["read"] }
+#   "sk-privshield-prod-secret-key-1": { "name": "gateway-service", "scopes": ["*"] },
+#   "sk-privshield-prod-reader-key-2": { "name": "audit-collector", "scopes": ["read"] }
 # }
 kubectl create secret generic privshield-apikeys \
-  --from-file=api-keys.json=path/to/api-keys.json \
+  --from-file=api-keys.json=deploy/k8s/secrets/api-keys.json \
   -n PrivShield
 
-# 3. 安装（使用生产 values 覆盖）
+# 步骤 4：使用 values-production.yaml 覆盖安装
 helm install privshield ./deploy/helm/PrivShield \
+  -n PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=privshield-tls \
   --set security.auth.apiKeysSecret=privshield-apikeys \
@@ -269,139 +348,415 @@ helm install privshield ./deploy/helm/PrivShield \
   --set image.tag=0.1.0
 ```
 
-**生产 values 关键差异**（`values-production.yaml`）：
+#### 3.4.3 场景三：ML 智能分类模式部署（PyTorch + Transformers 进程内推理）
 
-| 配置项 | 默认值 | 生产值 |
-|---|---|---|
-| replicaCount | 1 | 2 |
-| agent.logFormat | text | json |
-| security.tls.enabled | false | true |
-| security.auth.enabled | false | true |
-| security.rateLimit.enabled | false | true |
-| resources.requests | 100m / 256Mi | 500m / 512Mi |
-| resources.limits | 1000m / 1Gi | 2000m / 2Gi |
-| autoscaling.enabled | false | true（2~10 副本） |
-| networkPolicy.enabled | false | true |
-| serviceMonitor.enabled | false | true |
-
-### 3.4 ML 镜像部署
+如果需要在 PrivShield Pod 内部直接运行 Layer-2 Small-NER 或 Layer-3 深度学习分类器，使用 `values-ml.yaml`：
 
 ```bash
 helm install privshield-ml ./deploy/helm/PrivShield \
+  -n PrivShield \
   -f ./deploy/helm/PrivShield/values-ml.yaml \
   --set image.repository=myregistry/PrivShield \
   --set image.tag=0.1.0-ml
 ```
 
-**ML values 关键差异**（`values-ml.yaml`）：
+> **硬件与调度提示**：ML 镜像体积约 4GB，需确保宿主机节点有至少 8Gi~16Gi 可用内存，建议通过 `nodeSelector` 或 `tolerations` 将 Pod 调度至高性能计算节点。
 
-| 配置项 | 默认值 | ML 值 |
-|---|---|---|
-| flavor | core | ml |
-| resources.requests | 100m / 256Mi | 1000m / 2Gi |
-| resources.limits | 1000m / 1Gi | 4000m / 8Gi |
-| autoscaling | 关闭 | 开启（1~3 副本） |
+#### 3.4.4 场景四：使用生产自动化脚本一键管理
 
-> ML 镜像包含 PyTorch + Transformers，内存占用显著增大，建议节点至少 16Gi 可用内存。
-
-### 3.5 升级与回滚
+项目提供了标准化一键运维脚本：
 
 ```bash
-# 升级（修改 values 或镜像版本后）
-helm upgrade privshield ./deploy/helm/PrivShield \
-  -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set image.tag=0.2.0
+# 执行生产 Helm 部署脚本（自动校验 values、lint 检查与 Rollout 状态跟踪）
+bash ./scripts/prod/deploy-helm.sh
 
-# 查看历史版本
-helm history privshield
-
-# 回滚到上一版本
-helm rollback privshield
-
-# 回滚到指定版本
-helm rollback privshield 2
-```
-
-### 3.6 卸载
-
-```bash
-helm uninstall privshield
-
-# 如需同时清理 PVC / Secret 等手动创建的资源
-kubectl delete secret privshield-tls privshield-apikeys -n PrivShield
+# 一键卸载与资源清理
+bash ./scripts/prod/uninstall-helm.sh
 ```
 
 ---
 
-## 4. 原生 K8s 部署
+### 3.5 Chart 静态校验、调试与渲染预览 (Lint & Template Debugging)
 
-### 4.1 资源清单
-
-`deploy/k8s/` 目录包含以下资源（通过 Kustomize 管理）：
-
-| 文件 | Kind | 说明 |
-|---|---|---|
-| `namespace.yaml` | Namespace | 创建 `PrivShield` 命名空间 |
-| `configmap.yaml` | ConfigMap | 注入 `privacy-profile.yaml` 配置 |
-| `deployment.yaml` | Deployment | 主工作负载（含探针、资源限制） |
-| `service.yaml` | Service | ClusterIP，暴露 8079（REST）+ 50051（gRPC） |
-| `secret.example.yaml` | Secret | TLS 证书 + API Key 示例（需复制修改） |
-| `kustomization.yaml` | Kustomization | 资源编排入口 |
-
-### 4.2 部署步骤
+在向 Kubernetes 集群提交部署前，建议执行本地静态校验，避免由于缩进或参数类型错误导致发布中断：
 
 ```bash
-# 1. 准备 Secret（复制示例并填入真实证书/密钥）
-cp deploy/k8s/secret.example.yaml deploy/k8s/secret.yaml
-# 编辑 secret.yaml，替换 REPLACE_WITH_YOUR_CERT / REPLACE_WITH_YOUR_KEY
+# 1. 语法与 Schema 规则校验（必须输出 0 errors）
+helm lint ./deploy/helm/PrivShield
 
-# 2. 如需启用 Secret，取消 kustomization.yaml 中的注释：
-#    resources:
-#      - secret.yaml
+# 2. 模拟本地渲染并输出最终 Kubernetes YAML（不连接集群）
+helm template privshield ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
+  --set security.tls.existingSecret=privshield-tls
 
-# 3. 一键部署
-kubectl apply -k deploy/k8s/
-
-# 4. 验证
-kubectl get pods -n PrivShield
-kubectl get svc -n PrivShield
+# 3. 集群端 Dry-Run 预演（连接集群做 API 兼容性验证，但不实际创建资源）
+helm install privshield ./deploy/helm/PrivShield \
+  -n PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
+  --dry-run --debug
 ```
 
-**Deployment 关键配置说明**：
+---
+
+### 3.6 生产发布全生命周期管理（平滑升级、版本追踪与秒级回滚）
+
+#### 3.6.1 零停机平滑升级（RollingUpdate）
+
+PrivShield Deployment 模板配置了 `RollingUpdate` 滚动更新策略（`maxSurge: 25%`, `maxUnavailable: 0`），升级过程中保证集群始终有可用 Pod 提供服务：
+
+```bash
+# 升级应用镜像版本或更新参数配置
+helm upgrade privshield ./deploy/helm/PrivShield \
+  -n PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
+  --set image.tag=0.2.0
+
+# 实时跟踪滚动更新进度
+kubectl rollout status deployment/privshield -n PrivShield
+```
+
+#### 3.6.2 查看历史版本（Release History）
+
+```bash
+helm history privshield -n PrivShield
+```
+
+输出示例：
+```text
+REVISION    UPDATED                     STATUS          CHART               APP VERSION    DESCRIPTION     
+1           Mon Aug 17 10:00:00 2026    superseded      PrivShield-0.1.0    0.1.0          Install complete
+2           Mon Aug 17 14:30:00 2026    deployed        PrivShield-0.1.0    0.2.0          Upgrade to 0.2.0
+```
+
+#### 3.6.3 秒级故障回滚（Instant Rollback）
+
+如果新版本发布后健康探针告警或接口异常，可直接执行回滚：
+
+```bash
+# 回滚到上一版本（Revision 1）
+helm rollback privshield -n PrivShield
+
+# 或回滚到指定的历史版本号（例如回滚到 Revision 1）
+helm rollback privshield 1 -n PrivShield
+```
+
+#### 3.6.4 卸载与清理保护
+
+```bash
+# 卸载 Helm Release
+helm uninstall privshield -n PrivShield
+
+# 注意：手动创建的 Secret 与持久化 PVC 不会被 Helm 默认级联删除，如需彻底清除需显式执行：
+kubectl delete secret privshield-tls privshield-apikeys -n PrivShield
+kubectl delete namespace PrivShield
+```
+
+---
+
+### 3.7 Helm 常见运维问题与避坑指南
+
+| 常见故障现象 | 根因分析 | 解决步骤与操作命令 |
+|---|---|---|
+| **Release 状态卡在 `pending-upgrade` 或 `pending-install`** | 上一次部署因终端中断、网络超时或探针卡死未完成，导致 Release 锁未释放 | 1. 执行 `helm rollback privshield` 强制重置状态<br>2. 若无效，执行 `kubectl delete secret -l owner=helm,name=privshield -n PrivShield` 清理卡死状态的 Helm 历史 Secret，再重新部署 |
+| **错误：`rendered manifests contain a resource that already exists`** | 模板中尝试创建的资源（如 ConfigMap、Service）已在集群中被 `kubectl apply` 手动创建，缺乏 Helm 所有权标记 | 1. 确认该资源是否可被 Helm 托管<br>2. 删除旧资源 `kubectl delete <kind> <name> -n PrivShield` 后重新执行 `helm install`<br>3. 或在 values 中设置 `namespace.create: false` 跳过已有命名空间 |
+| **Pod 报错 `CreateContainerConfigError`** | values 中启用了 `existingSecret`，但 Kubernetes 集群中尚未创建对应的 Secret 对象 | 1. 查看 Pod 详细事件：`kubectl describe pod <pod-name> -n PrivShield`<br>2. 检查 Secret 是否存在：`kubectl get secrets -n PrivShield`<br>3. 执行 `kubectl create secret` 创建缺失的 TLS 证书或 API Key Secret |
+| **探针持续失败（`Readiness probe failed: HTTP 500/503`）** | PrivShield 就绪探针 `/readyz` 会主动校验隐私配置解析器与 SQLite 预算数据库的健康状态。如果挂载的 profile 格式错误或数据库无法写入，探针将拒绝接收流量 | 1. 查看容器实时日志：`kubectl logs -n PrivShield <pod-name> -c agent`<br>2. 检查 `ConfigMap` 中的 profile YAML 缩进与语法<br>3. 检查 PVC 挂载路径读写权限 |
+
+---
+
+## 4. 原生 K8s 部署 (Kubernetes Native Deployment with Kustomize)
+
+### 4.1 原生 Kubernetes 部署与 Kustomize 架构原理
+
+除了 Helm 之外，PrivShield 官方提供了纯原生、零外部工具依赖的 **Kubernetes + Kustomize** 声明式编排清单（位于 `deploy/k8s/`）。
+
+#### 4.0.1 为什么提供原生 K8s / Kustomize 方案？
+
+1. **零外部客户端依赖（Zero Extra CLI Tooling）**：
+   - 现代 Kubernetes 官方客户端 `kubectl` 自带原生 Kustomize 引擎（通过 `kubectl apply -k` 直接调用）。
+   - 在严格管控或受限的内网发布流水线（CI/CD Runner）中，无需额外安装或配置 Helm 二进制工具链。
+2. **GitOps 声明式最佳实践（Native GitOps Friendly）**：
+   - 无任何模板语法变量插入（No Template Interpolation），所有 YAML 均为纯粹、标准的 Kubernetes 资源清单。
+   - 与 ArgoCD、Flux 等原生 GitOps 控制器 100% 契合，在代码仓库提 PR 时能够进行最直观的 YAML 版本 Diff 与合规安全审计。
+3. **架构底层实现透明直观（Transparent Architecture）**：
+   - 清晰展现 PrivShield 进程内双协议端口定义（REST: 8079, gRPC: 50051）、安全上下文（SecurityContext）、双就绪/存活探针以及 ConfigMap 存储挂载的底层细节。
+4. **解耦模式与 LLM 推理工作负载开箱即用**：
+   - 内置包含 `llm-deployment.yaml` 与 `llm-service.yaml`，便于按需将 Layer-3 LLM 推理服务以独立 Pod / GPU 节点形式部署，与 PrivShield Core 形成高可靠微服务网格。
+
+#### 4.0.2 Kustomize 核心工作机制
+
+Kustomize 通过一个主入口文件 `kustomization.yaml` 声明需要编排的 `resources` 资源列表、通用 `namespace` / `labels` 以及 `configMapGenerator` / `secretGenerator`。当执行 `kubectl apply -k deploy/k8s/` 时，Kustomize 引擎会在内存中将资源解析合并为完整的流式清单并原子提交给 Kubernetes API Server。
+
+---
+
+### 4.2 K8s 资源清单与拓扑结构全景
+
+`deploy/k8s/` 目录中包含的 Kubernetes 标准清单文件如下表所示：
+
+| 文件名 | Kubernetes Kind | 核心职责与设计说明 |
+|---|---|---|
+| `namespace.yaml` | `Namespace` | 定义专用的隔离命名空间 `PrivShield`，保障多租户与资源配额隔离 |
+| `configmap.yaml` | `ConfigMap` | 注入 `privacy-profile.yaml`，声明 DP、K-匿名与脱敏规则引擎参数 |
+| `deployment.yaml` | `Deployment` | PrivShield Core 主应用工作负载（声明双端口、双探针、资源限制与环境变量） |
+| `service.yaml` | `Service` | ClusterIP 服务，统一暴露 REST (`8079`) 与 gRPC (`50051`) 两个容器端口 |
+| `secret.example.yaml` | `Secret` | 生产级安全凭据示例（TLS 证书、私钥与 API Key JSON，用于复制定制） |
+| `kustomization.yaml` | `Kustomization` | 资源编排总入口，声明资源清单依赖与统一命名空间管理 |
+| `llm-deployment.yaml` | `Deployment` | 独立 vLLM 大模型推理服务工作负载（按需启用，配置 GPU 挂载与显存优化参数） |
+| `llm-service.yaml` | `Service` | 独立 vLLM 内部 ClusterIP 服务（暴露 `8000` 端口，供 Core Pod 内部 RPC/HTTP 访问） |
+
+#### 4.2.1 系统部署网络拓扑结构
+
+```text
+                     ┌──────────────────────────────────────────────┐
+                     │          Kubernetes Cluster (K8s)            │
+                     │                                              │
+                     │   ┌──────────────────────────────────────┐   │
+外部客户端 / 网关 ───┼──►│  Service: PrivShield (ClusterIP)     │   │
+(REST: 8079 / gRPC)  │   │  ├─ Port 8079 (TCP) -> Pod:8079      │   │
+                     │   │  └─ Port 50051 (TCP) -> Pod:50051    │   │
+                     │   └──────────────────┬───────────────────┘   │
+                     │                      │ (负载均衡分发)         │
+                     │                      ▼                       │
+                     │   ┌──────────────────────────────────────┐   │
+                     │   │  Deployment: PrivShield (Core Pods)  │   │
+                     │   │  ├─ /etc/PrivShield/ (ConfigMap)     │   │
+                     │   │  ├─ /certs/ (TLS / mTLS Secret)      │   │
+                     │   │  ├─ 探针: /health (10s) & /readyz(5s)│   │
+                     │   │  └─ 降级兜底: 本地规则 + NER          │   │
+                     │   └──────────────────┬───────────────────┘   │
+                     │                      │ (HTTP/gRPC 解耦调用)  │
+                     │                      ▼                       │
+                     │   ┌──────────────────────────────────────┐   │
+                     │   │  Service: PrivShield-llm (8000)      │   │
+                     │   └──────────────────┬───────────────────┘   │
+                     │                      │                       │
+                     │                      ▼                       │
+                     │   ┌──────────────────────────────────────┐   │
+                     │   │  Deployment: PrivShield-llm (vLLM)   │   │
+                     │   │  └─ GPU / NPU 独立推理 Pod           │   │
+                     │   └──────────────────────────────────────┘   │
+                     └──────────────────────────────────────────────┘
+```
+
+---
+
+### 4.3 Deployment 核心配置行级深度剖析
+
+`deploy/k8s/deployment.yaml` 清单展现了 PrivShield 生产级 Pod 的最佳配置实践：
 
 ```yaml
-# 容器端口
-ports:
-  - name: http
-    containerPort: 8079    # REST API
-  - name: grpc
-    containerPort: 50051   # gRPC
-
-# 探针配置
-livenessProbe:
-  httpGet:
-    path: /health
-    port: http
-  initialDelaySeconds: 10
-  periodSeconds: 10
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: http
-  initialDelaySeconds: 5
-  periodSeconds: 5
-
-# 资源限制
-resources:
-  requests: { cpu: 100m, memory: 256Mi }
-  limits:   { cpu: 1000m, memory: 1Gi }
-
-# 配置挂载
-volumeMounts:
-  - name: config
-    mountPath: /etc/PrivShield
-    readOnly: true
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: PrivShield
+  namespace: PrivShield
+  labels:
+    app: PrivShield
+spec:
+  replicas: 1                        # 副本数，生产可按需提升或配置 HPA
+  selector:
+    matchLabels:
+      app: PrivShield
+  template:
+    metadata:
+      labels:
+        app: PrivShield
+    spec:
+      containers:
+        - name: agent
+          image: privshield:0.1.0
+          imagePullPolicy: IfNotPresent
+          # 双协议端口声明：同一容器内同时支持 HTTP REST 与高性能 gRPC
+          ports:
+            - name: http
+              containerPort: 8079    # REST API 服务端口
+            - name: grpc
+              containerPort: 50051   # gRPC 通信端口
+          env:
+            - name: PRIVACY_REST_HOST
+              value: "0.0.0.0"
+            - name: PRIVACY_REST_PORT
+              value: "8079"
+            - name: PRIVACY_GRPC_HOST
+              value: "0.0.0.0"
+            - name: PRIVACY_GRPC_PORT
+              value: "50051"
+            - name: PRIVACY_PROFILE
+              value: "/etc/PrivShield/privacy-profile.yaml"
+            - name: PRIVACY_LOG_LEVEL
+              value: "INFO"
+            - name: PRIVACY_LOG_FORMAT
+              value: "text"          # 生产环境建议修改为 json
+          volumeMounts:
+            - name: config
+              mountPath: /etc/PrivShield
+              readOnly: true         # 配置文件只读挂载
+          # 存活探针（LivenessProbe）：监控进程是否存活，失败时 Kubelet 自动重启容器
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          # 就绪探针（ReadinessProbe）：深度校验隐私规则解析器与预算数据库，就绪前不接入流量
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          # 资源配额：设定合理的 requests 与 limits，保障调度与稳定性
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: PrivShield-config
 ```
+
+---
+
+### 4.4 部署实操指南 (Step-by-Step Deployment Walkthrough)
+
+#### 步骤 1：准备生产凭据 Secret（可选但生产强烈推荐）
+
+如需启用 TLS 加密通信与 API Key 鉴权：
+
+```bash
+# 1. 复制示例文件
+cp deploy/k8s/secret.example.yaml deploy/k8s/secret.yaml
+
+# 2. 编辑 secret.yaml，将真实证书与 Base64 编码后的 API Key 填入：
+#    tls.crt: <base64-encoded-crt>
+#    tls.key: <base64-encoded-key>
+#    api-keys.json: <base64-encoded-json>
+```
+
+#### 步骤 2：配置 `kustomization.yaml` 编排入口
+
+编辑 `deploy/k8s/kustomization.yaml`：
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: PrivShield
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  # 若已准备 secret.yaml，取消下行注释
+  # - secret.yaml
+  # 若需同时拉起独立 LLM 推理服务，取消下面两行注释
+  # - llm-deployment.yaml
+  # - llm-service.yaml
+```
+
+#### 步骤 3：执行部署与 Rollout 状态跟踪
+
+```bash
+# 1. 一键应用全套资源
+kubectl apply -k deploy/k8s/
+
+# 2. 实时跟踪 Deployment 滚动状态直至成功
+kubectl rollout status deployment/PrivShield -n PrivShield
+
+# 3. 查看资源清单运行状态
+kubectl get pods,svc,configmap -n PrivShield -o wide
+```
+
+#### 步骤 4：使用生产运维脚本一键管理
+
+```bash
+# 执行原生 K8s 自动化部署脚本
+bash ./scripts/prod/deploy-k8s.sh
+
+# 停止并清理原生 K8s 部署
+bash ./scripts/prod/stop-k8s.sh
+```
+
+---
+
+### 4.5 生产级服务暴露与流量接入 (Ingress & Service Routing)
+
+#### 4.5.1 Service 模式选择与适用场景
+
+- **ClusterIP（默认）**：仅集群内部可达，适用于作为微服务 Sidecar 或内部隐私计算代理网关。
+- **NodePort**：在每个节点开放固定端口（如 `30079` / `35051`），适用于局域网或裸金属无外部负载均衡器环境。
+- **LoadBalancer**：自动向云厂商（AWS NLB / 阿里云 SLB / 腾讯云 CLB）申请公网/专网负载均衡 IP。
+
+#### 4.5.2 统一 Ingress 网关路由（含 gRPC 支持）
+
+若集群部署了 Ingress-Nginx Controller，可通过如下 Ingress 清单实现统一路由：
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: PrivShield-ingress
+  namespace: PrivShield
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    # 若需通过 Ingress 转发 gRPC 流量，必须指定 backend-protocol 为 GRPC
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+    - hosts:
+        - privacy.example.com
+      secretName: PrivShield-tls
+  rules:
+    - host: privacy.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: PrivShield
+                port:
+                  number: 8079
+```
+
+---
+
+### 4.6 原生 K8s 日常运维与故障诊断
+
+```bash
+# 1. 平滑重启（热重载配置或强制拉取新镜像）
+kubectl rollout restart deployment/PrivShield -n PrivShield
+
+# 2. 动态副本伸缩
+kubectl scale deployment/PrivShield --replicas=3 -n PrivShield
+
+# 3. 实时查看应用日志
+kubectl logs -f deployment/PrivShield -n PrivShield --tail=100
+
+# 4. 进入容器交互式调试
+kubectl exec -it deployment/PrivShield -n PrivShield -- /bin/bash
+
+# 5. 查看 Pod 详细调度与探针生命周期事件（排查 CrashLoopBackOff 核心利器）
+kubectl describe pod -l app=PrivShield -n PrivShield
+```
+
+#### 常见异常诊断速查表
+
+| Pod 状态 | 常见原因 | 排查与修复手段 |
+|---|---|---|
+| `ImagePullBackOff` / `ErrImagePull` | 镜像名或 Tag 不存在、私有仓库缺少 `imagePullSecrets` | 检查 `image` 字段拼写；执行 `kubectl create secret docker-registry` 创建拉取凭据 |
+| `CrashLoopBackOff` | 进程启动异常退出（如环境变量配置错误、端口冲突、文件权限不足） | 执行 `kubectl logs <pod-name> -n PrivShield --previous` 查看退出前的最后堆栈 |
+| `CreateContainerConfigError` | 引用了不存在的 ConfigMap 或 Secret 键 | 执行 `kubectl describe pod <pod-name> -n PrivShield` 查看缺失的凭据名称并补齐创建 |
+| `OOMKilled` (Exit Code 137) | 内存超出 `limits.memory`（常见于 ML 镜像或大批量数据处理） | 调大 `resources.limits.memory`（core 镜像建议 >= 1Gi，ml 镜像建议 >= 4Gi~8Gi） |
+| `Running` 但状态为 `0/1 Ready` | 就绪探针 `/readyz` 校验失败（配置语法错误或预算 DB 异常） | 进入容器 curl 探测 `curl http://127.0.0.1:8079/readyz` 查看返回的具体诊断错误信息 |
 
 ---
 
@@ -1324,12 +1679,70 @@ spec:
 
 ---
 
-## 11. 自动伸缩（HPA）
+## 11. 自动伸缩（HPA - Horizontal Pod Autoscaler）
 
-Helm 模板使用 `autoscaling/v2` API，支持 CPU 和内存双指标：
+### 11.0 HPA 核心原理与 PrivShield 伸缩架构
+
+**Horizontal Pod Autoscaler (HPA)** 是 Kubernetes 内置的根据工作负载实际资源消耗指标（CPU、内存、自定义业务指标）动态自动调整 Pod 副本数（Replicas）的弹性控制器。
+
+#### 11.0.1 PrivShield 场景下的弹性特征与挑战
+
+1. **计算密集型（CPU Bound）隐私原语**：
+   - 差分隐私（DP Laplace / Gaussian 噪声注入与全局敏感度计算）、K-匿名（Mondrian 数据集多维空间划分）、规则引擎（ConfigurableRuleEngine 向量化匹配）均高度依赖 CPU 算力。
+   - 当遇到上游批量数据汇聚、大规模导出或业务高峰时，CPU 利用率会瞬间飙升，需依靠 HPA 快速拉起副本分摊计算负载。
+2. **显存/内存密集型（Memory Bound）ML 分类**：
+   - 运行 ML 镜像（含 PyTorch、Transformers、ONNX NER）时，每个 Pod 基础内存占用在 2GB~4GB 左右。如果无限制扩容可能引发 Kubernetes 节点内存耗尽（OOM）。因此 ML 场景下 HPA 的 `maxReplicas` 必须严格结合集群节点容量设定。
+3. **典型业务流量潮汐特征**：
+   - 白天高频在线隐私脱敏、审批仲裁与分类请求密集；夜间仅有低频心跳或定时批处理任务。HPA 能够实现业务波峰自动扩容保障 SLA、波谷自动缩容节省集群服务器成本。
+
+#### 11.0.2 HPA 核心控制算法与循环周期
+
+Kubernetes `kube-controller-manager` 内部的 HPA 控制循环默认每隔 `15 秒`（由 `--horizontal-pod-autoscaler-sync-period` 控制）从 Metrics Server 采集所有受管 Pod 的实际指标，并通过如下经典公式计算期望副本数：
+
+$$\text{DesiredReplicas} = \left\lceil \text{CurrentReplicas} \times \left( \frac{\text{CurrentMetricValue}}{\text{TargetMetricValue}} \right) \right\rceil$$
+
+- **向上取整（Ceil）**：确保计算结果始终偏向保守防御，一旦资源利用率超过目标阈值立即向上扩容。
+- **容忍区间（Tolerance）**：默认当 $\left| \frac{\text{CurrentMetricValue}}{\text{TargetMetricValue}} - 1.0 \right| \le 0.1$（即利用率波动在 $\pm 10\%$ 以内）时，HPA 不会触发伸缩动作，避免因微小波动引起无谓调度。
+
+---
+
+### 11.1 前置条件与 Metrics Server 依赖
+
+要在 Kubernetes 中成功运行 HPA，必须满足以下两大前置条件：
+
+1. **集群中已部署 Metrics Server 并正常运行**：
+   - Metrics Server 是 Kubernetes 聚合 API 的指标采集组件，负责从各节点 Kubelet 的 cAdvisor 收集容器 CPU 与内存利用率。
+   - 验证 Metrics Server 是否就绪：
+     ```bash
+     # 必须能正常输出节点与 Pod 的实时 CPU/内存利用率
+     kubectl top nodes
+     kubectl top pods -n PrivShield
+     ```
+2. **PrivShield Pod 必须配置显式的 `resources.requests`**：
+   - HPA 目标百分比（如 CPU 70%）是相对于容器的 `requests.cpu` 计算的，公式为：`实际使用量 / requests 配额`。
+   - **重要坑点**：如果 Pod 未配置 `resources.requests.cpu` 或 `resources.requests.memory`，HPA 将无法计算百分比，`kubectl get hpa` 的 `TARGETS` 列会持续显示 `<unknown>`，自动伸缩将完全失效。
+
+---
+
+### 11.2 Helm 配置与参数详解
+
+PrivShield Helm Chart 模板（`deploy/helm/PrivShield/templates/hpa.yaml`）使用现代 Kubernetes **`autoscaling/v2`** API，支持 CPU 和内存多指标联合决策（任意一项指标超标即触发扩容）。
+
+#### 11.2.1 核心配置参数表
+
+| 参数项 | 默认值 | 生产建议值 | ML 镜像建议值 | 核心功能与说明 |
+|---|---|---|---|---|
+| `autoscaling.enabled` | `false` | `true` | `true` | HPA 自动伸缩全局开关 |
+| `autoscaling.minReplicas` | `1` | `2` | `1` | 最小 Pod 副本数（生产环境建议 >= 2 保障高可用） |
+| `autoscaling.maxReplicas` | `5` | `10` | `3` | 最大 Pod 副本数（ML 模式受限于单 Pod 内存，需限制上限） |
+| `autoscaling.targetCPUUtilizationPercentage` | `80` | `70` | `75` | 目标 CPU 平均利用率阈值（%） |
+| `autoscaling.targetMemoryUtilizationPercentage` | `80` | `80` | `85` | 目标内存平均利用率阈值（%） |
+| `autoscaling.behavior` | `{}` | 见 11.3 节 | 见 11.3 节 | 自定义扩缩容速率、步长与冷却防抖窗口配置 |
+
+#### 11.2.2 生产环境覆盖配置示例 (`values-production.yaml`)
 
 ```yaml
-# values-production.yaml
+# deploy/helm/PrivShield/values-production.yaml
 autoscaling:
   enabled: true
   minReplicas: 2
@@ -1338,10 +1751,141 @@ autoscaling:
   targetMemoryUtilizationPercentage: 80
 ```
 
-**注意事项**：
-- 启用 HPA 后，`replicaCount` 字段被忽略（Deployment 模板中有条件判断）。
-- 可通过 `autoscaling.behavior` 自定义缩容策略（如冷却窗口）。
-- ML 镜像建议 `maxReplicas` 不宜过大（单 Pod 内存占用高）。
+> **注意机制**：当 `autoscaling.enabled: true` 时，Helm `deployment.yaml` 模板会自动忽略 `replicaCount` 参数，将副本数的控制权完全移交给 HPA 控制器，防止 Helm 升级时强制重置副本数。
+
+---
+
+### 11.3 自定义伸缩行为与防抖策略 (Behavior & Stabilization)
+
+在生产高并发场景下，默认的 HPA 伸缩行为可能存在两大痛点：
+1. **扩容不够快**：突发流量洪峰涌入时，Pod 增加步长过小导致接口排队超时或 504。
+2. **频繁缩容震荡（Flapping / Thrashing）**：流量刚有短暂回落便立即缩容，几秒后流量再次上涨又重新拉起 Pod，造成容器反复初始化与镜像开销。
+
+通过 `autoscaling/v2` 的 `behavior` 配置段，可以实现**“激进扩容、平缓缩容”**的生产级弹性策略：
+
+```yaml
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  behavior:
+    # 扩容策略（Scale Up）：极速响应突发流量
+    scaleUp:
+      stabilizationWindowSeconds: 0      # 无需等待防抖，指标超标立即触发扩容
+      policies:
+        - type: Percent
+          value: 100                     # 允许单次扩容 100%（副本数翻倍）
+          periodSeconds: 15
+        - type: Pods
+          value: 4                       # 或单次直接增加 4 个 Pod
+          periodSeconds: 15
+      selectPolicy: Max                  # 取上述两条策略中扩容幅度最大者
+    # 缩容策略（Scale Down）：稳健平缓防抖
+    scaleDown:
+      stabilizationWindowSeconds: 300    # 5 分钟观察冷却期（防止流量波动引起的反复伸缩）
+      policies:
+        - type: Percent
+          value: 10                      # 每分钟最多仅缩容当前副本数的 10%
+          periodSeconds: 60
+        - type: Pods
+          value: 1                       # 或每分钟最多下线 1 个 Pod
+          periodSeconds: 60
+      selectPolicy: Min                  # 取上述两条策略中缩容幅度最小者（保守缩容）
+```
+
+---
+
+### 11.4 原生 Kubernetes HPA 资源清单
+
+如果使用原生 Kubernetes (Kustomize) 部署，可以在 `deploy/k8s/` 下创建独立的 `hpa.yaml` 清单：
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: PrivShield-hpa
+  namespace: PrivShield
+  labels:
+    app: PrivShield
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: PrivShield
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+```
+
+应用清单：
+```bash
+kubectl apply -f deploy/k8s/hpa.yaml -n PrivShield
+```
+
+---
+
+### 11.5 状态检查、压测验证与调试
+
+#### 11.5.1 查看 HPA 运行状态
+
+```bash
+# 查看 HPA 列表与指标命中情况
+kubectl get hpa -n PrivShield
+
+# 期望输出示例：
+# NAME             REFERENCE               TARGETS           MINPODS   MAXPODS   REPLICAS   AGE
+# privshield       Deployment/privshield   45%/70%, 30%/80%  2         10        2          10m
+
+# 查看 HPA 详细事件与扩缩容历史
+kubectl describe hpa privshield -n PrivShield
+```
+
+#### 11.5.2 生产高并发压测验证实操
+
+可以使用 `hey` 或 `ab`（Apache Bench）对 PrivShield 脱敏接口发起并发压力测试，观察 HPA 自动扩容过程：
+
+```bash
+# 步骤 1：开启一个终端持续观察 HPA 与 Pod 状态变化
+watch -n 2 'kubectl get hpa,pods -n PrivShield'
+
+# 步骤 2：在测试机上对 PrivShield 节点发起并发压测（50 并发，持续 60 秒）
+# 向脱敏接口 POST 复杂 JSON 数据模拟密集规则匹配与脱敏
+hey -n 100000 -c 50 -m POST \
+  -H "Content-Type: application/json" \
+  -d '{"records": [{"name": "张三", "id_card": "110101199003072391", "phone": "13800138000", "email": "zhangsan@example.com", "address": "北京市海淀区中关村南大街1号"}]}' \
+  http://<NODE_IP>:8079/mask/batch
+
+# 步骤 3：观察输出
+# 当 CPU 利用率突破 70% 阈值（如达到 120%/70%）时，HPA 会自动触发 ScaleUp 事件：
+# SuccessfullyRescaled: New size: 4; reason: cpu resource utilization (percentage of request) above target
+# Pod 副本数将从 2 个逐步增加至 4 个、8 个直至平摊负载。
+# 压测停止 5 分钟（防抖窗口）后，副本数将平缓自动缩减回 minReplicas (2)。
+```
+
+---
+
+### 11.6 常见问题排查与最佳实践
+
+| 故障现象 | 根本原因 | 解决方案与最佳实践 |
+|---|---|---|
+| **`TARGETS` 持续显示 `<unknown>/70%`** | 1. 集群未安装或未启动 `metrics-server`<br>2. Deployment 中未配置 `resources.requests`<br>3. Pod 刚启动探针未就绪 | 1. 验证 `kubectl top pods -n PrivShield` 是否有输出<br>2. 检查 `values.yaml` 中 `resources.requests.cpu` 与 `memory` 是否已正确设置<br>3. 等待 1~2 分钟让 Metrics Server 完成指标聚合采样 |
+| **HPA 扩缩容与手动 `kubectl scale` 冲突** | 运维人员或发布脚本手动修改了 Deployment 的 `replicas`，导致与 HPA 控制器争夺副本控制权（乒乓效应） | **最佳实践**：一旦启用 HPA，禁止在 CI/CD 流水线中通过 `kubectl scale` 修改副本数；如需临时扩容，应通过 `kubectl edit hpa` 修改 `minReplicas` |
+| **ML 镜像模式下集群节点发生 OOM** | ML 镜像包含深度学习框架，单个 Pod 内存限制较高（如 8Gi），HPA 快速扩容出多个副本导致耗尽 Worker 节点宿主机内存 | 1. 将 `values-ml.yaml` 中的 `maxReplicas` 严格限制在 `2~3`<br>2. 为 ML Pod 配置专属的节点选择器（`nodeSelector` / `affinity`）隔离至大内存 GPU 计算节点 |
+| **HPA 多副本下的隐私预算一致性保障** | PrivShield 在多副本模式下，若使用内存预算模式（默认），各 Pod 间的隐私预算扣减无法互通，可能导致差分隐私预算超扣 | **生产强制规范**：在多副本和 HPA 场景下，**必须配置统一的 SQLite 共享卷或外部预算持久化**（设置环境变量 `PRIVACY_BUDGET_DB=/data/budget/privacy_budget.db` 并挂载共享 PVC），确保所有 Pod 共享强一致的全局隐私预算状态 |
 
 ---
 
