@@ -1,13 +1,20 @@
-"""HTTP 反向代理网关模块。
+"""HTTP 反向代理网关模块 (HTTP Reverse-Proxy Gateway).
 
 基于 FastAPI 实现通配路由代理，将 REST 请求透明转发至后端健康节点，
-支持故障重试、被动健康检测与 Prometheus 指标采集。
+支持故障自适应重试、被动健康检测、熔断器保护、双向 TLS 回源与 Prometheus 指标采集。
 
-HTTP reverse-proxy gateway module.
-
-Implements a wildcard-route proxy on FastAPI that transparently forwards REST
-requests to healthy backend nodes with retry, passive health detection, and
-Prometheus metrics instrumentation.
+主要职责与执行逻辑：
+1. **连接池生命周期管理 (Lifespan)**：在应用级维护长连接单例 `httpx.AsyncClient`，并支持跨事件循环漂移感知自愈；
+2. **Hop-by-Hop 与压缩头过滤**：按 RFC 7230 剔除逐段传输头，并在响应端剔除 `content-encoding` 杜绝客户端二次解包崩溃；
+3. **真实客户端 IP 透传**：提取直连 IP 并规范化追加至 `X-Forwarded-For` 与 `X-Real-IP`；
+4. **动态拓扑管理安全防护**：提供 `/v1/gateway/register` 与 `/v1/gateway/deregister` 端点，采用 Fail-Closed 鉴权与 SSRF 阻断；
+5. **通配路由透明代理 (/{path:path})**：
+   - 步骤 1：单次读取缓存 Request Body；
+   - 步骤 2：负载均衡器动态选路；
+   - 步骤 3：在途连接追踪 (`track_connection`) 与代理转发；
+   - 步骤 4：状态码精细分流（5xx 熔断惩罚、2xx/3xx 熔断复位、4xx 业务透传）；
+   - 步骤 5：毫秒级被动故障感知（5s 冷却）与非幂等重试安全中断；
+   - 步骤 6：全链路 Prometheus 指标记录与内部错误脱敏。
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ from .balancer import LoadBalancer, backend_tls_verify
 logger = get_logger(__name__)
 
 
-# RFC 7230 规定的逐段传输头 (Hop-by-hop headers)，在代理转发时不应向下传递
+# RFC 7230 规定的逐段传输头 (Hop-by-hop headers)，仅在直连链路有效，代理转发时不应向下传递
 EXCLUDE_HEADERS = {
     "connection",
     "keep-alive",
@@ -71,18 +78,24 @@ class DeregisterRequest(BaseModel):
 
 
 def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
-    """创建并初始化 HTTP 网关 FastAPI 应用 / Create HTTP gateway FastAPI app.
+    """创建并初始化 HTTP 网关 FastAPI 核心应用。
+
+    执行流程：
+        1. 配置 FastAPI Lifespan 管理单例 HTTP 客户端连接池；
+        2. 注册动态管理端点鉴权钩子 (require_management_auth)；
+        3. 挂载动态注册 /v1/gateway/register 与注销 /v1/gateway/deregister 路由；
+        4. 挂载通配反向代理路由 /{path:path} 并绑定重试与指标采集逻辑。
 
     Args:
-        balancer: 关联的负载均衡实例。
+        balancer: 关联的负载均衡调度器实例。
 
     Returns:
-        初始化后的 FastAPI 应用实例。
+        FastAPI: 构建完成的网关 FastAPI 应用。
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # 初始化应用级单例 HTTP 客户端，并优化连接池配置
+        # 步骤 1：在应用启动时初始化全局单例 HTTP 客户端，配置超时、连接池上限与回源 CA
         app.state.http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0),
             limits=httpx.Limits(max_keepalive_connections=100, max_connections=500),
@@ -90,18 +103,19 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
             verify=backend_tls_verify(),  # 回源 TLS 启用时按 CA 校验后端证书
         )
         yield
-        # 优雅释放连接池
+        # 步骤 2：在应用关闭时优雅释放连接池
         await app.state.http_client.aclose()
 
     app = FastAPI(title="SecretFlow Local Privacy Agent REST Gateway", lifespan=lifespan)
     gateway_api_key = os.environ.get("GATEWAY_API_KEY", "")
 
     def require_management_auth(authorization: str | None) -> None:
-        """Protect topology mutation endpoints with an operator key (fail-closed).
+        """保护拓扑管理端点的鉴权函数（Fail-Closed 默认拒绝策略）。
 
-        未配置 ``GATEWAY_API_KEY`` 时管理端点一律返回 503（fail-closed）：
-        拓扑注册/注销可借 SSRF 把流量引向任意内网地址，绝不能默认放行。
-        本地开发如需使用，必须显式设置一个已知值（不接受空值）。
+        执行步骤：
+            1. Fail-Closed 检查：若环境变量未配置 ``GATEWAY_API_KEY``，直接抛出 503 禁用接口；
+            2. 常量时间比对：使用 ``hmac.compare_digest`` 严格比对 Authorization Bearer Token，
+               比对失败时抛出 401 Unauthorized。
         """
         if not gateway_api_key:
             logger.warning(
@@ -118,7 +132,14 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
 
     @app.post("/v1/gateway/register")
     async def register_node(req: RegisterRequest, authorization: str | None = Header(default=None)):
-        """动态注册工作节点 / Register a worker node to the pool."""
+        """动态注册或热更新工作节点。
+
+        执行步骤：
+            1. 校验管理端点鉴权令牌；
+            2. 校验 `http_url` 协议合法性（必须以 http:// 或 https:// 开头，杜绝 SSRF）；
+            3. 调用 `balancer.add_node` 将节点注入调度池并刷新健康指标；
+            4. 记录审计日志并返回 `{"status": "registered"}`。
+        """
         require_management_auth(authorization)
         if not (req.http_url.startswith("http://") or req.http_url.startswith("https://")):
             raise HTTPException(status_code=400, detail="Invalid http_url scheme, must be http:// or https://")
@@ -131,7 +152,13 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
 
     @app.post("/v1/gateway/deregister")
     async def deregister_node(req: DeregisterRequest, authorization: str | None = Header(default=None)):
-        """注销工作节点 / Deregister a worker node from the pool."""
+        """动态注销工作节点。
+
+        执行步骤：
+            1. 校验管理端点鉴权令牌；
+            2. 调用 `balancer.remove_node` 从调度池中移除节点并异步释放底层通道；
+            3. 记录审计日志并返回 `{"status": "deregistered"}`。
+        """
         require_management_auth(authorization)
         balancer.remove_node(req.http_url, req.grpc_address)
         logger.info(
@@ -142,10 +169,28 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
     async def proxy_request(path: str, request: Request):
-        """通配路由代理 / Wildcard proxy route with retry and metrics.
+        """通配反向代理核心路由（支持故障重试、被动感知与指标采集）。
 
-        代理并转发所有 HTTP 方法的请求，支持故障重试、被动健康检测、
-        熔断器保护与 Prometheus 延迟/计数指标采集。
+        执行步骤：
+            1. **准备阶段**：记录请求开始时间戳，提取请求方法与 Query 参数；
+            2. **Header 过滤与客户端 IP 注入**：
+               - 剥离 Hop-by-Hop 逐段传输头；
+               - 提取客户端直连 IP 并规范化追加至 `X-Forwarded-For` 与 `X-Real-IP`；
+            3. **Body 单次缓冲**：通过 `await request.body()` 完成单次流式读取，确保重发安全；
+            4. **重试与故障转移循环 (最多 3 次尝试)**：
+               - 步骤 4.1：调用 `balancer.select_node()` 获取可用健康节点，若无节点可用立即返回 503；
+               - 步骤 4.2：检查当前 AsyncIO Event Loop 是否漂移，按需重建单例 `httpx.AsyncClient`；
+               - 步骤 4.3：在 `node.track_connection()` 上下文管理器内发起 HTTP 异步请求；
+               - 步骤 4.4：请求成功：
+                 * 记录 Prometheus QPS 与 Latency 直方图；
+                 * 根据 HTTP 状态码反馈熔断器（>=500 记录失败，<400 记录成功，4xx 业务错误不惩罚）；
+                 * 清洗响应头（剔除 Hop-by-Hop 与 `content-encoding`），封装 `fastapi.Response` 返回；
+               - 步骤 4.5：请求异常（网络连接失败或超时）：
+                 * 判定是否允许重试：幂等方法（GET/HEAD/OPTIONS）或 `httpx.ConnectError`（连接未建立，无副作用）；
+                 * 记录熔断器失败与 Prometheus `privacy_gateway_retries_total` 计数；
+                 * 触发毫秒级被动健康下线（`node.is_healthy = False`, 5 秒冷却退避）；
+                 * 若为非幂等且已发送数据的超时异常，立即中断重试循环，防止产生重复扣减副作用；
+            5. **重试耗尽兜底**：记录 502 监控指标，对客户端屏蔽内网真实错误详情并抛出 HTTP 502。
         """
         method = request.method
         # 非幂等请求仅在 ConnectError（TCP 连接未建立，请求尚未到达后端）时
@@ -174,6 +219,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
         last_exception: Exception | None = None
 
         for attempt in range(max_retries):
+            # 步骤 4.1: 动态挑选健康后端节点
             node = await balancer.select_node()
             if not node:
                 duration = time.perf_counter() - start_time
@@ -185,7 +231,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                 )
                 raise HTTPException(status_code=503, detail="No healthy backend nodes available")
 
-            # 获取或延迟初始化应用级单例 HTTP 客户端
+            # 步骤 4.2: 获取或延迟初始化应用级单例 HTTP 客户端（处理 Loop 漂移）
             current_loop = asyncio.get_running_loop()
             client = getattr(request.app.state, "http_client", None)
             cached_loop = getattr(request.app.state, "http_client_loop", None)
@@ -210,6 +256,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
 
             url = f"{node.http_url}/{path}"
             try:
+                # 步骤 4.3: 追踪连接数并转发请求
                 async with node.track_connection():
                     resp = await client.request(
                         method=method,
@@ -219,7 +266,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                         content=body,
                     )
 
-                # 记录成功指标
+                # 步骤 4.4: 记录监控指标与熔断反馈
                 duration = time.perf_counter() - start_time
                 GATEWAY_REQUESTS_TOTAL.labels(
                     protocol="http", method=method, status=str(resp.status_code)
@@ -245,6 +292,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                     headers=resp_headers,
                 )
             except Exception as exc:
+                # 步骤 4.5: 异常处理、被动健康感知与重试判定
                 last_exception = exc
                 retry_allowed = method in {"GET", "HEAD", "OPTIONS"} or isinstance(exc, httpx.ConnectError)
                 node.circuit_breaker.record_failure()
@@ -259,14 +307,13 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                         "circuit_breaker": node.circuit_breaker.state,
                     },
                 )
-                # 被动健康检查更新：立即将该节点置为不健康
+                # 被动健康检查更新：立即将该节点置为不健康并开启 5 秒冷却退避
                 node.is_healthy = False
                 node.passive_unhealthy_until = time.monotonic() + 5.0
                 if not retry_allowed:
                     break
 
-
-        # 若重试全部耗尽：不向客户端回传后端异常原文（可能含内网 URL/拓扑信息），
+        # 步骤 5: 若重试全部耗尽：不向客户端回传后端异常原文（可能含内网 URL/拓扑信息），
         # 详细原因仅记录在网关内部日志中。
         duration = time.perf_counter() - start_time
         GATEWAY_REQUESTS_TOTAL.labels(protocol="http", method=method, status="502").inc()
@@ -281,4 +328,3 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
         )
 
     return app
-

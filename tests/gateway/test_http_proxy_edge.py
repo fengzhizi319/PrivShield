@@ -1,14 +1,29 @@
 """HTTP 网关代理边界回归测试。
 
-覆盖以下修复点：
-- 响应头 content-encoding 必须剥离（httpx 已自动解压 body，透传会导致客户端二次解压失败）；
-- POST 等非幂等请求在超时 / 读取失败时不得重试（仅 ConnectError 允许故障转移）；
-- 幂等 GET 超时后应重试并故障转移到健康节点；
-- 后端 5xx 响应应计入节点熔断器失败统计，且原样透传状态码。
+覆盖以下关键特性与边界场景：
+1. **响应头 content-encoding 剥离**：httpx 已自动解压 body，透传会导致客户端二次解压失败；
+2. **非幂等请求重试边界**：
+   - POST 读超时 (ReadTimeout) 不得重试（副作用不可重放）；
+   - POST 连接建立失败 (ConnectError) 允许安全故障转移重试（TCP 未连接，无副作用）；
+3. **幂等 GET 读超时重试**：被动下线故障节点并故障转移到健康节点；
+4. **后端状态码分流与熔断反馈**：
+   - 5xx 响应原样透传并计入熔断器失败；
+   - 4xx 业务错误原样透传，不惩罚节点健康度；
+5. **安全与管理端点防护**：
+   - 注册 URL Scheme 非法阻断 (仅限 http/https，防 SSRF)；
+   - 未配置 GATEWAY_API_KEY 时 Fail-Closed 默认 503 阻断；
+   - 常量时间比对鉴权 (hmac.compare_digest)；
+   - 502 错误脱敏（绝不向客户端泄露内网 URL / 内部堆栈）；
+6. **网络头治理与 IP 透传**：
+   - Hop-by-Hop 请求头（Connection, Transfer-Encoding, Upgrade 等）严格剔除；
+   - 客户端 IP 自动注入 X-Forwarded-For 与 X-Real-IP；
+7. **连接池与事件循环漂移自愈**：
+   - 跨事件循环 (Event Loop Drift) 时自动重建 AsyncClient 连接池。
 """
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 
 import httpx
@@ -25,22 +40,26 @@ def patched_client(monkeypatch):
     """将代理内部创建的 httpx.AsyncClient 替换为基于 MockTransport 的客户端。
 
     Returns:
-        (calls, state)：calls 记录每次转发的 "METHOD URL"；
-        state["handler"] 由各用例设置为 (request) -> Response 的可调用。
+        (calls, state, captured_requests)：
+        calls 记录每次转发的 "METHOD URL"；
+        state["handler"] 由各用例设置为 (request) -> Response 的可调用；
+        captured_requests 记录上游收到的每个原始 httpx.Request 对象。
     """
     calls: list[str] = []
+    captured_requests: list[httpx.Request] = []
     state: dict = {"handler": None}
     real_async_client = httpx.AsyncClient  # 先保留真实类，避免 factory 内递归调用
 
     def factory(**_kwargs):
         def dispatch(request: httpx.Request) -> httpx.Response:
             calls.append(f"{request.method} {request.url}")
+            captured_requests.append(request)
             return state["handler"](request)
 
         return real_async_client(transport=httpx.MockTransport(dispatch))
 
     monkeypatch.setattr(http_proxy.httpx, "AsyncClient", factory)
-    return calls, state
+    return calls, state, captured_requests
 
 
 def test_response_strips_content_encoding(patched_client):
@@ -49,7 +68,7 @@ def test_response_strips_content_encoding(patched_client):
     模拟真实场景：上游返回 gzip 压缩体 + content-encoding 头，
     httpx 会自动解压，若再把头透传给客户端将导致二次解压失败。
     """
-    _calls, state = patched_client
+    _calls, state, _captured = patched_client
     payload = gzip.compress(b'{"status": "ok"}')
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -74,7 +93,7 @@ def test_response_strips_content_encoding(patched_client):
 
 def test_post_read_timeout_not_retried(patched_client):
     """POST（非幂等）读超时不应重试：只发出一次上游请求并返回 502。"""
-    calls, state = patched_client
+    calls, state, _captured = patched_client
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow backend", request=request)
@@ -94,9 +113,37 @@ def test_post_read_timeout_not_retried(patched_client):
     assert len(calls) == 1
 
 
+def test_post_connect_error_is_retried(patched_client):
+    """POST 遭遇 ConnectError（连接未建立）时允许安全重试与故障转移。"""
+    calls, state, _captured = patched_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "node-a" in str(request.url):
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(200, json={"result": "138****5678"})
+
+    state["handler"] = handler
+
+    balancer = LoadBalancer(strategy="round_robin")
+    balancer.add_node("http://node-a.test", "127.0.0.1:50051")
+    balancer.add_node("http://node-b.test", "127.0.0.1:50052")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    resp = client.post(
+        "/v1/privacy/mask",
+        json={"field_name": "mobile", "value": "13812345678", "context": ""},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["result"] == "138****5678"
+    assert len(calls) == 2
+    # 故障节点 node-a 被标记为不健康
+    bad_node = next(n for n in balancer.nodes if "node-a" in n.http_url)
+    assert bad_node.is_healthy is False
+
+
 def test_get_timeout_fails_over_to_healthy_node(patched_client):
     """幂等 GET 超时后应被动下线故障节点并重试到健康节点。"""
-    calls, state = patched_client
+    calls, state, _captured = patched_client
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "node-a" in str(request.url):
@@ -121,7 +168,7 @@ def test_get_timeout_fails_over_to_healthy_node(patched_client):
 
 def test_backend_5xx_records_circuit_breaker_failure(patched_client):
     """后端 5xx 应计入熔断器失败统计并原样透传，4xx 不影响熔断器状态。"""
-    calls, state = patched_client
+    calls, state, _captured = patched_client
 
     state["handler"] = lambda request: httpx.Response(500, json={"error": "boom"})
 
@@ -144,6 +191,52 @@ def test_backend_5xx_records_circuit_breaker_failure(patched_client):
     resp404 = client.get("/v1/unknown")
     assert resp404.status_code == 404
     assert node.circuit_breaker._failure_count == 1
+
+
+def test_hop_by_hop_headers_stripped_on_request(patched_client):
+    """请求方向必须剔除 Hop-by-Hop 逐段传输头，其余自定义头保留透传。"""
+    _calls, state, captured = patched_client
+    state["handler"] = lambda request: httpx.Response(200, json={"status": "ok"})
+
+    balancer = LoadBalancer(strategy="round_robin")
+    balancer.add_node("http://node-a.test", "127.0.0.1:50051")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    resp = client.get(
+        "/health",
+        headers={
+            "Connection": "keep-alive",
+            "Proxy-Authenticate": "basic",
+            "Upgrade": "websocket",
+            "X-Custom-Trace": "trace-12345",
+        },
+    )
+    assert resp.status_code == 200
+    assert len(captured) == 1
+    req_headers = captured[0].headers
+    assert "proxy-authenticate" not in req_headers
+    assert "upgrade" not in req_headers
+    assert req_headers.get("x-custom-trace") == "trace-12345"
+
+
+def test_client_ip_forwarding(patched_client):
+    """验证 X-Forwarded-For 与 X-Real-IP 注入与追加。"""
+    _calls, state, captured = patched_client
+    state["handler"] = lambda request: httpx.Response(200, json={"status": "ok"})
+
+    balancer = LoadBalancer(strategy="round_robin")
+    balancer.add_node("http://node-a.test", "127.0.0.1:50051")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    # 1. 未携带 X-Forwarded-For 时自动注入 client_ip
+    client.get("/health")
+    assert "x-forwarded-for" in captured[0].headers
+    assert "x-real-ip" in captured[0].headers
+
+    # 2. 原请求已有 X-Forwarded-For 时追加
+    client.get("/health", headers={"X-Forwarded-For": "10.0.0.1"})
+    xff = captured[1].headers.get("x-forwarded-for")
+    assert xff.startswith("10.0.0.1, ")
 
 
 def test_register_node_invalid_scheme_rejected(monkeypatch):
@@ -183,7 +276,7 @@ def test_management_endpoints_fail_closed_without_key(monkeypatch):
 
 def test_502_does_not_leak_backend_error(patched_client):
     """502 响应不得回传后端异常原文（可能含内网 URL），仅给通用文案。"""
-    _calls, state = patched_client
+    _calls, state, _captured = patched_client
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow backend", request=request)
@@ -236,3 +329,17 @@ def test_register_node_auth_constant_time(monkeypatch):
     assert resp_correct.status_code == 200
     assert resp_correct.json() == {"status": "registered"}
 
+
+def test_deregister_nonexistent_node(monkeypatch):
+    """注销不存在的节点应返回 200 deregistered（幂等设计）。"""
+    monkeypatch.setenv("GATEWAY_API_KEY", "secret-token-123")
+    balancer = LoadBalancer(strategy="round_robin")
+    client = TestClient(create_http_gateway_app(balancer))
+
+    resp = client.post(
+        "/v1/gateway/deregister",
+        headers={"Authorization": "Bearer secret-token-123"},
+        json={"http_url": "http://node-not-exists.test", "grpc_address": "127.0.0.1:50051"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "deregistered"}

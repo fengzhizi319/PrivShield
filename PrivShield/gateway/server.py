@@ -1,12 +1,23 @@
-"""网关统一启动入口模块。
+"""网关统一启动入口模块 (Gateway Unified Server Entrypoint).
 
-读取配置文件与环境变量，初始化负载均衡器，并在同一 Event Loop 内异步运行 REST (Uvicorn)
-与 gRPC 网关服务器。
+读取配置文件与环境变量，初始化负载均衡器，并在同一 AsyncIO 事件循环内并发托管
+HTTP/REST (FastAPI + Uvicorn) 与 gRPC 异步网关服务器。
 
-Gateway unified entrypoint module.
-
-Reads configuration from file and environment variables, initializes the load
-balancer, and runs REST (Uvicorn) + gRPC gateway servers in the same event loop.
+核心职责与执行逻辑：
+1. **配置层级合并 (load_config)**：
+   - 步骤 1：装载默认配置模板；
+   - 步骤 2：加载 YAML 文件配置 (`PRIVACY_GATEWAY_CONFIG`)；
+   - 步骤 3：应用环境变量覆盖 (`GATEWAY_*`) 并解析 `GATEWAY_BACKENDS`；
+2. **服务并行启动 (async_main)**：
+   - 步骤 1：实例化 `LoadBalancer` 并注入初始后端节点；
+   - 步骤 2：启动异步 gRPC 网关服务 (`start_grpc_gateway`)；
+   - 步骤 3：配置 Uvicorn 并启动 HTTP 网关（支持 TLS 终结与 mTLS `ssl.CERT_REQUIRED`）；
+   - 步骤 4：拉起后台双协议主动健康检查守护协程 (`health_check_loop`)；
+   - 步骤 5：使用 `asyncio.gather` 并发运行双协议服务；
+3. **优雅停机与资源排空 (Graceful Shutdown)**：
+   - 取消并彻底等待健康检查任务退出（消除 pending 警告）；
+   - 给予在途 gRPC 请求 1 秒优雅排空期；
+   - 释放所有后端 gRPC 通道。
 """
 
 from __future__ import annotations
@@ -34,10 +45,18 @@ logger = get_logger(__name__)
 
 
 def load_config() -> dict[str, Any]:
-    """从配置文件或环境变量加载网关配置参数 / Load gateway config from file or env.
+    """从配置文件与环境变量中层级加载并合并网关配置。
+
+    执行流程：
+        1. 步骤 1：初始化默认配置字典（默认监听 0.0.0.0:8000 与 0.0.0.0:50000，策略为 round_robin）；
+        2. 步骤 2：若指定了 `PRIVACY_GATEWAY_CONFIG` 环境变量且文件存在，解析 YAML 文件合并入配置；
+        3. 步骤 3：检测环境变量覆盖（`GATEWAY_REST_HOST`, `GATEWAY_REST_PORT`, `GATEWAY_GRPC_PORT`,
+           `GATEWAY_STRATEGY`, `GATEWAY_TLS_*` 等），环境变量具备最高优先级；
+        4. 步骤 4：解析 `GATEWAY_BACKENDS` 字符串（格式如 "http://127.0.0.1:8079|127.0.0.1:50051,..."）
+           并填充至后端列表。
 
     Returns:
-        解析合并后的配置字典。
+        dict[str, Any]: 合并后的网关与后端配置字典。
     """
     config: dict[str, Any] = {
         "gateway": {
@@ -56,7 +75,7 @@ def load_config() -> dict[str, Any]:
         "backends": [],
     }
 
-    # 1. 尝试从指定配置文件读取
+    # 步骤 2: 尝试从指定配置文件读取
     config_path = os.environ.get("PRIVACY_GATEWAY_CONFIG")
     if config_path and os.path.exists(config_path):
         try:
@@ -71,7 +90,7 @@ def load_config() -> dict[str, Any]:
         except Exception as e:
             logger.error("Failed to load config file", extra={"error": str(e)})
 
-    # 2. 尝试使用环境变量进行覆盖/补充
+    # 步骤 3: 尝试使用环境变量进行覆盖/补充
     gw = config["gateway"]
     gw["rest_host"] = os.environ.get("GATEWAY_REST_HOST", gw["rest_host"])
     gw["rest_port"] = int(os.environ.get("GATEWAY_REST_PORT", str(gw["rest_port"])))
@@ -81,12 +100,13 @@ def load_config() -> dict[str, Any]:
     gw["health_check_interval"] = float(
         os.environ.get("GATEWAY_HEALTH_INTERVAL", str(gw["health_check_interval"]))
     )
-    # TLS 终结环境变量 / TLS termination env vars
+    # TLS 终结环境变量
     gw["tls_enabled"] = os.environ.get("GATEWAY_TLS_ENABLED", str(gw["tls_enabled"])).lower() == "true"
     gw["tls_cert_file"] = os.environ.get("GATEWAY_TLS_CERT", gw["tls_cert_file"])
     gw["tls_key_file"] = os.environ.get("GATEWAY_TLS_KEY", gw["tls_key_file"])
     gw["tls_ca_file"] = os.environ.get("GATEWAY_TLS_CA", gw["tls_ca_file"])
 
+    # 步骤 4: 解析后端节点列表字符串
     env_backends = os.environ.get("GATEWAY_BACKENDS")
     if env_backends:
         backends = []
@@ -113,7 +133,18 @@ async def async_main(
     grpc_host: str | None = None,
     grpc_port: int | None = None,
 ):
-    """异步主函数，加载配置、初始化节点、启动双协议服务及健康检查后台任务。"""
+    """异步主函数，加载配置、初始化节点、启动双协议服务及健康检查后台任务。
+
+    执行流程：
+        1. 步骤 1：加载配置并应用 CLI 显式覆盖参数；
+        2. 步骤 2：初始化 `LoadBalancer` 并将配置的静态后端节点注入调度池；
+        3. 步骤 3：启动异步 gRPC 网关服务器 (`start_grpc_gateway`)；
+        4. 步骤 4：构建 HTTP 反向代理应用，配置 Uvicorn（处理 TLS 证书与 mTLS 验签）；
+        5. 步骤 5：启动后台主动健康检查守护任务 (`health_check_loop`)；
+        6. 步骤 6：通过 `asyncio.gather` 并发运行 Uvicorn 服务与 gRPC 监听服务；
+        7. 步骤 7 (优雅停机)：捕获取消或中断信号，取消健康检查任务，优雅终止 gRPC 服务并关闭所有通道。
+    """
+    # 步骤 1: 加载并合并配置
     config = load_config()
     gw = config["gateway"]
 
@@ -127,7 +158,7 @@ async def async_main(
     if grpc_port is not None:
         gw["grpc_port"] = grpc_port
 
-    # 初始化负载均衡器
+    # 步骤 2: 初始化负载均衡器
     balancer = LoadBalancer(strategy=gw["strategy"])
     backends = config["backends"]
 
@@ -141,7 +172,7 @@ async def async_main(
             weight=node_cfg.get("weight", 1),
         )
 
-    # 1. 启动异步 gRPC 网关服务器（支持 TLS 终结）
+    # 步骤 3: 启动异步 gRPC 网关服务器（支持 TLS 终结）
     grpc_server = await start_grpc_gateway(
         host=gw["grpc_host"],
         port=gw["grpc_port"],
@@ -152,7 +183,7 @@ async def async_main(
         tls_ca_file=gw.get("tls_ca_file", ""),
     )
 
-    # 2. 启动 HTTP 网关 FastAPI + Uvicorn 服务器（支持 TLS 终结）
+    # 步骤 4: 启动 HTTP 网关 FastAPI + Uvicorn 服务器（支持 TLS 终结与 mTLS）
     http_app = create_http_gateway_app(balancer)
     import ssl as _ssl
 
@@ -174,7 +205,7 @@ async def async_main(
     )
     uv_server = uvicorn.Server(uv_config)
 
-    # 3. 注册健康检查后台任务
+    # 步骤 5: 注册健康检查后台任务
     health_interval = gw["health_check_interval"]
     health_task = asyncio.create_task(health_check_loop(balancer, health_interval))
 
@@ -184,7 +215,7 @@ async def async_main(
     )
 
     try:
-        # 并发挂起运行 Uvicorn 服务器和 gRPC 服务器，保持主流程运行
+        # 步骤 6: 并发挂起运行 Uvicorn 服务器和 gRPC 服务器，保持主流程运行
         await asyncio.gather(
             uv_server.serve(),
             grpc_server.wait_for_termination(),
@@ -192,7 +223,7 @@ async def async_main(
     except (asyncio.CancelledError, KeyboardInterrupt):
         logger.info("Gateway is shutting down...")
     finally:
-        # 优雅清理资源
+        # 步骤 7: 优雅清理资源
         health_task.cancel()
         # 等待健康检查任务真正退出，避免事件循环关闭时
         # 出现 "Task was destroyed but it is pending" 警告。
@@ -204,7 +235,7 @@ async def async_main(
 
 
 def main():
-    """同步入口，解析命令行参数并启动 asyncio 事件循环。"""
+    """网关同步启动入口，负责命令行解析与 asyncio 事件循环拉起。"""
 
     parser = argparse.ArgumentParser(
         prog="PrivShield.gateway.server",
