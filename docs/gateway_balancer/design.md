@@ -1039,8 +1039,6 @@ CLI 命令行参数  >  环境变量 (GATEWAY_*)  >  YAML 配置文件  >  内�
 
 ---
 
-> **运维与部署指南**：生产部署检查清单、故障排查手册、容量规划与性能基准、配置优先级链、K8s 优雅停机协同等运维内容，已拆分至独立的 [运维与部署手册](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/ops.md)（§8–§11）。
-
 ---
 
 ## 14. 测试策略与验证体系
@@ -1049,7 +1047,7 @@ CLI 命令行参数  >  环境变量 (GATEWAY_*)  >  YAML 配置文件  >  内�
 
 ```mermaid
 graph TD
-    subgraph TestSuite [PrivShield 网关测试验证金字塔 (55 Passed)]
+    subgraph TestSuite [PrivShield 网关测试验证金字塔]
         E2E["端到端协议与协同测试 (test_gateway.py: 7 tests)<br/>真实 Agent 实例 + 双协议代理 + 泛化方法 + 动态注册"]
         Edge["反向代理边界与安全测试 (test_http_proxy_edge.py: 12 tests)<br/>Hop-by-hop 剔除 + content-encoding 剥离 + 幂等重试 + IP透传 + Fail-Closed"]
         Unit["核心调度与状态机单元测试 (test_balancer_unit.py: 22 tests)<br/>CircuitBreaker 三态流转 + SWRR 算法数学序列 + Least-Conn + 探针循环"]

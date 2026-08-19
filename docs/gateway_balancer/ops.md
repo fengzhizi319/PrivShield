@@ -48,6 +48,12 @@
   - [故障 7：Kubernetes 环境下 gRPC 流量倾斜与单 Pod 负载过高 (Single-Pod Pinning)](#故障-7kubernetes-环境下-grpc-流量倾斜与单-pod-负载过高-single-pod-pinning)
 - [9. 生产健康巡检与诊断工具](#9-生产健康巡检与诊断工具)
 - [10. 生产上线前检查清单 (Production Readiness Checklist)](#10-生产上线前检查清单-production-readiness-checklist)
+- [11. 容量规划与性能基准](#11-容量规划与性能基准)
+  - [11.1 单网关实例性能基线](#111-单网关实例性能基线)
+  - [11.2 请求超时与连接池参数](#112-请求超时与连接池参数)
+  - [11.3 扩展建议](#113-扩展建议)
+  - [11.4 配置优先级链](#114-配置优先级链)
+  - [11.5 K8s 优雅停机与 preStop Hook 协同](#115-k8s-优雅停机与-prestop-hook-协同)
 
 ---
 
@@ -900,6 +906,18 @@ cat /var/log/privshield/gateway.log | jq 'select(.message == "Node status change
 
 ## 8. 生产故障排查手册与应急预案 (Runbook)
 
+> **快速故障速查表**：
+>
+> | 故障现象 | 可能原因 | 快速处理 |
+> |---|---|---|
+> | **HTTP 502 全量失败** | 所有后端节点不可达 | 检查 `privacy_gateway_healthy_nodes` 是否为 0；查看日志 `error` 字段 |
+> | **503 No healthy backend** | 节点池为空或全部熔断/冷却 | 确认已配置 `GATEWAY_BACKENDS`；检查被动冷却期（5s）是否已过 |
+> | **节点反复上下线抖动** | 健康检查超时或后端响应慢 | 检查 `GATEWAY_HEALTH_INTERVAL`；确认后端 `/health` 延迟 < 2s |
+> | **熔断器长期 Open** | 后端持续 5xx 或网络故障 | 查看后端应用日志；检查 `circuit_breaker` 状态；临时重启后端 Pod |
+> | **gRPC UNAVAILABLE** | gRPC 通道异常或后端未启动 | 确认 gRPC 端口可达；检查回源 TLS 配置；查看 `last_error` 日志 |
+> | **TLS 握手失败** | 证书不匹配或 CA 未配置 | 确认证书文件存在且格式正确；检查 CA 路径；验证证书有效期 |
+> | **管理端点 503** | 未配置 `GATEWAY_API_KEY` | 显式设置 `GATEWAY_API_KEY` 环境变量并重启网关 |
+
 ### 故障 1：`503 No healthy backend nodes available` / `gRPC UNAVAILABLE`
 
 - **现象**：客户端请求全部返回 HTTP 503 或 gRPC `StatusCode.UNAVAILABLE`；Prometheus 告警 `GatewayNoHealthyNodes` 触发。
@@ -1077,3 +1095,77 @@ bash ./scripts/prod/prod_health_check.sh \
 | 8 | **熔断与重试** | 节点连续失败阈值 (5) 与恢复窗口 (30s) 已通过集成测试验证 | [ ] |
 | 9 | **K8s 双层协同** | Agent Service 已配置为 Headless（`clusterIP: None`），彻底消除 gRPC 长连接倾斜 | [ ] |
 | 10 | **全链路健康巡检** | 执行 `./scripts/prod/prod_health_check.sh` 退出码为 0 | [ ] |
+
+---
+
+## 11. 容量规划与性能基准
+
+### 11.1 单网关实例性能基线
+
+| 指标 | 参考值 | 测试条件 |
+|---|---|---|
+| HTTP 代理吞吐量 | ~2000 RPS | 1 后端节点，简单 JSON 响应，`round_robin` 策略 |
+| gRPC 代理吞吐量 | ~3000 RPS | 1 后端节点，小消息体 (<1KB)，`round_robin` 策略 |
+| 代理附加延迟 (P50) | < 1ms | 网关本身处理开销（不含后端响应时间） |
+| 代理附加延迟 (P99) | < 5ms | 含连接池获取、Header 清洗、指标记录 |
+| 内存基线 | ~80–120 MB | 空闲状态，10 后端节点，无在途请求 |
+| 最大并发连接 | 500 | `max_connections` 默认上限，超出后排队 |
+
+### 11.2 请求超时与连接池参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| HTTP 转发超时 | 30s | `httpx.Timeout(30.0)`，含 connect/read/write/pool 四维度 |
+| gRPC 转发超时 | 30s | `stub_method(request, timeout=30.0)` |
+| 健康检查超时 | 2s | 防止探测挂死影响巡检周期 |
+| `max_keepalive_connections` | 100 | 长连接保持上限 |
+| `max_connections` | 500 | 并发连接绝对上限 |
+| `GRPC_MAX_MESSAGE_BYTES` | 64 MiB | gRPC 单消息体积上限 |
+
+### 11.3 扩展建议
+
+| 场景 | 建议 |
+|---|---|
+| 后端节点数 > 20 | 考虑部署多个网关实例，配合 K8s Ingress 分发 |
+| 并发请求 > 500 | 调高 `max_connections` 或部署多网关实例分摊流量 |
+| 大消息传输频繁 (>10MB) | 确认 `GRPC_MAX_MESSAGE_BYTES` (64MiB) 足够，必要时调高 |
+| 混合 CPU/GPU 后端 | 采用 `weighted_round_robin` 或 `least_connections` 策略，GPU 节点配置高权重 |
+| 高可用要求 > 99.9% | 至少部署 2 个网关实例 + 3 个后端 Agent，启用熔断与双协议探针 |
+
+### 11.4 配置优先级链
+
+网关配置遵循四级覆盖优先级（从高到低）：
+
+```
+CLI 命令行参数  >  环境变量 (GATEWAY_*)  >  YAML 配置文件  >  内置默认值
+```
+
+- **内置默认值**：`load_config()` 初始化时硬编码（REST `0.0.0.0:8000`、gRPC `0.0.0.0:50000`、策略 `round_robin`）；
+- **YAML 配置文件**：通过 `PRIVACY_GATEWAY_CONFIG` 环境变量指定路径，`yaml.safe_load` 解析后合并入默认配置；
+- **环境变量**：`GATEWAY_REST_HOST`、`GATEWAY_STRATEGY` 等逐一覆盖，`GATEWAY_BACKENDS` 解析后端列表字符串；
+- **CLI 参数**：`argparse` 解析的命令行参数具有最高优先级，仅在显式传入时覆盖。
+
+### 11.5 K8s 优雅停机与 `preStop` Hook 协同
+
+在 Kubernetes 环境中，网关的优雅停机需要与 K8s 生命周期钩子协同配合：
+
+```yaml
+# Gateway Deployment 推荐配置
+spec:
+  terminationGracePeriodSeconds: 30   # K8s 层面总排空窗口
+  containers:
+    - name: gateway
+      lifecycle:
+        preStop:
+          exec:
+            # 先 sleep 5s，等待 Ingress/iptables 规则刷新完毕，
+            # 避免在排空期间仍有新流量打入即将终止的 Pod。
+            command: ["/bin/sh", "-c", "sleep 5"]
+```
+
+停机时序协同：
+1. K8s 发送 `SIGTERM` → 网关捕获并触发 `finally` 清理流程；
+2. 同时执行 `preStop` hook（`sleep 5`），在此期间网关仍在处理在途请求；
+3. 网关 `grpc_server.stop(grace=1.0)` 拒绝新请求并排空在途 gRPC；
+4. `balancer.close_all()` 关闭所有后端通道；
+5. `preStop` 结束后 K8s 发送 `SIGKILL` 强杀（若仍未退出）。
