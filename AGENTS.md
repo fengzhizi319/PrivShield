@@ -349,6 +349,12 @@ Address these before any hardened production deployment.
 | Run Dev Console (Python + Vite HMR) | `bash ./console/scripts/dev-start.sh` |
 | Run Dev Console (Dual Backend + Vite) | `bash ./console/scripts/dev-start-all.sh` |
 | Run Dev Console (Go mTLS + Vite) | `bash ./console/scripts/dev-start-go-mtls.sh` |
+| Start All E2E Services (Agent + 3 Go) | `bash ./console/scripts/e2e-start-all-services.sh` |
+| Stop All E2E Services | `bash ./console/scripts/e2e-stop-all-services.sh` |
+| Run Dev 3 New Modules (Agent required) | `bash ./console/scripts/dev-start-new-modules.sh` |
+| Stop 3 New Modules | `bash ./console/scripts/dev-stop-new-modules.sh` |
+| Run Integration Test (curl-based) | `bash ./console/scripts/integration-test-new-modules.sh` |
+| Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./console/service-hub/internal/handlers/` |
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
 | Run Docker Console (Go Backend + Web) | `bash ./console/scripts/docker-start-go.sh` |

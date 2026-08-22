@@ -10,10 +10,18 @@
 #   └─────────────────┘     └─────────┬──────────┘
 #                                      │
 #                            ┌─────────▼──────────┐
-#                            │ PrivShield │
+#                            │   PrivShield Agent  │
 #                            │   REST:8079 gRPC    │
 #                            │      :50051         │
-#                            └─────────────────────┘
+#                            └─────────┬──────────┘
+#                                      │
+#              ┌───────────────────────┼───────────────────────┐
+#              │                       │                       │
+#    ┌─────────▼──────────┐ ┌─────────▼──────────┐ ┌─────────▼──────────┐
+#    │   Service Hub      │ │ Datasource Mgr     │ │   Audit Log        │
+#    │   (调度中枢)        │ │ (数据源管理)        │ │  (脱敏审计日志)     │
+#    │      :8082         │ │      :8083         │ │      :8084         │
+#    └────────────────────┘ └────────────────────┘ └────────────────────┘
 #
 # 启动方式 / Usage:
 #   docker compose up -d                    # 启动核心服务（不含 LLM，纯 core 镜像）
@@ -418,7 +426,145 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 5. 可选：vLLM Layer-3 本地大模型推理服务 (GPU 加速，独立容器)
+  # 5. 数据服务调度中枢 (Service Hub)
+  #    PORT: 8082
+  #    作用: 6 阶段调度流水线（ingest→fetch→classify→desensitize→return→audit）
+  # ===========================================================================
+  service-hub:
+    build:
+      context: ../../console/service-hub
+      dockerfile: Dockerfile
+    image: privacy-service-hub:0.1.0
+    pull_policy: build
+    container_name: privacy-service-hub
+    ports:
+      - "8082:8082"
+    environment:
+      SERVICE_HUB_HOST: "0.0.0.0"
+      SERVICE_HUB_PORT: "8082"
+      SERVICE_HUB_AGENT_REST_HOST: "PrivShield"
+      SERVICE_HUB_AGENT_REST_PORT: "8079"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 6. 数据源管理 (Datasource Manager)
+  #    PORT: 8083
+  #    作用: 数据源 CRUD、连接测试、元数据自动分类分级
+  # ===========================================================================
+  datasource-mgr:
+    build:
+      context: ../../console/datasource-mgr
+      dockerfile: Dockerfile
+    image: privacy-datasource-mgr:0.1.0
+    pull_policy: build
+    container_name: privacy-datasource-mgr
+    ports:
+      - "8083:8083"
+    environment:
+      DATASOURCE_MGR_HOST: "0.0.0.0"
+      DATASOURCE_MGR_PORT: "8083"
+      DATASOURCE_MGR_AGENT_REST_HOST: "PrivShield"
+      DATASOURCE_MGR_AGENT_REST_PORT: "8079"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 7. 脱敏审计日志 (Audit Log)
+  #    PORT: 8084
+  #    作用: 脱敏操作审计记录、SHA256 完整性校验、合规报告生成
+  # ===========================================================================
+  audit-log:
+    build:
+      context: ../../console/audit-log
+      dockerfile: Dockerfile
+    image: privacy-audit-log:0.1.0
+    pull_policy: build
+    container_name: privacy-audit-log
+    ports:
+      - "8084:8084"
+    environment:
+      AUDIT_LOG_HOST: "0.0.0.0"
+      AUDIT_LOG_PORT: "8084"
+      AUDIT_LOG_AGENT_REST_HOST: "PrivShield"
+      AUDIT_LOG_AGENT_REST_PORT: "8079"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8084/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 8. 可选：vLLM Layer-3 本地大模型推理服务 (GPU 加速，独立容器)
   #    PORT: 8000
   #    启用：docker compose --profile llm up -d vllm
   #    独立运维：升级/重启只影响 LLM 层，core 自动降级，互不干扰

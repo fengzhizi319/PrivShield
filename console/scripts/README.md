@@ -12,6 +12,7 @@
 | **开发模式** | `dev-*.sh` | Python/Go 进程热重载 + Vite HMR 前端开发服务器 | 本地前端/后端代码开发调试（支持 `<50ms` 实时热更新） |
 | **生产代理模式** | `prod-*.sh` | 编译构建前端静态产物 (`dist`) + 后端静态托管/代理 | 无 Docker 环境下的单机静态部署与集成测试 |
 | **Docker 容器模式** | `docker-*.sh` | 多阶段 Docker 容器构建 + Docker Compose 全栈编排 | 容器化集群部署、GPU 大模型联合联调、开箱即用体验 |
+| **E2E 集成测试模式** | `e2e-*.sh` / `integration-test-*.sh` | 启动真实服务套件并运行全流程端到端集成测试 | 「申请数据→分类分级→脱敏→拿到脱敏数据→审计」全链路验证 |
 
 ---
 
@@ -74,6 +75,24 @@
 - **用法**：
   ```bash
   bash ./console/scripts/dev-stop.sh
+  ```
+
+#### 6. `./console/scripts/dev-start-new-modules.sh`
+- **作用**：一键启动三个新 Go 模块（数据服务调度中枢、数据源管理、脱敏审计日志），需 Agent 已在 `:8079` 运行。
+- **启动组件**：
+  - service-hub (调度中枢: `http://127.0.0.1:8082`)
+  - datasource-mgr (数据源管理: `http://127.0.0.1:8083`)
+  - audit-log (脱敏审计日志: `http://127.0.0.1:8084`)
+- **用法**：
+  ```bash
+  bash ./console/scripts/dev-start-new-modules.sh
+  ```
+
+#### 7. `./console/scripts/dev-stop-new-modules.sh`
+- **作用**：安全停止并清理三个新 Go 模块的后台进程。
+- **用法**：
+  ```bash
+  bash ./console/scripts/dev-stop-new-modules.sh
   ```
 
 ---
@@ -184,6 +203,44 @@
 - **用法**：
   ```bash
   bash ./console/scripts/docker-stop.sh
+  ```
+
+---
+
+### 2.4 E2E 集成测试脚本 (`e2e-*.sh` / `integration-test-*.sh`)
+
+一键启动真实服务套件并运行全流程端到端集成测试，验证「申请数据 → 分类分级 → 脱敏 → 拿到脱敏数据 → 审计」完整链路。
+
+#### 1. `./console/scripts/e2e-start-all-services.sh`
+- **作用**：一键启动 PrivShield Agent + 三个新 Go 模块共 4 个真实服务，自动等待健康检查通过。
+- **启动组件**：
+  - PrivShield Agent (分级脱敏引擎: `http://127.0.0.1:8079`)
+  - service-hub (调度中枢: `http://127.0.0.1:8082`)
+  - datasource-mgr (数据源管理: `http://127.0.0.1:8083`)
+  - audit-log (脱敏审计日志: `http://127.0.0.1:8084`)
+- **前置条件**：已安装 Python 3.13+ 虚拟环境，已安装 Go 1.27+。
+- **用法**：
+  ```bash
+  bash ./console/scripts/e2e-start-all-services.sh
+  ```
+
+#### 2. `./console/scripts/e2e-stop-all-services.sh`
+- **作用**：停止并清理全部 E2E 测试服务（先停 Go 模块，再停 Agent）。
+- **用法**：
+  ```bash
+  bash ./console/scripts/e2e-stop-all-services.sh
+  ```
+
+#### 3. `./console/scripts/integration-test-new-modules.sh`
+- **作用**：通过 curl 调用各服务，验证三个新模块的集成测试。
+- **测试内容**：
+  - service-hub 健康检查 + 任务提交
+  - datasource-mgr 数据源 CRUD + 连接测试
+  - audit-log 审计记录 + 统计查询 + 合规报告
+- **前置条件**：需先运行 `e2e-start-all-services.sh` 启动全部服务。
+- **用法**：
+  ```bash
+  bash ./console/scripts/integration-test-new-modules.sh
   ```
 
 ---

@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package servicehub;
+
+option go_package = "github.com/fengzhizi319/PrivShield/console/service-hub/proto";
+
+// ServiceHubService 数据服务调度中枢 gRPC 服务
+// ServiceHubService is the gRPC service interface for the data scheduling hub.
+service ServiceHubService {
+  // Health 健康检查（自检 + 上游 Agent 连通性）
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // HubStatus 调度中枢状态概览
+  rpc HubStatus(HubStatusRequest) returns (HubStatusResponse);
+
+  // Dispatch 分发脱敏/分类任务到流水线
+  rpc Dispatch(DispatchRequest) returns (DispatchResponse);
+
+  // ClassifyAndDispatch 先分类分级，再根据敏感度自动分发脱敏策略
+  rpc ClassifyAndDispatch(ClassifyAndDispatchRequest) returns (ClassifyAndDispatchResponse);
+
+  // GetTask 查询单个任务状态
+  rpc GetTask(GetTaskRequest) returns (TaskProto);
+
+  // ListTasks 列出全部任务（可选按状态过滤）
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+
+  // PipelineStatus 流水线各阶段状态
+  rpc PipelineStatus(PipelineStatusRequest) returns (PipelineStatusResponse);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Health / 健康检查
+// ─────────────────────────────────────────────────────────────
+
+message HealthRequest {}
+
+message HealthResponse {
+  string backend = 1;      // "ok"
+  string agent = 2;        // Agent 状态或 "unreachable"
+  string agent_url = 3;    // 上游 Agent 地址
+  int64  latency_ms = 4;   // 健康检查耗时（毫秒）
+  string error = 5;        // Agent 不可达时的错误信息
+  string via = 6;          // 模块标识 "service-hub"
+}
+
+// ─────────────────────────────────────────────────────────────
+// HubStatus / 调度中枢状态
+// ─────────────────────────────────────────────────────────────
+
+message HubStatusRequest {}
+
+message HubStatusResponse {
+  string status = 1;           // "running" | "degraded" | "stopped"
+  string uptime = 2;           // 可读运行时长
+  int32  active_tasks = 3;     // 当前运行任务数
+  int32  queued_tasks = 4;     // 排队等待任务数
+  int32  completed_total = 5;  // 已完成任务总数
+  int32  failed_total = 6;     // 已失败任务总数
+  string agent_url = 7;        // 上游 Agent 地址
+}
+
+// ─────────────────────────────────────────────────────────────
+// Dispatch / 分发任务
+// ─────────────────────────────────────────────────────────────
+
+message DispatchRequest {
+  string source = 1;           // 数据源名称
+  string operation = 2;        // 操作类型: mask / k_anon / dp / classify
+  string payload_json = 3;     // 任务数据（JSON 序列化）
+  int32  priority = 4;         // 优先级（越高越优先）
+}
+
+message DispatchResponse {
+  string task_id = 1;          // 分配的任务 ID
+  string status = 2;           // "accepted" | "queued" | "rejected"
+  string via = 3;              // 模块标识
+}
+
+// ─────────────────────────────────────────────────────────────
+// ClassifyAndDispatch / 分类分级 + 自动分发
+// ─────────────────────────────────────────────────────────────
+
+message ClassifyAndDispatchRequest {
+  string source = 1;           // 数据源名称
+  string payload_json = 2;     // 待分类数据（JSON 序列化）
+}
+
+message ClassifyAndDispatchResponse {
+  string task_id = 1;          // 分配的任务 ID
+  string level = 2;            // 分类等级 L1-L5
+  string auto_operation = 3;   // 自动选择的脱敏操作
+  string classify_result_json = 4; // 分类结果详情（JSON 序列化）
+  string via = 5;              // 模块标识
+}
+
+// ─────────────────────────────────────────────────────────────
+// GetTask / ListTasks / 任务查询
+// ─────────────────────────────────────────────────────────────
+
+message GetTaskRequest {
+  string task_id = 1;          // 任务 ID
+}
+
+message ListTasksRequest {
+  string status_filter = 1;    // 可选状态过滤: pending/running/completed/failed
+}
+
+message ListTasksResponse {
+  int32 total = 1;             // 任务总数
+  repeated TaskProto tasks = 2; // 任务列表
+  string via = 3;              // 模块标识
+}
+
+// ─────────────────────────────────────────────────────────────
+// TaskProto / 任务数据结构
+// ─────────────────────────────────────────────────────────────
+
+message TaskProto {
+  string id = 1;               // 唯一任务 ID
+  string status = 2;           // pending | running | completed | failed
+  string stage = 3;            // 当前流水线阶段
+  string source = 4;           // 数据源名称
+  string operation = 5;        // 操作类型
+  string created_at = 6;       // 创建时间（RFC3339）
+  string started_at = 7;       // 开始时间（RFC3339，可为空）
+  string completed_at = 8;     // 完成时间（RFC3339，可为空）
+  int64  duration_ms = 9;      // 耗时（毫秒）
+  string error = 10;           // 失败时的错误信息
+}
+
+// ─────────────────────────────────────────────────────────────
+// PipelineStatus / 流水线状态
+// ─────────────────────────────────────────────────────────────
+
+message PipelineStatusRequest {}
+
+message PipelineStatusResponse {
+  repeated PipelineStageProto stages = 1; // 流水线各阶段
+  bool agent_ok = 2;                      // 上游 Agent 是否可达
+}
+
+message PipelineStageProto {
+  string name = 1;           // 阶段名称
+  string status = 2;         // "idle" | "processing" | "error"
+  int32  active_count = 3;   // 当前阶段活跃任务数
+}

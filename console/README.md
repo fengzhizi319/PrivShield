@@ -7,6 +7,9 @@
 - `backend/` - Python FastAPI 代理服务，统一转发请求到 `PrivShield` REST 接口，并提供示例数据。
 - `backend-go/` - Go gRPC 代理服务，将前端的 REST 请求转换为 gRPC 调用转发给 `PrivShield`，接口格式与 Python 后端保持一致；同时可直接挂载 `web/dist` 提供 Console UI 页面。
 - `web/` - React + TypeScript + Vite 前端，按功能分组展示所有端点，支持一键加载示例和发送请求。
+- `service-hub/` - **数据服务调度中枢**（Go），6 阶段调度流水线（ingest→fetch→classify→desensitize→return→audit），自动根据分类分级结果选择脱敏策略。端口 `:8082`。
+- `datasource-mgr/` - **数据源管理**（Go），数据源 CRUD、连接测试、元数据自动采集与分类分级。端口 `:8083`。
+- `audit-log/` - **脱敏审计日志**（Go），脱敏操作审计记录、SHA256 完整性校验、合规报告生成。端口 `:8084`。
 
 ## 文档
 
@@ -16,11 +19,14 @@
 - `docs/vite.md` - Vite 原理、项目结构、配置方式，以及在 `console/web` 中的实际用法
 - `backend/docs/` - Python REST 代理后端：[design](backend/docs/design.md) · [api](backend/docs/api.md) · [test](backend/docs/test.md) · [ops](backend/docs/ops.md)
 - `backend-go/docs/` - Go gRPC 代理后端：[design](backend-go/docs/design.md) · [api](backend-go/docs/api.md) · [test](backend-go/docs/test.md) · [ops](backend-go/docs/ops.md)
+- `service-hub/docs/` - 数据服务调度中枢：[design](service-hub/docs/design.md) · [api](service-hub/docs/api.md) · [prd](service-hub/docs/prd.md) · [testing](service-hub/docs/testing.md) · [ops](service-hub/docs/ops.md)
+- `datasource-mgr/docs/` - 数据源管理：[design](datasource-mgr/docs/design.md) · [api](datasource-mgr/docs/api.md) · [prd](datasource-mgr/docs/prd.md) · [testing](datasource-mgr/docs/testing.md) · [ops](datasource-mgr/docs/ops.md)
+- `audit-log/docs/` - 脱敏审计日志：[design](audit-log/docs/design.md) · [api](audit-log/docs/api.md) · [prd](audit-log/docs/prd.md) · [testing](audit-log/docs/testing.md) · [ops](audit-log/docs/ops.md)
 
 其中 **ops 运维文档** 说明了开发模式与生产模式的区别、环境变量配置、跨域（CORS）解决方案、启停脚本与常见问题排查，部署前建议先阅读。
 如果你想先看“整条 console 链路在开发模式和商业化产品模式下怎么组合”，建议先读 `docs/modes.md`，再按需要查看各组件的 `ops.md`。
 
-> 💡 **运行脚本手册**：`console/scripts/` 目录下全部 16 个 Shell 运行与部署脚本的作用与详细用法，请查阅 [console/scripts/README.md](scripts/README.md)。
+> 💡 **运行脚本手册**：`console/scripts/` 目录下全部 21 个 Shell 运行与部署脚本的作用与详细用法，请查阅 [console/scripts/README.md](scripts/README.md)。
 
 ## 快速开始
 
@@ -104,7 +110,57 @@ bash ./console/scripts/docker-stop.sh
 
 该脚本会同时启动 `PrivShield`（REST 8079 + gRPC 50051）、Python REST 代理后端（`http://127.0.0.1:8080`）与 Go gRPC 代理后端（`http://127.0.0.1:8081`）。打开任一 Console 地址，顶部 Backend Selector 即可在两个后端间自由切换。
 
-### 2. 手动启动
+### 4. 启动三个新模块（数据服务调度中枢 / 数据源管理 / 脱敏审计日志）
+
+三个新模块均为 Go 服务，需要与 `PrivShield` Agent 联动。可一键启动全部真实服务进行全流程测试：
+
+```bash
+# 一键启动 Agent + 三个新模块（自动等待健康检查）
+bash ./console/scripts/e2e-start-all-services.sh
+
+# 启动后服务拓扑：
+#   PrivShield Agent  → http://127.0.0.1:8079  (分级脱敏引擎)
+#   service-hub       → http://127.0.0.1:8082  (调度中枢)
+#   datasource-mgr    → http://127.0.0.1:8083  (数据源管理)
+#   audit-log         → http://127.0.0.1:8084  (审计日志)
+
+# 停止全部
+bash ./console/scripts/e2e-stop-all-services.sh
+```
+
+也可以单独启动/停止三个新模块（不启动 Agent）：
+
+```bash
+# 启动三个 Go 模块（需 Agent 已在 :8079 运行）
+bash ./console/scripts/dev-start-new-modules.sh
+
+# 停止三个 Go 模块
+bash ./console/scripts/dev-stop-new-modules.sh
+```
+
+### 5. 全流程 E2E 集成测试
+
+启动全部真实服务后，运行端到端集成测试，验证「申请数据 → 分类分级 → 脱敏 → 拿到脱敏数据 → 审计」完整链路：
+
+```bash
+# 运行全流程 E2E 测试（真实调用 4 个服务）
+PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./console/service-hub/internal/handlers/
+
+# 运行三模块集成测试（bash 脚本，curl 调用各服务）
+bash ./console/scripts/integration-test-new-modules.sh
+```
+
+E2E 测试覆盖：
+
+| 测试用例 | 覆盖流程 |
+|---|---|
+| `TestRealE2E_FullFlow` | 健康检查 → 注册数据源 → 分类分级 → 自动脱敏 → 审计记录 → 合规报告 |
+| `TestRealE2E_AgentDirectCalls` | Agent 直接调用：分类(规则引擎) → 字段脱敏 → 整记录脱敏 |
+| `TestRealE2E_MultiServiceCoordination` | 四服务协调：数据源注册 → 脱敏调度 → 审计追踪 → 统计验证 |
+
+> 💡 不带 `PRIVSHIELD_E2E=1` 时 E2E 测试自动跳过，不影响日常开发。
+
+### 6. 手动启动
 
 启动 agent：
 
@@ -126,7 +182,7 @@ cd console/backend-go
 go run ./cmd/server
 ```
 
-### 3. 构建前端
+### 7. 构建前端
 
 ```bash
 cd console/web
@@ -138,7 +194,7 @@ corepack pnpm build
 
 构建产物输出到 `console/web/dist/`，后端会自动挂载为静态资源。
 
-### 4. 打开控制台
+### 8. 打开控制台
 
 - `./console/scripts/dev-start.sh` 启动后访问 `http://127.0.0.1:8080`（Python 后端提供 UI）
 - `./console/scripts/dev-start-go.sh` 启动后访问 `http://127.0.0.1:8081`（Go 后端直接提供 UI）
@@ -186,6 +242,20 @@ go test ./...
 
 # 仅集成测试
 go test ./tests -v
+```
+
+### 三个新模块测试
+
+三个 Go 模块各自包含单元测试，另外提供全流程 E2E 集成测试：
+
+```bash
+# 单元测试（无需 Agent，mock 模式）
+cd console/service-hub   && go test ./... -v
+cd console/datasource-mgr && go test ./... -v
+cd console/audit-log     && go test ./... -v
+
+# 全流程 E2E 测试（需先启动全部真实服务）
+PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./console/service-hub/internal/handlers/
 ```
 
 ### 前端构建检查
