@@ -53,6 +53,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/api/datasources", s.ListDataSources)
 	r.POST("/api/datasources", s.CreateDataSource)
 	r.GET("/api/datasources/:id", s.GetDataSource)
+	r.PUT("/api/datasources/:id", s.UpdateDataSource)
 	r.DELETE("/api/datasources/:id", s.DeleteDataSource)
 	r.POST("/api/datasources/:id/test", s.TestConnection)
 	r.GET("/api/datasources/:id/metadata", s.GetMetadata)
@@ -197,6 +198,84 @@ func (s *Server) GetDataSource(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, ds)
+}
+
+// UpdateDataSource updates an existing data source configuration.
+// UpdateDataSource 更新已注册数据源的配置属性。
+func (s *Server) UpdateDataSource(c *gin.Context) {
+	id := c.Param("id")
+	ds, err := s.ds.GetDS(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "data source not found"})
+		return
+	}
+
+	var req struct {
+		Name          string   `json:"name"`
+		Type          string   `json:"type"`
+		Host          string   `json:"host"`
+		Port          int      `json:"port"`
+		Database      string   `json:"database"`
+		SecurityLevel string   `json:"security_level"`
+		Status        string   `json:"status"`
+		Tags          []string `json:"tags"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
+		return
+	}
+
+	if req.Name != "" {
+		if err := validation.MaxLength("name", req.Name, 1024); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		ds.Name = req.Name
+	}
+	if req.Type != "" {
+		if err := validation.AllowedValues("type", req.Type, validation.DataSourceTypes); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		ds.Type = req.Type
+	}
+	if req.Host != "" {
+		ds.Host = req.Host
+	}
+	if req.Port > 0 {
+		if err := validation.PortRange(req.Port); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		ds.Port = req.Port
+	}
+	if req.Database != "" {
+		ds.Database = req.Database
+	}
+	if req.SecurityLevel != "" {
+		if err := validation.AllowedValues("security_level", req.SecurityLevel, validation.SecurityLevels); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		ds.SecurityLevel = req.SecurityLevel
+	}
+	if req.Status != "" {
+		ds.Status = req.Status
+	}
+	if req.Tags != nil {
+		ds.Tags = req.Tags
+	}
+
+	if err := s.ds.UpdateDS(ds); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	s.addAuditRecord(id, ds.Name, "update", "system", 0, "success")
+	c.JSON(http.StatusOK, gin.H{
+		"updated": id,
+		"via":     moduleVia,
+	})
 }
 
 // DeleteDataSource removes a data source.

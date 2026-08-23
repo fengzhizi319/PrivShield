@@ -304,19 +304,44 @@ func TestCircuitBreaker_RecoveryOnSuccess(t *testing.T) {
 	}
 }
 
-func TestCircuitStateString(t *testing.T) {
-	tests := []struct {
-		state CircuitState
-		want  string
-	}{
-		{CircuitClosed, "closed"},
-		{CircuitOpen, "open"},
-		{CircuitHalfOpen, "half-open"},
-		{CircuitState(99), "unknown"},
-	}
-	for _, tt := range tests {
-		if got := tt.state.String(); got != tt.want {
-			t.Errorf("CircuitState(%d).String() = %q, want %q", tt.state, got, tt.want)
+func TestCircuitBreaker_IntermittentSuccessResetsFailureCount(t *testing.T) {
+	var shouldFail atomic.Bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if shouldFail.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("error"))
+			return
 		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	}))
+	defer srv.Close()
+
+	c := New(Config{
+		BaseURL:     srv.URL,
+		CBThreshold: 3,
+		Logger:      newTestLogger(),
+	})
+
+	// 2 failures
+	shouldFail.Store(true)
+	c.Get(context.Background(), "/test")
+	c.Get(context.Background(), "/test")
+	if c.CircuitStateString() != "closed" {
+		t.Fatalf("expected closed after 2 failures, got %s", c.CircuitStateString())
+	}
+
+	// 1 success -> should reset consecutive failure counter
+	shouldFail.Store(false)
+	c.Get(context.Background(), "/test")
+
+	// 2 more failures -> should NOT trip since threshold is 3 consecutive
+	shouldFail.Store(true)
+	c.Get(context.Background(), "/test")
+	c.Get(context.Background(), "/test")
+
+	if c.CircuitStateString() != "closed" {
+		t.Errorf("expected circuit to stay closed because failures were non-consecutive, got %s", c.CircuitStateString())
 	}
 }

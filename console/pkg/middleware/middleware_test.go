@@ -288,3 +288,51 @@ func TestStructuredLogger_NilLogger(t *testing.T) {
 		t.Errorf("status = %d, want 200", w.Code)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// Recovery / 异常恢复中间件测试
+// ─────────────────────────────────────────────────────────────
+
+func TestRecovery_CatchesPanic(t *testing.T) {
+	r := gin.New()
+	r.Use(RequestID())
+	r.Use(Recovery(nil, "test-module"))
+	r.GET("/panic", func(c *gin.Context) {
+		panic("unexpected runtime error")
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/panic", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// SecurityHeaders / 安全头中间件测试
+// ─────────────────────────────────────────────────────────────
+
+func TestSecurityHeaders(t *testing.T) {
+	r := gin.New()
+	r.Use(SecurityHeaders())
+	r.GET("/test", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	r.ServeHTTP(w, req)
+
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := w.Header().Get("X-Frame-Options"); got != "SAMEORIGIN" {
+		t.Errorf("X-Frame-Options = %q, want SAMEORIGIN", got)
+	}
+	if got := w.Header().Get("X-XSS-Protection"); got != "1; mode=block" {
+		t.Errorf("X-XSS-Protection = %q, want 1; mode=block", got)
+	}
+	if got := w.Header().Get("Referrer-Policy"); got != "strict-origin-when-cross-origin" {
+		t.Errorf("Referrer-Policy = %q, want strict-origin-when-cross-origin", got)
+	}
+}

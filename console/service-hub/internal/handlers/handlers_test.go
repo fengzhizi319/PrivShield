@@ -463,30 +463,18 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	// Step 2: 等待流水线处理完成 (6 stages × 100ms each + buffer)
 	time.Sleep(1200 * time.Millisecond)
 
-	// Step 3: 拿到脱敏数据 — Query task to verify completion
+	// Step 3: 拿到脱敏数据 — Query task by ID directly
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("GET", "/api/hub/tasks/"+taskID, nil)
 	router.ServeHTTP(w2, req2)
 
-	// Note: we need to add a GetTask handler, but since we don't have one,
-	// we use the list endpoint with filter instead
-	w2 = httptest.NewRecorder()
-	req2, _ = http.NewRequest("GET", "/api/hub/tasks?status=completed", nil)
-	router.ServeHTTP(w2, req2)
-
 	if w2.Code != http.StatusOK {
-		t.Fatalf("get task: expected 200, got %d", w2.Code)
+		t.Fatalf("get task by id: expected 200, got %d", w2.Code)
 	}
 
-	var listResp map[string]any
-	_ = json.Unmarshal(w2.Body.Bytes(), &listResp)
-	total := listResp["total"].(float64)
-	if total != 1 {
-		t.Fatalf("expected 1 completed task, got %v", total)
-	}
-
-	tasks := listResp["tasks"].([]any)
-	task := tasks[0].(map[string]any)
+	var getResp map[string]any
+	_ = json.Unmarshal(w2.Body.Bytes(), &getResp)
+	task := getResp["task"].(map[string]any)
 
 	// Verify task completed successfully through all 6 pipeline stages
 	if task["status"] != "completed" {

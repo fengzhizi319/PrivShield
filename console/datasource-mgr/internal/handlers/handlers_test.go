@@ -338,3 +338,57 @@ func TestCreateDataSourceNameTooLong(t *testing.T) {
 		t.Errorf("expected 400 for name > 1024 chars, got %d", w.Code)
 	}
 }
+
+func TestUpdateDataSource(t *testing.T) {
+	s := newTestServer()
+	router := newTestRouter(s)
+
+	// Create a datasource first
+	body := map[string]any{
+		"name":           "初始名称",
+		"type":           "database",
+		"host":           "127.0.0.1",
+		"port":           3306,
+		"security_level": "medium",
+		"tags":           []string{"tag1"},
+	}
+	b, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/datasources", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	var createResp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	id := createResp["id"].(string)
+
+	// Update datasource
+	updateBody := map[string]any{
+		"name":           "修改后名称",
+		"security_level": "high",
+		"tags":           []string{"tag1", "tag2"},
+	}
+	ub, _ := json.Marshal(updateBody)
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/api/datasources/"+id, bytes.NewReader(ub))
+	req2.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// Verify get reflects updated values
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest("GET", "/api/datasources/"+id, nil)
+	router.ServeHTTP(w3, req3)
+
+	var ds map[string]any
+	_ = json.Unmarshal(w3.Body.Bytes(), &ds)
+	if ds["name"] != "修改后名称" {
+		t.Errorf("expected name=修改后名称, got %v", ds["name"])
+	}
+	if ds["security_level"] != "high" {
+		t.Errorf("expected security_level=high, got %v", ds["security_level"])
+	}
+}

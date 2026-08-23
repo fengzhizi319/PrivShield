@@ -248,14 +248,15 @@ func (c *Client) cooldownDuration() time.Duration {
 	return c.cbCooldown
 }
 
-// recordSuccess records a successful call, closing the circuit if half-open.
+// recordSuccess records a successful call, resetting consecutive failure counter
+// and closing the circuit if half-open.
 func (c *Client) recordSuccess() {
 	c.cbMu.Lock()
 	defer c.cbMu.Unlock()
 
+	c.cbFailures = 0
 	if c.cbState == CircuitHalfOpen {
 		c.cbState = CircuitClosed
-		c.cbFailures = 0
 		c.logger.Info("circuit breaker closed (recovery successful)")
 	}
 }

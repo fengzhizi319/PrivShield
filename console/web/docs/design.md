@@ -1,140 +1,176 @@
-# 测试控制台前端（Web）设计文档
+# 测试控制台前端 (React Web SPA) — 详细设计文档
 
-## 1. 概述
+> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 测试控制台 Web 前端（`console/web`）的系统架构、组件层级、双后端热切换、多流水线交互与国际化设计。
 
-本文档定义 Privacy 测试控制台 Web 前端（`console/web`）的架构设计、组件划分与状态管理。前端基于 **React 18 + TypeScript + Vite + Tailwind CSS** 构建，是一个纯静态单页应用（SPA），所有数据通过后端 `/api/*` 接口获取。
+---
 
-核心定位：把 `PrivShield` 的全部接口能力，组织为一个**结构清晰、可交互、可调试**的可视化控制台。
+## 1. 概述与设计理念
 
-## 2. 设计目标
+测试控制台 Web 前端基于 **React 18 + TypeScript + Vite + Tailwind CSS** 构建，是一个高性能、零多余第三方 UI 依赖的纯单页应用（SPA）。
 
-- **结构清晰**：三栏布局 + 分类分组，避免「所有功能挤在一页」的长列表。
-- **双后端统一**：通过同一套 `/api/*` 契约对接 Python REST 与 Go gRPC 两个代理后端，可一键切换。
-- **调试友好**：请求编辑、JSON 格式化、语法高亮、cURL 导出、请求历史一应俱全。
-- **轻量零依赖**：图标内联 SVG、JSON 高亮手写实现，不引入第三方 UI 库。
-- **类型安全**：TypeScript 全量类型化，数据契约与后端 Pydantic 模型一一对应。
+### 核心定位
+将 `PrivShield` 的全部复杂隐私原语（掩码脱敏、差分隐私、K-匿名、查询混淆、动态三层漏斗分类分级）以及数据服务调度中枢（Service Hub）、数据源管理（Datasource Manager）与脱敏审计日志（Audit Log）组织为一个**结构清晰、交互流畅、可即时调试验证**的沉浸式工作台。
 
-## 3. 系统架构
+---
+
+## 2. 总体架构与数据流
 
 ```mermaid
 graph TD
-    subgraph App [React SPA]
-        Main[main.tsx 入口] --> Root[App.tsx 根组件/全局状态]
-        Root --> Header[Header 顶栏]
-        Root --> Sidebar[Sidebar 侧边导航]
-        Root --> ViewSwitch{视图路由}
-        ViewSwitch --> Overview[Overview 总览]
-        ViewSwitch --> EndpointView[EndpointView 端点测试]
-        ViewSwitch --> BatchTest[BatchTest 批量测试]
-        EndpointView --> ResponsePanel[ResponsePanel 响应]
-        EndpointView --> HistoryPanel[HistoryPanel 历史]
+    subgraph BrowserRuntime [浏览器运行时]
+        Main[main.tsx 入口] --> AppRoot[App.tsx 全局状态与路由]
+        
+        AppRoot --> Header[Header 顶栏组件]
+        Header --> BackendSel[BackendSelector 后端切换]
+        Header --> HealthLamp[HealthIndicator 健康状态]
+        Header --> LangToggle[i18n 语言切换]
+
+        AppRoot --> Sidebar[Sidebar 侧边导航]
+        
+        AppRoot --> ViewRouter{主视图路由}
+        ViewRouter --> Overview[Overview 概览看板]
+        ViewRouter --> EndpointView[EndpointView 端点交互测试]
+        ViewRouter --> BatchTest[BatchTest 批量压测]
+        ViewRouter --> FileTest[FileTest 文件上传脱敏]
+        ViewRouter --> DynClassPanel[DynClassificationPanel 三层漏斗]
+        ViewRouter --> MedicalPanel[MedicalPipelinePanel 医疗病历流水线]
+        ViewRouter --> YibaoPanel[YibaoPipelinePanel 医保结算流水线]
+        ViewRouter --> LbTestPanel[LbTest 网关负载均衡测试]
+        ViewRouter --> ConcurrencyPanel[ConcurrencyTestPanel 并发测试]
+        ViewRouter --> OpsPanel[OpsPanel 运维与监控看板]
+
+        EndpointView --> ResponsePanel[ResponsePanel 响应与语法高亮]
+        EndpointView --> HistoryPanel[HistoryPanel 请求历史]
     end
 
-    Root --> Client[api/client.ts HTTP 封装]
-    Client -- /api/* --> Backend[Python REST :8080<br/>或 Go gRPC :8081]
-    Backend --> Agent[PrivShield]
+    subgraph APIClient [API 通信层 api/client.ts]
+        FetchCore[Fetch 核心封装<br/>BaseURL 动态更新]
+    end
 
-    HistoryPanel --> LS[(localStorage)]
+    subgraph BackendProxies [双代理网关]
+        PythonBFF[Python REST 后端 :8080]
+        GoBFF[Go gRPC 后端 :8081]
+    end
+
+    AppRoot --> APIClient
+    APIClient -->|HTTP REST| BackendProxies
+    HistoryPanel --> LocalStorage[(localStorage 历史缓存)]
 ```
 
-## 4. 目录结构
+---
+
+## 3. 核心设计与交互机制
+
+### 3.1 双后端一键热切换 (Dual-Backend Switching)
+
+前端同时支持通过 Python REST 代理或 Go gRPC 代理与核心 Agent 通信：
+1. **统一契约保障**：两个后端均对前端暴露完全相同的 `/api/*` 路由与 JSON 返回结构；
+2. **基地址热切换**：用户通过顶栏 `BackendSelector` 切换时，调用 `setBaseUrl('http://localhost:8081')` 即时切换底层请求目标；
+3. **协议与路径透传验证**：响应面板根据返回体中的 `via`（`python-rest` / `go-grpc`）与 `protocol`（`REST` / `gRPC`）实时显示通信徽标，验证切换生效。
+
+---
+
+### 3.2 动态三层漏斗可视化 (`DynClassificationPanel`)
+
+直观展示三层分类漏斗执行路径：
+- **Layer 1: 规则引擎**（YAML 领域正则/词表秒级判定）
+- **Layer 2: Small-NER**（ONNX / 医疗专用轻量实体识别）
+- **Layer 3: Local LLM**（本地大模型多维语义仲裁与置信度平滑）
+
+支持输入单条记录、多行 JSON 或医疗文本，实时动态呈现每一层级的置信度评分、字段打标与最终输出的安全等级（L1~L5）。
+
+---
+
+### 3.3 专项业务流水线面板 (`MedicalPipelinePanel` & `YibaoPipelinePanel`)
+
+- **医疗病历脱敏流水线**：涵盖患者姓名、身份证、就诊科室、敏感诊断（如精神科、传染病）分级脱敏；
+- **医保结算脱敏流水线**：涵盖医保卡号、自费金额、统筹报销金额的差分隐私与 K-匿名混合脱敏；
+- 页面提供原始数据、脱敏前后对比对照表与差分隐私预算消耗计费面板。
+
+---
+
+## 4. 路由与反向代理配置
+
+### 4.1 Nginx 容器化代理配置 (`nginx.conf`)
+
+生产镜像内嵌 Nginx 监听 `5173` 端口，反向代理各后端微服务：
+
+```nginx
+# Python 代理
+location /api/v1/ {
+    proxy_pass http://console-backend-python:8080/v1/;
+}
+
+# Go 代理
+location /api/go/ {
+    proxy_pass http://console-backend-go:8081/;
+}
+
+# Service Hub 调度中枢
+location /api/hub/ {
+    proxy_pass http://privacy-service-hub:8082/api/hub/;
+}
+
+# Datasource Manager 数据源管理
+location /api/datasources {
+    proxy_pass http://privacy-datasource-mgr:8083/api/datasources;
+}
+
+# Audit Log 脱敏审计日志
+location /api/audit/ {
+    proxy_pass http://privacy-audit-log:8084/api/audit/;
+}
+
+# SPA 前端路由回退
+location / {
+    root /usr/share/nginx/html;
+    index index.html index.htm;
+    try_files $uri $uri/ /index.html;
+}
+```
+
+---
+
+## 5. 组件层级与模块划分
 
 ```text
 console/web/src/
-├── main.tsx                 # 应用入口，挂载 React 根
-├── App.tsx                  # 根组件：全局状态 + 三栏布局 + 视图路由
-├── index.css                # Tailwind 入口与全局样式
+├── main.tsx                    # 应用挂载入口
+├── App.tsx                     # 根组件：全局状态机、导航布局、路由分发
+├── index.css                   # Tailwind 全局样式
 ├── api/
-│   └── client.ts            # 后端 HTTP 调用封装（唯一 fetch 出口）
-├── types/
-│   └── api.ts               # 前后端数据契约（TS 类型定义）
+│   ├── client.ts               # 统一 API 客户端（fetchHealth, proxyRequest, uploadFile 等）
+│   └── __tests__/              # API 客户端单元测试
+├── components/
+│   ├── Header.tsx              # 顶部导航栏（Logo, 后端切换, 状态灯, 语言切换）
+│   ├── BackendSelector.tsx     # 后端切换下拉选择器
+│   ├── Sidebar.tsx             # 侧边导航栏（分组折叠与搜索）
+│   ├── Overview.tsx            # 全景功能概览卡片网格
+│   ├── EndpointView.tsx        # 单接口交互测试面板（请求构建 + 响应查看）
+│   ├── BatchTest.tsx           # 批量接口并发/顺序测试
+│   ├── FileTest.tsx            # 50MB 大文件上传与流式脱敏预览
+│   ├── DynClassificationPanel.tsx # 三层漏斗动态分类分级面板
+│   ├── MedicalPipelinePanel.tsx   # 医疗健康隐私治理全流程面板
+│   ├── YibaoPipelinePanel.tsx     # 医保结算流水治理面板
+│   ├── LbTest.tsx              # 负载均衡多策略压测面板
+│   ├── ConcurrencyTestPanel.tsx   # 高并发压力测试面板
+│   ├── OpsPanel.tsx            # Prometheus 监控指标与运维看板
+│   ├── ResponsePanel.tsx       # 语法高亮响应查看器与下载工具
+│   ├── HistoryPanel.tsx        # 本地历史请求回放面板
+│   ├── ErrorBoundary.tsx       # 全局 React 渲染异常捕获兜底组件
+│   └── icons.tsx               # 纯内联 SVG 图标库
+├── i18n/
+│   └── index.tsx               # 中英文双语国际化上下文与词条映射
 ├── lib/
-│   ├── categories.ts        # 分类元数据（顺序/图标/配色/描述）
-│   ├── curl.ts              # cURL 命令生成
-│   └── history.ts           # 请求历史（localStorage 持久化）
-└── components/
-    ├── Header.tsx           # 顶栏：品牌 + 健康状态灯 + 后端切换
-    ├── BackendSelector.tsx  # 后端切换下拉框
-    ├── Sidebar.tsx          # 侧边导航树（搜索/分组/折叠）
-    ├── Overview.tsx         # 总览页（分类卡片网格）
-    ├── EndpointView.tsx     # 端点测试页（请求/响应分栏）
-    ├── BatchTest.tsx        # 批量测试页
-    ├── ResponsePanel.tsx    # 响应查看器（JSON 高亮/复制/下载）
-    ├── HistoryPanel.tsx     # 请求历史面板
-    └── icons.tsx            # 内联 SVG 图标库
+│   ├── categories.ts           # 隐私分类元数据与主题色
+│   ├── curl.ts                 # cURL 命令一键生成器
+│   ├── history.ts              # LocalStorage 历史记录管理
+│   └── levelColor.ts           # L1~L5 敏感等级主题配色函数
+├── types/
+│   └── api.ts                  # 前后端交互 TypeScript 类型定义
+└── utils/
+    ├── error.ts                # 异常格式化与解析
+    ├── fieldLabels.ts          # 字段中文映射
+    ├── fileParse.ts            # CSV / JSON 文件解析与校验
+    └── sampleFile.ts           # 样例数据生成器
 ```
-
-## 5. 核心设计
-
-### 5.1 全局状态与视图路由（`App.tsx`）
-
-App 是唯一的**状态中心**，采用「状态提升」模式，子组件通过 props 接收数据与回调：
-
-- `samples`：全部端点示例（来自 `/api/samples`）；
-- `view`：当前主区域视图，用 **判别联合（Discriminated Union）** 表达：
-
-```ts
-type View =
-  | { type: 'overview' }
-  | { type: 'endpoint'; sample: EndpointSample }
-  | { type: 'batch' };
-```
-
-- `health`：后端健康状态（用于状态灯与 cURL 基址推断）；
-- `backend`：当前选中的后端（Python REST / Go gRPC）。
-
-**数据流**：启动时 `Promise.all` 并行拉取 samples 与 health；切换后端时先 `setBaseUrl()` 更新 API 基址再重新拉取，并重置视图到总览。
-
-**视图重建**：`EndpointView` 使用 `key={method-path}` 强制在切换端点时**重建组件**，避免上一个端点的请求体/响应状态残留。
-
-### 5.2 HTTP 封装（`api/client.ts`）
-
-所有 fetch 调用集中于此，上层组件不直接使用 fetch：
-
-- `API_BASE` 为模块级可变基址，默认空串（同源）；`setBaseUrl()` 在切换后端时更新；
-- `fetchHealth()` / `fetchSamples()` / `proxyRequest()` / `batchRequest()` 四个方法对应后端四个接口；
-- 后端返回非 2xx 时抛出携带 `detail` 的 `Error`，由调用方展示。
-
-### 5.3 数据契约（`types/api.ts`）
-
-TypeScript 类型与后端 Pydantic 模型**一一对应**，是前后端的「单一事实来源」。包含：`EndpointSample`（camelCase，示例数据）、`ProxyRequest` / `ProxyResponse`（snake_case，代理转发）、`ConsoleHealth`、`BatchRequestItem` / `BatchResultItem` / `BatchResponse`、`HistoryEntry`。修改任何接口时需同步更新本文件与后端模型。
-
-### 5.4 侧边导航（`Sidebar.tsx`）
-
-- 按 `category` 分组，`orderCategories()` 按预定义顺序排列；
-- 支持搜索（匹配 label / path / category），搜索时强制展开命中分组；
-- 分组**默认折叠**，避免首页过长；选中项变化时自动展开所属分组；
-- 顶部固定「接口总览」与「批量测试」两个快捷入口；
-- 仅 Python 后端可用的端点显示 `REST` 角标。
-
-### 5.5 端点测试（`EndpointView.tsx`）
-
-上方接口信息栏（返回 / method / 可编辑路径 / 分类徽章 / 描述），下方左右分栏：
-
-- **请求编辑器**：JSON 格式化校验、cURL 复制、请求历史、重载示例；`Cmd/Ctrl+Enter` 快捷发送（用 `useRef` 保持 handler 最新引用）；
-- **响应查看器**（`ResponsePanel`）：空 / 错误 / 成功三态；成功时手写正则做 JSON 语法高亮，提供复制与下载。
-
-### 5.6 批量测试（`BatchTest.tsx`）
-
-选择分类（或全部）→ 调 `/api/batch` 顺序执行 → 汇总展示通过率与逐条结果（状态 / 接口 / 耗时 / 错误），点击结果行可跳转到对应端点。单个失败不中断批次。
-
-### 5.7 请求历史（`lib/history.ts` + `HistoryPanel.tsx`）
-
-持久化到 `localStorage`（键 `privacy-console.history`），仅存请求体与状态码（不存响应，避免存储过大），上限 50 条。支持回填、单条删除、一键清空与相对时间展示。
-
-## 6. 样式与主题
-
-- 使用 **Tailwind CSS** 原子类，无自定义 CSS 组件库；
-- 分类配色（图标底色、卡片渐变色条）在 `categories.ts` 中以**字面量类名**声明，确保 Tailwind 能静态扫描生成；
-- 图标为内联 SVG（lucide 风格，stroke 渲染），集中在 `icons.tsx`，通过 `IconName` 联合类型约束。
-
-## 7. 非功能设计
-
-- **性能**：`useMemo` 缓存分组/过滤结果；构建产物带内容哈希，配合后端 `/assets` 强缓存。
-- **可访问性**：图标 `aria-hidden`，交互元素均有 `title` 提示。
-- **可维护性**：组件单一职责；全部代码含详细中文注释；类型全量覆盖。
-- **降级**：剪贴板不可用时静默忽略；localStorage 不可用（隐私模式）时历史功能降级。
-
-## 8. 测试策略
-
-前端以**构建期类型检查**（`tsc --noEmit`）为主要自动化手段，配合手工回归清单验证交互。详见 [testing.md](./testing.md)。

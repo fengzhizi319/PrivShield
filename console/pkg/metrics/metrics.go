@@ -9,6 +9,7 @@ package metrics
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -107,6 +108,29 @@ func (c *Collector) RecordHTTP(method, path string, status int, durationSec floa
 func (c *Collector) RecordAgentCall(endpoint string, status string, durationSec float64) {
 	c.AgentRequestsTotal.WithLabelValues(endpoint, status).Inc()
 	c.AgentRequestDuration.WithLabelValues(endpoint).Observe(durationSec)
+}
+
+// HTTPMiddleware returns a Gin middleware that automatically records HTTP request
+// metrics (count and latency histogram) using this collector.
+// HTTPMiddleware 返回自动记录 HTTP 请求指标（请求数与延迟直方图）的 Gin 中间件。
+func (c *Collector) HTTPMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		start := time.Now()
+		path := ctx.FullPath()
+		if path == "" {
+			path = ctx.Request.URL.Path
+		}
+
+		ctx.Next()
+
+		// Skip metric recording for the /metrics endpoint itself to avoid recursion
+		if path == "/metrics" {
+			return
+		}
+
+		duration := time.Since(start).Seconds()
+		c.RecordHTTP(ctx.Request.Method, path, ctx.Writer.Status(), duration)
+	}
 }
 
 // Handler returns a Gin handler that serves Prometheus /metrics endpoint

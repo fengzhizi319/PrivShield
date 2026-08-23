@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -282,5 +283,61 @@ func TestAuditStore_Snapshots(t *testing.T) {
 	}
 	if got.IntegrityHash != "abc123" {
 		t.Errorf("expected abc123, got %s", got.IntegrityHash)
+	}
+}
+
+func TestTaskStore_Pagination(t *testing.T) {
+	s := NewTaskStore()
+	for i := 0; i < 10; i++ {
+		s.Save(&store.Task{
+			ID:        fmt.Sprintf("t-%02d", i),
+			Status:    "pending",
+			CreatedAt: time.Now().Add(time.Duration(i) * time.Minute),
+		})
+	}
+
+	// Offset 3, Limit 4
+	tasks, total, err := s.List(store.TaskFilter{Limit: 4, Offset: 3})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 10 {
+		t.Errorf("expected total 10, got %d", total)
+	}
+	if len(tasks) != 4 {
+		t.Errorf("expected 4 tasks, got %d", len(tasks))
+	}
+
+	// Offset out of bounds
+	tasksOOB, totalOOB, err := s.List(store.TaskFilter{Limit: 4, Offset: 20})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if totalOOB != 10 || len(tasksOOB) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasksOOB))
+	}
+}
+
+func TestAuditStore_LogPagination(t *testing.T) {
+	s := NewAuditStore()
+	for i := 0; i < 10; i++ {
+		s.SaveLog(&store.AuditLog{
+			ID:        fmt.Sprintf("log-%02d", i),
+			Timestamp: time.Now().Add(time.Duration(i) * time.Minute),
+			Operation: "mask",
+			Status:    "success",
+		})
+	}
+
+	// Offset 4, Limit 3
+	logs, total, err := s.ListLogs(store.AuditFilter{Limit: 3, Offset: 4})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 10 {
+		t.Errorf("expected total 10, got %d", total)
+	}
+	if len(logs) != 3 {
+		t.Errorf("expected 3 logs, got %d", len(logs))
 	}
 }

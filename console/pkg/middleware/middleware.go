@@ -115,6 +115,45 @@ func StructuredLogger(logger *slog.Logger, module string) gin.HandlerFunc {
 	}
 }
 
+// Recovery returns a Gin middleware that recovers from panics and logs structured errors.
+// Recovery 返回一个 Gin 中间件，捕获 panic 并记录结构化日志与返回 500 JSON。
+func Recovery(logger *slog.Logger, module string) gin.HandlerFunc {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return func(c *gin.Context) {
+		defer func() {
+			if r := recover(); r != nil {
+				rid, _ := c.Get("request_id")
+				requestID, _ := rid.(string)
+				logger.Error("panic recovered in handler",
+					"request_id", requestID,
+					"module", module,
+					"panic", fmt.Sprintf("%v", r),
+					"path", c.Request.URL.Path,
+				)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+					"detail":     fmt.Sprintf("Internal Server Error: %v", r),
+					"request_id": requestID,
+				})
+			}
+		}()
+		c.Next()
+	}
+}
+
+// SecurityHeaders returns a middleware that sets recommended HTTP security response headers.
+// SecurityHeaders 返回一个设置推荐 HTTP 安全响应头的中间件。
+func SecurityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		c.Writer.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		c.Writer.Header().Set("X-XSS-Protection", "1; mode=block")
+		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Next()
+	}
+}
+
 // generateRequestID generates a unique request ID using crypto/rand.
 // P25 fix: replaces predictable timestamp-based ID with cryptographic random suffix.
 // Format: req-<unix_seconds>-<8_random_hex_chars>

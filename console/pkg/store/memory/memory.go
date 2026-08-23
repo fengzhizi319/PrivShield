@@ -66,12 +66,19 @@ func (s *TaskStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
 		return all[j].CreatedAt.Before(all[i].CreatedAt)
 	})
 
+	// Apply pagination / 应用分页
+	start := filter.Offset
+	if start > len(all) {
+		start = len(all)
+	}
 	if filter.Limit > 0 {
-		end := filter.Limit
+		end := start + filter.Limit
 		if end > len(all) {
 			end = len(all)
 		}
-		all = all[filter.Offset:end]
+		all = all[start:end]
+	} else if start > 0 {
+		all = all[start:]
 	}
 	return all, total, nil
 }
@@ -319,16 +326,19 @@ func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, 
 		return filtered[j].Timestamp.Before(filtered[i].Timestamp)
 	})
 
+	// Apply pagination / 应用分页
+	start := filter.Offset
+	if start > len(filtered) {
+		start = len(filtered)
+	}
 	if filter.Limit > 0 {
-		end := filter.Limit
+		end := start + filter.Limit
 		if end > len(filtered) {
 			end = len(filtered)
 		}
-		offset := filter.Offset
-		if offset > len(filtered) {
-			offset = len(filtered)
-		}
-		filtered = filtered[offset:end]
+		filtered = filtered[start:end]
+	} else if start > 0 {
+		filtered = filtered[start:]
 	}
 	return filtered, total, nil
 }

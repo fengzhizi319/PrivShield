@@ -94,6 +94,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/api/health", s.Health)
 	r.GET("/api/hub/status", s.HubStatus)
 	r.GET("/api/hub/tasks", s.ListTasks)
+	r.GET("/api/hub/tasks/:id", s.GetTask)
 	r.POST("/api/hub/dispatch", s.Dispatch)
 	r.GET("/api/hub/pipeline", s.Pipeline)
 	r.POST("/api/hub/classify", s.ClassifyAndDispatch)
@@ -148,6 +149,25 @@ func (s *Server) HubStatus(c *gin.Context) {
 		"completed_total": counts.Completed,
 		"failed_total":    counts.Failed,
 		"agent_url":       s.cfg.AgentBaseURL(),
+	})
+}
+
+// GetTask returns a single task by ID.
+// GetTask 根据 ID 返回单个任务的详情。
+func (s *Server) GetTask(c *gin.Context) {
+	id := c.Param("id")
+	task, err := s.tasks.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"detail": fmt.Sprintf("task %s not found", id),
+			"via":    moduleVia,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"task": task,
+		"via":  moduleVia,
 	})
 }
 

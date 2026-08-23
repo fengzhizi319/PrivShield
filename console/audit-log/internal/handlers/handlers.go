@@ -139,6 +139,8 @@ func (s *Server) CreateLog(c *gin.Context) {
 		DataSource    string `json:"datasource"`
 		InputHash     string `json:"input_hash"`
 		OutputHash    string `json:"output_hash"`
+		InputSample   string `json:"input_sample"`
+		OutputSample  string `json:"output_sample"`
 		Algorithm     string `json:"algorithm"`
 		Parameters    any    `json:"parameters"`
 		InputRows     int    `json:"input_rows"`
@@ -215,6 +217,8 @@ func (s *Server) CreateLog(c *gin.Context) {
 		ID:             validation.GenerateID("snap"),
 		AuditLogID:     logID,
 		Timestamp:      now,
+		InputSample:    req.InputSample,
+		OutputSample:   req.OutputSample,
 		Algorithm:      req.Algorithm,
 		Parameters:     req.Parameters,
 		ParametersJSON: string(paramsJSON),
