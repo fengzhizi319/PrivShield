@@ -10,3 +10,12 @@ __pycache__/
 *.log
 .pids/
 
+# P70 fix: local SQLite database files (created when running modules without Docker)
+# 本地 SQLite 数据库文件（本地运行模块时生成）
+*.db
+
+# P74 fix: Go build artifacts (compiled binaries in each module)
+# Go 构建产物（各模块编译生成的二进制文件）
+bin/
+*/bin/
+*/server

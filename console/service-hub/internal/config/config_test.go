@@ -79,38 +79,36 @@ func TestAgentBaseURL(t *testing.T) {
 	}
 }
 
-func TestGetEnvIntInvalid(t *testing.T) {
-	os.Setenv("TEST_INVALID_INT", "not-a-number")
-	defer os.Unsetenv("TEST_INVALID_INT")
-
-	got := getEnvInt("TEST_INVALID_INT", 42)
-	if got != 42 {
-		t.Errorf("expected default 42 for invalid int, got %d", got)
+func TestGRPCAddress(t *testing.T) {
+	cfg := &Config{GRPCHost: "127.0.0.1", GRPCPort: 50052}
+	if addr := cfg.GRPCAddress(); addr != "127.0.0.1:50052" {
+		t.Errorf("expected 127.0.0.1:50052, got %s", addr)
 	}
 }
 
-func TestGetEnvBool(t *testing.T) {
-	tests := []struct {
-		value    string
-		expected bool
-	}{
-		{"true", true},
-		{"TRUE", true},
-		{"1", true},
-		{"yes", true},
-		{"on", true},
-		{"false", false},
-		{"0", false},
-		{"no", false},
-		{"", false},
-	}
+func TestLoadProductionHardeningDefaults(t *testing.T) {
+	// Clear env vars to test defaults
+	os.Unsetenv("SERVICE_HUB_API_KEY")
+	os.Unsetenv("SERVICE_HUB_CORS_ORIGINS")
+	os.Unsetenv("SERVICE_HUB_DB_PATH")
+	os.Unsetenv("SERVICE_HUB_LOG_FORMAT")
+	os.Unsetenv("SERVICE_HUB_LOG_LEVEL")
 
-	for _, tt := range tests {
-		os.Setenv("TEST_BOOL", tt.value)
-		got := getEnvBool("TEST_BOOL", false)
-		if got != tt.expected {
-			t.Errorf("getEnvBool(%q) = %v, want %v", tt.value, got, tt.expected)
-		}
+	cfg := Load()
+
+	if cfg.APIKey != "" {
+		t.Errorf("expected empty API key, got %s", cfg.APIKey)
 	}
-	os.Unsetenv("TEST_BOOL")
+	if len(cfg.CORSOrigins) != 0 {
+		t.Errorf("expected empty CORS origins, got %v", cfg.CORSOrigins)
+	}
+	if cfg.DBPath != "" {
+		t.Errorf("expected empty DB path, got %s", cfg.DBPath)
+	}
+	if cfg.LogFormat != "json" {
+		t.Errorf("expected log format=json, got %s", cfg.LogFormat)
+	}
+	if cfg.LogLevel != "info" {
+		t.Errorf("expected log level=info, got %s", cfg.LogLevel)
+	}
 }

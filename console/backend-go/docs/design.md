@@ -39,30 +39,47 @@ console/backend-go/
 │   └── main.go             # 加载配置、创建 gRPC 客户端、启动 HTTP 服务
 ├── internal/
 │   ├── agent/              # gRPC 客户端封装
-│   │   └── client.go       # Client、New、NewFromConnection、WithAuth
+│   │   ├── client.go       # Client、New、NewFromConnection、WithAuth
+│   │   └── client_test.go
 │   ├── config/             # 环境变量配置
-│   │   └── config.go
-│   ├── handlers/           # HTTP 处理器
-│   │   ├── handlers.go     # /api/health、/api/samples、/api/proxy、静态 UI 托管
+│   │   ├── config.go
+│   │   └── config_test.go
+│   ├── fileparse/          # CSV/JSON 文件解析
+│   │   ├── fileparse.go
+│   │   └── fileparse_test.go
+│   ├── handlers/           # HTTP 处理器 + 共享中间件集成
+│   │   ├── handlers.go     # /api/* 路由 + /metrics + 共享中间件链
 │   │   └── handlers_test.go
+│   ├── lbtest/             # 负载均衡策略测试
+│   │   ├── lbtest.go
+│   │   └── lbtest_test.go
 │   ├── mapper/             # REST -> gRPC 路由映射
 │   │   ├── mapper.go       # Dispatch 与各 path handler
+│   │   ├── dp.go / kano.go / mask.go / qol.go / ldp.go / profile.go
 │   │   └── mapper_test.go
 │   ├── models/             # 与前端共享的 JSON 结构体
 │   │   └── models.go
-│   └── samples/            # 示例 payload
-│       └── samples.go
+│   └── samples/            # 示例 payload + CSV 样本
+│       ├── samples.go
+│       ├── kangyang.csv
+│       └── yibao.csv
 ├── proto/                  # 生成的 protobuf 代码
 │   ├── privacy.pb.go
 │   └── privacy_grpc.pb.go
 ├── scripts/                # 运维脚本
 │   └── gen-certs.sh        # 生成 mTLS 测试证书链（CA/服务端/客户端）
-├── docs/                     # 设计、API、测试文档
+├── tests/                  # 端到端集成测试
+│   └── integration_test.go
+├── docs/                   # 设计、API、测试文档
 │   ├── design.md
 │   ├── api.md
-│   └── test.md
+│   └── testing.md
 └── go.mod / go.sum
 ```
+
+**共享库依赖**：backend-go 通过 `go.mod` 中的 `replace` 指令引用 `console/pkg/` 共享基础库，
+复用 Agent HTTP Client、中间件（CORS/Auth/RequestID/StructuredLogger）、Prometheus 指标与结构化日志。
+详见 [console/design.md](../../design.md) §共享基础库。
 
 ## 4. REST 到 gRPC 的映射方式
 
@@ -97,6 +114,34 @@ console/backend-go/
 
 ## 6. 安全与可观测性
 
+### 6.1 共享中间件链
+
+所有请求经过以下中间件链（顺序固定）：
+
+```
+RequestID → StructuredLogger → CORS → SecurityMiddleware
+```
+
+| 中间件 | 来源 | 功能 |
+|---|---|---|
+| `RequestID` | `pkg/middleware` | 透传或生成 `X-Request-ID`，写入响应头供追踪 |
+| `StructuredLogger` | `pkg/middleware` | `log/slog` JSON 格式记录每个请求（method/path/status/latency_ms/request_id） |
+| `CORS` | `pkg/middleware` | 可配置来源的跨域策略（backend-go 默认允许所有来源） |
+| `SecurityMiddleware` | `handlers` 本地 | API Key 鉴权 + 速率限制（`console/backend-go` 特有逻辑） |
+
+### 6.2 Prometheus 指标
+
+通过 `GET /metrics` 暴露 Prometheus 指标，使用 `pkg/metrics.Collector` 独立注册表：
+
+| 指标 | 类型 | 说明 |
+|---|---|---|
+| `http_requests_total{module="backend-go"}` | Counter | HTTP 请求计数（method/path/status） |
+| `http_request_duration_seconds{module="backend-go"}` | Histogram | HTTP 延迟分布 |
+| `agent_requests_total{module="backend-go"}` | Counter | 上游 Agent 调用计数 |
+| `agent_request_duration_seconds{module="backend-go"}` | Histogram | 上游 Agent 调用延迟 |
+
+### 6.3 gRPC 安全
+
 - **认证**：`agent.Client.WithAuth` 在 gRPC 元数据中附加 `authorization: Bearer <key>`；
   通过环境变量 `PRIVACY_AGENT_API_KEY` 启用。
 - **TLS/mTLS**：`agent.buildTransportCredentials` 根据配置选择传输凭证：
@@ -104,8 +149,11 @@ console/backend-go/
   加载 CA 校验服务端证书、强制最低 TLS 1.2，并可选加载客户端证书/私钥完成 mTLS 双向认证
   （`PRIVACY_AGENT_TLS_CERT_FILE` / `_KEY_FILE` / `_CA_FILE` / `_SERVER_NAME`）。
   证书生成与一键启动见 [ops.md](ops.md) 第 5 节。
-- **CORS**：`handlers` 中添加了宽松 CORS 中间件，方便本地 Vite 开发服务器调用。
-- **日志**：使用 Gin 默认日志与标准 `log` 包；生产环境可接入结构化日志。
+
+### 6.4 HTTP Client 复用
+
+`Server` 结构体持有共享 `httpClient *http.Client`（60s 超时），所有 `callRest` 调用复用同一连接池，
+避免每次请求创建新客户端导致的 TCP 连接浪费。
 
 ## 7. 扩展方式
 

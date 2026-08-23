@@ -1,5 +1,15 @@
+# ============================================================================
+# Audit Log — Multi-stage Dockerfile
+# ============================================================================
+# Build context: console/ (NOT audit-log/)
+# 构建上下文：console/ 目录（非 audit-log/ 目录）
+#
+# docker build -f audit-log/Dockerfile -t audit-log:latest .
+# (从 console/ 目录执行)
+# ============================================================================
+
 # Stage 1: Build
-FROM golang:1.23.4-alpine3.20 AS builder
+FROM golang:1.27-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -9,14 +19,20 @@ ENV GOTOOLCHAIN=auto
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
     && apk add --no-cache git ca-certificates
 
-COPY go.mod go.sum ./
+# Copy shared pkg/ first (required by replace ../pkg in go.mod)
+COPY pkg/ ./pkg/
+
+# Copy module dependencies for layer caching
+COPY audit-log/go.mod audit-log/go.sum ./audit-log/
+WORKDIR /app/audit-log
 RUN go mod download
 
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o server ./cmd/server
+# Copy module source
+COPY audit-log/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server
 
 # Stage 2: Runtime
-FROM alpine:3.20.3
+FROM alpine:3.21
 
 WORKDIR /app
 
@@ -31,8 +47,12 @@ RUN chown -R privacy:privacy /app
 
 EXPOSE 8084
 
+# P27 fix: declare data volume for SQLite persistence
+# 声明数据卷用于 SQLite 持久化
+VOLUME ["/app/data"]
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8084/health || exit 1
+    CMD curl -f http://localhost:8084/api/health || exit 1
 
 USER privacy
 

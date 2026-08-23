@@ -4,12 +4,15 @@
 
 ## 目录结构
 
+- `pkg/` - **共享库**（Go），各模块共用的 agent 客户端、配置工具、中间件、存储接口、校验工具与 Prometheus 指标。
 - `backend/` - Python FastAPI 代理服务，统一转发请求到 `PrivShield` REST 接口，并提供示例数据。
 - `backend-go/` - Go gRPC 代理服务，将前端的 REST 请求转换为 gRPC 调用转发给 `PrivShield`，接口格式与 Python 后端保持一致；同时可直接挂载 `web/dist` 提供 Console UI 页面。
 - `web/` - React + TypeScript + Vite 前端，按功能分组展示所有端点，支持一键加载示例和发送请求。
 - `service-hub/` - **数据服务调度中枢**（Go），6 阶段调度流水线（ingest→fetch→classify→desensitize→return→audit），自动根据分类分级结果选择脱敏策略。端口 `:8082`。
 - `datasource-mgr/` - **数据源管理**（Go），数据源 CRUD、连接测试、元数据自动采集与分类分级。端口 `:8083`。
 - `audit-log/` - **脱敏审计日志**（Go），脱敏操作审计记录、SHA256 完整性校验、合规报告生成。端口 `:8084`。
+
+> 📦 **Go Workspace**：`go.work` 统一管理 `pkg`、`backend-go`、`service-hub`、`datasource-mgr`、`audit-log` 五个模块，避免 `replace` 指令散落。
 
 ## 文档
 
@@ -249,10 +252,11 @@ go test ./tests -v
 三个 Go 模块各自包含单元测试，另外提供全流程 E2E 集成测试：
 
 ```bash
-# 单元测试（无需 Agent，mock 模式）
-cd console/service-hub   && go test ./... -v
-cd console/datasource-mgr && go test ./... -v
-cd console/audit-log     && go test ./... -v
+# 共享库单元测试
+cd console && go test ./pkg/... -v
+
+# 各模块单元测试（在 workspace 根目录执行）
+cd console && go test ./service-hub/... ./datasource-mgr/... ./audit-log/... -v
 
 # 全流程 E2E 测试（需先启动全部真实服务）
 PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./console/service-hub/internal/handlers/
@@ -294,3 +298,34 @@ python smoke_test.py
 - 默认使用 Python REST 后端与 agent 通信；新增 Go gRPC 后端通过 gRPC 支持同样的隐私原语（ Masking、Hash、DP、LDP、K-Anonymity、Query Obfuscation、Classification、Profile 等），但 `/livez`、`/readyz`、`/readyz/llm`、`/v1/privacy/budget`、`/v1/privacy/dp/arrow_ipc` 等 REST 专属端点以及部分路径差异端点仅在 Python 后端可用。
 - 若 agent 启用了认证或限速，请正确配置 `PRIVACY_AGENT_API_KEY` 或相应环境变量。
 - `Arrow IPC` 端点的二进制响应会被后端解析为 JSON 记录后返回。
+
+## 共享库架构 (`pkg/`)
+
+三个 Go 模块（service-hub / datasource-mgr / audit-log）共用 `console/pkg/` 下的基础库，避免代码重复：
+
+| 包 | 职责 |
+|---|---|
+| `pkg/agent` | 上游 agent HTTP 客户端（熔断器、请求重试、Bearer Token 认证） |
+| `pkg/config` | 环境变量读取工具（`EnvString` / `EnvInt` / `EnvBool` / `EnvStringSlice`） |
+| `pkg/metrics` | Prometheus 指标收集器（每模块独立 Registry，暴露 `GET /metrics`） |
+| `pkg/middleware` | 共享 Gin 中间件：RequestID → StructuredLogger → CORS → Auth |
+| `pkg/store` | 存储接口定义（`TaskStore` / `DataSourceStore` / `AuditStore`） |
+| `pkg/store/memory` | 内存实现（开发/测试场景，`DB_PATH` 为空时自动回退） |
+| `pkg/store/sqlite` | SQLite 实现（生产场景，纯 Go `modernc.org/sqlite` 无 CGO 依赖） |
+| `pkg/validation` | 输入校验工具（白名单、端口范围、最大长度） |
+
+## 生产加固特性
+
+三个 Go 模块均已通过生产级加固，主要特性：
+
+| 特性 | 说明 |
+|---|---|
+| **持久化存储** | `DB_PATH` 环境变量指定 SQLite 路径，空值自动回退内存实现 |
+| **结构化日志** | `log/slog` 标准库，支持 JSON/Text 格式，可配置日志级别 |
+| **Prometheus 指标** | `GET /metrics` 暴露 HTTP/Agent 请求指标 |
+| **API Key 鉴权** | `*_API_KEY` 环境变量启用，`/health` 豁免，防时序攻击 |
+| **CORS 配置** | `*_CORS_ORIGINS` 逗号分隔白名单，空值降级 `*` |
+| **输入校验** | 白名单校验 operation / type / security_level / status / port |
+| **请求追踪** | X-Request-ID 中间件自动注入，传递至上游 agent |
+| **熔断器** | 上游 agent 调用内置熔断（5 次失败熔断，30s 冷却） |
+| **增强完整性哈希** | 审计日志 SHA256 包含 8 个字段（logID/timestamp/algorithm/inputHash/outputHash/user/securityLevel/params） |

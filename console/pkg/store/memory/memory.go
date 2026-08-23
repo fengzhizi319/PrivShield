@@ -1,0 +1,520 @@
+// Package memory provides in-memory fallback implementations of the store interfaces.
+// Package memory 为 store 接口提供内存实现，用于开发/测试场景。
+//
+// 当 DB_PATH 环境变量为空时，各模块自动回退到内存实现。
+// 进程重启后数据会丢失，生产环境应使用 SQLite 实现。
+package memory
+
+import (
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/fengzhizi319/PrivShield/console/pkg/store"
+)
+
+// ─────────────────────────────────────────────────────────────
+// TaskStore / 任务内存存储
+// ─────────────────────────────────────────────────────────────
+
+// TaskStore implements store.TaskStore backed by an in-memory map.
+type TaskStore struct {
+	mu    sync.RWMutex
+	tasks map[string]*store.Task
+}
+
+// NewTaskStore creates a new in-memory task store.
+func NewTaskStore() *TaskStore {
+	return &TaskStore{tasks: make(map[string]*store.Task)}
+}
+
+func (s *TaskStore) Save(task *store.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *task
+	s.tasks[task.ID] = &cp
+	return nil
+}
+
+func (s *TaskStore) Get(id string) (*store.Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.tasks[id]
+	if !ok {
+		return nil, fmt.Errorf("task %s not found", id)
+	}
+	cp := *t
+	return &cp, nil
+}
+
+func (s *TaskStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	all := make([]store.Task, 0, len(s.tasks))
+	for _, t := range s.tasks {
+		if filter.Status != "" && t.Status != filter.Status {
+			continue
+		}
+		all = append(all, *t)
+	}
+	total := len(all)
+
+	// P46 fix: use sort.Slice (O(n log n)) instead of bubble sort (O(n²)) for production workloads.
+	sort.Slice(all, func(i, j int) bool {
+		return all[j].CreatedAt.Before(all[i].CreatedAt)
+	})
+
+	if filter.Limit > 0 {
+		end := filter.Limit
+		if end > len(all) {
+			end = len(all)
+		}
+		all = all[filter.Offset:end]
+	}
+	return all, total, nil
+}
+
+func (s *TaskStore) Update(task *store.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.tasks[task.ID]; !ok {
+		return fmt.Errorf("task %s not found", task.ID)
+	}
+	cp := *task
+	s.tasks[task.ID] = &cp
+	return nil
+}
+
+func (s *TaskStore) Counts() (store.TaskCounts, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var c store.TaskCounts
+	for _, t := range s.tasks {
+		switch t.Status {
+		case "pending":
+			c.Pending++
+		case "running":
+			c.Running++
+		case "completed":
+			c.Completed++
+		case "failed":
+			c.Failed++
+		}
+	}
+	return c, nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// DataSourceStore / 数据源内存存储
+// ─────────────────────────────────────────────────────────────
+
+// DataSourceStore implements store.DataSourceStore backed by an in-memory map.
+type DataSourceStore struct {
+	mu           sync.RWMutex
+	dsMap        map[string]*store.DataSource
+	auditRecords []store.AccessAuditRecord
+}
+
+// maxAuditRecords is the maximum number of access audit records retained in memory.
+// P60 fix: cap in-memory audit records to prevent unbounded memory growth.
+const maxAuditRecords = 10_000
+
+// NewDataSourceStore creates a new in-memory data source store.
+func NewDataSourceStore() *DataSourceStore {
+	return &DataSourceStore{
+		dsMap:        make(map[string]*store.DataSource),
+		auditRecords: make([]store.AccessAuditRecord, 0),
+	}
+}
+
+func (s *DataSourceStore) SaveDS(ds *store.DataSource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *ds
+	s.dsMap[ds.ID] = &cp
+	return nil
+}
+
+func (s *DataSourceStore) GetDS(id string) (*store.DataSource, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ds, ok := s.dsMap[id]
+	if !ok {
+		return nil, fmt.Errorf("data source %s not found", id)
+	}
+	cp := *ds
+	return &cp, nil
+}
+
+func (s *DataSourceStore) ListDS(filter store.DataSourceFilter) ([]store.DataSource, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]store.DataSource, 0, len(s.dsMap))
+	for _, ds := range s.dsMap {
+		result = append(result, *ds)
+	}
+	total := len(result)
+
+	// P46 fix: use sort.Slice instead of bubble sort.
+	sort.Slice(result, func(i, j int) bool {
+		return result[j].CreatedAt.Before(result[i].CreatedAt)
+	})
+
+	// Apply pagination
+	if filter.Limit > 0 {
+		start := filter.Offset
+		if start > len(result) {
+			start = len(result)
+		}
+		end := start + filter.Limit
+		if end > len(result) {
+			end = len(result)
+		}
+		result = result[start:end]
+	}
+	return result, total, nil
+}
+
+func (s *DataSourceStore) DeleteDS(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.dsMap[id]; !ok {
+		return fmt.Errorf("data source %s not found", id)
+	}
+	delete(s.dsMap, id)
+	return nil
+}
+
+func (s *DataSourceStore) UpdateDS(ds *store.DataSource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.dsMap[ds.ID]; !ok {
+		return fmt.Errorf("data source %s not found", ds.ID)
+	}
+	cp := *ds
+	s.dsMap[ds.ID] = &cp
+	return nil
+}
+
+func (s *DataSourceStore) SaveAudit(rec *store.AccessAuditRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *rec
+	s.auditRecords = append(s.auditRecords, cp)
+	// P60 fix: drop oldest records when capacity is exceeded to prevent unbounded memory growth.
+	if len(s.auditRecords) > maxAuditRecords {
+		s.auditRecords = s.auditRecords[len(s.auditRecords)-maxAuditRecords:]
+	}
+	return nil
+}
+
+func (s *DataSourceStore) ListAudit(dsID string, limit, offset int) ([]store.AccessAuditRecord, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	filtered := make([]store.AccessAuditRecord, 0)
+	for _, r := range s.auditRecords {
+		if dsID != "" && r.DataSourceID != dsID {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	total := len(filtered)
+
+	// Apply pagination
+	if limit > 0 {
+		start := offset
+		if start > len(filtered) {
+			start = len(filtered)
+		}
+		end := start + limit
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		filtered = filtered[start:end]
+	}
+	return filtered, total, nil
+}
+
+// ─────────────────────────────────────────────────────────────
+// AuditStore / 审计日志内存存储
+// ─────────────────────────────────────────────────────────────
+
+// AuditStore implements store.AuditStore backed by in-memory slices.
+type AuditStore struct {
+	mu        sync.RWMutex
+	logs      []store.AuditLog
+	snapshots []store.SnapshotRecord
+}
+
+// maxAuditLogs is the maximum number of audit logs retained in memory.
+// P60 fix: cap in-memory audit logs to prevent unbounded memory growth.
+const maxAuditLogs = 50_000
+
+// maxSnapshots is the maximum number of snapshots retained in memory.
+// P60 fix: cap in-memory snapshots to prevent unbounded memory growth.
+const maxSnapshots = 50_000
+
+// NewAuditStore creates a new in-memory audit store.
+func NewAuditStore() *AuditStore {
+	return &AuditStore{
+		logs:      make([]store.AuditLog, 0),
+		snapshots: make([]store.SnapshotRecord, 0),
+	}
+}
+
+func (s *AuditStore) SaveLog(log *store.AuditLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *log
+	s.logs = append(s.logs, cp)
+	// P60 fix: drop oldest logs when capacity is exceeded to prevent unbounded memory growth.
+	if len(s.logs) > maxAuditLogs {
+		s.logs = s.logs[len(s.logs)-maxAuditLogs:]
+	}
+	return nil
+}
+
+func (s *AuditStore) GetLog(id string) (*store.AuditLog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, l := range s.logs {
+		if l.ID == id {
+			cp := l
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("audit log %s not found", id)
+}
+
+func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	filtered := make([]store.AuditLog, 0)
+	for _, l := range s.logs {
+		if filter.Operation != "" && l.Operation != filter.Operation {
+			continue
+		}
+		if filter.DataSource != "" && l.DataSource != filter.DataSource {
+			continue
+		}
+		if filter.User != "" && l.User != filter.User {
+			continue
+		}
+		if filter.Status != "" && l.Status != filter.Status {
+			continue
+		}
+		if filter.SecurityLevel != "" && l.SecurityLevel != filter.SecurityLevel {
+			continue
+		}
+		filtered = append(filtered, l)
+	}
+
+	total := len(filtered)
+
+	// P46 fix: use sort.Slice instead of bubble sort.
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[j].Timestamp.Before(filtered[i].Timestamp)
+	})
+
+	if filter.Limit > 0 {
+		end := filter.Limit
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		offset := filter.Offset
+		if offset > len(filtered) {
+			offset = len(filtered)
+		}
+		filtered = filtered[offset:end]
+	}
+	return filtered, total, nil
+}
+
+func (s *AuditStore) GetStats() (*store.AuditStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	stats := &store.AuditStats{
+		ByOperation:     make(map[string]int),
+		ByStatus:        make(map[string]int),
+		BySecurityLevel: make(map[string]int),
+	}
+
+	var totalDuration int64
+	for _, l := range s.logs {
+		stats.ByOperation[l.Operation]++
+		stats.ByStatus[l.Status]++
+		if l.SecurityLevel != "" {
+			stats.BySecurityLevel[l.SecurityLevel]++
+		}
+		totalDuration += l.DurationMs
+	}
+
+	stats.TotalOperations = len(s.logs)
+	if len(s.logs) > 0 {
+		stats.AvgDurationMs = float64(totalDuration) / float64(len(s.logs))
+	}
+	return stats, nil
+}
+
+func (s *AuditStore) GenerateReport(period string) (*store.AuditReport, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Parse period to duration
+	var periodDuration time.Duration
+	switch period {
+	case "1h":
+		periodDuration = time.Hour
+	case "7d":
+		periodDuration = 7 * 24 * time.Hour
+	case "30d":
+		periodDuration = 30 * 24 * time.Hour
+	default:
+		periodDuration = 24 * time.Hour
+	}
+
+	cutoff := time.Now().Add(-periodDuration)
+	report := &store.AuditReport{
+		BySecurityLevel: make(map[string]int),
+	}
+
+	// Filter by period and compute statistics
+	byOp := make(map[string]int)
+	successCount := 0
+	totalCount := 0
+
+	for _, l := range s.logs {
+		if !l.Timestamp.After(cutoff) {
+			continue
+		}
+		totalCount++
+		if l.SecurityLevel != "" {
+			report.BySecurityLevel[l.SecurityLevel]++
+		}
+		byOp[l.Operation]++
+		if l.Status == "success" {
+			successCount++
+		}
+	}
+
+	report.TotalOperations = totalCount
+	if totalCount > 0 {
+		report.SuccessRate = float64(successCount) / float64(totalCount) * 100
+	}
+
+	// Get top operations
+	type kv struct {
+		Key   string
+		Value int
+	}
+	sorted := make([]kv, 0, len(byOp))
+	for k, v := range byOp {
+		sorted = append(sorted, kv{k, v})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Value > sorted[j].Value
+	})
+
+	topOps := make([]string, 0, 5)
+	for i, kv := range sorted {
+		if i >= 5 {
+			break
+		}
+		topOps = append(topOps, fmt.Sprintf("%s (%d)", kv.Key, kv.Value))
+	}
+	report.TopOperations = topOps
+
+	// Generate recommendations
+	report.Recommendations = generateRecommendations(report.BySecurityLevel, report.SuccessRate)
+
+	return report, nil
+}
+
+// generateRecommendations generates audit recommendations based on statistics.
+func generateRecommendations(byLevel map[string]int, successRate float64) []string {
+	recs := make([]string, 0)
+
+	if l4 := byLevel["L4"]; l4 > 100 {
+		recs = append(recs, "L4 级别操作频繁，建议审查差分隐私预算消耗")
+	}
+	if l5 := byLevel["L5"]; l5 > 50 {
+		recs = append(recs, "L5 绝密数据操作较多，建议加强访问控制审计")
+	}
+	if successRate < 95 {
+		recs = append(recs, fmt.Sprintf("成功率 %.1f%% 低于 95%%，建议排查失败原因", successRate))
+	}
+	if len(recs) == 0 {
+		recs = append(recs, "审计指标正常，无需特别关注")
+	}
+
+	return recs
+}
+
+func (s *AuditStore) SaveSnapshot(snap *store.SnapshotRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *snap
+	s.snapshots = append(s.snapshots, cp)
+	// P60 fix: drop oldest snapshots when capacity is exceeded to prevent unbounded memory growth.
+	if len(s.snapshots) > maxSnapshots {
+		s.snapshots = s.snapshots[len(s.snapshots)-maxSnapshots:]
+	}
+	return nil
+}
+
+// ListSnapshots returns paginated snapshots with total count.
+// P35 fix: return total count for proper pagination instead of len(snaps).
+func (s *AuditStore) ListSnapshots(limit, offset int) ([]store.SnapshotRecord, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	sorted := make([]store.SnapshotRecord, len(s.snapshots))
+	copy(sorted, s.snapshots)
+	// P46 fix: use sort.Slice instead of bubble sort.
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[j].Timestamp.Before(sorted[i].Timestamp)
+	})
+	total := len(sorted)
+
+	// P30 fix: apply offset + limit for proper pagination
+	start := offset
+	if start > len(sorted) {
+		start = len(sorted)
+	}
+	if limit > 0 {
+		end := start + limit
+		if end > len(sorted) {
+			end = len(sorted)
+		}
+		sorted = sorted[start:end]
+	} else if start > 0 {
+		sorted = sorted[start:]
+	}
+	return sorted, total, nil
+}
+
+func (s *AuditStore) GetSnapshot(id string) (*store.SnapshotRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, snap := range s.snapshots {
+		if snap.ID == id {
+			cp := snap
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("snapshot %s not found", id)
+}
+
+// Ensure interface compliance at compile time.
+var (
+	_ store.TaskStore    = (*TaskStore)(nil)
+	_ store.DataSourceStore = (*DataSourceStore)(nil)
+	_ store.AuditStore   = (*AuditStore)(nil)
+)
+
+// Unused import guard.
+var _ = time.Now

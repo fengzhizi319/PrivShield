@@ -3,12 +3,18 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/console/pkg/store/memory"
 
 	"github.com/fengzhizi319/PrivShield/console/audit-log/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/audit-log/internal/config"
@@ -18,6 +24,13 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
+// testDeps bundles shared test dependencies.
+type testDeps struct {
+	audit  *memory.AuditStore
+	logger *slog.Logger
+	mc     *metrics.Collector
+}
+
 func newTestServer() *Server {
 	cfg := &config.Config{
 		Host:          "127.0.0.1",
@@ -25,10 +38,14 @@ func newTestServer() *Server {
 		AgentRESTHost: "127.0.0.1",
 		AgentRESTPort: 19999, // unreachable
 		AgentAPIKey:   "",
-		MaxLogEntries: 1000,
+	}
+	d := &testDeps{
+		audit:  memory.NewAuditStore(),
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		mc:     metrics.NewCollector("audit-log-test"),
 	}
 	ag := agent.New(cfg)
-	return New(ag, cfg)
+	return New(ag, cfg, d.audit, d.logger, d.mc)
 }
 
 func newTestRouter(s *Server) *gin.Engine {
@@ -127,15 +144,14 @@ func TestCreateLogInvalidBody(t *testing.T) {
 	s := newTestServer()
 	router := newTestRouter(s)
 
+	// Empty body should fail because operation and status are required
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/audit/logs", bytes.NewReader([]byte("{}")))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	// Empty body should still succeed (no required fields in model)
-	// but the log will have empty fields
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -285,20 +301,37 @@ func TestVerifyIntegrity(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	// Verify the snapshot
-	verifyBody := map[string]any{"snapshot_id": "snap-1"}
-	vb, _ := json.Marshal(verifyBody)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create log: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// List snapshots to get the actual snapshot ID
 	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("POST", "/api/audit/snapshots/verify", bytes.NewReader(vb))
-	req2.Header.Set("Content-Type", "application/json")
+	req2, _ := http.NewRequest("GET", "/api/audit/snapshots", nil)
 	router.ServeHTTP(w2, req2)
 
-	if w2.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	var listResp map[string]any
+	_ = json.Unmarshal(w2.Body.Bytes(), &listResp)
+	snaps := listResp["snapshots"].([]any)
+	if len(snaps) == 0 {
+		t.Fatal("expected at least 1 snapshot")
+	}
+	snapID := snaps[0].(map[string]any)["id"].(string)
+
+	// Verify the snapshot
+	verifyBody := map[string]any{"snapshot_id": snapID}
+	vb, _ := json.Marshal(verifyBody)
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest("POST", "/api/audit/snapshots/verify", bytes.NewReader(vb))
+	req3.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w3, req3)
+
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w3.Code, w3.Body.String())
 	}
 
 	var result map[string]any
-	_ = json.Unmarshal(w2.Body.Bytes(), &result)
+	_ = json.Unmarshal(w3.Body.Bytes(), &result)
 	if result["valid"] != true {
 		t.Errorf("expected valid=true, got %v", result["valid"])
 	}
@@ -399,9 +432,9 @@ func TestListLogsWithFilter(t *testing.T) {
 
 func TestComputeIntegrityHash(t *testing.T) {
 	ts := time.Now()
-	hash1 := computeIntegrityHash("log-1", ts, "field_mask")
-	hash2 := computeIntegrityHash("log-1", ts, "field_mask")
-	hash3 := computeIntegrityHash("log-2", ts, "field_mask")
+	hash1 := computeIntegrityHash("log-1", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
+	hash2 := computeIntegrityHash("log-1", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
+	hash3 := computeIntegrityHash("log-2", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
 
 	if hash1 != hash2 {
 		t.Error("same inputs should produce same hash")
@@ -411,5 +444,32 @@ func TestComputeIntegrityHash(t *testing.T) {
 	}
 	if len(hash1) != 64 { // SHA256 hex = 64 chars
 		t.Errorf("expected 64-char hex hash, got %d chars", len(hash1))
+	}
+}
+
+// TestCreateLogParametersTooLarge 验证 parameters 超过 1 MB 上限时返回 400。
+// P44 fix: parameters size limit.
+func TestCreateLogParametersTooLarge(t *testing.T) {
+	s := newTestServer()
+	router := newTestRouter(s)
+
+	// 构造一个超过 1 MB 的 parameters 对象
+	bigParams := make(map[string]any)
+	bigValue := strings.Repeat("x", 1024*1024+100) // > 1 MB
+	bigParams["data"] = bigValue
+
+	body := map[string]any{
+		"operation":  "mask",
+		"status":     "success",
+		"parameters": bigParams,
+	}
+	b, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/audit/logs", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for parameters > 1 MB, got %d: %s", w.Code, w.Body.String())
 	}
 }

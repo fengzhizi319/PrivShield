@@ -73,7 +73,7 @@ start_service_hub() {
 
     log_info "Starting service-hub on :${port}..."
     SERVICE_HUB_HOST=127.0.0.1 SERVICE_HUB_PORT="$port" \
-        ./bin/service-hub &
+        ./bin/service-hub >> "${PIDS_DIR}/service-hub.log" 2>&1 &
     echo $! > "$pid_file"
     log_info "service-hub started (PID $(cat "$pid_file"))"
 }
@@ -95,7 +95,7 @@ start_datasource_mgr() {
 
     log_info "Starting datasource-mgr on :${port}..."
     DATASOURCE_MGR_HOST=127.0.0.1 DATASOURCE_MGR_PORT="$port" \
-        ./bin/datasource-mgr &
+        ./bin/datasource-mgr >> "${PIDS_DIR}/datasource-mgr.log" 2>&1 &
     echo $! > "$pid_file"
     log_info "datasource-mgr started (PID $(cat "$pid_file"))"
 }
@@ -117,7 +117,7 @@ start_audit_log() {
 
     log_info "Starting audit-log on :${port}..."
     AUDIT_LOG_HOST=127.0.0.1 AUDIT_LOG_PORT="$port" \
-        ./bin/audit-log &
+        ./bin/audit-log >> "${PIDS_DIR}/audit-log.log" 2>&1 &
     echo $! > "$pid_file"
     log_info "audit-log started (PID $(cat "$pid_file"))"
 }

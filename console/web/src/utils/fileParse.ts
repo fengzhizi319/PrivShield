@@ -23,6 +23,17 @@
 /** 引入统一错误消息提取工具 / Import unified error message extraction utility */
 import { getErrorMessage } from '@/utils/error';
 
+/**
+ * 前端文件解析大小上限（50 MB）。
+ * Maximum file size for frontend parsing (50 MB).
+ *
+ * 超过此限制的文件可能导致浏览器内存溢出或长时间卡顿，
+ * 生产环境应通过后端批量处理大文件。
+ * Files exceeding this limit may cause browser OOM or long stalls;
+ * production environments should process large files via backend batch processing.
+ */
+const MAX_PARSE_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+
 /** 解析后的统一结构：记录数组 + 列名顺序 / Parsed unified structure: records array + column order */
 export interface ParsedRecords {
   /** 每条记录：列名 → 字符串值 / Each record: column name → string value */
@@ -179,6 +190,12 @@ function parseJsonRecords(text: string): ParsedRecords {
  * @returns 解析结果 / Parsed result
  */
 export async function parseDataFile(file: File): Promise<ParsedRecords> {
+  // P47 fix: reject oversized files before reading to prevent browser OOM / freeze.
+  // 在读取前拒绝超大文件，防止浏览器内存溢出或卡顿。
+  if (file.size > MAX_PARSE_FILE_SIZE) {
+    const maxMB = Math.round(MAX_PARSE_FILE_SIZE / (1024 * 1024));
+    throw new Error(`文件过大（${(file.size / (1024 * 1024)).toFixed(1)} MB），超过前端解析上限 ${maxMB} MB，请使用后端批量处理接口`);
+  }
   const text = await file.text();
   const name = file.name.toLowerCase();
   if (name.endsWith('.csv')) return parseCsvRecords(text);

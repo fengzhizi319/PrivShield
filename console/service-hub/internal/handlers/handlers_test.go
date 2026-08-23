@@ -3,15 +3,20 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/console/pkg/store/memory"
 
 	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
@@ -19,6 +24,21 @@ import (
 
 func init() {
 	gin.SetMode(gin.TestMode)
+}
+
+// testDeps bundles shared test dependencies (store, logger, metrics).
+type testDeps struct {
+	tasks  *memory.TaskStore
+	logger *slog.Logger
+	mc     *metrics.Collector
+}
+
+func newTestDeps() *testDeps {
+	return &testDeps{
+		tasks:  memory.NewTaskStore(),
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		mc:     metrics.NewCollector("service-hub-test"),
+	}
 }
 
 // newTestServer creates a Server with a mock upstream (httptest server).
@@ -55,8 +75,9 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 		MaxQueueDepth:   100,
 		ScheduleTimeout: 5,
 	}
+	d := newTestDeps()
 	ag := agent.New(cfg)
-	srv := New(ag, cfg)
+	srv := New(ag, cfg, d.tasks, d.logger, d.mc)
 	return srv, mockAgent
 }
 
@@ -69,8 +90,9 @@ func newSimpleTestServer() *Server {
 		MaxQueueDepth:   100,
 		ScheduleTimeout: 5,
 	}
+	d := newTestDeps()
 	ag := agent.New(cfg)
-	return New(ag, cfg)
+	return New(ag, cfg, d.tasks, d.logger, d.mc)
 }
 
 // newMockE2EServer creates a Server connected to a mock agent (httptest.Server).
@@ -142,8 +164,9 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 		MaxQueueDepth:   100,
 		ScheduleTimeout: 10,
 	}
+	d := newTestDeps()
 	ag := agent.New(cfg)
-	srv := New(ag, cfg)
+	srv := New(ag, cfg, d.tasks, d.logger, d.mc)
 	return srv, mockAgent
 }
 

@@ -31,6 +31,7 @@ import asyncio
 from pathlib import Path
 import base64
 import ipaddress
+import posixpath
 import random
 import socket
 import time
@@ -112,7 +113,8 @@ class BatchRequest(BaseModel):
     默认工厂为空列表，避免可变默认参数陷阱。
     """
 
-    requests: list[BatchRequestItem] = Field(default_factory=list)
+    # P41 fix: 限制批量请求数量上限为 100，防止单次提交数千请求导致长时间占用连接（DoS 防护）。
+    requests: list[BatchRequestItem] = Field(default_factory=list, le=100)
 
 
 class BatchResultItem(BaseModel):
@@ -562,7 +564,6 @@ def _validate_lb_url(url: str) -> None:
     if parsed.username or parsed.password or ("@" in (parsed.netloc or "")):
         raise HTTPException(status_code=400, detail="探测地址不允许包含 Userinfo 授权凭据与 '@' 符号")
 
-    parsed = urlparse(url)
     if parsed.scheme not in _LB_ALLOWED_SCHEMES:
         raise HTTPException(
             status_code=400,
@@ -885,25 +886,72 @@ async def _run_concurrency_test(req: ConcurrencyTestRequest) -> ConcurrencyTestR
     )
 
 
+# 并发压测允许的 agent 路径白名单（与 Go 后端 isAllowedConcurrencyPath 对齐）。
+# P38 fix: 防止通过压测端点访问敏感内部接口（如 /v1/ops/* 运维接口）。
+_CONCURRENCY_ALLOWED_PREFIXES = (
+    "/v1/privacy/",
+    "/v1/dynclassification/",
+    "/v1/medical/",
+    "/v1/pipeline/",
+)
+
+
+def _is_allowed_concurrency_path(raw_path: str) -> bool:
+    """校验压测路径是否在白名单内。
+
+    使用 ``posixpath.normpath`` 规范化路径，消除 ".." 穿越，
+    防止 ``/v1/privacy/../ops/health`` 绕过前缀检查。
+    """
+    cleaned = posixpath.normpath(raw_path)
+    return (
+        any(cleaned.startswith(p) for p in _CONCURRENCY_ALLOWED_PREFIXES)
+        or cleaned == "/health"
+    )
+
+
 @app.post("/api/concurrency_test")
 async def concurrency_test(req: ConcurrencyTestRequest):
     """并发压测：以指定并发度向 agent 发送请求并统计延迟分布与吞吐量。
 
-    用于前端“并发测试”面板，验证 agent 在高并发下的性能表现。
+    用于前端"并发测试"面板，验证 agent 在高并发下的性能表现。
     """
+    # P38 fix: 校验路径白名单，防止通过压测端点访问敏感内部接口
+    if not _is_allowed_concurrency_path(req.path):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"path {req.path!r} not allowed for concurrency test; "
+                f"allowed prefixes: {', '.join(_CONCURRENCY_ALLOWED_PREFIXES)}, /health"
+            ),
+        )
     return await _run_concurrency_test(req)
 
 
+class MedicalPipelineRequest(BaseModel):
+    """医疗/医保治理代理端点 ``POST /api/medical_pipeline`` 的请求体。
+
+    P73 fix: 替代原先的 ``dict[str, Any]`` 入参，由 Pydantic v2 做输入校验，
+    防止非法字段注入到 agent。
+
+    Attributes:
+        records: 可选的记录列表；未提供时自动加载示例 CSV。
+        dataset: 示例数据集选择（"kangyang" 或 "yibao"）。
+    """
+
+    records: list[dict[str, Any]] | None = Field(default=None)
+    dataset: str = Field(default="kangyang", pattern=r"^(kangyang|yibao)$")
+
+
 @app.post("/api/medical_pipeline")
-async def medical_pipeline(req: dict[str, Any]):
+async def medical_pipeline(req: MedicalPipelineRequest):
     """医疗敏感数据全流程治理代理端点：分类分级与 L4/L5 数据脱敏。
 
     若未指定 records，根据 dataset 参数（"yibao" 或 "kangyang"）选择对应的示例数据。
     """
-    records = req.get("records")
+    records = req.records
     if not records:
         import csv
-        sample_name = "yibao.csv" if req.get("dataset") == "yibao" else "kangyang.csv"
+        sample_name = "yibao.csv" if req.dataset == "yibao" else "kangyang.csv"
         sample_path = Path(__file__).resolve().parent.parent / "samples" / sample_name
         records = []
         if sample_path.exists():
@@ -921,16 +969,29 @@ async def medical_pipeline(req: dict[str, Any]):
 
 
 @app.post("/api/yibao_pipeline")
-async def yibao_pipeline(req: dict[str, Any]):
+async def yibao_pipeline(req: MedicalPipelineRequest = None):
     """医保结算数据全流程治理代理端点：读入 yibao.csv 18 字段进行治理。"""
-    req["dataset"] = "yibao"
-    return await medical_pipeline(req)
+    # P73 fix: 强制 dataset="yibao"，忽略客户端传入的值
+    validated = MedicalPipelineRequest(dataset="yibao", records=req.records if req else None)
+    return await medical_pipeline(validated)
+
+
+class PipelineProcessRequest(BaseModel):
+    """通用流水线代理端点 ``POST /api/pipeline/process`` 的请求体。
+
+    P73 fix: 替代原先的 ``dict[str, Any]`` 入参。
+    """
+
+    records: list[dict[str, Any]] | None = Field(default=None)
+    standard: str = Field(default="jrt0197", max_length=64)
+    mask_l4: bool = Field(default=True)
+    mask_l5: bool = Field(default=True)
 
 
 @app.post("/api/pipeline/process")
-async def pipeline_process(req: dict[str, Any]):
+async def pipeline_process(req: PipelineProcessRequest):
     """通用分类分级与脱敏流水线代理端点。"""
-    records = req.get("records")
+    records = req.records
     if not records:
         import csv
         sample_path = Path(__file__).resolve().parent.parent / "samples" / "kangyang.csv"
@@ -944,9 +1005,9 @@ async def pipeline_process(req: dict[str, Any]):
         path="/v1/pipeline/process_records",
         body={
             "records": records,
-            "standard": req.get("standard", "jrt0197"),
-            "mask_l4": req.get("mask_l4", True),
-            "mask_l5": req.get("mask_l5", True),
+            "standard": req.standard,
+            "mask_l4": req.mask_l4,
+            "mask_l5": req.mask_l5,
         },
     )
 

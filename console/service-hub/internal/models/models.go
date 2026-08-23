@@ -82,3 +82,23 @@ type ProxyResponse struct {
 	Data       any    `json:"data"`
 	Via        string `json:"via"`
 }
+
+// LevelToOperation maps a sensitivity level to the corresponding desensitization operation.
+// P50 fix: extracted to shared models to eliminate duplication between HTTP handler and gRPC server.
+// LevelToOperation 将敏感度等级映射为对应的脱敏操作。
+func LevelToOperation(level string) string {
+	switch level {
+	case "L1":
+		return "none" // public data, no masking
+	case "L2":
+		return "mask" // field-level masking
+	case "L3":
+		return "k_anon" // K-anonymity
+	case "L4":
+		return "dp" // differential privacy
+	case "L5":
+		return "dp" // full anonymization + DP
+	default:
+		return "mask"
+	}
+}

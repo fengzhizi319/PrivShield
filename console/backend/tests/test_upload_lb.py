@@ -379,3 +379,38 @@ def test_validate_lb_url_query_with_at_symbol() -> None:
         with patch.object(settings, "lb_allowed_hosts", ""):
             # 不应抛出异常
             _validate_lb_url("http://example.com:8079/probe?email=test@example.com")
+
+
+# --------------------------------------------------------------------------- #
+# P40: 响应体大小限制
+# --------------------------------------------------------------------------- #
+def test_check_response_size_ok() -> None:
+    """P40: 正常大小的响应不应抛出异常。"""
+    from app.client import PrivacyAgentClient
+
+    resp = httpx.Response(200, headers={"content-length": "1024"})
+    # 不应抛出
+    PrivacyAgentClient._check_response_size(resp)
+
+
+def test_check_response_size_too_large() -> None:
+    """P40: Content-Length 超过 64 MiB 应抛出 502。"""
+    from fastapi import HTTPException
+
+    from app.client import PrivacyAgentClient
+
+    # 100 MiB > 64 MiB 限制
+    resp = httpx.Response(200, headers={"content-length": str(100 * 1024 * 1024)})
+    with pytest.raises(HTTPException) as excinfo:
+        PrivacyAgentClient._check_response_size(resp)
+    assert excinfo.value.status_code == 502
+    assert "too large" in excinfo.value.detail
+
+
+def test_check_response_size_no_header() -> None:
+    """P40: 无 Content-Length 头时不抛出（由后续读取保护）。"""
+    from app.client import PrivacyAgentClient
+
+    resp = httpx.Response(200)
+    # 不应抛出
+    PrivacyAgentClient._check_response_size(resp)

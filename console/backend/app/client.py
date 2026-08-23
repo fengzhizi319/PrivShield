@@ -27,6 +27,10 @@ from fastapi import HTTPException
 
 from .config import settings
 
+# P40 fix: 响应体最大大小限制（64 MiB），与 Go 客户端 pkg/agent/client.go 对齐。
+# 防止上游返回超大响应导致 OOM。
+_MAX_RESPONSE_SIZE = 64 * 1024 * 1024  # 64 MiB
+
 
 class PrivacyAgentClient:
     """转发请求到 PrivShield 的轻量异步客户端。
@@ -131,6 +135,24 @@ class PrivacyAgentClient:
             "records": table.to_pandas().replace({float("nan"): None}).to_dict(orient="records"),
         }
 
+    @staticmethod
+    def _check_response_size(response: httpx.Response) -> None:
+        """P40 fix: 校验响应体大小，防止上游返回超大响应导致 OOM。
+
+        与 Go 客户端 ``pkg/agent/client.go`` 的 64 MiB 限制对齐。
+        在读取响应体之前调用，超限抛出 HTTPException(502)。
+        """
+        content_length = response.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > _MAX_RESPONSE_SIZE:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Agent response too large: {content_length} bytes exceeds {_MAX_RESPONSE_SIZE} bytes limit",
+                    )
+            except ValueError:
+                pass  # 非法 Content-Length 忽略，后续读取时由 LimitReader 保护
+
     async def request(
         self,
         method: str,
@@ -181,6 +203,9 @@ class PrivacyAgentClient:
             raise HTTPException(
                 status_code=502, detail=f"Unable to reach privacy agent: {exc}"
             ) from exc
+        
+        # P40 fix: 校验响应体大小，防止 OOM
+        self._check_response_size(response)
 
         try:
             # 状态码检查：非 2xx 抛出 HTTPStatusError。
@@ -240,6 +265,9 @@ class PrivacyAgentClient:
             raise HTTPException(
                 status_code=502, detail=f"Unable to reach privacy agent: {exc}"
             ) from exc
+
+        # P40 fix: 校验响应体大小，防止 OOM
+        self._check_response_size(response)
 
         try:
             # 状态码检查：非 2xx 抛出 HTTPStatusError。

@@ -56,9 +56,14 @@ docker run -d \
 | `SERVICE_HUB_PORT` | `8082` | HTTP 监听端口 |
 | `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | 上游 Agent REST 地址 |
 | `PRIVACY_REST_PORT` | `8079` | 上游 Agent REST 端口 |
-| `PRIVACY_AGENT_API_KEY` | (空) | 认证密钥 |
+| `PRIVACY_AGENT_API_KEY` | (空) | 上游 Agent 认证密钥 |
 | `SERVICE_HUB_MAX_QUEUE` | `1000` | 最大队列深度 |
 | `SERVICE_HUB_SCHEDULE_TIMEOUT` | `30` | 调度超时（秒） |
+| `SERVICE_HUB_API_KEY` | (空) | 本模块入站 API Key（空=不鉴权） |
+| `SERVICE_HUB_CORS_ORIGINS` | (空) | 允许的 CORS 来源，逗号分隔（空=`*`） |
+| `SERVICE_HUB_DB_PATH` | (空) | SQLite 数据库路径（空=内存模式） |
+| `SERVICE_HUB_LOG_FORMAT` | `json` | 日志格式: `json` \| `text` |
+| `SERVICE_HUB_LOG_LEVEL` | `info` | 日志级别: `debug` \| `info` \| `warn` \| `error` |
 
 ## 4. 健康检查
 
@@ -68,7 +73,9 @@ curl http://127.0.0.1:8082/api/health
 
 ## 5. 日志
 
-当前使用标准 `log` 包输出，生产环境建议接入结构化日志（如 zerolog / zap）。
+使用 Go 标准 `log/slog` 结构化日志，默认 JSON 格式输出。可通过 `SERVICE_HUB_LOG_FORMAT=text` 切换为文本格式。
+
+Prometheus 指标端点: `GET /metrics`
 
 ## 6. 故障排查
 

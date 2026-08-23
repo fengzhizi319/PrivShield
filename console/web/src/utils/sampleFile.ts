@@ -123,6 +123,14 @@ export function downloadSampleFile(format: SampleFormat): void {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  // P42 fix + P48 enhancement: 延迟释放 Blob URL 并清理 DOM 元素。
+  // Delayed Blob URL revocation and DOM cleanup.
+  // 10 秒后释放足以覆盖所有浏览器的下载启动延迟。
+  // 10s delay covers all browsers' download startup latency.
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 10_000);
 }

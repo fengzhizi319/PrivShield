@@ -3,11 +3,17 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/console/pkg/store/memory"
 
 	"github.com/fengzhizi319/PrivShield/console/datasource-mgr/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/datasource-mgr/internal/config"
@@ -15,6 +21,13 @@ import (
 
 func init() {
 	gin.SetMode(gin.TestMode)
+}
+
+// testDeps bundles shared test dependencies.
+type testDeps struct {
+	ds     *memory.DataSourceStore
+	logger *slog.Logger
+	mc     *metrics.Collector
 }
 
 func newTestServer() *Server {
@@ -25,8 +38,13 @@ func newTestServer() *Server {
 		AgentRESTPort: 19999, // unreachable
 		AgentAPIKey:   "",
 	}
+	d := &testDeps{
+		ds:     memory.NewDataSourceStore(),
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		mc:     metrics.NewCollector("datasource-mgr-test"),
+	}
 	ag := agent.New(cfg)
-	return New(ag, cfg)
+	return New(ag, cfg, d.ds, d.logger, d.mc)
 }
 
 func newTestRouter(s *Server) *gin.Engine {
@@ -294,5 +312,29 @@ func TestGetAccessAudit(t *testing.T) {
 	// Should have at least the "create" audit record
 	if audit["total"].(float64) < 1 {
 		t.Errorf("expected at least 1 audit record, got %v", audit["total"])
+	}
+}
+
+// TestCreateDataSourceNameTooLong 验证 name 超过 1024 字符时返回 400。
+// P43 fix: name length validation.
+func TestCreateDataSourceNameTooLong(t *testing.T) {
+	s := newTestServer()
+	router := newTestRouter(s)
+
+	longName := strings.Repeat("x", 1025)
+	body := map[string]any{
+		"name": longName,
+		"type": "database",
+		"host": "127.0.0.1",
+		"port": 3306,
+	}
+	b, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/datasources", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for name > 1024 chars, got %d", w.Code)
 	}
 }

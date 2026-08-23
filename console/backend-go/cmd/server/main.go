@@ -19,31 +19,21 @@
 package main
 
 import (
-	// context：用于优雅关闭时设置超时上下文
 	"context"
-	// fmt：用于打印启动信息
-	"fmt"
-	// log：标准库日志，用于输出错误与致命错误信息
 	"log"
-	// net/http：标准库 HTTP 服务器，承载 Gin 路由
 	"net/http"
-	// os：用于读取环境变量、接收系统信号
 	"os"
-	// os/signal：注册系统信号通知通道
 	"os/signal"
-	// syscall：定义 SIGINT/SIGTERM 等系统信号常量
 	"syscall"
-	// time：用于优雅关闭超时时间
 	"time"
 
-	// gin：高性能 HTTP Web 框架，用于构建 REST API 路由
 	"github.com/gin-gonic/gin"
 
-	// agent：封装到 PrivShield 的 gRPC 客户端连接
+	pkgconfig "github.com/fengzhizi319/PrivShield/console/pkg/config"
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"
-	// config：从环境变量加载代理后端配置
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
-	// handlers：HTTP 处理器与路由注册，负责将 REST 请求转发为 gRPC 调用
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/handlers"
 )
 
@@ -59,6 +49,13 @@ func main() {
 	//   - PRIVACY_AGENT_API_KEY：可选的认证 API Key
 	//   - PRIVACY_CONSOLE_STATIC_DIR：可选的前端静态文件目录
 	cfg := config.Load()
+
+	// ── 步骤 1.5：结构化日志 + Prometheus 指标 ─────────────────────
+	logger := pkgconfig.SetupLogger(
+		pkgconfig.EnvString("CONSOLE_LOG_FORMAT", "json"),
+		pkgconfig.EnvString("CONSOLE_LOG_LEVEL", "info"),
+	)
+	mc := metrics.NewCollector("backend-go")
 
 	// ── 步骤 2：创建 gRPC 客户端 ─────────────────────────────────────
 	// 根据配置建立到 PrivShield 的 gRPC 连接。
@@ -76,7 +73,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	// 创建 HTTP 处理器实例，持有 gRPC 客户端引用与配置信息，
 	// 内部实现了 /api/health、/api/samples、/api/proxy、/api/batch 等接口
-	server := handlers.New(client, cfg)
+	server := handlers.New(client, cfg, logger, mc)
 	// 创建一个新的 Gin 引擎实例（包含默认的 Logger + Recovery 中间件）
 	router := gin.New()
 	// 将所有 REST 代理路由与可选的静态 UI 托管路由注册到 Gin 引擎
@@ -86,10 +83,10 @@ func main() {
 	// ── 步骤 4：配置并启动 HTTP 服务器 ───────────────────────────────
 	// 创建标准库 HTTP 服务器实例，将 Gin 引擎作为 Handler
 	srv := &http.Server{
-		// 监听地址，格式如 ":8081" 或 "127.0.0.1:8081"，由配置决定
-		Addr:    cfg.ConsoleAddress(),
-		// Gin 引擎实现了 http.Handler 接口，所有请求由 Gin 路由分发处理
-		Handler: router,
+		Addr:              cfg.ConsoleAddress(),
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// ── 步骤 5：启动优雅关闭协程 ─────────────────────────────────────
@@ -102,6 +99,9 @@ func main() {
 		// 阻塞等待，直到收到任意一个系统信号
 		<-sigChan
 
+		// P57 fix: stop securityMiddleware ticker goroutine before stopping HTTP server.
+		server.Shutdown()
+
 		// 收到关闭信号后，创建带 5 秒超时的上下文，
 		// 确保优雅关闭不会无限阻塞（如存在未完成的长连接）
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -110,20 +110,17 @@ func main() {
 		// 调用 Shutdown：停止接收新连接，等待所有活跃请求处理完毕或超时
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			// 超时或关闭异常时仅打印日志（此时主协程可能已退出）
-			log.Printf("http server shutdown error: %v", err)
+			logger.Error("http server shutdown error", "error", err.Error())
 		}
 	}()
 
-	// ── 步骤 6：打印启动信息并开始监听 ──────────────────────────────
-	// 输出本代理的 HTTP 监听地址，方便调试确认
-	fmt.Printf("Go gRPC proxy listening on http://%s\n", cfg.ConsoleAddress())
-	// 输出上游 agent 的 gRPC 地址，方便调试确认连接目标
-	fmt.Printf("Upstream agent gRPC: %s\n", cfg.AgentAddress())
-	// 启动 HTTP 服务器，开始监听并接受连接。
-	// 该方法会阻塞当前 goroutine，直到服务器关闭。
-	// 正常关闭时返回 http.ErrServerClosed，忽略该错误；
-	// 其他错误（如端口冲突）视为致命错误，打印日志并退出进程。
+	// ── 步骤 6：启动服务 ──────────────────────────────────────────────
+	logger.Info("backend-go started",
+		"http_addr", cfg.ConsoleAddress(),
+		"agent_grpc", cfg.AgentAddress(),
+	)
+
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("http server failed: %v", err) // 致命错误：无法启动 HTTP 服务
+		log.Fatalf("http server failed: %v", err)
 	}
 }

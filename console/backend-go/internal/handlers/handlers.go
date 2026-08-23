@@ -38,11 +38,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -51,6 +52,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/console/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/fileparse"
@@ -74,22 +77,49 @@ const (
 
 // Server 聚合 HTTP 处理器所需的全部依赖。
 type Server struct {
-	client *agent.Client
-	mapper *mapper.Mapper
-	cfg    *config.Config
+	client     *agent.Client
+	mapper     *mapper.Mapper
+	cfg        *config.Config
+	logger     *slog.Logger
+	mc         *metrics.Collector
+	httpClient *http.Client // Shared HTTP client for REST calls / 共享 HTTP 客户端
+	secCleanup func()       // P57 fix: cleanup function for securityMiddleware ticker goroutine
 }
 
-func New(client *agent.Client, cfg *config.Config) *Server {
+func New(client *agent.Client, cfg *config.Config, logger *slog.Logger, mc *metrics.Collector) *Server {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Server{
 		client: client,
 		mapper: mapper.New(),
 		cfg:    cfg,
+		logger: logger,
+		mc:     mc,
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+	}
+}
+
+// Shutdown gracefully stops background goroutines.
+// P57 fix: stop the securityMiddleware ticker goroutine to prevent goroutine leak.
+func (s *Server) Shutdown() {
+	if s.secCleanup != nil {
+		s.secCleanup()
 	}
 }
 
 func (s *Server) RegisterRoutes(r *gin.Engine) {
-	r.Use(corsMiddleware())
-	r.Use(securityMiddleware(s.cfg.ConsoleAPIKey, s.cfg.ConsoleRateLimit))
+	// Shared middleware chain / 共享中间件链
+	r.Use(middleware.RequestID())
+	r.Use(middleware.StructuredLogger(s.logger, "backend-go"))
+	r.Use(middleware.CORS(nil)) // backend-go 默认允许所有来源（开发模式）
+	// P57 fix: capture cleanup function from securityMiddleware to stop ticker goroutine on shutdown.
+	secHandler, secCleanup := securityMiddleware(s.cfg.ConsoleAPIKey, s.cfg.ConsoleRateLimit)
+	s.secCleanup = secCleanup
+	r.Use(secHandler)
+
 	r.GET("/health", s.Health)
 	r.GET("/api/health", s.Health)
 	r.GET("/api/samples", s.Samples)
@@ -101,6 +131,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.POST("/api/medical_pipeline", s.MedicalPipeline)
 	r.POST("/api/yibao_pipeline", s.YibaoPipeline)
 	r.POST("/api/pipeline/process", s.PipelineProcess)
+	r.GET("/metrics", s.mc.Handler())
 	s.registerStatic(r)
 }
 
@@ -128,14 +159,14 @@ func (s *Server) registerStatic(r *gin.Engine) {
 	info, err := os.Stat(distDir)
 	if err != nil || !info.IsDir() {
 		// 目录不存在或不是目录时打印日志并跳过，不阻止服务启动
-		log.Printf("static dist dir not found (%s), serving API only", distDir)
+		s.logger.Warn("static dist dir not found", "path", distDir, "serving", "API only")
 		return
 	}
 	// 拼接 index.html 完整路径，检查其是否存在
 	indexPath := filepath.Join(distDir, "index.html")
 	if _, err := os.Stat(indexPath); err != nil {
 		// index.html 不存在说明前端未构建，跳过静态托管
-		log.Printf("index.html not found in %s, serving API only", distDir)
+		s.logger.Warn("index.html not found", "dir", distDir, "serving", "API only")
 		return
 	}
 
@@ -166,7 +197,7 @@ func (s *Server) registerStatic(r *gin.Engine) {
 		c.File(indexPath)
 	})
 	// 打印静态托管启用日志，便于调试确认
-	log.Printf("Console UI enabled, serving static files from %s", distDir)
+	s.logger.Info("Console UI enabled", "static_dir", distDir)
 }
 
 // dirExists 判断指定路径是否存在且为目录。
@@ -178,38 +209,8 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// corsMiddleware 返回一个宽松的 CORS 中间件，允许任意来源的跨域请求。
-//
-// 设计目的：本地开发时前端 Vite 服务器（如 localhost:5173）与后端（localhost:8081）
-// 端口不同，浏览器会发送 CORS 预检请求（OPTIONS），必须正确响应才能正常通信。
-//
-// 安全说明：本控制台为本地工具，不依赖 cookie/凭证，故仅设置
-// Access-Control-Allow-Origin: * 而不携带 Access-Control-Allow-Credentials，
-// 避免“任意来源 + 凭证”组合带来的跨域凭证泄露风险。
-//
-// 执行逻辑：
-//  1. 设置 Access-Control-Allow-Origin: *（允许任意来源）
-//  2. 设置允许的 HTTP 方法：GET、POST、OPTIONS
-//  3. 设置允许的请求头：Content-Type、Authorization
-//  4. OPTIONS 预检请求直接返回 204，不继续转发到后续处理器
-//  5. 非 OPTIONS 请求继续传递到下一个中间件/handler
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 设置 CORS 响应头：允许任意来源跨域访问
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		// 设置允许的 HTTP 方法
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		// 设置允许的请求头（Content-Type 用于 JSON 请求，Authorization 用于认证）
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		// 对 OPTIONS 预检请求直接返回 204 No Content，不继续处理
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent) // 终止请求链，直接返回 204
-			return
-		}
-		// 非 OPTIONS 请求继续传递到下一个中间件或 handler
-		c.Next()
-	}
-}
+// corsMiddleware is replaced by shared middleware.CORS() in RegisterRoutes.
+// corsMiddleware 已由共享 middleware.CORS() 替代，保留函数签名以免破坏兼容性。
 
 // Health 检查 Go 代理自身与上游 agent 的连通性，返回结构化健康状态。
 //
@@ -362,6 +363,19 @@ func restOnlyPath(path string) bool {
 		path == "/health"
 }
 
+// isAllowedConcurrencyPath 校验压测路径是否在白名单内。
+// P37 fix: 防止通过压测端点访问敏感内部接口（如 /v1/ops/* 运维接口）。
+// 白名单与 Proxy 路由保持一致，仅允许隐私处理与分类分级相关路径。
+func isAllowedConcurrencyPath(rawPath string) bool {
+	// path.Clean 先规范化路径，消除 ".." 穿越，防止 /v1/privacy/../ops/health 绕过前缀检查
+	cleaned := path.Clean(rawPath)
+	return strings.HasPrefix(cleaned, "/v1/privacy/") ||
+		strings.HasPrefix(cleaned, "/v1/dynclassification/") ||
+		strings.HasPrefix(cleaned, "/v1/medical/") ||
+		strings.HasPrefix(cleaned, "/v1/pipeline/") ||
+		cleaned == "/health"
+}
+
 // agentRestBaseURL 返回 agent REST 服务的基础地址。
 // REST 与 gRPC 是 agent 的两个独立服务，主机/端口可能不同，
 // 因此默认值使用 agent REST 默认地址（127.0.0.1:8079），
@@ -471,16 +485,21 @@ func (s *Server) callRest(ctx context.Context, method, path string, body json.Ra
 		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := s.httpClient
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, http.StatusBadGateway, fmt.Errorf("Agent REST HTTP error: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
+	// P32 fix: limit response body size to prevent OOM from malicious upstream
+	const maxRespSize = 64 << 20 // 64 MB
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxRespSize))
 	if err != nil {
 		return nil, http.StatusBadGateway, fmt.Errorf("reading REST response: %w", err)
+	}
+	if int64(len(respBytes)) >= maxRespSize {
+		return nil, http.StatusBadGateway, fmt.Errorf("REST response exceeded %d MB limit", maxRespSize>>20)
 	}
 
 	var respData any
@@ -538,6 +557,15 @@ func (s *Server) Batch(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 请求体格式不合法时返回 400 错误
 		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err)})
+		return
+	}
+
+	// P41 fix: 限制批量请求数量上限为 100，防止单次提交数千请求导致长时间占用连接（DoS 防护）
+	const maxBatchSize = 100
+	if len(req.Requests) > maxBatchSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"detail": fmt.Sprintf("batch too large: %d requests (max %d)", len(req.Requests), maxBatchSize),
+		})
 		return
 	}
 
@@ -663,11 +691,24 @@ func (s *Server) Upload(c *gin.Context) {
 		params = "{}"
 	}
 
-	// 读取文件全部内容到内存（适用于中小文件）
-	content, err := io.ReadAll(file)
+	// P34 fix: 读取文件内容，使用 io.LimitReader 防止 forged Content-Length 攻击
+	// 即使 header.Size 检查通过，实际读取时仍加上限保护
+	maxReadSize := int64(50 << 20) // 50 MB hard limit
+	if s.cfg.MaxUploadBytes > 0 && s.cfg.MaxUploadBytes < maxReadSize {
+		maxReadSize = s.cfg.MaxUploadBytes
+	}
+	content, err := io.ReadAll(io.LimitReader(file, maxReadSize+1))
 	if err != nil {
 		// 文件读取失败时返回 400 错误
 		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("读取文件失败: %v", err), "status": http.StatusBadRequest})
+		return
+	}
+	if int64(len(content)) > maxReadSize {
+		// 文件实际大小超过限制
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"detail": fmt.Sprintf("文件实际大小超过上限 %d 字节", maxReadSize),
+			"status": http.StatusRequestEntityTooLarge,
+		})
 		return
 	}
 
@@ -990,10 +1031,14 @@ func containsAny(s string, subs []string) bool {
 //
 // CORS 预检（OPTIONS）已由 corsMiddleware 提前返回 204，不会进入本中间件；
 // 静态资源等非 /api 路径与 /api/health 均子以豁免。
-func securityMiddleware(apiKey string, rateLimit int) gin.HandlerFunc {
+func securityMiddleware(apiKey string, rateLimit int) (gin.HandlerFunc, func()) {
 	// 限流状态：每个客户端 IP 的请求时间戳列表（60 秒滑动窗口）。
 	var mu sync.Mutex
 	hits := make(map[string][]time.Time)
+
+	// P57 fix: done channel signals the cleanup goroutine to exit on shutdown,
+	// preventing goroutine leak when the server is stopped.
+	done := make(chan struct{})
 
 	// 后台 goroutine 定期清理过期 IP 条目，防止长期运行时 map 无限增长（内存泄漏）。
 	// 每 5 分钟扫描一次，删除 60 秒内无请求的 IP 记录。
@@ -1001,29 +1046,43 @@ func securityMiddleware(apiKey string, rateLimit int) gin.HandlerFunc {
 		go func() {
 			ticker := time.NewTicker(5 * time.Minute)
 			defer ticker.Stop()
-			for range ticker.C {
-				mu.Lock()
-				cutoff := time.Now().Add(-60 * time.Second)
-				for ip, window := range hits {
-					// 过滤掉 60 秒内的记录；若过滤后为空则删除该 IP 条目
-					kept := window[:0]
-					for _, t := range window {
-						if t.After(cutoff) {
-							kept = append(kept, t)
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					mu.Lock()
+					cutoff := time.Now().Add(-60 * time.Second)
+					for ip, window := range hits {
+						// 过滤掉 60 秒内的记录；若过滤后为空则删除该 IP 条目
+						kept := window[:0]
+						for _, t := range window {
+							if t.After(cutoff) {
+								kept = append(kept, t)
+							}
+						}
+						if len(kept) == 0 {
+							delete(hits, ip)
+						} else {
+							hits[ip] = kept
 						}
 					}
-					if len(kept) == 0 {
-						delete(hits, ip)
-					} else {
-						hits[ip] = kept
-					}
+					mu.Unlock()
 				}
-				mu.Unlock()
 			}
 		}()
 	}
 
-	return func(c *gin.Context) {
+	cleanup := func() {
+		select {
+		case <-done:
+			// already closed
+		default:
+			close(done)
+		}
+	}
+
+	handler := func(c *gin.Context) {
 		path := c.Request.URL.Path
 		// 仅对 /api/* 生效；健康检查豁免。
 		if !strings.HasPrefix(path, "/api/") || path == "/api/health" {
@@ -1063,6 +1122,7 @@ func securityMiddleware(apiKey string, rateLimit int) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+	return handler, cleanup
 }
 
 // extractBearer 从 Authorization 头提取 Bearer token，格式不符时返回空字符串。
@@ -1083,6 +1143,15 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 	}
 	if req.Path == "" {
 		req.Path = "/v1/privacy/mask"
+	}
+	// P37 fix: validate path against allowlist to prevent SSRF via pressure test endpoint
+	// 校验压测路径白名单，防止通过压测端点访问敏感内部接口
+	if !isAllowedConcurrencyPath(req.Path) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"detail": fmt.Sprintf("path %q not allowed for concurrency test; allowed prefixes: /v1/privacy/, /v1/dynclassification/, /v1/medical/, /v1/pipeline/, /health", req.Path),
+			"status": http.StatusBadRequest,
+		})
+		return
 	}
 	if req.Method == "" {
 		req.Method = "POST"

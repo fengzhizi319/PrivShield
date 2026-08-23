@@ -218,3 +218,51 @@ def test_pipeline_process_route(client: TestClient, mock_agent_client: AsyncMock
     assert response.status_code == 200
     mock_agent_client.assert_called()
 
+
+# --------------------------------------------------------------------------- #
+# P38: concurrency_test 路径白名单校验
+# --------------------------------------------------------------------------- #
+def test_concurrency_test_blocked_path(client: TestClient) -> None:
+    """P38: 压测接口拒绝非白名单路径（如 /v1/ops/* 运维接口）。"""
+    response = client.post(
+        "/api/concurrency_test",
+        json={"path": "/v1/ops/health", "method": "GET", "concurrency": 2, "total_requests": 4},
+    )
+    assert response.status_code == 400
+    assert "not allowed" in response.json()["detail"]
+
+
+def test_concurrency_test_path_traversal_blocked(client: TestClient) -> None:
+    """P38: 路径穿越（如 /v1/privacy/../ops/health）应被拦截。"""
+    response = client.post(
+        "/api/concurrency_test",
+        json={"path": "/v1/privacy/../ops/health", "method": "GET", "concurrency": 2, "total_requests": 4},
+    )
+    assert response.status_code == 400
+
+
+def test_is_allowed_concurrency_path() -> None:
+    """P38: 单元测试白名单判定函数。"""
+    from app.main import _is_allowed_concurrency_path
+
+    # 允许的路径
+    assert _is_allowed_concurrency_path("/v1/privacy/mask") is True
+    assert _is_allowed_concurrency_path("/v1/dynclassification/classify") is True
+    assert _is_allowed_concurrency_path("/v1/medical/pipeline") is True
+    assert _is_allowed_concurrency_path("/v1/pipeline/process") is True
+    assert _is_allowed_concurrency_path("/health") is True
+
+    # 拒绝的路径
+    assert _is_allowed_concurrency_path("/v1/ops/health") is False
+    assert _is_allowed_concurrency_path("/v1/ops/config") is False
+    assert _is_allowed_concurrency_path("/api/samples") is False
+    assert _is_allowed_concurrency_path("") is False
+    # 路径穿越
+    assert _is_allowed_concurrency_path("/v1/privacy/../ops/health") is False
+
+
+def test_batch_too_large(client: TestClient) -> None:
+    """P41: 批量请求超过 100 个应返回 400。"""
+    requests = [{"method": "POST", "path": "/v1/privacy/mask", "body": {"field_name": "email", "value": "a@b.com"}} for _ in range(101)]
+    response = client.post("/api/batch", json={"requests": requests})
+    assert response.status_code == 422  # Pydantic le=100 校验失败返回 422

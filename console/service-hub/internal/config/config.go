@@ -10,12 +10,17 @@
 //	| PRIVACY_AGENT_REST_HOST   | 127.0.0.1  | Upstream agent REST host / 上游 agent REST 地址 |
 //	| PRIVACY_REST_PORT         | 8079       | Upstream agent REST port / 上游 agent REST 端口 |
 //	| PRIVACY_AGENT_API_KEY     | (empty)    | Optional auth key / 可选认证密钥       |
+//	| SERVICE_HUB_API_KEY       | (empty)    | Inbound API key for this module / 本模块入站 API Key |
+//	| SERVICE_HUB_CORS_ORIGINS  | (empty)    | Comma-separated CORS origins / 逗号分隔 CORS 来源 |
+//	| SERVICE_HUB_DB_PATH       | (empty)    | SQLite DB path; empty = in-memory / SQLite 路径；空=内存 |
+//	| SERVICE_HUB_LOG_FORMAT    | json       | Log format: json | text / 日志格式      |
+//	| SERVICE_HUB_LOG_LEVEL     | info       | Log level: debug|info|warn|error / 日志级别 |
 package config
 
 import (
-	"os"
 	"strconv"
-	"strings"
+
+	pkgconfig "github.com/fengzhizi319/PrivShield/console/pkg/config"
 )
 
 // Config holds all runtime configuration for the service-hub server.
@@ -25,7 +30,7 @@ type Config struct {
 	Port            int    // HTTP listen port / HTTP 监听端口
 	AgentRESTHost   string // Upstream agent REST host / 上游 agent REST 地址
 	AgentRESTPort   int    // Upstream agent REST port / 上游 agent REST 端口
-	AgentAPIKey     string // Optional auth key / 可选认证密钥
+	AgentAPIKey     string // Optional auth key for upstream agent / 上游 agent 认证密钥
 	MaxQueueDepth   int    // Max task queue depth / 最大任务队列深度
 	ScheduleTimeout int    // Schedule timeout in seconds / 调度超时（秒）
 
@@ -42,33 +47,47 @@ type Config struct {
 
 	// Public key pinning / 公钥固定（额外安全层）
 	TLSPinnedPubKeyFile string // Pinned client public key PEM / 固定的客户端公钥文件路径
+
+	// Production hardening / 生产加固
+	APIKey        string   // Inbound API key for this module / 本模块入站 API Key
+	CORSOrigins   []string // Allowed CORS origins / 允许的 CORS 来源
+	DBPath        string   // SQLite database path (empty = in-memory) / SQLite 数据库路径
+	LogFormat     string   // "json" or "text" / 日志格式
+	LogLevel      string   // "debug", "info", "warn", "error" / 日志级别
 }
 
 // Load reads configuration from environment variables.
 // Load 从环境变量读取所有配置项。
 func Load() *Config {
 	return &Config{
-		Host:            getEnv("SERVICE_HUB_HOST", "127.0.0.1"),
-		Port:            getEnvInt("SERVICE_HUB_PORT", 8082),
-		AgentRESTHost:   getEnv("PRIVACY_AGENT_REST_HOST", "127.0.0.1"),
-		AgentRESTPort:   getEnvInt("PRIVACY_REST_PORT", 8079),
-		AgentAPIKey:     getEnv("PRIVACY_AGENT_API_KEY", ""),
-		MaxQueueDepth:   getEnvInt("SERVICE_HUB_MAX_QUEUE", 1000),
-		ScheduleTimeout: getEnvInt("SERVICE_HUB_SCHEDULE_TIMEOUT", 30),
+		Host:            pkgconfig.EnvString("SERVICE_HUB_HOST", "127.0.0.1"),
+		Port:            pkgconfig.EnvInt("SERVICE_HUB_PORT", 8082),
+		AgentRESTHost:   pkgconfig.EnvString("PRIVACY_AGENT_REST_HOST", "127.0.0.1"),
+		AgentRESTPort:   pkgconfig.EnvInt("PRIVACY_REST_PORT", 8079),
+		AgentAPIKey:     pkgconfig.EnvString("PRIVACY_AGENT_API_KEY", ""),
+		MaxQueueDepth:   pkgconfig.EnvInt("SERVICE_HUB_MAX_QUEUE", 1000),
+		ScheduleTimeout: pkgconfig.EnvInt("SERVICE_HUB_SCHEDULE_TIMEOUT", 30),
 
 		// gRPC / gRPC 配置
-		GRPCHost: getEnv("SERVICE_HUB_GRPC_HOST", "127.0.0.1"),
-		GRPCPort: getEnvInt("SERVICE_HUB_GRPC_PORT", 50052),
+		GRPCHost: pkgconfig.EnvString("SERVICE_HUB_GRPC_HOST", "127.0.0.1"),
+		GRPCPort: pkgconfig.EnvInt("SERVICE_HUB_GRPC_PORT", 50052),
 
 		// mTLS / 双向认证配置
-		TLSEnabled:    getEnvBool("SERVICE_HUB_TLS_ENABLED", false),
-		TLSCertFile:   getEnv("SERVICE_HUB_TLS_CERT_FILE", ""),
-		TLSKeyFile:    getEnv("SERVICE_HUB_TLS_KEY_FILE", ""),
-		TLSCAFile:     getEnv("SERVICE_HUB_TLS_CA_FILE", ""),
-		TLSClientAuth: getEnv("SERVICE_HUB_TLS_CLIENT_AUTH", ""),
+		TLSEnabled:    pkgconfig.EnvBool("SERVICE_HUB_TLS_ENABLED", false),
+		TLSCertFile:   pkgconfig.EnvString("SERVICE_HUB_TLS_CERT_FILE", ""),
+		TLSKeyFile:    pkgconfig.EnvString("SERVICE_HUB_TLS_KEY_FILE", ""),
+		TLSCAFile:     pkgconfig.EnvString("SERVICE_HUB_TLS_CA_FILE", ""),
+		TLSClientAuth: pkgconfig.EnvString("SERVICE_HUB_TLS_CLIENT_AUTH", ""),
 
 		// Public key pinning / 公钥固定
-		TLSPinnedPubKeyFile: getEnv("SERVICE_HUB_TLS_PINNED_PUBKEY_FILE", ""),
+		TLSPinnedPubKeyFile: pkgconfig.EnvString("SERVICE_HUB_TLS_PINNED_PUBKEY_FILE", ""),
+
+		// Production hardening / 生产加固
+		APIKey:      pkgconfig.EnvString("SERVICE_HUB_API_KEY", ""),
+		CORSOrigins: pkgconfig.EnvStringSlice("SERVICE_HUB_CORS_ORIGINS"),
+		DBPath:      pkgconfig.EnvString("SERVICE_HUB_DB_PATH", ""),
+		LogFormat:   pkgconfig.EnvString("SERVICE_HUB_LOG_FORMAT", "json"),
+		LogLevel:    pkgconfig.EnvString("SERVICE_HUB_LOG_LEVEL", "info"),
 	}
 }
 
@@ -88,36 +107,4 @@ func (c *Config) AgentBaseURL() string {
 // GRPCAddress 返回完整的 gRPC 监听地址。
 func (c *Config) GRPCAddress() string {
 	return c.GRPCHost + ":" + strconv.Itoa(c.GRPCPort)
-}
-
-func getEnv(name, def string) string {
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	return def
-}
-
-func getEnvInt(name string, def int) int {
-	v := os.Getenv(name)
-	if v == "" {
-		return def
-	}
-	i, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return i
-}
-
-func getEnvBool(name string, def bool) bool {
-	v := os.Getenv(name)
-	if v == "" {
-		return def
-	}
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "true", "1", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }

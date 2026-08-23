@@ -3,6 +3,7 @@
 //
 // Route list / 路由清单：
 //
+//	GET  /health              → Health check (self + upstream agent)
 //	GET  /api/health          → Health check (self + upstream agent)
 //	GET  /api/hub/status      → Scheduling hub status overview
 //	GET  /api/hub/tasks       → List all tasks (with optional status filter)
@@ -15,12 +16,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"sort"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/console/pkg/middleware"
+	"github.com/fengzhizi319/PrivShield/console/pkg/store"
+	"github.com/fengzhizi319/PrivShield/console/pkg/validation"
 
 	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
@@ -29,32 +35,61 @@ import (
 
 const moduleVia = "service-hub"
 
+// dispatchRequest is the common request shape used across Dispatch / ClassifyAndDispatch / processTask.
+type dispatchRequest struct {
+	Source    string `json:"source"`
+	Operation string `json:"operation"`
+	Payload   any    `json:"payload"`
+	Priority  int    `json:"priority"`
+}
+
 // Server aggregates HTTP handler dependencies.
 // Server 聚合 HTTP 处理器所需的全部依赖。
 type Server struct {
 	agent     *agent.Client
 	cfg       *config.Config
 	startTime time.Time
-
-	mu       sync.RWMutex
-	tasks    map[string]*models.Task
-	taskSeq  int
+	tasks     store.TaskStore
+	logger    *slog.Logger
+	mc        *metrics.Collector
+	taskSem   chan struct{} // P29 fix: semaphore to limit concurrent task processing goroutines
+	ctx       context.Context    // P51 fix: parent context for graceful shutdown of task goroutines
+	cancel    context.CancelFunc // P51 fix: cancel function to signal all task goroutines to stop
+	wg        sync.WaitGroup     // P51 fix: wait group to track active task goroutines
 }
 
 // New creates a new Server instance.
-func New(ag *agent.Client, cfg *config.Config) *Server {
+// New 创建新的 Server 实例，tasks 为 nil 时自动回退到内存实现。
+func New(ag *agent.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger, mc *metrics.Collector) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		agent:     ag,
 		cfg:       cfg,
 		startTime: time.Now(),
-		tasks:     make(map[string]*models.Task),
+		tasks:     tasks,
+		logger:    logger,
+		mc:        mc,
+		taskSem:   make(chan struct{}, 10), // P29: max 10 concurrent task goroutines
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 }
 
+// Shutdown gracefully stops all in-flight task goroutines.
+// P51 fix: call during server shutdown to cancel running processTask goroutines.
+func (s *Server) Shutdown() {
+	s.cancel()
+	s.wg.Wait()
+}
+
 // RegisterRoutes registers all HTTP routes on the Gin engine.
-// RegisterRoutes 在 Gin 引擎上注册全部 HTTP 路由。
+// RegisterRoutes 在 Gin 引擎上注册全部 HTTP 路由，并注入共享中间件。
 func (s *Server) RegisterRoutes(r *gin.Engine) {
-	r.Use(corsMiddleware())
+	r.Use(middleware.RequestID())
+	r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
+	r.Use(middleware.CORS(s.cfg.CORSOrigins))
+	r.Use(middleware.Auth(s.cfg.APIKey))
+
 	r.GET("/health", s.Health)
 	r.GET("/api/health", s.Health)
 	r.GET("/api/hub/status", s.HubStatus)
@@ -62,6 +97,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.POST("/api/hub/dispatch", s.Dispatch)
 	r.GET("/api/hub/pipeline", s.Pipeline)
 	r.POST("/api/hub/classify", s.ClassifyAndDispatch)
+	r.GET("/metrics", s.mc.Handler())
 }
 
 // Health checks self + upstream agent connectivity.
@@ -98,119 +134,166 @@ func (s *Server) Health(c *gin.Context) {
 // HubStatus returns the scheduling hub's current status.
 // HubStatus 返回调度中枢的当前状态概览。
 func (s *Server) HubStatus(c *gin.Context) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var active, queued, completed, failed int
-	for _, t := range s.tasks {
-		switch t.Status {
-		case "running":
-			active++
-		case "pending":
-			queued++
-		case "completed":
-			completed++
-		case "failed":
-			failed++
-		}
+	counts, err := s.tasks.Counts()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
 	}
 
-	c.JSON(http.StatusOK, models.HubStatus{
-		Status:         "running",
-		Uptime:         time.Since(s.startTime).Round(time.Second).String(),
-		ActiveTasks:    active,
-		QueuedTasks:    queued,
-		CompletedTotal: completed,
-		FailedTotal:    failed,
-		AgentURL:       s.cfg.AgentBaseURL(),
+	c.JSON(http.StatusOK, gin.H{
+		"status":          "running",
+		"uptime":          time.Since(s.startTime).Round(time.Second).String(),
+		"active_tasks":    counts.Running,
+		"queued_tasks":    counts.Pending,
+		"completed_total": counts.Completed,
+		"failed_total":    counts.Failed,
+		"agent_url":       s.cfg.AgentBaseURL(),
 	})
 }
 
 // ListTasks returns all tasks, optionally filtered by status query param.
-// ListTasks 返回所有任务，可选按 status 查询参数过滤。
+// P17 fix: added pagination via limit/offset query params with safe defaults.
 func (s *Server) ListTasks(c *gin.Context) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	statusFilter := c.Query("status")
-	tasks := make([]models.Task, 0, len(s.tasks))
-	for _, t := range s.tasks {
-		if statusFilter != "" && t.Status != statusFilter {
-			continue
-		}
-		tasks = append(tasks, *t)
-	}
-	// Sort by creation time descending (newest first)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].CreatedAt.After(tasks[j].CreatedAt)
-	})
 
-	c.JSON(http.StatusOK, models.TaskListResponse{
-		Total: len(tasks),
-		Tasks: tasks,
-		Via:   moduleVia,
+	// P52 fix: validate status filter to prevent meaningless queries.
+	if statusFilter != "" {
+		if err := validation.AllowedValues("status", statusFilter, validation.TaskStatuses); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+	}
+
+	// P61 fix: use shared ParsePagination helper instead of duplicated parsing logic.
+	limit, offset := validation.ParsePagination(c, 100, 1000)
+
+	tasks, total, err := s.tasks.List(store.TaskFilter{Status: statusFilter, Limit: limit, Offset: offset})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+		"tasks":  tasks,
+		"via":    moduleVia,
 	})
 }
 
 // Dispatch creates a new task and simulates pipeline processing.
 // Dispatch 创建新任务并模拟流水线处理。
 //
-// Integration with desensitization / 与分级脱敏模块集成：
-//   1. Accept task with source + operation (mask/k_anon/dp/classify)
-//   2. If operation is "classify", first call agent classification
-//   3. Based on classification result (L1-L5), auto-select masking strategy
-//   4. Forward to agent's masking endpoint
-//   5. Record task lifecycle in memory store
+// Input validation / 输入校验：
+//   - operation 必须在白名单内: mask / k_anon / dp / classify / none
+//   - source 不得为空且长度不超过 1024 字符
 func (s *Server) Dispatch(c *gin.Context) {
-	var req models.DispatchRequest
+	var req dispatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
 		return
 	}
 
-	s.mu.Lock()
-	s.taskSeq++
-	taskID := fmt.Sprintf("task-%d-%d", s.startTime.Unix(), s.taskSeq)
-	now := time.Now()
-	task := &models.Task{
-		ID:        taskID,
-		Status:    "pending",
-		Stage:     "queued",
-		Source:    req.Source,
-		Operation: req.Operation,
-		CreatedAt: now,
+	// Input validation / 输入校验
+	if err := validation.NonEmpty("source", req.Source); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
 	}
-	s.tasks[taskID] = task
-	s.mu.Unlock()
+	if err := validation.AllowedValues("operation", req.Operation, validation.HubOperations); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	if err := validation.MaxLength("source", req.Source, 1024); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 
-	// Simulate async pipeline processing
-	go s.processTask(task, req)
+	taskID := validation.GenerateID("task")
+	now := time.Now()
 
-	c.JSON(http.StatusAccepted, models.DispatchResponse{
-		TaskID: taskID,
-		Status: "accepted",
-		Via:    moduleVia,
+	payloadJSON, _ := json.Marshal(req.Payload)
+	task := &store.Task{
+		ID:          taskID,
+		Status:      "pending",
+		Stage:       "queued",
+		Source:      req.Source,
+		Operation:   req.Operation,
+		Priority:    req.Priority,
+		CreatedAt:   now,
+		PayloadJSON: string(payloadJSON),
+	}
+
+	if err := s.tasks.Save(task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	// P51 fix: track goroutine via WaitGroup for graceful shutdown.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.processTask(task, req)
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"task_id": taskID,
+		"status":  "accepted",
+		"via":     moduleVia,
 	})
 }
 
 // processTask simulates the scheduling pipeline stages.
 // processTask 模拟调度流水线的各阶段处理。
 //
+// P19 fix: recover from panics to prevent goroutine crash from killing the process.
+// 从 panic 中恢复，防止 goroutine 崩溃导致整个进程退出。
+//
 // Pipeline stages / 流水线阶段：
-//   ① 请求接入 → ② 申请原数 → ③ 分类分级 → ④ 下发脱敏 → ⑤ 返回结果 → ⑥ 存证写日志
-func (s *Server) processTask(task *models.Task, req models.DispatchRequest) {
+//
+//	① 请求接入 → ② 申请原数 → ③ 分类分级 → ④ 下发脱敏 → ⑤ 返回结果 → ⑥ 存证写日志
+func (s *Server) processTask(task *store.Task, req dispatchRequest) {
+	// P29 fix: acquire semaphore slot to limit concurrent task goroutines
+	// 获取信号量槽位以限制并发任务 goroutine 数量
+	s.taskSem <- struct{}{}
+	defer func() { <-s.taskSem }()
+
+	// P19 fix: panic recovery — mark task as failed instead of crashing the process
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("processTask panic recovered",
+				"task_id", task.ID, "panic", fmt.Sprintf("%v", r))
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("internal panic: %v", r)
+			now := time.Now()
+			task.CompletedAt = &now
+			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+			_ = s.tasks.Update(task)
+		}
+	}()
+
 	stages := []string{"ingest", "fetch", "classify", "desensitize", "return", "audit"}
 
-	for i, stage := range stages {
-		s.mu.Lock()
+	for _, stage := range stages {
 		task.Stage = stage
 		task.Status = "running"
 		now := time.Now()
 		task.StartedAt = &now
-		s.mu.Unlock()
+		_ = s.tasks.Update(task)
 
-		// Simulate stage processing time
-		time.Sleep(100 * time.Millisecond)
+		// P51 fix: use select with context instead of plain time.Sleep,
+		// so goroutine can be cancelled during shutdown.
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-s.ctx.Done():
+			task.Status = "failed"
+			task.Error = "server shutting down"
+			now := time.Now()
+			task.CompletedAt = &now
+			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+			_ = s.tasks.Update(task)
+			return
+		}
 
 		// Stage 3: classify → call agent if operation is classify
 		if stage == "classify" && req.Operation == "classify" {
@@ -218,10 +301,9 @@ func (s *Server) processTask(task *models.Task, req models.DispatchRequest) {
 			_, err := s.agent.Classify(ctx, req.Payload)
 			cancel()
 			if err != nil {
-				s.mu.Lock()
 				task.Status = "failed"
 				task.Error = fmt.Sprintf("classify failed at stage %s: %v", stage, err)
-				s.mu.Unlock()
+				_ = s.tasks.Update(task)
 				return
 			}
 		}
@@ -229,7 +311,6 @@ func (s *Server) processTask(task *models.Task, req models.DispatchRequest) {
 		// Stage 4: desensitize → call agent masking
 		if stage == "desensitize" && (req.Operation == "mask" || req.Operation == "k_anon" || req.Operation == "dp") {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			// Convert payload to record format for mask_record endpoint
 			record := toStringMap(req.Payload)
 			var err error
 			if len(record) > 0 {
@@ -239,50 +320,48 @@ func (s *Server) processTask(task *models.Task, req models.DispatchRequest) {
 			}
 			cancel()
 			if err != nil {
-				s.mu.Lock()
 				task.Status = "failed"
 				task.Error = fmt.Sprintf("desensitize failed at stage %s: %v", stage, err)
-				s.mu.Unlock()
+				_ = s.tasks.Update(task)
 				return
 			}
 		}
-
-		_ = i // avoid unused warning
 	}
 
-	s.mu.Lock()
 	task.Status = "completed"
 	task.Stage = "done"
 	now := time.Now()
 	task.CompletedAt = &now
 	task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-	s.mu.Unlock()
+	_ = s.tasks.Update(task)
 }
 
 // Pipeline returns the status of each pipeline stage.
 // Pipeline 返回调度流水线各阶段的状态。
 func (s *Server) Pipeline(c *gin.Context) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// P36 fix: cap running tasks query to prevent OOM under high concurrency
+	runningTasks, _, err := s.tasks.List(store.TaskFilter{Status: "running", Limit: 1000})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
 
 	stageNames := []string{"ingest", "fetch", "classify", "desensitize", "return", "audit"}
 	stageCounts := make(map[string]int)
-	for _, t := range s.tasks {
-		if t.Status == "running" {
-			stageCounts[t.Stage]++
-		}
+	for _, t := range runningTasks {
+		stageCounts[t.Stage]++
 	}
 
-	stages := make([]models.PipelineStage, 0, len(stageNames))
+	stages := make([]gin.H, 0, len(stageNames))
 	for _, name := range stageNames {
 		status := "idle"
 		if stageCounts[name] > 0 {
 			status = "processing"
 		}
-		stages = append(stages, models.PipelineStage{
-			Name:        name,
-			Status:      status,
-			ActiveCount: stageCounts[name],
+		stages = append(stages, gin.H{
+			"name":         name,
+			"status":       status,
+			"active_count": stageCounts[name],
 		})
 	}
 
@@ -291,9 +370,9 @@ func (s *Server) Pipeline(c *gin.Context) {
 	_, agentErr := s.agent.Health(ctx)
 	cancel()
 
-	c.JSON(http.StatusOK, models.PipelineStatus{
-		Stages:  stages,
-		AgentOK: agentErr == nil,
+	c.JSON(http.StatusOK, gin.H{
+		"stages":   stages,
+		"agent_ok": agentErr == nil,
 	})
 }
 
@@ -317,6 +396,11 @@ func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 		return
 	}
 
+	if err := validation.MaxLength("source", req.Source, 1024); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
 	// Step 1: Call agent classification
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -331,7 +415,6 @@ func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 	}
 
 	// Step 2: Determine operation based on classification level
-	// Extract level from classification result (default L2 if not found)
 	level := "L2"
 	if lvl, ok := classifyResult["level"].(string); ok {
 		level = lvl
@@ -340,29 +423,39 @@ func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 	operation := levelToOperation(level)
 
 	// Step 3: Auto-dispatch the appropriate task
-	dispatchReq := models.DispatchRequest{
+	taskID := validation.GenerateID("task")
+	now := time.Now()
+
+	payloadJSON, _ := json.Marshal(req.Payload)
+	task := &store.Task{
+		ID:          taskID,
+		Status:      "pending",
+		Stage:       "queued",
+		Source:      req.Source,
+		Operation:   operation,
+		Priority:    levelToPriority(level),
+		CreatedAt:   now,
+		PayloadJSON: string(payloadJSON),
+	}
+
+	if err := s.tasks.Save(task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	dispatchReq := dispatchRequest{
 		Source:    req.Source,
 		Operation: operation,
 		Payload:   req.Payload,
 		Priority:  levelToPriority(level),
 	}
 
-	s.mu.Lock()
-	s.taskSeq++
-	taskID := fmt.Sprintf("task-%d-%d", s.startTime.Unix(), s.taskSeq)
-	now := time.Now()
-	task := &models.Task{
-		ID:        taskID,
-		Status:    "pending",
-		Stage:     "queued",
-		Source:    req.Source,
-		Operation: operation,
-		CreatedAt: now,
-	}
-	s.tasks[taskID] = task
-	s.mu.Unlock()
-
-	go s.processTask(task, dispatchReq)
+	// P51 fix: track goroutine via WaitGroup for graceful shutdown.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.processTask(task, dispatchReq)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
 		"task_id":         taskID,
@@ -374,22 +467,9 @@ func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 }
 
 // levelToOperation maps sensitivity level to desensitization operation.
-// levelToOperation 将敏感度等级映射为对应的脱敏操作。
+// P50 fix: delegates to shared models.LevelToOperation to eliminate duplication.
 func levelToOperation(level string) string {
-	switch level {
-	case "L1":
-		return "none" // public data, no masking
-	case "L2":
-		return "mask" // field-level masking
-	case "L3":
-		return "k_anon" // K-anonymity
-	case "L4":
-		return "dp" // differential privacy
-	case "L5":
-		return "dp" // full anonymization + DP
-	default:
-		return "mask"
-	}
+	return models.LevelToOperation(level)
 }
 
 // levelToPriority maps sensitivity level to task priority.
@@ -408,20 +488,6 @@ func levelToPriority(level string) int {
 		return 10
 	default:
 		return 40
-	}
-}
-
-// corsMiddleware returns a permissive CORS middleware.
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
 	}
 }
 

@@ -98,6 +98,15 @@ volumes:
   audit-logs:
     driver: local
 
+  # P67 fix: 新增三个命名卷用于三模块 SQLite 持久化
+  # Named volumes for three modules' SQLite persistence
+  service-hub-data:
+    driver: local
+  datasource-mgr-data:
+    driver: local
+  audit-log-data:
+    driver: local
+
   # Prometheus 持久化数据（时序数据，容器重建不丢历史）
   # Prometheus persisted data
   prometheus-data:
@@ -276,8 +285,9 @@ services:
   console-backend-go:
     # build: 从 console/backend-go 目录的 Dockerfile 构建（Go 编译型镜像，无源码运行）
     build:
-      context: ../../console/backend-go  # 构建上下文 = Go 后端源码目录
-      dockerfile: Dockerfile             # 多阶段：Go 编译 → scratch/alpine 运行
+      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + backend-go/go.mod 路径）
+      context: ../../console             # Build context = console/ (Dockerfile COPY paths require it)
+      dockerfile: backend-go/Dockerfile  # 多阶段：Go 编译 → scratch/alpine 运行
     image: privacy-console-backend-go:0.1.0
     pull_policy: build
     container_name: privacy-console-backend-go
@@ -310,8 +320,8 @@ services:
       - frontend   # 供 console-web / 外部访问
       - backend    # 用于访问 PrivShield 的 gRPC
     healthcheck:
-      # 探测 /health 端点；curl 不可用时可换 wget --spider 方式（见 console-web）
-      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      # P69 fix: 健康检查路径与 Dockerfile/代码路由 /api/health 对齐
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/api/health || exit 1"]
       interval: 30s    # 每 30s 检查一次（较宽松，代理为轻量服务）
       timeout: 5s       # 单次检查 5s 超时
       retries: 3        # 连续 3 次失败标记 unhealthy
@@ -432,8 +442,9 @@ services:
   # ===========================================================================
   service-hub:
     build:
-      context: ../../console/service-hub
-      dockerfile: Dockerfile
+      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + service-hub/go.mod 路径）
+      context: ../../console
+      dockerfile: service-hub/Dockerfile
     image: privacy-service-hub:0.1.0
     pull_policy: build
     container_name: privacy-service-hub
@@ -442,8 +453,13 @@ services:
     environment:
       SERVICE_HUB_HOST: "0.0.0.0"
       SERVICE_HUB_PORT: "8082"
-      SERVICE_HUB_AGENT_REST_HOST: "PrivShield"
-      SERVICE_HUB_AGENT_REST_PORT: "8079"
+      # P68 fix: 环境变量名与 config.go 读取一致（PRIVACY_AGENT_REST_HOST / PRIVACY_REST_PORT）
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      SERVICE_HUB_DB_PATH: "/app/data/service-hub.db"
+    volumes:
+      # P67 fix: SQLite 数据持久化命名卷（容器重建数据不丢失）
+      - service-hub-data:/app/data
     depends_on:
       PrivShield:
         condition: service_healthy
@@ -478,8 +494,9 @@ services:
   # ===========================================================================
   datasource-mgr:
     build:
-      context: ../../console/datasource-mgr
-      dockerfile: Dockerfile
+      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + datasource-mgr/go.mod 路径）
+      context: ../../console
+      dockerfile: datasource-mgr/Dockerfile
     image: privacy-datasource-mgr:0.1.0
     pull_policy: build
     container_name: privacy-datasource-mgr
@@ -488,8 +505,13 @@ services:
     environment:
       DATASOURCE_MGR_HOST: "0.0.0.0"
       DATASOURCE_MGR_PORT: "8083"
-      DATASOURCE_MGR_AGENT_REST_HOST: "PrivShield"
-      DATASOURCE_MGR_AGENT_REST_PORT: "8079"
+      # P68 fix: 环境变量名与 config.go 读取一致
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      DATASOURCE_MGR_DB_PATH: "/app/data/datasource-mgr.db"
+    volumes:
+      # P67 fix: SQLite 数据持久化命名卷
+      - datasource-mgr-data:/app/data
     depends_on:
       PrivShield:
         condition: service_healthy
@@ -524,8 +546,9 @@ services:
   # ===========================================================================
   audit-log:
     build:
-      context: ../../console/audit-log
-      dockerfile: Dockerfile
+      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + audit-log/go.mod 路径）
+      context: ../../console
+      dockerfile: audit-log/Dockerfile
     image: privacy-audit-log:0.1.0
     pull_policy: build
     container_name: privacy-audit-log
@@ -534,8 +557,13 @@ services:
     environment:
       AUDIT_LOG_HOST: "0.0.0.0"
       AUDIT_LOG_PORT: "8084"
-      AUDIT_LOG_AGENT_REST_HOST: "PrivShield"
-      AUDIT_LOG_AGENT_REST_PORT: "8079"
+      # P68 fix: 环境变量名与 config.go 读取一致
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      AUDIT_LOG_DB_PATH: "/app/data/audit-log.db"
+    volumes:
+      # P67 fix: SQLite 数据持久化命名卷
+      - audit-log-data:/app/data
     depends_on:
       PrivShield:
         condition: service_healthy

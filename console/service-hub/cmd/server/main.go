@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
+	pkgconfig "github.com/fengzhizi319/PrivShield/console/pkg/config"
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/console/pkg/store"
+	"github.com/fengzhizi319/PrivShield/console/pkg/store/memory"
+	"github.com/fengzhizi319/PrivShield/console/pkg/store/sqlite"
+
 	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/grpcserver"
@@ -30,43 +37,64 @@ import (
 
 func main() {
 	cfg := config.Load()
+
+	// ── Structured logger / 结构化日志 ────────────────────────
+	logger := pkgconfig.SetupLogger(cfg.LogFormat, cfg.LogLevel)
+
+	// ── Task store / 任务存储 ──────────────────────────────────
+	taskStore, err := initTaskStore(cfg.DBPath, logger)
+	if err != nil {
+		log.Fatalf("failed to initialize task store: %v", err)
+	}
+
+	// ── Prometheus metrics / Prometheus 指标 ───────────────────
+	mc := metrics.NewCollector("service-hub")
+
+	// ── Agent client / Agent 客户端 ────────────────────────────
 	agentClient := agent.New(cfg)
 
 	// ── HTTP REST Server / HTTP REST 服务器 ──────────────────────
 	gin.SetMode(gin.ReleaseMode)
-	server := handlers.New(agentClient, cfg)
+	server := handlers.New(agentClient, cfg, taskStore, logger, mc)
 	router := gin.New()
 	server.RegisterRoutes(router)
 
 	httpSrv := &http.Server{
-		Addr:    cfg.Address(),
-		Handler: router,
+		Addr:              cfg.Address(),
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// ── gRPC Server (with optional mTLS) / gRPC 服务器（可选 mTLS）──
 	var grpcServer *grpc.Server
+	// P53 fix: save serviceImpl reference for graceful shutdown of task goroutines.
+	// 保存 serviceImpl 引用，以便优雅关停时通知 processTask goroutine 停止。
+	var serviceImpl *grpcserver.GRPCServer
+
+	// P53 fix: both TLS and non-TLS branches manually create serviceImpl so we
+	// hold the registered instance reference for Shutdown(). Previously the TLS
+	// branch used StartGRPCServer() which created an internal instance we couldn't
+	// reach, then created a second unregistered one — Shutdown() was a no-op.
+	// TLS 和非 TLS 分支均手动创建 serviceImpl，确保持有已注册实例的引用用于 Shutdown()。
 	if cfg.TLSEnabled {
-		var err error
-		grpcServer, err = grpcserver.StartGRPCServer(agentClient, cfg)
-		if err != nil {
-			log.Fatalf("failed to start gRPC server: %v", err)
+		creds, credErr := grpcserver.BuildServerCredentials(cfg)
+		if credErr != nil {
+			log.Fatalf("failed to build TLS credentials: %v", credErr)
 		}
-		fmt.Printf("gRPC server started with mTLS on %s\n", cfg.GRPCAddress())
-		fmt.Printf("  TLS cert: %s\n", cfg.TLSCertFile)
-		fmt.Printf("  TLS key:  %s\n", cfg.TLSKeyFile)
-		if cfg.TLSCAFile != "" {
-			fmt.Printf("  CA cert:  %s (client verification enabled)\n", cfg.TLSCAFile)
-		}
-		if cfg.TLSPinnedPubKeyFile != "" {
-			fmt.Printf("  Pinned public key: %s\n", cfg.TLSPinnedPubKeyFile)
-		}
-	} else {
-		// Start gRPC without TLS (development mode)
-		// 无 TLS 启动 gRPC（开发模式）
-		grpcServer = grpc.NewServer()
-		serviceImpl := grpcserver.New(agentClient, cfg)
+		grpcServer = grpc.NewServer(grpc.Creds(creds))
+		serviceImpl = grpcserver.New(agentClient, cfg, taskStore, logger)
 		pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)
-		fmt.Printf("gRPC server started (insecure) on %s\n", cfg.GRPCAddress())
+		logger.Info("gRPC server started with mTLS",
+			"addr", cfg.GRPCAddress(),
+			"tls_cert", cfg.TLSCertFile,
+			"tls_key", cfg.TLSKeyFile,
+		)
+	} else {
+		grpcServer = grpc.NewServer()
+		serviceImpl = grpcserver.New(agentClient, cfg, taskStore, logger)
+		pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)
+		logger.Info("gRPC server started (insecure)", "addr", cfg.GRPCAddress())
 	}
 
 	// ── Signal handling / 信号处理 ───────────────────────────────
@@ -82,39 +110,68 @@ func main() {
 
 	go func() {
 		if err := grpcServer.Serve(grpcLis); err != nil {
-			log.Printf("gRPC server error: %v", err)
+			logger.Error("gRPC server error", "error", err.Error())
 		}
 	}()
 
 	// Start HTTP server
-	// 启动 HTTP 服务器
 	go func() {
-		fmt.Printf("Service Hub (HTTP) listening on http://%s\n", cfg.Address())
-		fmt.Printf("Service Hub (gRPC) listening on %s\n", cfg.GRPCAddress())
-		fmt.Printf("Upstream agent REST: %s\n", cfg.AgentBaseURL())
-
+		logger.Info("service-hub started",
+			"http_addr", cfg.Address(),
+			"grpc_addr", cfg.GRPCAddress(),
+			"agent_rest", cfg.AgentBaseURL(),
+			"db_path", cfg.DBPath,
+			"auth_enabled", cfg.APIKey != "",
+		)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http server failed: %v", err)
 		}
 	}()
 
 	// Wait for shutdown signal
-	// 等待关闭信号
 	<-sigChan
-	fmt.Println("\nShutting down servers...")
+	logger.Info("shutting down servers...")
 
-	// Graceful shutdown
-	// 优雅关闭
+	// P53 fix: cancel in-flight task goroutines via Server.Shutdown() before
+	// stopping the gRPC/HTTP listeners, so processTask goroutines receive
+	// context cancellation and exit cleanly instead of being killed mid-flight.
+	server.Shutdown()   // HTTP handler: cancel processTask goroutines + wait
+	serviceImpl.Shutdown() // gRPC handler: cancel processTask goroutines + wait
+
+	// Graceful shutdown of listeners
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Stop gRPC server
 	grpcServer.GracefulStop()
 
-	// Stop HTTP server
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("http server shutdown error: %v", err)
+		logger.Error("http server shutdown error", "error", err.Error())
 	}
 
-	fmt.Println("Servers stopped gracefully")
+	logger.Info("servers stopped gracefully")
+}
+
+// initTaskStore creates the task store based on configuration.
+// initTaskStore 根据配置创建任务存储：SQLite 或内存回退。
+func initTaskStore(dbPath string, logger *slog.Logger) (store.TaskStore, error) {
+	if dbPath == "" {
+		// Fall back to in-memory store
+		// 回退到内存存储
+		logger.Info("using in-memory task store (no persistence)")
+		return memory.NewTaskStore(), nil
+	}
+
+	db, err := sqlite.Open(dbPath, logger)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+
+	ts, err := sqlite.NewTaskStore(db)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create task store: %w", err)
+	}
+
+	logger.Info("sqlite task store initialized", "path", dbPath)
+	return ts, nil
 }

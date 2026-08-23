@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -21,6 +23,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
 
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
@@ -101,7 +105,9 @@ func setupTestServer(t *testing.T, grpcSrv *testPrivacyServer) (*httptest.Server
 		ConsolePort:   0,
 	}
 	client := agent.NewFromConnection(conn)
-	server := New(client, cfg)
+	testLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	testMC := metrics.NewCollector("backend-go-test")
+	server := New(client, cfg, testLogger, testMC)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -257,7 +263,10 @@ func TestStaticServing(t *testing.T) {
 		ConsolePort:   0,
 		StaticDistDir: distDir,
 	}
-	server := New(agent.NewFromConnection(conn), cfg)
+	server := New(agent.NewFromConnection(conn), cfg,
+		slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		metrics.NewCollector("backend-go-test"),
+	)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -721,7 +730,10 @@ func setupTestServerWithCfg(t *testing.T, grpcSrv *testPrivacyServer, cfg *confi
 		gs.Stop()
 	})
 
-	server := New(agent.NewFromConnection(conn), cfg)
+	server := New(agent.NewFromConnection(conn), cfg,
+		slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		metrics.NewCollector("backend-go-test"),
+	)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	server.RegisterRoutes(router)
@@ -1031,6 +1043,65 @@ func TestConcurrencyTestHandler(t *testing.T) {
 	}
 }
 
+// TestConcurrencyTestHandler_BlockedPath 验证压测接口拒绝非白名单路径（P37）。
+func TestConcurrencyTestHandler_BlockedPath(t *testing.T) {
+	grpcSrv := &testPrivacyServer{}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	// /v1/ops/* 属于运维内部接口，不应允许通过压测端点访问
+	blockedPaths := []string{
+		"/v1/ops/health",
+		"/v1/ops/config",
+		"/v1/internal/debug",
+		"/api/samples",
+		"/metrics",
+	}
+	for _, p := range blockedPaths {
+		reqBody := fmt.Sprintf(`{"path":%q,"method":"GET","concurrency":2,"total_requests":4}`, p)
+		resp, err := http.Post(ts.URL+"/api/concurrency_test", "application/json", strings.NewReader(reqBody))
+		if err != nil {
+			t.Fatalf("POST /api/concurrency_test path=%s failed: %v", p, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("path %s: expected 400, got %d", p, resp.StatusCode)
+		}
+	}
+}
+
+// TestIsAllowedConcurrencyPath 单元测试白名单判定函数。
+func TestIsAllowedConcurrencyPath(t *testing.T) {
+	allowed := []string{
+		"/v1/privacy/mask",
+		"/v1/privacy/dp",
+		"/v1/dynclassification/classify",
+		"/v1/medical/pipeline",
+		"/v1/pipeline/process",
+		"/health",
+	}
+	for _, p := range allowed {
+		if !isAllowedConcurrencyPath(p) {
+			t.Errorf("expected %q to be allowed", p)
+		}
+	}
+
+	blocked := []string{
+		"/v1/ops/health",
+		"/v1/ops/config",
+		"/v1/internal/debug",
+		"/api/samples",
+		"/metrics",
+		"/v1/privacy/../ops/health", // 路径穿越（不会被前缀匹配放行，因为 /v1/privacy/../ops 不匹配任何白名单前缀）
+		"",
+	}
+	for _, p := range blocked {
+		if isAllowedConcurrencyPath(p) {
+			t.Errorf("expected %q to be blocked", p)
+		}
+	}
+}
+
 // TestMedicalPipelineHandler 验证医疗敏感数据全流程治理接口 /api/medical_pipeline。
 func TestMedicalPipelineHandler(t *testing.T) {
 	grpcSrv := &testPrivacyServer{}
@@ -1062,5 +1133,30 @@ func TestPipelineProcessHandler(t *testing.T) {
 
 	if resp.StatusCode == 0 {
 		t.Fatalf("expected non-zero HTTP response")
+	}
+}
+
+// TestBatchTooLarge 验证批量请求超过 100 上限时返回 400。
+// P41 fix: batch size limit enforcement.
+func TestBatchTooLarge(t *testing.T) {
+	grpcSrv := &testPrivacyServer{}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	// 构造 101 个请求的批量（超过 100 上限）
+	requests := make([]map[string]any, 101)
+	for i := range requests {
+		requests[i] = map[string]any{"method": "POST", "path": "/v1/privacy/mask", "body": map[string]any{"field_name": "email", "value": "a@b.com"}}
+	}
+	body, _ := json.Marshal(map[string]any{"requests": requests})
+
+	resp, err := http.Post(ts.URL+"/api/batch", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/batch failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for batch > 100, got %d", resp.StatusCode)
 	}
 }
