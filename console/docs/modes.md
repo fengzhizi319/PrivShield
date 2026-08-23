@@ -61,62 +61,39 @@ corepack pnpm build
 
 ---
 
-## 3. 后端差异
+## 3. 后端微服务差异
 
-`console` 目录里有两个后端实现：
+`console` 目录下包含完整的控制台微服务与代理网关集群：
 
-- `console/backend/`：Python FastAPI REST 代理
-- `console/backend-go/`：Go gRPC 代理
+| 微服务 | 技术栈 | 默认端口 | 职责 |
+|---|---|---|---|
+| `console/backend` | Python FastAPI | `8080` | REST 代理网关，支持 Arrow IPC 解码与 Python 同构模型 |
+| `console/backend-go` | Go + Gin | `8081` | gRPC 代理网关，高性能 HTTP/2 多路复用，支持独立托管 Web SPA |
+| `console/service-hub` | Go + Gin + gRPC | `8082` (HTTP) / `50052` (gRPC) | 6 阶段数据治理调度中枢（接入/取数/分类/脱敏/返回/存证） |
+| `console/datasource-mgr`| Go + Gin | `8083` | 多源异构数据源接入、连通性探测、元数据智能分类打标与访问审计 |
+| `console/audit-log` | Go + Gin | `8084` | 治理事件存证、8 要素 SHA-256 防篡改快照与 SQL 级合规报告 |
+| `console/pkg` | Go Package | — | 共享基础包（SQLite/Memory 存储引擎、安全中间件链、Prometheus 指标、熔断客户端） |
 
-### 3.1 Python 后端
-
-#### 开发模式
-
-```bash
-cd console/backend
-./run.sh
-```
-
-典型特点：
-
-- `uvicorn --reload`，代码改动后自动重启；
-- 适合快速调接口、调试 JSON 结构、排查前端联调问题；
-- 可以直接连本地 `PrivShield` REST 端口；
-- CORS 往往开放得更宽松，便于浏览器直连。
-
-#### 商业化产品模式
-
-推荐：
-
-- 关闭 `--reload`；
-- 通过 `uvicorn ... --workers N` 或容器副本提升稳定性；
-- 仅暴露必要端口，通常放在反向代理 / Ingress 后；
-- 通过环境变量、Secret、证书挂载控制配置；
-- 如果需要外部访问，建议开启认证、限流和 HTTPS。
-
-### 3.2 Go 后端
+### 3.1 代理网关 (Python / Go)
 
 #### 开发模式
-
-```bash
-cd console/backend-go
-go run ./cmd/server
-```
-
-典型特点：
-
-- 启动快、二进制独立；
-- 适合验证 gRPC 链路、并发和跨后端一致性；
-- 改代码后一般需要手动重启或借助热重载工具。
+- **Python 后端**：`cd console/backend && ./run.sh`（`uvicorn --reload`，改动热重载）。
+- **Go 后端**：`cd console/backend-go && go run ./cmd/server`（快速编译启动，直连 Agent gRPC）。
 
 #### 商业化产品模式
+- **Python 后端**：多 Worker 容器化运行，关闭 reload，挂载生产 Secret。
+- **Go 后端**：预编译单一静态二进制文件，开启 gRPC TLS/mTLS，直接提供内置 Web 静态资源托管。
 
-推荐：
+### 3.2 专项治理微服务 (service-hub, datasource-mgr, audit-log)
 
-- 预编译成二进制，再以容器或服务方式运行；
-- 通过 TLS/mTLS 保护 Go 后端到 agent 的链路；
-- 对外只暴露 HTTP 入口，不直接暴露 gRPC 上游链路；
-- 生产环境里尽量使用稳定版本和固定配置，不在运行时频繁切换实现。
+#### 开发模式
+- 默认采用内存存储模式（`PRIVACY_HUB_DB=""` 等），轻量快速，无需预先创建数据库文件；
+- 一键启动本地脚本：`bash ./console/scripts/dev-start-new-modules.sh`。
+
+#### 商业化产品模式
+- 启用 SQLite WAL 持久化（如 `PRIVACY_HUB_DB="/var/data/service_hub.db"`），读写并发不阻塞，掉电不丢数据；
+- 开启微服务间 API Key 鉴权与安全响应头；
+- `service-hub` 开启 gRPC mTLS 与公钥固定（`PRIVACY_TLS_PINNED_PUBKEY_FILE`），达到金融级零信任传输安全。
 
 ---
 

@@ -22,33 +22,38 @@
 
 ## 1. 项目全景：你在学什么
 
-本项目 `PrivShield` 是一个**隐私计算 Sidecar**，整体架构分三层：
+本项目 `PrivShield` 是一个**数据安全与隐私治理 Sidecar 及控制台微服务集群**，整体架构分为三大层级：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        浏览器（前端）                             │
 │   React + TypeScript + Vite + Tailwind CSS                      │
-│   位置：console/web/                                             │
+│   位置：console/web/ (:5173)                                    │
 └────────────────────────────┬────────────────────────────────────┘
                              │ HTTP (JSON)
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     控制台后端（二选一）                           │
+│                     控制台微服务与代理网关集群                      │
 │                                                                  │
-│   方案 A：Python FastAPI（REST 代理）                             │
-│   位置：console/backend/                                         │
+│   • 统一代理网关：                                                │
+│     - 方案 A：Python FastAPI REST 代理 (console/backend/ :8080)   │
+│     - 方案 B：Go gRPC 代理网关 (console/backend-go/ :8081)        │
 │                                                                  │
-│   方案 B：Go Gin（gRPC 代理）                                    │
-│   位置：console/backend-go/                                      │
+│   • 专项治理微服务 (Go/Gin + SQLite 持久化)：                     │
+│     - 调度中枢：console/service-hub/ (:8082 / :50052 gRPC)       │
+│     - 数据源管理：console/datasource-mgr/ (:8083)                 │
+│     - 脱敏审计日志：console/audit-log/ (:8084)                    │
+│                                                                  │
+│   • 共享基础库：console/pkg/ (存储/中间件/指标/客户端)             │
 └────────────────────────────┬────────────────────────────────────┘
                              │ REST 或 gRPC
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  PrivShield（核心引擎）                   │
+│                  PrivShield（核心隐私计算引擎）                   │
 │   Python FastAPI + gRPC + 隐私算法                                │
-│   位置：PrivShield/                                     │
+│   位置：PrivShield/ (:8079 REST / :50051 gRPC)                  │
 │                                                                  │
-│   能力：脱敏 / 差分隐私 / K-匿名 / 查询混淆 / 动态分类分级         │
+│   能力：脱敏 / 差分隐私 / K-匿名 / 查询混淆 / 动态三层分类分级       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -56,16 +61,17 @@
 
 | 层级 | 技术 | 作用 |
 |------|------|------|
-| 前端 | React 18 + TypeScript | 构建交互式 UI |
-| 前端 | Vite | 开发服务器 + 构建工具 |
+| 前端 | React 18 + TypeScript | 构建交互式 UI 与治理流水线面板 |
+| 前端 | Vite | 开发服务器 + 生产构建工具 |
 | 前端 | Tailwind CSS | 原子化 CSS 样式 |
-| 前端 | Vitest + Testing Library | 单元测试 |
-| 后端 A | Python + FastAPI + Uvicorn | REST 代理层 |
-| 后端 A | Pydantic v2 | 数据校验 |
-| 后端 A | httpx | 异步 HTTP 客户端 |
-| 后端 B | Go + Gin | 高性能 HTTP 框架 |
-| 后端 B | gRPC + Protobuf | 与 agent 的 RPC 通信 |
-| Agent | Python + FastAPI + gRPC | 隐私算法执行引擎 |
+| 前端 | Vitest + Testing Library | 前端单元测试 |
+| 代理网关 A | Python + FastAPI + Uvicorn | REST 代理层与 Arrow IPC 解码 |
+| 代理网关 B | Go + Gin + Protobuf | 高性能 gRPC 代理网关与静态托管 |
+| 调度中枢 | Go + Gin + gRPC (mTLS) | 6 阶段流水线编排调度 |
+| 数据源管理 | Go + Gin + SQLite | 多源异构数据源纳管与元数据分类 |
+| 脱敏审计日志 | Go + Gin + SHA-256 | 8 要素防篡改存证与合规报告 |
+| 共享基础库 | Go Package (pkg/) | SQLite/Memory 存储、中间件、指标 |
+| 核心 Agent | Python + FastAPI + gRPC | 隐私原语与三层分类漏斗执行引擎 |
 
 ---
 
@@ -651,16 +657,62 @@ console/web/src/
 6. `hooks/useAsyncAction.ts`（理解自定义 Hook）
 7. `DynClassificationPanel.tsx`（理解复杂组件）
 
-### 8.2 Go 后端代码地图
+### 8.2 Go 代理网关与微服务代码地图
 
+#### (1) 共享基础库 (`console/pkg/`)
+```
+console/pkg/
+├── store/              ← 存储接口 (TaskStore, DataSourceStore, AuditStore)
+│   ├── memory/         ← 内存安全存储实现
+│   └── sqlite/         ← SQLite 纯 Go WAL 持久化引擎
+├── middleware/         ← 共享中间件 (Auth, CORS, RequestID, Recovery, SecurityHeaders)
+├── metrics/            ← Prometheus 模块级指标收集器与 HTTP 拦截器
+├── agent/              ← 上游 Agent HTTP 客户端 (带熔断器与 64MB 限制)
+├── config/             ← 环境变量统一解析与结构化日志
+└── validation/         ← 白名单校验、端口范围与抗碰撞 ID 生成
+```
+
+#### (2) 调度中枢 (`console/service-hub/`)
+```
+console/service-hub/
+├── cmd/server/main.go       ← 服务入口 (HTTP :8082 + gRPC :50052 双协议)
+├── internal/
+│   ├── agent/               ← Agent 上游通信 (REST / gRPC)
+│   ├── config/              ← 环境变量与 TLS 配置
+│   ├── handlers/            ← REST 路由 (Dispatch, Classify, Tasks, Pipeline)
+│   └── grpcserver/          ← gRPC 服务实现 (带 mTLS 与公钥固定)
+└── proto/                   ← gRPC Protobuf 定义文件
+```
+
+#### (3) 数据源管理 (`console/datasource-mgr/`)
+```
+console/datasource-mgr/
+├── cmd/server/main.go       ← 服务入口 (:8083)
+├── internal/
+│   ├── agent/               ← Agent 探活与分类委托客户端
+│   ├── config/              ← 环境变量配置
+│   └── handlers/            ← 数据源 CRUD、连通性测试、元数据分类与访问审计
+```
+
+#### (4) 脱敏审计日志 (`console/audit-log/`)
+```
+console/audit-log/
+├── cmd/server/main.go       ← 服务入口 (:8084)
+├── internal/
+│   ├── agent/               ← 上游 Agent 通信客户端
+│   ├── config/              ← 环境变量配置
+│   └── handlers/            ← 审计日志、8 要素 SHA-256 存证快照与合规报告
+```
+
+#### (5) Go gRPC 代理网关 (`console/backend-go/`)
 ```
 console/backend-go/
-├── cmd/server/main.go       ← 入口：配置 → 客户端 → 路由 → 启动
+├── cmd/server/main.go       ← 入口：配置 → 客户端 → 路由 → 静态托管 → 启动 (:8081)
 ├── internal/
 │   ├── config/config.go     ← 环境变量读取
-│   ├── agent/client.go      ← gRPC 客户端（含 mTLS）
-│   ├── handlers/handlers.go ← HTTP 处理器（Health/Proxy/Batch/Upload/LbTest）
-│   ├── mapper/              ← REST path → gRPC method 映射
+│   ├── agent/client.go      ← gRPC 客户端 (HTTP/2 连接池 + mTLS)
+│   ├── handlers/handlers.go ← HTTP 处理器 (Health/Proxy/Batch/Upload/LbTest)
+│   ├── mapper/              ← REST path → gRPC method 映射调度表
 │   ├── models/models.go     ← JSON 请求/响应结构体
 │   ├── samples/samples.go   ← 内置示例数据
 │   ├── fileparse/           ← CSV/JSON 文件解析
@@ -668,25 +720,19 @@ console/backend-go/
 └── proto/                   ← Protobuf 生成的 Go 代码
 ```
 
-**建议阅读顺序：**
-1. `cmd/server/main.go`（程序怎么启动的）
-2. `internal/handlers/handlers.go`（请求怎么处理的）
-3. `internal/mapper/mapper.go`（REST 怎么转 gRPC 的）
-4. `internal/agent/client.go`（gRPC 怎么调用的）
-
-### 8.3 Python 后端代码地图
+### 8.3 Python REST 代理网关代码地图
 
 ```
 console/backend/
 ├── app/
-│   ├── main.py          ← FastAPI 应用 + 所有路由
-│   ├── config.py        ← 环境变量配置
-│   ├── client.py        ← httpx 异步客户端
+│   ├── main.py          ← FastAPI 应用 + 所有路由 (:8080)
+│   ├── config.py        ← 环境变量配置 (Pydantic-Settings)
+│   ├── client.py        ← httpx 异步客户端连接池
 │   ├── security.py      ← API Key + 限流中间件
 │   └── fixtures/
 │       └── samples.py   ← 示例数据
-├── tests/               ← pytest 测试
-├── requirements.txt     ← 依赖
+├── tests/               ← pytest 测试套件
+├── requirements.txt     ← 依赖清单
 └── run.sh               ← 启动脚本
 ```
 

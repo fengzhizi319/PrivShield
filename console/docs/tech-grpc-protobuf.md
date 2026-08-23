@@ -26,17 +26,23 @@ Protocol Buffers is Google's language-neutral, platform-neutral serialization da
 ### 2.1 架构角色 / Architecture Role
 
 ```
-React 前端 ──HTTP/JSON──▶ Go 代理后端(Gin) ──gRPC/protobuf──▶ Python agent(FastAPI+gRPC)
-                          console/backend-go                   PrivShield
+1. 核心原语调用链路：
+   React 前端 ──HTTP/JSON──▶ Go 代理网关(Gin) ──gRPC/protobuf──▶ Python Agent(FastAPI+gRPC)
+                             console/backend-go                     PrivShield (:50051)
+
+2. 调度中枢高性能服务链路：
+   外部高并发客户端 ──gRPC/mTLS (公钥固定)──▶ 调度中枢 gRPC 服务 (ServiceHubService)
+                                               console/service-hub (:50052)
 ```
 
-Go 代理后端作为"协议转换网关"：
-The Go proxy backend acts as a "protocol translation gateway":
-- 前端发送 HTTP/JSON → Go 后端解析 → 构造 protobuf 消息 → gRPC 调用 → 解析响应 → 返回 JSON
+- **Go 代理网关 (`backend-go`)** 作为“协议转换客户端”：前端发送 HTTP/JSON → Go 后端解析 → 构造 protobuf 消息 → gRPC 调用 → 解析响应 → 返回 JSON。
+- **调度中枢 (`service-hub`)** 作为“高性能 gRPC 服务端”：对外暴露 `ServiceHubService`，支持金融级 mTLS 双向证书校验与客户端公钥指纹固定（Public Key Pinning）。
 
 ### 2.2 Proto 定义 / Proto Definition
 
-文件 / File：`proto/privacy.proto`（项目根目录）
+本项目包含两套核心 Proto 定义：
+
+#### (1) Agent 隐私原语服务：`proto/privacy.proto`（项目根目录）
 
 ```protobuf
 service PrivacyService {
@@ -44,7 +50,22 @@ service PrivacyService {
   rpc Mask(MaskRequest) returns (MaskResponse);
   rpc DPCount(DPRequest) returns (DPResponse);
   rpc KAnonymizeTable(KAnonymizeTableRequest) returns (KAnonymizeTableResponse);
-  // ... 共 30+ 个 RPC 方法 / 30+ RPC methods total
+  rpc Classify(ClassifyRequest) returns (ClassifyResponse);
+  // ... 核心隐私原语 RPC 方法
+}
+```
+
+#### (2) 调度中枢服务：`console/service-hub/proto/servicehub.proto`
+
+```protobuf
+service ServiceHubService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc HubStatus(HubStatusRequest) returns (HubStatusResponse);
+  rpc Dispatch(DispatchRequest) returns (DispatchResponse);
+  rpc ClassifyAndDispatch(ClassifyAndDispatchRequest) returns (ClassifyAndDispatchResponse);
+  rpc GetTask(GetTaskRequest) returns (TaskProto);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc PipelineStatus(PipelineStatusRequest) returns (PipelineStatusResponse);
 }
 ```
 
