@@ -1,494 +1,281 @@
 # 数盾 PrivShield (Data & Privacy Shield)
 
-> **数联天下 · 数盾 (PrivShield)** —— 企业级数据隐私计算、多原语脱敏与三层动态分类分级治理边车 (Privacy Governance Sidecar)，全面落地 **「三层四柱五御六类」数据安全与隐私治理架构**，提供 REST + gRPC 双协议高可用服务。
+> **数联天下 · 数盾 (PrivShield)** —— 企业级数据隐私计算、多原语脱敏与三层动态分类分级治理中台 (Data Privacy & Security Governance Sidecar & Platform)，全面落地 **「三层四柱五御六类」数据安全与隐私治理架构**，提供 REST + gRPC 双协议高可用服务与政务级全链路流通调度中台。
 >
 > 🌐 **GitHub Repository**: [https://github.com/fengzhizi319/PrivShield](https://github.com/fengzhizi319/PrivShield)
 
+---
 
 ## 目录 (Table of Contents)
 
-- [快速开始](#快速开始)
-  - [本地运行（开发）](#本地运行开发)
-  - [Docker 运行](#docker-运行)
-- [生产安全（可选）](#生产安全可选)
-- [可观测性（可选）](#可观测性可选)
-- [K8s / Helm 部署](#k8s-helm-部署)
-- [网关 / 负载均衡（可选）](#网关-负载均衡可选)
-- [能力概览](#能力概览)
-  - [处理原语 / Processing Primitives](#处理原语-processing-primitives)
-  - [数据分类 / Data Classification](#数据分类-data-classification)
-- [运行测试](#运行测试)
-- [构建与分发](#构建与分发)
-  - [构建 Python 包](#构建-python-包)
-  - [Docker 镜像](#docker-镜像)
-  - [可编辑安装（开发用）](#可编辑安装开发用)
-- [文档](#文档)
-  - [文档书 (Documentation Book)](#文档书-documentation-book)
-  - [处理原语](#处理原语)
-  - [数据分类](#数据分类)
-  - [网关 / 负载均衡](#网关-负载均衡)
-  - [生产安全](#生产安全)
-  - [可观测性](#可观测性)
-  - [K8s / Helm 部署](#k8s-helm-部署)
-  - [其他](#其他)
+- [一、 平台架构与多语言分层](#一-平台架构与多语言分层)
+- [二、 核心能力概览](#二-核心能力概览)
+  - [1. 隐私保护计算原语 (Processing Primitives)](#1-隐私保护计算原语-processing-primitives)
+  - [2. 动态数据分类分级三层漏斗 (Dynamic Classification Funnel)](#2-动态数据分类分级三层漏斗-dynamic-classification-funnel)
+  - [3. 企业级数据流通中台微服务群 (Go Microservices)](#3-企业级数据流通中台微服务群-go-microservices)
+  - [4. 全栈多层次纵深防 DDoS 与安全基底 (Anti-DDoS & Security Shield)](#4-全栈多层次纵深防-ddos-与安全基底-anti-ddos--security-shield)
+- [三、 快速开始 (Quick Start)](#三-快速开始-quick-start)
+  - [1. 本地快速启动（算力引擎）](#1-本地快速启动算力引擎)
+  - [2. Docker Compose 全栈一键运行](#2-docker-compose-全栈一键运行)
+  - [3. 全服务端口与职责速查表](#3-全服务端口与职责速查表)
+- [四、 自动化构建与测试](#四-自动化构建与测试)
+  - [1. 运行多语言全量测试](#1-运行多语言全量测试)
+  - [2. 容器镜像构建](#2-容器镜像构建)
+  - [3. 本地可编辑安装](#3-本地可编辑安装)
+- [五、 生产安全与可观测性](#五-生产安全与可观测性)
+  - [1. 生产安全防护 (TLS/mTLS/Auth/RateLimit/DDoS)](#1-生产安全防护-tlsmtlsauthratelimitddos)
+  - [2. 生产可观测性 (Prometheus/Grafana/Tracing)](#2-生产可观测性-prometheusgrafanatracing)
+  - [3. 云原生 K8s 与 Helm 部署](#3-云原生-k8s-与-helm-部署)
+- [六、 完整文档导航 (Documentation Hub)](#六-完整文档导航-documentation-hub)
 
 ---
 
-## 快速开始
+## 一、 平台架构与多语言分层
 
-### 本地运行（开发）
+PrivShield 采用现代**多语言分层云原生 Monorepo 架构**，清晰解耦底层算力、业务编排中台与表现层接入：
+
+```text
+PrivShield/ (Repo Root)
+├── engine/                       # 【Python 隐私算力引擎】REST(:8079) + gRPC(:50051)
+│   ├── main.py / grpc_server.py / server.py
+│   ├── privacy/                  # 脱敏 (Masking)、差分隐私 (DP/LDP)、K-匿名、查询混淆 (QOL)、预算记账
+│   ├── dynclassification/        # 三层分类分级漏斗 (Rule -> NER -> LLM/VLM)
+│   ├── security/                 # TLS 1.3 / mTLS 白名单 / API Key 鉴权 / 滑动窗口限流
+│   ├── observability/            # 结构化日志、Prometheus /metrics、OpenTelemetry Tracing
+│   └── gateway/                  # P2C 负载均衡与反向代理
+├── services/                     # 【Go 企业级中台微服务群】
+│   ├── service-hub/              # 数据服务调度中枢 (:8082) - 流水线编排 (Ingest→Classify→Mask→Audit)
+│   ├── datasource-mgr/           # 数据源与资产管理微服务 (:8083) - CSV/DB 连接池、元数据探查与抽样
+│   └── audit-log/                # 脱敏审计与存证微服务 (:8084) - 审计快照、SHA-256 存证哈希链
+├── console/                      # 【统一控制台与接入层】
+│   ├── web/                      # React 18 + TS + Vite + TailwindCSS 交互控制台 (:5173)
+│   ├── bff-go/                   # 主力 Go gRPC API Gateway / BFF (:8081)
+│   └── bff-py/                   # 备用 Python FastAPI 代理网关 (:8080)
+├── pkg/                          # 【Go 全局共享基础库】连接池、中间件、安全防御、SQLite/Memory 存储
+├── proto/                        # 【Protobuf 契约定义】privacy.proto / servicehub.proto
+├── deploy/                       # 【云原生运维套件】Docker Compose / Helm / K8s / Prometheus / Grafana
+├── config/                       # 环境变量模板、Profile YAML、mTLS 白名单
+├── rules/                        # 分类分级标准 (GB/T 37988, 医疗, 医保, 金融) 与规则体系
+└── scripts/                      # 开发、测试、压测与生产自动化运维工具链
+```
+
+---
+
+## 二、 核心能力概览
+
+### 1. 隐私保护计算原语 (Processing Primitives)
+
+| 隐私原语 | REST 端点 | gRPC 接口 | 本地 SDK 方法 | 算法特性 |
+|---|---|---|---|---|
+| **数据脱敏** | `POST /v1/privacy/mask` | `Mask` | `PrivacyService.mask` | 字段语义识别、掩码掩盖、FPE 格式保留加密 |
+| **整记录脱敏** | `POST /v1/privacy/mask_record` | `MaskRecord` | `PrivacyService.mask_record` | 批量字段并行处理、个性化 Profile 策略 |
+| **HMAC 哈希** | `POST /v1/privacy/hash` | `Hash` | `PrivacyService.hash` | 盐值混淆、SHA-256 不可逆单向变换 |
+| **差分隐私计数** | `POST /v1/privacy/dp/count` | `DPCount` | `PrivacyService.dp_count` | Laplace / Gaussian 机制、预算实时消耗 |
+| **差分隐私求和** | `POST /v1/privacy/dp/sum` | `DPSum` | `PrivacyService.dp_sum` | 灵敏度截断、解析高斯极值保护 |
+| **差分隐私均值** | `POST /v1/privacy/dp/mean` | `DPMean` | `PrivacyService.dp_mean` | 边界夹紧、噪声校准 |
+| **K-匿名泛化** | `POST /v1/privacy/k_anonymize/record` | `KAnonymizeRecord` | `PrivacyService.k_anonymize_record` | Mondrian 多维区间划分、准标识符泛化 |
+| **查询混淆注入** | `POST /v1/privacy/qol/obfuscate` | `ObfuscateQuery` | `PrivacyService.obfuscate_query` | 假查询注入 (Dummy Injection)、KL 散度混淆 |
+| **隐私预算记账** | `GET /v1/privacy/budget` | `Health` | `PrivacyService.budget_remaining` | 内存/SQLite/Redis Lua 原子记账、滑动窗口重置 |
+
+### 2. 动态数据分类分级三层漏斗 (Dynamic Classification Funnel)
+
+引擎创新性地构建了 **「规则引擎 ➔ 实体识别 ➔ 认知仲裁」** 阶梯式识别架构：
+
+1. **Layer-1: 高性能声明式规则引擎 (Rule Engine)**：毫秒级 YAML 规则匹配、正则表达式、关键词字典、校验和算子（如身份证校验码算子）；
+2. **Layer-2: 轻量命名实体识别 (Small-NER)**：采用轻量 ONNX / ModelScope NER 模型，针对无规则显式特征的文本段落提取上下文实体；
+3. **Layer-3: 大语言模型/多模态仲裁 (Local LLM / VLM)**：集成 Qwen3.5 等本地模型，对低置信度、歧义场景或医学影像 (DICOM) 执行语义仲裁；
+4. **安全底座兜底 (Safety Floor)**：高敏安全红线机制，确保任何降级与仲裁均不低于法定最低保护等级。
+
+### 3. 企业级数据流通中台微服务群 (Go Microservices)
+
+- **调度中枢 ([services/service-hub](file:///home/charles/code/sfwork/PrivShield/services/service-hub))**：串联国密 VPN 专线网关、任务流转、分类分级打标、动态脱敏处理、存证上链回传 6 阶段流水线；
+- **数据源资产管理 ([services/datasource-mgr](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr))**：提供多源数据库连接池、元数据探查（内置 `yibao.csv` 医保与 `kangyang.csv` 康养模拟源）及数据抽样；
+- **脱敏审计与存证 ([services/audit-log](file:///home/charles/code/sfwork/PrivShield/services/audit-log))**：实时落盘脱敏快照，构建基于 SHA-256 的不可篡改哈希存证链与合规只读看板；
+- **控制台 BFF ([console/bff-go](file:///home/charles/code/sfwork/PrivShield/console/bff-go))**：基于 gRPC 连接池实现请求聚合、多节点 Client-Side 轮询与故障转移。
+
+### 4. 全栈多层次纵深防 DDoS 与安全基底 (Anti-DDoS & Security Shield)
+
+- **协议级慢速攻击防护 (Anti-Slowloris)**：强制设置 `ReadHeaderTimeout: 5s`、`ReadTimeout: 30s` 与 `MaxHeaderBytes: 1MB`；
+- **大包 DoS 拦截 (MaxBodySize)**：全微服务配置 32MB/64MB 请求体上限，超限使用 `http.MaxBytesReader` 快速返回 `413 Payload Too Large`；
+- **IP 令牌桶防刷 (RateLimit)**：提供并发安全 `IPRateLimiter`（自动后台 GC 10 分钟闲置 IP 桶），超额响应 `429 Too Many Requests` 与 `Retry-After: 1`；
+- **并发容量硬顶 (MaxConcurrent)**：信号量并发熔断保护协程池，过载快速响应 `503 Service Unavailable`；
+- **数据源沙箱防护 (LFI Prevention)**：CSV 上传校验 `.csv` 白名单、提取 `BaseName` 并在指定目录沙箱内加载，硬性限制 50,000 行。
+
+---
+
+## 三、 快速开始 (Quick Start)
+
+### 1. 本地快速启动（算力引擎）
 
 ```bash
+# 1. 激活虚拟环境并安装依赖
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 
-# REST 服务
-python -m PrivShield.main
-
-# gRPC 服务
-python -m PrivShield.grpc_server
-
-# 同时启动 REST + gRPC
+# 2. 启动 REST + gRPC 联合服务
 python -m PrivShield.server
+# 或使用 engine 模块名启动：
+# python -m engine.server
 ```
 
-默认端口：
-
-| 协议 | 端口 | 说明 |
-|---|---|---|
-| REST | 8079 | FastAPI + Uvicorn |
-| gRPC | 50051 | grpcio |
-
-### Docker 运行
-
-#### 单容器运行
+### 2. Docker Compose 全栈一键运行
 
 ```bash
-# core 镜像（默认推荐，不含 torch/transformers/onnxruntime）
-docker build --target core -t PrivShield:0.1.0 .
-docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
+# 启动核心服务（Agent + Go BFF + Web UI）
+bash ./console/scripts/docker-start-go.sh
 
-# ml 镜像（含完整本地分类模型依赖）
-docker build --target ml -t PrivShield:0.1.0-ml .
-```
+# 启动全栈微服务群（Agent + 3 Go 中台微服务 + 双 BFF + Web UI）
+bash ./console/scripts/docker-start-all.sh
 
-#### Docker Compose 全栈编排
+# 启动全栈 + vLLM 本地大模型推理
+bash ./console/scripts/docker-start-all.sh --with-llm
 
-一键启动 Agent + Console 控制台（Go/Python 双后端 + Web UI）：
-
-```bash
-# 启动核心服务（Agent + Go 后端 + Web UI）
-./console/scripts/docker-start-go.sh
-
-# 启动全栈（Agent + 双后端 + Web UI）
-./console/scripts/docker-start-all.sh
-
-# 启用 vLLM GPU 推理服务
-./console/scripts/docker-start-all.sh --with-llm
-
-# 启用监控栈（Prometheus + Grafana）
+# 启动 Prometheus + Grafana 监控大屏
 docker compose --profile monitoring up -d
 
-# 一键停止并清理
-./console/scripts/docker-stop.sh
+# 一键停止全栈容器
+bash ./console/scripts/docker-stop.sh
 ```
 
-**服务端口映射：**
+### 3. 全服务端口与职责速查表
 
-| 服务 | 端口 | 说明 |
-|---|---|---|
-| Agent REST | 8079 | FastAPI 隐私治理主服务 |
-| Agent gRPC | 50051 | gRPC 核心算力主服务 |
-| Console Web UI | 5173 | React + TypeScript 前端控制台 |
-| Go BFF 网关 | 8081 | 高性能 gRPC/REST 代理网关 |
-| Python BFF 网关 | 8080 | FastAPI REST 代理网关 |
-| Service Hub | 8082 | 数据服务调度中枢微服务 |
-| Datasource Mgr | 8083 | 数据源与资产管理微服务 |
-| Audit Log | 8084 | 脱敏审计与不可篡改存证微服务 |
-| vLLM (可选) | 8000 | GPU 大模型推理 |
-| Prometheus (可选) | 9090 | 监控指标采集 |
-| Grafana (可选) | 3000 | 可视化面板 |
+| 服务模块 | 默认端口 | 运行形态 | 职责说明 |
+|---|---|---|---|
+| **Privacy Engine (REST)** | `8079` | Python / FastAPI | 核心隐私算法与分类分级 REST 接口 |
+| **Privacy Engine (gRPC)** | `50051` | Python / gRPC | 核心隐私算法高性能 RPC 通信 |
+| **Console Web UI** | `5173` | React 18 + Vite | 控制台可视化大盘与调试页面 |
+| **Console BFF (Go)** | `8081` | Go / Gin + gRPC | 主力 BFF 聚合网关，连接池与多节点分流 |
+| **Console BFF (Python)** | `8080` | Python / FastAPI | 备用 BFF 代理网关，支持流式解析 |
+| **Service Hub** | `8082` | Go / Gin + gRPC | 数据流通流水线调度中枢微服务 |
+| **Datasource Mgr** | `8083` | Go / Gin | 数据源管理与敏感特征自动探查微服务 |
+| **Audit Log** | `8084` | Go / Gin | 脱敏审计快照与不可篡改存证微服务 |
+| **vLLM (可选)** | `8000` | Python / vLLM | GPU 大模型/VLM 本地推理加速服务 |
+| **Prometheus (可选)** | `9090` | Prometheus 容器 | 全微服务指标抓取与告警评估 |
+| **Grafana (可选)** | `3000` | Grafana 容器 | 预置中台调度大盘与集群全景大屏 |
 
-**安全特性：**
-- 所有容器以非 root 用户运行
-- 基础镜像版本锁定，确保构建可追溯
-- 内置 HEALTHCHECK 健康检查
-- 资源限制（CPU/Memory）防止资源耗尽
-- 日志轮转配置（json-file driver）
-- 网络隔离（frontend / backend / llm）
+---
 
-## 生产安全（可选）
+## 四、 自动化构建与测试
 
-生产环境建议开启 TLS、认证鉴权和速率限制。所有安全能力默认关闭，通过环境变量启用：
+### 1. 运行多语言全量测试
+
+```bash
+# 运行 Go 基础库与全部 4 个 Go 微服务单测
+make test-go
+
+# 运行 Python 核心算力引擎单测（423 个用例）
+PYTHONPATH=. pytest tests/ -q
+
+# 运行 Python BFF 网关单测（37 个用例）
+cd console/bff-py && pytest tests/ -v
+
+# 运行前端控制台 Vitest 单测（77 个用例）
+cd console/web && corepack pnpm test -- --run
+
+# 运行真实跨服务 E2E 全链路流水线测试
+PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/
+```
+
+### 2. 容器镜像构建
+
+```bash
+# 构建 core 镜像（推荐，轻量算力镜像，不含 ML 大依赖）
+make docker-core
+
+# 构建 ml 镜像（含 Torch/Transformers/ModelScope 依赖）
+make docker-ml
+
+# 校验 Helm 语法与模板渲染
+make helm-lint && make helm-template
+```
+
+### 3. 本地可编辑安装
+
+```bash
+pip install -e .
+# 或安装完整开发依赖
+pip install -e ".[dev,observability,docs]"
+```
+
+---
+
+## 五、 生产安全与可观测性
+
+### 1. 生产安全防护 (TLS/mTLS/Auth/RateLimit/DDoS)
+
+所有安全特性默认开启平滑兼容，生产环境建议开启：
 
 ```bash
 PRIVACY_TLS_ENABLED=true \
-PRIVACY_TLS_CERT_FILE=./certs/server.crt \
-PRIVACY_TLS_KEY_FILE=./certs/server.key \
+PRIVACY_TLS_CERT_FILE=deploy/tls/server.crt \
+PRIVACY_TLS_KEY_FILE=deploy/tls/server.key \
+PRIVACY_TLS_CA_FILE=deploy/tls/ca.crt \
+PRIVACY_TLS_CLIENT_AUTH=require \
 PRIVACY_AUTH_ENABLED=true \
-PRIVACY_AUTH_INTERNAL_KEYS_JSON='{"sk-internal":{"name":"secretpad","scopes":["*"]}}' \
+PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true \
+PRIVACY_AUTH_MTLS_WHITELIST_FILE=config/mtls-whitelist.yaml \
 PRIVACY_RATE_LIMIT_ENABLED=true \
 python -m PrivShield.server
 ```
 
-详细配置、证书生成和调用示例请参考：
+### 2. 生产可观测性 (Prometheus/Grafana/Tracing)
 
-- [生产安全 PRD](./docs/production_security/prd.md)
-- [生产安全设计文档](./docs/production_security/design.md)
-- [生产安全运维手册](./docs/production_security/ops.md)
+- **Prometheus 端点**：所有服务均暴露 `/metrics` 指标接口；
+- **Grafana 预置大屏**：
+  - [deploy/grafana/dashboard.json](file:///home/charles/code/sfwork/PrivShield/deploy/grafana/dashboard.json)：PrivShield 集群全景与算力监控大屏；
+  - [deploy/grafana/service-hub-dashboard.json](file:///home/charles/code/sfwork/PrivShield/deploy/grafana/service-hub-dashboard.json)：数联数据服务调度中枢专属大屏。
 
-## 可观测性（可选）
-
-项目内置结构化日志、Prometheus `/metrics` 端点和可选 OpenTelemetry 链路追踪，详见：
-
-- [Observability PRD](./docs/production_observability/prd.md)
-- [Observability Design](./docs/production_observability/design.md)
-- [Observability Ops](./docs/production_observability/ops.md)
-
-## K8s / Helm 部署
-
-项目提供 Helm Chart、Kustomize 和 Docker Compose 三种部署方式，详见：
-
-- [Deployment PRD](./docs/deployment/prd.md)
-- [Deployment Design](./docs/deployment/design.md)
-- [Deployment Ops](./docs/deployment/ops.md)
-
-## 网关 / 负载均衡（可选）
-
-内置 REST + gRPC 反向代理，支持健康检查和加权轮询，详见：
-
-- [Gateway PRD](./docs/gateway_balancer/prd.md)
-- [Gateway Design](./docs/gateway_balancer/design.md)
-- [Gateway Ops](./docs/gateway_balancer/ops.md)
-
-## 能力概览
-
-本项目将能力划分为两大类：
-
-1. **处理原语（Processing Primitives）**：对数据进行直接变换或隐私保护计算。
-2. **数据分类（Data Classification）**：识别数据敏感度等级，为后续处理原语或访问控制提供决策依据。
-
-### 处理原语 / Processing Primitives
-
-| 能力 | REST | gRPC | 本地 SDK |
-|---|---|---|---|
-| 数据脱敏（masking） | `POST /v1/privacy/mask` | `Mask` | `PrivacyService.mask` |
-| 整记录脱敏 | `POST /v1/privacy/mask_record` | `MaskRecord` | `PrivacyService.mask_record` |
-| HMAC 哈希 | `POST /v1/privacy/hash` | `Hash` | `PrivacyService.hash` |
-| 差分隐私计数 | `POST /v1/privacy/dp/count` | `DPCount` | `PrivacyService.dp_count` |
-| 差分隐私求和 | `POST /v1/privacy/dp/sum` | `DPSum` | `PrivacyService.dp_sum` |
-| 差分隐私均值 | `POST /v1/privacy/dp/mean` | `DPMean` | `PrivacyService.dp_mean` |
-| K-匿名 | `POST /v1/privacy/k_anonymize/record` | `KAnonymizeRecord` | `PrivacyService.k_anonymize_record` |
-| 查询混淆 | `POST /v1/privacy/qol/obfuscate` | `ObfuscateQuery` | `PrivacyService.obfuscate_query` |
-| 隐私预算查询 | `GET /v1/privacy/budget` | `Health` | `PrivacyService.budget_remaining` |
-
-处理原语统一由 `PrivShield.service.PrivacyService` 编排，
-并通过 `PrivShield.main`（REST）和 `PrivShield.grpc_server`（gRPC）暴露。
-
-#### REST 示例
+### 3. 云原生 K8s 与 Helm 部署
 
 ```bash
-curl -X POST http://127.0.0.1:8079/v1/privacy/mask \
-  -H "Content-Type: application/json" \
-  -d '{"field_name":"mobile","value":"13812345678","context":"doctor_query"}'
+# 生产 Helm 安装
+helm install privshield ./deploy/helm/PrivShield \
+  -f ./deploy/helm/PrivShield/values-production.yaml \
+  --set security.tls.existingSecret=your-tls-secret \
+  --set security.auth.apiKeysSecret=your-apikeys-secret
 ```
 
-#### gRPC 示例
+---
 
-```python
-import grpc
-from PrivShield import privacy_pb2, privacy_pb2_grpc
+## 六、 完整文档导航 (Documentation Hub)
 
-channel = grpc.insecure_channel("127.0.0.1:50051")
-stub = privacy_pb2_grpc.PrivacyServiceStub(channel)
-resp = stub.Mask(privacy_pb2.MaskRequest(field_name="mobile", value="13812345678", context="doctor_query"))
-print(resp.result)
-```
-
-### 数据分类 / Data Classification
-
-| 能力 | REST | gRPC | 本地 SDK |
-|---|---|---|---|
-| 字段级分类 | `POST /v1/dynclassification/eval` | `DynClassifyField` | `DynClassificationService.classify_field` |
-| 记录级分类 | `POST /v1/dynclassification/eval_record` | `DynClassifyRecord` | `DynClassificationService.classify_record` |
-| 表级分类 | `POST /v1/dynclassification/eval_table` | `DynClassifyTable` | `DynClassificationService.classify_table` |
-
-数据分类拥有基于 3 层漏斗（规则引擎 -> Small-NER -> Local LLM）的引擎架构：
-
-- 漏斗编排：`PrivShield.dynclassification.funnel.ClassificationFunnel`
-- 服务包装：`PrivShield.dynclassification.service.DynClassificationService`
-- REST 路由：`PrivShield.routers.dynclassification`
-- 规则配置与加载：`PrivShield.dynclassification.profile_loader.ProfileLoader`
-
-#### 本地 SDK
-
-```python
-from PrivShield.dynclassification import DynClassificationService
-
-service = DynClassificationService(rules_dir="rules")
-
-# 字段级 / Field level
-result = service.classify_field("id_card", "110101199001011237")
-print(result.final_level, result.tags)
-
-# 记录级 / Record level
-result = service.classify_record({
-    "id_card": "110101199001011237",
-    "mobile": "13800138000",
-    "diagnosis": "B21.1",
-})
-print(result.final_level)
-
-# 表级 / Table level
-result = service.classify_table(
-    schema=["id_card", "brca1_status", "diagnosis"],
-    rows=[{
-        "id_card": "110101199001011237",
-        "brca1_status": "positive",
-        "diagnosis": "C78.0",
-    }],
-)
-print(result.final_level)
-```
-
-#### REST
+项目提供基于 **MkDocs + Material** 的离线与在线文档书：
 
 ```bash
-# 字段级
-curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval \
-  -H "Content-Type: application/json" \
-  -d '{"fieldName":"id_card","value":"110101199001011237"}'
-
-# 记录级
-curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval_record \
-  -H "Content-Type: application/json" \
-  -d '{
-    "record": {
-      "id_card": "110101199001011237",
-      "mobile": "13800138000",
-      "diagnosis": "B21.1"
-    }
-  }'
-
-# 表级
-curl -X POST http://127.0.0.1:8079/v1/dynclassification/eval_table \
-  -H "Content-Type: application/json" \
-  -d '{
-    "schema": ["id_card", "brca1_status", "diagnosis"],
-    "rows": [{
-      "id_card": "110101199001011237",
-      "brca1_status": "positive",
-      "diagnosis": "C78.0"
-    }]
-  }'
-```
-
-#### gRPC
-
-```python
-import json
-import grpc
-from PrivShield import privacy_pb2, privacy_pb2_grpc
-
-channel = grpc.insecure_channel("127.0.0.1:50051")
-stub = privacy_pb2_grpc.PrivacyServiceStub(channel)
-
-resp = stub.ClassifyField(privacy_pb2.ClassifyFieldRequest(
-    field_name="id_card",
-    value="110101199001011237",
-    params_json=json.dumps({}),
-))
-print(json.loads(resp.result_json))
-```
-
-## 运行测试
-
-```bash
-PYTHONPATH=. pytest tests -q
-```
-
-## 构建与分发
-
-### 构建 Python 包
-
-```bash
-# 安装构建工具
-pip install build
-
-# 构建 wheel 和 sdist（输出到 dist/）
-python -m build
-
-# 生成的文件
-# dist/PrivShield-0.1.0-py3-none-any.whl  (wheel)
-# dist/PrivShield-0.1.0.tar.gz            (源码包)
-```
-
-其他人安装：
-```bash
-pip install PrivShield-0.1.0-py3-none-any.whl
-```
-
-### Docker 镜像
-
-```bash
-# 构建 core 镜像（推荐，不含 ML 依赖）
-make docker-core
-
-# 构建 ml 镜像（含 torch/transformers/onnxruntime）
-make docker-ml
-
-# 运行（非 root 用户，内置健康检查）
-docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
-
-# 挂载自定义配置文件
-docker run -v ./privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro \
-  -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
-```
-
-**镜像安全特性：**
-- 非 root 用户运行（`USER privacy`）
-- 基础镜像版本锁定（`python:3.10.14-slim-bookworm`）
-- 分层 COPY 减小镜像体积
-- 内置 `HEALTHCHECK` 指令
-- 完整的 `.dockerignore` 排除敏感文件
-
-### 可编辑安装（开发用）
-
-```bash
-pip install -e .
-```
-
-让当前目录成为可导入的包，适合开发调试。
-
-## 文档
-
-### 文档书 (Documentation Book)
-
-项目提供基于 **MkDocs + Material** 的在线文档书，支持导航、搜索、暗色模式和 Mermaid 图表。
-
-```bash
-# 安装依赖
-pip install mkdocs mkdocs-material mkdocs-minify-plugin
-
-# 本地预览（热重载，浏览器自动打开 http://127.0.0.1:8000）
+# 本地热重载预览 (http://127.0.0.1:8000)
 make docs-serve
 
-# 构建静态站点（输出到 site/index.html，使用浏览器打开index.html即可）
+# 静态站点全量构建 (site/)
 make docs-build
-
-# 清理构建产物
-make docs-clean
 ```
 
-> 构建完成后可通过 `cd site && python3 -m http.server 8000` 启动本地服务器预览。
+### 核心架构与中台微服务文档
+- **[系统架构与全景设计 (Architecture Design)](file:///home/charles/code/sfwork/PrivShield/docs/architecture-design.md)**
+- **[全平台目录架构重构方案 (Migration Design)](file:///home/charles/code/sfwork/PrivShield/console/migration-design.md)**
+- **[企业级中台微服务总览 (Services Overview)](file:///home/charles/code/sfwork/PrivShield/services/README.md)**
+- **[数据服务调度中枢文档 (Service Hub Docs)](file:///home/charles/code/sfwork/PrivShield/services/service-hub/docs/design.md)**
+- **[数据源与资产管理文档 (Datasource Manager Docs)](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/docs/design.md)**
+- **[脱敏审计与不可篡改存证文档 (Audit Log Docs)](file:///home/charles/code/sfwork/PrivShield/services/audit-log/docs/design.md)**
+- **[Go 全局共享基础库文档 (Pkg README)](file:///home/charles/code/sfwork/PrivShield/pkg/README.md)**
+- **[统一控制台与接入层手册 (Console README)](file:///home/charles/code/sfwork/PrivShield/console/README.md)**
 
-### 处理原语
+### 隐私原语与分类算法文档
+- **[数据脱敏设计 (Masking Design)](file:///home/charles/code/sfwork/PrivShield/docs/masking/design.md)**
+- **[差分隐私机制 (Differential Privacy Design)](file:///home/charles/code/sfwork/PrivShield/docs/dp/design.md)**
+- **[K-匿名算法 (K-Anonymity Design)](file:///home/charles/code/sfwork/PrivShield/docs/k_anonymity/design.md)**
+- **[查询混淆注入 (Query Obfuscation Design)](file:///home/charles/code/sfwork/PrivShield/docs/qol/design.md)**
+- **[三层动态分类分级漏斗 (3-Layer Funnel Design)](file:///home/charles/code/sfwork/PrivShield/docs/dynclassification/three_layer_funnel_design.md)**
 
-#### 数据脱敏 (Masking)
-- [概述](./docs/masking/README.md)
-- [Design 设计文档](./docs/masking/design.md)
-- [PRD 产品需求文档](./docs/masking/prd.md)
-- [Operations 运维文档](./docs/masking/ops.md)
-- [Testing 测试文档](./docs/masking/testing.md)
-- [API Reference](./docs/masking/api_reference.md)
-- [Examples 示例](./docs/masking/examples.md)
+### 生产治理、安全与部署文档
+- **[生产安全规范与设计 (Production Security Design)](file:///home/charles/code/sfwork/PrivShield/docs/production_security/design.md)**
+- **[安全合规要求与审计修复表 (Security Requirements)](file:///home/charles/code/sfwork/PrivShield/docs/production_security/security_requirements.md)**
+- **[生产可观测性设计 (Observability Design)](file:///home/charles/code/sfwork/PrivShield/docs/production_observability/design.md)**
+- **[云原生多环境部署全景指南 (Deployment Guide)](file:///home/charles/code/sfwork/PrivShield/deploy/README.md)**
+- **[网关负载均衡与 P2C 调度 (Gateway Balancer)](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/design.md)**
 
-#### 差分隐私 (Differential Privacy)
-- [概述](./docs/dp/README.md)
-- [Design 设计文档](./docs/dp/design.md)
-- [PRD 产品需求文档](./docs/dp/prd.md)
-- [Operations 运维文档](./docs/dp/ops.md)
-- [Testing 测试文档](./docs/dp/testing.md)
-- [API Reference](./docs/dp/api_reference.md)
-- [Examples 示例](./docs/dp/examples.md)
+---
 
-#### K-匿名 (K-Anonymity)
-- [概述](./docs/k_anonymity/README.md)
-- [Design 设计文档](./docs/k_anonymity/design.md)
-- [PRD 产品需求文档](./docs/k_anonymity/prd.md)
-- [Operations 运维文档](./docs/k_anonymity/ops.md)
-- [Testing 测试文档](./docs/k_anonymity/testing.md)
-- [API Reference](./docs/k_anonymity/api_reference.md)
-- [Examples 示例](./docs/k_anonymity/examples.md)
+## 开源许可证 (License)
 
-#### 查询混淆 (Query Obfuscation)
-- [概述](./docs/qol/README.md)
-- [Design 设计文档](./docs/qol/design.md)
-- [PRD 产品需求文档](./docs/qol/prd.md)
-- [Operations 运维文档](./docs/qol/ops.md)
-- [Testing 测试文档](./docs/qol/testing.md)
-- [API Reference](./docs/qol/api_reference.md)
-- [Examples 示例](./docs/qol/examples.md)
-
-### 数据分类
-
-#### 动态分类引擎（规则 → NER → LLM 三层漏斗）
-- [概述](./docs/dynclassification/README.md)
-- [PRD 产品需求文档](./docs/dynclassification/prd.md)
-- [Design 设计文档](./docs/dynclassification/design.md)
-- [Operations 运维文档](./docs/dynclassification/ops.md)
-- [Testing 测试文档](./docs/dynclassification/testing.md)
-- [API Reference](./docs/dynclassification/api_reference.md)
-- [Examples 示例](./docs/dynclassification/examples.md)
-- [三层漏斗设计文档](./docs/dynclassification/three_layer_funnel_design.md)
-- [降级规则设计文档](./docs/dynclassification/downgrade_override_design.md)
-
-### 网关 / 负载均衡
-
-- [概述](./docs/gateway_balancer/README.md)
-- [PRD 产品需求文档](./docs/gateway_balancer/prd.md)
-- [Design 设计文档](./docs/gateway_balancer/design.md)
-- [Operations 运维文档](./docs/gateway_balancer/ops.md)
-- [Testing 测试文档](./docs/gateway_balancer/testing.md)
-- [API Reference](./docs/gateway_balancer/api_reference.md)
-- [Examples 示例](./docs/gateway_balancer/examples.md)
-- [Optimizations 优化指南](./docs/gateway_balancer/optimizations.md)
-
-### 生产安全
-
-- [概述](./docs/production_security/README.md)
-- [PRD 产品需求文档](./docs/production_security/prd.md)
-- [Design 设计文档](./docs/production_security/design.md)
-- [Operations 运维手册](./docs/production_security/ops.md)
-- [Testing 测试文档](./docs/production_security/testing.md)
-- [API Reference](./docs/production_security/api_reference.md)
-- [Examples 示例](./docs/production_security/examples.md)
-
-### 可观测性
-
-- [概述](./docs/production_observability/README.md)
-- [PRD 产品需求文档](./docs/production_observability/prd.md)
-- [Design 设计文档](./docs/production_observability/design.md)
-- [Operations 运维手册](./docs/production_observability/ops.md)
-- [Testing 测试文档](./docs/production_observability/testing.md)
-- [API Reference](./docs/production_observability/api_reference.md)
-- [Examples 示例](./docs/production_observability/examples.md)
-
-### K8s / Helm 部署
-
-- [概述](./docs/deployment/README.md)
-- [PRD 产品需求文档](./docs/deployment/prd.md)
-- [Design 设计文档](./docs/deployment/design.md)
-- [Operations 运维手册](./docs/deployment/ops.md)
-- [Testing 测试文档](./docs/deployment/testing.md)
-- [Examples 示例](./docs/deployment/examples.md)
-
-### 企业级数据流通中台微服务 (Go)
-- [微服务总览与架构](./services/README.md)
-- [数据服务调度中枢 (Service Hub)](./services/service-hub/docs/design.md)
-- [数据源与资产管理 (Datasource Manager)](./services/datasource-mgr/docs/design.md)
-- [脱敏审计与不可篡改存证 (Audit Log)](./services/audit-log/docs/design.md)
-- [共享核心基础库 (Pkg)](./pkg/README.md)
-
-### 统一控制台与 BFF 网关
-- [控制台总览与运行指南](./console/README.md)
-- [全平台目录架构重构方案](./console/migration-design.md)
-- [Go gRPC BFF 设计与实现](./console/bff-go/docs/design.md)
-- [Python REST BFF 设计与实现](./console/bff-py/docs/design.md)
-- [开发模式与产品模式拓扑](./console/docs/modes.md)
-
-### 其他
-
-- [个性化隐私配置文件](./docs/personalized_profiles.md)
-- [生产改进建议](./docs/production_improvements.md)
+本项目采用 Apache 2.0 开源许可证。
