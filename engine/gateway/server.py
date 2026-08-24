@@ -191,11 +191,20 @@ async def async_main(
 
     # mTLS：配置了 CA 文件时必须显式要求并校验客户端证书，
     # 否则 uvicorn 默认 ssl.CERT_NONE，ssl_ca_certs 形同虚设（客户端证书根本不会被请求）。
+    # 生产加固：与主 Agent uvicorn 配置对齐，添加并发/超时限制防止 Slowloris 与资源耗尽。
     uv_config = uvicorn.Config(
         app=http_app,
         host=gw["rest_host"],
         port=gw["rest_port"],
         log_level="info",
+        # 生产加固：限制最大并发连接数，防止过载 OOM
+        limit_concurrency=int(os.environ.get("GATEWAY_LIMIT_CONCURRENCY", "10000")),
+        # 生产加固：worker 最大处理请求数，防止内存泄漏
+        limit_max_requests=int(os.environ.get("GATEWAY_LIMIT_MAX_REQUESTS", "100000")),
+        # 生产加固：keep-alive 超时，减少空闲连接占用
+        timeout_keep_alive=int(os.environ.get("GATEWAY_TIMEOUT_KEEP_ALIVE", "30")),
+        # 生产加固：优雅关闭超时，收到 SIGTERM 后等待在途请求完成
+        timeout_graceful_shutdown=int(os.environ.get("GATEWAY_TIMEOUT_GRACEFUL_SHUTDOWN", "10")),
         ssl_certfile=gw["tls_cert_file"] if gw.get("tls_enabled") else None,
         ssl_keyfile=gw["tls_key_file"] if gw.get("tls_enabled") else None,
         ssl_ca_certs=gw["tls_ca_file"] if gw.get("tls_enabled") and gw.get("tls_ca_file") else None,
