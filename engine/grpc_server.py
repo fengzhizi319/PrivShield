@@ -1230,6 +1230,36 @@ if __name__ == "__main__":
         default=int(os.environ.get("PRIVACY_GRPC_PORT", "50051")),
         help="gRPC server port (default: 50051 or PRIVACY_GRPC_PORT).",
     )
-    # 解析命令行参数并启动服务（阻塞等待终止）
+    # 解析命令行参数并启动服务
     args = parser.parse_args()
-    serve(host=args.host, port=args.port)
+
+    # Non-blocking start so we can install signal handlers for graceful shutdown.
+    # 非阻塞启动 gRPC 服务，以便注册信号处理器实现优雅停机。
+    import signal as _signal
+    import threading as _threading
+
+    from .observability.logging_config import get_logger as _get_logger
+
+    _logger = _get_logger(__name__)
+    _grpc_server = serve(host=args.host, port=args.port, wait_for_termination=False)
+
+    _shutdown_event = _threading.Event()
+
+    def _handle_signal(signum, _frame):
+        _logger.warning("gRPC standalone: received signal %s — initiating graceful shutdown", signum)
+        _shutdown_event.set()
+
+    _signal.signal(_signal.SIGTERM, _handle_signal)
+    _signal.signal(_signal.SIGINT, _handle_signal)
+
+    # Block main thread until a signal arrives.
+    # 阻塞主线程直到收到关闭信号。
+    _shutdown_event.wait()
+
+    # Graceful stop: drain in-flight RPCs with a 5-second grace period.
+    # 优雅停机：给在途 RPC 5 秒排空时间。
+    _logger.info("gRPC standalone: stopping server (5s grace period)...")
+    _stop_event = _grpc_server.stop(grace=5)
+    if not _stop_event.wait(timeout=10):
+        _logger.warning("gRPC standalone: server did not drain in-flight requests within timeout")
+    _logger.info("gRPC standalone: server shut down gracefully")
