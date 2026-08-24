@@ -18,6 +18,7 @@
 
 两个代理后端各自维护一套 `docs/` 文档（设计 / 接口 / 测试 / 运维）：
 
+- `migration-design.md` - **【架构重构】全平台目录架构重构与平滑迁移设计方案**：中台微服务（service-hub/datasource-mgr/audit-log）解耦与 Monorepo 演进
 - `docs/modes.md` - 开发模式 vs 商业化产品模式的整条链路总览：前端、后端、agent 与服务器配置差异
 - `docs/vite.md` - Vite 原理、项目结构、配置方式，以及在 `console/web` 中的实际用法
 - `backend/docs/` - Python REST 代理后端：[design](backend/docs/design.md) · [api](backend/docs/api.md) · [test](backend/docs/test.md) · [ops](backend/docs/ops.md)
