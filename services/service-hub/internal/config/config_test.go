@@ -112,3 +112,59 @@ func TestLoadProductionHardeningDefaults(t *testing.T) {
 		t.Errorf("expected log level=info, got %s", cfg.LogLevel)
 	}
 }
+
+func TestAgentBaseURLs(t *testing.T) {
+	t.Run("DefaultSingleURL", func(t *testing.T) {
+		t.Setenv("PRIVACY_AGENT_URLS", "")
+		cfg := &Config{AgentRESTHost: "127.0.0.1", AgentRESTPort: 8079}
+		urls := cfg.AgentBaseURLs()
+		if len(urls) != 1 || urls[0] != "http://127.0.0.1:8079" {
+			t.Errorf("expected [http://127.0.0.1:8079], got %v", urls)
+		}
+	})
+
+	t.Run("MultipleURLsFromEnv", func(t *testing.T) {
+		t.Setenv("PRIVACY_AGENT_URLS", "http://node1:8079,http://node2:8079")
+		cfg := &Config{AgentRESTHost: "127.0.0.1", AgentRESTPort: 8079}
+		urls := cfg.AgentBaseURLs()
+		if len(urls) != 2 || urls[0] != "http://node1:8079" || urls[1] != "http://node2:8079" {
+			t.Errorf("expected 2 URLs, got %v", urls)
+		}
+	})
+}
+
+func TestLoadAllEnvVariables(t *testing.T) {
+	t.Setenv("SERVICE_HUB_GRPC_HOST", "0.0.0.0")
+	t.Setenv("SERVICE_HUB_GRPC_PORT", "50059")
+	t.Setenv("SERVICE_HUB_MAX_QUEUE", "500")
+	t.Setenv("SERVICE_HUB_SCHEDULE_TIMEOUT", "60")
+	t.Setenv("SERVICE_HUB_TLS_ENABLED", "true")
+	t.Setenv("SERVICE_HUB_TLS_CERT_FILE", "/path/server.crt")
+	t.Setenv("SERVICE_HUB_TLS_KEY_FILE", "/path/server.key")
+	t.Setenv("SERVICE_HUB_TLS_CA_FILE", "/path/ca.crt")
+	t.Setenv("SERVICE_HUB_TLS_CLIENT_AUTH", "require")
+	t.Setenv("SERVICE_HUB_TLS_PINNED_PUBKEY_FILE", "/path/client.pub")
+	t.Setenv("SERVICE_HUB_CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
+	t.Setenv("SERVICE_HUB_DB_PATH", "/tmp/hub.db")
+	t.Setenv("SERVICE_HUB_LOG_FORMAT", "text")
+	t.Setenv("SERVICE_HUB_LOG_LEVEL", "debug")
+
+	cfg := Load()
+
+	if cfg.GRPCHost != "0.0.0.0" || cfg.GRPCPort != 50059 {
+		t.Errorf("gRPC host/port mismatch: %s:%d", cfg.GRPCHost, cfg.GRPCPort)
+	}
+	if cfg.MaxQueueDepth != 500 || cfg.ScheduleTimeout != 60 {
+		t.Errorf("queue depth / timeout mismatch: depth=%d, timeout=%d", cfg.MaxQueueDepth, cfg.ScheduleTimeout)
+	}
+	if !cfg.TLSEnabled || cfg.TLSCertFile != "/path/server.crt" || cfg.TLSClientAuth != "require" {
+		t.Errorf("TLS config mismatch: %+v", cfg)
+	}
+	if cfg.TLSPinnedPubKeyFile != "/path/client.pub" {
+		t.Errorf("pinned pubkey mismatch: %s", cfg.TLSPinnedPubKeyFile)
+	}
+	if len(cfg.CORSOrigins) != 2 || cfg.DBPath != "/tmp/hub.db" || cfg.LogFormat != "text" || cfg.LogLevel != "debug" {
+		t.Errorf("hardening configs mismatch: %+v", cfg)
+	}
+}
+

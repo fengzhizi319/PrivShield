@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
@@ -768,3 +769,167 @@ func TestE2E_FullPipeline_PipelineStagesWithAgent(t *testing.T) {
 	// Wait for completion
 	time.Sleep(1200 * time.Millisecond)
 }
+
+func TestGetTask_SuccessAndNotFound(t *testing.T) {
+	s := newSimpleTestServer()
+	router := newTestRouter(s)
+
+	now := time.Now()
+	_ = s.tasks.Save(&store.Task{ID: "task-abc-123", Status: "running", Source: "source1", CreatedAt: now})
+
+	t.Run("Found", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/hub/tasks/task-abc-123", nil)
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		taskMap, ok := resp["task"].(map[string]any)
+		if !ok || taskMap["id"] != "task-abc-123" || taskMap["status"] != "running" {
+			t.Errorf("unexpected task payload: %+v", resp)
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/hub/tasks/nonexistent", nil)
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", w.Code)
+		}
+	})
+}
+
+func TestDispatch_OversizedSource(t *testing.T) {
+	s := newSimpleTestServer()
+	router := newTestRouter(s)
+
+	oversized := map[string]any{
+		"source":    string(make([]byte, 1025)),
+		"operation": "mask",
+	}
+	body, _ := json.Marshal(oversized)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/hub/dispatch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized source, got %d", w.Code)
+	}
+}
+
+func TestClassifyAndDispatch_Validations(t *testing.T) {
+	s := newSimpleTestServer()
+	router := newTestRouter(s)
+
+	t.Run("InvalidJSON", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/hub/classify", bytes.NewReader([]byte("{invalid-json")))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("EmptySource", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/hub/classify", bytes.NewReader([]byte("{}")))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("OversizedSource", func(t *testing.T) {
+		oversized := map[string]any{
+			"source": string(make([]byte, 1025)),
+		}
+		body, _ := json.Marshal(oversized)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/hub/classify", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", w.Code)
+		}
+	})
+}
+
+func TestListTasks_InvalidStatusFilter(t *testing.T) {
+	s := newSimpleTestServer()
+	router := newTestRouter(s)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/hub/tasks?status=illegal_status", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid status filter, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddleware_Protection(t *testing.T) {
+	cfg := &config.Config{
+		Host:          "127.0.0.1",
+		Port:          0,
+		AgentRESTHost: "127.0.0.1",
+		AgentRESTPort: 19999,
+		APIKey:        "secret-token-123",
+	}
+	d := newTestDeps()
+	ag := agent.New(cfg)
+	s := New(ag, cfg, d.tasks, d.logger, d.mc)
+
+	r := gin.New()
+	s.RegisterRoutes(r)
+
+	t.Run("Unauthorized_NoHeader", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/hub/status", nil)
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", w.Code)
+		}
+	})
+
+	t.Run("Authorized_Bearer", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/hub/status", nil)
+		req.Header.Set("Authorization", "Bearer secret-token-123")
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("Health_ExemptFromAuth", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/health", nil)
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 for health exempt from auth, got %d", w.Code)
+		}
+	})
+}
+
+func TestServer_ShutdownGraceful(t *testing.T) {
+	s := newSimpleTestServer()
+	// Call shutdown directly
+	s.Shutdown()
+}
+

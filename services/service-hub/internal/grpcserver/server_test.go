@@ -1,19 +1,32 @@
 package grpcserver
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
+	"log/slog"
 	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	pb "github.com/fengzhizi319/PrivShield/services/service-hub/proto"
 )
 
 // testCerts holds paths to test certificate files.
@@ -309,3 +322,379 @@ func TestPublicKeysEqualDifferentTypes(t *testing.T) {
 		t.Error("RSA key should not equal string")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// gRPC Server Method Tests / gRPC 服务方法单元测试
+// ─────────────────────────────────────────────────────────────
+
+func setupTestGRPCServer(t *testing.T, agentHandler http.HandlerFunc) (*GRPCServer, *httptest.Server, store.TaskStore) {
+	t.Helper()
+	var mockServer *httptest.Server
+	if agentHandler != nil {
+		mockServer = httptest.NewServer(agentHandler)
+	} else {
+		mockServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/health":
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			case "/v1/dynclassification/eval_record":
+				_ = json.NewEncoder(w).Encode(map[string]any{"level": "L3", "tags": []string{"PII"}})
+			case "/v1/privacy/mask", "/v1/privacy/mask_record":
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": "masked"})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+	}
+
+	t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
+	cfg := config.Load()
+	ag := agent.New(cfg)
+	taskStore := memory.NewTaskStore()
+	logger := slog.Default()
+
+	srv := New(ag, cfg, taskStore, logger)
+	return srv, mockServer, taskStore
+}
+
+func TestGRPCServer_Health(t *testing.T) {
+	t.Run("Reachable", func(t *testing.T) {
+		srv, mockServer, _ := setupTestGRPCServer(t, nil)
+		defer mockServer.Close()
+		defer srv.Shutdown()
+
+		resp, err := srv.Health(context.Background(), &pb.HealthRequest{})
+		if err != nil {
+			t.Fatalf("Health failed: %v", err)
+		}
+		if resp.Backend != "ok" || resp.Agent != "ok" {
+			t.Errorf("Health unexpected response: %+v", resp)
+		}
+	})
+
+	t.Run("Unreachable", func(t *testing.T) {
+		srv, mockServer, _ := setupTestGRPCServer(t, nil)
+		mockServer.Close() // Close upstream
+		defer srv.Shutdown()
+
+		resp, err := srv.Health(context.Background(), &pb.HealthRequest{})
+		if err != nil {
+			t.Fatalf("Health returned gRPC error: %v", err)
+		}
+		if resp.Agent != "unreachable" || resp.Error == "" {
+			t.Errorf("Health expected unreachable status, got: %+v", resp)
+		}
+	})
+}
+
+func TestGRPCServer_HubStatus(t *testing.T) {
+	srv, mockServer, taskStore := setupTestGRPCServer(t, nil)
+	defer mockServer.Close()
+	defer srv.Shutdown()
+
+	now := time.Now()
+	_ = taskStore.Save(&store.Task{ID: "t-1", Status: "running", Stage: "classify", CreatedAt: now})
+	_ = taskStore.Save(&store.Task{ID: "t-2", Status: "pending", Stage: "queued", CreatedAt: now})
+	_ = taskStore.Save(&store.Task{ID: "t-3", Status: "completed", Stage: "done", CreatedAt: now})
+
+	resp, err := srv.HubStatus(context.Background(), &pb.HubStatusRequest{})
+	if err != nil {
+		t.Fatalf("HubStatus failed: %v", err)
+	}
+	if resp.Status != "running" || resp.ActiveTasks != 1 || resp.QueuedTasks != 1 || resp.CompletedTotal != 1 {
+		t.Errorf("HubStatus unexpected counts: %+v", resp)
+	}
+}
+
+func TestGRPCServer_Dispatch(t *testing.T) {
+	srv, mockServer, _ := setupTestGRPCServer(t, nil)
+	defer mockServer.Close()
+	defer srv.Shutdown()
+
+	ctx := context.Background()
+
+	t.Run("Validation_EmptySource", func(t *testing.T) {
+		_, err := srv.Dispatch(ctx, &pb.DispatchRequest{Operation: "mask"})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument, got: %v", err)
+		}
+	})
+
+	t.Run("Validation_EmptyOperation", func(t *testing.T) {
+		_, err := srv.Dispatch(ctx, &pb.DispatchRequest{Source: "test.csv"})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument, got: %v", err)
+		}
+	})
+
+	t.Run("Validation_OversizedSource", func(t *testing.T) {
+		_, err := srv.Dispatch(ctx, &pb.DispatchRequest{
+			Source:    strings.Repeat("a", 1025),
+			Operation: "mask",
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument for oversized source, got: %v", err)
+		}
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		resp, err := srv.Dispatch(ctx, &pb.DispatchRequest{
+			Source:      "yibao.csv",
+			Operation:   "mask",
+			PayloadJson: `{"name":"张三"}`,
+			Priority:    1,
+		})
+		if err != nil {
+			t.Fatalf("Dispatch failed: %v", err)
+		}
+		if resp.TaskId == "" || resp.Status != "accepted" {
+			t.Errorf("unexpected dispatch response: %+v", resp)
+		}
+
+		// Wait briefly and check task was saved
+		time.Sleep(50 * time.Millisecond)
+		task, err := srv.GetTask(ctx, &pb.GetTaskRequest{TaskId: resp.TaskId})
+		if err != nil {
+			t.Fatalf("GetTask failed: %v", err)
+		}
+		if task.Id != resp.TaskId || task.Source != "yibao.csv" {
+			t.Errorf("task retrieved mismatch: %+v", task)
+		}
+	})
+}
+
+func TestGRPCServer_ClassifyAndDispatch(t *testing.T) {
+	srv, mockServer, _ := setupTestGRPCServer(t, nil)
+	defer mockServer.Close()
+	defer srv.Shutdown()
+
+	ctx := context.Background()
+
+	t.Run("Validation_EmptySource", func(t *testing.T) {
+		_, err := srv.ClassifyAndDispatch(ctx, &pb.ClassifyAndDispatchRequest{})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument, got: %v", err)
+		}
+	})
+
+	t.Run("Validation_OversizedSource", func(t *testing.T) {
+		_, err := srv.ClassifyAndDispatch(ctx, &pb.ClassifyAndDispatchRequest{
+			Source: strings.Repeat("a", 1025),
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument, got: %v", err)
+		}
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		resp, err := srv.ClassifyAndDispatch(ctx, &pb.ClassifyAndDispatchRequest{
+			Source:      "medical.csv",
+			PayloadJson: `{"diagnosis":"C78.0"}`,
+		})
+		if err != nil {
+			t.Fatalf("ClassifyAndDispatch failed: %v", err)
+		}
+		if resp.TaskId == "" || resp.Level != "L3" || resp.AutoOperation != "k_anon" {
+			t.Errorf("unexpected ClassifyAndDispatch response: %+v", resp)
+		}
+	})
+}
+
+func TestGRPCServer_GetAndListTasks(t *testing.T) {
+	srv, mockServer, taskStore := setupTestGRPCServer(t, nil)
+	defer mockServer.Close()
+	defer srv.Shutdown()
+
+	ctx := context.Background()
+
+	// Seed tasks
+	now := time.Now()
+	_ = taskStore.Save(&store.Task{ID: "t-10", Status: "running", Stage: "fetch", Source: "src1", CreatedAt: now})
+	_ = taskStore.Save(&store.Task{ID: "t-20", Status: "completed", Stage: "done", Source: "src2", CreatedAt: now.Add(time.Second)})
+
+	t.Run("GetTask_NotFound", func(t *testing.T) {
+		_, err := srv.GetTask(ctx, &pb.GetTaskRequest{TaskId: "nonexistent"})
+		if status.Code(err) != codes.NotFound {
+			t.Errorf("expected NotFound, got: %v", err)
+		}
+	})
+
+	t.Run("GetTask_EmptyID", func(t *testing.T) {
+		_, err := srv.GetTask(ctx, &pb.GetTaskRequest{TaskId: ""})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument, got: %v", err)
+		}
+	})
+
+	t.Run("GetTask_Success", func(t *testing.T) {
+		task, err := srv.GetTask(ctx, &pb.GetTaskRequest{TaskId: "t-10"})
+		if err != nil {
+			t.Fatalf("GetTask failed: %v", err)
+		}
+		if task.Id != "t-10" || task.Status != "running" {
+			t.Errorf("unexpected task: %+v", task)
+		}
+	})
+
+	t.Run("ListTasks_All", func(t *testing.T) {
+		resp, err := srv.ListTasks(ctx, &pb.ListTasksRequest{})
+		if err != nil {
+			t.Fatalf("ListTasks failed: %v", err)
+		}
+		if resp.Total != 2 || len(resp.Tasks) != 2 {
+			t.Errorf("unexpected list response: %+v", resp)
+		}
+	})
+
+	t.Run("ListTasks_FilterStatus", func(t *testing.T) {
+		resp, err := srv.ListTasks(ctx, &pb.ListTasksRequest{StatusFilter: "completed"})
+		if err != nil {
+			t.Fatalf("ListTasks filter failed: %v", err)
+		}
+		if resp.Total != 1 || len(resp.Tasks) != 1 || resp.Tasks[0].Id != "t-20" {
+			t.Errorf("unexpected filtered list response: %+v", resp)
+		}
+	})
+
+	t.Run("ListTasks_InvalidFilter", func(t *testing.T) {
+		_, err := srv.ListTasks(ctx, &pb.ListTasksRequest{StatusFilter: "invalid_status"})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument for invalid filter, got: %v", err)
+		}
+	})
+}
+
+func TestGRPCServer_PipelineStatus(t *testing.T) {
+	srv, mockServer, taskStore := setupTestGRPCServer(t, nil)
+	defer mockServer.Close()
+	defer srv.Shutdown()
+
+	now := time.Now()
+	_ = taskStore.Save(&store.Task{ID: "t-1", Status: "running", Stage: "ingest", CreatedAt: now})
+	_ = taskStore.Save(&store.Task{ID: "t-2", Status: "running", Stage: "classify", CreatedAt: now})
+
+	resp, err := srv.PipelineStatus(context.Background(), &pb.PipelineStatusRequest{})
+	if err != nil {
+		t.Fatalf("PipelineStatus failed: %v", err)
+	}
+	if !resp.AgentOk || len(resp.Stages) != 6 {
+		t.Errorf("unexpected PipelineStatus response: %+v", resp)
+	}
+
+	for _, stage := range resp.Stages {
+		if stage.Name == "ingest" && (stage.Status != "processing" || stage.ActiveCount != 1) {
+			t.Errorf("expected ingest processing with 1 active, got: %+v", stage)
+		}
+	}
+}
+
+func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
+	t.Run("ClassifyFails", func(t *testing.T) {
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/dynclassification/eval_record" {
+				http.Error(w, "internal model error", http.StatusInternalServerError)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer mockServer.Close()
+
+		t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
+		cfg := config.Load()
+		ag := agent.New(cfg)
+		taskStore := memory.NewTaskStore()
+		srv := New(ag, cfg, taskStore, slog.Default())
+		defer srv.Shutdown()
+
+		task := &store.Task{
+			ID:        "task-fail-1",
+			Status:    "pending",
+			Source:    "test.csv",
+			Operation: "classify",
+			CreatedAt: time.Now(),
+		}
+		_ = taskStore.Save(task)
+
+		// Run processTask synchronously to verify completion and failure state
+		srv.processTask(task, "classify", `{"record":"test"}`)
+
+		updated, err := taskStore.Get("task-fail-1")
+		if err != nil {
+			t.Fatalf("Get task failed: %v", err)
+		}
+		if updated.Status != "failed" || !strings.Contains(updated.Error, "classify failed") {
+			t.Errorf("expected failed status with classify error, got: %+v", updated)
+		}
+	})
+
+	t.Run("MaskFails", func(t *testing.T) {
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/privacy/mask" {
+				http.Error(w, "masking engine down", http.StatusInternalServerError)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer mockServer.Close()
+
+		t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
+		cfg := config.Load()
+		ag := agent.New(cfg)
+		taskStore := memory.NewTaskStore()
+		srv := New(ag, cfg, taskStore, slog.Default())
+		defer srv.Shutdown()
+
+		task := &store.Task{
+			ID:        "task-fail-2",
+			Status:    "pending",
+			Source:    "test.csv",
+			Operation: "mask",
+			CreatedAt: time.Now(),
+		}
+		_ = taskStore.Save(task)
+
+		srv.processTask(task, "mask", `{"name":"test"}`)
+
+		updated, err := taskStore.Get("task-fail-2")
+		if err != nil {
+			t.Fatalf("Get task failed: %v", err)
+		}
+		if updated.Status != "failed" || !strings.Contains(updated.Error, "desensitize failed") {
+			t.Errorf("expected failed status with desensitize error, got: %+v", updated)
+		}
+	})
+
+	t.Run("CancellationOnShutdown", func(t *testing.T) {
+		srv, mockServer, taskStore := setupTestGRPCServer(t, nil)
+		defer mockServer.Close()
+
+		task := &store.Task{
+			ID:        "task-cancel",
+			Status:    "pending",
+			Source:    "test.csv",
+			Operation: "mask",
+			CreatedAt: time.Now(),
+		}
+		_ = taskStore.Save(task)
+
+		srv.wg.Add(1)
+		go func() {
+			defer srv.wg.Done()
+			srv.processTask(task, "mask", `{}`)
+		}()
+
+		time.Sleep(20 * time.Millisecond)
+		srv.Shutdown()
+
+		updated, err := taskStore.Get("task-cancel")
+		if err != nil {
+			t.Fatalf("Get task failed: %v", err)
+		}
+		if updated.Status != "failed" || !strings.Contains(updated.Error, "server shutting down") {
+			t.Errorf("expected failed status with shutting down error, got: %+v", updated)
+		}
+	})
+}
+
+
