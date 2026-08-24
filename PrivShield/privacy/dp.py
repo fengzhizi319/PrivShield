@@ -375,6 +375,12 @@ def calibrate_analytic_gaussian(epsilon: float, delta: float, sensitivity: float
     # Zero sensitivity means the query output is unchanged by any single record → no noise needed
     if sensitivity == 0.0:
         return 0.0
+    if sensitivity < 0.0:
+        raise ValueError(f"sensitivity must be non-negative, got {sensitivity}")
+    if epsilon <= 0.0:
+        raise ValueError(f"epsilon must be strictly positive, got {epsilon}")
+    if not (0.0 < delta < 1.0):
+        raise ValueError(f"delta must be strictly between 0 and 1, got {delta}")
 
     # Standard normal CDF: phi(t) = 0.5 * (1 + erf(t / sqrt(2)))
     def phi(t: float) -> float:

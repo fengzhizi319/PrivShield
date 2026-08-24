@@ -1,10 +1,10 @@
 # PrivShield 全平台目录架构重构与平滑迁移设计方案 (Migration Design Document)
 
-> **版本**：v1.4.0  
+> **版本**：v1.5.0  
 > **状态**：✅ **Completed / Implemented (已完全落地并通过全量验证)**  
 > **适用范围**：`PrivShield` 核心引擎、`console` 控制台及全部关联微服务（`service-hub` / `datasource-mgr` / `audit-log` / `bff-go` / `bff-py` / `web`）  
 > **实施分支**：`refactor/directory-restructure`  
-> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容、全栈安全漏洞排查与加固及全套 CI/CD/E2E 验证。
+> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容、全栈安全漏洞排查与加固、系统健壮性加固（连接池管理、熔断器 4xx/5xx 精细分流、任务失败耗时归档、gRPC 状态精准映射及 DP 参数极值防护）及全套 CI/CD/E2E 验证。
 
 ---
 
@@ -731,6 +731,10 @@ gantt
 | 18 | 路径穿越 (LFI) 漏洞防御 | `go test -v -run TestLoadCSVRecords_PathTraversal ./services/datasource-mgr/internal/handlers/` | 限制 .csv 扩展名、提取 BaseName 与目录白名单沙箱验证通过 | ✅ PASS |
 | 19 | 运行时异常信息泄露防护 | `go test -v -run TestRecovery_CatchesPanic ./pkg/middleware/` | Panic 详情保留服务端结构化日志，HTTP 响应脱敏验证通过 | ✅ PASS |
 | 20 | SQLite 分页参数边界加固 | `go test -v -run TestAuditStore ./pkg/store/sqlite/` | Limit (1~10000) 与 Offset (>=0) 强边界夹紧防护通过 | ✅ PASS |
+| 21 | 熔断器 4xx 业务错误隔离 | `go test -v -run TestCircuitBreaker_ClientError4xx_NoTrip ./pkg/agent/` | 4xx 客户端参数错误不惩罚熔断器计数，防恶意击穿验证通过 | ✅ PASS |
+| 22 | gRPC 状态码与连接状态识别 | `go test -v -run TestProxy ./console/bff-go/internal/handlers/` | 类型化 `status.FromError` 识别 Unavailable/DeadlineExceeded 通过 | ✅ PASS |
+| 23 | 调度中枢流水线失败生命周期 | `go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` | 失败任务准确归档 CompletedAt 与实际耗时 DurationMs 通过 | ✅ PASS |
+| 24 | 解析高斯 DP 参数极值防护 | `pytest tests/privacy/test_dp.py -v` | 校验 epsilon>0、0<delta<1 及非负敏感度，杜绝 NaN 异常通过 | ✅ PASS |
 
 ---
 
@@ -828,4 +832,12 @@ gantt
 - **路径穿越防御**：加固 `services/datasource-mgr` CSV 加载逻辑，强制 `.csv` 白名单，提取纯文件名，封闭任意文件读取（LFI）风险并增加单测；
 - **异常信息脱敏**：修复 `pkg/middleware/middleware.go` 中 Recovery panic 详情回显泄露问题，堆栈收敛至内部日志，HTTP 响应统一安全脱敏；
 - **分页与内存保护**：限制 SQLite 分页参数上限（Limit 1~10000 / Offset >= 0），为 CSV 文件加载增加 50,000 行上限保护，杜绝 DoS/OOM 隐患。
+
+### 11.9 全栈系统健壮性加固与故障容错交付
+- **HTTP 连接池优化**：`pkg/agent/client.go` 深度配置 `http.Transport`（`MaxIdleConns: 100`、`MaxIdleConnsPerHost: 20` 与 `IdleConnTimeout: 90s`），杜绝高并发下文件句柄泄漏；
+- **熔断器 4xx/5xx 精细分流**：修复客户端 4xx 参数错误错误触发熔断器连带失效的缺陷，熔断器仅对 5xx 故障与网络异常累计，新增 `TestCircuitBreaker_ClientError4xx_NoTrip` 单测；
+- **流水线失败生命周期审计**：在 `services/service-hub`（REST 与 gRPC 两套处理器）中为失败阶段补充 `task.CompletedAt` 与实际耗时 `task.DurationMs` 计算归档；
+- **gRPC 状态码类型化映射**：`console/bff-go` 通过 `status.FromError` 精准映射 `Unavailable` / `DeadlineExceeded` 到 HTTP 502；
+- **DP 极值保护与 Redis 现代 API**：`PrivShield/privacy/dp.py` 增加解析高斯参数极值边界保护，`budget.py` 全面升级至 Redis `hset(mapping=...)`。
+
 

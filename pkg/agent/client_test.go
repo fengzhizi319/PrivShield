@@ -385,3 +385,31 @@ func TestMultiNode_RoundRobin(t *testing.T) {
 	}
 }
 
+func TestCircuitBreaker_ClientError4xx_NoTrip(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"detail":"invalid argument"}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{
+		BaseURL:     srv.URL,
+		CBThreshold: 3,
+		Logger:      newTestLogger(),
+	})
+
+	// Send 5 400 Bad Request calls
+	for i := 0; i < 5; i++ {
+		_, err := c.Get(context.Background(), "/bad-request")
+		if err == nil {
+			t.Errorf("expected error for 400, got nil")
+		}
+	}
+
+	// Circuit should still be CLOSED because 4xx does not indicate an agent server outage
+	if state := c.CircuitStateString(); state != "closed" {
+		t.Errorf("state = %s, want closed (4xx errors must not trip circuit breaker)", state)
+	}
+}
+
+

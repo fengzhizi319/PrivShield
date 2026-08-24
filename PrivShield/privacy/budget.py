@@ -618,7 +618,7 @@ class BudgetAccountant:
                         eps_spent = 0.0
                         del_spent = 0.0
                         self._window_start = self._now()
-                        self._redis_client.hmset(redis_key, {"eps_spent": 0.0, "del_spent": 0.0, "win_start": self._window_start})
+                        self._redis_client.hset(redis_key, mapping={"eps_spent": 0.0, "del_spent": 0.0, "win_start": self._window_start})
 
                     self._update_metrics(eps_total, del_total, eps_spent, del_spent)
                     return {

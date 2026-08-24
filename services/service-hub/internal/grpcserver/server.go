@@ -386,6 +386,9 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			if err != nil {
 				task.Status = "failed"
 				task.Error = fmt.Sprintf("classify failed at stage %s: %v", stage, err)
+				now := time.Now()
+				task.CompletedAt = &now
+				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
 				_ = s.tasks.Update(task)
 				return
 			}
@@ -399,6 +402,9 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			if err != nil {
 				task.Status = "failed"
 				task.Error = fmt.Sprintf("desensitize failed at stage %s: %v", stage, err)
+				now := time.Now()
+				task.CompletedAt = &now
+				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
 				_ = s.tasks.Update(task)
 				return
 			}

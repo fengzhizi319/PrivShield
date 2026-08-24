@@ -91,11 +91,19 @@ func New(cfg Config) *Client {
 		urls = append(urls, cfg.BaseURL)
 	}
 
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
+	}
+
 	return &Client{
 		baseURLs: urls,
 		apiKey:   cfg.APIKey,
 		httpClient: &http.Client{
-			Timeout: cfg.Timeout,
+			Transport: transport,
+			Timeout:   cfg.Timeout,
 		},
 		logger:      cfg.Logger,
 		cbState:     CircuitClosed,
@@ -226,9 +234,17 @@ func (c *Client) do(req *http.Request) (map[string]any, error) {
 		return nil, fmt.Errorf("agent response too large: exceeds %d bytes", maxBodySize)
 	}
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 500 {
 		c.recordFailure()
-		c.logger.Warn("agent returned error status",
+		c.logger.Warn("agent returned server error status",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", resp.StatusCode,
+		)
+		return nil, fmt.Errorf("agent returned server error %d: %s", resp.StatusCode, string(body))
+	} else if resp.StatusCode >= 400 {
+		// 4xx 是客户端请求参数/业务错误，不计入服务端节点熔断失败计数，防止恶意/非法参数击穿熔断器
+		c.logger.Debug("agent returned client error status",
 			"method", req.Method,
 			"path", req.URL.Path,
 			"status", resp.StatusCode,

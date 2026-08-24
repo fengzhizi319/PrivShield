@@ -51,6 +51,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/console/pkg/middleware"
@@ -992,12 +994,9 @@ func int32Val(m map[string]any, key string, def int32) int32 {
 
 // isUnavailable 判断错误是否表示上游 agent 不可达。
 //
-// 这是一个简化的启发式判断，通过检查错误消息中是否包含
-// 连接类关键词来区分“上游连接错误”与“参数/业务错误”：
-//   - 连接拒绝（connection refused）：agent 未启动或端口错误
-//   - DNS 解析失败（dns）：主机名无法解析
-//   - 超时（timeout）：网络不通或 agent 响应过慢
-//   - gRPC Unavailable（Unavailable）：gRPC 标准不可用状态码
+// 健壮性判断策略：
+//  1. 优先通过 gRPC status.FromError 检查标准状态码（Unavailable / DeadlineExceeded / ResourceExhausted）；
+//  2. 兜底检查错误文本中的底层网络连接异常关键字。
 //
 // 返回 true 表示应返回 502 Bad Gateway，false 表示应返回 400 Bad Request。
 func isUnavailable(err error) bool {
@@ -1005,10 +1004,19 @@ func isUnavailable(err error) bool {
 	if err == nil {
 		return false
 	}
-	// 获取错误消息文本
+	// 1. gRPC 标准状态码类型检查
+	if st, ok := status.FromError(err); ok {
+		code := st.Code()
+		if code == codes.Unavailable || code == codes.DeadlineExceeded || code == codes.ResourceExhausted {
+			return true
+		}
+	}
+	// 2. 文本关键字兜底匹配
 	msg := err.Error()
-	// 检查是否包含任意连接类关键词
-	return containsAny(msg, []string{"connection refused", "dns", "timeout", "Unavailable"})
+	return containsAny(msg, []string{
+		"connection refused", "dns", "timeout", "Unavailable",
+		"connection reset", "broken pipe", "context deadline exceeded",
+	})
 }
 
 // containsAny 检查字符串 s 是否包含 subs 列表中的任意一个子串。
