@@ -254,6 +254,20 @@ func main() {
 		"log_level", cfg.LogLevel,
 	)
 
+	// Emit a prominent security warning when all protections are disabled.
+	// 当所有安全功能均未启用时输出醒目警告，防止生产环境意外裸奔。
+	if !cfg.TLSEnabled && cfg.APIKey == "" {
+		logger.Warn("========================================================================\n" +
+			"  SECURITY WARNING: All security features are DISABLED.\n" +
+			"  TLS=off  Auth=off\n" +
+			"  All endpoints are exposed without encryption or authentication.\n" +
+			"  For production deployments, set:\n" +
+			"    SERVICE_HUB_TLS_ENABLED=true\n" +
+			"    SERVICE_HUB_API_KEY=<your-key>\n" +
+			"  See docs/production_security/ops.md for details.\n" +
+			"========================================================================")
+	}
+
 	// =========================================================================
 	// 8. Operating System Signal Registration / 系统中断信号监听
 	// =========================================================================

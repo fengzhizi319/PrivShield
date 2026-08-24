@@ -195,17 +195,22 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// MaxRetries=1 + RetryBaseDelay=1ms: each c.Get() makes 2 attempts (1 initial + 1 retry),
+	// each recording a failure. CBThreshold=2 means 1 c.Get() call (2 failures) trips the circuit.
+	// 每个 c.Get() 调用产生 2 次尝试（1 次初始 + 1 次重试），每次均记录失败。
+	// CBThreshold=2 表示 1 次 c.Get() 调用（2 次失败）即触发熔断。
 	c := New(Config{
-		BaseURL:     srv.URL,
-		CBThreshold: 3,
-		CBCooldown:  1 * time.Second,
-		Logger:      newTestLogger(),
+		BaseURL:       srv.URL,
+		CBThreshold:   2,
+		CBCooldown:    1 * time.Second,
+		MaxRetries:    1,
+		RetryBaseDelay: time.Millisecond,
+		Logger:        newTestLogger(),
 	})
 
-	// Make requests equal to threshold — all should fail but circuit stays closed
-	for i := 0; i < 3; i++ {
-		c.Get(context.Background(), "/test")
-	}
+	// 1 request with 2 attempts → 2 failures >= threshold(2) → circuit opens
+	// 1 次请求含 2 次尝试 → 2 次失败 >= 阈值(2) → 熔断器打开
+	c.Get(context.Background(), "/test")
 
 	// Circuit should now be open
 	if state := c.CircuitStateString(); state != "open" {
@@ -318,25 +323,34 @@ func TestCircuitBreaker_IntermittentSuccessResetsFailureCount(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// MaxRetries=1 + RetryBaseDelay=1ms: each c.Get() makes 2 attempts.
+	// CBThreshold=5: need 5 consecutive failures to trip.
+	// 每次 c.Get() 调用产生 2 次尝试。CBThreshold=5：需要 5 次连续失败才触发熔断。
 	c := New(Config{
-		BaseURL:     srv.URL,
-		CBThreshold: 3,
-		Logger:      newTestLogger(),
+		BaseURL:       srv.URL,
+		CBThreshold:   5,
+		MaxRetries:    1,
+		RetryBaseDelay: time.Millisecond,
+		Logger:        newTestLogger(),
 	})
 
-	// 2 failures
+	// 2 failures (2 calls × 2 attempts = 4 consecutive failures)
+	// 2 次失败（2 次调用 × 2 次尝试 = 4 次连续失败）
 	shouldFail.Store(true)
 	c.Get(context.Background(), "/test")
 	c.Get(context.Background(), "/test")
 	if c.CircuitStateString() != "closed" {
-		t.Fatalf("expected closed after 2 failures, got %s", c.CircuitStateString())
+		t.Fatalf("expected closed after 4 consecutive failures, got %s", c.CircuitStateString())
 	}
 
-	// 1 success -> should reset consecutive failure counter
+	// 1 success -> resets consecutive failure counter to 0
+	// 1 次成功 → 重置连续失败计数器为 0
 	shouldFail.Store(false)
 	c.Get(context.Background(), "/test")
 
-	// 2 more failures -> should NOT trip since threshold is 3 consecutive
+	// 2 more failures (2 calls × 2 attempts = 4 consecutive failures)
+	// Should NOT trip since threshold is 5 and failures were reset by the success
+	// 不应触发熔断，因为阈值为 5 且失败计数已被成功重置
 	shouldFail.Store(true)
 	c.Get(context.Background(), "/test")
 	c.Get(context.Background(), "/test")
