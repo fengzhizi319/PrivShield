@@ -11,7 +11,8 @@
 //	④ 下发脱敏 (desensitize) ──▶ ⑤ 结果返回 (return)   ──▶ ⑥ 审计存证 (audit / done)
 //
 // 路由清单 (Route List)：
-//   GET  /health                         → 自身与上下游健康检查探针 (Self + Upstream Agent + Datasource-Mgr)
+//   GET  /health                         → 存活探针 (Liveness: always 200 if process is alive)
+//   GET  /readyz                         → 就绪探针 (Readiness: 503 if upstream unreachable)
 //   GET  /api/health                     → 标准健康检查探针
 //   GET  /api/hub/status                 → 调度中枢运行状态与队列深度概览
 //   GET  /api/hub/tasks                  → 分页查询任务列表 (支持 status 状态过滤)
@@ -120,8 +121,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
 	// 基础健康检查与服务概览
-	r.GET("/health", s.Health)
-	r.GET("/api/health", s.Health)
+	r.GET("/health", s.Health)       // Liveness probe / 存活探针
+	r.GET("/readyz", s.Readyz)       // Readiness probe / 就绪探针
+	r.GET("/api/health", s.Health)   // Alias for backward compat / 向后兼容别名
 	r.GET("/api/hub/status", s.HubStatus)
 
 	// 任务生命周期管理
@@ -141,9 +143,23 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/metrics", s.mc.Handler())
 }
 
-// Health checks self + upstream agent + datasource-mgr connectivity.
-// Health 组合健康检查探针：并发或快速校验自身、上游 PrivShield Agent 与下游 datasource-mgr 的健康状态。
+// Health is a liveness probe — returns 200 if the process is alive.
+// Use /readyz for deep upstream dependency checks.
+// Health 存活探针 — 进程存活即返回 200。
+// 深度上游依赖检查请使用 /readyz。
 func (s *Server) Health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+		"via":    moduleVia,
+	})
+}
+
+// Readyz is a readiness probe — checks upstream agent + datasource-mgr connectivity.
+// Returns 503 Service Unavailable when critical backends are unreachable,
+// so K8s won't route traffic to this pod until dependencies are ready.
+// Readyz 就绪探针 — 检查上游 Agent + datasource-mgr 连通性。
+// 当关键后端不可用时返回 503，K8s 不会将流量路由到该 Pod。
+func (s *Server) Readyz(c *gin.Context) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -160,8 +176,11 @@ func (s *Server) Health(c *gin.Context) {
 		}
 	}
 
+	// Agent is the critical dependency — if unreachable, report not ready.
+	// Agent 是关键依赖 — 不可用时报告未就绪。
 	if agentErr != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":         "not_ready",
 			"backend":        "ok",
 			"agent":          "unreachable",
 			"agent_url":      s.cfg.AgentBaseURL(),
@@ -175,6 +194,7 @@ func (s *Server) Health(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"status":         "ready",
 		"backend":        "ok",
 		"agent":          agentData,
 		"agent_url":      s.cfg.AgentBaseURL(),

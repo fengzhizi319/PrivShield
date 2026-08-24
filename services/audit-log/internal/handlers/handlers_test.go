@@ -68,8 +68,8 @@ func TestHealth(t *testing.T) {
 
 	var resp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["backend"] != "ok" {
-		t.Errorf("expected backend=ok, got %v", resp["backend"])
+	if resp["status"] != "ok" {
+		t.Errorf("expected status=ok, got %v", resp["status"])
 	}
 	if resp["via"] != "audit-log" {
 		t.Errorf("expected via=audit-log, got %v", resp["via"])

@@ -59,7 +59,7 @@ func TestHealth(t *testing.T) {
 
 	var resp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["backend"] != "ok" || resp["via"] != "datasource-mgr" {
+	if resp["status"] != "ok" || resp["via"] != "datasource-mgr" {
 		t.Errorf("unexpected health response: %+v", resp)
 	}
 }

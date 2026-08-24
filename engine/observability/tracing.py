@@ -90,6 +90,21 @@ def get_tracer() -> Any:
     return _tracer
 
 
+def shutdown_tracing() -> None:
+    """Flush and shut down the OpenTelemetry tracer provider.
+
+    Ensures all buffered spans are exported before process exit.
+    Safe to call even if tracing was never initialized.
+    刷新并关闭 OpenTelemetry TracerProvider，确保所有缓冲 span 在进程退出前导出。
+    即使追踪从未初始化也可安全调用。
+    """
+    if not _HAS_OTEL:
+        return
+    provider = trace.get_tracer_provider() if trace else None
+    if provider and hasattr(provider, "shutdown"):
+        provider.shutdown()
+
+
 @contextlib.contextmanager
 def start_span(name: str, attributes: dict[str, Any] | None = None) -> Iterator[Any]:
     """Context manager to start a span with optional attributes."""

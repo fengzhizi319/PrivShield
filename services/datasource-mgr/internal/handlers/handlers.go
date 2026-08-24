@@ -62,8 +62,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
 	// 健康探针路由
-	r.GET("/health", s.Health)
-	r.GET("/api/health", s.Health)
+	r.GET("/health", s.Health)       // Liveness probe / 存活探针
+	r.GET("/readyz", s.Readyz)       // Readiness probe / 就绪探针
+	r.GET("/api/health", s.Health)   // Alias for backward compat / 向后兼容别名
 
 	// API 1, 2, 3, 4: 专用模拟数据源访问端点
 	r.GET("/api/v1/yibao", s.GetYibaoData)         // API 1: 医保就医与结算
@@ -107,10 +108,23 @@ func parsePagination(c *gin.Context, defaultLimit, maxLimit int) (int, int) {
 
 // Health returns mock service status.
 // Health 返回模拟数据源服务的健康状态与元数据，用于负载均衡器和容器编排存活探针。
+// Health is a liveness probe — returns 200 if the process is alive.
+// Health 存活探针 — 进程存活即返回 200。
 func (s *Server) Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"backend":    "ok",
 		"status":     "ok",
+		"mode":       "mock_datasource_provider",
+		"latency_ms": 0,
+		"via":        moduleVia,
+	})
+}
+
+// Readyz is a readiness probe — for datasource-mgr this is equivalent to
+// liveness since it has no upstream dependencies.
+// Readyz 就绪探针 — datasource-mgr 无上游依赖，因此与存活探针等效。
+func (s *Server) Readyz(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":     "ready",
 		"mode":       "mock_datasource_provider",
 		"latency_ms": 0,
 		"via":        moduleVia,

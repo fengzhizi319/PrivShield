@@ -188,8 +188,8 @@ func newTestRouter(s *Server) *gin.Engine {
 	return r
 }
 
-// TestHealth tests the /api/health endpoint when the upstream agent is unreachable.
-// TestHealth 测试健康检查探针在 Agent 未就绪时的降级返回结构。
+// TestHealth tests the /api/health liveness probe endpoint.
+// TestHealth 验证存活探针端点：进程存活即返回 200。
 func TestHealth(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -206,13 +206,35 @@ func TestHealth(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	if resp["backend"] != "ok" {
-		t.Errorf("expected backend=ok, got %v", resp["backend"])
+	if resp["status"] != "ok" {
+		t.Errorf("expected status=ok, got %v", resp["status"])
 	}
 	if resp["via"] != "service-hub" {
 		t.Errorf("expected via=service-hub, got %v", resp["via"])
 	}
-	// 由于单测配置了未监听端口，Agent 应当报告 unreachable
+}
+
+// TestReadyzAgentUnreachable tests the /readyz readiness probe when the upstream agent is unreachable.
+// TestReadyzAgentUnreachable 验证就绪探针在 Agent 不可达时返回 503。
+func TestReadyzAgentUnreachable(t *testing.T) {
+	s := newSimpleTestServer()
+	router := newTestRouter(s)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/readyz", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if resp["status"] != "not_ready" {
+		t.Errorf("expected status=not_ready, got %v", resp["status"])
+	}
 	if resp["agent"] != "unreachable" {
 		t.Errorf("expected agent=unreachable, got %v", resp["agent"])
 	}
@@ -716,16 +738,16 @@ func TestE2E_FullPipeline_MultiLevelDesensitize(t *testing.T) {
 	}
 }
 
-// TestE2E_FullPipeline_HealthCheckWithAgent verifies that the health endpoint
+// TestE2E_FullPipeline_HealthCheckWithAgent verifies that the /readyz endpoint
 // correctly reports agent connectivity when the mock agent is reachable.
-// TestE2E_FullPipeline_HealthCheckWithAgent 验证 Agent 可达时健康检查正确报告连通状态。
+// TestE2E_FullPipeline_HealthCheckWithAgent 验证 Agent 可达时就绪探针正确报告连通状态。
 func TestE2E_FullPipeline_HealthCheckWithAgent(t *testing.T) {
 	srv, mockAgent := newMockE2EServer(t)
 	defer mockAgent.Close()
 	router := newTestRouter(srv)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/health", nil)
+	req, _ := http.NewRequest("GET", "/readyz", nil)
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -735,11 +757,11 @@ func TestE2E_FullPipeline_HealthCheckWithAgent(t *testing.T) {
 	var resp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
+	if resp["status"] != "ready" {
+		t.Errorf("expected status=ready, got %v", resp["status"])
+	}
 	if resp["agent"] == "unreachable" {
 		t.Error("expected agent to be reachable via mock server")
-	}
-	if resp["backend"] != "ok" {
-		t.Errorf("expected backend=ok, got %v", resp["backend"])
 	}
 	t.Logf("✅ Agent 可达: agent=%v", resp["agent"])
 }

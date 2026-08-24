@@ -53,8 +53,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
-	r.GET("/health", s.Health)
-	r.GET("/api/health", s.Health)
+	r.GET("/health", s.Health)       // Liveness probe / 存活探针
+	r.GET("/readyz", s.Readyz)       // Readiness probe / 就绪探针
+	r.GET("/api/health", s.Health)   // Alias for backward compat / 向后兼容别名
 	r.GET("/api/audit/logs", s.ListLogs)
 	r.POST("/api/audit/logs", s.CreateLog)
 	r.GET("/api/audit/logs/:id", s.GetLog)
@@ -65,8 +66,22 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/metrics", s.mc.Handler())
 }
 
-// Health checks self + upstream agent connectivity.
+// Health is a liveness probe — returns 200 if the process is alive.
+// Use /readyz for deep upstream dependency checks.
+// Health 存活探针 — 进程存活即返回 200。
 func (s *Server) Health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+		"via":    moduleVia,
+	})
+}
+
+// Readyz is a readiness probe — checks upstream agent connectivity.
+// Returns 503 when the agent is unreachable so K8s won't route traffic
+// until the dependency is ready.
+// Readyz 就绪探针 — 检查上游 Agent 连通性。
+// 当 Agent 不可用时返回 503，K8s 不会将流量路由到该 Pod。
+func (s *Server) Readyz(c *gin.Context) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -75,7 +90,8 @@ func (s *Server) Health(c *gin.Context) {
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":     "not_ready",
 			"backend":    "ok",
 			"agent":      "unreachable",
 			"agent_url":  s.cfg.AgentBaseURL(),
@@ -87,6 +103,7 @@ func (s *Server) Health(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"status":     "ready",
 		"backend":    "ok",
 		"agent":      agentData,
 		"agent_url":  s.cfg.AgentBaseURL(),

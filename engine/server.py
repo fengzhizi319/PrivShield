@@ -211,6 +211,10 @@ def main():
         limit_max_requests=int(os.environ.get("PRIVACY_LIMIT_MAX_REQUESTS", "100000")),
         # 高并发优化：keep-alive 超时，减少空闲连接占用
         timeout_keep_alive=int(os.environ.get("PRIVACY_TIMEOUT_KEEP_ALIVE", "30")),
+        # 优雅关闭超时：收到 SIGTERM 后等待在途请求完成的最大秒数，超时后强制断开。
+        # Graceful shutdown timeout: max seconds to wait for in-flight requests
+        # after SIGTERM before force-closing connections.
+        timeout_graceful_shutdown=int(os.environ.get("PRIVACY_TIMEOUT_GRACEFUL_SHUTDOWN", "10")),
         **_UVICORN_LOOP_KWARG,
         **ssl_kwargs,
     )

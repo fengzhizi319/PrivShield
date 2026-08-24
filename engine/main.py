@@ -53,7 +53,7 @@ from starlette.responses import Response
 
 # Structured logging configuration (text/json format, per-module log levels)
 # 结构化日志配置（支持 text/json 格式、按模块设置日志级别）
-from .observability.logging_config import configure_logging
+from .observability.logging_config import configure_logging, get_logger
 # Prometheus metrics ASGI app factory — creates a standalone metrics endpoint
 # Prometheus 指标 ASGI 应用工厂 — 创建独立的指标暴露端点
 from .observability.metrics import make_asgi_app
@@ -69,6 +69,9 @@ from .observability.tracing import init_tracing
 # 再导出 PrivacyService 单例，使测试和外部调用方可通过
 # ``from engine.main import service`` 获取。
 from .deps import service  # noqa: F401
+# Import exception mapper for global exception handler registration
+# 导入异常映射函数，用于注册全局异常处理器
+from .deps import handle_request_exception
 
 # Medical pipeline router (multi-step classification + privacy processing)
 # 医疗流水线路由（多步分类 + 隐私处理组合端点）
@@ -198,9 +201,17 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # --- Shutdown phase / 关闭阶段 ---
-        # Placeholder for future cleanup: close DB connections, flush trace buffers, etc.
-        # 占位块，供未来清理逻辑使用：关闭数据库连接、刷新追踪缓冲区等。
-        pass
+        # Log shutdown event for operational visibility.
+        # 记录关闭事件，便于运维审计。
+        _shutdown_logger = get_logger(__name__)
+        _shutdown_logger.info("PrivShield Agent shutting down — flushing buffers and releasing resources")
+        # Flush OpenTelemetry tracing buffers if initialized.
+        # 若已初始化 OpenTelemetry 追踪，刷新缓冲区以确保所有 span 导出。
+        try:
+            from .observability.tracing import shutdown_tracing
+            shutdown_tracing()
+        except Exception:  # noqa: BLE001
+            pass  # Best-effort; tracing may not be initialized / 尽力而为
 
 
 # =============================================================================
@@ -225,6 +236,19 @@ app = FastAPI(
     docs_url=None if _auth_enabled else "/docs",
     openapi_url=None if _auth_enabled else "/openapi.json",
 )
+
+# ---------------------------------------------------------------------------
+# Global exception handler — defense-in-depth safety net
+# ---------------------------------------------------------------------------
+# 全局异常处理器 — 纵深防御安全网
+# Some routers (budget, dynclassification, medical, ops, profile) do not wrap
+# every handler in try/except. This catches any unhandled exception and maps it
+# to a clean HTTP response via the same logic used by per-router handlers,
+# preventing raw tracebacks from leaking to callers.
+# 部分路由（budget、dynclassification、medical、ops、profile）并未在每个处理函数中
+# 包裹 try/except。此全局处理器捕获所有未处理异常，通过相同逻辑映射为干净的 HTTP
+# 响应，防止原始堆栈信息泄露给调用方。
+app.add_exception_handler(Exception, handle_request_exception)
 
 # ---------------------------------------------------------------------------
 # Middleware execution order (outermost -> innermost, i.e. request flow):
@@ -281,6 +305,24 @@ if _cors_enabled:
 #   3. 更新 Prometheus 计数器/直方图（请求数、延迟、流量）
 #   注意：/metrics 路径在内部被排除，避免自引用循环。
 app.add_middleware(ObservabilityMiddleware)
+
+# ---------------------------------------------------------------------------
+# Startup feature-flag banner — operator visibility
+# ---------------------------------------------------------------------------
+# 启动特性横幅 — 运维可见性
+# Log key configuration flags at startup so operators can verify the security
+# posture before the service begins accepting traffic.
+_startup_logger = get_logger("engine.startup")
+_startup_logger.info(
+    "PrivShield Agent configuration: "
+    "auth=%s | tls=%s | rate_limit=%s | cors=%s | ner=%s | llm=%s",
+    _auth_enabled,
+    get_security_settings().tls_enabled,
+    get_security_settings().rate_limit_enabled,
+    _cors_enabled,
+    os.environ.get("PRIVACY_NER_ENABLE", "false").lower() == "true",
+    os.environ.get("PRIVACY_LLM_ENABLE", "false").lower() == "true",
+)
 
 # ---------------------------------------------------------------------------
 # Mounted sub-applications (ASGI mount, bypasses FastAPI dependency injection)
