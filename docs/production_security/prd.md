@@ -80,32 +80,51 @@
 | FR-HEALTH-1 | `/health` 与 `Health` RPC 默认不认证、不限速。 |
 | FR-HEALTH-2 | 可通过 `PRIVACY_HEALTH_NO_AUTH=false` 与 `PRIVACY_HEALTH_NO_RATE_LIMIT=false` 关闭豁免。 |
 
+### 4.5 全栈防 DDoS 与系统容量保护 (DDoS & Capacity Protection)
+
+| ID | 需求 |
+|---|---|
+| FR-DDOS-1 | **慢速连接防护**：所有 Go/Python HTTP 服务显式配置 `ReadHeaderTimeout ≤ 5s` 与 `MaxHeaderBytes ≤ 1MB`，拦截 Slowloris 与慢速 Header 挂起。 |
+| FR-DDOS-2 | **大包 DoS 拦截**：全平台配置 `MaxBodySize`（32MB/64MB），超出上限时立即切断请求并返回 `413 Payload Too Large`。 |
+| FR-DDOS-3 | **IP 令牌桶限流**：Go 共享基础库提供 `RateLimit(rps, burst)` 中间件，自动 GC 闲置 IP 桶，超限响应 `429 Too Many Requests` 与 `Retry-After`。 |
+| FR-DDOS-4 | **并发容量硬顶**：提供 `MaxConcurrent(limit)` 信号量中间件，突发过载快速返回 `503 Service Unavailable` 保护协程池。 |
+| FR-DDOS-5 | **云原生 Ingress 防护**：Helm 与生产模板预置 Nginx Ingress 连接限制（50 连接/IP）与速率限制（100 RPS/IP）。 |
+
+### 4.6 数据源与存储沙箱安全 (Data Source & Storage Security)
+
+| ID | 需求 |
+|---|---|
+| FR-DATA-1 | **路径遍历 (LFI) 沙箱防护**：`datasource-mgr` CSV 加载强制 `.csv` 白名单，提取纯文件名并在目录沙箱内加载，且限制最大读取 50,000 行。 |
+| FR-DATA-2 | **异常信息脱敏**：`pkg/middleware.Recovery` 捕获 Panic 并向客户端返回安全脱敏响应，堆栈仅留存于内部结构化日志。 |
+| FR-DATA-3 | **SQL 分页边界安全**：SQLite 存储层使用 `ParsePagination` 强制约束 `Limit` 在 1~10000 且 `Offset ≥ 0`。 |
+
 ## 5. 非功能需求
 
 | 维度 | 要求 |
 |---|---|
 | 向后兼容 | 所有安全开关默认关闭；现有本地启动命令与测试集无需修改即可通过。 |
 | 性能 | 认证与限流处理耗时 < 1ms/P99（内存模式）。 |
-| 可观测 | 关键拒绝事件（认证失败、越权、超速）打印结构化日志。 |
+| 可观测 | 关键拒绝事件（认证失败、越权、超速、413/503 拦截）打印结构化日志。 |
 | 可配置 | 全部行为通过环境变量配置，无需改动代码即可适配不同环境。 |
-| 可测试 | 提供自签名证书生成工具/测试夹具，单元测试覆盖 TLS/mTLS/Auth/RateLimit。 |
+| 可测试 | 提供自签名证书生成工具/测试夹具，单元测试覆盖 TLS/mTLS/Auth/RateLimit/DDoS/LFI。 |
 
 ## 6. 验收标准
 
-- [ ] 编写 `docs/production_security/prd.md`、`design.md`、`ops.md`。
-- [ ] 新增 `PrivShield/security/` 模块，包含 config/tls/identity/auth/ratelimit。
-- [ ] REST/gRPC 在开启 TLS 后仅接受 HTTPS/gRPCs 连接。
-- [ ] mTLS `require` 模式拒绝无客户端证书的调用。
-- [ ] mTLS CN 白名单：命中白名单的 CN 获得内部身份（`["*"]` scope），未命中的被拒绝。
-- [ ] mTLS 认证默认关闭（fail-closed）：未显式启用时即使证书合法也不授予身份。
-- [ ] 内部 API Key 可访问所有接口；外部 API Key 越权被拦截。
-- [ ] 超速调用 REST 返回 429，gRPC 返回 `RESOURCE_EXHAUSTED`。
-- [ ] `/health` 与 `Health` 默认保持匿名、不限速。
-- [ ] 所有现有测试在默认配置下通过；新增安全测试通过。
-- [ ] `pyproject.toml` 与 `requirements.txt` 更新依赖。
+- [x] 编写 `docs/production_security/prd.md`、`design.md`、`ops.md`、`security_requirements.md`。
+- [x] 新增 `PrivShield/security/` 模块，包含 config/tls/identity/auth/ratelimit。
+- [x] REST/gRPC 在开启 TLS 后仅接受 HTTPS/gRPCs 连接。
+- [x] mTLS `require` 模式拒绝无客户端证书的调用。
+- [x] mTLS CN 白名单：命中白名单的 CN 获得内部身份（`["*"]` scope），未命中的被拒绝。
+- [x] mTLS 认证默认关闭（fail-closed）：未显式启用时即使证书合法也不授予身份。
+- [x] 内部 API Key 可访问所有接口；外部 API Key 越权被拦截。
+- [x] 超速调用 REST 返回 429，gRPC 返回 `RESOURCE_EXHAUSTED`。
+- [x] `/health` 与 `Health` 默认保持匿名、不限速。
+- [x] 全微服务配置 Slowloris 5s 超时与 1MB 请求头限制。
+- [x] 引入 `MaxBodySize` 大包防御（413）与 `MaxConcurrent` 并发熔断（503）。
+- [x] 实施 CSV Loader 路径穿越沙箱与 SQLite 分页上下限夹紧。
+- [x] 所有现有测试在默认配置下通过；新增安全与 DDoS 测试 100% 通过。
 
-## 7. 非目标
+## 7. 非目标与演进规划
 
-- 本次不涉及结构化日志、Prometheus、Tracing、Helm/K8s 模板（后续 P0）。
-- 本次不涉及 KMS 集成、密钥轮换、模型输入沙箱（P2）。
-- 本次不实现 OAuth/OIDC/复杂 RBAC，采用静态 API Key + 静态 scope 映射。
+- 本次不实现复杂 OAuth/OIDC 认证服务，采用静态 API Key + mTLS 客户端证书 + 静态 Scope 映射；
+- 硬件安全模块 (HSM) 与 KMS 信封加密密钥自动轮换作为后续演进目标。

@@ -85,21 +85,36 @@
 - **安全编码要求**：
   1. 内存隐私预算更新必须通过 `threading.Lock` 加锁。
   2. SQLite 持久化预算更新必须使用事务排他锁（`BEGIN IMMEDIATE`）与 WAL 模式，确保并发原子扣减。
+  3. Redis 分布式预算必须使用 Lua 脚本保证原子扣减与原子滑动窗口重置。
+
+### 2.9 拒绝服务与洪峰攻击防护 (DDoS & Overload Protection)
+- **常见漏洞场景**：
+  - 未配置 HTTP 读写超时，导致 Slowloris 慢速请求挂起所有连接；
+  - 允许无限制读取请求体，导致内存溢出；
+  - 缺少并发在途请求限制，突发流量耗尽系统线程/协程池。
+- **安全编码要求**：
+  1. 所有 HTTP Server 必须显式设置 `ReadHeaderTimeout`（建议 ≤ 5s）、`ReadTimeout` 与 `MaxHeaderBytes`。
+  2. 针对请求体必须设置最大大小（`MaxBodySize` 结合 `http.MaxBytesReader` 或网关 `Content-Length` 预检），超限立即返回 413。
+  3. 在关键链路上挂载令牌桶限流与并发信号量控制，防止过载击穿。
 
 ---
 
 ## 3. 本项目安全扫描与修复记录
 
-基于上述安全要求，对 `PrivShield` 全库代码进行了静态扫描与安全审计，审计结果与修复清单如下：
+基于上述安全要求，对 `PrivShield` 全库代码（含 Python 算力层、Go 微服务群、共享库与控制台）进行了静态扫描与深度安全审计，审计结果与修复清单如下：
 
 ### 3.1 发现的漏洞与安全隐患
 
-| 编号 | 漏洞/隐患描述 | 严重级别 | 受影响文件 | 修复方案 |
+| 编号 | 漏洞/隐患描述 | 严重级别 | 受影响文件 | 修复方案与效果 |
 |---|---|---|---|---|
 | **SEC-01** | Gateway 网关管理接口 Bearer Token 校验存在时序攻击 (Timing Attack) | 中危 | `PrivShield/gateway/http_proxy.py` | 替换普通字符串比较 `!=` 为 `hmac.compare_digest` 恒定时间比较 |
-| **SEC-02** | Go 控制台代理 API Key 校验存在时序攻击 (Timing Attack) | 中危 | `console/backend-go/internal/handlers/handlers.go` | 替换字符串 `!=` 比较为 `subtle.ConstantTimeCompare` 恒定时间比较 |
+| **SEC-02** | Go 控制台代理 API Key 校验存在时序攻击 (Timing Attack) | 中危 | `console/bff-go/internal/handlers/handlers.go` | 替换字符串比较为 `subtle.ConstantTimeCompare` 恒定时间比较 |
 | **SEC-03** | Gateway 节点动态注册 API 缺少 URL Scheme 与格式校验 (SSRF/畸形 URL 防护) | 中危 | `PrivShield/gateway/http_proxy.py` | 增加 `http_url` 的 Scheme 校验 (仅允许 `http://` 或 `https://`) |
 | **SEC-04** | REST 主服务缺少 HTTP 安全响应头 (MIME 嗅探与点击劫持防护) | 低危 | `PrivShield/main.py` | 添加 `SecurityHeadersMiddleware` 中间件，自动注入 `X-Content-Type-Options`、`X-Frame-Options` 等响应头 |
+| **SEC-05** | CSV 数据源加载存在任意文件读取 (LFI / Path Traversal) 隐患 | 高危 | `services/datasource-mgr/internal/handlers/csv_loader.go` | 强制 `.csv` 后缀白名单，使用 `filepath.Base` 提取纯文件名，限定目录沙箱白名单并增加 50,000 行限制 |
+| **SEC-06** | Gin Recovery 中间件向客户端回显 Panic 堆栈敏感信息 | 中危 | `pkg/middleware/middleware.go` | Panic 堆栈收敛至服务端内部结构化日志，HTTP 响应统一返回安全脱敏 JSON |
+| **SEC-07** | SQLite 分页参数未限制上下限导致超大查询与负数偏移越界 | 中危 | `pkg/store/sqlite/` (`audit.go`, `datasources.go`, `tasks.go`) | 引入 `validation.ParsePagination`，强制 `Limit` 夹紧在 1~10000，`Offset >= 0` |
+| **SEC-08** | 全平台存在 Slowloris 慢速挂起与大包 Payload DoS 风险 | 高危 | Go 微服务 `cmd/server/main.go`、`pkg/middleware`、Python 网关 | 配置 `ReadHeaderTimeout: 5s`，引入 `MaxBodySize` (32MB/64MB 413 拦截)、`RateLimit` (IP 令牌桶 429) 与 `MaxConcurrent` (503 熔断) |
 
 ---
 
@@ -110,7 +125,7 @@
 1. **Python 静态代码安全扫描**：
    ```bash
    pip install bandit
-   bandit -r PrivShield/ console/backend/app/
+   bandit -r PrivShield/ console/bff-py/
    ```
 2. **依赖包漏洞扫描**：
    ```bash
@@ -120,5 +135,5 @@
 3. **Go 语言静态安全扫描**：
    ```bash
    go install github.com/securego/gosec/v2/cmd/gosec@latest
-   gosec ./console/backend-go/...
+   gosec ./pkg/... ./services/... ./console/bff-go/...
    ```

@@ -51,41 +51,61 @@
 - 为 REST/gRPC 提供可选的服务器端 TLS，gRPC 额外支持可选的 mTLS。
 - 区分内部服务与外部服务两类身份，按最小权限原则控制接口访问。
 - 基于调用者身份与接口路径/方法进行速率限制。
-- 所有安全能力默认关闭，通过环境变量显式开启。
+- 构建全栈防 DDoS 纵深防御（慢速连接拦截、大包切断、IP 令牌桶限流、并发容量硬顶）。
+- 实施数据源输入沙箱与存储边界防御（LFI 防护、异常脱敏、SQL 分页夹紧）。
+- 所有安全能力默认平滑兼容，核心开关通过环境变量显式开启。
 
 ## 3. 威胁模型与缓解措施
 
-| 威胁 | 缓解措施 |
-|---|---|
-| 链路上窃听隐私请求/响应 | REST/gRPC 服务端 TLS 加密 |
-| 中间人篡改请求 | TLS + 客户端校验服务器证书；mTLS 同时校验客户端证书 |
-| 未授权调用消耗隐私预算 | API Key / mTLS 认证 + 接口级 scope 鉴权 |
-| 凭证泄露后横向越权 | 外部服务使用最小 scope；内部服务使用独立内部 Key |
-| 暴力调用导致资源/预算耗尽 | 基于身份的速率限制 |
-| K8s 探针因认证失败被误判 | `/health` 与 `Health` 默认匿名、不限速 |
+| 威胁类型 | 攻击场景 / 风险 | 缓解措施与防御层级 |
+|---|---|---|
+| **链路窃听** | 窃听隐私数据、脱敏结果与预算请求 | REST/gRPC 强制开启 TLS 1.3 / HTTPS / gRPCs |
+| **中间人篡改** | 伪造调用方身份消耗隐私预算 | mTLS 双向证书 CA 信任链 + 客户端 CN 白名单校验 |
+| **越权调用** | 外部租户越权调用高敏差分隐私或销毁接口 | Bearer API Key 恒定时间防时序攻击鉴权 + Scope 细粒度校验 |
+| **慢速攻击 (Slowloris)** | 攻击者以极慢速度发送 Header/Body 挂起连接池 | 服务端强制配置 `ReadHeaderTimeout: 5s`、`ReadTimeout: 30s` 与 `MaxHeaderBytes: 1MB` |
+| **大包 DoS (Payload Attack)** | 传入超大 JSON/CSV 造成内存耗尽 (OOM) | `MaxBodySize` (32MB/64MB) + `http.MaxBytesReader` 超限切断并返回 413 |
+| **应用层 Flood** | 单 IP 突发数千 QPS 刷爆 CPU | `pkg/middleware.RateLimit` IP 令牌桶限流 (429 + Retry-After) |
+| **并发协程耗尽** | 大规模并发连接打满 Goroutine 线程池 | `pkg/middleware.MaxConcurrent` 信号量硬顶 (503 快速失败) |
+| **任意文件包含 (LFI)** | CSV 数据源路径穿越读取系统敏感文件 | 强制 `.csv` 后缀白名单、`filepath.Base` 提取与沙箱目录校验 |
+| **敏感信息泄露** | 服务端 Panic 返回完整堆栈给客户端 | `pkg/middleware.Recovery` 堆栈收敛至服务端内部日志，对外返回脱敏 JSON |
+| **SQL 越界查询** | 超大 Limit 或负数 Offset 拖垮 SQLite | `validation.ParsePagination` 强制 Limit (1~10000) 与 Offset (>=0) |
+| **K8s 探针误判** | 健康检查因无凭证导致 Pod 被误重启 | `/health` 与 `Health` 默认保持匿名放行与不限速 |
 
 ## 4. 总体架构
 
 ```mermaid
 graph TD
-    subgraph PrivShield
-        REST[FastAPI<br/>REST]
-        GRPC[gRPC Server]
-        SEC[Security Layer<br/>config/tls/auth/rl]
-        REST --> TLS1[TLS + Auth + RL]
-        GRPC --> TLS2[TLS + Auth + RL]
-        TLS1 --> R1["/v1/privacy/*"]
-        TLS2 --> R2["PrivacyService.*"]
+    subgraph ClientAndIngress [外部流量与云原生入口]
+        Ingress[K8s Ingress / Envoy<br/>Rate-Limit: 100 RPS / 50 Conn]
     end
+
+    subgraph GoMicroservices [中台微服务群与 BFF]
+        BFF[console/bff-go]
+        Hub[services/service-hub]
+        DS[services/datasource-mgr]
+        Audit[services/audit-log]
+        PkgSec[pkg/middleware<br/>CORS / Auth / RateLimit / MaxBodySize / Recovery]
+        BFF & Hub & DS & Audit --- PkgSec
+    end
+
+    subgraph EngineSecurity [Python 核心算力引擎]
+        REST[FastAPI REST :8079]
+        GRPC[gRPC Server :50051]
+        SEC[Security Layer<br/>TLS / mTLS / APIKey / SlidingWindow RL]
+        REST --> SEC
+        GRPC --> SEC
+    end
+
+    Ingress --> BFF
+    BFF -->|gRPC mTLS| GRPC
+    BFF & Hub -->|REST TLS| REST
+    Hub --> DS & Audit
 ```
 
-安全层对 REST 与 gRPC 共享同一套配置与身份模型：
+安全层对 Python 算力引擎与 Go 中台微服务群提供协同治理：
 
-- `SecuritySettings`：统一从环境变量加载。
-- `Identity`：调用者身份（internal/external + name + scopes）。
-- `tls.py`：为 Uvicorn 与 gRPC server 构造 TLS 参数。
-- `auth.py`：FastAPI dependency + gRPC interceptor。
-- `ratelimit.py`：FastAPI dependency + gRPC interceptor。
+- **Python 算力层 (`PrivShield/security/`)**：`SecuritySettings` 配置加载、`tls.py` 证书参数构造、`auth.py` / `ratelimit.py` FastAPI 依赖与 gRPC Interceptor、`whitelist.py` mTLS CN 白名单；
+- **Go 微服务群 (`pkg/middleware/`)**：`ratelimit.go` (IP 令牌桶限流 + MaxBodySize + MaxConcurrent)、`auth.go` (恒定时间 Bearer 鉴权)、`middleware.go` (CORS、Request ID、结构化日志、Recovery 异常脱敏与 Security Headers)。
 
 ## 5. 模块设计
 

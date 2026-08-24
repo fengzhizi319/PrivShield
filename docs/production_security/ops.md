@@ -88,6 +88,19 @@ PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON='{
 | `PRIVACY_HEALTH_NO_AUTH` | `true` | `/health` 与 `Health` 是否免认证。 |
 | `PRIVACY_HEALTH_NO_RATE_LIMIT` | `true` | `/health` 与 `Health` 是否免限速。 |
 
+### 全栈防 DDoS 与微服务安全参数
+
+| 参数 / 配置项 | 推荐生产配置 | 所在模块 / 位置 | 作用说明 |
+|---|---|---|---|
+| `ReadHeaderTimeout` | `5 * time.Second` | Go Server / main.go | 强制关闭缓慢发送 Header 的慢速连接 (Anti-Slowloris) |
+| `ReadTimeout` | `30 * time.Second` | Go Server / main.go | 请求体完整读取超时 (Anti-Slow-POST) |
+| `MaxHeaderBytes` | `1 << 20` (1 MiB) | Go Server / main.go | 限制最大 Header 字节数，防止超大头部耗尽内存 |
+| `MaxBodySize` | `32 << 20` (32 MiB) / `64 MiB` | `pkg/middleware` & Python 网关 | 超过限制直接响应 413 Payload Too Large 切断连接 |
+| `RateLimit(rps, burst)` | `(200, 400)` | `pkg/middleware` | 客户端 IP 令牌桶限流，超额返回 429 与 Retry-After |
+| `MaxConcurrent(limit)` | `1000` | `pkg/middleware` | 全局在途请求信号量硬顶，过载快速响应 503 保护协程池 |
+| `nginx.ingress.kubernetes.io/limit-rps` | `"100"` | Helm `values.yaml` Ingress | 云原生边缘层单 IP 速率限制 |
+| `nginx.ingress.kubernetes.io/limit-connections` | `"50"` | Helm `values.yaml` Ingress | 云原生边缘层单 IP 并发连接数限制 |
+
 ---
 
 ## 2. 证书生成（自签名开发示例）
@@ -237,19 +250,31 @@ readinessProbe:
 
 ---
 
-## 6. 常见问题
+## 6. 常见问题与排错 (FAQ)
 
-**Q: 开启 TLS 后本地 `curl http://...` 失败？**
-A: 使用 `https://` 并指定 `--cacert`。
+**Q: 开启 TLS 后本地 `curl http://...` 失败？**  
+A: 使用 `https://` 并指定 `--cacert` 或在开发测试环境使用 `curl -k`。
 
-**Q: mTLS 模式下客户端没有证书？**
-A: 服务端会拒绝握手；请为客户端生成受信 CA 签发的证书，并在调用时携带。
+**Q: mTLS 模式下客户端没有证书？**  
+A: 服务端会直接拒绝 TLS 握手；请为客户端生成受信 CA 签发的证书，并在调用时携带。
 
-**Q: 多副本限速不生效？**
-A: 默认使用进程内存计数器，副本间不共享。配置 `PRIVACY_RATE_LIMIT_REDIS_URL`。
+**Q: 多副本限速不生效？**  
+A: 默认使用进程内存计数器，副本间不共享。请配置 `PRIVACY_RATE_LIMIT_REDIS_URL`。
 
-**Q: 外部服务访问了越权接口返回什么？**
+**Q: 外部服务访问了越权接口返回什么？**  
 A: REST 返回 `403 Forbidden`，gRPC 返回 `PERMISSION_DENIED`。
 
-**Q: 是否需要更新 gRPC proto？**
-A: 本次 P0 不改 proto，认证通过 metadata 完成。
+**Q: 是否需要更新 gRPC proto？**  
+A: 不需要修改 proto，认证通过 gRPC Header Metadata (`authorization`) 与 TLS 对等证书完成。
+
+**Q: 请求返回 413 Payload Too Large 是怎么回事？**  
+A: 请求体大小超出了 `MaxBodySize` 防护上限（默认 32MB，BFF 默认 64MB）。请分批上传或检查是否有恶意大包。
+
+**Q: 请求返回 429 Too Many Requests 是怎么回事？**  
+A: 触发了客户端 IP 令牌桶限流或身份限流。响应头中包含 `Retry-After: 1`，客户端应按照退避重试机制稍后再发。
+
+**Q: 请求返回 503 Service Unavailable: Server is overloaded 是怎么回事？**  
+A: 触发了 `MaxConcurrent` 并发容量硬顶熔断，表明当前系统在途处理连接数达到上限。可通过 K8s HPA 自动水平扩容增加 Pod 副本数分流。
+
+**Q: 数据源上传 CSV 提示路径非法或行数超出上限？**  
+A: 数据源探查与加载受 LFI 目录沙箱与 50,000 行安全边界保护。请确保上传文件为合法 `.csv` 文件且数据行数在限制范围内。
