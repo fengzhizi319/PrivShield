@@ -15,10 +15,25 @@ spec:
       labels:
         app: PrivShield
     spec:
+      # Pod 级安全上下文：强制非 root 运行、卷文件属组
+      # 与 Helm chart values.yaml podSecurityContext 对齐
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      # 优雅终止宽限期：gRPC GracefulStop 30s + 余量
+      terminationGracePeriodSeconds: 40
       containers:
         - name: agent
           image: privshield:1.8.0
           imagePullPolicy: IfNotPresent
+          # 容器级安全上下文：最小权限原则
+          # 与 Helm chart values.yaml securityContext 对齐
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 8079
