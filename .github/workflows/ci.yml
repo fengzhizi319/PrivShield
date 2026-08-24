@@ -123,7 +123,16 @@ jobs:
           go vet ./console/bff-go/...
 
       - name: Test all Go modules
-        run: go test ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/... -race -count=1
+        run: |
+          go test ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/... -race -count=1 -coverprofile=go-coverage.out -covermode=atomic
+
+      - name: Upload Go coverage
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: go-coverage.out
+          flags: go-unittests
+          fail_ci_if_error: false
 
   frontend:
     name: Frontend

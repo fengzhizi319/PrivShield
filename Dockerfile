@@ -113,11 +113,13 @@ RUN mkdir -p /data/budget /var/log/privacy \
 EXPOSE 8079 50051
 
 # 容器级健康检查（Docker HEALTHCHECK）：
-#   - 每 30s 探测 /health，超时 5s，启动宽限 10s，连续失败 3 次标记 unhealthy
+#   - 每 30s 同时探测 REST /health 与 gRPC :50051 TCP 连通性，超时 5s，启动宽限 10s
 #   - 职责定位：服务于 docker run 单容器场景；K8s 部署时由 liveness/readiness
 #     探针接管（见 deploy/helm/PrivShield/values.yaml 的 probes 节）
+#   - REST: curl 探测 /health 端点返回 200
+#   - gRPC: Python 轻量 TCP 连接检查（grpcio 已包含在核心依赖中）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8079/health || exit 1
+    CMD curl -sf http://localhost:8079/health > /dev/null && python -c "import socket; s=socket.create_connection(('localhost',50051),timeout=3); s.close()" || exit 1
 
 # 切换到非 root 用户（安全最佳实践）：
 #   - 自此之后所有 RUN/CMD/ENTRYPOINT 均以 privacy 用户身份执行

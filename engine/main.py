@@ -474,4 +474,21 @@ if __name__ == "__main__":
     # Parse CLI args and start the ASGI server with the configured app
     # 解析命令行参数，使用配置好的 app 启动 ASGI 服务器
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port)
+
+    import os as _os
+
+    # Production-hardened uvicorn configuration (aligned with server.py).
+    # 生产加固的 uvicorn 配置（与 server.py 对齐）。
+    # Even in standalone REST mode, apply timeout/concurrency limits
+    # to prevent Slowloris DoS and unbounded resource consumption.
+    # 即使独立 REST 模式也应用超时/并发限制，
+    # 防止 Slowloris DoS 与无限制资源消耗。
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        limit_concurrency=int(_os.environ.get("PRIVACY_LIMIT_CONCURRENCY", "10000")),
+        limit_max_requests=int(_os.environ.get("PRIVACY_LIMIT_MAX_REQUESTS", "100000")),
+        timeout_keep_alive=int(_os.environ.get("PRIVACY_TIMEOUT_KEEP_ALIVE", "30")),
+        timeout_graceful_shutdown=int(_os.environ.get("PRIVACY_TIMEOUT_GRACEFUL_SHUTDOWN", "10")),
+    )
