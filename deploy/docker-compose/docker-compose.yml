@@ -275,6 +275,9 @@ services:
     #   always              : 任何退出都重启（含 daemon 启动时）
     #   on-failure[:3]      : 仅非零退出码时重启（可带最大重试次数）
     #   unless-stopped      : 除非手动 stop，否则总是重启（本配置，兼顾手动停止需求）
+    # stop_grace_period: Docker 发送 SIGTERM 后等待容器优雅关闭的时间。
+    # PrivShield Agent: gRPC GracefulStop 30s + REST shutdown，需留足余量。
+    stop_grace_period: 40s
     restart: unless-stopped
 
   # ===========================================================================
@@ -322,6 +325,8 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+    # stop_grace_period: Go HTTP server Shutdown 5s，10s 足够。
+    stop_grace_period: 10s
     restart: unless-stopped
 
   # ===========================================================================
@@ -372,6 +377,7 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+    stop_grace_period: 10s
     restart: unless-stopped
 
   # ===========================================================================
@@ -464,6 +470,8 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+    # stop_grace_period: Go gRPC GracefulStop 30s + HTTP shutdown，需留足余量。
+    stop_grace_period: 40s
     restart: unless-stopped
 
   # ===========================================================================
@@ -513,6 +521,7 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+    stop_grace_period: 40s
     restart: unless-stopped
 
   # ===========================================================================
@@ -564,6 +573,7 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+    stop_grace_period: 40s
     restart: unless-stopped
 
   # ===========================================================================

@@ -1168,6 +1168,13 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = No
         ("grpc.http2.max_pings_without_data", 0),
         # 禁用 PING 频率超限强制断开连接惩罚 (0 表示静默忽略过多 PING 而不断开 TCP)
         ("grpc.http2.max_ping_strikes", 0),
+        # 连接最大存活时间 2h，到期后服务端发送 GOAWAY 通知客户端重连。
+        # 防止长连接内存泄漏、促进负载均衡重分配、配合证书轮换。
+        # 与 Go 服务端 MaxConnectionAge: 2h 对齐。
+        ("grpc.max_connection_age_ms", 7_200_000),
+        # 连接老化宽限期 5s：发送 GOAWAY 后等待在途 RPC 完成。
+        # 与 Go 服务端 MaxConnectionAgeGrace: 5s 对齐。
+        ("grpc.max_connection_age_grace_ms", 5_000),
     ]
     # SO_REUSEPORT 内核级负载均衡仅 Linux 原生支持；
     # macOS 虽定义该常量但语义不同（无内核级连接分发），Windows 不支持。
