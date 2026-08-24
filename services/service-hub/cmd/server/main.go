@@ -234,6 +234,27 @@ func main() {
 	}
 
 	// =========================================================================
+	// 7.5 Startup Config Summary / 启动配置摘要横幅
+	// =========================================================================
+	// Log key configuration flags at startup so operators can verify the
+	// security posture and runtime parameters at a glance.
+	// 启动时记录关键配置摘要，便于运维确认服务状态与安全姿态。
+	logger.Info("service-hub startup configuration",
+		"http_addr", cfg.Address(),
+		"grpc_addr", cfg.GRPCAddress(),
+		"agent_rest", cfg.AgentBaseURL(),
+		"datasource_rest", cfg.DatasourceBaseURL(),
+		"tls_enabled", cfg.TLSEnabled,
+		"auth_enabled", cfg.APIKey != "",
+		"cors_origins", len(cfg.CORSOrigins),
+		"db_path", cfg.DBPath,
+		"retention_days", cfg.RetentionDays,
+		"shutdown_timeout", cfg.ShutdownTimeout,
+		"log_format", cfg.LogFormat,
+		"log_level", cfg.LogLevel,
+	)
+
+	// =========================================================================
 	// 8. Operating System Signal Registration / 系统中断信号监听
 	// =========================================================================
 	sigChan := make(chan os.Signal, 1)

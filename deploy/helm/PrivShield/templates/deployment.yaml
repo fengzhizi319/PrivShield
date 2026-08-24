@@ -236,6 +236,15 @@ spec:
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "curl -fsS -k https://localhost:{{ .Values.service.restPort }}{{ .Values.probes.startup.path }} || wget -qO- --no-check-certificate https://localhost:{{ .Values.service.restPort }}{{ .Values.probes.startup.path }}"
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
           {{- else }}
           livenessProbe:
             httpGet:
@@ -251,6 +260,13 @@ spec:
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.startup.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
           {{- end }}
           # 资源限制（CPU/内存）
           resources:

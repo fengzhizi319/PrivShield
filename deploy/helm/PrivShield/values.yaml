@@ -279,6 +279,15 @@ probes:
     initialDelaySeconds: 5    # 容器启动后延迟 5 秒再开始探测
     periodSeconds: 5           # 每 5 秒探测一次
     failureThreshold: 3        # 连续 3 次失败判定为未就绪，从 Service 端点移除
+  # startupProbe: 启动探针——保护慢启动应用（如 ML 模型加载）
+  # 在 startupProbe 成功前，liveness/readiness 探针不会生效，
+  # 避免 K8s 在应用尚未就绪时过早重启 Pod。
+  startup:
+    path: /health
+    port: http
+    initialDelaySeconds: 5    # 容器启动后延迟 5 秒再开始探测
+    periodSeconds: 5           # 每 5 秒探测一次
+    failureThreshold: 30       # 最多允许 30 × 5s = 150s 启动时间
 
 # ── HPA 水平自动扩缩 / Horizontal Pod Autoscaler ─────────────────────────
 autoscaling:

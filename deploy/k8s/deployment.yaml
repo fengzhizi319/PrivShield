@@ -84,6 +84,17 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
+          # startupProbe: 启动探针——保护慢启动应用（如 ML 模型加载）
+          # 在 startupProbe 成功前，liveness/readiness 探针不会生效，
+          # 避免 K8s 在应用尚未就绪时过早重启 Pod。
+          # 最多允许 30 × 5s = 150s 启动时间。
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
           resources:
             requests:
               cpu: 100m
