@@ -127,4 +127,9 @@ ENV PRIVACY_AGENT_URL=http://PrivShield:8079
 # Startup command: run FastAPI app with uvicorn ASGI server
 # --host 0.0.0.0  监听所有网络接口（容器内必须，实际访问控制由 docker network 管理）
 # --port 8080     监听端口，与 EXPOSE 和 PRIVACY_CONSOLE_PORT 保持一致
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# 生产加固 / Production hardening（与主 Agent uvicorn 配置对齐）：
+#   --limit-concurrency       最大并发连接数，防止过载 OOM
+#   --limit-max-requests      worker 最大处理请求数，防止内存泄漏
+#   --timeout-keep-alive      空闲连接超时，减少资源占用
+#   --timeout-graceful-shutdown  SIGTERM 后优雅排空在途请求
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--limit-concurrency", "10000", "--limit-max-requests", "100000", "--timeout-keep-alive", "30", "--timeout-graceful-shutdown", "10"]

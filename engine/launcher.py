@@ -132,6 +132,7 @@ def _worker_entry(
         limit_concurrency=int(os.environ.get("PRIVACY_LIMIT_CONCURRENCY", "10000")),
         limit_max_requests=int(os.environ.get("PRIVACY_LIMIT_MAX_REQUESTS", "100000")),
         timeout_keep_alive=int(os.environ.get("PRIVACY_TIMEOUT_KEEP_ALIVE", "30")),
+        timeout_graceful_shutdown=int(os.environ.get("PRIVACY_TIMEOUT_GRACEFUL_SHUTDOWN", "10")),
         **_UVICORN_LOOP_KWARG,
         **ssl_kwargs,
     )
