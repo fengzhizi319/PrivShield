@@ -39,7 +39,7 @@ Core dependencies are pinned in `pyproject.toml`. Heavy ML dependencies are **no
 
 ```text
 PrivShield/
-├── PrivShield/           # Python 核心隐私与动态分类分级引擎 (Core Agent / Sidecar)
+├── engine/                # Python 核心隐私与动态分类分级引擎 (Core Agent / Sidecar)
 │   ├── main.py                    # FastAPI REST entrypoint
 │   ├── grpc_server.py             # gRPC servicer
 │   ├── server.py                  # REST + gRPC combined launcher
@@ -73,6 +73,7 @@ PrivShield/
 │       ├── balancer.py
 │       ├── http_proxy.py
 │       └── grpc_proxy.py
+├── PrivShield -> engine/          # 双轨兼容期软链接（含 sys.modules["PrivShield"] 动态导入别名）
 ├── services/                      # 企业级数据流通与安全治理中台微服务群 (Go)
 │   ├── service-hub/               # 数联数据服务调度中枢 (流水线调度: :8082)
 │   ├── datasource-mgr/            # 数据源资产管理与敏感特征自动探查 (:8083)
@@ -120,8 +121,8 @@ PYTHONPATH=. pytest tests/api/test_rest.py -v
 PYTHONPATH=. python tests/benchmark_primitives.py
 
 # Download models (optional, required for LLM/NER layers)
-python -m PrivShield.privacy.download_model
-python -m PrivShield.privacy.download_ner_model
+python -m engine.privacy.download_model
+python -m engine.privacy.download_ner_model
 ```
 
 ## 5. Running Locally
@@ -129,7 +130,8 @@ python -m PrivShield.privacy.download_ner_model
 ### REST + gRPC in one process
 
 ```bash
-python -m PrivShield.server
+python -m engine.server
+# （注：双轨兼容期内 python -m PrivShield.server 同样可用）
 ```
 
 Defaults:
@@ -139,19 +141,19 @@ Defaults:
 ### REST only
 
 ```bash
-python -m PrivShield.main
+python -m engine.main
 ```
 
 ### gRPC only
 
 ```bash
-python -m PrivShield.grpc_server
+python -m engine.grpc_server
 ```
 
 ### Gateway + worker pool
 
 ```bash
-python -m PrivShield.gateway.server
+python -m engine.gateway.server
 ```
 
 ## 6. Configuration
@@ -192,8 +194,8 @@ Key environment variables:
 | `PRIVACY_CLASSIFICATION_CACHE_SIZE` | `10000` | DynClassificationService result LRU cache capacity |
 | `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 图片打码允许读取的目录白名单（os.pathsep 分隔）；路径 resolve 后必须位于白名单内，拒绝目录穿越与 symlink 逃逸 |
 
-> 注意：三个入口的默认监听地址不同 —— `python -m PrivShield.main` 仅绑定 `127.0.0.1`（REST-only），
-> 而 `python -m PrivShield.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`。
+> 注意：三个入口的默认监听地址不同 —— `python -m engine.main` 仅绑定 `127.0.0.1`（REST-only），
+> 而 `python -m engine.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`（双轨兼容期亦支持 `PrivShield.*`）。
 > 生产部署请显式设置 `PRIVACY_REST_HOST` / `PRIVACY_GRPC_HOST` 并配合 TLS/Auth。
 
 ## 7. Code Conventions
@@ -211,16 +213,16 @@ Key environment variables:
 
 ## 8. Adding a New Privacy Primitive
 
-1. Implement the algorithm in `PrivShield/privacy/<primitive>.py`.
-2. Add a Pydantic request/response model in `PrivShield/schemas.py` or a new models file.
+1. Implement the algorithm in `engine/privacy/<primitive>.py`.
+2. Add a Pydantic request/response model in `engine/schemas.py` or a new models file.
 3. Expose it in:
-   - `PrivShield/service.py` (business logic)
-   - `PrivShield/routers/<primitive>.py` (REST sub-router, mounted by `main.py`)
-   - `PrivShield/grpc_server.py` (gRPC method)
+   - `engine/service.py` (business logic)
+   - `engine/routers/<primitive>.py` (REST sub-router, mounted by `main.py`)
+   - `engine/grpc_server.py` (gRPC method)
 4. Add tests in `tests/api/test_rest.py` and/or `tests/test_<primitive>.py`.
 5. Update `proto/privacy.proto` and regenerate stubs if adding gRPC:
    ```bash
-   python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto
+   python -m grpc_tools.protoc -I proto --python_out=engine --grpc_python_out=engine proto/privacy.proto
    ```
 
 ## 9. Adding a Classification Rule / Composite Rule / Taxonomy
@@ -370,15 +372,15 @@ Address these before any hardened production deployment.
 | Run Prod Console (Dual Backend + Static) | `bash ./console/scripts/prod-start-all.sh` |
 | Stop Dev Console | `bash ./console/scripts/dev-stop.sh` |
 | Stop Prod Console | `bash ./console/scripts/prod-stop.sh` |
-| Run REST + gRPC | `python -m PrivShield.server` |
+| Run REST + gRPC | `python -m engine.server`（兼容 `python -m PrivShield.server`） |
 | Run test console backend | `cd console/bff-py && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |
-| Run gateway | `python -m PrivShield.gateway.server` |
-| Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto` |
+| Run gateway | `python -m engine.gateway.server` |
+| Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=engine --grpc_python_out=engine proto/privacy.proto` |
 | Build docs | `make docs-build` |
 | Serve docs | `make docs-serve` |
-| Download LLM | `python -m PrivShield.privacy.download_model` |
-| Download NER | `python -m PrivShield.privacy.download_ner_model` |
+| Download LLM | `python -m engine.privacy.download_model` |
+| Download NER | `python -m engine.privacy.download_ner_model` |
 | Deploy Prod Compose | `bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--agent-only]` |
 | Stop Prod Compose | `bash ./scripts/prod/stop-docker-compose.sh` |
 | Run Prod Docker Agent | `bash ./scripts/prod/docker-start-agent.sh [core|ml]` |

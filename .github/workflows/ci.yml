@@ -33,7 +33,7 @@ jobs:
         run: make check
 
       - name: Ruff format check
-        run: ruff format --check PrivShield/ tests/ console/bff-py/
+        run: ruff format --check engine/ tests/ console/bff-py/
 
   test:
     name: Test
@@ -58,7 +58,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest tests/ -q --tb=short \
-            --cov=PrivShield \
+            --cov=engine \
             --cov-report=xml \
             --cov-report=term-missing \
             -m "not integration and not slow"
@@ -95,7 +95,7 @@ jobs:
         # S110（try-except-pass）为本仓库刻意的静默降级风格，与 S101/S104/S311/S324 一并豁免
         run: |
           pip install ruff
-          ruff check PrivShield/ --select F,S --ignore S101,S104,S110,S311,S324
+          ruff check engine/ --select F,S --ignore S101,S104,S110,S311,S324
 
   go-suite:
     name: Go Microservices & BFF Suite
@@ -189,7 +189,7 @@ jobs:
       - name: Verify image starts
         run: |
           docker run --rm privshield:ci python -c \
-            "from PrivShield.service import PrivacyService; print('OK')"
+            "from engine.service import PrivacyService; from PrivShield.service import PrivacyService as PS; print('OK')"
 
   helm-lint:
     name: Helm Chart Testing

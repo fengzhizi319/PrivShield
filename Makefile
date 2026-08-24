@@ -52,14 +52,14 @@ help:
 # ── Quality ──────────────────────────────────────────────────
 
 lint:
-	ruff check PrivShield/ tests/ console/bff-py/
+	ruff check engine/ tests/ console/bff-py/
 
 lint-console:
 	ruff check console/bff-py/
 
 format:
-	ruff format PrivShield/ tests/ console/bff-py/
-	ruff check --fix PrivShield/ tests/ console/bff-py/
+	ruff format engine/ tests/ console/bff-py/
+	ruff check --fix engine/ tests/ console/bff-py/
 
 format-console:
 	ruff format console/bff-py/
@@ -97,7 +97,7 @@ test-services:
 
 test-cov:
 	pytest tests/ -q --tb=short \
-		--cov=PrivShield \
+		--cov=engine \
 		--cov-report=term-missing \
 		-m "not integration and not slow"
 
@@ -105,7 +105,7 @@ cover: test-cov
 
 cover-html:
 	pytest tests/ -q --tb=short \
-		--cov=PrivShield \
+		--cov=engine \
 		--cov-report=html \
 		-m "not integration and not slow"
 	@echo "Open htmlcov/index.html"
@@ -192,7 +192,7 @@ prod-backup:
 # ── Other ────────────────────────────────────────────────────
 
 proto-gen:
-	python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto
+	python -m grpc_tools.protoc -I proto --python_out=engine --grpc_python_out=engine proto/privacy.proto
 
 clean:
 	rm -rf .pytest_cache __pycache__ .bin htmlcov .coverage coverage.xml

@@ -143,12 +143,15 @@ ignore = [
 "tests/**" = ["S", "B011"]
 "console/bff-py/tests/**" = ["S", "B011"]
 "console/bff-py/app/fixtures/samples.py" = ["E501"]
+"engine/privacy_pb2*.py" = ["E", "F", "N", "UP"]
+"engine/grpc_server.py" = ["N802"]
+"engine/classification_grpc.py" = ["N802"]
 "PrivShield/privacy_pb2*.py" = ["E", "F", "N", "UP"]
 "PrivShield/grpc_server.py" = ["N802"]
 "PrivShield/classification_grpc.py" = ["N802"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["PrivShield"]
+known-first-party = ["engine", "PrivShield"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -168,8 +171,10 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 ignore_missing_imports = true
 implicit_optional = true
-files = ["PrivShield", "console/bff-py", "tests"]
+files = ["engine", "console/bff-py", "tests"]
 exclude = [
+    "engine/privacy_pb2.*",
+    "engine/privacy_pb2_grpc.*",
     "PrivShield/privacy_pb2.*",
     "PrivShield/privacy_pb2_grpc.*",
     "console/bff-py/tests",
@@ -210,22 +215,16 @@ markers = [
 addopts = "-q --tb=short"
 
 [tool.coverage.run]
-source = ["engine", "PrivShield"]
+source = ["engine"]
 omit = [
     "engine/privacy_pb2*",
     "engine/privacy_pb2_grpc*",
-    "PrivShield/privacy_pb2*",
-    "PrivShield/privacy_pb2_grpc*",
     "*/tests/*",
     # 进程入口 / 模型下载脚本：仅含启动与网络下载逻辑，无法在单测中覆盖
     "engine/server.py",
     "engine/gateway/server.py",
     "engine/privacy/download_model.py",
     "engine/privacy/download_ner_model.py",
-    "PrivShield/server.py",
-    "PrivShield/gateway/server.py",
-    "PrivShield/privacy/download_model.py",
-    "PrivShield/privacy/download_ner_model.py",
 ]
 
 [tool.coverage.report]

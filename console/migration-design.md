@@ -870,9 +870,12 @@ gantt
 | 全仓文档/脚本旧路径清理（`console/backend`/`backend-go`/`console/pkg` 等） | ✅ | 仅保留历史设计文档中的整改记录原文 |
 | `deploy/README.md` 部署全景指南 | ✅ | 新增标准化全景部署指引 |
 | `PrivShield/` → `engine/` 物理更名与双包名平滑兼容层 | ✅ | `engine/` 独立目录 + `engine/__init__.py` `sys.modules` 别名 + `ln -s engine PrivShield` 软链兼容，423 个 Python 测试全绿通过 |
+| Docker 构建链与镜像入口单轨化 | ✅ | 根目录 `Dockerfile` 与 `engine/Dockerfile` 同步为 `COPY engine/` + 容器内兼容软链 + `CMD python -m engine.server` |
+| 工具链配置单轨化（Makefile / CI / Coverage / Mypy） | ✅ | `Makefile`（`engine/`、`--cov=engine`）、`ci.yml`（`engine/`）、`pyproject.toml`（`source=["engine"]`、`files=["engine",...]`）全面切换 |
 | `services/service-hub/proto/servicehub.pb.go` stubs 重新生成 | ✅ | 采用 `python -m grpc_tools.protoc` 重新生成，彻底清除历史旧路径 rawDesc 字节残留 |
 | 全栈防 DDoS 纵深防御体系 | ✅ | Slowloris 5s 超时、MaxBodySize (413)、RateLimit IP 令牌桶 (429)、MaxConcurrent (503) 全部单测通过 |
 | 跨语言全量自动化测试套件 | ✅ | `make test-go`（100% PASS）、`pytest tests/ -q`（423 PASS）、Vitest 前端单测（77 PASS） |
+| 双轨兼容过渡期保障 | ℹ️ | 算力主包与构建/CI/Lint 工具链已单轨化运行于 `engine/`；根目录保留 `PrivShield -> engine` 符号链接与动态别名，确保历史直调与自动化测试无缝衔接 |
 
 
 
