@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
 )
 
 // testCerts holds paths to test certificate files.

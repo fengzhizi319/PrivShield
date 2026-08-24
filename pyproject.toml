@@ -94,18 +94,18 @@ docs = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["PrivShield*"]
+include = ["PrivShield*", "engine*"]
 
 # ── Ruff (lint + format) ─────────────────────────────────────
 [tool.ruff]
 # 这个仓库是“根级配置 + 多子项目”结构：
-# - `PrivShield` 是主包
+# - `engine` / `PrivShield` 是算力主包
 # - `tests` 是主测试集
-# - `console/backend` 是同仓库中的辅助后端
+# - `console/bff-py` 是同仓库中的控制台 Python BFF（原 console/backend）
 # 因此这里将多个源码根目录一起纳入 lint/format 规则。
 target-version = "py313"
 line-length = 120
-src = ["PrivShield", "tests", "console/backend"]
+src = ["engine", "PrivShield", "tests", "console/bff-py"]
 
 [tool.ruff.lint]
 select = [
@@ -141,8 +141,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "B011"]
-"console/backend/tests/**" = ["S", "B011"]
-"console/backend/app/fixtures/samples.py" = ["E501"]
+"console/bff-py/tests/**" = ["S", "B011"]
+"console/bff-py/app/fixtures/samples.py" = ["E501"]
 "PrivShield/privacy_pb2*.py" = ["E", "F", "N", "UP"]
 "PrivShield/grpc_server.py" = ["N802"]
 "PrivShield/classification_grpc.py" = ["N802"]
@@ -156,8 +156,8 @@ indent-style = "space"
 
 # ── mypy ─────────────────────────────────────────────────────
 [tool.mypy]
-# 这里同样覆盖 `console/backend`，因为它共享一部分仓库级约束和公共代码风格。
-# 统一检查可以减少主包与控制台后端之间的接口漂移。
+# 这里同样覆盖 `console/bff-py`，因为它共享一部分仓库级约束和公共代码风格。
+# 统一检查可以减少主包与控制台 BFF 之间的接口漂移。
 # python_version 与运行时下限（requires-python >=3.13）保持一致；
 # 3.13 同样兼容 numpy 2.x stub 中的 PEP 695 type 语句。
 python_version = "3.13"
@@ -168,17 +168,22 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 ignore_missing_imports = true
 implicit_optional = true
-files = ["PrivShield", "console/backend", "tests"]
+files = ["PrivShield", "console/bff-py", "tests"]
 exclude = [
     "PrivShield/privacy_pb2.*",
     "PrivShield/privacy_pb2_grpc.*",
-    "console/backend/tests",
+    "console/bff-py/tests",
 ]
 
 [[tool.mypy.overrides]]
 # protobuf 生成模块的属性 mypy 无法识别（生成的描述符动态注入），
 # 直接跳过对这两个模块的导入分析，避免从它们导入的模块产生大量 has no attribute 错误。
-module = ["PrivShield.privacy_pb2", "PrivShield.privacy_pb2_grpc"]
+module = [
+    "PrivShield.privacy_pb2",
+    "PrivShield.privacy_pb2_grpc",
+    "engine.privacy_pb2",
+    "engine.privacy_pb2_grpc",
+]
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
@@ -190,7 +195,7 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 # privacy/dp.py 包含大量 scipy sparse / numpy ndarray 类型推断与 Union 分发问题，
 # 短期内难以逐项修复，先忽略以解决 numpy 2.x stub 兼容的阻塞问题。
-module = ["PrivShield.privacy.dp"]
+module = ["PrivShield.privacy.dp", "engine.privacy.dp"]
 ignore_errors = true
 
 # ── pytest + coverage ────────────────────────────────────────
@@ -205,12 +210,18 @@ markers = [
 addopts = "-q --tb=short"
 
 [tool.coverage.run]
-source = ["PrivShield"]
+source = ["engine", "PrivShield"]
 omit = [
+    "engine/privacy_pb2*",
+    "engine/privacy_pb2_grpc*",
     "PrivShield/privacy_pb2*",
     "PrivShield/privacy_pb2_grpc*",
     "*/tests/*",
     # 进程入口 / 模型下载脚本：仅含启动与网络下载逻辑，无法在单测中覆盖
+    "engine/server.py",
+    "engine/gateway/server.py",
+    "engine/privacy/download_model.py",
+    "engine/privacy/download_ner_model.py",
     "PrivShield/server.py",
     "PrivShield/gateway/server.py",
     "PrivShield/privacy/download_model.py",

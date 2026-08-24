@@ -54,16 +54,16 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/console/pkg/middleware"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/fileparse"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/lbtest"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/mapper"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/models"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/samples"
-	pb "github.com/fengzhizi319/PrivShield/console/backend-go/proto"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/middleware"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/agent"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/config"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/fileparse"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/lbtest"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/mapper"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/models"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/samples"
+	pb "github.com/fengzhizi319/PrivShield/console/bff-go/proto"
 )
 
 // 本控制台后端的身份标识常量，随每个响应下发给前端。
@@ -414,7 +414,7 @@ func agentRestBaseURL() string {
 
 // extractRestErrorDetail 从上游错误响应体中提取可读的错误描述。
 // 优先取 JSON 体中的 detail 字段（FastAPI 规范，对齐 Python 后端
-// console/backend/app/client.py 的 _extract_detail 行为）；
+// console/bff-py/app/client.py 的 _extract_detail 行为）；
 // 非 JSON 或无 detail 字段时降级为截断后的原始文本，避免把整段
 // HTML/堆栈塞进响应 detail。
 func extractRestErrorDetail(body []byte, statusCode int) string {

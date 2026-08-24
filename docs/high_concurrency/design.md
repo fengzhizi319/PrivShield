@@ -1540,5 +1540,5 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 ### 14.4 差分隐私 (DP) 批量扣减异常契约与分位数算法优化
 - **`BatchedBudgetSpend`**：在 `_SpendFuture.result()` 中保持原始 `PrivacyBudgetExhaustedError` 异常对象的传递，保障领域异常契约一致。
-- **控制台分位数插值**：`console/backend` 压测端点采用双向线性插值算法（Linear Interpolation），使并发压测出的 P50 / P95 / P99 表现更加精确平滑。
+- **控制台分位数插值**：`console/bff-py` 压测端点采用双向线性插值算法（Linear Interpolation），使并发压测出的 P50 / P95 / P99 表现更加精确平滑。
 

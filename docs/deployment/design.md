@@ -704,7 +704,7 @@ Docker Compose 2.x 的 `pull_policy` 默认值为 `missing`。如果服务指定
    ```yaml
    console-backend-python:
      build:
-       context: ../../console/backend
+       context: ../../console/bff-py
        dockerfile: Dockerfile
      image: privacy-console-backend-python:0.1.0
      pull_policy: build  # 强制本地构建，禁止向远程 Registry 拉取未推送 Tag

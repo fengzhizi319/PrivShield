@@ -3,7 +3,7 @@
 ## 1. 运行全部测试
 
 ```bash
-cd console/backend-go
+cd console/bff-go
 
 go test ./...
 ```
@@ -73,7 +73,7 @@ Go 代理默认会连接 `127.0.0.1:50051`。
 ### 运行集成测试
 
 ```bash
-cd console/backend-go
+cd console/bff-go
 go test ./tests -v
 ```
 
@@ -104,19 +104,18 @@ go test ./tests -v
 如果修改了 `proto/privacy.proto`，需要重新生成 Go 代码：
 
 ```bash
-cd console/backend-go
+cd console/bff-go
 
 protoc \
-  -I ../backend/proto \
+  -I ../../proto \
   --go_out=./proto \
   --go_opt=paths=source_relative \
   --go-grpc_out=./proto \
   --go-grpc_opt=paths=source_relative \
-  ../backend/proto/privacy.proto
+  ../../proto/privacy.proto
 ```
 
-> 注意：上述命令假设 Python 后端的 proto 文件位于 `console/backend/proto/privacy.proto`。
-> 实际路径可能为 `proto/privacy.proto`（项目根目录），请根据仓库结构调整 `-I` 参数。
+> 注意：proto 定义文件位于仓库根目录 `proto/privacy.proto`，请根据仓库结构调整 `-I` 参数。
 
 或者使用 `go generate`（如果已配置）：
 
@@ -136,7 +135,7 @@ go test ./...
 ## 6. 构建检查
 
 ```bash
-cd console/backend-go
+cd console/bff-go
 
 go build ./cmd/server
 ```
@@ -153,7 +152,7 @@ go test ./...
 启动 Go gRPC 代理后端：
 
 ```bash
-cd console/backend-go
+cd console/bff-go
 go run ./cmd/server
 ```
 

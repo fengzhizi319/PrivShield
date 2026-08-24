@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store/sqlite"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
 )
 
 // openTestDB creates a temporary SQLite database for testing.

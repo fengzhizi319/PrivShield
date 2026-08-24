@@ -15,7 +15,7 @@
 ### 开发模式
 
 ```bash
-cd console/service-hub
+cd services/service-hub
 bash run.sh
 ```
 
@@ -47,8 +47,11 @@ make test
 
 ### Docker
 
+构建上下文为仓库根目录（需复制共享库 `pkg/`）：
+
 ```bash
-docker build -t privshield-service-hub .
+# 在仓库根目录执行
+docker build -f services/service-hub/Dockerfile -t privshield-service-hub .
 docker run -p 8082:8082 -e PRIVACY_AGENT_REST_HOST=host.docker.internal privshield-service-hub
 ```
 

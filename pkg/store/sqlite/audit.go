@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
 )
 
 // AuditStore implements store.AuditStore backed by SQLite.

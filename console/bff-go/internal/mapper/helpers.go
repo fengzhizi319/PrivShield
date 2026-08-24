@@ -20,7 +20,7 @@ import (
 
 	// pb：由 proto/privacy.proto 生成的 gRPC 代码（RecordEntry/DoubleChunk/StringChunk 等消息类型）
 	// pb: generated gRPC code from proto/privacy.proto (RecordEntry/DoubleChunk/StringChunk message types)
-	pb "github.com/fengzhizi319/PrivShield/console/backend-go/proto"
+	pb "github.com/fengzhizi319/PrivShield/console/bff-go/proto"
 )
 
 // ---------------------------------------------------------------------------

@@ -1,13 +1,13 @@
-module github.com/fengzhizi319/PrivShield/console/datasource-mgr
+module github.com/fengzhizi319/PrivShield/services/datasource-mgr
 
 go 1.27.0
 
 require (
-	github.com/fengzhizi319/PrivShield/console/pkg v0.0.0
+	github.com/fengzhizi319/PrivShield/pkg v0.0.0
 	github.com/gin-gonic/gin v1.12.0
 )
 
-replace github.com/fengzhizi319/PrivShield/console/pkg => ../../pkg
+replace github.com/fengzhizi319/PrivShield/pkg => ../../pkg
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

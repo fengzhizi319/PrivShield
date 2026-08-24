@@ -6,3 +6,10 @@
 Root package of the PrivShield, exposing REST/gRPC entrypoints
 and privacy primitives such as DP, K-anonymity, masking and query obfuscation.
 """
+
+import sys
+
+# 向后兼容别名：允许既有代码通过 import PrivShield 继续访问
+if "PrivShield" not in sys.modules:
+    sys.modules["PrivShield"] = sys.modules[__name__]
+

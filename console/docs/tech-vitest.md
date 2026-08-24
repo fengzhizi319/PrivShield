@@ -532,7 +532,7 @@ export default defineWorkspace([
   {
     test: {
       name: 'backend',
-      root: './console/backend',
+      root: './console/bff-py',
       environment: 'node',
     },
   },
@@ -1500,7 +1500,7 @@ jobs:
       
       - name: Start backend
         run: |
-          cd console/backend
+          cd console/bff-py
           pip install -r requirements.txt
           python -m uvicorn app.main:app --port 8080 &
       

@@ -1,6 +1,6 @@
-module github.com/fengzhizi319/PrivShield/console/pkg
+module github.com/fengzhizi319/PrivShield/pkg
 
-go 1.25.0
+go 1.27.0
 
 require (
 	github.com/gin-gonic/gin v1.12.0

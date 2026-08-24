@@ -67,18 +67,18 @@ corepack pnpm build
 
 | 微服务 | 技术栈 | 默认端口 | 职责 |
 |---|---|---|---|
-| `console/backend` | Python FastAPI | `8080` | REST 代理网关，支持 Arrow IPC 解码与 Python 同构模型 |
-| `console/backend-go` | Go + Gin | `8081` | gRPC 代理网关，高性能 HTTP/2 多路复用，支持独立托管 Web SPA |
-| `console/service-hub` | Go + Gin + gRPC | `8082` (HTTP) / `50052` (gRPC) | 6 阶段数据治理调度中枢（接入/取数/分类/脱敏/返回/存证） |
-| `console/datasource-mgr`| Go + Gin | `8083` | 多源异构数据源接入、连通性探测、元数据智能分类打标与访问审计 |
-| `console/audit-log` | Go + Gin | `8084` | 治理事件存证、8 要素 SHA-256 防篡改快照与 SQL 级合规报告 |
-| `console/pkg` | Go Package | — | 共享基础包（SQLite/Memory 存储引擎、安全中间件链、Prometheus 指标、熔断客户端） |
+| `console/bff-py` | Python FastAPI | `8080` | REST 代理网关，支持 Arrow IPC 解码与 Python 同构模型 |
+| `console/bff-go` | Go + Gin | `8081` | gRPC 代理网关，高性能 HTTP/2 多路复用，支持独立托管 Web SPA |
+| `services/service-hub` | Go + Gin + gRPC | `8082` (HTTP) / `50052` (gRPC) | 6 阶段数据治理调度中枢（接入/取数/分类/脱敏/返回/存证） |
+| `services/datasource-mgr`| Go + Gin | `8083` | 多源异构数据源接入、连通性探测、元数据智能分类打标与访问审计 |
+| `services/audit-log` | Go + Gin | `8084` | 治理事件存证、8 要素 SHA-256 防篡改快照与 SQL 级合规报告 |
+| `pkg`（仓库根） | Go Package | — | 共享基础包（SQLite/Memory 存储引擎、安全中间件链、Prometheus 指标、熔断客户端） |
 
 ### 3.1 代理网关 (Python / Go)
 
 #### 开发模式
-- **Python 后端**：`cd console/backend && ./run.sh`（`uvicorn --reload`，改动热重载）。
-- **Go 后端**：`cd console/backend-go && go run ./cmd/server`（快速编译启动，直连 Agent gRPC）。
+- **Python 后端**：`cd console/bff-py && ./run.sh`（`uvicorn --reload`，改动热重载）。
+- **Go 后端**：`cd console/bff-go && go run ./cmd/server`（快速编译启动，直连 Agent gRPC）。
 
 #### 商业化产品模式
 - **Python 后端**：多 Worker 容器化运行，关闭 reload，挂载生产 Secret。
@@ -133,7 +133,7 @@ python -m PrivShield.server
 最常见的本地联调组合是：
 
 - 前端：`console/web` + Vite dev server
-- 后端：`console/backend`（带 reload）或 `console/backend-go`（手动重启）
+- 后端：`console/bff-py`（带 reload）或 `console/bff-go`（手动重启）
 - agent：本机 `PrivShield.server`
 
 适用场景：
@@ -192,8 +192,8 @@ python -m PrivShield.server
 
 ## 7. 与现有文档的关系
 
-- Python 后端的详细运维说明：`console/backend/docs/ops.md`
-- Go 后端的详细运维说明：`console/backend-go/docs/ops.md`
+- Python 后端的详细运维说明：`console/bff-py/docs/ops.md`
+- Go 后端的详细运维说明：`console/bff-go/docs/ops.md`
 - 本文档：从“整条链路”角度说明前端、后端、agent 的模式差异
 
 如果你只想看某一个组件的启动、CORS 或 mTLS 细节，优先阅读对应的 `ops.md`；如果你想先理解整个 console 在不同模式下该怎么组合，优先阅读本文。

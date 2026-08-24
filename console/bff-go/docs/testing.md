@@ -12,14 +12,14 @@
 
 | 层次 | 工具 | 是否依赖真实 agent | 位置 |
 |---|---|---|---|
-| 单元测试 | `pytest` + `fastapi.testclient.TestClient` + `unittest.mock` | 否（mock `agent_client.request`） | `console/backend/tests/test_routes.py` |
-| 冒烟测试 | `httpx`（真实 HTTP 调用） | 是（需 agent + 后端运行） | `console/backend/smoke_test.py` |
+| 单元测试 | `pytest` + `fastapi.testclient.TestClient` + `unittest.mock` | 否（mock `agent_client.request`） | `console/bff-py/tests/test_routes.py` |
+| 冒烟测试 | `httpx`（真实 HTTP 调用） | 是（需 agent + 后端运行） | `console/bff-py/smoke_test.py` |
 
 **关键设计**：单元测试通过 `AsyncMock` 对模块级单例 `app.main.agent_client.request` 打桩，完全隔离对真实 agent 的依赖，可在 CI 中快速、稳定地运行。
 
 ## 2. 单元测试用例说明
 
-测试文件 `console/backend/tests/test_routes.py` 覆盖以下场景：
+测试文件 `console/bff-py/tests/test_routes.py` 覆盖以下场景：
 
 ### 2.1 `/api/health`
 
@@ -49,7 +49,7 @@
 
 ## 3. 冒烟测试说明
 
-`console/backend/smoke_test.py` 遍历 `get_samples()` 返回的全部示例端点，通过后端代理**真实**发送请求并统计成功 / 失败 / 跳过：
+`console/bff-py/smoke_test.py` 遍历 `get_samples()` 返回的全部示例端点，通过后端代理**真实**发送请求并统计成功 / 失败 / 跳过：
 
 - 需要 agent 与控制台后端均已启动；
 - 需预存资源的端点（如异步任务查询、复核确认）会被自动跳过；
@@ -60,7 +60,7 @@
 ### 4.1 运行单元测试
 
 ```bash
-cd console/backend
+cd console/bff-py
 source .venv/bin/activate
 pytest tests -v
 ```
@@ -84,7 +84,7 @@ tests/test_routes.py::test_proxy_upstream_error PASSED
 ./console/scripts/dev-start.sh
 
 # 另一终端
-cd console/backend
+cd console/bff-py
 source .venv/bin/activate
 python smoke_test.py
 ```
@@ -94,8 +94,8 @@ python smoke_test.py
 单元测试不依赖外部服务，可直接纳入 CI：
 
 ```bash
-pip install -r console/backend/requirements.txt
-pytest console/backend/tests -q
+pip install -r console/bff-py/requirements.txt
+pytest console/bff-py/tests -q
 ```
 
 ## 5. 测试覆盖建议

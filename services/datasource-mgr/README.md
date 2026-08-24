@@ -16,7 +16,7 @@
 ### 开发模式
 
 ```bash
-cd console/datasource-mgr
+cd services/datasource-mgr
 bash run.sh
 ```
 
@@ -46,8 +46,11 @@ make test
 
 ### Docker
 
+构建上下文为仓库根目录（需复制共享库 `pkg/`）：
+
 ```bash
-docker build -t privshield-datasource-mgr .
+# 在仓库根目录执行
+docker build -f services/datasource-mgr/Dockerfile -t privshield-datasource-mgr .
 docker run -p 8083:8083 -e PRIVACY_AGENT_REST_HOST=host.docker.internal privshield-datasource-mgr
 ```
 

@@ -28,7 +28,7 @@ Gin is the most popular HTTP web framework in the Go ecosystem, known for high p
 console/
 ├── go.work                     # Go 工作区定义 (包含 pkg, backend-go, service-hub, datasource-mgr, audit-log)
 │
-├── pkg/                        # 共享基础公共库 (github.com/fengzhizi319/PrivShield/console/pkg)
+├── pkg/                        # 共享基础公共库 (github.com/fengzhizi319/PrivShield/pkg)
 │   ├── store/                  # 存储接口 (TaskStore, DataSourceStore, AuditStore)
 │   │   ├── memory/             # 内存安全存储实现 (RWMutex, 切片边界保护)
 │   │   └── sqlite/             # SQLite 纯 Go WAL 持久化驱动 (modernc.org/sqlite)
@@ -62,7 +62,7 @@ console/
 
 ### 2.2 服务启动 / Server Startup
 
-文件 / File：`console/backend-go/cmd/server/main.go`
+文件 / File：`console/bff-go/cmd/server/main.go`
 
 ```go
 // 加载环境变量配置 / Load environment variable config
@@ -494,7 +494,7 @@ SIGINT/SIGTERM 信号 / Signal received
 ### 5.1 go.mod 解析 / go.mod Analysis
 
 ```go
-// console/backend-go/go.mod
+// console/bff-go/go.mod
 module privacy-console-go          // 模块路径 / Module path
 
 go 1.21                            // 最低 Go 版本 / Minimum Go version
@@ -618,7 +618,7 @@ func TestIsUnavailable(t *testing.T) {
 
 ```bash
 # 运行所有测试 / Run all tests
-cd console/backend-go && go test ./...
+cd console/bff-go && go test ./...
 
 # 运行特定包测试 / Run specific package tests
 go test ./internal/mapper/ -v
@@ -639,7 +639,7 @@ go test ./... -race
 ### 7.1 Makefile 解析 / Makefile Analysis
 
 ```makefile
-# console/backend-go/Makefile
+# console/bff-go/Makefile
 BINARY := privacy-console-go
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"

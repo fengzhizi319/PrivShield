@@ -3,7 +3,7 @@
 ## 1. 运行全部单元测试
 
 ```bash
-cd console/backend
+cd console/bff-py
 source .venv/bin/activate          # 或使用 .venv/bin/python -m pytest
 pytest tests -q
 ```
@@ -81,7 +81,7 @@ cd /path/to/PrivShield
 python -m PrivShield.server
 
 # 终端二：启动后端
-cd console/backend
+cd console/bff-py
 source .venv/bin/activate
 ./run.sh
 ```
@@ -89,7 +89,7 @@ source .venv/bin/activate
 ### 运行
 
 ```bash
-cd console/backend
+cd console/bff-py
 source .venv/bin/activate
 python smoke_test.py
 ```
@@ -105,7 +105,7 @@ python smoke_test.py
 ### 启动后端
 
 ```bash
-cd console/backend
+cd console/bff-py
 ./run.sh        # 等价于 uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
 ```
 

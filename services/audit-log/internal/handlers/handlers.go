@@ -12,13 +12,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/console/pkg/middleware"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
-	"github.com/fengzhizi319/PrivShield/console/pkg/validation"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/middleware"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/validation"
 
-	"github.com/fengzhizi319/PrivShield/console/audit-log/internal/agent"
-	"github.com/fengzhizi319/PrivShield/console/audit-log/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/agent"
+	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/config"
 )
 
 const moduleVia = "audit-log"

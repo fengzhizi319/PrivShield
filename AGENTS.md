@@ -355,7 +355,7 @@ Address these before any hardened production deployment.
 | Run Dev 3 New Modules (Agent required) | `bash ./console/scripts/dev-start-new-modules.sh` |
 | Stop 3 New Modules | `bash ./console/scripts/dev-stop-new-modules.sh` |
 | Run Integration Test (curl-based) | `bash ./console/scripts/integration-test-new-modules.sh` |
-| Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./console/service-hub/internal/handlers/` |
+| Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` |
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
 | Run Docker Console (Go Backend + Web) | `bash ./console/scripts/docker-start-go.sh` |
@@ -371,7 +371,7 @@ Address these before any hardened production deployment.
 | Stop Dev Console | `bash ./console/scripts/dev-stop.sh` |
 | Stop Prod Console | `bash ./console/scripts/prod-stop.sh` |
 | Run REST + gRPC | `python -m PrivShield.server` |
-| Run test console backend | `cd console/backend && ./run.sh` |
+| Run test console backend | `cd console/bff-py && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |
 | Run gateway | `python -m PrivShield.gateway.server` |
 | Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=PrivShield --grpc_python_out=PrivShield proto/privacy.proto` |

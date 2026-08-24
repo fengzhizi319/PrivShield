@@ -3,7 +3,7 @@
 # Generate mTLS test certificate chain for service-hub gRPC server.
 # 为 service-hub gRPC 服务端生成 mTLS 测试证书链。
 #
-# Generated files (default output: console/service-hub/certs/) / 生成的文件：
+# Generated files (default output: services/service-hub/certs/) / 生成的文件：
 #   ca.crt / ca.key                 Trusted root CA
 #                                   受信任根 CA
 #   server.crt / server.key         Server cert (SAN: localhost/127.0.0.1)

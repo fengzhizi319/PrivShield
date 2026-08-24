@@ -5,7 +5,7 @@ Python FastAPI 代理服务，用于转发请求到 `PrivShield` 并提供示例
 ## 运行
 
 ```bash
-cd console/backend
+cd console/bff-py
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -15,7 +15,7 @@ pip install -r requirements.txt
 ## 单元测试
 
 ```bash
-cd console/backend
+cd console/bff-py
 source .venv/bin/activate
 pip install -r requirements.txt  # 已包含 pytest 所需依赖
 pytest tests -v

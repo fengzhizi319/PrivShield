@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
 )
 
 // SeedMockDataSources initializes the two mock CSV data sources (yibao.csv & kangyang.csv).

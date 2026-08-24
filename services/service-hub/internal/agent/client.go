@@ -8,8 +8,8 @@ package agent
 import (
 	"context"
 
-	pkgagent "github.com/fengzhizi319/PrivShield/console/pkg/agent"
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
 )
 
 // Client wraps the shared agent client with service-hub-specific endpoints.

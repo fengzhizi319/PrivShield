@@ -214,7 +214,7 @@ log_info "║  datasource-mgr    → http://127.0.0.1:8083  (数据源管理)   
 log_info "║  audit-log         → http://127.0.0.1:8084  (审计日志)       ║"
 log_info "╠══════════════════════════════════════════════════════════════╣"
 log_info "║  Run E2E tests:                                              ║"
-log_info "║    cd console/service-hub && go test -v -run TestRealE2E     ║"
+log_info "║    cd services/service-hub && go test -v -run TestRealE2E     ║"
 log_info "║  Stop all:                                                   ║"
 log_info "║    bash console/scripts/e2e-stop-all-services.sh             ║"
 log_info "╚══════════════════════════════════════════════════════════════╝"

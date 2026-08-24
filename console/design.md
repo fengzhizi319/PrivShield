@@ -91,9 +91,9 @@ flowchart LR
 | 负载均衡网关 | LbTest / ConcurrencyTestPanel | ✅ 已覆盖 |
 | 运维诊断 | OpsPanel | ⚠️ 部分覆盖（偏通用运维，缺少审计专项） |
 | 国密 VPN 专线网关 | 无 | ❌ 缺失 |
-| 数联数据服务 S（调度中枢） | `console/service-hub` (Go/Gin) | ✅ 已实现 |
-| 原始数据库 D（数据源管理） | `console/datasource-mgr` (Go/Gin) | ✅ 已实现 |
-| 脱敏审计日志服务器 L | `console/audit-log` (Go/Gin) | ✅ 已实现 |
+| 数联数据服务 S（调度中枢） | `services/service-hub` (Go/Gin) | ✅ 已实现 |
+| 原始数据库 D（数据源管理） | `services/datasource-mgr` (Go/Gin) | ✅ 已实现 |
+| 脱敏审计日志服务器 L | `services/audit-log` (Go/Gin) | ✅ 已实现 |
 | 隐私预算管控 | Budget 端点测试（仅单点查询） | ❌ 缺失仪表盘 |
 | 个性化隐私配置管理 | Profile 端点测试（仅单点推荐） | ❌ 缺失配置管理 |
 
@@ -238,7 +238,7 @@ design.md 架构组件              →  Console 模块
 
 ## 三个新模块实现概要
 
-### 模块 1：数据服务调度中枢 (`console/service-hub`)
+### 模块 1：数据服务调度中枢 (`services/service-hub`)
 
 | 属性 | 值 |
 |---|---|
@@ -257,7 +257,7 @@ design.md 架构组件              →  Console 模块
 - L4 (秘密) → 差分隐私 (dp)
 - L5 (绝密) → 差分隐私 + 完全匿名 (dp)
 
-### 模块 2：数据源管理 (`console/datasource-mgr`)
+### 模块 2：数据源管理 (`services/datasource-mgr`)
 
 | 属性 | 值 |
 |---|---|
@@ -267,7 +267,7 @@ design.md 架构组件              →  Console 模块
 | 核心 API | `CRUD /api/datasources`、`POST /api/datasources/:id/test` 连通性测试、`GET /api/datasources/:id/metadata` 元数据（含分级标签） |
 | 部署 | Dockerfile + Docker Compose `datasource-mgr` 服务 |
 
-### 模块 3：脱敏审计日志 (`console/audit-log`)
+### 模块 3：脱敏审计日志 (`services/audit-log`)
 
 | 属性 | 值 |
 |---|---|
@@ -296,7 +296,7 @@ docker compose up -d
 
 ---
 
-## 共享基础库 `console/pkg/` 架构设计
+## 共享基础库 `pkg/` 架构设计
 
 ### 设计动机
 
@@ -317,7 +317,7 @@ docker compose up -d
 ### 目录结构
 
 ```
-console/pkg/
+pkg/
 ├── agent/           # 共享 Agent HTTP Client（含熔断器）
 │   ├── client.go    # 292 行：GET/POST/Health + Circuit Breaker
 │   └── client_test.go  # 322 行：14 个测试
@@ -353,19 +353,19 @@ console/pkg/
 ### Go Workspace 管理
 
 ```text
-console/go.work
-├── ./pkg            # 共享基础库（独立 module）
-├── ./backend-go     # Go gRPC 代理后端
-├── ./service-hub    # 数据服务调度中枢
-├── ./datasource-mgr # 数据源管理
-└── ./audit-log      # 脱敏审计日志
+go.work（仓库根目录）
+├── ./pkg                    # 共享基础库（独立 module）
+├── ./console/bff-go         # Go gRPC 控制台 BFF（原 backend-go）
+├── ./services/service-hub   # 数据服务调度中枢
+├── ./services/datasource-mgr # 数据源管理
+└── ./services/audit-log     # 脱敏审计日志
 ```
 
-各业务模块通过 `go.mod` 中的 `replace` 指令引用本地 `../pkg`：
+各业务模块通过 `go.mod` 中的 `replace` 指令引用本地 `../../pkg`：
 
 ```go
-require github.com/fengzhizi319/PrivShield/console/pkg v0.0.0
-replace github.com/fengzhizi319/PrivShield/console/pkg => ../pkg
+require github.com/fengzhizi319/PrivShield/pkg v0.0.0
+replace github.com/fengzhizi319/PrivShield/pkg => ../../pkg
 ```
 
 ### 核心组件详解

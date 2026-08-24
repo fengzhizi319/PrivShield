@@ -23,14 +23,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/console/pkg/middleware"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
-	"github.com/fengzhizi319/PrivShield/console/pkg/validation"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/middleware"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/validation"
 
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/agent"
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/models"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/models"
 )
 
 const moduleVia = "service-hub"

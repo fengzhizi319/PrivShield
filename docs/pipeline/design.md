@@ -2,7 +2,7 @@
 
 > **文档版本**: 1.1 (已实操落盘与全栈贯通)  
 > **关联文档**: [`docs/pipeline/prd.md`](prd.md)  
-> **关键组件**: `scripts/data/generate_medical_data.py`, `PrivShield/pipeline`, `PrivShield/medical_pipeline`, `console/backend`, `console/backend-go`, `console/web`
+> **关键组件**: `scripts/data/generate_medical_data.py`, `PrivShield/pipeline`, `PrivShield/medical_pipeline`, `console/bff-py`, `console/bff-go`, `console/web`
 
 ---
 
@@ -111,7 +111,7 @@ class PipelineResult(BaseModel):
 
 ## 4. 双后端代理与全栈集成
 
-### 4.1 Python 后端 (`console/backend`)
+### 4.1 Python 后端 (`console/bff-py`)
 - 扩展 `console/backend/app/main.py`:
   - `POST /api/pipeline/process`
   - `POST /api/medical_pipeline`

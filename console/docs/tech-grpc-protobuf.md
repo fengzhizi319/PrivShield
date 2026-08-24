@@ -28,14 +28,14 @@ Protocol Buffers is Google's language-neutral, platform-neutral serialization da
 ```
 1. 核心原语调用链路：
    React 前端 ──HTTP/JSON──▶ Go 代理网关(Gin) ──gRPC/protobuf──▶ Python Agent(FastAPI+gRPC)
-                             console/backend-go                     PrivShield (:50051)
+                             console/bff-go                       PrivShield (:50051)
 
 2. 调度中枢高性能服务链路：
    外部高并发客户端 ──gRPC/mTLS (公钥固定)──▶ 调度中枢 gRPC 服务 (ServiceHubService)
-                                               console/service-hub (:50052)
+                                               services/service-hub (:50052)
 ```
 
-- **Go 代理网关 (`backend-go`)** 作为“协议转换客户端”：前端发送 HTTP/JSON → Go 后端解析 → 构造 protobuf 消息 → gRPC 调用 → 解析响应 → 返回 JSON。
+- **Go 代理网关 (`bff-go`)** 作为“协议转换客户端”：前端发送 HTTP/JSON → Go 后端解析 → 构造 protobuf 消息 → gRPC 调用 → 解析响应 → 返回 JSON。
 - **调度中枢 (`service-hub`)** 作为“高性能 gRPC 服务端”：对外暴露 `ServiceHubService`，支持金融级 mTLS 双向证书校验与客户端公钥指纹固定（Public Key Pinning）。
 
 ### 2.2 Proto 定义 / Proto Definition
@@ -55,7 +55,7 @@ service PrivacyService {
 }
 ```
 
-#### (2) 调度中枢服务：`console/service-hub/proto/servicehub.proto`
+#### (2) 调度中枢服务：`services/service-hub/proto/servicehub.proto`
 
 ```protobuf
 service ServiceHubService {
@@ -71,7 +71,7 @@ service ServiceHubService {
 
 ### 2.3 客户端连接管理 / Client Connection Management
 
-文件 / File：`console/backend-go/internal/agent/client.go`
+文件 / File：`console/bff-go/internal/agent/client.go`
 
 ```go
 func New(cfg *config.Config) (*Client, error) {
@@ -93,7 +93,7 @@ func New(cfg *config.Config) (*Client, error) {
 
 ### 2.4 REST → gRPC 路由映射 / REST → gRPC Route Mapping
 
-文件 / File：`console/backend-go/internal/mapper/mapper.go`
+文件 / File：`console/bff-go/internal/mapper/mapper.go`
 
 ```go
 // 分发表：REST 路径 → gRPC handler / Dispatch table: REST path → gRPC handler
@@ -132,13 +132,13 @@ func (c *Client) WithAuth(ctx context.Context) context.Context {
 protoc --go_out=. --go-grpc_out=. proto/privacy.proto
 
 # 生成的文件 / Generated files:
-# console/backend-go/proto/privacy.pb.go       → 消息类型 / Message types
-# console/backend-go/proto/privacy_grpc.pb.go  → 服务接口 / Service interfaces
+# console/bff-go/proto/privacy.pb.go       → 消息类型 / Message types
+# console/bff-go/proto/privacy_grpc.pb.go  → 服务接口 / Service interfaces
 ```
 
 ### 2.7 mTLS 双向认证详解 / mTLS Mutual Authentication Details
 
-文件 / File：`console/backend-go/internal/agent/client.go`
+文件 / File：`console/bff-go/internal/agent/client.go`
 
 本项目支持完整的 mTLS（双向 TLS）认证，确保客户端与服务端互相验证身份：
 This project supports full mTLS (mutual TLS) authentication, ensuring client and server verify each other:
@@ -187,7 +187,7 @@ mTLS 环境变量配置 / mTLS Environment Variable Configuration：
 | `PRIVACY_AGENT_TLS_SERVER_NAME` | 覆盖服务端主机名校验 / Override server hostname verification |
 | `PRIVACY_AGENT_TLS_INSECURE_SKIP_VERIFY` | 跳过证书校验（仅测试）/ Skip cert verify (test only) |
 
-证书生成工具 / Certificate Generation Tool：`console/backend-go/scripts/gen-certs.sh`
+证书生成工具 / Certificate Generation Tool：`console/bff-go/scripts/gen-certs.sh`
 
 ### 2.8 连接保活与重连 / Connection Keepalive & Reconnect
 
@@ -1152,7 +1152,7 @@ def create_secure_server(
 
 ```bash
 # 本项目提供的证书生成脚本 / Project cert generation script
-# console/backend-go/scripts/gen-certs.sh
+# console/bff-go/scripts/gen-certs.sh
 
 # 1. 生成 CA / Generate CA
 openssl req -x509 -newkey rsa:4096 -days 365 -nodes \

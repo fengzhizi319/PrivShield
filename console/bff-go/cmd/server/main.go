@@ -29,12 +29,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	pkgconfig "github.com/fengzhizi319/PrivShield/console/pkg/config"
-	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
+	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/agent"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/handlers"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/agent"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/config"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/handlers"
 )
 
 // main 是程序入口函数，按以下步骤顺序执行：

@@ -1,6 +1,6 @@
 # 测试控制台后端（Python）API 参考
 
-本文档描述控制台 Python 后端（`console/backend`）对外提供的全部 REST 接口、请求/响应数据模型与环境变量配置。
+本文档描述控制台 Python 后端（`console/bff-py`）对外提供的全部 REST 接口、请求/响应数据模型与环境变量配置。
 
 - **默认基址**：`http://127.0.0.1:8080`
 - **数据格式**：除静态资源外，全部为 `application/json`
@@ -205,7 +205,7 @@ curl -X POST http://127.0.0.1:8080/api/batch \
 
 ## 8. 与 Go 后端的差异
 
-控制台另有 Go gRPC 代理后端（`console/backend-go`，默认 `8081`），接口契约（`/api/health` / `/api/samples` / `/api/proxy` / `/api/batch`）与本文档保持一致，差异在于：
+控制台另有 Go gRPC 代理后端（`console/bff-go`，默认 `8081`），接口契约（`/api/health` / `/api/samples` / `/api/proxy` / `/api/batch`）与本文档保持一致，差异在于：
 
 - Go 后端把请求转换为 **gRPC** 调用转发给 agent；
 - 部分 REST 专属端点（如 `/livez`、`/v1/privacy/dp/arrow_ipc`）仅在 Python 后端可用，示例数据中以 `backend` 字段（`rest` / `both`）标识。

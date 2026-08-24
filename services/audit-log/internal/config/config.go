@@ -4,7 +4,7 @@ package config
 import (
 	"strconv"
 
-	pkgconfig "github.com/fengzhizi319/PrivShield/console/pkg/config"
+	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 )
 
 // Config holds all runtime configuration for the audit-log server.

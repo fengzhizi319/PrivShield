@@ -17,8 +17,8 @@
 # 启用严格模式：遇错退出、未定义变量报错、管道失败报错
 set -euo pipefail
 
-# Change to script directory (console/backend/)
-# 切换到脚本所在目录（console/backend/）
+# Change to script directory (console/bff-py/)
+# 切换到脚本所在目录（console/bff-py/）
 cd "$(dirname "$0")"
 
 # Read listen host from env, default to 127.0.0.1

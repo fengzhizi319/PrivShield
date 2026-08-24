@@ -51,7 +51,7 @@ console/pkg/
 ├── validation/             # 输入安全校验与工具函数
 │   ├── validation.go       # AllowedValues, PortRange, GenerateID, ParsePagination
 │   └── validation_test.go
-├── go.mod                  # github.com/fengzhizi319/PrivShield/console/pkg
+├── go.mod                  # github.com/fengzhizi319/PrivShield/pkg
 └── go.sum
 ```
 

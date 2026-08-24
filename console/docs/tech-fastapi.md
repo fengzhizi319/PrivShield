@@ -18,7 +18,7 @@ FastAPI is a modern, high-performance Python web framework for building APIs, ba
 
 ### 2.1 应用创建与生命周期 / App Creation & Lifespan
 
-文件 / File：`console/backend/app/main.py`
+文件 / File：`console/bff-py/app/main.py`
 
 ```python
 from contextlib import asynccontextmanager
@@ -116,7 +116,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 ### 2.7 安全中间件详解 / Security Middleware Details
 
-文件 / File：`console/backend/app/security.py`
+文件 / File：`console/bff-py/app/security.py`
 
 本项目实现了基于 Starlette `BaseHTTPMiddleware` 的安全中间件：
 This project implements a security middleware based on Starlette `BaseHTTPMiddleware`:

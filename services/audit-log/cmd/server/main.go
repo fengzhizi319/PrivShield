@@ -15,15 +15,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	pkgconfig "github.com/fengzhizi319/PrivShield/console/pkg/config"
-	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store/memory"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store/sqlite"
+	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
+	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
 
-	"github.com/fengzhizi319/PrivShield/console/audit-log/internal/agent"
-	"github.com/fengzhizi319/PrivShield/console/audit-log/internal/config"
-	"github.com/fengzhizi319/PrivShield/console/audit-log/internal/handlers"
+	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/agent"
+	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/handlers"
 )
 
 func main() {

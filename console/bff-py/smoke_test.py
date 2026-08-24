@@ -4,7 +4,7 @@
 Prerequisites: backend (8080) and PrivShield must both be running:
 运行前提：后端（8080）与 PrivShield 均已启动：
 
-    cd console/backend
+    cd console/bff-py
     source .venv/bin/activate
     python smoke_test.py
 

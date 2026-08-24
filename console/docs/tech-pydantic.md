@@ -18,7 +18,7 @@ Pydantic is the most popular data validation library for Python, using type hint
 
 ### 2.1 请求/响应模型 / Request/Response Models
 
-文件 / File：`console/backend/app/main.py`
+文件 / File：`console/bff-py/app/main.py`
 
 ```python
 from pydantic import BaseModel, Field
@@ -42,7 +42,7 @@ class LbTestRequest(BaseModel):
 
 ### 2.2 配置管理 / Configuration Management
 
-文件 / File：`console/backend/app/config.py`
+文件 / File：`console/bff-py/app/config.py`
 
 ```python
 from pydantic import Field

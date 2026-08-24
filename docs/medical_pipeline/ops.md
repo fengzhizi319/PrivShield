@@ -27,10 +27,10 @@ python scripts/data/generate_medical_data.py --output tmp/custom_data.csv --coun
 
 ```bash
 # 复制至 Python 后端样例目录
-cp data/kangyang.csv console/backend/samples/kangyang.csv
+cp data/kangyang.csv console/bff-py/samples/kangyang.csv
 
 # 复制至 Go 后端样例目录
-cp data/kangyang.csv console/backend-go/internal/samples/kangyang.csv
+cp data/kangyang.csv console/bff-go/internal/samples/kangyang.csv
 ```
 
 ---
@@ -64,7 +64,7 @@ make run-server
 ### 3.1 启动 Python 控制台后端
 
 ```bash
-cd console/backend
+cd console/bff-py
 ./run.sh
 # 服务监听在 http://127.0.0.1:8000
 ```
@@ -72,7 +72,7 @@ cd console/backend
 ### 3.2 启动 Go 控制台后端
 
 ```bash
-cd console/backend-go
+cd console/bff-go
 go run cmd/server/main.go
 # 服务监听在 http://127.0.0.1:8080
 ```

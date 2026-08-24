@@ -15,11 +15,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store/memory"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
 
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/agent"
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
 )
 
 func init() {

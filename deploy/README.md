@@ -1,140 +1,212 @@
-# 数盾部署与运维编排全景指南 (PrivShield Deployment Guide)
+# PrivShield 部署全景指南（deploy/）
 
-本目录包含 **数联天下 · 数盾 (`PrivShield`)** 全套企业级生产与开发部署编排方案，支持从单机 Docker 极速体验到大规模 Kubernetes 云原生集群部署。
-
----
-
-## 1. 部署形态总览与选型矩阵
-
-| 部署形态 | 目录位置 | 适用场景 | 核心特性 | 快速启动命令 |
-|---|---|---|---|---|
-| **Docker Compose** | [`deploy/docker-compose/`](docker-compose/README.md) | 单机 / 边缘节点 / 开发测试 | 包含 Prod、Dev、Test 三套编排，一键拉起 Agent + BFF + 3大微服务 + Web UI | `bash ./scripts/prod/deploy-docker-compose.sh` |
-| **Kubernetes (原生清单)** | [`deploy/k8s/`](k8s/kustomization.yaml) | 生产私有云 / 自动化运维集群 | Kustomize 声明式编排，运行时解耦部署（Core 与 vLLM 分离） | `bash ./scripts/prod/deploy-k8s.sh` |
-| **Helm Chart** | [`deploy/helm/PrivShield/`](helm/PrivShield/Chart.yaml) | 企业级生产标准交付 / 云原生 PaaS | 模板化参数配置、HPA 弹性扩缩、NetworkPolicy 安全隔离、mTLS 支持 | `bash ./scripts/prod/deploy-helm.sh` |
-| **Prometheus 监控** | [`deploy/prometheus/`](prometheus/prometheus.yml) | 全链路指标采集与告警 | 自动采集 Agent 算力引擎、BFF 代理网关与 3 大中台微服务指标 | `docker compose --profile monitoring up -d` |
-| **Grafana 可视化** | [`deploy/grafana/`](grafana/dashboard.json) | 生产大屏与实时监控看板 | 预置 QPS、P95 延迟、三层漏斗命中率与敏感字段统计大屏 | `http://localhost:3000` (admin/密码) |
+> 本目录汇总了 PrivShield 全栈的所有部署资产：Docker Compose 编排、Helm Chart、
+> 原生 K8s 清单，以及 Prometheus / Grafana 监控配置。本文是部署入口导航，
+> 各部署形态的深度文档见 [`docs/deployment/`](../docs/deployment/)。
 
 ---
 
-## 2. 全栈组件拓扑与端口映射
+## 1. 目录结构总览
 
 ```text
-                                  ┌──────────────────────────┐
-                                  │   Console Web UI         │
-                                  │   (React SPA :5173 / :80)│
-                                  └─────────────┬────────────┘
-                                                │
-                                  ┌─────────────▼────────────┐
-                                  │   Go gRPC BFF 代理网关    │
-                                  │   (:8081 / HTTP/2 多路复用)│
-                                  └─────────────┬────────────┘
-                                                │
-                                  ┌─────────────▼────────────┐
-                                  │   PrivShield Core Agent   │
-                                  │   (REST: 8079 / gRPC: 50051) │
-                                  └─────────────┬────────────┘
-                                                │
-        ┌───────────────────────────────────────┼───────────────────────────────────────┐
-        │                                       │                                       │
-┌───────▼──────────────┐             ┌──────────▼───────────┐                ┌──────────▼───────────┐
-│ Service Hub 调度中枢  │             │ Datasource Mgr 数据源 │                │ Audit Log 审计存证   │
-│ (:8082 调度流水线)   │             │ (:8083 敏感特征探查)  │                │ (:8084 SHA-256 存证) │
-└──────────────────────┘             └──────────────────────┘                └──────────────────────┘
+deploy/
+├── README.md                    # ← 本文件：部署全景导航
+├── docker-compose/              # Docker Compose 编排（单机/演示/开发/生产）
+│   ├── README.md                #   Compose 使用详解（文件矩阵、生产准备、CI 测试）
+│   ├── docker-compose.yml       #   通用全栈编排（本地构建，支持 --profile llm / monitoring）
+│   ├── docker-compose.prod.yml  #   生产编排（纯镜像、TLS、Redis 限流、安全加固）
+│   ├── docker-compose.dev.yml   #   开发联调编排（源码挂载、免鉴权）
+│   ├── docker-compose.test.yml  #   CI 集成测试编排（test-runner 自动冒烟）
+│   ├── .env.prod.example        #   生产环境变量模板（cp 为 .env 后填写）
+│   └── privacy-profile.yaml     #   隐私原语参数 profile（挂载至容器）
+├── helm/PrivShield/             # 生产级 Helm Chart（HPA / PDB / NetworkPolicy / Ingress）
+│   ├── Chart.yaml
+│   ├── values.yaml              #   默认值（开发模式）
+│   ├── values-production.yaml   #   生产覆盖值（2 副本 + TLS + Auth + 限流 + HPA）
+│   ├── values-ml.yaml           #   ML 镜像覆盖值（torch/transformers/onnxruntime）
+│   └── templates/               #   K8s 资源模板
+├── k8s/                         # 原生 K8s 最小清单（Kustomize，适合学习/最小化部署）
+│   ├── kustomization.yaml
+│   ├── namespace.yaml / configmap.yaml / deployment.yaml / service.yaml
+│   └── secret.example.yaml      #   TLS + API Key 示例（需自行填值）
+├── prometheus/                  # Prometheus 采集配置与告警规则
+│   ├── prometheus.yml
+│   └── alerts.yml
+└── grafana/                     # Grafana 预置仪表盘（JSON 大屏）
+    └── dashboard.json
 ```
 
 ---
 
-## 3. 各部署方案操作指南
+## 2. 服务拓扑与端口
 
-### 3.1 Docker Compose 部署
+全栈共 8 类业务服务 + 可选的 LLM 与监控：
+
+| 服务 | 角色 | 端口 | 技术栈 |
+|---|---|---|---|
+| **PrivShield (Core Agent)** | 隐私计算引擎（脱敏/DP/K-匿名/分类分级） | REST `8079` / gRPC `50051` | Python (FastAPI + gRPC) |
+| **bff-go** (`console/bff-go`) | Console Go 高性能代理（gRPC 直连） | `8081` | Go (Gin) |
+| **bff-py** (`console/bff-py`) | Console Python 代理（REST 转发） | `8080` | Python (FastAPI) |
+| **console-web** | React 控制台前端（Nginx 托管） | `5173` | React + Nginx |
+| **service-hub** (`services/service-hub`) | 数据服务调度中枢 | `8082` | Go |
+| **datasource-mgr** (`services/datasource-mgr`) | 数据源管理 | `8083` | Go |
+| **audit-log** (`services/audit-log`) | 脱敏审计日志 | `8084` | Go |
+| **vllm**（可选，`--profile llm`） | Layer-3 LLM 推理（GPU） | `8000` | vLLM |
+| **redis**（仅生产编排） | 分布式限流后端 | `6379`（内部） | Redis |
+| **prometheus / grafana**（可选，`--profile monitoring`） | 监控与可视化 | `9090` / `3000` | Prometheus / Grafana |
+
+调用链路：`console-web → bff-go/bff-py → PrivShield(REST/gRPC)`；
+`service-hub / datasource-mgr / audit-log → PrivShield(REST)`；
+`PrivShield → vllm`（Layer-3 分类）。
+
+---
+
+## 3. 部署方式选型
+
+| 场景 | 推荐方式 | 入口 |
+|---|---|---|
+| 本地开发 / 演示 / 单机 | Docker Compose（通用编排） | §4.1 |
+| 生产单机（无 K8s） | Docker Compose 生产编排 | §4.2 |
+| 生产多副本 / 弹性伸缩 / 合规 | Helm Chart | §5 |
+| 最小化学习 / 无 Helm 环境 | 原生 K8s 清单 | §6 |
+| CI 集成冒烟测试 | Compose 测试编排 | `deploy/docker-compose/README.md` §4 |
+
+---
+
+## 4. Docker Compose 部署
+
+> 详细用法（文件矩阵、证书准备、日志查看）见
+> [`deploy/docker-compose/README.md`](docker-compose/README.md)。
+
+### 4.1 通用全栈（本地构建）
 
 ```bash
-# 1. 基础生产模式（Core + Redis + Go BFF + 微服务群 + Web UI）
-bash ./scripts/prod/deploy-docker-compose.sh
+# 前置：构建 Agent 镜像（core 或 ml）
+make docker-core          # 或 make docker-ml
 
-# 2. 启用 GPU vLLM 大模型推理容器
-bash ./scripts/prod/deploy-docker-compose.sh --with-llm
+cd deploy/docker-compose
+docker compose up -d                              # 基础全栈
+docker compose --profile llm up -d                # + vLLM GPU 推理
+docker compose --profile monitoring up -d         # + Prometheus/Grafana
+```
 
-# 3. 启用 Prometheus + Grafana 监控套件
-bash ./scripts/prod/deploy-docker-compose.sh --with-monitoring
+### 4.2 生产编排
 
-# 4. 生产健康全面巡检
-bash ./scripts/prod/prod_health_check.sh
+```bash
+cd deploy/docker-compose
 
-# 5. 停止集群
+# 1. 准备环境变量（强密码 / API Key / Grafana 密码必填）
+cp .env.prod.example .env && vim .env
+
+# 2. 准备 TLS 证书
+mkdir -p certs && cp /path/to/tls.crt certs/tls.crt && cp /path/to/tls.key certs/tls.key
+
+# 3. 启动（纯镜像、不挂载源码、restart: always）
+docker compose -f docker-compose.prod.yml up -d
+
+# 4. 查看状态
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f PrivShield
+```
+
+生产编排关键特性：全链路 TLS + API Key 鉴权、Redis 分布式限流、
+`security_opt: no-new-privileges`、资源 limits/reservations、
+JSON 结构化日志（json-file 滚动）、命名卷持久化（预算库/审计日志/各服务 DB）。
+
+或使用一键脚本：
+
+```bash
+bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--agent-only]
 bash ./scripts/prod/stop-docker-compose.sh
 ```
 
-### 3.2 Helm Chart 生产级部署
+---
+
+## 5. Helm 部署（生产级）
 
 ```bash
-# 1. 语法检查与模板渲染验证
-make helm-lint
-make helm-template
+# 开发模式
+helm install privshield ./deploy/helm/PrivShield
 
-# 2. 安装/升级 Chart（默认 values.yaml）
-helm upgrade --install privshield ./deploy/helm/PrivShield -n privshield --create-namespace
+# 生产模式（需自管 TLS / API Key Secret）
+kubectl create secret tls privshield-tls --cert=tls.crt --key=tls.key -n PrivShield
+kubectl create secret generic privshield-apikeys --from-file=api-keys.json -n PrivShield
 
-# 3. 生产高可用部署（含 Secret 引用与资源限制）
-helm upgrade --install privshield ./deploy/helm/PrivShield \
+helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
-  -n privshield
+  --set security.tls.existingSecret=privshield-tls \
+  --set security.auth.apiKeysSecret=privshield-apikeys
 
-# 4. 卸载 Release
-bash ./scripts/prod/uninstall-helm.sh
+# ML 镜像
+helm install privshield ./deploy/helm/PrivShield -f ./deploy/helm/PrivShield/values-ml.yaml
 ```
 
-### 3.3 原生 Kubernetes (Kustomize) 部署
+生产模式额外启用：2 副本、HPA（2~10）、PDB、NetworkPolicy、ServiceMonitor（需 Prometheus Operator）。
+
+常用命令：
 
 ```bash
-# 部署全套 K8s 资源
-kubectl apply -k ./deploy/k8s/
-
-# 检查 Pod 状态
-kubectl get pods -n PrivShield
-
-# 停止与清理
-kubectl delete -k ./deploy/k8s/
+make helm-lint            # helm lint 静态检查
+make helm-template        # 模板渲染验证
+bash ./scripts/prod/deploy-helm.sh      # 一键部署
+bash ./scripts/prod/uninstall-helm.sh   # 卸载
 ```
 
 ---
 
-## 4. 监控与可观测性集成
+## 6. 原生 K8s 部署（最小清单）
 
-### 4.1 Prometheus 抓取端点
-Prometheus 配置文件 [deploy/prometheus/prometheus.yml](prometheus/prometheus.yml) 预置了对以下服务的自动抓取：
-* `PrivShield Agent` (`:8079/metrics`)
-* `Go BFF Gateway` (`:8081/metrics`)
-* `Service Hub` (`:8082/metrics`)
-* `Datasource Manager` (`:8083/metrics`)
-* `Audit Log` (`:8084/metrics`)
+```bash
+kubectl apply -k ./deploy/k8s/
+kubectl get pods -n PrivShield -w
+kubectl port-forward -n PrivShield svc/PrivShield 8079:8079 50051:50051
+curl http://localhost:8079/health
 
-### 4.2 Grafana 预置大屏看板
-* **[deploy/grafana/dashboard.json](grafana/dashboard.json)**：全平台联合监控总览大屏（Agent 算力 + 微服务群 QPS/P95 延迟）；
-* **[deploy/grafana/service-hub-dashboard.json](grafana/service-hub-dashboard.json)**：Service Hub 专属流水线调度大屏（按 Path 吞吐、P95/P99 延迟分解、Agent 算力耗时）。
+# 停止
+bash ./scripts/prod/stop-k8s.sh
+```
 
-### 4.3 告警规则
-预置告警规则位于 [deploy/prometheus/alerts.yml](prometheus/alerts.yml)：
-* 网关无健康节点 / 降级告警（`GatewayNoHealthyNodes`, `GatewayDegradedCapacity`）
-* 请求与分类高延迟告警（`HighRequestLatencyP95`, `HighClassificationLatency`）
-* 调度中枢超时与错误率告警（`ServiceHubHighLatencyP95`, `ServiceHubHighErrorRate`, `ServiceHubAgentCallFailure`）
-* 审计日志存证写入异常告警（`AuditLogWriteFailure`）
-* 隐私预算耗尽预警（`PrivacyBudgetExhausted`）
-
-### 4.4 监控运维快捷脚本
-* 启动监控栈：`bash ./scripts/dev/start_monitoring.sh`
-* 停止监控栈：`bash ./scripts/dev/stop_monitoring.sh`
-* 检查指标端点：`bash ./scripts/dev/check_metrics_endpoints.sh`
-* 模拟调度流量：`bash ./services/service-hub/scripts/simulate-pipeline.sh`
+> TLS 证书与 API Key 请复制 `deploy/k8s/secret.example.yaml` 并填入真实值后再启用。
 
 ---
 
-## 5. 生产安全加固核查表
+## 7. 监控与可观测性
 
-在正式生产上线前，请确认已完成以下加固项：
+- **指标**：Agent 内置 `/metrics`（`privacy_*` 前缀），采集配置见
+  `deploy/prometheus/prometheus.yml`，告警规则见 `deploy/prometheus/alerts.yml`。
+- **大屏**：`deploy/grafana/dashboard.json` 为预置仪表盘，
+  启用 `--profile monitoring` 时经 `deploy/grafana/` provisioning 自动加载；
+  也可在 Grafana 中手动 Import。
+- **健康检查**：`bash ./scripts/prod/prod_health_check.sh`（REST `/health`、`/readyz`、gRPC 探活）。
+- **日志**：生产编排使用 JSON 结构化日志（`PRIVACY_LOG_FORMAT=json`），便于 ELK / Loki 收集。
+- 深度文档：[`docs/production_observability/`](../docs/production_observability/)。
 
-- [ ] **传输安全**：启用 TLS/mTLS，配置有效证书（替换默认自签名测试证书）；
-- [ ] **身份鉴权**：设置强密码 `PRIVACY_AUTH_EXTERNAL_KEYS_JSON` / `api-keys.json`；
-- [ ] **容器安全**：确认所有容器以非 root 用户（UID 1000）运行，开启 `no-new-privileges`；
-- [ ] **持久化存储**：为 SQLite 数据库（预算库与微服务库）配置具有备份策略的本地持久卷或网络卷；
-- [ ] **资源配额**：在 Helm/Compose 中明确配置 `requests` 与 `limits`，防止 OOM 级联故障。
+---
+
+## 8. 运维入口速查
+
+| 目标 | 命令 |
+|---|---|
+| 生产 Compose 部署 | `bash ./scripts/prod/deploy-docker-compose.sh` |
+| 停止生产 Compose | `bash ./scripts/prod/stop-docker-compose.sh` |
+| Helm 部署 / 卸载 | `bash ./scripts/prod/deploy-helm.sh` / `uninstall-helm.sh` |
+| K8s 部署 / 停止 | `bash ./scripts/prod/deploy-k8s.sh` / `stop-k8s.sh` |
+| 生产健康检查 | `bash ./scripts/prod/prod_health_check.sh` |
+| 备份隐私预算库 | `bash ./scripts/prod/backup_privacy_budget.sh` |
+| 构建 core / ml 镜像 | `make docker-core` / `make docker-ml` |
+| Helm lint / template | `make helm-lint` / `make helm-template` |
+
+---
+
+## 9. 延伸文档
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/deployment/README.md`](../docs/deployment/README.md) | 部署文档总入口 |
+| [`docs/deployment/design.md`](../docs/deployment/design.md) | 部署架构与 Compose vs K8s 选型决策 |
+| [`docs/deployment/from_code_to_k8s.md`](../docs/deployment/from_code_to_k8s.md) | 从代码到 K8s 的完整教程（清单拆解、Helm、监控） |
+| [`docs/deployment/ops.md`](../docs/deployment/ops.md) | 安装、升级与故障排查手册 |
+| [`docs/deployment/testing.md`](../docs/deployment/testing.md) | 部署测试清单（helm lint / dry-run / kind） |
+| [`deploy/docker-compose/README.md`](docker-compose/README.md) | Compose 文件矩阵与使用详解 |
+| [`docs/production_security/ops.md`](../docs/production_security/ops.md) | TLS / 证书 / 鉴权运维速查 |
+| [`docs/production_observability/ops.md`](../docs/production_observability/ops.md) | 监控配置与 Grafana 示例 |

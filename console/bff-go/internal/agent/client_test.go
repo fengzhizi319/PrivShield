@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengzhizi319/PrivShield/console/backend-go/internal/config"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/config"
 )
 
 // testCerts 保存测试用证书/密钥的临时文件路径。

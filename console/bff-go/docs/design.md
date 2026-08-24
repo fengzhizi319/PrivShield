@@ -93,7 +93,7 @@ graph TD
 
 ### 3.2 共享基础库深度整合 (`pkg/`)
 
-`backend-go` 全面接入 `console/pkg`：
+`backend-go` 全面接入 `pkg/`：
 - **`pkg/middleware`**：集成 `RequestID()`、`StructuredLogger()`、`CORS()`、`SecurityHeaders()`；
 - **`pkg/metrics`**：引入独立的 Prometheus 收集器暴露 `GET /metrics`；
 - **`pkg/config`**：使用 `SetupLogger` 实现 JSON/Text 日志格式动态切换。

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
 )
 
 // TaskStore implements store.TaskStore backed by SQLite.

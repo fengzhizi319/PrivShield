@@ -9,7 +9,7 @@
 
 ## 1. 定位与端口总览
 
-本后端（`console/backend`）是测试控制台的 **Python REST 代理**，基于 FastAPI + httpx，把前端的 REST 请求转发到 `PrivShield` 的 REST 接口，并可选地托管前端构建产物（SPA）。
+本后端（`console/bff-py`）是测试控制台的 **Python REST 代理**，基于 FastAPI + httpx，把前端的 REST 请求转发到 `PrivShield` 的 REST 接口，并可选地托管前端构建产物（SPA）。
 
 它本身是**无状态**的薄代理——不持有数据（示例数据为内置常量），不实现隐私算法，可任意水平扩展或重启。典型部署形态有两种：
 
@@ -41,7 +41,7 @@ graph LR
 ## 2. 依赖与环境准备
 
 ```bash
-cd console/backend
+cd console/bff-py
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -81,7 +81,7 @@ pip install -r requirements.txt
 python -m PrivShield.server
 
 # 2. 启动 Python 代理后端（8080，带热重载）
-cd console/backend
+cd console/bff-py
 ./run.sh            # 等价于 uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
 
 # 3. 启动 Vite 前端开发服务器（5173，热更新）
@@ -122,7 +122,7 @@ corepack pnpm build
 python -m PrivShield.server
 
 # 3. 启动后端（不带 --reload）
-cd console/backend
+cd console/bff-py
 uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
 
@@ -143,7 +143,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8080
 
 ## 4. 配置参考
 
-所有配置通过环境变量加载（支持 `console/backend/.env` 文件），均有本地开发默认值，零配置即可运行。定义见 [app/config.py](../app/config.py)。
+所有配置通过环境变量加载（支持 `console/bff-py/.env` 文件），均有本地开发默认值，零配置即可运行。定义见 [app/config.py](../app/config.py)。
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -163,7 +163,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
 ```ini
-# console/backend/.env（pydantic-settings 自动加载）
+# console/bff-py/.env（pydantic-settings 自动加载）
 PRIVACY_AGENT_URL=http://127.0.0.1:8079
 PRIVACY_CONSOLE_PORT=8080
 ```
@@ -272,10 +272,10 @@ server {
 
 ```bash
 # 启动（开发，带热重载）
-cd console/backend && ./run.sh
+cd console/bff-py && ./run.sh
 
 # 启动（生产，多 worker）
-cd console/backend
+cd console/bff-py
 uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 2
 
 # 停止：Ctrl+C，或 kill 对应进程
@@ -325,7 +325,7 @@ curl http://127.0.0.1:8079/health
 **冒烟测试**（遍历所有示例端点）：
 
 ```bash
-cd console/backend
+cd console/bff-py
 python smoke_test.py
 ```
 

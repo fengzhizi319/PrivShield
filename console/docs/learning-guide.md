@@ -36,15 +36,15 @@
 │                     控制台微服务与代理网关集群                      │
 │                                                                  │
 │   • 统一代理网关：                                                │
-│     - 方案 A：Python FastAPI REST 代理 (console/backend/ :8080)   │
-│     - 方案 B：Go gRPC 代理网关 (console/backend-go/ :8081)        │
+│     - 方案 A：Python FastAPI REST 代理 (console/bff-py/ :8080)   │
+│     - 方案 B：Go gRPC 代理网关 (console/bff-go/ :8081)        │
 │                                                                  │
 │   • 专项治理微服务 (Go/Gin + SQLite 持久化)：                     │
-│     - 调度中枢：console/service-hub/ (:8082 / :50052 gRPC)       │
-│     - 数据源管理：console/datasource-mgr/ (:8083)                 │
-│     - 脱敏审计日志：console/audit-log/ (:8084)                    │
+│     - 调度中枢：services/service-hub/ (:8082 / :50052 gRPC)       │
+│     - 数据源管理：services/datasource-mgr/ (:8083)                 │
+│     - 脱敏审计日志：services/audit-log/ (:8084)                    │
 │                                                                  │
-│   • 共享基础库：console/pkg/ (存储/中间件/指标/客户端)             │
+│   • 共享基础库：仓库根 `pkg/` (存储/中间件/指标/客户端)      │
 └────────────────────────────┬────────────────────────────────────┘
                              │ REST 或 gRPC
                              ▼
@@ -433,13 +433,13 @@ async with httpx.AsyncClient(timeout=60) as client:
 ```
 
 **在本项目中阅读：**
-- `console/backend/app/main.py` — 所有路由定义
-- `console/backend/app/config.py` — 环境变量配置
-- `console/backend/app/security.py` — API Key + 限流中间件
+- `console/bff-py/app/main.py` — 所有路由定义
+- `console/bff-py/app/config.py` — 环境变量配置
+- `console/bff-py/app/security.py` — API Key + 限流中间件
 
 **启动方式：**
 ```bash
-cd console/backend
+cd console/bff-py
 pip install -r requirements.txt
 ./run.sh   # 或 uvicorn app.main:app --reload --port 8080
 ```
@@ -483,14 +483,14 @@ resp, err := client.Mask(ctx, &pb.MaskRequest{
 ```
 
 **在本项目中阅读：**
-- `console/backend-go/cmd/server/main.go` — 程序入口
-- `console/backend-go/internal/handlers/handlers.go` — HTTP 路由
-- `console/backend-go/internal/mapper/mapper.go` — REST→gRPC 映射
-- `console/backend-go/internal/agent/client.go` — gRPC 客户端
+- `console/bff-go/cmd/server/main.go` — 程序入口
+- `console/bff-go/internal/handlers/handlers.go` — HTTP 路由
+- `console/bff-go/internal/mapper/mapper.go` — REST→gRPC 映射
+- `console/bff-go/internal/agent/client.go` — gRPC 客户端
 
 **启动方式：**
 ```bash
-cd console/backend-go
+cd console/bff-go
 go run ./cmd/server   # 默认监听 :8080
 ```
 
@@ -573,7 +573,7 @@ python -m PrivShield.server
 python -m PrivShield.server
 
 # 终端 2：启动 Go 后端
-cd console/backend-go && go run ./cmd/server
+cd console/bff-go && go run ./cmd/server
 
 # 终端 3：启动前端开发服务器
 cd console/web && corepack pnpm dev
@@ -659,9 +659,9 @@ console/web/src/
 
 ### 8.2 Go 代理网关与微服务代码地图
 
-#### (1) 共享基础库 (`console/pkg/`)
+#### (1) 共享基础库 (`pkg/`)
 ```
-console/pkg/
+pkg/（仓库根共享基础库）
 ├── store/              ← 存储接口 (TaskStore, DataSourceStore, AuditStore)
 │   ├── memory/         ← 内存安全存储实现
 │   └── sqlite/         ← SQLite 纯 Go WAL 持久化引擎
@@ -672,9 +672,9 @@ console/pkg/
 └── validation/         ← 白名单校验、端口范围与抗碰撞 ID 生成
 ```
 
-#### (2) 调度中枢 (`console/service-hub/`)
+#### (2) 调度中枢 (`services/service-hub/`)
 ```
-console/service-hub/
+services/service-hub/
 ├── cmd/server/main.go       ← 服务入口 (HTTP :8082 + gRPC :50052 双协议)
 ├── internal/
 │   ├── agent/               ← Agent 上游通信 (REST / gRPC)
@@ -684,9 +684,9 @@ console/service-hub/
 └── proto/                   ← gRPC Protobuf 定义文件
 ```
 
-#### (3) 数据源管理 (`console/datasource-mgr/`)
+#### (3) 数据源管理 (`services/datasource-mgr/`)
 ```
-console/datasource-mgr/
+services/datasource-mgr/
 ├── cmd/server/main.go       ← 服务入口 (:8083)
 ├── internal/
 │   ├── agent/               ← Agent 探活与分类委托客户端
@@ -694,9 +694,9 @@ console/datasource-mgr/
 │   └── handlers/            ← 数据源 CRUD、连通性测试、元数据分类与访问审计
 ```
 
-#### (4) 脱敏审计日志 (`console/audit-log/`)
+#### (4) 脱敏审计日志 (`services/audit-log/`)
 ```
-console/audit-log/
+services/audit-log/
 ├── cmd/server/main.go       ← 服务入口 (:8084)
 ├── internal/
 │   ├── agent/               ← 上游 Agent 通信客户端
@@ -704,9 +704,9 @@ console/audit-log/
 │   └── handlers/            ← 审计日志、8 要素 SHA-256 存证快照与合规报告
 ```
 
-#### (5) Go gRPC 代理网关 (`console/backend-go/`)
+#### (5) Go gRPC 代理网关 (`console/bff-go/`)
 ```
-console/backend-go/
+console/bff-go/
 ├── cmd/server/main.go       ← 入口：配置 → 客户端 → 路由 → 静态托管 → 启动 (:8081)
 ├── internal/
 │   ├── config/config.go     ← 环境变量读取
@@ -723,7 +723,7 @@ console/backend-go/
 ### 8.3 Python REST 代理网关代码地图
 
 ```
-console/backend/
+console/bff-py/
 ├── app/
 │   ├── main.py          ← FastAPI 应用 + 所有路由 (:8080)
 │   ├── config.py        ← 环境变量配置 (Pydantic-Settings)
@@ -801,7 +801,7 @@ console/backend/
 cd console/web && ./node_modules/.bin/vitest run
 
 # Python 后端测试
-cd console/backend && python -m pytest tests/ -v
+cd console/bff-py && python -m pytest tests/ -v
 
 # Agent 测试
 PYTHONPATH=. pytest tests -q

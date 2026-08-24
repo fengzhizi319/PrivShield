@@ -16,7 +16,7 @@
 ### 开发模式
 
 ```bash
-cd console/audit-log
+cd services/audit-log
 bash run.sh
 ```
 
@@ -47,8 +47,11 @@ make test
 
 ### Docker
 
+构建上下文为仓库根目录（需复制共享库 `pkg/`）：
+
 ```bash
-docker build -t privshield-audit-log .
+# 在仓库根目录执行
+docker build -f services/audit-log/Dockerfile -t privshield-audit-log .
 docker run -p 8084:8084 -e PRIVACY_AGENT_REST_HOST=host.docker.internal privshield-audit-log
 ```
 

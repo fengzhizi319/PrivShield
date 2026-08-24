@@ -9,7 +9,7 @@
 
 ## 1. 定位与端口总览
 
-本后端（`console/backend-go`）是测试控制台的 **Go gRPC 代理**，基于 Gin + grpc-go，把前端的 REST 请求**转换为 gRPC 调用**转发给 `PrivShield`，并可选地托管前端构建产物（SPA）。它与 Python 后端对前端暴露**一致的 JSON 契约**，二者可通过页面顶部 Backend Selector 自由切换。
+本后端（`console/bff-go`）是测试控制台的 **Go gRPC 代理**，基于 Gin + grpc-go，把前端的 REST 请求**转换为 gRPC 调用**转发给 `PrivShield`，并可选地托管前端构建产物（SPA）。它与 Python 后端对前端暴露**一致的 JSON 契约**，二者可通过页面顶部 Backend Selector 自由切换。
 
 控制台涉及的进程与默认端口：
 
@@ -61,7 +61,7 @@ graph LR
 python -m PrivShield.server
 
 # 2. 启动 Go 代理后端（8081）
-cd console/backend-go
+cd console/bff-go
 go run ./cmd/server
 
 # 3. 启动 Vite 前端开发服务器（5173，热更新）
@@ -102,7 +102,7 @@ corepack pnpm build
 python -m PrivShield.server
 
 # 3. 预编译并启动 Go 后端
-cd console/backend-go
+cd console/bff-go
 go build -o bin/backend-go ./cmd/server
 ./bin/backend-go
 ```
@@ -258,8 +258,8 @@ server {
 仓库提供了证书生成脚本与 mTLS 一键启动脚本，方便本地快速验证：
 
 ```bash
-# 1. 生成一套自签名测试证书（CA + 服务端 + 客户端）到 console/backend-go/certs/
-./console/backend-go/scripts/gen-certs.sh
+# 1. 生成一套自签名测试证书（CA + 服务端 + 客户端）到 console/bff-go/certs/
+./console/bff-go/scripts/gen-certs.sh
 
 # 2. 一键以 mTLS 模式启动 agent + Go 代理（证书缺失时会自动生成）
 ./console/scripts/dev-start-go-mtls.sh
@@ -350,10 +350,10 @@ sequenceDiagram
 
 ```bash
 # 开发（改代码后手动重启）
-cd console/backend-go && go run ./cmd/server
+cd console/bff-go && go run ./cmd/server
 
 # 生产（预编译二进制）
-cd console/backend-go
+cd console/bff-go
 go build -o bin/backend-go ./cmd/server
 ./bin/backend-go
 
@@ -391,7 +391,7 @@ curl http://127.0.0.1:8079/health
 **Go 测试：**
 
 ```bash
-cd console/backend-go
+cd console/bff-go
 
 # 单元测试（无需 agent）
 go test -short ./...

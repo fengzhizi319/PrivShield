@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements-core.txt
           pip install ruff mypy
 
-      # 先使用 make check，确保 console/backend 不退化；
+      # 先使用 make check，确保 console/bff-py 不退化；
       # 后续全局 ruff/mypy 全绿后再推进到 make lint。
       - name: Lint & type check (console/bff-py)
         run: make check
@@ -106,7 +106,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          # 与根目录 go.work 声明的 go 1.27.0 保持一致，避免依赖 GOTOOLCHAIN 自动下载
+          go-version: "1.27"
           cache-dependency-path: go.work.sum
 
       - name: Vet all Go packages

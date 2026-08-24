@@ -22,17 +22,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
-	pkgconfig "github.com/fengzhizi319/PrivShield/console/pkg/config"
-	"github.com/fengzhizi319/PrivShield/console/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store/memory"
-	"github.com/fengzhizi319/PrivShield/console/pkg/store/sqlite"
+	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
+	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
 
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/agent"
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/config"
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/grpcserver"
-	"github.com/fengzhizi319/PrivShield/console/service-hub/internal/handlers"
-	pb "github.com/fengzhizi319/PrivShield/console/service-hub/proto"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/grpcserver"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/handlers"
+	pb "github.com/fengzhizi319/PrivShield/services/service-hub/proto"
 )
 
 func main() {
