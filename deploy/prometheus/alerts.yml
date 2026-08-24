@@ -156,3 +156,62 @@ groups:
         annotations:
           summary: "High LLM classifier error rate (> 10%)"
           description: "The LLM classifier error rate is above 10% for more than 5 minutes."
+
+  - name: PrivShield.services
+    rules:
+      # 调度中枢 P95 延迟过高 / Service Hub scheduling latency high
+      - alert: ServiceHubHighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{module="service-hub"}[5m])) by (le, path)) > 2
+        for: 3m
+        labels:
+          severity: warning
+          service: service-hub
+        annotations:
+          summary: "Service Hub high request latency (P95 > 2s)"
+          description: "Pipeline orchestration P95 latency is above 2 seconds for path {{ $labels.path }}."
+
+      # 调度中枢 5xx 错误率过高 / Service Hub 5xx error rate high
+      - alert: ServiceHubHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{module="service-hub",status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{module="service-hub"}[5m]))
+          > 0.05
+        for: 3m
+        labels:
+          severity: critical
+          service: service-hub
+        annotations:
+          summary: "Service Hub 5xx error rate (> 5%)"
+          description: "Service Hub error rate exceeds 5% for more than 3 minutes."
+
+      # 上游 Agent 算力调用失败率过高 / Upstream Agent call failure rate high
+      - alert: ServiceHubAgentCallFailure
+        expr: |
+          sum(rate(agent_requests_total{module="service-hub",status=~"5.."}[5m]))
+          /
+          sum(rate(agent_requests_total{module="service-hub"}[5m]))
+          > 0.05
+        for: 3m
+        labels:
+          severity: critical
+          service: service-hub
+        annotations:
+          summary: "Service Hub upstream Agent call failure rate (> 5%)"
+          description: "Upstream Agent privacy computation calls failed for endpoint {{ $labels.endpoint }}."
+
+      # 审计日志写入异常 / Audit Log write error rate high
+      - alert: AuditLogWriteFailure
+        expr: |
+          sum(rate(http_requests_total{module="audit-log",status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{module="audit-log"}[5m]))
+          > 0.05
+        for: 3m
+        labels:
+          severity: critical
+          service: audit-log
+        annotations:
+          summary: "Audit Log service write failure rate (> 5%)"
+          description: "Audit Log write or query error rate exceeds 5%."
+

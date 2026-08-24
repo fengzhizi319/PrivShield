@@ -3,7 +3,7 @@
 ## 1. 开发模式
 
 ```bash
-cd console/service-hub
+cd services/service-hub
 bash run.sh
 ```
 
@@ -21,7 +21,7 @@ SERVICE_HUB_HOST=0.0.0.0 SERVICE_HUB_PORT=8082 ./bin/service-hub
 ### 2.2 Docker
 
 ```bash
-docker build -t privshield-service-hub .
+docker build -f services/service-hub/Dockerfile -t privshield-service-hub .
 docker run -d \
   --name service-hub \
   -p 8082:8082 \
@@ -33,22 +33,33 @@ docker run -d \
 
 ### 2.3 Docker Compose
 
-在 `deploy/docker-compose/docker-compose.yml` 中添加：
+在 `deploy/docker-compose/docker-compose.prod.yml` 中已内置该微服务：
 
-```yaml
-  service-hub:
-    build: ../../console/service-hub
-    ports:
-      - "8082:8082"
-    environment:
-      - SERVICE_HUB_HOST=0.0.0.0
-      - PRIVACY_AGENT_REST_HOST=agent
-      - PRIVACY_REST_PORT=8079
-    depends_on:
-      - agent
+```bash
+docker compose -f deploy/docker-compose/docker-compose.prod.yml up -d service-hub
 ```
 
-## 3. 环境变量速查
+## 3. Prometheus 指标与 Grafana 监控大屏
+
+### 3.1 Prometheus 指标采集端点
+Service Hub 暴露标准 Prometheus 指标：`GET /metrics`：
+* `http_requests_total{module="service-hub"}`：HTTP 调度请求数（按 path/status）
+* `http_request_duration_seconds{module="service-hub"}`：调度延迟直方图
+* `agent_requests_total{module="service-hub"}`：上游 Agent 算力调用总数（按 endpoint/status）
+* `agent_request_duration_seconds{module="service-hub"}`：上游 Agent 算力调用延迟直方图
+
+### 3.2 专属 Grafana 监控大屏
+预置监控大屏模板位于：
+* **[deploy/grafana/service-hub-dashboard.json](../../../deploy/grafana/service-hub-dashboard.json)**（Service Hub 专属流水线调度大屏）
+* **[deploy/grafana/dashboard.json](../../../deploy/grafana/dashboard.json)**（全平台联合监控总览）
+
+一键启动监控栈：
+```bash
+docker compose -f deploy/docker-compose/docker-compose.prod.yml --profile monitoring up -d
+# 访问 Grafana: http://localhost:3000
+```
+
+## 4. 环境变量速查
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
