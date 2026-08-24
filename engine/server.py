@@ -123,6 +123,11 @@ GRPC_HOST = os.environ.get("PRIVACY_GRPC_HOST", "0.0.0.0")
 GRPC_PORT = int(os.environ.get("PRIVACY_GRPC_PORT", "50051"))
 # 高并发优化：gRPC 线程池大小可通过环境变量配置
 GRPC_MAX_WORKERS = int(os.environ.get("PRIVACY_GRPC_MAX_WORKERS", "64"))
+if GRPC_MAX_WORKERS < 1:
+    raise ValueError(
+        f"PRIVACY_GRPC_MAX_WORKERS must be >= 1, got {GRPC_MAX_WORKERS}. "
+        "Set it to the desired thread pool size for the gRPC server."
+    )
 
 # ---------------------------------------------------------------------------
 # 高并发优化：uvloop + httptools 自动检测

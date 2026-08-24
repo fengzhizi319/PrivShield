@@ -324,10 +324,24 @@ _cors_enabled = os.environ.get("PRIVACY_CORS_ENABLED", "false").lower() == "true
 if _cors_enabled:
     _cors_origins_raw = os.environ.get("PRIVACY_CORS_ALLOW_ORIGINS", "*")
     _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    _cors_credentials = os.environ.get("PRIVACY_CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+    # Security: CORS spec forbids Access-Control-Allow-Origin: * with credentials.
+    # When wildcard origin is used, force credentials=False to prevent silent browser rejection.
+    # 安全修复：CORS 规范禁止通配符 origin 与 credentials 同时使用。
+    # 当允许源为 "*" 时，强制关闭 credentials，避免浏览器静默拒绝带凭证的请求。
+    if "*" in _cors_origins and _cors_credentials:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "CORS misconfiguration detected: allow_origins contains '*' but "
+            "allow_credentials=True. Per CORS spec, credentials are forbidden "
+            "with wildcard origins. Forcing allow_credentials=False. "
+            "Set PRIVACY_CORS_ALLOW_ORIGINS to specific origins to use credentials."
+        )
+        _cors_credentials = False
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins,
-        allow_credentials=os.environ.get("PRIVACY_CORS_ALLOW_CREDENTIALS", "true").lower() == "true",
+        allow_credentials=_cors_credentials,
         allow_methods=os.environ.get("PRIVACY_CORS_ALLOW_METHODS", "*"),
         allow_headers=os.environ.get("PRIVACY_CORS_ALLOW_HEADERS", "*"),
         expose_headers=os.environ.get("PRIVACY_CORS_EXPOSE_HEADERS", "x-request-id"),
