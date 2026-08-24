@@ -153,6 +153,41 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Maximum request body size in bytes (default 32 MiB, aligned with Go services MaxBodySize).
+# Configurable via PRIVACY_MAX_BODY_SIZE environment variable.
+# 请求体最大字节数（默认 32 MiB，与 Go 服务 MaxBodySize 对齐）。
+# 通过 PRIVACY_MAX_BODY_SIZE 环境变量可配置。
+_MAX_BODY_SIZE = int(os.environ.get("PRIVACY_MAX_BODY_SIZE", str(32 * 1024 * 1024)))
+
+
+class MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    """Request body size limit middleware — DoS protection.
+
+    Checks the Content-Length header before the request body is read.
+    Returns 413 Payload Too Large if the declared size exceeds the limit.
+    This is a first line of defense; actual body reading is also bounded
+    by the file upload size check in deps.py.
+
+    请求体大小限制中间件 — DoS 防护。
+    在读取请求体之前检查 Content-Length 头，超过限制时返回 413。
+    这是第一道防线；实际 body 读取还受 deps.py 中文件上传大小检查约束。
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > _MAX_BODY_SIZE:
+                    from starlette.responses import JSONResponse
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": f"Request body exceeds {_MAX_BODY_SIZE} bytes limit"},
+                    )
+            except ValueError:
+                pass  # Non-integer Content-Length; let downstream handle
+        return await call_next(request)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager.
@@ -266,6 +301,11 @@ app.add_exception_handler(Exception, handle_request_exception)
 # 安全响应头中间件 — 添加 X-Content-Type-Options、X-Frame-Options 等。
 # 最先添加，使其最靠近路由处理函数（最内层）。
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Request body size limit — rejects requests with Content-Length exceeding the threshold.
+# DoS protection aligned with Go services' MaxBodySize middleware.
+# 请求体大小限制 — 拒绝 Content-Length 超过阈值的请求，DoS 防护，与 Go 服务 MaxBodySize 对齐。
+app.add_middleware(MaxBodySizeMiddleware)
 
 # GZip response compression — reduces bandwidth for responses >= 1KB.
 # minimum_size=1000 avoids compressing tiny responses where compression overhead

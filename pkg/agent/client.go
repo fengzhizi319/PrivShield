@@ -43,6 +43,21 @@ type Client struct {
 // CircuitState represents the circuit breaker state.
 type CircuitState int
 
+// requestIDKeyType is the context key for propagating X-Request-ID to upstream services.
+// requestIDKeyType 是用于在 context 中传播 X-Request-ID 的键类型。
+type requestIDKeyType struct{}
+
+var requestIDKey requestIDKeyType
+
+// ContextWithRequestID returns a copy of ctx carrying the given request ID.
+// Downstream Get/Post calls automatically inject this value as X-Request-ID header,
+// enabling distributed tracing correlation across service boundaries.
+// ContextWithRequestID 返回携带请求 ID 的 context 副本。
+// 下游 Get/Post 调用自动将该值注入 X-Request-ID 头，实现跨服务边界的分布式追踪关联。
+func ContextWithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey, requestID)
+}
+
 const (
 	CircuitClosed   CircuitState = iota // Normal operation / 正常运行
 	CircuitOpen                         // Tripped, rejecting calls / 熔断中，拒绝调用
@@ -164,6 +179,8 @@ func (c *Client) Health(ctx context.Context) (map[string]any, error) {
 
 // Get performs a GET request to the agent and returns parsed JSON.
 // Get 对 agent 执行 GET 请求并返回解析后的 JSON。
+// Automatically injects X-Request-ID from context if present.
+// 若 context 中存在请求 ID 则自动注入 X-Request-ID 头。
 func (c *Client) Get(ctx context.Context, path string) (map[string]any, error) {
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
@@ -177,14 +194,21 @@ func (c *Client) Get(ctx context.Context, path string) (map[string]any, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	c.setHeaders(req)
+	if rid, ok := ctx.Value(requestIDKey).(string); ok && rid != "" {
+		req.Header.Set("X-Request-ID", rid)
+	}
 	return c.do(req)
 }
 
 // Post performs a POST request to the agent and returns parsed JSON.
 // Post 对 agent 执行 POST 请求并返回解析后的 JSON。
-// P59 fix: delegates to PostWithRequestID to eliminate code duplication.
+// Automatically injects X-Request-ID from context if present.
+// 若 context 中存在请求 ID 则自动注入 X-Request-ID 头。
 func (c *Client) Post(ctx context.Context, path string, payload any) (map[string]any, error) {
-	return c.PostWithRequestID(ctx, path, payload, "")
+	// Extract request ID from context for automatic distributed tracing correlation.
+	// 从 context 提取请求 ID，实现自动分布式追踪关联。
+	rid, _ := ctx.Value(requestIDKey).(string)
+	return c.PostWithRequestID(ctx, path, payload, rid)
 }
 
 // PostWithRequestID performs a POST request, injecting X-Request-ID for tracing.

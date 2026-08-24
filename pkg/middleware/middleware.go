@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 )
 
 // CORS returns a CORS middleware that allows requests from the specified origins.
@@ -76,6 +78,12 @@ func RequestID() gin.HandlerFunc {
 		}
 		c.Set("request_id", rid)
 		c.Writer.Header().Set("X-Request-ID", rid)
+		// Inject request ID into request context so downstream HTTP clients
+		// (e.g. pkg/agent) automatically propagate it as X-Request-ID header.
+		// 将请求 ID 注入 request context，使下游 HTTP 客户端
+		//（如 pkg/agent）自动将其作为 X-Request-ID 头传播。
+		ctx := pkgagent.ContextWithRequestID(c.Request.Context(), rid)
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }
@@ -146,12 +154,22 @@ func Recovery(logger *slog.Logger, module string) gin.HandlerFunc {
 
 // SecurityHeaders returns a middleware that sets recommended HTTP security response headers.
 // SecurityHeaders 返回一个设置推荐 HTTP 安全响应头的中间件。
+//
+// Headers set (aligned with Python Agent SecurityHeadersMiddleware):
+//   - X-Content-Type-Options: nosniff — 禁止浏览器 MIME 类型嗅探
+//   - X-Frame-Options: SAMEORIGIN — 防止点击劫持
+//   - X-XSS-Protection: 1; mode=block — 旧版浏览器 XSS 过滤
+//   - Strict-Transport-Security (HSTS) — 强制 HTTPS，防协议降级攻击
+//   - Referrer-Policy: strict-origin-when-cross-origin — 控制 Referrer 信息量
+//   - Permissions-Policy — 限制浏览器敏感特性访问
 func SecurityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 		c.Writer.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		c.Writer.Header().Set("X-XSS-Protection", "1; mode=block")
+		c.Writer.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		c.Next()
 	}
 }

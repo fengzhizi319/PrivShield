@@ -338,6 +338,12 @@ func TestSecurityHeaders(t *testing.T) {
 	if got := w.Header().Get("Referrer-Policy"); got != "strict-origin-when-cross-origin" {
 		t.Errorf("Referrer-Policy = %q, want strict-origin-when-cross-origin", got)
 	}
+	if got := w.Header().Get("Strict-Transport-Security"); got != "max-age=31536000; includeSubDomains" {
+		t.Errorf("Strict-Transport-Security = %q, want max-age=31536000; includeSubDomains", got)
+	}
+	if got := w.Header().Get("Permissions-Policy"); got != "camera=(), microphone=(), geolocation=()" {
+		t.Errorf("Permissions-Policy = %q, want camera=(), microphone=(), geolocation=()", got)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────
