@@ -75,7 +75,7 @@ flowchart TB
         BFF[Go / Python BFF<br/>:8081 / :8080]
     end
 
-    subgraph AuditLogService [audit-log 审计存证中心 (:8084 / :50054)]
+    subgraph AuditLogService ["audit-log 审计存证中心 (:8084 / :50054)"]
         GinRouter[Gin REST Router<br/>/api/audit/*]
         GRPCSrv[gRPC Server<br/>AuditLogServiceServer]
         MW[中间件链: MaxBodySize / StructuredLogger / Auth / SecurityHeaders]
