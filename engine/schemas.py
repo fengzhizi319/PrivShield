@@ -6,7 +6,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # --------------------------------------------------------------------------- #
 # 脱敏 / 哈希
@@ -16,24 +16,24 @@ from pydantic import BaseModel
 class MaskRequest(BaseModel):
     """单字段脱敏请求模型。"""
 
-    field_name: str
-    value: str
-    context: str = ""
+    field_name: str = Field(max_length=200)
+    value: str = Field(max_length=100_000)
+    context: str = Field(default="", max_length=10_000)
 
 
 class MaskRecordRequest(BaseModel):
     """整记录脱敏请求模型。"""
 
-    record: dict[str, str]
-    context: str = ""
+    record: dict[str, str] = Field(max_length=200)
+    context: str = Field(default="", max_length=10_000)
 
 
 class MaskBatchRequest(BaseModel):
     """批量字段脱敏请求模型。"""
 
-    field_names: list[str]
-    values: list[str]
-    context: str = ""
+    field_names: list[str] = Field(max_length=200)
+    values: list[str] = Field(max_length=10_000)
+    context: str = Field(default="", max_length=10_000)
 
 
 class MaskDataFrameRequest(BaseModel):
@@ -43,16 +43,16 @@ class MaskDataFrameRequest(BaseModel):
     columns 指定需要脱敏的列；未指定则对所有字符串列脱敏。
     """
 
-    data: list[dict[str, Any]]
-    columns: list[str] | None = None
-    context: str = ""
+    data: list[dict[str, Any]] = Field(max_length=1_000)
+    columns: list[str] | None = Field(default=None, max_length=200)
+    context: str = Field(default="", max_length=10_000)
 
 
 class HashRequest(BaseModel):
     """HMAC 哈希请求模型。"""
 
-    value: str
-    salt: str
+    value: str = Field(max_length=100_000)
+    salt: str = Field(max_length=1_000)
 
 
 # --------------------------------------------------------------------------- #
@@ -66,16 +66,16 @@ class DPRequest(BaseModel):
     values 为输入数据列表；params 为可选参数，用于覆盖默认或 profile 中的配置。
     """
 
-    values: list[float]
-    params: dict[str, object] = {}
+    values: list[float] = Field(max_length=10_000)
+    params: dict[str, object] = Field(default={})
 
 
 class DPHistogramRequest(BaseModel):
     """差分隐私直方图请求模型。"""
 
-    values: list[str]
-    categories: list[str]
-    params: dict[str, object] = {}
+    values: list[str] = Field(max_length=10_000)
+    categories: list[str] = Field(max_length=1_000)
+    params: dict[str, object] = Field(default={})
 
 
 class DPNoisyCountRequest(BaseModel):
@@ -113,62 +113,62 @@ class DPNoisyHistogramRequest(BaseModel):
 class DPChunkedCountRequest(BaseModel):
     """分块流式 DP 计数请求模型。"""
 
-    chunks: list[list[float]]
-    params: dict[str, object] = {}
+    chunks: list[list[float]] = Field(max_length=1_000)
+    params: dict[str, object] = Field(default={})
 
 
 class DPChunkedSumRequest(BaseModel):
     """分块流式 DP 求和请求模型。"""
 
-    chunks: list[list[float]]
-    params: dict[str, object] = {}
+    chunks: list[list[float]] = Field(max_length=1_000)
+    params: dict[str, object] = Field(default={})
 
 
 class DPChunkedMeanRequest(BaseModel):
     """分块流式 DP 均值请求模型。"""
 
-    chunks: list[list[float]]
-    params: dict[str, object] = {}
+    chunks: list[list[float]] = Field(max_length=1_000)
+    params: dict[str, object] = Field(default={})
 
 
 class DPAggregateRequest(BaseModel):
     """表格级原位 DP 聚合请求模型。"""
 
-    rows: list[dict[str, Any]]
-    specs: dict[str, Any]
-    params: dict[str, object] = {}
+    rows: list[dict[str, Any]] = Field(max_length=1_000)
+    specs: dict[str, Any] = Field(default={})
+    params: dict[str, object] = Field(default={})
 
 
 class DPVectorSumRequest(BaseModel):
     """高维向量 / 梯度 $L_2$ 范数截断加噪请求模型。"""
 
-    vectors: list[list[float]]
-    params: dict[str, object] = {}
+    vectors: list[list[float]] = Field(max_length=1_000)
+    params: dict[str, object] = Field(default={})
 
 
 class DPAdaptiveClipRequest(BaseModel):
     """差分隐私自适应二分搜索估计上下界请求模型。"""
 
-    values: list[float]
-    params: dict[str, object] = {}
+    values: list[float] = Field(max_length=10_000)
+    params: dict[str, object] = Field(default={})
 
 
 class DPGroupByRequest(BaseModel):
     """Tau-Thresholding 差分隐私 SQL Group-By 请求模型。"""
 
-    rows: list[dict[str, Any]]
-    group_col: str
-    target_col: str
-    agg: str
-    params: dict[str, object] = {}
+    rows: list[dict[str, Any]] = Field(max_length=1_000)
+    group_col: str = Field(max_length=200)
+    target_col: str = Field(max_length=200)
+    agg: str = Field(max_length=50)
+    params: dict[str, object] = Field(default={})
 
 
 class DPChunkedHistogramRequest(BaseModel):
     """分块流式 DP 直方图请求模型。"""
 
-    chunks: list[list[str]]
-    categories: list[str]
-    params: dict[str, object] = {}
+    chunks: list[list[str]] = Field(max_length=1_000)
+    categories: list[str] = Field(max_length=1_000)
+    params: dict[str, object] = Field(default={})
 
 
 # --------------------------------------------------------------------------- #
@@ -179,18 +179,18 @@ class DPChunkedHistogramRequest(BaseModel):
 class KAnonRequest(BaseModel):
     """K-匿名单条记录请求模型。"""
 
-    record: dict[str, object]
-    qi_cols: list[str]
-    k: int = 5
+    record: dict[str, object] = Field(max_length=200)
+    qi_cols: list[str] = Field(max_length=50)
+    k: int = Field(default=5, ge=2, le=1000)
 
 
 class KAnonTableRequest(BaseModel):
     """K-匿名整张表请求模型。"""
 
-    rows: list[dict[str, object]]
-    qi_cols: list[str]
-    k: int = 5
-    max_depth: int = 10
+    rows: list[dict[str, object]] = Field(max_length=1_000)
+    qi_cols: list[str] = Field(max_length=50)
+    k: int = Field(default=5, ge=2, le=1000)
+    max_depth: int = Field(default=10, ge=1, le=50)
 
 
 class KAnonDataFrameRequest(BaseModel):
@@ -199,10 +199,10 @@ class KAnonDataFrameRequest(BaseModel):
     data 为 records 列表（可来自 pandas/SecretFlow DataFrame）。
     """
 
-    data: list[dict[str, Any]]
-    qi_cols: list[str]
-    k: int = 5
-    max_depth: int = 10
+    data: list[dict[str, Any]] = Field(max_length=1_000)
+    qi_cols: list[str] = Field(max_length=50)
+    k: int = Field(default=5, ge=2, le=1000)
+    max_depth: int = Field(default=10, ge=1, le=50)
 
 
 # --------------------------------------------------------------------------- #
@@ -213,22 +213,22 @@ class KAnonDataFrameRequest(BaseModel):
 class QolRequest(BaseModel):
     """查询混淆请求模型。"""
 
-    query: str
-    num_dummies: int = 3
-    domain: str = "medical"
-    medical_pool: list[str] | None = None
-    generic_pool: list[str] | None = None
+    query: str = Field(max_length=10_000)
+    num_dummies: int = Field(default=3, ge=1, le=100)
+    domain: str = Field(default="medical", max_length=100)
+    medical_pool: list[str] | None = Field(default=None, max_length=1_000)
+    generic_pool: list[str] | None = Field(default=None, max_length=1_000)
     seed: int | None = None
 
 
 class QolBatchRequest(BaseModel):
     """批量查询混淆请求模型。"""
 
-    queries: list[str]
-    num_dummies: int = 3
-    domain: str = "medical"
-    medical_pool: list[str] | None = None
-    generic_pool: list[str] | None = None
+    queries: list[str] = Field(max_length=1_000)
+    num_dummies: int = Field(default=3, ge=1, le=100)
+    domain: str = Field(default="medical", max_length=100)
+    medical_pool: list[str] | None = Field(default=None, max_length=1_000)
+    generic_pool: list[str] | None = Field(default=None, max_length=1_000)
     seed: int | None = None
 
 
@@ -240,31 +240,31 @@ class QolBatchRequest(BaseModel):
 class LdpPerturbBinaryRequest(BaseModel):
     """二值本地 DP 扰动请求模型。"""
 
-    values: list[int]
-    epsilon: float
+    values: list[int] = Field(max_length=10_000)
+    epsilon: float = Field(gt=0)
 
 
 class LdpPerturbCategoricalRequest(BaseModel):
     """类别型本地 DP 扰动请求模型。"""
 
-    values: list[str]
-    categories: list[str]
-    epsilon: float
+    values: list[str] = Field(max_length=10_000)
+    categories: list[str] = Field(max_length=1_000)
+    epsilon: float = Field(gt=0)
 
 
 class LdpEstimateBinaryRequest(BaseModel):
     """二值本地 DP 估计请求模型。"""
 
-    reported_values: list[int]
-    epsilon: float
+    reported_values: list[int] = Field(max_length=10_000)
+    epsilon: float = Field(gt=0)
 
 
 class LdpEstimateCategoricalRequest(BaseModel):
     """类别型本地 DP 估计请求模型。"""
 
-    reported_values: list[str]
-    categories: list[str]
-    epsilon: float
+    reported_values: list[str] = Field(max_length=10_000)
+    categories: list[str] = Field(max_length=1_000)
+    epsilon: float = Field(gt=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -275,10 +275,10 @@ class LdpEstimateCategoricalRequest(BaseModel):
 class RecommendRequest(BaseModel):
     """隐私参数推荐请求模型。"""
 
-    namespace: str
-    values: list[float] | None = None
-    rows: list[dict[str, object]] | None = None
-    qi_cols: list[str] | None = None
+    namespace: str = Field(max_length=200)
+    values: list[float] | None = Field(default=None, max_length=10_000)
+    rows: list[dict[str, object]] | None = Field(default=None, max_length=1_000)
+    qi_cols: list[str] | None = Field(default=None, max_length=50)
 
 
 # --------------------------------------------------------------------------- #
