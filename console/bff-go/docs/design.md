@@ -13,7 +13,11 @@
 1. **强类型编译期校验**：依托 Protobuf 生成的 Go 结构体，消除手写字典在字段类型、拼写错误上的隐患；
 2. **HTTP/2 多路复用与低延迟**：通过 gRPC 长连接复用底层 TCP，吞吐大幅提升，单次原语调用延迟较短连接显著降低；
 3. **与 Python 后端完全一致的契约 (Contract Parity)**：对外提供与 Python 后端（`console/bff-py`）完全相同的 REST JSON 接口，前端只需切换 API Base URL 即可无缝热切换；
-4. **内置单页应用独立托管**：支持直接托管前端构建产物（`web/dist`），使 Go 后端可独立提供完整 Web UI，无需依赖外部 Web 服务器或 Python 环境。
+4. **内置单页应用独立托管**：支持直接托管前端构建产物（`web/dist`），使 Go 后端可独立提供完整 Web UI，无需依赖外部 Web 服务器或 Python 环境；
+5. **gRPC 自动重试与连接保活**：内置可配置 gRPC 重试策略（默认最多 6 次，指数退避 1s→8s），`waitForReady=true` 连接等待就绪，HTTP/2 PING 帧心跳保活；
+6. **优雅停机与 Panic 恢复**：SIGINT/SIGTERM 信号优雅停机，Gin Recovery 中间件自动捕获 panic，Goroutine 泄漏防护。
+
+> 📖 **可靠性能力详解**：[docs/reliability.md](docs/reliability.md)
 
 ---
 

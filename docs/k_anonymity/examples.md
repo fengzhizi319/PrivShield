@@ -3,7 +3,7 @@
 
 ## 1. 概述
 
-本文档提供 `PrivShield.privacy.kano`（单记录泛化）与 `PrivShield.privacy.kano_table`（数据集级 Mondrian 泛化）的典型使用示例，以及对应的 REST API 调用方式。
+本文档提供 `engine.privacy.kano`（单记录泛化）与 `engine.privacy.kano_table`（数据集级 Mondrian 泛化）的典型使用示例，以及对应的 REST API 调用方式。
 
 ## 2. Python SDK 示例
 

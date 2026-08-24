@@ -118,6 +118,20 @@ type Config struct {
 	// LBAllowedHosts：负载均衡探测目标 host 白名单（逗号分隔）。
 	// 对应环境变量 LB_ALLOWED_HOSTS，默认空（不限制，本地探测默认行为）。
 	LBAllowedHosts string
+
+	// ── gRPC 重试策略配置（#12）───────────────
+
+	// AgentRetryMaxAttempts：上游 agent gRPC 调用最大重试次数。
+	// 对应环境变量 PRIVACY_AGENT_RETRY_MAX_ATTEMPTS，默认 6。
+	AgentRetryMaxAttempts int
+
+	// AgentRetryInitialBackoff：重试初始退避时间（秒）。
+	// 对应环境变量 PRIVACY_AGENT_RETRY_INITIAL_BACKOFF，默认 1。
+	AgentRetryInitialBackoff int
+
+	// AgentRetryMaxBackoff：重试最大退避时间（秒）。
+	// 对应环境变量 PRIVACY_AGENT_RETRY_MAX_BACKOFF，默认 8。
+	AgentRetryMaxBackoff int
 }
 
 // Load reads all configuration from environment variables and returns a populated Config.
@@ -168,6 +182,10 @@ func Load() *Config {
 		MaxUploadBytes: int64(getEnvInt("CONSOLE_MAX_UPLOAD_BYTES", 10*1024*1024)),
 		// 负载均衡探测 host 白名单，默认空（不限制）
 		LBAllowedHosts: getEnv("LB_ALLOWED_HOSTS", ""),
+		// gRPC 重试策略（#12）：最大重试次数、初始/最大退避秒数
+		AgentRetryMaxAttempts:    getEnvInt("PRIVACY_AGENT_RETRY_MAX_ATTEMPTS", 6),
+		AgentRetryInitialBackoff: getEnvInt("PRIVACY_AGENT_RETRY_INITIAL_BACKOFF", 1),
+		AgentRetryMaxBackoff:     getEnvInt("PRIVACY_AGENT_RETRY_MAX_BACKOFF", 8),
 	}
 }
 

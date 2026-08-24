@@ -9,7 +9,7 @@
 需求包含三条必须闭环的链路：
 
 1. 生成 20 条具有医疗语义、包含 L4/L5 病史、个人信息和图文病例引用的仿真数据，并输出 `kangyang.csv`。
-2. 读取 CSV，调用 `PrivShield.dynclassification` 完成字段/记录分类分级，再调用 `PrivShield.privacy` 完成脱敏；最终同时得到“分级数据”和“不含 L4/L5 数据的脱敏数据”。
+2. 读取 CSV，调用 `engine.dynclassification` 完成字段/记录分类分级，再调用 `engine.privacy` 完成脱敏；最终同时得到“分级数据”和“不含 L4/L5 数据的脱敏数据”。
 3. 将同一流程接入测试控制台：React 前端可发起和查看处理结果，Python Console 后端和 Go Console 后端都能转发并跑通完整 Agent 链路。
 
 目标是形成可重复、可测试、默认不泄露原始高敏内容的测试流水线，而不是生成或接入真实患者数据。

@@ -40,6 +40,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"log/slog"
@@ -47,6 +48,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,6 +60,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
 	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
+	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
@@ -86,6 +89,16 @@ func main() {
 	// =========================================================================
 	// 若配置了 DBPath（如 "/app/data/service-hub.db"），则初始化 SQLite 持久化任务库；
 	// 若 DBPath 为空，则回退为进程内内存任务存储（memory.NewTaskStore），确保轻量与无外部依赖。
+	//
+	// 3.1 SQLite Integrity Check / SQLite 完整性校验
+	// 启动时先校验数据库完整性，检测损坏并阻止服务启动，防止带病运行。
+	if cfg.DBPath != "" {
+		if err := sqlite.ValidateIntegrity(cfg.DBPath); err != nil {
+			log.Fatalf("sqlite integrity check failed: %v", err)
+		}
+		logger.Info("database integrity check passed", "path", cfg.DBPath)
+	}
+
 	taskStore, err := initTaskStore(cfg.DBPath, logger)
 	if err != nil {
 		log.Fatalf("failed to initialize task store: %v", err)
@@ -95,7 +108,32 @@ func main() {
 	// 4. Prometheus Metrics Collector / Prometheus 监控指标收集器
 	// =========================================================================
 	// 注册 service-hub 命名空间的 Prometheus 监控指标（QPS、延迟、流水线各阶段状态等）。
+	// 注意：mc 必须在崩溃恢复/重试之前初始化，以便记录恢复/重试指标。
 	mc := metrics.NewCollector("service-hub")
+
+	// =========================================================================
+	// 3.5 Crash Recovery / 崩溃恢复机制
+	// =========================================================================
+	// 启动时自动扫描并恢复孤立任务：
+	// - pending 任务：直接保留在队列中（尚未执行，无需标记失败）；
+	// - running 任务：标记为 failed（可能已部分执行，需重新提交）。
+	recoverOrphanedTasks(taskStore, mc, logger)
+
+	// =========================================================================
+	// 3.6 Automatic Task Retry / 失败任务自动重试
+	// =========================================================================
+	// 启动时自动重试因临时错误（网络超时、连接失败等）而失败的任务。
+	// 最多重试 3 次，使用结构化 RetryCount 字段（替代脆弱的字符串匹配）。
+	// 重试采用指数退避延迟，避免下游服务仍不可用时立即再次失败。
+	retryFailedTasks(taskStore, mc, logger)
+
+	// =========================================================================
+	// 3.7 Periodic Background Retry / 周期性后台重试协程
+	// =========================================================================
+	// 启动后台协程，每 60 秒扫描一次 failed 任务并自动重试。
+	// 解决“运行时失败的任务必须等到下次服务重启才能重试”的问题。
+	retryCtx, retryCancel := context.WithCancel(context.Background())
+	go periodicRetryLoop(retryCtx, taskStore, mc, logger, 60*time.Second)
 
 	// =========================================================================
 	// 5. Upstream & Downstream Clients Setup / 下游依赖客户端实例化
@@ -125,6 +163,35 @@ func main() {
 		WriteTimeout:      60 * time.Second,  // 响应写入的超时时间
 		IdleTimeout:       120 * time.Second, // Keep-Alive 空闲连接保活上限
 		MaxHeaderBytes:    1 << 20,           // 1 MiB 单请求 Header 最大字节限制
+	}
+
+	// =========================================================================
+	// 6.5 HTTP TLS/mTLS Configuration / HTTP TLS 双向认证配置
+	// =========================================================================
+	// 当启用 TLS 时，为 HTTP 服务器构建 TLS 配置，支持 mTLS 双向认证：
+	// - TLS 1.3 强制最低版本；
+	// - 可选客户端证书认证（require/verify/request）；
+	// - 可选公钥固定（SPKI Pinning）。
+	var httpTLSConfig *tls.Config
+	if cfg.TLSEnabled {
+		tlsCfg := &tlsutil.ServerTLSConfig{
+			Enabled:          cfg.TLSEnabled,
+			CertFile:         cfg.TLSCertFile,
+			KeyFile:          cfg.TLSKeyFile,
+			CAFile:           cfg.TLSCAFile,
+			ClientAuth:       cfg.TLSClientAuth,
+			PinnedPubKeyFile: cfg.TLSPinnedPubKeyFile,
+		}
+		var tlsErr error
+		httpTLSConfig, tlsErr = tlsutil.BuildServerTLSConfig(tlsCfg)
+		if tlsErr != nil {
+			log.Fatalf("failed to build HTTP TLS config: %v", tlsErr)
+		}
+		httpSrv.TLSConfig = httpTLSConfig
+		logger.Info("HTTP REST server configured with mTLS",
+			"client_auth", cfg.TLSClientAuth,
+			"tls_cert", cfg.TLSCertFile,
+		)
 	}
 
 	// =========================================================================
@@ -179,16 +246,32 @@ func main() {
 
 	// 2) 启动 HTTP REST 服务并在后台独立协程中监听请求
 	go func() {
-		logger.Info("service-hub HTTP REST server started",
-			"addr", cfg.Address(),
-			"grpc_addr", cfg.GRPCAddress(),
-			"agent_rest", cfg.AgentBaseURL(),
-			"datasource_rest", cfg.DatasourceBaseURL(),
-			"db_path", cfg.DBPath,
-			"auth_enabled", cfg.APIKey != "",
-		)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error", "error", err.Error())
+		if cfg.TLSEnabled {
+			logger.Info("service-hub HTTPS REST server started (mTLS enabled)",
+				"addr", cfg.Address(),
+				"grpc_addr", cfg.GRPCAddress(),
+				"agent_rest", cfg.AgentBaseURL(),
+				"datasource_rest", cfg.DatasourceBaseURL(),
+				"db_path", cfg.DBPath,
+				"auth_enabled", cfg.APIKey != "",
+				"mtls_client_auth", cfg.TLSClientAuth,
+			)
+			// ListenAndServeTLS 使用 httpSrv.TLSConfig 中的证书，空字符串表示从 TLSConfig 读取
+			if err := httpSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				logger.Error("HTTPS server error", "error", err.Error())
+			}
+		} else {
+			logger.Info("service-hub HTTP REST server started",
+				"addr", cfg.Address(),
+				"grpc_addr", cfg.GRPCAddress(),
+				"agent_rest", cfg.AgentBaseURL(),
+				"datasource_rest", cfg.DatasourceBaseURL(),
+				"db_path", cfg.DBPath,
+				"auth_enabled", cfg.APIKey != "",
+			)
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("HTTP server error", "error", err.Error())
+			}
 		}
 	}()
 
@@ -199,7 +282,10 @@ func main() {
 	sig := <-sigChan
 	logger.Info("shutting down service-hub servers...", "signal", sig.String())
 
-	// 2) 优先向内部异步流水线任务发送取消信号，平滑等待在途处理协程完成
+	// 2) 停止周期性重试协程
+	retryCancel()
+
+	// 3) 优先向内部异步流水线任务发送取消信号，平滑等待在途处理协程完成
 	serviceImpl.Shutdown()
 	server.Shutdown()
 
@@ -240,4 +326,186 @@ func initTaskStore(dbPath string, logger *slog.Logger) (store.TaskStore, error) 
 
 	logger.Info("sqlite task store initialized", "path", dbPath)
 	return ts, nil
+}
+
+// recoverOrphanedTasks scans for tasks stuck in "running" or "pending" state
+// after a crash/restart and handles them appropriately:
+// - pending tasks: kept in queue (not yet executed, safe to requeue);
+// - running tasks: marked as failed (may have partially executed).
+// 崩溃恢复：区分处理 running 和 pending 状态的孤立任务。
+//
+// 当服务突然崩溃（kill -9、OOM Kill、断电）时，优雅停机代码不会执行，
+// 导致 running/pending 状态的任务永远卡在数据库中。此函数在启动时自动恢复这些孤立任务。
+//
+// 改进点（#1）：pending 任务直接保留在队列中（它们尚未执行，无需标记失败）；
+// running 任务标记为 failed（可能已部分执行，需要重新提交）。
+func recoverOrphanedTasks(taskStore store.TaskStore, mc *metrics.Collector, logger *slog.Logger) {
+	// 1. 扫描所有 "running" 状态的任务 → 标记为 failed（可能已部分执行）
+	runningTasks, _, err := taskStore.List(store.TaskFilter{Status: "running", Limit: 10000})
+	if err != nil {
+		logger.Error("failed to list running tasks for recovery", "error", err.Error())
+		return
+	}
+
+	for i := range runningTasks {
+		runningTasks[i].Status = "failed"
+		runningTasks[i].Error = "server crashed or restarted (recovered on startup)"
+		now := time.Now()
+		runningTasks[i].CompletedAt = &now
+		runningTasks[i].DurationMs = now.Sub(runningTasks[i].CreatedAt).Milliseconds()
+		_ = taskStore.Update(&runningTasks[i])
+		if mc != nil {
+			mc.RecordOrphanedRecovery("running")
+		}
+	}
+
+	// 2. 扫描所有 "pending" 状态的任务 → 直接保留在队列中（尚未执行，无需标记失败）
+	pendingTasks, _, err := taskStore.List(store.TaskFilter{Status: "pending", Limit: 10000})
+	if err != nil {
+		logger.Error("failed to list pending tasks for recovery", "error", err.Error())
+		return
+	}
+
+	// pending 任务无需修改状态，仅记录指标
+	for range pendingTasks {
+		if mc != nil {
+			mc.RecordOrphanedRecovery("pending")
+		}
+	}
+
+	// 3. 记录恢复日志
+	if len(runningTasks) > 0 || len(pendingTasks) > 0 {
+		logger.Warn("recovered orphaned tasks after crash/restart",
+			"running_marked_failed", len(runningTasks),
+			"pending_kept_in_queue", len(pendingTasks),
+			"total_recovered", len(runningTasks)+len(pendingTasks))
+	} else {
+		logger.Info("no orphaned tasks found, all tasks are in terminal state")
+	}
+}
+
+// maxRetryCount is the maximum number of retry attempts for a failed task.
+const maxRetryCount = 3
+
+// retryFailedTasks automatically retries failed tasks that are marked as retryable.
+// 自动重试机制：扫描所有因临时错误而失败的任务，重新提交执行。
+//
+// 改进点（#3）：使用结构化 RetryCount 字段替代脆弱的字符串匹配；
+// 改进点（#10）：重试采用指数退避延迟（5s → 10s → 20s），避免下游仍不可用时立即再次失败。
+func retryFailedTasks(taskStore store.TaskStore, mc *metrics.Collector, logger *slog.Logger) {
+	// 扫描所有 "failed" 状态的任务
+	failedTasks, _, err := taskStore.List(store.TaskFilter{Status: "failed", Limit: 100})
+	if err != nil {
+		logger.Error("failed to list failed tasks for retry", "error", err.Error())
+		return
+	}
+
+	retryCount := 0
+	for i := range failedTasks {
+		// 只重试特定类型的失败（如网络超时、临时错误）
+		if !isRetryableError(failedTasks[i].Error) {
+			continue
+		}
+
+		// 使用结构化 RetryCount 字段检查重试次数（替代脆弱的 strings.Count）
+		if failedTasks[i].RetryCount >= maxRetryCount {
+			logger.Warn("task exceeded max retry attempts, skipping",
+				"task_id", failedTasks[i].ID,
+				"retry_count", failedTasks[i].RetryCount,
+				"max_retry", maxRetryCount)
+			if mc != nil {
+				mc.RecordTaskRetry("exhausted")
+			}
+			continue
+		}
+
+		// 检查退避延迟（#10）：如果 RetryAfter 尚未到期，跳过
+		if failedTasks[i].RetryAfter != nil && time.Now().Before(*failedTasks[i].RetryAfter) {
+			continue
+		}
+
+		// 计算指数退避延迟：5s * 2^(retryCount)
+		newRetryCount := failedTasks[i].RetryCount + 1
+		backoffDuration := 5 * time.Second * time.Duration(1<<uint(failedTasks[i].RetryCount))
+		retryAfter := time.Now().Add(backoffDuration)
+
+		// 重置任务状态为 pending
+		failedTasks[i].Status = "pending"
+		failedTasks[i].Stage = "queued"
+		failedTasks[i].Error = fmt.Sprintf("retrying (attempt %d/%d)", newRetryCount, maxRetryCount)
+		failedTasks[i].StartedAt = nil
+		failedTasks[i].CompletedAt = nil
+		failedTasks[i].DurationMs = 0
+		failedTasks[i].RetryCount = newRetryCount
+		failedTasks[i].RetryAfter = &retryAfter
+
+		if err := taskStore.Update(&failedTasks[i]); err != nil {
+			logger.Error("failed to reset task for retry", "task_id", failedTasks[i].ID, "error", err.Error())
+			continue
+		}
+
+		retryCount++
+		if mc != nil {
+			mc.RecordTaskRetry("queued")
+		}
+		logger.Info("task queued for retry",
+			"task_id", failedTasks[i].ID,
+			"attempt", newRetryCount,
+			"backoff_seconds", backoffDuration.Seconds())
+	}
+
+	if retryCount > 0 {
+		logger.Info("queued tasks for retry", "count", retryCount)
+	} else {
+		logger.Debug("no retryable failed tasks found")
+	}
+}
+
+// periodicRetryLoop runs retryFailedTasks periodically until the context is cancelled.
+// 周期性后台重试循环：每隔 interval 扫描一次 failed 任务并自动重试。
+// 解决“运行时失败的任务必须等到下次服务重启才能重试”的问题（#2）。
+func periodicRetryLoop(ctx context.Context, taskStore store.TaskStore, mc *metrics.Collector, logger *slog.Logger, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	logger.Info("periodic background retry started", "interval_seconds", interval.Seconds())
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("periodic background retry stopped")
+			return
+		case <-ticker.C:
+			retryFailedTasks(taskStore, mc, logger)
+		}
+	}
+}
+
+// isRetryableError checks if an error is retryable (network timeout, temporary failure, etc.)
+// isRetryableError 检查错误是否可重试（网络超时、临时故障等）。
+//
+// 可重试的错误类型：
+// - timeout（超时）
+// - connection refused（连接拒绝）
+// - temporary failure（临时故障）
+// - network unreachable（网络不可达）
+// - context deadline exceeded（上下文超时）
+// - server crashed or restarted（服务崩溃或重启）
+func isRetryableError(errMsg string) bool {
+	retryablePatterns := []string{
+		"timeout",
+		"connection refused",
+		"temporary failure",
+		"network unreachable",
+		"context deadline exceeded",
+		"server crashed or restarted",
+	}
+
+	errMsgLower := strings.ToLower(errMsg)
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(errMsgLower, pattern) {
+			return true
+		}
+	}
+	return false
 }

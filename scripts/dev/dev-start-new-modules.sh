@@ -18,6 +18,11 @@
 
 set -euo pipefail
 
+# ── 解析脚本目录，初始化全局变量 ──────────────────────────────────────
+# PIDS_DIR  : PID 文件存储目录（.pids/）
+# LOGS_DIR  : 日志输出目录（.logs/）
+# DATA_DIR  : SQLite DB 存储目录（data/）
+# GO_BIN    : Go 编译器路径，可通过环境变量覆盖
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PIDS_DIR="${PROJECT_ROOT}/.pids"
@@ -36,6 +41,7 @@ log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# ── Go 编译器自动探测：优先 PATH，回退到常见安装路径 ──────────────────
 if ! command -v "$GO_BIN" &>/dev/null; then
     for p in /Users/charles/go/go1.27.0/bin/go /usr/local/go/bin/go; do
         if [ -x "$p" ]; then
@@ -52,6 +58,12 @@ fi
 
 log_info "Using Go: $GO_BIN ($($GO_BIN version))"
 
+# ── 每个模块的启动流程：─────────────────────────────────────────────
+#   1. 检查 PID 文件，若已存在且进程存活则跳过（幂等性）
+#   2. go build 编译最新二进制
+#   3. 设置环境变量（监听地址/端口、Agent 连接信息、DB 路径）
+#   4. 后台启动，日志追加到 .logs/，PID 写入 .pids/
+#
 # ── 模块 1: service-hub ──────────────────────────────────────────────
 start_service_hub() {
     local port="${SERVICE_HUB_PORT:-8082}"
@@ -124,7 +136,7 @@ start_audit_log() {
     log_info "audit-log started (PID $(cat "$pid_file"))"
 }
 
-# ── 启动全部 ─────────────────────────────────────────────────────────
+# ── 回到项目根目录，按顺序启动全部三个模块 ──────────────────────────
 cd "$PROJECT_ROOT"
 start_service_hub
 start_datasource_mgr

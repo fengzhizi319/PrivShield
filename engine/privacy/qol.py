@@ -34,7 +34,7 @@ from enum import Enum  # 枚举基类，用于 ObfuscationDomain/ObfuscationStra
 from ..observability.logging_config import get_logger
 from ..observability.metrics import QOL_OPERATIONS_TOTAL
 
-# 创建模块级结构化日志记录器，__name__ 自动解析为 "PrivShield.privacy.qol"
+# 创建模块级结构化日志记录器，__name__ 自动解析为 "engine.privacy.qol"
 # 所有日志调用（logger.info/debug）均通过此实例发出，支持 JSON 格式输出和上下文 extra 字段
 logger = get_logger(__name__)
 

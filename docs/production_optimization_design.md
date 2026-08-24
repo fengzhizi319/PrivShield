@@ -121,6 +121,19 @@ PRIVACY_BUDGET_WINDOW_SECONDS=86400
 - 提供任务排队、状态机追踪（`pending` ➔ `running` ➔ `completed` / `failed`）与超时保护；
 - 避免突发数千任务并发时瞬间打爆系统资源。
 
+#### 崩溃恢复与自动重试
+- **启动时崩溃恢复**：自动扫描并回收孤立任务（running 标记失败、pending 保留队列），通过 Prometheus 指标 `orphaned_tasks_recovered_total` 记录恢复数量；
+- **周期性后台重试**：定期扫描失败任务，自动重试可恢复错误（timeout、connection refused 等），指数退避延迟 + RetryCount 结构化字段，通过 `tasks_retried_total` 指标监控重试活动；
+- **完整性校验**：启动时 `PRAGMA integrity_check` 阻断损坏数据库；
+- **统一备份脚本**：支持全量/增量备份、`--verify` 恢复验证模式、自动过期清理。
+
+#### HTTP/gRPC 双协议 mTLS
+- 共享 `pkg/tlsutil` 工具库，HTTP 与 gRPC 双协议统一 TLS 配置；
+- TLS 1.3 强制最低版本，支持 require/verify/request 客户端认证模式；
+- 公钥固定（SPKI Pinning）防御 CA 劫持。
+
+> 📖 **可靠性能力详解**：[services/service-hub/docs/reliability.md](services/service-hub/docs/reliability.md)
+
 ---
 
 ### 2.5 极限压测与基准性能评估套件 (Stress & Benchmark Suite)

@@ -14,6 +14,8 @@
 
 set -euo pipefail
 
+# ── 解析命令行参数：仅支持 --force ─────────────────────────────────
+# --force : 非交互模式，端口被占用时自动终止占用进程（CI/脚本化场景）
 FORCE=false
 for arg in "$@"; do
     case "$arg" in
@@ -21,6 +23,10 @@ for arg in "$@"; do
     esac
 done
 
+# ── 解析脚本目录，初始化全局变量 ──────────────────────────────────
+# CONSOLE_DIR : 控制台源码目录（console/）
+# PIDS_DIR    : PID 文件存储目录（.pids/）
+# LOGS_DIR    : 日志输出目录（.logs/）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONSOLE_DIR="$PROJECT_ROOT/console"
@@ -36,6 +42,8 @@ AGENT_URL="http://127.0.0.1:8079"
 CONSOLE_URL="http://127.0.0.1:8080"
 VITE_URL="http://localhost:5173"
 
+# ── _is_port_in_use: 通过 TCP socket 探测端口是否被占用 ────────────
+# 使用 Python socket 而非 lsof/ss，跨平台兼容性更好
 _is_port_in_use() {
     local port="$1"
     python3 -c "
@@ -51,6 +59,11 @@ except (ConnectionRefusedError, socket.timeout, OSError):
 " 2>/dev/null
 }
 
+# ── check_port_available: 端口占用检测 + 交互式/自动释放 ───────────
+# 1. 探测端口是否被占用，未占用则直接返回
+# 2. 占用时显示占用进程信息（lsof/ss/fuser）
+# 3. --force 模式自动终止占用进程；交互模式询问用户
+# 4. 非交互环境（无 TTY）且无 --force 则报错退出
 check_port_available() {
     local port="$1"
     local name="$2"
@@ -108,6 +121,11 @@ check_port_available() {
     esac
 }
 
+# ── 第一步：自动创建虚拟环境（首次运行时） ────────────────────────
+# 1. Agent 虚拟环境：项目根目录 .venv/，安装 engine 包
+# 2. Python BFF 虚拟环境：console/bff-py/.venv/，安装 BFF 依赖
+# 3. 前端 node_modules：console/web/node_modules/
+
 # 1. Agent 虚拟环境
 if [[ ! -d "$AGENT_VENV" ]]; then
     echo "未找到 agent 虚拟环境，自动创建并安装依赖：$AGENT_VENV"
@@ -144,6 +162,8 @@ if [[ ! -d "$CONSOLE_DIR/web/node_modules" ]]; then
     )
 fi
 
+# ── 第二步：注册 PID 文件路径 + 退出钩子 ────────────────────────────
+# cleanup(): 捕获 INT/TERM/EXIT 信号，统一停止所有后台进程并删除 PID 文件
 AGENT_PID_FILE="$PIDS_DIR/agent.pid"
 CONSOLE_PID_FILE="$PIDS_DIR/console.pid"
 VITE_PID_FILE="$PIDS_DIR/vite-dev.pid"
@@ -167,11 +187,13 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
+# ── 第三步：检查端口可用性（8079/8080/5173） ────────────────────────
 check_port_available 8079 "PrivShield REST"
 check_port_available 8080 "Python REST 代理后端"
 check_port_available 5173 "Vite 前端开发服务器"
 
-# 4. 启动 Python Agent
+# ── 第四步：启动 PrivShield Agent（REST: 8079） ────────────────────
+# 在子 shell 中激活 venv 并后台启动，日志追加到 .logs/agent_rest.log
 launch_agent() {
     local agent_log="$LOGS_DIR/agent_rest.log"
     echo "启动 PrivShield (REST: $AGENT_URL)，日志: $agent_log..."
@@ -186,6 +208,7 @@ launch_agent() {
 }
 launch_agent
 
+# ── wait_for_service: HTTP 健康检查轮询，最多等待 30 秒 ────────────
 wait_for_service() {
     local url="$1"
     local name="$2"
@@ -207,7 +230,7 @@ wait_for_service() {
 
 wait_for_service "$AGENT_URL/health" "PrivShield"
 
-# 5. 启动 Python REST 代理后端
+# ── 第五步：启动 Python REST 代理后端（API: 8080） ────────────────
 echo "启动 Python REST 代理后端 (API: $CONSOLE_URL)..."
 (
     source "$BACKEND_VENV/bin/activate"
@@ -220,7 +243,7 @@ write_pid "$CONSOLE_PID_FILE" "$CONSOLE_PID"
 
 wait_for_service "$CONSOLE_URL/api/health" "Python REST 代理后端"
 
-# 6. 启动 Vite 前端开发服务器 (HMR 模式)
+# ── 第六步：启动 Vite 前端开发服务器（HMR 模式，端口 5173） ───────
 echo "启动 Vite 前端开发服务器 (HMR 模式)..."
 (
     cd "$CONSOLE_DIR/web"
@@ -255,6 +278,9 @@ echo "────────────────────────�
 echo "  按 Ctrl+C 停止所有开发服务"
 echo "======================================================================"
 
+# ── 第七步：Watchdog 看门狗机制 ──────────────────────────────────
+# 主进程 wait Agent PID，若 Agent 意外退出则自动重启
+# 循环检测：启动 → wait → 退出 → 1s 后重启 → 健康检查 → 继续 wait
 set +e
 wait "$AGENT_PID" 2>/dev/null
 wait_rc=$?

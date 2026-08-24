@@ -32,20 +32,25 @@ services/
 ### 2.1 数据服务调度中枢 (`service-hub` :8082)
 * **核心职责**：实现 6 阶段自动化调度流水线（`Ingest` ➔ `Fetch` ➔ `Classify` ➔ `Desensitize` ➔ `Return` ➔ `Audit`）；
 * **与 Agent 联动**：自动请求 PrivShield Agent 进行字段安全级别判定并匹配执行脱敏算子；
-* **高可用保障**：内置熔断器、重试队列与背压保护机制。
-* 📖 学习与设计文档：[学习指南](service-hub/docs/learning-guide.md) · [设计文档](service-hub/docs/design.md)
+* **高可用保障**：内置熔断器、重试队列与背压保护机制；
+* **崩溃恢复与自动重试**：启动时自动回收孤立任务（running 标记失败、pending 保留队列），周期性后台重试失败任务（指数退避 + RetryCount）；
+* **完整性校验与备份**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量/验证模式；
+* **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 + 公钥固定；
+* 📖 学习与设计文档：[学习指南](service-hub/docs/learning-guide.md) · [设计文档](service-hub/docs/design.md) · [可靠性能力](service-hub/docs/reliability.md)
 
 ### 2.2 数据源管理 (`datasource-mgr` :8083)
 * **核心职责**：管理结构化与半结构化数据源连接（MySQL, PostgreSQL, ClickHouse, Hive, CSV, API）；
 * **特征探查**：自动探查数据源元数据，批量采样并联动 PrivShield 进行分类分级打标；
-* **资产目录**：提供企业级数据资产目录与敏感字段分布视图。
-* 📖 学习与设计文档：[学习指南](datasource-mgr/docs/learning-guide.md) · [设计文档](datasource-mgr/docs/design.md)
+* **资产目录**：提供企业级数据资产目录与敏感字段分布视图；
+* **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 + 公钥固定；
+* 📖 学习与设计文档：[学习指南](datasource-mgr/docs/learning-guide.md) · [设计文档](datasource-mgr/docs/design.md) · [可靠性能力](datasource-mgr/docs/reliability.md)
 
 ### 2.3 脱敏审计日志 (`audit-log` :8084)
 * **核心职责**：记录全链路所有脱敏与隐私计算操作；
 * **不可篡改存证**：采用 SHA-256 包含 8 维度字段（`logID`, `timestamp`, `algorithm`, `inputHash`, `outputHash`, `user`, `securityLevel`, `params`）进行链式哈希计算；
-* **合规报告**：支持按时间跨度、部门、数据源生成数据安全审计与合规评估报告。
-* 📖 学习与设计文档：[学习指南](audit-log/docs/learning-guide.md) · [设计文档](audit-log/docs/design.md)
+* **合规报告**：支持按时间跨度、部门、数据源生成数据安全审计与合规评估报告；
+* **完整性校验**：启动时 `PRAGMA integrity_check` + HMAC-SHA256 签名审计日志 + 独立校验脚本；
+* 📖 学习与设计文档：[学习指南](audit-log/docs/learning-guide.md) · [设计文档](audit-log/docs/design.md) · [可靠性能力](audit-log/docs/reliability.md)
 
 ---
 

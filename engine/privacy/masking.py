@@ -48,7 +48,7 @@ from ..observability.metrics import MASKING_OPERATIONS_TOTAL
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-# 创建模块级结构化日志记录器，__name__ 自动解析为 "PrivShield.privacy.masking"
+# 创建模块级结构化日志记录器，__name__ 自动解析为 "engine.privacy.masking"
 # 所有日志调用（logger.info/debug）均通过此实例发出，支持 JSON 格式输出和上下文 extra 字段
 logger = get_logger(__name__)
 

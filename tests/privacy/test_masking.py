@@ -1,7 +1,7 @@
 """数据脱敏模块单元测试 / Data Masking Module Unit Tests.
 
 中文说明：
-本模块全面验证 PrivShield.privacy.masking 模块的所有功能：
+本模块全面验证 engine.privacy.masking 模块的所有功能：
 
 1. 单字段脱敏 / Single Field Masking:
    - 手机号: 保留前3后4，中间 **** / Mobile: keep first 3 & last 4

@@ -832,7 +832,7 @@ flowchart TD
 
 ### 12.1 Prometheus 监控指标矩阵
 
-网关在 `PrivShield.observability.metrics` 中注册并采集以下核心指标：
+网关在 `engine.observability.metrics` 中注册并采集以下核心指标：
 
 | 指标名称 | 类型 | Labels | 说明与观测目的 |
 |---|---|---|---|
@@ -843,7 +843,7 @@ flowchart TD
 
 ### 12.2 结构化日志上下文规范
 
-网关全模块统一使用 `PrivShield.observability.logging_config.get_logger`，所有关键路径均附带 `extra={...}` 结构化键值对：
+网关全模块统一使用 `engine.observability.logging_config.get_logger`，所有关键路径均附带 `extra={...}` 结构化键值对：
 
 ```json
 {

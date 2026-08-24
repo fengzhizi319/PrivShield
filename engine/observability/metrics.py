@@ -256,6 +256,20 @@ GATEWAY_RETRIES_TOTAL = Counter(
     ["protocol", "reason"],
 )
 
+# Gateway circuit breaker state per backend node.
+GATEWAY_CIRCUIT_BREAKER_STATE = Gauge(
+    "privacy_gateway_circuit_breaker_state",
+    "Circuit breaker state per backend node (0=closed, 1=open, 2=half_open).",
+    ["node"],
+)
+
+# Gateway node isolated/drained flag.
+GATEWAY_NODE_ADMIN_STATE = Gauge(
+    "privacy_gateway_node_admin_state",
+    "Administrative node state (0=active, 1=isolated, 2=drained).",
+    ["node"],
+)
+
 # ---------------------------------------------------------------------------
 # Module-level duration histograms (P1: 全局延迟指标)
 # ---------------------------------------------------------------------------

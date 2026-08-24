@@ -85,7 +85,7 @@ Gaussian 机制提供 **$(\varepsilon, \delta)$-DP**，向查询结果添加正�
 
 $$M(D) = f(D) + \mathcal{N}(0, \sigma^2), \quad \sigma = \frac{\Delta_2 f \cdot \sqrt{2\ln(1.25/\delta)}}{\varepsilon}$$
 
-本模块默认采用 **Balle & Wang (2018) 解析高斯机制（Analytic Gaussian Mechanism）**，对任意 $\varepsilon > 0$、$\delta > 0$ 数值求解满足 $(\varepsilon, \delta)$-DP 的最小 $\sigma$，噪声通常小于经典公式且不受 $\varepsilon \leq 1$ 限制。实现位于 `PrivShield.privacy.dp.calibrate_analytic_gaussian()`。
+本模块默认采用 **Balle & Wang (2018) 解析高斯机制（Analytic Gaussian Mechanism）**，对任意 $\varepsilon > 0$、$\delta > 0$ 数值求解满足 $(\varepsilon, \delta)$-DP 的最小 $\sigma$，噪声通常小于经典公式且不受 $\varepsilon \leq 1$ 限制。实现位于 `engine.privacy.dp.calibrate_analytic_gaussian()`。
 
 **与 Laplace 的核心区别**：
 
@@ -163,7 +163,7 @@ Laplace / Gaussian 机制的完整数学推导、代码示例与实现细节请�
 
 ### 2.1 `DPApi`
 
-位置：`PrivShield.privacy.dp.DPApi`
+位置：`engine.privacy.dp.DPApi`
 
 差分隐私计算入口类，封装 Laplace/Gaussian 采样与预算扣减。
 
@@ -550,7 +550,7 @@ chunked_histogram(
 
 ### 2.2 `extract_values`（数据适配器）
 
-位置：`PrivShield.privacy.data_adapters.extract_values`
+位置：`engine.privacy.data_adapters.extract_values`
 
 ```python
 extract_values(
@@ -586,7 +586,7 @@ extract_values(
 
 ### 2.3 `LocalDPApi`
 
-位置：`PrivShield.privacy.dp.LocalDPApi`
+位置：`engine.privacy.dp.LocalDPApi`
 
 本地差分隐私入口类，支持单条记录的随机响应扰动与服务端的频率/直方图纠偏估计。
 
@@ -685,7 +685,7 @@ estimate_categorical_histogram(
 
 ### 2.4 `BudgetAccountant` & `BudgetRegistry`
 
-位置：`PrivShield.privacy.budget.BudgetAccountant`
+位置：`engine.privacy.budget.BudgetAccountant`
 
 隐私预算账户，追踪命名空间级别的累计 `(ε, δ)` 消耗。推荐通过 `get_budget()` 或 `default_registry.get_or_create()` 创建与获取。
 

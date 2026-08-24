@@ -8,10 +8,12 @@
 
 set -euo pipefail
 
+# ── 解析脚本所在目录，定位项目根目录 ────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BUILD_FLAG="--build"
+BUILD_FLAG="--build"   # 默认启动前重新构建镜像
 
+# ── 解析命令行参数 ─────────────────────────────────────────────────────
 for arg in "$@"; do
     case "$arg" in
         --no-build)
@@ -36,6 +38,10 @@ echo "==========================================================================
 echo "🚀 [Docker Mode] 正在启动 Agent + Python 后端代理 + Web 控制台全套容器..."
 echo "============================================================================"
 
+# ── 进入 docker-compose 目录，仅启动指定的 3 个服务 ──────────────────────
+# PrivShield              : 隐私计算 Agent（REST + gRPC）
+# console-backend-python  : Python BFF 代理后端（端口 8080）
+# console-web             : React 前端 UI（端口 5173）
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
 # shellcheck disable=SC2086

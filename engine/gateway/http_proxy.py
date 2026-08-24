@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
+import random
 import time
 from contextlib import asynccontextmanager
 
@@ -72,6 +73,27 @@ class RegisterRequest(BaseModel):
 
 class DeregisterRequest(BaseModel):
     """节点动态注销请求模型 / Node deregistration request model."""
+
+    http_url: str
+    grpc_address: str
+
+
+class IsolateRequest(BaseModel):
+    """节点隔离请求模型 / Node isolate request model."""
+
+    http_url: str
+    grpc_address: str
+
+
+class DrainRequest(BaseModel):
+    """节点排空请求模型 / Node drain request model."""
+
+    http_url: str
+    grpc_address: str
+
+
+class ActivateRequest(BaseModel):
+    """节点激活请求模型 / Node activate request model."""
 
     http_url: str
     grpc_address: str
@@ -166,6 +188,36 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
             extra={"http_url": req.http_url, "grpc_address": req.grpc_address},
         )
         return {"status": "deregistered"}
+
+    @app.post("/v1/gateway/isolate")
+    async def isolate_node(req: IsolateRequest, authorization: str | None = Header(default=None)):
+        """手动隔离节点：强制从调度池排除，不参与任何请求分发（#13）。"""
+        require_management_auth(authorization)
+        ok = balancer.isolate_node(req.http_url, req.grpc_address)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Node not found")
+        logger.info("Node isolated via API", extra={"http_url": req.http_url, "grpc_address": req.grpc_address})
+        return {"status": "isolated"}
+
+    @app.post("/v1/gateway/drain")
+    async def drain_node(req: DrainRequest, authorization: str | None = Header(default=None)):
+        """排空节点：不再接受新请求，但在途请求可继续完成（#13）。"""
+        require_management_auth(authorization)
+        ok = balancer.drain_node(req.http_url, req.grpc_address)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Node not found")
+        logger.info("Node drained via API", extra={"http_url": req.http_url, "grpc_address": req.grpc_address})
+        return {"status": "drained"}
+
+    @app.post("/v1/gateway/activate")
+    async def activate_node(req: ActivateRequest, authorization: str | None = Header(default=None)):
+        """激活节点：取消隔离或排空状态，恢复正常调度（#13）。"""
+        require_management_auth(authorization)
+        ok = balancer.activate_node(req.http_url, req.grpc_address)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Node not found")
+        logger.info("Node activated via API", extra={"http_url": req.http_url, "grpc_address": req.grpc_address})
+        return {"status": "activated"}
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
     async def proxy_request(path: str, request: Request):
@@ -327,6 +379,12 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                 node.mark_unhealthy(cooldown_seconds=5.0)
                 if not retry_allowed:
                     break
+
+                # 指数退避 + 随机抖动（#6）：避免重试风暴
+                if attempt < max_retries - 1:
+                    backoff = min(0.1 * (2 ** attempt), 2.0)  # 0.1s, 0.2s, 0.4s
+                    jitter = random.uniform(0, backoff * 0.5)
+                    await asyncio.sleep(backoff + jitter)
 
         # 步骤 5: 若重试全部耗尽：不向客户端回传后端异常原文（可能含内网 URL/拓扑信息），
         # 详细原因仅记录在网关内部日志中。

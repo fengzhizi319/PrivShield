@@ -328,7 +328,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="PrivShield.launcher",
+        prog="engine.launcher",
         description="PrivShield multi-process launcher with SO_REUSEPORT.",
     )
     parser.add_argument(

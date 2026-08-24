@@ -7,7 +7,7 @@
 
 ## 1. Python SDK 使用示例
 
-可以直接在 Python 代码中导入并使用 `PrivShield.medical_pipeline` 或 `PrivShield.pipeline`：
+可以直接在 Python 代码中导入并使用 `engine.medical_pipeline` 或 `engine.pipeline`：
 
 ```python
 from engine.medical_pipeline import process_medical_dataset

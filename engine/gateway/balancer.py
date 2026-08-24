@@ -46,7 +46,9 @@ import httpx
 from engine import privacy_pb2, privacy_pb2_grpc
 from engine.observability.logging_config import get_logger
 from engine.observability.metrics import (
+    GATEWAY_CIRCUIT_BREAKER_STATE,
     GATEWAY_HEALTHY_NODES,
+    GATEWAY_NODE_ADMIN_STATE,
 )
 
 logger = get_logger(__name__)
@@ -268,6 +270,9 @@ class BackendNode:
         self._grpc_channel: grpc.aio.Channel | None = None
         self._grpc_stub: privacy_pb2_grpc.PrivacyServiceStub | None = None
         self._stub_lock = threading.Lock()  # 保护 grpc_stub 延迟初始化的双重检查锁
+        # 管理状态：支持手动隔离/排空运维操作（#13）
+        # "active" = 正常参与调度；"isolated" = 强制排除（运维手动隔离）；"drained" = 不再接受新请求但在途请求可完成
+        self._admin_state = "active"
 
     # ------------------------------------------------------------------
     # 线程安全的健康状态与连接数属性
@@ -301,6 +306,16 @@ class BackendNode:
     def active_connections(self, value: int) -> None:
         with self._state_lock:
             self._active_connections = max(0, int(value))
+
+    @property
+    def admin_state(self) -> str:
+        with self._state_lock:
+            return self._admin_state
+
+    @admin_state.setter
+    def admin_state(self, value: str) -> None:
+        with self._state_lock:
+            self._admin_state = value
 
     def mark_unhealthy(self, cooldown_seconds: float = 5.0) -> None:
         """原子地将节点标记为不健康并设置被动冷却截止时间。"""
@@ -417,10 +432,11 @@ class LoadBalancer:
     def _get_healthy_nodes_locked(self, nodes: list[BackendNode]) -> list[BackendNode]:
         """在已持有 `_nodes_lock` 的前提下计算健康节点列表。
 
-        判定准则（必须同时满足 3 项）：
+        判定准则（必须同时满足 4 项）：
             1. `node.is_healthy is True`（主动探针检查通过）；
             2. `time.monotonic() >= node.passive_unhealthy_until`（被动故障 5 秒冷却已过）；
-            3. `node.circuit_breaker.allow_request() is True`（熔断器允许请求通过）。
+            3. `node.circuit_breaker.allow_request() is True`（熔断器允许请求通过）；
+            4. `node.admin_state == "active"`（未被运维手动隔离或排空）。
         """
         now = time.monotonic()
         return [
@@ -429,6 +445,7 @@ class LoadBalancer:
             if node.is_healthy
             and now >= node.passive_unhealthy_until
             and node.circuit_breaker.allow_request()
+            and node.admin_state == "active"
         ]
 
     def add_node(self, http_url: str, grpc_address: str, weight: int = 1) -> None:
@@ -501,6 +518,59 @@ class LoadBalancer:
                     extra={"http_url": http_url, "grpc_address": grpc_address},
                 )
                 self._update_healthy_gauge_locked()
+
+    def isolate_node(self, http_url: str, grpc_address: str) -> bool:
+        """手动隔离指定节点：强制从调度池排除，不参与任何请求分发。
+
+        Returns:
+            bool: 是否成功找到并隔离了目标节点。
+        """
+        with self._nodes_lock:
+            clean_url = http_url.rstrip("/")
+            for node in self.nodes:
+                if node.http_url == clean_url and node.grpc_address == grpc_address:
+                    node.admin_state = "isolated"
+                    node.is_healthy = False
+                    GATEWAY_NODE_ADMIN_STATE.labels(node=node.grpc_address).set(1)
+                    logger.warning("Node manually isolated", extra={"http_url": http_url, "grpc_address": grpc_address})
+                    self._update_healthy_gauge_locked()
+                    return True
+            return False
+
+    def drain_node(self, http_url: str, grpc_address: str) -> bool:
+        """排空指定节点：不再接受新请求，但在途请求可继续完成。
+
+        Returns:
+            bool: 是否成功找到并排空了目标节点。
+        """
+        with self._nodes_lock:
+            clean_url = http_url.rstrip("/")
+            for node in self.nodes:
+                if node.http_url == clean_url and node.grpc_address == grpc_address:
+                    node.admin_state = "drained"
+                    GATEWAY_NODE_ADMIN_STATE.labels(node=node.grpc_address).set(2)
+                    logger.warning("Node drained (no new requests)", extra={"http_url": http_url, "grpc_address": grpc_address})
+                    self._update_healthy_gauge_locked()
+                    return True
+            return False
+
+    def activate_node(self, http_url: str, grpc_address: str) -> bool:
+        """恢复指定节点为正常活跃状态（取消隔离或排空）。
+
+        Returns:
+            bool: 是否成功找到并激活了目标节点。
+        """
+        with self._nodes_lock:
+            clean_url = http_url.rstrip("/")
+            for node in self.nodes:
+                if node.http_url == clean_url and node.grpc_address == grpc_address:
+                    node.admin_state = "active"
+                    node.mark_healthy()
+                    GATEWAY_NODE_ADMIN_STATE.labels(node=node.grpc_address).set(0)
+                    logger.info("Node reactivated", extra={"http_url": http_url, "grpc_address": grpc_address})
+                    self._update_healthy_gauge_locked()
+                    return True
+            return False
 
     def get_healthy_nodes(self) -> list[BackendNode]:
         """获取当前处于健康可用状态且未被熔断器阻断的节点列表。
@@ -666,6 +736,11 @@ async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0) -> No
                             "circuit_breaker": node.circuit_breaker.state,
                         },
                     )
+
+                # 上报熔断器状态指标（#7）
+                cb_state = node.circuit_breaker.state
+                cb_val = 0.0 if cb_state == "closed" else (1.0 if cb_state == "open" else 2.0)
+                GATEWAY_CIRCUIT_BREAKER_STATE.labels(node=node.grpc_address).set(cb_val)
 
             # Update gauge after each sweep（加锁保证与节点池状态一致）
             await asyncio.to_thread(balancer._nodes_lock.acquire)

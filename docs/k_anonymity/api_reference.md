@@ -5,7 +5,7 @@
 
 ### `k_anonymize_table`
 
-位置：`PrivShield.privacy.kano_table.k_anonymize_table`
+位置：`engine.privacy.kano_table.k_anonymize_table`
 
 对整张表执行 Mondrian 多维分区 K-匿名泛化。
 
@@ -41,7 +41,7 @@ def k_anonymize_table(
 
 ### `k_anonymize_dataframe`
 
-位置：`PrivShield.privacy.kano_table.k_anonymize_dataframe`
+位置：`engine.privacy.kano_table.k_anonymize_dataframe`
 
 对 DataFrame 执行 Mondrian 多维分区 K-匿名泛化。
 
@@ -67,7 +67,7 @@ def k_anonymize_dataframe(
 
 ### `anonymize_record`
 
-位置：`PrivShield.privacy.kano.anonymize_record`
+位置：`engine.privacy.kano.anonymize_record`
 
 对单条记录按内置泛化层次结构进行启发式泛化。
 
@@ -95,7 +95,7 @@ def anonymize_record(
 
 ### `BUILTIN_HIERARCHIES`
 
-位置：`PrivShield.privacy.kano.BUILTIN_HIERARCHIES`
+位置：`engine.privacy.kano.BUILTIN_HIERARCHIES`
 
 内置准标识符泛化层次结构映射表，包含 `age`、`zipcode`、`gender` 三个字段。
 

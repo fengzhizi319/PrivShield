@@ -2581,7 +2581,7 @@ subprocess.run(["bash", script_path], env=_clean_env(), check=True)
 ```
 Agent 容器后台日志报错：
 ```text
-{"level": "WARNING", "name": "PrivShield.routers.dynclassification", "message": "generate_profile failed", "error": "标准文档不存在: /app/docs/standard/四川省健康医疗大数据应用指南.md"}
+{"level": "WARNING", "name": "engine.routers.dynclassification", "message": "generate_profile failed", "error": "标准文档不存在: /app/docs/standard/四川省健康医疗大数据应用指南.md"}
 ```
 
 **根因**：

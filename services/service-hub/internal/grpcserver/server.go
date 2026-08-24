@@ -12,16 +12,9 @@ package grpcserver
 import (
 	"context"
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/rsa"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"log/slog"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +27,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 	"github.com/fengzhizi319/PrivShield/pkg/validation"
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
@@ -491,126 +485,34 @@ func levelToPriority(level string) int {
 // ─────────────────────────────────────────────────────────────
 
 // BuildServerCredentials constructs gRPC transport credentials supporting TLS 1.3, mTLS client auth, and public key pinning.
-// BuildServerCredentials 根据配置构造 gRPC TLS 传输凭证：
-// 1. 加载服务端证书与私钥，强制启用 TLS 1.3 最低版本；
-// 2. 若配置了 TLSClientAuth，挂载根 CA 证书池，设置 RequireAndVerifyClientCert 双向认证策略；
-// 3. 若配置了 TLSPinnedPubKeyFile，注入 VerifyPeerCertificate 验证钩子，严格比对客户端公钥指纹。
+// BuildServerCredentials 委托共享 tlsutil.BuildServerTLSConfig 构造 gRPC TLS 传输凭证，
+// 支持 TLS 1.3 强制最低版本、mTLS 双向认证与公钥固定。
 func BuildServerCredentials(cfg *config.Config) (credentials.TransportCredentials, error) {
-	if !cfg.TLSEnabled {
-		return nil, fmt.Errorf("TLS is disabled in configuration")
+	tlsCfg := &tlsutil.ServerTLSConfig{
+		Enabled:          cfg.TLSEnabled,
+		CertFile:         cfg.TLSCertFile,
+		KeyFile:          cfg.TLSKeyFile,
+		CAFile:           cfg.TLSCAFile,
+		ClientAuth:       cfg.TLSClientAuth,
+		PinnedPubKeyFile: cfg.TLSPinnedPubKeyFile,
 	}
-	if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-		return nil, fmt.Errorf("TLS cert file and key file must be configured")
-	}
-
-	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+	tlsConfig, err := tlsutil.BuildServerTLSConfig(tlsCfg)
 	if err != nil {
-		return nil, fmt.Errorf("load server x509 key pair: %w", err)
+		return nil, err
 	}
-
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS13,
-	}
-
-	clientAuthMode := strings.ToLower(strings.TrimSpace(cfg.TLSClientAuth))
-	if clientAuthMode != "" {
-		if cfg.TLSCAFile == "" {
-			return nil, fmt.Errorf("TLS CA file must be configured when client auth is enabled")
-		}
-		caPEM, err := os.ReadFile(cfg.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("read TLS CA file: %w", err)
-		}
-		caPool := x509.NewCertPool()
-		if !caPool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("failed to parse CA certificate from %s", cfg.TLSCAFile)
-		}
-		tlsConfig.ClientCAs = caPool
-
-		switch clientAuthMode {
-		case "require", "requireandverify":
-			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-		case "verify":
-			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
-		case "request":
-			tlsConfig.ClientAuth = tls.RequestClientCert
-		default:
-			return nil, fmt.Errorf("unknown TLS client auth mode: %s", cfg.TLSClientAuth)
-		}
-	}
-
-	// 注入公钥固定校验器
-	if cfg.TLSPinnedPubKeyFile != "" {
-		pinnedKey, err := loadPublicKey(cfg.TLSPinnedPubKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("load pinned client public key: %w", err)
-		}
-		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
-				return fmt.Errorf("mTLS: client did not present a certificate")
-			}
-			peerCert, err := x509.ParseCertificate(rawCerts[0])
-			if err != nil {
-				return fmt.Errorf("mTLS: failed to parse peer certificate: %w", err)
-			}
-			if !publicKeysEqual(peerCert.PublicKey, pinnedKey) {
-				return fmt.Errorf("mTLS: client public key does not match pinned key")
-			}
-			return nil
-		}
-	}
-
 	return credentials.NewTLS(tlsConfig), nil
 }
 
-// loadPublicKey loads a public key from PEM file (supports PKIX and X.509 Certificate formats).
-// loadPublicKey 从 PEM 格式文件中解析并提取公钥对象。
+// loadPublicKey loads a public key from PEM file (delegates to tlsutil.LoadPublicKey).
+// loadPublicKey 委托共享 tlsutil.LoadPublicKey 从 PEM 文件中解析公钥。
 func loadPublicKey(path string) (crypto.PublicKey, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read public key file: %w", err)
-	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, fmt.Errorf("no PEM data found in %s", path)
-	}
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		cert, certErr := x509.ParseCertificate(block.Bytes)
-		if certErr == nil {
-			return cert.PublicKey, nil
-		}
-		return nil, fmt.Errorf("parse public key: %w", err)
-	}
-	return pub, nil
+	return tlsutil.LoadPublicKey(path)
 }
 
-// publicKeysEqual checks if two public keys are identical (RSA, ECDSA, Ed25519).
-// publicKeysEqual 深度比对两个公钥的数学属性（支持 RSA 模数/指数、ECDSA 椭圆曲线坐标与 Ed25519 字节）。
+// publicKeysEqual checks if two public keys are identical (delegates to tlsutil.PublicKeysEqual).
+// publicKeysEqual 委托共享 tlsutil.PublicKeysEqual 比对两个公钥。
 func publicKeysEqual(a, b crypto.PublicKey) bool {
-	switch keyA := a.(type) {
-	case *rsa.PublicKey:
-		keyB, ok := b.(*rsa.PublicKey)
-		if !ok {
-			return false
-		}
-		return keyA.N.Cmp(keyB.N) == 0 && keyA.E == keyB.E
-	case *ecdsa.PublicKey:
-		keyB, ok := b.(*ecdsa.PublicKey)
-		if !ok {
-			return false
-		}
-		return keyA.X.Cmp(keyB.X) == 0 && keyA.Y.Cmp(keyB.Y) == 0 && keyA.Curve == keyB.Curve
-	case ed25519.PublicKey:
-		keyB, ok := b.(ed25519.PublicKey)
-		if !ok {
-			return false
-		}
-		return keyA.Equal(keyB)
-	default:
-		return false
-	}
+	return tlsutil.PublicKeysEqual(a, b)
 }
 
 // ─────────────────────────────────────────────────────────────

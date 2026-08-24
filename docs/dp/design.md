@@ -594,7 +594,7 @@ $$M(D) = f(D) + \mathcal{N}(0, \sigma^2)$$
 
 **解析高斯机制（Analytic Gaussian Mechanism）**
 
-本模块默认采用 **Balle & Wang (2018) 提出的解析高斯机制**。该算法对任意 $\varepsilon > 0$、$\delta > 0$ 直接数值求解满足 $(\varepsilon, \delta)$-DP 的最小 $\sigma$，在相同隐私参数下噪声通常小于经典公式，且不受 $\varepsilon \le 1$ 的限制。实现位于 `PrivShield.privacy.dp.calibrate_analytic_gaussian()`。
+本模块默认采用 **Balle & Wang (2018) 提出的解析高斯机制**。该算法对任意 $\varepsilon > 0$、$\delta > 0$ 直接数值求解满足 $(\varepsilon, \delta)$-DP 的最小 $\sigma$，在相同隐私参数下噪声通常小于经典公式，且不受 $\varepsilon \le 1$ 的限制。实现位于 `engine.privacy.dp.calibrate_analytic_gaussian()`。
 
 **与 Laplace 的核心区别**：
 

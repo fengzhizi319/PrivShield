@@ -41,6 +41,16 @@ func main() {
 	// ── Structured logger / 结构化日志 ────────────────────────
 	logger := pkgconfig.SetupLogger(cfg.LogFormat, cfg.LogLevel)
 
+	// ── SQLite Integrity Check / SQLite 完整性校验 ──────────────
+	// 启动时校验 SQLite 数据库完整性，检测损坏并阻止服务启动。
+	// 使用共享库 sqlite.ValidateIntegrity() 统一实现，避免各模块重复代码。
+	if cfg.DBPath != "" {
+		if err := sqlite.ValidateIntegrity(cfg.DBPath); err != nil {
+			log.Fatalf("sqlite integrity check failed: %v", err)
+		}
+		logger.Info("database integrity check passed", "path", cfg.DBPath)
+	}
+
 	// ── Audit store / 审计存储 ─────────────────────────────────
 	auditStore, err := initAuditStore(cfg.DBPath, logger)
 	if err != nil {

@@ -14,7 +14,9 @@
   - **API 4**：预留企业数据源 4 扩展模拟接口 (`GET /api/v1/mock4` / `rpc GetMockData4`)
 - **双协议通信支持**：对外提供 HTTP/HTTPS REST（端口 `:8083`），对内提供高性能 gRPC（端口 `:50053`）；
 - **全链路 mTLS 双向认证与公钥固定**：HTTP/HTTPS 与 gRPC 服务均支持 TLS 1.3 客户端证书校验与客户端公钥固定（Public Key Pinning）；
-- **测试证书持久入库**：预置全套测试证书链与已固定的公钥文件（`certs/client.pub`），无需每次测试重新生成，保障公钥固定机制可复现。
+- **测试证书持久入库**：预置全套测试证书链与已固定的公钥文件（`certs/client.pub`），无需每次测试重新生成，保障公钥固定机制可复现；
+- **无状态设计**：纯无状态服务，无持久化存储与任务队列，天然具备崩溃恢复能力；
+- 📖 **可靠性能力详解**：[docs/reliability.md](docs/reliability.md)
 
 > 📖 **深度学习指南**：完整架构解析、数据集字典说明与源码导读见 [docs/learning-guide.md](docs/learning-guide.md)。
 

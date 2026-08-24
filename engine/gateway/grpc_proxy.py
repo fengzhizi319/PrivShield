@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import random
 import time
 
 import grpc
@@ -191,6 +193,11 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
                     )
                     # 毫秒级被动健康下线（5秒冷却）
                     node.mark_unhealthy(cooldown_seconds=5.0)
+                    # 指数退避 + 随机抖动（#6）：避免重试风暴
+                    if attempt < max_retries - 1:
+                        backoff = min(0.1 * (2 ** attempt), 2.0)
+                        jitter = random.uniform(0, backoff * 0.5)
+                        await asyncio.sleep(backoff + jitter)
                 else:
                     # 正常的业务级/参数类错误，无需重试，直接透传
                     duration = time.perf_counter() - start_time
@@ -215,6 +222,11 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
                     },
                 )
                 node.mark_unhealthy(cooldown_seconds=5.0)
+                # 指数退避 + 随机抖动（#6）：避免重试风暴
+                if attempt < max_retries - 1:
+                    backoff = min(0.1 * (2 ** attempt), 2.0)
+                    jitter = random.uniform(0, backoff * 0.5)
+                    await asyncio.sleep(backoff + jitter)
 
         # 步骤 3: 若全部重试机会已耗尽
         duration = time.perf_counter() - start_time

@@ -5,7 +5,7 @@
 
 ### `obfuscate_query`
 
-位置：`PrivShield.privacy.qol.obfuscate_query`
+位置：`engine.privacy.qol.obfuscate_query`
 
 ```python
 def obfuscate_query(
@@ -31,7 +31,7 @@ def obfuscate_query(
 
 ### `obfuscate_query_batch`
 
-位置：`PrivShield.privacy.qol.obfuscate_query_batch`
+位置：`engine.privacy.qol.obfuscate_query_batch`
 
 ```python
 def obfuscate_query_batch(

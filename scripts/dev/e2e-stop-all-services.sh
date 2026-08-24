@@ -9,6 +9,8 @@
 
 set -euo pipefail
 
+# ── 解析脚本目录，定位项目根目录和 PID 文件目录 ────────────────────────
+# 支持两个 PID 目录：新版 .pids/ 和旧版 console/.pids/（向后兼容）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PIDS_DIR="${PROJECT_ROOT}/.pids"
@@ -21,6 +23,11 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
+# ── stop_module: 通过 PID 文件停止单个模块 ────────────────────────────
+# 1. 在 .pids/ 和 console/.pids/ 中查找 PID 文件（优先新版目录）
+# 2. 发送 SIGTERM 优雅退出，每 0.5s 检查一次，最多等待 10s
+# 3. 超时后发送 SIGKILL 强杀
+# 4. 删除 PID 文件
 stop_module() {
     local name="$1"
     local pid_file=""
@@ -57,7 +64,7 @@ stop_module() {
     rm -f "$pid_file"
 }
 
-# 停止顺序：先停 Go 模块，再停 Agent
+# ── 停止顺序：先停 Go 微服务群，再停 Agent（避免服务依赖导致僵尸进程） ──
 stop_module "service-hub"
 stop_module "datasource-mgr"
 stop_module "audit-log"

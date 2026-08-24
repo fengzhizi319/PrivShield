@@ -90,35 +90,30 @@ func New(cfg *config.Config) (*Client, error) {
 	// 创建 gRPC 客户端连接。
 	// grpc.NewClient 采用懒连接模式，不会立即建立 TCP 连接，
 	// 而是在首次 RPC 调用时才真正连接（延迟连接策略）。
+	//
+	// 重试策略参数从配置读取（#12），支持通过环境变量动态调整：
+	// - PRIVACY_AGENT_RETRY_MAX_ATTEMPTS: 最大重试次数（默认 6）
+	// - PRIVACY_AGENT_RETRY_INITIAL_BACKOFF: 初始退避秒数（默认 1）
+	// - PRIVACY_AGENT_RETRY_MAX_BACKOFF: 最大退避秒数（默认 8）
 	conn, err := grpc.NewClient(
 		target,
 		// 使用构造好的传输凭证：非安全或 TLS/mTLS
 		grpc.WithTransportCredentials(creds),
 		// 配置自动重试 + 等待就绪策略：覆盖 agent 崩溃/重启的完整故障窗口。
-		// 1) waitForReady=true：连接不可用（dial connection refused，如 agent 重启中）时
-		//    RPC 不立即失败，而是等待连接恢复后自动发送，前端无需手动重试；
-		// 2) retryPolicy：已建立的连接上收到 UNAVAILABLE（如 connection reset by peer）
-		//    时自动重试，最大 6 次尝试（1 次原始调用 + 5 次重试），指数退避
-		//    1s → 2s → 4s → 8s → 8s（总重试窗口约 31 秒，覆盖 agent 重启耗时）。
-		// Configure retry + wait-for-ready to cover the full agent crash/restart window:
-		// 1) waitForReady=true: RPC waits for the connection to recover instead of
-		//    failing immediately when dialing is refused (agent restarting);
-		// 2) retryPolicy: retries UNAVAILABLE (e.g. connection reset by peer) on
-		//    established connections up to 6 attempts with backoff 1s→2s→4s→8s→8s
-		//    (≈31s total window, covering the agent restart duration).
-		grpc.WithDefaultServiceConfig(`{
+		// 重试参数从配置读取，支持运行时通过环境变量调整。
+		grpc.WithDefaultServiceConfig(fmt.Sprintf(`{
   "methodConfig": [{
     "name": [{"service": "privacy.local.PrivacyService"}],
     "waitForReady": true,
     "retryPolicy": {
-      "MaxAttempts": 6,
-      "InitialBackoff": "1s",
-      "MaxBackoff": "8s",
+      "MaxAttempts": %d,
+      "InitialBackoff": "%ds",
+      "MaxBackoff": "%ds",
       "BackoffMultiplier": 2.0,
       "RetryableStatusCodes": ["UNAVAILABLE"]
     }
   }]
-}`),
+}`, cfg.AgentRetryMaxAttempts, cfg.AgentRetryInitialBackoff, cfg.AgentRetryMaxBackoff)),
 		// 设置单次 RPC 调用最大接收与发送消息大小为 64 MiB（64 * 2^20 字节）。
 		// 默认值为 4 MiB，base64 编码的图片或大表分类场景可能超出默认限制，
 		// 导致服务端重置 HTTP/2 连接（表现为 connection reset by peer）。

@@ -24,16 +24,16 @@ func NewTaskStore(db *sql.DB) (*TaskStore, error) {
 
 func (s *TaskStore) Save(task *store.Task) error {
 	_, err := s.db.Exec(`
-		INSERT OR REPLACE INTO tasks (id, status, stage, source, operation, priority, created_at, payload_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT OR REPLACE INTO tasks (id, status, stage, source, operation, priority, created_at, payload_json, retry_count, retry_after)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Status, task.Stage, task.Source, task.Operation, task.Priority,
-		task.CreatedAt.Format(time.RFC3339Nano), task.PayloadJSON)
+		task.CreatedAt.Format(time.RFC3339Nano), task.PayloadJSON, task.RetryCount, nullTime(task.RetryAfter))
 	return err
 }
 
 func (s *TaskStore) Get(id string) (*store.Task, error) {
 	row := s.db.QueryRow(`
-		SELECT id, status, stage, source, operation, priority, created_at, started_at, completed_at, duration_ms, error
+		SELECT id, status, stage, source, operation, priority, created_at, started_at, completed_at, duration_ms, error, retry_count, retry_after
 		FROM tasks WHERE id = ?
 	`, id)
 	return scanTask(row)
@@ -53,7 +53,7 @@ func (s *TaskStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
 	}
 
 	// Fetch rows
-	query := "SELECT id, status, stage, source, operation, priority, created_at, started_at, completed_at, duration_ms, error FROM tasks"
+	query := "SELECT id, status, stage, source, operation, priority, created_at, started_at, completed_at, duration_ms, error, retry_count, retry_after FROM tasks"
 	if filter.Status != "" {
 		query += " WHERE status = ?"
 	}
@@ -94,10 +94,10 @@ func (s *TaskStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
 
 func (s *TaskStore) Update(task *store.Task) error {
 	_, err := s.db.Exec(`
-		UPDATE tasks SET status=?, stage=?, started_at=?, completed_at=?, duration_ms=?, error=?
+		UPDATE tasks SET status=?, stage=?, started_at=?, completed_at=?, duration_ms=?, error=?, retry_count=?, retry_after=?
 		WHERE id=?
 	`, task.Status, task.Stage, nullTime(task.StartedAt), nullTime(task.CompletedAt),
-		task.DurationMs, task.Error, task.ID)
+		task.DurationMs, task.Error, task.RetryCount, nullTime(task.RetryAfter), task.ID)
 	return err
 }
 
@@ -134,10 +134,11 @@ func (s *TaskStore) Counts() (store.TaskCounts, error) {
 func scanTaskFields(scan func(dest ...any) error) (*store.Task, error) {
 	var t store.Task
 	var createdAt string
-	var startedAt, completedAt, errMsg sql.NullString
+	var startedAt, completedAt, errMsg, retryAfter sql.NullString
 
 	err := scan(&t.ID, &t.Status, &t.Stage, &t.Source, &t.Operation, &t.Priority,
-		&createdAt, &startedAt, &completedAt, &t.DurationMs, &errMsg)
+		&createdAt, &startedAt, &completedAt, &t.DurationMs, &errMsg,
+		&t.RetryCount, &retryAfter)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +155,11 @@ func scanTaskFields(scan func(dest ...any) error) (*store.Task, error) {
 		}
 	}
 	t.Error = errMsg.String
+	if retryAfter.Valid {
+		if ts, err := time.Parse(time.RFC3339Nano, retryAfter.String); err == nil {
+			t.RetryAfter = &ts
+		}
+	}
 	return &t, nil
 }
 

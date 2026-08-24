@@ -19,6 +19,8 @@
 
 set -euo pipefail
 
+# ── 解析脚本目录，初始化全局变量 ──────────────────────────────────
+# 各微服务 URL 可通过环境变量覆盖（适配非默认端口部署）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
@@ -42,6 +44,11 @@ AGENT_URL="${PRIVSHIELD_AGENT_URL:-http://127.0.0.1:8079}"
 PASS_COUNT=0
 FAIL_COUNT=0
 
+# ── 断言工具函数 ────────────────────────────────────────────────
+# assert_status              : 断言 HTTP 状态码
+# assert_json_field          : 断言 JSON 响应中指定字段的值
+# assert_json_field_not_empty: 断言 JSON 响应中指定字段非空
+# curl_json                  : 发送 HTTP 请求并返回 JSON 响应
 assert_status() {
     local desc="$1"
     local expected="$2"

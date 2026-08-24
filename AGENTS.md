@@ -332,6 +332,7 @@ Address these before any hardened production deployment.
 | Dynclassification PRD | `docs/dynclassification/prd.md` | Dynamic classification requirements |
 | 2026 full project audit report | `docs/audit_reports/2026_full_project_audit_report.md` | 全项目安全/正确性审计与整改报告 |
 | Gateway design | `docs/gateway_balancer/design.md` | Gateway and load balancer |
+| **Gateway reliability** | `docs/gateway_balancer/reliability.md` | **网关可靠性能力（重试/熔断/健康检查/动态拓扑）** |
 | Production security PRD | `docs/production_security/prd.md` | TLS/auth/rate-limit requirements |
 | Production security design | `docs/production_security/design.md` | TLS/auth/rate-limit architecture |
 | Production security ops | `docs/production_security/ops.md` | Deployment and cert quick reference |
@@ -347,6 +348,11 @@ Address these before any hardened production deployment.
 | Deployment PRD | `docs/deployment/prd.md` | K8s/Helm/Docker Compose requirements |
 | Deployment design | `docs/deployment/design.md` | Chart structure and parameters |
 | Deployment ops | `docs/deployment/ops.md` | Install, upgrade and troubleshooting |
+| **Engine reliability** | `docs/reliability.md` | **引擎可靠性能力（预算恢复/完整性校验/备份）** |
+| **Service Hub reliability** | `services/service-hub/docs/reliability.md` | **调度中枢可靠性（崩溃恢复/自动重试/mTLS/备份）** |
+| **Audit Log reliability** | `services/audit-log/docs/reliability.md` | **审计存证可靠性（完整性校验/HMAC 审计/备份）** |
+| **Datasource Mgr reliability** | `services/datasource-mgr/docs/reliability.md` | **数据源可靠性（无状态设计/双协议 mTLS）** |
+| **BFF-Go reliability** | `console/bff-go/docs/reliability.md` | **Go BFF 可靠性（gRPC 重试/连接保活/优雅停机）** |
 
 ## 14. Quick Reference
 

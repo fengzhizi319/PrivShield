@@ -149,7 +149,7 @@
 
 ---
 
-## 2. Python SDK (`PrivShield.pipeline`)
+## 2. Python SDK (`engine.pipeline`)
 
 ```python
 from engine.pipeline import PipelineService, PipelineResult

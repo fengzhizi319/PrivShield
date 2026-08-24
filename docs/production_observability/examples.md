@@ -3,7 +3,7 @@
 
 ## 1. 概述
 
-本文档提供 `PrivShield.observability` 的典型使用示例，涵盖结构化日志配置、Prometheus 指标抓取以及 OpenTelemetry tracing 初始化。
+本文档提供 `engine.observability` 的典型使用示例，涵盖结构化日志配置、Prometheus 指标抓取以及 OpenTelemetry tracing 初始化。
 
 ## 2. 配置 JSON 日志
 
@@ -21,7 +21,7 @@ PRIVACY_LOG_FORMAT=json PRIVACY_LOG_LEVEL=INFO python -m engine.main
 {
   "timestamp": "2026-07-11T14:30:27.123Z",
   "level": "INFO",
-  "logger": "PrivShield.observability.middleware",
+  "logger": "engine.observability.middleware",
   "message": "POST /v1/privacy/mask 200 1.234ms identity=anonymous",
   "request_id": "a1b2c3d4e5f67890",
   "identity_name": "",

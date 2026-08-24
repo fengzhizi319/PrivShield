@@ -70,9 +70,17 @@ PrivShield/ (Repo Root)
 ### 3. 企业级数据流通中台微服务群 (Go Microservices)
 
 - **调度中枢 ([services/service-hub](file:///home/charles/code/sfwork/PrivShield/services/service-hub))**：串联国密 VPN 专线网关、任务流转、分类分级打标、动态脱敏处理、存证上链回传 6 阶段流水线；
+  - **崩溃恢复与自动重试**：启动时自动回收孤立任务，周期性后台重试失败任务（指数退避 + RetryCount）；
+  - **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 + 公钥固定；
+  - 📖 [可靠性能力详解](services/service-hub/docs/reliability.md)
 - **数据源资产管理 ([services/datasource-mgr](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr))**：提供 4 个模拟数据源接口（医保 `yibao`、康养 `kangyang` 及 2 个预留接口），支持 HTTPS REST + gRPC mTLS 双协议与公钥固定，内置数据抽样与资产目录；
+  - 📖 [可靠性能力详解](services/datasource-mgr/docs/reliability.md)
 - **脱敏审计与存证 ([services/audit-log](file:///home/charles/code/sfwork/PrivShield/services/audit-log))**：实时落盘脱敏快照，构建基于 SHA-256 的不可篡改哈希存证链与合规只读看板；
-- **控制台 BFF ([console/bff-go](file:///home/charles/code/sfwork/PrivShield/console/bff-go))**：基于 gRPC 连接池实现请求聚合、多节点 Client-Side 轮询与故障转移。
+  - **完整性校验**：启动时 `PRAGMA integrity_check` + HMAC-SHA256 签名审计日志 + 独立校验脚本；
+  - 📖 [可靠性能力详解](services/audit-log/docs/reliability.md)
+- **控制台 BFF ([console/bff-go](file:///home/charles/code/sfwork/PrivShield/console/bff-go))**：基于 gRPC 连接池实现请求聚合、多节点 Client-Side 轮询与故障转移；
+  - **gRPC 自动重试**：可配置重试策略（默认最多 6 次，指数退避 1s→8s）；
+  - 📖 [可靠性能力详解](console/bff-go/docs/reliability.md)
 
 ### 4. 全栈多层次纵深防 DDoS 与安全基底 (Anti-DDoS & Security Shield)
 

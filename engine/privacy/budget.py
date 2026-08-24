@@ -93,7 +93,7 @@ class BudgetAuditLogger:
                     f.write(log_line)
             except Exception as e:
                 import logging
-                logging.getLogger("PrivShield.privacy.budget").warning(
+                logging.getLogger("engine.privacy.budget").warning(
                     f"BudgetAuditLogger: failed to write audit log to '{self.log_file}': {e}"
                 )
             return signature
@@ -286,9 +286,32 @@ class BudgetAccountant:
                 conn.close()
 
     def _init_db(self) -> None:
-        """初始化共享数据库，如果设置了 PRIVACY_BUDGET_DB 持久化路径。"""
+        """初始化共享数据库，如果设置了 PRIVACY_BUDGET_DB 持久化路径。
+
+        启动时执行 PRAGMA integrity_check 校验数据库完整性（#8），
+        若检测到损坏则记录错误日志并回退到内存模式，防止带病运行。
+        """
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
+            # 启动时完整性校验（#8）：检测突然断电或文件系统故障导致的数据库损坏
+            if os.path.exists(db_path):
+                try:
+                    check_conn = sqlite3.connect(db_path, timeout=10.0)
+                    try:
+                        result = check_conn.execute("PRAGMA integrity_check").fetchone()
+                        if result and result[0] != "ok":
+                            logger.error(
+                                "budget_db_integrity_check_failed",
+                                extra={"db_path": db_path, "result": result[0]},
+                            )
+                    finally:
+                        check_conn.close()
+                except Exception as e:
+                    logger.error(
+                        "budget_db_integrity_check_error",
+                        extra={"db_path": db_path, "error": str(e)},
+                    )
+
             parent_dir = os.path.dirname(db_path)
             if parent_dir:
                 os.makedirs(parent_dir, exist_ok=True)

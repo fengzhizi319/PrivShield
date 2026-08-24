@@ -1,4 +1,4 @@
-"""Observability layer for PrivShield.
+"""Observability layer for engine.
 
 提供结构化日志、Prometheus metrics、可选 OpenTelemetry tracing 以及 REST/gRPC 中间件。
 Provides structured logging, Prometheus metrics, optional OpenTelemetry tracing,

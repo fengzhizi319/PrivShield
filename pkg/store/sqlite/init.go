@@ -70,6 +70,36 @@ func Open(path string, logger *slog.Logger) (*sql.DB, error) {
 	return db, nil
 }
 
+// ValidateIntegrity performs a SQLite integrity check on the database file at dbPath.
+// ValidateIntegrity 对指定路径的 SQLite 数据库文件执行完整性校验。
+//
+// 返回 nil 表示校验通过或 dbPath 为空（内存模式无需校验）。
+// 返回 error 表示数据库损坏或校验失败。
+//
+// 突然断电可能导致 SQLite 数据库文件损坏，此函数在服务启动早期检测损坏，防止带病运行。
+func ValidateIntegrity(dbPath string) error {
+	if dbPath == "" {
+		return nil // 内存模式无需校验
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("open database for integrity check: %w", err)
+	}
+	defer db.Close()
+
+	var result string
+	if err := db.QueryRow("PRAGMA integrity_check").Scan(&result); err != nil {
+		return fmt.Errorf("integrity check query failed: %w", err)
+	}
+
+	if result != "ok" {
+		return fmt.Errorf("database corruption detected: %s", result)
+	}
+
+	return nil
+}
+
 // InitTaskTables creates the tasks table if it doesn't exist.
 // InitTaskTables 在不存在时创建 tasks 表。
 func InitTaskTables(db *sql.DB) error {
@@ -86,12 +116,54 @@ func InitTaskTables(db *sql.DB) error {
 			completed_at DATETIME,
 			duration_ms INTEGER DEFAULT 0,
 			error TEXT,
-			payload_json TEXT
+			payload_json TEXT,
+			retry_count INTEGER DEFAULT 0,
+			retry_after DATETIME
 		);
 		CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 		CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+		CREATE INDEX IF NOT EXISTS idx_tasks_retry_after ON tasks(retry_after);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Backward compatibility: add columns if they don't exist (for existing databases)
+	// 向后兼容：如果列不存在则添加（针对已有数据库）
+	cursor, err := db.Query("PRAGMA table_info(tasks)")
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+
+	columns := make(map[string]bool)
+	for cursor.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := cursor.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			continue
+		}
+		columns[name] = true
+	}
+
+	if !columns["retry_count"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN retry_count INTEGER DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	if !columns["retry_after"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN retry_after DATETIME"); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // InitDataSourceTables creates the datasources and access_audit tables.

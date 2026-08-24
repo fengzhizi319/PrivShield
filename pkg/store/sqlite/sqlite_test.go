@@ -511,3 +511,71 @@ func TestAuditStore_GetLogNotFound(t *testing.T) {
 func fmt_id(format string, args ...any) string {
 	return fmt.Sprintf(format, args...)
 }
+
+// ─────────────────────────────────────────────────────────────
+// ValidateIntegrity
+// ─────────────────────────────────────────────────────────────
+
+func TestValidateIntegrity_EmptyPath(t *testing.T) {
+	// Empty path should return nil (memory mode, no check needed)
+	err := sqlite.ValidateIntegrity("")
+	if err != nil {
+		t.Fatalf("expected nil error for empty path, got %v", err)
+	}
+}
+
+func TestValidateIntegrity_ValidDatabase(t *testing.T) {
+	// Create a valid database and check integrity
+	dbPath := openTestDB(t)
+	db, err := sqlite.Open(dbPath, testLogger())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	// Create tables to make it a real database
+	if err := sqlite.InitTaskTables(db); err != nil {
+		t.Fatalf("init tables: %v", err)
+	}
+	db.Close()
+
+	// Now validate integrity
+	err = sqlite.ValidateIntegrity(dbPath)
+	if err != nil {
+		t.Fatalf("expected nil error for valid database, got %v", err)
+	}
+}
+
+func TestValidateIntegrity_NonexistentPath(t *testing.T) {
+	// Non-existent path should return error
+	err := sqlite.ValidateIntegrity("/nonexistent/path/to/database.db")
+	if err == nil {
+		t.Fatal("expected error for nonexistent database path")
+	}
+}
+
+func TestValidateIntegrity_CorruptedDatabase(t *testing.T) {
+	// Create a database, then corrupt it by writing garbage
+	dbPath := openTestDB(t)
+	db, err := sqlite.Open(dbPath, testLogger())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := sqlite.InitTaskTables(db); err != nil {
+		t.Fatalf("init tables: %v", err)
+	}
+	db.Close()
+
+	// Corrupt the database by overwriting part of the file
+	f, err := os.OpenFile(dbPath, os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("open for corruption: %v", err)
+	}
+	// Write garbage at the beginning of the file (after the first 100 bytes to partially corrupt)
+	_, _ = f.WriteAt([]byte("CORRUPTED_DATA_GARBHERE"), 100)
+	f.Close()
+
+	// ValidateIntegrity should detect corruption
+	err = sqlite.ValidateIntegrity(dbPath)
+	if err == nil {
+		t.Fatal("expected error for corrupted database")
+	}
+}

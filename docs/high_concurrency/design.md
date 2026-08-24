@@ -1449,7 +1449,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 | 多进程预算竞争 | 超卖或拒绝 | Lua 脚本原子扣减 + 预扣批量模式 |
 | gevent monkey-patch 副作用 | 第三方库行为异常 | 充分测试 + `patch_all(thread=False)` 限制范围 |
 | Numba 首次编译延迟 | 首个请求延迟 ~200ms | 启动时预热 `@jit` 函数 + `cache=True` 持久化编译结果 |
-| Numba 安装包体积大 | 镜像增加 ~300MB | 设为可选依赖 `pip install PrivShield[numba]` |
+| Numba 安装包体积大 | 镜像增加 ~300MB | 设为可选依赖 `pip install privshield[numba]` |
 
 ---
 

@@ -26,6 +26,8 @@ type Task struct {
 	DurationMs  int64      `json:"duration_ms"`
 	Error       string     `json:"error,omitempty"`
 	PayloadJSON string     `json:"-"`             // Raw payload (not exposed in JSON)
+	RetryCount  int        `json:"retry_count"`   // Number of retry attempts (replaces fragile string matching)
+	RetryAfter  *time.Time `json:"retry_after,omitempty"` // Earliest time for next retry (backoff delay)
 }
 
 // TaskFilter specifies filtering criteria for listing tasks.

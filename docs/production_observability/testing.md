@@ -200,7 +200,7 @@ PYTHONPATH=. pytest tests/test_observability.py -v
 PYTHONPATH=. pytest tests -q
 
 # 带覆盖率报告
-PYTHONPATH=. pytest tests/test_observability.py --cov=PrivShield.observability --cov-report=term-missing
+PYTHONPATH=. pytest tests/test_observability.py --cov=engine.observability --cov-report=term-missing
 ```
 
 ## 6. 持续集成建议

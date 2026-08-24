@@ -28,6 +28,9 @@ log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# ── stop_module: 通过 PID 文件停止单个微服务模块 ──────────────────────
+# 查找顺序：先查 .pids/，再查 console/.pids/（向后兼容）
+# 停止策略：SIGTERM 优雅退出，每 0.5s 检查一次，最多等待 10s，超时则 SIGKILL
 stop_module() {
     local name="$1"
     local pid_file=""
@@ -67,6 +70,7 @@ stop_module() {
     rm -f "$pid_file"
 }
 
+# ── 按依赖反序停止三个中台微服务 ────────────────────────────────────
 stop_module "service-hub"
 stop_module "datasource-mgr"
 stop_module "audit-log"

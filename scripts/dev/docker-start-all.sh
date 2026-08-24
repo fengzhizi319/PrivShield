@@ -8,11 +8,16 @@
 
 set -euo pipefail
 
+# ── 解析脚本所在目录，定位项目根目录 ────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WITH_LLM=false
-BUILD_FLAG="--build"
+BUILD_FLAG="--build"   # 默认启动前重新构建镜像
 
+# ── 解析命令行参数 ─────────────────────────────────────────────────────
+#   --with-llm  : 同时启动 vLLM 大模型推理容器（需 GPU 支持）
+#   --no-build  : 跳过镜像构建，直接使用本地已有镜像
+#   --build     : 启动前重新构建本地镜像（默认行为）
 for arg in "$@"; do
     case "$arg" in
         --with-llm)
@@ -41,6 +46,9 @@ echo "==========================================================================
 echo "🌟 [Docker Mode] 正在启动 PrivShield 全栈容器套件..."
 echo "============================================================================"
 
+# ── 进入 docker-compose 目录，启动容器 ──────────────────────────────────
+# 默认仅启动核心服务（Agent + 双后端 + Web UI）
+# 传入 --with-llm 时激活 llm profile，额外启动 vLLM 推理容器
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
 if [[ "$WITH_LLM" == "true" ]]; then

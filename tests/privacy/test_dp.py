@@ -123,7 +123,7 @@ class TestDPSum:
 
         api = DPApi(namespace="test-sum-compat")
         api.rng.seed(42)
-        with caplog.at_level(logging.WARNING, logger="PrivShield.privacy.dp"):
+        with caplog.at_level(logging.WARNING, logger="engine.privacy.dp"):
             result = api.sum([1.0, 2.0, 3.0], epsilon=10.0, mechanism="laplace")
         assert any("clip_bounds_inferred_from_data" in r.message for r in caplog.records)
         # Data-dependent clipping: sensitivity inferred from data range

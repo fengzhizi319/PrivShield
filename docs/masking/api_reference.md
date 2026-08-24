@@ -5,7 +5,7 @@
 
 ### `mask_value`
 
-位置：`PrivShield.privacy.masking.mask_value`
+位置：`engine.privacy.masking.mask_value`
 
 ```python
 def mask_value(field_name: str, value: str, context: str = "") -> str
@@ -44,7 +44,7 @@ result = mask_value("name", "张三丰")
 
 ### `mask_record`
 
-位置：`PrivShield.privacy.masking.mask_record`
+位置：`engine.privacy.masking.mask_record`
 
 ```python
 def mask_record(record: Any, context: str = "") -> Any
@@ -93,7 +93,7 @@ masked = mask_record(record)
 
 ### `mask_value_batch`
 
-位置：`PrivShield.privacy.masking.mask_value_batch`
+位置：`engine.privacy.masking.mask_value_batch`
 
 ```python
 def mask_value_batch(
@@ -126,7 +126,7 @@ results = mask_value_batch(field_names, values)
 
 ### `mask_dataframe`
 
-位置：`PrivShield.privacy.masking.mask_dataframe`
+位置：`engine.privacy.masking.mask_dataframe`
 
 ```python
 def mask_dataframe(
@@ -209,7 +209,7 @@ print(result_table.column("mobile").to_pylist())
 
 ### `hash_value`
 
-位置：`PrivShield.privacy.masking.hash_value`
+位置：`engine.privacy.masking.hash_value`
 
 ```python
 def hash_value(value: str, salt: str) -> str
@@ -242,7 +242,7 @@ assert hash_value("user_12345", "my_secret_salt") == hash_value("user_12345", "m
 
 ### `truncate`
 
-位置：`PrivShield.privacy.masking.truncate`
+位置：`engine.privacy.masking.truncate`
 
 ```python
 def truncate(value: str, keep_prefix: int) -> str

@@ -75,8 +75,18 @@ gRPC (grpcio, :50051)  ←→  PrivacyService (业务中枢)  ←→  隐私算�
 ### 2.6 企业级中台微服务群实践
 
 - **`service-hub` (:8082)**：流水线 6 阶段调度编排（`Ingest` ➔ `Fetch` ➔ `Classify` ➔ `Desensitize` ➔ `Return` ➔ `Audit`）与 Worker Pool 异步削峰；
+  - **崩溃恢复**：启动时自动回收孤立任务（running 标记失败、pending 保留队列）；
+  - **自动重试**：启动时 + 周期性后台重试失败任务，指数退避延迟 + RetryCount 结构化字段；
+  - **完整性校验**：启动时 `PRAGMA integrity_check` 阻断损坏数据库；
+  - **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 + 公钥固定；
+  - 📖 [可靠性能力详解](services/service-hub/docs/reliability.md)
 - **`datasource-mgr` (:8083)**：多源异构资产纳管、内置医保与康养模拟库（`yibao.csv` & `kangyang.csv`）、动态元数据自动探查与样本抽样；
-- **`audit-log` (:8084)**：基于 8 维度特征的不可篡改 SHA-256 存证哈希链。
+  - **HTTP/gRPC 双协议 mTLS**：与 service-hub 共享 `pkg/tlsutil` 工具库；
+  - 📖 [可靠性能力详解](services/datasource-mgr/docs/reliability.md)
+- **`audit-log` (:8084)**：基于 8 维度特征的不可篡改 SHA-256 存证哈希链；
+  - **完整性校验**：启动时 `PRAGMA integrity_check` + HMAC-SHA256 签名审计日志；
+  - **独立校验脚本**：`scripts/prod/verify_audit.py` 独立验证审计数据完整性；
+  - 📖 [可靠性能力详解](services/audit-log/docs/reliability.md)
 
 ### 2.7 测试与自动化验证矩阵
 
@@ -110,7 +120,11 @@ Layer 3: Local LLM 仲裁 (100~500ms) → Qwen3.5 语义判定与无痕平滑 (�
 ### 3.2 智能动态负载均衡 (P2C + Client-Side LB)
 
 - **Go 客户端多节点负载池 (`pkg/agent/client.go`)**：原生支持 `PRIVACY_AGENT_URLS` 集群列表，内置平滑轮询与节点宕机自动剔除与容灾切换；
-- **Python 网关 P2C 调度 (`engine/gateway/balancer.py`)**：Power of Two Choices 算法结合在途连接与响应延迟动态打分分流，消除羊群效应。
+  - **熔断器 Prometheus 指标**：`circuit_breaker_state{node="..."}` 实时暴露熔断器状态；
+  - 📖 [网关可靠性详解](gateway_balancer/reliability.md)
+- **Python 网关 P2C 调度 (`engine/gateway/balancer.py`)**：Power of Two Choices 算法结合在途连接与响应延迟动态打分分流，消除羊群效应；
+  - **HTTP/gRPC 故障重试**：最多 3 次重试，指数退避 + 随机抖动，幂等方法无条件重试；
+  - **动态拓扑管理**：运行时 API 注册/注销/隔离/排空/激活后端节点。
 
 ### 3.3 分布式无噪累加器 (Accumulator)
 

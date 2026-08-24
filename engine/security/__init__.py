@@ -1,4 +1,4 @@
-"""Security layer for PrivShield.
+"""Security layer for engine.
 
 Provides TLS, authentication/authorization, and rate limiting shared between the
 REST (FastAPI) and gRPC servers.

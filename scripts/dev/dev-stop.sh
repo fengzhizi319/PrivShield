@@ -17,6 +17,8 @@ CONSOLE_DIR="$PROJECT_ROOT/console"
 PIDS_DIR="$PROJECT_ROOT/.pids"
 LEGACY_PIDS_DIR="$CONSOLE_DIR/.pids"
 
+# ── kill_by_pid_file: 通过 PID 文件精确停止指定服务 ────────────────────
+# 策略：SIGTERM → 0.5s → 仍存活则 SIGKILL
 kill_by_pid_file() {
     local file="$1"
     local name="$2"
@@ -35,6 +37,9 @@ kill_by_pid_file() {
     fi
 }
 
+# ── kill_by_port: 清理指定端口上的残余进程 ────────────────────────────
+# 作为 PID 文件的补充安全网，确保端口完全释放
+# 支持三种工具：lsof（macOS/Linux）、ss（Linux）、fuser（备选）
 kill_by_port() {
     local port="$1"
     local name="$2"
@@ -63,6 +68,8 @@ kill_by_port() {
 
 echo "正在停止【开发模式】控制台所有服务..."
 
+# ── 第一步：通过 PID 文件停止已知服务（按依赖反序） ──────────────────
+# 遍历新版 .pids/ 和旧版 console/.pids/ 两个目录
 for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
     if [[ -d "$dir" ]]; then
         kill_by_pid_file "$dir/vite-dev.pid" "Vite 开发服务器"
@@ -81,7 +88,8 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
     fi
 done
 
-# 端口清理
+# ── 第二步：端口级安全网清理 ────────────────────────────────────────
+# 即使 PID 文件缺失或过期，也确保所有开发端口完全释放
 kill_by_port 5173 "Vite 前端开发服务器"
 kill_by_port 8084 "audit-log 审计日志"
 kill_by_port 8083 "datasource-mgr 数据源管理"

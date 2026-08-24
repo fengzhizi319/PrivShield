@@ -37,6 +37,18 @@ type Collector struct {
 	// AgentRequestDuration records upstream agent call latency.
 	// AgentRequestDuration 记录上游 agent 调用延迟。
 	AgentRequestDuration *prometheus.HistogramVec
+
+	// OrphanedTasksRecovered counts tasks recovered after crash/restart by type.
+	// OrphanedTasksRecovered 统计崩溃恢复后回收的孤立任务数（按类型）。
+	OrphanedTasksRecovered *prometheus.CounterVec
+
+	// TasksRetried counts tasks queued for retry by result.
+	// TasksRetried 统计排队重试的任务数（按结果）。
+	TasksRetried *prometheus.CounterVec
+
+	// CircuitBreakerState tracks circuit breaker state per node.
+	// CircuitBreakerState 跟踪每个节点的熔断器状态。
+	CircuitBreakerState *prometheus.GaugeVec
 }
 
 // NewCollector creates and registers a new metrics collector for the given module.
@@ -85,11 +97,41 @@ func NewCollector(module string) *Collector {
 		),
 	}
 
+	// Reliability metrics (only registered for modules that need them)
+	// 可靠性指标（仅在需要的模块中注册）
+	c.OrphanedTasksRecovered = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name:        "orphaned_tasks_recovered_total",
+			Help:        "Total orphaned tasks recovered after crash/restart.",
+			ConstLabels: prometheus.Labels{"module": module},
+		},
+		[]string{"type"}, // "running" | "pending"
+	)
+	c.TasksRetried = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name:        "tasks_retried_total",
+			Help:        "Total tasks queued for automatic retry.",
+			ConstLabels: prometheus.Labels{"module": module},
+		},
+		[]string{"result"}, // "queued" | "exhausted"
+	)
+	c.CircuitBreakerState = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name:        "circuit_breaker_state",
+			Help:        "Circuit breaker state per node (0=closed, 1=open, 2=half_open).",
+			ConstLabels: prometheus.Labels{"module": module},
+		},
+		[]string{"node"},
+	)
+
 	reg.MustRegister(
 		c.HTTPRequestsTotal,
 		c.HTTPRequestDuration,
 		c.AgentRequestsTotal,
 		c.AgentRequestDuration,
+		c.OrphanedTasksRecovered,
+		c.TasksRetried,
+		c.CircuitBreakerState,
 	)
 
 	return c
@@ -131,6 +173,33 @@ func (c *Collector) HTTPMiddleware() gin.HandlerFunc {
 		duration := time.Since(start).Seconds()
 		c.RecordHTTP(ctx.Request.Method, path, ctx.Writer.Status(), duration)
 	}
+}
+
+// RecordOrphanedRecovery records a recovered orphaned task metric.
+// RecordOrphanedRecovery 记录一次孤立任务恢复指标。
+func (c *Collector) RecordOrphanedRecovery(taskType string) {
+	c.OrphanedTasksRecovered.WithLabelValues(taskType).Inc()
+}
+
+// RecordTaskRetry records a task retry attempt metric.
+// RecordTaskRetry 记录一次任务重试指标。
+func (c *Collector) RecordTaskRetry(result string) {
+	c.TasksRetried.WithLabelValues(result).Inc()
+}
+
+// SetCircuitBreakerState updates the circuit breaker state gauge for a node.
+// SetCircuitBreakerState 更新节点的熔断器状态指标。
+func (c *Collector) SetCircuitBreakerState(node string, state string) {
+	var val float64
+	switch state {
+	case "closed":
+		val = 0
+	case "open":
+		val = 1
+	case "half_open":
+		val = 2
+	}
+	c.CircuitBreakerState.WithLabelValues(node).Set(val)
 }
 
 // Handler returns a Gin handler that serves Prometheus /metrics endpoint

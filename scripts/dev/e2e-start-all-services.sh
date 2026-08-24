@@ -18,6 +18,7 @@
 
 set -euo pipefail
 
+# ── 解析脚本目录，初始化全局变量 ──────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PIDS_DIR="${PROJECT_ROOT}/.pids"
@@ -27,6 +28,7 @@ GO_BIN="${GO_BIN:-go}"
 
 mkdir -p "$PIDS_DIR" "$LOGS_DIR" "$DATA_DIR"
 
+# ── Python 解释器自动探测：优先 venv，回退到系统 python3 ──────────────
 if [ -x "${PROJECT_ROOT}/.venv/bin/python" ]; then
     PYTHON="${PYTHON:-${PROJECT_ROOT}/.venv/bin/python}"
 else
@@ -73,6 +75,9 @@ check_python() {
     log_info "Python: $PYTHON ($($PYTHON --version))"
 }
 
+# ── wait_for_service: HTTP 健康检查轮询，等待服务就绪 ────────────────
+# 参数: $1=服务名  $2=健康检查 URL  $3=最大等待秒数（默认 30）
+# 返回: 0=就绪  1=超时
 wait_for_service() {
     local name="$1"
     local url="$2"
@@ -92,6 +97,13 @@ wait_for_service() {
     return 1
 }
 
+# ── 每个服务的启动流程：─────────────────────────────────────────────
+#   1. 检查 PID 文件，若已运行则跳过（幂等性）
+#   2. 设置环境变量并后台启动进程
+#   3. 写入 PID 文件
+#   4. 通过 HTTP 健康检查轮询等待服务就绪
+#   5. 超时则报错退出
+#
 # ── 1. PrivShield Agent (Python REST) ────────────────────────────────
 start_agent() {
     local port="${PRIVACY_REST_PORT:-8079}"
@@ -188,7 +200,9 @@ start_audit_log() {
     wait_for_service "audit-log" "http://127.0.0.1:${port}/api/health" 10
 }
 
-# ── 启动所有服务 ─────────────────────────────────────────────────────
+# ── 主流程：先检查依赖，再按顺序启动全部服务 ────────────────────────
+# 启动顺序：Agent → service-hub → datasource-mgr → audit-log
+# Agent 必须先启动，因为 Go 微服务依赖 Agent REST API
 cd "$PROJECT_ROOT"
 
 log_step "Checking dependencies..."

@@ -3,7 +3,7 @@
 
 ## 1. 概述
 
-本文档提供 `PrivShield.privacy.dp.DPApi` 与 REST API 的典型使用示例，帮助开发者快速上手 count、sum、mean 三种差分隐私聚合。
+本文档提供 `engine.privacy.dp.DPApi` 与 REST API 的典型使用示例，帮助开发者快速上手 count、sum、mean 三种差分隐私聚合。
 
 ## 2. Python SDK 示例
 

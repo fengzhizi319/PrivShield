@@ -10,7 +10,11 @@
 - **全链路流水线可视化**：实时追踪 `ingest` ➔ `fetch` ➔ `classify` ➔ `desensitize` ➔ `return` ➔ `audit` 六大阶段；
 - **分类分级智能调度**：根据数据敏感度等级（L1~L5）自动匹配最适脱敏原语（明文/掩码/K-匿名/差分隐私/查询混淆）；
 - **双协议暴露**：同时支持面向 Web 控制台的 HTTP REST (:8082) 与面向高性能内部调用的 gRPC mTLS (:50052)；
-- **生产级高可用**：SQLite WAL 持久化、并发信号量防 DoS 击穿、Slowloris 慢连接防御及 Prometheus `/metrics` 监控。
+- **生产级高可用**：SQLite WAL 持久化、并发信号量防 DoS 击穿、Slowloris 慢连接防御及 Prometheus `/metrics` 监控；
+- **崩溃恢复与自动重试**：启动时自动回收孤立任务（running 标记失败、pending 保留队列），周期性后台重试失败任务（指数退避 + RetryCount）；
+- **完整性校验与备份**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量/验证模式；
+- **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 + 公钥固定；
+- 📖 **可靠性能力详解**：[docs/reliability.md](docs/reliability.md)
 
 > 📖 **深度学习指南**：完整架构解析、六阶段调度流水线实现与源码导读见 [docs/learning-guide.md](docs/learning-guide.md)。
 

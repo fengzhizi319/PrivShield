@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-# --force：非交互模式（CI/无 TTY 环境），端口冲突时自动终止占用进程
+# ── 解析命令行参数：仅支持 --force ─────────────────────────────────
 FORCE=false
 for arg in "$@"; do
     case "$arg" in
@@ -22,6 +22,7 @@ for arg in "$@"; do
     esac
 done
 
+# ── 解析脚本目录，初始化全局变量 ──────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONSOLE_DIR="$PROJECT_ROOT/console"
@@ -277,7 +278,8 @@ echo "────────────────────────�
 echo "  按 Ctrl+C 停止所有开发服务"
 echo "======================================================================"
 
-# Watchdog 守护 agent
+# ── Watchdog 看门狗：守护 Agent 进程 ────────────────────────────
+# Agent 意外退出时自动重启，同时等待 REST + gRPC 两个端口均就绪后继续
 set +e
 wait "$AGENT_PID" 2>/dev/null
 wait_rc=$?

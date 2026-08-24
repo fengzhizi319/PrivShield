@@ -1,6 +1,6 @@
 # 标准文档 YAML 规则包自动生成器 (Standard Profile Generator) 算法与指南
 
-本文档详细说明 `PrivShield.dynclassification.standard_profile_generator` 模块的设计思想、算法实现细节、流程架构图以及具体使用示例。
+本文档详细说明 `engine.dynclassification.standard_profile_generator` 模块的设计思想、算法实现细节、流程架构图以及具体使用示例。
 
 ---
 
