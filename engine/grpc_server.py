@@ -1175,6 +1175,15 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = No
         # 连接老化宽限期 5s：发送 GOAWAY 后等待在途 RPC 完成。
         # 与 Go 服务端 MaxConnectionAgeGrace: 5s 对齐。
         ("grpc.max_connection_age_grace_ms", 5_000),
+        # 服务端主动 keepalive：每 30s 向客户端发送 PING，检测死连接。
+        # 与 Go 服务端 KeepaliveParams.Time: 30s 对齐。
+        ("grpc.keepalive_time_ms", 30_000),
+        # keepalive PING 超时：10s 内未收到 ACK 视为连接断开。
+        # 与 Go 服务端 KeepaliveParams.Timeout: 10s 对齐。
+        ("grpc.keepalive_timeout_ms", 10_000),
+        # 空闲连接最大存活时间 15min，超时后服务端发送 GOAWAY 关闭连接。
+        # 防止空闲连接长期占用资源。与 Go 服务端 MaxConnectionIdle: 15min 对齐。
+        ("grpc.max_connection_idle_ms", 900_000),
     ]
     # SO_REUSEPORT 内核级负载均衡仅 Linux 原生支持；
     # macOS 虽定义该常量但语义不同（无内核级连接分发），Windows 不支持。
