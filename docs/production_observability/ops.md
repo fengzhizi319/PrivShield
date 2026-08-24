@@ -92,6 +92,7 @@ spec:
 
 ## 4. Grafana Dashboard 关键面板
 
+### 4.1 核心 Agent 算力层
 | 面板 | PromQL |
 |---|---|
 | QPS | `sum(rate(privacy_requests_total[1m]))` |
@@ -102,7 +103,20 @@ spec:
 | 拒绝事件 | `sum(rate(privacy_auth_denials_total[1m])) by (reason)` |
 | 入站流量 | `sum(rate(privacy_traffic_bytes_total{direction="request"}[1m])) by (path)` |
 | 出站流量 | `sum(rate(privacy_traffic_bytes_total{direction="response"}[1m])) by (path)` |
-| 大流量接口 | `sum by (path) (rate(privacy_traffic_bytes_total[5m])) > 1e6` |
+
+### 4.2 企业级中台微服务群 (Service Hub & 微服务群)
+| 面板 | PromQL |
+|---|---|
+| Service Hub 调度 QPS | `sum(rate(http_requests_total{module="service-hub"}[5m])) by (path)` |
+| Service Hub P95 调度延迟 | `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{module="service-hub"}[5m])) by (le, path))` |
+| 上游 Agent 算力调用 QPS | `sum(rate(agent_requests_total{module="service-hub"}[5m])) by (endpoint, status)` |
+| 上游 Agent 算力调用延迟 P95 | `histogram_quantile(0.95, sum(rate(agent_request_duration_seconds_bucket{module="service-hub"}[5m])) by (le, endpoint))` |
+| 数据源管理探查吞吐 | `sum(rate(http_requests_total{module="datasource-mgr"}[5m])) by (path)` |
+| 脱敏审计存证写入吞吐 | `sum(rate(http_requests_total{module="audit-log"}[5m])) by (path)` |
+
+> 预置仪表盘文件：
+> - `deploy/grafana/dashboard.json`（全平台联合监控总览大屏）
+> - `deploy/grafana/service-hub-dashboard.json`（Service Hub 专属流水线调度大屏）
 
 ---
 

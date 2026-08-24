@@ -189,3 +189,24 @@ service ServiceHubService {
   rpc PipelineStatus(PipelineStatusRequest) returns (PipelineStatusResponse);
 }
 ```
+
+---
+
+## 7. 监控指标与可观测性设计
+
+`service-hub` 深度集成了基于 Prometheus 与 Grafana 的可观测性体系：
+
+### 7.1 Prometheus 核心指标
+* `http_requests_total{module="service-hub",method,path,status}`: 调度端点 HTTP 请求量与状态码分布；
+* `http_request_duration_seconds{module="service-hub",method,path}`: 端到端调度延迟直方图（用于计算 P95 / P99 响应延迟）；
+* `agent_requests_total{module="service-hub",endpoint,status}`: 调度中枢发往上游 Agent 的算力调用次数与成功率；
+* `agent_request_duration_seconds{module="service-hub",endpoint}`: 上游 Agent 算力调用延迟直方图。
+
+### 7.2 专属 Grafana 看板
+* 预置仪表盘: `deploy/grafana/service-hub-dashboard.json` (UID: `privshield-service-hub`)；
+* 具备 QPS 监控、P95 延迟分解、Agent 算力耗时分析与协同微服务吞吐看板。
+
+### 7.3 自动化告警规则
+* 规则定义位于 `deploy/prometheus/alerts.yml` 的 `PrivShield.services` 告警组；
+* 覆盖调度 P95 超时（>2s）、5xx 错误率飙升（>5%）与上游 Agent 调用失败预警。
+

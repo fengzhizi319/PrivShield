@@ -109,12 +109,23 @@ Prometheus 配置文件 [deploy/prometheus/prometheus.yml](prometheus/prometheus
 * `Datasource Manager` (`:8083/metrics`)
 * `Audit Log` (`:8084/metrics`)
 
-### 4.2 告警规则
+### 4.2 Grafana 预置大屏看板
+* **[deploy/grafana/dashboard.json](grafana/dashboard.json)**：全平台联合监控总览大屏（Agent 算力 + 微服务群 QPS/P95 延迟）；
+* **[deploy/grafana/service-hub-dashboard.json](grafana/service-hub-dashboard.json)**：Service Hub 专属流水线调度大屏（按 Path 吞吐、P95/P99 延迟分解、Agent 算力耗时）。
+
+### 4.3 告警规则
 预置告警规则位于 [deploy/prometheus/alerts.yml](prometheus/alerts.yml)：
 * 网关无健康节点 / 降级告警（`GatewayNoHealthyNodes`, `GatewayDegradedCapacity`）
 * 请求与分类高延迟告警（`HighRequestLatencyP95`, `HighClassificationLatency`）
-* 5xx 错误率与认证拒绝率告警（`HighGatewayErrorRate`, `HighAuthDenialRate`）
+* 调度中枢超时与错误率告警（`ServiceHubHighLatencyP95`, `ServiceHubHighErrorRate`, `ServiceHubAgentCallFailure`）
+* 审计日志存证写入异常告警（`AuditLogWriteFailure`）
 * 隐私预算耗尽预警（`PrivacyBudgetExhausted`）
+
+### 4.4 监控运维快捷脚本
+* 启动监控栈：`bash ./scripts/dev/start_monitoring.sh`
+* 停止监控栈：`bash ./scripts/dev/stop_monitoring.sh`
+* 检查指标端点：`bash ./scripts/dev/check_metrics_endpoints.sh`
+* 模拟调度流量：`bash ./services/service-hub/scripts/simulate-pipeline.sh`
 
 ---
 
