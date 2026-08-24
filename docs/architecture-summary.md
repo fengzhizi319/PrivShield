@@ -135,7 +135,7 @@ Layer 3: Local LLM 仲裁 (100~500ms) → Qwen3.5 语义判定与无痕平滑 (�
 ### 3.2 智能动态负载均衡 (P2C + Client-Side LB)
 
 - **Go 客户端多节点负载池 (`pkg/agent/client.go`)**：原生支持 `PRIVACY_AGENT_URLS` 集群列表，内置平滑轮询与节点宕机自动剔除与容灾切换；
-- **Python 网关 P2C 调度 (`PrivShield/gateway/balancer.py`)**：Power of Two Choices 算法结合在途连接与响应延迟动态打分分流，消除羊群效应。
+- **Python 网关 P2C 调度 (`engine/gateway/balancer.py`)**：Power of Two Choices 算法结合在途连接与响应延迟动态打分分流，消除羊群效应。
 
 ### 3.3 分布式无噪累加器 (Accumulator)
 

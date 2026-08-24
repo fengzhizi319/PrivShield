@@ -316,7 +316,7 @@ sequenceDiagram
 
 ### 5.1 BackendNode（后端节点模型）
 
-模块路径：[`PrivShield/gateway/balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py)（`class BackendNode`）
+模块路径：[`engine/gateway/balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py)（`class BackendNode`）
 
 `BackendNode` 是网关对单个后端工作实例的封装，维护该节点的所有连接元数据、运行状态及专用通信链路。
 
@@ -350,7 +350,7 @@ class BackendNode:
 
 ### 5.2 CircuitBreaker（节点级熔断器）
 
-模块路径：[`PrivShield/gateway/balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py)（`class CircuitBreaker`）
+模块路径：[`engine/gateway/balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py)（`class CircuitBreaker`）
 
 每个后端节点配备独立的熔断器，隔离单个节点的连续雪崩故障，防止故障节点拖垮整个网关。
 
@@ -382,7 +382,7 @@ stateDiagram-v2
 
 ### 5.3 LoadBalancer（负载均衡调度引擎）
 
-模块路径：[`PrivShield/gateway/balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py)（`class LoadBalancer`）
+模块路径：[`engine/gateway/balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py)（`class LoadBalancer`）
 
 负责节点池管理、调度策略执行及 Prometheus 指标同步。
 
@@ -418,7 +418,7 @@ class LoadBalancer:
 
 ### 5.4 HTTP 反向代理引擎 (`http_proxy.py`)
 
-模块路径：[`PrivShield/gateway/http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py)（`create_http_gateway_app`）
+模块路径：[`engine/gateway/http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py)（`create_http_gateway_app`）
 
 基于 FastAPI 构建的全方法通配代理应用（`/{path:path}`）。
 
@@ -456,7 +456,7 @@ class LoadBalancer:
 
 ### 5.5 gRPC 泛化代理引擎 (`grpc_proxy.py`)
 
-模块路径：[`PrivShield/gateway/grpc_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/grpc_proxy.py)（`class GatewayGrpcServicer`）
+模块路径：[`engine/gateway/grpc_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/grpc_proxy.py)（`class GatewayGrpcServicer`）
 
 基于 `grpc.aio` 实现的泛化 Servicer，提供对 `PrivacyService` 所有 RPC 调用的透明反射代理。
 
@@ -486,7 +486,7 @@ class LoadBalancer:
 
 ### 5.6 网关统一启动器与生命周期 (`server.py`)
 
-模块路径：[`PrivShield/gateway/server.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/server.py)（`async_main`）
+模块路径：[`engine/gateway/server.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/server.py)（`async_main`）
 
 在同一个主进程和同一个 AsyncIO 事件循环内并发托管 Uvicorn (FastAPI) 与 gRPC 异步服务器。
 
@@ -1131,9 +1131,9 @@ graph LR
 
 | 指标编号 | 二级评估指标 | 得分 | 考核标准与实现证据 | 关联代码 / 测试用例 |
 |---|---|:---:|---|---|
-| **1.1** | **双协议透明代理** | 10.0 | 同时支持 HTTP/REST（全方法通配）与 gRPC 异步调用转发，协议特性（Header/Trailing Metadata/Status Code）全保真透传。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L143-L283), [`grpc_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/grpc_proxy.py#L80-L211) / `test_gateway.py` |
-| **1.2** | **调度算法矩阵** | 10.0 | 支持轮询、Nginx 平滑加权轮询（SWRR）、最小连接数（Least Connections）、随机与加权随机 5 种算法。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py#L349-L383) / `test_balancer_unit.py` |
-| **1.3** | **动态拓扑管理** | 9.5 | 提供 `/v1/gateway/register` 与 `/deregister` REST 端点，支持热添加、就地更新权重与状态重置，幂等防重。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L119-L141) / `test_gateway.py` |
+| **1.1** | **双协议透明代理** | 10.0 | 同时支持 HTTP/REST（全方法通配）与 gRPC 异步调用转发，协议特性（Header/Trailing Metadata/Status Code）全保真透传。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L143-L283), [`grpc_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/grpc_proxy.py#L80-L211) / `test_gateway.py` |
+| **1.2** | **调度算法矩阵** | 10.0 | 支持轮询、Nginx 平滑加权轮询（SWRR）、最小连接数（Least Connections）、随机与加权随机 5 种算法。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py#L349-L383) / `test_balancer_unit.py` |
+| **1.3** | **动态拓扑管理** | 9.5 | 提供 `/v1/gateway/register` 与 `/deregister` REST 端点，支持热添加、就地更新权重与状态重置，幂等防重。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L119-L141) / `test_gateway.py` |
 | **1.4** | **分布式预算协同** | 9.5 | 支持多节点共享 SQLite 数据库挂载，采用 `BEGIN IMMEDIATE` 排他事务锁实现跨实例 ACID 原子记账，杜绝超扣。 | [`docs/gateway_balancer/design.md`](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/design.md#10-分布式共享隐私预算记账) |
 | **1.5** | **云原生双层协同** | 10.0 | 完美适配 K8s Ingress + Gateway + Headless Service 架构，攻克 gRPC HTTP/2 长连接在 ClusterIP 下的单 Pod 钉住难题。 | [`design.md#11`](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/design.md#11-网关与-kubernetes-负载均衡协同架构设计), [`ops.md#6.3`](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/ops.md#63-kubernetes-生产部署网关与-k8s-双层协同实战) |
 
@@ -1141,45 +1141,45 @@ graph LR
 
 | 指标编号 | 二级评估指标 | 得分 | 考核标准与实现证据 | 关联代码 / 测试用例 |
 |---|---|:---:|---|---|
-| **2.1** | **异步非阻塞体系** | 10.0 | 纯 AsyncIO 协程模型，Uvicorn + grpc.aio 同事件循环并发托管，高并发 I/O 零阻塞。 | [`server.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/server.py#L187-L191) / `test_server_unit.py` |
-| **2.2** | **长连接池复用** | 9.5 | 应用级单例 `httpx.AsyncClient`，配置 Keep-Alive 100、Max 500 连接上限，避免高频创建 TCP 套接字。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L86-L91) / `test_http_proxy_edge.py` |
-| **2.3** | **大消息体吞吐** | 9.5 | 全链路调优 gRPC 收发上限至 64 MiB，彻底消除 4 MiB 默认上限引发的大表/多模态图片传输重置问题。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py#L48-L54) / `test_backend_tls.py` |
-| **2.4** | **事件循环漂移自愈**| 9.5 | 自动检测当前 Event Loop 与缓存 Client 绑定 Loop 是否一致，异步安全淘汰旧连接池并重建，杜绝 Closed Loop 异常。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L189-L210) |
+| **2.1** | **异步非阻塞体系** | 10.0 | 纯 AsyncIO 协程模型，Uvicorn + grpc.aio 同事件循环并发托管，高并发 I/O 零阻塞。 | [`server.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/server.py#L187-L191) / `test_server_unit.py` |
+| **2.2** | **长连接池复用** | 9.5 | 应用级单例 `httpx.AsyncClient`，配置 Keep-Alive 100、Max 500 连接上限，避免高频创建 TCP 套接字。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L86-L91) / `test_http_proxy_edge.py` |
+| **2.3** | **大消息体吞吐** | 9.5 | 全链路调优 gRPC 收发上限至 64 MiB，彻底消除 4 MiB 默认上限引发的大表/多模态图片传输重置问题。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py#L48-L54) / `test_backend_tls.py` |
+| **2.4** | **事件循环漂移自愈**| 9.5 | 自动检测当前 Event Loop 与缓存 Client 绑定 Loop 是否一致，异步安全淘汰旧连接池并重建，杜绝 Closed Loop 异常。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L189-L210) |
 
 #### 维度 3：高可用与容灾韧性（得分：9.80 / 权重 20%）
 
 | 指标编号 | 二级评估指标 | 得分 | 考核标准与实现证据 | 关联代码 / 测试用例 |
 |---|---|:---:|---|---|
-| **3.1** | **双协议主动探针** | 10.0 | 后台守护协程每 5 秒并发探测 HTTP `/health` 与 gRPC `Health`（2.0s 超时），强一致判定节点在线状态。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py#L400-L472) / `test_balancer_unit.py` |
-| **3.2** | **毫秒级被动故障感知**| 10.0 | 转发遭遇连接断开或 UNAVAILABLE 时，0 毫秒即时将节点标记为不健康并开启 5 秒冷却退避，并发请求绝不踩坑。 | [`http_proxy.py#L263`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L263-L264), [`grpc_proxy.py#L168`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/grpc_proxy.py#L168-L169) / `test_gateway.py` |
-| **3.3** | **节点级独立熔断器** | 10.0 | 每个节点独立配备 CircuitBreaker，连续失败 5 次触发熔断 Open，30 秒后进入 Half-Open 半开试探，自愈闭合。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py#L126-L176) / `test_balancer_unit.py` |
-| **3.4** | **幂等故障转移重试** | 9.5 | 严格控制重试边界：幂等方法与 ConnectError 允许重试 3 次；非幂等超时严格阻断防止重复扣费与副作用。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L247-L267) / `test_http_proxy_edge.py` |
-| **3.5** | **优雅停机与连接排空**| 9.5 | SIGINT / 停机信号触发时，取消并 await 探针协程、gRPC 1 秒排空期、释放所有后端通道。 | [`server.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/server.py#L192-L203) / `test_server_unit.py` |
+| **3.1** | **双协议主动探针** | 10.0 | 后台守护协程每 5 秒并发探测 HTTP `/health` 与 gRPC `Health`（2.0s 超时），强一致判定节点在线状态。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py#L400-L472) / `test_balancer_unit.py` |
+| **3.2** | **毫秒级被动故障感知**| 10.0 | 转发遭遇连接断开或 UNAVAILABLE 时，0 毫秒即时将节点标记为不健康并开启 5 秒冷却退避，并发请求绝不踩坑。 | [`http_proxy.py#L263`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L263-L264), [`grpc_proxy.py#L168`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/grpc_proxy.py#L168-L169) / `test_gateway.py` |
+| **3.3** | **节点级独立熔断器** | 10.0 | 每个节点独立配备 CircuitBreaker，连续失败 5 次触发熔断 Open，30 秒后进入 Half-Open 半开试探，自愈闭合。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py#L126-L176) / `test_balancer_unit.py` |
+| **3.4** | **幂等故障转移重试** | 9.5 | 严格控制重试边界：幂等方法与 ConnectError 允许重试 3 次；非幂等超时严格阻断防止重复扣费与副作用。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L247-L267) / `test_http_proxy_edge.py` |
+| **3.5** | **优雅停机与连接排空**| 9.5 | SIGINT / 停机信号触发时，取消并 await 探针协程、gRPC 1 秒排空期、释放所有后端通道。 | [`server.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/server.py#L192-L203) / `test_server_unit.py` |
 
 #### 维度 4：安全性与零信任防御（得分：9.70 / 权重 15%）
 
 | 指标编号 | 二级评估指标 | 得分 | 考核标准与实现证据 | 关联代码 / 测试用例 |
 |---|---|:---:|---|---|
-| **4.1** | **南北向入站 TLS 终结**| 10.0 | 支持 REST 与 gRPC TLS 终结；配置 CA 时通过 `ssl.CERT_REQUIRED` 强约束客户端 mTLS 证书验签。 | [`server.py#L163-L174`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/server.py#L163-L174), [`grpc_proxy.py#L251-L281`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/grpc_proxy.py#L251-L281) / `test_server_unit.py` |
-| **4.2** | **东西向安全 TLS 回源**| 9.5 | 支持网关至后端全链路 CA 证书校验与客户端证书透传，缺失配置时 Fail-Fast 拒绝启动。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/balancer.py#L57-L119) / `test_backend_tls.py` |
-| **4.3** | **管理端点 Fail-Closed**| 10.0 | 未配置 `GATEWAY_API_KEY` 时管理端点默认返回 503 彻底禁用；配置后采用 `hmac.compare_digest` 抗时序攻击比对。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L99-L117) / `test_http_proxy_edge.py` |
-| **4.4** | **SSRF 协议白名单拦截**| 9.5 | 严格校验动态注册 `http_url` 前缀为 `http://` 或 `https://`，阻断 `file://`, `gopher://` 等内网渗透攻击。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L123-L125) / `test_http_proxy_edge.py` |
-| **4.5** | **内部错误脱敏屏蔽** | 9.5 | 代理重试耗尽返回标准 502/503 文案，绝不向客户端泄露内网 IP、端口或异常调用栈。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/http_proxy.py#L269-L281) / `test_http_proxy_edge.py` |
+| **4.1** | **南北向入站 TLS 终结**| 10.0 | 支持 REST 与 gRPC TLS 终结；配置 CA 时通过 `ssl.CERT_REQUIRED` 强约束客户端 mTLS 证书验签。 | [`server.py#L163-L174`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/server.py#L163-L174), [`grpc_proxy.py#L251-L281`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/grpc_proxy.py#L251-L281) / `test_server_unit.py` |
+| **4.2** | **东西向安全 TLS 回源**| 9.5 | 支持网关至后端全链路 CA 证书校验与客户端证书透传，缺失配置时 Fail-Fast 拒绝启动。 | [`balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py#L57-L119) / `test_backend_tls.py` |
+| **4.3** | **管理端点 Fail-Closed**| 10.0 | 未配置 `GATEWAY_API_KEY` 时管理端点默认返回 503 彻底禁用；配置后采用 `hmac.compare_digest` 抗时序攻击比对。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L99-L117) / `test_http_proxy_edge.py` |
+| **4.4** | **SSRF 协议白名单拦截**| 9.5 | 严格校验动态注册 `http_url` 前缀为 `http://` 或 `https://`，阻断 `file://`, `gopher://` 等内网渗透攻击。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L123-L125) / `test_http_proxy_edge.py` |
+| **4.5** | **内部错误脱敏屏蔽** | 9.5 | 代理重试耗尽返回标准 502/503 文案，绝不向客户端泄露内网 IP、端口或异常调用栈。 | [`http_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/http_proxy.py#L269-L281) / `test_http_proxy_edge.py` |
 
 #### 维度 5：架构设计与代码可维护性（得分：9.60 / 权重 15%）
 
 | 指标编号 | 二级评估指标 | 得分 | 考核标准与实现证据 | 关联代码 / 测试用例 |
 |---|---|:---:|---|---|
 | **5.1** | **代码规范与类型安全** | 9.5 | 严格遵循 PEP 8，全量采用 `from __future__ import annotations` 与 Pydantic v2 模型，无类型隐患。 | 全模块源码 |
-| **5.2** | **泛化反射代理设计** | 10.0 | gRPC 动态反射扫描基类方法并绑定转发闭包，Protobuf 接口增改无需手工修改网关代码，零维护成本。 | [`grpc_proxy.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/grpc_proxy.py#L52-L78) / `test_gateway.py` |
-| **5.3** | **高内聚低耦合模块化** | 9.5 | 调度器、HTTP 代理、gRPC 代理与启动入口职责划分清晰，无循环依赖，具备高度可测试性。 | `PrivShield/gateway/` 子目录架构 |
+| **5.2** | **泛化反射代理设计** | 10.0 | gRPC 动态反射扫描基类方法并绑定转发闭包，Protobuf 接口增改无需手工修改网关代码，零维护成本。 | [`grpc_proxy.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/grpc_proxy.py#L52-L78) / `test_gateway.py` |
+| **5.3** | **高内聚低耦合模块化** | 9.5 | 调度器、HTTP 代理、gRPC 代理与启动入口职责划分清晰，无循环依赖，具备高度可测试性。 | `engine/gateway/` 子目录架构 |
 | **5.4** | **详尽注释与步骤解析** | 9.5 | 所有公共接口配备双语 docstring，关键复杂函数提供详细的步骤编号（Step-by-Step）与算法数学注释。 | 全模块源码注释 |
 
 #### 维度 6：全链路可观测性与工程化（得分：9.50 / 权重 15%）
 
 | 指标编号 | 二级评估指标 | 得分 | 考核标准与实现证据 | 关联代码 / 测试用例 |
 |---|---|:---:|---|---|
-| **6.1** | **Prometheus 指标矩阵**| 9.5 | 采集 QPS (Counter)、耗时直方图 (Histogram 1ms–30s)、健康节点数 (Gauge) 与故障重试数 (Counter)。 | [`metrics.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/observability/metrics.py#L230-L258) / Prometheus `/metrics` |
+| **6.1** | **Prometheus 指标矩阵**| 9.5 | 采集 QPS (Counter)、耗时直方图 (Histogram 1ms–30s)、健康节点数 (Gauge) 与故障重试数 (Counter)。 | [`metrics.py`](file:///home/charles/code/sfwork/PrivShield/engine/observability/metrics.py#L230-L258) / Prometheus `/metrics` |
 | **6.2** | **结构化 JSON 日志** | 9.5 | 支持 `PRIVACY_LOG_FORMAT=json`，关键路径携带 `url`, `method`, `attempt`, `error`, `circuit_breaker` 等键值对。 | 全模块 logging |
 | **6.3** | **自动化测试覆盖度** | 9.5 | 拥有 55 项全自动化单元与集成测试用例，覆盖算法、状态机、重试边界、安全防护与服务生命周期。 | `tests/gateway/` 测试套件 |
 | **6.4** | **生产运维手册与 SOP** | 9.5 | 配套提供端到端运维手册 ([`ops.md`](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/ops.md))、PromQL 告警矩阵、排障 Runbook 与一键诊断工具。 | [`docs/gateway_balancer/ops.md`](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/ops.md), [`prod_health_check.sh`](file:///home/charles/code/sfwork/PrivShield/scripts/prod/prod_health_check.sh) |

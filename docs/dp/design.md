@@ -23,8 +23,8 @@
   - [3.15 Tau-Thresholding DP Group-By](#315-tau-thresholding-dp-group-by)
   - [3.16 分布式流式累加器（Accumulator）](#316-分布式流式累加器accumulator)
 - [4. 模块设计](#4-模块设计)
-  - [4.1 `PrivShield/privacy/dp.py`](#41-PrivShieldprivacydppy)
-  - [4.2 `PrivShield/service.py`](#42-PrivShieldservicepy)
+  - [4.1 `engine/privacy/dp.py`](#41-engineprivacydppy)
+  - [4.2 `engine/service.py`](#42-engineservicepy)
   - [4.3 proto / REST / gRPC](#43-proto-rest-grpc)
 - [5. BudgetAccountant 设计](#5-budgetaccountant-设计)
   - [5.1 Registry 工厂设计考虑](#51-registry-工厂设计考虑)
@@ -1331,7 +1331,7 @@ Chunked 接口适合"数据能放进单台 sidecar 内存分批处理，但不�
 
 ### 3.10 数据适配器
 
-`PrivShield/privacy/data_adapters.py` 为 DP 原语及分类、脱敏等模块提供统一的数据输入适配。核心职责是将多种数据格式转换为内部计算所需的 `np.ndarray`（一维浮点数组）或保持 `scipy.sparse` 稀疏矩阵不变。
+`engine/privacy/data_adapters.py` 为 DP 原语及分类、脱敏等模块提供统一的数据输入适配。核心职责是将多种数据格式转换为内部计算所需的 `np.ndarray`（一维浮点数组）或保持 `scipy.sparse` 稀疏矩阵不变。
 
 #### 核心函数
 
@@ -1595,7 +1595,7 @@ privacy_traffic_bytes_total{method, path, direction}
 
 #### 实现位置
 
-- REST：`PrivShield/observability/middleware.py` 中的 `ObservabilityMiddleware`，读取请求体长度与响应内容长度。
+- REST：`engine/observability/middleware.py` 中的 `ObservabilityMiddleware`，读取请求体长度与响应内容长度。
 - gRPC：`GrpcObservabilityInterceptor` 中对 unary 调用使用 `protobuf.Message.ByteSize()` 估算请求/响应字节数；stream 调用因消息流不可预知，request/response 字节数计为 0。
 
 ### 3.12 自适应截断（Adaptive Clipping）
@@ -1691,7 +1691,7 @@ Tau-Thresholding 保证：即使某个分组只包含一条记录，攻击者也
 
 ## 4. 模块设计
 
-### 4.1 `PrivShield/privacy/dp.py`
+### 4.1 `engine/privacy/dp.py`
 
 - `DPApi.count(...)`：count 查询入口。
 - `DPApi.sum(...)`：sum 查询入口，先 clipping 再计算。
@@ -1711,7 +1711,7 @@ Tau-Thresholding 保证：即使某个分组只包含一条记录，攻击者也
 - `_sample_laplace(scale)` / `_sample_gaussian(sigma)`：噪声采样。
 - `mechanism` 校验为 `laplace` 或 `gaussian`。
 
-### 4.2 `PrivShield/service.py`
+### 4.2 `engine/service.py`
 
 - `dp_count/dp_sum/dp_mean` 从解析后的参数中传递 `delta`、`clip_lower`、`clip_upper`。
 - 负责参数解析、profile 合并与错误处理。

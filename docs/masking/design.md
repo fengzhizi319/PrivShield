@@ -267,13 +267,13 @@ assert MaskingOperation.HASH_VALUE == "hash_value"
 
 ## 9. 模块设计
 
-- `PrivShield/privacy/masking.py`：核心脱敏逻辑。
+- `engine/privacy/masking.py`：核心脱敏逻辑。
   - `_mask_arrow_column`：PyArrow 列级向量化脱敏内核（`pyarrow.compute` UTF-8 算子）。
   - `_coerce_to_dict`：单行多格式输入转 dict。
   - `_convert_to_records`：多行多格式输入转记录列表。
-- `PrivShield/privacy/data_adapters.py`：DataFrame 与记录列表互转。
-- `PrivShield/service.py`：`PrivacyService` 封装。
-- `PrivShield/main.py` / `grpc_server.py`：REST / gRPC 接口。
+- `engine/privacy/data_adapters.py`：DataFrame 与记录列表互转。
+- `engine/service.py`：`PrivacyService` 封装。
+- `engine/main.py` / `grpc_server.py`：REST / gRPC 接口。
 
 ## 10. 测试策略
 

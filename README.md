@@ -115,8 +115,6 @@ pip install -e .
 
 # 2. 启动 REST + gRPC 联合服务
 python -m engine.server
-# 或使用 engine 模块名启动：
-# python -m engine.server
 ```
 
 ### 2. Docker Compose 全栈一键运行

@@ -1,83 +1,68 @@
-# 数据源管理 (Datasource Manager)
+# 数据源管理与特征探查 (Datasource Manager)
 
-数据源管理模块负责统一管理 PrivShield 控制台中的所有数据源连接，提供数据源注册、连通性测试、元数据浏览、安全等级标记与访问审计等功能。
+`services/datasource-mgr` 是 PrivShield 平台的企业级数据源统一纳管与敏感特征自动探查微服务。模块提供 **REST (HTTP/JSON :8083) + gRPC (mTLS :50053)** 双协议接入，支持多源异构数据源连接管理、连通性探测、敏感特征自动打标识别、安全采样读取与全生命周期访问审计。
 
-## 功能特性
+---
 
-- **数据源注册**：支持数据库、API、文件等多种类型数据源的注册管理
-- **连通性测试**：一键测试数据源连接可用性
-- **元数据浏览**：查看数据表结构、字段类型、安全等级
-- **安全等级标记**：按高密/中密/低密标记数据源安全级别
-- **访问审计**：记录所有数据源访问操作（查询/导出/脱敏）
-- **分类分级联动**：自动调用 Agent 对字段进行分类分级
+## 核心功能特性
+
+- **双协议接入**：提供标准 REST API（供前端控制台/BFF 使用）与高性能 gRPC 接口（端口 `:50053`，供调度流水线使用）；
+- **零信任 mTLS 与公钥固定**：gRPC 通道支持 TLS 1.3 双向证书认证与客户端公钥固定（Public Key Pinning）；
+- **多源异构资产纳管**：统一支持关系型数据库（MySQL/PG/Oracle）、API 接口及 CSV 文件等数据源；
+- **敏感特征自动探查**：联动上游 PrivShield Agent 三层动态分类漏斗，自动识别 PII 敏感字段并标记 L1-L5 安全等级；
+- **安全沙箱采样读取**：内置路径穿越防护（防 LFI）与 50,000 行内存上限防护（DoS 防护）；
+- **全量访问审计与存证**：对所有数据源操作记录结构化审计日志；
+- **高可用与生产加固**：Slowloris 防护、32 MiB MaxBodySize 限制、Prometheus `/metrics` 监控与 SQLite WAL 持久化。
+
+---
 
 ## 快速开始
 
-### 开发模式
+### 本地启动
 
 ```bash
 cd services/datasource-mgr
 bash run.sh
 ```
 
-默认监听 `http://127.0.0.1:8083`。
+默认监听：
+- **HTTP REST**：`http://127.0.0.1:8083`
+- **gRPC (insecure)**：`127.0.0.1:50053`
 
-### 环境变量
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `DATASOURCE_MGR_HOST` | `127.0.0.1` | HTTP 监听地址 |
-| `DATASOURCE_MGR_PORT` | `8083` | HTTP 监听端口 |
-| `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | 上游 Agent REST 地址 |
-| `PRIVACY_REST_PORT` | `8079` | 上游 Agent REST 端口 |
-| `PRIVACY_AGENT_API_KEY` | (空) | 可选认证密钥 |
-
-### 构建
+### 生产启动（启用 mTLS 与公钥固定）
 
 ```bash
-make build
+DATASOURCE_MGR_HOST=0.0.0.0 \
+DATASOURCE_MGR_PORT=8083 \
+DATASOURCE_MGR_GRPC_HOST=0.0.0.0 \
+DATASOURCE_MGR_GRPC_PORT=50053 \
+DATASOURCE_MGR_TLS_ENABLED=true \
+DATASOURCE_MGR_TLS_CERT_FILE=/certs/server.crt \
+DATASOURCE_MGR_TLS_KEY_FILE=/certs/server.key \
+DATASOURCE_MGR_TLS_CA_FILE=/certs/ca.crt \
+DATASOURCE_MGR_TLS_CLIENT_AUTH=require \
+DATASOURCE_MGR_TLS_PINNED_PUBKEY_FILE=/certs/client_pub.pem \
+./bin/datasource-mgr
 ```
 
-### 测试
+---
+
+## 运行测试
 
 ```bash
-make test
+# 运行全部单元测试
+go test -v ./services/datasource-mgr/...
+
+# 运行全仓 Go 测试
+make test-go
 ```
 
-### Docker
+---
 
-构建上下文为仓库根目录（需复制共享库 `pkg/`）：
+## 详细文档目录
 
-```bash
-# 在仓库根目录执行
-docker build -f services/datasource-mgr/Dockerfile -t privshield-datasource-mgr .
-docker run -p 8083:8083 -e PRIVACY_AGENT_REST_HOST=host.docker.internal privshield-datasource-mgr
-```
-
-## API 接口
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/health` | 健康检查 |
-| GET | `/api/datasources` | 数据源列表 |
-| POST | `/api/datasources` | 注册新数据源 |
-| GET | `/api/datasources/:id` | 获取单个数据源 |
-| DELETE | `/api/datasources/:id` | 删除数据源 |
-| POST | `/api/datasources/:id/test` | 测试连接 |
-| GET | `/api/datasources/:id/metadata` | 获取元数据 |
-| GET | `/api/datasources/:id/audit` | 访问审计日志 |
-
-## 与分级脱敏模块的集成
-
-数据源管理通过元数据浏览接口实现与分级脱敏模块的集成：
-
-1. 查询元数据时自动调用 Agent 的 `/v1/dynclassification/classify` 对字段进行分类
-2. 根据分类结果自动标记字段的安全等级（L1~L5）
-3. 敏感字段（PII、医疗数据等）自动打标，便于后续脱敏策略选择
-4. 访问审计记录所有对数据源的操作，包括脱敏操作
-
-## 文档
-
-- [设计文档](docs/design.md)
-- [API 参考](docs/api.md)
-- [运维手册](docs/ops.md)
+- 📘 [详细设计文档 (docs/design.md)](docs/design.md)
+- 🔌 [API 接口规范与 Proto 定义 (docs/api.md)](docs/api.md)
+- 🛠️ [运维与部署手册 (docs/ops.md)](docs/ops.md)
+- 🧪 [测试规范与全景指南 (docs/testing.md)](docs/testing.md)
+- 📋 [产品需求文档 (docs/prd.md)](docs/prd.md)

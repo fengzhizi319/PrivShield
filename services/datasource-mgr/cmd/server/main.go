@@ -1,5 +1,10 @@
 // Command server is the entry point for the datasource-mgr module.
 // Command server 是数据源管理模块的程序入口。
+//
+// Architecture / 架构：
+//
+//	React 前端  ──HTTP/JSON──▶  datasource-mgr(Go)  ──HTTP──▶  PrivShield Agent
+//	                          └─gRPC(mTLS)───────▶  微服务群/外部客户端
 package main
 
 import (
@@ -7,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
@@ -23,7 +30,9 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/handlers"
+	pb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
 )
 
 func main() {
@@ -47,13 +56,13 @@ func main() {
 	// ── Agent client / Agent 客户端 ────────────────────────────
 	agentClient := agent.New(cfg)
 
-	// ── HTTP Server ────────────────────────────────────────────
+	// ── HTTP REST Server / HTTP REST 服务器 ──────────────────────
 	gin.SetMode(gin.ReleaseMode)
 	server := handlers.New(agentClient, cfg, dsStore, logger, mc)
 	router := gin.New()
 	server.RegisterRoutes(router)
 
-	srv := &http.Server{
+	httpSrv := &http.Server{
 		Addr:              cfg.Address(),
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,  // Slowloris header timeout
@@ -63,28 +72,76 @@ func main() {
 		MaxHeaderBytes:    1 << 20, // 1 MiB max header size
 	}
 
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
+	// ── gRPC Server (with optional mTLS) / gRPC 服务器（可选 mTLS）──
+	var grpcServer *grpc.Server
+	var serviceImpl *grpcserver.GRPCServer
 
-		logger.Info("shutting down datasource-mgr server...")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			logger.Error("http server shutdown error", "error", err.Error())
+	if cfg.TLSEnabled {
+		creds, credErr := grpcserver.BuildServerCredentials(cfg)
+		if credErr != nil {
+			log.Fatalf("failed to build TLS credentials: %v", credErr)
+		}
+		grpcServer = grpc.NewServer(grpc.Creds(creds))
+		serviceImpl = grpcserver.New(agentClient, cfg, dsStore, logger)
+		pb.RegisterDataSourceManagerServiceServer(grpcServer, serviceImpl)
+		logger.Info("gRPC server started with mTLS",
+			"addr", cfg.GRPCAddress(),
+			"tls_cert", cfg.TLSCertFile,
+			"tls_key", cfg.TLSKeyFile,
+		)
+	} else {
+		grpcServer = grpc.NewServer()
+		serviceImpl = grpcserver.New(agentClient, cfg, dsStore, logger)
+		pb.RegisterDataSourceManagerServiceServer(grpcServer, serviceImpl)
+		logger.Info("gRPC server started (insecure)", "addr", cfg.GRPCAddress())
+	}
+
+	// ── Signal handling / 信号处理 ───────────────────────────────
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start gRPC listener / 启动 gRPC 监听
+	grpcLis, err := net.Listen("tcp", cfg.GRPCAddress())
+	if err != nil {
+		log.Fatalf("failed to listen on gRPC address %s: %v", cfg.GRPCAddress(), err)
+	}
+
+	go func() {
+		if err := grpcServer.Serve(grpcLis); err != nil {
+			logger.Error("gRPC server error", "error", err.Error())
 		}
 	}()
 
-	logger.Info("datasource-mgr started",
-		"addr", cfg.Address(),
-		"agent_rest", cfg.AgentBaseURL(),
-		"db_path", cfg.DBPath,
-		"auth_enabled", cfg.APIKey != "",
-	)
+	// Start HTTP server / 启动 HTTP 监听
+	go func() {
+		logger.Info("datasource-mgr HTTP REST server started",
+			"addr", cfg.Address(),
+			"grpc_addr", cfg.GRPCAddress(),
+			"agent_rest", cfg.AgentBaseURL(),
+			"db_path", cfg.DBPath,
+			"auth_enabled", cfg.APIKey != "",
+		)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("HTTP server error", "error", err.Error())
+		}
+	}()
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("http server failed: %v", err)
+	// Wait for shutdown signal / 等待优雅停机信号
+	sig := <-sigChan
+	logger.Info("shutting down datasource-mgr servers...", "signal", sig.String())
+
+	// Graceful shutdown gRPC
+	serviceImpl.Shutdown()
+	grpcServer.GracefulStop()
+	logger.Info("gRPC server stopped")
+
+	// Graceful shutdown HTTP
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP server shutdown error", "error", err.Error())
+	} else {
+		logger.Info("HTTP server stopped")
 	}
 }
 

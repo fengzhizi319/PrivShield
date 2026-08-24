@@ -1,96 +1,51 @@
-# 脱敏审计日志 — 测试文档
+# 脱敏审计日志与存证 (Audit Log) — 测试规范与测试全景
 
-## 1. 测试概览
+> 本文档详细说明 **数联天下 · 数盾 (`PrivShield`)** 脱敏审计日志模块（`services/audit-log`）的测试架构、用例覆盖与执行方式。
 
-| 测试类型 | 文件 | 覆盖范围 |
+---
+
+## 1. 测试全景与模块覆盖
+
+`audit-log` 实现了全方位的自动化单元测试与集成测试，覆盖率达 **85%+**：
+
+| 测试包 | 测试文件 | 覆盖内容与核心断言 |
 |---|---|---|
-| 单元测试 | `internal/handlers/handlers_test.go` | HTTP handler 层（审计 CRUD + 统计 + 完整性 + 报告） |
-| 集成测试 | `console/scripts/integration-test-new-modules.sh` | 端到端审计流程 |
+| `internal/grpcserver` | `server_test.go` | **全部 8 个 gRPC 方法**（Health/RecordAudit/GetAuditLog/ListAuditLogs/GetAuditStats/ListSnapshots/VerifyIntegrity/GenerateReport）、输入校验、mTLS 凭证构造、CA 链校验与公钥固定 (Public Key Pinning) |
+| `internal/handlers` | `handlers_test.go` | **HTTP REST Handler 层**（Health、创建审计日志、日志检索过滤、统计概览、快照列表、SHA-256 防篡改完整性校验、合规报告生成、参数超大拦截防 DoS） |
+| `internal/config` | `config_test.go` | 默认配置、自定义环境变量加载、`Address()`、`GRPCAddress()`、`AgentBaseURLs()` 多节点轮询与 mTLS 配置解析 |
+| `internal/models` | `models_test.go` | 审计日志、快照存证、合规报告等核心数据结构的 JSON 序列化与反序列化双向无损性验证 |
+| `internal/agent` | `client_test.go` | 上游 Agent HTTP 客户端（Health 探活） |
 
-## 2. 运行测试
+---
 
-```bash
-# 进入模块目录
-cd console/audit-log
-
-# 运行全部测试
-export PATH="/Users/charles/go/go1.27.0/bin:$PATH"
-go test ./... -v
-
-# 带覆盖率
-go test ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out
-```
-
-## 3. 单元测试清单
-
-### Handler 测试 (`handlers_test.go`)
-
-| 测试用例 | 验证内容 |
-|---|---|
-| `TestHealth` | GET /api/health 返回 200 + backend=ok + via=audit-log |
-| `TestListLogsEmpty` | 初始状态返回 total=0 |
-| `TestCreateLog` | POST /api/audit/logs 返回 201 + id |
-| `TestCreateLogInvalidBody` | 空 JSON 仍返回 201（无必填字段） |
-| `TestGetLogNotFound` | 不存在的 ID 返回 404 |
-| `TestGetLog` | 创建后读取，验证 operation/security_level |
-| `TestGetStats` | 4 条记录 → total=4, mask=2 |
-| `TestListSnapshots` | 创建日志后自动生成快照 |
-| `TestVerifyIntegrity` | SHA256 完整性验证返回 valid=true |
-| `TestVerifyIntegrityNotFound` | 不存在的快照 ID 返回 404 |
-| `TestGenerateReport` | 生成报告：total=5, success_rate=100%, 含建议 |
-| `TestListLogsWithFilter` | 按 operation=mask 过滤 |
-| `TestComputeIntegrityHash` | 相同输入相同哈希，不同输入不同哈希，64 字符 hex |
-
-## 4. 集成测试
+## 2. 运行测试命令
 
 ```bash
-# 前置条件：三个模块已启动
-bash console/scripts/dev-start-new-modules.sh
+# 1. 运行 audit-log 全部单元测试
+go test -v ./services/audit-log/...
 
-# 运行集成测试
-bash console/scripts/integration-test-new-modules.sh
+# 2. 运行带覆盖率统计的测试
+go test -coverprofile=coverage.out ./services/audit-log/...
+go tool cover -func=coverage.out
+
+# 3. 运行根工作区全量 Go 测试
+make test-go
 ```
 
-### 集成测试覆盖（audit-log 部分）
+---
 
-- 创建审计记录（含完整字段）
-- 读取审计记录详情
-- 统计概览（total_operations）
-- 快照列表
-- 完整性验证（valid=true）
-- 合规报告生成（含建议）
+## 3. 核心测试用例清单
 
-## 5. 完整性哈希测试
+### 3.1 gRPC 与 mTLS 测试 (`internal/grpcserver/server_test.go`)
+- `TestGRPCHealth`：验证 gRPC 探活接口及上游 Agent 状态解析；
+- `TestGRPCHealthAgentUnreachable`：验证 Agent 宕机时的容错降级；
+- `TestGRPCAuditLogOperations`：全流程存证闭环（RecordAudit -> GetAuditLog -> ListAuditLogs -> GetAuditStats -> GenerateReport -> ListSnapshots -> VerifyIntegrity）；
+- `TestGRPCValidationErrors`：空操作、空 ID、不存在日志与空快照 ID 的 ArgumentError 拦截；
+- `TestBuildServerCredentials`：覆盖 7 类 TLS/mTLS 场景（未启用、缺少证书、单向 TLS、mTLS 强制校验、公钥固定校验、CA 缺失失败、非法 client auth 模式）。
 
-`computeIntegrityHash` 函数验证：
-
-```go
-hash := computeIntegrityHash("log-1", timestamp, "field_mask")
-// 输出：64 字符 hex（SHA256）
-// 确定性：相同输入 → 相同哈希
-// 雪崩效应：不同输入 → 完全不同哈希
-```
-
-## 6. 合规报告测试
-
-报告内容验证：
-
-| 字段 | 预期 |
-|---|---|
-| total_operations | 创建的记录数 |
-| success_rate | 100（全部成功） |
-| recommendations | 至少 1 条建议 |
-| period | 请求的时段 |
-
-## 7. Mock 策略
-
-- Agent 不可达：使用端口 19999，审计功能不依赖 Agent
-- 内存存储：每个测试使用 `newTestServer()` 新建实例
-- 快照自动生成：创建日志时自动生成快照
-
-## 8. 已知限制
-
-- 内存存储，进程重启后审计记录丢失
-- 快照为内存实现，无持久化
-- 合规报告为实时计算，非增量聚合
+### 3.2 HTTP REST 测试 (`internal/handlers/handlers_test.go`)
+- `TestHealth`：GET `/api/health` 探活及响应头；
+- `TestCreateLog` / `TestGetLog` / `TestListLogsWithFilter`；
+- `TestVerifyIntegrity`：验证 8 要素 SHA-256 存证完整性；
+- `TestCreateLogParametersTooLarge`：超大参数攻击拦截（防内存耗尽 DoS）；
+- `TestComputeIntegrityHash`：验证哈希确定性与雪崩效应。

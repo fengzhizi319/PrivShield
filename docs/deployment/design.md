@@ -85,7 +85,7 @@
 #### 3.1.2 弹性扩缩容（流量波动）
 
 - HPA v2：CPU 70% / 内存 80% 阈值触发，`minReplicas 2 → maxReplicas 10` 自动横向扩展；
-- 项目具备高并发与网关负载均衡设计（`PrivShield/gateway/`、`docs/high_concurrency/`），脱敏/分类请求量不恒定，LLM 层慢请求占用资源，需要按负载弹性伸缩。
+- 项目具备高并发与网关负载均衡设计（`engine/gateway/`、`docs/high_concurrency/`），脱敏/分类请求量不恒定，LLM 层慢请求占用资源，需要按负载弹性伸缩。
 
 #### 3.1.3 生产安全加固
 
@@ -327,7 +327,7 @@ autoscaling:
 | 入口 | 位置 | 加载机制 | 生效场景 |
 |---|---|---|---|
 | Helm values | `deploy/helm/PrivShield/values.yaml`（另有 `values-production.yaml` / `values-ml.yaml`） | Helm 模板渲染为 Pod 环境变量、ConfigMap、Secret 引用与卷挂载（`templates/deployment.yaml`、`configmap.yaml`、`secret.yaml`） | K8s 部署唯一声明式配置入口 |
-| 根目录 `.env` | 项目根目录 `.env`（模板见 `.env.example`） | `PrivShield/env_loader.py` 的 `load_env_file()` 在进程启动时加载（`main.py` / `grpc_server.py` / `server.py` 模块级执行），默认 `override=False` 不覆盖已有环境变量 | 本地直跑（`python -m engine.server` 等） |
+| 根目录 `.env` | 项目根目录 `.env`（模板见 `.env.example`） | `engine/env_loader.py` 的 `load_env_file()` 在进程启动时加载（`main.py` / `grpc_server.py` / `server.py` 模块级执行），默认 `override=False` 不覆盖已有环境变量 | 本地直跑（`python -m engine.server` 等） |
 | 场景 profile env | `config/env/<profile>.env`（`vllm` / `qwen3` / `mlx` / `openai`） | 按 `PRIVACY_ENV_PROFILE`（默认 `vllm`）级联加载，`override=True` 覆盖基础值；仅用于 LLM 推理后端场景切换 | 本地直跑 |
 
 #### 二、values → 环境变量映射

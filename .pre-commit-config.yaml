@@ -26,5 +26,5 @@ repos:
       - id: mypy
         additional_dependencies: []
         args: [--ignore-missing-imports]
-        files: ^PrivShield/
-        exclude: PrivShield/privacy_pb2.*
+        files: ^engine/
+        exclude: engine/privacy_pb2.*

@@ -177,7 +177,7 @@ flowchart TD
 
 #### 4.1.2 用户输入清洗与 ChatML 模板化
 1. **防注入与清洗**：
-   在 [`PrivShield/dynclassification/utils.py:wrap_untrusted_text`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/utils.py) 中，输入的脏数据（如包含未闭合引号、控制字符、尝试越狱注入的文本）首先被中和，防止 Prompt 结构遭到破坏。
+   在 [`engine/dynclassification/utils.py:wrap_untrusted_text`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/utils.py) 中，输入的脏数据（如包含未闭合引号、控制字符、尝试越狱注入的文本）首先被中和，防止 Prompt 结构遭到破坏。
 2. **ChatML 结构化构建与 `enable_thinking=False` 细节**：
    通过 [`chat_template.jinja`](file:///home/charles/code/sfwork/PrivShield/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother/chat_template.jinja) 组装标准对话角色消息。Qwen3.5 基座模板默认会在 `add_generation_prompt=True` 时注入 `<think>\n\n</think>` 思考前缀，若直接生成会导致 JSON 输出被思考标记包裹而解析失败。因此 `PrivShield` 在推理与训练渲染时**显式传入 `enable_thinking=False`**，走非思考分支，保证 Assistant 直接输出 JSON。
    模板将 System 角色（固定 **177 tokens** 隐私分类指南）、User 角色（被分类文本）以及 Assistant 触发词渲染为标准序列（为简洁省略空 think 块，实际渲染含 `<think>\n\n</think>`）：
@@ -515,7 +515,7 @@ flowchart TD
 
 #### 4.7.2 在 PrivShield 中的运行策略
 1. **纯文本模式（当前生产默认）**：
-   在 `PrivShield/dynclassification/llm_engines.py` 的 `Qwen3Classifier` 中，文本输入直接送入 Language Model 主干，**视觉编码塔被自动旁路（Bypass）**，计算耗时与显存开销为 0。
+   在 `engine/dynclassification/llm_engines.py` 的 `Qwen3Classifier` 中，文本输入直接送入 Language Model 主干，**视觉编码塔被自动旁路（Bypass）**，计算耗时与显存开销为 0。
 2. **多模态就绪（未来演进）**：
    当传入医疗图像、病理切片或 DICOM 影像时，系统可激活视觉塔生成视觉 Tokens，无缝执行多模态隐私判定。视觉塔自身参数量约 **101M**（12 层 ViT + Patch 嵌入 + Pos 嵌入 + Merger），合并后的 `model.safetensors` 中共有 153 个 `model.visual.*` 权重张量。
 
@@ -645,12 +645,12 @@ flowchart TD
 
 ## 6. 生产级推理引擎、自回归解码控制与安全容灾机制
 
-在 `PrivShield` 端侧 Sidecar 运行时，大模型推理链路由 `LlmAdapter`（[`llm_adapter.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_adapter.py)）统一封装，实际执行器包括：
-- **本地 PyTorch 后端**：`Qwen3Classifier`（[`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py)），通过 `AutoModelForCausalLM.from_pretrained(..., trust_remote_code=True)` 加载 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`；
-- **远程/本地 vLLM HTTP 后端**：`OpenAILlmClassifier`（[`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py)），调用 OpenAI 兼容 `/v1/chat/completions` 接口，可对接 vLLM、Ollama 或云端 API；
+在 `PrivShield` 端侧 Sidecar 运行时，大模型推理链路由 `LlmAdapter`（[`llm_adapter.py`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/llm_adapter.py)）统一封装，实际执行器包括：
+- **本地 PyTorch 后端**：`Qwen3Classifier`（[`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/llm_engines.py)），通过 `AutoModelForCausalLM.from_pretrained(..., trust_remote_code=True)` 加载 `.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother`；
+- **远程/本地 vLLM HTTP 后端**：`OpenAILlmClassifier`（[`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/llm_engines.py)），调用 OpenAI 兼容 `/v1/chat/completions` 接口，可对接 vLLM、Ollama 或云端 API；
 - **MLX 后端**：Apple Silicon 本地 Metal 推理（可选，延迟加载）。
 
-这些后端共同与 `ClassificationFunnel`（[`funnel.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/funnel.py)）协同，实现高效解码控制与多重生产级容灾兜底。
+这些后端共同与 `ClassificationFunnel`（[`funnel.py`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/funnel.py)）协同，实现高效解码控制与多重生产级容灾兜底。
 
 ### 6.1 Prefill 预填充与 Decode 自回归解码两阶段画像
 
@@ -870,7 +870,7 @@ flowchart TD
 ```
 
 1. **延迟初始化与双重检查锁定 (Double-Checked Locking)**：
-   [`llm_engines.py:Qwen3Classifier`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py#L121) 采用双重检查锁定，首次被调用时才加载权重，避免非 LLM 场景或启动阶段的显存占用。
+   [`llm_engines.py:Qwen3Classifier`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/llm_engines.py#L121) 采用双重检查锁定，首次被调用时才加载权重，避免非 LLM 场景或启动阶段的显存占用。
 2. **并发信号量控制 (Concurrency Semaphore)**：
    受 `PRIVACY_LLM_MAX_CONCURRENCY=1` 约束，多线程请求通过信号量串行化排队，防止瞬时并发请求并发加载多份前向激活造成显存爆 OOM；等待超过 30s（`PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS`）自动放弃并平滑降级。
 3. **可用显存/内存熔断守护**（双层阈值）：
@@ -879,17 +879,17 @@ flowchart TD
 4. **独立线程池与 180s 绝对超时隔离**：
    将推理运算隔离到专用单线程池 `ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-infer")`，超时（默认 180s）即刻抛出 `TimeoutError` 并返回 `None`，绝不永久锁死 gRPC 工作线程。
 5. **Fail-Closed 等级安全地板与脱敏门禁**：
-   - 在 [`funnel.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/funnel.py) 中，LLM 裁定的 `final_level` 绝不允许低于规则/上游已判定的等级（防止模型幻觉或 Prompt 注入导致降级放行），否则被拒绝并标记 `needs_human_review`；
+   - 在 [`funnel.py`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/funnel.py) 中，LLM 裁定的 `final_level` 绝不允许低于规则/上游已判定的等级（防止模型幻觉或 Prompt 注入导致降级放行），否则被拒绝并标记 `needs_human_review`；
    - LLM 仲裁结果必须落在冲突标签等级集合内，且不得低于值级证据（`match_target=field_value`）的最高敏感等级；
    - `Qwen3Classifier` 是纯文本模型，遇到图像/图片输入直接返回 `None` 触发降级，由 `ClassificationFunnel` 按高敏医学影像规则保护；
-   - 在 [`service.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/service.py) 服务出口处，对 `sanitized_text` 再次执行规则级高敏词扫描，若发现脱敏不彻底仍残留 L4/L5 敏感数据，强制替换为 `"[L4-L5-DATA-REMOVED]"`，实现绝对的合规兜底。
+   - 在 [`service.py`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/service.py) 服务出口处，对 `sanitized_text` 再次执行规则级高敏词扫描，若发现脱敏不彻底仍残留 L4/L5 敏感数据，强制替换为 `"[L4-L5-DATA-REMOVED]"`，实现绝对的合规兜底。
 
 
 ---
 
 ## 7. 模型仓库文件体系与各文件功能全景
 
-在 `PrivShield` 项目中，大模型微调合并后的核心权重与配置文件集中存储于 **`.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother/`** 目录下。该目录由 [`download_model.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/privacy/download_model.py) 自动拉取，或由微调流水线 [`trainer.py`](file:///home/charles/code/sfwork/PrivShield/llmlora/src/models/trainer.py) 导出。
+在 `PrivShield` 项目中，大模型微调合并后的核心权重与配置文件集中存储于 **`.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother/`** 目录下。该目录由 [`download_model.py`](file:///home/charles/code/sfwork/PrivShield/engine/privacy/download_model.py) 自动拉取，或由微调流水线 [`trainer.py`](file:///home/charles/code/sfwork/PrivShield/llmlora/src/models/trainer.py) 导出。
 
 ### 7.1 文件清单与功能对照矩阵
 
@@ -898,7 +898,7 @@ flowchart TD
 | 文件名称 | 文件大小 | 格式 / 类型 | 核心作用与工程机制 | 关联加载模块 |
 |---|---|---|---|---|
 | **`model.safetensors`** | **~1.70 GB** | SafeTensors 二进制张量 | **模型全量权重参数文件**。<br>1. 包含 24 层 Hybrid 混合主干网络（`model.language_model.*`）的全部线性/全注意力与 SwiGLU 权重；<br>2. 包含输入 Embedding 与输出 LM Head 的绑定权重（`embed_tokens.weight`），词表 248320 × 1024，约 254M；<br>3. 包含 153 个 `model.visual.*` 视觉兼容权重，视觉塔参数量约 101M；<br>4. 全模型总参数量约 **853M**（文本主干约 752M + 视觉塔约 101M）；<br>5. 原生支持零拷贝（Zero-Copy mmap）内存映射，加载速度提升 5x+ 且杜绝任意代码执行漏洞。 | `AutoModelForCausalLM` / `vLLM` / `MLX` |
-| **`config.json`** | **2.9 KB** | JSON 结构化配置 | **模型架构与超参数拓扑总配置文件**。<br>1. 声明顶层架构 `architectures: ["Qwen3_5ForConditionalGeneration"]`；<br>2. 定义 `text_config`（24 层 3:1 混合排布 `layer_types`、隐层 1024、中间层 3584、GQA 8Q/2KV、25% Partial RoPE、`mamba_ssm_dtype: float32`、`max_position_embeddings: 262144` 等）；<br>3. 包含 `vision_config`（12 层 ViT、768 维隐层、12 头、`num_position_embeddings: 2304`、`patch_size: 16`、`temporal_patch_size: 2`、`spatial_merge_size: 2`、`deepstack_visual_indexes: []`）；<br>4. 推理框架（vLLM / Transformers）解析网络骨架与显存预分配的核心依据。 | [`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py) / `vLLM Engine` |
+| **`config.json`** | **2.9 KB** | JSON 结构化配置 | **模型架构与超参数拓扑总配置文件**。<br>1. 声明顶层架构 `architectures: ["Qwen3_5ForConditionalGeneration"]`；<br>2. 定义 `text_config`（24 层 3:1 混合排布 `layer_types`、隐层 1024、中间层 3584、GQA 8Q/2KV、25% Partial RoPE、`mamba_ssm_dtype: float32`、`max_position_embeddings: 262144` 等）；<br>3. 包含 `vision_config`（12 层 ViT、768 维隐层、12 头、`num_position_embeddings: 2304`、`patch_size: 16`、`temporal_patch_size: 2`、`spatial_merge_size: 2`、`deepstack_visual_indexes: []`）；<br>4. 推理框架（vLLM / Transformers）解析网络骨架与显存预分配的核心依据。 | [`llm_engines.py`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/llm_engines.py) / `vLLM Engine` |
 | **`generation_config.json`** | **116 B** | JSON 结构化配置 | **自回归解码生成控制配置文件**。<br>1. 声明终止 Token `eos_token_id: 248044`（注意：实际 tokenizer 将 `<|im_end|>` 映射为 `248046`、`<|endoftext|>` 映射为 `248044`，推理时以 tokenizer 实际映射为准）；<br>2. 显式开启 `use_cache: true`，默认启用 KV Cache 与 SSM 循环状态增量解码；<br>3. 声明适配的 Transformers 框架版本（`5.14.1`）。 | `model.generate()` / `SamplingParams` |
 | **`tokenizer_config.json`** | **1.15 KB** | JSON 结构化配置 | **分词器运行参数与特殊 Token 映射表**。<br>1. 声明底层分词器类 `Qwen2Tokenizer`；<br>2. 设定最大序列长度 `model_max_length: 262144`；<br>3. 配置特殊标记：`pad_token: "<|endoftext|>"`, `eos_token: "<|im_end|>"`, `<|vision_start|>`, `<|vision_end|>`, `<|image_pad|>`, `<|video_pad|>`；<br>4. 默认 `padding_side: "right"`（与训练侧 Collator 一致；vLLM Batch 推理由引擎内部管理 Block，无需业务层手动覆盖为 `left`）。 | `AutoTokenizer` / [`loader.py`](file:///home/charles/code/sfwork/PrivShield/llmlora/src/dataset/loader.py) |
 | **`tokenizer.json`** | **~20.0 MB** | JSON 快速分词词表 | **完备的 Fast Tokenizer BPE 状态机与词表编码文件**。<br>1. 内嵌 **248,320** 个 Token 的映射表与合并规则（Merges）；<br>2. 固化正则表达式预分词规则（`pretokenize_regex`）；<br>3. 由 Rust 高性能分词后端驱动，支持微秒级批量文本到 Token ID 的双向编解码。 | `tokenizers` / `AutoTokenizer.from_pretrained` |
@@ -967,13 +967,13 @@ flowchart TD
 ### 8.2 各级缓存加速机制深度剖析
 
 #### Level 1: 应用层高并发分片 LRU 缓存 (`HighConcurrencyLRUCache`)
-- **实现位置**：[`PrivShield/dynclassification/service.py:160`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/service.py#L160) 与 [`PrivShield/privacy/high_concurrency.py`](file:///home/charles/code/sfwork/PrivShield/PrivShield/privacy/high_concurrency.py)；
+- **实现位置**：[`engine/dynclassification/service.py:160`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/service.py#L160) 与 [`engine/privacy/high_concurrency.py`](file:///home/charles/code/sfwork/PrivShield/engine/privacy/high_concurrency.py)；
 - **键设计**：`(field_name, value, domain, standard, sanitize)` 五元组；
 - **工作机制**：在数据表批量分类（`classify_table`）或高频接口调用时，针对大量重复出现的枚举值、状态码、字段名进行内存级 $O(1)$ 拦截。默认容量 10,000 条，内部采用分片锁（Sharded Lock）消除多线程争用。命中后直接跳过 Layer-1~Layer-3 全流程，端到端延迟 **< 0.05ms**。
 
 #### Level 2: 引擎层公共前缀 KV 缓存 (Automatic Prefix Caching, APC)
 - **实现位置**：vLLM 引擎通过 `enable_prefix_caching=True` 驱动；
-- **核心原理**：在 `PrivShield` 体系中，微调大模型的 System Prompt 与分类标准指南是**完全固定**的（在 [`llm_engines.py:109`](file:///home/charles/code/sfwork/PrivShield/PrivShield/dynclassification/llm_engines.py#L109) 中固定为 **177 tokens**，占常规单次分类 Prompt 总长 204 tokens 的近 **85%**）；
+- **核心原理**：在 `PrivShield` 体系中，微调大模型的 System Prompt 与分类标准指南是**完全固定**的（在 [`llm_engines.py:109`](file:///home/charles/code/sfwork/PrivShield/engine/dynclassification/llm_engines.py#L109) 中固定为 **177 tokens**，占常规单次分类 Prompt 总长 204 tokens 的近 **85%**）；
 - **加速机制**：
   1. 系统通过 Radix 树管理 KV Cache 物理块，System Prompt 对应的 177 个 Token 在首次执行 Prefill 后，其 KV Cache 块被固化在 GPU 显存池中；
   2. 当后续 Batch 中的请求到来时，引擎直接通过前缀哈希命中公共 KV Cache，**仅需对剩余 20~50 个用户输入 Token 执行 Prefill GEMM 计算**；
@@ -1025,7 +1025,10 @@ Qwen3.5-0.8B 区别于传统 Transformer 的核心在于其 24 层中包含了 *
 │ 公共 System Prompt (分类指南与 JSON 规范) [177 Tokens] │ 用户独立输入 [21~38 Tokens] │
 ├────────────────────────────────────────────────────────┼─────────────────────────┤
 │ <|im_start|>system\n你是一个专业的隐私安全Sidecar...    │ <|im_start|>user\n...   │
-│ ...【数据分类分级标准指南】\n- L1... - L5...<|im_end|>\n │ ...<|im_end|>\n<|im_start|>assistant\n
+│ ...【数据分类分级标准指南】@@NEWLINE@@- L1... - L5...<|im_end|>
+ │ ...<|im_end|>
+<|im_start|>assistant@@NEWLINE@@
+ │
 └────────────────────────────────────────────────────────┴─────────────────────────┘
 ```
 

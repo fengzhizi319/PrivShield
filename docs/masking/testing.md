@@ -18,7 +18,7 @@
 
 ## 1. 概述
 
-本文档定义 `PrivShield/privacy/masking.py` 的测试策略、测试范围与可执行示例。
+本文档定义 `engine/privacy/masking.py` 的测试策略、测试范围与可执行示例。
 
 ## 2. 测试目标
 

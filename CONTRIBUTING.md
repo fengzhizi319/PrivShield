@@ -84,7 +84,7 @@ perf: optimize histogram with numpy vectorization
 ## Architecture
 
 ```
-PrivShield/
+engine/
 ├── privacy/          # Core privacy primitives (DP, masking, K-anon, QoL, classification)
 ├── security/         # Auth, RBAC, rate limiting, TLS
 ├── observability/    # Prometheus metrics, OTel tracing, structured logging

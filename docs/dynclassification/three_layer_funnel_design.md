@@ -1,6 +1,6 @@
 # 三层漏斗模型 + 置信度策略设计
 
-> 本文档与实现代码 `PrivShield/dynclassification/funnel.py`、`models.py` 保持同步（最后对齐：2026-08）。
+> 本文档与实现代码 `engine/dynclassification/funnel.py`、`models.py` 保持同步（最后对齐：2026-08）。
 
 ## 目录 (Table of Contents)
 

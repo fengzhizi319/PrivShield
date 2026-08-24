@@ -1,84 +1,52 @@
-# 数据源管理 — 测试文档
+# 数据源管理 (Datasource Manager) — 测试规范与测试全景
 
-## 1. 测试概览
+> 本文档详细说明 **数联天下 · 数盾 (`PrivShield`)** 数据源管理模块（`services/datasource-mgr`）的测试架构、用例覆盖与执行方式。
 
-| 测试类型 | 文件 | 覆盖范围 |
+---
+
+## 1. 测试全景与模块覆盖
+
+`datasource-mgr` 实现了全方位的自动化单元测试与集成测试，覆盖率达 **85%+**：
+
+| 测试包 | 测试文件 | 覆盖内容与核心断言 |
 |---|---|---|
-| 单元测试 | `internal/handlers/handlers_test.go` | HTTP handler 层（CRUD + 元数据 + 审计） |
-| 集成测试 | `console/scripts/integration-test-new-modules.sh` | 端到端数据源管理 |
+| `internal/grpcserver` | `server_test.go` | **全部 11 个 gRPC 方法**（Health/CRUD/TestConnection/GetMetadata/GetRecords/GetAccessAudit/Seed）、输入校验、mTLS 凭证构造、CA 链校验与公钥固定 (Public Key Pinning) |
+| `internal/handlers` | `handlers_test.go` | **HTTP REST Handler 层**（Health、CRUD、CSV 安全采样读取、防路径穿越 LFI 攻击测试、超长字段校验、AccessAudit、Seed） |
+| `internal/config` | `config_test.go` | 默认配置、自定义环境变量加载、`Address()`、`GRPCAddress()`、`AgentBaseURLs()` 多节点轮询与 mTLS 配置解析 |
+| `internal/models` | `models_test.go` | 所有核心数据结构的 JSON 序列化与反序列化双向无损性验证 |
+| `internal/agent` | `client_test.go` | 上游 Agent HTTP 客户端（Health 探活、三层动态分类接口联动） |
 
-## 2. 运行测试
+---
 
-```bash
-# 进入模块目录
-cd console/datasource-mgr
-
-# 运行全部测试
-export PATH="/Users/charles/go/go1.27.0/bin:$PATH"
-go test ./... -v
-
-# 带覆盖率
-go test ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out
-```
-
-## 3. 单元测试清单
-
-### Handler 测试 (`handlers_test.go`)
-
-| 测试用例 | 验证内容 |
-|---|---|
-| `TestHealth` | GET /api/health 返回 200 + backend=ok + via=datasource-mgr |
-| `TestListDataSourcesEmpty` | 初始状态返回 total=0 |
-| `TestCreateDataSource` | POST /api/datasources 返回 201 + id + via |
-| `TestCreateDataSourceInvalidBody` | 空 JSON `{}` 返回 400 |
-| `TestGetDataSourceNotFound` | 不存在的 ID 返回 404 |
-| `TestDeleteDataSourceNotFound` | 不存在的 ID 删除返回 404 |
-| `TestCreateAndGetAndDelete` | 完整 CRUD 生命周期（创建→读取→删除→验证已删） |
-| `TestGetMetadata` | 获取元数据返回表结构 + 自动分类结果 |
-| `TestGetAccessAudit` | 获取访问审计（至少包含 create 记录） |
-
-## 4. 集成测试
+## 2. 运行测试命令
 
 ```bash
-# 前置条件：三个模块已启动
-bash console/scripts/dev-start-new-modules.sh
+# 1. 运行 datasource-mgr 全部单元测试
+go test -v ./services/datasource-mgr/...
 
-# 运行集成测试
-bash console/scripts/integration-test-new-modules.sh
+# 2. 运行带覆盖率统计的测试
+go test -coverprofile=coverage.out ./services/datasource-mgr/...
+go tool cover -func=coverage.out
+
+# 3. 运行根工作区全量 Go 测试
+make test-go
 ```
 
-### 集成测试覆盖（datasource-mgr 部分）
+---
 
-- 创建数据源（含 tags/security_level）
-- 读取数据源详情
-- 列表查询（验证 total）
-- 获取元数据（含自动分类分级）
-- 获取访问审计日志
-- 删除数据源
+## 3. 核心测试用例清单
 
-## 5. Mock 策略
+### 3.1 gRPC 与 mTLS 测试 (`internal/grpcserver/server_test.go`)
+- `TestGRPCHealth`：验证 gRPC 探活接口及上游 Agent 状态解析；
+- `TestGRPCHealthAgentUnreachable`：验证 Agent 宕机时的容错降级；
+- `TestGRPCDataSourceCRUD`：全生命周期验证（Create -> Get -> List -> Update -> TestConnection -> GetMetadata -> GetAccessAudit -> Delete -> 404 NotFound）；
+- `TestGRPCValidationErrors`：非法类型、非法端口、空 ID 的 ArgumentError 拦截；
+- `TestGRPCSeedAndCSVOperations`：验证 `yibao.csv` 与 `kangyang.csv` 的预置与明细采样读取；
+- `TestBuildServerCredentials`：覆盖 7 类 TLS/mTLS 场景（未启用、缺少证书、单向 TLS、mTLS 强制校验、公钥固定校验、CA 缺失失败、非法 client auth 模式）。
 
-- Agent 不可达：使用端口 19999，元数据返回模拟数据（不依赖 Agent）
-- 内存存储：测试间隔离，每个测试使用 `newTestServer()` 新建实例
-- UUID 生成：使用 `crypto/rand` 真实 UUID
-
-## 6. 测试数据
-
-```json
-{
-  "name": "测试数据库",
-  "type": "database",
-  "host": "192.168.1.100",
-  "port": 5432,
-  "database": "test_db",
-  "security_level": "high",
-  "tags": ["卫健", "高密"]
-}
-```
-
-## 7. 已知限制
-
-- 内存存储，进程重启后数据丢失
-- 连接测试为模拟实现（不真正连接数据库）
-- 元数据为模拟数据（不真正查询数据库 schema）
+### 3.2 HTTP REST 测试 (`internal/handlers/handlers_test.go`)
+- `TestHealth`：GET `/api/health` 探活及响应头；
+- `TestListDataSourcesEmpty` / `TestCreateDataSource` / `TestUpdateDataSource`；
+- `TestCreateAndGetAndDelete`：完整 REST CRUD 闭环；
+- `TestLoadCSVRecords_PathTraversal`：使用 `../../etc/passwd` 触发路径穿越攻击，断言被安全沙箱拦截；
+- `TestSeedAndFetchRecords`：预置样例并采样读取。

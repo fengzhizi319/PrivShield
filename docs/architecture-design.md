@@ -231,7 +231,7 @@ flowchart LR
 * 内置平滑轮询（Round-Robin）与熔断状态机（Closed / Open / Half-Open），遇到单点宕机自动透明切换至存活节点。
 
 ### 4.2 网关 P2C 动态负载调度
-* `PrivShield/gateway/balancer.py` 新增 **Power of Two Choices (P2C)** 算法，每次随机选取两个候选健康节点并路由至负载得分更低者，彻底消除大并发下的羊群聚集效应。
+* `engine/gateway/balancer.py` 新增 **Power of Two Choices (P2C)** 算法，每次随机选取两个候选健康节点并路由至负载得分更低者，彻底消除大并发下的羊群聚集效应。
 
 ### 4.3 云原生多维自动扩缩容
 * **业务指标 HPA**：支持基于 QPS 速率、LLM 排队深度与 P95 延迟进行水平扩缩；

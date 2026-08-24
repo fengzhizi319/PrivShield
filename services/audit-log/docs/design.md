@@ -1,18 +1,19 @@
-# 脱敏审计日志 (Audit Log) — 详细设计文档
+# 脱敏审计日志与存证 (Audit Log) — 详细设计文档
 
-> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 脱敏审计日志模块（`services/audit-log`）的系统架构、日志模型、8 要素增强完整性校验、合规报告生成与高可用持久化设计。
+> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 脱敏审计日志模块（`services/audit-log`）的系统架构、双协议服务模型（REST + gRPC）、mTLS 双向认证与公钥固定、8 要素增强完整性校验、不可篡改存证与高可用持久化设计。
 
 ---
 
 ## 1. 背景与业务定位
 
-在国家数据安全法与等保合规要求下，数据流通全链路必须具备**「可追溯、防篡改、抗抵赖」**的审计存证能力。**脱敏审计日志服务器 L (Audit Log)** 作为独立的安全审计节点，承担着以下核心职责：
+在国家数据安全法与等保合规要求下，数据流通全链路必须具备**「可追溯、防篡改、抗抵赖」**的审计存证能力。**脱敏审计日志与存证服务 (Audit Log)** 作为独立的安全审计节点，承担着以下核心职责：
 
-1. **全量治理事件审计**：完整记录所有脱敏（Masking）、K-匿名（K-Anonymity）、差分隐私（DP）、数据分类（Classify）及查询混淆（QOL）操作明细；
-2. **8 要素增强防篡改哈希存证**：采用 SHA-256 密码学哈希对审计事件全字段签名，自动生成存证快照；
-3. **在线完整性校验**：提供存证真实性核验端点，实时检测并告警任何底层数据篡改；
-4. **SQL 级多维统计与合规报告**：基于 SQLite SQL 聚合引擎提供毫秒级操作概览（`GetStats`）与合规报告（`GenerateReport`），彻底杜绝内存加载溢出风险；
-5. **企业级持久化与安全防护**：基于纯 Go SQLite 实现 WAL 读写分离持久化，配备 API Key 鉴权、常量时间比对防时序攻击与 Prometheus 监控。
+1. **双协议接入（REST + gRPC）**：对外提供标准 HTTP REST API 供前端控制台访问，同时对内提供高性能 gRPC 接口（端口 `:50054`）供 `service-hub` 调度中枢与微服务集群直接写入审计存证；
+2. **零信任 mTLS 与公钥固定**：gRPC 通道支持 TLS 1.3 双向证书认证（mTLS），并内置客户端公钥固定（Public Key Pinning）机制，彻底防范中间人篡改；
+3. **8 要素增强防篡改哈希存证**：采用 SHA-256 密码学哈希对审计事件全字段签名，自动生成存证快照；
+4. **在线完整性校验与对账**：提供存证真实性核验端点，实时检测并告警任何底层数据篡改；
+5. **SQL 级多维统计与合规报告**：基于 SQLite SQL 聚合引擎提供毫秒级操作概览（`GetStats`）与合规报告（`GenerateReport`），彻底杜绝内存加载溢出风险；
+6. **企业级持久化与安全防护**：基于纯 Go SQLite 实现 WAL 读写分离持久化，配备 API Key 鉴权、常量时间比对防时序攻击与 Prometheus 监控。
 
 ---
 
@@ -20,15 +21,17 @@
 
 ```mermaid
 graph TD
-    subgraph Clients [审计核验客户端]
+    subgraph Clients [审计核验与调用方]
         WebConsole[React 前端审计看板<br/>:5173]
         GatewayBFF[Go BFF 网关<br/>:8081]
-        Auditor[局方安全核验员<br/>专用只读通道]
+        ServiceHub[Service Hub 调度中枢<br/>:8082]
+        Auditor[局方安全审计员<br/>专用只读通道]
     end
 
-    subgraph AuditLogService [Audit Log 微服务 :8084]
-        HTTPRouter[Gin REST 路由层<br/>/api/audit/*]
-        MiddlewareStack[共享中间件链<br/>Auth / RequestID / Logger / Recovery / CORS]
+    subgraph AuditLogService [Audit Log 微服务 :8084 / :50054]
+        HTTPRouter[Gin REST 路由层<br/>/api/audit/* :8084]
+        GRPCRouter[gRPC Server :50054<br/>mTLS + Key Pinning]
+        MiddlewareStack[共享中间件链<br/>Auth / RequestID / Logger / Recovery / CORS / MaxBodySize]
         PromMetrics[Prometheus Collector<br/>/metrics]
 
         AuditController[审计业务控制器]
@@ -38,20 +41,14 @@ graph TD
         AuditStore[(AuditStore 引擎<br/>SQLite / Memory)]
     end
 
-    subgraph Upstream [PrivShield Agent & 调度中枢]
-        ServiceHub[Service Hub 调度完成回调]
-        CoreAgent[PrivShield Agent 原语调用记录]
-    end
-
     WebConsole -->|HTTP/JSON| HTTPRouter
     GatewayBFF -->|HTTP/JSON| HTTPRouter
     Auditor -->|只读核验| HTTPRouter
-
-    ServiceHub -->|POST /api/audit/logs| HTTPRouter
-    CoreAgent -->|POST /api/audit/logs| HTTPRouter
+    ServiceHub -->|gRPC mTLS :50054| GRPCRouter
 
     HTTPRouter --> MiddlewareStack
     MiddlewareStack --> AuditController
+    GRPCRouter --> AuditController
     HTTPRouter --> PromMetrics
 
     AuditController --> IntegrityEngine
@@ -63,15 +60,41 @@ graph TD
 
 ---
 
-## 3. 核心机制与算法设计
+## 3. mTLS 与防篡改存证流程
 
-### 3.1 8 要素增强完整性哈希算法 (Enhanced 8-Factor SHA-256)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Pipeline as Service Hub 调度流水线
+    participant AuditGRPC as audit-log gRPC (:50054)
+    participant Engine as 8要素哈希引擎
+    participant Store as SQLite WAL 存储
+    participant Auditor as 安全审计员 / 控制台
 
-#### 3.1.1 历史痛点与漏洞修复
-旧版实现仅对 3 个字段（`log_id + timestamp + algorithm`）进行简单拼接哈希，攻击者即便篡改了 `input_hash`、`output_hash`、执行用户 `user`、敏感度等级 `security_level` 或算法配置 `parameters`，重新校验时哈希值依然看似“合法”，存在重大安全合规漏洞。
+    Pipeline->>AuditGRPC: gRPC TLS 1.3 握手 (客户端 X.509 证书 + 公钥固定校验)
+    AuditGRPC->>AuditGRPC: 验证 Client CA 与公钥 Pinning
+    Pipeline->>AuditGRPC: RecordAudit(op="mask", in_hash, out_hash, params, user, level="L4")
+    AuditGRPC->>Engine: 计算 8 要素 SHA-256 完整性哈希
+    Engine-->>AuditGRPC: integrity_hash = SHA-256(...)
+    AuditGRPC->>Store: SaveLog(...) & SaveSnapshot(...)
+    AuditGRPC-->>Pipeline: 返回 audit_id, success=true
 
-#### 3.1.2 8 要素增强哈希算法公式
-新版实现将所有关键治理要素全面纳入哈希计算，公式如下：
+    Auditor->>AuditGRPC: VerifyIntegrity(snapshot_id)
+    AuditGRPC->>Store: GetSnapshot(id)
+    AuditGRPC->>Engine: 重算当前数据的 SHA-256 哈希
+    Engine-->>AuditGRPC: 比较 computed_hash 与存证 hash
+    alt 哈希完全一致
+        AuditGRPC-->>Auditor: valid=true (未发生篡改，抗抵赖存证有效)
+    else 哈希不一致
+        AuditGRPC-->>Auditor: valid=false (数据遭受篡改，触发安全告警)
+    end
+```
+
+---
+
+## 4. 8 要素增强完整性哈希算法
+
+新版实现将所有关键治理要素全面纳入哈希计算：
 
 $$\text{Data} = \text{logID} \parallel \text{timestamp (RFC3339Nano)} \parallel \text{algorithm} \parallel \text{inputHash} \parallel \text{outputHash} \parallel \text{user} \parallel \text{securityLevel} \parallel \text{parametersJSON}$$
 
@@ -88,84 +111,3 @@ func computeIntegrityHash(logID string, timestamp time.Time, algorithm, inputHas
 ```
 
 任何微小篡改（甚至是配置 JSON 中的空格或敏感度等级由 L4 改为 L3）都将导致 SHA-256 产生雪崩效应，使 `VerifyIntegrity` 立即识别并报警。
-
----
-
-### 3.2 SQL 级高性能统计与合规报告
-
-#### 3.2.1 统计概览 (`GetStats`)
-通过 SQL 聚合函数一次性汇总：
-- 总操作次数与平均耗时：`SELECT COUNT(*), COALESCE(AVG(duration_ms), 0) FROM audit_logs`
-- 按操作类型分布：`SELECT operation, COUNT(*) FROM audit_logs GROUP BY operation`
-- 按状态分布：`SELECT status, COUNT(*) FROM audit_logs GROUP BY status`
-- 按敏感等级分布：`SELECT security_level, COUNT(*) FROM audit_logs WHERE security_level != '' GROUP BY security_level`
-
-#### 3.2.2 周期性合规审计报告 (`GenerateReport`)
-支持指定周期（`1h`、`24h`、`7d`、`30d`），利用 SQLite 原生时间函数 `timestamp > datetime('now', ?)` 在数据库底层完成时间窗口过滤，直接计算：
-1. **成功率**：`COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) / COUNT(*)`
-2. **高频操作 Top 5**：`ORDER BY count DESC LIMIT 5`
-3. **智能合规建议**：
-   - 当 `L4` 敏感操作频繁时提示审查差分隐私预算消耗；
-   - 当 `L5` 绝密数据操作增加时提示强化访问控制白名单；
-   - 当操作成功率低于 95% 时触发排查预警。
-
----
-
-## 4. 数据持久化设计 (`pkg/store/sqlite`)
-
-### 4.1 表结构与索引 DDL
-
-```sql
--- 审计日志主表
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id TEXT PRIMARY KEY,
-    timestamp DATETIME NOT NULL,
-    operation TEXT,
-    datasource TEXT,
-    input_hash TEXT,
-    output_hash TEXT,
-    algorithm TEXT,
-    parameters_json TEXT,
-    input_rows INTEGER DEFAULT 0,
-    output_rows INTEGER DEFAULT 0,
-    duration_ms INTEGER DEFAULT 0,
-    user_name TEXT,
-    status TEXT,
-    error_message TEXT,
-    security_level TEXT
-);
-
--- 存证快照表
-CREATE TABLE IF NOT EXISTS snapshots (
-    id TEXT PRIMARY KEY,
-    audit_log_id TEXT,
-    timestamp DATETIME NOT NULL,
-    input_sample TEXT,
-    output_sample TEXT,
-    algorithm TEXT,
-    parameters_json TEXT,
-    integrity_hash TEXT,
-    FOREIGN KEY(audit_log_id) REFERENCES audit_logs(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_logs_ts ON audit_logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_op ON audit_logs(operation);
-CREATE INDEX IF NOT EXISTS idx_snapshots_audit ON snapshots(audit_log_id);
-```
-
----
-
-## 5. API 接口规范
-
-| 方法 | 路径 | 描述 | 请求参数 / 请求体 | 响应说明 |
-|---|---|---|---|---|
-| `GET` | `/health` | 服务健康检查 | — | `200 OK` (连通性状态) |
-| `GET` | `/api/health` | 内部健康检查端点 | — | `200 OK` |
-| `GET` | `/api/audit/logs` | 多维度过滤分页查询审计日志 | `operation`, `datasource`, `user`, `status`, `security_level`, `limit`, `offset` | `200 OK` (total, logs) |
-| `POST` | `/api/audit/logs` | 写入一条脱敏审计事件（自动生成防篡改快照） | `operation, datasource, input_hash, output_hash, input_sample, output_sample, algorithm, parameters, input_rows, output_rows, duration_ms, user, status, error, security_level` | `201 Created` (id) |
-| `GET` | `/api/audit/logs/:id` | 根据 ID 获取单个审计日志详情 | URL 路径参数 `:id` | `200 OK` / `404` |
-| `GET` | `/api/audit/stats` | 获取系统治理操作统计指标概览 | `period` (默认 `24h`) | `200 OK` (按操作/等级/状态统计) |
-| `GET` | `/api/audit/snapshots` | 获取脱敏存证快照列表（分页） | `limit`, `offset` | `200 OK` (total, snapshots) |
-| `POST` | `/api/audit/snapshots/verify` | 对指定快照执行 8 要素完整性真伪核验 | `{"snapshot_id": "snap-..."}` | `200 OK` (`valid`: bool, `expected`, `actual`) |
-| `POST` | `/api/audit/report` | 自动生成周期合规审计分析报告 | `{"period": "24h"}` | `200 OK` (合规指标与改进建议) |
-| `GET` | `/metrics` | Prometheus 监控指标抓取 | — | `200 OK` |

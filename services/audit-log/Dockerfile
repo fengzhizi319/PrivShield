@@ -44,7 +44,7 @@ COPY --from=builder /app/server /app/server
 
 RUN chown -R privacy:privacy /app
 
-EXPOSE 8084
+EXPOSE 8084 50054
 
 # P27 fix: declare data volume for SQLite persistence
 # 声明数据卷用于 SQLite 持久化
@@ -57,6 +57,8 @@ USER privacy
 
 ENV AUDIT_LOG_HOST=0.0.0.0
 ENV AUDIT_LOG_PORT=8084
+ENV AUDIT_LOG_GRPC_HOST=0.0.0.0
+ENV AUDIT_LOG_GRPC_PORT=50054
 ENV PRIVACY_AGENT_REST_HOST=privshield-agent
 ENV PRIVACY_REST_PORT=8079
 

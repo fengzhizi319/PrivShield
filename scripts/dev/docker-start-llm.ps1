@@ -65,7 +65,7 @@ $ModelDir = Join-Path $ProjectRoot ".models\Qwen3.5-0.8B-Privacy-Classifier-Smoo
 if (-not (Test-Path $ModelDir)) {
     Write-Host "⚠️  [提示] 本地大模型权重目录不存在: $ModelDir" -ForegroundColor Yellow
     Write-Host "   建议先执行模型下载命令以获取微调权重:" -ForegroundColor Yellow
-    Write-Host "   python -m PrivShield.privacy.download_model" -ForegroundColor Yellow
+    Write-Host "   python -m engine.privacy.download_model" -ForegroundColor Yellow
     Write-Host ""
 }
 

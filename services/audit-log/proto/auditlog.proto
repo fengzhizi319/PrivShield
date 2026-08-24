@@ -1,0 +1,194 @@
+syntax = "proto3";
+
+package auditlog;
+
+option go_package = "github.com/fengzhizi319/PrivShield/services/audit-log/proto";
+
+// AuditLogService 审计日志与不可篡改存证 gRPC 服务
+// AuditLogService is the gRPC service interface for audit logging and tamper-proof evidence verification.
+service AuditLogService {
+  // Health 健康检查（自检 + 上游 Agent 连通性）
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // RecordAudit 写入单条审计存证日志
+  rpc RecordAudit(RecordAuditRequest) returns (RecordAuditResponse);
+
+  // GetAuditLog 查询单条审计日志
+  rpc GetAuditLog(GetAuditLogRequest) returns (AuditLogProto);
+
+  // ListAuditLogs 分页与多维度条件检索审计日志
+  rpc ListAuditLogs(ListAuditLogsRequest) returns (ListAuditLogsResponse);
+
+  // GetAuditStats 获取审计与脱敏统计分析指标
+  rpc GetAuditStats(GetAuditStatsRequest) returns (AuditStatsResponse);
+
+  // ListSnapshots 查询脱敏快照数据存证
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+
+  // VerifyIntegrity 校验审计快照的 SHA-256 完整性与防篡改存证
+  rpc VerifyIntegrity(VerifyIntegrityRequest) returns (VerifyIntegrityResponse);
+
+  // GenerateReport 生成合规审计与治理效能报告
+  rpc GenerateReport(GenerateReportRequest) returns (ComplianceReportResponse);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Health / 健康检查
+// ─────────────────────────────────────────────────────────────
+
+message HealthRequest {}
+
+message HealthResponse {
+  string backend = 1;      // "ok"
+  string agent = 2;        // Agent 状态或 "unreachable"
+  string agent_url = 3;    // 上游 Agent 地址
+  int64  latency_ms = 4;   // 耗时（毫秒）
+  string error = 5;        // 错误信息
+  string via = 6;          // 模块标识 "audit-log"
+}
+
+// ─────────────────────────────────────────────────────────────
+// Audit Log Models & CRUD / 审计日志模型与操作
+// ─────────────────────────────────────────────────────────────
+
+message AuditLogProto {
+  string id = 1;              // 唯一日志 ID
+  string timestamp = 2;       // 操作发生时间 (RFC3339)
+  string operation = 3;       // "mask" | "classify" | "k_anon" | "dp" | "qol"
+  string datasource = 4;      // 数据源标识
+  string input_hash = 5;      // 输入数据 SHA256 哈希
+  string output_hash = 6;     // 输出数据 SHA256 哈希
+  string algorithm = 7;       // 所用脱敏或隐私算法
+  string parameters_json = 8; // 算法参数（JSON 字符串）
+  int32  input_rows = 9;      // 输入数据行数
+  int32  output_rows = 10;    // 输出数据行数
+  int64  duration_ms = 11;    // 耗时（毫秒）
+  string user = 12;           // 操作人/调用服务
+  string status = 13;         // "success" | "failed"
+  string error_message = 14;  // 错误信息（失败时）
+  string security_level = 15; // 敏感等级 "L1" - "L5"
+}
+
+message RecordAuditRequest {
+  string operation = 1;
+  string datasource = 2;
+  string input_hash = 3;
+  string output_hash = 4;
+  string algorithm = 5;
+  string parameters_json = 6;
+  int32  input_rows = 7;
+  int32  output_rows = 8;
+  int64  duration_ms = 9;
+  string user = 10;
+  string status = 11;
+  string error_message = 12;
+  string security_level = 13;
+}
+
+message RecordAuditResponse {
+  string id = 1;
+  bool   success = 2;
+  string via = 3;
+}
+
+message GetAuditLogRequest {
+  string id = 1;
+}
+
+message ListAuditLogsRequest {
+  string operation = 1;
+  string datasource = 2;
+  string user = 3;
+  string status = 4;
+  string security_level = 5;
+  int32  limit = 6;
+  int32  offset = 7;
+}
+
+message ListAuditLogsResponse {
+  int32 total = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  repeated AuditLogProto logs = 4;
+  string via = 5;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Audit Stats / 审计统计指标
+// ─────────────────────────────────────────────────────────────
+
+message GetAuditStatsRequest {
+  string period = 1; // "1h" | "24h" | "7d" | "30d"
+}
+
+message AuditStatsResponse {
+  int32 total_operations = 1;
+  map<string, int32> by_operation = 2;
+  map<string, int32> by_status = 3;
+  map<string, int32> by_security_level = 4;
+  double avg_duration_ms = 5;
+  string period = 6;
+  string via = 7;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Snapshots & Verification / 脱敏快照与防篡改校验
+// ─────────────────────────────────────────────────────────────
+
+message SnapshotProto {
+  string id = 1;
+  string audit_log_id = 2;
+  string timestamp = 3;
+  string input_sample = 4;
+  string output_sample = 5;
+  string algorithm = 6;
+  string parameters_json = 7;
+  string integrity_hash = 8;
+}
+
+message ListSnapshotsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListSnapshotsResponse {
+  int32 total = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  repeated SnapshotProto snapshots = 4;
+  string via = 5;
+}
+
+message VerifyIntegrityRequest {
+  string snapshot_id = 1;
+  string expected_hash = 2;
+}
+
+message VerifyIntegrityResponse {
+  string snapshot_id = 1;
+  bool   valid = 2;
+  string computed_hash = 3;
+  string expected_hash = 4;
+  string message = 5;
+  string via = 6;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Compliance Report / 合规报告
+// ─────────────────────────────────────────────────────────────
+
+message GenerateReportRequest {
+  string period = 1; // "1h" | "24h" | "7d" | "30d"
+}
+
+message ComplianceReportResponse {
+  string id = 1;
+  string generated_at = 2;
+  string period = 3;
+  int32  total_operations = 4;
+  double success_rate = 5;
+  map<string, int32> by_security_level = 6;
+  repeated string top_operations = 7;
+  repeated string recommendations = 8;
+  string via = 9;
+}

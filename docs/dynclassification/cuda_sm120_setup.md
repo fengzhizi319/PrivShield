@@ -106,7 +106,7 @@ pip install --pre torchvision --index-url https://download.pytorch.org/whl/night
 - **原因分析**：
   pip 安装的 `nvidia-*` 扩展包将动态链接库散落在 `site-packages/nvidia/*/lib` 和 `site-packages/triton/backends/nvidia/lib/cupti` 中。Linux 系统默认的 `dlopen` 不会自动搜索 Python `site-packages` 的深层子目录。
 - **解决方案**：
-  在 [`PrivShield/dynclassification/base.py`](../../PrivShield/dynclassification/base.py#L70-L115) 的 `SmallNerEngine` 基类中实现了 `_preload_nvidia_libs()` 静态方法。在 `import torch` 执行前，通过 `ctypes.CDLL(..., mode=ctypes.RTLD_GLOBAL)` 自动遍历并预加载底层的 CUDA 共享库，并实时更新 `os.environ["LD_LIBRARY_PATH"]`：
+  在 [`engine/dynclassification/base.py`](../../engine/dynclassification/base.py#L70-L115) 的 `SmallNerEngine` 基类中实现了 `_preload_nvidia_libs()` 静态方法。在 `import torch` 执行前，通过 `ctypes.CDLL(..., mode=ctypes.RTLD_GLOBAL)` 自动遍历并预加载底层的 CUDA 共享库，并实时更新 `os.environ["LD_LIBRARY_PATH"]`：
 
 ```python
 @staticmethod
@@ -164,7 +164,7 @@ def _preload_nvidia_libs() -> None:
 - **原因分析**：
   在 `sm_120` GPU 上，仅仅判断 `torch.cuda.is_available()` 会错误地返回 `True`，但在创建引擎阶段仍会崩溃。
 - **解决方案**：
-  在 [`ModelScopeSmallNerEngine._is_cuda_compatible(torch)`](../../PrivShield/dynclassification/ner_engines.py#L630-L645) 中增加了真正执行微小 CUDA Kernel 计算的探测代码：
+  在 [`ModelScopeSmallNerEngine._is_cuda_compatible(torch)`](../../engine/dynclassification/ner_engines.py#L630-L645) 中增加了真正执行微小 CUDA Kernel 计算的探测代码：
 
 ```python
 @classmethod

@@ -44,7 +44,7 @@ COPY --from=builder /app/server /app/server
 
 RUN chown -R privacy:privacy /app
 
-EXPOSE 8083
+EXPOSE 8083 50053
 
 # P27 fix: declare data volume for SQLite persistence
 # 声明数据卷用于 SQLite 持久化
@@ -57,6 +57,8 @@ USER privacy
 
 ENV DATASOURCE_MGR_HOST=0.0.0.0
 ENV DATASOURCE_MGR_PORT=8083
+ENV DATASOURCE_MGR_GRPC_HOST=0.0.0.0
+ENV DATASOURCE_MGR_GRPC_PORT=50053
 ENV PRIVACY_AGENT_REST_HOST=privshield-agent
 ENV PRIVACY_REST_PORT=8079
 

@@ -1,0 +1,517 @@
+// Package grpcserver implements the gRPC service for the audit-log module with mTLS support.
+// Package grpcserver 实现审计日志与不可篡改存证模块的 gRPC 服务端，支持 mTLS 双向认证与公钥固定。
+package grpcserver
+
+import (
+	"context"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
+
+	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/agent"
+	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/config"
+	pb "github.com/fengzhizi319/PrivShield/services/audit-log/proto"
+)
+
+const moduleVia = "audit-log"
+
+// GRPCServer implements pb.AuditLogServiceServer.
+type GRPCServer struct {
+	pb.UnimplementedAuditLogServiceServer
+
+	agent     *agent.Client
+	cfg       *config.Config
+	audit     store.AuditStore
+	logger    *slog.Logger
+	startTime time.Time
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+// New creates a new GRPCServer instance.
+func New(ag *agent.Client, cfg *config.Config, audit store.AuditStore, logger *slog.Logger) *GRPCServer {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &GRPCServer{
+		agent:     ag,
+		cfg:       cfg,
+		audit:     audit,
+		logger:    logger,
+		startTime: time.Now(),
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+}
+
+// Shutdown gracefully stops background tasks.
+func (s *GRPCServer) Shutdown() {
+	s.cancel()
+	s.wg.Wait()
+}
+
+// Health checks self and upstream agent connectivity.
+func (s *GRPCServer) Health(ctx context.Context, _ *pb.HealthRequest) (*pb.HealthResponse, error) {
+	start := time.Now()
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	agentData, err := s.agent.Health(timeoutCtx)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		s.logger.Warn("gRPC Health: agent unreachable", "error", err.Error())
+		return &pb.HealthResponse{
+			Backend:   "ok",
+			Agent:     "unreachable",
+			AgentUrl:  s.cfg.AgentBaseURL(),
+			LatencyMs: latency,
+			Error:     err.Error(),
+			Via:       moduleVia,
+		}, nil
+	}
+
+	agentStatus := "ok"
+	if st, ok := agentData["status"].(string); ok {
+		agentStatus = st
+	}
+
+	return &pb.HealthResponse{
+		Backend:   "ok",
+		Agent:     agentStatus,
+		AgentUrl:  s.cfg.AgentBaseURL(),
+		LatencyMs: latency,
+		Via:       moduleVia,
+	}, nil
+}
+
+// RecordAudit writes a new audit log entry.
+func (s *GRPCServer) RecordAudit(ctx context.Context, req *pb.RecordAuditRequest) (*pb.RecordAuditResponse, error) {
+	if strings.TrimSpace(req.Operation) == "" {
+		return nil, status.Error(codes.InvalidArgument, "operation is required")
+	}
+
+	now := time.Now()
+	id := fmt.Sprintf("audit_%d", now.UnixNano())
+
+	secLevel := req.SecurityLevel
+	if secLevel == "" {
+		secLevel = "L3"
+	}
+	opStatus := req.Status
+	if opStatus == "" {
+		opStatus = "success"
+	}
+	user := req.User
+	if user == "" {
+		user = "system"
+	}
+
+	var params any
+	if req.ParametersJson != "" {
+		_ = json.Unmarshal([]byte(req.ParametersJson), &params)
+	}
+
+	logEntry := &store.AuditLog{
+		ID:            id,
+		Timestamp:     now,
+		Operation:     req.Operation,
+		DataSource:    req.Datasource,
+		InputHash:     req.InputHash,
+		OutputHash:    req.OutputHash,
+		Algorithm:     req.Algorithm,
+		Parameters:    params,
+		InputRows:     int(req.InputRows),
+		OutputRows:    int(req.OutputRows),
+		DurationMs:    req.DurationMs,
+		User:          user,
+		Status:        opStatus,
+		ErrorMessage:  req.ErrorMessage,
+		SecurityLevel: secLevel,
+	}
+
+	if err := s.audit.SaveLog(logEntry); err != nil {
+		return nil, status.Errorf(codes.Internal, "save audit log: %v", err)
+	}
+
+	s.logger.Info("gRPC recorded audit log", "id", id, "op", req.Operation, "status", opStatus)
+
+	return &pb.RecordAuditResponse{
+		Id:      id,
+		Success: true,
+		Via:     moduleVia,
+	}, nil
+}
+
+// GetAuditLog returns a single audit log by ID.
+func (s *GRPCServer) GetAuditLog(ctx context.Context, req *pb.GetAuditLogRequest) (*pb.AuditLogProto, error) {
+	if strings.TrimSpace(req.Id) == "" {
+		return nil, status.Error(codes.InvalidArgument, "audit log id is required")
+	}
+
+	rec, err := s.audit.GetLog(req.Id)
+	if err != nil || rec == nil {
+		return nil, status.Errorf(codes.NotFound, "audit log not found: %s", req.Id)
+	}
+
+	return recordToProto(rec), nil
+}
+
+// ListAuditLogs returns filtered audit logs.
+func (s *GRPCServer) ListAuditLogs(ctx context.Context, req *pb.ListAuditLogsRequest) (*pb.ListAuditLogsResponse, error) {
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	offset := int(req.Offset)
+	if offset < 0 {
+		offset = 0
+	}
+
+	filter := store.AuditFilter{
+		Operation:     req.Operation,
+		DataSource:    req.Datasource,
+		User:          req.User,
+		Status:        req.Status,
+		SecurityLevel: req.SecurityLevel,
+		Limit:         limit,
+		Offset:        offset,
+	}
+
+	logs, total, err := s.audit.ListLogs(filter)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list audit logs: %v", err)
+	}
+
+	protos := make([]*pb.AuditLogProto, 0, len(logs))
+	for i := range logs {
+		protos = append(protos, recordToProto(&logs[i]))
+	}
+
+	return &pb.ListAuditLogsResponse{
+		Total:  int32(total),
+		Limit:  int32(limit),
+		Offset: int32(offset),
+		Logs:   protos,
+		Via:    moduleVia,
+	}, nil
+}
+
+// GetAuditStats calculates aggregated audit metrics.
+func (s *GRPCServer) GetAuditStats(ctx context.Context, req *pb.GetAuditStatsRequest) (*pb.AuditStatsResponse, error) {
+	period := req.Period
+	if period == "" {
+		period = "24h"
+	}
+
+	filter := store.AuditFilter{Limit: 10000}
+	logs, _, err := s.audit.ListLogs(filter)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get stats: %v", err)
+	}
+
+	byOp := make(map[string]int32)
+	byStatus := make(map[string]int32)
+	byLevel := make(map[string]int32)
+	var totalDuration int64
+
+	for _, l := range logs {
+		byOp[l.Operation]++
+		byStatus[l.Status]++
+		if l.SecurityLevel != "" {
+			byLevel[l.SecurityLevel]++
+		}
+		totalDuration += l.DurationMs
+	}
+
+	var avgDuration float64
+	if len(logs) > 0 {
+		avgDuration = float64(totalDuration) / float64(len(logs))
+	}
+
+	return &pb.AuditStatsResponse{
+		TotalOperations: int32(len(logs)),
+		ByOperation:     byOp,
+		ByStatus:        byStatus,
+		BySecurityLevel: byLevel,
+		AvgDurationMs:   avgDuration,
+		Period:          period,
+		Via:             moduleVia,
+	}, nil
+}
+
+// ListSnapshots returns desensitization snapshots.
+func (s *GRPCServer) ListSnapshots(ctx context.Context, req *pb.ListSnapshotsRequest) (*pb.ListSnapshotsResponse, error) {
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := int(req.Offset)
+	if offset < 0 {
+		offset = 0
+	}
+
+	snapshots, total, err := s.audit.ListSnapshots(limit, offset)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list snapshots: %v", err)
+	}
+
+	protos := make([]*pb.SnapshotProto, 0, len(snapshots))
+	for _, snap := range snapshots {
+		paramsJSON, _ := json.Marshal(snap.Parameters)
+		protos = append(protos, &pb.SnapshotProto{
+			Id:             snap.ID,
+			AuditLogId:     snap.AuditLogID,
+			Timestamp:      snap.Timestamp.Format(time.RFC3339),
+			InputSample:    snap.InputSample,
+			OutputSample:   snap.OutputSample,
+			Algorithm:      snap.Algorithm,
+			ParametersJson: string(paramsJSON),
+			IntegrityHash:  snap.IntegrityHash,
+		})
+	}
+
+	return &pb.ListSnapshotsResponse{
+		Total:     int32(total),
+		Limit:     int32(limit),
+		Offset:    int32(offset),
+		Snapshots: protos,
+		Via:       moduleVia,
+	}, nil
+}
+
+// VerifyIntegrity verifies SHA-256 hash of a snapshot.
+func (s *GRPCServer) VerifyIntegrity(ctx context.Context, req *pb.VerifyIntegrityRequest) (*pb.VerifyIntegrityResponse, error) {
+	if strings.TrimSpace(req.SnapshotId) == "" {
+		return nil, status.Error(codes.InvalidArgument, "snapshot_id is required")
+	}
+
+	snap, err := s.audit.GetSnapshot(req.SnapshotId)
+	if err != nil || snap == nil {
+		return nil, status.Errorf(codes.NotFound, "snapshot not found: %s", req.SnapshotId)
+	}
+
+	h := sha256.New()
+	h.Write([]byte(snap.InputSample + snap.OutputSample + snap.Algorithm))
+	computed := hex.EncodeToString(h.Sum(nil))
+
+	expected := req.ExpectedHash
+	if expected == "" {
+		expected = snap.IntegrityHash
+	}
+
+	valid := computed == expected
+	msg := "integrity verified: SHA-256 matches non-repudiation proof"
+	if !valid {
+		msg = "integrity violation: hash mismatch, potential data tampering detected"
+	}
+
+	return &pb.VerifyIntegrityResponse{
+		SnapshotId:   snap.ID,
+		Valid:        valid,
+		ComputedHash: computed,
+		ExpectedHash: expected,
+		Message:      msg,
+		Via:          moduleVia,
+	}, nil
+}
+
+// GenerateReport produces a compliance audit report.
+func (s *GRPCServer) GenerateReport(ctx context.Context, req *pb.GenerateReportRequest) (*pb.ComplianceReportResponse, error) {
+	period := req.Period
+	if period == "" {
+		period = "30d"
+	}
+
+	filter := store.AuditFilter{Limit: 10000}
+	logs, total, err := s.audit.ListLogs(filter)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "generate report: %v", err)
+	}
+
+	successCount := 0
+	byLevel := make(map[string]int32)
+	opCounts := make(map[string]int)
+
+	for _, l := range logs {
+		if l.Status == "success" {
+			successCount++
+		}
+		if l.SecurityLevel != "" {
+			byLevel[l.SecurityLevel]++
+		}
+		opCounts[l.Operation]++
+	}
+
+	var successRate float64
+	if total > 0 {
+		successRate = float64(successCount) / float64(total) * 100
+	}
+
+	topOps := make([]string, 0, len(opCounts))
+	for op := range opCounts {
+		topOps = append(topOps, op)
+	}
+
+	recommendations := []string{
+		"对 L4/L5 敏感数据强化自动化差异隐私 (DP) 与 K-匿名防护",
+		"定期进行 SHA-256 审计存证一致性巡检与防篡改对账",
+		"建立针对高频查询数据源的差分隐私预算动态分配策略",
+	}
+
+	now := time.Now()
+	reportID := fmt.Sprintf("report_%d", now.UnixNano())
+
+	return &pb.ComplianceReportResponse{
+		Id:              reportID,
+		GeneratedAt:     now.Format(time.RFC3339),
+		Period:          period,
+		TotalOperations: int32(total),
+		SuccessRate:     successRate,
+		BySecurityLevel: byLevel,
+		TopOperations:   topOps,
+		Recommendations: recommendations,
+		Via:             moduleVia,
+	}, nil
+}
+
+func recordToProto(rec *store.AuditLog) *pb.AuditLogProto {
+	paramsJSON, _ := json.Marshal(rec.Parameters)
+	return &pb.AuditLogProto{
+		Id:             rec.ID,
+		Timestamp:      rec.Timestamp.Format(time.RFC3339),
+		Operation:      rec.Operation,
+		Datasource:     rec.DataSource,
+		InputHash:      rec.InputHash,
+		OutputHash:     rec.OutputHash,
+		Algorithm:      rec.Algorithm,
+		ParametersJson: string(paramsJSON),
+		InputRows:      int32(rec.InputRows),
+		OutputRows:     int32(rec.OutputRows),
+		DurationMs:     rec.DurationMs,
+		User:           rec.User,
+		Status:         rec.Status,
+		ErrorMessage:   rec.ErrorMessage,
+		SecurityLevel:  rec.SecurityLevel,
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// mTLS Credentials Builder / mTLS 凭证构造与公钥固定
+// ─────────────────────────────────────────────────────────────
+
+// BuildServerCredentials constructs gRPC transport credentials supporting mTLS and public key pinning.
+func BuildServerCredentials(cfg *config.Config) (credentials.TransportCredentials, error) {
+	if !cfg.TLSEnabled {
+		return nil, fmt.Errorf("TLS is disabled in configuration")
+	}
+	if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
+		return nil, fmt.Errorf("TLS cert file and key file must be configured")
+	}
+
+	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load server x509 key pair: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	clientAuthMode := strings.ToLower(strings.TrimSpace(cfg.TLSClientAuth))
+	if clientAuthMode != "" {
+		if cfg.TLSCAFile == "" {
+			return nil, fmt.Errorf("TLS CA file must be configured when client auth is enabled")
+		}
+		caPEM, err := os.ReadFile(cfg.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS CA file: %w", err)
+		}
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", cfg.TLSCAFile)
+		}
+		tlsConfig.ClientCAs = caPool
+
+		switch clientAuthMode {
+		case "require", "requireandverify":
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		case "verify":
+			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+		case "request":
+			tlsConfig.ClientAuth = tls.RequestClientCert
+		default:
+			return nil, fmt.Errorf("unknown TLS client auth mode: %s", cfg.TLSClientAuth)
+		}
+	}
+
+	if cfg.TLSPinnedPubKeyFile != "" {
+		pinnedKey, err := loadPublicKey(cfg.TLSPinnedPubKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load pinned client public key: %w", err)
+		}
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return fmt.Errorf("mTLS: client did not present a certificate")
+			}
+			peerCert, err := x509.ParseCertificate(rawCerts[0])
+			if err != nil {
+				return fmt.Errorf("mTLS: failed to parse peer certificate: %w", err)
+			}
+			if !publicKeysEqual(peerCert.PublicKey, pinnedKey) {
+				return fmt.Errorf("mTLS: client public key does not match pinned key")
+			}
+			return nil
+		}
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
+}
+
+func loadPublicKey(path string) (any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read public key file: %w", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM data found in %s", path)
+	}
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		cert, certErr := x509.ParseCertificate(block.Bytes)
+		if certErr == nil {
+			return cert.PublicKey, nil
+		}
+		return nil, fmt.Errorf("parse public key: %w", err)
+	}
+	return pub, nil
+}
+
+func publicKeysEqual(a, b any) bool {
+	rsaA, okA := a.(*rsa.PublicKey)
+	rsaB, okB := b.(*rsa.PublicKey)
+	if okA && okB {
+		return rsaA.N.Cmp(rsaB.N) == 0 && rsaA.E == rsaB.E
+	}
+	return false
+}

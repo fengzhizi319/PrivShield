@@ -1360,7 +1360,7 @@ gRPC 使用 HTTP/2 长连接，传统 L4 负载均衡无法有效分配请求：
 
 ```python
 # ===== 本项目网关负载均衡 / This Project's Gateway LB =====
-# PrivShield/gateway/balancer.py
+# engine/gateway/balancer.py
 
 from enum import Enum
 from typing import List

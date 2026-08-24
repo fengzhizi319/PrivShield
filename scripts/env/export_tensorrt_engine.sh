@@ -90,7 +90,7 @@ echo -e "${BLUE}====================================================${NC}"
 # 1. 检查输入 ONNX 文件是否存在
 if [ ! -f "$ONNX_INPUT" ]; then
     echo -e "${YELLOW}警告: 未在 ${ONNX_INPUT} 找到 ONNX 文件。正在尝试自动下载...${NC}"
-    python3 -m PrivShield.privacy.download_ner_model || {
+    python3 -m engine.privacy.download_ner_model || {
         echo -e "${RED}错误: 无法获取 ONNX 模型，请确保离线模型文件就失。${NC}"
         exit 1
     }

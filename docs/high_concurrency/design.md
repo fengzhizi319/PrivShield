@@ -95,7 +95,7 @@ Agent 启动 N 个 worker 进程，所有进程绑定同一 IP:Port（`SO_REUSEP
 
 #### 3.2.1 SO_REUSEPORT 多进程启动器
 
-新增 `PrivShield/launcher.py` 多进程启动模块：
+新增 `engine/launcher.py` 多进程启动模块：
 
 ```python
 """多进程启动器：fork N 个 worker 共享同一端口。"""
@@ -992,7 +992,7 @@ def l2_norm_clip(vectors: np.ndarray, max_norm: float) -> np.ndarray:
 在 `dp.py` 等模块中按需引入 Numba 加速函数：
 
 ```python
-# PrivShield/privacy/dp.py
+# engine/privacy/dp.py
 try:
     from numba import jit
     HAS_NUMBA = True
