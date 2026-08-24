@@ -18,7 +18,7 @@ from PrivShield.env_loader import load_env_file
 
 def main() -> None:
     # 自动装载项目根目录下的 .env
-    root_dir = Path(__file__).resolve().parent
+    root_dir = Path(__file__).resolve().parents[2]
     load_env_file(root_dir / ".env")
 
     host = os.environ.get("PRIVACY_LLM_API_HOST", "127.0.0.1")

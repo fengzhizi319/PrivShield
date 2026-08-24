@@ -37,11 +37,14 @@ Thumbs.db
 .fonts/
 
 # Local tooling
-.bin/
+# Local benchmarks & scratch
+.benchmarks/
+scratch/
+*.patch
+*.tmp
 
 # User-specific privacy profile (copy from config/sample-privacy-profile.yaml)
 privacy-profile.yaml
-
 
 # Local generated data
 data/sanitized_images/

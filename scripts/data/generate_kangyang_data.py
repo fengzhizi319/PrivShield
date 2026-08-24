@@ -429,8 +429,8 @@ for idx in range(100):
 def main():
     target_paths = [
         Path("data/kangyang.csv"),
-        Path("console/backend/samples/kangyang.csv"),
-        Path("console/backend-go/internal/samples/kangyang.csv"),
+        Path("console/bff-py/samples/kangyang.csv"),
+        Path("console/bff-go/internal/samples/kangyang.csv"),
     ]
 
     for p in target_paths:
