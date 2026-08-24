@@ -62,6 +62,11 @@ func main() {
 	// 未设置时采用安全合理的默认值（默认 HTTP :8083, gRPC :50053）。
 	cfg := config.Load()
 
+	// Validate configuration consistency (fail-fast with clear error messages).
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+
 	// =========================================================================
 	// 2. Structured Logger Setup / 结构化日志系统初始化
 	// =========================================================================

@@ -6,6 +6,8 @@
 package config
 
 import (
+	"fmt"
+	"os"
 	"strconv"
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
@@ -76,6 +78,26 @@ func Load() *Config {
 		// Graceful shutdown / 优雅关闭超时（默认 5 秒）
 		ShutdownTimeout: pkgconfig.EnvInt("DATASOURCE_MGR_SHUTDOWN_TIMEOUT", 5),
 	}
+}
+
+// Validate checks that the configuration is consistent and all required files exist.
+// Validate 校验配置一致性：当 TLS 启用时确认证书/私钥文件存在。
+func (c *Config) Validate() error {
+	if c.TLSEnabled {
+		if c.TLSCertFile == "" {
+			return fmt.Errorf("TLS enabled but DATASOURCE_MGR_TLS_CERT_FILE is not set")
+		}
+		if c.TLSKeyFile == "" {
+			return fmt.Errorf("TLS enabled but DATASOURCE_MGR_TLS_KEY_FILE is not set")
+		}
+		if _, err := os.Stat(c.TLSCertFile); err != nil {
+			return fmt.Errorf("TLS cert file not accessible: %s: %w", c.TLSCertFile, err)
+		}
+		if _, err := os.Stat(c.TLSKeyFile); err != nil {
+			return fmt.Errorf("TLS key file not accessible: %s: %w", c.TLSKeyFile, err)
+		}
+	}
+	return nil
 }
 
 // Address returns the full HTTP listen address formatted as "host:port".

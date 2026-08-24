@@ -92,41 +92,41 @@ def get_service() -> DynClassificationService:
 
 
 class DynEvalFieldRequest(BaseModel):
-    field_name: str = Field(description="字段名称", alias="fieldName")
+    field_name: str = Field(max_length=200, description="字段名称", alias="fieldName")
     value: Optional[Any] = Field(default=None, description="字段值")
-    domain: Optional[str] = Field(default=None, description="领域标识")
-    standard: Optional[str] = Field(default=None, description="标准标识")
+    domain: Optional[str] = Field(default=None, max_length=100, description="领域标识")
+    standard: Optional[str] = Field(default=None, max_length=100, description="标准标识")
 
     model_config = {"populate_by_name": True}
 
 
 class DynEvalRecordRequest(BaseModel):
-    record: dict[str, Any] = Field(description="记录字典")
-    domain: Optional[str] = Field(default=None, description="领域标识")
-    standard: Optional[str] = Field(default=None, description="标准标识")
+    record: dict[str, Any] = Field(max_length=200, description="记录字典")
+    domain: Optional[str] = Field(default=None, max_length=100, description="领域标识")
+    standard: Optional[str] = Field(default=None, max_length=100, description="标准标识")
 
     model_config = {"populate_by_name": True}
 
 
 class DynEvalTableRequest(BaseModel):
-    schema_: list[str] = Field(description="列名列表", alias="schema")
-    rows: list[dict[str, Any]] = Field(description="记录列表")
-    domain: Optional[str] = Field(default=None, description="领域标识")
-    standard: Optional[str] = Field(default=None, description="标准标识")
+    schema_: list[str] = Field(max_length=200, description="列名列表", alias="schema")
+    rows: list[dict[str, Any]] = Field(max_length=1_000, description="记录列表")
+    domain: Optional[str] = Field(default=None, max_length=100, description="领域标识")
+    standard: Optional[str] = Field(default=None, max_length=100, description="标准标识")
 
     model_config = {"populate_by_name": True}
 
 
 class DryRunRequest(BaseModel):
-    sample_data: list[dict[str, Any]] = Field(description="样本记录列表")
-    domain: Optional[str] = Field(default=None, description="领域标识")
-    standard: Optional[str] = Field(default=None, description="标准标识")
+    sample_data: list[dict[str, Any]] = Field(max_length=100, description="样本记录列表")
+    domain: Optional[str] = Field(default=None, max_length=100, description="领域标识")
+    standard: Optional[str] = Field(default=None, max_length=100, description="标准标识")
 
     model_config = {"populate_by_name": True}
 
 
 class GenerateProfileRequest(BaseModel):
-    doc_path: str = Field(description="标准 Markdown 文档文件路径", alias="docPath")
+    doc_path: str = Field(max_length=1_000, description="标准 Markdown 文档文件路径", alias="docPath")
 
     model_config = {"populate_by_name": True}
 

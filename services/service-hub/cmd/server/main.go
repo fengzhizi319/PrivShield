@@ -79,6 +79,12 @@ func main() {
 	// 未设置时采用安全合理的回退默认值（默认 HTTP :8082, gRPC :50052）。
 	cfg := config.Load()
 
+	// Validate configuration consistency (fail-fast with clear error messages).
+	// 校验配置一致性（如 TLS 启用但证书文件缺失），快速失败并给出清晰错误。
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+
 	// =========================================================================
 	// 2. Structured Logger Setup / 结构化日志系统初始化
 	// =========================================================================

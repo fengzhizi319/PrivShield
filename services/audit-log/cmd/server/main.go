@@ -39,6 +39,11 @@ import (
 func main() {
 	cfg := config.Load()
 
+	// Validate configuration consistency (fail-fast with clear error messages).
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+
 	// ── Structured logger / 结构化日志 ────────────────────────
 	logger := pkgconfig.SetupLogger(cfg.LogFormat, cfg.LogLevel)
 
