@@ -4,126 +4,95 @@ package datasourcemgr;
 
 option go_package = "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto";
 
-// DataSourceManagerService 数据源管理与敏感特征自动探查 gRPC 服务
-// DataSourceManagerService is the gRPC service interface for data source management and automated sensitive feature exploration.
+// DataSourceManagerService 模拟数据源服务 (Mock Data Source Service)
+// 专为开发与调试提供模拟数据源通信与采样，生产环境将由真实数据源替代。
 service DataSourceManagerService {
-  // Health 健康检查（自检 + 上游 Agent 连通性）
+  // Health 健康检查
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // ListDataSources 获取已注册的数据源列表（支持分页）
-  rpc ListDataSources(ListDataSourcesRequest) returns (ListDataSourcesResponse);
+  // API 1: 获取医保就医与结算模拟数据 (yibao.csv)
+  rpc GetYibaoData(DataQueryRequest) returns (DataQueryResponse);
 
-  // GetDataSource 查询单个数据源详情
+  // API 2: 获取康养体检与慢病模拟数据 (kangyang.csv)
+  rpc GetKangyangData(DataQueryRequest) returns (DataQueryResponse);
+
+  // API 3: 预留模拟数据源扩展接口 3
+  rpc GetMockData3(DataQueryRequest) returns (DataQueryResponse);
+
+  // API 4: 预留模拟数据源扩展接口 4
+  rpc GetMockData4(DataQueryRequest) returns (DataQueryResponse);
+
+  // 通用按数据源 ID 获取模拟数据
+  rpc GetDataBySource(SourceDataQueryRequest) returns (DataQueryResponse);
+
+  // 列出所有内置模拟数据源
+  rpc ListMockSources(ListMockSourcesRequest) returns (ListMockSourcesResponse);
+
+  // 获取单个模拟数据源基本信息
   rpc GetDataSource(GetDataSourceRequest) returns (DataSourceProto);
 
-  // CreateDataSource 注册新的数据源
-  rpc CreateDataSource(CreateDataSourceRequest) returns (DataSourceProto);
-
-  // UpdateDataSource 更新数据源配置
-  rpc UpdateDataSource(UpdateDataSourceRequest) returns (DataSourceProto);
-
-  // DeleteDataSource 删除数据源
-  rpc DeleteDataSource(DeleteDataSourceRequest) returns (DeleteDataSourceResponse);
-
-  // TestConnection 测试数据源连通性
+  // 模拟数据源连通性测试
   rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
-
-  // GetMetadata 获取数据源元数据与敏感字段自动探查分类结果
-  rpc GetMetadata(GetMetadataRequest) returns (MetadataResponse);
-
-  // GetDataSourceRecords 读取数据源明细记录或采样数据
-  rpc GetDataSourceRecords(GetRecordsRequest) returns (GetRecordsResponse);
-
-  // GetAccessAudit 查询数据源访问审计日志
-  rpc GetAccessAudit(GetAccessAuditRequest) returns (AccessAuditResponse);
-
-  // SeedDataSources 初始化/预置默认样例数据源
-  rpc SeedDataSources(SeedDataSourcesRequest) returns (SeedDataSourcesResponse);
 }
 
 // ─────────────────────────────────────────────────────────────
-// Health / 健康检查
+// 请求与响应消息定义
 // ─────────────────────────────────────────────────────────────
 
 message HealthRequest {}
 
 message HealthResponse {
-  string backend = 1;      // "ok"
-  string agent = 2;        // Agent 状态或 "unreachable"
-  string agent_url = 3;    // 上游 Agent 地址
-  int64  latency_ms = 4;   // 耗时（毫秒）
-  string error = 5;        // 错误信息
-  string via = 6;          // 模块标识 "datasource-mgr"
+  string status = 1;       // "ok"
+  int64  latency_ms = 2;   // 耗时（毫秒）
+  string via = 3;          // "datasource-mgr"
 }
 
-// ─────────────────────────────────────────────────────────────
-// Data Source Models & CRUD / 数据源模型与操作
-// ─────────────────────────────────────────────────────────────
+message DataQueryRequest {
+  int32 limit = 1;         // 返回条数（默认 20）
+  int32 offset = 2;        // 偏移量（默认 0）
+}
+
+message SourceDataQueryRequest {
+  string source_id = 1;    // "ds_yibao" | "ds_kangyang" | "ds_mock3" | "ds_mock4"
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message DataRowProto {
+  map<string, string> fields = 1;
+}
+
+message DataQueryResponse {
+  string source_id = 1;
+  string source_name = 2;
+  int32 total = 3;
+  int32 limit = 4;
+  int32 offset = 5;
+  repeated DataRowProto records = 6;
+  string via = 7;
+}
 
 message DataSourceProto {
-  string id = 1;              // 唯一 ID
-  string name = 2;            // 显示名称
-  string type = 3;            // "database" | "api" | "file"
-  string host = 4;            // 连接主机
-  int32  port = 5;            // 连接端口
-  string database = 6;        // 数据库名称 / 文件名
-  string security_level = 7;  // "high" | "medium" | "low"
-  string status = 8;          // "connected" | "disconnected" | "error"
-  string created_at = 9;      // 创建时间 (RFC3339)
-  string last_check_at = 10;  // 最后检查时间 (RFC3339)
-  repeated string tags = 11;  // 业务标签
-}
-
-message ListDataSourcesRequest {
-  int32 limit = 1;            // 分页大小
-  int32 offset = 2;           // 分页偏移量
-}
-
-message ListDataSourcesResponse {
-  int32 total = 1;
-  repeated DataSourceProto datasources = 2;
-  int32 limit = 3;
-  int32 offset = 4;
-  string via = 5;
-}
-
-message GetDataSourceRequest {
-  string id = 1;              // 数据源 ID
-}
-
-message CreateDataSourceRequest {
-  string name = 1;
-  string type = 2;            // "database" | "api" | "file"
-  string host = 3;
-  int32  port = 4;
-  string database = 5;
-  string security_level = 6;
-  repeated string tags = 7;
-}
-
-message UpdateDataSourceRequest {
   string id = 1;
   string name = 2;
-  string host = 3;
-  int32  port = 4;
-  string database = 5;
-  string security_level = 6;
+  string type = 3;          // "file" | "mock"
+  string description = 4;
+  string status = 5;        // "connected"
+  int32  row_count = 6;
   repeated string tags = 7;
 }
 
-message DeleteDataSourceRequest {
-  string id = 1;
-}
+message ListMockSourcesRequest {}
 
-message DeleteDataSourceResponse {
-  bool success = 1;
-  string message = 2;
+message ListMockSourcesResponse {
+  int32 total = 1;
+  repeated DataSourceProto sources = 2;
   string via = 3;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Connection Test & Metadata / 连通性测试与元数据探查
-// ─────────────────────────────────────────────────────────────
+message GetDataSourceRequest {
+  string id = 1;
+}
 
 message TestConnectionRequest {
   string id = 1;
@@ -133,85 +102,5 @@ message TestConnectionResponse {
   string datasource_id = 1;
   bool success = 2;
   int64 latency_ms = 3;
-  string error = 4;
-  string via = 5;
-}
-
-message MetadataFieldProto {
-  string name = 1;           // 字段名
-  string type = 2;           // 数据类型 (string, int, float, etc.)
-  string security_level = 3; // L1-L5
-  string classification = 4; // 敏感分类标签
-  bool   sensitive = 5;      // 是否敏感
-}
-
-message TableMetadataProto {
-  string name = 1;           // 表名 / 实体名
-  repeated MetadataFieldProto fields = 2;
-  int32 row_count = 3;       // 记录总数
-}
-
-message GetMetadataRequest {
-  string id = 1;
-}
-
-message MetadataResponse {
-  string datasource_id = 1;
-  repeated TableMetadataProto tables = 2;
-  string via = 3;
-}
-
-// ─────────────────────────────────────────────────────────────
-// Records & Audit / 数据记录读取与审计日志
-// ─────────────────────────────────────────────────────────────
-
-message GetRecordsRequest {
-  string id = 1;
-  int32 limit = 2;
-  int32 offset = 3;
-}
-
-message RecordRowProto {
-  map<string, string> fields = 1;
-}
-
-message GetRecordsResponse {
-  string datasource_id = 1;
-  int32 total = 2;
-  int32 limit = 3;
-  int32 offset = 4;
-  repeated RecordRowProto records = 5;
-  string via = 6;
-}
-
-message AccessAuditRecordProto {
-  string id = 1;
-  string datasource_id = 2;
-  string datasource_name = 3;
-  string operation = 4;      // "query" | "export" | "mask"
-  string user = 5;
-  string timestamp = 6;      // RFC3339
-  int32  records_count = 7;
-  string status = 8;         // "success" | "denied"
-}
-
-message GetAccessAuditRequest {
-  string id = 1;
-  int32 limit = 2;
-  int32 offset = 3;
-}
-
-message AccessAuditResponse {
-  string datasource_id = 1;
-  int32 total = 2;
-  repeated AccessAuditRecordProto records = 3;
   string via = 4;
-}
-
-message SeedDataSourcesRequest {}
-
-message SeedDataSourcesResponse {
-  int32 seeded_count = 1;
-  repeated string seeded_ids = 2;
-  string via = 3;
 }

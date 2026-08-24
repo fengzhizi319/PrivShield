@@ -1,48 +1,47 @@
-// Package models defines shared data structures for the datasource-mgr module.
+// Package models defines data structures for the mock datasource-mgr module.
+// Package models 定义模拟数据源模块的数据结构。
 package models
 
-import "time"
-
-// DataSource represents a registered data source.
-type DataSource struct {
-	ID          string    `json:"id"`           // Unique ID
-	Name        string    `json:"name"`         // Display name / 显示名称
-	Type        string    `json:"type"`         // "database" | "api" | "file"
-	Host        string    `json:"host"`         // Connection host
-	Port        int       `json:"port"`         // Connection port
-	Database    string    `json:"database"`     // Database name
-	SecurityLevel string  `json:"security_level"` // "high" | "medium" | "low"
-	Status      string    `json:"status"`       // "connected" | "disconnected" | "error"
-	CreatedAt   time.Time `json:"created_at"`
-	LastCheckAt *time.Time `json:"last_check_at"`
-	Tags        []string  `json:"tags"`         // Business tags (卫健/医保/etc)
+// MockDataSource represents a registered mock data source for dev/testing.
+type MockDataSource struct {
+	ID          string   `json:"id"`          // "ds_yibao" | "ds_kangyang" | "ds_mock3" | "ds_mock4"
+	Name        string   `json:"name"`        // Display name
+	Type        string   `json:"type"`        // "file" | "mock"
+	Description string   `json:"description"` // Description
+	Status      string   `json:"status"`      // "connected"
+	RowCount    int      `json:"row_count"`   // Total mock rows
+	Tags        []string `json:"tags"`        // Tags
 }
 
-// DataSourceCreateRequest is the request body for creating a data source.
-type DataSourceCreateRequest struct {
-	Name          string   `json:"name" binding:"required"`
-	Type          string   `json:"type" binding:"required"`
-	Host          string   `json:"host" binding:"required"`
-	Port          int      `json:"port" binding:"required"`
-	Database      string   `json:"database"`
-	SecurityLevel string   `json:"security_level"`
-	Tags          []string `json:"tags"`
+// DataQueryResponse represents the query result of mock data records.
+type DataQueryResponse struct {
+	SourceID   string           `json:"source_id"`
+	SourceName string           `json:"source_name"`
+	Total      int              `json:"total"`
+	Limit      int              `json:"limit"`
+	Offset     int              `json:"offset"`
+	Records    []map[string]any `json:"records"`
+	Via        string           `json:"via"`
 }
 
-// DataSourceListResponse is the response for listing data sources.
+// DataSourceListResponse is the response for listing mock datasources.
 type DataSourceListResponse struct {
-	Total       int          `json:"total"`
-	DataSources []DataSource `json:"datasources"`
-	Via         string       `json:"via"`
+	Total       int              `json:"total"`
+	DataSources []MockDataSource `json:"datasources"`
+	Via         string           `json:"via"`
 }
 
-// MetadataField represents a field in the data source metadata.
+// MetadataField describes a single column's metadata.
 type MetadataField struct {
-	Name          string `json:"name"`           // Field name
-	Type          string `json:"type"`           // Data type
-	SecurityLevel string `json:"security_level"` // L1-L5
-	Classification string `json:"classification"` // Auto-classified category
-	Sensitive     bool   `json:"sensitive"`      // Whether contains PII
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// TableMetadata describes the schema of a mock data table.
+type TableMetadata struct {
+	Name     string          `json:"name"`
+	RowCount int             `json:"row_count"`
+	Fields   []MetadataField `json:"fields"`
 }
 
 // MetadataResponse is the response for metadata query.
@@ -52,37 +51,10 @@ type MetadataResponse struct {
 	Via          string          `json:"via"`
 }
 
-// TableMetadata represents metadata for a single table.
-type TableMetadata struct {
-	Name   string          `json:"name"`
-	Fields []MetadataField `json:"fields"`
-	RowCount int           `json:"row_count"`
-}
-
-// AccessAuditRecord represents an access audit log entry.
-type AccessAuditRecord struct {
-	ID           string    `json:"id"`
-	DataSourceID string    `json:"datasource_id"`
-	DataSourceName string  `json:"datasource_name"`
-	Operation    string    `json:"operation"`     // "query" | "export" | "mask"
-	User         string    `json:"user"`
-	Timestamp    time.Time `json:"timestamp"`
-	RecordsCount int       `json:"records_count"`
-	Status       string    `json:"status"`        // "success" | "denied"
-}
-
-// AccessAuditResponse is the response for access audit query.
-type AccessAuditResponse struct {
-	Total   int                  `json:"total"`
-	Records []AccessAuditRecord  `json:"records"`
-	Via     string               `json:"via"`
-}
-
 // ConnectionTestResult is the response for connection test.
 type ConnectionTestResult struct {
 	DataSourceID string `json:"datasource_id"`
 	Success      bool   `json:"success"`
 	LatencyMs    int64  `json:"latency_ms"`
-	Error        string `json:"error,omitempty"`
 	Via          string `json:"via"`
 }

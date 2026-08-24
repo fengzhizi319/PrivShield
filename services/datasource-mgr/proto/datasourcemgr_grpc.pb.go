@@ -19,48 +19,42 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DataSourceManagerService_Health_FullMethodName               = "/datasourcemgr.DataSourceManagerService/Health"
-	DataSourceManagerService_ListDataSources_FullMethodName      = "/datasourcemgr.DataSourceManagerService/ListDataSources"
-	DataSourceManagerService_GetDataSource_FullMethodName        = "/datasourcemgr.DataSourceManagerService/GetDataSource"
-	DataSourceManagerService_CreateDataSource_FullMethodName     = "/datasourcemgr.DataSourceManagerService/CreateDataSource"
-	DataSourceManagerService_UpdateDataSource_FullMethodName     = "/datasourcemgr.DataSourceManagerService/UpdateDataSource"
-	DataSourceManagerService_DeleteDataSource_FullMethodName     = "/datasourcemgr.DataSourceManagerService/DeleteDataSource"
-	DataSourceManagerService_TestConnection_FullMethodName       = "/datasourcemgr.DataSourceManagerService/TestConnection"
-	DataSourceManagerService_GetMetadata_FullMethodName          = "/datasourcemgr.DataSourceManagerService/GetMetadata"
-	DataSourceManagerService_GetDataSourceRecords_FullMethodName = "/datasourcemgr.DataSourceManagerService/GetDataSourceRecords"
-	DataSourceManagerService_GetAccessAudit_FullMethodName       = "/datasourcemgr.DataSourceManagerService/GetAccessAudit"
-	DataSourceManagerService_SeedDataSources_FullMethodName      = "/datasourcemgr.DataSourceManagerService/SeedDataSources"
+	DataSourceManagerService_Health_FullMethodName          = "/datasourcemgr.DataSourceManagerService/Health"
+	DataSourceManagerService_GetYibaoData_FullMethodName    = "/datasourcemgr.DataSourceManagerService/GetYibaoData"
+	DataSourceManagerService_GetKangyangData_FullMethodName = "/datasourcemgr.DataSourceManagerService/GetKangyangData"
+	DataSourceManagerService_GetMockData3_FullMethodName    = "/datasourcemgr.DataSourceManagerService/GetMockData3"
+	DataSourceManagerService_GetMockData4_FullMethodName    = "/datasourcemgr.DataSourceManagerService/GetMockData4"
+	DataSourceManagerService_GetDataBySource_FullMethodName = "/datasourcemgr.DataSourceManagerService/GetDataBySource"
+	DataSourceManagerService_ListMockSources_FullMethodName = "/datasourcemgr.DataSourceManagerService/ListMockSources"
+	DataSourceManagerService_GetDataSource_FullMethodName   = "/datasourcemgr.DataSourceManagerService/GetDataSource"
+	DataSourceManagerService_TestConnection_FullMethodName  = "/datasourcemgr.DataSourceManagerService/TestConnection"
 )
 
 // DataSourceManagerServiceClient is the client API for DataSourceManagerService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// DataSourceManagerService 数据源管理与敏感特征自动探查 gRPC 服务
-// DataSourceManagerService is the gRPC service interface for data source management and automated sensitive feature exploration.
+// DataSourceManagerService 模拟数据源服务 (Mock Data Source Service)
+// 专为开发与调试提供模拟数据源通信与采样，生产环境将由真实数据源替代。
 type DataSourceManagerServiceClient interface {
-	// Health 健康检查（自检 + 上游 Agent 连通性）
+	// Health 健康检查
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
-	// ListDataSources 获取已注册的数据源列表（支持分页）
-	ListDataSources(ctx context.Context, in *ListDataSourcesRequest, opts ...grpc.CallOption) (*ListDataSourcesResponse, error)
-	// GetDataSource 查询单个数据源详情
+	// API 1: 获取医保就医与结算模拟数据 (yibao.csv)
+	GetYibaoData(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
+	// API 2: 获取康养体检与慢病模拟数据 (kangyang.csv)
+	GetKangyangData(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
+	// API 3: 预留模拟数据源扩展接口 3
+	GetMockData3(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
+	// API 4: 预留模拟数据源扩展接口 4
+	GetMockData4(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
+	// 通用按数据源 ID 获取模拟数据
+	GetDataBySource(ctx context.Context, in *SourceDataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
+	// 列出所有内置模拟数据源
+	ListMockSources(ctx context.Context, in *ListMockSourcesRequest, opts ...grpc.CallOption) (*ListMockSourcesResponse, error)
+	// 获取单个模拟数据源基本信息
 	GetDataSource(ctx context.Context, in *GetDataSourceRequest, opts ...grpc.CallOption) (*DataSourceProto, error)
-	// CreateDataSource 注册新的数据源
-	CreateDataSource(ctx context.Context, in *CreateDataSourceRequest, opts ...grpc.CallOption) (*DataSourceProto, error)
-	// UpdateDataSource 更新数据源配置
-	UpdateDataSource(ctx context.Context, in *UpdateDataSourceRequest, opts ...grpc.CallOption) (*DataSourceProto, error)
-	// DeleteDataSource 删除数据源
-	DeleteDataSource(ctx context.Context, in *DeleteDataSourceRequest, opts ...grpc.CallOption) (*DeleteDataSourceResponse, error)
-	// TestConnection 测试数据源连通性
+	// 模拟数据源连通性测试
 	TestConnection(ctx context.Context, in *TestConnectionRequest, opts ...grpc.CallOption) (*TestConnectionResponse, error)
-	// GetMetadata 获取数据源元数据与敏感字段自动探查分类结果
-	GetMetadata(ctx context.Context, in *GetMetadataRequest, opts ...grpc.CallOption) (*MetadataResponse, error)
-	// GetDataSourceRecords 读取数据源明细记录或采样数据
-	GetDataSourceRecords(ctx context.Context, in *GetRecordsRequest, opts ...grpc.CallOption) (*GetRecordsResponse, error)
-	// GetAccessAudit 查询数据源访问审计日志
-	GetAccessAudit(ctx context.Context, in *GetAccessAuditRequest, opts ...grpc.CallOption) (*AccessAuditResponse, error)
-	// SeedDataSources 初始化/预置默认样例数据源
-	SeedDataSources(ctx context.Context, in *SeedDataSourcesRequest, opts ...grpc.CallOption) (*SeedDataSourcesResponse, error)
 }
 
 type dataSourceManagerServiceClient struct {
@@ -81,10 +75,60 @@ func (c *dataSourceManagerServiceClient) Health(ctx context.Context, in *HealthR
 	return out, nil
 }
 
-func (c *dataSourceManagerServiceClient) ListDataSources(ctx context.Context, in *ListDataSourcesRequest, opts ...grpc.CallOption) (*ListDataSourcesResponse, error) {
+func (c *dataSourceManagerServiceClient) GetYibaoData(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListDataSourcesResponse)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_ListDataSources_FullMethodName, in, out, cOpts...)
+	out := new(DataQueryResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_GetYibaoData_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataSourceManagerServiceClient) GetKangyangData(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DataQueryResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_GetKangyangData_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataSourceManagerServiceClient) GetMockData3(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DataQueryResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_GetMockData3_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataSourceManagerServiceClient) GetMockData4(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DataQueryResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_GetMockData4_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataSourceManagerServiceClient) GetDataBySource(ctx context.Context, in *SourceDataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DataQueryResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_GetDataBySource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataSourceManagerServiceClient) ListMockSources(ctx context.Context, in *ListMockSourcesRequest, opts ...grpc.CallOption) (*ListMockSourcesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMockSourcesResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_ListMockSources_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,36 +145,6 @@ func (c *dataSourceManagerServiceClient) GetDataSource(ctx context.Context, in *
 	return out, nil
 }
 
-func (c *dataSourceManagerServiceClient) CreateDataSource(ctx context.Context, in *CreateDataSourceRequest, opts ...grpc.CallOption) (*DataSourceProto, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DataSourceProto)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_CreateDataSource_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataSourceManagerServiceClient) UpdateDataSource(ctx context.Context, in *UpdateDataSourceRequest, opts ...grpc.CallOption) (*DataSourceProto, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DataSourceProto)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_UpdateDataSource_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataSourceManagerServiceClient) DeleteDataSource(ctx context.Context, in *DeleteDataSourceRequest, opts ...grpc.CallOption) (*DeleteDataSourceResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteDataSourceResponse)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_DeleteDataSource_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *dataSourceManagerServiceClient) TestConnection(ctx context.Context, in *TestConnectionRequest, opts ...grpc.CallOption) (*TestConnectionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TestConnectionResponse)
@@ -141,75 +155,31 @@ func (c *dataSourceManagerServiceClient) TestConnection(ctx context.Context, in 
 	return out, nil
 }
 
-func (c *dataSourceManagerServiceClient) GetMetadata(ctx context.Context, in *GetMetadataRequest, opts ...grpc.CallOption) (*MetadataResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MetadataResponse)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_GetMetadata_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataSourceManagerServiceClient) GetDataSourceRecords(ctx context.Context, in *GetRecordsRequest, opts ...grpc.CallOption) (*GetRecordsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetRecordsResponse)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_GetDataSourceRecords_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataSourceManagerServiceClient) GetAccessAudit(ctx context.Context, in *GetAccessAuditRequest, opts ...grpc.CallOption) (*AccessAuditResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AccessAuditResponse)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_GetAccessAudit_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataSourceManagerServiceClient) SeedDataSources(ctx context.Context, in *SeedDataSourcesRequest, opts ...grpc.CallOption) (*SeedDataSourcesResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SeedDataSourcesResponse)
-	err := c.cc.Invoke(ctx, DataSourceManagerService_SeedDataSources_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // DataSourceManagerServiceServer is the server API for DataSourceManagerService service.
 // All implementations must embed UnimplementedDataSourceManagerServiceServer
 // for forward compatibility.
 //
-// DataSourceManagerService 数据源管理与敏感特征自动探查 gRPC 服务
-// DataSourceManagerService is the gRPC service interface for data source management and automated sensitive feature exploration.
+// DataSourceManagerService 模拟数据源服务 (Mock Data Source Service)
+// 专为开发与调试提供模拟数据源通信与采样，生产环境将由真实数据源替代。
 type DataSourceManagerServiceServer interface {
-	// Health 健康检查（自检 + 上游 Agent 连通性）
+	// Health 健康检查
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
-	// ListDataSources 获取已注册的数据源列表（支持分页）
-	ListDataSources(context.Context, *ListDataSourcesRequest) (*ListDataSourcesResponse, error)
-	// GetDataSource 查询单个数据源详情
+	// API 1: 获取医保就医与结算模拟数据 (yibao.csv)
+	GetYibaoData(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
+	// API 2: 获取康养体检与慢病模拟数据 (kangyang.csv)
+	GetKangyangData(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
+	// API 3: 预留模拟数据源扩展接口 3
+	GetMockData3(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
+	// API 4: 预留模拟数据源扩展接口 4
+	GetMockData4(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
+	// 通用按数据源 ID 获取模拟数据
+	GetDataBySource(context.Context, *SourceDataQueryRequest) (*DataQueryResponse, error)
+	// 列出所有内置模拟数据源
+	ListMockSources(context.Context, *ListMockSourcesRequest) (*ListMockSourcesResponse, error)
+	// 获取单个模拟数据源基本信息
 	GetDataSource(context.Context, *GetDataSourceRequest) (*DataSourceProto, error)
-	// CreateDataSource 注册新的数据源
-	CreateDataSource(context.Context, *CreateDataSourceRequest) (*DataSourceProto, error)
-	// UpdateDataSource 更新数据源配置
-	UpdateDataSource(context.Context, *UpdateDataSourceRequest) (*DataSourceProto, error)
-	// DeleteDataSource 删除数据源
-	DeleteDataSource(context.Context, *DeleteDataSourceRequest) (*DeleteDataSourceResponse, error)
-	// TestConnection 测试数据源连通性
+	// 模拟数据源连通性测试
 	TestConnection(context.Context, *TestConnectionRequest) (*TestConnectionResponse, error)
-	// GetMetadata 获取数据源元数据与敏感字段自动探查分类结果
-	GetMetadata(context.Context, *GetMetadataRequest) (*MetadataResponse, error)
-	// GetDataSourceRecords 读取数据源明细记录或采样数据
-	GetDataSourceRecords(context.Context, *GetRecordsRequest) (*GetRecordsResponse, error)
-	// GetAccessAudit 查询数据源访问审计日志
-	GetAccessAudit(context.Context, *GetAccessAuditRequest) (*AccessAuditResponse, error)
-	// SeedDataSources 初始化/预置默认样例数据源
-	SeedDataSources(context.Context, *SeedDataSourcesRequest) (*SeedDataSourcesResponse, error)
 	mustEmbedUnimplementedDataSourceManagerServiceServer()
 }
 
@@ -223,35 +193,29 @@ type UnimplementedDataSourceManagerServiceServer struct{}
 func (UnimplementedDataSourceManagerServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
 }
-func (UnimplementedDataSourceManagerServiceServer) ListDataSources(context.Context, *ListDataSourcesRequest) (*ListDataSourcesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ListDataSources not implemented")
+func (UnimplementedDataSourceManagerServiceServer) GetYibaoData(context.Context, *DataQueryRequest) (*DataQueryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetYibaoData not implemented")
+}
+func (UnimplementedDataSourceManagerServiceServer) GetKangyangData(context.Context, *DataQueryRequest) (*DataQueryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetKangyangData not implemented")
+}
+func (UnimplementedDataSourceManagerServiceServer) GetMockData3(context.Context, *DataQueryRequest) (*DataQueryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMockData3 not implemented")
+}
+func (UnimplementedDataSourceManagerServiceServer) GetMockData4(context.Context, *DataQueryRequest) (*DataQueryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMockData4 not implemented")
+}
+func (UnimplementedDataSourceManagerServiceServer) GetDataBySource(context.Context, *SourceDataQueryRequest) (*DataQueryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDataBySource not implemented")
+}
+func (UnimplementedDataSourceManagerServiceServer) ListMockSources(context.Context, *ListMockSourcesRequest) (*ListMockSourcesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListMockSources not implemented")
 }
 func (UnimplementedDataSourceManagerServiceServer) GetDataSource(context.Context, *GetDataSourceRequest) (*DataSourceProto, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetDataSource not implemented")
 }
-func (UnimplementedDataSourceManagerServiceServer) CreateDataSource(context.Context, *CreateDataSourceRequest) (*DataSourceProto, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateDataSource not implemented")
-}
-func (UnimplementedDataSourceManagerServiceServer) UpdateDataSource(context.Context, *UpdateDataSourceRequest) (*DataSourceProto, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UpdateDataSource not implemented")
-}
-func (UnimplementedDataSourceManagerServiceServer) DeleteDataSource(context.Context, *DeleteDataSourceRequest) (*DeleteDataSourceResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DeleteDataSource not implemented")
-}
 func (UnimplementedDataSourceManagerServiceServer) TestConnection(context.Context, *TestConnectionRequest) (*TestConnectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TestConnection not implemented")
-}
-func (UnimplementedDataSourceManagerServiceServer) GetMetadata(context.Context, *GetMetadataRequest) (*MetadataResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetMetadata not implemented")
-}
-func (UnimplementedDataSourceManagerServiceServer) GetDataSourceRecords(context.Context, *GetRecordsRequest) (*GetRecordsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetDataSourceRecords not implemented")
-}
-func (UnimplementedDataSourceManagerServiceServer) GetAccessAudit(context.Context, *GetAccessAuditRequest) (*AccessAuditResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetAccessAudit not implemented")
-}
-func (UnimplementedDataSourceManagerServiceServer) SeedDataSources(context.Context, *SeedDataSourcesRequest) (*SeedDataSourcesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SeedDataSources not implemented")
 }
 func (UnimplementedDataSourceManagerServiceServer) mustEmbedUnimplementedDataSourceManagerServiceServer() {
 }
@@ -293,20 +257,110 @@ func _DataSourceManagerService_Health_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataSourceManagerService_ListDataSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListDataSourcesRequest)
+func _DataSourceManagerService_GetYibaoData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DataQueryRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).ListDataSources(ctx, in)
+		return srv.(DataSourceManagerServiceServer).GetYibaoData(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DataSourceManagerService_ListDataSources_FullMethodName,
+		FullMethod: DataSourceManagerService_GetYibaoData_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).ListDataSources(ctx, req.(*ListDataSourcesRequest))
+		return srv.(DataSourceManagerServiceServer).GetYibaoData(ctx, req.(*DataQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataSourceManagerService_GetKangyangData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DataQueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataSourceManagerServiceServer).GetKangyangData(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataSourceManagerService_GetKangyangData_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataSourceManagerServiceServer).GetKangyangData(ctx, req.(*DataQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataSourceManagerService_GetMockData3_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DataQueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataSourceManagerServiceServer).GetMockData3(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataSourceManagerService_GetMockData3_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataSourceManagerServiceServer).GetMockData3(ctx, req.(*DataQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataSourceManagerService_GetMockData4_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DataQueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataSourceManagerServiceServer).GetMockData4(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataSourceManagerService_GetMockData4_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataSourceManagerServiceServer).GetMockData4(ctx, req.(*DataQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataSourceManagerService_GetDataBySource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SourceDataQueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataSourceManagerServiceServer).GetDataBySource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataSourceManagerService_GetDataBySource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataSourceManagerServiceServer).GetDataBySource(ctx, req.(*SourceDataQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataSourceManagerService_ListMockSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMockSourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataSourceManagerServiceServer).ListMockSources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataSourceManagerService_ListMockSources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataSourceManagerServiceServer).ListMockSources(ctx, req.(*ListMockSourcesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -329,60 +383,6 @@ func _DataSourceManagerService_GetDataSource_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataSourceManagerService_CreateDataSource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateDataSourceRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).CreateDataSource(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataSourceManagerService_CreateDataSource_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).CreateDataSource(ctx, req.(*CreateDataSourceRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataSourceManagerService_UpdateDataSource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateDataSourceRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).UpdateDataSource(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataSourceManagerService_UpdateDataSource_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).UpdateDataSource(ctx, req.(*UpdateDataSourceRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataSourceManagerService_DeleteDataSource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteDataSourceRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).DeleteDataSource(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataSourceManagerService_DeleteDataSource_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).DeleteDataSource(ctx, req.(*DeleteDataSourceRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _DataSourceManagerService_TestConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TestConnectionRequest)
 	if err := dec(in); err != nil {
@@ -401,78 +401,6 @@ func _DataSourceManagerService_TestConnection_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataSourceManagerService_GetMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetMetadataRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).GetMetadata(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataSourceManagerService_GetMetadata_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).GetMetadata(ctx, req.(*GetMetadataRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataSourceManagerService_GetDataSourceRecords_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetRecordsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).GetDataSourceRecords(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataSourceManagerService_GetDataSourceRecords_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).GetDataSourceRecords(ctx, req.(*GetRecordsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataSourceManagerService_GetAccessAudit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetAccessAuditRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).GetAccessAudit(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataSourceManagerService_GetAccessAudit_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).GetAccessAudit(ctx, req.(*GetAccessAuditRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataSourceManagerService_SeedDataSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SeedDataSourcesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataSourceManagerServiceServer).SeedDataSources(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataSourceManagerService_SeedDataSources_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataSourceManagerServiceServer).SeedDataSources(ctx, req.(*SeedDataSourcesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // DataSourceManagerService_ServiceDesc is the grpc.ServiceDesc for DataSourceManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -485,44 +413,36 @@ var DataSourceManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DataSourceManagerService_Health_Handler,
 		},
 		{
-			MethodName: "ListDataSources",
-			Handler:    _DataSourceManagerService_ListDataSources_Handler,
+			MethodName: "GetYibaoData",
+			Handler:    _DataSourceManagerService_GetYibaoData_Handler,
+		},
+		{
+			MethodName: "GetKangyangData",
+			Handler:    _DataSourceManagerService_GetKangyangData_Handler,
+		},
+		{
+			MethodName: "GetMockData3",
+			Handler:    _DataSourceManagerService_GetMockData3_Handler,
+		},
+		{
+			MethodName: "GetMockData4",
+			Handler:    _DataSourceManagerService_GetMockData4_Handler,
+		},
+		{
+			MethodName: "GetDataBySource",
+			Handler:    _DataSourceManagerService_GetDataBySource_Handler,
+		},
+		{
+			MethodName: "ListMockSources",
+			Handler:    _DataSourceManagerService_ListMockSources_Handler,
 		},
 		{
 			MethodName: "GetDataSource",
 			Handler:    _DataSourceManagerService_GetDataSource_Handler,
 		},
 		{
-			MethodName: "CreateDataSource",
-			Handler:    _DataSourceManagerService_CreateDataSource_Handler,
-		},
-		{
-			MethodName: "UpdateDataSource",
-			Handler:    _DataSourceManagerService_UpdateDataSource_Handler,
-		},
-		{
-			MethodName: "DeleteDataSource",
-			Handler:    _DataSourceManagerService_DeleteDataSource_Handler,
-		},
-		{
 			MethodName: "TestConnection",
 			Handler:    _DataSourceManagerService_TestConnection_Handler,
-		},
-		{
-			MethodName: "GetMetadata",
-			Handler:    _DataSourceManagerService_GetMetadata_Handler,
-		},
-		{
-			MethodName: "GetDataSourceRecords",
-			Handler:    _DataSourceManagerService_GetDataSourceRecords_Handler,
-		},
-		{
-			MethodName: "GetAccessAudit",
-			Handler:    _DataSourceManagerService_GetAccessAudit_Handler,
-		},
-		{
-			MethodName: "SeedDataSources",
-			Handler:    _DataSourceManagerService_SeedDataSources_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

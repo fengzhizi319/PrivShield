@@ -1,17 +1,15 @@
-// Command server is the entry point for the datasource-mgr module.
-// Command server 是数据源管理模块的程序入口。
+// Command server is the entry point for the mock datasource-mgr module.
+// Command server 是模拟数据源模块的程序入口（用于开发与调试模拟数据通信）。
 //
 // Architecture / 架构：
 //
-//	React 前端  ──HTTP/JSON──▶  datasource-mgr(Go)  ──HTTP──▶  PrivShield Agent
-//	                          └─gRPC(mTLS)───────▶  微服务群/外部客户端
+//	React 前端 / BFF  ──HTTP/JSON──▶  datasource-mgr(Go) :8083 (提供 yibao/kangyang 模拟数据)
+//	                                └─gRPC(mTLS)───────▶ :50053 (API 1, 2, 3, 4 模拟数据接口)
 package main
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -23,12 +21,6 @@ import (
 	"google.golang.org/grpc"
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
-	"github.com/fengzhizi319/PrivShield/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/pkg/store"
-	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
-	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
-
-	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/handlers"
@@ -41,35 +33,20 @@ func main() {
 	// ── Structured logger / 结构化日志 ────────────────────────
 	logger := pkgconfig.SetupLogger(cfg.LogFormat, cfg.LogLevel)
 
-	// ── DataSource store / 数据源存储 ─────────────────────────
-	dsStore, err := initDSStore(cfg.DBPath, logger)
-	if err != nil {
-		log.Fatalf("failed to initialize datasource store: %v", err)
-	}
-
-	// ── Seed mock datasources (yibao.csv & kangyang.csv) ────────
-	_ = handlers.SeedMockDataSources(dsStore, logger)
-
-	// ── Prometheus metrics / Prometheus 指标 ───────────────────
-	mc := metrics.NewCollector("datasource-mgr")
-
-	// ── Agent client / Agent 客户端 ────────────────────────────
-	agentClient := agent.New(cfg)
-
 	// ── HTTP REST Server / HTTP REST 服务器 ──────────────────────
 	gin.SetMode(gin.ReleaseMode)
-	server := handlers.New(agentClient, cfg, dsStore, logger, mc)
+	server := handlers.New(cfg, logger)
 	router := gin.New()
 	server.RegisterRoutes(router)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Address(),
 		Handler:           router,
-		ReadHeaderTimeout: 5 * time.Second,  // Slowloris header timeout
-		ReadTimeout:       30 * time.Second, // Slow request body timeout
-		WriteTimeout:      60 * time.Second, // Slow client response timeout
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MiB max header size
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// ── gRPC Server (with optional mTLS) / gRPC 服务器（可选 mTLS）──
@@ -82,18 +59,18 @@ func main() {
 			log.Fatalf("failed to build TLS credentials: %v", credErr)
 		}
 		grpcServer = grpc.NewServer(grpc.Creds(creds))
-		serviceImpl = grpcserver.New(agentClient, cfg, dsStore, logger)
+		serviceImpl = grpcserver.New(cfg, logger)
 		pb.RegisterDataSourceManagerServiceServer(grpcServer, serviceImpl)
-		logger.Info("gRPC server started with mTLS",
+		logger.Info("mock datasource-mgr gRPC server started with mTLS",
 			"addr", cfg.GRPCAddress(),
 			"tls_cert", cfg.TLSCertFile,
 			"tls_key", cfg.TLSKeyFile,
 		)
 	} else {
 		grpcServer = grpc.NewServer()
-		serviceImpl = grpcserver.New(agentClient, cfg, dsStore, logger)
+		serviceImpl = grpcserver.New(cfg, logger)
 		pb.RegisterDataSourceManagerServiceServer(grpcServer, serviceImpl)
-		logger.Info("gRPC server started (insecure)", "addr", cfg.GRPCAddress())
+		logger.Info("mock datasource-mgr gRPC server started (insecure)", "addr", cfg.GRPCAddress())
 	}
 
 	// ── Signal handling / 信号处理 ───────────────────────────────
@@ -114,12 +91,10 @@ func main() {
 
 	// Start HTTP server / 启动 HTTP 监听
 	go func() {
-		logger.Info("datasource-mgr HTTP REST server started",
+		logger.Info("mock datasource-mgr HTTP REST server started",
 			"addr", cfg.Address(),
 			"grpc_addr", cfg.GRPCAddress(),
-			"agent_rest", cfg.AgentBaseURL(),
-			"db_path", cfg.DBPath,
-			"auth_enabled", cfg.APIKey != "",
+			"mode", "mock_development_and_debugging",
 		)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", "error", err.Error())
@@ -128,7 +103,7 @@ func main() {
 
 	// Wait for shutdown signal / 等待优雅停机信号
 	sig := <-sigChan
-	logger.Info("shutting down datasource-mgr servers...", "signal", sig.String())
+	logger.Info("shutting down mock datasource-mgr servers...", "signal", sig.String())
 
 	// Graceful shutdown gRPC
 	serviceImpl.Shutdown()
@@ -143,25 +118,4 @@ func main() {
 	} else {
 		logger.Info("HTTP server stopped")
 	}
-}
-
-func initDSStore(dbPath string, logger *slog.Logger) (store.DataSourceStore, error) {
-	if dbPath == "" {
-		logger.Info("using in-memory datasource store (no persistence)")
-		return memory.NewDataSourceStore(), nil
-	}
-
-	db, err := sqlite.Open(dbPath, logger)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
-
-	ds, err := sqlite.NewDataSourceStore(db)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create datasource store: %w", err)
-	}
-
-	logger.Info("sqlite datasource store initialized", "path", dbPath)
-	return ds, nil
 }

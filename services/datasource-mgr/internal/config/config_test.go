@@ -6,13 +6,10 @@ import (
 )
 
 func TestConfigDefaults(t *testing.T) {
-	// Clear env vars
 	os.Unsetenv("DATASOURCE_MGR_HOST")
 	os.Unsetenv("DATASOURCE_MGR_PORT")
 	os.Unsetenv("DATASOURCE_MGR_GRPC_HOST")
 	os.Unsetenv("DATASOURCE_MGR_GRPC_PORT")
-	os.Unsetenv("PRIVACY_AGENT_REST_HOST")
-	os.Unsetenv("PRIVACY_REST_PORT")
 	os.Unsetenv("DATASOURCE_MGR_TLS_ENABLED")
 
 	cfg := Load()
@@ -38,13 +35,6 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.GRPCAddress() != "127.0.0.1:50053" {
 		t.Errorf("expected GRPCAddress() 127.0.0.1:50053, got %s", cfg.GRPCAddress())
 	}
-	if cfg.AgentBaseURL() != "http://127.0.0.1:8079" {
-		t.Errorf("expected AgentBaseURL() http://127.0.0.1:8079, got %s", cfg.AgentBaseURL())
-	}
-	urls := cfg.AgentBaseURLs()
-	if len(urls) != 1 || urls[0] != "http://127.0.0.1:8079" {
-		t.Errorf("expected AgentBaseURLs() default [http://127.0.0.1:8079], got %v", urls)
-	}
 }
 
 func TestConfigCustomEnv(t *testing.T) {
@@ -60,10 +50,8 @@ func TestConfigCustomEnv(t *testing.T) {
 	t.Setenv("DATASOURCE_MGR_TLS_PINNED_PUBKEY_FILE", "/tmp/pinned.pem")
 	t.Setenv("DATASOURCE_MGR_API_KEY", "secret-key")
 	t.Setenv("DATASOURCE_MGR_CORS_ORIGINS", "http://localhost:3000,https://example.com")
-	t.Setenv("DATASOURCE_MGR_DB_PATH", "/tmp/test.db")
 	t.Setenv("DATASOURCE_MGR_LOG_FORMAT", "text")
 	t.Setenv("DATASOURCE_MGR_LOG_LEVEL", "debug")
-	t.Setenv("PRIVACY_AGENT_URLS", "http://agent1:8079,http://agent2:8079")
 
 	cfg := Load()
 
@@ -90,12 +78,5 @@ func TestConfigCustomEnv(t *testing.T) {
 	}
 	if len(cfg.CORSOrigins) != 2 {
 		t.Errorf("expected 2 CORS origins, got %d", len(cfg.CORSOrigins))
-	}
-	if cfg.DBPath != "/tmp/test.db" || cfg.LogFormat != "text" || cfg.LogLevel != "debug" {
-		t.Errorf("custom db/log mismatch")
-	}
-	urls := cfg.AgentBaseURLs()
-	if len(urls) != 2 || urls[0] != "http://agent1:8079" || urls[1] != "http://agent2:8079" {
-		t.Errorf("custom AgentBaseURLs() mismatch: %v", urls)
 	}
 }

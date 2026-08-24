@@ -1,18 +1,20 @@
-# 数据源管理与特征探查 (Datasource Manager)
+# 模拟数据源服务 (Mock Datasource Manager)
 
-`services/datasource-mgr` 是 PrivShield 平台的企业级数据源统一纳管与敏感特征自动探查微服务。模块提供 **REST (HTTP/JSON :8083) + gRPC (mTLS :50053)** 双协议接入，支持多源异构数据源连接管理、连通性探测、敏感特征自动打标识别、安全采样读取与全生命周期访问审计。
+`services/datasource-mgr` 是 PrivShield 平台的轻量级模拟数据源服务。**本项目仅用于开发、测试与调试阶段的模拟数据供给与通信验证**；在生产环境中，调度中枢与下游系统将直接对接真实外部数据源。
 
 ---
 
-## 核心功能特性
+## 核心功能与特性
 
-- **双协议接入**：提供标准 REST API（供前端控制台/BFF 使用）与高性能 gRPC 接口（端口 `:50053`，供调度流水线使用）；
-- **零信任 mTLS 与公钥固定**：gRPC 通道支持 TLS 1.3 双向证书认证与客户端公钥固定（Public Key Pinning）；
-- **多源异构资产纳管**：统一支持关系型数据库（MySQL/PG/Oracle）、API 接口及 CSV 文件等数据源；
-- **敏感特征自动探查**：联动上游 PrivShield Agent 三层动态分类漏斗，自动识别 PII 敏感字段并标记 L1-L5 安全等级；
-- **安全沙箱采样读取**：内置路径穿越防护（防 LFI）与 50,000 行内存上限防护（DoS 防护）；
-- **全量访问审计与存证**：对所有数据源操作记录结构化审计日志；
-- **高可用与生产加固**：Slowloris 防护、32 MiB MaxBodySize 限制、Prometheus `/metrics` 监控与 SQLite WAL 持久化。
+- **固定模拟数据库**：内置真实脱敏场景常用的医保就医结算数据（`yibao.csv`）与康养健康档案数据（`kangyang.csv`）；
+- **4 个专用模拟数据接口**：
+  - **API 1**：申请医保就医与结算模拟数据 (`GET /api/v1/yibao` / `rpc GetYibaoData`)
+  - **API 2**：申请康养体检与慢病模拟数据 (`GET /api/v1/kangyang` / `rpc GetKangyangData`)
+  - **API 3**：预留政务数据源 3 扩展模拟接口 (`GET /api/v1/mock3` / `rpc GetMockData3`)
+  - **API 4**：预留企业数据源 4 扩展模拟接口 (`GET /api/v1/mock4` / `rpc GetMockData4`)
+- **双协议通信支持**：对外提供 HTTP REST（端口 `:8083`），对内提供高性能 gRPC（端口 `:50053`）；
+- **mTLS 双向认证与公钥固定**：gRPC 服务支持 TLS 1.3 证书校验与客户端公钥固定（Public Key Pinning）；
+- **开发轻量化**：去除动态关系型数据库连接池、分类引擎联动与重型持久化开销，零外部依赖极速冷启动。
 
 ---
 
@@ -29,7 +31,7 @@ bash run.sh
 - **HTTP REST**：`http://127.0.0.1:8083`
 - **gRPC (insecure)**：`127.0.0.1:50053`
 
-### 生产启动（启用 mTLS 与公钥固定）
+### 生产调试启动（启用 mTLS）
 
 ```bash
 DATASOURCE_MGR_HOST=0.0.0.0 \
@@ -65,4 +67,3 @@ make test-go
 - 🔌 [API 接口规范与 Proto 定义 (docs/api.md)](docs/api.md)
 - 🛠️ [运维与部署手册 (docs/ops.md)](docs/ops.md)
 - 🧪 [测试规范与全景指南 (docs/testing.md)](docs/testing.md)
-- 📋 [产品需求文档 (docs/prd.md)](docs/prd.md)

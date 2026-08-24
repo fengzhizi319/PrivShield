@@ -6,12 +6,9 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
 	"encoding/pem"
 	"math/big"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,28 +20,16 @@ import (
 	"google.golang.org/grpc/status"
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
-	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
-	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
 	pb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
 )
 
-func setupTestGRPCServer(t *testing.T, agentMux http.Handler) (pb.DataSourceManagerServiceClient, *GRPCServer, func()) {
+func setupTestGRPCServer(t *testing.T) (pb.DataSourceManagerServiceClient, func()) {
 	t.Helper()
 
-	var agentURL string
-	if agentMux != nil {
-		agentSrv := httptest.NewServer(agentMux)
-		agentURL = agentSrv.URL
-	}
-
-	t.Setenv("PRIVACY_AGENT_URLS", agentURL)
 	cfg := config.Load()
 	logger := pkgconfig.SetupLogger("text", "debug")
-	dsStore := memory.NewDataSourceStore()
-	agentClient := agent.New(cfg)
-
-	srvImpl := New(agentClient, cfg, dsStore, logger)
+	srvImpl := New(cfg, logger)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -72,223 +57,135 @@ func setupTestGRPCServer(t *testing.T, agentMux http.Handler) (pb.DataSourceMana
 		_ = lis.Close()
 	}
 
-	return client, srvImpl, cleanup
+	return client, cleanup
 }
 
 func TestGRPCHealth(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
-	})
-
-	client, _, cleanup := setupTestGRPCServer(t, mux)
+	client, cleanup := setupTestGRPCServer(t)
 	defer cleanup()
 
 	resp, err := client.Health(context.Background(), &pb.HealthRequest{})
 	if err != nil {
 		t.Fatalf("Health failed: %v", err)
 	}
-	if resp.Backend != "ok" || resp.Agent != "ok" {
+	if resp.Status != "ok" || resp.Via != "datasource-mgr" {
 		t.Errorf("unexpected health response: %+v", resp)
 	}
 }
 
-func TestGRPCHealthAgentUnreachable(t *testing.T) {
-	client, _, cleanup := setupTestGRPCServer(t, nil)
-	defer cleanup()
-
-	resp, err := client.Health(context.Background(), &pb.HealthRequest{})
-	if err != nil {
-		t.Fatalf("Health failed: %v", err)
-	}
-	if resp.Backend != "ok" || resp.Agent != "unreachable" {
-		t.Errorf("unexpected health response when agent unreachable: %+v", resp)
-	}
-}
-
-func TestGRPCDataSourceCRUD(t *testing.T) {
-	client, _, cleanup := setupTestGRPCServer(t, nil)
+func TestGRPCApis(t *testing.T) {
+	client, cleanup := setupTestGRPCServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
-	// 1. Create
-	createResp, err := client.CreateDataSource(ctx, &pb.CreateDataSourceRequest{
-		Name:          "Test Hospital DB",
-		Type:          "database",
-		Host:          "192.168.1.100",
-		Port:          3306,
-		Database:      "hospital_ehr",
-		SecurityLevel: "high",
-		Tags:          []string{"hospital", "ehr"},
-	})
+	// API 1: Yibao
+	yibaoResp, err := client.GetYibaoData(ctx, &pb.DataQueryRequest{Limit: 5, Offset: 0})
 	if err != nil {
-		t.Fatalf("CreateDataSource failed: %v", err)
+		t.Fatalf("GetYibaoData failed: %v", err)
 	}
-	if createResp.Id == "" || createResp.Name != "Test Hospital DB" {
-		t.Errorf("unexpected created datasource: %+v", createResp)
+	if yibaoResp.SourceId != "ds_yibao" || yibaoResp.Limit != 5 {
+		t.Errorf("unexpected yibao response: %+v", yibaoResp)
 	}
 
-	dsID := createResp.Id
+	// API 2: Kangyang
+	kangResp, err := client.GetKangyangData(ctx, &pb.DataQueryRequest{Limit: 5, Offset: 0})
+	if err != nil {
+		t.Fatalf("GetKangyangData failed: %v", err)
+	}
+	if kangResp.SourceId != "ds_kangyang" || kangResp.Limit != 5 {
+		t.Errorf("unexpected kangyang response: %+v", kangResp)
+	}
 
-	// 2. Get
-	getResp, err := client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: dsID})
+	// API 3: Mock3
+	m3Resp, err := client.GetMockData3(ctx, &pb.DataQueryRequest{Limit: 5})
+	if err != nil {
+		t.Fatalf("GetMockData3 failed: %v", err)
+	}
+	if m3Resp.SourceId != "ds_mock3" || len(m3Resp.Records) == 0 {
+		t.Errorf("unexpected mock3 response: %+v", m3Resp)
+	}
+
+	// API 4: Mock4
+	m4Resp, err := client.GetMockData4(ctx, &pb.DataQueryRequest{Limit: 5})
+	if err != nil {
+		t.Fatalf("GetMockData4 failed: %v", err)
+	}
+	if m4Resp.SourceId != "ds_mock4" || len(m4Resp.Records) == 0 {
+		t.Errorf("unexpected mock4 response: %+v", m4Resp)
+	}
+
+	// GetDataBySource
+	bySrcResp, err := client.GetDataBySource(ctx, &pb.SourceDataQueryRequest{SourceId: "ds_yibao", Limit: 3})
+	if err != nil {
+		t.Fatalf("GetDataBySource failed: %v", err)
+	}
+	if bySrcResp.SourceId != "ds_yibao" {
+		t.Errorf("unexpected GetDataBySource response: %+v", bySrcResp)
+	}
+
+	// ListMockSources
+	listResp, err := client.ListMockSources(ctx, &pb.ListMockSourcesRequest{})
+	if err != nil {
+		t.Fatalf("ListMockSources failed: %v", err)
+	}
+	if listResp.Total < 2 {
+		t.Errorf("expected at least 2 sources, got %d", listResp.Total)
+	}
+
+	// GetDataSource
+	dsResp, err := client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: "ds_yibao"})
 	if err != nil {
 		t.Fatalf("GetDataSource failed: %v", err)
 	}
-	if getResp.Id != dsID || getResp.Port != 3306 {
-		t.Errorf("unexpected get datasource: %+v", getResp)
+	if dsResp.Id != "ds_yibao" {
+		t.Errorf("unexpected GetDataSource response: %+v", dsResp)
 	}
 
-	// 3. List
-	listResp, err := client.ListDataSources(ctx, &pb.ListDataSourcesRequest{Limit: 10, Offset: 0})
-	if err != nil {
-		t.Fatalf("ListDataSources failed: %v", err)
-	}
-	if listResp.Total < 1 || len(listResp.Datasources) < 1 {
-		t.Errorf("unexpected list datasources: %+v", listResp)
-	}
-
-	// 4. Update
-	updateResp, err := client.UpdateDataSource(ctx, &pb.UpdateDataSourceRequest{
-		Id:            dsID,
-		Name:          "Updated Hospital EHR",
-		SecurityLevel: "high",
-		Port:          3307,
-	})
-	if err != nil {
-		t.Fatalf("UpdateDataSource failed: %v", err)
-	}
-	if updateResp.Name != "Updated Hospital EHR" || updateResp.Port != 3307 {
-		t.Errorf("unexpected updated datasource: %+v", updateResp)
-	}
-
-	// 5. TestConnection
-	testResp, err := client.TestConnection(ctx, &pb.TestConnectionRequest{Id: dsID})
+	// TestConnection
+	connResp, err := client.TestConnection(ctx, &pb.TestConnectionRequest{Id: "ds_kangyang"})
 	if err != nil {
 		t.Fatalf("TestConnection failed: %v", err)
 	}
-	if !testResp.Success {
-		t.Errorf("expected successful connection test, got: %+v", testResp)
-	}
-
-	// 6. GetMetadata (database type fallback)
-	metaResp, err := client.GetMetadata(ctx, &pb.GetMetadataRequest{Id: dsID})
-	if err != nil {
-		t.Fatalf("GetMetadata failed: %v", err)
-	}
-	if len(metaResp.Tables) == 0 {
-		t.Errorf("expected tables metadata, got none: %+v", metaResp)
-	}
-
-	// 7. GetAccessAudit
-	auditResp, err := client.GetAccessAudit(ctx, &pb.GetAccessAuditRequest{Id: dsID})
-	if err != nil {
-		t.Fatalf("GetAccessAudit failed: %v", err)
-	}
-	if auditResp.Total < 1 || len(auditResp.Records) < 1 {
-		t.Errorf("unexpected access audit records: %+v", auditResp)
-	}
-
-	// 8. Delete
-	delResp, err := client.DeleteDataSource(ctx, &pb.DeleteDataSourceRequest{Id: dsID})
-	if err != nil {
-		t.Fatalf("DeleteDataSource failed: %v", err)
-	}
-	if !delResp.Success {
-		t.Errorf("expected successful delete: %+v", delResp)
-	}
-
-	// 9. Get after delete should return NotFound
-	_, err = client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: dsID})
-	if status.Code(err) != codes.NotFound {
-		t.Errorf("expected NotFound for deleted datasource, got code: %v, err: %v", status.Code(err), err)
+	if !connResp.Success || connResp.DatasourceId != "ds_kangyang" {
+		t.Errorf("unexpected TestConnection response: %+v", connResp)
 	}
 }
 
 func TestGRPCValidationErrors(t *testing.T) {
-	client, _, cleanup := setupTestGRPCServer(t, nil)
+	client, cleanup := setupTestGRPCServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
-	// Empty name
-	_, err := client.CreateDataSource(ctx, &pb.CreateDataSourceRequest{
-		Name: "",
-		Type: "database",
-		Host: "localhost",
-		Port: 3306,
-	})
+	// GetDataBySource empty source_id
+	_, err := client.GetDataBySource(ctx, &pb.SourceDataQueryRequest{SourceId: ""})
 	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("expected InvalidArgument for empty name, got: %v", err)
+		t.Errorf("expected InvalidArgument for empty source_id, got: %v", err)
 	}
 
-	// Invalid type
-	_, err = client.CreateDataSource(ctx, &pb.CreateDataSourceRequest{
-		Name: "Valid Name",
-		Type: "unknown_type",
-		Host: "localhost",
-		Port: 3306,
-	})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("expected InvalidArgument for invalid type, got: %v", err)
+	// GetDataBySource non-existent
+	_, err = client.GetDataBySource(ctx, &pb.SourceDataQueryRequest{SourceId: "unknown_123"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound for unknown source_id, got: %v", err)
 	}
 
-	// Invalid port
-	_, err = client.CreateDataSource(ctx, &pb.CreateDataSourceRequest{
-		Name: "Valid Name",
-		Type: "database",
-		Host: "localhost",
-		Port: 70000,
-	})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("expected InvalidArgument for invalid port, got: %v", err)
-	}
-
-	// Get with empty ID
+	// GetDataSource empty id
 	_, err = client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: ""})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("expected InvalidArgument for empty id, got: %v", err)
 	}
-}
 
-func TestGRPCSeedAndCSVOperations(t *testing.T) {
-	client, _, cleanup := setupTestGRPCServer(t, nil)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	// 1. Seed
-	seedResp, err := client.SeedDataSources(ctx, &pb.SeedDataSourcesRequest{})
-	if err != nil {
-		t.Fatalf("SeedDataSources failed: %v", err)
-	}
-	if seedResp.SeededCount < 2 {
-		t.Errorf("expected at least 2 seeded datasets, got %d", seedResp.SeededCount)
+	// GetDataSource not found
+	_, err = client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: "non_existent"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound for non-existent id, got: %v", err)
 	}
 
-	// 2. Get Records from seeded yibao
-	recResp, err := client.GetDataSourceRecords(ctx, &pb.GetRecordsRequest{
-		Id:     "ds_yibao",
-		Limit:  5,
-		Offset: 0,
-	})
-	if err != nil {
-		t.Fatalf("GetDataSourceRecords failed: %v", err)
-	}
-	if recResp.Total == 0 || len(recResp.Records) == 0 {
-		t.Errorf("expected CSV records from ds_yibao, got total %d", recResp.Total)
-	}
-
-	// 3. Get Metadata from seeded kangyang
-	metaResp, err := client.GetMetadata(ctx, &pb.GetMetadataRequest{
-		Id: "ds_kangyang",
-	})
-	if err != nil {
-		t.Fatalf("GetMetadata failed for ds_kangyang: %v", err)
-	}
-	if len(metaResp.Tables) == 0 || len(metaResp.Tables[0].Fields) == 0 {
-		t.Errorf("expected table metadata for ds_kangyang: %+v", metaResp)
+	// TestConnection empty id
+	_, err = client.TestConnection(ctx, &pb.TestConnectionRequest{Id: ""})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("expected InvalidArgument for empty test id, got: %v", err)
 	}
 }
 
@@ -299,7 +196,6 @@ func TestGRPCSeedAndCSVOperations(t *testing.T) {
 func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string, string) {
 	t.Helper()
 
-	// 1. CA
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate CA key: %v", err)
@@ -307,7 +203,7 @@ func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string
 	caTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			CommonName: "PrivShield-Test-CA",
+			CommonName: "PrivShield-DS-CA",
 		},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
@@ -323,7 +219,6 @@ func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string
 	caFile := filepath.Join(tmpDir, "ca.pem")
 	_ = os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes}), 0600)
 
-	// 2. Server Cert
 	srvKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate srv key: %v", err)
@@ -349,7 +244,6 @@ func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string
 	_ = os.WriteFile(srvCertFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvBytes}), 0600)
 	_ = os.WriteFile(srvKeyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(srvKey)}), 0600)
 
-	// 3. Client PubKey for Pinning
 	pubBytes, err := x509.MarshalPKIXPublicKey(&srvKey.PublicKey)
 	if err != nil {
 		t.Fatalf("marshal pubkey: %v", err)
@@ -376,7 +270,7 @@ func TestBuildServerCredentials(t *testing.T) {
 		t.Errorf("expected error when cert/key missing")
 	}
 
-	// 3. Valid TLS without client auth
+	// 3. Valid TLS
 	cfg = &config.Config{
 		TLSEnabled:  true,
 		TLSCertFile: srvCert,
@@ -405,28 +299,5 @@ func TestBuildServerCredentials(t *testing.T) {
 	creds, err = BuildServerCredentials(cfg)
 	if err != nil || creds == nil {
 		t.Fatalf("failed to build mTLS credentials with public key pinning: %v", err)
-	}
-
-	// 6. Missing CA when client auth enabled
-	cfg = &config.Config{
-		TLSEnabled:    true,
-		TLSCertFile:   srvCert,
-		TLSKeyFile:    srvKey,
-		TLSClientAuth: "require",
-	}
-	if _, err := BuildServerCredentials(cfg); err == nil {
-		t.Errorf("expected error when CA file missing with client auth enabled")
-	}
-
-	// 7. Invalid client auth mode
-	cfg = &config.Config{
-		TLSEnabled:    true,
-		TLSCertFile:   srvCert,
-		TLSKeyFile:    srvKey,
-		TLSCAFile:     caFile,
-		TLSClientAuth: "invalid_mode",
-	}
-	if _, err := BuildServerCredentials(cfg); err == nil {
-		t.Errorf("expected error for invalid client auth mode")
 	}
 }
