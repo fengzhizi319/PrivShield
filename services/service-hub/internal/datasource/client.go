@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	dspb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
@@ -352,7 +353,16 @@ func (c *Client) getGRPCClient(ctx context.Context) (dspb.DataSourceManagerServi
 	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dialCancel()
 
-	conn, err := grpc.DialContext(dialCtx, c.grpcAddr, dialOpt, grpc.WithBlock())
+	conn, err := grpc.DialContext(dialCtx, c.grpcAddr, dialOpt,
+		grpc.WithBlock(),
+		// Client-side keepalive: detect dead connections and maintain liveness.
+		// 客户端 keepalive：检测死连接并维持链路活跃。
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second,
+			Timeout:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("dial datasource-mgr gRPC at %s: %w", c.grpcAddr, err)
 	}

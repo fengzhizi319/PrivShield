@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
@@ -101,12 +102,31 @@ func main() {
 	var grpcServer *grpc.Server
 	var serviceImpl *grpcserver.GRPCServer
 
+	// Production hardening: message size limits & keepalive (aligned with Python Agent gRPC server).
+	// 生产加固：消息大小限制与 keepalive（与 Python Agent gRPC 服务端对齐）。
+	const maxMsgSize = 64 * 1024 * 1024 // 64 MiB
+	grpcServerOpts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     15 * time.Minute,
+			MaxConnectionAge:      2 * time.Hour,
+			MaxConnectionAgeGrace: 5 * time.Second,
+			Time:                  30 * time.Second,
+			Timeout:               10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	}
+
 	if cfg.TLSEnabled {
 		creds, credErr := grpcserver.BuildServerCredentials(cfg)
 		if credErr != nil {
 			log.Fatalf("failed to build TLS credentials: %v", credErr)
 		}
-		grpcServer = grpc.NewServer(grpc.Creds(creds))
+		grpcServer = grpc.NewServer(append(grpcServerOpts, grpc.Creds(creds))...)
 		serviceImpl = grpcserver.New(agentClient, cfg, auditStore, logger)
 		pb.RegisterAuditLogServiceServer(grpcServer, serviceImpl)
 		logger.Info("gRPC server started with mTLS",
@@ -115,7 +135,7 @@ func main() {
 			"tls_key", cfg.TLSKeyFile,
 		)
 	} else {
-		grpcServer = grpc.NewServer()
+		grpcServer = grpc.NewServer(grpcServerOpts...)
 		serviceImpl = grpcserver.New(agentClient, cfg, auditStore, logger)
 		pb.RegisterAuditLogServiceServer(grpcServer, serviceImpl)
 		logger.Info("gRPC server started (insecure)", "addr", cfg.GRPCAddress())
@@ -207,8 +227,21 @@ func main() {
 
 	// Graceful shutdown gRPC
 	serviceImpl.Shutdown()
-	grpcServer.GracefulStop()
-	logger.Info("gRPC server stopped")
+	// GracefulStop with timeout: fall back to hard Stop() to avoid indefinite blocking.
+	// 带超时的优雅停机：超时后回退到强制停止，防止在途 RPC 阻塞无限等待。
+	grpcDone := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(grpcDone)
+	}()
+	select {
+	case <-grpcDone:
+		logger.Info("gRPC server stopped")
+	case <-time.After(30 * time.Second):
+		logger.Warn("gRPC GracefulStop timed out after 30s, forcing stop")
+		grpcServer.Stop()
+		logger.Info("gRPC server force stopped")
+	}
 
 	// Graceful shutdown HTTP（超时时间可配置）
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeout)*time.Second)
