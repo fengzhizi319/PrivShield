@@ -283,63 +283,45 @@ services:
   #    作用: 为 Web UI 提供 gRPC→REST 转换与转发，屏蔽 agent 的 gRPC 细节
   # ===========================================================================
   console-backend-go:
-    # build: 从 console/backend-go 目录的 Dockerfile 构建（Go 编译型镜像，无源码运行）
     build:
-      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + backend-go/go.mod 路径）
-      context: ../../console             # Build context = console/ (Dockerfile COPY paths require it)
-      dockerfile: backend-go/Dockerfile  # 多阶段：Go 编译 → scratch/alpine 运行
+      context: ../..
+      dockerfile: console/bff-go/Dockerfile
     image: privacy-console-backend-go:0.1.0
     pull_policy: build
     container_name: privacy-console-backend-go
     ports:
-      - "8081:8081"  # 对外暴露 Go 代理 HTTP 端口（前端 dev/prod 均转发至此）
+      - "8081:8081"
     environment:
-      # PRIVACY_CONSOLE_HOST: Go 代理自身 HTTP 监听地址
-      #   "0.0.0.0": 监听所有网卡（容器内必须，供 console-web 等访问）
-      #   "127.0.0.1": 仅本机
       PRIVACY_CONSOLE_HOST: "0.0.0.0"
-      # PRIVACY_CONSOLE_PORT: Go 代理自身监听端口（与上方 ports 容器端口一致）
       PRIVACY_CONSOLE_PORT: "8081"
-      # PRIVACY_AGENT_GRPC_HOST: 上游 agent 的 gRPC 主机名
-      #   使用 compose 内部 DNS 服务名 PrivShield（同网络 backend 内自动解析）
-      #   若 agent 部署在其他主机，改为其 IP 或外部域名
       PRIVACY_AGENT_GRPC_HOST: "PrivShield"
-      # PRIVACY_AGENT_GRPC_PORT: 上游 agent 的 gRPC 端口（与 agent 的 50051 一致）
       PRIVACY_AGENT_GRPC_PORT: "50051"
-      # PRIVACY_AGENT_URL: 上游 agent 的 REST 端口（用于回退转发非 gRPC 接口）
       PRIVACY_AGENT_URL: "http://PrivShield:8079"
-    # depends_on: 服务启动顺序依赖
-    #   condition 可选值：
-    #     service_started                → 仅等待容器启动（默认）
-    #     service_healthy                → 等待健康检查通过后再启动（本配置，保证 agent 就绪）
-    #     service_completed_successfully → 等待一次性任务成功退出（仅用于批处理服务）
     depends_on:
       PrivShield:
         condition: service_healthy
     networks:
-      - frontend   # 供 console-web / 外部访问
-      - backend    # 用于访问 PrivShield 的 gRPC
+      - frontend
+      - backend
     healthcheck:
-      # P69 fix: 健康检查路径与 Dockerfile/代码路由 /api/health 对齐
       test: ["CMD-SHELL", "curl -f http://localhost:8081/api/health || exit 1"]
-      interval: 30s    # 每 30s 检查一次（较宽松，代理为轻量服务）
-      timeout: 5s       # 单次检查 5s 超时
-      retries: 3        # 连续 3 次失败标记 unhealthy
-      start_period: 5s  # 5s 启动宽限
-    # 资源限制 / Resource limits
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     deploy:
       resources:
-        limits:           # 硬上限：Go 代理轻量，1 核 512M 足够
+        limits:
           cpus: "1.0"
           memory: 512M
-        reservations:     # 软预留
+        reservations:
           cpus: "0.1"
           memory: 64M
     logging:
       driver: json-file
       options:
-        max-size: "20m"   # 单日志文件 20MB 滚动
-        max-file: "3"     # 保留 3 个
+        max-size: "20m"
+        max-file: "3"
     restart: unless-stopped
 
   # ===========================================================================
@@ -349,7 +331,7 @@ services:
   # ===========================================================================
   console-backend-python:
     build:
-      context: ../../console/backend   # 构建上下文 = Python FastAPI 代理源码目录
+      context: ../../console/bff-py   # 构建上下文 = Python FastAPI 代理源码目录
       dockerfile: Dockerfile
     image: privacy-console-backend-python:0.1.0
     pull_policy: build
@@ -442,9 +424,8 @@ services:
   # ===========================================================================
   service-hub:
     build:
-      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + service-hub/go.mod 路径）
-      context: ../../console
-      dockerfile: service-hub/Dockerfile
+      context: ../..
+      dockerfile: services/service-hub/Dockerfile
     image: privacy-service-hub:0.1.0
     pull_policy: build
     container_name: privacy-service-hub
@@ -453,12 +434,10 @@ services:
     environment:
       SERVICE_HUB_HOST: "0.0.0.0"
       SERVICE_HUB_PORT: "8082"
-      # P68 fix: 环境变量名与 config.go 读取一致（PRIVACY_AGENT_REST_HOST / PRIVACY_REST_PORT）
       PRIVACY_AGENT_REST_HOST: "PrivShield"
       PRIVACY_REST_PORT: "8079"
       SERVICE_HUB_DB_PATH: "/app/data/service-hub.db"
     volumes:
-      # P67 fix: SQLite 数据持久化命名卷（容器重建数据不丢失）
       - service-hub-data:/app/data
     depends_on:
       PrivShield:
@@ -494,9 +473,8 @@ services:
   # ===========================================================================
   datasource-mgr:
     build:
-      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + datasource-mgr/go.mod 路径）
-      context: ../../console
-      dockerfile: datasource-mgr/Dockerfile
+      context: ../..
+      dockerfile: services/datasource-mgr/Dockerfile
     image: privacy-datasource-mgr:0.1.0
     pull_policy: build
     container_name: privacy-datasource-mgr
@@ -505,12 +483,10 @@ services:
     environment:
       DATASOURCE_MGR_HOST: "0.0.0.0"
       DATASOURCE_MGR_PORT: "8083"
-      # P68 fix: 环境变量名与 config.go 读取一致
       PRIVACY_AGENT_REST_HOST: "PrivShield"
       PRIVACY_REST_PORT: "8079"
       DATASOURCE_MGR_DB_PATH: "/app/data/datasource-mgr.db"
     volumes:
-      # P67 fix: SQLite 数据持久化命名卷
       - datasource-mgr-data:/app/data
     depends_on:
       PrivShield:
@@ -546,9 +522,8 @@ services:
   # ===========================================================================
   audit-log:
     build:
-      # P66 fix: Dockerfile 要求 console/ 上下文（COPY pkg/ + audit-log/go.mod 路径）
-      context: ../../console
-      dockerfile: audit-log/Dockerfile
+      context: ../..
+      dockerfile: services/audit-log/Dockerfile
     image: privacy-audit-log:0.1.0
     pull_policy: build
     container_name: privacy-audit-log

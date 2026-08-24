@@ -90,8 +90,8 @@ services:
   # 2. Console Go 后端代理
   console-backend-go:
     build:
-      context: ../../console/backend-go
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: console/bff-go/Dockerfile
     image: privacy-console-backend-go:0.1.0-dev
     container_name: privacy-console-backend-go-dev
     ports:
@@ -119,7 +119,7 @@ services:
   # 3. Console Python 后端代理 (备选 REST 通道)
   console-backend-python:
     build:
-      context: ../../console/backend
+      context: ../../console/bff-py
       dockerfile: Dockerfile
     image: privacy-console-backend-python:0.1.0-dev
     container_name: privacy-console-backend-python-dev

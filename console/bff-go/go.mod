@@ -9,6 +9,8 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
+replace github.com/fengzhizi319/PrivShield/console/pkg => ../../pkg
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
@@ -47,5 +49,3 @@ require (
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 )
-
-replace github.com/fengzhizi319/PrivShield/console/pkg => ../pkg

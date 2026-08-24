@@ -67,7 +67,7 @@ start_service_hub() {
     fi
 
     log_info "Building service-hub..."
-    cd "${CONSOLE_DIR}/service-hub"
+    cd "${PROJECT_ROOT}/services/service-hub"
     SERVICE_HUB_HOST=127.0.0.1 SERVICE_HUB_PORT="$port" \
         "$GO_BIN" build -o bin/service-hub ./cmd/server
 
@@ -89,7 +89,7 @@ start_datasource_mgr() {
     fi
 
     log_info "Building datasource-mgr..."
-    cd "${CONSOLE_DIR}/datasource-mgr"
+    cd "${PROJECT_ROOT}/services/datasource-mgr"
     DATASOURCE_MGR_HOST=127.0.0.1 DATASOURCE_MGR_PORT="$port" \
         "$GO_BIN" build -o bin/datasource-mgr ./cmd/server
 
@@ -111,7 +111,7 @@ start_audit_log() {
     fi
 
     log_info "Building audit-log..."
-    cd "${CONSOLE_DIR}/audit-log"
+    cd "${PROJECT_ROOT}/services/audit-log"
     AUDIT_LOG_HOST=127.0.0.1 AUDIT_LOG_PORT="$port" \
         "$GO_BIN" build -o bin/audit-log ./cmd/server
 

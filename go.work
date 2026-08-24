@@ -1,0 +1,9 @@
+go 1.27.0
+
+use (
+	./pkg
+	./services/service-hub
+	./services/datasource-mgr
+	./services/audit-log
+	./console/bff-go
+)

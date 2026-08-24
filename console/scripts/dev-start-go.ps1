@@ -82,7 +82,7 @@ if (-not (Test-Path $NodeModules)) {
 # ── 2. Build Go backend ─────────────────────────────────────────────
 Write-Host ""
 Write-Host "====== Build Go backend ======" -ForegroundColor Cyan
-$GoBackendDir = Join-Path $ConsoleDir "backend-go"
+$GoBackendDir = Join-Path $ConsoleDir "bff-go"
 $GoBinDir     = Join-Path $GoBackendDir "bin"
 if (-not (Test-Path $GoBinDir)) { New-Item -ItemType Directory -Path $GoBinDir -Force | Out-Null }
 

@@ -144,7 +144,7 @@ fi
 
 # ── 3. 编译 Go gRPC 代理后端 ────────────────────────────────────────
 echo "编译 Go gRPC 代理后端..."
-(cd "$CONSOLE_DIR/backend-go" && go build -o bin/backend-go ./cmd/server)
+(cd "$CONSOLE_DIR/bff-go" && go build -o bin/backend-go ./cmd/server)
 
 # PID 文件配置
 AGENT_PID_FILE="$CONSOLE_DIR/.pids/agent-go.pid"
@@ -234,7 +234,7 @@ done
 # ── 5. 启动 Go gRPC 代理后端 ────────────────────────────────────────
 echo "启动 Go gRPC 代理后端 (API: $CONSOLE_URL)..."
 (
-    cd "$CONSOLE_DIR/backend-go"
+    cd "$CONSOLE_DIR/bff-go"
     exec ./bin/backend-go
 ) &
 CONSOLE_PID=$!

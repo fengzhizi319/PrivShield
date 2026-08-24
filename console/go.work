@@ -1,9 +1,0 @@
-go 1.27.0
-
-use (
-	./pkg
-	./backend-go
-	./service-hub
-	./datasource-mgr
-	./audit-log
-)

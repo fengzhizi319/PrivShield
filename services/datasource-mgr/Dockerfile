@@ -1,11 +1,10 @@
 # ============================================================================
-# Audit Log — Multi-stage Dockerfile
+# Datasource Manager — Multi-stage Dockerfile
 # ============================================================================
-# Build context: console/ (NOT audit-log/)
-# 构建上下文：console/ 目录（非 audit-log/ 目录）
+# Build context: . (Project root)
+# 构建上下文：项目根目录
 #
-# docker build -f audit-log/Dockerfile -t audit-log:latest .
-# (从 console/ 目录执行)
+# docker build -f services/datasource-mgr/Dockerfile -t datasource-mgr:latest .
 # ============================================================================
 
 # Stage 1: Build
@@ -19,16 +18,16 @@ ENV GOTOOLCHAIN=auto
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
     && apk add --no-cache git ca-certificates
 
-# Copy shared pkg/ first (required by replace ../pkg in go.mod)
+# Copy shared pkg/
 COPY pkg/ ./pkg/
 
 # Copy module dependencies for layer caching
-COPY audit-log/go.mod audit-log/go.sum ./audit-log/
-WORKDIR /app/audit-log
+COPY services/datasource-mgr/go.mod services/datasource-mgr/go.sum ./services/datasource-mgr/
+WORKDIR /app/services/datasource-mgr
 RUN go mod download
 
 # Copy module source
-COPY audit-log/ ./
+COPY services/datasource-mgr/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server
 
 # Stage 2: Runtime
@@ -45,19 +44,19 @@ COPY --from=builder /app/server /app/server
 
 RUN chown -R privacy:privacy /app
 
-EXPOSE 8084
+EXPOSE 8083
 
 # P27 fix: declare data volume for SQLite persistence
 # 声明数据卷用于 SQLite 持久化
 VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8084/api/health || exit 1
+    CMD curl -f http://localhost:8083/api/health || exit 1
 
 USER privacy
 
-ENV AUDIT_LOG_HOST=0.0.0.0
-ENV AUDIT_LOG_PORT=8084
+ENV DATASOURCE_MGR_HOST=0.0.0.0
+ENV DATASOURCE_MGR_PORT=8083
 ENV PRIVACY_AGENT_REST_HOST=privshield-agent
 ENV PRIVACY_REST_PORT=8079
 

@@ -1,11 +1,10 @@
 # ============================================================================
 # Console Go Backend — Multi-stage Dockerfile
 # ============================================================================
-# Build context: console/ (NOT backend-go/)
-# 构建上下文：console/ 目录（非 backend-go/ 目录）
+# Build context: . (Project root)
+# 构建上下文：项目根目录
 #
-# docker build -f backend-go/Dockerfile -t backend-go:latest .
-# (从 console/ 目录执行)
+# docker build -f console/bff-go/Dockerfile -t bff-go:latest .
 #
 # 本 Dockerfile 采用多阶段构建（Multi-stage Build），将「编译」和「运行」分离到
 # 两个独立的基础镜像中。最终镜像仅包含静态二进制 + 最少系统库 + 非 root 用户。
@@ -24,16 +23,16 @@ ENV GOTOOLCHAIN=auto
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
     && apk add --no-cache git ca-certificates
 
-# Copy shared pkg/ first (required by replace ../pkg in go.mod)
+# Copy shared pkg/
 COPY pkg/ ./pkg/
 
 # 先复制模块依赖文件，利用缓存
-COPY backend-go/go.mod backend-go/go.sum ./backend-go/
-WORKDIR /app/backend-go
+COPY console/bff-go/go.mod console/bff-go/go.sum ./console/bff-go/
+WORKDIR /app/console/bff-go
 RUN go mod download
 
 # 复制模块源码并编译
-COPY backend-go/ ./
+COPY console/bff-go/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server
 
 # ==============================================================================

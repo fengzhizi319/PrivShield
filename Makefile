@@ -51,24 +51,24 @@ help:
 # ── Quality ──────────────────────────────────────────────────
 
 lint:
-	ruff check PrivShield/ tests/ console/backend/
+	ruff check PrivShield/ tests/ console/bff-py/
 
 lint-console:
-	ruff check console/backend/
+	ruff check console/bff-py/
 
 format:
-	ruff format PrivShield/ tests/ console/backend/
-	ruff check --fix PrivShield/ tests/ console/backend/
+	ruff format PrivShield/ tests/ console/bff-py/
+	ruff check --fix PrivShield/ tests/ console/bff-py/
 
 format-console:
-	ruff format console/backend/
-	ruff check --fix console/backend/
+	ruff format console/bff-py/
+	ruff check --fix console/bff-py/
 
 typecheck:
 	mypy
 
 typecheck-console:
-	mypy console/backend
+	mypy console/bff-py
 
 check: lint-console typecheck-console
 
@@ -84,13 +84,15 @@ test-unit:
 
 # 控制台测试分成 Python 后端和 smoke test 两步，确保 UI 代理链路都能跑通。
 test-console:
-	cd console/backend && . .venv/bin/activate && pytest tests/ -v
-	cd console/backend && . .venv/bin/activate && python smoke_test.py
+	cd console/bff-py && pytest tests/ -v
+	cd console/bff-py && python smoke_test.py
 
-# Go 代理单独成套测试，避免与 Python 主项目耦合。
+# Go 微服务与 BFF 测试
 test-go:
-	cd console/backend-go && go test -short ./...
-	cd console/backend-go && go test ./tests -v
+	go test ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/...
+
+test-services:
+	go test ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...
 
 test-cov:
 	pytest tests/ -q --tb=short \

@@ -1,11 +1,10 @@
 # ============================================================================
 # Service Hub — Multi-stage Dockerfile
 # ============================================================================
-# Build context: console/ (NOT service-hub/)
-# 构建上下文：console/ 目录（非 service-hub/ 目录）
+# Build context: . (Project root)
+# 构建上下文：项目根目录
 #
-# docker build -f service-hub/Dockerfile -t service-hub:latest .
-# (从 console/ 目录执行)
+# docker build -f services/service-hub/Dockerfile -t service-hub:latest .
 # ============================================================================
 
 # Stage 1: Build
@@ -19,19 +18,16 @@ ENV GOTOOLCHAIN=auto
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
     && apk add --no-cache git ca-certificates
 
-# Copy shared pkg/ first (required by replace ../pkg in go.mod)
-# 先复制共享 pkg/ 目录（go.mod 中 replace ../pkg 依赖）
+# Copy shared pkg/
 COPY pkg/ ./pkg/
 
 # Copy module dependencies for layer caching
-# 复制模块依赖文件用于层缓存
-COPY service-hub/go.mod service-hub/go.sum ./service-hub/
-WORKDIR /app/service-hub
+COPY services/service-hub/go.mod services/service-hub/go.sum ./services/service-hub/
+WORKDIR /app/services/service-hub
 RUN go mod download
 
 # Copy module source
-# 复制模块源码
-COPY service-hub/ ./
+COPY services/service-hub/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server
 
 # Stage 2: Runtime

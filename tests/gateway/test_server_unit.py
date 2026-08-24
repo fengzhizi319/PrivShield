@@ -163,11 +163,13 @@ async def test_start_grpc_gateway_insecure_lifecycle():
 async def test_start_grpc_gateway_tls_lifecycle(tmp_path):
     """测试自签名证书下的 TLS/mTLS gRPC 网关启动与停止。"""
     import subprocess
+    import os
     # 生成真实的测试自签名证书
     cert = tmp_path / "server.crt"
     key = tmp_path / "server.key"
     ca = tmp_path / "ca.crt"
     ca_key = tmp_path / "ca.key"
+    clean_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
 
     subprocess.run(
         [
@@ -177,6 +179,7 @@ async def test_start_grpc_gateway_tls_lifecycle(tmp_path):
         ],
         check=True,
         capture_output=True,
+        env=clean_env,
     )
 
     subprocess.run(
@@ -187,6 +190,7 @@ async def test_start_grpc_gateway_tls_lifecycle(tmp_path):
         ],
         check=True,
         capture_output=True,
+        env=clean_env,
     )
 
     subprocess.run(
@@ -198,6 +202,7 @@ async def test_start_grpc_gateway_tls_lifecycle(tmp_path):
         ],
         check=True,
         capture_output=True,
+        env=clean_env,
     )
 
     port = find_free_port()

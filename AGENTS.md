@@ -39,7 +39,7 @@ Core dependencies are pinned in `pyproject.toml`. Heavy ML dependencies are **no
 
 ```text
 PrivShield/
-├── PrivShield/           # Main package
+├── PrivShield/           # Python 核心隐私与动态分类分级引擎 (Core Agent / Sidecar)
 │   ├── main.py                    # FastAPI REST entrypoint
 │   ├── grpc_server.py             # gRPC servicer
 │   ├── server.py                  # REST + gRPC combined launcher
@@ -73,23 +73,24 @@ PrivShield/
 │       ├── balancer.py
 │       ├── http_proxy.py
 │       └── grpc_proxy.py
+├── services/                      # 企业级数据流通与安全治理中台微服务群 (Go)
+│   ├── service-hub/               # 数联数据服务调度中枢 (流水线调度: :8082)
+│   ├── datasource-mgr/            # 数据源资产管理与敏感特征自动探查 (:8083)
+│   └── audit-log/                 # 脱敏审计日志与不可篡改 SHA-256 存证 (:8084)
+├── console/                       # 统一运维与测试控制台 (Web UI + BFF)
+│   ├── bff-go/                    # Go gRPC 代理网关 / BFF (:8081)
+│   ├── bff-py/                    # Python REST 代理后端 / 备用 BFF (:8080)
+│   ├── web/                       # React + TypeScript + Vite 前端控制台 (:5173)
+│   └── migration-design.md        # 目录架构重构与迁移设计方案
+├── pkg/                           # Go 共享基础库 (Agent客户端, 中间件, 存储, 指标, 校验)
 ├── proto/privacy.proto            # gRPC service definition
 ├── tests/                         # pytest suite
-├── mkdocs.yml                       # MkDocs + Material configuration
-
+├── mkdocs.yml                     # MkDocs + Material configuration
+├── go.work                        # 根目录 Go 工作区
 ├── config/                        # Profile & runtime configs
 ├── rules/                         # Preset classification rules & standards
 ├── data/                          # Sample datasets & test data
-├── scripts/                       # Utility scripts
-│   ├── dev/                       # Services, health check & test runners
-│   ├── prod/                      # Production deployment, health check & backup tools
-│   ├── data/                      # Data generators & rule exporters
-│   ├── env/                       # Environment installers & acceleration
-│   └── models/                    # Model downloaders & converters
-├── console/                       # 测试控制台（React + FastAPI / Go 代理）
-│   ├── backend/                   # FastAPI 代理，转发请求到 agent REST
-│   ├── backend-go/                # Go gRPC 代理，可直接提供 Console UI
-│   └── web/                       # React 单页测试控制台
+├── scripts/                       # 统一自动化运维、启动与测试脚本
 ├── Makefile
 ├── pyproject.toml
 ├── requirements.txt               # Local dev/test deps

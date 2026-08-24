@@ -114,7 +114,7 @@ class BatchRequest(BaseModel):
     """
 
     # P41 fix: 限制批量请求数量上限为 100，防止单次提交数千请求导致长时间占用连接（DoS 防护）。
-    requests: list[BatchRequestItem] = Field(default_factory=list, le=100)
+    requests: list[BatchRequestItem] = Field(default_factory=list, max_length=100)
 
 
 class BatchResultItem(BaseModel):

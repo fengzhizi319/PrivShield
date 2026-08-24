@@ -20,8 +20,8 @@ for arg in "$@"; do
 done
 
 AGENT_VENV="$PROJECT_ROOT/.venv"
-CERT_DIR="$CONSOLE_DIR/backend-go/certs"
-GEN_CERTS="$CONSOLE_DIR/backend-go/scripts/gen-certs.sh"
+CERT_DIR="$CONSOLE_DIR/bff-go/certs"
+GEN_CERTS="$CONSOLE_DIR/bff-go/scripts/gen-certs.sh"
 
 CONSOLE_URL="http://127.0.0.1:8081"
 AGENT_URL="http://127.0.0.1:8079"
@@ -154,7 +154,7 @@ fi
 
 # 5. 编译 Go 代理
 echo "编译 Go gRPC 代理后端..."
-(cd "$CONSOLE_DIR/backend-go" && go build -o bin/backend-go ./cmd/server)
+(cd "$CONSOLE_DIR/bff-go" && go build -o bin/backend-go ./cmd/server)
 
 AGENT_PID_FILE="$CONSOLE_DIR/.pids/agent-go-mtls.pid"
 CONSOLE_PID_FILE="$CONSOLE_DIR/.pids/console-go-mtls.pid"
@@ -242,7 +242,7 @@ done
 
 echo "启动 Go gRPC 代理后端 (mTLS -> $AGENT_GRPC_ADDR, Console: $CONSOLE_URL)..."
 (
-    cd "$CONSOLE_DIR/backend-go"
+    cd "$CONSOLE_DIR/bff-go"
     export PRIVACY_AGENT_TLS_ENABLED=true
     export PRIVACY_AGENT_TLS_CERT_FILE="$CERT_DIR/client.crt"
     export PRIVACY_AGENT_TLS_KEY_FILE="$CERT_DIR/client.key"

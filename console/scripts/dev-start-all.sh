@@ -145,7 +145,7 @@ fi
 
 # 5. 编译 Go 后端
 echo "编译 Go gRPC 代理后端..."
-(cd "$CONSOLE_DIR/backend-go" && go build -o bin/backend-go ./cmd/server)
+(cd "$CONSOLE_DIR/bff-go" && go build -o bin/backend-go ./cmd/server)
 
 AGENT_PID_FILE="$CONSOLE_DIR/.pids/agent-all.pid"
 PY_CONSOLE_PID_FILE="$CONSOLE_DIR/.pids/console-all.pid"
@@ -232,7 +232,7 @@ done
 echo "启动 Python REST 代理后端 (API: $PY_CONSOLE_URL)..."
 (
     source "$BACKEND_VENV/bin/activate"
-    cd "$CONSOLE_DIR/backend"
+    cd "$CONSOLE_DIR/bff-py"
     exec uvicorn app.main:app --host 127.0.0.1 --port 8080
 ) &
 PY_CONSOLE_PID=$!
@@ -241,7 +241,7 @@ write_pid "$PY_CONSOLE_PID_FILE" "$PY_CONSOLE_PID"
 
 echo "启动 Go gRPC 代理后端 (API: $GO_CONSOLE_URL)..."
 (
-    cd "$CONSOLE_DIR/backend-go"
+    cd "$CONSOLE_DIR/bff-go"
     exec ./bin/backend-go
 ) &
 GO_CONSOLE_PID=$!

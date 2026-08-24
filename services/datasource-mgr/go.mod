@@ -7,7 +7,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 )
 
-replace github.com/fengzhizi319/PrivShield/console/pkg => ../pkg
+replace github.com/fengzhizi319/PrivShield/console/pkg => ../../pkg
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
