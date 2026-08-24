@@ -1,10 +1,10 @@
 # PrivShield 全平台目录架构重构与平滑迁移设计方案 (Migration Design Document)
 
-> **版本**：v1.3.0  
+> **版本**：v1.4.0  
 > **状态**：✅ **Completed / Implemented (已完全落地并通过全量验证)**  
 > **适用范围**：`PrivShield` 核心引擎、`console` 控制台及全部关联微服务（`service-hub` / `datasource-mgr` / `audit-log` / `bff-go` / `bff-py` / `web`）  
 > **实施分支**：`refactor/directory-restructure`  
-> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容及全套 CI/CD/E2E 验证。
+> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容、全栈安全漏洞排查与加固及全套 CI/CD/E2E 验证。
 
 ---
 
@@ -728,6 +728,9 @@ gantt
 | 15 | Redis 分布式隐私预算记账 | `pytest tests/privacy/test_budget_redis.py -v` | Lua 脚本原子性扣减、滑动窗口重置与超支拦截通过 | ✅ PASS |
 | 16 | 云原生高级扩缩容模板 | `make helm-lint && make helm-template` | KEDA `ScaledObject` 与 CronHPA 潮汐预测模板校验通过 | ✅ PASS |
 | 17 | 极限性能压测基准套件 | `python scripts/test/stress_test_suite.py --target agent --concurrency 50 --duration 1` | 吞吐、QPS 与 P50/P90/P95/P99 延迟 SLA 报告正常输出 | ✅ PASS |
+| 18 | 路径穿越 (LFI) 漏洞防御 | `go test -v -run TestLoadCSVRecords_PathTraversal ./services/datasource-mgr/internal/handlers/` | 限制 .csv 扩展名、提取 BaseName 与目录白名单沙箱验证通过 | ✅ PASS |
+| 19 | 运行时异常信息泄露防护 | `go test -v -run TestRecovery_CatchesPanic ./pkg/middleware/` | Panic 详情保留服务端结构化日志，HTTP 响应脱敏验证通过 | ✅ PASS |
+| 20 | SQLite 分页参数边界加固 | `go test -v -run TestAuditStore ./pkg/store/sqlite/` | Limit (1~10000) 与 Offset (>=0) 强边界夹紧防护通过 | ✅ PASS |
 
 ---
 
@@ -820,4 +823,9 @@ gantt
 
 ### 11.7 系统架构文档全面收敛升级 (Commit: `edff334` & `c30ef59`)
 - 将 `docs/architecture-design.md` 与 `docs/architecture-summary.md` 全量升级至 v2.0 权威版本，完整对齐最新 Monorepo 拓扑与企业级治理能力。
+
+### 11.8 全栈安全加固与漏洞修复 (Commit: `27b4cda`)
+- **路径穿越防御**：加固 `services/datasource-mgr` CSV 加载逻辑，强制 `.csv` 白名单，提取纯文件名，封闭任意文件读取（LFI）风险并增加单测；
+- **异常信息脱敏**：修复 `pkg/middleware/middleware.go` 中 Recovery panic 详情回显泄露问题，堆栈收敛至内部日志，HTTP 响应统一安全脱敏；
+- **分页与内存保护**：限制 SQLite 分页参数上限（Limit 1~10000 / Offset >= 0），为 CSV 文件加载增加 50,000 行上限保护，杜绝 DoS/OOM 隐患。
 
