@@ -5,38 +5,6 @@
 ---
 
 
-## 目录 (Table of Contents)
-
-- [1. 规则配置文件挂载](#1-规则配置文件挂载)
-  - [1.1 环境变量配置](#11-环境变量配置)
-  - [1.2 Kubernetes ConfigMap 与 Helm 部署挂载](#12-kubernetes-configmap-与-helm-部署挂载)
-- [2. 规则更新与热重载流程](#2-规则更新与热重载流程)
-  - [手动触发热重载命令](#手动触发热重载命令)
-- [3. 监控与可观测性](#3-监控与可观测性)
-  - [3.1 Prometheus 指标参考](#31-prometheus-指标参考)
-  - [3.2 Grafana 告警规则建议](#32-grafana-告警规则建议)
-- [5. Layer-2 Small-NER 性能基准与 TensorRT 加速指南](#5-layer-2-small-ner-性能基准与-tensorrt-加速指南)
-  - [5.1 模型与 TensorRT 引擎缓存路径说明](#51-模型与-tensorrt-引擎缓存路径说明)
-  - [5.2 CPU 模式 vs TensorRTSmallNerEngine 性能对比基准测试](#52-cpu-模式-vs-tensorrtsmallnerengine-性能对比基准测试)
-  - [5.3 PyTorch CUDA (Blackwell sm_120 / RTX 50 系列) 配置指南](#53-pytorch-cuda-blackwell-sm_120-rtx-50-系列-配置指南)
-  - [故障 1: YAML 解析校验失败，引擎拒绝载入](#故障-1-yaml-解析校验失败引擎拒绝载入)
-  - [故障 2: 算子未找到异常 (`KeyError: 未找到名为 'xxx' 的匹配算子`)](#故障-2-算子未找到异常-keyerror-未找到名为-xxx-的匹配算子)
-- [5. 降级规则 `force_suppress` 与 `exempt_rules` 最佳实践指南](#5-降级规则-force_suppress-与-exempt_rules-最佳实践指南)
-  - [5.1 强制压制 4 重判定条件与综合实战案例](#51-强制压制-4-重判定条件与综合实战案例)
-- [6. Layer-3 LLM 多后端配置与 vLLM 运维指南](#6-layer-3-llm-多后端配置与-vllm-运维指南)
-  - [6.1 .env 配置文件多模式切换](#61-env-配置文件多模式切换)
-  - [6.2 vLLM 运行服务启动与运维参数](#62-vllm-运行服务启动与运维参数)
-  - [6.3 验证与冒烟测试命令](#63-验证与冒烟测试命令)
-  - [6.4 本地 PyTorch 推理环境依赖要求](#64-本地-pytorch-推理环境依赖要求)
-- [7. 零停机在线无痛升级指南 (Zero-Downtime Hot Upgrade)](#7-零停机在线无痛升级指南-zero-downtime-hot-upgrade)
-  - [7.1 升级架构与三分层策略](#71-升级架构与三分层策略)
-  - [7.2 算法规则与分类策略在线热重载 (0ms 停机)](#72-算法规则与分类策略在线热重载-0ms-停机)
-  - [7.3 LLM 基座模型与 LoRA 权重蓝绿切流](#73-llm-基座模型与-lora-权重蓝绿切流)
-  - [7.4 Agent 核心服务无损平滑替换 (SO_REUSEPORT & K8s RollingUpdate)](#74-agent-核心服务无损平滑替换-so_reuseport--k8s-rollingupdate)
-  - [7.5 运维升级标准 SOP 与紧急回退预案](#75-运维升级标准-sop-与紧急回退预案)
-
----
-
 ## 1. 规则配置文件挂载
 
 ### 1.1 环境变量配置

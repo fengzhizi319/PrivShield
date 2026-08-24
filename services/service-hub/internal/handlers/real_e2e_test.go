@@ -230,7 +230,7 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	t.Log("═══ Step 6: 写入审计日志（audit-log）═══")
 
 	auditPayload := map[string]any{
-		"operation":      "classify_and_mask",
+		"operation":      "classify",
 		"datasource":     "E2E测试-卫健数据库",
 		"algorithm":      "pipeline",
 		"parameters":     map[string]any{"classify_level": level, "auto_operation": autoOp},
@@ -267,8 +267,8 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("get audit detail failed: HTTP %d", status)
 	}
-	if auditDetail["operation"] != "classify_and_mask" {
-		t.Errorf("expected operation=classify_and_mask, got %v", auditDetail["operation"])
+	if auditDetail["operation"] != "classify" {
+		t.Errorf("expected operation=classify, got %v", auditDetail["operation"])
 	}
 	if auditDetail["security_level"] != level {
 		t.Errorf("expected security_level=%s, got %v", level, auditDetail["security_level"])
@@ -412,7 +412,7 @@ func TestRealE2E_MultiServiceCoordination(t *testing.T) {
 
 	// 5. 在 audit-log 记录操作
 	auditPayload := map[string]any{
-		"operation":  "coordination_test",
+		"operation":  "mask",
 		"datasource": "协调测试-医保库",
 		"status":     "success",
 		"user":       "e2e-coordination",

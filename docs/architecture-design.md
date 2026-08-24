@@ -6,38 +6,6 @@
 
 ---
 
-## 目录 (Table of Contents)
-
-- [一、总体架构与设计哲学](#一总体架构与设计哲学)
-  - [1.1 业务定位与全景拓扑](#11-业务定位与全景拓扑)
-  - [1.2 核心设计哲学](#12-核心设计哲学)
-  - [1.3 分层 Monorepo 代码架构](#13-分层-monorepo-代码架构)
-- [二、算法与核心算力引擎（PrivShield Core）](#二算法与核心算力引擎privshield-core)
-  - [2.1 三层动态分类分级漏斗 (3-Layer Funnel)](#21-三层动态分类分级漏斗-3-layer-funnel)
-  - [2.2 差分隐私与分布式预算一致性 (DP & Budget)](#22-差分隐私与分布式预算一致性-dp--budget)
-  - [2.3 K-匿名与 Mondrian 多维泛化](#23-k-匿名与-mondrian-多维泛化)
-  - [2.4 智能查询混淆 (QoL) 与字段感知脱敏](#24-智能查询混淆-qol-与字段感知脱敏)
-- [三、企业级中台微服务群（Enterprise Services）](#三企业级中台微服务群enterprise-services)
-  - [3.1 数据服务调度中枢 (Service Hub)](#31-数据服务调度中枢-service-hub)
-  - [3.2 数据源资产管理 (Datasource Manager)](#32-数据源资产管理-datasource-manager)
-  - [3.3 脱敏合规存证审计 (Audit Log)](#33-脱敏合规存证审计-audit-log)
-  - [3.4 全局共享基础库 (pkg)](#34-全局共享基础库-pkg)
-- [四、负载均衡、高可用与弹性扩缩容](#四负载均衡高可用与弹性扩缩容)
-  - [4.1 Go Client-Side 多节点负载均衡与容灾](#41-go-client-side-多节点负载均衡与容灾)
-  - [4.2 网关 P2C 动态负载感知调度](#42-网关-p2c-动态负载感知调度)
-  - [4.3 云原生多维自动扩缩容 (HPA / KEDA / CronHPA)](#43-云原生多维自动扩缩容-hpa--keda--cronhpa)
-- [五、统一管理与测试控制台（Console & BFF）](#五统一管理与测试控制台console--bff)
-  - [5.1 双 BFF 网关架构 (Go gRPC / Python REST)](#51-双-bff-网关架构-go-grpc--python-rest)
-  - [5.2 前端 React 18 + TS + Vite 架构](#52-前端-react-18--ts--vite-架构)
-- [六、可观测性、安全加固与压测基准](#六可观测性安全加固与压测基准)
-  - [6.1 Prometheus 5 大组件监控与 Grafana 双大屏](#61-prometheus-5-大组件监控与-grafana-双大屏)
-  - [6.2 纵深安全防御 (mTLS / API Key / RateLimit)](#62-纵深安全防御-mtls--api-key--ratelimit)
-  - [6.3 极限性能压测与 SLA 基准套件](#63-极限性能压测与-sla-基准套件)
-- [七、技术选型总表](#七技术选型总表)
-- [八、总结与演进方向](#八总结与演进方向)
-
----
-
 ## 一、总体架构与设计哲学
 
 ### 1.1 业务定位与全景拓扑

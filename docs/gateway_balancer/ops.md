@@ -6,57 +6,6 @@
 
 ---
 
-## 目录 (Table of Contents)
-
-- [1. 部署拓扑与架构模式](#1-部署拓扑与架构模式)
-  - [1.1 独立集群调度模式 (Standalone Clustered Gateway)](#11-独立集群调度模式-standalone-clustered-gateway)
-  - [1.2 云原生 Kubernetes 双层协同模式 (K8s Ingress + Gateway + Headless Agent)](#12-云原生-kubernetes-双层协同模式-k8s-ingress--gateway--headless-agent)
-- [2. 部署配置全参考 (Configuration Reference)](#2-部署配置全参考-configuration-reference)
-  - [2.1 YAML 配置文件规范 (`gateway-config.yaml`)](#21-yaml-配置文件规范-gateway-configyaml)
-  - [2.2 环境变量矩阵](#22-环境变量矩阵)
-  - [2.3 CLI 启动命令行参数](#23-cli-启动命令行参数)
-- [3. 双向安全与 TLS 运维实战](#3-双向安全与-tls-运维实战)
-  - [3.1 生产/测试证书一键签发脚本](#31-生产测试证书一键签发脚本)
-  - [3.2 南北向 TLS 终结与 mTLS 客户端验签](#32-南北向-tls-终结与-mtls-客户端验签)
-  - [3.3 东西向网关至后端 TLS 安全回源](#33-东西向网关至后端-tls-安全回源)
-  - [3.4 动态管理端点鉴权与 SSRF 阻断防护](#34-动态管理端点鉴权与-ssrf-阻断防护)
-- [4. 动态伸缩与节点生命周期管理](#4-动态伸缩与节点生命周期管理)
-  - [4.1 动态注册接口 (`POST /v1/gateway/register`)](#41-动态注册接口-post-v1gatewayregister)
-  - [4.2 动态注销接口 (`POST /v1/gateway/deregister`)](#42-动态注销接口-post-v1gatewayderegister)
-  - [4.3 Agent 启动/退出生命周期自动注册脚本示例](#43-agent-启动退出生命周期自动注册脚本示例)
-- [5. 分布式共享隐私预算记账运维](#5-分布式共享隐私预算记账运维)
-  - [5.1 共享存储卷挂载与环境配置](#51-共享存储卷挂载与环境配置)
-  - [5.2 预算数据库定时备份与恢复](#52-预算数据库定时备份与恢复)
-- [6. 多环境部署实战演练](#6-多环境部署实战演练)
-  - [6.1 裸机与虚拟机部署 (Systemd 服务托管)](#61-裸机与虚拟机部署-systemd-服务托管)
-  - [6.2 Docker & Docker Compose 生产编排](#62-docker--docker-compose-生产编排)
-  - [6.3 Kubernetes 生产部署（网关与 K8s 双层协同实战）](#63-kubernetes-生产部署网关与-k8s-双层协同实战)
-    - [6.3.1 完整双层协同架构编排清单 (`privshield-k8s-two-tier.yaml`)](#631-完整双层协同架构编排清单-privshield-k8s-two-tieryaml)
-    - [6.3.2 部署、弹性扩缩容与连通性验证 SOP](#632-部署弹性扩缩容与连通性验证-sop)
-- [7. 全链路可观测性、监控指标与告警](#7-全链路可观测性监控指标与告警)
-  - [7.1 Prometheus 抓取配置 (`prometheus.yml`)](#71-prometheus-抓取配置-prometheusyml)
-  - [7.2 生产核心 PromQL 监控查询](#72-生产核心-promql-监控查询)
-  - [7.3 Prometheus 告警规则矩阵](#73-prometheus-告警规则矩阵)
-  - [7.4 结构化 JSON 日志集中采集与检索](#74-结构化-json-日志集中采集与检索)
-- [8. 生产故障排查手册与应急预案 (Runbook)](#8-生产故障排查手册与应急预案-runbook)
-  - [故障 1：`503 No healthy backend nodes available` / `gRPC UNAVAILABLE`](#故障-1503-no-healthy-backend-nodes-available--grpc-unavailable)
-  - [故障 2：`502 Bad Gateway: all 3 backend retry attempts failed`](#故障-2502-bad-gateway-all-3-backend-retry-attempts-failed)
-  - [故障 3：管理端点 `503 Gateway management API is disabled` / `401 Unauthorized`](#故障-3管理端点-503-gateway-management-api-is-disabled--401-unauthorized)
-  - [故障 4：gRPC 消息体超限错误 (`RESOURCE_EXHAUSTED`)](#故障-4grpc-消息体超限错误-resource_exhausted)
-  - [故障 5：TLS 握手失败 / `SSLError` / 证书过期](#故障-5tls-握手失败--sslerror--证书过期)
-  - [故障 6：连接池耗尽 / 跨事件循环 (Event Loop) 异常](#故障-6连接池耗尽--跨事件循环-event-loop-异常)
-  - [故障 7：Kubernetes 环境下 gRPC 流量倾斜与单 Pod 负载过高 (Single-Pod Pinning)](#故障-7kubernetes-环境下-grpc-流量倾斜与单-pod-负载过高-single-pod-pinning)
-- [9. 生产健康巡检与诊断工具](#9-生产健康巡检与诊断工具)
-- [10. 生产上线前检查清单 (Production Readiness Checklist)](#10-生产上线前检查清单-production-readiness-checklist)
-- [11. 容量规划与性能基准](#11-容量规划与性能基准)
-  - [11.1 单网关实例性能基线](#111-单网关实例性能基线)
-  - [11.2 请求超时与连接池参数](#112-请求超时与连接池参数)
-  - [11.3 扩展建议](#113-扩展建议)
-  - [11.4 配置优先级链](#114-配置优先级链)
-  - [11.5 K8s 优雅停机与 preStop Hook 协同](#115-k8s-优雅停机与-prestop-hook-协同)
-
----
-
 ## 1. 部署拓扑与架构模式
 
 `PrivShield` 代理网关主要包含以下两种典型生产部署架构：

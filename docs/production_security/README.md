@@ -2,15 +2,6 @@
 
 本目录包含 `PrivShield` 全平台（Python 核心隐私算力引擎、Go 中台微服务群与控制台 BFF）生产安全模块的全套 SDLC 文档，覆盖 REST/gRPC 的 TLS/mTLS 传输加密、认证鉴权、速率限制、全栈纵深防 DDoS（Slowloris/Payload/Flood/Concurrency）、路径穿越沙箱防御、错误脱敏与存储安全。
 
-## 目录 (Table of Contents)
-
-- [文档清单](#文档清单)
-- [快速开始](#快速开始)
-- [运行示例](#运行示例)
-- [安全开关速查](#安全开关速查)
-
----
-
 ## 文档清单
 
 | 文档 | 说明 | 目标读者 |

@@ -1,6 +1,6 @@
 module github.com/fengzhizi319/PrivShield/services/datasource-mgr
 
-go 1.27.0
+go 1.25.0
 
 require (
 	github.com/fengzhizi319/PrivShield/pkg v0.0.0

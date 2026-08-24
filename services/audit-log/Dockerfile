@@ -8,7 +8,7 @@
 # ============================================================================
 
 # Stage 1: Build
-FROM golang:1.27-alpine3.21 AS builder
+FROM golang:1.25-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -42,7 +42,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 COPY --from=builder /app/server /app/server
 
-RUN chown -R privacy:privacy /app
+RUN mkdir -p /app/data && chown -R privacy:privacy /app
 
 EXPOSE 8084 50054
 

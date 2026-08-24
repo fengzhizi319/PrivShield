@@ -8,7 +8,7 @@
 # ============================================================================
 
 # Stage 1: Build
-FROM golang:1.27-alpine3.21 AS builder
+FROM golang:1.25-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -41,8 +41,11 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
     && adduser -S -G privacy -h /app -s /sbin/nologin privacy
 
 COPY --from=builder /app/server /app/server
+COPY data/ /app/data/
+COPY services/datasource-mgr/samples/ /app/samples/
+COPY engine/medical_pipeline/samples/ /app/engine/medical_pipeline/samples/
 
-RUN chown -R privacy:privacy /app
+RUN mkdir -p /app/data && chown -R privacy:privacy /app
 
 EXPOSE 8083 50053
 

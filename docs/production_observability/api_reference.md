@@ -1,27 +1,6 @@
 # 可观测性模块 API 参考
 
 
-## 目录 (Table of Contents)
-
-- [1. Python SDK](#1-python-sdk)
-  - [`configure_logging`](#configure_logging)
-  - [`get_logger`](#get_logger)
-  - [`RequestContext`](#requestcontext)
-  - [`init_tracing`](#init_tracing)
-  - [`start_span`](#start_span)
-  - [`make_asgi_app`](#make_asgi_app)
-- [2. 结构化日志字段](#2-结构化日志字段)
-  - [文本格式（默认）](#文本格式默认)
-  - [JSON 格式字段](#json-格式字段)
-- [3. Prometheus 指标](#3-prometheus-指标)
-  - [Histogram 分桶](#histogram-分桶)
-- [4. REST 接口](#4-rest-接口)
-  - [GET `/metrics`](#get-metrics)
-- [5. 环境变量](#5-环境变量)
-- [6. 异常与降级行为](#6-异常与降级行为)
-
----
-
 ## 1. Python SDK
 
 ### `configure_logging`

@@ -1,31 +1,6 @@
 # 代理转发与负载均衡网关 API 参考
 
 
-## 目录 (Table of Contents)
-
-- [1. Python SDK](#1-python-sdk)
-  - [`LoadBalancer`](#loadbalancer)
-  - [`BackendNode`](#backendnode)
-  - [`health_check_loop`](#health_check_loop)
-  - [`create_http_gateway_app`](#create_http_gateway_app)
-  - [`start_grpc_gateway`](#start_grpc_gateway)
-- [2. YAML / 环境变量配置参考](#2-yaml-环境变量配置参考)
-  - [2.1 YAML 配置文件](#21-yaml-配置文件)
-  - [2.2 配置项说明](#22-配置项说明)
-  - [2.3 `GATEWAY_BACKENDS` 格式](#23-gateway_backends-格式)
-- [3. REST 代理行为](#3-rest-代理行为)
-  - [3.1 通配转发路由](#31-通配转发路由)
-  - [3.2 Hop-by-hop 过滤头](#32-hop-by-hop-过滤头)
-  - [3.3 动态节点管理接口](#33-动态节点管理接口)
-- [4. gRPC 代理行为](#4-grpc-代理行为)
-  - [4.1 转发方法列表](#41-转发方法列表)
-  - [4.2 转发逻辑](#42-转发逻辑)
-- [5. 负载均衡策略](#5-负载均衡策略)
-- [6. 健康检查参数](#6-健康检查参数)
-- [7. 异常与错误码](#7-异常与错误码)
-
----
-
 ## 1. Python SDK
 
 ### `LoadBalancer`

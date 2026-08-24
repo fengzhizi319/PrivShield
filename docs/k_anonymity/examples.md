@@ -1,23 +1,6 @@
 # K-匿名模块使用示例
 
 
-## 目录 (Table of Contents)
-
-- [1. 概述](#1-概述)
-- [2. Python SDK 示例](#2-python-sdk-示例)
-  - [2.1 单记录 K-匿名泛化](#21-单记录-k-匿名泛化)
-  - [2.2 数据集级 K-匿名泛化（Mondrian）](#22-数据集级-k-匿名泛化mondrian)
-  - [2.3 验证等价组大小](#23-验证等价组大小)
-  - [2.4 DataFrame 输入示例](#24-dataframe-输入示例)
-- [3. REST API 示例](#3-rest-api-示例)
-  - [3.1 单条记录泛化](#31-单条记录泛化)
-  - [3.2 整张表泛化](#32-整张表泛化)
-  - [3.3 DataFrame 泛化](#33-dataframe-泛化)
-- [4. 最佳实践](#4-最佳实践)
-- [5. 常见错误](#5-常见错误)
-
----
-
 ## 1. 概述
 
 本文档提供 `PrivShield.privacy.kano`（单记录泛化）与 `PrivShield.privacy.kano_table`（数据集级 Mondrian 泛化）的典型使用示例，以及对应的 REST API 调用方式。

@@ -6,30 +6,6 @@
 
 ---
 
-## 目录 (Table of Contents)
-
-- [一、 平台架构与多语言分层](#一-平台架构与多语言分层)
-- [二、 核心能力概览](#二-核心能力概览)
-  - [1. 隐私保护计算原语 (Processing Primitives)](#1-隐私保护计算原语-processing-primitives)
-  - [2. 动态数据分类分级三层漏斗 (Dynamic Classification Funnel)](#2-动态数据分类分级三层漏斗-dynamic-classification-funnel)
-  - [3. 企业级数据流通中台微服务群 (Go Microservices)](#3-企业级数据流通中台微服务群-go-microservices)
-  - [4. 全栈多层次纵深防 DDoS 与安全基底 (Anti-DDoS & Security Shield)](#4-全栈多层次纵深防-ddos-与安全基底-anti-ddos--security-shield)
-- [三、 快速开始 (Quick Start)](#三-快速开始-quick-start)
-  - [1. 本地快速启动（算力引擎）](#1-本地快速启动算力引擎)
-  - [2. Docker Compose 全栈一键运行](#2-docker-compose-全栈一键运行)
-  - [3. 全服务端口与职责速查表](#3-全服务端口与职责速查表)
-- [四、 自动化构建与测试](#四-自动化构建与测试)
-  - [1. 运行多语言全量测试](#1-运行多语言全量测试)
-  - [2. 容器镜像构建](#2-容器镜像构建)
-  - [3. 本地可编辑安装](#3-本地可编辑安装)
-- [五、 生产安全与可观测性](#五-生产安全与可观测性)
-  - [1. 生产安全防护 (TLS/mTLS/Auth/RateLimit/DDoS)](#1-生产安全防护-tlsmtlsauthratelimitddos)
-  - [2. 生产可观测性 (Prometheus/Grafana/Tracing)](#2-生产可观测性-prometheusgrafanatracing)
-  - [3. 云原生 K8s 与 Helm 部署](#3-云原生-k8s-与-helm-部署)
-- [六、 完整文档导航 (Documentation Hub)](#六-完整文档导航-documentation-hub)
-
----
-
 ## 一、 平台架构与多语言分层
 
 PrivShield 采用现代**多语言分层云原生 Monorepo 架构**，清晰解耦底层算力、业务编排中台与表现层接入：

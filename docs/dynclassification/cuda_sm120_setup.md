@@ -5,36 +5,6 @@
 ---
 
 
-## 目录 (Table of Contents)
-
-- [1. 痛点与背景分析](#1-痛点与背景分析)
-  - [1.1 `sm_120` 算力缺失异常](#11-sm_120-算力缺失异常)
-  - [1.2 解决方案概述](#12-解决方案概述)
-- [2. 步骤一：安装支持 `sm_120` 的 PyTorch Nightly 包](#2-步骤一安装支持-sm_120-的-pytorch-nightly-包)
-- [3. 步骤二：配套依赖库与 C++ 共享库补齐](#3-步骤二配套依赖库与-c-共享库补齐)
-  - [3.1 补充精确版本的 NVIDIA C++ 运行库](#31-补充精确版本的-nvidia-c-运行库)
-  - [3.2 匹配安装 Nightly 版 `torchvision`](#32-匹配安装-nightly-版-torchvision)
-- [4. 关键踩坑点与代码级解决方案 (Critical Pitfalls & Solutions)](#4-关键踩坑点与代码级解决方案-critical-pitfalls-solutions)
-  - [🚨 踩坑 1：`ImportError: libcupti.so.12: cannot open shared object file`](#-踩坑-1importerror-libcuptiso12-cannot-open-shared-object-file)
-  - [🚨 踩坑 2：LLVM 命令行选项冲突崩溃 (`LLVM ERROR: inconsistency in registered CommandLine options ('enable-fs-discriminator')`)](#-踩坑-2llvm-命令行选项冲突崩溃-llvm-error-inconsistency-in-registered-commandline-options-enable-fs-discriminator)
-  - [🚨 踩坑 3：PyTorch CUDA 探针误判](#-踩坑-3pytorch-cuda-探针误判)
-- [5. 端到端功能与性能验证](#5-端到端功能与性能验证)
-  - [5.1 基础 PyTorch CUDA 运算验证](#51-基础-pytorch-cuda-运算验证)
-  - [5.2 ModelScope Small-NER 医疗实体识别 CUDA 推理实测](#52-modelscope-small-ner-医疗实体识别-cuda-推理实测)
-  - [5.3 运行单元测试集](#53-运行单元测试集)
-- [6. Layer-3 Qwen3.5 微调模型本地 PyTorch 推理环境搭建](#6-layer-3-qwen35-微调模型本地-pytorch-推理环境搭建)
-  - [6.1 依赖版本矩阵（已验证组合）](#61-依赖版本矩阵已验证组合)
-  - [6.2 一键安装命令](#62-一键安装命令)
-  - [🚨 踩坑 4：transformers 4.x 不识别 `qwen3_5` 架构](#-踩坑-4transformers-4x-不识别-qwen3_5-架构)
-  - [🚨 踩坑 5：缺失 `einops` 导致 `Qwen3_5ForCausalLM` 加载失败](#-踩坑-5缺失-einops-导致-qwen3_5forcausallm-加载失败)
-  - [🚨 踩坑 6：triton 3.7.x 报 `0 active drivers` 无法发现 GPU](#-踩坑-6triton-37x-报-0-active-drivers-无法发现-gpu)
-  - [🚨 踩坑 7：缺失 fla / causal-conv1d 回退慢路径](#-踩坑-7缺失-fla--causal-conv1d-回退慢路径)
-  - [6.3 推理 dtype 与 prompt 对齐要求](#63-推理-dtype-与-prompt-对齐要求)
-  - [6.4 验证命令](#64-验证命令)
-- [7. 总结](#7-总结)
-
----
-
 ## 1. 痛点与背景分析
 
 ### 1.1 `sm_120` 算力缺失异常

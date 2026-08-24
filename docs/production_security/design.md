@@ -3,45 +3,6 @@
 > Scope: P0 — TLS/mTLS、认证鉴权、速率限制。
 
 
-## 目录 (Table of Contents)
-
-- [1. 概述](#1-概述)
-- [2. 设计目标](#2-设计目标)
-- [3. 威胁模型与缓解措施](#3-威胁模型与缓解措施)
-- [4. 总体架构](#4-总体架构)
-- [5. 模块设计](#5-模块设计)
-  - [5.1 `security/config.py`](#51-securityconfigpy)
-  - [5.2 `security/tls.py`](#52-securitytlspy)
-  - [5.3 `security/identity.py`](#53-securityidentitypy)
-  - [5.4 `security/auth.py`](#54-securityauthpy)
-  - [5.5 `security/ratelimit.py`](#55-securityratelimitpy)
-- [6. mTLS 白名单认证鉴权](#6-mtls-白名单认证鉴权)
-  - [6.1 原理概述](#61-原理概述)
-  - [6.2 认证流程](#62-认证流程)
-  - [6.3 gRPC mTLS 白名单认证详解](#63-grpc-mtls-白名单认证详解)
-  - [6.4 REST mTLS 客户端证书认证详解](#64-rest-mtls-客户端证书认证详解)
-  - [6.5 证书生成与部署](#65-证书生成与部署)
-  - [6.6 环境变量配置](#66-环境变量配置)
-  - [6.7 Fail-Closed 安全设计](#67-fail-closed-安全设计)
-  - [6.8 白名单管理器（WhitelistManager）](#68-白名单管理器whitelistmanager)
-- [7. REST 与 gRPC 集成](#7-rest-与-grpc-集成)
-  - [REST (`main.py`)](#rest-mainpy)
-  - [gRPC (`grpc_server.py`)](#grpc-grpc_serverpy)
-  - [统一启动器 (`server.py`)](#统一启动器-serverpy)
-- [8. 部署约定](#8-部署约定)
-  - [8.1 证书管理](#81-证书管理)
-  - [8.2 K8s 探针](#82-k8s-探针)
-  - [8.3 多副本限速](#83-多副本限速)
-- [9. 错误码](#9-错误码)
-- [10. 测试策略](#10-测试策略)
-- [11. 工业化评分 / Industrialization Scorecard](#11-工业化评分-industrialization-scorecard)
-  - [11.1 加权评分表](#111-加权评分表)
-  - [11.2 结论](#112-结论)
-  - [11.3 亮点](#113-亮点)
-  - [11.4 改进建议](#114-改进建议)
-
----
-
 ## 1. 概述
 
 本文档定义 `PrivShield` 生产安全模块的技术架构、设计原理与实现细节。该模块为 REST 与 gRPC 双协议提供可选的传输安全、身份认证、权限鉴权与速率限制能力。

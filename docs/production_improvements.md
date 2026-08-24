@@ -5,20 +5,6 @@
 ---
 
 
-## 目录 (Table of Contents)
-
-- [1. 优雅关闭 (Graceful Shutdown)](#1-优雅关闭-graceful-shutdown)
-  - [1.1 现状与问题](#11-现状与问题)
-  - [1.2 改进方案](#12-改进方案)
-- [2. 生产级探针 (Readiness & Liveness Probes)](#2-生产级探针-readiness-liveness-probes)
-  - [2.1 现状与问题](#21-现状与问题)
-  - [2.2 改进方案（已部分实现）](#22-改进方案已部分实现)
-- [3. 可配置的查询混淆（QoL）Dummy 查询池](#3-可配置的查询混淆qoldummy-查询池)
-  - [3.1 现状与问题](#31-现状与问题)
-  - [3.2 改进方案](#32-改进方案)
-
----
-
 ## 1. 优雅关闭 (Graceful Shutdown)
 
 ### 1.1 现状与问题

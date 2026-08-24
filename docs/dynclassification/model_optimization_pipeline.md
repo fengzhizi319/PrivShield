@@ -5,26 +5,6 @@
 ---
 
 
-## 目录 (Table of Contents)
-
-- [1. 架构链路总览](#1-架构链路总览)
-  - [各阶段形态对比](#各阶段形态对比)
-- [2. 第一阶段：PyTorch 模型导出为 ONNX (PyTorch $\to$ ONNX)](#2-第一阶段pytorch-模型导出为-onnx-pytorch-to-onnx)
-  - [2.1 导出原理](#21-导出原理)
-  - [2.2 核心要点](#22-核心要点)
-  - [2.3 完整导出代码示例 (`export_to_onnx.py`)](#23-完整导出代码示例-export_to_onnxpy)
-- [3. 第二阶段：ONNX 模型校验与结构优化](#3-第二阶段onnx-模型校验与结构优化)
-  - [3.1 模型正确性校验](#31-模型正确性校验)
-  - [3.2 图结构简化 (`onnx-simplifier`)](#32-图结构简化-onnx-simplifier)
-- [4. 第三阶段：TensorRT Engine 编译构建 (ONNX $\to$ TensorRT Engine)](#4-第三阶段tensorrt-engine-编译构建-onnx-to-tensorrt-engine)
-  - [4.1 方法 A：使用 `trtexec` 命令行快速构建 (推荐 CI/CD 自动化)](#41-方法-a使用-trtexec-命令行快速构建-推荐-cicd-自动化)
-  - [4.2 方法 B：使用 Python `trt.Builder` 原生 API 构建](#42-方法-b使用-python-trtbuilder-原生-api-构建)
-- [5. 第四阶段：TensorRT Engine 推理与生命周期管理](#5-第四阶段tensorrt-engine-推理与生命周期管理)
-  - [5.1 运行时推理调用 (`trt.Runtime`)](#51-运行时推理调用-trtruntime)
-- [6. 在 `PrivShield` 中的架构设计总结](#6-在-PrivShield-中的架构设计总结)
-
----
-
 ## 1. 架构链路总览
 
 标准的深度学习模型推理性能优化链路分为三个阶段：

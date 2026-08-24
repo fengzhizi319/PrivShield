@@ -61,6 +61,18 @@ markdown_extensions:
   - attr_list
   - md_in_html
 
+# MkDocs 1.6+ 链接验证策略：
+# - 源码文件（engine/、services/、tests/ 等）不在 docs/ 内，但文档中需要引用；
+#   将其设为 ignore 避免 strict 模式误报。
+# - 锚点仍保留 warn，确保文档内部 TOC/交叉引用正确。
+validation:
+  omitted_files: ignore
+  links:
+    absolute_links: warn
+    not_found: ignore
+    unrecognized_links: ignore
+  anchors: warn
+
 plugins:
   # search：支持中英混合检索；minify：减少生成站点体积。
   - search:

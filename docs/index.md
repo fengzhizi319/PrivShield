@@ -7,13 +7,6 @@ Welcome to the **数盾 PrivShield** documentation.
 ---
 
 
-## 目录 (Table of Contents)
-
-- [Capabilities](#capabilities)
-- [Quick Navigation](#quick-navigation)
-
----
-
 ## Capabilities
 
 | Capability | Status | Description |

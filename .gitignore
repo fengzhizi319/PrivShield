@@ -32,6 +32,14 @@ Thumbs.db
 .pids/
 console/.pids/
 
+# SQLite runtime files
+data/*.db
+data/*.db-shm
+data/*.db-wal
+services/*/data/*.db
+services/*/data/*.db-shm
+services/*/data/*.db-wal
+
 # Downloaded models
 .models/
 

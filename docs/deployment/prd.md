@@ -3,20 +3,6 @@
 > Scope: P0 — 提供 Helm Chart 与原生 K8s 部署模板，支持 core/ml 两种镜像、TLS、认证、监控探针与弹性伸缩。
 
 
-## 目录 (Table of Contents)
-
-- [1. 概述](#1-概述)
-- [2. 设计目标](#2-设计目标)
-- [3. 用户故事](#3-用户故事)
-- [4. 功能需求](#4-功能需求)
-  - [4.1 Helm Chart](#41-helm-chart)
-  - [4.2 原生 K8s 样例](#42-原生-k8s-样例)
-  - [4.3 Docker Compose](#43-docker-compose)
-- [5. 非功能需求](#5-非功能需求)
-- [6. 验收标准](#6-验收标准)
-
----
-
 ## 1. 概述
 
 本文档定义 `PrivShield` 生产部署的产品需求与验收标准。通过 Helm Chart、原生 K8s manifests 与 Docker Compose 三种交付形式，覆盖从本地联调到 Kubernetes 生产部署的完整场景。

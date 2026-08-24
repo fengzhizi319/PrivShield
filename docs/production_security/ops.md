@@ -6,26 +6,6 @@
 ---
 
 
-## 目录 (Table of Contents)
-
-- [1. 环境变量速查](#1-环境变量速查)
-  - [TLS](#tls)
-  - [认证](#认证)
-  - [速率限制](#速率限制)
-  - [健康检查](#健康检查)
-- [2. 证书生成（自签名开发示例）](#2-证书生成自签名开发示例)
-- [3. 本地启动示例](#3-本地启动示例)
-  - [仅 TLS](#仅-tls)
-  - [TLS + mTLS + Auth + Rate Limit](#tls-mtls-auth-rate-limit)
-- [4. 调用示例](#4-调用示例)
-  - [REST（TLS + 外部 API Key）](#resttls-外部-api-key)
-  - [REST（TLS + mTLS + 内部 API Key）](#resttls-mtls-内部-api-key)
-  - [gRPC（Python 客户端，mTLS + 内部 token）](#grpcpython-客户端mtls-内部-token)
-- [5. K8s 探针配置](#5-k8s-探针配置)
-- [6. 常见问题](#6-常见问题)
-
----
-
 ## 1. 环境变量速查
 
 ### TLS

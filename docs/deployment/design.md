@@ -1,51 +1,6 @@
 # 部署设计文档
 
 
-## 目录 (Table of Contents)
-
-- [1. 概述](#1-概述)
-- [2. 设计目标](#2-设计目标)
-- [3. 架构选型](#3-架构选型)
-  - [3.1 K8s 适用场景与需求说明](#31-k8s-适用场景与需求说明)
-- [4. Helm Chart 结构](#4-helm-chart-结构)
-  - [4.1 Helm 介绍](#41-helm-介绍)
-  - [4.2 关键 values 说明](#42-关键-values-说明)
-  - [4.3 Deployment 环境变量](#43-deployment-环境变量)
-  - [4.4 values.yaml 与 env 文件的关系](#44-valuesyaml-与-env-文件的关系)
-  - [4.5 探针配置](#45-探针配置)
-- [5. core/ml 镜像分层](#5-coreml-镜像分层)
-- [6. LLM 推理服务部署设计](#6-llm-推理服务部署设计)
-  - [6.1 集成模式：进程内本地推理](#61-集成模式进程内本地推理)
-  - [6.2 解耦模式：外部独立 vLLM 服务](#62-解耦模式外部独立-vllm-服务)
-  - [6.3 并发与资源护栏](#63-并发与资源护栏)
-- [7. 安全设计](#7-安全设计)
-- [8. 可观测性设计](#8-可观测性设计)
-- [9. 部署流程](#9-部署流程)
-- [10. 测试策略](#10-测试策略)
-- [11. 滚动更新与回滚策略 / Rolling Update & Rollback Strategy](#11-滚动更新与回滚策略-rolling-update-rollback-strategy)
-  - [11.1 滚动更新策略](#111-滚动更新策略)
-  - [11.2 回滚方案 / Rollback Plan](#112-回滚方案-rollback-plan)
-  - [11.3 蓝绿部署（可选）/ Blue-Green Deployment (Optional)](#113-蓝绿部署可选-blue-green-deployment-optional)
-  - [11.4 金丝雀发布（可选）/ Canary Release (Optional)](#114-金丝雀发布可选-canary-release-optional)
-- [12. 工业化评分 / Industrialization Scorecard](#12-工业化评分-industrialization-scorecard)
-  - [12.1 加权评分表](#121-加权评分表)
-  - [12.2 结论](#122-结论)
-  - [12.3 亮点](#123-亮点)
-  - [12.4 改进建议](#124-改进建议)
-- [13. 容器化部署实战排坑与经验总结 / Deployment Pitfalls & Best Practices](#13-容器化部署实战排坑与经验总结--deployment-pitfalls--best-practices)
-  - [13.1 本地与私有镜像拉取策略（pull_policy: build）](#131-本地与私有镜像拉取策略pull_policy-build)
-  - [13.2 容器隔离构建引擎与宿主机 Daemon 代理冲突（Buildx 驱动选择）](#132-容器隔离构建引擎与宿主机-daemon-代理冲突buildx-驱动选择)
-  - [13.3 基础镜像 Tag 锁定与语义规范](#133-基础镜像-tag-锁定与语义规范)
-  - [13.4 多语言全链路容器构建加速体系（Debian / Alpine / Go / NPM）](#134-多语言全链路容器构建加速体系debian--alpine--go--npm)
-  - [13.5 Go 现代化工具链动态下载与版本协同（GOTOOLCHAIN=auto）](#135-go-现代化工具链动态下载与版本协同gotoolchainauto)
-  - [13.6 非 Root 容器安全运行与命名卷挂载权限冲突](#136-非-root-容器安全运行与命名卷挂载权限冲突)
-  - [13.7 跨组件探针与健康检查端点一致性（/health 与 /api/health）](#137-跨组件探针与健康检查端点一致性health-与-apihealth)
-  - [13.8 容器网络隔离下的服务发现与协议回退寻址](#138-容器网络隔离下的服务发现与协议回退寻址)
-  - [13.9 测试与 CI 执行环境中的 Linux ARG_MAX 限制规避](#139-测试与-ci-执行环境中的-linux-arg_max-限制规避)
-  - [13.10 运行时业务规范文档与 .dockerignore 排除冲突（generate_profile）](#1310-运行时业务规范文档与-dockerignore-排除冲突generate_profile)
-
----
-
 ## 1. 概述
 
 本文档定义 `PrivShield` 的部署架构、交付形式与配置管理策略。通过 Helm Chart、原生 K8s manifests 与 Docker Compose 三种形式，覆盖从本地联调到 Kubernetes 生产部署的完整场景。

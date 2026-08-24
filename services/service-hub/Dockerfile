@@ -8,7 +8,7 @@
 # ============================================================================
 
 # Stage 1: Build
-FROM golang:1.27-alpine3.21 AS builder
+FROM golang:1.25-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -23,11 +23,13 @@ COPY pkg/ ./pkg/
 
 # Copy module dependencies for layer caching
 COPY services/service-hub/go.mod services/service-hub/go.sum ./services/service-hub/
+COPY services/datasource-mgr/go.mod services/datasource-mgr/go.sum ./services/datasource-mgr/
 WORKDIR /app/services/service-hub
 RUN go mod download
 
 # Copy module source
 COPY services/service-hub/ ./
+COPY services/datasource-mgr/ ../datasource-mgr/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server
 
 # Stage 2: Runtime
@@ -42,7 +44,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 COPY --from=builder /app/server /app/server
 
-RUN chown -R privacy:privacy /app
+RUN mkdir -p /app/data && chown -R privacy:privacy /app
 
 EXPOSE 8082
 

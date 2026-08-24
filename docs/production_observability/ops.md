@@ -5,19 +5,6 @@
 ---
 
 
-## 目录 (Table of Contents)
-
-- [1. 环境变量](#1-环境变量)
-- [2. 日志样例](#2-日志样例)
-  - [文本格式（默认）](#文本格式默认)
-  - [JSON 格式](#json-格式)
-- [3. Prometheus 指标抓取](#3-prometheus-指标抓取)
-- [4. Grafana Dashboard 关键面板](#4-grafana-dashboard-关键面板)
-- [5. Jaeger / Tempo Tracing](#5-jaeger-tempo-tracing)
-- [6. 审计事件](#6-审计事件)
-
----
-
 ## 1. 环境变量
 
 | 变量 | 默认值 | 说明 |
