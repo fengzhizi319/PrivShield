@@ -41,10 +41,12 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .client import agent_client
 from .config import settings
@@ -227,10 +229,43 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Privacy Test Console", lifespan=lifespan)
 
+
+# ---------------------------------------------------------------------------
+# 生产加固：422 校验错误响应脱敏（对齐主 Agent main.py 同名处理器）
+# Sanitize 422 validation error responses to avoid leaking internal model structure.
+# ---------------------------------------------------------------------------
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """返回通用 422 错误信息，防止内部 Pydantic 模型字段名/类型路径泄露。"""
+    return JSONResponse(status_code=422, content={"detail": "Invalid request: one or more fields failed validation"})
+
+
+# ---------------------------------------------------------------------------
+# 生产加固：安全响应头中间件（对齐 Go BFF middleware.SecurityHeaders）
+# Security response headers middleware (aligned with Go BFF SecurityHeaders).
+# ---------------------------------------------------------------------------
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """为所有响应注入 HTTP 安全头，与 Go BFF SecurityHeaders 中间件对齐。"""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        return response
+
+
+# 中间件装配顺序（Starlette 后加先执行）：
+# 请求 → CORS → SecurityHeaders → ConsoleSecurity → Handler
+# Middleware assembly order (Starlette: last-added runs first on request):
+# Request → CORS → SecurityHeaders → ConsoleSecurity → Handler
+app.add_middleware(_SecurityHeadersMiddleware)
+
 # 可选安全中间件（API Key 鉴权 + 限流）：默认关闭 / 宽松，
 # 仅在配置了 CONSOLE_API_KEY / CONSOLE_RATE_LIMIT 时生效。
-# 先于 CORS 加入（位于 CORS 内层），使 CORS 处于最外层，
-# 从而为所有响应（含 401/429）附加跨域头。
 app.add_middleware(
     ConsoleSecurityMiddleware,
     api_key=settings.console_api_key,

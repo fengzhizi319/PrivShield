@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -69,6 +69,32 @@ class Settings(BaseSettings):
         populate_by_name=True,
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _validate_tls_config(self) -> "Settings":
+        """启动早期 fail-fast：TLS 证书/私钥文件必须成对出现且路径可达。
+        Fail-fast at startup: TLS cert/key must be provided together and files must exist.
+        """
+        # mTLS 客户端证书必须成对提供
+        if (self.privacy_agent_cert_file is not None) != (self.privacy_agent_key_file is not None):
+            raise ValueError(
+                "PRIVACY_AGENT_CERT_FILE and PRIVACY_AGENT_KEY_FILE must be provided together for mTLS"
+            )
+        # CA 证书文件必须存在
+        if self.privacy_agent_ca_file is not None:
+            ca_path = Path(self.privacy_agent_ca_file)
+            if not ca_path.is_file():
+                raise ValueError(f"PRIVACY_AGENT_CA_FILE not found or not a file: {ca_path}")
+        # mTLS 客户端证书/私钥文件必须存在
+        for field_name, value in [
+            ("PRIVACY_AGENT_CERT_FILE", self.privacy_agent_cert_file),
+            ("PRIVACY_AGENT_KEY_FILE", self.privacy_agent_key_file),
+        ]:
+            if value is not None:
+                fpath = Path(value)
+                if not fpath.is_file():
+                    raise ValueError(f"{field_name} not found or not a file: {fpath}")
+        return self
 
 
 # 全局配置单例：模块导入时即完成环境变量解析。
