@@ -6,10 +6,10 @@
 
 set -euo pipefail
 
-# Dockerfile 要求构建上下文为 console/（非模块子目录）
+# Dockerfile 要求构建上下文为项目根目录（包含 pkg/ 与 services/）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONSOLE_DIR="$(cd "$MODULE_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
 
 IMAGE_NAME="${DATASOURCE_MGR_IMAGE:-privshield-datasource-mgr:0.1.0}"
 CONTAINER_NAME="${DATASOURCE_MGR_CONTAINER:-privshield-datasource-mgr}"
@@ -22,9 +22,9 @@ echo "=========================================="
 echo "  Deploy Datasource Manager (数据源管理)"
 echo "=========================================="
 
-# Build image (build context = console/ for shared pkg/ dependency)
+# Build image (build context = PROJECT_ROOT for shared pkg/ dependency)
 echo "[1/3] Building Docker image: $IMAGE_NAME ..."
-docker build -f "$MODULE_DIR/Dockerfile" -t "$IMAGE_NAME" "$CONSOLE_DIR"
+docker build -f "$MODULE_DIR/Dockerfile" -t "$IMAGE_NAME" "$PROJECT_ROOT"
 
 # Stop old container
 echo "[2/3] Removing old container (if exists)..."

@@ -55,8 +55,11 @@ fi
 echo ""
 echo "✅ 全栈 Docker 容器服务已成功启动！"
 echo "   - React 控制台 Web UI     : http://localhost:5173"
-echo "   - Python 代理后端 REST API : http://localhost:8080"
-echo "   - Go 代理后端 REST API     : http://localhost:8081"
+echo "   - Go BFF 代理网关 REST     : http://localhost:8081"
+echo "   - Python BFF 代理后端 REST : http://localhost:8080"
+echo "   - Service Hub 调度中枢    : http://localhost:8082"
+echo "   - Datasource Mgr 数据源   : http://localhost:8083"
+echo "   - Audit Log 脱敏审计日志  : http://localhost:8084"
 echo "   - Privacy Agent REST      : http://localhost:8079"
 echo "   - Privacy Agent gRPC      : localhost:50051"
 if [[ "$WITH_LLM" == "true" ]]; then

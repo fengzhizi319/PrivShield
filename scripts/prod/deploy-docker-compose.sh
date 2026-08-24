@@ -229,7 +229,10 @@ echo "==========================================================================
 echo "  • 核心 Agent REST API : http://127.0.0.1:8079 (或 https://127.0.0.1:8079)"
 echo "  • 核心 Agent gRPC RPC : 127.0.0.1:50051"
 echo "  • Web 控制台 UI       : http://127.0.0.1:5173"
-echo "  • Go 代理后端 REST    : http://127.0.0.1:8081"
+echo "  • Go BFF 代理网关 REST: http://127.0.0.1:8081"
+echo "  • 调度中枢 Service Hub: http://127.0.0.1:8082"
+echo "  • 数据源管理 Datasource: http://127.0.0.1:8083"
+echo "  • 脱敏审计日志 AuditLog: http://127.0.0.1:8084"
 # 可选服务地址（根据 profile 动态显示）
 if [[ "$WITH_LLM" == "true" ]]; then
     echo "  • vLLM 大模型推理 API : http://127.0.0.1:8000/v1"

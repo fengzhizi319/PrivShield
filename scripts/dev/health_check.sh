@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # 脚本名称: health_check.sh
-# 脚本说明: PrivShield 侧边栏服务健康状态诊断与 GPU 运行环境巡检工具。
+# 脚本说明: PrivShield 核心算力服务、BFF 网关与中台微服务群健康状态诊断与环境巡检工具。
 #
 # 执行步骤总览：
-#   1. 解析命令行参数（--rest-host、--rest-port、--grpc-host、--grpc-port）
+#   1. 解析命令行参数（--rest-host、--rest-port、--grpc-host、--grpc-port、--all）
 #   2. 检查系统 Python 3 基础运行环境与版本
 #   3. 探测 NVIDIA GPU / CUDA / PyTorch / TensorRT 驱动及深度学习框架可用性
-#   4. 探测 REST API 端口连通性及 HTTP /health 端点报文响应
-#   5. 探测 gRPC 服务端口 TCP 连通性（nc 或 /dev/tcp）
-#   6. 巡检本地 SQLite 隐私预算数据库持久化文件状态
+#   4. 探测 核心 Agent REST API 端口连通性及 HTTP /health 端点报文响应
+#   5. 探测 核心 Agent gRPC 服务端口 TCP 连通性
+#   6. 可选探测 BFF 网关与微服务群（service-hub:8082, datasource-mgr:8083, audit-log:8084, bff:8081/8080）
+#   7. 巡检本地 SQLite 隐私预算数据库持久化文件状态
 #
 # 用法 / Usage:
 #   ./scripts/dev/health_check.sh [选项]
@@ -29,6 +30,7 @@ REST_HOST="${PRIVACY_REST_HOST:-127.0.0.1}"
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
 GRPC_HOST="${PRIVACY_GRPC_HOST:-127.0.0.1}"
 GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
+CHECK_ALL=false
 
 export no_proxy="127.0.0.1,localhost,${REST_HOST},${no_proxy:-}"
 export NO_PROXY="127.0.0.1,localhost,${REST_HOST},${NO_PROXY:-}"
@@ -43,11 +45,12 @@ usage() {
   --rest-port PORT    REST 服务端口 (默认: 8079 或 PRIVACY_REST_PORT)
   --grpc-host HOST    gRPC 服务主机地址 (默认: 127.0.0.1 或 PRIVACY_GRPC_HOST)
   --grpc-port PORT    gRPC 服务端口 (默认: 50051 或 PRIVACY_GRPC_PORT)
+  --all               全面探测中台微服务群 (service-hub, datasource-mgr, audit-log, bff)
   -h, --help          显示帮助信息并退出
 
 使用示例:
   ./scripts/dev/health_check.sh
-  ./scripts/dev/health_check.sh --rest-port 8080 --grpc-port 50052
+  ./scripts/dev/health_check.sh --all
 EOF
     exit 0
 }
@@ -70,6 +73,10 @@ while [[ $# -gt 0 ]]; do
             GRPC_PORT="$2"
             shift 2
             ;;
+        --all)
+            CHECK_ALL=true
+            shift 1
+            ;;
         -h|--help)
             usage
             ;;
@@ -84,6 +91,9 @@ echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} PrivShield 系统健康与环境诊断工具${NC}"
 echo -e "${BLUE} REST 目标: http://${REST_HOST}:${REST_PORT}${NC}"
 echo -e "${BLUE} gRPC 目标: ${GRPC_HOST}:${GRPC_PORT}${NC}"
+if [ "$CHECK_ALL" = true ]; then
+    echo -e "${BLUE} 模式     : 全链路中台巡检 (--all)${NC}"
+fi
 echo -e "${BLUE}====================================================${NC}"
 
 # 1. Python 及底层基础环境检查
@@ -98,15 +108,11 @@ fi
 # 2. NVIDIA GPU, CUDA & TensorRT 环境探针
 echo -e "\n${YELLOW}[2/5] 检查 GPU / CUDA / PyTorch / TensorRT 加载状态...${NC}"
 python3 -c "
-import sys
-
-print('--- GPU 驱动与框架探针 ---')
-# 检查 NVIDIA 驱动
+import subprocess
 try:
-    import subprocess
-    res = subprocess.run(['nvidia-smi', '--query-gpu=name,driver_version', '--format=csv,noheader'], capture_output=True, text=True)
+    res = subprocess.run(['nvidia-smi', '--query-gpu=name,driver_version,memory.total', '--format=csv,noheader'], capture_output=True, text=True)
     if res.returncode == 0:
-        print('NVIDIA 硬件信息 :', res.stdout.strip())
+        print('NVIDIA GPU 设备 :', res.stdout.strip())
     else:
         print('NVIDIA 驱动状态 :', 'nvidia-smi 返回异常')
 except Exception as e:
@@ -132,36 +138,59 @@ except ImportError:
 "
 
 # 3. REST 服务端口及 HTTP 端点探针
-echo -e "\n${YELLOW}[3/5] 检查 REST 服务连通性 (http://${REST_HOST}:${REST_PORT})...${NC}"
+echo -e "\n${YELLOW}[3/5] 检查核心 Agent REST 连通性 (http://${REST_HOST}:${REST_PORT})...${NC}"
 REST_URL="http://${REST_HOST}:${REST_PORT}/health"
 if command -v curl &> /dev/null; then
-    HTTP_CODE=$(curl --noproxy "*" -s -o /tmp/pla_health_response.json -w "%{http_code}" --max-time 5 "${REST_URL}" || echo "000")
-    if [ "$HTTP_CODE" -eq 200 ]; then
-        echo -e "REST 健康探针结果: ${GREEN}HTTP 200 OK${NC}"
-        echo -e "返回报文内容     : $(cat /tmp/pla_health_response.json)"
+    HTTP_CODE=$(curl --noproxy "*" -s -o /tmp/privshield_health_response.json -w "%{http_code}" --max-time 5 "${REST_URL}" 2>/dev/null || echo "000")
+    HTTP_CODE="${HTTP_CODE: -3}"
+    if [ "$HTTP_CODE" = "200" ]; then
+        echo -e "Agent REST 健康探针: ${GREEN}HTTP 200 OK${NC}"
+        echo -e "返回报文内容       : $(cat /tmp/privshield_health_response.json)"
     else
-        echo -e "REST 健康探针结果: ${RED}HTTP ${HTTP_CODE} (服务未启动或不可达)${NC}"
+        echo -e "Agent REST 健康探针: ${RED}HTTP ${HTTP_CODE} (服务未启动或不可达)${NC}"
     fi
 else
     echo -e "${YELLOW}未检测到 curl，跳过 HTTP 端口探针。${NC}"
 fi
 
 # 4. gRPC 服务端口连通性检测
-echo -e "\n${YELLOW}[4/5] 检查 gRPC 服务端口 (${GRPC_HOST}:${GRPC_PORT})...${NC}"
+echo -e "\n${YELLOW}[4/5] 检查核心 Agent gRPC 端口 (${GRPC_HOST}:${GRPC_PORT})...${NC}"
 if command -v nc &> /dev/null; then
     if nc -z -w 3 "$GRPC_HOST" "$GRPC_PORT" &> /dev/null; then
-        echo -e "gRPC 端口状态   : ${GREEN}端口 ${GRPC_PORT} 开放且可达${NC}"
+        echo -e "Agent gRPC 端口状态: ${GREEN}端口 ${GRPC_PORT} 开放且可达${NC}"
     else
-        echo -e "gRPC 端口状态   : ${RED}端口 ${GRPC_PORT} 无法连接 (服务可能未启动)${NC}"
+        echo -e "Agent gRPC 端口状态: ${RED}端口 ${GRPC_PORT} 无法连接${NC}"
     fi
 elif command -v timeout &> /dev/null && command -v bash &> /dev/null; then
     if timeout 3 bash -c "</dev/tcp/${GRPC_HOST}/${GRPC_PORT}" &> /dev/null; then
-        echo -e "gRPC 端口状态   : ${GREEN}端口 ${GRPC_PORT} 开放且可达${NC}"
+        echo -e "Agent gRPC 端口状态: ${GREEN}端口 ${GRPC_PORT} 开放且可达${NC}"
     else
-        echo -e "gRPC 端口状态   : ${RED}端口 ${GRPC_PORT} 无法连接${NC}"
+        echo -e "Agent gRPC 端口状态: ${RED}端口 ${GRPC_PORT} 无法连接${NC}"
     fi
 else
     echo -e "${YELLOW}缺少 nc/tcp 工具，跳过端口侦听检查。${NC}"
+fi
+
+# 可选探测微服务群
+if [ "$CHECK_ALL" = true ]; then
+    echo -e "\n${YELLOW}[扩展] 巡检中台微服务群与 BFF 网关...${NC}"
+    check_http_svc() {
+        local name="$1"
+        local url="$2"
+        local code
+        code=$(curl --noproxy "*" -s -o /dev/null -w "%{http_code}" --max-time 3 "$url" 2>/dev/null || echo "000")
+        code="${code: -3}"
+        if [ "$code" = "200" ]; then
+            echo -e "  • ${name} ($url): ${GREEN}HTTP 200 OK${NC}"
+        else
+            echo -e "  • ${name} ($url): ${RED}HTTP ${code} (未就绪)${NC}"
+        fi
+    }
+    check_http_svc "BFF-Go 网关" "http://127.0.0.1:8081/api/health"
+    check_http_svc "BFF-Py 网关" "http://127.0.0.1:8080/api/health"
+    check_http_svc "Service Hub 调度中枢" "http://127.0.0.1:8082/api/health"
+    check_http_svc "Datasource Mgr 数据源" "http://127.0.0.1:8083/api/health"
+    check_http_svc "Audit Log 审计日志" "http://127.0.0.1:8084/api/health"
 fi
 
 # 5. 本地持久化数据库文件巡检

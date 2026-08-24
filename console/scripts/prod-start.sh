@@ -20,7 +20,7 @@ for arg in "$@"; do
 done
 
 AGENT_VENV="$PROJECT_ROOT/.venv"
-BACKEND_VENV="$CONSOLE_DIR/backend/.venv"
+BACKEND_VENV="$CONSOLE_DIR/bff-py/.venv"
 
 AGENT_URL="http://127.0.0.1:8079"
 CONSOLE_URL="http://127.0.0.1:8080"
@@ -200,7 +200,7 @@ launch_agent
 echo "启动测试控制台后端 (Console UI + API: $CONSOLE_URL)..."
 (
     source "$BACKEND_VENV/bin/activate"
-    cd "$CONSOLE_DIR/backend"
+    cd "$CONSOLE_DIR/bff-py"
     exec uvicorn app.main:app --host 127.0.0.1 --port 8080
 ) &
 CONSOLE_PID=$!

@@ -55,14 +55,14 @@ fi
 echo -e "${GREEN}Mock Agent 已启动 (PID: ${MOCK_PID})${NC}"
 
 # 2. 启动 Console Python 后端 (端口 8080) 并运行单元测试与烟雾测试
-echo -e "\n${YELLOW}[步骤 2/4] 运行 Console Backend (Python) 单元测试与 Smoke Test...${NC}"
-if [ -d "console/backend" ]; then
+echo -e "\n${YELLOW}[步骤 2/5] 运行 Console BFF (Python) 单元测试与 Smoke Test...${NC}"
+if [ -d "console/bff-py" ]; then
     (
-        cd console/backend
+        cd console/bff-py
         echo "运行 pytest 路由与降级单元测试..."
         PYTHONPATH=. pytest tests/ -v
 
-        echo "启动 Console Backend FastAPI 服务 (端口 8080)..."
+        echo "启动 Console BFF FastAPI 服务 (端口 8080)..."
         python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8080 &
         INNER_BACKEND_PID=$!
         sleep 2
@@ -71,30 +71,43 @@ if [ -d "console/backend" ]; then
         python3 smoke_test.py
         kill "$INNER_BACKEND_PID" 2>/dev/null || true
     )
-    echo -e "${GREEN}[成功] Python 控制台后端与 Smoke Test 全部通过！${NC}"
+    echo -e "${GREEN}[成功] Python BFF 控制台与 Smoke Test 全部通过！${NC}"
 else
-    echo -e "${YELLOW}未发现 console/backend 目录，跳过。${NC}"
+    echo -e "${YELLOW}未发现 console/bff-py 目录，跳过。${NC}"
 fi
 
-# 3. 运行 Go 代理后端测试
-echo -e "\n${YELLOW}[步骤 3/4] 运行 Console Backend-Go (Go) 测试...${NC}"
-if command -v go &> /dev/null && [ -d "console/backend-go" ]; then
+# 3. 运行 Go BFF 与共享库测试
+echo -e "\n${YELLOW}[步骤 3/5] 运行 Console BFF-Go (Go) 与 Pkg 基础库测试...${NC}"
+if command -v go &> /dev/null && [ -d "console/bff-go" ]; then
     (
-        cd console/backend-go
-        go test -short ./...
-        go test ./tests -v
+        go test ./pkg/... ./console/bff-go/...
     )
-    echo -e "${GREEN}[成功] Go 代理后端测试通过！${NC}"
+    echo -e "${GREEN}[成功] Go BFF 与 Pkg 测试通过！${NC}"
 else
-    echo -e "${YELLOW}未发现 go 命令或 console/backend-go 目录，跳过 Go 测试。${NC}"
+    echo -e "${YELLOW}未发现 go 命令或 console/bff-go 目录，跳过 Go BFF 测试。${NC}"
 fi
 
-# 4. 运行 Web 前端组件与单元测试
-echo -e "\n${YELLOW}[步骤 4/4] 运行 Console Web (React) 组件与自动化测试...${NC}"
+# 4. 运行 Services 微服务群测试
+echo -e "\n${YELLOW}[步骤 4/5] 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试...${NC}"
+if command -v go &> /dev/null && [ -d "services" ]; then
+    (
+        go test ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...
+    )
+    echo -e "${GREEN}[成功] Services 中台微服务群测试通过！${NC}"
+else
+    echo -e "${YELLOW}未发现 services 目录，跳过微服务测试。${NC}"
+fi
+
+# 5. 运行 Web 前端组件与单元测试
+echo -e "\n${YELLOW}[步骤 5/5] 运行 Console Web (React) 组件与自动化测试...${NC}"
 if [ -d "console/web" ]; then
     (
         cd console/web
-        corepack pnpm test -- --run
+        if command -v corepack &> /dev/null; then
+            corepack pnpm test -- --run
+        elif command -v npm &> /dev/null; then
+            npm test -- --run
+        fi
     )
     echo -e "${GREEN}[成功] React 前端组件测试通过！${NC}"
 else

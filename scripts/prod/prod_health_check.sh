@@ -191,7 +191,7 @@ fi
 
 # ── 步骤 7：隐私预算持久化存储检查 ─────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[5/5] 隐私预算存储 (SQLite) 健康度巡检${NC}"
+echo -e "${BOLD}[5/6] 隐私预算存储 (SQLite) 健康度巡检${NC}"
 TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
 if [[ -f "$DB_PATH" ]]; then
     DB_SIZE=$(ls -lh "$DB_PATH" 2>/dev/null | awk '{print $5}')
@@ -214,6 +214,28 @@ except Exception:
 else
     echo -e "  [INFO] 未找到本地 SQLite 预算文件 ($DB_PATH)，使用内存模式或远端 DB"
 fi
+
+# ── 步骤 8：中台微服务群与 BFF 网关巡检 ──────────────────────────────────
+echo ""
+echo -e "${BOLD}[6/6] 中台微服务群与 BFF 代理健康巡检${NC}"
+check_microservice() {
+    local name="$1"
+    local url="$2"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    local code
+    code=$(curl -s -k -o /dev/null -w "%{http_code}" --max-time 3 "$url" 2>/dev/null || echo "000")
+    if [[ "$code" == "200" ]]; then
+        echo -e "  [PASS] ${name} (${url}) -> HTTP 200 OK"
+        PASSED_CHECKS=$((PASSED_CHECKS + 1))
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} ${name} (${url}) -> HTTP ${code} (未启动或不可达)"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+}
+check_microservice "BFF-Go 代理网关" "http://127.0.0.1:8081/api/health"
+check_microservice "Service Hub 调度中枢" "http://127.0.0.1:8082/api/health"
+check_microservice "Datasource Mgr 数据源" "http://127.0.0.1:8083/api/health"
+check_microservice "Audit Log 审计日志" "http://127.0.0.1:8084/api/health"
 
 # ── 步骤 8：汇总报告输出 ──────────────────────────────────────────────────
 echo ""

@@ -9,7 +9,7 @@
 #   为 Go gRPC 代理（客户端）与 PrivShield（gRPC 服务端）之间的
 #   mTLS 双向认证生成一套自签名测试证书，方便本地联调与集成测试。
 #
-# Generated files (default output: console/backend-go/certs/) / 生成的文件：
+# Generated files (default output: console/bff-go/certs/) / 生成的文件：
 #   ca.crt / ca.key         Trusted root CA (signs server & client certs)
 #                           受信任根 CA（签发服务端与客户端证书）
 #   server.crt / server.key Server cert (Python agent, SAN: localhost/127.0.0.1)

@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # 脚本名称: start_all_services.sh
-# 脚本说明: 一键后台启动 PrivShield 核心侧边栏服务 (REST + gRPC)
-#           及 Web 测试控制台代理后端服务，并自动检测健康就绪探针。
+# 脚本说明: 一键后台启动 PrivShield 核心侧边栏服务 (REST + gRPC)、
+#           Web 测试控制台代理后端服务 (BFF)，以及可选的中台微服务群 (services/*)，
+#           并自动检测健康就绪探针。
 #
 # 执行步骤总览：
-#   1. 初始化工作目录与端口配置（REST: 8079, gRPC: 50051, Console: 8080）
+#   1. 初始化工作目录与端口配置（REST: 8079, gRPC: 50051, BFF-Py: 8080, BFF-Go: 8081, Services: 8082~8084）
 #   2. 检查端口占用并执行日志文件轮转备份（保留最近 5 份）
 #   3. 使用 nohup 后台拉起 PrivShield Core REST & gRPC Agent 主进程并记录 PID
-#   4. 后台拉起 Console Backend 测试控制台 API 代理服务并记录 PID
-#   5. 轮询健康探针（GET /health 最长等待 15 秒）直至服务完全就绪
+#   4. 后台拉起 Console BFF (Python 或 Go) 代理服务并记录 PID
+#   5. 可选拉起 中台 3 大微服务群 (service-hub, datasource-mgr, audit-log) 并记录 PID
+#   6. 轮询健康探针（GET /health 最长等待 15 秒）直至服务完全就绪
 #
 # 用法 / Usage:
-#   ./scripts/dev/start_all_services.sh
+#   ./scripts/dev/start_all_services.sh [选项]
+#
+# 选项:
+#   --with-services      同时启动中台三大微服务群 (service-hub: 8082, datasource-mgr: 8083, audit-log: 8084)
+#   --go-bff             使用 Go gRPC BFF (8081) 代替默认 Python BFF (8080)
+#   -h, --help           显示帮助信息
 # ==============================================================================
 
 set -euo pipefail
@@ -24,7 +31,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# ── 步骤 1：定位项目根目录与端口初始化 ────────────────────────────────────
+# ── 步骤 1：定位项目根目录与参数解析 ──────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
@@ -35,6 +42,32 @@ mkdir -p "$LOG_DIR"
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
 GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
 CONSOLE_PORT="${PRIVACY_CONSOLE_PORT:-8080}"
+WITH_SERVICES=false
+USE_GO_BFF=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --with-services)
+            WITH_SERVICES=true
+            shift 1
+            ;;
+        --go-bff)
+            USE_GO_BFF=true
+            CONSOLE_PORT="8081"
+            shift 1
+            ;;
+        -h|--help)
+            echo "用法: $0 [--with-services] [--go-bff]"
+            echo "  --with-services: 联动启动中台三大微服务 (service-hub, datasource-mgr, audit-log)"
+            echo "  --go-bff:        启动 Go gRPC BFF (8081) 而非 Python BFF (8080)"
+            exit 0
+            ;;
+        *)
+            echo "未知参数: $1"
+            exit 1
+            ;;
+    esac
+done
 
 echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} PrivShield 一键拉起服务全家桶${NC}"
@@ -42,7 +75,10 @@ echo -e "${BLUE} 工作目录     : ${PROJECT_ROOT}${NC}"
 echo -e "${BLUE} 日志输出目录 : ${LOG_DIR}/${NC}"
 echo -e "${BLUE} REST 端口    : ${REST_PORT}${NC}"
 echo -e "${BLUE} gRPC 端口    : ${GRPC_PORT}${NC}"
-echo -e "${BLUE} 控制台端口   : ${CONSOLE_PORT}${NC}"
+echo -e "${BLUE} 控制台 BFF   : ${CONSOLE_PORT} ($([ "$USE_GO_BFF" = true ] && echo "Go gRPC" || echo "Python REST"))${NC}"
+if [ "$WITH_SERVICES" = true ]; then
+    echo -e "${BLUE} 微服务集群   : service-hub(:8082), datasource-mgr(:8083), audit-log(:8084)${NC}"
+fi
 echo -e "${BLUE}====================================================${NC}"
 
 # 1. 检查端口占用情况
@@ -50,13 +86,12 @@ check_port() {
     local port=$1
     if command -v lsof &> /dev/null; then
         if lsof -i:"$port" &> /dev/null; then
-            echo -e "${YELLOW}警告: 端口 ${port} 已被占用（本脚本不自动停止已有实例，请先运行 stop_all_services.sh）...${NC}"
+            echo -e "${YELLOW}警告: 端口 ${port} 已被占用（建议先运行 stop_all_services.sh）...${NC}"
         fi
     fi
 }
 
-# 日志轮转：启动时归档上一轮日志（保留最近 5 份），避免 .logs/*.log 无限增长。
-# 注：仅覆盖"重启截断"场景；长时间运行持续增长的日志请使用系统 logrotate（生产环境）。
+# 日志轮转
 rotate_log() {
     local log_file=$1 keep=5 i
     [ -f "$log_file" ] || return 0
@@ -69,9 +104,14 @@ rotate_log() {
 check_port "$REST_PORT"
 check_port "$GRPC_PORT"
 check_port "$CONSOLE_PORT"
+if [ "$WITH_SERVICES" = true ]; then
+    check_port 8082
+    check_port 8083
+    check_port 8084
+fi
 
-# 2. 启动核心 REST + gRPC 侧边栏
-echo -e "\n${YELLOW}[1/2] 启动 Core REST & gRPC Agent 侧边栏进程...${NC}"
+# 2. 启动核心 REST + gRPC Agent
+echo -e "\n${YELLOW}[1/3] 启动 Core REST & gRPC Agent 算力引擎...${NC}"
 AGENT_LOG="${LOG_DIR}/agent_server.log"
 rotate_log "$AGENT_LOG"
 
@@ -80,26 +120,64 @@ AGENT_PID=$!
 echo $AGENT_PID > "${LOG_DIR}/agent.pid"
 echo -e "Agent 进程 PID: ${GREEN}${AGENT_PID}${NC} (日志: ${AGENT_LOG})"
 
-# 3. 启动 Console Backend 代理控制台
-echo -e "\n${YELLOW}[2/2] 启动 Console API 代理控制台进程...${NC}"
-CONSOLE_LOG="${LOG_DIR}/console_backend.log"
-rotate_log "$CONSOLE_LOG"
-
-if [ -f "$PROJECT_ROOT/console/backend/app/main.py" ]; then
-    (
-        cd "$PROJECT_ROOT/console/backend"
-        if [ -f ".venv/bin/activate" ]; then
-            source ".venv/bin/activate"
-        fi
-        nohup python3 -m uvicorn app.main:app --host 127.0.0.1 --port "$CONSOLE_PORT" < /dev/null > "$CONSOLE_LOG" 2>&1 &
-        echo $! > "${LOG_DIR}/console.pid"
-    )
-    echo -e "Console 控制台日志: ${CONSOLE_LOG}"
+# 3. 启动 Console BFF 代理
+echo -e "\n${YELLOW}[2/3] 启动 Console BFF 代理网关...${NC}"
+if [ "$USE_GO_BFF" = true ]; then
+    if [ -d "$PROJECT_ROOT/console/bff-go" ]; then
+        (
+            cd "$PROJECT_ROOT/console/bff-go"
+            go build -o bin/backend-go ./cmd/server
+            nohup ./bin/backend-go < /dev/null > "${LOG_DIR}/console_bff_go.log" 2>&1 &
+            echo $! > "${LOG_DIR}/console.pid"
+        )
+        echo -e "Console Go BFF 日志: ${LOG_DIR}/console_bff_go.log"
+    fi
 else
-    echo -e "${YELLOW}未检测到 console/backend/app/main.py，跳过控制台启动。${NC}"
+    if [ -f "$PROJECT_ROOT/console/bff-py/app/main.py" ]; then
+        CONSOLE_LOG="${LOG_DIR}/console_bff_py.log"
+        rotate_log "$CONSOLE_LOG"
+        (
+            cd "$PROJECT_ROOT/console/bff-py"
+            nohup python3 -m uvicorn app.main:app --host 127.0.0.1 --port "$CONSOLE_PORT" < /dev/null > "$CONSOLE_LOG" 2>&1 &
+            echo $! > "${LOG_DIR}/console.pid"
+        )
+        echo -e "Console Python BFF 日志: ${CONSOLE_LOG}"
+    fi
 fi
 
-# 4. 健康轮询就绪探针 (Health Readiness Probe)
+# 4. 可选拉起中台微服务群
+if [ "$WITH_SERVICES" = true ]; then
+    echo -e "\n${YELLOW}[3/3] 启动中台微服务群 (service-hub / datasource-mgr / audit-log)...${NC}"
+    
+    # 4.1 service-hub
+    (
+        cd "$PROJECT_ROOT/services/service-hub"
+        go build -o bin/service-hub ./cmd/server
+        nohup ./bin/service-hub < /dev/null > "${LOG_DIR}/service_hub.log" 2>&1 &
+        echo $! > "${LOG_DIR}/service-hub.pid"
+    )
+    echo -e "  • service-hub (PID $(cat "${LOG_DIR}/service-hub.pid"), 日志: ${LOG_DIR}/service_hub.log)"
+
+    # 4.2 datasource-mgr
+    (
+        cd "$PROJECT_ROOT/services/datasource-mgr"
+        go build -o bin/datasource-mgr ./cmd/server
+        nohup ./bin/datasource-mgr < /dev/null > "${LOG_DIR}/datasource_mgr.log" 2>&1 &
+        echo $! > "${LOG_DIR}/datasource-mgr.pid"
+    )
+    echo -e "  • datasource-mgr (PID $(cat "${LOG_DIR}/datasource-mgr.pid"), 日志: ${LOG_DIR}/datasource_mgr.log)"
+
+    # 4.3 audit-log
+    (
+        cd "$PROJECT_ROOT/services/audit-log"
+        go build -o bin/audit-log ./cmd/server
+        nohup ./bin/audit-log < /dev/null > "${LOG_DIR}/audit_log.log" 2>&1 &
+        echo $! > "${LOG_DIR}/audit-log.pid"
+    )
+    echo -e "  • audit-log (PID $(cat "${LOG_DIR}/audit-log.pid"), 日志: ${LOG_DIR}/audit_log.log)"
+fi
+
+# 5. 健康轮询就绪探针 (Health Readiness Probe)
 echo -e "\n${YELLOW}正在等待服务探针响应 (最长等待 15 秒)...${NC}"
 MAX_RETRIES=15
 RETRY_COUNT=0
@@ -111,9 +189,14 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         if [ "$HTTP_CODE" -eq 200 ]; then
             echo -e "\n${GREEN}====================================================${NC}"
             echo -e "${GREEN} 所有服务启动成功且健康探针已就绪！${NC}"
-            echo -e "${GREEN} REST 服务端点   : http://127.0.0.1:${REST_PORT}${NC}"
-            echo -e "${GREEN} gRPC 服务端点   : 127.0.0.1:${GRPC_PORT}${NC}"
-            echo -e "${GREEN} 控制台代理端点  : http://127.0.0.1:${CONSOLE_PORT}${NC}"
+            echo -e "${GREEN} 核心 Agent REST : http://127.0.0.1:${REST_PORT}${NC}"
+            echo -e "${GREEN} 核心 Agent gRPC : 127.0.0.1:${GRPC_PORT}${NC}"
+            echo -e "${GREEN} 控制台 BFF 网关 : http://127.0.0.1:${CONSOLE_PORT}${NC}"
+            if [ "$WITH_SERVICES" = true ]; then
+                echo -e "${GREEN} 调度中枢 Service Hub : http://127.0.0.1:8082${NC}"
+                echo -e "${GREEN} 数据源管理 Datasource: http://127.0.0.1:8083${NC}"
+                echo -e "${GREEN} 脱敏审计日志 AuditLog: http://127.0.0.1:8084${NC}"
+            fi
             echo -e "${GREEN} 停止服务命令    : ./scripts/dev/stop_all_services.sh${NC}"
             echo -e "${GREEN}====================================================${NC}"
             exit 0
