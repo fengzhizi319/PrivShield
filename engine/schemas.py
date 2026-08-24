@@ -67,7 +67,7 @@ class DPRequest(BaseModel):
     """
 
     values: list[float] = Field(max_length=10_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPHistogramRequest(BaseModel):
@@ -75,14 +75,14 @@ class DPHistogramRequest(BaseModel):
 
     values: list[str] = Field(max_length=10_000)
     categories: list[str] = Field(max_length=1_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPNoisyCountRequest(BaseModel):
     """对已聚合计数进行 DP 加噪的请求模型。"""
 
-    true_count: float
-    params: dict[str, object] = {}
+    true_count: float = Field(description="真实聚合计数值")
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPNoisySumRequest(BaseModel):
@@ -91,66 +91,66 @@ class DPNoisySumRequest(BaseModel):
     params 中需提供 sensitivity，或同时提供 clip_lower 与 clip_upper。
     """
 
-    true_sum: float
-    params: dict[str, object] = {}
+    true_sum: float = Field(description="真实聚合求和值")
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPNoisyMeanRequest(BaseModel):
     """对已聚合 sum/count 进行 DP 加噪得到均值的请求模型。"""
 
-    true_sum: float
-    true_count: float
-    params: dict[str, object] = {}
+    true_sum: float = Field(description="真实聚合求和值")
+    true_count: float = Field(description="真实聚合计数值")
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPNoisyHistogramRequest(BaseModel):
     """对已聚合直方图计数进行 DP 加噪的请求模型。"""
 
-    true_counts: dict[str, float]
-    params: dict[str, object] = {}
+    true_counts: dict[str, float] = Field(max_length=1_000, description="各桶真实计数")
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPChunkedCountRequest(BaseModel):
     """分块流式 DP 计数请求模型。"""
 
     chunks: list[list[float]] = Field(max_length=1_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPChunkedSumRequest(BaseModel):
     """分块流式 DP 求和请求模型。"""
 
     chunks: list[list[float]] = Field(max_length=1_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPChunkedMeanRequest(BaseModel):
     """分块流式 DP 均值请求模型。"""
 
     chunks: list[list[float]] = Field(max_length=1_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPAggregateRequest(BaseModel):
     """表格级原位 DP 聚合请求模型。"""
 
     rows: list[dict[str, Any]] = Field(max_length=1_000)
-    specs: dict[str, Any] = Field(default={})
-    params: dict[str, object] = Field(default={})
+    specs: dict[str, Any] = Field(default={}, max_length=100)
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPVectorSumRequest(BaseModel):
     """高维向量 / 梯度 $L_2$ 范数截断加噪请求模型。"""
 
     vectors: list[list[float]] = Field(max_length=1_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPAdaptiveClipRequest(BaseModel):
     """差分隐私自适应二分搜索估计上下界请求模型。"""
 
     values: list[float] = Field(max_length=10_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPGroupByRequest(BaseModel):
@@ -160,7 +160,7 @@ class DPGroupByRequest(BaseModel):
     group_col: str = Field(max_length=200)
     target_col: str = Field(max_length=200)
     agg: str = Field(max_length=50)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 class DPChunkedHistogramRequest(BaseModel):
@@ -168,7 +168,7 @@ class DPChunkedHistogramRequest(BaseModel):
 
     chunks: list[list[str]] = Field(max_length=1_000)
     categories: list[str] = Field(max_length=1_000)
-    params: dict[str, object] = Field(default={})
+    params: dict[str, object] = Field(default={}, max_length=100)
 
 
 # --------------------------------------------------------------------------- #
