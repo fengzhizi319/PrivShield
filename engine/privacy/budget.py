@@ -199,8 +199,6 @@ class BudgetAccountant:
         self.epsilon_spent = 0.0
         self.delta_spent = 0.0
         self._mu = threading.Lock()
-        # Thread-local storage for SQLite connection reuse (high-concurrency optimization)
-        self._thread_local = threading.local()
         # Reuse a single BudgetAuditLogger to avoid re-reading env vars and lock creation per spend
         self._audit_logger = BudgetAuditLogger()
 
@@ -253,50 +251,39 @@ class BudgetAccountant:
             )
             self._redis_client = None
 
-    def _get_db_conn(self, db_path: str) -> sqlite3.Connection:
-        """获取线程级复用的 SQLite 连接。
+    @contextlib.contextmanager
+    def _db_conn(self, db_path: str):
+        """按操作创建并关闭 SQLite 连接的上下文管理器。
 
-        使用 ``threading.local()`` 缓存每线程的数据库连接，避免高并发 QPS
-        场景下频繁打开/关闭 SQLite 文件句柄的 CPU/IO 损耗。
+        修复旧版 ``threading.local()`` 缓存导致的连接泄漏：
+        线程池（如 FastAPI / gRPC 线程池、dynclassification ThreadPoolExecutor）
+        中的线程退出时不会自动关闭 thread-local 连接，长期运行会造成文件描述符
+        与 WAL 资源泄漏。改为每次操作独立打开/关闭连接，配合 WAL 模式与 busy
+        timeout，仍能在中等并发下保持可用。
 
-        连接创建时自动开启 WAL 模式与相关优化 pragma，以支持多进程并发读写：
+        连接创建时自动开启 WAL 模式与相关优化 pragma：
         - ``journal_mode=WAL``：读写不再互斥，写吞吐约 1K~3K TPS；
-        - ``busy_timeout=5000``：遇锁时等待 5 秒而非立即报错；
+        - ``busy_timeout=10000``：遇锁时等待 10 秒而非立即报错；
         - ``synchronous=NORMAL``：WAL 模式下安全且 faster 的同步级别。
 
         Args:
             db_path: SQLite 数据库文件路径。
 
-        Returns:
-            当前线程绑定的 sqlite3.Connection 实例。
+        Yields:
+            sqlite3.Connection: 已配置好 WAL 与超时的数据库连接。
         """
-        conn = getattr(self._thread_local, "conn", None)
-        cached_path = getattr(self._thread_local, "db_path", None)
-        if conn is None or cached_path != db_path:
-            if conn is not None:
-                with contextlib.suppress(Exception):
-                    conn.close()
-            parent_dir = os.path.dirname(db_path)
-            if parent_dir:
-                os.makedirs(parent_dir, exist_ok=True)
-            conn = sqlite3.connect(db_path, timeout=10.0)
-            # 高并发优化：开启 WAL 模式，读写不再互斥
+        parent_dir = os.path.dirname(db_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        conn = sqlite3.connect(db_path, timeout=10.0)
+        try:
             conn.execute("PRAGMA journal_mode=WAL")
-            # 高并发优化：遇锁等待 10 秒，避免 SQLITE_BUSY 立即失败
             conn.execute("PRAGMA busy_timeout=10000")
-            # 高并发优化：WAL 模式下 NORMAL 已足够安全且更快
             conn.execute("PRAGMA synchronous=NORMAL")
-            self._thread_local.conn = conn
-            self._thread_local.db_path = db_path
-        return conn
-
-    def _close_db_conn(self) -> None:
-        """关闭当前线程的 SQLite 连接（线程退出或重置时调用）。"""
-        conn = getattr(self._thread_local, "conn", None)
-        if conn is not None:
+            yield conn
+        finally:
             with contextlib.suppress(Exception):
                 conn.close()
-            self._thread_local.conn = None
 
     def _init_db(self) -> None:
         """初始化共享数据库，如果设置了 PRIVACY_BUDGET_DB 持久化路径。"""
@@ -459,8 +446,7 @@ class BudgetAccountant:
         # 2. SQLite 持久化后端
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
-            with self._mu:
-                conn = self._get_db_conn(db_path)
+            with self._mu, self._db_conn(db_path) as conn:
                 try:
                     # Ensure a clean transaction state in case a previous error left it rolled back
                     conn.rollback()
@@ -543,7 +529,6 @@ class BudgetAccountant:
                     raise
                 except Exception:
                     conn.rollback()
-                    self._close_db_conn()
                     raise
         else:
             with self._mu:
@@ -631,8 +616,7 @@ class BudgetAccountant:
         # 2. SQLite 持久化查询
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
-            with self._mu:
-                conn = self._get_db_conn(db_path)
+            with self._mu, self._db_conn(db_path) as conn:
                 try:
                     # Ensure a clean transaction state in case a previous error left it rolled back
                     conn.rollback()
@@ -685,7 +669,6 @@ class BudgetAccountant:
                         }
                 except Exception:
                     conn.rollback()
-                    self._close_db_conn()
                     raise
         else:
             with self._mu:

@@ -324,8 +324,7 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
                     },
                 )
                 # 被动健康检查更新：立即将该节点置为不健康并开启 5 秒冷却退避
-                node.is_healthy = False
-                node.passive_unhealthy_until = time.monotonic() + 5.0
+                node.mark_unhealthy(cooldown_seconds=5.0)
                 if not retry_allowed:
                     break
 

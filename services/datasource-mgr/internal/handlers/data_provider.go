@@ -78,9 +78,27 @@ var candidateDirs = []string{
 	"console/bff-go/internal/samples",
 }
 
+// allowedCSVFiles restricts which files can be loaded by LoadCSVRecords to prevent
+// path traversal / LFI attacks. Only the two official mock datasets are exposed.
+var allowedCSVFiles = map[string]struct{}{
+	"yibao.csv":    {},
+	"kangyang.csv": {},
+}
+
 func findCSVFile(filename string) (string, error) {
+	// Normalize and extract the final basename. Using filepath.Base drops any
+	// leading directory components, but an attacker could still try to access an
+	// unintended file with the same basename. We therefore also enforce an
+	// explicit allow-list and a strict ".csv" suffix.
 	cleanName := filepath.Clean(filename)
 	baseName := filepath.Base(cleanName)
+
+	if filepath.Ext(baseName) != ".csv" {
+		return "", fmt.Errorf("only .csv files are allowed: %s", baseName)
+	}
+	if _, ok := allowedCSVFiles[baseName]; !ok {
+		return "", fmt.Errorf("csv file is not in allow-list: %s", baseName)
+	}
 
 	for _, dir := range candidateDirs {
 		cand := filepath.Join(dir, baseName)

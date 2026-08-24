@@ -257,14 +257,62 @@ class BackendNode:
         self.grpc_address = grpc_address
         self.weight = max(1, weight)
         self.current_weight = 0  # 动态平滑加权轮询权重（SWRR 算法运行时更新）
-        self.is_healthy = True
-        self.passive_unhealthy_until = 0.0  # 被动故障感知冷却截止时间 (time.monotonic)
-        self.active_connections = 0  # 当前在途正在处理的并发请求计数
+        # 健康状态与在途连接数由统一的线程锁保护，避免并发调度与被动下线之间的
+        # 竞态读取（如 select_node 读取 active_connections 时 track_connection 正在
+        # 修改同一计数）。
+        self._state_lock = threading.Lock()
+        self._is_healthy = True
+        self._passive_unhealthy_until = 0.0  # 被动故障感知冷却截止时间 (time.monotonic)
+        self._active_connections = 0  # 当前在途正在处理的并发请求计数
         self.circuit_breaker = CircuitBreaker()  # 专属独立熔断器
         self._grpc_channel: grpc.aio.Channel | None = None
         self._grpc_stub: privacy_pb2_grpc.PrivacyServiceStub | None = None
-        self._connection_lock = asyncio.Lock()  # 保护 active_connections 原子操作
         self._stub_lock = threading.Lock()  # 保护 grpc_stub 延迟初始化的双重检查锁
+
+    # ------------------------------------------------------------------
+    # 线程安全的健康状态与连接数属性
+    # ------------------------------------------------------------------
+    @property
+    def is_healthy(self) -> bool:
+        with self._state_lock:
+            return self._is_healthy
+
+    @is_healthy.setter
+    def is_healthy(self, value: bool) -> None:
+        with self._state_lock:
+            self._is_healthy = bool(value)
+
+    @property
+    def passive_unhealthy_until(self) -> float:
+        with self._state_lock:
+            return self._passive_unhealthy_until
+
+    @passive_unhealthy_until.setter
+    def passive_unhealthy_until(self, value: float) -> None:
+        with self._state_lock:
+            self._passive_unhealthy_until = float(value)
+
+    @property
+    def active_connections(self) -> int:
+        with self._state_lock:
+            return self._active_connections
+
+    @active_connections.setter
+    def active_connections(self, value: int) -> None:
+        with self._state_lock:
+            self._active_connections = max(0, int(value))
+
+    def mark_unhealthy(self, cooldown_seconds: float = 5.0) -> None:
+        """原子地将节点标记为不健康并设置被动冷却截止时间。"""
+        with self._state_lock:
+            self._is_healthy = False
+            self._passive_unhealthy_until = time.monotonic() + cooldown_seconds
+
+    def mark_healthy(self) -> None:
+        """原子地将节点标记为健康并清除被动冷却截止时间。"""
+        with self._state_lock:
+            self._is_healthy = True
+            self._passive_unhealthy_until = 0.0
 
     @property
     def grpc_stub(self) -> privacy_pb2_grpc.PrivacyServiceStub:
@@ -304,17 +352,23 @@ class BackendNode:
         """自动追踪在途活跃连接数的异步上下文管理器（供最小连接数算法精确计量）。
 
         执行步骤：
-            1. 进入上下文：加锁递增 `self.active_connections += 1`；
+            1. 进入上下文：在线程锁保护下递增 `_active_connections`；
             2. yield 出让执行权给业务请求；
-            3. 退出上下文：在 finally 块中加锁递减 `self.active_connections`（下限保底为 0）。
+            3. 退出上下文：在 finally 块中在线程锁保护下递减 `_active_connections`（下限保底为 0）。
+
+        使用 `threading.Lock` 而非 `asyncio.Lock`，因为 `active_connections` 会被同步的
+        `select_node` 读取；通过 `asyncio.to_thread` 跨协程安全地获取锁，避免在途计数
+        读取与修改之间的竞态条件。
         """
-        async with self._connection_lock:
-            self.active_connections += 1
+        await asyncio.to_thread(self._state_lock.acquire)
+        self._active_connections += 1
+        self._state_lock.release()
         try:
             yield self
         finally:
-            async with self._connection_lock:
-                self.active_connections = max(0, self.active_connections - 1)
+            await asyncio.to_thread(self._state_lock.acquire)
+            self._active_connections = max(0, self._active_connections - 1)
+            self._state_lock.release()
 
     async def close(self) -> None:
         """优雅关闭并释放该节点的底层 gRPC 通道。
@@ -350,8 +404,32 @@ class LoadBalancer:
         self.strategy = strategy.lower()
         self.nodes: list[BackendNode] = []
         self.rr_index = 0
-        self.modify_lock = threading.Lock()  # 保护节点池增删操作的线程锁
-        self._selection_lock = asyncio.Lock()  # 保护节点选择调度过程的协程锁
+        # 统一节点池锁：保护 nodes 列表、rr_index 以及 current_weight 的读写。
+        # 同步 API（add_node / remove_node / get_healthy_nodes）直接加锁；
+        # 异步调度（select_node / health_check_loop）通过 asyncio.to_thread 安全获取，
+        # 避免在事件循环线程中阻塞其他协程。
+        self._nodes_lock = threading.Lock()
+        # 保留旧别名以便现有代码兼容。
+        self.modify_lock = self._nodes_lock
+        # 协程级调度锁：保证 select_node 内部状态更新（rr_index / current_weight）原子可见。
+        self._selection_lock = asyncio.Lock()
+
+    def _get_healthy_nodes_locked(self, nodes: list[BackendNode]) -> list[BackendNode]:
+        """在已持有 `_nodes_lock` 的前提下计算健康节点列表。
+
+        判定准则（必须同时满足 3 项）：
+            1. `node.is_healthy is True`（主动探针检查通过）；
+            2. `time.monotonic() >= node.passive_unhealthy_until`（被动故障 5 秒冷却已过）；
+            3. `node.circuit_breaker.allow_request() is True`（熔断器允许请求通过）。
+        """
+        now = time.monotonic()
+        return [
+            node
+            for node in nodes
+            if node.is_healthy
+            and now >= node.passive_unhealthy_until
+            and node.circuit_breaker.allow_request()
+        ]
 
     def add_node(self, http_url: str, grpc_address: str, weight: int = 1) -> None:
         """向节点池添加新节点或就地更新既有节点 (线程安全、自动去重与状态复位)。
@@ -366,21 +444,21 @@ class LoadBalancer:
             3. 新增节点：若不存在，实例化 `BackendNode` 并追加至列表；
             4. 触发 `_update_healthy_gauge()` 刷新监控指标。
         """
-        with self.modify_lock:
+        with self._nodes_lock:
             clean_url = http_url.rstrip("/")
             for node in self.nodes:
                 if node.http_url == clean_url and node.grpc_address == grpc_address:
-                    node.is_healthy = True
-                    node.passive_unhealthy_until = 0.0
+                    node.mark_healthy()
                     node.weight = max(1, weight)
                     node.active_connections = 0
+                    node.current_weight = 0
                     node.circuit_breaker.record_success()
                     logger.info(
                         "Updated existing backend node",
                         extra={"http_url": http_url, "grpc_address": grpc_address},
                     )
                     # 节点被重新标记为健康，同步刷新健康节点数指标
-                    self._update_healthy_gauge()
+                    self._update_healthy_gauge_locked()
                     return
 
             node = BackendNode(http_url, grpc_address, weight)
@@ -389,38 +467,30 @@ class LoadBalancer:
                 "Added backend node",
                 extra={"http_url": http_url, "grpc_address": grpc_address},
             )
-            self._update_healthy_gauge()
+            self._update_healthy_gauge_locked()
 
     def remove_node(self, http_url: str, grpc_address: str) -> None:
-        """从节点池安全注销工作节点并异步关闭其 gRPC 通道。
+        """从节点池安全注销工作节点并在后台线程优雅关闭其 gRPC 通道。
 
         执行步骤：
             1. 格式正规化并过滤出目标节点；
-            2. 双环境优雅销毁底层连接：
-               - 检测是否存在运行中的 AsyncIO 事件循环（如在 REST 注销端点中）；
-               - 若存在，通过 `loop.create_task(node.close())` 异步排空关闭通道；
-               - 若处于同步环境（如测试销毁），降级使用 `asyncio.run(node.close())`；
+            2. 在独立守护线程中关闭底层 gRPC 通道，避免在调用线程中直接
+               `asyncio.run(node.close())` 造成的事件循环嵌套或 fire-and-forget 泄漏；
             3. 更新节点池列表，记录日志并刷新 Prometheus 健康节点指标。
         """
-        with self.modify_lock:
+        with self._nodes_lock:
             clean_url = http_url.rstrip("/")
             new_nodes = []
             removed = False
             for node in self.nodes:
                 if node.http_url == clean_url and node.grpc_address == grpc_address:
-                    # 尽力关闭该节点的 gRPC 通道：
-                    # - 存在运行中的事件循环（如 REST 注销路由）时调度异步关闭；
-                    # - 同步上下文（脚本/测试）中没有运行中的循环，
-                    #   create_task 会抛 RuntimeError，此时用独立循环完成关闭。
-                    try:
-                        loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        loop = None
-                    if loop is not None:
-                        loop.create_task(node.close())  # noqa: RUF006
-                    else:
-                        with contextlib.suppress(Exception):
-                            asyncio.run(node.close())
+                    # 在后台线程中完成异步 close，避免阻塞当前调用线程，
+                    # 也避免与已运行事件循环产生嵌套冲突。
+                    threading.Thread(
+                        target=lambda n: asyncio.run(n.close()),
+                        args=(node,),
+                        daemon=True,
+                    ).start()
                     removed = True
                 else:
                     new_nodes.append(node)
@@ -430,95 +500,79 @@ class LoadBalancer:
                     "Removed backend node",
                     extra={"http_url": http_url, "grpc_address": grpc_address},
                 )
-                self._update_healthy_gauge()
+                self._update_healthy_gauge_locked()
 
     def get_healthy_nodes(self) -> list[BackendNode]:
         """获取当前处于健康可用状态且未被熔断器阻断的节点列表。
 
-        判定准则（必须同时满足 3 项）：
-            1. `node.is_healthy is True`（主动探针检查通过）；
-            2. `time.monotonic() >= node.passive_unhealthy_until`（被动故障 5 秒冷却已过）；
-            3. `node.circuit_breaker.allow_request() is True`（熔断器允许请求通过）。
-
         Returns:
             list[BackendNode]: 可路由的健康节点列表。
         """
-        return [
-            node
-            for node in self.nodes
-            if node.is_healthy
-            and time.monotonic() >= node.passive_unhealthy_until
-            and node.circuit_breaker.allow_request()
-        ]
+        with self._nodes_lock:
+            return self._get_healthy_nodes_locked(self.nodes)
 
     async def select_node(self) -> BackendNode | None:
         """根据配置的负载均衡算法从健康节点池中挑选一个目标节点。
 
         执行步骤：
             1. 加锁 `_selection_lock`，防止多协程并发调度产生竞争；
-            2. 调用 `get_healthy_nodes()` 过滤可用节点，若列表为空立即返回 None；
-            3. 执行算法分支：
-               - **Random / Weighted Random**：调用 `random.choices` 按静态权重带权抽样；
-               - **Least Connections**：寻找 `active_connections` 最小的节点；
-               - **Weighted Round-Robin (SWRR 平滑加权轮询)**：
-                 a. 遍历每个健康节点，累加其静态权重：`node.current_weight += node.weight`，并计算 `total_weight`；
-                 b. 选取 `current_weight` 最大的节点作为 `best_node`；
-                 c. 将该节点的动态权重扣除总权重：`best_node.current_weight -= total_weight`；
-                 d. 返回 `best_node`；
-               - **Round-Robin (普通轮询)**：
-                 取 `healthy[self.rr_index % len(healthy)]`，并将游标递增 1；
-            4. 返回选中的节点对象。
+            2. 在后台线程获取 `_nodes_lock` 并复制一致节点池快照；
+            3. 过滤可用节点，若列表为空立即返回 None；
+            4. 执行算法分支并返回选中的节点对象。
 
         Returns:
             BackendNode | None: 选中的后端节点，若无可路由节点返回 None。
         """
         async with self._selection_lock:
-            healthy = self.get_healthy_nodes()
-            if not healthy:
-                return None
 
-            if self.strategy in ("random", "weighted_random"):
-                weights = [n.weight for n in healthy]
-                return random.choices(healthy, weights=weights, k=1)[0]
+            def _select() -> BackendNode | None:
+                with self._nodes_lock:
+                    healthy = self._get_healthy_nodes_locked(self.nodes)
+                    if not healthy:
+                        return None
 
-            elif self.strategy in ("p2c", "power_of_two_choices"):
-                # Power of Two Choices (P2C) Algorithm:
-                # Randomly pick 2 nodes and choose the one with least relative load
-                if len(healthy) == 1:
-                    return healthy[0]
-                n1, n2 = random.sample(healthy, 2)
-                score1 = n1.active_connections / max(1, n1.weight)
-                score2 = n2.active_connections / max(1, n2.weight)
-                return n1 if score1 <= score2 else n2
+                    if self.strategy in ("random", "weighted_random"):
+                        weights = [n.weight for n in healthy]
+                        return random.choices(healthy, weights=weights, k=1)[0]
 
-            elif self.strategy == "least_connections":
-                return min(healthy, key=lambda n: n.active_connections)
+                    if self.strategy in ("p2c", "power_of_two_choices"):
+                        if len(healthy) == 1:
+                            return healthy[0]
+                        n1, n2 = random.sample(healthy, 2)
+                        score1 = n1.active_connections / max(1, n1.weight)
+                        score2 = n2.active_connections / max(1, n2.weight)
+                        return n1 if score1 <= score2 else n2
 
-            elif self.strategy == "weighted_round_robin":
-                # Smooth Weighted Round-Robin (Nginx Algorithm)
-                total_weight = sum(n.weight for n in healthy)
-                best_node: BackendNode | None = None
-                for node in healthy:
-                    node.current_weight += node.weight
-                    if best_node is None or node.current_weight > best_node.current_weight:
-                        best_node = node
-                if best_node is not None:
-                    best_node.current_weight -= total_weight
-                return best_node
+                    if self.strategy == "least_connections":
+                        return min(healthy, key=lambda n: n.active_connections)
 
-            else:  # round_robin
-                node = healthy[self.rr_index % len(healthy)]
-                self.rr_index = (self.rr_index + 1) % len(healthy)
-                return node
+                    if self.strategy == "weighted_round_robin":
+                        # Smooth Weighted Round-Robin (Nginx Algorithm)
+                        total_weight = sum(n.weight for n in healthy)
+                        best_node: BackendNode | None = None
+                        for node in healthy:
+                            node.current_weight += node.weight
+                            if best_node is None or node.current_weight > best_node.current_weight:
+                                best_node = node
+                        if best_node is not None:
+                            best_node.current_weight -= total_weight
+                        return best_node
+
+                    # round_robin
+                    node = healthy[self.rr_index % len(healthy)]
+                    self.rr_index = (self.rr_index + 1) % len(healthy)
+                    return node
+
+            return await asyncio.to_thread(_select)
 
     async def close_all(self) -> None:
         """优雅关闭节点池中所有后端实例的 gRPC 通道。"""
         for node in self.nodes:
             await node.close()
 
-    def _update_healthy_gauge(self) -> None:
-        """同步更新 Prometheus 健康可用节点数 Gauge 指标。"""
-        count = len(self.get_healthy_nodes())
+    def _update_healthy_gauge_locked(self) -> None:
+        """在已持有 `_nodes_lock` 时更新 Prometheus 健康可用节点数 Gauge 指标。"""
+        count = len(self._get_healthy_nodes_locked(self.nodes))
         GATEWAY_HEALTHY_NODES.set(count)
 
 
@@ -551,7 +605,15 @@ async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0) -> No
     # 回源 TLS 启用时按配置的 CA 校验后端证书（backend_tls_verify 在配置缺失时抛错）
     async with httpx.AsyncClient(verify=backend_tls_verify()) as client:
         while True:
-            for node in balancer.nodes:
+            # 在事件循环安全地获取节点池快照，避免巡检期间节点池被 add/remove 修改
+            # 导致迭代器失效或访问已移除节点。
+            await asyncio.to_thread(balancer._nodes_lock.acquire)
+            try:
+                nodes = balancer.nodes.copy()
+            finally:
+                balancer._nodes_lock.release()
+
+            for node in nodes:
                 # 1. 检查 REST (HTTP) 服务
                 http_ok = False
                 try:
@@ -579,20 +641,21 @@ async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0) -> No
                         extra={"node": node.grpc_address, "error": str(e)},
                     )
 
-                # 3. 状态决策与更替
+                # 3. 状态决策与更替（节点级状态锁保护，避免与 select_node 读取产生竞态）
                 was_healthy = node.is_healthy
                 passive_cooldown = time.monotonic() < node.passive_unhealthy_until
-                node.is_healthy = http_ok and grpc_ok and not passive_cooldown
+                healthy_now = http_ok and grpc_ok and not passive_cooldown
+                node.is_healthy = healthy_now
 
                 # Update circuit breaker based on health result
-                if node.is_healthy:
+                if healthy_now:
                     node.circuit_breaker.record_success()
                 else:
                     node.circuit_breaker.record_failure()
 
-                if was_healthy != node.is_healthy:
-                    status_str = "healthy" if node.is_healthy else "unhealthy"
-                    log_func = logger.info if node.is_healthy else logger.warning
+                if was_healthy != healthy_now:
+                    status_str = "healthy" if healthy_now else "unhealthy"
+                    log_func = logger.info if healthy_now else logger.warning
                     log_func(
                         "Node status changed",
                         extra={
@@ -604,6 +667,10 @@ async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0) -> No
                         },
                     )
 
-            # Update gauge after each sweep
-            balancer._update_healthy_gauge()
+            # Update gauge after each sweep（加锁保证与节点池状态一致）
+            await asyncio.to_thread(balancer._nodes_lock.acquire)
+            try:
+                balancer._update_healthy_gauge_locked()
+            finally:
+                balancer._nodes_lock.release()
             await asyncio.sleep(interval)

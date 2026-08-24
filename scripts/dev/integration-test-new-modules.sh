@@ -4,12 +4,13 @@
 # 三个中台微服务模块的集成测试脚本
 #
 # 测试内容：
-#   1. 三个模块的健康检查
-#   2. 模块间联动（service-hub → agent, datasource-mgr → agent, audit-log）
-#   3. 端到端流水线：数据源注册 → 分类分级 → 调度脱敏 → 审计记录
+#   1. 三个模块及 Agent 的健康检查
+#   2. datasource-mgr 模拟数据源操作（seed/list/records/test）
+#   3. service-hub 任务调度（dispatch/classify/status/tasks）
+#   4. audit-log 审计存证（create/list/stats/report）
 #
 # 前置条件：
-#   - 三个模块已启动（dev-start-new-modules.sh 或 e2e-start-all-services.sh）
+#   - 三个模块已启动（dev-start-new-modules.sh / e2e-start-all-services.sh / docker-start-all.sh）
 #   - PrivShield Agent 已运行（REST: 8079）
 #
 # Usage:
@@ -73,6 +74,65 @@ assert_json_field() {
     fi
 }
 
+assert_json_field_not_empty() {
+    local desc="$1"
+    local json="$2"
+    local field="$3"
+
+    local actual
+    actual=$(echo "$json" | python3 -c "import sys,json; v=json.load(sys.stdin).get('$field'); print(v if v is not None else '')" 2>/dev/null || echo "")
+
+    if [ -n "$actual" ]; then
+        log_info "$desc ($field present)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        log_error "$desc (expected $field to be present)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+}
+
+curl_json() {
+    local method="$1"
+    local url="$2"
+    local body="${3:-}"
+
+    if [ -n "$body" ]; then
+        curl -s -X "$method" "$url" -H "Content-Type: application/json" -d "$body" 2>/dev/null || echo "{}"
+    else
+        curl -s -X "$method" "$url" 2>/dev/null || echo "{}"
+    fi
+}
+
+curl_status() {
+    local method="$1"
+    local url="$2"
+    local body="${3:-}"
+
+    if [ -n "$body" ]; then
+        curl -s -o /dev/null -w "%{http_code}" -X "$method" "$url" -H "Content-Type: application/json" -d "$body" 2>/dev/null || echo "000"
+    else
+        curl -s -o /dev/null -w "%{http_code}" -X "$method" "$url" 2>/dev/null || echo "000"
+    fi
+}
+
+wait_for_task() {
+    local task_id="$1"
+    local deadline=$((SECONDS + 15))
+
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        local status_json
+        status_json=$(curl_json GET "${SERVICE_HUB_URL}/api/hub/tasks/${task_id}")
+        local status
+        status=$(echo "$status_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task',{}).get('status',''))" 2>/dev/null || echo "")
+        if [ "$status" = "completed" ] || [ "$status" = "failed" ]; then
+            echo "$status"
+            return
+        fi
+        sleep 0.5
+    done
+    echo "timeout"
+}
+
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║   Integration Test: service-hub / datasource-mgr / audit-log  ║"
@@ -83,23 +143,19 @@ echo ""
 log_step "Phase 1: Health Checks"
 echo ""
 
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_HUB_URL}/api/health" 2>/dev/null || echo "000")
-assert_status "service-hub health" "200" "$STATUS"
-
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DATASOURCE_MGR_URL}/api/health" 2>/dev/null || echo "000")
-assert_status "datasource-mgr health" "200" "$STATUS"
-
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${AUDIT_LOG_URL}/api/health" 2>/dev/null || echo "000")
-assert_status "audit-log health" "200" "$STATUS"
+assert_status "service-hub health" "200" "$(curl_status GET "${SERVICE_HUB_URL}/api/health")"
+assert_status "datasource-mgr health" "200" "$(curl_status GET "${DATASOURCE_MGR_URL}/api/health")"
+assert_status "audit-log health" "200" "$(curl_status GET "${AUDIT_LOG_URL}/api/health")"
+assert_status "PrivShield Agent health" "200" "$(curl_status GET "${AGENT_URL}/health")"
 
 echo ""
 
-# ── Phase 2: Agent Connectivity ────────────────────────────────────────
+# ── Phase 2: Agent Connectivity (privacy primitive smoke test) ───────────
 log_step "Phase 2: Agent Connectivity"
 echo ""
 
-AGENT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${AGENT_URL}/health" 2>/dev/null || echo "000")
-assert_status "PrivShield Agent health" "200" "$AGENT_STATUS"
+AGENT_MASK_RESP=$(curl_json POST "${AGENT_URL}/v1/privacy/mask" '{"field_name": "name", "value": "测试用户"}')
+assert_json_field_not_empty "Agent mask response" "$AGENT_MASK_RESP" "result"
 
 echo ""
 
@@ -107,30 +163,21 @@ echo ""
 log_step "Phase 3: datasource-mgr Operations"
 echo ""
 
-DS_RESP=$(curl -s -X POST "${DATASOURCE_MGR_URL}/api/datasources" \
-    -H "Content-Type: application/json" \
-    -d '{
-        "name": "test-yibao-db",
-        "type": "csv",
-        "connection_info": "{\"path\": \"data/yibao.csv\"}",
-        "description": "Integration test datasource"
-    }')
-assert_json_field "Create datasource" "$DS_RESP" "code" "0"
+DS_SEED_RESP=$(curl_json POST "${DATASOURCE_MGR_URL}/api/datasources/seed")
+assert_status "Seed mock datasources" "200" "$(curl_status POST "${DATASOURCE_MGR_URL}/api/datasources/seed")"
+assert_json_field "Seed confirmation" "$DS_SEED_RESP" "via" "datasource-mgr"
 
-DS_ID=$(echo "$DS_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('id',''))" 2>/dev/null || echo "")
+DS_LIST_RESP=$(curl_json GET "${DATASOURCE_MGR_URL}/api/datasources")
+assert_status "List datasources" "200" "$(curl_status GET "${DATASOURCE_MGR_URL}/api/datasources")"
+assert_json_field_not_empty "List datasources total" "$DS_LIST_RESP" "total"
 
-if [ -n "$DS_ID" ]; then
-    log_info "Created datasource ID: $DS_ID"
+DS_RECORDS_RESP=$(curl_json GET "${DATASOURCE_MGR_URL}/api/datasources/ds_yibao/records?limit=3")
+assert_status "Get ds_yibao records" "200" "$(curl_status GET "${DATASOURCE_MGR_URL}/api/datasources/ds_yibao/records?limit=3")"
+assert_json_field_not_empty "ds_yibao records" "$DS_RECORDS_RESP" "records"
 
-    LIST_RESP=$(curl -s "${DATASOURCE_MGR_URL}/api/datasources")
-    assert_json_field "List datasources" "$LIST_RESP" "code" "0"
-
-    TEST_CONN_RESP=$(curl -s -X POST "${DATASOURCE_MGR_URL}/api/datasources/${DS_ID}/test-connection")
-    assert_json_field "Test connection" "$TEST_CONN_RESP" "code" "0"
-
-    AUTO_PROBE_RESP=$(curl -s -X POST "${DATASOURCE_MGR_URL}/api/datasources/${DS_ID}/auto-probe")
-    assert_json_field "Auto probe" "$AUTO_PROBE_RESP" "code" "0"
-fi
+DS_TEST_RESP=$(curl_json POST "${DATASOURCE_MGR_URL}/api/datasources/ds_yibao/test")
+assert_status "Test ds_yibao connection" "200" "$(curl_status POST "${DATASOURCE_MGR_URL}/api/datasources/ds_yibao/test")"
+assert_json_field "Test connection via" "$DS_TEST_RESP" "via" "datasource-mgr"
 
 echo ""
 
@@ -138,33 +185,63 @@ echo ""
 log_step "Phase 4: service-hub Pipeline Execution"
 echo ""
 
-TASK_RESP=$(curl -s -X POST "${SERVICE_HUB_URL}/api/tasks" \
-    -H "Content-Type: application/json" \
-    -d '{
-        "title": "Integration Test Pipeline Task",
-        "description": "E2E pipeline test via integration-test-new-modules.sh",
-        "submitter": "qa-automation",
-        "dataset_name": "yibao_settlement",
-        "record_count": 5,
-        "purpose": "medical_insurance_analytics",
-        "data": [
-            {"id": "YB001", "name": "张三", "id_card": "110101199003072345", "phone": "13800138000", "diagnosis": "高血压", "fee": 1250.50},
-            {"id": "YB002", "name": "李四", "id_card": "310104198512154567", "phone": "13912345678", "diagnosis": "2型糖尿病", "fee": 3400.00}
-        ]
-    }')
-assert_json_field "Submit pipeline task" "$TASK_RESP" "code" "0"
+CLASSIFY_RESP=$(curl_json POST "${SERVICE_HUB_URL}/api/hub/classify" '{
+    "source": "ds_yibao",
+    "payload": {"name": "张三", "id_card": "110101199003072345", "phone": "13800138000", "diagnosis": "高血压"}
+}')
+assert_status "Submit classify task" "200" "$(curl_status POST "${SERVICE_HUB_URL}/api/hub/classify" '{
+    "source": "ds_yibao",
+    "payload": {"name": "张三", "id_card": "110101199003072345", "phone": "13800138000", "diagnosis": "高血压"}
+}')"
+assert_json_field_not_empty "Classify task_id" "$CLASSIFY_RESP" "task_id"
 
-TASK_ID=$(echo "$TASK_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('id',''))" 2>/dev/null || echo "")
-
+TASK_ID=$(echo "$CLASSIFY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
 if [ -n "$TASK_ID" ]; then
-    log_info "Created Task ID: $TASK_ID"
-
-    TASK_DETAIL=$(curl -s "${SERVICE_HUB_URL}/api/tasks/${TASK_ID}")
-    assert_json_field "Get task detail" "$TASK_DETAIL" "code" "0"
-
-    TASK_STATUS=$(echo "$TASK_DETAIL" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('status',''))" 2>/dev/null || echo "")
-    log_info "Task execution status: $TASK_STATUS"
+    log_info "Created classify task ID: $TASK_ID"
+    FINAL_STATUS=$(wait_for_task "$TASK_ID")
+    if [ "$FINAL_STATUS" = "completed" ] || [ "$FINAL_STATUS" = "failed" ]; then
+        log_info "Classify task final status: $FINAL_STATUS"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        log_error "Classify task did not finish in time (status=$FINAL_STATUS)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
 fi
+
+DISPATCH_RESP=$(curl_json POST "${SERVICE_HUB_URL}/api/hub/dispatch" '{
+    "source": "ds_kangyang",
+    "operation": "mask",
+    "priority": 1,
+    "payload": {"name": "李四", "id_card": "310104198512154567", "phone": "13912345678", "diagnosis": "2型糖尿病"}
+}')
+assert_status "Submit dispatch masking task" "202" "$(curl_status POST "${SERVICE_HUB_URL}/api/hub/dispatch" '{
+    "source": "ds_kangyang",
+    "operation": "mask",
+    "priority": 1,
+    "payload": {"name": "李四", "id_card": "310104198512154567", "phone": "13912345678", "diagnosis": "2型糖尿病"}
+}')"
+assert_json_field "Dispatch accepted status" "$DISPATCH_RESP" "status" "accepted"
+
+DISPATCH_ID=$(echo "$DISPATCH_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
+if [ -n "$DISPATCH_ID" ]; then
+    log_info "Created dispatch task ID: $DISPATCH_ID"
+    FINAL_STATUS=$(wait_for_task "$DISPATCH_ID")
+    if [ "$FINAL_STATUS" = "completed" ] || [ "$FINAL_STATUS" = "failed" ]; then
+        log_info "Dispatch task final status: $FINAL_STATUS"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        log_error "Dispatch task did not finish in time (status=$FINAL_STATUS)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+fi
+
+HUB_STATUS_RESP=$(curl_json GET "${SERVICE_HUB_URL}/api/hub/status")
+assert_status "Hub status" "200" "$(curl_status GET "${SERVICE_HUB_URL}/api/hub/status")"
+assert_json_field_not_empty "Hub status running" "$HUB_STATUS_RESP" "status"
+
+PIPELINE_RESP=$(curl_json GET "${SERVICE_HUB_URL}/api/hub/pipeline")
+assert_status "Pipeline status" "200" "$(curl_status GET "${SERVICE_HUB_URL}/api/hub/pipeline")"
+assert_json_field_not_empty "Pipeline stages" "$PIPELINE_RESP" "stages"
 
 echo ""
 
@@ -172,19 +249,53 @@ echo ""
 log_step "Phase 5: audit-log Verification"
 echo ""
 
-AUDIT_LOGS_RESP=$(curl -s "${AUDIT_LOG_URL}/api/logs?page=1&page_size=10")
-assert_json_field "List audit logs" "$AUDIT_LOGS_RESP" "code" "0"
+AUDIT_CREATE_RESP=$(curl_json POST "${AUDIT_LOG_URL}/api/audit/logs" '{
+    "operation": "mask",
+    "datasource": "ds_yibao",
+    "status": "success",
+    "user": "qa-automation",
+    "input_rows": 2,
+    "output_rows": 2,
+    "duration_ms": 120,
+    "algorithm": "masking",
+    "security_level": "L4"
+}')
+assert_status "Create audit log" "201" "$(curl_status POST "${AUDIT_LOG_URL}/api/audit/logs" '{
+    "operation": "mask",
+    "datasource": "ds_yibao",
+    "status": "success",
+    "user": "qa-automation",
+    "input_rows": 2,
+    "output_rows": 2,
+    "duration_ms": 120,
+    "algorithm": "masking",
+    "security_level": "L4"
+}')"
+assert_json_field_not_empty "Audit log ID" "$AUDIT_CREATE_RESP" "id"
 
-AUDIT_STATS_RESP=$(curl -s "${AUDIT_LOG_URL}/api/stats")
-assert_json_field "Audit stats" "$AUDIT_STATS_RESP" "code" "0"
+AUDIT_ID=$(echo "$AUDIT_CREATE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+if [ -n "$AUDIT_ID" ]; then
+    log_info "Created audit log ID: $AUDIT_ID"
+    AUDIT_DETAIL_RESP=$(curl_json GET "${AUDIT_LOG_URL}/api/audit/logs/${AUDIT_ID}")
+    assert_status "Get audit log detail" "200" "$(curl_status GET "${AUDIT_LOG_URL}/api/audit/logs/${AUDIT_ID}")"
+    assert_json_field "Audit log operation" "$AUDIT_DETAIL_RESP" "operation" "mask"
+fi
 
-REPORT_RESP=$(curl -s -X POST "${AUDIT_LOG_URL}/api/reports/generate" \
-    -H "Content-Type: application/json" \
-    -d '{
-        "title": "Integration Test Compliance Report",
-        "time_range": "24h"
-    }')
-assert_json_field "Generate compliance report" "$REPORT_RESP" "code" "0"
+AUDIT_LOGS_RESP=$(curl_json GET "${AUDIT_LOG_URL}/api/audit/logs?limit=5")
+assert_status "List audit logs" "200" "$(curl_status GET "${AUDIT_LOG_URL}/api/audit/logs?limit=5")"
+assert_json_field_not_empty "Audit logs total" "$AUDIT_LOGS_RESP" "total"
+
+AUDIT_STATS_RESP=$(curl_json GET "${AUDIT_LOG_URL}/api/audit/stats")
+assert_status "Audit stats" "200" "$(curl_status GET "${AUDIT_LOG_URL}/api/audit/stats")"
+assert_json_field_not_empty "Audit stats total_operations" "$AUDIT_STATS_RESP" "total_operations"
+
+REPORT_RESP=$(curl_json POST "${AUDIT_LOG_URL}/api/audit/report" '{
+    "period": "24h"
+}')
+assert_status "Generate compliance report" "200" "$(curl_status POST "${AUDIT_LOG_URL}/api/audit/report" '{
+    "period": "24h"
+}')"
+assert_json_field_not_empty "Report generated_at" "$REPORT_RESP" "generated_at"
 
 echo ""
 

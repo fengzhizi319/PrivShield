@@ -190,8 +190,7 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
                         },
                     )
                     # 毫秒级被动健康下线（5秒冷却）
-                    node.is_healthy = False
-                    node.passive_unhealthy_until = time.monotonic() + 5.0
+                    node.mark_unhealthy(cooldown_seconds=5.0)
                 else:
                     # 正常的业务级/参数类错误，无需重试，直接透传
                     duration = time.perf_counter() - start_time
@@ -215,8 +214,7 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
                         "circuit_breaker": node.circuit_breaker.state,
                     },
                 )
-                node.is_healthy = False
-                node.passive_unhealthy_until = time.monotonic() + 5.0
+                node.mark_unhealthy(cooldown_seconds=5.0)
 
         # 步骤 3: 若全部重试机会已耗尽
         duration = time.perf_counter() - start_time

@@ -506,26 +506,19 @@ class DynClassificationService:
         record_results: list[RecordClassificationResult] = []
         all_tags: list[SecurityTag] = []
 
-        # Classify rows (parallelize using ThreadPoolExecutor when rows count > 16)
-        if len(rows) > 16:
-            import concurrent.futures
-            max_workers = min(16, os.cpu_count() or 4)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(self.classify_record, row, idx, domain, standard)
-                    for idx, row in enumerate(rows)
-                ]
-                for fut in futures:
-                    resp = fut.result()
-                    if resp.record_result:
-                        record_results.append(resp.record_result)
-                        all_tags.extend(resp.record_result.aggregated_tags)
-        else:
-            for idx, row in enumerate(rows):
-                resp = self.classify_record(row, record_index=idx, domain=domain, standard=standard)
-                if resp.record_result:
-                    record_results.append(resp.record_result)
-                    all_tags.extend(resp.record_result.aggregated_tags)
+        # Classify rows sequentially to avoid shared-state races on the service-wide
+        # caches, lazy-loaded adapters, and ProfileLoader caches when multiple
+        # worker threads from ThreadPoolExecutor concurrently touch the same
+        # mutable service state. The per-row work is CPU-bound under the GIL, so
+        # the marginal speedup from threading is small while the correctness risk
+        # (non-atomic adapter init, cache mutation, and connection leakage) is
+        # real. If high throughput is needed, prefer batching smaller requests or
+        # running table classification in a dedicated process pool.
+        for idx, row in enumerate(rows):
+            resp = self.classify_record(row, record_index=idx, domain=domain, standard=standard)
+            if resp.record_result:
+                record_results.append(resp.record_result)
+                all_tags.extend(resp.record_result.aggregated_tags)
 
         # Determine table-level final level (highest across all records).
         engine = self.loader.get_engine(domain=domain, standard=standard)

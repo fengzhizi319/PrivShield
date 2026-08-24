@@ -226,3 +226,34 @@ func TestSeedDataSources(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
+
+func TestLoadCSVRecords_PathTraversal(t *testing.T) {
+	// Absolute path attempts should be rejected by the allow-list / basename logic.
+	malicious := []string{
+		"../../../etc/passwd.csv",
+		"..\\..\\..\\etc\\passwd.csv",
+		"/etc/passwd.csv",
+		"yibao.txt",
+		"unknown.csv",
+		"yibao.csv/../../etc/passwd.csv",
+	}
+
+	for _, name := range malicious {
+		if _, _, err := LoadCSVRecords(name, 10, 0); err == nil {
+			t.Errorf("expected error for path traversal attempt %q, got nil", name)
+		}
+	}
+}
+
+func TestLoadCSVRecords_AllowedFiles(t *testing.T) {
+	// The two official mock datasets must continue to load successfully.
+	for _, name := range []string{"yibao.csv", "kangyang.csv"} {
+		records, total, err := LoadCSVRecords(name, 5, 0)
+		if err != nil {
+			t.Fatalf("unexpected error loading %s: %v", name, err)
+		}
+		if total <= 0 || len(records) == 0 {
+			t.Errorf("expected records for %s, got total=%d len=%d", name, total, len(records))
+		}
+	}
+}

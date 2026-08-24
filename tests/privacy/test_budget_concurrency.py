@@ -1,7 +1,7 @@
 """高并发与锁多线程压力测试。
 
 验证 BudgetAccountant 在内存与 SQLite 存储后端下的多线程并发扣减安全性、
-数据一致性、BudgetRegistry 单例工厂的高并发争用正确性，以及 SQLite 线程级连接复用。
+数据一致性、BudgetRegistry 单例工厂的高并发争用正确性，以及 SQLite 每操作独立连接。
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
+import sqlite3
 
 from engine.privacy.budget import (
     PrivacyBudgetExhausted,
@@ -136,31 +137,30 @@ class TestSQLiteConcurrency:
         finally:
             conn.close()
 
-    def test_sqlite_thread_local_conn_reuse(self, tmp_path, monkeypatch):
-        """验证同一线程多次 spend 复用同一个 SQLite 连接。"""
-        db_file = str(tmp_path / "budget_reuse.db")
+    def test_sqlite_per_operation_conn(self, tmp_path, monkeypatch):
+        """验证每次 spend 都打开并关闭独立的 SQLite 连接，避免 thread-local 连接泄漏。"""
+        db_file = str(tmp_path / "budget_per_op.db")
         monkeypatch.setenv("PRIVACY_BUDGET_DB", db_file)
 
-        ns = "conn-reuse"
+        ns = "conn-per-op"
         acct = default_registry.get_or_create(ns, epsilon_total=100.0, delta_total=1.0)
 
-        # First spend creates the connection
-        acct.spend(1.0, 0.0)
-        conn1 = acct._thread_local.conn
-        assert conn1 is not None
+        connect_calls = []
+        original_connect = sqlite3.connect
 
-        # Second spend should reuse the same connection
-        acct.spend(1.0, 0.0)
-        conn2 = acct._thread_local.conn
-        assert conn1 is conn2
+        def _tracking_connect(*args, **kwargs):
+            connect_calls.append(args[0])
+            return original_connect(*args, **kwargs)
 
-        # Close and verify a new connection is created
-        acct._close_db_conn()
-        assert acct._thread_local.conn is None
+        monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
 
+        # 三次 spend 应该创建并关闭三个独立连接。
         acct.spend(1.0, 0.0)
-        conn3 = acct._thread_local.conn
-        assert conn3 is not conn1
+        acct.spend(1.0, 0.0)
+        acct.spend(1.0, 0.0)
+
+        assert len(connect_calls) == 3
+        assert all(path == db_file for path in connect_calls)
 
 
 class TestRegistryConcurrency:

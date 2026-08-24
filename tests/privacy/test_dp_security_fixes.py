@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -221,8 +222,13 @@ class TestBudgetRemainingSQLite:
             def __getattr__(self, name):
                 return getattr(self._real, name)
 
-        proxy = _ConnProxy(acc._get_db_conn(db_file))
-        monkeypatch.setattr(acc, "_get_db_conn", lambda path: proxy)
+        proxy = _ConnProxy(sqlite3.connect(db_file))
+
+        @contextlib.contextmanager
+        def _patched_db_conn(path):
+            yield proxy
+
+        monkeypatch.setattr(acc, "_db_conn", _patched_db_conn)
         acc.remaining()
         assert "BEGIN IMMEDIATE" in proxy.statements
 
