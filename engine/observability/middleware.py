@@ -148,7 +148,16 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 request_size,
                 exc,
             )
-            raise
+            # Return an error response with X-Request-ID header set, so clients
+            # can correlate error responses with request logs/traces.
+            # 返回带 X-Request-ID 的错误响应，便于客户端关联日志/追踪。
+            from starlette.responses import JSONResponse
+
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"},
+                headers={_REQUEST_ID_HEADER: request_id},
+            )
 
 
 def _grpc_status(context: grpc.ServicerContext) -> str:

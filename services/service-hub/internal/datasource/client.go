@@ -346,7 +346,13 @@ func (c *Client) getGRPCClient(ctx context.Context) (dspb.DataSourceManagerServi
 		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
 	}
 
-	conn, err := grpc.DialContext(ctx, c.grpcAddr, dialOpt, grpc.WithBlock())
+	// Use a bounded timeout for the dial operation to prevent indefinite blocking
+	// when the upstream gRPC service is unreachable.
+	// 为连接操作设置有限超时，防止上游 gRPC 服务不可达时无限阻塞。
+	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, c.grpcAddr, dialOpt, grpc.WithBlock())
 	if err != nil {
 		return nil, fmt.Errorf("dial datasource-mgr gRPC at %s: %w", c.grpcAddr, err)
 	}
