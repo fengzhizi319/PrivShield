@@ -52,10 +52,11 @@ graph LR
 * **高可用与弹性保护**：内置并发信号量控制、请求队列熔断与重试机制。
 * 📖 学习与设计文档：[学习指南](services/service-hub/docs/learning-guide.md) · [详细设计](services/service-hub/docs/design.md)
 
-### 2.2 Datasource Manager 数据源管理微服务 (`:8083`)
-* **多源纳管**：统一管理 MySQL、PostgreSQL、ClickHouse、文件型 CSV 等数据资产；
-* **敏感探查**：自动探查数据源 Schema 元数据，批量抽样并联动 Agent 进行特征识别与安全定级；
-* **生命周期管控**：提供数据源 CRUD、连通性心跳探测与多维访问审计。
+### 2.2 Datasource Manager 模拟数据源微服务 (`:8083`)
+* **模拟数据源接口**：提供医保 `yibao`、康养 `kangyang` 及 2 个预留通用接口，内置 CSV 样本与数据抽样；
+* **双协议暴露**：同时支持 HTTPS REST（TLS 1.3 + 客户端证书固定）与 gRPC mTLS 双向认证；
+* **零重依赖**：作为服务编排测试与演示用途的 Mock 数据源，不依赖外部 MySQL/PostgreSQL/ClickHouse；
+* **生命周期管控**：提供数据源资产目录、连通性心跳探测与多维访问审计。
 * 📖 学习与设计文档：[学习指南](services/datasource-mgr/docs/learning-guide.md) · [详细设计](services/datasource-mgr/docs/design.md)
 
 ### 2.3 Audit Log 脱敏审计与存证微服务 (`:8084`)

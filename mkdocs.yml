@@ -53,6 +53,11 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+      # 使用 pymdownx slugify 保持中文字符与英文术语，与所有中文文档手写的
+      # 目录锚点（如 #32-健康医疗信息-health-information）保持一致。
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
   - attr_list
   - md_in_html
 
@@ -207,7 +212,7 @@ nav:
 
   - 审计与报告:
     - 2026 全项目审计报告: audit_reports/2026_full_project_audit_report.md
-    - 生产级演进三周计划: 三周计划.md
+    - 生产级演进三周计划: project_management/三周计划.md
     - 全栈代码审计综合分析报告: 分析报告.md
     - 主流数据安全产品洞察报告: 主流数据安全产品洞察报告.md
 

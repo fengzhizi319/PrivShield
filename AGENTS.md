@@ -11,9 +11,14 @@
 | Capability | Status | Notes |
 |---|---|---|
 | Masking | ✅ Ready | Field-name-aware masking for common PII |
-| Differential Privacy | ✅ Ready | Laplace count/sum/mean with budget accounting |
+| Differential Privacy | ✅ Ready | Laplace/Gaussian count/sum/mean with budget accounting |
+| Local Differential Privacy (LDP) | ✅ Ready | Randomized response / histogram / frequency |
 | K-anonymity | ✅ Ready | Per-record heuristic & dataset-level generalization |
 | Query Obfuscation | ✅ Ready | Dummy query injection |
+| File Privacy Processing | ✅ Ready | CSV/Excel/JSON automatic field-level masking |
+| Medical Data Pipeline | ✅ Ready | DICOM/HL7/FHIR parsing and image redaction |
+| Profile Recommendation | ✅ Ready | Data-driven privacy profile recommendation |
+| Ops Diagnostics | ✅ Ready | Runtime health / dependency / configuration snapshot |
 | Classification | ✅ Ready | Rule engine → Small-NER → local LLM |
 | Gateway / Load Balancer | ✅ Ready | REST + gRPC reverse proxy with health checks |
 | TLS / Auth / Rate Limit | ✅ Ready | Opt-in via environment variables |
@@ -43,9 +48,10 @@ PrivShield/
 │   ├── main.py                    # FastAPI REST entrypoint
 │   ├── grpc_server.py             # gRPC servicer
 │   ├── server.py                  # REST + gRPC combined launcher
+│   ├── launcher.py                # CLI / environment-aware unified launcher
 │   ├── service.py                 # PrivacyService orchestrator
 │   ├── schemas.py                 # REST request models (Pydantic)
-│   ├── routers/                   # REST sub-routers (mask/dp/kano/qol/dynclassification/...)
+│   ├── routers/                   # REST sub-routers (mask/dp/ldp/kano/qol/file/profile/ops/medical/dynclassification/...)
 │   ├── security/                  # TLS / auth / rate-limit / whitelist
 │   ├── observability/             # Logging / metrics / tracing
 │   ├── privacy/                   # Privacy primitives
@@ -55,6 +61,8 @@ PrivShield/
 │   │   ├── qol.py
 │   │   ├── budget.py
 │   │   ├── profile.py
+│   │   ├── data_adapters.py       # Sparse/dense array normalization for DP
+│   │   ├── high_concurrency.py    # High-concurrency primitive dispatch helpers
 │   │   ├── download_model.py
 │   │   └── download_ner_model.py
 │   ├── dynclassification/         # Dynamic classification (3-layer funnel: Rule → NER → LLM)
@@ -167,6 +175,10 @@ Key environment variables:
 | `PRIVACY_REST_PORT` | `8079` | REST port |
 | `PRIVACY_GRPC_HOST` | `0.0.0.0`（`server.py`/`grpc_server.py`/`launcher.py`） | gRPC host |
 | `PRIVACY_GRPC_PORT` | `50051` | gRPC port |
+| `PRIVACY_GRPC_MAX_WORKERS` | `64`（`server.py`/`grpc_server.py`）；`min(64, cpu_count*4)`（`launcher.py`） | gRPC 线程池大小 |
+| `PRIVACY_LIMIT_CONCURRENCY` | `10000` | Uvicorn 最大并发连接数 |
+| `PRIVACY_LIMIT_MAX_REQUESTS` | `100000` | Uvicorn 单个连接最大请求数 |
+| `PRIVACY_TIMEOUT_KEEP_ALIVE` | `30` | Uvicorn keep-alive 超时（秒） |
 | `PRIVACY_BUDGET_DB` | — | SQLite DB path for distributed budget |
 | `PRIVACY_BUDGET_WINDOW_SECONDS` | — | Time window for automatic privacy budget reset |
 | `PRIVACY_LOG_LEVEL` | `INFO` | Logging level |
@@ -298,7 +310,7 @@ cd deploy/docker-compose && docker-compose up -d
 ### Production Gaps
 
 - KMS integration and automated key rotation are not yet implemented.
-- Load/chaos/memory-leak test suites are not yet implemented.
+- Load and memory-leak test suites are implemented under `tests/perf/` but not yet integrated into CI; chaos test suites are not yet implemented.
 
 Address these before any hardened production deployment.
 

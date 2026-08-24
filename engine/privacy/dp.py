@@ -1284,8 +1284,10 @@ class DPApi:
             # Sparse matrix: use shape[0] (number of rows), not nnz which counts stored entries
             n_samples = arr.shape[0]
         elif isinstance(arr, np.ndarray):
-            # Dense ndarray: size gives total element count
-            n_samples = arr.size
+            # Dense ndarray: use number of rows (samples), not total element count.
+            # For a 2-D array each row is one sample; arr.size would over-count
+            # columns and produce a wildly wrong mean denominator.
+            n_samples = arr.shape[0]
         else:
             # Fallback for list/iterable inputs
             n_samples = len(arr) if hasattr(arr, "__len__") else 0

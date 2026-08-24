@@ -73,7 +73,12 @@ PrivShield/ (Repo Root)
 | **差分隐私计数** | `POST /v1/privacy/dp/count` | `DPCount` | `PrivacyService.dp_count` | Laplace / Gaussian 机制、预算实时消耗 |
 | **差分隐私求和** | `POST /v1/privacy/dp/sum` | `DPSum` | `PrivacyService.dp_sum` | 灵敏度截断、解析高斯极值保护 |
 | **差分隐私均值** | `POST /v1/privacy/dp/mean` | `DPMean` | `PrivacyService.dp_mean` | 边界夹紧、噪声校准 |
+| **本地差分隐私 LDP** | `POST /v1/privacy/ldp` | `LDP` | `PrivacyService.ldp` | 本地化随机响应、频数/直方图估计 |
 | **K-匿名泛化** | `POST /v1/privacy/k_anonymize/record` | `KAnonymizeRecord` | `PrivacyService.k_anonymize_record` | Mondrian 多维区间划分、准标识符泛化 |
+| **文件级隐私处理** | `POST /v1/file/process` | — | `PrivacyService.process_file` | CSV/Excel/JSON 自动识别、字段级脱敏 |
+| **医疗数据流水线** | `POST /v1/medical/process` | — | `PrivacyService.process_medical` | DICOM/HL7/FHIR 解析、影像脱敏 |
+| **参数推荐** | `POST /v1/profile/recommend` | — | `PrivacyService.recommend_profile` | 基于数据特征推荐脱敏策略 |
+| **运维诊断** | `GET /v1/ops/diagnostics` | — | — | 运行时健康、依赖与配置快照 |
 | **查询混淆注入** | `POST /v1/privacy/qol/obfuscate` | `ObfuscateQuery` | `PrivacyService.obfuscate_query` | 假查询注入 (Dummy Injection)、KL 散度混淆 |
 | **隐私预算记账** | `GET /v1/privacy/budget` | `Health` | `PrivacyService.budget_remaining` | 内存/SQLite/Redis Lua 原子记账、滑动窗口重置 |
 
@@ -89,7 +94,7 @@ PrivShield/ (Repo Root)
 ### 3. 企业级数据流通中台微服务群 (Go Microservices)
 
 - **调度中枢 ([services/service-hub](file:///home/charles/code/sfwork/PrivShield/services/service-hub))**：串联国密 VPN 专线网关、任务流转、分类分级打标、动态脱敏处理、存证上链回传 6 阶段流水线；
-- **数据源资产管理 ([services/datasource-mgr](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr))**：提供多源数据库连接池、元数据探查（内置 `yibao.csv` 医保与 `kangyang.csv` 康养模拟源）及数据抽样；
+- **数据源资产管理 ([services/datasource-mgr](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr))**：提供 4 个模拟数据源接口（医保 `yibao`、康养 `kangyang` 及 2 个预留接口），支持 HTTPS REST + gRPC mTLS 双协议与公钥固定，内置数据抽样与资产目录；
 - **脱敏审计与存证 ([services/audit-log](file:///home/charles/code/sfwork/PrivShield/services/audit-log))**：实时落盘脱敏快照，构建基于 SHA-256 的不可篡改哈希存证链与合规只读看板；
 - **控制台 BFF ([console/bff-go](file:///home/charles/code/sfwork/PrivShield/console/bff-go))**：基于 gRPC 连接池实现请求聚合、多节点 Client-Side 轮询与故障转移。
 

@@ -56,6 +56,7 @@ import json
 import os
 import shutil
 import socket
+import ssl
 import stat
 import subprocess
 import sys
@@ -226,7 +227,7 @@ class TestDatasourceMgrExecutionLifecycle:
                 proc.kill()
 
     def test_prod_run_startup_and_mtls(self, bash_bin: str):
-        """测试 prod-run.sh 生产启动流程：加载证书 ➔ HTTP 探活 ➔ gRPC 端口就绪 ➔ SIGTERM 优雅退出。"""
+        """测试 prod-run.sh 生产启动流程：加载证书 ➔ HTTPS 探活 ➔ gRPC 端口就绪 ➔ SIGTERM 优雅退出。"""
         http_port = _get_free_port()
         grpc_port = _get_free_port()
 
@@ -251,13 +252,24 @@ class TestDatasourceMgrExecutionLifecycle:
         )
 
         try:
-            health_url = f"http://127.0.0.1:{http_port}/api/health"
+            # prod-run.sh 强制开启 HTTPS + mTLS，因此健康探活也需要使用客户端证书。
+            certs_dir = DS_DIR / "certs"
+            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_ctx.load_cert_chain(
+                certfile=str(certs_dir / "client.crt"),
+                keyfile=str(certs_dir / "client.key"),
+            )
+            # 测试证书为自签名，不验证服务端证书；仅验证 HTTPS+mTLS 握手与端口可达性。
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+            health_url = f"https://127.0.0.1:{http_port}/api/health"
             healthy = False
             for _ in range(25):
                 time.sleep(0.2)
                 try:
                     req = urllib.request.Request(health_url)
-                    with urllib.request.urlopen(req, timeout=1) as resp:
+                    with urllib.request.urlopen(req, timeout=1, context=ssl_ctx) as resp:
                         if resp.status == 200:
                             healthy = True
                             break

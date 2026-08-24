@@ -68,6 +68,8 @@ import json
 import os
 # 导入正则表达式模块，用于 JSON 提取
 import re
+# 导入路径库，用于类型提示中引用 Path 类型
+from pathlib import Path
 # 导入线程模块，用于创建互斥锁保护模型初始化和推理的线程安全
 import threading
 # 导入时间模块，用于测量推理耗时（monotonic 单调时钟）

@@ -211,7 +211,7 @@ services:
       PRIVACY_AGENT_GRPC_HOST: "PrivShield"
       PRIVACY_AGENT_GRPC_PORT: "50051"
       PRIVACY_AGENT_URL: "https://PrivShield:8079"
-      PRIVACY_AGENT_TLS_INSECURE: "true"
+      PRIVACY_AGENT_TLS_INSECURE_SKIP_VERIFY: "true"
     depends_on:
       PrivShield:
         condition: service_healthy
@@ -379,6 +379,9 @@ services:
       AUDIT_LOG_HOST: "0.0.0.0"
       AUDIT_LOG_PORT: "8084"
       AUDIT_LOG_DB_PATH: "/app/data/audit-log.db"
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      PRIVACY_AGENT_API_KEY: "${PRIVACY_AGENT_API_KEY:-}"
     depends_on:
       PrivShield:
         condition: service_healthy
