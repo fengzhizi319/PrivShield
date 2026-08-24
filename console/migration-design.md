@@ -1,10 +1,10 @@
 # PrivShield 全平台目录架构重构与平滑迁移设计方案 (Migration Design Document)
 
-> **版本**：v1.2.0  
+> **版本**：v1.3.0  
 > **状态**：✅ **Completed / Implemented (已完全落地并通过全量验证)**  
 > **适用范围**：`PrivShield` 核心引擎、`console` 控制台及全部关联微服务（`service-hub` / `datasource-mgr` / `audit-log` / `bff-go` / `bff-py` / `web`）  
 > **实施分支**：`refactor/directory-restructure`  
-> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入及全套 CI/CD/E2E 验证。
+> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容及全套 CI/CD/E2E 验证。
 
 ---
 
@@ -723,6 +723,11 @@ gantt
 | 10 | 真实全链路调度测试 | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` | 跨服务 6 阶段流水线调度全部畅通 | ✅ PASS |
 | 11 | 监控大屏与告警规则 | `python3 -c "import json; json.load(open('deploy/grafana/dashboard.json'))"` | Grafana 双大屏与 Prometheus 告警规则全部生效 | ✅ PASS |
 | 12 | 模拟 CSV 数据源注入 | `go test -v -run TestSeedAndFetchRecords ./services/datasource-mgr/internal/handlers/` | `yibao.csv` 与 `kangyang.csv` 自动预置与抽样成功 | ✅ PASS |
+| 13 | 多节点 Client-Side 负载均衡 | `go test -v -run TestMultiNode_RoundRobin ./pkg/agent/` | 平滑轮询、熔断隔离与透明容灾切换通过 | ✅ PASS |
+| 14 | 网关 P2C 动态负载调度 | `pytest tests/gateway/test_gateway.py tests/test_gateway_balancer_enhanced.py -v` | Power of Two Choices 算法选优与防羊群效应验证通过 | ✅ PASS |
+| 15 | Redis 分布式隐私预算记账 | `pytest tests/privacy/test_budget_redis.py -v` | Lua 脚本原子性扣减、滑动窗口重置与超支拦截通过 | ✅ PASS |
+| 16 | 云原生高级扩缩容模板 | `make helm-lint && make helm-template` | KEDA `ScaledObject` 与 CronHPA 潮汐预测模板校验通过 | ✅ PASS |
+| 17 | 极限性能压测基准套件 | `python scripts/test/stress_test_suite.py --target agent --concurrency 50 --duration 1` | 吞吐、QPS 与 P50/P90/P95/P99 延迟 SLA 报告正常输出 | ✅ PASS |
 
 ---
 
@@ -805,4 +810,14 @@ gantt
 ### 11.5 模拟数据源接入与自动注入 (Commit: `48287f3`)
 - `services/datasource-mgr` 内置 `yibao.csv`（医保结算）与 `kangyang.csv`（康养慢病）数据集；
 - 实现 `SeedMockDataSources` 启动自动注入、`ExtractCSVMetadata` 动态元数据探查与 `GET /api/datasources/:id/records` 真实数据抽样接口。
+
+### 11.6 高可用负载均衡、分布式预算与云原生扩缩 (Commit: `4ff5aba`)
+- **多节点 Client-Side LB**：升级 `pkg/agent/client.go`，支持 `PRIVACY_AGENT_URLS` 集群平滑轮询与故障转移；
+- **网关 P2C 调度**：`PrivShield/gateway/balancer.py` 新增 Power of Two Choices 综合评分动态分流算法；
+- **分布式预算一致性**：`PrivShield/privacy/budget.py` 实现 Redis Lua 原子记账与滑动窗口自动重置；
+- **云原生高级扩缩容**：Helm Chart 增加 KEDA `ScaledObject` 与 CronHPA 潮汐预测调度模板；
+- **压测套件**：新增 `scripts/test/stress_test_suite.py` 自动化并发压测基准工具。
+
+### 11.7 系统架构文档全面收敛升级 (Commit: `edff334` & `c30ef59`)
+- 将 `docs/architecture-design.md` 与 `docs/architecture-summary.md` 全量升级至 v2.0 权威版本，完整对齐最新 Monorepo 拓扑与企业级治理能力。
 
