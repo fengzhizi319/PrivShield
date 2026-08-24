@@ -77,7 +77,7 @@ flowchart TB
         ConsoleBFF[Go / Python BFF<br/>:8081 / :8080]
     end
 
-    subgraph DSMgrService [datasource-mgr 数据源管理 (:8083 / :50053)]
+    subgraph DSMgrService ["datasource-mgr 数据源管理 (:8083 / :50053)"]
         GinRouter[Gin REST Router<br/>/api/datasources/*<br/>/api/v1/*]
         GRPCSrv[gRPC Server<br/>DatasourceMgrServiceServer]
         MWStack[中间件链: RequestID / StructuredLogger / Recovery / CORS / Auth]
@@ -220,7 +220,7 @@ func main() {
     router := gin.New()
     server.RegisterRoutes(router)
 
-    // 3. 构建防御 Slowloris 慢连接拒绝服务的 HTTP Server
+    // 3. 构建防御 Slowloris 慢连接拒绝服务并支持 HTTPS mTLS 的 HTTP Server
     httpSrv := &http.Server{
         Addr:              cfg.Address(),
         Handler:           router,
@@ -231,11 +231,24 @@ func main() {
         MaxHeaderBytes:    1 << 20,          // 1 MiB 限制
     }
 
-    // 4. 协程 A：启动 HTTP REST 监听
+    if cfg.TLSEnabled {
+        httpTLSConfig, err := grpcserver.BuildServerTLSConfig(cfg)
+        if err != nil {
+            log.Fatalf("failed to build TLS config for HTTP/HTTPS server: %v", err)
+        }
+        httpSrv.TLSConfig = httpTLSConfig
+    }
+
+    // 4. 协程 A：启动 HTTP/HTTPS REST 监听（生产环境自动启用 mTLS）
     go func() {
-        if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            logger.Error("HTTP server failed", "err", err)
-            os.Exit(1)
+        if cfg.TLSEnabled {
+            if err := httpSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+                logger.Error("HTTPS server failed", "err", err)
+            }
+        } else {
+            if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+                logger.Error("HTTP server failed", "err", err)
+            }
         }
     }()
 
@@ -251,7 +264,7 @@ func main() {
         grpcServer = grpc.NewServer()
     }
     // 注册 gRPC 服务实现
-    pb.RegisterDatasourceMgrServiceServer(grpcServer, grpcserver.New(cfg, logger))
+    pb.RegisterDataSourceManagerServiceServer(grpcServer, grpcserver.New(cfg, logger))
     go func() {
         grpcListener, err := net.Listen("tcp", cfg.GRPCAddress())
         if err != nil {

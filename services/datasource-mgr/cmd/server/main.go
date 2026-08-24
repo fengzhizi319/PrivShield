@@ -101,6 +101,14 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 
+	if cfg.TLSEnabled {
+		httpTLSConfig, err := grpcserver.BuildServerTLSConfig(cfg)
+		if err != nil {
+			log.Fatalf("failed to build TLS config for HTTP/HTTPS server: %v", err)
+		}
+		httpSrv.TLSConfig = httpTLSConfig
+	}
+
 	// =========================================================================
 	// 4. gRPC Server Setup (with optional mTLS) / gRPC 服务构建（支持可选 mTLS）
 	// =========================================================================
@@ -189,15 +197,30 @@ func main() {
 		}
 	}()
 
-	// 3) 在后台独立 Goroutine 中启动 HTTP REST 服务
+	// 3) 在后台独立 Goroutine 中启动 HTTP/HTTPS REST 服务
 	go func() {
-		logger.Info("mock datasource-mgr HTTP REST server started",
-			"addr", cfg.Address(),
-			"grpc_addr", cfg.GRPCAddress(),
-			"mode", "mock_development_and_debugging",
-		)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error", "error", err.Error())
+		if cfg.TLSEnabled {
+			logger.Info("mock datasource-mgr HTTPS REST server started with mTLS",
+				"addr", cfg.Address(),
+				"grpc_addr", cfg.GRPCAddress(),
+				"tls_cert", cfg.TLSCertFile,
+				"client_auth", cfg.TLSClientAuth,
+				"pinned_pubkey", cfg.TLSPinnedPubKeyFile,
+				"mode", "mock_development_and_debugging",
+			)
+			// 利用 httpSrv.TLSConfig 中预置的证书链、ClientCA 池与公钥固定钩子启动 HTTPS
+			if err := httpSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				logger.Error("HTTPS server error", "error", err.Error())
+			}
+		} else {
+			logger.Info("mock datasource-mgr HTTP REST server started",
+				"addr", cfg.Address(),
+				"grpc_addr", cfg.GRPCAddress(),
+				"mode", "mock_development_and_debugging",
+			)
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("HTTP server error", "error", err.Error())
+			}
 		}
 	}()
 

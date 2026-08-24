@@ -12,8 +12,8 @@
   - **API 2**：申请康养体检与慢病模拟数据 (`GET /api/v1/kangyang` / `rpc GetKangyangData`)
   - **API 3**：预留政务数据源 3 扩展模拟接口 (`GET /api/v1/mock3` / `rpc GetMockData3`)
   - **API 4**：预留企业数据源 4 扩展模拟接口 (`GET /api/v1/mock4` / `rpc GetMockData4`)
-- **双协议通信支持**：对外提供 HTTP REST（端口 `:8083`），对内提供高性能 gRPC（端口 `:50053`）；
-- **mTLS 双向认证与公钥固定**：gRPC 服务支持 TLS 1.3 证书校验与客户端公钥固定（Public Key Pinning）；
+- **双协议通信支持**：对外提供 HTTP/HTTPS REST（端口 `:8083`），对内提供高性能 gRPC（端口 `:50053`）；
+- **全链路 mTLS 双向认证与公钥固定**：HTTP/HTTPS 与 gRPC 服务均支持 TLS 1.3 客户端证书校验与客户端公钥固定（Public Key Pinning）；
 - **测试证书持久入库**：预置全套测试证书链与已固定的公钥文件（`certs/client.pub`），无需每次测试重新生成，保障公钥固定机制可复现。
 
 > 📖 **深度学习指南**：完整架构解析、数据集字典说明与源码导读见 [docs/learning-guide.md](docs/learning-guide.md)。
@@ -39,7 +39,7 @@ make dev
 
 ### 2. 生产加固运行 (Production Run with mTLS)
 
-启用完整的 TLS 1.3 双向证书校验与客户端公钥固定：
+启用完整的 TLS 1.3 双向证书校验与客户端公钥固定（HTTPS + gRPC 双协议加固）：
 
 ```bash
 cd services/datasource-mgr
@@ -49,7 +49,7 @@ make prod
 ```
 
 监听：
-- **HTTP REST**：`http://0.0.0.0:8083`
+- **HTTPS REST (mTLS)**：`https://0.0.0.0:8083`（支持客户端证书与公钥固定校验）
 - **gRPC (mTLS)**：`0.0.0.0:50053`（校验 `certs/ca.crt`、`certs/server.crt` 与固定公钥 `certs/client.pub`）
 
 ### 3. 证书重新生成脚本 (Generate Certs)

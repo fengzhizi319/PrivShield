@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -314,26 +315,63 @@ func TestProdRunScript_StartupAndMTLS(t *testing.T) {
 		}
 	}()
 
-	// 探测 HTTP 端点
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", httpPort)
-	client := &http.Client{Timeout: 1 * time.Second}
+	// 1. 读取测试证书链配置 mTLS 客户端
+	clientCert, err := tls.LoadX509KeyPair(filepath.Join(certsDir, "client.crt"), filepath.Join(certsDir, "client.key"))
+	if err != nil {
+		t.Fatalf("failed to load client keypair: %v", err)
+	}
+	caPEM, err := os.ReadFile(filepath.Join(certsDir, "ca.crt"))
+	if err != nil {
+		t.Fatalf("failed to read ca.crt: %v", err)
+	}
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
 
+	tlsClient := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+				ServerName:   "localhost",
+			},
+		},
+	}
+
+	// 2. 探测 HTTPS REST mTLS 端点
+	healthURL := fmt.Sprintf("https://127.0.0.1:%d/api/health", httpPort)
 	var resp *http.Response
 	var lastErr error
 	for i := 0; i < 20; i++ {
 		time.Sleep(200 * time.Millisecond)
-		resp, lastErr = client.Get(healthURL)
+		resp, lastErr = tlsClient.Get(healthURL)
 		if lastErr == nil && resp.StatusCode == http.StatusOK {
 			break
 		}
 	}
 
 	if lastErr != nil || resp == nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("prod-run.sh failed to become healthy at %s: %v", healthURL, lastErr)
+		t.Fatalf("prod-run.sh failed to become healthy at HTTPS %s: %v", healthURL, lastErr)
 	}
 	defer resp.Body.Close()
 
-	// 探测 gRPC mTLS 端口已在监听
+	// 3. 验证未提供客户端证书的请求会被 mTLS 阻断
+	insecureClient := &http.Client{
+		Timeout: 1 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:            caPool,
+				ServerName:         "localhost",
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+	noCertResp, noCertErr := insecureClient.Get(healthURL)
+	if noCertErr == nil && noCertResp != nil && noCertResp.StatusCode == http.StatusOK {
+		t.Errorf("expected mTLS handshake failure when client certificate is not provided, but succeeded")
+	}
+
+	// 4. 探测 gRPC mTLS 端口已在监听
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var d net.Dialer
@@ -343,7 +381,7 @@ func TestProdRunScript_StartupAndMTLS(t *testing.T) {
 	}
 	_ = conn.Close()
 
-	t.Logf("✅ prod-run.sh 正常启动，REST (Port: %d) 与 gRPC mTLS (Port: %d) 均就绪", httpPort, grpcPort)
+	t.Logf("✅ prod-run.sh 正常启动，HTTPS REST (Port: %d) 与 gRPC mTLS (Port: %d) 均就绪并通过双向认证校验", httpPort, grpcPort)
 }
 
 func getFreePort(t *testing.T) int {

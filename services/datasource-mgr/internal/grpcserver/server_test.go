@@ -23,11 +23,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -339,5 +342,104 @@ func TestBuildServerCredentials(t *testing.T) {
 	creds, err = BuildServerCredentials(cfg)
 	if err != nil || creds == nil {
 		t.Fatalf("failed to build mTLS credentials with public key pinning: %v", err)
+	}
+}
+
+// TestBuildServerTLSConfig_HTTPS_MTLS verifies HTTPS REST server operation with mTLS and public key pinning.
+// TestBuildServerTLSConfig_HTTPS_MTLS 验证基于 BuildServerTLSConfig 启动的 HTTPS 服务器支持完整的双向证书校验与公钥固定。
+func TestBuildServerTLSConfig_HTTPS_MTLS(t *testing.T) {
+	tmpDir := t.TempDir()
+	caFile, srvCertFile, srvKeyFile, pubKeyFile := generateTestCertAndKey(t, tmpDir)
+
+	// 1. 构建带有双向认证与公钥固定的服务端 TLS 配置
+	cfg := &config.Config{
+		TLSEnabled:          true,
+		TLSCertFile:         srvCertFile,
+		TLSKeyFile:          srvKeyFile,
+		TLSCAFile:           caFile,
+		TLSClientAuth:       "require",
+		TLSPinnedPubKeyFile: pubKeyFile,
+	}
+	tlsConfig, err := BuildServerTLSConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildServerTLSConfig failed: %v", err)
+	}
+
+	// 2. 启动测试 HTTPS 服务器
+	rawListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen on tcp: %v", err)
+	}
+	tlsListener := tls.NewListener(rawListener, tlsConfig)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","mode":"https_mtls"}`))
+	})
+
+	srv := &http.Server{
+		Handler:   mux,
+		TLSConfig: tlsConfig,
+	}
+	go func() {
+		_ = srv.Serve(tlsListener)
+	}()
+	defer func() {
+		_ = srv.Close()
+		_ = tlsListener.Close()
+	}()
+
+	serverAddr := rawListener.Addr().String()
+	targetURL := fmt.Sprintf("https://%s/api/health", serverAddr)
+
+	// 3. 读取 CA 证书池
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		t.Fatalf("read ca.pem: %v", err)
+	}
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	// 4. 读取与服务端生成时公钥一致的证书作为合法的客户端证书
+	clientCert, err := tls.LoadX509KeyPair(srvCertFile, srvKeyFile)
+	if err != nil {
+		t.Fatalf("load client cert pair: %v", err)
+	}
+
+	// Case A: 携带合法客户端证书发起 HTTPS 请求 -> 应成功 200 OK
+	validClient := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+				ServerName:   "127.0.0.1",
+			},
+		},
+	}
+	resp, err := validClient.Get(targetURL)
+	if err != nil {
+		t.Fatalf("valid HTTPS mTLS request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Case B: 未携带客户端证书发起请求 -> 应当握手失败（被 mTLS 阻断）
+	noCertClient := &http.Client{
+		Timeout: 1 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:    caPool,
+				ServerName: "127.0.0.1",
+			},
+		},
+	}
+	_, noCertErr := noCertClient.Get(targetURL)
+	if noCertErr == nil {
+		t.Errorf("expected handshake failure when client certificate is missing, but request succeeded")
 	}
 }

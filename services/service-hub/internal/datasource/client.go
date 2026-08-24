@@ -37,15 +37,37 @@ type Client struct {
 	grpcClient dspb.DataSourceManagerServiceClient
 }
 
-// New creates a new Client instance.
+// New creates a new Client instance with optional HTTPS mTLS support.
 func New(cfg *config.Config) *Client {
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	if cfg.TLSEnabled && cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS13,
+		}
+		if cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile); err == nil {
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+		if cfg.TLSCAFile != "" {
+			if caPEM, err := os.ReadFile(cfg.TLSCAFile); err == nil {
+				caPool := x509.NewCertPool()
+				if caPool.AppendCertsFromPEM(caPEM) {
+					tlsConfig.RootCAs = caPool
+				}
+			}
+		}
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: tlsConfig,
+		}
+	}
+
 	return &Client{
-		cfg:      cfg,
-		baseURL:  strings.TrimRight(cfg.DatasourceBaseURL(), "/"),
-		grpcAddr: cfg.DatasourceGRPCAddress(),
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		cfg:        cfg,
+		baseURL:    strings.TrimRight(cfg.DatasourceBaseURL(), "/"),
+		grpcAddr:   cfg.DatasourceGRPCAddress(),
+		httpClient: httpClient,
 	}
 }
 

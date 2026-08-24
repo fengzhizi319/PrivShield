@@ -45,16 +45,16 @@ make gen-certs
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `DATASOURCE_MGR_HOST` | `127.0.0.1` | HTTP REST 服务监听主机 |
-| `DATASOURCE_MGR_PORT` | `8083` | HTTP REST 服务监听端口 |
+| `DATASOURCE_MGR_HOST` | `127.0.0.1` | HTTP/HTTPS REST 服务监听主机 |
+| `DATASOURCE_MGR_PORT` | `8083` | HTTP/HTTPS REST 服务监听端口 |
 | `DATASOURCE_MGR_GRPC_HOST` | `127.0.0.1` | gRPC 服务监听主机 |
 | `DATASOURCE_MGR_GRPC_PORT` | `50053` | gRPC 服务监听端口 |
-| `DATASOURCE_MGR_TLS_ENABLED` | `false` | 是否在 gRPC 服务上启用 TLS/mTLS |
-| `DATASOURCE_MGR_TLS_CERT_FILE` | (空) | gRPC 服务端 X.509 证书 PEM 路径 |
-| `DATASOURCE_MGR_TLS_KEY_FILE` | (空) | gRPC 服务端私钥 PEM 路径 |
+| `DATASOURCE_MGR_TLS_ENABLED` | `false` | 是否在 HTTP REST 与 gRPC 服务上启用 TLS 1.3 / mTLS |
+| `DATASOURCE_MGR_TLS_CERT_FILE` | (空) | 服务端 X.509 证书 PEM 路径 |
+| `DATASOURCE_MGR_TLS_KEY_FILE` | (空) | 服务端私钥 PEM 路径 |
 | `DATASOURCE_MGR_TLS_CA_FILE` | (空) | 客户端证书校验 CA 证书 PEM 路径 |
 | `DATASOURCE_MGR_TLS_CLIENT_AUTH` | (空) | 客户端认证模式: `require` \| `verify` \| `request` |
-| `DATASOURCE_MGR_TLS_PINNED_PUBKEY_FILE` | (空) | 固定的客户端公钥 PEM 路径 |
+| `DATASOURCE_MGR_TLS_PINNED_PUBKEY_FILE` | (空) | 固定的客户端公钥 PEM 路径 (SPKI Pinning) |
 | `DATASOURCE_MGR_API_KEY` | (空) | 本模块入站 API Key（空表示免密） |
 | `DATASOURCE_MGR_CORS_ORIGINS` | (空) | 允许的 CORS 跨域源（逗号分隔） |
 | `DATASOURCE_MGR_LOG_FORMAT` | `json` | 日志格式: `json` \| `text` |
@@ -64,14 +64,18 @@ make gen-certs
 
 ## 3. 接口快速验证与联调
 
-### 3.1 HTTP 综合健康检查
+### 3.1 HTTP 综合健康检查（开发模式）
 ```bash
 curl -s http://127.0.0.1:8083/api/health | jq .
 ```
 
-### 3.2 申请 API 1 医保数据
+### 3.2 HTTPS 双向认证 (mTLS) 调取示例（生产加固模式）
 ```bash
-curl -s "http://127.0.0.1:8083/api/v1/yibao?limit=5" | jq .
+# 携带 CA 根证书与已固定公钥的客户端证书访问 HTTPS REST API
+curl -s --cacert certs/ca.crt \
+  --cert certs/client.crt \
+  --key certs/client.key \
+  https://127.0.0.1:8083/api/v1/yibao?limit=5 | jq .
 ```
 
 ### 3.3 申请 API 2 康养数据
