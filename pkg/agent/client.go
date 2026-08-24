@@ -17,16 +17,14 @@ import (
 	"time"
 )
 
-// Client wraps HTTP calls to the upstream PrivShield agent REST API.
-// Client 封装对上游 PrivShield agent REST API 的 HTTP 调用。
-//
-// 各模块可通过嵌入本结构体复用通用 GET/POST/Health 逻辑，
-// 仅需在模块层添加特有端点方法（如 Classify / MaskRecord）。
+// Client wraps HTTP calls to the upstream PrivShield agent REST API with multi-node load balancing.
+// Client 封装对上游 PrivShield agent REST API 的 HTTP 调用，支持多节点客户端负载均衡与故障转移。
 type Client struct {
-	baseURL    string
+	baseURLs   []string
 	apiKey     string
 	httpClient *http.Client
 	logger     *slog.Logger
+	rrIndex    uint64
 
 	// Circuit breaker state / 熔断器状态
 	cbMu        sync.Mutex
@@ -61,7 +59,8 @@ func (s CircuitState) String() string {
 
 // Config holds agent client configuration.
 type Config struct {
-	BaseURL            string        // Upstream agent base URL / 上游 agent 基础地址
+	BaseURL            string        // Upstream agent base URL / 上游 agent 单基础地址
+	BaseURLs           []string      // Upstream agent multi-node cluster URLs / 上游 agent 多节点集群地址
 	APIKey             string        // Optional Bearer token / 可选 Bearer 令牌
 	Timeout            time.Duration // HTTP client timeout / HTTP 客户端超时
 	CBThreshold        int           // Consecutive failures before opening / 连续失败熔断阈值
@@ -70,7 +69,7 @@ type Config struct {
 }
 
 // New creates a new agent client from the given config.
-// New 根据配置创建新的 agent 客户端。
+// New 根据配置创建新的 agent 客户端，支持多节点轮询与自动容灾。
 func New(cfg Config) *Client {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
@@ -84,9 +83,17 @@ func New(cfg Config) *Client {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+
+	urls := make([]string, 0)
+	if len(cfg.BaseURLs) > 0 {
+		urls = append(urls, cfg.BaseURLs...)
+	} else if cfg.BaseURL != "" {
+		urls = append(urls, cfg.BaseURL)
+	}
+
 	return &Client{
-		baseURL: cfg.BaseURL,
-		apiKey:  cfg.APIKey,
+		baseURLs: urls,
+		apiKey:   cfg.APIKey,
 		httpClient: &http.Client{
 			Timeout: cfg.Timeout,
 		},
@@ -98,9 +105,32 @@ func New(cfg Config) *Client {
 	}
 }
 
-// BaseURL returns the configured upstream agent base URL.
+// BaseURL returns the first configured upstream agent base URL.
 func (c *Client) BaseURL() string {
-	return c.baseURL
+	if len(c.baseURLs) == 0 {
+		return ""
+	}
+	return c.baseURLs[0]
+}
+
+// BaseURLs returns all configured agent base URLs.
+func (c *Client) BaseURLs() []string {
+	return c.baseURLs
+}
+
+// PickEndpoint returns the next URL in the cluster using round-robin.
+func (c *Client) PickEndpoint() string {
+	if len(c.baseURLs) == 0 {
+		return ""
+	}
+	if len(c.baseURLs) == 1 {
+		return c.baseURLs[0]
+	}
+	c.cbMu.Lock()
+	idx := c.rrIndex
+	c.rrIndex++
+	c.cbMu.Unlock()
+	return c.baseURLs[idx%uint64(len(c.baseURLs))]
 }
 
 // Health checks the upstream agent health.
@@ -115,7 +145,11 @@ func (c *Client) Get(ctx context.Context, path string) (map[string]any, error) {
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	endpoint := c.PickEndpoint()
+	if endpoint == "" {
+		return nil, fmt.Errorf("no agent endpoint available")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -136,6 +170,10 @@ func (c *Client) PostWithRequestID(ctx context.Context, path string, payload any
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
+	endpoint := c.PickEndpoint()
+	if endpoint == "" {
+		return nil, fmt.Errorf("no agent endpoint available")
+	}
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
@@ -144,7 +182,7 @@ func (c *Client) PostWithRequestID(ctx context.Context, path string, payload any
 		}
 		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

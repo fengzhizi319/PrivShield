@@ -292,8 +292,30 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 目标内存利用率
   targetMemoryUtilizationPercentage: 80
+  # customMetrics: 自定义 Prometheus 业务指标（如 QPS / 排队深度）
+  customMetrics: []
   # behavior: 自定义扩缩行为（如缩容冷却时间、扩容速率限制等）
   behavior: {}
+
+# ── KEDA 事件驱动自动扩缩 / KEDA Event-Driven Autoscaler ─────────────────
+keda:
+  # enabled: 是否启用 KEDA 细粒度事件驱动自动扩缩容
+  enabled: false
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  pollingInterval: 15
+  cooldownPeriod: 300
+  prometheus:
+    serverAddress: "http://prometheus-server:9090"
+    threshold: "100"
+    query: "sum(rate(privacy_requests_total[1m]))"
+
+# ── CronHPA 潮汐预测扩缩容 / Cron-based Autoscaler ───────────────────────
+cronAutoscaling:
+  # enabled: 是否启用政务/就医业务潮汐预测定时扩缩容
+  enabled: false
+  peakReplicas: 10
+  offpeakReplicas: 2
 
 # ── Ingress 入口 / Ingress configuration ─────────────────────────────────
 # Ingress 定义外部流量如何路由到集群内部 Service（需集群安装 Ingress Controller）

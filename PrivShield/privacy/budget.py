@@ -214,7 +214,44 @@ class BudgetAccountant:
         self.window_seconds = window_seconds
         self._window_start = time.time()
 
+        # 分布式 Redis 后端初始化（可选）
+        self._redis_client = None
+        self._redis_url = os.environ.get("PRIVACY_BUDGET_REDIS_URL")
+        budget_backend = os.environ.get("PRIVACY_BUDGET_BACKEND", "").lower()
+        if budget_backend == "redis" or self._redis_url:
+            self._init_redis()
+
         self._init_db()
+
+    def _init_redis(self) -> None:
+        """初始化 Redis 分布式预算记账客户端（若安装了 redis 且配置了连接）。"""
+        try:
+            import redis
+            url = self._redis_url or "redis://127.0.0.1:6379/0"
+            self._redis_client = redis.Redis.from_url(url, socket_timeout=3.0, decode_responses=True)
+            # 测试连接
+            self._redis_client.ping()
+            logger.info(
+                "budget_redis_backend_initialized",
+                extra={"namespace": self.namespace, "redis_url": url},
+            )
+        except ImportError:
+            logger.warning(
+                "budget_redis_not_installed",
+                extra={
+                    "detail": "redis python package is not installed; falling back to SQLite or in-memory mode.",
+                    "recommendation": "Install redis (pip install redis) to enable distributed budget accounting.",
+                },
+            )
+            self._redis_client = None
+        except Exception as e:
+            logger.warning(
+                "budget_redis_connect_failed",
+                extra={
+                    "detail": f"Failed to connect to Redis at '{self._redis_url}': {e}. Falling back to SQLite/memory.",
+                },
+            )
+            self._redis_client = None
 
     def _get_db_conn(self, db_path: str) -> sqlite3.Connection:
         """获取线程级复用的 SQLite 连接。
@@ -357,6 +394,69 @@ class BudgetAccountant:
         """
         if epsilon <= 0.0 or delta < 0.0:
             raise ValueError(f"Budget amount to spend must be strictly positive (got epsilon={epsilon}, delta={delta})")
+
+        # 1. 分布式 Redis 后端优先
+        if self._redis_client:
+            with self._mu:
+                redis_key = f"privshield:budget:{self.namespace}"
+                window_sec = self.window_seconds or 0.0
+                now_ts = self._now()
+                # Lua 脚本保证原子性判断与扣减
+                lua_script = """
+                local key = KEYS[1]
+                local eps_spend = tonumber(ARGV[1])
+                local del_spend = tonumber(ARGV[2])
+                local eps_total = tonumber(ARGV[3])
+                local del_total = tonumber(ARGV[4])
+                local win_sec = tonumber(ARGV[5])
+                local now_ts = tonumber(ARGV[6])
+
+                local data = redis.call('HMGET', key, 'eps_spent', 'del_spent', 'win_start', 'eps_total', 'del_total')
+                local eps_spent = tonumber(data[1]) or 0.0
+                local del_spent = tonumber(data[2]) or 0.0
+                local win_start = tonumber(data[3]) or now_ts
+                local cur_eps_total = tonumber(data[4]) or eps_total
+                local cur_del_total = tonumber(data[5]) or del_total
+
+                if win_sec > 0 and (now_ts - win_start) >= win_sec then
+                    eps_spent = 0.0
+                    del_spent = 0.0
+                    win_start = now_ts
+                end
+
+                local new_eps = eps_spent + eps_spend
+                local new_del = del_spent + del_spend
+
+                if new_eps > (cur_eps_total + 1e-12) or new_del > (cur_del_total + 1e-12) then
+                    return {-1, eps_spent, del_spent, cur_eps_total, cur_del_total}
+                end
+
+                redis.call('HMSET', key, 'eps_spent', new_eps, 'del_spent', new_del, 'win_start', win_start, 'eps_total', cur_eps_total, 'del_total', cur_del_total)
+                return {1, new_eps, new_del, cur_eps_total, cur_del_total}
+                """
+                try:
+                    res = self._redis_client.eval(
+                        lua_script, 1, redis_key,
+                        epsilon, delta, self.epsilon_total, self.delta_total, window_sec, now_ts
+                    )
+                    status, new_eps, new_del, eps_tot, del_tot = res
+                    if status == -1:
+                        raise PrivacyBudgetExhausted(
+                            f"Privacy budget exhausted in namespace {self.namespace} (Redis): "
+                            f"epsilon={new_eps + epsilon}/{eps_tot}, delta={new_del + delta}/{del_tot}"
+                        )
+                    self.epsilon_spent = float(new_eps)
+                    self.delta_spent = float(new_del)
+                    self._update_metrics(float(eps_tot), float(del_tot), self.epsilon_spent, self.delta_spent)
+                    self._audit_logger.log_spend(self.namespace, float(eps_tot), float(del_tot), self.epsilon_spent, self.delta_spent)
+                    logger.info("budget_spend_completed", extra={"namespace": self.namespace, "epsilon": epsilon, "delta": delta, "eps_spent": self.epsilon_spent, "del_spent": self.delta_spent, "backend": "redis"})
+                    return
+                except PrivacyBudgetExhausted:
+                    raise
+                except Exception as e:
+                    logger.warning("budget_redis_eval_failed", extra={"detail": f"Redis eval failed: {e}; falling back to SQLite/memory."})
+
+        # 2. SQLite 持久化后端
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
             with self._mu:
@@ -502,6 +602,33 @@ class BudgetAccountant:
             包含 epsilon 与 delta 剩余量的字典，例如
             {"epsilon": 8.0, "delta": 1e-4}。
         """
+        # 1. Redis 分布式查询
+        if self._redis_client:
+            with self._mu:
+                redis_key = f"privshield:budget:{self.namespace}"
+                try:
+                    data = self._redis_client.hmget(redis_key, ["eps_spent", "del_spent", "win_start", "eps_total", "del_total"])
+                    eps_spent = float(data[0]) if data[0] is not None else 0.0
+                    del_spent = float(data[1]) if data[1] is not None else 0.0
+                    win_start = float(data[2]) if data[2] is not None else self._window_start
+                    eps_total = float(data[3]) if data[3] is not None else self.epsilon_total
+                    del_total = float(data[4]) if data[4] is not None else self.delta_total
+
+                    if self._window_expired(win_start):
+                        eps_spent = 0.0
+                        del_spent = 0.0
+                        self._window_start = self._now()
+                        self._redis_client.hmset(redis_key, {"eps_spent": 0.0, "del_spent": 0.0, "win_start": self._window_start})
+
+                    self._update_metrics(eps_total, del_total, eps_spent, del_spent)
+                    return {
+                        "epsilon": max(0.0, eps_total - eps_spent),
+                        "delta": max(0.0, del_total - del_spent),
+                    }
+                except Exception as e:
+                    logger.warning("budget_redis_remaining_failed", extra={"detail": f"Redis remaining query failed: {e}; falling back."})
+
+        # 2. SQLite 持久化查询
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
             with self._mu:

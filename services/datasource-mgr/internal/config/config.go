@@ -51,3 +51,12 @@ func (c *Config) Address() string {
 func (c *Config) AgentBaseURL() string {
 	return "http://" + c.AgentRESTHost + ":" + strconv.Itoa(c.AgentRESTPort)
 }
+
+// AgentBaseURLs returns all configured upstream agent REST base URLs.
+func (c *Config) AgentBaseURLs() []string {
+	envURLs := pkgconfig.EnvStringSlice("PRIVACY_AGENT_URLS")
+	if len(envURLs) > 0 {
+		return envURLs
+	}
+	return []string{c.AgentBaseURL()}
+}

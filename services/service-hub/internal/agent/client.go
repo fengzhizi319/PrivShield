@@ -22,8 +22,8 @@ type Client struct {
 // New 根据配置创建新的 agent 客户端。
 func New(cfg *config.Config) *Client {
 	shared := pkgagent.New(pkgagent.Config{
-		BaseURL: cfg.AgentBaseURL(),
-		APIKey:  cfg.AgentAPIKey,
+		BaseURLs: cfg.AgentBaseURLs(),
+		APIKey:   cfg.AgentAPIKey,
 	})
 	return &Client{Client: shared}
 }

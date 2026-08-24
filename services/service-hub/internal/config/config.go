@@ -103,6 +103,15 @@ func (c *Config) AgentBaseURL() string {
 	return "http://" + c.AgentRESTHost + ":" + strconv.Itoa(c.AgentRESTPort)
 }
 
+// AgentBaseURLs returns all configured upstream agent REST base URLs.
+func (c *Config) AgentBaseURLs() []string {
+	envURLs := pkgconfig.EnvStringSlice("PRIVACY_AGENT_URLS")
+	if len(envURLs) > 0 {
+		return envURLs
+	}
+	return []string{c.AgentBaseURL()}
+}
+
 // GRPCAddress returns the full gRPC listen address.
 // GRPCAddress 返回完整的 gRPC 监听地址。
 func (c *Config) GRPCAddress() string {

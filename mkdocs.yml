@@ -75,6 +75,7 @@ nav:
   - 架构设计:
     - 总体架构设计: architecture-design.md
     - 设计实现总结: architecture-summary.md
+    - 生产级架构优化与高可用演进: production_optimization_design.md
 
   - 隐私原语:
     - 数据脱敏 Masking:

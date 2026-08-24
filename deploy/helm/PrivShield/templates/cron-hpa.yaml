@@ -1,0 +1,30 @@
+# =============================================================================
+# PrivShield CronHPA 潮汐预测性定时扩缩容
+# =============================================================================
+# 当 cronAutoscaling.enabled=true 时创建，预置政务/医疗早晚高峰潮汐调度。
+# =============================================================================
+{{- if and .Values.cronAutoscaling .Values.cronAutoscaling.enabled }}
+apiVersion: extensions.tkex.tencent.com/v1alpha1
+kind: CronHPA
+metadata:
+  name: {{ include "PrivShield.fullname" . }}-cron-hpa
+  labels:
+    {{- include "PrivShield.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "PrivShield.fullname" . }}
+  crons:
+    # 工作日早高峰 (08:15) 提前扩容应对流量峰值
+    - name: "morning-peak-scale-up"
+      schedule: "15 8 * * 1-5"
+      targetReplicas: {{ .Values.cronAutoscaling.peakReplicas | default 10 }}
+    # 工作日晚间 (20:00) 自动缩容节省算力资源
+    - name: "night-offpeak-scale-down"
+      schedule: "0 20 * * 1-5"
+      targetReplicas: {{ .Values.cronAutoscaling.offpeakReplicas | default 2 }}
+    {{- with .Values.cronAutoscaling.customCrons }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

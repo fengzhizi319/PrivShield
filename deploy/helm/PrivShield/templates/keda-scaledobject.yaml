@@ -1,0 +1,34 @@
+# =============================================================================
+# PrivShield KEDA ScaledObject 事件驱动自动扩缩容
+# =============================================================================
+# 当 keda.enabled=true 时创建，支持基于 Prometheus QPS/排队深度的毫秒级弹性扩容。
+# =============================================================================
+{{- if and .Values.keda .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "PrivShield.fullname" . }}-keda
+  labels:
+    {{- include "PrivShield.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "PrivShield.fullname" . }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount | default 2 }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount | default 20 }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod | default 300 }}
+  pollingInterval: {{ .Values.keda.pollingInterval | default 15 }}
+  triggers:
+    {{- if .Values.keda.prometheus }}
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.keda.prometheus.serverAddress | default "http://prometheus-server:9090" }}
+        metricName: privacy_requests_qps
+        threshold: {{ .Values.keda.prometheus.threshold | default "100" | quote }}
+        query: {{ .Values.keda.prometheus.query | default "sum(rate(privacy_requests_total[1m]))" | quote }}
+    {{- end }}
+    {{- with .Values.keda.customTriggers }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

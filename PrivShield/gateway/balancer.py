@@ -11,6 +11,7 @@
    - 轮询 (Round-Robin)：简单游标递增取模调度；
    - 平滑加权轮询 (Smooth Weighted Round-Robin)：Nginx 算法动态累加与削减权重，避免大权重瞬时集中；
    - 最小连接数 (Least Connections)：实时统计在途活跃请求，将高耗时任务导向最空闲实例；
+   - 两选择随机算法 (Power of Two Choices, P2C)：随机选取两个健康节点并路由至负载更优者，防止羊群效应；
    - 随机与加权随机 (Random / Weighted Random)；
 4. **高可用主动探针 (health_check_loop)**：周期性并发发起 HTTP /health 与 gRPC Health 探针，强一致判定在线状态；
 5. **回源 TLS 体系 (Backend Origin TLS)**：按需构建基于 CA 校验的 Secure Channel 与 HTTPS 客户端，保障东西向流量安全。
@@ -479,6 +480,16 @@ class LoadBalancer:
             if self.strategy in ("random", "weighted_random"):
                 weights = [n.weight for n in healthy]
                 return random.choices(healthy, weights=weights, k=1)[0]
+
+            elif self.strategy in ("p2c", "power_of_two_choices"):
+                # Power of Two Choices (P2C) Algorithm:
+                # Randomly pick 2 nodes and choose the one with least relative load
+                if len(healthy) == 1:
+                    return healthy[0]
+                n1, n2 = random.sample(healthy, 2)
+                score1 = n1.active_connections / max(1, n1.weight)
+                score2 = n2.active_connections / max(1, n2.weight)
+                return n1 if score1 <= score2 else n2
 
             elif self.strategy == "least_connections":
                 return min(healthy, key=lambda n: n.active_connections)

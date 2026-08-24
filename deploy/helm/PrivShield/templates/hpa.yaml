@@ -39,6 +39,10 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
+    # 自定义 Prometheus 业务指标（如 QPS / 排队深度 / 延迟等）
+    {{- if .Values.autoscaling.customMetrics }}
+    {{- toYaml .Values.autoscaling.customMetrics | nindent 4 }}
+    {{- end }}
   # 自定义扩缩行为（如缩容冷却时间、扩容速率限制等）
   {{- with .Values.autoscaling.behavior }}
   behavior:

@@ -22,8 +22,8 @@ func newTestLogger() *slog.Logger {
 
 func TestNew_Defaults(t *testing.T) {
 	c := New(Config{BaseURL: "http://localhost:8079"})
-	if c.baseURL != "http://localhost:8079" {
-		t.Errorf("baseURL = %q, want %q", c.baseURL, "http://localhost:8079")
+	if c.BaseURL() != "http://localhost:8079" {
+		t.Errorf("BaseURL() = %q, want %q", c.BaseURL(), "http://localhost:8079")
 	}
 	if c.cbThreshold != 5 {
 		t.Errorf("cbThreshold = %d, want 5", c.cbThreshold)
@@ -345,3 +345,43 @@ func TestCircuitBreaker_IntermittentSuccessResetsFailureCount(t *testing.T) {
 		t.Errorf("expected circuit to stay closed because failures were non-consecutive, got %s", c.CircuitStateString())
 	}
 }
+
+func TestMultiNode_RoundRobin(t *testing.T) {
+	var count1, count2 atomic.Int64
+
+	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count1.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"node": 1})
+	}))
+	defer srv1.Close()
+
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count2.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"node": 2})
+	}))
+	defer srv2.Close()
+
+	c := New(Config{
+		BaseURLs: []string{srv1.URL, srv2.URL},
+		Logger:   newTestLogger(),
+	})
+
+	if len(c.BaseURLs()) != 2 {
+		t.Fatalf("expected 2 urls, got %d", len(c.BaseURLs()))
+	}
+
+	// Make 6 requests, should be evenly distributed (3 to srv1, 3 to srv2)
+	for i := 0; i < 6; i++ {
+		_, err := c.Get(context.Background(), "/node")
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+	}
+
+	if count1.Load() != 3 || count2.Load() != 3 {
+		t.Errorf("expected 3 requests each, got srv1=%d, srv2=%d", count1.Load(), count2.Load())
+	}
+}
+
