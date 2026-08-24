@@ -59,10 +59,15 @@ func (s *TaskStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
 	}
 	query += " ORDER BY created_at DESC"
 	if filter.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", filter.Limit)
-		if filter.Offset > 0 {
-			query += fmt.Sprintf(" OFFSET %d", filter.Offset)
+		limit := filter.Limit
+		if limit > 10000 {
+			limit = 10000
 		}
+		offset := filter.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
 	}
 
 	var listArgs []any

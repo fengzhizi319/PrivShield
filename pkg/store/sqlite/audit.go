@@ -57,10 +57,15 @@ func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, 
 		parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level
 		FROM audit_logs` + where + " ORDER BY timestamp DESC"
 	if filter.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", filter.Limit)
-		if filter.Offset > 0 {
-			query += fmt.Sprintf(" OFFSET %d", filter.Offset)
+		limit := filter.Limit
+		if limit > 10000 {
+			limit = 10000
 		}
+		offset := filter.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
 	}
 
 	rows, err := s.db.Query(query, args...)

@@ -76,17 +76,24 @@ var candidateDirs = []string{
 	"../bff-go/internal/samples",
 }
 
-// findCSVFile attempts to locate a CSV file by checking multiple known candidate paths and upward directory traversal.
+// findCSVFile attempts to locate a CSV file safely by extracting the base filename and checking known allowed candidate paths.
+// 安全查找 CSV 文件，严格限制 .csv 扩展名并仅在预定义白名单目录中搜寻，防止路径穿越（Path Traversal / LFI）。
 func findCSVFile(filename string) (string, error) {
-	// If absolute or existing relative path, return directly
-	if _, err := os.Stat(filename); err == nil {
-		return filename, nil
+	cleanName := filepath.Clean(filename)
+	// 强制要求 .csv 扩展名
+	if !strings.EqualFold(filepath.Ext(cleanName), ".csv") {
+		return "", fmt.Errorf("invalid file format: only .csv files are allowed (got %s)", filename)
 	}
 
-	baseName := filepath.Base(filename)
+	// 提取纯文件名，杜绝 ../ 路径穿越
+	baseName := filepath.Base(cleanName)
+	if baseName == "." || baseName == "/" || baseName == "" {
+		return "", fmt.Errorf("invalid csv filename: %s", filename)
+	}
+
 	for _, dir := range candidateDirs {
 		candidate := filepath.Join(dir, baseName)
-		if _, err := os.Stat(candidate); err == nil {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil
 		}
 	}
@@ -96,7 +103,7 @@ func findCSVFile(filename string) (string, error) {
 		for i := 0; i < 6; i++ {
 			for _, sub := range []string{"samples", "services/datasource-mgr/samples", "data", "console/bff-go/internal/samples"} {
 				cand := filepath.Join(curr, sub, baseName)
-				if _, err := os.Stat(cand); err == nil {
+				if info, err := os.Stat(cand); err == nil && !info.IsDir() {
 					return cand, nil
 				}
 			}
@@ -108,10 +115,11 @@ func findCSVFile(filename string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("csv file not found: %s", filename)
+	return "", fmt.Errorf("csv file not found in allowed sample/data directories: %s", baseName)
 }
 
 // LoadCSVRecords reads a CSV file and parses records with limit and offset.
+// 限制最大读取行数（50,000 行），防止过大文件导致内存耗尽（DoS 防护）。
 func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, error) {
 	filePath, err := findCSVFile(filename)
 	if err != nil {
@@ -133,8 +141,9 @@ func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, 
 		return nil, 0, fmt.Errorf("read csv header: %w", err)
 	}
 
+	const maxRowsToRead = 50000
 	var allRows []map[string]any
-	for {
+	for len(allRows) < maxRowsToRead {
 		record, err := reader.Read()
 		if err == io.EOF {
 			break

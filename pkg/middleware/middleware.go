@@ -118,6 +118,7 @@ func StructuredLogger(logger *slog.Logger, module string) gin.HandlerFunc {
 
 // Recovery returns a Gin middleware that recovers from panics and logs structured errors.
 // Recovery 返回一个 Gin 中间件，捕获 panic 并记录结构化日志与返回 500 JSON。
+// 安全设计：Panic 详情仅写入内部结构化日志，HTTP 响应只返回通用错误，防止堆栈与敏感信息泄露。
 func Recovery(logger *slog.Logger, module string) gin.HandlerFunc {
 	if logger == nil {
 		logger = slog.Default()
@@ -134,7 +135,7 @@ func Recovery(logger *slog.Logger, module string) gin.HandlerFunc {
 					"path", c.Request.URL.Path,
 				)
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-					"detail":     fmt.Sprintf("Internal Server Error: %v", r),
+					"detail":     "Internal Server Error",
 					"request_id": requestID,
 				})
 			}

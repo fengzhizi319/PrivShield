@@ -50,10 +50,15 @@ func (s *DataSourceStore) ListDS(filter store.DataSourceFilter) ([]store.DataSou
 	// Fetch with SQL-level pagination / P28 fix: 推分页到 SQL 层
 	query := "SELECT id, name, type, host, port, database_name, security_level, status, created_at, last_check_at, tags_json FROM datasources ORDER BY created_at DESC"
 	if filter.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", filter.Limit)
-		if filter.Offset > 0 {
-			query += fmt.Sprintf(" OFFSET %d", filter.Offset)
+		limit := filter.Limit
+		if limit > 10000 {
+			limit = 10000
 		}
+		offset := filter.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
 	}
 
 	rows, err := s.db.Query(query)

@@ -448,3 +448,21 @@ func TestSeedAndFetchRecords(t *testing.T) {
 	}
 }
 
+func TestLoadCSVRecords_PathTraversal(t *testing.T) {
+	// Attempt to access non-csv and traversal paths
+	traversalPaths := []string{
+		"../../../../etc/passwd",
+		"/etc/shadow",
+		"test.txt",
+		"../../../main.go",
+	}
+
+	for _, p := range traversalPaths {
+		_, _, err := LoadCSVRecords(p, 10, 0)
+		if err == nil {
+			t.Errorf("expected error for traversal path %q, got nil", p)
+		}
+	}
+}
+
+
