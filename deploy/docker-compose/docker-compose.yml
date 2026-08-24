@@ -397,7 +397,17 @@ services:
     # 说明: 前端仅需访问 Go/Python 代理，无需直连 agent，故仅挂 frontend 网络
     depends_on:
       PrivShield:
-        condition: service_healthy  # 等核心就绪（避免首屏请求 502）
+        condition: service_healthy  # 等核心 agent 就绪
+      console-backend-go:
+        condition: service_healthy  # nginx 反代 Go BFF，需先就绪避免 502
+      console-backend-python:
+        condition: service_healthy  # nginx 反代 Python BFF
+      service-hub:
+        condition: service_healthy  # nginx 反代 /api/hub/
+      datasource-mgr:
+        condition: service_healthy  # nginx 反代 /api/datasources
+      audit-log:
+        condition: service_healthy  # nginx 反代 /api/audit/
     networks:
       - frontend
     healthcheck:
@@ -448,6 +458,8 @@ services:
     depends_on:
       PrivShield:
         condition: service_healthy
+      datasource-mgr:
+        condition: service_healthy  # service-hub 调用 datasource-mgr REST/gRPC，需先就绪
     networks:
       - frontend
       - backend
