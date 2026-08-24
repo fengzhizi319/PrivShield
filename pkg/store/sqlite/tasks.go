@@ -173,6 +173,18 @@ func scanTaskRow(rows *sql.Rows) (*store.Task, error) {
 	return scanTaskFields(rows.Scan)
 }
 
+// CleanupOld deletes terminal (completed/failed) tasks older than the cutoff time.
+// CleanupOld 删除早于截止时间的终态（completed/failed）任务，防止 SQLite 无限膨胀。
+func (s *TaskStore) CleanupOld(before time.Time) (int64, error) {
+	cutoff := before.Format(time.RFC3339Nano)
+	result, err := s.db.Exec(
+		`DELETE FROM tasks WHERE status IN ('completed', 'failed') AND created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // nullTime converts a *time.Time to sql.NullString for storage.
 func nullTime(t *time.Time) sql.NullString {
 	if t == nil {

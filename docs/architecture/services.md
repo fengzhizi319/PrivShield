@@ -53,14 +53,14 @@ graph LR
 * **崩溃恢复与自动重试**：启动时自动回收孤立任务（running 标记失败、pending 保留队列），周期性后台重试失败任务（指数退避 + RetryCount）；
 * **完整性校验与备份**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量/验证模式；
 * **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 + 公钥固定；
-* 📖 学习与设计文档：[学习指南](services/service-hub/docs/learning-guide.md) · [详细设计](services/service-hub/docs/design.md) · [可靠性能力](services/service-hub/docs/reliability.md)
+* 📖 学习与设计文档：[学习指南](../../services/service-hub/docs/learning-guide.md) · [详细设计](../../services/service-hub/docs/design.md) · [可靠性能力](../../services/service-hub/docs/reliability.md)
 
 ### 2.2 Datasource Manager 模拟数据源微服务 (`:8083`)
 * **模拟数据源接口**：提供医保 `yibao`、康养 `kangyang` 及 2 个预留通用接口，内置 CSV 样本与数据抽样；
 * **双协议暴露**：同时支持 HTTPS REST（TLS 1.3 + 客户端证书固定）与 gRPC mTLS 双向认证；
 * **零重依赖**：作为服务编排测试与演示用途的 Mock 数据源，不依赖外部 MySQL/PostgreSQL/ClickHouse；
 * **生命周期管控**：提供数据源资产目录、连通性心跳探测与多维访问审计；
-* 📖 学习与设计文档：[学习指南](services/datasource-mgr/docs/learning-guide.md) · [详细设计](services/datasource-mgr/docs/design.md) · [可靠性能力](services/datasource-mgr/docs/reliability.md)
+* 📖 学习与设计文档：[学习指南](../../services/datasource-mgr/docs/learning-guide.md) · [详细设计](../../services/datasource-mgr/docs/design.md) · [可靠性能力](../../services/datasource-mgr/docs/reliability.md)
 
 ### 2.3 Audit Log 脱敏审计与存证微服务 (`:8084`)
 * **8 要素防篡改存证**：采用 SHA-256 对 `logID`、`timestamp`、`algorithm`、`inputHash`、`outputHash`、`user`、`securityLevel`、`params` 进行防篡改签名；
@@ -68,7 +68,7 @@ graph LR
 * **合规报告**：基于 SQLite 引擎秒级生成合规评估与多维统计图表；
 * **完整性校验**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量备份；
 * **独立校验脚本**：`scripts/prod/verify_audit.py` 独立验证审计数据完整性，支持 CI/CD 集成；
-* 📖 学习与设计文档：[学习指南](services/audit-log/docs/learning-guide.md) · [详细设计](services/audit-log/docs/design.md) · [可靠性能力](services/audit-log/docs/reliability.md)
+* 📖 学习与设计文档：[学习指南](../../services/audit-log/docs/learning-guide.md) · [详细设计](../../services/audit-log/docs/design.md) · [可靠性能力](../../services/audit-log/docs/reliability.md)
 
 ---
 

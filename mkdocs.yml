@@ -90,9 +90,9 @@ nav:
   - 快速开始: quickstart.md
 
   - 架构设计:
-    - 总体架构设计: architecture-design.md
-    - 设计实现总结: architecture-summary.md
-    - 生产级架构优化与高可用演进: production_optimization_design.md
+    - 总体架构设计: architecture/architecture-design.md
+    - 设计实现总结: architecture/architecture-summary.md
+    - 生产级架构优化与高可用演进: architecture/production_optimization_design.md
 
   - 隐私原语:
     - 数据脱敏 Masking:
@@ -156,10 +156,10 @@ nav:
       - 测试指南: medical_pipeline/testing.md
       - 脱敏算法标准规范: medical_pipeline/医疗健康数据分类分级与隐私脱敏算法标准规范.md
     - 端到端流水线:
-      - 流水线设计（实施版）: pipeline/design.md
-      - 流水线设计（Gemini 草案）: pipeline/designgemini.md
-      - 医疗数据流水线设计: pipeline/medical_data_pipeline_design.md
-      - 流水线需求文档: pipeline/prd.md
+      - 流水线设计（实施版，旧版）: medical_pipeline/design-legacy.md
+      - 流水线设计（Gemini 草案）: medical_pipeline/design-gemini.md
+      - 医疗数据流水线设计: medical_pipeline/medical_data_pipeline_design.md
+      - 流水线需求文档（旧版）: medical_pipeline/prd-legacy.md
 
   - LoRA 微调:
     - 概览: llmlora/README.md
@@ -175,16 +175,15 @@ nav:
     - 广东省健康医疗数据分类分级规范: standard/广东省健康医疗数据安全分类分级管理技术规范.md
 
   - 企业级中台微服务:
-    - 架构与流通模型: services.md
+    - 架构与流通模型: architecture/services.md
 
   - 统一控制台与 BFF:
-    - 控制台与双 BFF 架构: console.md
+    - 控制台与双 BFF 架构: architecture/console.md
 
   - 基础设施:
     - 高并发架构设计 (10k QPS):
       - 概览: high_concurrency/README.md
       - 架构设计: high_concurrency/design.md
-    - 高并发与负载均衡实现说明: high_concurr.md
     - 网关与负载均衡:
       - 概览: gateway_balancer/README.md
       - 架构设计: gateway_balancer/design.md
@@ -225,9 +224,28 @@ nav:
   - 审计与报告:
     - 2026 全项目审计报告: audit_reports/2026_full_project_audit_report.md
     - 生产级演进三周计划: project_management/三周计划.md
-    - 全栈代码审计综合分析报告: 分析报告.md
-    - 主流数据安全产品洞察报告: 主流数据安全产品洞察报告.md
+    - 全栈代码审计综合分析报告: reports/分析报告.md
+    - 主流数据安全产品洞察报告: reports/主流数据安全产品洞察报告.md
+    - 归档文档:
+      - 目录架构重构与迁移设计: archive/migration-design.md
+
+  - 技术学习指南:
+    - Vite 热重载与构建: learning/vite.md
+    - React: learning/tech-react.md
+    - TypeScript: learning/tech-typescript.md
+    - Go + Gin: learning/tech-go-gin.md
+    - FastAPI: learning/tech-fastapi.md
+    - gRPC & Protobuf: learning/tech-grpc-protobuf.md
+    - Pydantic: learning/tech-pydantic.md
+    - httpx: learning/tech-httpx.md
+    - ESLint: learning/tech-eslint.md
+    - TailwindCSS: learning/tech-tailwindcss.md
+    - PostCSS: learning/tech-postcss.md
+    - pnpm: learning/tech-pnpm.md
+    - Vitest: learning/tech-vitest.md
+    - Testing Library: learning/tech-testing-library.md
+    - 数据处理: learning/tech-data-processing.md
+    - uvicorn: learning/tech-uvicorn.md
 
   - 附录:
-    - 个性化配置: personalized_profiles.md
-    - 生产改进建议: production_improvements.md
+    - 个性化配置: dynclassification/personalized_profiles.md

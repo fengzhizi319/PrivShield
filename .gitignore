@@ -66,6 +66,20 @@ site/
 /llmlora/basemodels/
 /llmlora/output/
 
+# Legacy package directory (renamed to engine/)
+/PrivShield/
+
+# Compiled Go binaries in console/
+console/*/server
+console/*/bin/
+
+# Old Python BFF cache
+console/backend/
+
+# Node modules (console/web)
+console/web/node_modules/
+console/web/dist/
+
 # Secrets: 环境密钥文件一律不入库（模板 .env*.example 除外）
 .env
 .env.*

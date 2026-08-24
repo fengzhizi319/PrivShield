@@ -88,8 +88,7 @@ PrivShield/
 ├── console/                       # 统一运维与测试控制台 (Web UI + BFF)
 │   ├── bff-go/                    # Go gRPC 代理网关 / BFF (:8081)
 │   ├── bff-py/                    # Python REST 代理后端 / 备用 BFF (:8080)
-│   ├── web/                       # React + TypeScript + Vite 前端控制台 (:5173)
-│   └── migration-design.md        # 目录架构重构与迁移设计方案
+│   └── web/                       # React + TypeScript + Vite 前端控制台 (:5173)
 ├── pkg/                           # Go 共享基础库 (Agent客户端, 中间件, 存储, 指标, 校验)
 ├── proto/privacy.proto            # gRPC service definition
 ├── tests/                         # pytest suite

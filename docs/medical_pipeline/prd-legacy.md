@@ -110,4 +110,4 @@
 
 | 文档 | 路径 |
 |---|---|
-| 设计方案 | `docs/pipeline/design.md` |
+| 设计方案 | `docs/medical_pipeline/design-legacy.md` |

@@ -238,8 +238,8 @@ make docs-build
 ```
 
 ### 核心架构与中台微服务文档
-- **[系统架构与全景设计 (Architecture Design)](file:///home/charles/code/sfwork/PrivShield/docs/architecture-design.md)**
-- **[全平台目录架构重构方案 (Migration Design)](file:///home/charles/code/sfwork/PrivShield/console/migration-design.md)**
+- **[系统架构与全景设计 (Architecture Design)](file:///home/charles/code/sfwork/PrivShield/docs/architecture/architecture-design.md)**
+- **[全平台目录架构重构方案 (Migration Design)](file:///home/charles/code/sfwork/PrivShield/docs/archive/migration-design.md)**
 - **[企业级中台微服务总览 (Services Overview)](file:///home/charles/code/sfwork/PrivShield/services/README.md)**
 - **[数据服务调度中枢文档 (Service Hub Docs)](file:///home/charles/code/sfwork/PrivShield/services/service-hub/docs/design.md)**
 - **[数据源与资产管理文档 (Datasource Manager Docs)](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/docs/design.md)**

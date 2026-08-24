@@ -6,7 +6,7 @@
 - **分类分级仲裁**：L1~L5 密级裁定（Ground Truth 来自项目 Layer-1 规则引擎）
 - **无痕抹平脱敏**：上下文自然重写（Natural Context Rewriting），零泄漏 QA 保证
 
-完整设计方案见 [docs/design_and_workflow.md](docs/design_and_workflow.md)。
+完整设计方案见 [docs/llmlora/design_and_workflow.md](../docs/llmlora/design_and_workflow.md)。
 
 ---
 
@@ -30,8 +30,6 @@ llmlora/
 ├── basemodels/
 │   └── qwen3.5-0.8b/             # 原版 Qwen3.5 0.8B CausalLM 基座
 ├── data/                         # train.jsonl / dev.jsonl / test.jsonl
-├── docs/
-│   └── design_and_workflow.md    # 完整设计方案与工作流
 ├── output/
 │   ├── saves/qwen35-privacy-lora/               # LoRA adapter 权重
 │   └── models/Qwen3.5-0.8B-Privacy-Classifier-Smoother/  # 合并导出端到端模型

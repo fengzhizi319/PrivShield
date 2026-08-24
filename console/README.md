@@ -19,8 +19,6 @@ console/
 │   ├── app/              # FastAPI 代理路由与适配器
 │   └── docs/             # Python BFF 专属设计与接口文档
 ├── docs/                 # 控制台技术架构、模式与学习指南
-├── scripts/              # 控制台与全栈启停、压测与验证脚本
-├── migration-design.md   # 目录架构重构与迁移设计方案
 └── README.md             # 控制台总览（本文档）
 ```
 
@@ -34,14 +32,14 @@ console/
 
 ## 2. 文档索引
 
-- [migration-design.md](file:///home/charles/code/sfwork/PrivShield/console/migration-design.md) — 全平台目录架构重构与平滑迁移设计方案
+- [docs/archive/migration-design.md](file:///home/charles/code/sfwork/PrivShield/docs/archive/migration-design.md) — 全平台目录架构重构与平滑迁移设计方案（已归档）
 - [docs/modes.md](file:///home/charles/code/sfwork/PrivShield/console/docs/modes.md) — 开发模式 vs 生产模式部署与网络拓扑总览
-- [docs/vite.md](file:///home/charles/code/sfwork/PrivShield/console/docs/vite.md) — 前端 Vite 热重载与构建原理
+- [docs/learning/vite.md](file:///home/charles/code/sfwork/PrivShield/docs/learning/vite.md) — 前端 Vite 热重载与构建原理
 - **Go BFF 文档**：[design](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/design.md) · [api](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/api.md) · [test](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/test.md) · [ops](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/ops.md) · [reliability](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/reliability.md)
 - **Python BFF 文档**：[design](file:///home/charles/code/sfwork/PrivShield/console/bff-py/docs/design.md) · [api](file:///home/charles/code/sfwork/PrivShield/console/bff-py/docs/api.md) · [test](file:///home/charles/code/sfwork/PrivShield/console/bff-py/docs/test.md) · [ops](file:///home/charles/code/sfwork/PrivShield/console/bff-py/docs/ops.md)
 - **调度微服务文档**：[service-hub docs](file:///home/charles/code/sfwork/PrivShield/services/service-hub/docs/design.md) · [datasource-mgr docs](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/docs/design.md) · [audit-log docs](file:///home/charles/code/sfwork/PrivShield/services/audit-log/docs/design.md)
 - **可靠性能力文档**：[engine](file:///home/charles/code/sfwork/PrivShield/docs/reliability.md) · [service-hub](file:///home/charles/code/sfwork/PrivShield/services/service-hub/docs/reliability.md) · [audit-log](file:///home/charles/code/sfwork/PrivShield/services/audit-log/docs/reliability.md) · [datasource-mgr](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/docs/reliability.md) · [gateway](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/reliability.md) · [bff-go](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/reliability.md)
-- **脚本手册**：[console/scripts/README.md](file:///home/charles/code/sfwork/PrivShield/console/scripts/README.md)
+- **脚本手册**：[scripts/dev/](file:///home/charles/code/sfwork/PrivShield/scripts/dev) · [scripts/prod/](file:///home/charles/code/sfwork/PrivShield/scripts/prod)
 
 ---
 

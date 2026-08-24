@@ -136,6 +136,16 @@ func main() {
 	go periodicRetryLoop(retryCtx, taskStore, mc, logger, 60*time.Second)
 
 	// =========================================================================
+	// 3.8 Periodic Data Retention Cleanup / 周期性数据保留清理协程
+	// =========================================================================
+	// 启动后台协程，每 6 小时扫描并清理超过保留期的终态任务，防止 SQLite 无限膨胀。
+	// RetentionDays=0 时禁用清理（适用于调试或短期部署）。
+	retentionCtx, retentionCancel := context.WithCancel(context.Background())
+	if cfg.RetentionDays > 0 {
+		go dataRetentionLoop(retentionCtx, taskStore, logger, cfg.RetentionDays)
+	}
+
+	// =========================================================================
 	// 5. Upstream & Downstream Clients Setup / 下游依赖客户端实例化
 	// =========================================================================
 	// 1) AgentClient: 负责与 PrivShield Python Core Sidecar（:8079）通信，调用分类分级与脱敏算子；
@@ -282,8 +292,9 @@ func main() {
 	sig := <-sigChan
 	logger.Info("shutting down service-hub servers...", "signal", sig.String())
 
-	// 2) 停止周期性重试协程
+	// 2) 停止周期性重试协程与数据保留清理协程
 	retryCancel()
+	retentionCancel()
 
 	// 3) 优先向内部异步流水线任务发送取消信号，平滑等待在途处理协程完成
 	serviceImpl.Shutdown()
@@ -508,4 +519,45 @@ func isRetryableError(errMsg string) bool {
 		}
 	}
 	return false
+}
+
+// dataRetentionLoop periodically deletes terminal tasks older than retentionDays.
+// dataRetentionLoop 周期性删除超过保留期的终态任务，防止 SQLite 无限膨胀。
+//
+// 每 6 小时执行一次清理，仅删除 completed/failed 状态的任务，
+// 保留 pending/running 状态的任务不受影响。
+func dataRetentionLoop(ctx context.Context, taskStore store.TaskStore, logger *slog.Logger, retentionDays int) {
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+
+	logger.Info("data retention cleanup started", "retention_days", retentionDays, "interval_hours", 6)
+
+	// Run once immediately on startup / 启动时立即执行一次
+	runRetentionCleanup(taskStore, logger, retentionDays)
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("data retention cleanup stopped")
+			return
+		case <-ticker.C:
+			runRetentionCleanup(taskStore, logger, retentionDays)
+		}
+	}
+}
+
+// runRetentionCleanup performs a single cleanup pass.
+func runRetentionCleanup(taskStore store.TaskStore, logger *slog.Logger, retentionDays int) {
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	deleted, err := taskStore.CleanupOld(cutoff)
+	if err != nil {
+		logger.Error("data retention cleanup failed", "error", err.Error())
+		return
+	}
+	if deleted > 0 {
+		logger.Info("data retention cleanup completed",
+			"deleted_tasks", deleted,
+			"cutoff", cutoff.Format(time.RFC3339),
+			"retention_days", retentionDays)
+	}
 }

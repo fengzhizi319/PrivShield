@@ -161,19 +161,19 @@ graph TB
 * **崩溃恢复与自动重试**：启动时自动回收孤立任务（running 标记失败、pending 保留队列），周期性后台重试失败任务（指数退避 + RetryCount 结构化字段）；
 * **完整性校验与备份**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量/验证模式；
 * **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 强制最低版本，支持 require/verify/request 客户端认证模式与公钥固定（SPKI Pinning）；
-* 📖 **可靠性能力详解**：[service-hub/docs/reliability.md](services/service-hub/docs/reliability.md)
+* 📖 **可靠性能力详解**：[service-hub/docs/reliability.md](../../services/service-hub/docs/reliability.md)
 
 ### 3.2 数据源资产管理 (Datasource Manager :8083)
 * **多源异构纳管**：统一管理 MySQL、PostgreSQL、API 及文件型数据源；
 * **模拟数据集开箱即用**：内置医保结算（`yibao.csv`）与康养体检慢病（`kangyang.csv`）数据库，支持启动自动种子注入（`SeedMockDataSources`）、元数据自动探查与 `GET /api/datasources/:id/records` 真实数据抽样；
 * **HTTP/gRPC 双协议 mTLS**：与 service-hub 共享 `pkg/tlsutil` 工具库，支持 TLS 1.3 双向认证与公钥固定；
-* 📖 **可靠性能力详解**：[datasource-mgr/docs/reliability.md](services/datasource-mgr/docs/reliability.md)
+* 📖 **可靠性能力详解**：[datasource-mgr/docs/reliability.md](../../services/datasource-mgr/docs/reliability.md)
 
 ### 3.3 脱敏合规存证审计 (Audit Log :8084)
 * **不可篡改哈希链**：基于 8 维度特征（时间戳、任务 ID、用户、源库、操作、明文哈希、脱敏后哈希、上链指纹）生成 SHA-256 存证校验链，支持合规审计报告导出；
 * **完整性校验与备份**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量备份；
 * **独立校验脚本**：`scripts/prod/verify_audit.py` 独立验证审计数据完整性，支持 CI/CD 集成；
-* 📖 **可靠性能力详解**：[audit-log/docs/reliability.md](services/audit-log/docs/reliability.md)
+* 📖 **可靠性能力详解**：[audit-log/docs/reliability.md](../../services/audit-log/docs/reliability.md)
 
 ---
 
@@ -207,7 +207,7 @@ flowchart LR
 * `pkg/agent/client.go` 原生支持配置 `PRIVACY_AGENT_URLS` 集群列表；
 * 内置平滑轮询（Round-Robin）与熔断状态机（Closed / Open / Half-Open），遇到单点宕机自动透明切换至存活节点；
 * **熔断器 Prometheus 指标**：`circuit_breaker_state{node="..."}` 实时暴露熔断器状态，支持 Grafana 告警；
-* 📖 **网关可靠性详解**：[gateway_balancer/reliability.md](gateway_balancer/reliability.md)
+* 📖 **网关可靠性详解**：[gateway_balancer/reliability.md](../../gateway_balancer/reliability.md)
 
 ### 4.2 网关 P2C 动态负载调度
 * `engine/gateway/balancer.py` 新增 **Power of Two Choices (P2C)** 算法，每次随机选取两个候选健康节点并路由至负载得分更低者，彻底消除大并发下的羊群聚集效应。
@@ -224,7 +224,7 @@ flowchart LR
 ### 5.1 双 BFF 网关架构
 * **`bff-go` (:8081)**：主力 BFF，采用 Go 1.25 + Gin + ByteDance Sonic，通过 gRPC 直连 Agent 算力层并聚合 3 大微服务 REST 接口；
   * **gRPC 自动重试**：内置可配置重试策略（默认最多 6 次，指数退避 1s→8s），`waitForReady=true` 连接等待就绪；
-  * 📖 **可靠性能力详解**：[console/bff-go/docs/reliability.md](console/bff-go/docs/reliability.md)
+  * 📖 **可靠性能力详解**：[console/bff-go/docs/reliability.md](../../console/bff-go/docs/reliability.md)
 * **`bff-py` (:8080)**：备用/开发调试 BFF，采用 Python FastAPI，支持 Arrow 零拷贝流式解析。
 
 ### 5.2 前端 React 18 架构
@@ -262,12 +262,12 @@ flowchart LR
 
 | 组件 | 崩溃恢复 | 自动重试 | 完整性校验 | 备份 | HTTP/gRPC mTLS | 可靠性文档 |
 |---|---|---|---|---|---|---|
-| **engine (Agent)** | ✅ 预算状态持久化 | ⚪ 不适用 | ✅ HMAC 审计 + 预算 DB 校验 | ✅ | ⚪ 不适用 | [docs/reliability.md](reliability.md) |
-| **service-hub** | ✅ 孤立任务回收 | ✅ 启动时 + 周期性 | ✅ SQLite integrity_check | ✅ 全量/增量/验证 | ✅ 双协议 mTLS | [service-hub/docs/reliability.md](services/service-hub/docs/reliability.md) |
-| **audit-log** | ⚪ 不适用 | ⚪ 不适用 | ✅ PRAGMA + HMAC + 快照 | ✅ | ⚪ 不适用 | [audit-log/docs/reliability.md](services/audit-log/docs/reliability.md) |
-| **datasource-mgr** | ⚪ 无状态 | ⚪ 无状态 | ⚪ 无持久化 | ⚪ 无持久化 | ✅ 双协议 mTLS | [datasource-mgr/docs/reliability.md](services/datasource-mgr/docs/reliability.md) |
-| **gateway** | ⚪ 无状态 | ✅ HTTP/gRPC 重试 | ⚪ 无持久化 | ⚪ 无持久化 | ⚪ 不适用 | [gateway_balancer/reliability.md](gateway_balancer/reliability.md) |
-| **bff-go** | ⚪ 无状态 | ✅ gRPC 重试 | ⚪ 无持久化 | ⚪ 无持久化 | ⚪ 不适用 | [bff-go/docs/reliability.md](console/bff-go/docs/reliability.md) |
+| **engine (Agent)** | ✅ 预算状态持久化 | ⚪ 不适用 | ✅ HMAC 审计 + 预算 DB 校验 | ✅ | ⚪ 不适用 | [docs/reliability.md](../reliability.md) |
+| **service-hub** | ✅ 孤立任务回收 | ✅ 启动时 + 周期性 | ✅ SQLite integrity_check | ✅ 全量/增量/验证 | ✅ 双协议 mTLS | [service-hub/docs/reliability.md](../../services/service-hub/docs/reliability.md) |
+| **audit-log** | ⚪ 不适用 | ⚪ 不适用 | ✅ PRAGMA + HMAC + 快照 | ✅ | ⚪ 不适用 | [audit-log/docs/reliability.md](../../services/audit-log/docs/reliability.md) |
+| **datasource-mgr** | ⚪ 无状态 | ⚪ 无状态 | ⚪ 无持久化 | ⚪ 无持久化 | ✅ 双协议 mTLS | [datasource-mgr/docs/reliability.md](../../services/datasource-mgr/docs/reliability.md) |
+| **gateway** | ⚪ 无状态 | ✅ HTTP/gRPC 重试 | ⚪ 无持久化 | ⚪ 无持久化 | ⚪ 不适用 | [gateway_balancer/reliability.md](../../gateway_balancer/reliability.md) |
+| **bff-go** | ⚪ 无状态 | ✅ gRPC 重试 | ⚪ 无持久化 | ⚪ 无持久化 | ⚪ 不适用 | [bff-go/docs/reliability.md](../../console/bff-go/docs/reliability.md) |
 
 ---
 

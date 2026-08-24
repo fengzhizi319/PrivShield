@@ -37,6 +37,9 @@ type Config struct {
 	DBPath      string   // SQLite database path (empty = in-memory) / SQLite 数据库路径
 	LogFormat   string   // "json" or "text" / 日志格式
 	LogLevel    string   // "debug", "info", "warn", "error" / 日志级别
+
+	// Data retention / 数据保留策略
+	RetentionDays int // 审计日志保留天数，超期自动清理（0 = 不清理）
 }
 
 // Load reads configuration from environment variables.
@@ -69,6 +72,9 @@ func Load() *Config {
 		DBPath:      pkgconfig.EnvString("AUDIT_LOG_DB_PATH", ""),
 		LogFormat:   pkgconfig.EnvString("AUDIT_LOG_LOG_FORMAT", "json"),
 		LogLevel:    pkgconfig.EnvString("AUDIT_LOG_LOG_LEVEL", "info"),
+
+		// Data retention / 数据保留策略（默认 90 天，审计日志保留期较长）
+		RetentionDays: pkgconfig.EnvInt("AUDIT_LOG_RETENTION_DAYS", 90),
 	}
 }
 

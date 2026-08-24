@@ -52,6 +52,7 @@ type TaskStore interface {
 	List(filter TaskFilter) ([]Task, int, error) // returns tasks, total count, error
 	Update(task *Task) error
 	Counts() (TaskCounts, error)
+	CleanupOld(before time.Time) (int64, error) // Delete terminal tasks older than cutoff / 清理过期终态任务
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -184,4 +185,5 @@ type AuditStore interface {
 	SaveSnapshot(snap *SnapshotRecord) error
 	ListSnapshots(limit, offset int) ([]SnapshotRecord, int, error) // P35: return total count for pagination
 	GetSnapshot(id string) (*SnapshotRecord, error)
+	CleanupOld(before time.Time) (int64, error) // Delete audit logs older than cutoff / 清理过期审计日志
 }

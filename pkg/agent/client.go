@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -25,6 +26,10 @@ type Client struct {
 	httpClient *http.Client
 	logger     *slog.Logger
 	rrIndex    uint64
+
+	// Retry configuration / 重试配置
+	maxRetries     int
+	retryBaseDelay time.Duration
 
 	// Circuit breaker state / 熔断器状态
 	cbMu        sync.Mutex
@@ -65,6 +70,8 @@ type Config struct {
 	Timeout            time.Duration // HTTP client timeout / HTTP 客户端超时
 	CBThreshold        int           // Consecutive failures before opening / 连续失败熔断阈值
 	CBCooldown         time.Duration // Cooldown before half-open / 熔断冷却时间
+	MaxRetries         int           // Max retry attempts for retryable errors (0=no retry) / 可重试错误的最大重试次数（0=不重试）
+	RetryBaseDelay     time.Duration // Base delay for exponential backoff / 指数退避基础延迟
 	Logger             *slog.Logger  // Structured logger / 结构化日志
 }
 
@@ -79,6 +86,12 @@ func New(cfg Config) *Client {
 	}
 	if cfg.CBCooldown == 0 {
 		cfg.CBCooldown = 30 * time.Second
+	}
+	if cfg.MaxRetries == 0 {
+		cfg.MaxRetries = 3
+	}
+	if cfg.RetryBaseDelay == 0 {
+		cfg.RetryBaseDelay = 500 * time.Millisecond
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -99,17 +112,19 @@ func New(cfg Config) *Client {
 	}
 
 	return &Client{
-		baseURLs: urls,
-		apiKey:   cfg.APIKey,
+		baseURLs:       urls,
+		apiKey:         cfg.APIKey,
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   cfg.Timeout,
 		},
-		logger:      cfg.Logger,
-		cbState:     CircuitClosed,
-		cbFailures:  0,
-		cbThreshold: cfg.CBThreshold,
-		cbCooldown:  cfg.CBCooldown,
+		logger:         cfg.Logger,
+		maxRetries:     cfg.MaxRetries,
+		retryBaseDelay: cfg.RetryBaseDelay,
+		cbState:        CircuitClosed,
+		cbFailures:     0,
+		cbThreshold:    cfg.CBThreshold,
+		cbCooldown:     cfg.CBCooldown,
 	}
 }
 
@@ -209,58 +224,99 @@ func (c *Client) setHeaders(req *http.Request) {
 }
 
 func (c *Client) do(req *http.Request) (map[string]any, error) {
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		c.recordFailure()
-		c.logger.Warn("agent request failed",
-			"method", req.Method,
-			"path", req.URL.Path,
-			"error", err.Error(),
-		)
-		return nil, fmt.Errorf("agent request failed: %w", err)
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff with jitter / 指数退避 + 随机抖动
+			delay := c.retryBaseDelay * time.Duration(1<<(attempt-1))
+			jitter := time.Duration(rand.Int64N(int64(delay / 2)))
+			sleepDur := delay + jitter
 
-	// P23 fix: limit response body to 64 MiB to prevent OOM from misbehaving upstream
-	// 限制响应体最大 64 MiB，防止上游异常返回超大响应导致 OOM
-	const maxBodySize = 64 << 20
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize+1))
-	if err != nil {
-		c.recordFailure()
-		return nil, fmt.Errorf("read agent response: %w", err)
-	}
-	if int64(len(body)) > maxBodySize {
-		c.recordFailure()
-		return nil, fmt.Errorf("agent response too large: exceeds %d bytes", maxBodySize)
-	}
+			c.logger.Info("retrying agent request",
+				"method", req.Method,
+				"path", req.URL.Path,
+				"attempt", attempt+1,
+				"max_retries", c.maxRetries+1,
+				"backoff", sleepDur.String(),
+			)
 
-	if resp.StatusCode >= 500 {
-		c.recordFailure()
-		c.logger.Warn("agent returned server error status",
-			"method", req.Method,
-			"path", req.URL.Path,
-			"status", resp.StatusCode,
-		)
-		return nil, fmt.Errorf("agent returned server error %d: %s", resp.StatusCode, string(body))
-	} else if resp.StatusCode >= 400 {
-		// 4xx 是客户端请求参数/业务错误，不计入服务端节点熔断失败计数，防止恶意/非法参数击穿熔断器
-		c.logger.Debug("agent returned client error status",
-			"method", req.Method,
-			"path", req.URL.Path,
-			"status", resp.StatusCode,
-		)
-		return nil, fmt.Errorf("agent returned status %d: %s", resp.StatusCode, string(body))
-	}
+			select {
+			case <-req.Context().Done():
+				return nil, fmt.Errorf("retry cancelled: %w", req.Context().Err())
+			case <-time.After(sleepDur):
+			}
 
-	c.recordSuccess()
-
-	var result map[string]any
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("parse agent response: %w", err)
+			// Re-create request body for retry (body was consumed on first attempt)
+			if req.GetBody != nil {
+				newBody, err := req.GetBody()
+				if err != nil {
+					return nil, fmt.Errorf("retry: recreate body: %w", err)
+				}
+				req.Body = newBody
+			}
 		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			c.recordFailure()
+			lastErr = fmt.Errorf("agent request failed: %w", err)
+			c.logger.Warn("agent request failed",
+				"method", req.Method,
+				"path", req.URL.Path,
+				"attempt", attempt+1,
+				"error", err.Error(),
+			)
+			continue // Retry on network errors / 网络错误可重试
+		}
+		defer resp.Body.Close()
+
+		// P23 fix: limit response body to 64 MiB to prevent OOM from misbehaving upstream
+		// 限制响应体最大 64 MiB，防止上游异常返回超大响应导致 OOM
+		const maxBodySize = 64 << 20
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize+1))
+		if err != nil {
+			c.recordFailure()
+			lastErr = fmt.Errorf("read agent response: %w", err)
+			continue // Retry on read errors / 读取错误可重试
+		}
+		if int64(len(body)) > maxBodySize {
+			c.recordFailure()
+			return nil, fmt.Errorf("agent response too large: exceeds %d bytes", maxBodySize)
+		}
+
+		if resp.StatusCode >= 500 {
+			c.recordFailure()
+			lastErr = fmt.Errorf("agent returned server error %d: %s", resp.StatusCode, string(body))
+			c.logger.Warn("agent returned server error status",
+				"method", req.Method,
+				"path", req.URL.Path,
+				"status", resp.StatusCode,
+				"attempt", attempt+1,
+			)
+			continue // Retry on 5xx / 服务端错误可重试
+		} else if resp.StatusCode >= 400 {
+			// 4xx 是客户端请求参数/业务错误，不计入服务端节点熔断失败计数，防止恶意/非法参数击穿熔断器
+			c.logger.Debug("agent returned client error status",
+				"method", req.Method,
+				"path", req.URL.Path,
+				"status", resp.StatusCode,
+			)
+			return nil, fmt.Errorf("agent returned status %d: %s", resp.StatusCode, string(body))
+		}
+
+		c.recordSuccess()
+
+		var result map[string]any
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &result); err != nil {
+				return nil, fmt.Errorf("parse agent response: %w", err)
+			}
+		}
+		return result, nil
 	}
-	return result, nil
+
+	// All retries exhausted / 所有重试已耗尽
+	return nil, fmt.Errorf("agent request failed after %d attempts: %w", c.maxRetries+1, lastErr)
 }
 
 // CircuitStateString returns the current circuit breaker state as a string.

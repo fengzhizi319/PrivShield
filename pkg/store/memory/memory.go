@@ -113,6 +113,21 @@ func (s *TaskStore) Counts() (store.TaskCounts, error) {
 	return c, nil
 }
 
+// CleanupOld deletes terminal (completed/failed) tasks older than the cutoff time.
+// CleanupOld 删除早于截止时间的终态任务，防止内存无限增长。
+func (s *TaskStore) CleanupOld(before time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var count int64
+	for id, t := range s.tasks {
+		if t.CreatedAt.Before(before) && (t.Status == "completed" || t.Status == "failed") {
+			delete(s.tasks, id)
+			count++
+		}
+	}
+	return count, nil
+}
+
 // ─────────────────────────────────────────────────────────────
 // DataSourceStore / 数据源内存存储
 // ─────────────────────────────────────────────────────────────
@@ -517,6 +532,35 @@ func (s *AuditStore) GetSnapshot(id string) (*store.SnapshotRecord, error) {
 		}
 	}
 	return nil, fmt.Errorf("snapshot %s not found", id)
+}
+
+// CleanupOld deletes audit logs and their associated snapshots older than the cutoff time.
+// CleanupOld 删除早于截止时间的审计日志及其关联快照，防止内存无限增长。
+func (s *AuditStore) CleanupOld(before time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Collect IDs of old audit logs for snapshot cleanup
+	oldIDs := make(map[string]struct{})
+	kept := make([]store.AuditLog, 0, len(s.logs))
+	var count int64
+	for _, l := range s.logs {
+		if l.Timestamp.Before(before) {
+			oldIDs[l.ID] = struct{}{}
+			count++
+		} else {
+			kept = append(kept, l)
+		}
+	}
+	s.logs = kept
+	// Remove associated snapshots
+	keptSnaps := make([]store.SnapshotRecord, 0, len(s.snapshots))
+	for _, snap := range s.snapshots {
+		if _, ok := oldIDs[snap.AuditLogID]; !ok {
+			keptSnaps = append(keptSnaps, snap)
+		}
+	}
+	s.snapshots = keptSnaps
+	return count, nil
 }
 
 // Ensure interface compliance at compile time.

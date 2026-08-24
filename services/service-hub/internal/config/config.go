@@ -52,6 +52,9 @@ type Config struct {
 	DBPath      string   // SQLite 任务数据库文件物理路径（为空表示使用进程内内存存储）
 	LogFormat   string   // 日志输出格式："json"（生产推荐）或 "text"（开发可读）
 	LogLevel    string   // 日志输出级别："debug", "info", "warn", "error"
+
+	// Data retention / 数据保留策略
+	RetentionDays int // 终态任务保留天数，超期自动清理（0 = 不清理）
 }
 
 // Load reads configuration from environment variables with fallback defaults.
@@ -95,6 +98,9 @@ func Load() *Config {
 		DBPath:      pkgconfig.EnvString("SERVICE_HUB_DB_PATH", ""),
 		LogFormat:   pkgconfig.EnvString("SERVICE_HUB_LOG_FORMAT", "json"),
 		LogLevel:    pkgconfig.EnvString("SERVICE_HUB_LOG_LEVEL", "info"),
+
+		// Data retention / 数据保留策略（默认 30 天）
+		RetentionDays: pkgconfig.EnvInt("SERVICE_HUB_RETENTION_DAYS", 30),
 	}
 }
 

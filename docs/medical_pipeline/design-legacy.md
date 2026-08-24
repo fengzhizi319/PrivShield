@@ -1,7 +1,7 @@
 # 医疗数据分类分级与脱敏流水线设计方案 (Medical Privacy Pipeline Design)
 
 > **文档版本**: 1.1 (已实操落盘与全栈贯通)  
-> **关联文档**: [`docs/pipeline/prd.md`](prd.md)  
+> **关联文档**: [`docs/medical_pipeline/prd-legacy.md`](prd-legacy.md)  
 > **关键组件**: `scripts/data/generate_medical_data.py`, `engine/pipeline`, `engine/medical_pipeline`, `console/bff-py`, `console/bff-go`, `console/web`
 
 ---

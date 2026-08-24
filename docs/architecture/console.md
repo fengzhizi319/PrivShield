@@ -34,7 +34,7 @@ graph TD
   * 使用 Protobuf 结构体进行严格类型约束，通过 HTTP/2 多路复用大幅削减通信握手延迟；
   * 生产环境主力推荐，内置 mTLS 双向认证支持与前端静态文件独立托管；
   * **gRPC 自动重试**：内置可配置重试策略（默认最多 6 次，指数退避 1s→8s），`waitForReady=true` 连接等待就绪；
-  * 📖 [可靠性能力详解](console/bff-go/docs/reliability.md)
+  * 📖 [可靠性能力详解](../../console/bff-go/docs/reliability.md)
 * **Python REST BFF (`bff-py:8080`)**：
   * 基于 FastAPI + httpx 构建；
   * 与 Agent 核心库完全同构，原生支持 Arrow IPC 二进制流反序列化；

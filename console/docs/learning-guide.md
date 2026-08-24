@@ -765,7 +765,7 @@ console/bff-py/
 
 | 资源 | 说明 |
 |------|------|
-| 本项目 `console/docs/tech-*.md` | 每个技术的详细说明文档 |
+| 项目 `docs/learning/tech-*.md` | 每个技术的详细说明文档 |
 | 本项目 `console/docs/modes.md` | 开发模式 vs 生产模式 |
 | 本项目 `AGENTS.md` | 项目整体架构与约定 |
 
@@ -813,7 +813,7 @@ PYTHONPATH=. pytest tests -q
 
 ### Q: 学习过程中遇到不懂的 API 怎么办？
 
-1. 先在 `console/docs/tech-*.md` 中搜索（本项目已有详细技术文档）
+1. 先在 `docs/learning/tech-*.md` 中搜索（本项目已有详细技术文档）
 2. 再去官方文档搜索
 3. 最后用搜索引擎搜索具体错误信息
 

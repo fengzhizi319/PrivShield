@@ -515,3 +515,53 @@ func publicKeysEqual(a, b any) bool {
 	}
 	return false
 }
+
+// BuildServerTLSConfig constructs a *tls.Config for the HTTP REST server.
+// BuildServerTLSConfig 为 HTTP REST 服务器构建 TLS 配置，与 gRPC 共享同一套证书。
+func BuildServerTLSConfig(cfg *config.Config) (*tls.Config, error) {
+	if !cfg.TLSEnabled {
+		return nil, fmt.Errorf("TLS is disabled in configuration")
+	}
+	if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
+		return nil, fmt.Errorf("TLS cert file and key file must be configured")
+	}
+
+	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load server x509 key pair: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	clientAuthMode := strings.ToLower(strings.TrimSpace(cfg.TLSClientAuth))
+	if clientAuthMode != "" {
+		if cfg.TLSCAFile == "" {
+			return nil, fmt.Errorf("TLS CA file must be configured when client auth is enabled")
+		}
+		caPEM, err := os.ReadFile(cfg.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS CA file: %w", err)
+		}
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse TLS CA certificate from %s", cfg.TLSCAFile)
+		}
+		tlsConfig.ClientCAs = caPool
+
+		switch clientAuthMode {
+		case "require", "requireandverify":
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		case "verify":
+			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+		case "request":
+			tlsConfig.ClientAuth = tls.RequestClientCert
+		default:
+			return nil, fmt.Errorf("unknown TLS client auth mode: %s", cfg.TLSClientAuth)
+		}
+	}
+
+	return tlsConfig, nil
+}

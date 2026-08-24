@@ -63,6 +63,14 @@ func main() {
 	// ── Agent client / Agent 客户端 ────────────────────────────
 	agentClient := agent.New(cfg)
 
+	// ── Data Retention Cleanup / 数据保留清理协程 ───────────────
+	// 启动后台协程，每 6 小时扫描并清理超过保留期的审计日志，防止 SQLite 无限膨胀。
+	// RetentionDays=0 时禁用清理（适用于调试或短期部署）。
+	retentionCtx, retentionCancel := context.WithCancel(context.Background())
+	if cfg.RetentionDays > 0 {
+		go auditRetentionLoop(retentionCtx, auditStore, logger, cfg.RetentionDays)
+	}
+
 	// ── HTTP REST Server / HTTP REST 服务器 ──────────────────────
 	gin.SetMode(gin.ReleaseMode)
 	server := handlers.New(agentClient, cfg, auditStore, logger, mc)
@@ -77,6 +85,16 @@ func main() {
 		WriteTimeout:      60 * time.Second, // Slow client response timeout
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1 MiB max header size
+	}
+
+	// ── HTTP TLS / HTTPS 配置 ───────────────────────────────────
+	// 与 service-hub/datasource-mgr 对齐：当配置了 TLS 证书时，HTTP 也启用 HTTPS。
+	if cfg.TLSEnabled {
+		httpTLSConfig, err := grpcserver.BuildServerTLSConfig(cfg)
+		if err != nil {
+			log.Fatalf("failed to build TLS config for HTTP server: %v", err)
+		}
+		httpSrv.TLSConfig = httpTLSConfig
 	}
 
 	// ── gRPC Server (with optional mTLS) / gRPC 服务器（可选 mTLS）──
@@ -121,21 +139,39 @@ func main() {
 
 	// Start HTTP server / 启动 HTTP 监听
 	go func() {
-		logger.Info("audit-log HTTP REST server started",
-			"addr", cfg.Address(),
-			"grpc_addr", cfg.GRPCAddress(),
-			"agent_rest", cfg.AgentBaseURL(),
-			"db_path", cfg.DBPath,
-			"auth_enabled", cfg.APIKey != "",
-		)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error", "error", err.Error())
+		if cfg.TLSEnabled {
+			logger.Info("audit-log HTTPS REST server started (TLS enabled)",
+				"addr", cfg.Address(),
+				"grpc_addr", cfg.GRPCAddress(),
+				"agent_rest", cfg.AgentBaseURL(),
+				"db_path", cfg.DBPath,
+				"auth_enabled", cfg.APIKey != "",
+				"retention_days", cfg.RetentionDays,
+			)
+			if err := httpSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				logger.Error("HTTPS server error", "error", err.Error())
+			}
+		} else {
+			logger.Info("audit-log HTTP REST server started",
+				"addr", cfg.Address(),
+				"grpc_addr", cfg.GRPCAddress(),
+				"agent_rest", cfg.AgentBaseURL(),
+				"db_path", cfg.DBPath,
+				"auth_enabled", cfg.APIKey != "",
+				"retention_days", cfg.RetentionDays,
+			)
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("HTTP server error", "error", err.Error())
+			}
 		}
 	}()
 
 	// Wait for shutdown signal / 等待优雅停机信号
 	sig := <-sigChan
 	logger.Info("shutting down audit-log servers...", "signal", sig.String())
+
+	// Stop data retention cleanup goroutine / 停止数据保留清理协程
+	retentionCancel()
 
 	// Graceful shutdown gRPC
 	serviceImpl.Shutdown()
@@ -149,6 +185,39 @@ func main() {
 		logger.Error("HTTP server shutdown error", "error", err.Error())
 	} else {
 		logger.Info("HTTP server stopped")
+	}
+}
+
+// auditRetentionLoop periodically deletes audit logs older than retentionDays.
+// auditRetentionLoop 周期性删除超过保留期的审计日志及其关联快照，防止 SQLite 无限膨胀。
+func auditRetentionLoop(ctx context.Context, auditStore store.AuditStore, logger *slog.Logger, retentionDays int) {
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+
+	logger.Info("audit data retention cleanup started", "retention_days", retentionDays, "interval_hours", 6)
+
+	// Run once immediately on startup / 启动时立即执行一次
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	if deleted, err := auditStore.CleanupOld(cutoff); err != nil {
+		logger.Error("audit retention cleanup failed", "error", err.Error())
+	} else if deleted > 0 {
+		logger.Info("audit retention cleanup completed", "deleted_logs", deleted, "retention_days", retentionDays)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("audit data retention cleanup stopped")
+			return
+		case <-ticker.C:
+			cutoff := time.Now().AddDate(0, 0, -retentionDays)
+			deleted, err := auditStore.CleanupOld(cutoff)
+			if err != nil {
+				logger.Error("audit retention cleanup failed", "error", err.Error())
+			} else if deleted > 0 {
+				logger.Info("audit retention cleanup completed", "deleted_logs", deleted, "retention_days", retentionDays)
+			}
+		}
 	}
 }
 

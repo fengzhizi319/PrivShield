@@ -359,6 +359,19 @@ func buildAuditWhere(filter store.AuditFilter) (string, []any) {
 	return where, args
 }
 
+// CleanupOld deletes audit logs and their associated snapshots older than the cutoff time.
+// CleanupOld 删除早于截止时间的审计日志及其关联快照，防止 SQLite 无限膨胀。
+func (s *AuditStore) CleanupOld(before time.Time) (int64, error) {
+	cutoff := before.Format(time.RFC3339Nano)
+	// Delete associated snapshots first (foreign key dependency)
+	_, _ = s.db.Exec(`DELETE FROM snapshots WHERE audit_log_id IN (SELECT id FROM audit_logs WHERE timestamp < ?)`, cutoff)
+	result, err := s.db.Exec(`DELETE FROM audit_logs WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // scanAuditFields scans common audit log fields from any scanner interface.
 // P55 fix: extract common scanning logic to eliminate duplication between
 // scanAuditLog (*sql.Row) and scanAuditLogRow (*sql.Rows).

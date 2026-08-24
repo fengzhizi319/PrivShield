@@ -132,7 +132,7 @@ PRIVACY_BUDGET_WINDOW_SECONDS=86400
 - TLS 1.3 强制最低版本，支持 require/verify/request 客户端认证模式；
 - 公钥固定（SPKI Pinning）防御 CA 劫持。
 
-> 📖 **可靠性能力详解**：[services/service-hub/docs/reliability.md](services/service-hub/docs/reliability.md)
+> 📖 **可靠性能力详解**：[services/service-hub/docs/reliability.md](../../services/service-hub/docs/reliability.md)
 
 ---
 

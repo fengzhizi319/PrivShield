@@ -37,6 +37,9 @@ from fastapi import FastAPI
 # GZip middleware for compressing large HTTP responses to reduce bandwidth
 # GZip 中间件，压缩大型 HTTP 响应以减少网络带宽消耗
 from fastapi.middleware.gzip import GZipMiddleware
+# CORS middleware for cross-origin resource sharing (opt-in via env var)
+# CORS 中间件，跨域资源共享（通过环境变量可选启用）
+from fastapi.middleware.cors import CORSMiddleware
 # Starlette base middleware class for implementing custom ASGI middleware
 # Starlette 基础中间件类，用于实现自定义 ASGI 中间件
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -99,10 +102,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Security response headers middleware.
 
     Injects common security headers into every HTTP response to defend against
-    MIME sniffing, clickjacking, and reflected XSS attacks.
+    MIME sniffing, clickjacking, reflected XSS, protocol downgrade, referrer
+    leakage, and unauthorized feature access attacks.
 
     安全响应头中间件。
-    自动为所有 HTTP 响应注入通用安全响应头，防范 MIME 嗅探、点击劫持与反射型 XSS 攻击。
+    自动为所有 HTTP 响应注入通用安全响应头，防范 MIME 嗅探、点击劫持、反射型 XSS、
+    协议降级、Referrer 泄露与未授权特性访问攻击。
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -112,7 +117,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Prevent browsers from MIME-type sniffing — forces browser to respect
         # the declared Content-Type, mitigating drive-by download attacks.
         # 禁止浏览器进行 MIME 类型嗅探 — 强制浏览器遵守声明的 Content-Type，
-        # 防止"顺手牵羊"下载攻击（drive-by download）。
+        # 防止“顺手牵羊”下载攻击（drive-by download）。
         response.headers["X-Content-Type-Options"] = "nosniff"
         # Completely deny iframe embedding — prevents clickjacking by ensuring
         # the page cannot be rendered inside a <frame>/<iframe>.
@@ -124,6 +129,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # 启用浏览器内置 XSS 过滤器 — 当检测到反射型 XSS 时，阻止页面渲染而非
         # 尝试清理脚本代码（更安全）。
         response.headers["X-XSS-Protection"] = "1; mode=block"
+        # HSTS (HTTP Strict Transport Security) — instructs browsers to only
+        # access the service over HTTPS, preventing protocol downgrade attacks.
+        # max-age=31536000 (1 year); includeSubDomains extends to all subdomains.
+        # HSTS（HTTP 严格传输安全）— 指示浏览器仅通过 HTTPS 访问服务，
+        # 防止协议降级攻击。max-age=31536000（1 年）；includeSubDomains 扩展到所有子域名。
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Referrer-Policy — controls how much referrer information is sent with requests.
+        # "strict-origin-when-cross-origin" sends full URL for same-origin requests
+        # but only the origin (no path/query) for cross-origin requests.
+        # Referrer-Policy — 控制请求携带的 Referrer 信息量。
+        # "strict-origin-when-cross-origin" 同源请求发送完整 URL，
+        # 跨域请求仅发送 origin（不含路径和查询参数），防止敏感 URL 参数泄露。
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Permissions-Policy — restricts access to browser features (camera, mic, etc.).
+        # Deny all sensitive features by default for API services that don't need them.
+        # Permissions-Policy — 限制浏览器特性（摄像头、麦克风等）的访问。
+        # API 服务默认禁用所有敏感特性，缩小攻击面。
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         return response
 
 
@@ -205,12 +228,12 @@ app = FastAPI(
 
 # ---------------------------------------------------------------------------
 # Middleware execution order (outermost -> innermost, i.e. request flow):
-# ObservabilityMiddleware -> GZipMiddleware -> SecurityHeadersMiddleware -> router
+# ObservabilityMiddleware -> CORSMiddleware (opt-in) -> GZipMiddleware -> SecurityHeadersMiddleware -> router
 #
 # Note: Starlette add_middleware() prepends, so the LAST added runs FIRST on request.
 # ---------------------------------------------------------------------------
 # 中间件执行顺序（由外到内，即请求流向）：
-# ObservabilityMiddleware -> GZipMiddleware -> SecurityHeadersMiddleware -> 路由处理
+# ObservabilityMiddleware -> CORSMiddleware（可选启用） -> GZipMiddleware -> SecurityHeadersMiddleware -> 路由处理
 # 注意：Starlette add_middleware() 是前插的，因此最后添加的中间件在请求时最先执行。
 # ---------------------------------------------------------------------------
 
@@ -226,6 +249,26 @@ app.add_middleware(SecurityHeadersMiddleware)
 # GZip 响应压缩 — 减少 >= 1KB 响应的网络传输开销。
 # minimum_size=1000 避免压缩小型响应（压缩开销可能使压缩后反而更大）。
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# CORS middleware (opt-in via PRIVACY_CORS_ENABLED=true).
+# Allows external frontends / SPAs to call the API from a different origin.
+# Configure allowed origins via PRIVACY_CORS_ALLOW_ORIGINS (comma-separated).
+# CORS 中间件（通过 PRIVACY_CORS_ENABLED=true 可选启用）。
+# 允许外部前端 / SPA 从不同源调用 API。
+# 通过 PRIVACY_CORS_ALLOW_ORIGINS（逗号分隔）配置允许的源。
+_cors_enabled = os.environ.get("PRIVACY_CORS_ENABLED", "false").lower() == "true"
+if _cors_enabled:
+    _cors_origins_raw = os.environ.get("PRIVACY_CORS_ALLOW_ORIGINS", "*")
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=os.environ.get("PRIVACY_CORS_ALLOW_CREDENTIALS", "true").lower() == "true",
+        allow_methods=os.environ.get("PRIVACY_CORS_ALLOW_METHODS", "*"),
+        allow_headers=os.environ.get("PRIVACY_CORS_ALLOW_HEADERS", "*"),
+        expose_headers=os.environ.get("PRIVACY_CORS_EXPOSE_HEADERS", "x-request-id"),
+        max_age=int(os.environ.get("PRIVACY_CORS_MAX_AGE", "600")),
+    )
 
 # Observability middleware (outermost layer):
 #   1. Extracts/generates request_id for distributed tracing correlation
