@@ -10,7 +10,7 @@
 - 代价：相同 ε 下，本地 DP 的统计误差通常大于中心式 DP。
 """
 
-from PrivShield.privacy.dp import LocalDPApi
+from engine.privacy.dp import LocalDPApi
 
 
 def main():

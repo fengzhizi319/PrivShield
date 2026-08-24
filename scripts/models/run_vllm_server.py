@@ -13,7 +13,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from PrivShield.env_loader import load_env_file
+from engine.env_loader import load_env_file
 
 
 def main() -> None:

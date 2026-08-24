@@ -54,8 +54,8 @@ stop_by_pid "${LOG_DIR}/datasource-mgr.pid" "Datasource Mgr 数据源管理"
 stop_by_pid "${LOG_DIR}/audit-log.pid" "Audit Log 审计日志"
 
 # ── 步骤 2：按进程名兜底清理 (确保无残留孤儿进程) ─────────────────────────
-pkill -f "PrivShield.server" 2>/dev/null || true
-pkill -f "PrivShield.main" 2>/dev/null || true
+pkill -f "engine.server" 2>/dev/null || true
+pkill -f "engine.main" 2>/dev/null || true
 pkill -f "uvicorn app.main:app" 2>/dev/null || true
 pkill -f "backend-go" 2>/dev/null || true
 pkill -f "bin/service-hub" 2>/dev/null || true

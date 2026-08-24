@@ -3,9 +3,9 @@
 提供命令行工具用于规则配置校验等操作。 / Provides command-line tools for operations like rule configuration validation.
 
 Usage / 用法:
-    python -m PrivShield.dynclassification validate [rules_dir]
-    python -m PrivShield.dynclassification validate rules
-    python -m PrivShield.dynclassification validate /path/to/rules
+    python -m engine.dynclassification validate [rules_dir]
+    python -m engine.dynclassification validate rules
+    python -m engine.dynclassification validate /path/to/rules
 
 Commands / 命令:
     validate    校验规则配置 YAML 文件合法性 / Validate rule configuration YAML files
@@ -21,7 +21,7 @@ from pathlib import Path
 def main() -> int:
     """CLI 主入口。 / CLI main entry point."""
     parser = argparse.ArgumentParser(
-        prog="python -m PrivShield.dynclassification",
+        prog="python -m engine.dynclassification",
         description="动态分类分级模块命令行工具 / Dynamic Classification CLI Tool",
     )
     subparsers = parser.add_subparsers(dest="command", help="可用命令 / Available commands")

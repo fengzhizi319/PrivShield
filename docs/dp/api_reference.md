@@ -753,7 +753,7 @@ estimate_categorical_histogram(
 #### 推荐获取方式
 
 ```python
-from PrivShield.privacy.budget import get_budget, default_registry
+from engine.privacy.budget import get_budget, default_registry
 
 # 方式 1：模块级便捷函数（推荐）
 accountant = get_budget("hr_data", epsilon_total=10.0, delta_total=1e-4)
@@ -816,7 +816,7 @@ repr(accountant)
 
 ```python
 import pandas as pd
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 df = pd.read_csv("data.csv")
 api = DPApi(namespace="hr_dataset")
@@ -846,7 +846,7 @@ result = api.sum(
 SecretFlow 联邦 DataFrame 同样支持直接传入（需安装 secretflow）：
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="hr_dataset")
 
@@ -1442,7 +1442,7 @@ REST 侧同理：`values` 字段只包含目标列的样本值；如需指定列
 
 **示例**：
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="hospital_patients_2024")
 
@@ -1497,7 +1497,7 @@ mean_result = dp.mean(
 
 **示例**：
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="bank_transactions_q1")
 
@@ -1541,7 +1541,7 @@ histogram_result = dp.histogram(
 
 **示例**：
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="app_daily_active_users")
 
@@ -1581,7 +1581,7 @@ feature_usage = dp.histogram(
 
 **示例**：
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="federated_training_round_1")
 
@@ -1617,7 +1617,7 @@ noisy_gradient = dp.noisy_sum(
 
 **示例**：
 ```python
-from PrivShield.privacy.dp import LocalDPApi
+from engine.privacy.dp import LocalDPApi
 
 # === 客户端侧（用户设备）===
 local_api = LocalDPApi()
@@ -1669,7 +1669,7 @@ print(f"估计启用率: {estimated_ratio:.2%}")
 # true_sum = aggregated.collect()[0]["true_sum"]
 
 # === Sidecar 侧（Python）===
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="hr_monthly_report")
 
@@ -1711,7 +1711,7 @@ print(f"带噪声平均工资: {noisy_mean:.2f}")
 
 **示例**：
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 import pandas as pd
 
 dp = DPApi(namespace="streaming_logs")
@@ -2296,7 +2296,7 @@ Rényi DP 会计：为 Gaussian 机制提供比基本组合更紧致的预算估
 **使用示例**：
 
 ```python
-from PrivShield.privacy.budget import RDPAccountant
+from engine.privacy.budget import RDPAccountant
 
 rdp = RDPAccountant(target_delta=1e-5)
 

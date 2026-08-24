@@ -45,10 +45,10 @@ PYTHONPATH=. python docs/production_observability/examples/observability_usage.p
 
 ```bash
 # 文本日志（默认）
-python -m PrivShield.main
+python -m engine.main
 
 # JSON 日志
-PRIVACY_LOG_FORMAT=json python -m PrivShield.main
+PRIVACY_LOG_FORMAT=json python -m engine.main
 
 # 另开终端抓取指标
 curl http://127.0.0.1:8079/metrics

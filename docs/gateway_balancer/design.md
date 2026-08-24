@@ -69,7 +69,7 @@
 
 ## 1. 概述
 
-`PrivShield` 网关与负载均衡子系统（`PrivShield.gateway`）是整个隐私计算治理平台的高性能流量调度与安全接入层。它同时支持 **REST (HTTP/1.1 & HTTP/2)** 与 **gRPC** 双协议的反向代理与负载均衡，对上游客户端呈现单一统一接入入口，对下游后端屏蔽多节点集群的物理拓扑，并提供节点动态注册、健康探活、熔断保护、故障自适应转移、全链路双向 TLS 及分布式共享隐私预算记账能力。
+`PrivShield` 网关与负载均衡子系统（`engine.gateway`）是整个隐私计算治理平台的高性能流量调度与安全接入层。它同时支持 **REST (HTTP/1.1 & HTTP/2)** 与 **gRPC** 双协议的反向代理与负载均衡，对上游客户端呈现单一统一接入入口，对下游后端屏蔽多节点集群的物理拓扑，并提供节点动态注册、健康探活、熔断保护、故障自适应转移、全链路双向 TLS 及分布式共享隐私预算记账能力。
 
 ---
 
@@ -516,10 +516,10 @@ graph LR
 
 #### CLI 命令行参数：
 
-网关启动入口 `python -m PrivShield.gateway.server` 支持以下命令行参数（优先级高于环境变量与配置文件）：
+网关启动入口 `python -m engine.gateway.server` 支持以下命令行参数（优先级高于环境变量与配置文件）：
 
 ```bash
-python -m PrivShield.gateway.server \
+python -m engine.gateway.server \
   --rest-host 0.0.0.0 \
   --rest-port 8000 \
   --grpc-host 0.0.0.0 \
@@ -912,7 +912,7 @@ flowchart TD
 {
   "timestamp": "2026-08-19T09:27:00.123456Z",
   "level": "WARNING",
-  "logger": "PrivShield.gateway.http_proxy",
+  "logger": "engine.gateway.http_proxy",
   "message": "HTTP proxy attempt failed, retrying",
   "attempt": 1,
   "max_retries": 3,

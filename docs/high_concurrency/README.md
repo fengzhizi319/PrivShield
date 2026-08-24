@@ -69,13 +69,13 @@
 
 ```bash
 # 单进程模式（开发调试）
-python -m PrivShield.server
+python -m engine.server
 
 # 多进程模式（生产推荐）
-python -m PrivShield.launcher --workers 4
+python -m engine.launcher --workers 4
 
 # 多进程 + ML 模型预热（节省内存）
-python -m PrivShield.launcher --workers 4 --warmup
+python -m engine.launcher --workers 4 --warmup
 ```
 
 ## 测试

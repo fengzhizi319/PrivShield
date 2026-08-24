@@ -114,7 +114,7 @@ source .venv/bin/activate
 pip install -e .
 
 # 2. 启动 REST + gRPC 联合服务
-python -m PrivShield.server
+python -m engine.server
 # 或使用 engine 模块名启动：
 # python -m engine.server
 ```
@@ -216,7 +216,7 @@ PRIVACY_AUTH_ENABLED=true \
 PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true \
 PRIVACY_AUTH_MTLS_WHITELIST_FILE=config/mtls-whitelist.yaml \
 PRIVACY_RATE_LIMIT_ENABLED=true \
-python -m PrivShield.server
+python -m engine.server
 ```
 
 ### 2. 生产可观测性 (Prometheus/Grafana/Tracing)

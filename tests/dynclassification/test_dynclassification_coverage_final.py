@@ -4,17 +4,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from PrivShield.dynclassification.composite import CompositeRuleEngine
-from PrivShield.dynclassification.engine import ConfigurableRuleEngine
-from PrivShield.dynclassification.standard_profile_generator import StandardProfileGenerator
-from PrivShield.dynclassification.operator_registry import OperatorRegistry
-from PrivShield.dynclassification.operators import _validate_id_card, _validate_medical_card, _in_icd10_interval
-from PrivShield.dynclassification.profile_loader import ProfileLoader
-from PrivShield.dynclassification.models import (
+from engine.dynclassification.composite import CompositeRuleEngine
+from engine.dynclassification.engine import ConfigurableRuleEngine
+from engine.dynclassification.standard_profile_generator import StandardProfileGenerator
+from engine.dynclassification.operator_registry import OperatorRegistry
+from engine.dynclassification.operators import _validate_id_card, _validate_medical_card, _in_icd10_interval
+from engine.dynclassification.profile_loader import ProfileLoader
+from engine.dynclassification.models import (
     DomainTaxonomy, SecurityTag, SensitivityLevelDef, CategoryDef,
 )
-from PrivShield.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
-from PrivShield.dynclassification.service import DynClassificationService
+from engine.dynclassification.rule_schema import RuleProfile, RuleDef, MatcherDef
+from engine.dynclassification.service import DynClassificationService
 
 
 class TestUltimateCoverageDetails:

@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from PrivShield.dynclassification.ner_adapter import NerAdapter
-from PrivShield.dynclassification.ner_engines import (
+from engine.dynclassification.ner_adapter import NerAdapter
+from engine.dynclassification.ner_engines import (
     ModelScopeSmallNerEngine,
     ONNXSmallNerEngine,
     TensorRTSmallNerEngine,
@@ -35,7 +35,7 @@ class TestNerAdapter:
 
     def test_lazy_init_failure_degradation(self, monkeypatch):
         """测试当 MLX, TensorRT, ONNX 和 ModelScope 均不可用时，适配器能优雅降级且 is_available 为 False。"""
-        from PrivShield.dynclassification.mlx_ner_engine import MLXSmallNerEngine
+        from engine.dynclassification.mlx_ner_engine import MLXSmallNerEngine
 
         adapter = NerAdapter(model_path="/non_existent_path/model.onnx")
 

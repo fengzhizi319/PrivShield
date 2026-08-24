@@ -62,9 +62,9 @@ from .observability.middleware import ObservabilityMiddleware
 from .observability.tracing import init_tracing
 
 # Re-export the PrivacyService singleton so that tests and callers can access
-# it via ``from PrivShield.main import service``.
+# it via ``from engine.main import service``.
 # 再导出 PrivacyService 单例，使测试和外部调用方可通过
-# ``from PrivShield.main import service`` 获取。
+# ``from engine.main import service`` 获取。
 from .deps import service  # noqa: F401
 
 # Medical pipeline router (multi-step classification + privacy processing)
@@ -309,18 +309,18 @@ app.include_router(pipeline_router)
 
 
 # =============================================================================
-# Phase 5: Standalone entry point — ``python -m PrivShield.main``
-# Phase 5: 独立入口 — ``python -m PrivShield.main``
+# Phase 5: Standalone entry point — ``python -m engine.main``
+# Phase 5: 独立入口 — ``python -m engine.main``
 # =============================================================================
 
 # This block only executes when the file is run directly (not when imported).
 # It parses CLI arguments and starts the Uvicorn ASGI server.
 # Note: this entry point binds to 127.0.0.1 by default (local dev only).
-# For production, use ``python -m PrivShield.server`` which binds 0.0.0.0.
+# For production, use ``python -m engine.server`` which binds 0.0.0.0.
 # 该代码块仅在直接运行文件时执行（导入时不执行）。
 # 解析命令行参数并启动 Uvicorn ASGI 服务器。
 # 注意：此入口默认绑定 127.0.0.1（仅本地开发）。
-# 生产环境请使用 ``python -m PrivShield.server``（默认绑定 0.0.0.0）。
+# 生产环境请使用 ``python -m engine.server``（默认绑定 0.0.0.0）。
 
 if __name__ == "__main__":
     import argparse
@@ -330,7 +330,7 @@ if __name__ == "__main__":
     # CLI argument parser for standalone REST server mode
     # 独立 REST 服务器模式的命令行参数解析器
     parser = argparse.ArgumentParser(
-        prog="PrivShield.main",
+        prog="engine.main",
         description="SecretFlow Local Privacy Agent REST server.",
     )
     # Bind to loopback only — safe default for local development

@@ -23,7 +23,7 @@ including slot filling, domain awareness, and length-based filtering fallback.
 
 from __future__ import annotations
 
-from PrivShield.privacy.qol import DISEASES, ENTITIES, obfuscate_query
+from engine.privacy.qol import DISEASES, ENTITIES, obfuscate_query
 
 
 def test_obfuscate_query_semantic_slot_filling_medical() -> None:

@@ -18,9 +18,9 @@ import socket
 import pytest
 import yaml
 
-from PrivShield.gateway.balancer import LoadBalancer
-from PrivShield.gateway.grpc_proxy import start_grpc_gateway
-from PrivShield.gateway.server import load_config
+from engine.gateway.balancer import LoadBalancer
+from engine.gateway.grpc_proxy import start_grpc_gateway
+from engine.gateway.server import load_config
 
 
 def find_free_port() -> int:

@@ -29,8 +29,8 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from PrivShield.observability.logging_config import get_logger
-from PrivShield.observability.metrics import (
+from engine.observability.logging_config import get_logger
+from engine.observability.metrics import (
     GATEWAY_LATENCY,
     GATEWAY_REQUESTS_TOTAL,
     GATEWAY_RETRIES_TOTAL,

@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from PrivShield.privacy import data_adapters as da
+from engine.privacy import data_adapters as da
 
 
 class TestToNumpyArray:

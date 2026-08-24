@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
-from PrivShield.deps import SECURITY_DEPS, service
-from PrivShield.security.auth import require_permission
+from engine.deps import SECURITY_DEPS, service
+from engine.security.auth import require_permission
 
 router = APIRouter(prefix="/v1/medical", tags=["medical"])
 

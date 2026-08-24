@@ -14,7 +14,7 @@ Captures termination signals, stops both servers with a grace period, and joins 
               双协议服务启动与优雅关闭执行流程 / Dual-Protocol Lifecycle
 ===================================================================================
 
-  python -m PrivShield.server
+  python -m engine.server
        │
        ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
@@ -152,7 +152,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="PrivShield.server",
+        prog="engine.server",
         description="SecretFlow Local Privacy Agent REST + gRPC server.",
     )
     parser.add_argument(

@@ -58,7 +58,7 @@ graph LR
 
 ```bash
 # 1. 启动上游 agent（REST 8079 + gRPC 50051）
-python -m PrivShield.server
+python -m engine.server
 
 # 2. 启动 Go 代理后端（8081）
 cd console/bff-go
@@ -99,7 +99,7 @@ corepack pnpm install
 corepack pnpm build
 
 # 2. 启动 agent
-python -m PrivShield.server
+python -m engine.server
 
 # 3. 预编译并启动 Go 后端
 cd console/bff-go
@@ -286,7 +286,7 @@ PRIVACY_TLS_CERT_FILE=/path/server.crt \
 PRIVACY_TLS_KEY_FILE=/path/server.key \
 PRIVACY_TLS_CA_FILE=/path/ca.crt \
 PRIVACY_TLS_CLIENT_AUTH=require \
-python -m PrivShield.server
+python -m engine.server
 ```
 
 **Go 代理端（gRPC 客户端）** 出示客户端证书并校验服务端：

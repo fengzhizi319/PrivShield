@@ -54,8 +54,8 @@ from typing import Any  # compose 配置 dict / API JSON 的宽松类型标注
 from unittest.mock import patch  # mock HTTP 层，构造模拟响应
 
 # ── 项目内导入 / Project imports（Layer-3 真实推理路径）──
-from PrivShield.dynclassification.base import SensitivityLevel
-from PrivShield.dynclassification.llm_engines import OpenAILlmClassifier
+from engine.dynclassification.base import SensitivityLevel
+from engine.dynclassification.llm_engines import OpenAILlmClassifier
 
 # ── 第三方导入 / Third-party imports ──
 import pytest  # 测试框架：fixture / skip / mark
@@ -901,7 +901,7 @@ class TestVllmServiceIntegration:
         """真实任务：从 rules/domains/medical.yaml 与 rules/taxonomies/default.yaml 动态解析分类分级指南及脱敏抹平/泛化治理策略，
         注入 System Prompt 传给 vLLM，验证模型能否精准输出 L1~L5 结构化 JSON 及脱敏抹平结果。
         """
-        from PrivShield.dynclassification.llm_engines import (
+        from engine.dynclassification.llm_engines import (
             build_prompt_from_domain_and_taxonomy_yaml,
         )
 

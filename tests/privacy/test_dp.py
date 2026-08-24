@@ -20,11 +20,11 @@ import pytest
 
 # Import central DP API (DPApi) for aggregate queries and local DP API (LocalDPApi)
 # for per-record randomized response mechanisms.
-from PrivShield.privacy.budget import (
+from engine.privacy.budget import (
     PrivacyBudgetExhausted,
     default_registry,
 )
-from PrivShield.privacy.dp import DPApi, LocalDPApi
+from engine.privacy.dp import DPApi, LocalDPApi
 
 
 class TestDPCount:
@@ -422,7 +422,7 @@ class TestAnalyticGaussianAndMeanThreshold:
     """
 
     def test_calibrate_analytic_gaussian_basic(self) -> None:
-        from PrivShield.privacy.dp import calibrate_analytic_gaussian
+        from engine.privacy.dp import calibrate_analytic_gaussian
         # Analytic Gaussian sigma for eps=1.0, delta=1e-5, sensitivity=1.0
         sigma = calibrate_analytic_gaussian(epsilon=1.0, delta=1e-5, sensitivity=1.0)
         assert sigma > 0
@@ -739,7 +739,7 @@ class TestDPResultAndPostProcessing:
 
     def test_dp_result_metadata(self):
         # Verify DPResult fields are populated correctly when return_details=True
-        from PrivShield.privacy.dp import DPResult
+        from engine.privacy.dp import DPResult
 
         ns = "test-dp-result"
         default_registry.get_or_create(ns, epsilon_total=10.0, delta_total=1.0)
@@ -816,7 +816,7 @@ class TestBatchDP:
 
     def test_batch_count_and_sum(self):
         np = pytest.importorskip("numpy")
-        from PrivShield.privacy.dp import DPResult
+        from engine.privacy.dp import DPResult
 
         ns = "test-batch-dp"
         default_registry.get_or_create(ns, epsilon_total=100.0, delta_total=1.0)
@@ -859,7 +859,7 @@ class TestRefinedDPFixes:
 
     def test_mean_sparse_matrix_shape_and_delta_ci(self):
         sp = pytest.importorskip("scipy.sparse")
-        from PrivShield.privacy.dp import DPResult
+        from engine.privacy.dp import DPResult
 
         ns = "test-sparse-mean-delta"
         default_registry.get_or_create(ns, epsilon_total=50.0, delta_total=1.0)
@@ -884,7 +884,7 @@ class TestRefinedDPFixes:
         assert res_details.confidence_interval[0] < res_details.value < res_details.confidence_interval[1]
 
     def test_gaussian_confidence_interval_arbitrary_level(self):
-        from PrivShield.privacy.dp import compute_confidence_interval
+        from engine.privacy.dp import compute_confidence_interval
 
         # Higher confidence level (0.99 vs 0.90) must produce a strictly wider CI
         low90, high90 = compute_confidence_interval(
@@ -937,7 +937,7 @@ class TestAdvancedDPFeatures:
 
     def test_accumulator_serialize_merge_finalize(self):
         """Test distributed DP accumulator: create -> serialize -> merge -> finalize."""
-        from PrivShield.privacy.dp import Accumulator
+        from engine.privacy.dp import Accumulator
 
         ns = "test-accumulator"
         default_registry.get_or_create(ns, epsilon_total=20.0, delta_total=1.0)
@@ -980,7 +980,7 @@ class TestAdvancedDPFeatures:
     def test_rdp_accountant(self):
         # Renyi DP accountant: tracks composition of Gaussian mechanisms
         # using Renyi divergence for tighter epsilon bounds
-        from PrivShield.privacy.budget import RDPAccountant
+        from engine.privacy.budget import RDPAccountant
 
         rdp = RDPAccountant(target_delta=1e-5)
         # Record 10 Gaussian queries with sigma=2.0, sensitivity=1.0
@@ -1046,7 +1046,7 @@ class TestAdvancedDPFeatures:
         import os
         import tempfile
 
-        from PrivShield.privacy.budget import BudgetAuditLogger
+        from engine.privacy.budget import BudgetAuditLogger
 
         # 使用 tempfile 保证跨平台兼容（Windows 无 /tmp）
         audit_path = os.path.join(tempfile.gettempdir(), "test_budget_audit.log")

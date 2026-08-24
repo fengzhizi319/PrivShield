@@ -92,7 +92,7 @@ base（安装系统依赖 + 核心 Python 依赖）
 关键行为：
 
 - 容器内默认监听 `0.0.0.0:8079`（REST）和 `0.0.0.0:50051`（gRPC）。
-- 入口脚本是 `docker-entrypoint.sh`，最终执行 `python -m PrivShield.server`。
+- 入口脚本是 `docker-entrypoint.sh`，最终执行 `python -m engine.server`。
 
 ### 3.2 构建镜像
 

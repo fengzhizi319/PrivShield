@@ -43,9 +43,9 @@ import time
 import grpc
 import httpx
 
-from PrivShield import privacy_pb2, privacy_pb2_grpc
-from PrivShield.observability.logging_config import get_logger
-from PrivShield.observability.metrics import (
+from engine import privacy_pb2, privacy_pb2_grpc
+from engine.observability.logging_config import get_logger
+from engine.observability.metrics import (
     GATEWAY_HEALTHY_NODES,
 )
 

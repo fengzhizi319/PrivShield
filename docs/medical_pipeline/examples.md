@@ -10,8 +10,8 @@
 可以直接在 Python 代码中导入并使用 `PrivShield.medical_pipeline` 或 `PrivShield.pipeline`：
 
 ```python
-from PrivShield.medical_pipeline import process_medical_dataset
-from PrivShield.pipeline import PipelineService
+from engine.medical_pipeline import process_medical_dataset
+from engine.pipeline import PipelineService
 
 # 示例 1: 使用 process_medical_dataset 对医疗记录进行双重治理
 sample_records = [

@@ -17,16 +17,16 @@ Tests for unified data I/O adapters and PyArrow metadata export across privacy p
 
 import pandas as pd
 
-from PrivShield.privacy.kano_table import (
+from engine.privacy.kano_table import (
     KAnonymityResult,
     k_anonymize_table,
 )
-from PrivShield.privacy.masking import (
+from engine.privacy.masking import (
     MaskingResult,
     mask_dataframe,
     mask_value,
 )
-from PrivShield.privacy.qol import QoLResult, obfuscate_query
+from engine.privacy.qol import QoLResult, obfuscate_query
 
 
 class TestMaskingUnifiedAdapters:

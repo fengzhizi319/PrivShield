@@ -78,7 +78,7 @@ pytest tests -k "lb_test" -v
 ```bash
 # 终端一：启动 agent
 cd /path/to/PrivShield
-python -m PrivShield.server
+python -m engine.server
 
 # 终端二：启动后端
 cd console/bff-py

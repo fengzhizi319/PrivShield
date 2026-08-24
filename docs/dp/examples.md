@@ -49,7 +49,7 @@
 ### 2.1 计数查询（Count）
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 # 使用独立命名空间管理预算
 dp = DPApi(namespace="hospital_cohort_a")
@@ -62,7 +62,7 @@ print(f"带噪声计数: {result}")
 ### 2.2 求和查询（Sum）
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="hospital_cohort_a")
 
@@ -81,7 +81,7 @@ print(f"带噪声总费用: {result}")
 ### 2.3 均值查询（Mean）
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="hospital_cohort_a")
 
@@ -105,7 +105,7 @@ print(f"带噪声平均年龄: {result}")
 ### 2.4 直方图查询（Histogram）
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="hospital_cohort_a")
 
@@ -123,7 +123,7 @@ print(f"带噪声科室分布: {result}")
 ### 2.4 Gaussian 机制示例
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 dp = DPApi(namespace="financial_data")
 
@@ -143,7 +143,7 @@ print(f"Gaussian 带噪声总收入: {result}")
 ### 2.5 DataFrame 与 SecretFlow 输入示例
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 import pandas as pd
 
 api = DPApi(namespace="hr_dataset")
@@ -160,7 +160,7 @@ print(f"带噪声总工资: {result}")
 SecretFlow 联邦数据（需安装 `secretflow`）：
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="hr_dataset")
 
@@ -174,7 +174,7 @@ result = api.sum(hdf, column="salary", party="alice", epsilon=1.0, clip_lower=0.
 ### 2.6 Noisify 接口示例（Spark/SQL/DuckDB 工作流）
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="monthly_report")
 
@@ -195,7 +195,7 @@ print(f"带噪声总收入: {result}")
 ### 2.7 Chunked 流式聚合示例
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="streaming_data")
 
@@ -220,7 +220,7 @@ print(f"分块带噪声求和: {result}")
 ### 2.8 预算管理示例
 
 ```python
-from PrivShield.privacy.budget import default_registry
+from engine.privacy.budget import default_registry
 
 # 通过注册表初始化预算账户（推荐方式）
 accountant = default_registry.get_or_create(
@@ -367,7 +367,7 @@ curl -X POST http://127.0.0.1:8079/v1/privacy/ldp/estimate/categorical \
 ### 4.1 二值随机响应
 
 ```python
-from PrivShield.privacy.dp import LocalDPApi
+from engine.privacy.dp import LocalDPApi
 
 api = LocalDPApi(seed=42)
 
@@ -387,7 +387,7 @@ print(f"纠偏估计患病率: {estimated:.2%}")
 ### 4.2 类别型随机响应与本地直方图
 
 ```python
-from PrivShield.privacy.dp import LocalDPApi
+from engine.privacy.dp import LocalDPApi
 
 api = LocalDPApi(seed=42)
 
@@ -429,7 +429,7 @@ PYTHONPATH=. python docs/dp/examples/local_dp_usage.py
 
 ```python
 import numpy as np
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="adaptive_demo")
 data = np.random.exponential(scale=5.0, size=10000).tolist()
@@ -447,7 +447,7 @@ print(f"DP sum: {result:.2f}")
 
 ```python
 import pandas as pd
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="table_demo")
 df = pd.DataFrame({
@@ -471,7 +471,7 @@ print(result)
 
 ```python
 import numpy as np
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="dpsgd_demo")
 
@@ -490,7 +490,7 @@ print(f"DP 平均梯度: {avg_grad}")
 
 ```python
 import pandas as pd
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="groupby_demo")
 df = pd.DataFrame({
@@ -509,7 +509,7 @@ print(f"DP Group-By count: {result}")
 ### 6.5 分布式累加器（Accumulator）
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="distributed_demo")
 
@@ -530,7 +530,7 @@ print(f"DP sum (distributed): {result}")
 ### 6.6 Rényi DP 会计
 
 ```python
-from PrivShield.privacy.budget import RDPAccountant
+from engine.privacy.budget import RDPAccountant
 
 rdp = RDPAccountant(target_delta=1e-5)
 
@@ -547,7 +547,7 @@ print(f"基本组合总 ε: {10 * 0.5:.4f}")  # 对比基本组合
 
 ```python
 import numpy as np
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="user_dp_demo")
 
@@ -570,7 +570,7 @@ print(f"User-Level DP sum: {res}")
 ### 6.8 Discrete Laplace 整数加噪与 PyArrow Metadata 导出
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="arrow_discrete_demo")
 

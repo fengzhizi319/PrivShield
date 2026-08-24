@@ -51,7 +51,7 @@ cp data/kangyang.csv console/bff-go/internal/samples/kangyang.csv
 
 ```bash
 # 方式 1: 在 Python 环境下启动单进程服务器
-python -m PrivShield.server
+python -m engine.server
 
 # 方式 2: 通过 Makefile 目标启动
 make run-server
@@ -90,7 +90,7 @@ go run cmd/server/main.go
 ### Q1: 前端请求 `/api/medical_pipeline` 返回 502 Bad Gateway
 - **原因**: 控制台代理后端无法连接上游 `PrivShield` REST 服务 (默认 `127.0.0.1:8079`)。
 - **解决**:
-  1. 确认 `python -m PrivShield.server` 正常启动并在 `8079` 监听。
+  1. 确认 `python -m engine.server` 正常启动并在 `8079` 监听。
   2. 检查 `PRIVACY_REST_HOST` 与 `PRIVACY_REST_PORT` 配置。
 
 ### Q2: 单元测试提示 `ImportError: cannot import name 'gen_id_card'`

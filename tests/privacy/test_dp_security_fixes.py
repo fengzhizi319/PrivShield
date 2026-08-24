@@ -23,12 +23,12 @@ import time
 import numpy as np
 import pytest
 
-from PrivShield.privacy.budget import (
+from engine.privacy.budget import (
     BudgetAuditLogger,
     BudgetRegistry,
     default_registry,
 )
-from PrivShield.privacy.dp import DPApi, DPResult, LocalDPApi
+from engine.privacy.dp import DPApi, DPResult, LocalDPApi
 
 
 def _make_api(ns: str, epsilon_total: float = 100.0, delta_total: float = 10.0) -> DPApi:

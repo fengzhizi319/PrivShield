@@ -1,7 +1,7 @@
 """网关负载均衡平滑加权轮询与连接跟踪扩展测试。"""
 
 import pytest
-from PrivShield.gateway.balancer import LoadBalancer, BackendNode
+from engine.gateway.balancer import LoadBalancer, BackendNode
 
 
 class TestEnhancedLoadBalancer:

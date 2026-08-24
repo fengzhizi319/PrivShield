@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from PrivShield import privacy_pb2
-from PrivShield.dynclassification.profile_loader import ProfileLoader
-from PrivShield.grpc_server import PrivacyServicer
-from PrivShield.observability.metrics import (
+from engine import privacy_pb2
+from engine.dynclassification.profile_loader import ProfileLoader
+from engine.grpc_server import PrivacyServicer
+from engine.observability.metrics import (
     DYNCLASSIFICATION_ENGINE_LOAD_DURATION,
     DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL,
     DYNCLASSIFICATION_RULE_HITS_TOTAL,

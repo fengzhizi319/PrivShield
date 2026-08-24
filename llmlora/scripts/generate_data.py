@@ -42,10 +42,10 @@ if str(_REPO_ROOT) not in sys.path:
 from llmlora.src.utils.metrics import find_leaked_values  # noqa: E402
 
 # 规则引擎依赖（项目主包） / Rule engine dependencies from the main project package
-from PrivShield.dynclassification.engine import (  # noqa: E402
+from engine.dynclassification.engine import (  # noqa: E402
     ConfigurableRuleEngine,
 )
-from PrivShield.dynclassification.profile_loader import (  # noqa: E402
+from engine.dynclassification.profile_loader import (  # noqa: E402
     ProfileLoader,
 )
 

@@ -18,7 +18,7 @@ The model is stored under .models/Qwen3.5-0.8B-Privacy-Classifier-Smoother in th
 for lazy-loading by Qwen3Classifier in llm_engines.py.
 
 Usage:
-    python -m PrivShield.privacy.download_model
+    python -m engine.privacy.download_model
 """
 
 import os
@@ -111,7 +111,7 @@ def main():
     4. 根据结果输出成功/失败的信息并设置退出码。
        (Output success/failure message and set exit code)
     """
-    from PrivShield.env_loader import load_env_file
+    from engine.env_loader import load_env_file
     load_env_file()
 
     # 微调模型标识（本地合并导出的 Qwen3.5-0.8B 隐私分类器）

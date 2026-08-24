@@ -108,7 +108,7 @@ start_agent() {
     log_step "Starting PrivShield Agent on :${port}..."
     cd "$REPO_ROOT"
     PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT="$port" \
-        $PYTHON -m PrivShield.main --host 127.0.0.1 --port "$port" \
+        $PYTHON -m engine.main --host 127.0.0.1 --port "$port" \
         > "${CONSOLE_DIR}/.pids/agent.log" 2>&1 &
     echo $! > "$pid_file"
     log_info "Agent started (PID $(cat "$pid_file"))"

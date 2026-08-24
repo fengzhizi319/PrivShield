@@ -30,7 +30,7 @@ from typing import Any
 
 import yaml
 
-from PrivShield.observability.logging_config import configure_logging, get_logger
+from engine.observability.logging_config import configure_logging, get_logger
 
 from .balancer import LoadBalancer, health_check_loop
 from .grpc_proxy import start_grpc_gateway
@@ -238,7 +238,7 @@ def main():
     """网关同步启动入口，负责命令行解析与 asyncio 事件循环拉起。"""
 
     parser = argparse.ArgumentParser(
-        prog="PrivShield.gateway.server",
+        prog="engine.gateway.server",
         description="PrivShield REST + gRPC gateway / load balancer.",
     )
     parser.add_argument(

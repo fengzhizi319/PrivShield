@@ -187,7 +187,7 @@ launch_agent() {
         export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
         export PRIVACY_TLS_CLIENT_AUTH=require
         # 日志持久化到 .logs/agent_go_mtls.log，agent 崩溃/重启后可回溯根因
-        exec python -m PrivShield.server >> "$agent_log" 2>&1
+        exec python -m engine.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"

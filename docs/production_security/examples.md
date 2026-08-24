@@ -37,7 +37,7 @@ export PRIVACY_TLS_ENABLED=true
 export PRIVACY_TLS_CERT_FILE=./certs/server.crt
 export PRIVACY_TLS_KEY_FILE=./certs/server.key
 
-python -m PrivShield.server
+python -m engine.server
 ```
 
 ### 2.2 TLS + mTLS + 认证 + 限速
@@ -62,7 +62,7 @@ export PRIVACY_RATE_LIMIT_DEFAULT_RPS=10
 export PRIVACY_RATE_LIMIT_DEFAULT_BURST=20
 export PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON='{"/v1/privacy/dp/count":{"rps":2,"burst":5}}'
 
-python -m PrivShield.server
+python -m engine.server
 ```
 
 ## 3. REST 调用示例
@@ -128,7 +128,7 @@ with httpx.Client(
 
 ```python
 import grpc
-from PrivShield import privacy_pb2, privacy_pb2_grpc
+from engine import privacy_pb2, privacy_pb2_grpc
 
 with open("certs/ca.crt", "rb") as f:
     ca = f.read()
@@ -144,7 +144,7 @@ with grpc.secure_channel("127.0.0.1:50051", creds) as channel:
 
 ```python
 import grpc
-from PrivShield import privacy_pb2, privacy_pb2_grpc
+from engine import privacy_pb2, privacy_pb2_grpc
 
 with open("certs/ca.crt", "rb") as f:
     ca = f.read()
@@ -210,7 +210,7 @@ curl https://127.0.0.1:8079/health --cacert certs/ca.crt
 ```python
 # gRPC
 import grpc
-from PrivShield import privacy_pb2, privacy_pb2_grpc
+from engine import privacy_pb2, privacy_pb2_grpc
 
 with open("certs/ca.crt", "rb") as f:
     ca = f.read()

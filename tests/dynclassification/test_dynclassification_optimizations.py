@@ -5,9 +5,9 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.dynclassification import DynClassificationService, ProfileLoader
-from PrivShield.dynclassification.validator import validate_rules_dir, _suggest_similar_operator
-from PrivShield.main import app
+from engine.dynclassification import DynClassificationService, ProfileLoader
+from engine.dynclassification.validator import validate_rules_dir, _suggest_similar_operator
+from engine.main import app
 
 client = TestClient(app)
 

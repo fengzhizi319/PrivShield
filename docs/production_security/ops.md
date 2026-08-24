@@ -136,7 +136,7 @@ openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
 export PRIVACY_TLS_ENABLED=true
 export PRIVACY_TLS_CERT_FILE=./certs/server.crt
 export PRIVACY_TLS_KEY_FILE=./certs/server.key
-python -m PrivShield.server
+python -m engine.server
 ```
 
 REST: `https://127.0.0.1:8079`
@@ -170,7 +170,7 @@ export PRIVACY_RATE_LIMIT_DEFAULT_RPS=10
 export PRIVACY_RATE_LIMIT_DEFAULT_BURST=20
 export PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON='{"/v1/privacy/dp/count":{"rps":2,"burst":5}}'
 
-python -m PrivShield.server
+python -m engine.server
 ```
 
 ---
@@ -202,7 +202,7 @@ curl --cacert certs/ca.crt \
 
 ```python
 import grpc
-from PrivShield import privacy_pb2, privacy_pb2_grpc
+from engine import privacy_pb2, privacy_pb2_grpc
 
 with open("certs/ca.crt", "rb") as f:
     ca = f.read()

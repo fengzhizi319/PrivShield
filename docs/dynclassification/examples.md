@@ -29,7 +29,7 @@
 
 ```bash
 cd /path/to/PrivShield
-PYTHONPATH=. python -m PrivShield.dynclassification.standard_profile_generator \
+PYTHONPATH=. python -m engine.dynclassification.standard_profile_generator \
   --doc docs/standard/四川省健康医疗大数据应用指南.md \
   --output rules/
 ```
@@ -44,7 +44,7 @@ PYTHONPATH=. python -m PrivShield.dynclassification.standard_profile_generator \
 ### 1.2 Python SDK 自动化生成与热重载
 
 ```python
-from PrivShield.dynclassification import DynamicClassificationService  # 亦可使用 DynClassificationService 简写别名
+from engine.dynclassification import DynamicClassificationService  # 亦可使用 DynClassificationService 简写别名
 
 service = DynamicClassificationService(rules_dir="rules")
 
@@ -65,7 +65,7 @@ print("最终定级:", resp.field_result.final_level)  # 输出: L5
 ### 1.1 加载 Profile 并评估单个字段
 
 ```python
-from PrivShield.dynclassification.profile_loader import ProfileLoader
+from engine.dynclassification.profile_loader import ProfileLoader
 
 # 初始化加载器（指向规则 YAML 目录）
 loader = ProfileLoader(rules_dir="rules")
@@ -110,7 +110,7 @@ print(tags)
 
 ```python
 from typing import Any
-from PrivShield.dynclassification.operator_registry import OperatorRegistry
+from engine.dynclassification.operator_registry import OperatorRegistry
 
 # 1. 使用装饰器注册自定义算子：中国新能源车牌号校验算子
 @OperatorRegistry.register("nev_plate_number")
@@ -189,8 +189,8 @@ curl -X POST http://127.0.0.1:8079/v1/dynclassification/profiles/reload
 在代码中初始化动态分类规则引擎并评估字段：
 
 ```python
-from PrivShield.dynclassification.profile_loader import ProfileLoader
-from PrivShield.dynclassification.engine import ConfigurableRuleEngine
+from engine.dynclassification.profile_loader import ProfileLoader
+from engine.dynclassification.engine import ConfigurableRuleEngine
 
 loader = ProfileLoader("rules")
 taxonomy = loader.load_taxonomy("default")

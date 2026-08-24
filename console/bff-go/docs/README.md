@@ -18,7 +18,7 @@
 
 ```bash
 # 1. 启动 PrivShield（REST: 8079 / gRPC: 50051）
-python -m PrivShield.server
+python -m engine.server
 
 # 2. 启动 Go BFF（默认监听 127.0.0.1:8081）
 cd console/bff-go

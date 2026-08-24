@@ -41,7 +41,7 @@
 ### 3.1 单记录泛化测试
 
 ```python
-from PrivShield.privacy.kano import (
+from engine.privacy.kano import (
     BUILTIN_HIERARCHIES,
     age_hierarchy,
     anonymize_record,
@@ -76,7 +76,7 @@ def test_anonymize_record_does_not_mutate_input():
 
 ```python
 import pytest
-from PrivShield.privacy.kano_table import k_anonymize_table
+from engine.privacy.kano_table import k_anonymize_table
 
 
 def test_numeric_qi_generalizes_to_intervals():
@@ -120,7 +120,7 @@ def test_missing_qi_cols_raises():
 
 ```python
 from fastapi.testclient import TestClient
-from PrivShield.main import app
+from engine.main import app
 
 client = TestClient(app)
 
@@ -166,7 +166,7 @@ def test_rest_k_anonymize_table():
 
 ```python
 import pandas as pd
-from PrivShield.privacy.kano_table import k_anonymize_dataframe
+from engine.privacy.kano_table import k_anonymize_dataframe
 
 
 def test_k_anonymize_dataframe():
@@ -184,7 +184,7 @@ def test_k_anonymize_dataframe():
 
 ```python
 from prometheus_client import REGISTRY
-from PrivShield.privacy.kano_table import k_anonymize_table
+from engine.privacy.kano_table import k_anonymize_table
 
 
 def test_kano_metric():
@@ -204,8 +204,8 @@ def test_kano_metric():
 
 ```python
 import grpc
-from PrivShield.grpc_server import PrivacyServicer
-from PrivShield.proto import privacy_pb2, privacy_pb2_grpc
+from engine.grpc_server import PrivacyServicer
+from engine.proto import privacy_pb2, privacy_pb2_grpc
 
 
 def test_grpc_k_anonymize_table():

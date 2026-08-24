@@ -627,23 +627,23 @@ def diagnostics(
         _model_info(
             "NER ONNX 模型（CMeEE）",
             ".models/raner_cmeee.onnx",
-            "python -m PrivShield.privacy.download_ner_model",
+            "python -m engine.privacy.download_ner_model",
             note=_onnx_orphan_note(".models/raner_cmeee.onnx"),
         ),
         _model_info(
             "NER 词表 vocab.txt",
             ".models/vocab.txt",
-            "python -m PrivShield.privacy.download_ner_model",
+            "python -m engine.privacy.download_ner_model",
         ),
         _model_info(
             "NER ModelScope 模型目录",
             ".models/raner_cmeee",
-            "python -m PrivShield.privacy.download_ner_model",
+            "python -m engine.privacy.download_ner_model",
         ),
         _model_info(
             "LLM Qwen2-VL-2B-Instruct",
             ".models/Qwen2-VL-2B-Instruct",
-            "python -m PrivShield.privacy.download_model",
+            "python -m engine.privacy.download_model",
         ),
     ]
 

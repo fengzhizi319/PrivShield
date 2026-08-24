@@ -160,7 +160,7 @@ class BudgetAccountant:
 
         .. code-block:: python
 
-            from PrivShield.privacy.budget import default_registry
+            from engine.privacy.budget import default_registry
             acct = default_registry.get_or_create("my-namespace")
 
         Raises:

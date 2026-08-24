@@ -9,23 +9,23 @@ from unittest.mock import MagicMock
 import pytest
 import numpy as np
 
-from PrivShield.dynclassification.funnel import ClassificationFunnel
-from PrivShield.dynclassification.engine import ConfigurableRuleEngine
-from PrivShield.dynclassification.models import (
+from engine.dynclassification.funnel import ClassificationFunnel
+from engine.dynclassification.engine import ConfigurableRuleEngine
+from engine.dynclassification.models import (
     DomainTaxonomy,
     SecurityTag,
     SensitivityLevelDef,
 )
-from PrivShield.dynclassification.rule_schema import (
+from engine.dynclassification.rule_schema import (
     RuleProfile,
     RuleDef,
     MatcherDef,
     DowngradeRuleDef,
     CompositeRuleDef,
 )
-from PrivShield.privacy.budget import default_registry
-from PrivShield.privacy.dp import DPApi, DPResult
-from PrivShield.dynclassification.composite import CompositeRuleEngine
+from engine.privacy.budget import default_registry
+from engine.privacy.dp import DPApi, DPResult
+from engine.dynclassification.composite import CompositeRuleEngine
 
 
 # ─── 1. Safety Floor 安全地基与值级证据保护测试 ───

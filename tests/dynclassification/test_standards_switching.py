@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.dynclassification import DynClassificationService
-from PrivShield.main import app
+from engine.dynclassification import DynClassificationService
+from engine.main import app
 
 # 项目根目录与规则目录
 ROOT_DIR = Path(__file__).resolve().parents[2]

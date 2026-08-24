@@ -31,14 +31,14 @@ from dataclasses import asdict, dataclass, field  # dataclass 定义与报告转
 from typing import Any, Optional  # 泛型类型标注
 
 # 动态分类服务：3 层漏斗（Rule -> NER -> LLM）的统一分类引擎入口
-from PrivShield.dynclassification import DynClassificationService
+from engine.dynclassification import DynClassificationService
 # 图像病例打码能力：识别图像输入（文件路径 / Base64 Data URI）并执行图像级打码
-from PrivShield.dynclassification.image_redaction import (
+from engine.dynclassification.image_redaction import (
     IMAGE_REDACTION_FAILURE,  # 图像打码失败时的固定返回标记（fail-closed 安全策略）
     is_image_input,           # 判断输入是否为图像（路径或以 data:image 开头的 Base64）
 )
 # 通用字段名感知脱敏原语：按字段名（id_card_no/name/address 等）执行强掩码
-from PrivShield.privacy.masking import mask_value
+from engine.privacy.masking import mask_value
 
 # 医疗领域规则集：
 # - PII_FIELD_RULES: PII 身份字段名 -> 脱敏规则名 的映射表
@@ -609,7 +609,7 @@ class MedicalPrivacyPipeline:
             with self._lock:
                 self._sanitized_cache.pop((key, val_str), None)
             try:
-                from PrivShield.dynclassification.image_redaction import sanitize_image_input
+                from engine.dynclassification.image_redaction import sanitize_image_input
                 return sanitize_image_input(val_str)  # 执行图像级打码（区域遮盖/人脸模糊）
             except Exception:
                 return IMAGE_FAILURE  # 任何异常 → 固定失败标记（绝不泄露原图）

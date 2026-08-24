@@ -1624,7 +1624,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # 启动命令 / Start command
 # 使用 exec form 确保信号正确传递 / Use exec form for proper signal handling
-CMD ["python", "-m", "uvicorn", "PrivShield.main:app", \
+CMD ["python", "-m", "uvicorn", "engine.main:app", \
      "--host", "0.0.0.0", "--port", "8079", \
      "--workers", "2", "--loop", "uvloop", "--http", "httptools"]
 ```

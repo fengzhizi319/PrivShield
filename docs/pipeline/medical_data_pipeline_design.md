@@ -210,7 +210,7 @@ PrivShield/medical_pipeline/
 
 ```bash
 python scripts/data/generate_medical_data.py --count 20 --seed 2026
-python -m PrivShield.medical_pipeline --input .../kangyang.csv --output .../output
+python -m engine.medical_pipeline --input .../kangyang.csv --output .../output
 ```
 
 如果实现阶段选择不增加包级 CLI，则必须保证 `scripts` 脚本能调用包内函数，避免测试通过执行脚本复制出第二套业务逻辑。

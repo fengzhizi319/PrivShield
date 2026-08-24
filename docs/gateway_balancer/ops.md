@@ -69,7 +69,7 @@
 graph TD
     Client[客户端集群] -->|"REST (8000) / gRPC (50000)"| GW[PrivShield Gateway 集群]
     
-    subgraph GatewayLayer ["网关调度层 (PrivShield.gateway.server)"]
+    subgraph GatewayLayer ["网关调度层 (engine.gateway.server)"]
         GW
     end
 
@@ -207,14 +207,14 @@ backends:
 
 ### 2.3 CLI 启动命令行参数
 
-网关入口模块为 [`PrivShield.gateway.server`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/server.py)：
+网关入口模块为 [`engine.gateway.server`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/server.py)：
 
 ```bash
 # 查看帮助
-python -m PrivShield.gateway.server --help
+python -m engine.gateway.server --help
 
 # 常用启动选项
-python -m PrivShield.gateway.server \
+python -m engine.gateway.server \
   --rest-host 0.0.0.0 \
   --rest-port 8000 \
   --grpc-host 0.0.0.0 \
@@ -291,7 +291,7 @@ export GATEWAY_TLS_CA=/etc/privshield/certs/ca.crt  # 配置后强制开启客�
 - **gRPC 客户端访问示例 (Python)**：
   ```python
   import grpc
-  from PrivShield import privacy_pb2, privacy_pb2_grpc
+  from engine import privacy_pb2, privacy_pb2_grpc
 
   with open("certs/ca.crt", "rb") as f:
       root_certs = f.read()
@@ -383,7 +383,7 @@ MY_HTTP="http://$(hostname -I | awk '{print $1}'):8079"
 MY_GRPC="$(hostname -I | awk '{print $1}'):50051"
 
 # 1. 启动 Agent 主服务并在后台运行
-python -m PrivShield.server &
+python -m engine.server &
 AGENT_PID=$!
 
 # 2. 等待本地 Agent 健康就绪
@@ -473,7 +473,7 @@ Environment=PRIVACY_GATEWAY_CONFIG=/etc/privshield/gateway.yaml
 Environment=PRIVACY_LOG_FORMAT=json
 Environment=PRIVACY_LOG_LEVEL=INFO
 Environment=GATEWAY_API_KEY=sk_gw_prod_9f8b7c6d5e4a3b2a10987654321fedcba
-ExecStart=/opt/privshield/.venv/bin/python -m PrivShield.gateway.server
+ExecStart=/opt/privshield/.venv/bin/python -m engine.gateway.server
 Restart=always
 RestartSec=3s
 LimitNOFILE=65535
@@ -537,7 +537,7 @@ services:
   gateway:
     image: privshield:0.1.0
     restart: always
-    command: ["python", "-m", "PrivShield.gateway.server"]
+    command: ["python", "-m", "engine.gateway.server"]
     environment:
       - GATEWAY_REST_PORT=8000
       - GATEWAY_GRPC_PORT=50000
@@ -649,7 +649,7 @@ spec:
         - name: gateway
           image: privshield:0.1.0
           imagePullPolicy: IfNotPresent
-          command: ["python", "-m", "PrivShield.gateway.server"]
+          command: ["python", "-m", "engine.gateway.server"]
           env:
             - name: GATEWAY_REST_PORT
               value: "8000"
@@ -836,7 +836,7 @@ scrape_configs:
 
 ```yaml
 groups:
-  - name: PrivShield.gateway
+  - name: engine.gateway
     rules:
       # 1. 网关无可用健康节点 (致命告警)
       - alert: GatewayNoHealthyNodes
@@ -972,7 +972,7 @@ cat /var/log/privshield/gateway.log | jq 'select(.message == "Node status change
 
 - **现象**：传输大表或高清图像时 gRPC 返回 `RESOURCE_EXHAUSTED: Received message larger than max (xxx vs 4194304)`。
 - **根因分析**：
-  - 传统 gRPC 默认消息上限为 4 MiB。虽然 `PrivShield.gateway` 已调优至 64 MiB，但若客户端自身未配置 64 MiB 缓冲区，则客户端会在接收端抛错。
+  - 传统 gRPC 默认消息上限为 4 MiB。虽然 `engine.gateway` 已调优至 64 MiB，但若客户端自身未配置 64 MiB 缓冲区，则客户端会在接收端抛错。
 - **恢复步骤**：
   - 确保客户端与网关均配置 `grpc.max_receive_message_length` 和 `grpc.max_send_message_length` 为 `64 * 1024 * 1024` (64 MiB)。
 

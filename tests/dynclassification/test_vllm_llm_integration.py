@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from PrivShield.env_loader import load_env_file
-from PrivShield.dynclassification.base import SensitivityLevel
-from PrivShield.dynclassification.llm_adapter import LlmAdapter
-from PrivShield.dynclassification.llm_engines import (
+from engine.env_loader import load_env_file
+from engine.dynclassification.base import SensitivityLevel
+from engine.dynclassification.llm_adapter import LlmAdapter
+from engine.dynclassification.llm_engines import (
     OpenAILlmClassifier,
     VLLMLlmClassifier,
 )

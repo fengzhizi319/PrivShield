@@ -115,7 +115,7 @@ echo -e "\n${YELLOW}[1/3] 启动 Core REST & gRPC Agent 算力引擎...${NC}"
 AGENT_LOG="${LOG_DIR}/agent_server.log"
 rotate_log "$AGENT_LOG"
 
-nohup python3 -m PrivShield.server < /dev/null > "$AGENT_LOG" 2>&1 &
+nohup python3 -m engine.server < /dev/null > "$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
 echo $AGENT_PID > "${LOG_DIR}/agent.pid"
 echo -e "Agent 进程 PID: ${GREEN}${AGENT_PID}${NC} (日志: ${AGENT_LOG})"

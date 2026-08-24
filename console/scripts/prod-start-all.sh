@@ -211,7 +211,7 @@ launch_agent() {
         source "$AGENT_VENV/bin/activate"
         cd "$PROJECT_ROOT"
         # 日志持久化到 .logs/agent_all.log，agent 崩溃/重启后可回溯根因
-        exec python -m PrivShield.server >> "$agent_log" 2>&1
+        exec python -m engine.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"

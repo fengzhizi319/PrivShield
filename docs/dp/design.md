@@ -260,7 +260,7 @@ $$\Pr[M(D_i) \in S] \leq e^\varepsilon \cdot \Pr[M(D_i') \in S]$$
 
 ```python
 import pandas as pd
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 df = pd.read_csv("data.csv")
 api = DPApi(namespace="hr_dataset")
@@ -290,7 +290,7 @@ result = api.sum(
 SecretFlow 联邦 DataFrame 同样支持直接传入（需安装 secretflow）：
 
 ```python
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 api = DPApi(namespace="hr_dataset")
 
@@ -2184,8 +2184,8 @@ $$P[X = k] = \frac{1 - e^{-1/b}}{1 + e^{-1/b}} \cdot e^{-|k|/b}, \quad k \in \ma
 当使用 Gaussian 机制时，`DPApi` 支持通过可选注入的 `RDPAccountant` 自动追踪 Rényi DP 消耗：
 
 ```python
-from PrivShield.privacy.budget import RDPAccountant
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.budget import RDPAccountant
+from engine.privacy.dp import DPApi
 
 rdp = RDPAccountant()
 api = DPApi(namespace="prod", rdp_accountant=rdp)

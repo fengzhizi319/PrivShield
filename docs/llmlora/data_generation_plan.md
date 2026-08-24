@@ -192,7 +192,7 @@
 import json
 import random
 from faker import Faker
-from PrivShield.dynclassification.engine import ConfigurableRuleEngine
+from engine.dynclassification.engine import ConfigurableRuleEngine
 
 fake = Faker("zh_CN")
 

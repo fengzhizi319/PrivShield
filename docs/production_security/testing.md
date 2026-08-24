@@ -52,7 +52,7 @@ def test_generate_certs(tmp_path: Path):
 
 ```python
 import pytest
-from PrivShield.security.config import SecuritySettings
+from engine.security.config import SecuritySettings
 
 
 def test_tls_requires_cert_and_key():
@@ -78,9 +78,9 @@ def test_mtls_requires_ca():
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.main import app
-from PrivShield.security.config import get_security_settings
-from PrivShield.security.identity import Identity
+from engine.main import app
+from engine.security.config import get_security_settings
+from engine.security.identity import Identity
 
 client = TestClient(app)
 
@@ -133,8 +133,8 @@ def test_health_exempt_by_default(auth_enabled):
 
 ```python
 import pytest
-from PrivShield.security.auth import _authenticate_mtls
-from PrivShield.security.config import SecuritySettings
+from engine.security.auth import _authenticate_mtls
+from engine.security.config import SecuritySettings
 
 
 def test_mtls_default_disabled():
@@ -181,7 +181,7 @@ def test_mtls_enabled_but_empty_whitelist_rejects_all():
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.main import app
+from engine.main import app
 
 client = TestClient(app)
 
@@ -214,7 +214,7 @@ def test_rate_limit_health_exempt(tight_rate_limit):
 ### 3.5 身份模型
 
 ```python
-from PrivShield.security.identity import Identity
+from engine.security.identity import Identity
 
 
 def test_identity_wildcard():
@@ -246,9 +246,9 @@ from typing import Any
 import httpx
 import uvicorn
 
-from PrivShield.main import app
-from PrivShield.security.config import get_security_settings
-from PrivShield.security.tls import uvicorn_ssl_kwargs
+from engine.main import app
+from engine.security.config import get_security_settings
+from engine.security.tls import uvicorn_ssl_kwargs
 from tests.security_certs import generate_test_certs
 
 
@@ -316,10 +316,10 @@ from pathlib import Path
 import grpc
 import pytest
 
-from PrivShield import privacy_pb2, privacy_pb2_grpc
-from PrivShield.grpc_server import PrivacyServicer
-from PrivShield.security.config import get_security_settings
-from PrivShield.security.tls import grpc_server_credentials
+from engine import privacy_pb2, privacy_pb2_grpc
+from engine.grpc_server import PrivacyServicer
+from engine.security.config import get_security_settings
+from engine.security.tls import grpc_server_credentials
 from tests.security_certs import generate_test_certs
 
 

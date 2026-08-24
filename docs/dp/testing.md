@@ -58,7 +58,7 @@
 import math
 import random
 
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 
 def test_laplace_count_with_fixed_seed():
@@ -76,7 +76,7 @@ def test_laplace_count_with_fixed_seed():
 
 ```python
 import pytest
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 
 def test_gaussian_requires_clip():
@@ -94,7 +94,7 @@ def test_gaussian_requires_positive_delta():
 ### 3.3 预算消耗测试
 
 ```python
-from PrivShield.privacy.budget import BudgetAccountant
+from engine.privacy.budget import BudgetAccountant
 
 
 def test_budget_accountant_tracks_spending():
@@ -117,7 +117,7 @@ def test_budget_accountant_tracks_spending():
 ```python
 import statistics
 
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 
 def test_laplace_noise_statistics():
@@ -134,8 +134,8 @@ def test_laplace_noise_statistics():
 ### 3.5 均值低频保护与直方图测试
 
 ```python
-from PrivShield.privacy.dp import DPApi
-from PrivShield.privacy.budget import default_registry
+from engine.privacy.dp import DPApi
+from engine.privacy.budget import default_registry
 
 
 def test_mean_min_count_protection():
@@ -168,7 +168,7 @@ def test_histogram_joint_sensitivity():
 本地 DP 测试重点在于随机响应扰动与频率估计的无偏性。此外需验证 REST/gRPC 接口对本地 DP 能力的暴露。
 
 ```python
-from PrivShield.privacy.dp import LocalDPApi
+from engine.privacy.dp import LocalDPApi
 
 
 def test_local_dp_binary_unbiased():
@@ -205,8 +205,8 @@ PYTHONPATH=. pytest tests/test_dp.py -v -k "LocalDP or Randomized"
 ### 3.7 Noisify 接口测试
 
 ```python
-from PrivShield.privacy.dp import DPApi
-from PrivShield.privacy.budget import default_registry
+from engine.privacy.dp import DPApi
+from engine.privacy.budget import default_registry
 
 
 def test_noisy_sum():
@@ -225,7 +225,7 @@ def test_noisy_sum_requires_sensitivity():
     api = DPApi(namespace="test-noisy-2")
     with pytest.raises(ValueError, match="sensitivity"):
         # 通过 REST service 调用时未提供 sensitivity 或 clip 应报错
-        from PrivShield.service import PrivacyService
+        from engine.service import PrivacyService
         svc = PrivacyService(namespace="test-noisy-2")
         svc.dp_noisy_sum(1000.0, {})
 ```
@@ -233,8 +233,8 @@ def test_noisy_sum_requires_sensitivity():
 ### 3.8 Chunked 接口测试
 
 ```python
-from PrivShield.privacy.dp import DPApi
-from PrivShield.privacy.budget import default_registry
+from engine.privacy.dp import DPApi
+from engine.privacy.budget import default_registry
 
 
 def test_chunked_count():
@@ -256,7 +256,7 @@ def test_chunked_sum_requires_clip():
 ```python
 import numpy as np
 import pandas as pd
-from PrivShield.privacy.data_adapters import extract_values
+from engine.privacy.data_adapters import extract_values
 
 
 def test_extract_from_list():
@@ -283,7 +283,7 @@ def test_extract_from_pandas_series():
 ```python
 from prometheus_client import REGISTRY
 from fastapi.testclient import TestClient
-from PrivShield.main import app
+from engine.main import app
 
 
 def test_traffic_metric_recorded():
@@ -308,7 +308,7 @@ def test_traffic_metric_recorded():
 
 ```python
 import time
-from PrivShield.privacy.budget import default_registry
+from engine.privacy.budget import default_registry
 
 
 def test_budget_window_reset():
@@ -330,7 +330,7 @@ def test_budget_window_reset():
 
 ```python
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from PrivShield.privacy.budget import default_registry, PrivacyBudgetExhausted
+from engine.privacy.budget import default_registry, PrivacyBudgetExhausted
 
 
 def test_concurrent_spend_serializable():
@@ -383,7 +383,7 @@ PYTHONPATH=. pytest tests/test_budget_concurrency.py -v
 ```python
 import numpy as np
 from scipy import stats
-from PrivShield.privacy.dp import DPApi
+from engine.privacy.dp import DPApi
 
 
 def test_sample_laplace_ks_test():
@@ -434,7 +434,7 @@ PYTHONPATH=. pytest tests/test_dp_distributions.py -v
 
 ```python
 from fastapi.testclient import TestClient
-from PrivShield.main import app
+from engine.main import app
 
 
 def test_rest_dp_count():
@@ -451,8 +451,8 @@ def test_rest_dp_count():
 
 ```python
 import grpc
-from PrivShield.grpc_server import PrivacyServicer
-from PrivShield.proto import privacy_pb2, privacy_pb2_grpc
+from engine.grpc_server import PrivacyServicer
+from engine.proto import privacy_pb2, privacy_pb2_grpc
 
 
 def test_grpc_dp_sum():

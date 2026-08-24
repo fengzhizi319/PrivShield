@@ -4,7 +4,7 @@
 核心设计思想：标准配置化、规则声明化、算子插件化、执行上下文动态化。 / Core design philosophy: configurable standards, declarative rules, pluggable operators, dynamic execution contexts.
 
 Usage / 用法:
-    from PrivShield.dynclassification import DynClassificationService
+    from engine.dynclassification import DynClassificationService
 
     service = DynClassificationService(rules_dir="rules")
     result = service.classify_field("phone_number", "13800138000")

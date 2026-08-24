@@ -54,8 +54,8 @@ def _build_leakage_scanner(rules_dir: str):
         (scanner_fn_or_None, description)
     """
     try:
-        from PrivShield.dynclassification.engine import ConfigurableRuleEngine
-        from PrivShield.dynclassification.profile_loader import ProfileLoader
+        from engine.dynclassification.engine import ConfigurableRuleEngine
+        from engine.dynclassification.profile_loader import ProfileLoader
 
         loader = ProfileLoader(rules_dir)
         taxonomy = loader.load_taxonomy("default")

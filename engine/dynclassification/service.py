@@ -4,7 +4,7 @@
 CompositeRuleEngine 的调用逻辑，支持字段级、记录级和表级分类。
 
 使用示例：
-    from PrivShield.dynclassification import DynClassificationService
+    from engine.dynclassification import DynClassificationService
 
     service = DynClassificationService(rules_dir="rules")
 

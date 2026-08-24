@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.main import app
-from PrivShield.pipeline import (
+from engine.main import app
+from engine.pipeline import (
     PipelineResult,
     PipelineService,
     classify_records,

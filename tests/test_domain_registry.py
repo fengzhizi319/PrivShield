@@ -1,6 +1,6 @@
 """通用领域策略与脱敏回调注册表单元测试。"""
 
-from PrivShield.dynclassification import (
+from engine.dynclassification import (
     DomainStrategyRegistry,
     default_domain_registry,
 )

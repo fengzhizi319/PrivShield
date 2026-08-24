@@ -189,7 +189,7 @@ def require_permission(permission: str) -> Depends
 
 ```python
 from fastapi import Depends
-from PrivShield.security.auth import require_permission
+from engine.security.auth import require_permission
 
 @app.post("/v1/privacy/mask", dependencies=[require_permission("privacy:mask")])
 ```

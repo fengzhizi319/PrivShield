@@ -20,7 +20,7 @@ Artifacts are stored under .models/ in the project root for lazy-loading
 by ONNXSmallNerEngine in classification_ner.py.
 
 Usage:
-    python -m PrivShield.privacy.download_ner_model
+    python -m engine.privacy.download_ner_model
 """
 
 import os
@@ -126,7 +126,7 @@ def main():
     4. 根据结果设置退出码。
        (Set exit code based on result)
     """
-    from PrivShield.env_loader import load_env_file
+    from engine.env_loader import load_env_file
     load_env_file()
 
     # CMeEE 命名实体识别模型（中文医学命名实体识别）

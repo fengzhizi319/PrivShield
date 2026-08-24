@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from PrivShield.security.whitelist import (
+from engine.security.whitelist import (
     CNEntry,
     WhitelistConfig,
     WhitelistManager,
@@ -355,8 +355,8 @@ class TestWhitelistManagerAuthIntegration:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
         """mTLS 认证使用白名单中定义的 scopes。"""
-        from PrivShield.security.auth import _authenticate_mtls
-        from PrivShield.security.config import get_security_settings
+        from engine.security.auth import _authenticate_mtls
+        from engine.security.config import get_security_settings
 
         config_path = tmp_path / "whitelist.yaml"
         config_path.write_text(
@@ -390,8 +390,8 @@ entries:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
         """mTLS 认证拒绝不在白名单中的 CN。"""
-        from PrivShield.security.auth import _authenticate_mtls
-        from PrivShield.security.config import get_security_settings
+        from engine.security.auth import _authenticate_mtls
+        from engine.security.config import get_security_settings
 
         config_path = tmp_path / "whitelist.yaml"
         config_path.write_text(

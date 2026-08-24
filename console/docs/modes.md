@@ -104,7 +104,7 @@ corepack pnpm build
 ### 开发模式
 
 ```bash
-python -m PrivShield.server
+python -m engine.server
 ```
 
 推荐配置：
@@ -134,7 +134,7 @@ python -m PrivShield.server
 
 - 前端：`console/web` + Vite dev server
 - 后端：`console/bff-py`（带 reload）或 `console/bff-go`（手动重启）
-- agent：本机 `PrivShield.server`
+- agent：本机 `engine.server`
 
 适用场景：
 

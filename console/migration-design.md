@@ -258,7 +258,7 @@ PrivShield/                                   # 项目根目录
 | `Makefile` | `Makefile` (原地更新) | 内容更新 | 全部目标中的路径引用更新，新增微服务构建目标（详见 §5.5） |
 | `.github/workflows/ci.yml` | `.github/workflows/ci.yml` (原地更新) | 内容更新 | 8 个 Job 全部更新路径引用，新增 Go 微服务矩阵 Job（详见 §6） |
 | `proto/` | `proto/` | 保持不动 | gRPC 契约定义，代码生成脚本输出路径更新（输出到 `engine/` 与 `pkg/proto/`） |
-| `tests/` | `tests/` | 原地更新 | 测试文件中 `from PrivShield.xxx import` 更新为 `from engine.xxx import` |
+| `tests/` | `tests/` | 原地更新 | 测试文件中 `from engine.xxx import` 更新为 `from engine.xxx import` |
 | `console/migration-design.md` | `docs/migration/design.md` | 移至全局文档 | 本迁移设计文档，归档至全局文档中心 |
 
 ---
@@ -493,10 +493,10 @@ proto-gen:
 
 #### 2. 向后兼容导入别名
 
-为确保外部调用方（如测试脚本、CI 流水线）在过渡期内仍可使用 `import PrivShield`，在 `engine/__init__.py` 中添加：
+为确保外部调用方（如测试脚本、CI 流水线）在过渡期内仍可使用 `import engine`，在 `engine/__init__.py` 中添加：
 
 ```python
-# 向后兼容：过渡期允许 `import PrivShield` 别名
+# 向后兼容：过渡期允许 `import engine` 别名
 # 迁移完成后（建议 2 个 release 周期后）移除
 import sys
 import engine as _self
@@ -512,7 +512,7 @@ sys.modules.setdefault("PrivShield", _self)
 | 文件 | 变更内容 |
 |---|---|
 | `values.yaml` | `image.repository` 由 `privshield` 改为 `privshield-engine`；`agent.profile` 挂载路径 `/etc/PrivShield/` 可保持不变（ConfigMap 挂载路径与代码目录无关） |
-| `templates/deployment.yaml` | `command` 中 `python -m PrivShield.server` 改为 `python -m engine.server`；`livenessProbe`/`readinessProbe` 路径不变（`/health` 端点不受目录重构影响） |
+| `templates/deployment.yaml` | `command` 中 `python -m engine.server` 改为 `python -m engine.server`；`livenessProbe`/`readinessProbe` 路径不变（`/health` 端点不受目录重构影响） |
 | `templates/configmap.yaml` | 无需变更（挂载的是 YAML 配置内容，与目录结构无关） |
 | `Chart.yaml` | 可选：`name` 更新为 `privshield-engine` 或保持 `PrivShield`（Helm release 名称独立于目录结构） |
 
@@ -559,7 +559,7 @@ sys.modules.setdefault("PrivShield", _self)
 | `go-backend` | `working-directory: console/backend-go`<br>`cache-dependency-path: console/backend-go/go.sum` | `console/bff-go`<br>`console/bff-go/go.sum` | 工作目录与缓存路径更新 |
 | `frontend` | `working-directory: console/web`<br>`cache-dependency-path: console/web/pnpm-lock.yaml` | 不变 | 前端路径不受迁移影响 |
 | `console-backend` | `working-directory: console/backend`<br>`cache-dependency-path: console/backend/requirements.txt` | `console/bff-py`<br>`console/bff-py/requirements.txt` | 工作目录更新 |
-| `docker` | `docker build --target core -t privshield:ci .`<br>`from PrivShield.service import PrivacyService` | `docker build --target core -f engine/Dockerfile -t privshield:ci .`<br>`from engine.service import PrivacyService` | Dockerfile 路径与 Python 导入路径更新 |
+| `docker` | `docker build --target core -t privshield:ci .`<br>`from engine.service import PrivacyService` | `docker build --target core -f engine/Dockerfile -t privshield:ci .`<br>`from engine.service import PrivacyService` | Dockerfile 路径与 Python 导入路径更新 |
 | `helm-lint` | `--chart-dirs deploy/helm` | 不变 | Helm Chart 目录不受迁移影响 |
 | `image-scan` | `docker build --target core -t PrivShield:scan .` | `docker build --target core -f engine/Dockerfile -t PrivShield:scan .` | Dockerfile 路径更新 |
 
@@ -675,7 +675,7 @@ gantt
 3. 更新 `Makefile` 顶层指令（详见 §5.5）。
 4. 更新 `pyproject.toml` 中全部路径引用（详见 §5.6）。
 5. 更新 `.github/workflows/ci.yml` 中全部 Job 路径（详见 §6.1）。
-6. 更新根目录 `Dockerfile` 中 `COPY PrivShield/` 为 `COPY engine/`，`CMD` 中 `PrivShield.server` 为 `engine.server`。
+6. 更新根目录 `Dockerfile` 中 `COPY PrivShield/` 为 `COPY engine/`，`CMD` 中 `engine.server` 为 `engine.server`。
 
 ### Phase 6: 全链路 E2E 验收与上线合并 (Day 12)
 1. 执行全量 E2E 自动化测试：`PRIVSHIELD_E2E=1 go test -v ./...`。
@@ -867,15 +867,12 @@ gantt
 | Go 模块路径全量重命名 | ✅ | 5 个 go.mod module/require/replace + 全部 .go 导入 + `servicehub.proto` go_package |
 | `pyproject.toml` / `ci.yml` 路径修正（bff-py、go 1.27） | ✅ | 客观 bug 已修复，全量配置对齐 |
 | docker-compose 全栈编排（含 3 微服务、vLLM、监控 profile） | ✅ | Build Context 统一为仓库根目录 |
-| 全仓文档/脚本旧路径清理（`console/backend`/`backend-go`/`console/pkg` 等） | ✅ | 仅保留历史设计文档中的整改记录原文 |
-| `deploy/README.md` 部署全景指南 | ✅ | 新增标准化全景部署指引 |
-| `PrivShield/` → `engine/` 物理更名与双包名平滑兼容层 | ✅ | `engine/` 独立目录 + `engine/__init__.py` `sys.modules` 别名 + `ln -s engine PrivShield` 软链兼容，423 个 Python 测试全绿通过 |
-| Docker 构建链与镜像入口单轨化 | ✅ | 根目录 `Dockerfile` 与 `engine/Dockerfile` 同步为 `COPY engine/` + 容器内兼容软链 + `CMD python -m engine.server` |
-| 工具链配置单轨化（Makefile / CI / Coverage / Mypy） | ✅ | `Makefile`（`engine/`、`--cov=engine`）、`ci.yml`（`engine/`）、`pyproject.toml`（`source=["engine"]`、`files=["engine",...]`）全面切换 |
+| `PrivShield/` → `engine/` 物理更名与单轨化 | ✅ | 彻底采用 `engine/` 单轨架构，移除双轨软链与 `sys.modules` 别名，423 个 Python 测试全绿通过 |
+| Docker 构建链与镜像入口单轨化 | ✅ | 根目录 `Dockerfile` 与 `engine/Dockerfile` 同步为 `COPY engine/` 与 `CMD python -m engine.server` |
+| 工具链配置单轨化（Makefile / CI / Coverage / Mypy） | ✅ | `Makefile`（`engine/`、`--cov=engine`）、`ci.yml`（`engine/`）、`pyproject.toml`（`source=["engine"]`、`files=["engine",...]`）全面单轨化 |
 | `services/service-hub/proto/servicehub.pb.go` stubs 重新生成 | ✅ | 采用 `python -m grpc_tools.protoc` 重新生成，彻底清除历史旧路径 rawDesc 字节残留 |
 | 全栈防 DDoS 纵深防御体系 | ✅ | Slowloris 5s 超时、MaxBodySize (413)、RateLimit IP 令牌桶 (429)、MaxConcurrent (503) 全部单测通过 |
 | 跨语言全量自动化测试套件 | ✅ | `make test-go`（100% PASS）、`pytest tests/ -q`（423 PASS）、Vitest 前端单测（77 PASS） |
-| 双轨兼容过渡期保障 | ℹ️ | 算力主包与构建/CI/Lint 工具链已单轨化运行于 `engine/`；根目录保留 `PrivShield -> engine` 符号链接与动态别名，确保历史直调与自动化测试无缝衔接 |
 
 
 

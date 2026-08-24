@@ -111,7 +111,7 @@ def _worker_entry(worker_id: int, port_rest: int, port_grpc: int):
     setproctitle.setproctitle(f"privacy-agent-worker-{worker_id}")
 
     # 每个 worker 独立创建 socket 并设置 SO_REUSEPORT
-    from PrivShield.server import serve_with_socket
+    from engine.server import serve_with_socket
     serve_with_socket(
         rest_port=port_rest,
         grpc_port=port_grpc,

@@ -32,13 +32,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from PrivShield.gateway.balancer import (
+from engine.gateway.balancer import (
     BackendNode,
     CircuitBreaker,
     LoadBalancer,
     health_check_loop,
 )
-from PrivShield.observability.metrics import GATEWAY_HEALTHY_NODES
+from engine.observability.metrics import GATEWAY_HEALTHY_NODES
 
 
 # ===========================================================================

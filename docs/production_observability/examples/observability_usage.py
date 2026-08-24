@@ -17,7 +17,7 @@ import asyncio
 import io
 import sys
 
-from PrivShield.observability import (
+from engine.observability import (
     AUTH_DENIALS_TOTAL,
     BUDGET_REMAINING,
     CLASSIFICATION_TOTAL,

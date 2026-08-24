@@ -110,7 +110,7 @@
 模块提供 `FieldType` 枚举用于类型安全的字段类型判断：
 
 ```python
-from PrivShield.privacy.masking import FieldType
+from engine.privacy.masking import FieldType
 
 assert FieldType.MOBILE == "mobile"
 assert FieldType.EMAIL == "email"
@@ -259,7 +259,7 @@ logger.info(
 提供 `MaskingOperation` 枚举用于操作类型标识：
 
 ```python
-from PrivShield.privacy.masking import MaskingOperation
+from engine.privacy.masking import MaskingOperation
 
 assert MaskingOperation.MASK_VALUE == "mask_value"
 assert MaskingOperation.HASH_VALUE == "hash_value"

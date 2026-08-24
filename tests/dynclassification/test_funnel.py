@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from PrivShield.dynclassification import (
+from engine.dynclassification import (
     ClassificationFunnel,
     ConfidencePolicy,
     ConfigurableRuleEngine,
@@ -27,9 +27,9 @@ from PrivShield.dynclassification import (
     FunnelResult,
     SecurityTag,
 )
-from PrivShield.dynclassification.llm_adapter import LlmAdapter
-from PrivShield.dynclassification.ner_adapter import NerAdapter
-from PrivShield.dynclassification.rule_schema import (
+from engine.dynclassification.llm_adapter import LlmAdapter
+from engine.dynclassification.ner_adapter import NerAdapter
+from engine.dynclassification.rule_schema import (
     DowngradeRuleDef,
     MatcherDef,
     RuleDef,
@@ -502,7 +502,7 @@ class TestServiceIntegration:
 
     def test_classify_field_returns_engine_layer(self):
         """service.classify_field 返回 engine_layer 字段。"""
-        from PrivShield.dynclassification import DynClassificationService
+        from engine.dynclassification import DynClassificationService
 
         svc = DynClassificationService(rules_dir="rules")
         resp = svc.classify_field("phone_number", "13800138000")
@@ -513,7 +513,7 @@ class TestServiceIntegration:
 
     def test_classify_field_conflict_confidence(self):
         """通过 service 验证冲突置信度衰减。"""
-        from PrivShield.dynclassification import DynClassificationService
+        from engine.dynclassification import DynClassificationService
 
         svc = DynClassificationService(rules_dir="rules")
         # "turnover_rate" 在 medical domain 中会触发降级规则
@@ -537,7 +537,7 @@ class TestLlmClassifyPromptTemplate:
 
     def test_llm_adapter_accepts_classify_prompt_template(self):
         """LlmAdapter 接受 classify_prompt_template 参数。"""
-        from PrivShield.dynclassification.llm_adapter import LlmAdapter
+        from engine.dynclassification.llm_adapter import LlmAdapter
 
         template = "你是{domain}领域的安全专家。等级定义：{levels_desc}"
         adapter = LlmAdapter(model_path="/nonexistent", classify_prompt_template=template)
@@ -545,7 +545,7 @@ class TestLlmClassifyPromptTemplate:
 
     def test_llm_engine_accepts_classify_prompt_template(self):
         """Qwen2VLClassifier 接受 classify_prompt_template 参数。"""
-        from PrivShield.dynclassification.llm_engines import Qwen2VLClassifier
+        from engine.dynclassification.llm_engines import Qwen2VLClassifier
 
         template = "你是{domain}领域专家。标准: {standard_id}。{levels_desc}"
         clf = Qwen2VLClassifier(model_path="/tmp/fake", classify_prompt_template=template)
@@ -553,7 +553,7 @@ class TestLlmClassifyPromptTemplate:
 
     def test_taxonomy_llm_classify_prompt_template_field(self):
         """DomainTaxonomy 支持 llm_classify_prompt_template 字段。"""
-        from PrivShield.dynclassification.models import (
+        from engine.dynclassification.models import (
             CategoryDef,
             DomainTaxonomy,
             SensitivityLevelDef,
@@ -571,7 +571,7 @@ class TestLlmClassifyPromptTemplate:
 
     def test_sensitivity_level_from_string_warns_on_unknown(self):
         """未知等级字符串回退到 L3 并记录警告。"""
-        from PrivShield.dynclassification.base import SensitivityLevel
+        from engine.dynclassification.base import SensitivityLevel
 
         # 正常值解析
         assert SensitivityLevel.from_string("L4") == SensitivityLevel.L4
@@ -612,9 +612,9 @@ class TestServiceReloadResetsAdapters:
 
     def test_reload_clears_ner_and_llm_adapters(self):
         """热重载后 NER/LLM 适配器被重置为 None。"""
-        from PrivShield.dynclassification import DynClassificationService
-        from PrivShield.dynclassification.ner_adapter import NerAdapter
-        from PrivShield.dynclassification.llm_adapter import LlmAdapter
+        from engine.dynclassification import DynClassificationService
+        from engine.dynclassification.ner_adapter import NerAdapter
+        from engine.dynclassification.llm_adapter import LlmAdapter
 
         svc = DynClassificationService(rules_dir="rules")
         # 模拟已初始化的适配器单例
@@ -632,7 +632,7 @@ class TestServiceReloadResetsAdapters:
 
     def test_reload_clears_loader_caches(self):
         """热重载后 ProfileLoader 缓存被清空。"""
-        from PrivShield.dynclassification import DynClassificationService
+        from engine.dynclassification import DynClassificationService
 
         svc = DynClassificationService(rules_dir="rules")
         # 触发一次分类以填充缓存

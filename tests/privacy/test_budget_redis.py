@@ -4,7 +4,7 @@ import sys
 from unittest.mock import MagicMock
 import pytest
 
-from PrivShield.privacy.budget import (
+from engine.privacy.budget import (
     BudgetRegistry,
     PrivacyBudgetExhaustedError,
 )

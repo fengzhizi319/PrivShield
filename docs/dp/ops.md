@@ -284,7 +284,7 @@ DP 查询结果异常
 ```text
 连接/部署失败
 ├─ REST 连接拒绝
-│  ├─ 检查：服务是否启动（python -m PrivShield.server）
+│  ├─ 检查：服务是否启动（python -m engine.server）
 │  ├─ 检查：PRIVACY_REST_HOST / PRIVACY_REST_PORT 配置
 │  └─ 检查：防火墙规则是否放行端口
 │

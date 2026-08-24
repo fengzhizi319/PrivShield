@@ -189,7 +189,7 @@ jobs:
       - name: Verify image starts
         run: |
           docker run --rm privshield:ci python -c \
-            "from engine.service import PrivacyService; from PrivShield.service import PrivacyService as PS; print('OK')"
+            "from engine.service import PrivacyService; print('OK')"
 
   helm-lint:
     name: Helm Chart Testing

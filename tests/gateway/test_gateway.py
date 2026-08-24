@@ -13,12 +13,12 @@ import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 
-from PrivShield import privacy_pb2
-from PrivShield.gateway.balancer import LoadBalancer
-from PrivShield.gateway.grpc_proxy import GatewayGrpcServicer
-from PrivShield.gateway.http_proxy import create_http_gateway_app
-from PrivShield.grpc_server import serve as grpc_serve
-from PrivShield.main import app as rest_app
+from engine import privacy_pb2
+from engine.gateway.balancer import LoadBalancer
+from engine.gateway.grpc_proxy import GatewayGrpcServicer
+from engine.gateway.http_proxy import create_http_gateway_app
+from engine.grpc_server import serve as grpc_serve
+from engine.main import app as rest_app
 
 pytestmark = pytest.mark.integration
 

@@ -186,7 +186,7 @@ flowchart TD
 
 ```bash
 # 从四川省健康医疗地方标准 Markdown 生成 YAML 规则包
-python -m PrivShield.dynclassification.standard_profile_generator \
+python -m engine.dynclassification.standard_profile_generator \
     --doc docs/standard/四川省健康医疗大数据应用指南.md \
     --output rules
 ```
@@ -205,7 +205,7 @@ python -m PrivShield.dynclassification.standard_profile_generator \
 
 ```python
 from pathlib import Path
-from PrivShield.dynclassification.standard_profile_generator import StandardProfileGenerator
+from engine.dynclassification.standard_profile_generator import StandardProfileGenerator
 
 # 1. 初始化生成器
 doc_path = "docs/standard/四川省健康医疗大数据应用指南.md"

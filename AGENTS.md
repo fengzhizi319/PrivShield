@@ -73,7 +73,6 @@ PrivShield/
 │       ├── balancer.py
 │       ├── http_proxy.py
 │       └── grpc_proxy.py
-├── PrivShield -> engine/          # 双轨兼容期软链接（含 sys.modules["PrivShield"] 动态导入别名）
 ├── services/                      # 企业级数据流通与安全治理中台微服务群 (Go)
 │   ├── service-hub/               # 数联数据服务调度中枢 (流水线调度: :8082)
 │   ├── datasource-mgr/            # 数据源资产管理与敏感特征自动探查 (:8083)
@@ -131,7 +130,6 @@ python -m engine.privacy.download_ner_model
 
 ```bash
 python -m engine.server
-# （注：双轨兼容期内 python -m PrivShield.server 同样可用）
 ```
 
 Defaults:
@@ -195,7 +193,7 @@ Key environment variables:
 | `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 图片打码允许读取的目录白名单（os.pathsep 分隔）；路径 resolve 后必须位于白名单内，拒绝目录穿越与 symlink 逃逸 |
 
 > 注意：三个入口的默认监听地址不同 —— `python -m engine.main` 仅绑定 `127.0.0.1`（REST-only），
-> 而 `python -m engine.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`（双轨兼容期亦支持 `PrivShield.*`）。
+> 而 `python -m engine.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`。
 > 生产部署请显式设置 `PRIVACY_REST_HOST` / `PRIVACY_GRPC_HOST` 并配合 TLS/Auth。
 
 ## 7. Code Conventions
@@ -372,7 +370,7 @@ Address these before any hardened production deployment.
 | Run Prod Console (Dual Backend + Static) | `bash ./console/scripts/prod-start-all.sh` |
 | Stop Dev Console | `bash ./console/scripts/dev-stop.sh` |
 | Stop Prod Console | `bash ./console/scripts/prod-stop.sh` |
-| Run REST + gRPC | `python -m engine.server`（兼容 `python -m PrivShield.server`） |
+| Run REST + gRPC | `python -m engine.server` |
 | Run test console backend | `cd console/bff-py && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |
 | Run gateway | `python -m engine.gateway.server` |

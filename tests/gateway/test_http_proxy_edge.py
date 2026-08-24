@@ -30,9 +30,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.gateway import http_proxy
-from PrivShield.gateway.balancer import LoadBalancer
-from PrivShield.gateway.http_proxy import create_http_gateway_app
+from engine.gateway import http_proxy
+from engine.gateway.balancer import LoadBalancer
+from engine.gateway.http_proxy import create_http_gateway_app
 
 
 @pytest.fixture

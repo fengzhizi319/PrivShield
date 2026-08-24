@@ -46,12 +46,12 @@
 import logging
 import pytest
 
-from PrivShield.observability.logging_config import configure_logging
+from engine.observability.logging_config import configure_logging
 
 
 @pytest.fixture(autouse=True)
 def _reset_logging():
-    import PrivShield.observability.logging_config as lc
+    import engine.observability.logging_config as lc
 
     lc._logging_configured = False
     yield
@@ -76,7 +76,7 @@ def test_json_logging_formatter():
 
 ```python
 from fastapi.testclient import TestClient
-from PrivShield.main import app
+from engine.main import app
 
 client = TestClient(app)
 
@@ -160,7 +160,7 @@ def test_auth_denial_metric_recorded(monkeypatch):
 ### 3.8 OpenTelemetry 可选初始化测试
 
 ```python
-from PrivShield.observability.tracing import init_tracing
+from engine.observability.tracing import init_tracing
 
 
 def test_init_tracing_without_otel():
@@ -201,8 +201,8 @@ def test_json_log_contains_required_fields(capsys, monkeypatch):
 
 ```python
 import grpc
-from PrivShield.grpc_server import PrivacyServicer
-from PrivShield.proto import privacy_pb2, privacy_pb2_grpc
+from engine.grpc_server import PrivacyServicer
+from engine.proto import privacy_pb2, privacy_pb2_grpc
 
 
 def test_grpc_request_metrics():

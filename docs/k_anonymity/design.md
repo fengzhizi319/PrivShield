@@ -324,7 +324,7 @@ split_idx = max(2, min(2, 4-2)) = **2**
 
 **使用示例**:
 ```python
-from PrivShield.privacy.kano_table import k_anonymize_table
+from engine.privacy.kano_table import k_anonymize_table
 
 anonymized_data = k_anonymize_table(
     rows=complete_dataset,
@@ -361,7 +361,7 @@ anonymized_data = k_anonymize_table(
 
 **使用示例**:
 ```python
-from PrivShield.privacy.kano import anonymize_record, BUILTIN_HIERARCHIES
+from engine.privacy.kano import anonymize_record, BUILTIN_HIERARCHIES
 
 anonymized = anonymize_record(
     record={"age": "25", "zipcode": "100001", "gender": "M"},
@@ -509,7 +509,7 @@ logger.info(
 提供 `QIType` 和 `GeneralizationStrategy` 枚举用于类型安全：
 
 ```python
-from PrivShield.privacy.kano import QIType, GeneralizationStrategy
+from engine.privacy.kano import QIType, GeneralizationStrategy
 
 assert QIType.AGE == "age"
 assert QIType.SALARY == "salary"
@@ -528,7 +528,7 @@ assert GeneralizationStrategy.INTERVAL == "interval"
 新增 `anonymize_records_batch` 函数支持批量记录泛化：
 
 ```python
-from PrivShield.privacy.kano import anonymize_records_batch
+from engine.privacy.kano import anonymize_records_batch
 
 results = anonymize_records_batch(
     records=[{"age": "25"}, {"age": "30"}],

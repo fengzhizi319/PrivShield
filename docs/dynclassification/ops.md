@@ -142,7 +142,7 @@ Layer-2 实体识别模型相关文件统一存放在项目根目录的 `.models
 
 | 产物文件 | 说明 | 生成 / 保存位置 |
 |---|---|---|
-| `.models/raner_cmeee/` | ModelScope 完整模型仓库 | `python -m PrivShield.privacy.download_ner_model` 时下载 |
+| `.models/raner_cmeee/` | ModelScope 完整模型仓库 | `python -m engine.privacy.download_ner_model` 时下载 |
 | `.models/raner_cmeee.onnx` | 轻量化 ONNX 模型 | 用于 ONNX Runtime 与 TensorRT 导入 |
 | `.models/vocab.txt` | BERT 中文词表文件 | 用于纯 C++/Python Tokenizer 分词 |
 | `.models/raner_cmeee.onnx.engine` | **TensorRT C++ 编译硬件优化引擎** | **`TensorRTSmallNerEngine` 首次运行时由 TensorRT 驱动自动生成并保存在 `.models/` 下** |
@@ -180,7 +180,7 @@ Layer-2 实体识别模型相关文件统一存放在项目根目录的 `.models
 - **排查步骤**：
   1. 使用内置校验脚本检查 YAML：
      ```bash
-     PYTHONPATH=. python -m PrivShield.dynclassification validate /etc/privacy-agent/rules
+     PYTHONPATH=. python -m engine.dynclassification validate /etc/privacy-agent/rules
      ```
   2. 修复配置文件语法与语义错误后重新 reload。
 
@@ -464,7 +464,7 @@ graph LR
 
 1. **拉起新版 Agent 进程**（内核会自动在 8079 / 50051 端口上进行平滑分流）：
    ```bash
-   python -m PrivShield.server
+   python -m engine.server
    ```
 2. **向旧版 Agent 发送优雅退出信号**：
    ```bash

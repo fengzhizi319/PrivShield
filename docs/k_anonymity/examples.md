@@ -29,7 +29,7 @@
 使用内置的 `age`、`zipcode`、`gender` 泛化层次结构对单条记录进行泛化。
 
 ```python
-from PrivShield.privacy.kano import BUILTIN_HIERARCHIES, anonymize_record
+from engine.privacy.kano import BUILTIN_HIERARCHIES, anonymize_record
 
 record = {
     "name": "张三",
@@ -59,7 +59,7 @@ for k in [5, 12, 25]:
 ### 2.2 数据集级 K-匿名泛化（Mondrian）
 
 ```python
-from PrivShield.privacy.kano_table import k_anonymize_table
+from engine.privacy.kano_table import k_anonymize_table
 
 rows = [
     {"age": 25, "zipcode": "100001", "gender": "M", "disease": "A"},
@@ -92,7 +92,7 @@ print(result)
 
 ```python
 from collections import Counter
-from PrivShield.privacy.kano_table import k_anonymize_table
+from engine.privacy.kano_table import k_anonymize_table
 
 result = k_anonymize_table(rows, qi_cols, k=3)
 groups = Counter(
@@ -105,7 +105,7 @@ assert all(c >= 3 for c in groups.values())
 
 ```python
 import pandas as pd
-from PrivShield.privacy.kano_table import k_anonymize_dataframe
+from engine.privacy.kano_table import k_anonymize_dataframe
 
 df = pd.DataFrame({
     "age": [25, 26, 27, 55, 56, 57],

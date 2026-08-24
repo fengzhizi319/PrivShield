@@ -557,7 +557,7 @@ go run ./cmd/server   # 默认监听 :8080
 pip install -e .
 
 # 启动 REST + gRPC
-python -m PrivShield.server
+python -m engine.server
 # REST: http://127.0.0.1:8079
 # gRPC: 127.0.0.1:50051
 ```
@@ -570,7 +570,7 @@ python -m PrivShield.server
 
 ```bash
 # 终端 1：启动 agent
-python -m PrivShield.server
+python -m engine.server
 
 # 终端 2：启动 Go 后端
 cd console/bff-go && go run ./cmd/server

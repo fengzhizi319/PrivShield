@@ -24,9 +24,9 @@ import time
 
 import grpc
 
-from PrivShield import privacy_pb2_grpc
-from PrivShield.observability.logging_config import get_logger
-from PrivShield.observability.metrics import (
+from engine import privacy_pb2_grpc
+from engine.observability.logging_config import get_logger
+from engine.observability.metrics import (
     GATEWAY_LATENCY,
     GATEWAY_REQUESTS_TOTAL,
     GATEWAY_RETRIES_TOTAL,

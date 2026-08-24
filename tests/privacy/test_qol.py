@@ -16,7 +16,7 @@ import pytest  # pytest 测试框架，提供 raises/importorskip/fixture 等工
 from prometheus_client import REGISTRY  # Prometheus 全局默认注册表，用于读取指标当前值
 
 # 从被测模块导入公开接口和常量
-from PrivShield.privacy.qol import (
+from engine.privacy.qol import (
     ObfuscationDomain,  # 混淆领域枚举（medical/generic）
     ObfuscationStrategy,  # 混淆策略枚举（slot_filling/length_similarity/hybrid）
     obfuscate_query,  # 单条查询混淆接口

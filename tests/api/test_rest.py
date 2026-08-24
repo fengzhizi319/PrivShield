@@ -1,6 +1,6 @@
 """REST API 接口测试集。
 
-使用 FastAPI TestClient 对 PrivShield.main 中的各端点进行集成测试，
+使用 FastAPI TestClient 对 engine.main 中的各端点进行集成测试，
 覆盖健康检查、脱敏、哈希、差分隐私、K-匿名与查询混淆等核心接口。
 数据分类接口测试已拆分到 tests/test_classification_rest.py。
 
@@ -12,7 +12,7 @@ Classification endpoint tests are in tests/test_classification_rest.py.
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.main import app
+from engine.main import app
 
 # 复用同一个 TestClient 实例，避免重复创建应用
 client = TestClient(app)
@@ -21,7 +21,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def seed_global_rng():
     """每个 REST 测试前设定全局 DP API 随机种子，确保测试结果确定。"""
-    from PrivShield.main import service
+    from engine.main import service
     service.dp_api.rng.seed(42)
     yield
 
@@ -229,7 +229,7 @@ def test_recommend_and_apply_personalized_profile(monkeypatch, tmp_path):
     # 通常情况下这会返回 400，但由于我们已经在 default 命名空间保存了个性化推荐参数，
     # 框架应当自动加载推荐的 clip 值，使请求成功返回 200！
     # 另外，我们显式设置 RNG 种子保证结果确定
-    from PrivShield.main import service
+    from engine.main import service
     service.dp_api.rng.seed(42)
 
     response = client.post(
@@ -360,7 +360,7 @@ def test_dp_arrow_ipc_rest():
     import pyarrow as pa
     import pyarrow.ipc as ipc
 
-    from PrivShield.privacy.data_adapters import table_to_arrow_ipc_bytes
+    from engine.privacy.data_adapters import table_to_arrow_ipc_bytes
 
     input_table = pa.Table.from_arrays([pa.array([10.0, 20.0, 30.0, 40.0])], names=["value"])
     ipc_payload = table_to_arrow_ipc_bytes(input_table)
@@ -386,7 +386,7 @@ def test_dp_arrow_ipc_vector_sum():
     import pyarrow as pa
     import pyarrow.ipc as ipc
 
-    from PrivShield.privacy.data_adapters import table_to_arrow_ipc_bytes
+    from engine.privacy.data_adapters import table_to_arrow_ipc_bytes
 
     # 构造 3 条 4 维向量
     vectors = [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [0.5, 0.5, 0.5, 0.5]]
@@ -415,7 +415,7 @@ def test_dp_arrow_ipc_vector_mean():
     import pyarrow as pa
     import pyarrow.ipc as ipc
 
-    from PrivShield.privacy.data_adapters import table_to_arrow_ipc_bytes
+    from engine.privacy.data_adapters import table_to_arrow_ipc_bytes
 
     vectors = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]
     input_table = pa.Table.from_arrays(
@@ -441,7 +441,7 @@ def test_dp_arrow_ipc_unsupported_aggregation():
     """测试 Arrow IPC 端点对不支持的聚合类型返回 400。"""
     import pyarrow as pa
 
-    from PrivShield.privacy.data_adapters import table_to_arrow_ipc_bytes
+    from engine.privacy.data_adapters import table_to_arrow_ipc_bytes
 
     input_table = pa.Table.from_arrays([pa.array([1.0, 2.0])], names=["v"])
     ipc_payload = table_to_arrow_ipc_bytes(input_table)

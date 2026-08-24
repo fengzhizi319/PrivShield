@@ -52,8 +52,8 @@ from llmlora.src.utils.metrics import (  # noqa: E402
 def _build_leakage_scanner(rules_dir: str):
     """构建规则引擎复扫器；导入失败时降级为仅字面检查。"""
     try:
-        from PrivShield.dynclassification.engine import ConfigurableRuleEngine
-        from PrivShield.dynclassification.profile_loader import ProfileLoader
+        from engine.dynclassification.engine import ConfigurableRuleEngine
+        from engine.dynclassification.profile_loader import ProfileLoader
 
         loader = ProfileLoader(rules_dir)
         taxonomy = loader.load_taxonomy("default")

@@ -57,7 +57,7 @@ def mask_value(field_name: str, value: str, context: str = "") -> str
 
 **示例：**
 ```python
-from PrivShield.privacy.masking import mask_value
+from engine.privacy.masking import mask_value
 
 # 手机号脱敏
 result = mask_value("mobile", "13812345678")
@@ -99,7 +99,7 @@ def mask_record(record: Any, context: str = "") -> Any
 
 **示例：**
 ```python
-from PrivShield.privacy.masking import mask_record
+from engine.privacy.masking import mask_record
 
 record = {
     "mobile": "13812345678",
@@ -141,7 +141,7 @@ def mask_value_batch(
 
 **示例：**
 ```python
-from PrivShield.privacy.masking import mask_value_batch
+from engine.privacy.masking import mask_value_batch
 
 field_names = ["mobile", "name", "id_card"]
 values = ["13812345678", "张三丰", "110101199001011234"]
@@ -201,7 +201,7 @@ def mask_dataframe(
 ```python
 import pandas as pd
 import pyarrow as pa
-from PrivShield.privacy.masking import mask_dataframe
+from engine.privacy.masking import mask_dataframe
 
 # 创建示例数据
 df = pd.DataFrame({
@@ -256,7 +256,7 @@ HMAC-SHA256 哈希，输出 16 位 base64 摘要。
 
 **示例：**
 ```python
-from PrivShield.privacy.masking import hash_value
+from engine.privacy.masking import hash_value
 
 # 使用固定盐值
 user_id_hash = hash_value("user_12345", "my_secret_salt")
@@ -289,7 +289,7 @@ def truncate(value: str, keep_prefix: int) -> str
 
 **示例：**
 ```python
-from PrivShield.privacy.masking import truncate
+from engine.privacy.masking import truncate
 
 # 用户名截断
 result = truncate("zhangsan", 3)
@@ -557,7 +557,7 @@ print(response.result)  # "aB3dE5gH7jK9mN1p"
 
 **Python SDK：**
 ```python
-from PrivShield.privacy.masking import mask_value_batch
+from engine.privacy.masking import mask_value_batch
 
 try:
     # 错误示例：长度不匹配

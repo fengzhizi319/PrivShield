@@ -94,18 +94,13 @@ docs = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["PrivShield*", "engine*"]
+include = ["engine*"]
 
 # ── Ruff (lint + format) ─────────────────────────────────────
 [tool.ruff]
-# 这个仓库是“根级配置 + 多子项目”结构：
-# - `engine` / `PrivShield` 是算力主包
-# - `tests` 是主测试集
-# - `console/bff-py` 是同仓库中的控制台 Python BFF（原 console/backend）
-# 因此这里将多个源码根目录一起纳入 lint/format 规则。
 target-version = "py313"
 line-length = 120
-src = ["engine", "PrivShield", "tests", "console/bff-py"]
+src = ["engine", "tests", "console/bff-py"]
 
 [tool.ruff.lint]
 select = [
@@ -146,12 +141,9 @@ ignore = [
 "engine/privacy_pb2*.py" = ["E", "F", "N", "UP"]
 "engine/grpc_server.py" = ["N802"]
 "engine/classification_grpc.py" = ["N802"]
-"PrivShield/privacy_pb2*.py" = ["E", "F", "N", "UP"]
-"PrivShield/grpc_server.py" = ["N802"]
-"PrivShield/classification_grpc.py" = ["N802"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["engine", "PrivShield"]
+known-first-party = ["engine"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -175,8 +167,6 @@ files = ["engine", "console/bff-py", "tests"]
 exclude = [
     "engine/privacy_pb2.*",
     "engine/privacy_pb2_grpc.*",
-    "PrivShield/privacy_pb2.*",
-    "PrivShield/privacy_pb2_grpc.*",
     "console/bff-py/tests",
 ]
 
@@ -184,8 +174,6 @@ exclude = [
 # protobuf 生成模块的属性 mypy 无法识别（生成的描述符动态注入），
 # 直接跳过对这两个模块的导入分析，避免从它们导入的模块产生大量 has no attribute 错误。
 module = [
-    "PrivShield.privacy_pb2",
-    "PrivShield.privacy_pb2_grpc",
     "engine.privacy_pb2",
     "engine.privacy_pb2_grpc",
 ]
@@ -200,7 +188,7 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 # privacy/dp.py 包含大量 scipy sparse / numpy ndarray 类型推断与 Union 分发问题，
 # 短期内难以逐项修复，先忽略以解决 numpy 2.x stub 兼容的阻塞问题。
-module = ["PrivShield.privacy.dp", "engine.privacy.dp"]
+module = ["engine.privacy.dp"]
 ignore_errors = true
 
 # ── pytest + coverage ────────────────────────────────────────

@@ -10,7 +10,7 @@ from __future__ import annotations
 import grpc
 import pytest
 
-from PrivShield.gateway import balancer
+from engine.gateway import balancer
 
 
 @pytest.fixture()

@@ -651,7 +651,7 @@ rules/                              # 规则配置根目录
 ```dockerfile
 WORKDIR /app
 COPY . .
-CMD ["python", "-m", "PrivShield.server"]
+CMD ["python", "-m", "engine.server"]
 ```
 
 #### 场景二：打包为可执行文件（PyInstaller 等）

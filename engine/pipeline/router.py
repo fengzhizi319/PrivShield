@@ -12,9 +12,9 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, File, UploadFile, Query, status
 from pydantic import BaseModel, Field
 
-from PrivShield.deps import SECURITY_DEPS
-from PrivShield.security.auth import require_permission
-from PrivShield.observability.logging_config import get_logger
+from engine.deps import SECURITY_DEPS
+from engine.security.auth import require_permission
+from engine.observability.logging_config import get_logger
 
 from .models import PipelineResult
 from .service import PipelineService

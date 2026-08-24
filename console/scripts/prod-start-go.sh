@@ -187,7 +187,7 @@ launch_agent() {
         # 日志持久化到 .logs/agent_go.log（后台运行时终端不显示 agent 输出），
         # agent 崩溃/重启后可回溯根因；注意：不能用 exec ... | tee 管道，
         # 否则 $! 会指向 tee 而非 python，kill 将无法终止 agent。
-        exec python -m PrivShield.server >> "$agent_log" 2>&1
+        exec python -m engine.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"

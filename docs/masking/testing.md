@@ -35,7 +35,7 @@
 ### 3.1 字段脱敏测试
 
 ```python
-from PrivShield.privacy.masking import mask_value
+from engine.privacy.masking import mask_value
 
 
 def test_mask_mobile():
@@ -53,7 +53,7 @@ def test_mask_name():
 ### 3.2 整记录脱敏测试
 
 ```python
-from PrivShield.privacy.masking import mask_record
+from engine.privacy.masking import mask_record
 
 
 def test_mask_record():
@@ -67,7 +67,7 @@ def test_mask_record():
 
 ```python
 import pandas as pd
-from PrivShield.privacy.masking import mask_dataframe
+from engine.privacy.masking import mask_dataframe
 
 
 def test_mask_dataframe():
@@ -82,7 +82,7 @@ def test_mask_dataframe():
 ```python
 import numpy as np
 import pyarrow as pa
-from PrivShield.privacy.masking import mask_dataframe, mask_record
+from engine.privacy.masking import mask_dataframe, mask_record
 
 
 def test_mask_dataframe_numpy():
@@ -139,7 +139,7 @@ def test_mask_record_arrow_ipc():
 
 ```python
 from prometheus_client import REGISTRY
-from PrivShield.privacy.masking import mask_value
+from engine.privacy.masking import mask_value
 
 
 def test_masking_metric():

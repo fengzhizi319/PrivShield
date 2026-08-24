@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from PrivShield.dynclassification import (
+from engine.dynclassification import (
     CompositeRuleEngine,
     ConfigurableRuleEngine,
     DomainTaxonomy,
@@ -24,7 +24,7 @@ from PrivShield.dynclassification import (
     OperatorRegistry,
     SecurityTag,
 )
-from PrivShield.dynclassification.rule_schema import (
+from engine.dynclassification.rule_schema import (
     CompositeRuleDef,
     MatcherDef,
     RuleDef,
@@ -137,7 +137,7 @@ class TestOperatorRegistry:
     def test_builtin_operators_registered(self):
         """内置算子在模块导入后应自动注册。"""
         # 触发 operators 模块加载
-        from PrivShield.dynclassification import operators  # noqa: F401
+        from engine.dynclassification import operators  # noqa: F401
 
         expected = [
             "regex",

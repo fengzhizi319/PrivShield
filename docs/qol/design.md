@@ -100,7 +100,7 @@ logger.info(
 提供 `ObfuscationDomain` 和 `ObfuscationStrategy` 枚举用于类型安全：
 
 ```python
-from PrivShield.privacy.qol import ObfuscationDomain, ObfuscationStrategy
+from engine.privacy.qol import ObfuscationDomain, ObfuscationStrategy
 
 assert ObfuscationDomain.MEDICAL == "medical"
 assert ObfuscationStrategy.SLOT_FILLING == "slot_filling"

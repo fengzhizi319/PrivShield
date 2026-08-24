@@ -43,14 +43,14 @@ export GATEWAY_GRPC_PORT=50000
 export GATEWAY_STRATEGY=round_robin
 export GATEWAY_BACKENDS="http://127.0.0.1:8079|127.0.0.1:50051,http://127.0.0.1:8080|127.0.0.1:50052"
 
-PYTHONPATH=. python -m PrivShield.gateway.server
+PYTHONPATH=. python -m engine.gateway.server
 ```
 
 ### 2.2 使用 YAML 配置文件启动
 
 ```bash
 export PRIVACY_GATEWAY_CONFIG=docs/gateway_balancer/examples/gateway-config.yaml
-PYTHONPATH=. python -m PrivShield.gateway.server
+PYTHONPATH=. python -m engine.gateway.server
 ```
 
 示例 `gateway-config.yaml`：
@@ -79,7 +79,7 @@ backends:
 
 ```python
 import asyncio
-from PrivShield.gateway.balancer import LoadBalancer
+from engine.gateway.balancer import LoadBalancer
 
 balancer = LoadBalancer(strategy="round_robin")
 balancer.add_node("http://127.0.0.1:8079", "127.0.0.1:50051", weight=1)
@@ -96,8 +96,8 @@ asyncio.run(demo())
 ### 3.2 创建 HTTP 网关应用
 
 ```python
-from PrivShield.gateway.balancer import LoadBalancer
-from PrivShield.gateway.http_proxy import create_http_gateway_app
+from engine.gateway.balancer import LoadBalancer
+from engine.gateway.http_proxy import create_http_gateway_app
 
 balancer = LoadBalancer(strategy="least_connections")
 balancer.add_node("http://127.0.0.1:8079", "127.0.0.1:50051")
@@ -131,7 +131,7 @@ async def deregister_node(gateway_url: str, http_url: str, grpc_address: str):
 ### 3.4 切换负载均衡策略
 
 ```python
-from PrivShield.gateway.balancer import LoadBalancer
+from engine.gateway.balancer import LoadBalancer
 
 balancer = LoadBalancer(strategy="round_robin")
 # 运行时切换策略
@@ -194,7 +194,7 @@ curl -X POST http://127.0.0.1:8000/v1/gateway/deregister \
 
 ```bash
 export GATEWAY_STRATEGY=round_robin
-PYTHONPATH=. python -m PrivShield.gateway.server
+PYTHONPATH=. python -m engine.gateway.server
 ```
 
 适合后端节点性能相近、请求耗时均匀的场景。
@@ -203,7 +203,7 @@ PYTHONPATH=. python -m PrivShield.gateway.server
 
 ```bash
 export GATEWAY_STRATEGY=random
-PYTHONPATH=. python -m PrivShield.gateway.server
+PYTHONPATH=. python -m engine.gateway.server
 ```
 
 实现简单，适合节点性能一致且请求分布无明显规律的流量。
@@ -212,7 +212,7 @@ PYTHONPATH=. python -m PrivShield.gateway.server
 
 ```bash
 export GATEWAY_STRATEGY=least_connections
-PYTHONPATH=. python -m PrivShield.gateway.server
+PYTHONPATH=. python -m engine.gateway.server
 ```
 
 适合后端节点处理耗时差异较大的场景，可将新请求优先分发到负载较低的节点。

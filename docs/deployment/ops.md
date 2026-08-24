@@ -114,11 +114,11 @@ base (python:3.13-slim-bookworm)
  │     ├── COPY 全部源码
  │     ├── EXPOSE 8079 50051
  │     ├── ENV PRIVACY_REST_HOST=0.0.0.0 / PRIVACY_GRPC_HOST=0.0.0.0
- │     └── CMD python -m PrivShield.server
+ │     └── CMD python -m engine.server
  │
  └──► ml 目标（继承 core）
        ├── 安装 requirements-ml.txt（torch/transformers/onnxruntime 等）
-       └── CMD python -m PrivShield.server
+       └── CMD python -m engine.server
 ```
 
 - **core 镜像**（~350 MB）：仅含隐私原语（DP / K-匿名 / 脱敏 / 规则分类），适合绝大多数生产场景。
@@ -1602,7 +1602,7 @@ docker compose --profile llm up -d  # 解耦模式（core + 独立 vLLM）
 
 ## 8. 服务启动与优雅关闭
 
-容器入口为 `python -m PrivShield.server`，该模块实现 REST + gRPC 双协议统一启动：
+容器入口为 `python -m engine.server`，该模块实现 REST + gRPC 双协议统一启动：
 
 ```text
 启动流程：

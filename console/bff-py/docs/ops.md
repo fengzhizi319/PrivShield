@@ -78,7 +78,7 @@ pip install -r requirements.txt
 
 ```bash
 # 1. 启动上游 agent（REST 8079 + gRPC 50051）
-python -m PrivShield.server
+python -m engine.server
 
 # 2. 启动 Python 代理后端（8080，带热重载）
 cd console/bff-py
@@ -119,7 +119,7 @@ corepack pnpm install
 corepack pnpm build
 
 # 2. 启动 agent
-python -m PrivShield.server
+python -m engine.server
 
 # 3. 启动后端（不带 --reload）
 cd console/bff-py

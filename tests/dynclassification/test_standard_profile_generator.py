@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from PrivShield.dynclassification.standard_profile_generator import StandardProfileGenerator
+from engine.dynclassification.standard_profile_generator import StandardProfileGenerator
 
 
 @pytest.fixture()

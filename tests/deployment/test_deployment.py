@@ -758,7 +758,7 @@ def test_docker_compose_development_configuration() -> None:
     """验证开发环境 docker-compose.dev.yml 源码挂载与调试配置。
 
     检查项：
-    - Core Agent 挂载宿主机源码目录（../../PrivShield）
+    - Core Agent 挂载宿主机源码目录（../../engine）
     - 日志格式为 text
     - 关闭 TLS/Auth/限速便于直连调试
     """
@@ -773,8 +773,8 @@ def test_docker_compose_development_configuration() -> None:
     assert agent_env.get("PRIVACY_AUTH_ENABLED") == "false"
 
     volumes = services["PrivShield"].get("volumes", [])
-    has_source_mount = any("../../PrivShield:/app/PrivShield" in str(v) for v in volumes)
-    assert has_source_mount, "docker-compose.dev.yml should mount PrivShield source code"
+    has_source_mount = any("../../engine:/app/engine" in str(v) for v in volumes)
+    assert has_source_mount, "docker-compose.dev.yml should mount engine source code"
 
 
 def test_docker_compose_test_runner_configuration() -> None:

@@ -429,7 +429,7 @@ def main():
     """CLI 工具命令行入口 / CLI tool entry point.
 
     Usage:
-        python -m PrivShield.dynclassification.standard_profile_generator \\
+        python -m engine.dynclassification.standard_profile_generator \\
             --doc docs/standard/四川省健康医疗大数据应用指南.md \\
             --output rules
     """

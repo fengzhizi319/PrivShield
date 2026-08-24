@@ -1976,7 +1976,7 @@ rules/                              # 规则配置根目录
 CI 中使用 `pydantic` 模型校验所有 YAML 文件：
 
 ```bash
-PYTHONPATH=. python -m PrivShield.dynclassification.validate_rules rules/
+PYTHONPATH=. python -m engine.dynclassification.validate_rules rules/
 ```
 
 ## 15. 部署与运维

@@ -2,8 +2,8 @@
 
 import pytest
 from typing import Any
-from PrivShield.dynclassification.operator_registry import OperatorRegistry, OperatorResult
-from PrivShield.dynclassification import operators  # noqa: F401
+from engine.dynclassification.operator_registry import OperatorRegistry, OperatorResult
+from engine.dynclassification import operators  # noqa: F401
 
 
 class TestRegexOperator:

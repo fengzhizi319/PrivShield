@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-from PrivShield.privacy import kano_table as kt
+from engine.privacy import kano_table as kt
 
 
 class TestIsNumeric:

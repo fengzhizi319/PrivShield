@@ -3,7 +3,7 @@
 from pathlib import Path
 import pytest
 
-from PrivShield.dynclassification import DynClassificationService, StandardProfileGenerator
+from engine.dynclassification import DynClassificationService, StandardProfileGenerator
 
 
 def test_generate_profiles_from_sichuan_doc(tmp_path):

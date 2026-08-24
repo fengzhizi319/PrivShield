@@ -80,17 +80,17 @@ from typing import Any  # 类型提示
 from unittest.mock import MagicMock, patch  # Mock 依赖
 
 # ── 项目内导入 / Project imports ──
-from PrivShield.dynclassification.base import SensitivityLevel
-from PrivShield.dynclassification.llm_adapter import LlmAdapter
-from PrivShield.dynclassification.llm_engines import OpenAILlmClassifier
-from PrivShield.dynclassification.models import (
+from engine.dynclassification.base import SensitivityLevel
+from engine.dynclassification.llm_adapter import LlmAdapter
+from engine.dynclassification.llm_engines import OpenAILlmClassifier
+from engine.dynclassification.models import (
     CategoryDef,
     ConfidencePolicy,
     DomainTaxonomy,
     SecurityTag,
     SensitivityLevelDef,
 )
-from PrivShield.dynclassification.service import DynClassificationService
+from engine.dynclassification.service import DynClassificationService
 
 # ── 第三方导入 / Third-party imports ──
 import pytest
@@ -1098,7 +1098,7 @@ class TestDockerAgentContainerEndpoints:
             .venv/bin/pytest tests/scripts/test_docker_start_agent.py -k "TestDockerAgentContainerEndpoints" -v -s
         """
         from fastapi.testclient import TestClient
-        from PrivShield.main import app
+        from engine.main import app
 
         self.client = TestClient(app)
         self.live_agent_url = "http://127.0.0.1:8079"
@@ -1661,7 +1661,7 @@ class TestDockerAgentMultiHostDeployment:
             # 或直接调用：
             .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_agent_cross_host_network_timeout_and_graceful_degradation -v -s
         """
-        import PrivShield.env_loader as _env_mod
+        import engine.env_loader as _env_mod
         monkeypatch.setenv("PRIVACY_ENV_PROFILE", "vllm")
         monkeypatch.setenv("PRIVACY_LLM_PROVIDER", "vllm")
         monkeypatch.setenv("PRIVACY_LLM_API_BASE", "http://10.240.0.99:8000/v1")
@@ -1744,7 +1744,7 @@ class TestDockerAgentMultiHostDeployment:
             # 或直接调用：
             .venv/bin/pytest tests/scripts/test_docker_start_agent.py::TestDockerAgentMultiHostDeployment::test_cross_host_environment_switching_isolation -v -s
         """
-        import PrivShield.env_loader as _env_mod
+        import engine.env_loader as _env_mod
 
         # 1. 模拟同机模式
         monkeypatch.setenv("PRIVACY_ENV_PROFILE", "vllm")

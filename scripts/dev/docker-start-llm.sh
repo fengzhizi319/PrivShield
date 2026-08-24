@@ -76,7 +76,7 @@ MODEL_DIR="$PROJECT_ROOT/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
 if [ ! -d "$MODEL_DIR" ]; then
     echo "⚠️  [提示] 本地大模型权重目录不存在: $MODEL_DIR"
     echo "   建议先执行模型下载命令以获取微调权重:"
-    echo "   python -m PrivShield.privacy.download_model"
+    echo "   python -m engine.privacy.download_model"
     echo ""
 fi
 

@@ -192,7 +192,7 @@ def _is_cuda_compatible(cls, torch: Any) -> bool:
 
 ```bash
 python -c "
-from PrivShield.dynclassification.ner_engines import ModelScopeSmallNerEngine
+from engine.dynclassification.ner_engines import ModelScopeSmallNerEngine
 ModelScopeSmallNerEngine._preload_nvidia_libs()
 
 import torch
@@ -217,7 +217,7 @@ CUDA 设备名称: NVIDIA GeForce RTX 5060 Laptop GPU
 
 ```bash
 python -c "
-from PrivShield.dynclassification.ner_engines import ModelScopeSmallNerEngine
+from engine.dynclassification.ner_engines import ModelScopeSmallNerEngine
 engine = ModelScopeSmallNerEngine(device='cuda')
 res = engine.extract('患者诊断为急性心肌梗死和高血压')
 print('CUDA ModelScope NER 结果:', res)

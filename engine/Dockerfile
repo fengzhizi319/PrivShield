@@ -21,7 +21,6 @@ RUN pip install --no-cache-dir -r requirements-core.txt -i https://mirrors.aliyu
 FROM base AS core
 
 COPY engine/ ./engine/
-RUN ln -s engine PrivShield
 COPY rules/ ./rules/
 COPY config/ ./config/
 COPY proto/ ./proto/

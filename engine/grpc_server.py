@@ -65,7 +65,7 @@ from .service import PrivacyService
 PROFILE_PATH = os.environ.get("PRIVACY_PROFILE", "privacy-profile.yaml")  # 隐私参数 profile 文件路径
 NAMESPACE = os.environ.get("PRIVACY_NAMESPACE", "default")  # 隐私预算命名空间，用于多租户隔离
 
-# 获取当前模块的 logger 实例，日志名称为 "PrivShield.grpc_server"
+# 获取当前模块的 logger 实例，日志名称为 "engine.grpc_server"
 logger = get_logger(__name__)
 
 
@@ -1208,13 +1208,13 @@ def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int | None = No
 
 
 # ─── 命令行入口 / CLI entrypoint ───
-# 支持通过 python -m PrivShield.grpc_server 直接启动 gRPC 服务
+# 支持通过 python -m engine.grpc_server 直接启动 gRPC 服务
 if __name__ == "__main__":
     import argparse  # 命令行参数解析
 
     # 创建参数解析器，定义程序名与描述
     parser = argparse.ArgumentParser(
-        prog="PrivShield.grpc_server",
+        prog="engine.grpc_server",
         description="SecretFlow Local Privacy Agent gRPC server.",
     )
     # --host 参数：gRPC 监听地址，优先读取环境变量 PRIVACY_GRPC_HOST

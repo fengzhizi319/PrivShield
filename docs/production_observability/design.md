@@ -98,7 +98,7 @@ class ContextFilter(logging.Filter):
 ### 4.3 统一 logger 入口
 
 ```python
-from PrivShield.observability import get_logger
+from engine.observability import get_logger
 logger = get_logger(__name__)
 ```
 
@@ -173,7 +173,7 @@ def init_tracing(endpoint: str | None, service_name: str):
 ### REST (`main.py`)
 
 ```python
-from PrivShield.observability.middleware import RequestContextMiddleware, MetricsMiddleware
+from engine.observability.middleware import RequestContextMiddleware, MetricsMiddleware
 
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(MetricsMiddleware)
@@ -185,7 +185,7 @@ app.mount("/metrics", make_asgi_app())
 ### gRPC (`grpc_server.py`)
 
 ```python
-from PrivShield.observability.middleware import GrpcContextInterceptor, GrpcMetricsInterceptor
+from engine.observability.middleware import GrpcContextInterceptor, GrpcMetricsInterceptor
 
 interceptors = [GrpcContextInterceptor(), GrpcMetricsInterceptor()]
 if auth/rate-limit enabled: interceptors.extend(...)
@@ -194,7 +194,7 @@ if auth/rate-limit enabled: interceptors.extend(...)
 ### 统一启动器 (`server.py`)
 
 ```python
-from PrivShield.observability.logging_config import configure_logging
+from engine.observability.logging_config import configure_logging
 configure_logging()
 ```
 

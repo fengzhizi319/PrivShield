@@ -1418,7 +1418,7 @@ docker run -d \
 # ===== 本项目支持的部署方式 / Supported Deployment Modes =====
 
 # 1. 本地开发 / Local development
-python -m PrivShield.server
+python -m engine.server
 # REST: http://127.0.0.1:8079 | gRPC: 127.0.0.1:50051
 
 # 2. Docker 单容器 / Docker single container

@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from PrivShield.main import app
+from engine.main import app
 
 client = TestClient(app)
 

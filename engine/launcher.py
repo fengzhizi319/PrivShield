@@ -21,10 +21,10 @@ to bypass the Python GIL limitation.
 使用示例 / Usage Example::
 
     # 命令行启动（推荐）
-    python -m PrivShield.launcher --workers 4
+    python -m engine.launcher --workers 4
 
     # 代码调用
-    from PrivShield.launcher import launch
+    from engine.launcher import launch
     launch(num_workers=4, host_rest="0.0.0.0", port_rest=8079,
            host_grpc="0.0.0.0", port_grpc=50051)
 """

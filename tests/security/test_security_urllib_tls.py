@@ -25,9 +25,9 @@ import httpx
 import pytest
 import uvicorn
 
-from PrivShield.main import app
-from PrivShield.security.config import get_security_settings
-from PrivShield.security.tls import uvicorn_ssl_kwargs
+from engine.main import app
+from engine.security.config import get_security_settings
+from engine.security.tls import uvicorn_ssl_kwargs
 from tests.security_certs import generate_test_certs
 
 if TYPE_CHECKING:

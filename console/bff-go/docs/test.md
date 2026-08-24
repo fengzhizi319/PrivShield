@@ -60,7 +60,7 @@ go test ./internal/handlers -v
 
 ```bash
 cd /path/to/PrivShield
-python -m PrivShield.server
+python -m engine.server
 ```
 
 默认会监听：

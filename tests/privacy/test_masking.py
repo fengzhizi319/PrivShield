@@ -37,7 +37,7 @@ from __future__ import annotations
 import pytest
 from prometheus_client import REGISTRY
 
-from PrivShield.privacy.masking import (
+from engine.privacy.masking import (
     FieldType,
     MaskingOperation,
     chunked_mask_records,
@@ -550,7 +550,7 @@ class TestMaskDataFrame:
         3. monkeypatch _extract_dataframe_partition 返回内部 pandas DataFrame
         """
         pd = pytest.importorskip("pandas")
-        import PrivShield.privacy.data_adapters as da
+        import engine.privacy.data_adapters as da
 
         # 构造模拟的 SecretFlow DataFrame（鸭子类型：具有 partitions 属性）
         class FakeSecretFlowDataFrame:
@@ -577,7 +577,7 @@ class TestMaskDataFrame:
 
     def test_mask_dataframe_return_details_pyarrow(self) -> None:
         """验证 PyArrow Table + return_details=True 返回 MaskingResult 元数据。"""
-        from PrivShield.privacy.masking import MaskingResult
+        from engine.privacy.masking import MaskingResult
 
         pa = pytest.importorskip("pyarrow")
         table = pa.table({"mobile": ["13812345678", "13912345678"]})
@@ -673,7 +673,7 @@ class TestChunkedMaskRecords:
 
     def test_chunked_return_details(self) -> None:
         """验证 return_details=True 时返回 MaskingResult 元数据对象。"""
-        from PrivShield.privacy.masking import MaskingResult
+        from engine.privacy.masking import MaskingResult
 
         chunks = [
             [{"mobile": "13812345678", "name": "张三丰"}],
@@ -714,7 +714,7 @@ class TestAdvancedOperators:
 
     def test_fpe_encrypt_numeric(self) -> None:
         """验证保留格式加密 (FPE)：保持长度、格式形态一致且可重复相等匹配。"""
-        from PrivShield.privacy.masking import fpe_encrypt_numeric
+        from engine.privacy.masking import fpe_encrypt_numeric
 
         id_card = "110101199001011234"
         encrypted = fpe_encrypt_numeric(id_card)
@@ -729,7 +729,7 @@ class TestAdvancedOperators:
 
     def test_random_date_offset(self) -> None:
         """验证日期统一随机偏移 (Random Date Offset)：格式保持且时间序列差不变。"""
-        from PrivShield.privacy.masking import random_date_offset
+        from engine.privacy.masking import random_date_offset
 
         date_1 = "2025-03-15"
         date_2 = "2025-03-20"
@@ -743,7 +743,7 @@ class TestAdvancedOperators:
 
     def test_shuffle_column(self) -> None:
         """验证列洗牌 (Column Shuffle)：打乱映射关系但保持集合全集一致。"""
-        from PrivShield.privacy.masking import shuffle_column
+        from engine.privacy.masking import shuffle_column
 
         dept_list = ["肿瘤科", "心内科", "精神科", "皮肤科", "消化科"]
         shuffled = shuffle_column(dept_list, seed=123)

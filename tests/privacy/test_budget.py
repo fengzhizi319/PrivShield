@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from PrivShield.privacy.budget import (
+from engine.privacy.budget import (
     BudgetAccountant,
     BudgetRegistry,
     PrivacyBudgetExhausted,

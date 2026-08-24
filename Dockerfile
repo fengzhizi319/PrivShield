@@ -26,7 +26,7 @@
 #        │                    │ USER privacy（非 root 运行）
 #        │                    │ ENV 0.0.0.0 监听 + 日志无缓冲
 #        │                    ▼
-#        │                    CMD：python -m PrivShield.server（REST+gRPC 一体进程）
+#        │                    CMD：python -m engine.server（REST+gRPC 一体进程）
 #        │
 #        └──────────────► [ml] 完整 ML 镜像
 #                             │ USER root（安装需要 root 权限）
@@ -88,7 +88,6 @@ FROM base AS core
 #   - proto/               : gRPC 协议 .proto 源（对应生成的 stub 已随主包复制）
 #   - scripts/             : 运行时辅助脚本
 COPY engine/ ./engine/
-RUN ln -s engine PrivShield
 COPY rules/ ./rules/
 COPY config/ ./config/
 COPY proto/ ./proto/

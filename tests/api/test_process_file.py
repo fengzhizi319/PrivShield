@@ -9,7 +9,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from PrivShield.main import app
+from engine.main import app
 
 # 复用同一个 TestClient 实例，避免重复创建应用
 client = TestClient(app)

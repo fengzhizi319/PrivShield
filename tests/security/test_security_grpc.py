@@ -20,13 +20,13 @@ import asyncio
 import grpc
 import pytest
 
-from PrivShield.security import auth as auth_mod
-from PrivShield.security import ratelimit as rl
-from PrivShield.security import whitelist as wl_mod
-from PrivShield.security.auth import AuthInterceptor
-from PrivShield.security.config import KeyConfig, SecuritySettings, get_security_settings
-from PrivShield.security.identity import ANONYMOUS_IDENTITY
-from PrivShield.security.ratelimit import RateLimitInterceptor
+from engine.security import auth as auth_mod
+from engine.security import ratelimit as rl
+from engine.security import whitelist as wl_mod
+from engine.security.auth import AuthInterceptor
+from engine.security.config import KeyConfig, SecuritySettings, get_security_settings
+from engine.security.identity import ANONYMOUS_IDENTITY
+from engine.security.ratelimit import RateLimitInterceptor
 
 
 class AbortError(Exception):

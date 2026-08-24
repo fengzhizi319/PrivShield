@@ -109,7 +109,7 @@
 
 | 场景 | 部署形态 | 说明 |
 |---|---|---|
-| 本地开发 / 联调 | 本地直跑 | `python -m PrivShield.server`，`.env` + `config/env/<profile>.env` 级联加载 |
+| 本地开发 / 联调 | 本地直跑 | `python -m engine.server`，`.env` + `config/env/<profile>.env` 级联加载 |
 | 内部演示 / 单机小规模 | Docker 单容器 | `docker build --target core|ml` + `docker run`，环境变量注入 |
 | 本地全栈（agent + console + vLLM + 监控） | Docker Compose | `deploy/docker-compose/docker-compose.yml` 一键拉起，`env_file: ../../.env` 注入配置 |
 
@@ -327,7 +327,7 @@ autoscaling:
 | 入口 | 位置 | 加载机制 | 生效场景 |
 |---|---|---|---|
 | Helm values | `deploy/helm/PrivShield/values.yaml`（另有 `values-production.yaml` / `values-ml.yaml`） | Helm 模板渲染为 Pod 环境变量、ConfigMap、Secret 引用与卷挂载（`templates/deployment.yaml`、`configmap.yaml`、`secret.yaml`） | K8s 部署唯一声明式配置入口 |
-| 根目录 `.env` | 项目根目录 `.env`（模板见 `.env.example`） | `PrivShield/env_loader.py` 的 `load_env_file()` 在进程启动时加载（`main.py` / `grpc_server.py` / `server.py` 模块级执行），默认 `override=False` 不覆盖已有环境变量 | 本地直跑（`python -m PrivShield.server` 等） |
+| 根目录 `.env` | 项目根目录 `.env`（模板见 `.env.example`） | `PrivShield/env_loader.py` 的 `load_env_file()` 在进程启动时加载（`main.py` / `grpc_server.py` / `server.py` 模块级执行），默认 `override=False` 不覆盖已有环境变量 | 本地直跑（`python -m engine.server` 等） |
 | 场景 profile env | `config/env/<profile>.env`（`vllm` / `qwen3` / `mlx` / `openai`） | 按 `PRIVACY_ENV_PROFILE`（默认 `vllm`）级联加载，`override=True` 覆盖基础值；仅用于 LLM 推理后端场景切换 | 本地直跑 |
 
 #### 二、values → 环境变量映射
