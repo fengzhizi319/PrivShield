@@ -50,6 +50,11 @@ func main() {
 	//   - PRIVACY_CONSOLE_STATIC_DIR：可选的前端静态文件目录
 	cfg := config.Load()
 
+	// Validate configuration consistency (fail-fast with clear error messages).
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+
 	// ── 步骤 1.5：结构化日志 + Prometheus 指标 ─────────────────────
 	logger := pkgconfig.SetupLogger(
 		pkgconfig.EnvString("CONSOLE_LOG_FORMAT", "json"),

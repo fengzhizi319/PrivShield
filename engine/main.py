@@ -34,6 +34,9 @@ from contextlib import asynccontextmanager
 # FastAPI core framework for building REST API endpoints
 # FastAPI 核心框架，用于构建 REST API 端点
 from fastapi import FastAPI
+# RequestValidationError handler for sanitizing 422 responses
+# 请求校验异常，用于自定义 422 响应以防止泄露内部模型结构
+from fastapi.exceptions import RequestValidationError
 # GZip middleware for compressing large HTTP responses to reduce bandwidth
 # GZip 中间件，压缩大型 HTTP 响应以减少网络带宽消耗
 from fastapi.middleware.gzip import GZipMiddleware
@@ -44,7 +47,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Starlette 基础中间件类，用于实现自定义 ASGI 中间件
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 # =============================================================================
 # Phase 3: Internal package imports — observability, security, routers
@@ -284,6 +287,27 @@ app = FastAPI(
 # 包裹 try/except。此全局处理器捕获所有未处理异常，通过相同逻辑映射为干净的 HTTP
 # 响应，防止原始堆栈信息泄露给调用方。
 app.add_exception_handler(Exception, handle_request_exception)
+
+
+# ---------------------------------------------------------------------------
+# 422 Validation error handler — sanitize response for production security
+# ---------------------------------------------------------------------------
+# FastAPI 默认的 422 响应包含完整的字段名、类型路径和校验器信息，
+# 会泄露内部 Pydantic 模型结构，帮助攻击者探测 API 参数格式。
+# 生产环境返回精简错误信息，仅在 debug 模式下返回详细校验错误。
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    _debug = os.environ.get("PRIVACY_DEBUG_VALIDATION", "false").lower() == "true"
+    if _debug:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors()},
+        )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Invalid request: one or more fields failed validation"},
+    )
+
 
 # ---------------------------------------------------------------------------
 # Middleware execution order (outermost -> innermost, i.e. request flow):

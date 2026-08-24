@@ -28,11 +28,9 @@
 package config
 
 import (
-	// os：用于读取系统环境变量
+	"fmt"
 	"os"
-	// strconv：用于字符串与整数之间的类型转换（端口号解析）
 	"strconv"
-	// strings：用于布尔环境变量的大小写归一化与去空白
 	"strings"
 )
 
@@ -187,6 +185,43 @@ func Load() *Config {
 		AgentRetryInitialBackoff: getEnvInt("PRIVACY_AGENT_RETRY_INITIAL_BACKOFF", 1),
 		AgentRetryMaxBackoff:     getEnvInt("PRIVACY_AGENT_RETRY_MAX_BACKOFF", 8),
 	}
+}
+
+// Validate checks that the configuration is consistent and all required files exist.
+// Validate 校验配置一致性：当 TLS 启用时确认 CA 证书文件存在，
+// 客户端证书/私钥成对提供，重试参数合理。
+// 在启动早期快速失败并给出清晰错误信息，避免运行时才暴露配置问题。
+func (c *Config) Validate() error {
+	if c.AgentTLSEnabled {
+		if c.AgentTLSCAFile == "" {
+			return fmt.Errorf("TLS enabled but PRIVACY_AGENT_TLS_CA_FILE is not set")
+		}
+		if _, err := os.Stat(c.AgentTLSCAFile); err != nil {
+			return fmt.Errorf("TLS CA file not accessible: %s: %w", c.AgentTLSCAFile, err)
+		}
+		// Client cert and key must be provided together (mTLS pair).
+		if (c.AgentTLSCertFile != "") != (c.AgentTLSKeyFile != "") {
+			return fmt.Errorf("mTLS client cert and key must be provided together: set both PRIVACY_AGENT_TLS_CERT_FILE and PRIVACY_AGENT_TLS_KEY_FILE")
+		}
+		if c.AgentTLSCertFile != "" {
+			if _, err := os.Stat(c.AgentTLSCertFile); err != nil {
+				return fmt.Errorf("TLS client cert file not accessible: %s: %w", c.AgentTLSCertFile, err)
+			}
+			if _, err := os.Stat(c.AgentTLSKeyFile); err != nil {
+				return fmt.Errorf("TLS client key file not accessible: %s: %w", c.AgentTLSKeyFile, err)
+			}
+		}
+	}
+	if c.AgentRetryMaxAttempts < 1 {
+		return fmt.Errorf("PRIVACY_AGENT_RETRY_MAX_ATTEMPTS must be >= 1, got %d", c.AgentRetryMaxAttempts)
+	}
+	if c.AgentRetryInitialBackoff < 0 {
+		return fmt.Errorf("PRIVACY_AGENT_RETRY_INITIAL_BACKOFF must be >= 0, got %d", c.AgentRetryInitialBackoff)
+	}
+	if c.AgentRetryMaxBackoff < 0 {
+		return fmt.Errorf("PRIVACY_AGENT_RETRY_MAX_BACKOFF must be >= 0, got %d", c.AgentRetryMaxBackoff)
+	}
+	return nil
 }
 
 // getEnv reads a string env var; returns defaultValue if unset or empty.
