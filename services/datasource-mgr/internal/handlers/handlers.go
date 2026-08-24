@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -50,6 +52,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 
 	r.GET("/health", s.Health)
 	r.GET("/api/health", s.Health)
+	r.POST("/api/datasources/seed", s.SeedDataSourcesEndpoint)
 	r.GET("/api/datasources", s.ListDataSources)
 	r.POST("/api/datasources", s.CreateDataSource)
 	r.GET("/api/datasources/:id", s.GetDataSource)
@@ -57,6 +60,8 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.DELETE("/api/datasources/:id", s.DeleteDataSource)
 	r.POST("/api/datasources/:id/test", s.TestConnection)
 	r.GET("/api/datasources/:id/metadata", s.GetMetadata)
+	r.GET("/api/datasources/:id/records", s.GetDataSourceRecords)
+	r.GET("/api/datasources/:id/sample", s.GetDataSourceRecords)
 	r.GET("/api/datasources/:id/audit", s.GetAccessAudit)
 	r.GET("/metrics", s.mc.Handler())
 }
@@ -334,7 +339,19 @@ func (s *Server) TestConnection(c *gin.Context) {
 	})
 }
 
-// GetMetadata returns metadata for a data source.
+// SeedDataSourcesEndpoint triggers automatic seeding of mock datasets (yibao.csv and kangyang.csv).
+func (s *Server) SeedDataSourcesEndpoint(c *gin.Context) {
+	if err := SeedMockDataSources(s.ds, s.logger); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": fmt.Sprintf("failed to seed mock data sources: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "successfully seeded mock data sources: yibao.csv, kangyang.csv",
+		"via":     moduleVia,
+	})
+}
+
+// GetMetadata returns metadata for a data source with dynamic schema inspection.
 func (s *Server) GetMetadata(c *gin.Context) {
 	id := c.Param("id")
 	ds, err := s.ds.GetDS(id)
@@ -343,18 +360,36 @@ func (s *Server) GetMetadata(c *gin.Context) {
 		return
 	}
 
-	// Simulate metadata retrieval with auto-classification
-	tables := []gin.H{
-		{
-			"name":      "patients",
-			"row_count": 10000,
-			"fields": []gin.H{
-				{"name": "id", "type": "integer", "security_level": "L1", "sensitive": false},
-				{"name": "name", "type": "string", "security_level": "L3", "classification": "PII", "sensitive": true},
-				{"name": "id_card", "type": "string", "security_level": "L4", "classification": "PII", "sensitive": true},
-				{"name": "diagnosis", "type": "string", "security_level": "L3", "classification": "medical", "sensitive": true},
+	var tables []gin.H
+
+	// Check if this is a file datasource (like yibao.csv or kangyang.csv)
+	if ds.Database != "" && (strings.HasSuffix(strings.ToLower(ds.Database), ".csv") || ds.Type == "file") {
+		tableName := strings.TrimSuffix(filepath.Base(ds.Database), filepath.Ext(ds.Database))
+		if meta, err := ExtractCSVMetadata(tableName, ds.Database); err == nil && meta != nil {
+			tables = []gin.H{
+				{
+					"name":      meta.Name,
+					"row_count": meta.RowCount,
+					"fields":    meta.Fields,
+				},
+			}
+		}
+	}
+
+	// Fallback to default simulated tables if no file was found
+	if len(tables) == 0 {
+		tables = []gin.H{
+			{
+				"name":      "patients",
+				"row_count": 10000,
+				"fields": []gin.H{
+					{"name": "id", "type": "integer", "security_level": "L1", "sensitive": false},
+					{"name": "name", "type": "string", "security_level": "L3", "classification": "PII", "sensitive": true},
+					{"name": "id_card", "type": "string", "security_level": "L4", "classification": "PII", "sensitive": true},
+					{"name": "diagnosis", "type": "string", "security_level": "L3", "classification": "medical", "sensitive": true},
+				},
 			},
-		},
+		}
 	}
 
 	s.addAuditRecord(id, ds.Name, "query_metadata", "system", 0, "success")
@@ -362,6 +397,43 @@ func (s *Server) GetMetadata(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"datasource_id": id,
 		"tables":        tables,
+		"via":           moduleVia,
+	})
+}
+
+// GetDataSourceRecords returns actual sample records from the data source.
+func (s *Server) GetDataSourceRecords(c *gin.Context) {
+	id := c.Param("id")
+	ds, err := s.ds.GetDS(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "data source not found"})
+		return
+	}
+
+	limit, offset := validation.ParsePagination(c, 20, 500)
+
+	csvFile := ds.Database
+	if csvFile == "" {
+		csvFile = id + ".csv"
+	}
+
+	records, total, err := LoadCSVRecords(csvFile, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"detail": fmt.Sprintf("failed to read data source records: %v", err),
+		})
+		return
+	}
+
+	s.addAuditRecord(id, ds.Name, "fetch_records", "system", len(records), "success")
+
+	c.JSON(http.StatusOK, gin.H{
+		"datasource_id": id,
+		"database":      ds.Database,
+		"total":         total,
+		"limit":         limit,
+		"offset":        offset,
+		"records":       records,
 		"via":           moduleVia,
 	})
 }

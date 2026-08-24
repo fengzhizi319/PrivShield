@@ -8,6 +8,59 @@
 
 ---
 
+## GET /api/datasources/:id/records
+
+获取指定数据源的实际样本数据记录（如 `yibao.csv` 或 `kangyang.csv`）。
+
+**查询参数：**
+- `limit`：返回行数（默认 20，上限 500）
+- `offset`：偏移量（默认 0）
+
+**响应示例：**
+
+```json
+{
+  "datasource_id": "ds_yibao",
+  "database": "yibao.csv",
+  "total": 50,
+  "limit": 20,
+  "offset": 0,
+  "records": [
+    {
+      "insurance_settlement_id": "YB202511040001",
+      "person_id": "PID66453983",
+      "gender": "男",
+      "birth_date": "1968-09-17",
+      "diagnosis_name": "硬下疳伴TPPA滴度1:64阳性(早期梅毒)"
+    }
+  ],
+  "via": "datasource-mgr"
+}
+```
+
+---
+
+## POST /api/datasources/seed
+
+一键初始化或重置预置的模拟数据源（`yibao.csv` 与 `kangyang.csv`）。
+
+**响应示例：**
+
+```json
+{
+  "message": "successfully seeded mock data sources: yibao.csv, kangyang.csv",
+  "via": "datasource-mgr"
+}
+```
+
+---
+
+## GET /metrics
+
+Prometheus 指标抓取端点。
+
+---
+
 ## GET /api/health
 
 健康检查。

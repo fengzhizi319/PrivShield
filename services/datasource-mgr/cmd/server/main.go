@@ -38,6 +38,9 @@ func main() {
 		log.Fatalf("failed to initialize datasource store: %v", err)
 	}
 
+	// ── Seed mock datasources (yibao.csv & kangyang.csv) ────────
+	_ = handlers.SeedMockDataSources(dsStore, logger)
+
 	// ── Prometheus metrics / Prometheus 指标 ───────────────────
 	mc := metrics.NewCollector("datasource-mgr")
 

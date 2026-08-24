@@ -392,3 +392,59 @@ func TestUpdateDataSource(t *testing.T) {
 		t.Errorf("expected security_level=high, got %v", ds["security_level"])
 	}
 }
+
+func TestSeedAndFetchRecords(t *testing.T) {
+	s := newTestServer()
+	router := newTestRouter(s)
+
+	// 1. Trigger Seed
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/datasources/seed", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on seed, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 2. List DataSources - should contain ds_yibao and ds_kangyang
+	wList := httptest.NewRecorder()
+	reqList, _ := http.NewRequest("GET", "/api/datasources", nil)
+	router.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusOK {
+		t.Fatalf("expected 200 on list, got %d", wList.Code)
+	}
+	var listResp map[string]any
+	_ = json.Unmarshal(wList.Body.Bytes(), &listResp)
+	total := int(listResp["total"].(float64))
+	if total < 2 {
+		t.Fatalf("expected at least 2 seeded datasources, got %d", total)
+	}
+
+	// 3. Fetch Records from ds_yibao
+	wRec := httptest.NewRecorder()
+	reqRec, _ := http.NewRequest("GET", "/api/datasources/ds_yibao/records?limit=5&offset=0", nil)
+	router.ServeHTTP(wRec, reqRec)
+	if wRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on records, got %d: %s", wRec.Code, wRec.Body.String())
+	}
+	var recResp map[string]any
+	_ = json.Unmarshal(wRec.Body.Bytes(), &recResp)
+	records := recResp["records"].([]any)
+	if len(records) == 0 {
+		t.Fatalf("expected records from yibao.csv, got 0")
+	}
+
+	// 4. Get Metadata from ds_kangyang
+	wMeta := httptest.NewRecorder()
+	reqMeta, _ := http.NewRequest("GET", "/api/datasources/ds_kangyang/metadata", nil)
+	router.ServeHTTP(wMeta, reqMeta)
+	if wMeta.Code != http.StatusOK {
+		t.Fatalf("expected 200 on metadata, got %d: %s", wMeta.Code, wMeta.Body.String())
+	}
+	var metaResp map[string]any
+	_ = json.Unmarshal(wMeta.Body.Bytes(), &metaResp)
+	tables := metaResp["tables"].([]any)
+	if len(tables) == 0 {
+		t.Fatalf("expected tables from kangyang.csv metadata, got 0")
+	}
+}
+
