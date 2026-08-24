@@ -1,12 +1,15 @@
 package middleware
 
 import (
+	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -336,3 +339,94 @@ func TestSecurityHeaders(t *testing.T) {
 		t.Errorf("Referrer-Policy = %q, want strict-origin-when-cross-origin", got)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// DDoS Protection Middlewares (MaxBodySize / MaxConcurrent / RateLimit)
+// ─────────────────────────────────────────────────────────────
+
+func TestMaxBodySize(t *testing.T) {
+	r := gin.New()
+	r.Use(MaxBodySize(10)) // Max 10 bytes
+	r.POST("/upload", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"detail": "too large"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"len": len(body)})
+	})
+
+	// 1. Small payload (within limit)
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("POST", "/upload", bytes.NewReader([]byte("12345")))
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Errorf("expected 200 for 5 bytes, got %d", w1.Code)
+	}
+
+	// 2. Large payload (exceeds limit)
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("POST", "/upload", bytes.NewReader([]byte("12345678901234567890")))
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413 for 20 bytes, got %d", w2.Code)
+	}
+}
+
+func TestMaxConcurrent(t *testing.T) {
+	r := gin.New()
+	r.Use(MaxConcurrent(1)) // Max 1 concurrent request
+	blockCh := make(chan struct{})
+	r.GET("/slow", func(c *gin.Context) {
+		<-blockCh
+		c.JSON(200, gin.H{"ok": true})
+	})
+
+	// First request starts and blocks
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("GET", "/slow", nil)
+	go r.ServeHTTP(w1, req1)
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Second request should immediately get 503 Service Unavailable
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("GET", "/slow", nil)
+	r.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 for concurrent overflow, got %d", w2.Code)
+	}
+
+	// Unblock first request
+	close(blockCh)
+}
+
+func TestRateLimit_AllowsUnderBurstAndRejectsOver(t *testing.T) {
+	r := gin.New()
+	r.Use(RateLimit(2, 2)) // 2 RPS, burst 2
+	r.GET("/api/data", func(c *gin.Context) {
+		c.JSON(200, gin.H{"data": "ok"})
+	})
+
+	// 2 requests allowed immediately
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/data", nil)
+		req.RemoteAddr = "192.168.1.100:1234"
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("request %d expected 200, got %d", i, w.Code)
+		}
+	}
+
+	// 3rd request immediately should be rate limited (429)
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest("GET", "/api/data", nil)
+	req3.RemoteAddr = "192.168.1.100:1234"
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusTooManyRequests {
+		t.Errorf("request 3 expected 429 Too Many Requests, got %d", w3.Code)
+	}
+}
+

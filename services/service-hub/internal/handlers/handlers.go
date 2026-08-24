@@ -87,6 +87,9 @@ func (s *Server) Shutdown() {
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
+	r.Use(middleware.Recovery(s.logger, "service-hub"))
+	r.Use(middleware.SecurityHeaders())
+	r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB max payload protection
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 

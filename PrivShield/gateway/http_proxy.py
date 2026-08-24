@@ -214,8 +214,24 @@ def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI:
         if "x-real-ip" not in headers:
             headers["x-real-ip"] = client_ip
 
+        # 防大包拒绝服务攻击 (Payload DDoS Protection): 限制最大 64 MiB 请求体
+        content_length = request.headers.get("content-length")
+        max_body_bytes = 64 * 1024 * 1024  # 64 MiB
+        if content_length:
+            try:
+                if int(content_length) > max_body_bytes:
+                    raise HTTPException(
+                        status_code=413, detail=f"Payload too large: exceeds {max_body_bytes} bytes"
+                    )
+            except ValueError:
+                pass
+
         # 仅读取一次请求 body，供重试使用
         body = await request.body()
+        if len(body) > max_body_bytes:
+            raise HTTPException(
+                status_code=413, detail=f"Payload too large: exceeds {max_body_bytes} bytes"
+            )
         last_exception: Exception | None = None
 
         for attempt in range(max_retries):

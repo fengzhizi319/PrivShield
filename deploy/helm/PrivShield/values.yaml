@@ -324,8 +324,14 @@ ingress:
   enabled: false
   # className: IngressClass 名称（如 nginx、traefik 等，留空使用集群默认）
   className: ""
-  # annotations: Ingress 注解（常用于配置 TLS 证书、重写规则等）
-  annotations: {}
+  # annotations: Ingress 注解（常用于配置 TLS 证书、重写规则、DDoS 限流等）
+  annotations:
+    # 生产推荐 Nginx Ingress DDoS 防护注解示例（按需取消注释启用）:
+    # nginx.ingress.kubernetes.io/limit-rps: "100"
+    # nginx.ingress.kubernetes.io/limit-connections: "50"
+    # nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    # nginx.ingress.kubernetes.io/client-body-timeout: "30"
+    # nginx.ingress.kubernetes.io/client-header-timeout: "10"
   # hosts: 域名与路径映射规则
   hosts:
     - host: PrivShield.local

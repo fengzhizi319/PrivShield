@@ -116,7 +116,10 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// Shared middleware chain / 共享中间件链
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogger(s.logger, "backend-go"))
-	r.Use(middleware.CORS(nil)) // backend-go 默认允许所有来源（开发模式）
+	r.Use(middleware.Recovery(s.logger, "backend-go"))
+	r.Use(middleware.SecurityHeaders())
+	r.Use(middleware.MaxBodySize(64 << 20)) // 64 MiB max payload protection (supports larger CSV uploads)
+	r.Use(middleware.CORS(nil))            // backend-go 默认允许所有来源（开发模式）
 	// P57 fix: capture cleanup function from securityMiddleware to stop ticker goroutine on shutdown.
 	secHandler, secCleanup := securityMiddleware(s.cfg.ConsoleAPIKey, s.cfg.ConsoleRateLimit)
 	s.secCleanup = secCleanup

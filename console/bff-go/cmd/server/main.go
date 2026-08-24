@@ -85,8 +85,11 @@ func main() {
 	srv := &http.Server{
 		Addr:              cfg.ConsoleAddress(),
 		Handler:           router,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,  // Slowloris header timeout
+		ReadTimeout:       30 * time.Second, // Slow request body timeout
+		WriteTimeout:      60 * time.Second, // Slow client response timeout
 		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MiB max header size
 	}
 
 	// ── 步骤 5：启动优雅关闭协程 ─────────────────────────────────────
