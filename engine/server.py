@@ -239,11 +239,23 @@ def main():
         wait_for_termination=False,
     )
 
+    # 3.5 Startup info banner / 启动信息横幅
+    # Log bind addresses and key config for operator visibility at startup.
+    # 记录监听地址与关键配置，便于运维确认服务状态。
+    logger.info(
+        "PrivShield dual-protocol server started: "
+        "REST=%s:%d | gRPC=%s:%d | grpc_workers=%d | tls=%s | auth=%s",
+        args.rest_host, args.rest_port,
+        args.grpc_host, args.grpc_port,
+        GRPC_MAX_WORKERS,
+        _sec.tls_enabled, _sec.auth_enabled,
+    )
+
     # 4. 信号处理逻辑
     shutdown_event = threading.Event()
 
     def handle_shutdown(signum, frame):
-        print(f"\n[!] 捕获到信号 {signum}，正在启动优雅关闭流程...")
+        logger.warning("received signal %s — initiating graceful shutdown", signum)
         shutdown_event.set()
 
     # 注册信号处理器
@@ -258,21 +270,21 @@ def main():
         pass
 
     # 6. 执行优雅退出
-    print("[*] 正在停止 gRPC 服务 (保留 5 秒在途处理时间)...")
+    logger.info("stopping gRPC server (5s grace period for in-flight RPCs)...")
     # stop() 返回 threading.Event：grace 期内在途 RPC 完成后触发。
-    # 必须等待该事件（带超时兜底），否则进程会在在途 RPC 尚未排空时直接退出。
+    # 必须等待该事件（带超时兖底），否则进程会在在途 RPC 尚未排空时直接退出。
     stop_event = grpc_server.stop(grace=5)
     if not stop_event.wait(timeout=10):
-        print("[!] gRPC 服务未能在超时前排空在途请求，已强制取消剩余 RPC。")
-
-    print("[*] 正在停止 REST 服务...")
+        logger.warning("gRPC server did not drain in-flight requests within timeout; force-cancelling remaining RPCs")
+    
+    logger.info("stopping REST server...")
     rest_server.should_exit = True
-
+    
     # 等待 REST 线程退出；daemon=True 保证即使超时进程也能退出
     rest_thread.join(timeout=10)
     if rest_thread.is_alive():
-        print("[!] REST 服务线程未在超时内退出，随主进程强制终止。")
-    print("[+] 双协议服务优雅退出成功，进程安全终止。")
+        logger.warning("REST server thread did not exit within timeout; will be force-terminated with main process")
+    logger.info("PrivShield dual-protocol server shut down gracefully")
     sys.exit(0)
 
 

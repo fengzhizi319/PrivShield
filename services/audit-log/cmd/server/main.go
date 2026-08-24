@@ -178,8 +178,8 @@ func main() {
 	grpcServer.GracefulStop()
 	logger.Info("gRPC server stopped")
 
-	// Graceful shutdown HTTP
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Graceful shutdown HTTP（超时时间可配置）
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeout)*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err.Error())

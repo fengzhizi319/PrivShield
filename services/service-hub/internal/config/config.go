@@ -55,6 +55,9 @@ type Config struct {
 
 	// Data retention / 数据保留策略
 	RetentionDays int // 终态任务保留天数，超期自动清理（0 = 不清理）
+
+	// Graceful shutdown / 优雅关闭
+	ShutdownTimeout int // HTTP 优雅关闭超时秒数（默认 5）
 }
 
 // Load reads configuration from environment variables with fallback defaults.
@@ -101,6 +104,9 @@ func Load() *Config {
 
 		// Data retention / 数据保留策略（默认 30 天）
 		RetentionDays: pkgconfig.EnvInt("SERVICE_HUB_RETENTION_DAYS", 30),
+
+		// Graceful shutdown / 优雅关闭超时（默认 5 秒）
+		ShutdownTimeout: pkgconfig.EnvInt("SERVICE_HUB_SHUTDOWN_TIMEOUT", 5),
 	}
 }
 

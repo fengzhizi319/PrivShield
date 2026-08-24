@@ -40,6 +40,9 @@ type Config struct {
 
 	// Data retention / 数据保留策略
 	RetentionDays int // 审计日志保留天数，超期自动清理（0 = 不清理）
+
+	// Graceful shutdown / 优雅关闭
+	ShutdownTimeout int // HTTP 优雅关闭超时秒数（默认 5）
 }
 
 // Load reads configuration from environment variables.
@@ -75,6 +78,9 @@ func Load() *Config {
 
 		// Data retention / 数据保留策略（默认 90 天，审计日志保留期较长）
 		RetentionDays: pkgconfig.EnvInt("AUDIT_LOG_RETENTION_DAYS", 90),
+
+		// Graceful shutdown / 优雅关闭超时（默认 5 秒）
+		ShutdownTimeout: pkgconfig.EnvInt("AUDIT_LOG_SHUTDOWN_TIMEOUT", 5),
 	}
 }
 

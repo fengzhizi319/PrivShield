@@ -37,6 +37,9 @@ type Config struct {
 	// 可观测性与日志配置
 	LogFormat string // 日志输出格式："json"（生产推荐）或 "text"（本地开发可读）
 	LogLevel  string // 日志输出级别："debug", "info", "warn", "error"
+
+	// Graceful shutdown / 优雅关闭
+	ShutdownTimeout int // HTTP 优雅关闭超时秒数（默认 5）
 }
 
 // Load reads configuration from environment variables with fallback defaults.
@@ -69,6 +72,9 @@ func Load() *Config {
 		// 结构化日志参数解析（默认 json 格式，info 级别）
 		LogFormat: pkgconfig.EnvString("DATASOURCE_MGR_LOG_FORMAT", "json"),
 		LogLevel:  pkgconfig.EnvString("DATASOURCE_MGR_LOG_LEVEL", "info"),
+
+		// Graceful shutdown / 优雅关闭超时（默认 5 秒）
+		ShutdownTimeout: pkgconfig.EnvInt("DATASOURCE_MGR_SHUTDOWN_TIMEOUT", 5),
 	}
 }
 

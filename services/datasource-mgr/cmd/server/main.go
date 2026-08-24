@@ -239,9 +239,9 @@ func main() {
 	logger.Info("gRPC server stopped")
 
 	// 3) 优雅关闭 HTTP REST 服务：
-	//    - 使用带有 5 秒硬上限的 context 超时控制，等待现有 HTTP 请求结束；
-	//    - 若 5 秒内未完成则强制断开连接，释放 TCP 端口资源。
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	//    - 使用带有可配置超时上限的 context，等待现有 HTTP 请求结束；
+	//    - 若超时内未完成则强制断开连接，释放 TCP 端口资源。
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeout)*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err.Error())
