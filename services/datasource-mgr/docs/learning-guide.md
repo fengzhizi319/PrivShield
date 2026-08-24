@@ -42,12 +42,13 @@
 ┌───────────────────────────────────────────────────────────────────────────┐
 │                      数据源调度调用方 (service-hub / 控制台 BFF)             │
 └─────────────────────────────────────┬─────────────────────────────────────┘
-                                      │ HTTP REST (:8083) / gRPC (:50053)
+                                      │ HTTP/HTTPS REST (:8083) / gRPC (:50053) [双协议 mTLS]
                                       ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
 │                  datasource-mgr 数据源管理中台 (Go 1.24+)                  │
 │                                                                           │
 │   • 数据源注册与纳管   • 连通性健康探测   • 元数据特征探查   • 高保真数据抽取  │
+│   • TLS 1.3 双向认证  • SPKI 公钥固定    • 防 Slowloris 攻击 • 双协议安全暴露  │
 └───────────┬─────────────────────────┬──────────────────────────┬──────────┘
             │                         │                          │
             ▼                         ▼                          ▼
@@ -61,8 +62,8 @@
 
 1. **统一数据源资产纳管**：统一抽象异构数据源（MySQL、PostgreSQL、文件源、高保真 Mock 数据源）元数据。
 2. **敏感特征自动探查与抽样**：为调度中枢提供字段名、数据类型、行数统计与敏感特征抽样数据。
-3. **多协议高效暴露**：提供 Web 端易用的 HTTP RESTful API (:8083) 与微服务间高性能二进制 gRPC API (:50053)。
-4. **金融级零信任传输**：集成 TLS 1.3 mTLS 双向证书校验与公钥哈希白名单固定 (SPKI Pinning)。
+3. **多协议高效安全暴露**：提供 Web 端易用的 HTTP/HTTPS RESTful API (:8083) 与微服务间高性能二进制 gRPC API (:50053)。
+4. **金融级零信任传输**：全链路集成 TLS 1.3 mTLS 双向证书校验与公钥哈希白名单固定 (SPKI Pinning)，覆盖 HTTPS REST 与 gRPC 双通道。
 5. **开箱即用与零外部依赖**：内置完整的高保真医疗、康养、金融、政务仿真数据生成器，零依赖快速启动。
 
 ---
@@ -71,16 +72,23 @@
 
 ```mermaid
 flowchart TB
-    subgraph UpstreamConsumers [调用方]
+    subgraph UpstreamConsumers [调用方集群]
         WebConsole[Web 前端控制台<br/>:5173]
         ServiceHub[service-hub 调度中枢<br/>:8082 / :50052]
         ConsoleBFF[Go / Python BFF<br/>:8081 / :8080]
     end
 
-    subgraph DSMgrService ["datasource-mgr 数据源管理 (:8083 / :50053)"]
-        GinRouter[Gin REST Router<br/>/api/datasources/*<br/>/api/v1/*]
-        GRPCSrv[gRPC Server<br/>DatasourceMgrServiceServer]
-        MWStack[中间件链: RequestID / StructuredLogger / Recovery / CORS / Auth]
+    subgraph DSMgrService ["datasource-mgr 数据源管理中台 (:8083 / :50053)"]
+        subgraph SecurityEngine ["统一零信任安全凭证引擎 (TLS 1.3 + mTLS + SPKI Pinning)"]
+            TLSBuilder["BuildServerTLSConfig / BuildServerCredentials<br/>• TLS 1.3 基线锁定<br/>• Client CA 证书池校验<br/>• SPKI 客户端公钥指纹白名单固定"]
+        end
+
+        subgraph ProtocolLayers ["双协议接入层 (Concurrent Dual Listeners)"]
+            GinHTTPS["Gin HTTPS / HTTP REST 路由层<br/>:8083 (生产加固: HTTPS mTLS / 开发: Insecure HTTP)<br/>/api/datasources/* | /api/v1/*"]
+            GRPCSrv["gRPC Server :50053<br/>(TLS 1.3 mTLS + SPKI Pinning)<br/>DataSourceManagerServiceServer"]
+        end
+
+        MWStack[中间件链: RequestID / StructuredLogger / Recovery / CORS / SecurityHeaders / Auth]
         
         DataEngine[高保真数据仿真与检索引擎<br/>Mock Data Generator & Paginator]
         MetadataStore[元数据字典管理器<br/>Schema & Column Metadata Introspector]
@@ -93,12 +101,18 @@ flowchart TB
         DS4[(政务人口<br/>ds_mock4)]
     end
 
-    WebConsole -->|HTTP REST| GinRouter
-    ServiceHub -->|HTTP / gRPC| GinRouter
-    ServiceHub -->|gRPC mTLS| GRPCSrv
-    ConsoleBFF -->|HTTP REST| GinRouter
+    %% 调用关系与协议绑定
+    WebConsole -->|HTTP / HTTPS REST| GinHTTPS
+    ConsoleBFF -->|HTTP / HTTPS REST| GinHTTPS
+    ServiceHub -->|HTTPS REST mTLS :8083| GinHTTPS
+    ServiceHub -->|gRPC mTLS :50053| GRPCSrv
 
-    GinRouter --> MWStack --> DataEngine
+    %% 安全引擎与协议层绑定
+    TLSBuilder -.->|装配 httpSrv.TLSConfig| GinHTTPS
+    TLSBuilder -.->|装配 grpc.Creds| GRPCSrv
+
+    %% 业务流转
+    GinHTTPS --> MWStack --> DataEngine
     GRPCSrv --> DataEngine
 
     DataEngine --> MetadataStore
@@ -345,13 +359,21 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 - `GetKangyangRecords(limit, offset)`：支持动态生成收缩压/舒张压波动区间与慢性病评估指标。
 - `GetMetadataBySourceID(sourceID)`：返回目标数据源的表名、列名、数据类型字典，用于 Agent 进行特征探测与策略匹配。
 
-### 5.5 gRPC 高性能服务实现与 mTLS 加固 (`internal/grpcserver/server.go`)
+### 5.5 gRPC 与 HTTPS 传输层安全凭证实现与 mTLS 加固 (`internal/grpcserver/server.go`)
 
-`internal/grpcserver/server.go` 实现了完整的 `DatasourceMgrServiceServer` 接口：
+`internal/grpcserver/server.go` 既实现了完整的 `DatasourceMgrServiceServer` 业务接口，也承担了整个服务的 **底层 TLS 1.3 / mTLS 凭证构造中枢**：
+
+- `BuildServerTLSConfig(cfg)`：**统一构造标准 Go `*tls.Config`**，同时服务于 `http.Server`（HTTPS REST）与 `grpc.Server`：
+  1. 锁定 `MinVersion: tls.VersionTLS13`，防止针对 TLS 1.0/1.1/1.2 的协议降级攻击；
+  2. 加载服务端证书与私钥（`TLSCertFile`, `TLSKeyFile`）；
+  3. 配置客户端 CA 证书池（`ClientCAs`）与认证模式（`RequireAndVerifyClientCert`）；
+  4. 注入 `VerifyPeerCertificate` 回调，提取对端证书中的公钥数学参数（RSA 模数 N 与指数 E），比对固定的公钥白名单（SPKI Pinning）。
+- `BuildServerCredentials(cfg)`：将 `BuildServerTLSConfig` 生成的 `*tls.Config` 包装为 gRPC 的 `credentials.TransportCredentials`。
 - `GetYibaoData(ctx, req)`：高速流式或分页批处理返回 Protobuf 序列化的医保记录。
 - `GetDataBySource(ctx, req)`：多态数据源通用拉取接口。
 - `TestConnection(ctx, req)`：毫秒级连通性探测。
-- `BuildServerCredentials(cfg)`：构造 TLS 1.3、加载自建 CA 根证书池，并在开启公钥固定时注入 `VerifyPeerCertificate` 回调函数。
+
+---
 
 ### 5.6 gRPC 桩代码 (`datasourcemgr_grpc.pb.go`) 与业务实现 (`server.go`) 的核心关联
 
@@ -407,28 +429,38 @@ flowchart TB
 
 ## 6. 零信任传输与公钥固定安全机制
 
-在分布式零信任网络中，仅依赖 CA 根证书签名可能存在风险（如企业内部自建 CA 私钥意外泄露导致伪造证书）。
+在分布式零信任网络中，仅依赖 CA 根证书签名可能存在风险（如企业内部自建 CA 私钥意外泄露导致攻击者伪造合法证书）。
 
-`datasource-mgr` 引入了 **SPKI (Subject Public Key Info) SHA-256 公钥固定机制**：
+`datasource-mgr` 在 **HTTPS REST (:8083) 与 gRPC (:50053)** 双协议上全面落地了 **SPKI (Subject Public Key Info) 公钥指纹白名单固定机制**：
 
 ```mermaid
 sequenceDiagram
-    participant Client as gRPC 客户端 (service-hub)
-    participant Server as gRPC 服务端 (datasource-mgr)
+    autonumber
+    participant Caller as 调用方 (service-hub / 控制台 BFF / curl)
+    participant Server as datasource-mgr (HTTPS :8083 / gRPC :50053)
 
-    Client->>Server: TLS ClientHello
-    Server-->>Client: TLS ServerHello + Server Certificate
-    Server->>Client: CertificateRequest (要求提供客户端证书)
-    Client-->>Server: Client Certificate (client.crt)
+    Caller->>Server: 1. TCP 三次握手 + TLS 1.3 ClientHello (携带 Supported Cipher Suites)
+    Server-->>Caller: 2. TLS 1.3 ServerHello + Server Certificate (server.crt)
+    Server->>Caller: 3. CertificateRequest (强制要求客户端出示身份证书)
+    Caller-->>Server: 4. Client Certificate (client.crt) + CertificateVerify (客户端私钥签名)
     
     rect rgb(240, 248, 255)
-        Note over Server: 1. 验证 CA 证书签名链<br/>2. 提取 RawSubjectPublicKeyInfo<br/>3. 计算 SHA-256(PublicKey)<br/>4. 比对允许的客户端公钥白名单
+        Note over Server: 【安全校验核心: BuildServerTLSConfig 钩子】<br/>a. 校验 CA 证书签名有效性 (ClientCAs 池校验)<br/>b. 提取客户端证书公钥 (RSA Modulus N + Exponent E)<br/>c. 比对预置白名单 publicKeysEqual(peer.PublicKey, pinnedKey)
     end
 
-    alt 公钥在白名单内
-        Server-->>Client: 握手成功，建立 TLS 1.3 双向加密通道
-    else 公钥不在白名单内 (即使由受信任 CA 签发)
-        Server-->>Client: TLS Alert: client public key pin verification failed
+    alt 公钥完全匹配 (白名单放行)
+        Server-->>Caller: 5. Handshake Finished (建立加密会话通道)
+        opt HTTPS REST 分支 (:8083)
+            Caller->>Server: HTTP/1.1 or HTTP/2 GET /api/v1/yibao (TLS 加密载荷)
+            Server-->>Caller: HTTP 200 OK (JSON 医保模拟数据)
+        end
+        opt gRPC 分支 (:50053)
+            Caller->>Server: HTTP/2 HEADERS + DATA (RPC GetYibaoData)
+            Server-->>Caller: gRPC DataQueryResponse (Protobuf 二进制载荷)
+        end
+    else 公钥不匹配 (防伪造 CA 伪签证书)
+        Server-->>Caller: TLS Alert: bad certificate / client public key does not match pinned key
+        Note over Server,Caller: 🚨 立即断开 TCP 连接，阻断未授权接入！
     end
 ```
 
@@ -442,37 +474,49 @@ sequenceDiagram
 # 进入 datasource-mgr 目录
 cd services/datasource-mgr
 
-# 启动开发服务器（默认监听 :8083 REST 与 :50053 gRPC）
-bash run.sh
+# 1. 启动轻量开发模式（免 TLS，默认监听 :8083 HTTP 与 :50053 gRPC）
+bash scripts/dev-run.sh
+# 或
+make dev
+
+# 2. 启动生产加固模式（双协议 TLS 1.3 + mTLS + 公钥固定）
+bash scripts/prod-run.sh
+# 或
+make prod
 ```
 
-### 7.2 核心 REST 接口调用演练
+### 7.2 核心接口调用演练
 
-#### 1. 查看数据源资产清单
+#### 1. 开发模式（纯明文 HTTP）
 ```bash
+# 查看数据源资产清单
 curl -s http://127.0.0.1:8083/api/datasources | jq .
-```
 
-#### 2. 分页调取医保就医模拟数据集（取前 3 条）
-```bash
+# 分页调取医保就医模拟数据集（取前 3 条）
 curl -s "http://127.0.0.1:8083/api/v1/yibao?limit=3&offset=0" | jq .
-```
 
-#### 3. 探查康养数据源元数据字典
-```bash
+# 探查康养数据源元数据字典
 curl -s http://127.0.0.1:8083/api/datasources/ds_kangyang/metadata | jq .
 ```
 
-#### 4. 模拟数据源连通性测试
+#### 2. 生产加固模式（HTTPS REST 双向认证 mTLS）
 ```bash
-curl -s -X POST http://127.0.0.1:8083/api/datasources/ds_yibao/test | jq .
+# 挂载测试 CA 根证书与已固定公钥的客户端证书访问 HTTPS REST 接口
+curl -s --cacert certs/ca.crt \
+  --cert certs/client.crt \
+  --key certs/client.key \
+  https://127.0.0.1:8083/api/v1/yibao?limit=3 | jq .
+
+# 测试未携带客户端证书时，验证被 mTLS 阻断
+curl -s --cacert certs/ca.crt https://127.0.0.1:8083/api/v1/yibao
+# 预期输出: curl: (35) error:0A000412:SSL routines::ssl/tls alert bad certificate
 ```
 
 ### 7.3 运行单元测试套件
 
 ```bash
-# 运行全部单元测试（含 gRPC mTLS 证书生成与握手断言）
-go test -v ./internal/...
+# 运行全部单元测试与脚本集成测试（含 HTTPS mTLS 与 gRPC mTLS 握手校验）
+go test -v ./...
 ```
 
 ---
@@ -679,11 +723,41 @@ func TestAPIShebaoData(t *testing.T) {
 
 ### 10.3 上游消费端 (以 `service-hub` 为例) 跨微服务对接
 
-当 `datasource-mgr` 增加了新接口后，上游微服务 `service-hub` 只需在 `internal/datasource/client.go` 中暴露封装好的客户端方法：
+当 `datasource-mgr` 增加了新接口后，上游微服务 `service-hub` 只需在 `internal/datasource/client.go` 中暴露封装好的客户端方法。由于 `datasource-mgr` 支持 **全链路双向认证 (HTTPS mTLS + gRPC mTLS)**，`service-hub` 客户端构造器已内嵌自适应凭证装配机制：
 
 ```go
 // services/service-hub/internal/datasource/client.go
-func (c *Client) FetchShebaoData(ctx context.Context, limit, offset int) ([]map[string]any, error) {
+
+// 1. 客户端构造器：自适应注入 TLS 1.3 客户端证书与根 CA
+func New(cfg *config.Config) *Client {
+    httpClient := &http.Client{Timeout: 10 * time.Second}
+
+    if cfg.TLSEnabled && cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+        tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
+        if cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile); err == nil {
+            tlsConfig.Certificates = []tls.Certificate{cert}
+        }
+        if cfg.TLSCAFile != "" {
+            if caPEM, err := os.ReadFile(cfg.TLSCAFile); err == nil {
+                caPool := x509.NewCertPool()
+                if caPool.AppendCertsFromPEM(caPEM) {
+                    tlsConfig.RootCAs = caPool
+                }
+            }
+        }
+        httpClient.Transport = &http.Transport{TLSClientConfig: tlsConfig}
+    }
+
+    return &Client{
+        cfg:        cfg,
+        baseURL:    strings.TrimRight(cfg.DatasourceBaseURL(), "/"),
+        grpcAddr:   cfg.DatasourceGRPCAddress(),
+        httpClient: httpClient,
+    }
+}
+
+// 2. 业务调用方法：优先走 gRPC 二进制流，降级走 HTTPS REST
+func (c *Client) FetchShebaoData(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
     if c.grpcClient != nil {
         // 优先使用高性能 gRPC mTLS 通道
         resp, err := c.grpcClient.GetShebaoData(ctx, &pb.DataQueryRequest{
@@ -693,12 +767,12 @@ func (c *Client) FetchShebaoData(ctx context.Context, limit, offset int) ([]map[
         if err != nil {
             return nil, err
         }
-        return convertProtoRows(resp.Rows), nil
+        return protoToQueryResult(resp), nil
     }
-    // 降级使用 HTTP REST 通道
+    // 降级使用 HTTPS REST 通道（自动携带 Client 证书与 CA 根链）
     return c.fetchREST(ctx, fmt.Sprintf("/api/v1/shebao?limit=%d&offset=%d", limit, offset))
 }
 ```
 
-最后执行 `make test-go`，即可确保整个中台微服务群在类型安全、协议编译与业务逻辑上 100% 协同就绪。
+最后执行 `make test-go`，即可确保整个中台微服务群在类型安全、协议编译、双向安全握手与业务逻辑上 100% 协同就绪。
 
