@@ -98,11 +98,14 @@ docker compose --profile monitoring up -d
 
 | 服务 | 端口 | 说明 |
 |---|---|---|
-| Agent REST | 8079 | FastAPI 主服务 |
-| Agent gRPC | 50051 | gRPC 主服务 |
-| Console Web UI | 5173 | React 控制台 |
-| Go Backend | 8081 | 高性能 gRPC/REST 代理 |
-| Python Backend | 8080 | FastAPI REST 代理 |
+| Agent REST | 8079 | FastAPI 隐私治理主服务 |
+| Agent gRPC | 50051 | gRPC 核心算力主服务 |
+| Console Web UI | 5173 | React + TypeScript 前端控制台 |
+| Go BFF 网关 | 8081 | 高性能 gRPC/REST 代理网关 |
+| Python BFF 网关 | 8080 | FastAPI REST 代理网关 |
+| Service Hub | 8082 | 数据服务调度中枢微服务 |
+| Datasource Mgr | 8083 | 数据源与资产管理微服务 |
+| Audit Log | 8084 | 脱敏审计与不可篡改存证微服务 |
 | vLLM (可选) | 8000 | GPU 大模型推理 |
 | Prometheus (可选) | 9090 | 监控指标采集 |
 | Grafana (可选) | 3000 | 可视化面板 |
@@ -470,6 +473,20 @@ make docs-clean
 - [Operations 运维手册](./docs/deployment/ops.md)
 - [Testing 测试文档](./docs/deployment/testing.md)
 - [Examples 示例](./docs/deployment/examples.md)
+
+### 企业级数据流通中台微服务 (Go)
+- [微服务总览与架构](./services/README.md)
+- [数据服务调度中枢 (Service Hub)](./services/service-hub/docs/design.md)
+- [数据源与资产管理 (Datasource Manager)](./services/datasource-mgr/docs/design.md)
+- [脱敏审计与不可篡改存证 (Audit Log)](./services/audit-log/docs/design.md)
+- [共享核心基础库 (Pkg)](./pkg/README.md)
+
+### 统一控制台与 BFF 网关
+- [控制台总览与运行指南](./console/README.md)
+- [全平台目录架构重构方案](./console/migration-design.md)
+- [Go gRPC BFF 设计与实现](./console/bff-go/docs/design.md)
+- [Python REST BFF 设计与实现](./console/bff-py/docs/design.md)
+- [开发模式与产品模式拓扑](./console/docs/modes.md)
 
 ### 其他
 

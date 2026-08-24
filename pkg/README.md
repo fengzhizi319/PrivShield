@@ -1,6 +1,6 @@
-# console/pkg — 控制台共享基础库
+# pkg — 数盾 Go 共享核心基础库
 
-`console/pkg` 是 **数盾 (PrivShield)** 控制台各 Go 微服务（`backend-go`、`service-hub`、`datasource-mgr`、`audit-log`）共享的核心基础库。
+`pkg` 是 **数联天下 · 数盾 (PrivShield)** 全平台各 Go 微服务（`services/service-hub`、`services/datasource-mgr`、`services/audit-log` 以及 `console/bff-go`）共享的核心基础库。
 
 ---
 

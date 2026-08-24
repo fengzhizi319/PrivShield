@@ -1,6 +1,6 @@
-# 测试控制台后端 (Python FastAPI) — 详细设计文档
+# 测试控制台后端 (Python FastAPI BFF) — 详细设计文档
 
-> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** Python REST 代理后端（`console/backend`）的技术架构、模块划分、转发机制与双后端对齐规范。
+> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** Python REST 代理后端（`console/bff-py`）的技术架构、模块划分、转发机制与双后端对齐规范。
 
 ---
 
@@ -13,7 +13,7 @@
 1. **同构极速适配**：与 Agent 核心服务同属 Python 生态，请求/响应的 Pydantic v2 模型与字段命名完全一致，零模型转换开销；
 2. **原生异步连接池**：基于 ASGI 架构与 `httpx.AsyncClient` 连接池，高并发转发无阻塞；
 3. **二进制流友好**：借助 `pyarrow` 原生解析 Arrow IPC 二进制流，将其反序列化为前端可直接渲染的 JSON 表格；
-4. **与 Go 后端双向对齐 (Dual-Backend Parity)**：与 `console/backend-go` 对外提供严格一致的 JSON 契约，前端支持一键无感热切换。
+4. **与 Go 后端双向对齐 (Dual-Backend Parity)**：与 `console/bff-go` 对外提供严格一致的 JSON 契约，前端支持一键无感热切换。
 
 ---
 
@@ -23,13 +23,14 @@
 graph TD
     Browser[浏览器 React SPA :5173] -- /api/* --> FastAPIApp[FastAPI 应用 :8080]
 
-    subgraph PythonBackend [控制台后端 console/backend]
+    subgraph PythonBackend [控制台后端 console/bff-py]
         FastAPIApp --> SecMid[ConsoleSecurityMiddleware<br/>Rate Limit / API Key]
-        SecMid --> Routes[API 路由层 main.py]
-        Routes --> Client[代理客户端 client.py<br/>httpx.AsyncClient 连接池]
+        FastAPIApp --> OpenTelemetry[Prometheus Metrics]
+        FastAPIApp --> Routes[API 路由层 app/main.py]
+        Routes --> Client[代理客户端 app/client.py<br/>httpx.AsyncClient 连接池]
         Routes --> Samples[示例数据 fixtures/samples.py]
         Routes --> Static[静态 SPA 托管 web/dist]
-        Config[配置 config.py<br/>pydantic-settings] --> Client
+        Config[配置 app/config.py<br/>pydantic-settings] --> Client
         Config --> Static
     end
 

@@ -1,6 +1,6 @@
 # 数据源管理 (Datasource Manager) — 详细设计文档
 
-> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 数据源管理模块（`console/datasource-mgr`）的系统架构、数据源接入生命周期、元数据智能分类、访问审计追踪与持久化设计。
+> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 数据源管理模块（`services/datasource-mgr`）的系统架构、数据源接入生命周期、元数据智能分类、访问审计追踪与持久化设计。
 
 ---
 

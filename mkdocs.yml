@@ -156,6 +156,12 @@ nav:
     - 四川省健康医疗大数据应用指南: standard/四川省健康医疗大数据应用指南.md
     - 广东省健康医疗数据分类分级规范: standard/广东省健康医疗数据安全分类分级管理技术规范.md
 
+  - 企业级中台微服务:
+    - 架构与流通模型: services.md
+
+  - 统一控制台与 BFF:
+    - 控制台与双 BFF 架构: console.md
+
   - 基础设施:
     - 高并发架构设计 (10k QPS):
       - 概览: high_concurrency/README.md

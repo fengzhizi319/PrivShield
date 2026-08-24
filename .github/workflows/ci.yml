@@ -29,11 +29,11 @@ jobs:
 
       # 先使用 make check，确保 console/backend 不退化；
       # 后续全局 ruff/mypy 全绿后再推进到 make lint。
-      - name: Lint & type check (console/backend)
+      - name: Lint & type check (console/bff-py)
         run: make check
 
       - name: Ruff format check
-        run: ruff format --check PrivShield/ tests/ console/backend/
+        run: ruff format --check PrivShield/ tests/ console/bff-py/
 
   test:
     name: Test
@@ -97,12 +97,9 @@ jobs:
           pip install ruff
           ruff check PrivShield/ --select F,S --ignore S101,S104,S110,S311,S324
 
-  go-backend:
-    name: Go Backend
+  go-suite:
+    name: Go Microservices & BFF Suite
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: console/backend-go
     steps:
       - uses: actions/checkout@v4
 
@@ -110,13 +107,18 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-          cache-dependency-path: console/backend-go/go.sum
+          cache-dependency-path: go.work.sum
 
-      - name: Vet
-        run: go vet ./...
+      - name: Vet all Go packages
+        run: |
+          go vet ./pkg/...
+          go vet ./services/service-hub/...
+          go vet ./services/datasource-mgr/...
+          go vet ./services/audit-log/...
+          go vet ./console/bff-go/...
 
-      - name: Test
-        run: go test ./... -race -count=1
+      - name: Test all Go modules
+        run: go test ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/... -race -count=1
 
   frontend:
     name: Frontend
@@ -151,12 +153,12 @@ jobs:
       - name: Test
         run: npx vitest --run
 
-  console-backend:
-    name: Console Backend (Python)
+  console-bff-py:
+    name: Console BFF (Python)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: console/backend
+        working-directory: console/bff-py
     steps:
       - uses: actions/checkout@v4
 
@@ -165,7 +167,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: console/backend/requirements.txt
+          cache-dependency-path: console/bff-py/requirements.txt
 
       - name: Install dependencies
         run: pip install -r requirements.txt

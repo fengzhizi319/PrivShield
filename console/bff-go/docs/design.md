@@ -1,6 +1,6 @@
-# Go gRPC 代理网关后端 (backend-go) — 详细设计文档
+# Go gRPC 代理网关后端 (bff-go) — 详细设计文档
 
-> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** Go gRPC 代理后端（`console/backend-go`）的技术架构、模块职责、协议转换与安全治理设计。
+> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** Go gRPC 代理后端（`console/bff-go`）的技术架构、模块职责、协议转换与安全治理设计。
 
 ---
 
@@ -8,11 +8,11 @@
 
 `PrivShield` 的核心隐私治理服务基于 gRPC（默认端口 `50051`）与 REST（默认端口 `8079`）双协议暴露全部隐私原语（脱敏、差分隐私、K-匿名、查询混淆、数据分类分级）。
 
-为了为前端控制台提供高性能、强类型安全的通信通道，并探索 Go 在高并发隐私网关/Sidecar 中的架构优势，我们构建了 **`console/backend-go`**：
+为了为前端控制台提供高性能、强类型安全的通信通道，并探索 Go 在高并发隐私网关/Sidecar 中的架构优势，我们构建了 **`console/bff-go`**：
 
 1. **强类型编译期校验**：依托 Protobuf 生成的 Go 结构体，消除手写字典在字段类型、拼写错误上的隐患；
 2. **HTTP/2 多路复用与低延迟**：通过 gRPC 长连接复用底层 TCP，吞吐大幅提升，单次原语调用延迟较短连接显著降低；
-3. **与 Python 后端完全一致的契约 (Contract Parity)**：对外提供与 Python 后端（`console/backend`）完全相同的 REST JSON 接口，前端只需切换 API Base URL 即可无缝热切换；
+3. **与 Python 后端完全一致的契约 (Contract Parity)**：对外提供与 Python 后端（`console/bff-py`）完全相同的 REST JSON 接口，前端只需切换 API Base URL 即可无缝热切换；
 4. **内置单页应用独立托管**：支持直接托管前端构建产物（`web/dist`），使 Go 后端可独立提供完整 Web UI，无需依赖外部 Web 服务器或 Python 环境。
 
 ---
@@ -25,7 +25,7 @@ graph TD
         UI[控制台用户界面]
     end
 
-    subgraph GoBackend [Go gRPC 代理网关 console/backend-go :8081]
+    subgraph GoBackend [Go gRPC 代理网关 console/bff-go :8081]
         Router[Gin HTTP 路由层]
         SecMid[安全与限流中间件<br/>Rate Limit / API Key / CORS]
         SharedMid[共享基础包中间件<br/>pkg/middleware]

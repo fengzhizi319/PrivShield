@@ -23,6 +23,10 @@ Welcome to the **数盾 PrivShield** documentation.
 | K-anonymity | ✅ Ready | Per-record heuristic & dataset-level (Mondrian) |
 | Query Obfuscation | ✅ Ready | Dummy query injection |
 | Classification | ✅ Ready | Rule engine → Small-NER → local VLM/LLM |
+| Service Hub | ✅ Ready | 6-stage data pipeline orchestration (:8082) |
+| Datasource Mgr | ✅ Ready | Asset metadata & sensitive feature discovery (:8083) |
+| Audit Log | ✅ Ready | Tamper-proof SHA-256 blockchain-style log (:8084) |
+| Console & BFF | ✅ Ready | React SPA + Go gRPC & Python REST BFF (:5173/:8081/:8080) |
 | Gateway / Load Balancer | ✅ Ready | REST + gRPC reverse proxy with health checks |
 | TLS / Auth / Rate Limit | ✅ Ready | Opt-in via environment variables |
 | Observability | ✅ Ready | Structured logs + Prometheus `/metrics` + tracing |
@@ -32,6 +36,8 @@ Welcome to the **数盾 PrivShield** documentation.
 
 - **Privacy Primitives** — Masking, DP, K-Anonymity, Query Obfuscation
 - **Data Classification** — 3-layer funnel: Rule Engine → NER → LLM
+- **Enterprise Microservices** — Service Hub, Datasource Manager, Audit Log
+- **Console & BFF Gateway** — React Web UI, Go gRPC BFF, Python REST BFF
 - **Infrastructure** — Gateway, load balancer, health checks
 - **Production** — Security, observability, deployment
 - **Audit & Security** — [Full Project Audit & Remediation Report (2026)](audit_reports/2026_full_project_audit_report.md)
