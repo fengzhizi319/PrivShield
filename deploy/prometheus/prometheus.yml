@@ -1,8 +1,5 @@
-# PrivShield - Prometheus scrape configuration
-# 隐私本地代理 - Prometheus 抓取配置
-#
-# 默认抓取本项目中 PrivShield 的 /metrics 端点；
-# 如 Agent 开启 TLS，请改用 https://... 并配置 tls_config。
+# PrivShield - Prometheus Scrape Configuration
+# 数盾全平台 Prometheus 指标抓取配置
 
 global:
   scrape_interval: 15s
@@ -12,9 +9,42 @@ rule_files:
   - /etc/prometheus/rules/PrivShield-alerts.yml
 
 scrape_configs:
-  - job_name: "PrivShield"
+  # 1. 核心算力 Agent 侧边栏
+  - job_name: "privshield-agent"
     static_configs:
       - targets:
           - "PrivShield:8079"
+    metrics_path: "/metrics"
+    scheme: http
+
+  # 2. Go BFF 代理网关
+  - job_name: "console-bff-go"
+    static_configs:
+      - targets:
+          - "console-backend-go:8081"
+    metrics_path: "/metrics"
+    scheme: http
+
+  # 3. 数据服务调度中枢
+  - job_name: "service-hub"
+    static_configs:
+      - targets:
+          - "service-hub:8082"
+    metrics_path: "/metrics"
+    scheme: http
+
+  # 4. 数据源管理
+  - job_name: "datasource-mgr"
+    static_configs:
+      - targets:
+          - "datasource-mgr:8083"
+    metrics_path: "/metrics"
+    scheme: http
+
+  # 5. 脱敏审计日志
+  - job_name: "audit-log"
+    static_configs:
+      - targets:
+          - "audit-log:8084"
     metrics_path: "/metrics"
     scheme: http

@@ -56,6 +56,13 @@ volumes:
   # 审计日志持久化
   audit-logs:
     driver: local
+  # 中台微服务数据持久化
+  service-hub-data:
+    driver: local
+  datasource-mgr-data:
+    driver: local
+  audit-log-data:
+    driver: local
   # 分布式限流 Redis 数据持久化
   redis-data:
     driver: local
@@ -271,7 +278,131 @@ services:
     restart: always
 
   # ===========================================================================
-  # 5. Layer-3 vLLM GPU 推理服务 (Profile: llm)
+  # 5. Service Hub 数据服务调度中枢
+  #    PORT: 8082
+  # ===========================================================================
+  service-hub:
+    image: privshield-service-hub:0.1.0
+    container_name: privshield-service-hub-prod
+    pull_policy: if_not_present
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8082:8082"
+    volumes:
+      - service-hub-data:/app/data
+    environment:
+      SERVICE_HUB_HOST: "0.0.0.0"
+      SERVICE_HUB_PORT: "8082"
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      SERVICE_HUB_DB_PATH: "/app/data/service-hub.db"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    restart: always
+
+  # ===========================================================================
+  # 6. Datasource Manager 数据源管理
+  #    PORT: 8083
+  # ===========================================================================
+  datasource-mgr:
+    image: privshield-datasource-mgr:0.1.0
+    container_name: privshield-datasource-mgr-prod
+    pull_policy: if_not_present
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8083:8083"
+    volumes:
+      - datasource-mgr-data:/app/data
+    environment:
+      DATASOURCE_MGR_HOST: "0.0.0.0"
+      DATASOURCE_MGR_PORT: "8083"
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      DATASOURCE_MGR_DB_PATH: "/app/data/datasource-mgr.db"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    restart: always
+
+  # ===========================================================================
+  # 7. Audit Log 脱敏审计日志
+  #    PORT: 8084
+  # ===========================================================================
+  audit-log:
+    image: privshield-audit-log:0.1.0
+    container_name: privshield-audit-log-prod
+    pull_policy: if_not_present
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8084:8084"
+    volumes:
+      - audit-log-data:/app/data
+    environment:
+      AUDIT_LOG_HOST: "0.0.0.0"
+      AUDIT_LOG_PORT: "8084"
+      AUDIT_LOG_DB_PATH: "/app/data/audit-log.db"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8084/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    restart: always
+
+  # ===========================================================================
+  # 8. Layer-3 vLLM GPU 推理服务 (Profile: llm)
   #    PORT: 8000
   # ===========================================================================
   vllm:
