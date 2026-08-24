@@ -140,7 +140,7 @@ services:
       target: core
     # image: 构建产物/运行使用的镜像名:tag
     #   若本地不存在该标签，compose 配合 pull_policy: build 优先本地构建，避免向远端拉取失败
-    image: privshield:0.1.0
+    image: privshield:1.8.0
     pull_policy: build
     # container_name: 指定容器名称（同一宿主机全局唯一）
     #   不设置时 compose 自动生成 "<项目名>-<服务名>-<序号>" 格式名称
@@ -286,7 +286,7 @@ services:
     build:
       context: ../..
       dockerfile: console/bff-go/Dockerfile
-    image: privacy-console-backend-go:0.1.0
+    image: privacy-console-backend-go:1.8.0
     pull_policy: build
     container_name: privacy-console-backend-go
     ports:
@@ -333,7 +333,7 @@ services:
     build:
       context: ../../console/bff-py   # 构建上下文 = Python FastAPI 代理源码目录
       dockerfile: Dockerfile
-    image: privacy-console-backend-python:0.1.0
+    image: privacy-console-backend-python:1.8.0
     pull_policy: build
     container_name: privacy-console-backend-python
     ports:
@@ -383,7 +383,7 @@ services:
     build:
       context: ../../console/web   # 构建上下文 = React 前端源码目录（构建产物打入 Nginx 镜像）
       dockerfile: Dockerfile
-    image: privacy-console-web:0.1.0
+    image: privacy-console-web:1.8.0
     pull_policy: build
     container_name: privacy-console-web
     ports:
@@ -426,9 +426,9 @@ services:
     build:
       context: ../..
       dockerfile: services/service-hub/Dockerfile
-    image: privacy-service-hub:0.1.0
+    image: privshield-service-hub:1.8.0
     pull_policy: build
-    container_name: privacy-service-hub
+    container_name: privshield-service-hub
     ports:
       - "8082:8082"
     environment:
@@ -475,9 +475,9 @@ services:
     build:
       context: ../..
       dockerfile: services/datasource-mgr/Dockerfile
-    image: privacy-datasource-mgr:0.1.0
+    image: privshield-datasource-mgr:1.8.0
     pull_policy: build
-    container_name: privacy-datasource-mgr
+    container_name: privshield-datasource-mgr
     ports:
       - "8083:8083"
     environment:
@@ -524,9 +524,9 @@ services:
     build:
       context: ../..
       dockerfile: services/audit-log/Dockerfile
-    image: privacy-audit-log:0.1.0
+    image: privshield-audit-log:1.8.0
     pull_policy: build
-    container_name: privacy-audit-log
+    container_name: privshield-audit-log
     ports:
       - "8084:8084"
     environment:

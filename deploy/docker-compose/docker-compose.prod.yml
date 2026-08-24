@@ -83,7 +83,7 @@ services:
   #    REST: 8079 | gRPC: 50051 (启用 TLS + API Key Auth)
   # ===========================================================================
   PrivShield:
-    image: privshield:0.1.0
+    image: privshield:1.8.0
     container_name: PrivShield-prod
     pull_policy: if_not_present
     security_opt:
@@ -198,7 +198,7 @@ services:
   #    PORT: 8081
   # ===========================================================================
   console-backend-go:
-    image: privacy-console-backend-go:0.1.0
+    image: privacy-console-backend-go:1.8.0
     container_name: privacy-console-backend-go-prod
     pull_policy: if_not_present
     security_opt:
@@ -244,7 +244,7 @@ services:
   #    PORT: 5173
   # ===========================================================================
   console-web:
-    image: privacy-console-web:0.1.0
+    image: privacy-console-web:1.8.0
     container_name: privacy-console-web-prod
     pull_policy: if_not_present
     security_opt:
@@ -282,7 +282,7 @@ services:
   #    PORT: 8082
   # ===========================================================================
   service-hub:
-    image: privshield-service-hub:0.1.0
+    image: privshield-service-hub:1.8.0
     container_name: privshield-service-hub-prod
     pull_policy: if_not_present
     security_opt:
@@ -324,7 +324,7 @@ services:
   #    PORT: 8083
   # ===========================================================================
   datasource-mgr:
-    image: privshield-datasource-mgr:0.1.0
+    image: privshield-datasource-mgr:1.8.0
     container_name: privshield-datasource-mgr-prod
     pull_policy: if_not_present
     security_opt:
@@ -366,7 +366,7 @@ services:
   #    PORT: 8084
   # ===========================================================================
   audit-log:
-    image: privshield-audit-log:0.1.0
+    image: privshield-audit-log:1.8.0
     container_name: privshield-audit-log-prod
     pull_policy: if_not_present
     security_opt:

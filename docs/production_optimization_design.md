@@ -62,7 +62,7 @@ flowchart TD
 单机 SQLite 模式在多副本 Deployment（如 5~20 个 Pod）水平扩展时，无法实现跨 Pod 强一致性的原子记账，可能导致隐私预算 $\epsilon$ 发生超支穿透。
 
 #### 优化设计
-在 `PrivShield/privacy/budget.py` 中引入统一后端抽象：
+在 `engine/privacy/budget.py` 中引入统一后端抽象：
 1. **`InMemoryBudgetAccountant`**：单机开发调试（零依赖）；
 2. **`SQLiteBudgetAccountant`**：单机本地持久化；
 3. **`RedisBudgetAccountant`**：生产多节点强一致原子记账，使用 Redis 原子指令与事务扣减，支持自动滑动时间窗口（`window_seconds`）重置。
@@ -87,7 +87,7 @@ PRIVACY_BUDGET_WINDOW_SECONDS=86400
   - 当某个节点连续失败达到阈值时自动熔断并剔除，在后台异步进行心跳探活；
   - 探活恢复后自动重新纳入可用节点池。
 
-#### 2. Python 网关 P2C 动态负载调度 (`PrivShield/gateway/balancer.py`)
+#### 2. Python 网关 P2C 动态负载调度 (`engine/gateway/balancer.py`)
 - **Power of Two Choices (P2C) 算法**：
   - 每次调度从健康节点列表中随机选取两个候选节点；
   - 计算候选节点的综合负载得分：

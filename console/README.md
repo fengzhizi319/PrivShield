@@ -52,39 +52,39 @@ console/
 
 ```bash
 # 启动 PrivShield Agent + Go BFF + Web 前端 (Vite HMR: http://localhost:5173)
-bash ./console/scripts/dev-start-go.sh
+bash ./scripts/dev/dev-start-go.sh
 
 # 或启动 PrivShield Agent + 双 BFF (Go :8081 + Python :8080) + Web 前端
-bash ./console/scripts/dev-start-all.sh
+bash ./scripts/dev/dev-start-all.sh
 
 # 停止开发服务
-bash ./console/scripts/dev-stop.sh
+bash ./scripts/dev/dev-stop.sh
 ```
 
 ### 3.2 联动启动中台微服务群
 
 ```bash
 # 一键启动 Agent + 三大中台微服务群 (service-hub, datasource-mgr, audit-log)
-bash ./console/scripts/e2e-start-all-services.sh
+bash ./scripts/dev/e2e-start-all-services.sh
 
 # 或单独启动三大微服务 (需 Agent 已运行)
-bash ./console/scripts/dev-start-new-modules.sh
+bash ./scripts/dev/dev-start-new-modules.sh
 
 # 停止微服务群
-bash ./console/scripts/dev-stop-new-modules.sh
+bash ./scripts/dev/dev-stop-new-modules.sh
 ```
 
 ### 3.3 Docker 容器化启动
 
 ```bash
 # 启动 Agent + Go BFF + React Web UI
-bash ./console/scripts/docker-start-go.sh
+bash ./scripts/dev/docker-start-go.sh
 
 # 启动全栈容器套件（Agent + 双后端 + Web UI + 可选 vLLM）
-bash ./console/scripts/docker-start-all.sh [--with-llm]
+bash ./scripts/dev/docker-start-all.sh [--with-llm]
 
 # 停止并清理容器服务
-bash ./console/scripts/docker-stop.sh
+bash ./scripts/dev/docker-stop.sh
 ```
 
 ---

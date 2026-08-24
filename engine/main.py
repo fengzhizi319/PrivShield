@@ -195,7 +195,7 @@ _auth_enabled = get_security_settings().auth_enabled
 app = FastAPI(
     title="数盾 (PrivShield) 隐私治理边车",
     description="数联天下企业级数据隐私计算、多原语脱敏与三层动态分类分级治理服务 (PrivShield Privacy Governance Sidecar)",
-    version="0.1.0",
+    version="1.8.0",
     lifespan=lifespan,
     # docs_url=None disables Swagger UI; openapi_url=None disables the schema endpoint
     # docs_url=None 禁用 Swagger UI；openapi_url=None 禁用 schema 端点

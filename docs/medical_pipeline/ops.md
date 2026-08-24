@@ -80,7 +80,7 @@ go run cmd/server/main.go
 ### 3.3 快速同时启动开发环境 (Go + Vite HMR)
 
 ```bash
-./console/scripts/dev-start-go.sh
+./scripts/dev/dev-start-go.sh
 ```
 
 ---

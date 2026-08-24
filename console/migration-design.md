@@ -484,10 +484,10 @@ proto-gen:
 | `[project] name` | `"privshield"` | `"privshield-engine"` |
 | `[tool.setuptools.packages.find] include` | `["PrivShield*"]` | `["engine*"]` |
 | `[tool.ruff] src` | `["PrivShield", "tests", "console/backend"]` | `["engine", "tests", "console/bff-py"]` |
-| `[tool.ruff.lint] per-file-ignores` | `"PrivShield/privacy_pb2*.py"` | `"engine/privacy_pb2*.py"` |
+| `[tool.ruff.lint] per-file-ignores` | `"engine/privacy_pb2*.py"` | `"engine/privacy_pb2*.py"` |
 | `[tool.ruff.lint.isort] known-first-party` | `["PrivShield"]` | `["engine"]` |
 | `[tool.mypy] files` | `["PrivShield", "console/backend", "tests"]` | `["engine", "console/bff-py", "tests"]` |
-| `[tool.mypy] exclude` | `"PrivShield/privacy_pb2.*"` | `"engine/privacy_pb2.*"` |
+| `[tool.mypy] exclude` | `"engine/privacy_pb2.*"` | `"engine/privacy_pb2.*"` |
 | `[tool.coverage.run] source` | `["PrivShield"]` | `["engine"]` |
 | `[tool.coverage.run] omit` | `"PrivShield/server.py"` 等 | `"engine/server.py"` 等 |
 
@@ -824,8 +824,8 @@ gantt
 
 ### 11.6 高可用负载均衡、分布式预算与云原生扩缩 (Commit: `4ff5aba`)
 - **多节点 Client-Side LB**：升级 `pkg/agent/client.go`，支持 `PRIVACY_AGENT_URLS` 集群平滑轮询与故障转移；
-- **网关 P2C 调度**：`PrivShield/gateway/balancer.py` 新增 Power of Two Choices 综合评分动态分流算法；
-- **分布式预算一致性**：`PrivShield/privacy/budget.py` 实现 Redis Lua 原子记账与滑动窗口自动重置；
+- **网关 P2C 调度**：`engine/gateway/balancer.py` 新增 Power of Two Choices 综合评分动态分流算法；
+- **分布式预算一致性**：`engine/privacy/budget.py` 实现 Redis Lua 原子记账与滑动窗口自动重置；
 - **云原生高级扩缩容**：Helm Chart 增加 KEDA `ScaledObject` 与 CronHPA 潮汐预测调度模板；
 - **压测套件**：新增 `scripts/test/stress_test_suite.py` 自动化并发压测基准工具。
 
@@ -842,7 +842,7 @@ gantt
 - **熔断器 4xx/5xx 精细分流**：修复客户端 4xx 参数错误错误触发熔断器连带失效的缺陷，熔断器仅对 5xx 故障与网络异常累计，新增 `TestCircuitBreaker_ClientError4xx_NoTrip` 单测；
 - **流水线失败生命周期审计**：在 `services/service-hub`（REST 与 gRPC 两套处理器）中为失败阶段补充 `task.CompletedAt` 与实际耗时 `task.DurationMs` 计算归档；
 - **gRPC 状态码类型化映射**：`console/bff-go` 通过 `status.FromError` 精准映射 `Unavailable` / `DeadlineExceeded` 到 HTTP 502；
-- **DP 极值保护与 Redis 现代 API**：`PrivShield/privacy/dp.py` 增加解析高斯参数极值边界保护，`budget.py` 全面升级至 Redis `hset(mapping=...)`。
+- **DP 极值保护与 Redis 现代 API**：`engine/privacy/dp.py` 增加解析高斯参数极值边界保护，`budget.py` 全面升级至 Redis `hset(mapping=...)`。
 
 ### 11.10 全栈多层次防 DDoS 体系交付 (Commit: `82698fe`)
 - **慢速连接与 Slowloris 防护**：在所有 Go 微服务与 BFF 服务端配置 `ReadHeaderTimeout: 5s`、`ReadTimeout: 30s`、`WriteTimeout: 60s` 与 `MaxHeaderBytes: 1MB`；
@@ -867,12 +867,14 @@ gantt
 | Go 模块路径全量重命名 | ✅ | 5 个 go.mod module/require/replace + 全部 .go 导入 + `servicehub.proto` go_package |
 | `pyproject.toml` / `ci.yml` 路径修正（bff-py、go 1.27） | ✅ | 客观 bug 已修复，全量配置对齐 |
 | docker-compose 全栈编排（含 3 微服务、vLLM、监控 profile） | ✅ | Build Context 统一为仓库根目录 |
-| `PrivShield/` → `engine/` 物理更名与单轨化 | ✅ | 彻底采用 `engine/` 单轨架构，移除双轨软链与 `sys.modules` 别名，423 个 Python 测试全绿通过 |
+| `PrivShield/` → `engine/` 物理更名与单轨化 | ✅ | 彻底采用 `engine/` 单轨架构，移除双轨软链与 `sys.modules` 别名，全量 Python 测试全绿通过 |
 | Docker 构建链与镜像入口单轨化 | ✅ | 根目录 `Dockerfile` 与 `engine/Dockerfile` 同步为 `COPY engine/` 与 `CMD python -m engine.server` |
 | 工具链配置单轨化（Makefile / CI / Coverage / Mypy） | ✅ | `Makefile`（`engine/`、`--cov=engine`）、`ci.yml`（`engine/`）、`pyproject.toml`（`source=["engine"]`、`files=["engine",...]`）全面单轨化 |
 | `services/service-hub/proto/servicehub.pb.go` stubs 重新生成 | ✅ | 采用 `python -m grpc_tools.protoc` 重新生成，彻底清除历史旧路径 rawDesc 字节残留 |
 | 全栈防 DDoS 纵深防御体系 | ✅ | Slowloris 5s 超时、MaxBodySize (413)、RateLimit IP 令牌桶 (429)、MaxConcurrent (503) 全部单测通过 |
-| 跨语言全量自动化测试套件 | ✅ | `make test-go`（100% PASS）、`pytest tests/ -q`（423 PASS）、Vitest 前端单测（77 PASS） |
+| 脚本体系收敛与 console/scripts 归并 | ✅ | 20+ 个启停与运维脚本已归并至 `scripts/dev/` 与 `scripts/prod/`，`console/scripts/` 保留向后兼容转发器与 DEPRECATED 警告，运行时 PID/日志统一至根目录 `.pids/` 与 `.logs/` |
+| 跨语言全量自动化测试套件 | ✅ | `make test-go`（100% PASS）、`pytest tests/ -q`（1358 PASS）、Vitest 前端单测（77 PASS） |
+| 生产负载与内存回归测试套件 | ✅ | tests/ 增加 Locust 压测场景与内存回归测试套件 |
 
 
 

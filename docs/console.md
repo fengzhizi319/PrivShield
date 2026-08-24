@@ -57,14 +57,14 @@ graph TD
 
 ```bash
 # 启动 Go BFF + Web 前端
-bash ./console/scripts/dev-start-go.sh
+bash ./scripts/dev/dev-start-go.sh
 
 # 启动 Python BFF + Web 前端
-bash ./console/scripts/dev-start.sh
+bash ./scripts/dev/dev-start.sh
 
 # 启动双后端 + Web 前端 (支持 UI 顶部一键切换后端)
-bash ./console/scripts/dev-start-all.sh
+bash ./scripts/dev/dev-start-all.sh
 
 # 停止控制台服务
-bash ./console/scripts/dev-stop.sh
+bash ./scripts/dev/dev-stop.sh
 ```

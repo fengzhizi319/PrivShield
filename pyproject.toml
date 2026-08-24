@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "privshield"
-version = "0.1.0"
+version = "1.8.0"
 description = "数盾 (PrivShield): 数联天下企业级数据隐私计算、多原语脱敏与三层动态分类分级治理边车 (Privacy Governance Sidecar)"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -40,6 +40,7 @@ dev = [
     "pytest-benchmark>=4.0.0",
     "hypothesis>=6.0.0",
     "scipy>=1.12.0,<2.0.0",
+    "locust>=2.20.0",
     "ruff>=0.4.0",
     "mypy>=1.10.0",
     "pre-commit>=3.7.0",

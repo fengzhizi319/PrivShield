@@ -1,3 +1,22 @@
+// Package grpcserver_test contains unit and integration tests for the datasource-mgr gRPC server.
+// Package grpcserver_test 包含 datasource-mgr 模块 gRPC 服务的单元与集成测试套件。
+//
+// ==============================================================================
+// Test Suite Coverage / 测试套件覆盖范围：
+// ==============================================================================
+// 1. 服务初始化与生命周期测试 (TestGRPCHealth):
+//    - 验证健康检查接口返回 "ok" 状态以及正确的 moduleVia 标识。
+// 2. 模拟数据源查询接口全覆盖 (TestGRPCApis):
+//    - API 1 ~ 4 专用接口验证 (GetYibaoData, GetKangyangData, GetMockData3, GetMockData4)；
+//    - 通用路由查询与资产元数据接口验证 (GetDataBySource, ListMockSources, GetDataSource, TestConnection)。
+// 3. 入参校验与错误码防御测试 (TestGRPCValidationErrors):
+//    - 校验空参数时的 codes.InvalidArgument 错误拦截；
+//    - 校验不存在的数据源 ID 时的 codes.NotFound 错误拦截。
+// 4. mTLS 安全凭证与公钥指纹固定测试 (TestBuildServerCredentials):
+//    - 动态生成内存临时 CA 根证书与 RSA 2048 密钥对；
+//    - 覆盖 TLS 关闭、证书缺失、单向 TLS、双向 mTLS（ClientAuth）以及公钥指纹固定（Key Pinning）场景。
+// ==============================================================================
+
 package grpcserver
 
 import (
@@ -24,18 +43,24 @@ import (
 	pb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
 )
 
+// setupTestGRPCServer starts an in-process ephemeral gRPC server for testing.
+// setupTestGRPCServer 在本地随机空闲端口（127.0.0.1:0）启动一个临时的 gRPC 服务器并创建测试客户端，
+// 返回客户端实例与清理闭包（自动释放连接、端口和后台 goroutine）。
 func setupTestGRPCServer(t *testing.T) (pb.DataSourceManagerServiceClient, func()) {
 	t.Helper()
 
+	// 1. 初始化测试配置与日志记录器
 	cfg := config.Load()
 	logger := pkgconfig.SetupLogger("text", "debug")
 	srvImpl := New(cfg, logger)
 
+	// 2. 随机分配本地可用端口
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
 	}
 
+	// 3. 构建 gRPC 服务并注册 Protobuf 服务定义
 	s := grpc.NewServer()
 	pb.RegisterDataSourceManagerServiceServer(s, srvImpl)
 
@@ -43,6 +68,7 @@ func setupTestGRPCServer(t *testing.T) (pb.DataSourceManagerServiceClient, func(
 		_ = s.Serve(lis)
 	}()
 
+	// 4. 创建本地明文 gRPC 客户端连接
 	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
@@ -50,6 +76,7 @@ func setupTestGRPCServer(t *testing.T) (pb.DataSourceManagerServiceClient, func(
 
 	client := pb.NewDataSourceManagerServiceClient(conn)
 
+	// 5. 资源清理闭包
 	cleanup := func() {
 		_ = conn.Close()
 		s.Stop()
@@ -60,6 +87,8 @@ func setupTestGRPCServer(t *testing.T) (pb.DataSourceManagerServiceClient, func(
 	return client, cleanup
 }
 
+// TestGRPCHealth verifies the self-health endpoint response and module identification.
+// TestGRPCHealth 验证健康检查接口返回 "ok" 状态以及正确的 moduleVia 标识。
 func TestGRPCHealth(t *testing.T) {
 	client, cleanup := setupTestGRPCServer(t)
 	defer cleanup()
@@ -73,13 +102,15 @@ func TestGRPCHealth(t *testing.T) {
 	}
 }
 
+// TestGRPCApis tests all functional mock data query endpoints through the gRPC interface.
+// TestGRPCApis 测试 gRPC 暴露的所有业务查询接口（医保、康养、预留政务数据、通用数据源动态查询及连通性测试）。
 func TestGRPCApis(t *testing.T) {
 	client, cleanup := setupTestGRPCServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
-	// API 1: Yibao
+	// ── API 1: 医保就医与结算模拟数据 (GetYibaoData) ──────────────────────
 	yibaoResp, err := client.GetYibaoData(ctx, &pb.DataQueryRequest{Limit: 5, Offset: 0})
 	if err != nil {
 		t.Fatalf("GetYibaoData failed: %v", err)
@@ -88,7 +119,7 @@ func TestGRPCApis(t *testing.T) {
 		t.Errorf("unexpected yibao response: %+v", yibaoResp)
 	}
 
-	// API 2: Kangyang
+	// ── API 2: 康养体检与慢病模拟数据 (GetKangyangData) ───────────────────
 	kangResp, err := client.GetKangyangData(ctx, &pb.DataQueryRequest{Limit: 5, Offset: 0})
 	if err != nil {
 		t.Fatalf("GetKangyangData failed: %v", err)
@@ -97,7 +128,7 @@ func TestGRPCApis(t *testing.T) {
 		t.Errorf("unexpected kangyang response: %+v", kangResp)
 	}
 
-	// API 3: Mock3
+	// ── API 3: 预留政务模拟数据源 3 (GetMockData3) ─────────────────────────
 	m3Resp, err := client.GetMockData3(ctx, &pb.DataQueryRequest{Limit: 5})
 	if err != nil {
 		t.Fatalf("GetMockData3 failed: %v", err)
@@ -106,7 +137,7 @@ func TestGRPCApis(t *testing.T) {
 		t.Errorf("unexpected mock3 response: %+v", m3Resp)
 	}
 
-	// API 4: Mock4
+	// ── API 4: 预留政务模拟数据源 4 (GetMockData4) ─────────────────────────
 	m4Resp, err := client.GetMockData4(ctx, &pb.DataQueryRequest{Limit: 5})
 	if err != nil {
 		t.Fatalf("GetMockData4 failed: %v", err)
@@ -115,7 +146,7 @@ func TestGRPCApis(t *testing.T) {
 		t.Errorf("unexpected mock4 response: %+v", m4Resp)
 	}
 
-	// GetDataBySource
+	// ── 通用数据源按 ID 路由查询 (GetDataBySource) ──────────────────────────
 	bySrcResp, err := client.GetDataBySource(ctx, &pb.SourceDataQueryRequest{SourceId: "ds_yibao", Limit: 3})
 	if err != nil {
 		t.Fatalf("GetDataBySource failed: %v", err)
@@ -124,7 +155,7 @@ func TestGRPCApis(t *testing.T) {
 		t.Errorf("unexpected GetDataBySource response: %+v", bySrcResp)
 	}
 
-	// ListMockSources
+	// ── 模拟数据源资产目录列表 (ListMockSources) ───────────────────────────
 	listResp, err := client.ListMockSources(ctx, &pb.ListMockSourcesRequest{})
 	if err != nil {
 		t.Fatalf("ListMockSources failed: %v", err)
@@ -133,7 +164,7 @@ func TestGRPCApis(t *testing.T) {
 		t.Errorf("expected at least 2 sources, got %d", listResp.Total)
 	}
 
-	// GetDataSource
+	// ── 单个数据源详情查询 (GetDataSource) ──────────────────────────────────
 	dsResp, err := client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: "ds_yibao"})
 	if err != nil {
 		t.Fatalf("GetDataSource failed: %v", err)
@@ -142,7 +173,7 @@ func TestGRPCApis(t *testing.T) {
 		t.Errorf("unexpected GetDataSource response: %+v", dsResp)
 	}
 
-	// TestConnection
+	// ── 数据源连通性测试 (TestConnection) ────────────────────────────────────
 	connResp, err := client.TestConnection(ctx, &pb.TestConnectionRequest{Id: "ds_kangyang"})
 	if err != nil {
 		t.Fatalf("TestConnection failed: %v", err)
@@ -152,50 +183,55 @@ func TestGRPCApis(t *testing.T) {
 	}
 }
 
+// TestGRPCValidationErrors verifies error handling and gRPC status codes on invalid inputs.
+// TestGRPCValidationErrors 验证在非法请求入参（如空 ID、未注册数据源）时的 gRPC 错误状态码映射。
 func TestGRPCValidationErrors(t *testing.T) {
 	client, cleanup := setupTestGRPCServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
-	// GetDataBySource empty source_id
+	// 1. GetDataBySource 空 source_id 应返回 InvalidArgument 错误
 	_, err := client.GetDataBySource(ctx, &pb.SourceDataQueryRequest{SourceId: ""})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("expected InvalidArgument for empty source_id, got: %v", err)
 	}
 
-	// GetDataBySource non-existent
+	// 2. GetDataBySource 不存在的数据源 ID 应返回 NotFound 错误
 	_, err = client.GetDataBySource(ctx, &pb.SourceDataQueryRequest{SourceId: "unknown_123"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("expected NotFound for unknown source_id, got: %v", err)
 	}
 
-	// GetDataSource empty id
+	// 3. GetDataSource 空 id 应返回 InvalidArgument 错误
 	_, err = client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: ""})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("expected InvalidArgument for empty id, got: %v", err)
 	}
 
-	// GetDataSource not found
+	// 4. GetDataSource 不存在的 id 应返回 NotFound 错误
 	_, err = client.GetDataSource(ctx, &pb.GetDataSourceRequest{Id: "non_existent"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("expected NotFound for non-existent id, got: %v", err)
 	}
 
-	// TestConnection empty id
+	// 5. TestConnection 空 id 应返回 InvalidArgument 错误
 	_, err = client.TestConnection(ctx, &pb.TestConnectionRequest{Id: ""})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("expected InvalidArgument for empty test id, got: %v", err)
 	}
 }
 
-// ─────────────────────────────────────────────────────────────
-// mTLS Credentials and Key Pinning Tests
-// ─────────────────────────────────────────────────────────────
+// ==============================================================================
+// mTLS Credentials and Key Pinning Helper & Tests / mTLS 凭据与公钥固定测试
+// ==============================================================================
 
+// generateTestCertAndKey dynamically creates a self-signed CA, server cert/key pair, and client public key file.
+// generateTestCertAndKey 动态生成测试用的 CA 根证书、带 IP SAN (127.0.0.1) 的服务端证书/私钥，以及客户端公钥 PEM 文件。
 func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string, string) {
 	t.Helper()
 
+	// 1. 生成 CA 私钥与自签名根证书
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate CA key: %v", err)
@@ -219,6 +255,7 @@ func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string
 	caFile := filepath.Join(tmpDir, "ca.pem")
 	_ = os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes}), 0600)
 
+	// 2. 生成服务端私钥与由 CA 签发的操作证书
 	srvKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate srv key: %v", err)
@@ -244,6 +281,7 @@ func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string
 	_ = os.WriteFile(srvCertFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvBytes}), 0600)
 	_ = os.WriteFile(srvKeyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(srvKey)}), 0600)
 
+	// 3. 导出客户端公钥 PEM 用于指纹固定校验
 	pubBytes, err := x509.MarshalPKIXPublicKey(&srvKey.PublicKey)
 	if err != nil {
 		t.Fatalf("marshal pubkey: %v", err)
@@ -254,23 +292,25 @@ func generateTestCertAndKey(t *testing.T, tmpDir string) (string, string, string
 	return caFile, srvCertFile, srvKeyFile, pubKeyFile
 }
 
+// TestBuildServerCredentials verifies TLS and mTLS credentials construction with different security configurations.
+// TestBuildServerCredentials 验证 BuildServerCredentials 在不同配置组合（未启用 TLS、缺失私钥、有效单向 TLS、双向 mTLS、公钥固定）下的行为。
 func TestBuildServerCredentials(t *testing.T) {
 	tmpDir := t.TempDir()
 	caFile, srvCert, srvKey, pubKey := generateTestCertAndKey(t, tmpDir)
 
-	// 1. TLS disabled
+	// 1. 测试用例 1：TLS 未启用时应返回错误
 	cfg := &config.Config{TLSEnabled: false}
 	if _, err := BuildServerCredentials(cfg); err == nil {
 		t.Errorf("expected error when TLS is disabled")
 	}
 
-	// 2. Missing cert/key
+	// 2. 测试用例 2：启用 TLS 但证书/私钥文件路径缺失时应返回错误
 	cfg = &config.Config{TLSEnabled: true}
 	if _, err := BuildServerCredentials(cfg); err == nil {
 		t.Errorf("expected error when cert/key missing")
 	}
 
-	// 3. Valid TLS
+	// 3. 测试用例 3：合法的单向 TLS 配置
 	cfg = &config.Config{
 		TLSEnabled:  true,
 		TLSCertFile: srvCert,
@@ -281,7 +321,7 @@ func TestBuildServerCredentials(t *testing.T) {
 		t.Fatalf("failed to build simple TLS credentials: %v", err)
 	}
 
-	// 4. Valid mTLS with client cert verification
+	// 4. 测试用例 4：合法的双向 mTLS 配置（验证 Client CA 证书池与 RequireAndVerifyClientCert 模式）
 	cfg = &config.Config{
 		TLSEnabled:    true,
 		TLSCertFile:   srvCert,
@@ -294,7 +334,7 @@ func TestBuildServerCredentials(t *testing.T) {
 		t.Fatalf("failed to build mTLS credentials: %v", err)
 	}
 
-	// 5. Valid mTLS with public key pinning
+	// 5. 测试用例 5：合法的双向 mTLS + 客户端公钥指纹固定配置
 	cfg.TLSPinnedPubKeyFile = pubKey
 	creds, err = BuildServerCredentials(cfg)
 	if err != nil || creds == nil {

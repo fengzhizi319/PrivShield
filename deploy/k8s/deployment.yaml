@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: privshield:0.1.0
+          image: privshield:1.8.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

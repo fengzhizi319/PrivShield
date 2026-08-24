@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-24
+
+### ⚠️ Breaking Changes
+- **核心包物理更名与单轨化**：核心隐私与动态分类分级引擎目录由 `PrivShield/` 物理更名为 `engine/`，Python 顶层包导入路径全面切换为 `engine.*`（如 `from engine.service import PrivacyService`、`python -m engine.server`）。
+- **兼容性声明（无导入别名）**：全面移除过渡期符号链接与 `sys.modules["PrivShield"]` 动态导入别名映射，所有下游调用方必须显式导入 `engine`，实现彻底的单轨化架构。
+- **构建链与镜像入口单轨化**：删除孤儿 `engine/Dockerfile`，统一采用仓库根目录多阶段 `Dockerfile`（支持 `--target core|ml`），所有 Docker 构建上下文统一收敛至仓库根目录。
+
+### Changed
+- **企业级 Monorepo 目录分层解耦**：
+  - 中台微服务群解耦提至根目录 `services/{service-hub,datasource-mgr,audit-log}`。
+  - Go 共享基础库提至根目录 `pkg/`，根目录 `go.work` 统一纳管全部 5 个 Go 模块（Go 1.27）。
+  - 控制台职责收敛为 `console/{bff-go,bff-py,web}`，分别对应 Go gRPC BFF（主力）、Python REST BFF（备用）及 React Web UI。
+- **运维与启停脚本体系全面收敛**：
+  - `console/scripts/` 下 20+ 个启停、Docker 编排及测试脚本全面归并至 `scripts/dev/` 与 `scripts/prod/`。
+  - `console/scripts/` 中保留向后兼容转发脚本，执行时输出 `[DEPRECATED]` 迁移警告并自动转发执行新路径脚本。
+  - 运行时产物路径统一，PID 统一输出至根目录 `.pids/`，运行日志统一输出至根目录 `.logs/`。
+- **工具链与文档链路全面单轨化**：
+  - `Makefile`、`pyproject.toml`、`.github/workflows/ci.yml`、`mkdocs.yml` 全量配置单轨化（`--cov=engine`、`engine/`）。
+  - 重新编译生成 `services/service-hub/proto/servicehub.pb.go`，清除历史旧路径 rawDesc 残留。
+
+### Security & Resilience
+- **全栈多层次防 DDoS 纵深防御体系**：
+  - 慢速连接与 Slowloris 防护（5s 强制请求头超时与 1MB 请求头限制）。
+  - 请求体大包 DoS 防护（`MaxBodySize` 快速切断超限请求并响应 `413 Payload Too Large`）。
+  - 线程安全 IP 令牌桶限流（`IPRateLimiter` 超额精准响应 `429 Too Many Requests` 与 `Retry-After: 1` 响应头，后台自动 GC 闲置桶）。
+  - 并发容量硬顶保护（`MaxConcurrent` 信号量中间件，过载快速返回 `503 Service Unavailable` 保护协程池）。
+- **路径穿越 (LFI) 与敏感信息泄露防护**：
+  - `datasource-mgr` CSV 加载增加严格 `.csv` 后缀与文件名白名单沙箱校验。
+  - 运行时 Panic 堆栈详情收敛至内部日志，HTTP 响应全局安全脱敏。
+- **高可用调度与分布式一致性**：
+  - 多节点 Client-Side 负载均衡（`PRIVACY_AGENT_URLS` 集群平滑轮询与容灾切换）。
+  - 网关 P2C（Power of Two Choices）综合评分动态分流。
+  - 分布式隐私预算 Redis Lua 原子记账与滑动窗口自动重置。
+
 ### Added
 - 动态分类分级引擎基于 `OrderedDict` 的真实 LRU 评估缓存 (`ConfigurableRuleEngine._eval_cache`)，支持并发线程锁 (`_cache_lock`)、`PRIVACY_ENGINE_CACHE_MAX_SIZE` 环境变量配置及微秒级重复评估匹配
 - 独立 Markdown 文档提取与规则 YAML 生成脚本 (`scripts/data/gen_yaml_from_doc.py`)，支持从 Markdown 规范直接抽取规则

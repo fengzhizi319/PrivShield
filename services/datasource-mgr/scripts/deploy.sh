@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
 
-IMAGE_NAME="${DATASOURCE_MGR_IMAGE:-privshield-datasource-mgr:0.1.0}"
+IMAGE_NAME="${DATASOURCE_MGR_IMAGE:-privshield-datasource-mgr:1.8.0}"
 CONTAINER_NAME="${DATASOURCE_MGR_CONTAINER:-privshield-datasource-mgr}"
 HOST="${DATASOURCE_MGR_HOST:-0.0.0.0}"
 PORT="${DATASOURCE_MGR_PORT:-8083}"

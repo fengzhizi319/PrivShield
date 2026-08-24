@@ -90,7 +90,7 @@ if (-not (Test-Path $LogsDir)) { New-Item -ItemType Directory -Path $LogsDir -Fo
 
 # 4. 构建镜像（若未指定 -NoBuild）
 if ($Target -eq "ml") {
-    $ImageName = "privshield:0.1.0-ml"
+    $ImageName = "privshield:1.8.0-ml"
     $Cpus = "4.0"
     $Memory = "8g"
     if (-not $NoBuild) {
@@ -99,7 +99,7 @@ if ($Target -eq "ml") {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 } else {
-    $ImageName = "privshield:0.1.0"
+    $ImageName = "privshield:1.8.0"
     $Cpus = "2.0"
     $Memory = "2g"
     if (-not $NoBuild) {

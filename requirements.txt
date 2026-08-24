@@ -19,6 +19,7 @@ numpy>=1.24.0,<3.0.0
 pandas>=2.0.0,<4.0.0
 pyarrow>=14.0.0,<26.0.0
 pytest>=8.0.0
+locust>=2.20.0
 
 # Documentation (MkDocs + Material)
 mkdocs>=1.6.0

@@ -3,13 +3,17 @@
 //
 // Route list / 路由清单：
 //
-//	GET  /health              → Health check (self + upstream agent)
-//	GET  /api/health          → Health check (self + upstream agent)
-//	GET  /api/hub/status      → Scheduling hub status overview
-//	GET  /api/hub/tasks       → List all tasks (with optional status filter)
-//	POST /api/hub/dispatch    → Dispatch a new task to the pipeline
-//	GET  /api/hub/pipeline    → Pipeline stages status
-//	POST /api/hub/classify    → Classify + dispatch based on data sensitivity
+//	GET  /health                         → Health check (self + upstream agent + datasource-mgr)
+//	GET  /api/health                     → Health check (self + upstream agent + datasource-mgr)
+//	GET  /api/hub/status                 → Scheduling hub status overview
+//	GET  /api/hub/tasks                  → List all tasks (with optional status filter)
+//	GET  /api/hub/tasks/:id              → Get single task
+//	POST /api/hub/dispatch               → Dispatch a new task to the pipeline
+//	GET  /api/hub/pipeline               → Pipeline stages status
+//	POST /api/hub/classify               → Classify + dispatch based on data sensitivity
+//	POST /api/hub/pipeline/trigger-ds    → Fetch data from datasource-mgr & dispatch pipeline
+//	GET  /api/hub/datasources            → Proxy list datasources from datasource-mgr
+//	GET  /metrics                        → Prometheus metrics
 package handlers
 
 import (
@@ -30,6 +34,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/datasource"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/models"
 )
 
@@ -46,32 +51,34 @@ type dispatchRequest struct {
 // Server aggregates HTTP handler dependencies.
 // Server 聚合 HTTP 处理器所需的全部依赖。
 type Server struct {
-	agent     *agent.Client
-	cfg       *config.Config
-	startTime time.Time
-	tasks     store.TaskStore
-	logger    *slog.Logger
-	mc        *metrics.Collector
-	taskSem   chan struct{} // P29 fix: semaphore to limit concurrent task processing goroutines
-	ctx       context.Context    // P51 fix: parent context for graceful shutdown of task goroutines
-	cancel    context.CancelFunc // P51 fix: cancel function to signal all task goroutines to stop
-	wg        sync.WaitGroup     // P51 fix: wait group to track active task goroutines
+	agent      *agent.Client
+	datasource *datasource.Client
+	cfg        *config.Config
+	startTime  time.Time
+	tasks      store.TaskStore
+	logger     *slog.Logger
+	mc         *metrics.Collector
+	taskSem    chan struct{}      // P29 fix: semaphore to limit concurrent task processing goroutines
+	ctx        context.Context    // P51 fix: parent context for graceful shutdown of task goroutines
+	cancel     context.CancelFunc // P51 fix: cancel function to signal all task goroutines to stop
+	wg         sync.WaitGroup     // P51 fix: wait group to track active task goroutines
 }
 
 // New creates a new Server instance.
 // New 创建新的 Server 实例，tasks 为 nil 时自动回退到内存实现。
-func New(ag *agent.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger, mc *metrics.Collector) *Server {
+func New(ag *agent.Client, ds *datasource.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger, mc *metrics.Collector) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		agent:     ag,
-		cfg:       cfg,
-		startTime: time.Now(),
-		tasks:     tasks,
-		logger:    logger,
-		mc:        mc,
-		taskSem:   make(chan struct{}, 10), // P29: max 10 concurrent task goroutines
-		ctx:       ctx,
-		cancel:    cancel,
+		agent:      ag,
+		datasource: ds,
+		cfg:        cfg,
+		startTime:  time.Now(),
+		tasks:      tasks,
+		logger:     logger,
+		mc:         mc,
+		taskSem:    make(chan struct{}, 10), // P29: max 10 concurrent task goroutines
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -101,37 +108,55 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.POST("/api/hub/dispatch", s.Dispatch)
 	r.GET("/api/hub/pipeline", s.Pipeline)
 	r.POST("/api/hub/classify", s.ClassifyAndDispatch)
+
+	// Datasource-mgr integration routes / 模拟数据源联动端点
+	r.POST("/api/hub/pipeline/trigger-datasource", s.TriggerDataSourcePipeline)
+	r.GET("/api/hub/datasources", s.ListDataSources)
+
 	r.GET("/metrics", s.mc.Handler())
 }
 
-// Health checks self + upstream agent connectivity.
-// Health 检查自身与上游 agent 的连通性。
+// Health checks self + upstream agent + datasource-mgr connectivity.
+// Health 检查自身与上游 agent 和 datasource-mgr 的连通性。
 func (s *Server) Health(c *gin.Context) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	agentData, err := s.agent.Health(ctx)
+	agentData, agentErr := s.agent.Health(ctx)
 	latency := time.Since(start).Milliseconds()
 
-	if err != nil {
+	var dsStatus any = "ok"
+	if s.datasource != nil {
+		if dsData, dsErr := s.datasource.Health(ctx); dsErr != nil {
+			dsStatus = "unreachable"
+		} else if st, ok := dsData["status"]; ok {
+			dsStatus = st
+		}
+	}
+
+	if agentErr != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"backend":    "ok",
-			"agent":      "unreachable",
-			"agent_url":  s.cfg.AgentBaseURL(),
-			"latency_ms": latency,
-			"error":      err.Error(),
-			"via":        moduleVia,
+			"backend":        "ok",
+			"agent":          "unreachable",
+			"agent_url":      s.cfg.AgentBaseURL(),
+			"datasource":     dsStatus,
+			"datasource_url": s.cfg.DatasourceBaseURL(),
+			"latency_ms":     latency,
+			"error":          agentErr.Error(),
+			"via":            moduleVia,
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"backend":    "ok",
-		"agent":      agentData,
-		"agent_url":  s.cfg.AgentBaseURL(),
-		"latency_ms": latency,
-		"via":        moduleVia,
+		"backend":        "ok",
+		"agent":          agentData,
+		"agent_url":      s.cfg.AgentBaseURL(),
+		"datasource":     dsStatus,
+		"datasource_url": s.cfg.DatasourceBaseURL(),
+		"latency_ms":     latency,
+		"via":            moduleVia,
 	})
 }
 
@@ -152,6 +177,7 @@ func (s *Server) HubStatus(c *gin.Context) {
 		"completed_total": counts.Completed,
 		"failed_total":    counts.Failed,
 		"agent_url":       s.cfg.AgentBaseURL(),
+		"datasource_url":  s.cfg.DatasourceBaseURL(),
 	})
 }
 
@@ -207,10 +233,6 @@ func (s *Server) ListTasks(c *gin.Context) {
 
 // Dispatch creates a new task and simulates pipeline processing.
 // Dispatch 创建新任务并模拟流水线处理。
-//
-// Input validation / 输入校验：
-//   - operation 必须在白名单内: mask / k_anon / dp / classify / none
-//   - source 不得为空且长度不超过 1024 字符
 func (s *Server) Dispatch(c *gin.Context) {
 	var req dispatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -267,21 +289,13 @@ func (s *Server) Dispatch(c *gin.Context) {
 }
 
 // processTask simulates the scheduling pipeline stages.
-// processTask 模拟调度流水线的各阶段处理。
-//
-// P19 fix: recover from panics to prevent goroutine crash from killing the process.
-// 从 panic 中恢复，防止 goroutine 崩溃导致整个进程退出。
-//
 // Pipeline stages / 流水线阶段：
 //
-//	① 请求接入 → ② 申请原数 → ③ 分类分级 → ④ 下发脱敏 → ⑤ 返回结果 → ⑥ 存证写日志
+//	① 请求接入 → ② 申请原数 (fetch) → ③ 分类分级 (classify) → ④ 下发脱敏 (desensitize) → ⑤ 返回结果 → ⑥ 存证写日志
 func (s *Server) processTask(task *store.Task, req dispatchRequest) {
-	// P29 fix: acquire semaphore slot to limit concurrent task goroutines
-	// 获取信号量槽位以限制并发任务 goroutine 数量
 	s.taskSem <- struct{}{}
 	defer func() { <-s.taskSem }()
 
-	// P19 fix: panic recovery — mark task as failed instead of crashing the process
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error("processTask panic recovered",
@@ -304,8 +318,6 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 		task.StartedAt = &now
 		_ = s.tasks.Update(task)
 
-		// P51 fix: use select with context instead of plain time.Sleep,
-		// so goroutine can be cancelled during shutdown.
 		select {
 		case <-time.After(100 * time.Millisecond):
 		case <-s.ctx.Done():
@@ -316,6 +328,20 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
 			_ = s.tasks.Update(task)
 			return
+		}
+
+		// Stage 2: fetch → if payload is empty, attempt to fetch from datasource-mgr
+		if stage == "fetch" && s.datasource != nil {
+			if req.Payload == nil || isEmptyPayload(req.Payload) {
+				ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+				if res, err := s.datasource.FetchDataBySource(ctx, req.Source, 10, 0); err == nil && len(res.Records) > 0 {
+					req.Payload = res.Records
+					payloadBytes, _ := json.Marshal(req.Payload)
+					task.PayloadJSON = string(payloadBytes)
+					_ = s.tasks.Update(task)
+				}
+				cancel()
+			}
 		}
 
 		// Stage 3: classify → call agent if operation is classify
@@ -366,9 +392,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 }
 
 // Pipeline returns the status of each pipeline stage.
-// Pipeline 返回调度流水线各阶段的状态。
 func (s *Server) Pipeline(c *gin.Context) {
-	// P36 fix: cap running tasks query to prevent OOM under high concurrency
 	runningTasks, _, err := s.tasks.List(store.TaskFilter{Status: "running", Limit: 1000})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
@@ -405,16 +429,7 @@ func (s *Server) Pipeline(c *gin.Context) {
 	})
 }
 
-// ClassifyAndDispatch performs classification first, then auto-dispatches
-// the appropriate desensitization operation based on the sensitivity level.
-// ClassifyAndDispatch 先执行分类分级，再根据敏感度等级自动分发对应的脱敏操作。
-//
-// This is the key integration point with the desensitization module / 这是与分级脱敏模块的关键集成点：
-//   - L1 (public): no masking needed
-//   - L2 (internal): field-level masking
-//   - L3 (confidential): record-level masking + K-anonymity
-//   - L4 (secret): differential privacy
-//   - L5 (top-secret): full anonymization + query obfuscation
+// ClassifyAndDispatch performs classification first, then auto-dispatches.
 func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 	var req struct {
 		Source  string `json:"source" binding:"required"`
@@ -428,6 +443,15 @@ func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 	if err := validation.MaxLength("source", req.Source, 1024); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
+	}
+
+	// If payload is empty, try to fetch mock data from datasource-mgr
+	if (req.Payload == nil || isEmptyPayload(req.Payload)) && s.datasource != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if res, err := s.datasource.FetchDataBySource(ctx, req.Source, 5, 0); err == nil && len(res.Records) > 0 {
+			req.Payload = res.Records[0]
+		}
+		cancel()
 	}
 
 	// Step 1: Call agent classification
@@ -479,7 +503,6 @@ func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 		Priority:  levelToPriority(level),
 	}
 
-	// P51 fix: track goroutine via WaitGroup for graceful shutdown.
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -495,14 +518,128 @@ func (s *Server) ClassifyAndDispatch(c *gin.Context) {
 	})
 }
 
-// levelToOperation maps sensitivity level to desensitization operation.
-// P50 fix: delegates to shared models.LevelToOperation to eliminate duplication.
+// TriggerDataSourcePipeline requests mock data from datasource-mgr, classifies and executes desensitization.
+func (s *Server) TriggerDataSourcePipeline(c *gin.Context) {
+	var req struct {
+		DataSourceID string `json:"datasource_id" binding:"required"`
+		Limit        int    `json:"limit"`
+		Operation    string `json:"operation"` // optional, default "auto"
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
+		return
+	}
+
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+	if req.Limit > 100 {
+		req.Limit = 100
+	}
+
+	if s.datasource == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "datasource client not configured", "via": moduleVia})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dsResp, err := s.datasource.FetchDataBySource(ctx, req.DataSourceID, req.Limit, 0)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"detail": fmt.Sprintf("fetch data from datasource-mgr failed: %v", err),
+			"via":    moduleVia,
+		})
+		return
+	}
+
+	operation := req.Operation
+	if operation == "" || operation == "auto" {
+		operation = "mask"
+	}
+
+	taskID := validation.GenerateID("task")
+	now := time.Now()
+	payloadJSON, _ := json.Marshal(dsResp.Records)
+
+	task := &store.Task{
+		ID:          taskID,
+		Status:      "pending",
+		Stage:       "queued",
+		Source:      dsResp.SourceName,
+		Operation:   operation,
+		Priority:    50,
+		CreatedAt:   now,
+		PayloadJSON: string(payloadJSON),
+	}
+
+	if err := s.tasks.Save(task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	dispatchReq := dispatchRequest{
+		Source:    dsResp.SourceName,
+		Operation: operation,
+		Payload:   dsResp.Records,
+		Priority:  50,
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.processTask(task, dispatchReq)
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"task_id":        taskID,
+		"datasource_id":  req.DataSourceID,
+		"records_count": len(dsResp.Records),
+		"operation":      operation,
+		"status":         "accepted",
+		"via":            moduleVia,
+	})
+}
+
+// ListDataSources proxies datasource list from datasource-mgr.
+func (s *Server) ListDataSources(c *gin.Context) {
+	if s.datasource == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "datasource client not configured", "via": moduleVia})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	list, err := s.datasource.ListDataSources(ctx)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"detail": fmt.Sprintf("list datasources failed: %v", err), "via": moduleVia})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func isEmptyPayload(p any) bool {
+	if p == nil {
+		return true
+	}
+	switch v := p.(type) {
+	case string:
+		return v == "" || v == "{}" || v == "[]"
+	case map[string]any:
+		return len(v) == 0
+	case []any:
+		return len(v) == 0
+	case []map[string]any:
+		return len(v) == 0
+	}
+	return false
+}
+
 func levelToOperation(level string) string {
 	return models.LevelToOperation(level)
 }
 
-// levelToPriority maps sensitivity level to task priority.
-// levelToPriority 将敏感度等级映射为任务优先级。
 func levelToPriority(level string) int {
 	switch level {
 	case "L5":
@@ -520,15 +657,16 @@ func levelToPriority(level string) int {
 	}
 }
 
-// toStringMap converts an arbitrary payload to map[string]string for the mask_record endpoint.
-// Returns an empty map if the conversion is not possible.
-// toStringMap 将任意 payload 转换为 map[string]string，供 mask_record 端点使用。
-// 转换失败时返回空 map。
 func toStringMap(payload any) map[string]string {
 	result := make(map[string]string)
 	m, ok := payload.(map[string]any)
 	if !ok {
-		return result
+		// If payload is slice of maps, take the first element
+		if slice, ok := payload.([]map[string]any); ok && len(slice) > 0 {
+			m = slice[0]
+		} else {
+			return result
+		}
 	}
 	for k, v := range m {
 		switch val := v.(type) {

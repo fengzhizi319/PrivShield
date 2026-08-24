@@ -263,12 +263,12 @@ Key environment variables:
 
 ```bash
 # core 镜像（默认推荐）
-docker build --target core -t privshield:0.1.0 .
+docker build --target core -t privshield:1.8.0 .
 
 # ml 镜像（含 torch/transformers/onnxruntime）
-docker build --target ml -t privshield:0.1.0-ml .
+docker build --target ml -t privshield:1.8.0-ml .
 
-docker run -p 8079:8079 -p 50051:50051 privshield:0.1.0
+docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
 ```
 
 ### Helm
@@ -346,30 +346,30 @@ Address these before any hardened production deployment.
 | Helm template | `make helm-template` |
 | Build core image | `make docker-core` |
 | Build ml image | `make docker-ml` |
-| Run Dev Console (Go + Vite HMR) | `bash ./console/scripts/dev-start-go.sh` |
-| Run Dev Console (Python + Vite HMR) | `bash ./console/scripts/dev-start.sh` |
-| Run Dev Console (Dual Backend + Vite) | `bash ./console/scripts/dev-start-all.sh` |
-| Run Dev Console (Go mTLS + Vite) | `bash ./console/scripts/dev-start-go-mtls.sh` |
-| Start All E2E Services (Agent + 3 Go) | `bash ./console/scripts/e2e-start-all-services.sh` |
-| Stop All E2E Services | `bash ./console/scripts/e2e-stop-all-services.sh` |
-| Run Dev 3 New Modules (Agent required) | `bash ./console/scripts/dev-start-new-modules.sh` |
-| Stop 3 New Modules | `bash ./console/scripts/dev-stop-new-modules.sh` |
-| Run Integration Test (curl-based) | `bash ./console/scripts/integration-test-new-modules.sh` |
+| Run Dev Console (Go + Vite HMR) | `bash ./scripts/dev/dev-start-go.sh` |
+| Run Dev Console (Python + Vite HMR) | `bash ./scripts/dev/dev-start.sh` |
+| Run Dev Console (Dual Backend + Vite) | `bash ./scripts/dev/dev-start-all.sh` |
+| Run Dev Console (Go mTLS + Vite) | `bash ./scripts/dev/dev-start-go-mtls.sh` |
+| Start All E2E Services (Agent + 3 Go) | `bash ./scripts/dev/e2e-start-all-services.sh` |
+| Stop All E2E Services | `bash ./scripts/dev/e2e-stop-all-services.sh` |
+| Run Dev 3 New Modules (Agent required) | `bash ./scripts/dev/dev-start-new-modules.sh` |
+| Stop 3 New Modules | `bash ./scripts/dev/dev-stop-new-modules.sh` |
+| Run Integration Test (curl-based) | `bash ./scripts/dev/integration-test-new-modules.sh` |
 | Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` |
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
-| Run Docker Console (Go Backend + Web) | `bash ./console/scripts/docker-start-go.sh` |
-| Run Docker Console (Python Backend + Web) | `bash ./console/scripts/docker-start-python.sh` |
-| Run Docker Full Stack (Agent+Backends+Web) | `bash ./console/scripts/docker-start-all.sh [--with-llm]` |
+| Run Docker Console (Go Backend + Web) | `bash ./scripts/dev/docker-start-go.sh` |
+| Run Docker Console (Python Backend + Web) | `bash ./scripts/dev/docker-start-python.sh` |
+| Run Docker Full Stack (Agent+Backends+Web) | `bash ./scripts/dev/docker-start-all.sh [--with-llm]` |
 | Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
 | Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |
 | Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
-| Stop Docker Services | `bash ./console/scripts/docker-stop.sh` |
-| Run Prod Console (Go + Static) | `bash ./console/scripts/prod-start-go.sh` |
-| Run Prod Console (Python + Static) | `bash ./console/scripts/prod-start.sh` |
-| Run Prod Console (Dual Backend + Static) | `bash ./console/scripts/prod-start-all.sh` |
-| Stop Dev Console | `bash ./console/scripts/dev-stop.sh` |
-| Stop Prod Console | `bash ./console/scripts/prod-stop.sh` |
+| Stop Docker Services | `bash ./scripts/dev/docker-stop.sh` |
+| Run Prod Console (Go + Static) | `bash ./scripts/prod/prod-start-go.sh` |
+| Run Prod Console (Python + Static) | `bash ./scripts/prod/prod-start.sh` |
+| Run Prod Console (Dual Backend + Static) | `bash ./scripts/prod/prod-start-all.sh` |
+| Stop Dev Console | `bash ./scripts/dev/dev-stop.sh` |
+| Stop Prod Console | `bash ./scripts/prod/prod-stop.sh` |
 | Run REST + gRPC | `python -m engine.server` |
 | Run test console backend | `cd console/bff-py && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |

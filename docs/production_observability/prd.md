@@ -90,7 +90,7 @@
 ## 6. 验收标准
 
 - [ ] `docs/production_observability/{prd,design,ops}.md` 完成。
-- [ ] 新增 `PrivShield/observability/` 模块。
+- [ ] 新增 `engine/observability/` 模块。
 - [ ] REST `/metrics` 可访问并返回预期指标。
 - [ ] JSON 日志输出包含指定字段。
 - [ ] gRPC 请求记录 access log 与 metrics。

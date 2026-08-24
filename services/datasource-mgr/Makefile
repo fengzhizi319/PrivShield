@@ -1,19 +1,23 @@
 # ============================================================================
-# Datasource Manager (数据源管理) Build Automation
+# Datasource Manager (模拟数据源服务) Build Automation
 # ============================================================================
 
-.PHONY: build run test lint clean
+.PHONY: build run dev prod gen-certs test test-unit lint clean
 
 build:
 	go mod tidy
 	go build -o bin/datasource-mgr ./cmd/server
 
-run:
-	go mod tidy
-	go build -o bin/datasource-mgr ./cmd/server
-	./bin/datasource-mgr
+run: dev
 
-dev: run
+dev:
+	bash scripts/dev-run.sh
+
+prod:
+	bash scripts/prod-run.sh
+
+gen-certs:
+	bash scripts/gen-certs.sh
 
 test:
 	go test ./...

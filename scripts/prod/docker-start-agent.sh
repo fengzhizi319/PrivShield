@@ -112,14 +112,14 @@ chmod 755 "$PROJECT_ROOT/.data/budget" "$PROJECT_ROOT/.logs"
 
 # ── 4. 镜像构建（若未指定 --no-build）──
 if [[ "$TARGET" == "ml" ]]; then
-    IMAGE_NAME="privshield:0.1.0-ml"
+    IMAGE_NAME="privshield:1.8.0-ml"
     RESOURCE_LIMITS=(--cpus="4.0" --memory="8g")
     if [[ "$NO_BUILD" != "true" ]]; then
         echo "📦 正在构建生产级 ML 镜像 ($IMAGE_NAME)..."
         docker build --target ml -t "$IMAGE_NAME" .
     fi
 else
-    IMAGE_NAME="privshield:0.1.0"
+    IMAGE_NAME="privshield:1.8.0"
     RESOURCE_LIMITS=(--cpus="2.0" --memory="2g")
     if [[ "$NO_BUILD" != "true" ]]; then
         echo "📦 正在构建生产级 Core 镜像 ($IMAGE_NAME)..."

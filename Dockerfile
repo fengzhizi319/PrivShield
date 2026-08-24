@@ -37,8 +37,8 @@
 #                             CMD：与 core 相同的启动命令
 #
 # 示例：
-#   docker build --target core -t PrivShield:0.1.0 .
-#   docker build --target ml -t PrivShield:0.1.0-ml .
+#   docker build --target core -t privshield:1.8.0 .
+#   docker build --target ml -t privshield:1.8.0-ml .
 
 # ==============================================================================
 # Stage 1: base —— 公共基础层（core / ml 两个目标共享）

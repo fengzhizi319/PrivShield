@@ -42,7 +42,7 @@ Uvicorn serves as the HTTP server for the Python REST proxy backend:
 
 #### 开发模式（启动脚本）/ Development Mode (Startup Script)
 
-文件 / File：`console/scripts/dev-start.sh`
+文件 / File：`scripts/dev/dev-start.sh`
 
 ```bash
 # 在虚拟环境中启动 Uvicorn
@@ -454,7 +454,7 @@ asyncio.run(main())
 
 ### 4.3 本项目中的编程式启动 / Programmatic Startup in This Project
 
-文件 / File：`PrivShield/server.py`
+文件 / File：`engine/server.py`
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -1138,7 +1138,7 @@ Uvicorn 原生支持 WebSocket，通过 ASGI 协议处理：
 ### 12.2 FastAPI WebSocket 端点 / FastAPI WebSocket Endpoint
 
 ```python
-# PrivShield/routers/ws.py
+# engine/routers/ws.py
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import json
@@ -1600,7 +1600,7 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # 复制应用代码 / Copy application code
-COPY PrivShield/ ./PrivShield/
+COPY engine/ ./engine/
 COPY pyproject.toml .
 
 # 设置环境变量 / Set environment variables
@@ -1664,7 +1664,7 @@ spec:
       
       containers:
         - name: privacy-agent
-          image: PrivShield:0.1.0
+          image: privshield:1.8.0
           ports:
             - containerPort: 8079
               name: http

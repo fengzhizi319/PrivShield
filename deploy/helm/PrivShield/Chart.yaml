@@ -23,11 +23,11 @@ type: application
 
 # version: Chart 自身的语义化版本号（每次发布 Chart 时递增）
 #   Helm 用此版本管理 Chart 的升级/回滚
-version: 0.1.0
+version: 1.8.0
 
 # appVersion: 本 Chart 部署的应用程序版本号（与 PrivShield 代码版本对应）
 #   仅作文档说明和 image tag 默认值，不影响 Chart 版本排序
-appVersion: "0.1.0"
+appVersion: "1.8.0"
 
 # keywords: 搜索关键词，helm search repo 时用于匹配
 keywords:

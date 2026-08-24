@@ -100,10 +100,10 @@ base（安装系统依赖 + 核心 Python 依赖）
 
 ```bash
 # 构建 core 镜像（推荐默认）
-docker build --target core -t PrivShield:0.1.0 .
+docker build --target core -t privshield:1.8.0 .
 
 # 构建 ml 镜像
-docker build --target ml -t PrivShield:0.1.0-ml .
+docker build --target ml -t privshield:1.8.0-ml .
 
 # 也可以用 Makefile
 make docker-core
@@ -113,14 +113,14 @@ make docker-ml
 构建完成后查看镜像：
 
 ```bash
-docker images | grep PrivShield
+docker images | grep privshield
 ```
 
 ### 3.3 本地运行验证
 
 ```bash
 # 本地运行 core 镜像
-docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
+docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
 
 # 另开一个终端测试健康检查
 curl http://localhost:8079/health
@@ -153,7 +153,7 @@ K8s 节点要从某个地方拉取镜像，通常有两种方式：
 eval $(minikube docker-env)
 
 # 重新构建镜像（此时镜像会存在 minikube 内部）
-docker build --target core -t PrivShield:0.1.0 .
+docker build --target core -t privshield:1.8.0 .
 
 # 退出 minikube docker-env 后，kubectl 就能看到镜像
 ```
@@ -161,17 +161,17 @@ docker build --target core -t PrivShield:0.1.0 .
 如果你用 kind：
 
 ```bash
-kind load docker-image PrivShield:0.1.0 --name <你的集群名>
+kind load docker-image privshield:1.8.0 --name <你的集群名>
 ```
 
 ### 4.3 真实集群：推送镜像
 
 ```bash
 # 1. 给镜像打仓库标签
-docker tag PrivShield:0.1.0 myregistry.example.com/PrivShield:0.1.0
+docker tag privshield:1.8.0 myregistry.example.com/privshield:1.8.0
 
 # 2. 推送
-docker push myregistry.example.com/PrivShield:0.1.0
+docker push myregistry.example.com/privshield:1.8.0
 ```
 
 在 K8s 部署时，把 `image.repository` 和 `image.tag` 改成这个地址。
@@ -345,7 +345,7 @@ helm install privshield ./deploy/helm/PrivShield \
   --set security.tls.existingSecret=privshield-tls \
   --set security.auth.apiKeysSecret=privshield-apikeys \
   --set image.repository=myregistry.example.com/PrivShield \
-  --set image.tag=0.1.0
+  --set image.tag=1.8.0
 ```
 
 生产模式会同时启用：
@@ -444,15 +444,15 @@ curl http://localhost:8079/health
 
 ```bash
 # ── 镜像构建 ──
-docker build --target core -t PrivShield:0.1.0 .
-docker build --target ml -t PrivShield:0.1.0-ml .
+docker build --target core -t privshield:1.8.0 .
+docker build --target ml -t privshield:1.8.0-ml .
 
 # ── 本地运行 ──
-docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
+docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
 
 # ── 镜像推送 ──
-docker tag PrivShield:0.1.0 myregistry/PrivShield:0.1.0
-docker push myregistry/PrivShield:0.1.0
+docker tag privshield:1.8.0 myregistry/privshield:1.8.0
+docker push myregistry/privshield:1.8.0
 
 # ── 原生 K8s ──
 kubectl apply -k deploy/k8s/

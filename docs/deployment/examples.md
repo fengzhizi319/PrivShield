@@ -31,8 +31,8 @@
 
 | 镜像 | 标签 | 适用场景 | 资源建议 |
 |---|---|---|---|
-| `core` | `0.1.0` | 脱敏、DP、K-匿名、规则分类 | 256Mi ~ 1Gi 内存 |
-| `ml` | `0.1.0-ml` | 完整三层分类（规则 → NER → LLM/VLM） | 2Gi ~ 8Gi 内存 |
+| `core` | `1.8.0` | 脱敏、DP、K-匿名、规则分类 | 256Mi ~ 1Gi 内存 |
+| `ml` | `1.8.0-ml` | 完整三层分类（规则 → NER → LLM/VLM） | 2Gi ~ 8Gi 内存 |
 
 Helm Chart 通过 `flavor: core` 或 `flavor: ml` 自动选择镜像标签；当 `image.tag` 留空时，`ml` 会自动附加 `-ml` 后缀。
 
@@ -44,7 +44,7 @@ Helm Chart 通过 `flavor: core` 或 `flavor: ml` 自动选择镜像标签；当
 cd /path/to/PrivShield
 
 # 构建 core 镜像
-docker build --target core -t PrivShield:0.1.0 .
+docker build --target core -t privshield:1.8.0 .
 
 # 安装 Chart
 helm install privshield ./deploy/helm/PrivShield
@@ -79,21 +79,21 @@ helm install privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=privshield-tls \
   --set security.auth.apiKeysSecret=privshield-apikeys \
-  --set image.repository=PrivShield \
-  --set image.tag=0.1.0
+  --set image.repository=privshield \
+  --set image.tag=1.8.0
 ```
 
 ### 3.3 ML 镜像部署
 
 ```bash
 # 构建 ml 镜像
-docker build --target ml -t PrivShield:0.1.0-ml .
+docker build --target ml -t privshield:1.8.0-ml .
 
 # 使用 values-ml.yaml，并指定仓库地址
 helm install privshield-ml ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-ml.yaml \
-  --set image.repository=PrivShield \
-  --set image.tag=0.1.0-ml
+  --set image.repository=privshield \
+  --set image.tag=1.8.0-ml
 ```
 
 ### 3.4 引用自定义 values 文件

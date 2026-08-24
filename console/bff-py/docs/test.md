@@ -113,8 +113,8 @@ cd console/bff-py
 
 ```bash
 cd /path/to/PrivShield
-./console/scripts/dev-start.sh       # 启动
-./console/scripts/dev-stop.sh        # 停止
+./scripts/dev/dev-start.sh       # 启动
+./scripts/dev/dev-stop.sh        # 停止
 ```
 
 ## 7. 调试技巧

@@ -11,7 +11,7 @@
 //   4. audit-log running on :8084
 //
 // 启动方式 / How to start services:
-//   bash console/scripts/e2e-start-all-services.sh
+//   bash scripts/dev/e2e-start-all-services.sh
 //
 // 运行测试 / Run tests:
 //   PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./internal/handlers/
@@ -130,31 +130,15 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	}
 	t.Logf("  ✅ audit-log: %v", alHealth["backend"])
 
-	// ── Step 2: 注册数据源 ────────────────────────────────────────────
-	t.Log("═══ Step 2: 注册数据源（datasource-mgr）═══")
+	// ── Step 2: 申请模拟数据源（datasource-mgr API 1）────────────────
+	t.Log("═══ Step 2: 申请模拟数据源（datasource-mgr API 1: 医保数据）═══")
 
-	dsPayload := map[string]any{
-		"name":           "E2E测试-卫健数据库",
-		"type":           "database",
-		"host":           "192.168.1.100",
-		"port":           5432,
-		"database":       "health_e2e_test",
-		"security_level": "high",
-		"tags":           []string{"E2E测试", "卫健", "高密"},
+	status, dsResp := httpGet(t, datasourceURL+"/api/v1/yibao?limit=5")
+	if status != 200 {
+		t.Fatalf("fetch yibao mock data failed: HTTP %d: %v", status, dsResp)
 	}
-	status, dsResp := httpPost(t, datasourceURL+"/api/datasources", dsPayload)
-	if status != 201 {
-		t.Fatalf("create datasource failed: HTTP %d: %v", status, dsResp)
-	}
-	dsID := dsResp["id"].(string)
-	t.Logf("  ✅ 数据源已注册: id=%s name=%s", dsID, dsResp["name"])
-
-	// Cleanup: ensure datasource is deleted at the end
-	defer func() {
-		req, _ := http.NewRequest("DELETE", datasourceURL+"/api/datasources/"+dsID, nil)
-		http.DefaultClient.Do(req)
-		t.Logf("  🧹 数据源已清理: id=%s", dsID)
-	}()
+	dsID := dsResp["source_id"].(string)
+	t.Logf("  ✅ 模拟数据源已就绪: id=%s name=%s total=%v", dsID, dsResp["source_name"], dsResp["total"])
 
 	// ── Step 3: 申请数据 + 分类分级 + 脱敏 ─────────────────────────────
 	t.Log("═══ Step 3: 申请数据 → 分类分级 → 脱敏（service-hub → agent）═══")
@@ -391,28 +375,17 @@ func TestRealE2E_MultiServiceCoordination(t *testing.T) {
 
 	t.Log("═══ 多服务协调测试 ═══")
 
-	// 1. 在 datasource-mgr 注册数据源
-	dsPayload := map[string]any{
-		"name":           "协调测试-医保库",
-		"type":           "database",
-		"host":           "10.0.0.1",
-		"port":           3306,
-		"security_level": "high",
-	}
-	status, dsResp := httpPost(t, datasourceURL+"/api/datasources", dsPayload)
-	if status != 201 {
-		t.Fatalf("create datasource: HTTP %d", status)
+	// 1. 获取 datasource-mgr 模拟数据源
+	status, dsResp := httpGet(t, datasourceURL+"/api/datasources/ds_yibao")
+	if status != 200 {
+		t.Fatalf("get datasource: HTTP %d", status)
 	}
 	dsID := dsResp["id"].(string)
-	defer func() {
-		req, _ := http.NewRequest("DELETE", datasourceURL+"/api/datasources/"+dsID, nil)
-		http.DefaultClient.Do(req)
-	}()
-	t.Logf("  ✅ 数据源注册: %s", dsID)
+	t.Logf("  ✅ 获取模拟数据源成功: %s", dsID)
 
 	// 2. 通过 service-hub 提交脱敏任务
 	dispatchPayload := map[string]any{
-		"source":    "协调测试-医保库",
+		"source":    "ds_yibao",
 		"operation": "mask",
 		"payload": map[string]any{
 			"patient_name": "赵六",

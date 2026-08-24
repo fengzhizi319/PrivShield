@@ -29,10 +29,10 @@
 |---|---|---|
 | 医疗 CSV 生成与合法校验码 | `scripts/data/generate_medical_data.py` | 扩展现有脚本，不新建第二套同名数据模板 |
 | 医疗病例图片 | `scripts/data/gen_medical_images.py` | 复用 `CaseTemplate`、`TEMPLATES` 和 `render_case()` |
-| 三层分类漏斗 | `PrivShield/dynclassification/service.py` | 以 `classify_record()` / `classify_table()` 为主要入口 |
-| 分类 REST API | `PrivShield/routers/dynclassification.py` | Console 的动态分类请求经 `/api/proxy` 透传 |
-| 分类 gRPC API | `PrivShield/grpc_server.py`、`proto/privacy.proto` | Go 对已有可映射 RPC 使用 gRPC；无映射的动态分类路径明确走 REST fallback 或补充正式 RPC |
-| 字段/记录脱敏 | `PrivShield/privacy/masking.py` | 复用 `mask_value()`、`mask_record()` 或批量接口，不复制字段规则 |
+| 三层分类漏斗 | `engine/dynclassification/service.py` | 以 `classify_record()` / `classify_table()` 为主要入口 |
+| 分类 REST API | `engine/routers/dynclassification.py` | Console 的动态分类请求经 `/api/proxy` 透传 |
+| 分类 gRPC API | `engine/grpc_server.py`、`proto/privacy.proto` | Go 对已有可映射 RPC 使用 gRPC；无映射的动态分类路径明确走 REST fallback 或补充正式 RPC |
+| 字段/记录脱敏 | `engine/privacy/masking.py` | 复用 `mask_value()`、`mask_record()` 或批量接口，不复制字段规则 |
 | Python Console | `console/backend/app/main.py` | 新增专用流水线请求时保持既有 `ProxyResponse` 包装 |
 | Go Console | `console/backend-go/internal/handlers`、`internal/mapper` | 与 Python 保持相同 `/api/*` 契约；动态分类当前必须处理 REST fallback 差异 |
 | Web 动态分类页 | `console/web/src/components/DynClassificationPanel.tsx` | 新增“病例流水线”视图或 Tab，沿用现有标准选择、结果徽章和原始 JSON 展示 |
@@ -111,8 +111,8 @@ case_image_path
 建议产物：
 
 ```text
-PrivShield/medical_pipeline/output/classification_result.json
-PrivShield/medical_pipeline/output/classification_result.csv
+engine/medical_pipeline/output/classification_result.json
+engine/medical_pipeline/output/classification_result.csv
 ```
 
 JSON 作为完整结果，CSV 作为前端下载和人工查看的扁平化视图。完整结果至少包括：
@@ -157,8 +157,8 @@ JSON 作为完整结果，CSV 作为前端下载和人工查看的扁平化视�
 建议产物：
 
 ```text
-PrivShield/medical_pipeline/output/masked_data.csv
-PrivShield/medical_pipeline/output/masked_manifest.json
+engine/medical_pipeline/output/masked_data.csv
+engine/medical_pipeline/output/masked_manifest.json
 ```
 
 `masked_data.csv` 保留稳定 schema 和 L1-L3 的非空字段：
@@ -192,10 +192,10 @@ REST 调用使用动态分类路由的 camelCase alias（如 `fieldName`、`stan
 
 ## 6. `medical_pipeline` 模块设计
 
-计划在 `PrivShield/medical_pipeline/` 下按职责拆分，避免把 CSV 生成、算法调用和 HTTP 路由混在一个脚本中：
+计划在 `engine/medical_pipeline/` 下按职责拆分，避免把 CSV 生成、算法调用和 HTTP 路由混在一个脚本中：
 
 ```text
-PrivShield/medical_pipeline/
+engine/medical_pipeline/
 ├── __init__.py
 ├── models.py              # 输入行、分类结果、脱敏结果、汇总模型
 ├── generator.py           # 可复用的 20 条仿真数据生成逻辑
@@ -219,7 +219,7 @@ python -m engine.medical_pipeline --input .../kangyang.csv --output .../output
 
 - 先写临时文件，校验通过后使用原子替换，避免前端读到半成品。
 - 输入 CSV 编码固定为 UTF-8 with BOM 或 UTF-8；实现时选择一种并在文档/测试中固定，中文 Excel 兼容性优先时使用 UTF-8 with BOM。
-- 输出目录默认位于 `PrivShield/medical_pipeline/output/`，用户可以用 `--output` 覆盖。
+- 输出目录默认位于 `engine/medical_pipeline/output/`，用户可以用 `--output` 覆盖。
 - 不覆盖原始 `kangyang.csv`；输入和输出路径必须经过 `Path.resolve()` 校验，禁止输出到项目外不可控位置（除非 CLI 明确允许）。
 - 单条记录错误记录在 manifest 中并按 `--fail-fast` 决定是否终止；安全门禁错误必须终止并清理不安全输出。
 

@@ -306,7 +306,7 @@ autoscaling:
 
 | 环境变量 | 来源 | 说明 |
 |---|---|---|
-| `PRIVACY_PROFILE` | ConfigMap 挂载 | `/etc/PrivShield/privacy-profile.yaml` |
+| `PRIVACY_PROFILE` | ConfigMap 挂载 | `/etc/engine/privacy-profile.yaml` |
 | `PRIVACY_LOG_LEVEL` | values | `INFO` / `DEBUG` |
 | `PRIVACY_LOG_FORMAT` | values | `json` / `text` |
 | `PRIVACY_TLS_ENABLED` | values | `true` / `false` |
@@ -336,7 +336,7 @@ Helm Chart 通过 `templates/deployment.yaml` 把 values 中的配置渲染为 P
 
 | values.yaml 键 | 渲染产物 | 注入方式 / 对应环境变量 |
 |---|---|---|
-| `agent.profile` | ConfigMap `<fullname>-config` → `privacy-profile.yaml` | 卷挂载到 `/etc/PrivShield/privacy-profile.yaml`（只读），`PRIVACY_PROFILE` 指向该路径；对应本地 `.env` 的 `PRIVACY_PROFILE` |
+| `agent.profile` | ConfigMap `<fullname>-config` → `privacy-profile.yaml` | 卷挂载到 `/etc/engine/privacy-profile.yaml`（只读），`PRIVACY_PROFILE` 指向该路径；对应本地 `.env` 的 `PRIVACY_PROFILE` |
 | `agent.logLevel` / `agent.logFormat` | Pod env | `PRIVACY_LOG_LEVEL`（转大写）/ `PRIVACY_LOG_FORMAT` |
 | `service.restPort` / `service.grpcPort` | Pod env | `PRIVACY_REST_PORT` / `PRIVACY_GRPC_PORT`（REST/gRPC Host 固定 `0.0.0.0`） |
 | `security.tls.*` | Pod env + Secret 卷 | `PRIVACY_TLS_ENABLED` / `PRIVACY_TLS_CERT_FILE` / `PRIVACY_TLS_KEY_FILE` / `PRIVACY_TLS_CLIENT_AUTH`；`caSecret` → `PRIVACY_TLS_CA_FILE`；`keyPasswordSecret` → `PRIVACY_TLS_KEY_PASSWORD`（secretKeyRef） |
@@ -471,7 +471,7 @@ LLM 推理进程内置三道护栏（`llm_adapter.py`，模块级全局，所有
 
 ```bash
 # 1. 构建镜像（core）
-docker build --target core -t PrivShield:0.1.0 .
+docker build --target core -t privshield:1.8.0 .
 
 # 2. 安装 Helm chart（开发模式）
 helm install PrivShield ./deploy/helm/PrivShield

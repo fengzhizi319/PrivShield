@@ -646,7 +646,7 @@ console/web/dist/
 
 - Python 后端会把 `dist/` 当静态资源；
 - Go 后端也可以挂载相同的 `dist/`；
-- `console/scripts/dev-start.sh`、`console/scripts/dev-start-go.sh` 等脚本会自动帮你处理这部分流程。
+- `scripts/dev/dev-start.sh`、`scripts/dev/dev-start-go.sh` 等脚本会自动帮你处理这部分流程。
 
 ### 9.5 后端切换和 Vite 的关系
 

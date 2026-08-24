@@ -24,17 +24,17 @@
 
 | 模块 | 文件 | 说明 |
 |------|------|------|
-| 多进程启动器 | `PrivShield/launcher.py` | fork N 个 worker 共享同一端口，内核级连接分发；worker 意外退出自动拉起（`launch` 与 `--warmup` 均支持） |
+| 多进程启动器 | `engine/launcher.py` | fork N 个 worker 共享同一端口，内核级连接分发；worker 意外退出自动拉起（`launch` 与 `--warmup` 均支持） |
 | fork-after-warmup | `launcher.py --warmup` | 主进程预热 NER/LLM 模型并注册到预加载表，fork 后 worker 首次使用时直接复用（COW 共享模型只读内存页，避免 N 份模型内存翻倍） |
-| SQLite WAL 模式 | `PrivShield/privacy/budget.py` | 读写不再互斥，支持多进程并发预算扣减 |
+| SQLite WAL 模式 | `engine/privacy/budget.py` | 读写不再互斥，支持多进程并发预算扣减 |
 | gRPC 线程池调优 | `PRIVACY_GRPC_MAX_WORKERS` 环境变量 | 每 worker 默认 64 线程，支持环境变量配置 |
 
 ### 方案四：NumPy 向量化 + 请求合并（最快验证路径）
 
 | 模块 | 文件 | 说明 |
 |------|------|------|
-| DP 数值核心 | `PrivShield/privacy/dp_jit.py` | Laplace/Gaussian 噪声采样、值截断、L2 范数裁剪，全部 NumPy 向量化（无 Python 级循环）；检测到 Numba 时置 `HAS_NUMBA=True` 供后续 JIT 叠加 |
-| 噪声预生成池 | `PrivShield/privacy/high_concurrency.py` → `NoisePool` | 预生成 10K+ 噪声样本，取用 O(1)，避免实时采样 CPU 开销 |
+| DP 数值核心 | `engine/privacy/dp_jit.py` | Laplace/Gaussian 噪声采样、值截断、L2 范数裁剪，全部 NumPy 向量化（无 Python 级循环）；检测到 Numba 时置 `HAS_NUMBA=True` 供后续 JIT 叠加 |
+| 噪声预生成池 | `engine/privacy/high_concurrency.py` → `NoisePool` | 预生成 10K+ 噪声样本，取用 O(1)，避免实时采样 CPU 开销 |
 | 批量预算扣减 | `high_concurrency.py` → `BatchedBudgetSpend` | 1ms 时间窗口合并多个 spend 为 1 次原子操作，减少锁竞争 |
 
 ### 全功能高并发组件（分类分级、脱敏、通用架构）
@@ -50,8 +50,8 @@
 
 | 模块 | 文件 | 说明 |
 |------|------|------|
-| uvloop + httptools | `PrivShield/server.py` | 自动检测并启用高性能事件循环与 HTTP 解析器 |
-| GZip 响应压缩 | `PrivShield/main.py` | ≥1KB 响应自动 gzip 压缩，减少网络传输 |
+| uvloop + httptools | `engine/server.py` | 自动检测并启用高性能事件循环与 HTTP 解析器 |
+| GZip 响应压缩 | `engine/main.py` | ≥1KB 响应自动 gzip 压缩，减少网络传输 |
 | 并发连接限制 | `PRIVACY_LIMIT_CONCURRENCY` 环境变量 | 默认 10000 最大并发连接，防止过载 OOM |
 | 请求数限制 | `PRIVACY_LIMIT_MAX_REQUESTS` 环境变量 | 默认 100000 最大请求数，防止内存泄漏 |
 

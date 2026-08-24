@@ -1,20 +1,5 @@
 // Package config provides centralized configuration for the service-hub module.
 // Package config 为数据服务调度中枢模块提供集中化配置管理。
-//
-// Environment variables / 环境变量：
-//
-//	| Variable                  | Default    | Description                          |
-//	|---------------------------|------------|--------------------------------------|
-//	| SERVICE_HUB_HOST          | 127.0.0.1  | HTTP listen host / HTTP 监听地址      |
-//	| SERVICE_HUB_PORT          | 8082       | HTTP listen port / HTTP 监听端口      |
-//	| PRIVACY_AGENT_REST_HOST   | 127.0.0.1  | Upstream agent REST host / 上游 agent REST 地址 |
-//	| PRIVACY_REST_PORT         | 8079       | Upstream agent REST port / 上游 agent REST 端口 |
-//	| PRIVACY_AGENT_API_KEY     | (empty)    | Optional auth key / 可选认证密钥       |
-//	| SERVICE_HUB_API_KEY       | (empty)    | Inbound API key for this module / 本模块入站 API Key |
-//	| SERVICE_HUB_CORS_ORIGINS  | (empty)    | Comma-separated CORS origins / 逗号分隔 CORS 来源 |
-//	| SERVICE_HUB_DB_PATH       | (empty)    | SQLite DB path; empty = in-memory / SQLite 路径；空=内存 |
-//	| SERVICE_HUB_LOG_FORMAT    | json       | Log format: json | text / 日志格式      |
-//	| SERVICE_HUB_LOG_LEVEL     | info       | Log level: debug|info|warn|error / 日志级别 |
 package config
 
 import (
@@ -34,6 +19,12 @@ type Config struct {
 	MaxQueueDepth   int    // Max task queue depth / 最大任务队列深度
 	ScheduleTimeout int    // Schedule timeout in seconds / 调度超时（秒）
 
+	// Datasource Manager configuration / 数据源管理微服务配置
+	DatasourceRESTHost string // Datasource Mgr HTTP host / 数据源服务 HTTP 主机
+	DatasourceRESTPort int    // Datasource Mgr HTTP port / 数据源服务 HTTP 端口
+	DatasourceGRPCHost string // Datasource Mgr gRPC host / 数据源服务 gRPC 主机
+	DatasourceGRPCPort int    // Datasource Mgr gRPC port / 数据源服务 gRPC 端口
+
 	// gRPC server configuration / gRPC 服务器配置
 	GRPCHost string // gRPC listen host / gRPC 监听地址
 	GRPCPort int    // gRPC listen port / gRPC 监听端口
@@ -49,11 +40,11 @@ type Config struct {
 	TLSPinnedPubKeyFile string // Pinned client public key PEM / 固定的客户端公钥文件路径
 
 	// Production hardening / 生产加固
-	APIKey        string   // Inbound API key for this module / 本模块入站 API Key
-	CORSOrigins   []string // Allowed CORS origins / 允许的 CORS 来源
-	DBPath        string   // SQLite database path (empty = in-memory) / SQLite 数据库路径
-	LogFormat     string   // "json" or "text" / 日志格式
-	LogLevel      string   // "debug", "info", "warn", "error" / 日志级别
+	APIKey      string   // Inbound API key for this module / 本模块入站 API Key
+	CORSOrigins []string // Allowed CORS origins / 允许的 CORS 来源
+	DBPath      string   // SQLite database path (empty = in-memory) / SQLite 数据库路径
+	LogFormat   string   // "json" or "text" / 日志格式
+	LogLevel    string   // "debug", "info", "warn", "error" / 日志级别
 }
 
 // Load reads configuration from environment variables.
@@ -67,6 +58,12 @@ func Load() *Config {
 		AgentAPIKey:     pkgconfig.EnvString("PRIVACY_AGENT_API_KEY", ""),
 		MaxQueueDepth:   pkgconfig.EnvInt("SERVICE_HUB_MAX_QUEUE", 1000),
 		ScheduleTimeout: pkgconfig.EnvInt("SERVICE_HUB_SCHEDULE_TIMEOUT", 30),
+
+		// Datasource Mgr / 数据源配置
+		DatasourceRESTHost: pkgconfig.EnvString("DATASOURCE_MGR_HOST", "127.0.0.1"),
+		DatasourceRESTPort: pkgconfig.EnvInt("DATASOURCE_MGR_PORT", 8083),
+		DatasourceGRPCHost: pkgconfig.EnvString("DATASOURCE_MGR_GRPC_HOST", "127.0.0.1"),
+		DatasourceGRPCPort: pkgconfig.EnvInt("DATASOURCE_MGR_GRPC_PORT", 50053),
 
 		// gRPC / gRPC 配置
 		GRPCHost: pkgconfig.EnvString("SERVICE_HUB_GRPC_HOST", "127.0.0.1"),
@@ -110,6 +107,16 @@ func (c *Config) AgentBaseURLs() []string {
 		return envURLs
 	}
 	return []string{c.AgentBaseURL()}
+}
+
+// DatasourceBaseURL returns the datasource manager HTTP base URL.
+func (c *Config) DatasourceBaseURL() string {
+	return "http://" + c.DatasourceRESTHost + ":" + strconv.Itoa(c.DatasourceRESTPort)
+}
+
+// DatasourceGRPCAddress returns the datasource manager gRPC address.
+func (c *Config) DatasourceGRPCAddress() string {
+	return c.DatasourceGRPCHost + ":" + strconv.Itoa(c.DatasourceGRPCPort)
 }
 
 // GRPCAddress returns the full gRPC listen address.

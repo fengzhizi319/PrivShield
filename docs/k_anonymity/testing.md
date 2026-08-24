@@ -22,7 +22,7 @@
 
 ## 1. 概述
 
-本文档定义 `PrivShield/privacy/kano.py` 与 `PrivShield/privacy/kano_table.py` 的测试策略、测试范围与可执行示例。K-匿名模块的测试需覆盖单记录泛化正确性、Mondrian 算法正确性、等价组大小约束、敏感字段不变性以及 REST/gRPC 接口一致性。
+本文档定义 `engine/privacy/kano.py` 与 `engine/privacy/kano_table.py` 的测试策略、测试范围与可执行示例。K-匿名模块的测试需覆盖单记录泛化正确性、Mondrian 算法正确性、等价组大小约束、敏感字段不变性以及 REST/gRPC 接口一致性。
 
 ## 2. 测试目标
 

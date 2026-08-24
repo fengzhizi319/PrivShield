@@ -73,14 +73,14 @@ Set-Location $ProjectRoot
 # 3. 构建镜像
 if ($Target -eq "ml") {
     Write-Host "📦 构建含有 PyTorch / Transformers / ONNX 的 ML 镜像..." -ForegroundColor Yellow
-    & docker build --target ml -t privshield:0.1.0-ml .
+    & docker build --target ml -t privshield:1.8.0-ml .
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $ImageName = "privshield:0.1.0-ml"
+    $ImageName = "privshield:1.8.0-ml"
 } else {
     Write-Host "📦 构建轻量 Core 镜像..." -ForegroundColor Yellow
-    & docker build --target core -t privshield:0.1.0 .
+    & docker build --target core -t privshield:1.8.0 .
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $ImageName = "privshield:0.1.0"
+    $ImageName = "privshield:1.8.0"
 }
 
 # 4. 清理旧同名容器

@@ -1382,7 +1382,7 @@ uvicorn.run(
 # 开发环境 / Development
 docker run -p 8079:8079 \
   -e PRIVACY_LOG_LEVEL=debug \
-  PrivShield:0.1.0
+  privshield:1.8.0
 
 # 生产环境 / Production
 docker run -d \
@@ -1396,7 +1396,7 @@ docker run -d \
   --memory=512m \
   --cpus=2 \
   --restart=unless-stopped \
-  PrivShield:0.1.0
+  privshield:1.8.0
 ```
 
 ### 16.3 性能调优策略 / Performance Tuning Strategies
@@ -1422,8 +1422,8 @@ python -m engine.server
 # REST: http://127.0.0.1:8079 | gRPC: 127.0.0.1:50051
 
 # 2. Docker 单容器 / Docker single container
-docker build --target core -t PrivShield:0.1.0 .
-docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
+docker build --target core -t privshield:1.8.0 .
+docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
 
 # 3. Docker Compose (含代理) / Docker Compose (with proxy)
 cd deploy/docker-compose && docker-compose up -d

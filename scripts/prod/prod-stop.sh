@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# ============================================================================
+# 【正式部署/生产模式】一键停止控制台全部服务
+# Stop all prod mode console services
+#
+# ⚠️ 注意 / WARNING:
+#   本脚本按 .pids/ 中的 PID 文件精确停止，并对生产端口
+#   (8080/8081/8079/50051) 上残留的任何进程执行清理。
+#   清理策略为先 SIGTERM 优雅退出、1 秒后仍存活再 SIGKILL 强杀。
+# ============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CONSOLE_DIR="$PROJECT_ROOT/console"
+PIDS_DIR="$PROJECT_ROOT/.pids"
+LEGACY_PIDS_DIR="$CONSOLE_DIR/.pids"
+
+kill_by_pid_file() {
+    local file="$1"
+    local name="$2"
+    if [[ -f "$file" ]]; then
+        local pid
+        pid=$(cat "$file")
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "停止 $name (PID $pid)..."
+            kill "$pid" 2>/dev/null || true
+            sleep 0.5
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$file"
+    fi
+}
+
+kill_by_port() {
+    local port="$1"
+    local name="$2"
+    local pids=""
+    if command -v lsof >/dev/null 2>&1; then
+        pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')
+    elif command -v fuser >/dev/null 2>&1; then
+        pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
+    fi
+
+    if [[ -n "$pids" ]]; then
+        echo "清理端口 $port 上的残余进程 ($name: $pids)..."
+        for pid in $pids; do
+            kill -15 "$pid" 2>/dev/null || true
+        done
+        sleep 1
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null || true
+            fi
+        done
+    fi
+}
+
+echo "正在停止【生产模式】控制台所有服务..."
+
+for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
+    if [[ -d "$dir" ]]; then
+        kill_by_pid_file "$dir/console-go-mtls.pid" "Go gRPC 代理后端 (mTLS)"
+        kill_by_pid_file "$dir/console-go-all.pid" "Go gRPC 代理后端 (all)"
+        kill_by_pid_file "$dir/console-go.pid" "Go gRPC 代理后端"
+        kill_by_pid_file "$dir/console-all.pid" "Python REST 代理后端 (all)"
+        kill_by_pid_file "$dir/console.pid" "Python REST 代理后端"
+        kill_by_pid_file "$dir/agent-go-mtls.pid" "PrivShield (mTLS)"
+        kill_by_pid_file "$dir/agent-all.pid" "PrivShield (all)"
+        kill_by_pid_file "$dir/agent-go.pid" "PrivShield (gRPC)"
+        kill_by_pid_file "$dir/agent.pid" "PrivShield (REST)"
+    fi
+done
+
+kill_by_port 8081 "Go gRPC 代理后端"
+kill_by_port 8080 "Python REST 代理后端"
+kill_by_port 50051 "PrivShield gRPC"
+kill_by_port 8079 "PrivShield REST"
+
+echo "✅ 生产模式所有服务已安全停止。"

@@ -104,10 +104,10 @@ corepack pnpm dev       # 打开 http://localhost:5173
 
 ```bash
 # 一键启动 agent + Python 后端，并自动构建前端（若 dist 缺失）
-./console/scripts/dev-start.sh
+./scripts/dev/dev-start.sh
 
 # 访问 http://127.0.0.1:8080 即可打开控制台
-# 按 Ctrl+C 停止所有服务；或在另一终端执行 ./console/scripts/dev-stop.sh
+# 按 Ctrl+C 停止所有服务；或在另一终端执行 ./scripts/dev/dev-stop.sh
 ```
 
 **手动方式：**
@@ -133,8 +133,8 @@ uvicorn app.main:app --host 127.0.0.1 --port 8080
 如需在页面顶部 Backend Selector 中自由切换 Python REST / Go gRPC 两个后端：
 
 ```bash
-./console/scripts/dev-start-all.sh    # 同时启动 agent + Python(8080) + Go(8081)
-./console/scripts/dev-stop.sh     # 停止
+./scripts/dev/dev-start-all.sh    # 同时启动 agent + Python(8080) + Go(8081)
+./scripts/dev/dev-stop.sh     # 停止
 ```
 
 打开 `http://127.0.0.1:8080` 或 `http://127.0.0.1:8081` 均可，切换后端时请求会跨域到另一端口，同样依赖 CORS 中间件。
@@ -261,12 +261,12 @@ server {
 
 | 脚本 | 作用 |
 |---|---|
-| `./console/scripts/dev-start.sh` | 启动 agent + Python 后端（自动补依赖、构建前端），Ctrl+C 停止 |
-| `./console/scripts/dev-stop.sh` | 读取 `console/.pids/` 中的 PID 安全停止 |
-| `./console/scripts/dev-start-all.sh` | 启动 agent + Python + Go 双后端 |
-| `./console/scripts/dev-stop.sh` | 停止双后端全部进程 |
+| `./scripts/dev/dev-start.sh` | 启动 agent + Python 后端（自动补依赖、构建前端），Ctrl+C 停止 |
+| `./scripts/dev/dev-stop.sh` | 读取 `.pids/` 中的 PID 安全停止 |
+| `./scripts/dev/dev-start-all.sh` | 启动 agent + Python + Go 双后端 |
+| `./scripts/dev/dev-stop.sh` | 停止双后端全部进程 |
 
-脚本每次启动都会自动补齐缺失依赖并在 `dist/` 缺失时构建前端；如需强制重建前端，删除 `console/web/dist` 后重新运行 `./console/scripts/dev-start.sh` 即可。
+脚本每次启动都会自动补齐缺失依赖并在 `dist/` 缺失时构建前端；如需强制重建前端，删除 `console/web/dist` 后重新运行 `./scripts/dev/dev-start.sh` 即可。
 
 ### 6.2 手动启停
 
@@ -285,7 +285,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 2
 
 ### 6.3 PID 管理
 
-一键脚本会把进程 PID 写入 `console/.pids/`（如 `agent.pid`、`console.pid`），`dev-stop.sh` 据此精确停止，避免误杀其他进程。
+一键脚本会把进程 PID 写入根目录 `.pids/`（如 `agent.pid`、`console.pid`），`dev-stop.sh` 据此精确停止，避免误杀其他进程。
 
 ---
 
@@ -342,7 +342,7 @@ python smoke_test.py
 | 页面打开但样式/脚本丢失 | `dist/assets` 与 `index.html` 版本不一致 | 清理后重新 `corepack pnpm build` |
 | agent 返回 401/403 | agent 开启了认证 | 设置 `PRIVACY_AGENT_API_KEY` |
 | 转发返回 502 | agent 超时（默认 60s）或网络错误 | 查看 agent 侧日志；排查慢查询 |
-| 端口被占用 | 8080 已被其他进程使用 | 改 `PRIVACY_CONSOLE_PORT`，或 `./console/scripts/dev-stop.sh` 清理残留 |
+| 端口被占用 | 8080 已被其他进程使用 | 改 `PRIVACY_CONSOLE_PORT`，或 `./scripts/dev/dev-stop.sh` 清理残留 |
 | 改后端代码不生效 | 生产模式未开 reload | 开发用 `./run.sh`（带 `--reload`）；生产手动重启 |
 | 422 校验错误 | 请求体不符合 Pydantic 模型 | 对照 [api.md](./api.md) 检查字段 |
 

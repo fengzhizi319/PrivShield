@@ -25,7 +25,7 @@
 
 ## 1. 概述
 
-本文档定义 `PrivShield/observability/` 的测试策略、测试范围与可执行示例。可观测性模块的测试需覆盖日志格式、Prometheus 指标、`request_id` 透传、认证拒绝事件以及 OpenTelemetry 可选初始化。
+本文档定义 `engine/observability/` 的测试策略、测试范围与可执行示例。可观测性模块的测试需覆盖日志格式、Prometheus 指标、`request_id` 透传、认证拒绝事件以及 OpenTelemetry 可选初始化。
 
 ## 2. 测试目标
 

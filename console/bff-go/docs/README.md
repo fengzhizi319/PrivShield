@@ -31,5 +31,5 @@ open http://127.0.0.1:8081
 也可以直接使用一键开发脚本：
 
 ```bash
-bash ./console/scripts/dev-start-go.sh
+bash ./scripts/dev/dev-start-go.sh
 ```

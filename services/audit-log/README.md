@@ -13,6 +13,8 @@
 - **SQL 级高性能统计与合规报告**：基于 SQLite 聚合引擎提供毫秒级多维统计指标与权威合规治理建议；
 - **高可用与生产加固**：Slowloris 防护、32 MiB MaxBodySize 限制、Prometheus `/metrics` 监控与 SQLite WAL 模式持久化。
 
+> 📖 **深度学习指南**：完整架构解析、8 要素 SHA-256 存证原理与源码导读见 [docs/learning-guide.md](docs/learning-guide.md)。
+
 ---
 
 ## 快速开始

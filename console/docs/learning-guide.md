@@ -51,7 +51,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                  PrivShield（核心隐私计算引擎）                   │
 │   Python FastAPI + gRPC + 隐私算法                                │
-│   位置：PrivShield/ (:8079 REST / :50051 gRPC)                  │
+│   位置：engine/ (:8079 REST / :50051 gRPC)                  │
 │                                                                  │
 │   能力：脱敏 / 差分隐私 / K-匿名 / 查询混淆 / 动态三层分类分级       │
 └─────────────────────────────────────────────────────────────────┘
@@ -585,20 +585,20 @@ cd console/web && corepack pnpm dev
 
 ```bash
 # 从仓库根目录执行
-./console/scripts/dev-start-go.sh     # 启动 Go 后端 + 前端
-./console/scripts/dev-start.sh        # 启动 Python 后端 + 前端
-./console/scripts/dev-start-all.sh    # 启动 agent + 后端 + 前端
-./console/scripts/dev-stop.sh         # 停止所有
+./scripts/dev/dev-start-go.sh     # 启动 Go 后端 + 前端
+./scripts/dev/dev-start.sh        # 启动 Python 后端 + 前端
+./scripts/dev/dev-start-all.sh    # 启动 agent + 后端 + 前端
+./scripts/dev/dev-stop.sh         # 停止所有
 ```
 
 ### 7.3 Docker 部署
 
 ```bash
 # 构建 agent 镜像
-docker build --target core -t PrivShield:0.1.0 .
+docker build --target core -t privshield:1.8.0 .
 
 # 运行
-docker run -p 8079:8079 -p 50051:50051 PrivShield:0.1.0
+docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
 ```
 
 ### 7.4 环境变量速查

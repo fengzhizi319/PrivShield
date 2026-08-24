@@ -1,163 +1,83 @@
-# 数据服务调度中枢 — API 参考
+# 数据服务调度中枢 (Service Hub) — API 规范
 
-## 基础信息
-
-- 默认地址：`http://127.0.0.1:8082`
-- 数据格式：JSON
-- 认证：可选 Bearer Token（通过 `PRIVACY_AGENT_API_KEY` 环境变量配置）
+`service-hub` 是 PrivShield 平台的流水线调度中枢，负责串联 **模拟数据源 (datasource-mgr)**、**隐私与分类引擎 (PrivShield Agent)** 与 **审计存证 (audit-log)**，支持 **REST (HTTP/JSON :8082) + gRPC (mTLS :50052)** 双协议接入。
 
 ---
 
-## GET /api/health
+## 1. 通信协议与端口规划
 
-健康检查，返回自身状态与上游 Agent 连通性。
+| 协议 | 默认地址 | 认证方式 | 说明 |
+|---|---|---|---|
+| **HTTP REST** | `http://127.0.0.1:8082` | Bearer Token / API Key | 供 React 前端与 BFF 交互 |
+| **gRPC (mTLS)** | `127.0.0.1:50052` | 双向 TLS (mTLS) + 公钥固定 | 供调度客户端高性能提交与编排任务 |
 
-**响应示例：**
+---
 
+## 2. HTTP REST 接口规范
+
+### 2.1 健康检查与状态概览
+
+#### `GET /api/health`
+- **说明**：检查自身、上游 PrivShield Agent 以及下游模拟数据源 `datasource-mgr` 的健康状态与连通性。
+- **响应示例**：
 ```json
 {
   "backend": "ok",
-  "agent": {"status": "ok"},
+  "agent": {"status": "ok", "namespace": "default"},
   "agent_url": "http://127.0.0.1:8079",
-  "latency_ms": 5,
+  "datasource": "ok",
+  "datasource_url": "http://127.0.0.1:8083",
+  "latency_ms": 3,
   "via": "service-hub"
 }
 ```
 
+#### `GET /api/hub/status`
+- **说明**：返回调度中枢状态概览（运行时长、排队/运行/完成任务数、Agent 与 Datasource 连接地址）。
+
 ---
 
-## GET /api/hub/status
+### 2.2 流水线调度与数据源联动
 
-返回调度中枢状态概览。
-
-**响应示例：**
-
+#### `POST /api/hub/pipeline/trigger-datasource`
+- **说明**：一键联动 `datasource-mgr` 申请数据并执行脱敏流水线调度。
+- **请求体**：
 ```json
 {
-  "status": "running",
-  "uptime": "2h30m15s",
-  "active_tasks": 3,
-  "queued_tasks": 1,
-  "completed_total": 150,
-  "failed_total": 2,
-  "agent_url": "http://127.0.0.1:8079"
+  "datasource_id": "ds_yibao",
+  "limit": 10,
+  "operation": "mask"
 }
 ```
-
----
-
-## GET /api/hub/tasks
-
-列出所有任务，可选按状态过滤。
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `status` | string | 否 | 过滤状态：pending / running / completed / failed |
-
-**响应示例：**
-
+- **响应示例**：
 ```json
 {
-  "total": 2,
-  "tasks": [
-    {
-      "id": "task-1724300000-1",
-      "status": "completed",
-      "stage": "done",
-      "source": "卫健数据",
-      "operation": "mask",
-      "created_at": "2026-08-22T10:00:00Z",
-      "duration_ms": 620
-    }
-  ],
-  "via": "service-hub"
-}
-```
-
----
-
-## POST /api/hub/dispatch
-
-分发新任务到调度流水线。
-
-**请求体：**
-
-```json
-{
-  "source": "卫健数据",
+  "task_id": "task-1787554500-eabf3934",
+  "datasource_id": "ds_yibao",
+  "records_count": 10,
   "operation": "mask",
-  "payload": {"field_name": "name", "value": "张三"},
-  "priority": 50
-}
-```
-
-**响应：**
-
-```json
-{
-  "task_id": "task-1724300000-1",
   "status": "accepted",
   "via": "service-hub"
 }
 ```
 
----
+#### `GET /api/hub/datasources`
+- **说明**：代理获取 `datasource-mgr` 当前已注册的所有模拟数据源（医保 `ds_yibao`、康养 `ds_kangyang` 及预留数据源 3/4）。
 
-## GET /api/hub/pipeline
-
-返回流水线各阶段实时状态。
-
-**响应示例：**
-
+#### `POST /api/hub/dispatch`
+- **说明**：手动分发任务到调度流水线。
+- **请求体**：
 ```json
 {
-  "stages": [
-    {"name": "ingest", "status": "idle", "active_count": 0},
-    {"name": "fetch", "status": "processing", "active_count": 1},
-    {"name": "classify", "status": "idle", "active_count": 0},
-    {"name": "desensitize", "status": "idle", "active_count": 0},
-    {"name": "return", "status": "idle", "active_count": 0},
-    {"name": "audit", "status": "idle", "active_count": 0}
-  ],
-  "agent_ok": true
+  "source": "ds_yibao",
+  "operation": "mask",
+  "payload": {"name": "张三", "id_card": "510101199001011234"},
+  "priority": 50
 }
 ```
 
----
+#### `POST /api/hub/classify`
+- **说明**：先调用 Agent 动态分类漏斗评定敏感度等级（L1~L5），并根据策略自动选择脱敏原语分发执行。
 
-## POST /api/hub/classify
-
-分类分级 + 自动脱敏分发（关键集成端点）。
-
-**请求体：**
-
-```json
-{
-  "source": "医保数据",
-  "payload": {"records": [{"name": "李四", "id_card": "110101199001011234"}]}
-}
-```
-
-**响应：**
-
-```json
-{
-  "task_id": "task-1724300000-2",
-  "classify_result": {"level": "L3", "fields": [...]},
-  "auto_operation": "k_anon",
-  "level": "L3",
-  "via": "service-hub"
-}
-```
-
-**等级-操作映射：**
-
-| 等级 | 自动操作 | 说明 |
-|---|---|---|
-| L1 | none | 公开数据，无需脱敏 |
-| L2 | mask | 字段级脱敏 |
-| L3 | k_anon | K-匿名泛化 |
-| L4 | dp | 差分隐私 |
-| L5 | dp | 差分隐私 + 查询混淆 |
+#### `GET /api/hub/pipeline`
+- **说明**：返回 6 大流水线阶段（`ingest` ➔ `fetch` ➔ `classify` ➔ `desensitize` ➔ `return` ➔ `audit`）的实时活跃任务数。

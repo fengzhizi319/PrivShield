@@ -50,16 +50,19 @@ graph LR
   5. `Return`：封装脱敏后的安全数据流并返回调用方；
   6. `Audit`：异步向 Audit Log 微服务写入完整存证。
 * **高可用与弹性保护**：内置并发信号量控制、请求队列熔断与重试机制。
+* 📖 学习与设计文档：[学习指南](services/service-hub/docs/learning-guide.md) · [详细设计](services/service-hub/docs/design.md)
 
 ### 2.2 Datasource Manager 数据源管理微服务 (`:8083`)
 * **多源纳管**：统一管理 MySQL、PostgreSQL、ClickHouse、文件型 CSV 等数据资产；
 * **敏感探查**：自动探查数据源 Schema 元数据，批量抽样并联动 Agent 进行特征识别与安全定级；
 * **生命周期管控**：提供数据源 CRUD、连通性心跳探测与多维访问审计。
+* 📖 学习与设计文档：[学习指南](services/datasource-mgr/docs/learning-guide.md) · [详细设计](services/datasource-mgr/docs/design.md)
 
 ### 2.3 Audit Log 脱敏审计与存证微服务 (`:8084`)
 * **8 要素防篡改存证**：采用 SHA-256 对 `logID`、`timestamp`、`algorithm`、`inputHash`、`outputHash`、`user`、`securityLevel`、`params` 进行防篡改签名；
 * **在线核验**：提供不可篡改性校验接口，实时识别任何底层数据变动；
 * **合规报告**：基于 SQLite 引擎秒级生成合规评估与多维统计图表。
+* 📖 学习与设计文档：[学习指南](services/audit-log/docs/learning-guide.md) · [详细设计](services/audit-log/docs/design.md)
 
 ---
 
@@ -67,10 +70,10 @@ graph LR
 
 ```bash
 # 启动微服务集群 (需 Agent 先在 :8079 启动)
-bash ./console/scripts/dev-start-new-modules.sh
+bash ./scripts/dev/dev-start-new-modules.sh
 
 # 停止微服务集群
-bash ./console/scripts/dev-stop-new-modules.sh
+bash ./scripts/dev/dev-stop-new-modules.sh
 
 # 运行微服务单元测试
 make test-services

@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
 
-IMAGE_NAME="${AUDIT_LOG_IMAGE:-privshield-audit-log:0.1.0}"
+IMAGE_NAME="${AUDIT_LOG_IMAGE:-privshield-audit-log:1.8.0}"
 CONTAINER_NAME="${AUDIT_LOG_CONTAINER:-privshield-audit-log}"
 HOST="${AUDIT_LOG_HOST:-0.0.0.0}"
 PORT="${AUDIT_LOG_PORT:-8084}"

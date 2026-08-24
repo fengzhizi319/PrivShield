@@ -4,38 +4,39 @@
 
 ---
 
-## 1. 运行与启动
+## 1. 运行与启动脚本
 
-### 1.1 开发与调试模式
+### 1.1 开发模式 (Insecure / No-mTLS)
 
 ```bash
 cd services/datasource-mgr
-bash run.sh
+bash scripts/dev-run.sh
+# 或
+make dev
 ```
 
 默认同时启动：
 - **HTTP REST**：`http://127.0.0.1:8083`
 - **gRPC (insecure)**：`127.0.0.1:50053`
 
-### 1.2 生产调试模式（启用 mTLS 与公钥固定）
+### 1.2 生产加固模式 (mTLS + 公钥固定)
 
 ```bash
-# 编译二进制产物
 cd services/datasource-mgr
-make build
+bash scripts/prod-run.sh
+# 或
+make prod
+```
 
-# 启动服务
-DATASOURCE_MGR_HOST=0.0.0.0 \
-DATASOURCE_MGR_PORT=8083 \
-DATASOURCE_MGR_GRPC_HOST=0.0.0.0 \
-DATASOURCE_MGR_GRPC_PORT=50053 \
-DATASOURCE_MGR_TLS_ENABLED=true \
-DATASOURCE_MGR_TLS_CERT_FILE=/certs/server.crt \
-DATASOURCE_MGR_TLS_KEY_FILE=/certs/server.key \
-DATASOURCE_MGR_TLS_CA_FILE=/certs/ca.crt \
-DATASOURCE_MGR_TLS_CLIENT_AUTH=require \
-DATASOURCE_MGR_TLS_PINNED_PUBKEY_FILE=/certs/client_pub.pem \
-./bin/datasource-mgr
+自动加载 `services/datasource-mgr/certs/` 目录中的测试证书与客户端固定公钥 `client.pub`。
+
+### 1.3 重新生成测试证书链
+
+```bash
+cd services/datasource-mgr
+bash scripts/gen-certs.sh
+# 或
+make gen-certs
 ```
 
 ---
@@ -61,23 +62,19 @@ DATASOURCE_MGR_TLS_PINNED_PUBKEY_FILE=/certs/client_pub.pem \
 
 ---
 
-## 3. 快速联调与接口测试
+## 3. 接口快速验证与联调
 
-### 3.1 申请医保模拟数据 (API 1)
+### 3.1 HTTP 综合健康检查
+```bash
+curl -s http://127.0.0.1:8083/api/health | jq .
+```
+
+### 3.2 申请 API 1 医保数据
 ```bash
 curl -s "http://127.0.0.1:8083/api/v1/yibao?limit=5" | jq .
 ```
 
-### 3.2 申请康养模拟数据 (API 2)
+### 3.3 申请 API 2 康养数据
 ```bash
 curl -s "http://127.0.0.1:8083/api/v1/kangyang?limit=5" | jq .
-```
-
-### 3.3 gRPC 探活与数据获取
-```bash
-# 探活
-grpcurl -plaintext 127.0.0.1:50053 datasourcemgr.DataSourceManagerService/Health
-
-# 获取医保数据
-grpcurl -plaintext -d '{"limit": 5, "offset": 0}' 127.0.0.1:50053 datasourcemgr.DataSourceManagerService/GetYibaoData
 ```

@@ -369,7 +369,7 @@ class TestAgentScriptFakeExecution:
 
         测试目的：
             1. 验证默认目标分支为 core；
-            2. 验证构建命令包含 `--target core` 与标签 `privshield:0.1.0`；
+            2. 验证构建命令包含 `--target core` 与标签 `privshield:1.8.0`；
             3. 验证终端输出启动成功友好提示。
 
         .venv 测试命令 / Test Command:
@@ -380,13 +380,13 @@ class TestAgentScriptFakeExecution:
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0)
         assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
         assert "PrivShield (Docker) 已成功启动" in result.stdout
-        assert "build --target core -t privshield:0.1.0" in logs
+        assert "build --target core -t privshield:1.8.0" in logs
         assert "run -d --name PrivShield" in logs
 
     def test_script_runs_ml_target(self, bash_bin: str):
         """【模拟执行】显式传入 ml 参数时，验证脚本构建并启动 ml 镜像。
 
-        测试目的：验证多阶段构建目标切换为 `ml` 且镜像标签为 `privshield:0.1.0-ml`。
+        测试目的：验证多阶段构建目标切换为 `ml` 且镜像标签为 `privshield:1.8.0-ml`。
 
         .venv 测试命令 / Test Command:
             source .venv/bin/activate && pytest tests/scripts/test_docker_start_agent.py::TestAgentScriptFakeExecution::test_script_runs_ml_target -v -s
@@ -395,8 +395,8 @@ class TestAgentScriptFakeExecution:
         """
         result, logs = _run_script_with_fake_docker(bash_bin, exit_code=0, target="ml")
         assert result.returncode == 0, f"脚本执行失败: {result.stderr}"
-        assert "build --target ml -t privshield:0.1.0-ml" in logs
-        assert "privshield:0.1.0-ml" in logs
+        assert "build --target ml -t privshield:1.8.0-ml" in logs
+        assert "privshield:1.8.0-ml" in logs
 
     def test_cleans_up_old_container_before_run(self, bash_bin: str):
         """【模拟执行】验证在每次启动新容器前，脚本先执行 docker rm -f 清理同名旧容器。

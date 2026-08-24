@@ -26,6 +26,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/datasource"
 	pb "github.com/fengzhizi319/PrivShield/services/service-hub/proto"
 )
 
@@ -351,10 +352,11 @@ func setupTestGRPCServer(t *testing.T, agentHandler http.HandlerFunc) (*GRPCServ
 	t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
 	cfg := config.Load()
 	ag := agent.New(cfg)
+	ds := datasource.New(cfg)
 	taskStore := memory.NewTaskStore()
 	logger := slog.Default()
 
-	srv := New(ag, cfg, taskStore, logger)
+	srv := New(ag, ds, cfg, taskStore, logger)
 	return srv, mockServer, taskStore
 }
 
@@ -603,8 +605,9 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
 		cfg := config.Load()
 		ag := agent.New(cfg)
+		ds := datasource.New(cfg)
 		taskStore := memory.NewTaskStore()
-		srv := New(ag, cfg, taskStore, slog.Default())
+		srv := New(ag, ds, cfg, taskStore, slog.Default())
 		defer srv.Shutdown()
 
 		task := &store.Task{
@@ -641,8 +644,9 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
 		cfg := config.Load()
 		ag := agent.New(cfg)
+		ds := datasource.New(cfg)
 		taskStore := memory.NewTaskStore()
-		srv := New(ag, cfg, taskStore, slog.Default())
+		srv := New(ag, ds, cfg, taskStore, slog.Default())
 		defer srv.Shutdown()
 
 		task := &store.Task{

@@ -118,9 +118,9 @@ assert ObfuscationStrategy.SLOT_FILLING == "slot_filling"
 
 ## 8. 模块设计
 
-- `PrivShield/privacy/qol.py`：核心混淆逻辑。
-- `PrivShield/service.py`：`PrivacyService` 封装。
-- `PrivShield/main.py` / `grpc_server.py`：REST / gRPC 接口。
+- `engine/privacy/qol.py`：核心混淆逻辑。
+- `engine/service.py`：`PrivacyService` 封装。
+- `engine/main.py` / `grpc_server.py`：REST / gRPC 接口。
 
 ## 9. 测试策略
 

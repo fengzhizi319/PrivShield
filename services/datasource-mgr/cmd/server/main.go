@@ -1,10 +1,36 @@
 // Command server is the entry point for the mock datasource-mgr module.
-// Command server 是模拟数据源模块的程序入口（用于开发与调试模拟数据通信）。
+// Command server 是模拟数据源模块（datasource-mgr）的程序入口。
 //
-// Architecture / 架构：
+// 本服务在 PrivShield 架构中扮演“数据源资产与敏感特征模拟服务”角色，
+// 负责向上游应用（如 service-hub 流水线、BFF 网关、前端控制台）提供结构化医保、康养及测试数据源，
+// 同时支持 HTTP REST 与双向认证 gRPC (mTLS) 双协议接入。
 //
-//	React 前端 / BFF  ──HTTP/JSON──▶  datasource-mgr(Go) :8083 (提供 yibao/kangyang 模拟数据)
-//	                                └─gRPC(mTLS)───────▶ :50053 (API 1, 2, 3, 4 模拟数据接口)
+// ==============================================================================
+// Architecture & Traffic Flow / 系统架构与流量图：
+// ==============================================================================
+//
+//	┌────────────────────────┐         HTTP / JSON (:8083)
+//	│  React Web UI / BFF-Go │ ──────────────────────────────────┐
+//	└────────────────────────┘                                   │
+//	                                                             ▼
+//	┌────────────────────────┐   gRPC + mTLS 双向加密 (:50053)   ┌───────────────────────────────┐
+//	│ service-hub 数据调度中枢 │ ───────────────────────────────▶ │ datasource-mgr 模拟数据源服务  │
+//	└────────────────────────┘                                   │ - HTTP REST: :8083           │
+//	                                                             │ - gRPC (mTLS/Plain): :50053  │
+//	                                                             │ - 提供 yibao/kangyang 模拟数据 │
+//	                                                             └───────────────────────────────┘
+//
+// ==============================================================================
+// Key Responsibilities / 核心职责：
+// ==============================================================================
+// 1. 配置加载 (Configuration)：从环境变量解析 HTTP/gRPC 端口、mTLS 证书链、安全鉴权与日志参数；
+// 2. 结构化日志 (Structured Logging)：初始化统一的 slog 结构化日志输出（JSON/Text）；
+// 3. HTTP REST 服务 (Gin + net/http)：暴露标准 REST API 及探针，配置超时与防 Slowloris 参数；
+// 4. gRPC 服务 (Protobuf + mTLS)：根据配置支持零信任 mTLS 双向认证或明文模式，注册服务实现；
+// 5. 并发协程服务 (Dual-Protocol Goroutines)：在独立 goroutine 中异步启动 HTTP 与 gRPC 服务；
+// 6. 优雅停机 (Graceful Shutdown)：捕获 SIGINT/SIGTERM，顺序执行 gRPC 停机与带超时的 HTTP 优雅退出。
+// ==============================================================================
+
 package main
 
 import (
@@ -28,17 +54,43 @@ import (
 )
 
 func main() {
+	// =========================================================================
+	// 1. Configuration Loading / 配置解析与加载
+	// =========================================================================
+	// 从环境变量读取运行配置（如 DATASOURCE_MGR_HOST/PORT, TLS/mTLS 证书路径, API_KEY 等），
+	// 未设置时采用安全合理的默认值（默认 HTTP :8083, gRPC :50053）。
 	cfg := config.Load()
 
-	// ── Structured logger / 结构化日志 ────────────────────────
+	// =========================================================================
+	// 2. Structured Logger Setup / 结构化日志系统初始化
+	// =========================================================================
+	// 使用共享库 pkgconfig.SetupLogger 初始化基于 slog 的全局结构化日志记录器，
+	// 支持 JSON（生产环境推荐，便于 Loki/ELK 采集）与 Text（本地开发高可读）两种格式。
 	logger := pkgconfig.SetupLogger(cfg.LogFormat, cfg.LogLevel)
 
-	// ── HTTP REST Server / HTTP REST 服务器 ──────────────────────
+	// =========================================================================
+	// 3. HTTP REST Server Setup / HTTP REST 路由与服务器构建
+	// =========================================================================
+	// 1) 锁定 Gin 为生产发布模式（ReleaseMode），禁用控制台调试冗余输出与性能损耗；
+	// 2) 实例化 HTTP 处理器集合，封装数据源 CRUD、模拟数据集（yibao/kangyang）与健康探针；
+	// 3) 初始化无默认中间件的纯净 Gin 引擎，并通过 handlers.RegisterRoutes 装配中间件栈：
+	//    - RequestID: 全链路请求追踪 ID 生成与注入；
+	//    - StructuredLogger: 请求访问日志记录；
+	//    - Recovery: Panic 拦截与自动恢复，防止单请求崩溃导致进程退出；
+	//    - SecurityHeaders: HSTS, X-Content-Type-Options 等安全响应头；
+	//    - CORS: 跨域资源共享策略；
+	//    - Auth: 基于 Header API Key 的身份认证（配置时生效）。
 	gin.SetMode(gin.ReleaseMode)
 	server := handlers.New(cfg, logger)
 	router := gin.New()
 	server.RegisterRoutes(router)
 
+	// 4) 显式配置 http.Server 网络超时参数，防范 Slowloris 慢连接拒绝服务攻击与连接泄露：
+	//    - ReadHeaderTimeout: 5s （限制读取 HTTP Header 的最大时间，防御 Slowloris）
+	//    - ReadTimeout: 30s       （读取整个请求体的时间）
+	//    - WriteTimeout: 60s      （响应写入的最长时间）
+	//    - IdleTimeout: 120s      （Keep-Alive 空闲连接保活复用上限）
+	//    - MaxHeaderBytes: 1MB    （单请求 Header 最大字节限制）
 	httpSrv := &http.Server{
 		Addr:              cfg.Address(),
 		Handler:           router,
@@ -49,7 +101,15 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	// ── gRPC Server (with optional mTLS) / gRPC 服务器（可选 mTLS）──
+	// =========================================================================
+	// 4. gRPC Server Setup (with optional mTLS) / gRPC 服务构建（支持可选 mTLS）
+	// =========================================================================
+	// 根据配置决定是否开启 mTLS 双向认证：
+	// - 开启 TLS (cfg.TLSEnabled = true):
+	//   通过 grpcserver.BuildServerCredentials 加载服务端私钥/证书，并挂载 CA 证书校验客户端身份，
+	//   支持基于证书指纹（Pinned Public Key）或 ClientAuth（RequireAndVerifyClientCert）强校验；
+	// - 未开启 TLS:
+	//   创建标准明文 gRPC Server 实例，适用于本地快速开发或由 Service Mesh (如 Istio/Envoy) 代理 TLS 的场景。
 	var grpcServer *grpc.Server
 	var serviceImpl *grpcserver.GRPCServer
 
@@ -73,23 +133,63 @@ func main() {
 		logger.Info("mock datasource-mgr gRPC server started (insecure)", "addr", cfg.GRPCAddress())
 	}
 
-	// ── Signal handling / 信号处理 ───────────────────────────────
+	// =========================================================================
+	// 5. Operating System Signal Registration / 系统中断信号监听
+	// =========================================================================
+	// 创建带缓冲的信号通道，监听终端中断信号（SIGINT, 如 Ctrl+C）与容器编排停止信号（SIGTERM, 如 k8s pod 终止），
+	// 确保服务在收到退出指令时能够完成正在处理中的请求，防止数据损坏或客户端异常断连。
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start gRPC listener / 启动 gRPC 监听
+	// =========================================================================
+	// 6. Dual-Protocol Concurrent Listeners / 双协议并发监听启动
+	// =========================================================================
+	// 1) 启动 gRPC TCP 监听端口（默认 :50053），失败时阻断进程启动
 	grpcLis, err := net.Listen("tcp", cfg.GRPCAddress())
 	if err != nil {
 		log.Fatalf("failed to listen on gRPC address %s: %v", cfg.GRPCAddress(), err)
 	}
 
+	// 2) 在后台独立 Goroutine 中启动 gRPC 事件循环
+	// ─────────────────────────────────────────────────────────────────────────
+	// 💡 【核心执行机制与请求处理全流程 / How gRPC Handles Connections & Requests】：
+	//
+	// a. 【连接监听与接收 (TCP Accept & TLS Handshake)】：
+	//    `grpcServer.Serve(grpcLis)` 内部执行标准的 `for { rawConn, err := grpcLis.Accept(); ... }` 阻塞循环：
+	//    - 当上游（如 service-hub 或外部微服务）发起连接时，Accept() 接收底层的 raw TCP 连接；
+	//    - 若开启 mTLS（`cfg.TLSEnabled=true`），立即进行 TLS 1.3 握手，执行证书链校验与公钥固定 (SPKI Pinning)；
+	//    - 握手成功后，为该 TCP 连接创建独立的 HTTP/2 传输层处理器 (transport)，单个 TCP 即可支持高并发 Stream 多路复用。
+	//
+	// b. 【请求路由与并发派发 (HTTP/2 Frame & Method Dispatch)】：
+	//    - 当客户端通过该连接发送 RPC 请求时（如 HTTP/2 HEADERS 帧携带 `:path: /datasource_mgr.DataSourceManagerService/GetYibaoData`）；
+	//    - gRPC 运行时根据注册表（通过上文 `pb.RegisterDataSourceManagerServiceServer` 注册的服务描述 `ServiceDesc`）查找对应的方法处理器；
+	//    - 为每个 RPC 请求独立派发一个 Worker Goroutine，实现高并发无阻塞处理。
+	//
+	// c. 【相关核心代码位置 / Related Code Locations】：
+	//    1. 路由分发与 Protobuf 编解码桩代码：
+	//       - 文件：`proto/datasource_mgr_grpc.pb.go`
+	//       - 符号：`_DataSourceManagerService_GetYibaoData_Handler`、`DataSourceManagerService_ServiceDesc`
+	//    2. 业务逻辑核心实现（方法接收者为 `*grpcserver.GRPCServer`）：
+	//       - 文件：`internal/grpcserver/server.go`
+	//       - 方法：
+	//         * `GetYibaoData(ctx, req)`：医保结算数据抽取处理
+	//         * `GetKangyangData(ctx, req)`：康养健康档案数据抽取处理
+	//         * `GetMockData3(ctx, req)` / `GetMockData4(ctx, req)`：扩展数据源抽取处理
+	//         * `GetDataBySource(ctx, req)`：多态通用数据源路由分发
+	//         * `ListMockSources(ctx, req)`：数据源资产目录列表查询
+	//         * `TestConnection(ctx, req)`：数据源连通性测试
+	//         * `Health(ctx, req)`：gRPC 服务存活与就绪探针
+	//    3. 底层高保真数据生成与分页过滤引擎：
+	//       - 文件：`internal/handlers/mock_data.go`
+	//       - 函数：`GetYibaoRecords(limit, offset)`、`GetKangyangRecords(limit, offset)`
+	// ─────────────────────────────────────────────────────────────────────────
 	go func() {
 		if err := grpcServer.Serve(grpcLis); err != nil {
 			logger.Error("gRPC server error", "error", err.Error())
 		}
 	}()
 
-	// Start HTTP server / 启动 HTTP 监听
+	// 3) 在后台独立 Goroutine 中启动 HTTP REST 服务
 	go func() {
 		logger.Info("mock datasource-mgr HTTP REST server started",
 			"addr", cfg.Address(),
@@ -101,16 +201,23 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal / 等待优雅停机信号
+	// =========================================================================
+	// 7. Graceful Shutdown Workflow / 优雅停机收敛流程
+	// =========================================================================
+	// 1) 阻塞等待退出信号到达
 	sig := <-sigChan
 	logger.Info("shutting down mock datasource-mgr servers...", "signal", sig.String())
 
-	// Graceful shutdown gRPC
+	// 2) 优雅关闭 gRPC 内部后台任务与服务：
+	//    - serviceImpl.Shutdown(): 发送内部 context 取消通知并等待后台异步任务完成；
+	//    - grpcServer.GracefulStop(): 停止接受新连接，等待在途（In-flight）RPC 请求处理完毕。
 	serviceImpl.Shutdown()
 	grpcServer.GracefulStop()
 	logger.Info("gRPC server stopped")
 
-	// Graceful shutdown HTTP
+	// 3) 优雅关闭 HTTP REST 服务：
+	//    - 使用带有 5 秒硬上限的 context 超时控制，等待现有 HTTP 请求结束；
+	//    - 若 5 秒内未完成则强制断开连接，释放 TCP 端口资源。
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {

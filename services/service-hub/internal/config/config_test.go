@@ -168,3 +168,19 @@ func TestLoadAllEnvVariables(t *testing.T) {
 	}
 }
 
+func TestDatasourceConfig(t *testing.T) {
+	cfg := &Config{
+		DatasourceRESTHost: "127.0.0.1",
+		DatasourceRESTPort: 8083,
+		DatasourceGRPCHost: "127.0.0.1",
+		DatasourceGRPCPort: 50053,
+	}
+	if cfg.DatasourceBaseURL() != "http://127.0.0.1:8083" {
+		t.Errorf("expected http://127.0.0.1:8083, got %s", cfg.DatasourceBaseURL())
+	}
+	if cfg.DatasourceGRPCAddress() != "127.0.0.1:50053" {
+		t.Errorf("expected 127.0.0.1:50053, got %s", cfg.DatasourceGRPCAddress())
+	}
+}
+
+

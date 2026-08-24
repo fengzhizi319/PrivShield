@@ -31,7 +31,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
       target: core
-    image: privshield:0.1.0-test
+    image: privshield:1.8.0-test
     container_name: PrivShield-test-target
     environment:
       PRIVACY_REST_HOST: "0.0.0.0"
@@ -63,7 +63,7 @@ services:
     build:
       context: ../..
       dockerfile: console/bff-go/Dockerfile
-    image: privacy-console-backend-go:0.1.0-test
+    image: privacy-console-backend-go:1.8.0-test
     container_name: privacy-console-backend-go-test
     environment:
       PRIVACY_CONSOLE_HOST: "0.0.0.0"
@@ -88,7 +88,7 @@ services:
     build:
       context: ../../console/bff-py
       dockerfile: Dockerfile
-    image: privacy-console-backend-python:0.1.0-test
+    image: privacy-console-backend-python:1.8.0-test
     container_name: privacy-console-backend-python-test
     environment:
       PRIVACY_CONSOLE_HOST: "0.0.0.0"

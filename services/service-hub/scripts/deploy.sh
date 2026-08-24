@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
 
-IMAGE_NAME="${SERVICE_HUB_IMAGE:-privshield-service-hub:0.1.0}"
+IMAGE_NAME="${SERVICE_HUB_IMAGE:-privshield-service-hub:1.8.0}"
 CONTAINER_NAME="${SERVICE_HUB_CONTAINER:-privshield-service-hub}"
 HOST="${SERVICE_HUB_HOST:-0.0.0.0}"
 PORT="${SERVICE_HUB_PORT:-8082}"

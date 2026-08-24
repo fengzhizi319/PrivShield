@@ -25,10 +25,12 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs & Runtime
 *.log
 .logs/
 *.pid
+.pids/
+console/.pids/
 
 # Downloaded models
 .models/

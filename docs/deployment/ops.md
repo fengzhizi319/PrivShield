@@ -263,7 +263,7 @@ deploy/helm/PrivShield/
     ├── NOTES.txt                  # 安装/升级完成后控制台输出的指引信息与冒烟测试提示
     ├── namespace.yaml             # 可选命名空间（当 values 中 namespace.create=true 时创建）
     ├── serviceaccount.yaml        # 运行 Pod 所需的 ServiceAccount（遵循最小特权原则）
-    ├── configmap.yaml             # 挂载 /etc/PrivShield/privacy-profile.yaml 的隐私治理参数配置
+    ├── configmap.yaml             # 挂载 /etc/engine/privacy-profile.yaml 的隐私治理参数配置
     ├── secret.yaml                # 内置 Secret（当未指定外部 secret 时自动由 values 生成证书与 API Key）
     ├── deployment.yaml            # PrivShield Core 主工作负载（含双端口、双探针、安全上下文与存储挂载）
     ├── service.yaml               # ClusterIP Service（统一暴露 REST 8079 与 gRPC 50051 端口）
@@ -646,7 +646,7 @@ spec:
             - name: PRIVACY_GRPC_PORT
               value: "50051"
             - name: PRIVACY_PROFILE
-              value: "/etc/PrivShield/privacy-profile.yaml"
+              value: "/etc/engine/privacy-profile.yaml"
             - name: PRIVACY_LOG_LEVEL
               value: "INFO"
             - name: PRIVACY_LOG_FORMAT
@@ -1130,7 +1130,7 @@ docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-co
 | `restart: unless-stopped`（yml 字段，见 5.2.6） | 重启策略 | 容器异常退出时由 daemon **自动**重启 | 无人值守，按策略拉起 |
 | `docker compose restart vllm`（命令） | 手动操作 | 运维执行 | stop + start **现有容器**；不重建、不重新解析 yml |
 
-> **运维要点**：修改 `docker-compose.yml` 或 `.env` 后，必须 `docker compose up -d`（对比并重建有变更的容器）才生效；`restart` 只重启现有容器，**配置变更不会生效**。`console/scripts/docker-*.sh` 只是命令的封装，不包含实现。
+> **运维要点**：修改 `docker-compose.yml` 或 `.env` 后，必须 `docker compose up -d`（对比并重建有变更的容器）才生效；`restart` 只重启现有容器，**配置变更不会生效**。`scripts/dev/docker-*.sh` 只是命令的封装，不包含实现。
 
 #### 5.2.9 `--profile llm` 从哪里找服务（小白澄清）
 
@@ -1317,7 +1317,7 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 
 ### 5.3 自动化 Docker 脚本运行集
 
-为简化容器化运维与测试，项目在 `scripts/dev/`（侧边栏/LLM 单组分）与 `console/scripts/`（全栈/控制台）中内置了一套便捷的 Docker 脚本：
+为简化容器化运维与测试，项目在 `scripts/dev/` 与 `scripts/prod/` 中内置了一套便捷的 Docker 脚本：
 
 ```bash
 # 1. 独立运行/停止 PrivShield Agent 容器 (支持 core / ml 目标)
@@ -1329,16 +1329,16 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 ./scripts/dev/docker-stop-llm.sh
 
 # 3. 启动 Agent + Go 代理后端 + Web UI 容器套件
-./console/scripts/docker-start-go.sh
+./scripts/dev/docker-start-go.sh
 
 # 4. 启动 Agent + Python 代理后端 + Web UI 容器套件
-./console/scripts/docker-start-python.sh
+./scripts/dev/docker-start-python.sh
 
 # 5. 启动全栈 Docker 容器套件 (Agent + 双后端 + Web UI + 可选 vLLM)
-./console/scripts/docker-start-all.sh [--with-llm]
+./scripts/dev/docker-start-all.sh [--with-llm]
 
 # 6. 一键停止并清理全栈 Docker 容器与 Compose 栈
-./console/scripts/docker-stop.sh
+./scripts/dev/docker-stop.sh
 ```
 
 | 脚本文件 | 适用场景与功能 | 默认端口 / 网络 | 对应自动化测试套件 |
@@ -1351,8 +1351,8 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 | `scripts/dev/docker-stop-agent.sh` | 【开发】停止并删除 Agent 单容器 | — | `tests/scripts/test_docker_start_agent.py` |
 | `scripts/dev/docker-start-llm.sh` | 【开发】启动独立 vLLM 大模型 GPU 推理容器 | HTTP: 8000 (OpenAI 兼容) | `tests/scripts/test_docker_start_llm.py` |
 | `scripts/dev/docker-stop-llm.sh` | 【开发】停止并删除 vLLM 大模型容器 | — | `tests/scripts/test_docker_start_llm.py` |
-| `console/scripts/docker-start-all.sh` | 一键拉起 Agent + 双代理后端 + Web UI（可选 `--with-llm`） | Web: 5173, Go: 8081, Py: 8080 | Docker Compose 全栈编排 |
-| `console/scripts/docker-stop.sh` | 一键停止并清理所有全栈 Compose 容器 | — | 执行 `docker compose down` |
+| `scripts/dev/docker-start-all.sh` | 一键拉起 Agent + 双代理后端 + Web UI（可选 `--with-llm`） | Web: 5173, Go: 8081, Py: 8080 | Docker Compose 全栈编排 |
+| `scripts/dev/docker-stop.sh` | 一键停止并清理所有全栈 Compose 容器 | — | 执行 `docker compose down` |
 
 > **自动化测试建议**：
 > 运行以下命令可自动验证启动脚本、网络拓扑与真实容器的生命周期：
@@ -1402,7 +1402,7 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 | 调脱敏/DP/K匿名参数 | 容器：`deploy/docker-compose/privacy-profile.yaml`；本地：`config/sample-privacy-profile.yaml` | 重建容器 / 重启进程 |
 | 看更详细的日志 | 根目录 `.env` 的 `PRIVACY_LOG_LEVEL=DEBUG` | 重启生效 |
 | 升级 agent 版本 | 改 compose `image:` tag 或重新 `build` | `docker compose up -d` |
-| 改 agent 源码（如 `PrivShield/*.py`） | 无需改配置，直接重新构建镜像 | `docker compose up -d --build PrivShield` |
+| 改 agent 源码（如 `engine/*.py`） | 无需改配置，直接重新构建镜像 | `docker compose up -d --build PrivShield` |
 | 清理容器日志占用的磁盘 | compose 已有 max-size 自动轮转；想手动清可 `docker compose logs --tail=0` | 即时 |
 | 想用监控栈（Prometheus+Grafana） | 无需改配置，加 `--profile monitoring` 即可 | `docker compose --profile monitoring up -d` |
 
@@ -1541,7 +1541,7 @@ docker compose --profile llm up -d  # 解耦模式（core + 独立 vLLM）
 
 ## 7. 安全配置
 
-所有安全开关默认关闭，生产环境通过环境变量显式启用。配置由 `PrivShield/security/config.py` 中的 `SecuritySettings` 统一解析。
+所有安全开关默认关闭，生产环境通过环境变量显式启用。配置由 `engine/security/config.py` 中的 `SecuritySettings` 统一解析。
 
 ### 7.1 TLS / mTLS
 
@@ -2282,7 +2282,7 @@ curl http://localhost:8079/health
 | 2 | `deploy/docker-compose/docker-compose.yml` | healthcheck `test` 数组中 `python` 改为 `python3` |
 | 3 | `tests/scripts/test_docker_start_llm.py` | `_http_get_json` / `_http_post_json` 使用 `urllib.request.build_opener(urllib.request.ProxyHandler({}))` 显式禁用代理 |
 | 4 | `tests/scripts/test_docker_start_llm.py` | 重构 `vllm_service` fixture：使用 `try/finally`、检查容器删除结果、端口映射失败时附加日志诊断 |
-| 5 | `PrivShield/dynclassification/llm_engines.py` | `OpenAILlmClassifier` 新增 `_is_finetuned_model()`，匹配微调模型名时复用 `_FINETUNED_SYSTEM_PROMPT` 和裸用户文本 |
+| 5 | `engine/dynclassification/llm_engines.py` | `OpenAILlmClassifier` 新增 `_is_finetuned_model()`，匹配微调模型名时复用 `_FINETUNED_SYSTEM_PROMPT` 和裸用户文本 |
 
 **验证命令**：
 
@@ -2423,7 +2423,7 @@ docker images | grep -E "(privshield|privacy-console)"
    ```dockerfile
    FROM python:3.13-slim-bookworm
    ```
-3. 在管理脚本（如 `console/scripts/docker-start-all.sh`）中默认传递 `--build` 参数，并提供 `--no-build` 选项。
+3. 在管理脚本（如 `scripts/dev/docker-start-all.sh`）中默认传递 `--build` 参数，并提供 `--no-build` 选项。
 
 ---
 
@@ -2516,7 +2516,7 @@ RUN go mod download
 ```text
 Traceback (most recent call last):
   ...
-  File "/app/PrivShield/privacy/budget.py", line 265, in _init_db
+  File "/app/engine/privacy/budget.py", line 265, in _init_db
     conn = sqlite3.connect(db_path, timeout=10.0)
 sqlite3.OperationalError: unable to open database file
 ```
@@ -2543,7 +2543,7 @@ docker exec PrivShield ls -ld /data/budget /var/log/privacy
 
    USER privacy
    ```
-2. **业务代码上级目录递归建目录兜底**（`PrivShield/privacy/budget.py`）：
+2. **业务代码上级目录递归建目录兜底**（`engine/privacy/budget.py`）：
    ```python
    db_path = os.environ.get("PRIVACY_BUDGET_DB")
    if db_path:

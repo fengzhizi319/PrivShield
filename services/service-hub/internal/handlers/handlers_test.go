@@ -21,6 +21,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/datasource"
 )
 
 func init() {
@@ -78,7 +79,8 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	}
 	d := newTestDeps()
 	ag := agent.New(cfg)
-	srv := New(ag, cfg, d.tasks, d.logger, d.mc)
+	ds := datasource.New(cfg)
+	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 	return srv, mockAgent
 }
 
@@ -93,7 +95,8 @@ func newSimpleTestServer() *Server {
 	}
 	d := newTestDeps()
 	ag := agent.New(cfg)
-	return New(ag, cfg, d.tasks, d.logger, d.mc)
+	ds := datasource.New(cfg)
+	return New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 }
 
 // newMockE2EServer creates a Server connected to a mock agent (httptest.Server).
@@ -167,7 +170,8 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 	}
 	d := newTestDeps()
 	ag := agent.New(cfg)
-	srv := New(ag, cfg, d.tasks, d.logger, d.mc)
+	ds := datasource.New(cfg)
+	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 	return srv, mockAgent
 }
 
@@ -890,7 +894,8 @@ func TestAuthMiddleware_Protection(t *testing.T) {
 	}
 	d := newTestDeps()
 	ag := agent.New(cfg)
-	s := New(ag, cfg, d.tasks, d.logger, d.mc)
+	ds := datasource.New(cfg)
+	s := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 
 	r := gin.New()
 	s.RegisterRoutes(r)
@@ -931,5 +936,96 @@ func TestServer_ShutdownGraceful(t *testing.T) {
 	s := newSimpleTestServer()
 	// Call shutdown directly
 	s.Shutdown()
+}
+
+func TestTriggerDataSourcePipeline(t *testing.T) {
+	// Mock datasource-mgr
+	mockDS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(datasource.DataQueryResult{
+			SourceID:   "ds_yibao",
+			SourceName: "医保就医结算",
+			Total:      50,
+			Records:    []map[string]any{{"name": "张三", "id_card": "510101199001011234"}},
+		})
+	}))
+	defer mockDS.Close()
+
+	u, _ := url.Parse(mockDS.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	cfg := &config.Config{
+		Host:               "127.0.0.1",
+		Port:               0,
+		AgentRESTHost:      "127.0.0.1",
+		AgentRESTPort:      19999,
+		DatasourceRESTHost: u.Hostname(),
+		DatasourceRESTPort: port,
+		MaxQueueDepth:      100,
+		ScheduleTimeout:    5,
+	}
+
+	d := newTestDeps()
+	ag := agent.New(cfg)
+	ds := datasource.New(cfg)
+	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
+	r := newTestRouter(srv)
+
+	body, _ := json.Marshal(map[string]any{
+		"datasource_id": "ds_yibao",
+		"limit":         5,
+		"operation":     "mask",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/hub/pipeline/trigger-datasource", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["datasource_id"] != "ds_yibao" || resp["records_count"].(float64) != 1 {
+		t.Errorf("unexpected trigger response: %+v", resp)
+	}
+}
+
+func TestListDataSourcesProxy(t *testing.T) {
+	mockDS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"total":       2,
+			"datasources": []string{"ds_yibao", "ds_kangyang"},
+		})
+	}))
+	defer mockDS.Close()
+
+	u, _ := url.Parse(mockDS.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	cfg := &config.Config{
+		Host:               "127.0.0.1",
+		Port:               0,
+		AgentRESTHost:      "127.0.0.1",
+		AgentRESTPort:      19999,
+		DatasourceRESTHost: u.Hostname(),
+		DatasourceRESTPort: port,
+	}
+
+	d := newTestDeps()
+	ag := agent.New(cfg)
+	ds := datasource.New(cfg)
+	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
+	r := newTestRouter(srv)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/hub/datasources", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
 }
 

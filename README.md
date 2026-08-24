@@ -121,19 +121,19 @@ python -m engine.server
 
 ```bash
 # 启动核心服务（Agent + Go BFF + Web UI）
-bash ./console/scripts/docker-start-go.sh
+bash ./scripts/dev/docker-start-go.sh
 
 # 启动全栈微服务群（Agent + 3 Go 中台微服务 + 双 BFF + Web UI）
-bash ./console/scripts/docker-start-all.sh
+bash ./scripts/dev/docker-start-all.sh
 
 # 启动全栈 + vLLM 本地大模型推理
-bash ./console/scripts/docker-start-all.sh --with-llm
+bash ./scripts/dev/docker-start-all.sh --with-llm
 
 # 启动 Prometheus + Grafana 监控大屏
 docker compose --profile monitoring up -d
 
 # 一键停止全栈容器
-bash ./console/scripts/docker-stop.sh
+bash ./scripts/dev/docker-stop.sh
 ```
 
 ### 3. 全服务端口与职责速查表

@@ -84,10 +84,10 @@ corepack pnpm dev       # 打开 http://localhost:5173
 
 ```bash
 # 一键启动 agent + Go 后端（自动补依赖、构建前端、预编译 Go 二进制）
-./console/scripts/dev-start-go.sh
+./scripts/dev/dev-start-go.sh
 
 # 访问 http://127.0.0.1:8081 即可打开控制台
-# 按 Ctrl+C 停止所有服务；或在另一终端执行 ./console/scripts/dev-stop.sh
+# 按 Ctrl+C 停止所有服务；或在另一终端执行 ./scripts/dev/dev-stop.sh
 ```
 
 **手动方式：**
@@ -114,8 +114,8 @@ go build -o bin/backend-go ./cmd/server
 如需在页面顶部 Backend Selector 中自由切换 Python REST / Go gRPC 两个后端：
 
 ```bash
-./console/scripts/dev-start-all.sh    # 同时启动 agent + Python(8080) + Go(8081)
-./console/scripts/dev-stop.sh     # 停止
+./scripts/dev/dev-start-all.sh    # 同时启动 agent + Python(8080) + Go(8081)
+./scripts/dev/dev-stop.sh     # 停止
 ```
 
 打开 `http://127.0.0.1:8080` 或 `http://127.0.0.1:8081` 均可，切换后端时请求会跨域到另一端口，同样依赖 CORS 中间件。
@@ -259,13 +259,13 @@ server {
 
 ```bash
 # 1. 生成一套自签名测试证书（CA + 服务端 + 客户端）到 console/bff-go/certs/
-./console/bff-go/scripts/gen-certs.sh
+./scripts/dev/gen-certs.sh
 
 # 2. 一键以 mTLS 模式启动 agent + Go 代理（证书缺失时会自动生成）
-./console/scripts/dev-start-go-mtls.sh
+./scripts/dev/dev-start-go-mtls.sh
 
 # 3. 停止
-./console/scripts/dev-stop.sh
+./scripts/dev/dev-stop.sh
 ```
 
 `gen-certs.sh` 基于 openssl 生成：
@@ -338,13 +338,13 @@ sequenceDiagram
 
 | 脚本 | 作用 |
 |---|---|
-| `./console/scripts/dev-start-go.sh` | 启动 agent + Go 后端（自动补依赖、构建前端、预编译二进制），Ctrl+C 停止 |
-| `./console/scripts/dev-start-go-mtls.sh` | 以 **mTLS 模式**启动 agent + Go 后端（证书缺失时自动生成） |
-| `./console/scripts/dev-stop.sh` | 读取 `console/.pids/` 中的 PID 安全停止（含 mTLS 进程） |
-| `./console/scripts/dev-start-all.sh` | 启动 agent + Python + Go 双后端 |
-| `./console/scripts/dev-stop.sh` | 停止双后端全部进程 |
+| `./scripts/dev/dev-start-go.sh` | 启动 agent + Go 后端（自动补依赖、构建前端、预编译二进制），Ctrl+C 停止 |
+| `./scripts/dev/dev-start-go-mtls.sh` | 以 **mTLS 模式**启动 agent + Go 后端（证书缺失时自动生成） |
+| `./scripts/dev/dev-stop.sh` | 读取 `.pids/` 中的 PID 安全停止（含 mTLS 进程） |
+| `./scripts/dev/dev-start-all.sh` | 启动 agent + Python + Go 双后端 |
+| `./scripts/dev/dev-stop.sh` | 停止双后端全部进程 |
 
-启动脚本每次运行都会自动补齐依赖并构建前端（Go 二进制每次均重新编译）；如需强制重建前端，删除 `console/web/dist` 后重新运行 `./console/scripts/dev-start-go.sh` 即可。
+启动脚本每次运行都会自动补齐依赖并构建前端（Go 二进制每次均重新编译）；如需强制重建前端，删除 `console/web/dist` 后重新运行 `./scripts/dev/dev-start-go.sh` 即可。
 
 ### 6.2 手动启停
 
@@ -372,7 +372,7 @@ go build -o bin/backend-go ./cmd/server
 
 ### 6.4 PID 管理
 
-一键脚本会把进程 PID 写入 `console/.pids/`（如 `agent-go.pid`、`console-go.pid`），`dev-stop.sh` 据此精确停止，避免误杀其他进程。
+一键脚本会把进程 PID 写入根目录 `.pids/`（如 `agent-go.pid`、`console-go.pid`），`dev-stop.sh` 据此精确停止，避免误杀其他进程。
 
 ---
 
@@ -411,7 +411,7 @@ go test ./...
 | gRPC 调用返回认证错误 | agent 开启了认证 | 设置 `PRIVACY_AGENT_API_KEY` |
 | 访问 `/` 返回 404 | `web/dist` 未构建 | `cd console/web && corepack pnpm build` 后重启 |
 | 静态托管未生效 | `PRIVACY_CONSOLE_STATIC_DIR` 被设为空 | 去掉该变量或指向正确的 dist 目录 |
-| 端口被占用 `http server failed` | 8081 已被其他进程使用 | 改 `PRIVACY_CONSOLE_PORT`，或 `./console/scripts/dev-stop.sh` 清理残留 |
+| 端口被占用 `http server failed` | 8081 已被其他进程使用 | 改 `PRIVACY_CONSOLE_PORT`，或 `./scripts/dev/dev-stop.sh` 清理残留 |
 | 部分端点 404 / 不支持 | 该端点为 REST 专属（如 `/livez`、`/v1/privacy/budget`） | 切回 Python REST 后端（见 README「已知限制」） |
 | 改后端代码不生效 | Go 无热重载 | 重新 `go run` 或重新编译二进制 |
 

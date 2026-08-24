@@ -207,7 +207,7 @@ backends:
 
 ### 2.3 CLI 启动命令行参数
 
-网关入口模块为 [`engine.gateway.server`](file:///home/charles/code/sfwork/PrivShield/PrivShield/gateway/server.py)：
+网关入口模块为 [`engine.gateway.server`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/server.py)：
 
 ```bash
 # 查看帮助
@@ -507,7 +507,7 @@ volumes:
 services:
   # Agent 计算节点 1
   agent-worker-1:
-    image: privshield:0.1.0
+    image: privshield:1.8.0
     restart: always
     environment:
       - PRIVACY_REST_PORT=8079
@@ -521,7 +521,7 @@ services:
 
   # Agent 计算节点 2
   agent-worker-2:
-    image: privshield:0.1.0
+    image: privshield:1.8.0
     restart: always
     environment:
       - PRIVACY_REST_PORT=8079
@@ -535,7 +535,7 @@ services:
 
   # 网关与负载均衡器
   gateway:
-    image: privshield:0.1.0
+    image: privshield:1.8.0
     restart: always
     command: ["python", "-m", "engine.gateway.server"]
     environment:
@@ -647,7 +647,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: privshield:0.1.0
+          image: privshield:1.8.0
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "engine.gateway.server"]
           env:
@@ -727,7 +727,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: privshield:0.1.0
+          image: privshield:1.8.0
           imagePullPolicy: IfNotPresent
           env:
             - name: PRIVACY_REST_PORT

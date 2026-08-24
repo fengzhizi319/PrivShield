@@ -158,7 +158,7 @@ def test_helm_template_default_values() -> None:
     containers = core_deploy["spec"]["template"]["spec"]["containers"]
     assert len(containers) == 1
     core_container = containers[0]
-    assert core_container["image"] == "privshield:0.1.0"
+    assert core_container["image"] == "privshield:1.8.0"
     assert core_container["imagePullPolicy"] == "IfNotPresent"
 
     # 验证端口
@@ -286,7 +286,7 @@ def test_helm_template_ml_flavor() -> None:
     """验证 ML 镜像版本 (flavor: ml) 的 values 渲染。
 
     验证：
-    - 镜像标签自动添加 -ml 后缀 (如 privshield:0.1.0-ml)
+    - 镜像标签自动添加 -ml 后缀 (如 privshield:1.8.0-ml)
     - 资源限制调整为 ML 场景 (CPU 4000m / 内存 8Gi)
     - HPA 自动启用 (minReplicas 1, maxReplicas 3)
     """

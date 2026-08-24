@@ -3,8 +3,9 @@
 //
 // Architecture / 架构：
 //
-//	React 前端  ──HTTP/JSON──▶  service-hub(Go)  ──HTTP──▶  PrivShield Agent
-//	                          └─gRPC(mTLS)──▶  外部客户端
+//	React 前端 ──HTTP/JSON──▶ service-hub(Go) ──HTTP──▶ PrivShield Agent
+//	                          │               ──HTTP──▶ datasource-mgr (:8083)
+//	                          └─gRPC(mTLS)───▶ 调度中枢客户端 (Port: :50052)
 package main
 
 import (
@@ -30,6 +31,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/datasource"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/handlers"
 	pb "github.com/fengzhizi319/PrivShield/services/service-hub/proto"
@@ -50,12 +52,13 @@ func main() {
 	// ── Prometheus metrics / Prometheus 指标 ───────────────────
 	mc := metrics.NewCollector("service-hub")
 
-	// ── Agent client / Agent 客户端 ────────────────────────────
+	// ── Clients / 客户端依赖 ───────────────────────────────────
 	agentClient := agent.New(cfg)
+	dsClient := datasource.New(cfg)
 
 	// ── HTTP REST Server / HTTP REST 服务器 ──────────────────────
 	gin.SetMode(gin.ReleaseMode)
-	server := handlers.New(agentClient, cfg, taskStore, logger, mc)
+	server := handlers.New(agentClient, dsClient, cfg, taskStore, logger, mc)
 	router := gin.New()
 	server.RegisterRoutes(router)
 
@@ -71,22 +74,15 @@ func main() {
 
 	// ── gRPC Server (with optional mTLS) / gRPC 服务器（可选 mTLS）──
 	var grpcServer *grpc.Server
-	// P53 fix: save serviceImpl reference for graceful shutdown of task goroutines.
-	// 保存 serviceImpl 引用，以便优雅关停时通知 processTask goroutine 停止。
 	var serviceImpl *grpcserver.GRPCServer
 
-	// P53 fix: both TLS and non-TLS branches manually create serviceImpl so we
-	// hold the registered instance reference for Shutdown(). Previously the TLS
-	// branch used StartGRPCServer() which created an internal instance we couldn't
-	// reach, then created a second unregistered one — Shutdown() was a no-op.
-	// TLS 和非 TLS 分支均手动创建 serviceImpl，确保持有已注册实例的引用用于 Shutdown()。
 	if cfg.TLSEnabled {
 		creds, credErr := grpcserver.BuildServerCredentials(cfg)
 		if credErr != nil {
 			log.Fatalf("failed to build TLS credentials: %v", credErr)
 		}
 		grpcServer = grpc.NewServer(grpc.Creds(creds))
-		serviceImpl = grpcserver.New(agentClient, cfg, taskStore, logger)
+		serviceImpl = grpcserver.New(agentClient, dsClient, cfg, taskStore, logger)
 		pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)
 		logger.Info("gRPC server started with mTLS",
 			"addr", cfg.GRPCAddress(),
@@ -95,7 +91,7 @@ func main() {
 		)
 	} else {
 		grpcServer = grpc.NewServer()
-		serviceImpl = grpcserver.New(agentClient, cfg, taskStore, logger)
+		serviceImpl = grpcserver.New(agentClient, dsClient, cfg, taskStore, logger)
 		pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)
 		logger.Info("gRPC server started (insecure)", "addr", cfg.GRPCAddress())
 	}
@@ -118,48 +114,49 @@ func main() {
 	}()
 
 	// Start HTTP server
+	// 启动 HTTP 监听
 	go func() {
-		logger.Info("service-hub started",
-			"http_addr", cfg.Address(),
+		logger.Info("service-hub HTTP REST server started",
+			"addr", cfg.Address(),
 			"grpc_addr", cfg.GRPCAddress(),
 			"agent_rest", cfg.AgentBaseURL(),
+			"datasource_rest", cfg.DatasourceBaseURL(),
 			"db_path", cfg.DBPath,
 			"auth_enabled", cfg.APIKey != "",
 		)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http server failed: %v", err)
+			logger.Error("HTTP server error", "error", err.Error())
 		}
 	}()
 
 	// Wait for shutdown signal
-	<-sigChan
-	logger.Info("shutting down servers...")
+	// 等待优雅停机信号
+	sig := <-sigChan
+	logger.Info("shutting down service-hub servers...", "signal", sig.String())
 
-	// P53 fix: cancel in-flight task goroutines via Server.Shutdown() before
-	// stopping the gRPC/HTTP listeners, so processTask goroutines receive
-	// context cancellation and exit cleanly instead of being killed mid-flight.
-	server.Shutdown()   // HTTP handler: cancel processTask goroutines + wait
-	serviceImpl.Shutdown() // gRPC handler: cancel processTask goroutines + wait
+	// P51 + P53 fix: signal running task goroutines to cancel before stopping servers
+	// 先取消正在运行的任务 goroutine，再停止 gRPC 和 HTTP 服务器
+	serviceImpl.Shutdown()
+	server.Shutdown()
 
-	// Graceful shutdown of listeners
+	// Graceful shutdown gRPC
+	// 优雅关停 gRPC 服务器
+	grpcServer.GracefulStop()
+	logger.Info("gRPC server stopped")
+
+	// Graceful shutdown HTTP with 5-second deadline
+	// 优雅关停 HTTP 服务器（5 秒超时）
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	grpcServer.GracefulStop()
-
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("http server shutdown error", "error", err.Error())
+		logger.Error("HTTP server shutdown error", "error", err.Error())
+	} else {
+		logger.Info("HTTP server stopped")
 	}
-
-	logger.Info("servers stopped gracefully")
 }
 
-// initTaskStore creates the task store based on configuration.
-// initTaskStore 根据配置创建任务存储：SQLite 或内存回退。
 func initTaskStore(dbPath string, logger *slog.Logger) (store.TaskStore, error) {
 	if dbPath == "" {
-		// Fall back to in-memory store
-		// 回退到内存存储
 		logger.Info("using in-memory task store (no persistence)")
 		return memory.NewTaskStore(), nil
 	}

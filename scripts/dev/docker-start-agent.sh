@@ -85,12 +85,12 @@ cd "$PROJECT_ROOT"
 # ── 步骤 4：镜像构建 ──────────────────────────────────────────────────────
 if [[ "$TARGET" == "ml" ]]; then
     echo "📦 构建含有 PyTorch / Transformers / ONNX 的 ML 镜像..."
-    docker build --target ml -t privshield:0.1.0-ml .
-    IMAGE_NAME="privshield:0.1.0-ml"
+    docker build --target ml -t privshield:1.8.0-ml .
+    IMAGE_NAME="privshield:1.8.0-ml"
 else
     echo "📦 构建轻量 Core 镜像..."
-    docker build --target core -t privshield:0.1.0 .
-    IMAGE_NAME="privshield:0.1.0"
+    docker build --target core -t privshield:1.8.0 .
+    IMAGE_NAME="privshield:1.8.0"
 fi
 
 # ── 步骤 5：停止并清理旧容器（防止名称冲突）──────────────────────────────

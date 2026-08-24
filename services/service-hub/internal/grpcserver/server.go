@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
+	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/datasource"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/models"
 	pb "github.com/fengzhizi319/PrivShield/services/service-hub/proto"
 )
@@ -41,30 +43,32 @@ const moduleVia = "service-hub-grpc"
 type GRPCServer struct {
 	pb.UnimplementedServiceHubServiceServer
 
-	agent     *agent.Client
-	cfg       *config.Config
-	startTime time.Time
-	tasks     store.TaskStore
-	logger    *slog.Logger
-	taskSem   chan struct{} // P29 fix: semaphore to limit concurrent task processing goroutines
-	ctx       context.Context    // P51 fix: parent context for graceful shutdown of task goroutines
-	cancel    context.CancelFunc // P51 fix: cancel function to signal all task goroutines to stop
-	wg        sync.WaitGroup     // P51 fix: wait group to track active task goroutines
+	agent      *agent.Client
+	datasource *datasource.Client
+	cfg        *config.Config
+	startTime  time.Time
+	tasks      store.TaskStore
+	logger     *slog.Logger
+	taskSem    chan struct{}      // P29 fix: semaphore to limit concurrent task processing goroutines
+	ctx        context.Context    // P51 fix: parent context for graceful shutdown of task goroutines
+	cancel     context.CancelFunc // P51 fix: cancel function to signal all task goroutines to stop
+	wg         sync.WaitGroup     // P51 fix: wait group to track active task goroutines
 }
 
 // New creates a new GRPCServer instance.
 // New 创建一个新的 GRPCServer 实例。
-func New(ag *agent.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger) *GRPCServer {
+func New(ag *agent.Client, ds *datasource.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger) *GRPCServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &GRPCServer{
-		agent:     ag,
-		cfg:       cfg,
-		startTime: time.Now(),
-		tasks:     tasks,
-		logger:    logger,
-		taskSem:   make(chan struct{}, 10), // P29: max 10 concurrent task goroutines
-		ctx:       ctx,
-		cancel:    cancel,
+		agent:      ag,
+		datasource: ds,
+		cfg:        cfg,
+		startTime:  time.Now(),
+		tasks:      tasks,
+		logger:     logger,
+		taskSem:    make(chan struct{}, 10), // P29: max 10 concurrent task goroutines
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -91,31 +95,31 @@ func (s *GRPCServer) Health(ctx context.Context, req *pb.HealthRequest) (*pb.Hea
 
 	if err != nil {
 		return &pb.HealthResponse{
-			Backend:    "ok",
-			Agent:      "unreachable",
-			AgentUrl:   s.cfg.AgentBaseURL(),
-			LatencyMs:  latency,
-			Error:      err.Error(),
-			Via:        moduleVia,
+			Backend:   "ok",
+			Agent:     "unreachable",
+			AgentUrl:  s.cfg.AgentBaseURL(),
+			LatencyMs: latency,
+			Error:     err.Error(),
+			Via:       moduleVia,
 		}, nil
 	}
 
 	agentStr := fmt.Sprintf("%v", agentData["status"])
 	return &pb.HealthResponse{
-		Backend:    "ok",
-		Agent:      agentStr,
-		AgentUrl:   s.cfg.AgentBaseURL(),
-		LatencyMs:  latency,
-		Via:        moduleVia,
+		Backend:   "ok",
+		Agent:     agentStr,
+		AgentUrl:  s.cfg.AgentBaseURL(),
+		LatencyMs: latency,
+		Via:       moduleVia,
 	}, nil
 }
 
-// HubStatus returns the scheduling hub's current status.
-// HubStatus 返回调度中枢的当前状态概览。
+// HubStatus returns the scheduling hub status overview.
+// HubStatus 返回调度中枢的状态概览。
 func (s *GRPCServer) HubStatus(ctx context.Context, req *pb.HubStatusRequest) (*pb.HubStatusResponse, error) {
 	counts, err := s.tasks.Counts()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get task counts: %v", err)
+		return nil, status.Errorf(codes.Internal, "get task counts: %v", err)
 	}
 
 	return &pb.HubStatusResponse{
@@ -129,35 +133,38 @@ func (s *GRPCServer) HubStatus(ctx context.Context, req *pb.HubStatusRequest) (*
 	}, nil
 }
 
-// Dispatch creates a new task and processes it through the pipeline.
-// Dispatch 创建新任务并通过流水线处理。
+// Dispatch dispatches a new task to the scheduling pipeline.
+// Dispatch 将新任务分发到调度流水线。
 func (s *GRPCServer) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.DispatchResponse, error) {
-	if req.Source == "" || req.Operation == "" {
-		return nil, status.Error(codes.InvalidArgument, "source and operation are required")
+	// Input validation / 输入校验
+	if strings.TrimSpace(req.Source) == "" {
+		return nil, status.Error(codes.InvalidArgument, "source must not be empty")
 	}
-	// P54 fix: validate source length to prevent storage exhaustion, aligned with HTTP handler.
 	if len(req.Source) > 1024 {
-		return nil, status.Error(codes.InvalidArgument, "source must not exceed 1024 characters")
+		return nil, status.Error(codes.InvalidArgument, "source exceeds maximum length of 1024 characters")
+	}
+	if err := validation.AllowedValues("operation", req.Operation, validation.HubOperations); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 
-	taskID := validation.GenerateID("grpc-task")
+	taskID := validation.GenerateID("task")
 	now := time.Now()
+
 	task := &store.Task{
 		ID:          taskID,
 		Status:      "pending",
 		Stage:       "queued",
 		Source:      req.Source,
 		Operation:   req.Operation,
+		Priority:    int(req.Priority),
 		CreatedAt:   now,
 		PayloadJSON: req.PayloadJson,
 	}
 
 	if err := s.tasks.Save(task); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save task: %v", err)
+		return nil, status.Errorf(codes.Internal, "save task: %v", err)
 	}
 
-	// Process task asynchronously
-	// P51 fix: track goroutine via WaitGroup for graceful shutdown.
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -171,115 +178,113 @@ func (s *GRPCServer) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb
 	}, nil
 }
 
-// ClassifyAndDispatch performs classification first, then auto-dispatches.
-// ClassifyAndDispatch 先执行分类分级，再根据敏感度自动分发。
+// ClassifyAndDispatch performs classification first, then auto-dispatches based on sensitivity.
 func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAndDispatchRequest) (*pb.ClassifyAndDispatchResponse, error) {
-	if req.Source == "" {
-		return nil, status.Error(codes.InvalidArgument, "source is required")
+	if strings.TrimSpace(req.Source) == "" {
+		return nil, status.Error(codes.InvalidArgument, "source must not be empty")
 	}
-	// P49 fix: validate source length to prevent storage exhaustion, aligned with HTTP handler.
 	if len(req.Source) > 1024 {
-		return nil, status.Error(codes.InvalidArgument, "source must not exceed 1024 characters")
+		return nil, status.Error(codes.InvalidArgument, "source exceeds maximum length of 1024 characters")
 	}
 
-	// Call agent classification
+	payloadJSON := req.PayloadJson
+	if (payloadJSON == "" || payloadJSON == "{}" || payloadJSON == "null") && s.datasource != nil {
+		dsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if res, err := s.datasource.FetchDataBySource(dsCtx, req.Source, 5, 0); err == nil && len(res.Records) > 0 {
+			b, _ := json.Marshal(res.Records[0])
+			payloadJSON = string(b)
+		}
+		cancel()
+	}
+
 	classifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	classifyResult, err := s.agent.Classify(classifyCtx, req.PayloadJson)
+	classifyResult, err := s.agent.Classify(classifyCtx, payloadJSON)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "classification failed: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "classification failed: %v", err)
 	}
 
-	// Determine operation based on classification level
 	level := "L2"
 	if lvl, ok := classifyResult["level"].(string); ok {
 		level = lvl
 	}
 
-	operation := levelToOperation(level)
+	operation := models.LevelToOperation(level)
+	priority := levelToPriority(level)
 
-	// Auto-dispatch the appropriate task
-	taskID := validation.GenerateID("grpc-task")
+	taskID := validation.GenerateID("task")
 	now := time.Now()
+
 	task := &store.Task{
 		ID:          taskID,
 		Status:      "pending",
 		Stage:       "queued",
 		Source:      req.Source,
 		Operation:   operation,
+		Priority:    priority,
 		CreatedAt:   now,
-		PayloadJSON: req.PayloadJson,
+		PayloadJSON: payloadJSON,
 	}
 
 	if err := s.tasks.Save(task); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save task: %v", err)
+		return nil, status.Errorf(codes.Internal, "save task: %v", err)
 	}
 
-	// P51 fix: track goroutine via WaitGroup for graceful shutdown.
+	classifyResultJSON, _ := json.Marshal(classifyResult)
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.processTask(task, operation, req.PayloadJson)
+		s.processTask(task, operation, payloadJSON)
 	}()
 
-	// Serialize classify result
-	resultJSON := fmt.Sprintf("%v", classifyResult)
-
 	return &pb.ClassifyAndDispatchResponse{
-		TaskId:               taskID,
-		Level:                level,
-		AutoOperation:        operation,
-		ClassifyResultJson:   resultJSON,
-		Via:                  moduleVia,
+		TaskId:             taskID,
+		Level:              level,
+		AutoOperation:      operation,
+		ClassifyResultJson: string(classifyResultJSON),
+		Via:                moduleVia,
 	}, nil
 }
 
-// GetTask returns a single task by ID.
-// GetTask 根据 ID 返回单个任务。
+// GetTask returns the details of a single task by ID.
 func (s *GRPCServer) GetTask(ctx context.Context, req *pb.GetTaskRequest) (*pb.TaskProto, error) {
-	if req.TaskId == "" {
-		return nil, status.Error(codes.InvalidArgument, "task_id is required")
+	taskID := strings.TrimSpace(req.GetTaskId())
+	if taskID == "" {
+		return nil, status.Error(codes.InvalidArgument, "task id must not be empty")
 	}
 
-	task, err := s.tasks.Get(req.TaskId)
+	task, err := s.tasks.Get(taskID)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "task %s not found", req.TaskId)
+		return nil, status.Errorf(codes.NotFound, "task %s not found", taskID)
 	}
 
 	return taskToProto(task), nil
 }
 
 // ListTasks returns all tasks, optionally filtered by status.
-// P20 fix: added pagination via limit/offset with safe defaults, aligned with REST API.
-// ListTasks 返回所有任务，可选按状态过滤。已添加分页保护，与 REST API 对齐。
 func (s *GRPCServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.ListTasksResponse, error) {
-	// P52 fix: validate status filter to prevent meaningless queries.
-	if req.StatusFilter != "" {
-		if err := validation.AllowedValues("status", req.StatusFilter, validation.TaskStatuses); err != nil {
-			return nil, status.Error(codes.InvalidArgument, err.Error())
+	statusFilter := req.GetStatusFilter()
+	if statusFilter != "" {
+		if err := validation.AllowedValues("status", statusFilter, validation.TaskStatuses); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "%v", err)
 		}
 	}
 
-	// P20 fix: apply safe pagination limits (server-side defaults, proto fields not yet available)
-	// 应用安全分页限制（服务端默认值，proto 字段待 protoc 可用后补齐）
-	limit := 100
-	offset := 0
-
-	tasks, total, err := s.tasks.List(store.TaskFilter{Status: req.StatusFilter, Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list tasks: %v", err)
-	}
-
-	protos := make([]*pb.TaskProto, 0, len(tasks))
-	for i := range tasks {
-		protos = append(protos, taskToProto(&tasks[i]))
-	}
-
-	// Sort by creation time descending (newest first)
-	sort.Slice(protos, func(i, j int) bool {
-		return protos[i].CreatedAt > protos[j].CreatedAt
+	tasks, total, err := s.tasks.List(store.TaskFilter{
+		Status: statusFilter,
+		Limit:  100,
+		Offset: 0,
 	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list tasks: %v", err)
+	}
+
+	protos := make([]*pb.TaskProto, len(tasks))
+	for i := range tasks {
+		protos[i] = taskToProto(&tasks[i])
+	}
 
 	return &pb.ListTasksResponse{
 		Total: int32(total),
@@ -288,35 +293,32 @@ func (s *GRPCServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*
 	}, nil
 }
 
-// PipelineStatus returns the status of each pipeline stage.
-// PipelineStatus 返回调度流水线各阶段的状态。
+// PipelineStatus returns the current status of each pipeline stage.
 func (s *GRPCServer) PipelineStatus(ctx context.Context, req *pb.PipelineStatusRequest) (*pb.PipelineStatusResponse, error) {
-	// P36 fix: cap running tasks query to prevent OOM under high concurrency
 	runningTasks, _, err := s.tasks.List(store.TaskFilter{Status: "running", Limit: 1000})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list tasks: %v", err)
+		return nil, status.Errorf(codes.Internal, "list running tasks: %v", err)
 	}
 
 	stageNames := []string{"ingest", "fetch", "classify", "desensitize", "return", "audit"}
-	stageCounts := make(map[string]int32)
+	stageCounts := make(map[string]int)
 	for _, t := range runningTasks {
 		stageCounts[t.Stage]++
 	}
 
-	stages := make([]*pb.PipelineStageProto, 0, len(stageNames))
-	for _, name := range stageNames {
-		statusStr := "idle"
+	stages := make([]*pb.PipelineStageProto, len(stageNames))
+	for i, name := range stageNames {
+		st := "idle"
 		if stageCounts[name] > 0 {
-			statusStr = "processing"
+			st = "processing"
 		}
-		stages = append(stages, &pb.PipelineStageProto{
+		stages[i] = &pb.PipelineStageProto{
 			Name:        name,
-			Status:      statusStr,
-			ActiveCount: stageCounts[name],
-		})
+			Status:      st,
+			ActiveCount: int32(stageCounts[name]),
+		}
 	}
 
-	// Check agent connectivity
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, agentErr := s.agent.Health(healthCtx)
@@ -332,16 +334,10 @@ func (s *GRPCServer) PipelineStatus(ctx context.Context, req *pb.PipelineStatusR
 // ─────────────────────────────────────────────────────────────
 
 // processTask simulates the scheduling pipeline stages.
-// processTask 模拟调度流水线的各阶段处理。
-//
-// P19 fix: recover from panics to prevent goroutine crash from killing the process.
-// 从 panic 中恢复，防止 goroutine 崩溃导致整个进程退出。
 func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string) {
-	// P29 fix: acquire semaphore slot to limit concurrent task goroutines
 	s.taskSem <- struct{}{}
 	defer func() { <-s.taskSem }()
 
-	// P19 fix: panic recovery — mark task as failed instead of crashing the process
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error("processTask panic recovered",
@@ -364,8 +360,6 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 		task.StartedAt = &now
 		_ = s.tasks.Update(task)
 
-		// P51 fix: use select with context instead of plain time.Sleep,
-		// so goroutine can be cancelled during shutdown.
 		select {
 		case <-time.After(100 * time.Millisecond):
 		case <-s.ctx.Done():
@@ -376,6 +370,20 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
 			_ = s.tasks.Update(task)
 			return
+		}
+
+		// Stage 2: fetch → if payload is empty, attempt to fetch from datasource-mgr
+		if stage == "fetch" && s.datasource != nil {
+			if payloadJSON == "" || payloadJSON == "{}" || payloadJSON == "null" {
+				ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+				if res, err := s.datasource.FetchDataBySource(ctx, task.Source, 10, 0); err == nil && len(res.Records) > 0 {
+					b, _ := json.Marshal(res.Records)
+					payloadJSON = string(b)
+					task.PayloadJSON = payloadJSON
+					_ = s.tasks.Update(task)
+				}
+				cancel()
+			}
 		}
 
 		// Stage 3: classify → call agent if operation is classify
@@ -419,8 +427,6 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 	_ = s.tasks.Update(task)
 }
 
-// taskToProto converts a store.Task to pb.TaskProto.
-// taskToProto 将 store.Task 转换为 pb.TaskProto。
 func taskToProto(t *store.Task) *pb.TaskProto {
 	proto := &pb.TaskProto{
 		Id:         t.ID,
@@ -428,208 +434,273 @@ func taskToProto(t *store.Task) *pb.TaskProto {
 		Stage:      t.Stage,
 		Source:     t.Source,
 		Operation:  t.Operation,
-		CreatedAt:  t.CreatedAt.Format(time.RFC3339),
-		DurationMs: t.DurationMs,
+		CreatedAt:  t.CreatedAt.Format(time.RFC3339Nano),
 		Error:      t.Error,
+		DurationMs: t.DurationMs,
 	}
 	if t.StartedAt != nil {
-		proto.StartedAt = t.StartedAt.Format(time.RFC3339)
+		proto.StartedAt = t.StartedAt.Format(time.RFC3339Nano)
 	}
 	if t.CompletedAt != nil {
-		proto.CompletedAt = t.CompletedAt.Format(time.RFC3339)
+		proto.CompletedAt = t.CompletedAt.Format(time.RFC3339Nano)
 	}
 	return proto
 }
 
-// levelToOperation maps sensitivity level to desensitization operation.
-// P50 fix: delegates to shared models.LevelToOperation to eliminate duplication.
-func levelToOperation(level string) string {
-	return models.LevelToOperation(level)
+func levelToPriority(level string) int {
+	switch level {
+	case "L5":
+		return 100
+	case "L4":
+		return 80
+	case "L3":
+		return 60
+	case "L2":
+		return 40
+	case "L1":
+		return 10
+	default:
+		return 40
+	}
 }
 
 // ─────────────────────────────────────────────────────────────
-// mTLS Credential Builder / mTLS 凭证构建
+// mTLS Credentials Builder / mTLS 凭证构造
 // ─────────────────────────────────────────────────────────────
 
-// BuildServerCredentials constructs gRPC server credentials with mTLS.
-// BuildServerCredentials 构建带 mTLS 双向认证的 gRPC 服务端凭证。
-//
-// Security layers / 安全层级：
-//  1. TLS encryption: server cert + key for encrypted transport
-//  2. Client certificate verification: CA cert to verify client identity
-//  3. Public key pinning: optional pinned public key for extra security
 func BuildServerCredentials(cfg *config.Config) (credentials.TransportCredentials, error) {
 	if !cfg.TLSEnabled {
-		return nil, fmt.Errorf("TLS is not enabled")
+		return nil, fmt.Errorf("TLS is disabled in configuration")
 	}
-
 	if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-		return nil, fmt.Errorf("server cert and key are required when TLS is enabled")
+		return nil, fmt.Errorf("TLS cert file and key file must be configured")
 	}
 
-	serverCert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load server certificate: %w", err)
+		return nil, fmt.Errorf("load server x509 key pair: %w", err)
 	}
 
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
 	}
 
-	switch strings.ToLower(cfg.TLSClientAuth) {
-	case "require", "verify":
+	clientAuthMode := strings.ToLower(strings.TrimSpace(cfg.TLSClientAuth))
+	if clientAuthMode != "" {
 		if cfg.TLSCAFile == "" {
-			return nil, fmt.Errorf("CA certificate is required for client verification")
+			return nil, fmt.Errorf("TLS CA file must be configured when client auth is enabled")
 		}
-
-		caCert, err := os.ReadFile(cfg.TLSCAFile)
+		caPEM, err := os.ReadFile(cfg.TLSCAFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+			return nil, fmt.Errorf("read TLS CA file: %w", err)
 		}
-
-		caCertPool := x509.NewCertPool()
-		if !caCertPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", cfg.TLSCAFile)
 		}
+		tlsConfig.ClientCAs = caPool
 
-		tlsConfig.ClientCAs = caCertPool
-		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-
-		if cfg.TLSPinnedPubKeyFile != "" {
-			tlsConfig.VerifyPeerCertificate = buildPublicKeyVerifier(cfg.TLSPinnedPubKeyFile)
+		switch clientAuthMode {
+		case "require", "requireandverify":
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		case "verify":
+			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+		case "request":
+			tlsConfig.ClientAuth = tls.RequestClientCert
+		default:
+			return nil, fmt.Errorf("unknown TLS client auth mode: %s", cfg.TLSClientAuth)
 		}
+	}
 
-	case "":
-		tlsConfig.ClientAuth = tls.NoClientCert
-
-	default:
-		return nil, fmt.Errorf("unknown client auth mode: %s", cfg.TLSClientAuth)
+	if cfg.TLSPinnedPubKeyFile != "" {
+		pinnedKey, err := loadPublicKey(cfg.TLSPinnedPubKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load pinned client public key: %w", err)
+		}
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return fmt.Errorf("mTLS: client did not present a certificate")
+			}
+			peerCert, err := x509.ParseCertificate(rawCerts[0])
+			if err != nil {
+				return fmt.Errorf("mTLS: failed to parse peer certificate: %w", err)
+			}
+			if !publicKeysEqual(peerCert.PublicKey, pinnedKey) {
+				return fmt.Errorf("mTLS: client public key does not match pinned key")
+			}
+			return nil
+		}
 	}
 
 	return credentials.NewTLS(tlsConfig), nil
 }
 
-// buildPublicKeyVerifier creates a VerifyPeerCertificate callback that pins a specific public key.
-func buildPublicKeyVerifier(pinnedPubKeyFile string) func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-	pinnedKey, err := loadPublicKey(pinnedPubKeyFile)
-	if err != nil {
-		return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			return fmt.Errorf("failed to load pinned public key: %v", err)
-		}
-	}
-
-	return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-		if len(rawCerts) == 0 {
-			return fmt.Errorf("no client certificate provided")
-		}
-
-		cert, err := x509.ParseCertificate(rawCerts[0])
-		if err != nil {
-			return fmt.Errorf("failed to parse client certificate: %w", err)
-		}
-
-		if !publicKeysEqual(cert.PublicKey, pinnedKey) {
-			return fmt.Errorf("client public key does not match pinned key")
-		}
-
-		return nil
-	}
-}
-
-// loadPublicKey loads a public key from a PEM file.
 func loadPublicKey(path string) (crypto.PublicKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read public key file: %w", err)
 	}
-
 	block, _ := pem.Decode(data)
 	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM block")
+		return nil, fmt.Errorf("no PEM data found in %s", path)
 	}
-
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err == nil {
-		return pub, nil
+	if err != nil {
+		cert, certErr := x509.ParseCertificate(block.Bytes)
+		if certErr == nil {
+			return cert.PublicKey, nil
+		}
+		return nil, fmt.Errorf("parse public key: %w", err)
 	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err == nil {
-		return cert.PublicKey, nil
-	}
-
-	return nil, fmt.Errorf("failed to parse public key: not a valid PKIX public key or certificate")
+	return pub, nil
 }
 
-// publicKeysEqual compares two public keys for equality.
 func publicKeysEqual(a, b crypto.PublicKey) bool {
-	switch aKey := a.(type) {
+	switch keyA := a.(type) {
 	case *rsa.PublicKey:
-		bKey, ok := b.(*rsa.PublicKey)
+		keyB, ok := b.(*rsa.PublicKey)
 		if !ok {
 			return false
 		}
-		return aKey.N.Cmp(bKey.N) == 0 && aKey.E == bKey.E
-
+		return keyA.N.Cmp(keyB.N) == 0 && keyA.E == keyB.E
 	case *ecdsa.PublicKey:
-		bKey, ok := b.(*ecdsa.PublicKey)
+		keyB, ok := b.(*ecdsa.PublicKey)
 		if !ok {
 			return false
 		}
-		return aKey.Curve == bKey.Curve && aKey.X.Cmp(bKey.X) == 0 && aKey.Y.Cmp(bKey.Y) == 0
-
+		return keyA.X.Cmp(keyB.X) == 0 && keyA.Y.Cmp(keyB.Y) == 0 && keyA.Curve == keyB.Curve
 	case ed25519.PublicKey:
-		bKey, ok := b.(ed25519.PublicKey)
+		keyB, ok := b.(ed25519.PublicKey)
 		if !ok {
 			return false
 		}
-		return aKey.Equal(bKey)
-
+		return keyA.Equal(keyB)
 	default:
 		return false
 	}
 }
 
 // ─────────────────────────────────────────────────────────────
-// Server Lifecycle / 服务器生命周期
+// Interceptors / 拦截器
 // ─────────────────────────────────────────────────────────────
 
-// StartGRPCServer creates and starts the gRPC server with optional mTLS.
-// StartGRPCServer 创建并启动 gRPC 服务器，可选 mTLS。
-//
-// The shared taskStore is used for persistence (replaces in-memory map).
-// 共享 taskStore 用于持久化（替代原内存 map）。
-func StartGRPCServer(ag *agent.Client, cfg *config.Config, taskStore store.TaskStore, logger *slog.Logger) (*grpc.Server, error) {
-	var opts []grpc.ServerOption
-
-	if cfg.TLSEnabled {
-		creds, err := BuildServerCredentials(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build TLS credentials: %w", err)
+func UnaryLoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+		var clientPeer string
+		if p, ok := peer.FromContext(ctx); ok {
+			clientPeer = p.Addr.String()
 		}
-		opts = append(opts, grpc.Creds(creds))
+
+		resp, err := handler(ctx, req)
+		latency := time.Since(start)
+
+		grpcCode := codes.OK
+		if err != nil {
+			if s, ok := status.FromError(err); ok {
+				grpcCode = s.Code()
+			} else {
+				grpcCode = codes.Unknown
+			}
+		}
+
+		logger.Info("gRPC request completed",
+			"method", info.FullMethod,
+			"code", grpcCode.String(),
+			"latency_ms", latency.Milliseconds(),
+			"peer", clientPeer,
+			"module", "service-hub",
+		)
+		return resp, err
 	}
-
-	grpcServer := grpc.NewServer(opts...)
-	serviceImpl := New(ag, cfg, taskStore, logger)
-	pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)
-
-	return grpcServer, nil
 }
 
-// GetPeerCertificate extracts the client certificate from gRPC context (for logging/auditing).
-// GetPeerCertificate 从 gRPC 上下文中提取客户端证书（用于日志/审计）。
-func GetPeerCertificate(ctx context.Context) *x509.Certificate {
-	p, ok := peer.FromContext(ctx)
-	if !ok || p.AuthInfo == nil {
-		return nil
+func UnaryRecoveryInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("gRPC handler panic recovered",
+					"method", info.FullMethod,
+					"panic", fmt.Sprintf("%v", r),
+					"module", "service-hub",
+				)
+				err = status.Errorf(codes.Internal, "internal server error: %v", r)
+			}
+		}()
+		return handler(ctx, req)
+	}
+}
+
+func StreamLoggingInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		start := time.Now()
+		err := handler(srv, ss)
+		latency := time.Since(start)
+		logger.Info("gRPC stream completed",
+			"method", info.FullMethod,
+			"latency_ms", latency.Milliseconds(),
+			"error", err,
+			"module", "service-hub",
+		)
+		return err
+	}
+}
+
+func StreamRecoveryInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("gRPC stream handler panic recovered",
+					"method", info.FullMethod,
+					"panic", fmt.Sprintf("%v", r),
+					"module", "service-hub",
+				)
+				err = status.Errorf(codes.Internal, "internal server error: %v", r)
+			}
+		}()
+		return handler(srv, ss)
+	}
+}
+
+func BuildServerOptions(logger *slog.Logger, creds credentials.TransportCredentials) []grpc.ServerOption {
+	unaryChain := grpc.ChainUnaryInterceptor(
+		UnaryRecoveryInterceptor(logger),
+		UnaryLoggingInterceptor(logger),
+	)
+	streamChain := grpc.ChainStreamInterceptor(
+		StreamRecoveryInterceptor(logger),
+		StreamLoggingInterceptor(logger),
+	)
+
+	opts := []grpc.ServerOption{unaryChain, streamChain}
+	if creds != nil {
+		opts = append(opts, grpc.Creds(creds))
+	}
+	return opts
+}
+
+func StartGRPCServer(ag *agent.Client, ds *datasource.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger) (*grpc.Server, *GRPCServer, error) {
+	var creds credentials.TransportCredentials
+	if cfg.TLSEnabled {
+		var err error
+		creds, err = BuildServerCredentials(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build TLS credentials: %w", err)
+		}
 	}
 
-	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
-	if !ok || len(tlsInfo.State.VerifiedChains) == 0 {
-		return nil
-	}
+	opts := BuildServerOptions(logger, creds)
+	grpcServer := grpc.NewServer(opts...)
+	serviceImpl := New(ag, ds, cfg, tasks, logger)
+	pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)
 
-	return tlsInfo.State.VerifiedChains[0][0]
+	return grpcServer, serviceImpl, nil
+}
+
+func AllowedOperations() []string {
+	ops := make([]string, len(validation.HubOperations))
+	copy(ops, validation.HubOperations)
+	sort.Strings(ops)
+	return ops
 }

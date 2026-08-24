@@ -281,13 +281,13 @@ design.md 架构组件              →  Console 模块
 
 ```bash
 # 开发模式：一键启动三个模块
-bash console/scripts/dev-start-new-modules.sh
+bash scripts/dev/dev-start-new-modules.sh
 
 # 集成测试（需先启动 Agent）
-bash console/scripts/integration-test-new-modules.sh
+bash scripts/dev/integration-test-new-modules.sh
 
 # 停止
-bash console/scripts/dev-stop-new-modules.sh
+bash scripts/dev/dev-stop-new-modules.sh
 
 # Docker Compose 部署（含三个新模块）
 cd deploy/docker-compose
@@ -1287,7 +1287,7 @@ docker run -d --name privshield-service-hub \
   -p 8082:8082 \
   -e SERVICE_HUB_HOST=0.0.0.0 \
   ...
-  privshield-service-hub:0.1.0
+  privshield-service-hub:1.8.0
 
 # 修复后：数据卷持久化 + SQLite 路径配置
 docker run -d --name privshield-service-hub \
@@ -1295,7 +1295,7 @@ docker run -d --name privshield-service-hub \
   -v "privshield-service-hub-data:/app/data" \  # P63: 数据卷挂载
   -e SERVICE_HUB_DB_PATH=/app/data/service-hub.db \  # P63: SQLite 持久化路径
   ...
-  privshield-service-hub:0.1.0
+  privshield-service-hub:1.8.0
 ```
 
 **为什么需要显式挂载数据卷？**

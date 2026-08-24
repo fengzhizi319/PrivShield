@@ -6,10 +6,10 @@
 # - 只改控制台时优先跑 `test-console` / `lint-console` / `typecheck-console`
 # - 构建部署产物时使用 `docker-*`、`helm-*`、`docs-*`
 
-.PHONY: help test test-cov test-unit test-console test-go lint lint-console format format-console typecheck typecheck-console check cover cover-html bench \
-        helm-lint helm-template docker-core docker-ml clean docs-serve docs-build docs-clean
+.PHONY: help test test-unit test-console test-go test-services test-perf test-load test-mem test-cov lint lint-console format format-console typecheck typecheck-console check cover cover-html bench \
+        helm-lint helm-template docker-core docker-ml docker-services docker-console docker-all clean docs-serve docs-build docs-clean
 
-VERSION ?= 0.1.0
+VERSION ?= 1.8.0
 HELM_DIR = deploy/helm/PrivShield
 
 help:
@@ -21,6 +21,9 @@ help:
 	@echo "  test-console   - 运行 console/bff-py 单元与冒烟测试"
 	@echo "  test-go        - 运行 Go 全量测试（共享库 + 微服务群 + BFF-Go）"
 	@echo "  test-services  - 运行三大中台微服务单元测试"
+	@echo "  test-perf      - 运行性能与内存回归测试套件"
+	@echo "  test-load      - 运行 Locust 压测基准场景"
+	@echo "  test-mem       - 运行内存泄漏专项测试"
 	@echo "  test-cov       - 运行测试 + 覆盖率报告"
 	@echo "  cover          - 同 test-cov"
 	@echo "  cover-html     - 生成 HTML 覆盖率报告"
@@ -40,6 +43,9 @@ help:
 	@echo "  helm-template  - helm template 渲染 chart"
 	@echo "  docker-core    - 构建 core 镜像"
 	@echo "  docker-ml      - 构建 ml 镜像"
+	@echo "  docker-services- 构建三大中台微服务 Docker 镜像"
+	@echo "  docker-console - 构建控制台全套 Docker 镜像"
+	@echo "  docker-all     - 构建全套 PrivShield Docker 镜像"
 	@echo ""
 	@echo "Docs:"
 	@echo "  docs-serve     - 启动 MkDocs 开发服务器"
@@ -113,6 +119,16 @@ cover-html:
 bench:
 	pytest tests/ -q --benchmark-only --benchmark-columns=mean,stddev,rounds
 
+test-perf:
+	pytest tests/perf/ -v --tb=short
+
+test-load:
+	@command -v locust >/dev/null 2>&1 || { echo "Installing locust..."; pip install locust; }
+	locust -f tests/perf/locustfile.py --headless -u 10 -r 2 --run-time 10s --host=http://127.0.0.1:8079
+
+test-mem:
+	pytest tests/perf/test_memory_leak.py -v --tb=short
+
 # ── Deployment ───────────────────────────────────────────────
 
 # Helm 相关目标只负责模板和 lint，不直接安装集群；这样可以在 CI 和本地做预检查。
@@ -131,6 +147,21 @@ docker-ml:
 	# 适合需要 NER / VLM / LLM 功能的环境。
 	docker build --target ml -t privshield:$(VERSION)-ml .
 
+docker-services:
+	# 三大中台微服务 Docker 镜像构建（共享项目根目录作为构建上下文）
+	docker build -f services/service-hub/Dockerfile -t privshield-service-hub:$(VERSION) .
+	docker build -f services/datasource-mgr/Dockerfile -t privshield-datasource-mgr:$(VERSION) .
+	docker build -f services/audit-log/Dockerfile -t privshield-audit-log:$(VERSION) .
+
+docker-console:
+	# 控制台 Go BFF、Python BFF 与 Web UI Docker 镜像构建
+	docker build -f console/bff-go/Dockerfile -t privacy-console-backend-go:$(VERSION) .
+	docker build -f console/bff-py/Dockerfile -t privacy-console-backend-python:$(VERSION) .
+	docker build -f console/web/Dockerfile -t privacy-console-web:$(VERSION) .
+
+docker-all: docker-core docker-services docker-console
+	@echo "All PrivShield Docker images built successfully (version $(VERSION))."
+
 # ── Docs ─────────────────────────────────────────────────────
 
 # MkDocs 文档生成分成“开发预览”和“静态构建”两种入口，便于本地校对与 CI 发布复用。
@@ -148,34 +179,34 @@ docs-clean:
 # ── Console Launchers ────────────────────────────────────────
 
 dev-go:
-	./console/scripts/dev-start-go.sh
+	./scripts/dev/dev-start-go.sh
 
 dev-python:
-	./console/scripts/dev-start.sh
+	./scripts/dev/dev-start.sh
 
 dev-all:
-	./console/scripts/dev-start-all.sh
+	./scripts/dev/dev-start-all.sh
 
 dev-go-mtls:
-	./console/scripts/dev-start-go-mtls.sh
+	./scripts/dev/dev-start-go-mtls.sh
 
 prod-go:
-	./console/scripts/prod-start-go.sh
+	./scripts/prod/prod-start-go.sh
 
 prod-python:
-	./console/scripts/prod-start.sh
+	./scripts/prod/prod-start.sh
 
 prod-all:
-	./console/scripts/prod-start-all.sh
+	./scripts/prod/prod-start-all.sh
 
 prod-go-mtls:
-	./console/scripts/prod-start-go-mtls.sh
+	./scripts/prod/prod-start-go-mtls.sh
 
 stop:
-	./console/scripts/dev-stop.sh
+	./scripts/dev/dev-stop.sh
 
 prod-stop:
-	./console/scripts/prod-stop.sh
+	./scripts/prod/prod-stop.sh
 
 prod-compose:
 	./scripts/prod/deploy-docker-compose.sh

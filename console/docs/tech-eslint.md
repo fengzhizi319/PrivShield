@@ -917,7 +917,7 @@ PrivShield/
 │       ├── eslint.config.js  ← 独立配置 / Independent config
 │       ├── package.json      ← 独立依赖 / Independent deps
 │       └── src/
-├── PrivShield/      ← Python（无 ESLint）/ Python (no ESLint)
+├── engine/          ← Python（无 ESLint）/ Python (no ESLint)
 └── console/backend-go/       ← Go（无 ESLint）/ Go (no ESLint)
 
 本项目结构特点 / This project's structure:
@@ -956,7 +956,7 @@ pnpm lint:fix          # 自动修复 / Auto-fix
 - name: Lint backend
   run: |
     pip install ruff
-    ruff check PrivShield/
+    ruff check engine/
 
 # Go 质量检查（非 ESLint）/ Go quality (not ESLint)
 - name: Lint Go backend

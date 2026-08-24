@@ -47,7 +47,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
       target: core
-    image: privshield:0.1.0-dev
+    image: privshield:1.8.0-dev
     container_name: PrivShield-dev
     ports:
       - "8079:8079"   # REST API
@@ -92,7 +92,7 @@ services:
     build:
       context: ../..
       dockerfile: console/bff-go/Dockerfile
-    image: privacy-console-backend-go:0.1.0-dev
+    image: privacy-console-backend-go:1.8.0-dev
     container_name: privacy-console-backend-go-dev
     ports:
       - "8081:8081"
@@ -121,7 +121,7 @@ services:
     build:
       context: ../../console/bff-py
       dockerfile: Dockerfile
-    image: privacy-console-backend-python:0.1.0-dev
+    image: privacy-console-backend-python:1.8.0-dev
     container_name: privacy-console-backend-python-dev
     ports:
       - "8080:8080"
@@ -148,7 +148,7 @@ services:
     build:
       context: ../../console/web
       dockerfile: Dockerfile
-    image: privacy-console-web:0.1.0-dev
+    image: privacy-console-web:1.8.0-dev
     container_name: privacy-console-web-dev
     ports:
       - "5173:5173"

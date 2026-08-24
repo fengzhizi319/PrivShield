@@ -160,8 +160,8 @@ go run ./cmd/server
 
 ```bash
 cd /path/to/PrivShield
-./console/scripts/dev-start-go.sh
-./console/scripts/dev-stop.sh    # 在另一个终端停止
+./scripts/dev/dev-start-go.sh
+./scripts/dev/dev-stop.sh    # 在另一个终端停止
 ```
 
 ## 9. 调试技巧

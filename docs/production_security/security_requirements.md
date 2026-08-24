@@ -107,10 +107,10 @@
 
 | 编号 | 漏洞/隐患描述 | 严重级别 | 受影响文件 | 修复方案与效果 |
 |---|---|---|---|---|
-| **SEC-01** | Gateway 网关管理接口 Bearer Token 校验存在时序攻击 (Timing Attack) | 中危 | `PrivShield/gateway/http_proxy.py` | 替换普通字符串比较 `!=` 为 `hmac.compare_digest` 恒定时间比较 |
+| **SEC-01** | Gateway 网关管理接口 Bearer Token 校验存在时序攻击 (Timing Attack) | 中危 | `engine/gateway/http_proxy.py` | 替换普通字符串比较 `!=` 为 `hmac.compare_digest` 恒定时间比较 |
 | **SEC-02** | Go 控制台代理 API Key 校验存在时序攻击 (Timing Attack) | 中危 | `console/bff-go/internal/handlers/handlers.go` | 替换字符串比较为 `subtle.ConstantTimeCompare` 恒定时间比较 |
-| **SEC-03** | Gateway 节点动态注册 API 缺少 URL Scheme 与格式校验 (SSRF/畸形 URL 防护) | 中危 | `PrivShield/gateway/http_proxy.py` | 增加 `http_url` 的 Scheme 校验 (仅允许 `http://` 或 `https://`) |
-| **SEC-04** | REST 主服务缺少 HTTP 安全响应头 (MIME 嗅探与点击劫持防护) | 低危 | `PrivShield/main.py` | 添加 `SecurityHeadersMiddleware` 中间件，自动注入 `X-Content-Type-Options`、`X-Frame-Options` 等响应头 |
+| **SEC-03** | Gateway 节点动态注册 API 缺少 URL Scheme 与格式校验 (SSRF/畸形 URL 防护) | 中危 | `engine/gateway/http_proxy.py` | 增加 `http_url` 的 Scheme 校验 (仅允许 `http://` 或 `https://`) |
+| **SEC-04** | REST 主服务缺少 HTTP 安全响应头 (MIME 嗅探与点击劫持防护) | 低危 | `engine/main.py` | 添加 `SecurityHeadersMiddleware` 中间件，自动注入 `X-Content-Type-Options`、`X-Frame-Options` 等响应头 |
 | **SEC-05** | CSV 数据源加载存在任意文件读取 (LFI / Path Traversal) 隐患 | 高危 | `services/datasource-mgr/internal/handlers/csv_loader.go` | 强制 `.csv` 后缀白名单，使用 `filepath.Base` 提取纯文件名，限定目录沙箱白名单并增加 50,000 行限制 |
 | **SEC-06** | Gin Recovery 中间件向客户端回显 Panic 堆栈敏感信息 | 中危 | `pkg/middleware/middleware.go` | Panic 堆栈收敛至服务端内部结构化日志，HTTP 响应统一返回安全脱敏 JSON |
 | **SEC-07** | SQLite 分页参数未限制上下限导致超大查询与负数偏移越界 | 中危 | `pkg/store/sqlite/` (`audit.go`, `datasources.go`, `tasks.go`) | 引入 `validation.ParsePagination`，强制 `Limit` 夹紧在 1~10000，`Offset >= 0` |
