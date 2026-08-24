@@ -1,21 +1,41 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Service Hub (数据服务调度中枢) Production Deployment Script
-# 数据服务调度中枢生产部署脚本
+# 数据服务调度中枢生产容器化部署脚本
+#
+# 部署流程与执行逻辑：
+#   1. 解析多级目录结构，将项目根目录设为 Docker 构建上下文（以支持 pkg/ 共享依赖编译）；
+#   2. 执行 docker build 构建最新生产镜像（默认标签：privshield-service-hub:1.8.0）；
+#   3. 检查并安全删除旧容器实例；
+#   4. 挂载持久化存储卷（SQLite 数据持久化至 /app/data）并注入生产环境变量启动容器；
+#   5. 启动后自动进行最多 30 次（每次 1 秒）的健康检查轮询（/api/health），确保服务真正就绪。
+#
+# 支持的环境变量配置：
+#   SERVICE_HUB_IMAGE: 镜像名称与标签（默认 privshield-service-hub:1.8.0）
+#   SERVICE_HUB_CONTAINER: 容器运行名称（默认 privshield-service-hub）
+#   SERVICE_HUB_HOST: 容器内监听的主机地址（默认 0.0.0.0）
+#   SERVICE_HUB_PORT: 宿主机对外映射的 HTTP 端口（默认 8082）
+#   SERVICE_HUB_DATA_DIR: SQLite 数据持久化目录或 Docker 卷名（默认 privshield-service-hub-data）
+#   PRIVACY_AGENT_REST_HOST: Python Agent 所在容器名或 IP（默认 privshield-agent）
+#   PRIVACY_REST_PORT: Python Agent 端口（默认 8079）
+#   SERVICE_HUB_MAX_QUEUE: 最大任务排队深度（默认 1000）
+#   SERVICE_HUB_SCHEDULE_TIMEOUT: 流水线调度超时秒数（默认 30）
+#   SERVICE_HUB_DB_PATH: SQLite 数据库在容器内的绝对路径（默认 /app/data/service-hub.db）
 # ============================================================================
 
 set -euo pipefail
 
+# ── 1. 定位上下文路径 ────────────────────────────────────────────────────────
 # Dockerfile 要求构建上下文为项目根目录（包含 pkg/ 与 services/）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
 
+# ── 2. 读取部署环境变量与默认值 ──────────────────────────────────────────────
 IMAGE_NAME="${SERVICE_HUB_IMAGE:-privshield-service-hub:1.8.0}"
 CONTAINER_NAME="${SERVICE_HUB_CONTAINER:-privshield-service-hub}"
 HOST="${SERVICE_HUB_HOST:-0.0.0.0}"
 PORT="${SERVICE_HUB_PORT:-8082}"
-# P63 fix: SQLite data directory for persistent storage (default: named volume)
 # SQLite 数据持久化目录（默认使用 Docker 命名卷）
 DATA_DIR="${SERVICE_HUB_DATA_DIR:-${CONTAINER_NAME}-data}"
 
@@ -23,17 +43,17 @@ echo "=========================================="
 echo "  Deploy Service Hub (调度中枢)"
 echo "=========================================="
 
-# Build image (build context = PROJECT_ROOT for shared pkg/ dependency)
+# ── 3. 构建 Docker 镜像 ──────────────────────────────────────────────────────
+# 构建上下文设置为 PROJECT_ROOT，确保可以成功导入和编译 pkg/ 下的公共模块
 echo "[1/3] Building Docker image: $IMAGE_NAME ..."
 docker build -f "$MODULE_DIR/Dockerfile" -t "$IMAGE_NAME" "$PROJECT_ROOT"
 
-# Stop old container
+# ── 4. 清理旧容器 ────────────────────────────────────────────────────────────
 echo "[2/3] Removing old container (if exists)..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
-# Run new container
-# P63 fix: mount data volume for SQLite persistence
-# P64 fix: add post-deploy health check verification
+# ── 5. 启动新容器 ────────────────────────────────────────────────────────────
+# 挂载数据卷保障任务与审计元数据在容器重启后不丢失
 echo "[3/3] Starting container on port $PORT ..."
 docker run -d \
   --name "$CONTAINER_NAME" \
@@ -50,7 +70,8 @@ docker run -d \
   --restart unless-stopped \
   "$IMAGE_NAME"
 
-# P64 fix: wait for container to become healthy
+# ── 6. 部署后健康巡检 ────────────────────────────────────────────────────────
+# 轮询探测 /api/health 端点，最多等待 30 秒
 echo -n "Waiting for service-hub to be healthy"
 for i in $(seq 1 30); do
   if curl -sf --max-time 3 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then

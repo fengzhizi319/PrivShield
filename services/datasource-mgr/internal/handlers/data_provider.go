@@ -1,4 +1,12 @@
 // Package handlers provides data provider utilities for mock datasets.
+// Package handlers 提供模拟数据集的数据提供者工具与数据加载引擎。
+//
+// 该文件实现了：
+// 1. 模拟数据源注册表（MockDataSources）与其元数据维护；
+// 2. CSV 文件跨层级自适应搜索与安全路径解析（findCSVFile）；
+// 3. 通用 CSV 文件解析器与动态类型推断（LoadCSVRecords：字符串、整数、浮点数自动转换）；
+// 4. 专用与通用数据源查询接口（医保 yibao.csv、康养 kangyang.csv、预留政务 3 与 4）；
+// 5. 内存数据集切片分页器（paginateSlice）与数据源 Schema 元数据构建器（GetMetadata）。
 package handlers
 
 import (
@@ -14,6 +22,7 @@ import (
 )
 
 // Pre-defined mock data sources
+// MockDataSources 定义了系统内置注册的模拟数据源清单，用于开发测试与演示环境。
 var MockDataSources = []models.MockDataSource{
 	{
 		ID:          "ds_yibao",
@@ -54,11 +63,17 @@ var MockDataSources = []models.MockDataSource{
 }
 
 // ListMockDataSources returns all registered mock sources.
+// ListMockDataSources 返回当前已注册的全部模拟数据源列表。
 func ListMockDataSources() []models.MockDataSource {
 	return MockDataSources
 }
 
 // GetMockDataSource returns a mock datasource by ID.
+// GetMockDataSource 根据数据源 ID（或常用别名如 "yibao", "kangyang"）查找对应的数据源元数据。
+// 执行逻辑：
+// 1. 遍历 MockDataSources 列表；
+// 2. 匹配精确 ID 或别名映射；
+// 3. 匹配成功返回元数据指针，未找到则返回格式化错误信息。
 func GetMockDataSource(id string) (*models.MockDataSource, error) {
 	for _, ds := range MockDataSources {
 		if ds.ID == id || (id == "yibao" && ds.ID == "ds_yibao") || (id == "kangyang" && ds.ID == "ds_kangyang") {
@@ -69,6 +84,7 @@ func GetMockDataSource(id string) (*models.MockDataSource, error) {
 }
 
 // candidateDirs for finding mock CSV files
+// candidateDirs 预置了常见的样本 CSV 文件存放相对路径，支持在不同运行工作目录下自动定位数据文件。
 var candidateDirs = []string{
 	"samples",
 	"services/datasource-mgr/samples",
@@ -80,11 +96,19 @@ var candidateDirs = []string{
 
 // allowedCSVFiles restricts which files can be loaded by LoadCSVRecords to prevent
 // path traversal / LFI attacks. Only the two official mock datasets are exposed.
+// allowedCSVFiles 限制只允许加载官方白名单内的模拟数据集文件，防止路径遍历与恶意文件读取。
 var allowedCSVFiles = map[string]struct{}{
 	"yibao.csv":    {},
 	"kangyang.csv": {},
 }
 
+// findCSVFile searches for a given CSV filename across candidate directories and parent directory trees.
+// findCSVFile 根据文件名在系统候选目录及向上父级目录中递归探查实际文件路径，执行逻辑如下：
+// 1. 路径清洗与白名单校验：使用 filepath.Clean 与 filepath.Base 提取纯文件名，并校验必须在 allowedCSVFiles 白名单内且后缀为 .csv，防止目录穿越攻击；
+// 2. 候选目录扫描：遍历 candidateDirs 列表，检查 filepath.Join(dir, baseName) 是否存在且非目录；
+// 3. 向上回溯搜索：若候选目录未命中，获取当前工作目录 (os.Getwd)，向上逐层遍历最多 6 级父目录，
+//    在每级目录的常见样本子目录中查找；
+// 4. 若最终仍未找到，返回明确的“文件未找到”错误。
 func findCSVFile(filename string) (string, error) {
 	// Normalize and extract the final basename. Using filepath.Base drops any
 	// leading directory components, but an attacker could still try to access an
@@ -100,6 +124,7 @@ func findCSVFile(filename string) (string, error) {
 		return "", fmt.Errorf("csv file is not in allow-list: %s", baseName)
 	}
 
+	// 阶段 1：在预定义的候选相对目录中查找
 	for _, dir := range candidateDirs {
 		cand := filepath.Join(dir, baseName)
 		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
@@ -107,6 +132,7 @@ func findCSVFile(filename string) (string, error) {
 		}
 	}
 
+	// 阶段 2：以当前工作目录为基准，向上逐层回溯探查
 	if curr, err := os.Getwd(); err == nil {
 		for i := 0; i < 6; i++ {
 			for _, sub := range []string{"samples", "services/datasource-mgr/samples", "data", "engine/medical_pipeline/samples"} {
@@ -116,7 +142,7 @@ func findCSVFile(filename string) (string, error) {
 				}
 			}
 			parent := filepath.Dir(curr)
-			if parent == curr {
+			if parent == curr { // 已到达文件系统根目录
 				break
 			}
 			curr = parent
@@ -126,27 +152,45 @@ func findCSVFile(filename string) (string, error) {
 	return "", fmt.Errorf("csv file not found: %s", baseName)
 }
 
-// LoadCSVRecords loads CSV records with limit and offset.
+// LoadCSVRecords loads CSV records from disk with dynamic type inference and pagination.
+// LoadCSVRecords 加载并解析指定的 CSV 数据文件，执行动态类型推断与分页切片，执行逻辑如下：
+// 1. 定位文件：调用 findCSVFile(filename) 获取文件物理路径；
+// 2. 打开文件：以只读方式打开文件并注册 defer file.Close()；
+// 3. 解析表头：使用 csv.NewReader 读取首行作为字段名映射表（设置 FieldsPerRecord = -1 支持变长字段）；
+// 4. 行流式解析与类型推断：
+//    - 逐行读取数据记录直至 io.EOF；
+//    - 将每个字段值映射到表头列名；
+//    - 智能类型转换：优先尝试转为 int64 整数；若包含小数点则尝试转为 float64 浮点数；否则保留为 string；
+//    - 将解析后的 map[string]any 追加至 allRows；
+// 5. 分页窗口截取：
+//    - 纠正非法 offset（小于 0 时重置为 0）；
+//    - 若 offset 超出总记录数，返回空切片与总行数；
+//    - 计算结束边界 end = offset + limit（若 limit <= 0 或 end > total 则截断为 total）；
+//    - 返回当前分页切片 allRows[offset:end]、数据集总行数 total 以及可能的错误。
 func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, error) {
+	// 1. 定位物理文件路径
 	filePath, err := findCSVFile(filename)
 	if err != nil {
 		return nil, 0, err
 	}
 
+	// 2. 打开文件
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open csv file: %w", err)
 	}
 	defer file.Close()
 
+	// 3. 构建 CSV 读取器并解析首行表头
 	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1
+	reader.FieldsPerRecord = -1 // 允许每行字段数动态浮动
 
 	header, err := reader.Read()
 	if err != nil {
 		return nil, 0, fmt.Errorf("read csv header: %w", err)
 	}
 
+	// 4. 逐行读取与动态类型推断
 	var allRows []map[string]any
 	for {
 		record, err := reader.Read()
@@ -154,7 +198,7 @@ func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, 
 			break
 		}
 		if err != nil {
-			continue
+			continue // 忽略损坏或空行
 		}
 
 		rowMap := make(map[string]any, len(header))
@@ -162,10 +206,13 @@ func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, 
 			colName := strings.TrimSpace(col)
 			if i < len(record) {
 				val := strings.TrimSpace(record[i])
+				// 优先推断整数
 				if intVal, err := strconv.ParseInt(val, 10, 64); err == nil {
 					rowMap[colName] = intVal
+				// 包含小数点时推断浮点数
 				} else if floatVal, err := strconv.ParseFloat(val, 64); err == nil && strings.Contains(val, ".") {
 					rowMap[colName] = floatVal
+				// 兜底作为纯文本字符串
 				} else {
 					rowMap[colName] = val
 				}
@@ -176,6 +223,7 @@ func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, 
 		allRows = append(allRows, rowMap)
 	}
 
+	// 5. 分页区间安全计算与切片
 	total := len(allRows)
 	if offset < 0 {
 		offset = 0
@@ -193,16 +241,19 @@ func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, 
 }
 
 // GetYibaoRecords (API 1: 医保数据)
+// GetYibaoRecords 读取并返回医保就医与结算模拟数据（yibao.csv），支持分页。
 func GetYibaoRecords(limit, offset int) ([]map[string]any, int, error) {
 	return LoadCSVRecords("yibao.csv", limit, offset)
 }
 
 // GetKangyangRecords (API 2: 康养数据)
+// GetKangyangRecords 读取并返回康养体检与慢病管理模拟数据（kangyang.csv），支持分页。
 func GetKangyangRecords(limit, offset int) ([]map[string]any, int, error) {
 	return LoadCSVRecords("kangyang.csv", limit, offset)
 }
 
 // GetMock3Records (API 3: 预留数据 3)
+// GetMock3Records 返回预留政务数据源 3 的内存模拟数据（政务服务审批流水），支持分页。
 func GetMock3Records(limit, offset int) ([]map[string]any, int, error) {
 	rows := []map[string]any{
 		{"id": 1, "service_code": "GOV_001", "name": "政务服务审批流水 1", "amount": 1000.0, "status": "approved"},
@@ -213,6 +264,7 @@ func GetMock3Records(limit, offset int) ([]map[string]any, int, error) {
 }
 
 // GetMock4Records (API 4: 预留数据 4)
+// GetMock4Records 返回预留政务数据源 4 的内存模拟数据（季度税收与财务报表），支持分页。
 func GetMock4Records(limit, offset int) ([]map[string]any, int, error) {
 	rows := []map[string]any{
 		{"id": 101, "dept_code": "FIN_001", "report_name": "季度税收与财务报表 A", "value": 982000.0},
@@ -221,7 +273,11 @@ func GetMock4Records(limit, offset int) ([]map[string]any, int, error) {
 	return paginateSlice(rows, limit, offset), len(rows), nil
 }
 
-// GetDataBySource retrieves records by source ID.
+// GetDataBySource retrieves records by source ID with unified name and error handling.
+// GetDataBySource 根据传入的数据源唯一标识符动态路由并调用对应的数据提取函数，执行逻辑如下：
+// 1. 将 sourceID 转为小写以增强兼容性；
+// 2. 根据分支调用对应的数据加载函数（如 "ds_yibao" 调用 GetYibaoRecords）；
+// 3. 返回数据行列表、总记录数、数据源中文显示名称以及可能发生的错误。
 func GetDataBySource(sourceID string, limit, offset int) ([]map[string]any, int, string, error) {
 	switch strings.ToLower(sourceID) {
 	case "ds_yibao", "yibao", "yibao.csv":
@@ -241,6 +297,8 @@ func GetDataBySource(sourceID string, limit, offset int) ([]map[string]any, int,
 	}
 }
 
+// paginateSlice applies offset and limit pagination on an in-memory row slice.
+// paginateSlice 对内存切片执行安全的分页截取计算，防止越界 panic。
 func paginateSlice(rows []map[string]any, limit, offset int) []map[string]any {
 	total := len(rows)
 	if offset < 0 {
@@ -257,18 +315,24 @@ func paginateSlice(rows []map[string]any, limit, offset int) []map[string]any {
 }
 
 // GetMetadata returns table schema for a mock source.
+// GetMetadata 根据数据源 ID 生成并返回对应的数据表模式（Schema）元数据定义，执行逻辑如下：
+// 1. 查询数据源基础元数据（调用 GetMockDataSource）；
+// 2. 根据数据源 ID 动态装配对应的表字段定义列表（包含字段名与数据类型）；
+// 3. 构造并返回标准的 models.MetadataResponse 对象。
 func GetMetadata(sourceID string) (*models.MetadataResponse, error) {
 	ds, err := GetMockDataSource(sourceID)
 	if err != nil {
 		return nil, err
 	}
 
+	// 默认基础字段集合
 	fields := []models.MetadataField{
 		{Name: "id", Type: "string"},
 		{Name: "name", Type: "string"},
 		{Name: "created_at", Type: "timestamp"},
 	}
 
+	// 针对特定数据集定制其业务 Schema
 	if ds.ID == "ds_yibao" {
 		fields = []models.MetadataField{
 			{Name: "insurance_settlement_id", Type: "string"},

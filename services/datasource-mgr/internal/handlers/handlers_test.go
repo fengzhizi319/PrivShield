@@ -1,3 +1,16 @@
+// Package handlers_test contains unit and API tests for the HTTP REST handlers of datasource-mgr.
+// Package handlers_test 包含 datasource-mgr 模块 HTTP REST 路由与处理器实现的单元测试套件。
+//
+// 测试覆盖：
+// 1. 存活健康探针（TestHealth）；
+// 2. 专用模拟数据源接口 API 1 ~ 4（TestAPI1YibaoData, TestAPI2KangyangData, TestAPI3Mock3Data, TestAPI4Mock4Data）；
+// 3. 数据源资产列表查询（TestListDataSources）；
+// 4. 单个数据源详情查询与 404 错误处理（TestGetDataSource, TestGetDataSourceNotFound）；
+// 5. 数据源记录动态分页采样（TestGetDataSourceRecords）；
+// 6. 数据源连通性测试（TestTestConnection）；
+// 7. Schema 元数据探查（TestGetMetadata）；
+// 8. 访问审计日志（TestGetAccessAudit）；
+// 9. 模拟数据重新播种端点（TestSeedDataSources）。
 package handlers
 
 import (
@@ -13,6 +26,11 @@ import (
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/models"
 )
 
+// newTestRouter constructs an in-memory Gin test engine with all routes registered.
+// newTestRouter 构造并初始化用于单元测试的纯内存 Gin 引擎实例：
+// 1. 切换 Gin 为 TestMode 模式；
+// 2. 构造默认 Config 与 text/debug 格式的 Logger；
+// 3. 实例化 Server 并调用 RegisterRoutes 装配全部中间件与业务路由。
 func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	cfg := config.Load()
@@ -24,6 +42,11 @@ func newTestRouter() *gin.Engine {
 	return r
 }
 
+// TestHealth verifies that GET /api/health returns 200 OK and correct service identifiers.
+// TestHealth 验证存活健康探针端点：
+// 1. 发送 HTTP GET /api/health 请求；
+// 2. 断言 HTTP 状态码为 200 OK；
+// 3. 验证 JSON 响应体中的 backend 为 "ok" 且 via 标识为 "datasource-mgr"。
 func TestHealth(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/health", nil)
@@ -41,6 +64,11 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+// TestAPI1YibaoData verifies dedicated API 1 for healthcare/settlement dataset.
+// TestAPI1YibaoData 验证专用 API 1（医保就医与结算模拟数据）：
+// 1. 请求 GET /api/v1/yibao?limit=5；
+// 2. 断言状态码 200 OK；
+// 3. 校验返回的 SourceID 为 "ds_yibao"，且 Limit 为 5。
 func TestAPI1YibaoData(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/v1/yibao?limit=5", nil)
@@ -58,6 +86,11 @@ func TestAPI1YibaoData(t *testing.T) {
 	}
 }
 
+// TestAPI2KangyangData verifies dedicated API 2 for elderly care dataset.
+// TestAPI2KangyangData 验证专用 API 2（康养体检与慢病管理模拟数据）：
+// 1. 请求 GET /api/v1/kangyang?limit=5；
+// 2. 断言状态码 200 OK；
+// 3. 校验返回的 SourceID 为 "ds_kangyang"，且 Limit 为 5。
 func TestAPI2KangyangData(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/v1/kangyang?limit=5", nil)
@@ -75,6 +108,11 @@ func TestAPI2KangyangData(t *testing.T) {
 	}
 }
 
+// TestAPI3Mock3Data verifies dedicated API 3 for reserved municipal dataset 3.
+// TestAPI3Mock3Data 验证专用 API 3（预留政务数据源 3）：
+// 1. 请求 GET /api/v1/mock3；
+// 2. 断言状态码 200 OK；
+// 3. 校验 SourceID 为 "ds_mock3" 且非空记录。
 func TestAPI3Mock3Data(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/v1/mock3", nil)
@@ -92,6 +130,11 @@ func TestAPI3Mock3Data(t *testing.T) {
 	}
 }
 
+// TestAPI4Mock4Data verifies dedicated API 4 for reserved municipal dataset 4.
+// TestAPI4Mock4Data 验证专用 API 4（预留政务数据源 4）：
+// 1. 请求 GET /api/v1/mock4；
+// 2. 断言状态码 200 OK；
+// 3. 校验 SourceID 为 "ds_mock4" 且非空记录。
 func TestAPI4Mock4Data(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/v1/mock4", nil)
@@ -109,6 +152,11 @@ func TestAPI4Mock4Data(t *testing.T) {
 	}
 }
 
+// TestListDataSources verifies GET /api/datasources returns the full mock directory.
+// TestListDataSources 验证数据源列表查询端点：
+// 1. 请求 GET /api/datasources；
+// 2. 断言返回状态码 200 OK；
+// 3. 校验返回的数据源总数至少为 2 个（包含医保与康养）。
 func TestListDataSources(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/datasources", nil)
@@ -126,6 +174,10 @@ func TestListDataSources(t *testing.T) {
 	}
 }
 
+// TestGetDataSource verifies GET /api/datasources/:id returns metadata for a registered datasource.
+// TestGetDataSource 验证单个数据源元数据查询端点：
+// 1. 请求 GET /api/datasources/ds_yibao；
+// 2. 断言状态码 200 OK 且返回的 ID 精确匹配 "ds_yibao"。
 func TestGetDataSource(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/datasources/ds_yibao", nil)
@@ -143,6 +195,8 @@ func TestGetDataSource(t *testing.T) {
 	}
 }
 
+// TestGetDataSourceNotFound verifies GET /api/datasources/:id returns 404 for unknown datasource.
+// TestGetDataSourceNotFound 验证查询不存在的数据源时返回 404 Not Found 错误。
 func TestGetDataSourceNotFound(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/datasources/non_existent", nil)
@@ -154,6 +208,10 @@ func TestGetDataSourceNotFound(t *testing.T) {
 	}
 }
 
+// TestGetDataSourceRecords verifies GET /api/datasources/:id/records returns paginated data rows.
+// TestGetDataSourceRecords 验证通用数据源分页采样端点：
+// 1. 请求 GET /api/datasources/ds_yibao/records?limit=3；
+// 2. 验证响应状态码 200 OK 且 datasource_id 为 "ds_yibao"。
 func TestGetDataSourceRecords(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/datasources/ds_yibao/records?limit=3", nil)
@@ -171,6 +229,10 @@ func TestGetDataSourceRecords(t *testing.T) {
 	}
 }
 
+// TestTestConnection verifies POST /api/datasources/:id/test returns success and latency.
+// TestTestConnection 验证数据源连通性测试端点：
+// 1. 发送 POST /api/datasources/ds_kangyang/test 请求；
+// 2. 校验返回成功标识 Success=true 且 DataSourceID 匹配。
 func TestTestConnection(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("POST", "/api/datasources/ds_kangyang/test", nil)
@@ -188,6 +250,10 @@ func TestTestConnection(t *testing.T) {
 	}
 }
 
+// TestGetMetadata verifies GET /api/datasources/:id/metadata returns table schemas.
+// TestGetMetadata 验证数据源 Schema 元数据探查端点：
+// 1. 请求 GET /api/datasources/ds_yibao/metadata；
+// 2. 校验返回状态码 200 OK，包含数据表清单且 DataSourceID 为 "ds_yibao"。
 func TestGetMetadata(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/datasources/ds_yibao/metadata", nil)
@@ -205,6 +271,8 @@ func TestGetMetadata(t *testing.T) {
 	}
 }
 
+// TestGetAccessAudit verifies GET /api/datasources/:id/audit returns mock audit log records.
+// TestGetAccessAudit 验证模拟数据源访问审计日志查询端点。
 func TestGetAccessAudit(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("GET", "/api/datasources/ds_yibao/audit", nil)
@@ -216,6 +284,8 @@ func TestGetAccessAudit(t *testing.T) {
 	}
 }
 
+// TestSeedDataSources verifies POST /api/datasources/seed returns seed initialization message.
+// TestSeedDataSources 验证模拟数据源重新初始化/播种端点返回 200 OK。
 func TestSeedDataSources(t *testing.T) {
 	r := newTestRouter()
 	req, _ := http.NewRequest("POST", "/api/datasources/seed", nil)

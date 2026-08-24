@@ -31,24 +31,23 @@ import (
 )
 
 // testCerts holds paths to test certificate files.
-// testCerts 保存测试证书文件路径。
+// testCerts 保存测试证书文件路径集合。
 type testCerts struct {
-	caFile     string
-	serverCert string
-	serverKey  string
-	clientCert string
-	clientKey  string
-	clientPub  string
+	caFile     string // CA 根证书文件路径
+	serverCert string // 服务端证书文件路径
+	serverKey  string // 服务端私钥文件路径
+	clientCert string // 客户端证书文件路径
+	clientKey  string // 客户端私钥文件路径
+	clientPub  string // 客户端公钥 PEM 文件路径
 }
 
 // genTestCerts generates a complete test certificate chain in a temp directory.
-// genTestCerts 在临时目录中生成完整的测试证书链。
+// genTestCerts 在临时目录中动态生成完整的测试证书链（CA 根证书 ➔ 服务端证书 ➔ 客户端证书 ➔ 客户端公钥）。
 func genTestCerts(t *testing.T) testCerts {
 	t.Helper()
 	dir := t.TempDir()
 
-	// Generate CA key and self-signed CA cert
-	// 生成 CA 私钥和自签名 CA 证书
+	// 1. 生成 CA 私钥和自签名 CA 证书
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate CA key: %v", err)
@@ -69,12 +68,10 @@ func genTestCerts(t *testing.T) testCerts {
 	caFile := writePEM(t, dir, "ca.crt", "CERTIFICATE", caDER)
 	writePEM(t, dir, "ca.key", "RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(caKey))
 
-	// Parse CA for signing
-	// 解析 CA 用于签发
+	// 解析 CA 用于签发后续证书
 	caCert, _ := x509.ParseCertificate(caDER)
 
-	// Generate server cert signed by CA
-	// 生成由 CA 签发的服务端证书
+	// 2. 生成由 CA 签发的服务端证书
 	serverKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	serverTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
@@ -90,8 +87,7 @@ func genTestCerts(t *testing.T) testCerts {
 	serverCert := writePEM(t, dir, "server.crt", "CERTIFICATE", serverDER)
 	serverKeyFile := writePEM(t, dir, "server.key", "RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(serverKey))
 
-	// Generate client cert signed by CA
-	// 生成由 CA 签发的客户端证书
+	// 3. 生成由 CA 签发的客户端证书
 	clientKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	clientTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(3),
@@ -105,8 +101,7 @@ func genTestCerts(t *testing.T) testCerts {
 	clientCert := writePEM(t, dir, "client.crt", "CERTIFICATE", clientDER)
 	clientKeyFile := writePEM(t, dir, "client.key", "RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(clientKey))
 
-	// Extract client public key
-	// 提取客户端公钥
+	// 4. 提取客户端公钥并保存为 PEM
 	clientPubDER, _ := x509.MarshalPKIXPublicKey(&clientKey.PublicKey)
 	clientPub := writePEM(t, dir, "client.pub", "PUBLIC KEY", clientPubDER)
 
@@ -121,7 +116,7 @@ func genTestCerts(t *testing.T) testCerts {
 }
 
 // writePEM writes a DER-encoded block as PEM to a file.
-// writePEM 将 DER 编码的块以 PEM 格式写入文件。
+// writePEM 将 DER 编码的字节切片以指定 blockType 写入 PEM 格式文件。
 func writePEM(t *testing.T, dir, name, blockType string, der []byte) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -141,7 +136,7 @@ func writePEM(t *testing.T, dir, name, blockType string, der []byte) string {
 // ─────────────────────────────────────────────────────────────
 
 // TestBuildServerCredentialsTLSDisabled verifies that disabled TLS returns error.
-// TestBuildServerCredentialsTLSDisabled 验证禁用 TLS 时返回错误。
+// TestBuildServerCredentialsTLSDisabled 验证当 TLSEnabled=false 时正确返回错误。
 func TestBuildServerCredentialsTLSDisabled(t *testing.T) {
 	cfg := &config.Config{TLSEnabled: false}
 	if _, err := BuildServerCredentials(cfg); err == nil {
@@ -150,7 +145,7 @@ func TestBuildServerCredentialsTLSDisabled(t *testing.T) {
 }
 
 // TestBuildServerCredentialsMissingCert verifies error when cert is missing.
-// TestBuildServerCredentialsMissingCert 验证缺少证书时报错。
+// TestBuildServerCredentialsMissingCert 验证证书或私钥配置缺失时的错误拦截。
 func TestBuildServerCredentialsMissingCert(t *testing.T) {
 	cfg := &config.Config{
 		TLSEnabled:  true,
@@ -163,7 +158,7 @@ func TestBuildServerCredentialsMissingCert(t *testing.T) {
 }
 
 // TestBuildServerCredentialsInvalidCertPath verifies error with invalid cert path.
-// TestBuildServerCredentialsInvalidCertPath 验证使用无效证书路径时报错。
+// TestBuildServerCredentialsInvalidCertPath 验证证书路径不存在时的文件读取错误。
 func TestBuildServerCredentialsInvalidCertPath(t *testing.T) {
 	cfg := &config.Config{
 		TLSEnabled:  true,
@@ -176,7 +171,7 @@ func TestBuildServerCredentialsInvalidCertPath(t *testing.T) {
 }
 
 // TestBuildServerCredentialsMTLS verifies successful mTLS credential building.
-// TestBuildServerCredentialsMTLS 验证成功构建 mTLS 凭证。
+// TestBuildServerCredentialsMTLS 验证成功构建包含 Client CAs 的双向认证 TLS 凭证。
 func TestBuildServerCredentialsMTLS(t *testing.T) {
 	certs := genTestCerts(t)
 	cfg := &config.Config{
@@ -200,7 +195,7 @@ func TestBuildServerCredentialsMTLS(t *testing.T) {
 }
 
 // TestBuildServerCredentialsMTLSWithPinnedKey verifies mTLS with public key pinning.
-// TestBuildServerCredentialsMTLSWithPinnedKey 验证带公钥固定的 mTLS。
+// TestBuildServerCredentialsMTLSWithPinnedKey 验证带公钥固定校验器的 mTLS 凭证构建。
 func TestBuildServerCredentialsMTLSWithPinnedKey(t *testing.T) {
 	certs := genTestCerts(t)
 	cfg := &config.Config{
@@ -222,14 +217,14 @@ func TestBuildServerCredentialsMTLSWithPinnedKey(t *testing.T) {
 }
 
 // TestBuildServerCredentialsMTLSMissingCA verifies error when CA is missing for mTLS.
-// TestBuildServerCredentialsMTLSMissingCA 验证 mTLS 缺少 CA 证书时报错。
+// TestBuildServerCredentialsMTLSMissingCA 验证启用客户端认证但缺失 CA 文件时的校验阻断。
 func TestBuildServerCredentialsMTLSMissingCA(t *testing.T) {
 	certs := genTestCerts(t)
 	cfg := &config.Config{
 		TLSEnabled:    true,
 		TLSCertFile:   certs.serverCert,
 		TLSKeyFile:    certs.serverKey,
-		TLSCAFile:     "", // Missing CA
+		TLSCAFile:     "", // 缺失 CA 文件
 		TLSClientAuth: "require",
 	}
 
@@ -239,7 +234,7 @@ func TestBuildServerCredentialsMTLSMissingCA(t *testing.T) {
 }
 
 // TestBuildServerCredentialsInvalidClientAuthMode verifies error with unknown auth mode.
-// TestBuildServerCredentialsInvalidClientAuthMode 验证使用未知认证模式时报错。
+// TestBuildServerCredentialsInvalidClientAuthMode 验证使用非法客户端认证模式字符串时报错。
 func TestBuildServerCredentialsInvalidClientAuthMode(t *testing.T) {
 	certs := genTestCerts(t)
 	cfg := &config.Config{
@@ -256,7 +251,7 @@ func TestBuildServerCredentialsInvalidClientAuthMode(t *testing.T) {
 }
 
 // TestLoadPublicKey verifies public key loading from PEM file.
-// TestLoadPublicKey 验证从 PEM 文件加载公钥。
+// TestLoadPublicKey 验证从 PEM 公钥文件中正确解析加载 RSA 公钥。
 func TestLoadPublicKey(t *testing.T) {
 	certs := genTestCerts(t)
 
@@ -270,7 +265,7 @@ func TestLoadPublicKey(t *testing.T) {
 }
 
 // TestLoadPublicKeyInvalidPath verifies error with invalid path.
-// TestLoadPublicKeyInvalidPath 验证使用无效路径时报错。
+// TestLoadPublicKeyInvalidPath 验证加载不存在的公钥文件时返回错误。
 func TestLoadPublicKeyInvalidPath(t *testing.T) {
 	if _, err := loadPublicKey("/nonexistent/key.pub"); err == nil {
 		t.Fatal("expected error with invalid path")
@@ -278,7 +273,7 @@ func TestLoadPublicKeyInvalidPath(t *testing.T) {
 }
 
 // TestLoadPublicKeyInvalidPEM verifies error with invalid PEM content.
-// TestLoadPublicKeyInvalidPEM 验证使用无效 PEM 内容时报错。
+// TestLoadPublicKeyInvalidPEM 验证加载非 PEM 格式内容时返回错误。
 func TestLoadPublicKeyInvalidPEM(t *testing.T) {
 	dir := t.TempDir()
 	badFile := filepath.Join(dir, "bad.pub")
@@ -292,7 +287,7 @@ func TestLoadPublicKeyInvalidPEM(t *testing.T) {
 }
 
 // TestPublicKeysEqual verifies public key comparison.
-// TestPublicKeysEqual 验证公钥比较。
+// TestPublicKeysEqual 验证同源公钥与不同公钥的比对逻辑。
 func TestPublicKeysEqual(t *testing.T) {
 	certs := genTestCerts(t)
 
@@ -303,7 +298,7 @@ func TestPublicKeysEqual(t *testing.T) {
 		t.Error("same public keys should be equal")
 	}
 
-	// Generate a different key
+	// 生成不同的密钥
 	dir := t.TempDir()
 	diffKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	diffPubDER, _ := x509.MarshalPKIXPublicKey(&diffKey.PublicKey)
@@ -316,7 +311,7 @@ func TestPublicKeysEqual(t *testing.T) {
 }
 
 // TestPublicKeysEqualDifferentTypes verifies comparison of different key types.
-// TestPublicKeysEqualDifferentTypes 验证不同类型公钥的比较。
+// TestPublicKeysEqualDifferentTypes 验证不同类型（RSA vs 非 Key 结构）比对安全返回 false。
 func TestPublicKeysEqualDifferentTypes(t *testing.T) {
 	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	if publicKeysEqual(&rsaKey.PublicKey, "not a key") {
@@ -328,6 +323,8 @@ func TestPublicKeysEqualDifferentTypes(t *testing.T) {
 // gRPC Server Method Tests / gRPC 服务方法单元测试
 // ─────────────────────────────────────────────────────────────
 
+// setupTestGRPCServer initializes a test GRPCServer with optional mock agent.
+// setupTestGRPCServer 初始化测试用 GRPCServer 实例与 Mock Upstream Agent。
 func setupTestGRPCServer(t *testing.T, agentHandler http.HandlerFunc) (*GRPCServer, *httptest.Server, store.TaskStore) {
 	t.Helper()
 	var mockServer *httptest.Server
@@ -360,6 +357,8 @@ func setupTestGRPCServer(t *testing.T, agentHandler http.HandlerFunc) (*GRPCServ
 	return srv, mockServer, taskStore
 }
 
+// TestGRPCServer_Health tests the gRPC Health RPC under reachable and unreachable agent scenarios.
+// TestGRPCServer_Health 测试 gRPC 服务健康检查在 Agent 可达与不可达时的返回。
 func TestGRPCServer_Health(t *testing.T) {
 	t.Run("Reachable", func(t *testing.T) {
 		srv, mockServer, _ := setupTestGRPCServer(t, nil)
@@ -377,7 +376,7 @@ func TestGRPCServer_Health(t *testing.T) {
 
 	t.Run("Unreachable", func(t *testing.T) {
 		srv, mockServer, _ := setupTestGRPCServer(t, nil)
-		mockServer.Close() // Close upstream
+		mockServer.Close() // 提前关闭上游模拟服务
 		defer srv.Shutdown()
 
 		resp, err := srv.Health(context.Background(), &pb.HealthRequest{})
@@ -390,6 +389,8 @@ func TestGRPCServer_Health(t *testing.T) {
 	})
 }
 
+// TestGRPCServer_HubStatus tests the gRPC HubStatus RPC method.
+// TestGRPCServer_HubStatus 测试 HubStatus RPC 返回的运行态指标与队列计数。
 func TestGRPCServer_HubStatus(t *testing.T) {
 	srv, mockServer, taskStore := setupTestGRPCServer(t, nil)
 	defer mockServer.Close()
@@ -409,6 +410,8 @@ func TestGRPCServer_HubStatus(t *testing.T) {
 	}
 }
 
+// TestGRPCServer_Dispatch tests the gRPC Dispatch RPC method.
+// TestGRPCServer_Dispatch 测试 Dispatch RPC 方法的各类入参边界校验与正常任务创建。
 func TestGRPCServer_Dispatch(t *testing.T) {
 	srv, mockServer, _ := setupTestGRPCServer(t, nil)
 	defer mockServer.Close()
@@ -454,7 +457,7 @@ func TestGRPCServer_Dispatch(t *testing.T) {
 			t.Errorf("unexpected dispatch response: %+v", resp)
 		}
 
-		// Wait briefly and check task was saved
+		// 短暂等待并校验任务已持久化
 		time.Sleep(50 * time.Millisecond)
 		task, err := srv.GetTask(ctx, &pb.GetTaskRequest{TaskId: resp.TaskId})
 		if err != nil {
@@ -466,6 +469,8 @@ func TestGRPCServer_Dispatch(t *testing.T) {
 	})
 }
 
+// TestGRPCServer_ClassifyAndDispatch tests the gRPC ClassifyAndDispatch RPC method.
+// TestGRPCServer_ClassifyAndDispatch 测试分类定级并自动分发 RPC 方法。
 func TestGRPCServer_ClassifyAndDispatch(t *testing.T) {
 	srv, mockServer, _ := setupTestGRPCServer(t, nil)
 	defer mockServer.Close()
@@ -503,6 +508,8 @@ func TestGRPCServer_ClassifyAndDispatch(t *testing.T) {
 	})
 }
 
+// TestGRPCServer_GetAndListTasks tests GetTask and ListTasks RPC methods.
+// TestGRPCServer_GetAndListTasks 测试 GetTask 与 ListTasks RPC 方法。
 func TestGRPCServer_GetAndListTasks(t *testing.T) {
 	srv, mockServer, taskStore := setupTestGRPCServer(t, nil)
 	defer mockServer.Close()
@@ -510,7 +517,7 @@ func TestGRPCServer_GetAndListTasks(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Seed tasks
+	// 初始化种子任务
 	now := time.Now()
 	_ = taskStore.Save(&store.Task{ID: "t-10", Status: "running", Stage: "fetch", Source: "src1", CreatedAt: now})
 	_ = taskStore.Save(&store.Task{ID: "t-20", Status: "completed", Stage: "done", Source: "src2", CreatedAt: now.Add(time.Second)})
@@ -567,6 +574,8 @@ func TestGRPCServer_GetAndListTasks(t *testing.T) {
 	})
 }
 
+// TestGRPCServer_PipelineStatus tests the gRPC PipelineStatus RPC method.
+// TestGRPCServer_PipelineStatus 测试 PipelineStatus RPC 返回各阶段活跃度和 Agent 状态。
 func TestGRPCServer_PipelineStatus(t *testing.T) {
 	srv, mockServer, taskStore := setupTestGRPCServer(t, nil)
 	defer mockServer.Close()
@@ -591,6 +600,8 @@ func TestGRPCServer_PipelineStatus(t *testing.T) {
 	}
 }
 
+// TestGRPCServer_ProcessTask_FailureBranches tests error branches during asynchronous pipeline processing.
+// TestGRPCServer_ProcessTask_FailureBranches 测试异步流水线各异常分支（分类失败、脱敏失败、优雅停机取消）。
 func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 	t.Run("ClassifyFails", func(t *testing.T) {
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -619,7 +630,7 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		}
 		_ = taskStore.Save(task)
 
-		// Run processTask synchronously to verify completion and failure state
+		// 同步调用 processTask 验证失败状态更新
 		srv.processTask(task, "classify", `{"record":"test"}`)
 
 		updated, err := taskStore.Get("task-fail-1")
@@ -700,5 +711,6 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		}
 	})
 }
+
 
 

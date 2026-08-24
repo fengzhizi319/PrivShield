@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// TestLevelToOperation tests the mapping from data security levels (L1~L5) to privacy operations.
+// TestLevelToOperation 针对不同敏感度等级（L1~L5、未知等级及空字符串）进行表驱动测试，
+// 验证映射函数严格满足「三层四柱五御六类」标准：
+// - L1 -> "none"（公开）
+// - L2 -> "mask"（掩码）
+// - L3 -> "k_anon"（K匿名）
+// - L4 -> "dp"（差分隐私）
+// - L5 -> "dp"（强差分隐私）
+// - 未知/空 -> "mask"（安全兜底）
 func TestLevelToOperation(t *testing.T) {
 	tests := []struct {
 		level    string
@@ -16,7 +25,7 @@ func TestLevelToOperation(t *testing.T) {
 		{"L3", "k_anon"},
 		{"L4", "dp"},
 		{"L5", "dp"},
-		{"L6", "mask"}, // unknown level defaults to mask
+		{"L6", "mask"}, // unknown level defaults to mask / 未知等级回退至 mask
 		{"unknown", "mask"},
 		{"", "mask"},
 	}
@@ -31,9 +40,13 @@ func TestLevelToOperation(t *testing.T) {
 	}
 }
 
+// TestModelSerialization tests JSON serialization and deserialization roundtrip for all core models.
+// TestModelSerialization 测试 HubStatus, Task, PipelineStatus, DispatchRequest/Response 与 ProxyResponse
+// 的 JSON 序列化与反序列化双向一致性。
 func TestModelSerialization(t *testing.T) {
 	now := time.Now().Truncate(time.Millisecond)
 
+	// 1. 测试 HubStatus 状态模型序列化与反序列化
 	t.Run("HubStatus", func(t *testing.T) {
 		status := HubStatus{
 			Status:         "running",
@@ -57,6 +70,7 @@ func TestModelSerialization(t *testing.T) {
 		}
 	})
 
+	// 2. 测试 Task 流水线任务模型序列化与时间戳反序列化
 	t.Run("Task", func(t *testing.T) {
 		task := Task{
 			ID:          "task-12345",
@@ -83,6 +97,7 @@ func TestModelSerialization(t *testing.T) {
 		}
 	})
 
+	// 3. 测试 PipelineStatus 流水线阶段遥测状态模型
 	t.Run("PipelineStatus", func(t *testing.T) {
 		pStatus := PipelineStatus{
 			Stages: []PipelineStage{
@@ -117,6 +132,7 @@ func TestModelSerialization(t *testing.T) {
 		}
 	})
 
+	// 4. 测试 DispatchRequest、DispatchResponse 与 ProxyResponse
 	t.Run("DispatchAndProxyResponse", func(t *testing.T) {
 		req := DispatchRequest{
 			Source:    "kangyang.csv",

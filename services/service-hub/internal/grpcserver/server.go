@@ -1,5 +1,12 @@
 // Package grpcserver implements the gRPC service interface for service-hub with mTLS support.
-// Package grpcserver 实现 service-hub 的 gRPC 服务接口，支持 mTLS 双向认证与公钥固定。
+// Package grpcserver 实现 service-hub 的 gRPC 高性能远程调用接口层，支持 TLS 1.3 双向认证（mTLS）与公钥指纹固定（Pinned Public Key）。
+//
+// 核心能力与安全特性：
+// 1. 高性能 RPC：基于 google.golang.org/grpc 提供微秒级内部服务通信；
+// 2. 企业级 mTLS：支持 RequireAndVerifyClientCert 双向证书认证与动态 CA 根证书挂载；
+// 3. 公钥固定（Public Key Pinning）：支持 RSA、ECDSA、Ed25519 客户端公钥证书比对，防御证书伪造攻击；
+// 4. 拦截器链：提供 Unary/Stream 统一 Panic 恢复（Recovery）与结构化访问日志（Logging）拦截器；
+// 5. 6 阶段流水线驱动：在后台协程中安全驱动 6 阶段流通治理任务，支持并发信号量限流与优雅停机（Graceful Shutdown）。
 package grpcserver
 
 import (
@@ -39,24 +46,24 @@ import (
 const moduleVia = "service-hub-grpc"
 
 // GRPCServer implements the ServiceHubService gRPC service.
-// GRPCServer 实现 ServiceHubService gRPC 服务。
+// GRPCServer 结构体实现 Protobuf 生成的 ServiceHubServiceServer 接口，管理核心客户端与生命周期。
 type GRPCServer struct {
 	pb.UnimplementedServiceHubServiceServer
 
-	agent      *agent.Client
-	datasource *datasource.Client
-	cfg        *config.Config
-	startTime  time.Time
-	tasks      store.TaskStore
-	logger     *slog.Logger
-	taskSem    chan struct{}      // P29 fix: semaphore to limit concurrent task processing goroutines
-	ctx        context.Context    // P51 fix: parent context for graceful shutdown of task goroutines
-	cancel     context.CancelFunc // P51 fix: cancel function to signal all task goroutines to stop
-	wg         sync.WaitGroup     // P51 fix: wait group to track active task goroutines
+	agent      *agent.Client      // 上游 PrivShield Python Agent 客户端
+	datasource *datasource.Client // 下游 datasource-mgr 客户端
+	cfg        *config.Config     // 模块全局运行配置
+	startTime  time.Time          // 服务启动时间戳
+	tasks      store.TaskStore    // 任务持久化仓库接口
+	logger     *slog.Logger       // 结构化日志记录器
+	taskSem    chan struct{}      // 限制后台并发任务协程数的信号量（默认容量 10）
+	ctx        context.Context    // 优雅停机广播上下文
+	cancel     context.CancelFunc // 触发停机 Context 取消的回调函数
+	wg         sync.WaitGroup     // 跟踪记录正在运行的任务协程计数
 }
 
 // New creates a new GRPCServer instance.
-// New 创建一个新的 GRPCServer 实例。
+// New 构造函数初始化 GRPCServer 实例，配置并发信号量与取消上下文。
 func New(ag *agent.Client, ds *datasource.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger) *GRPCServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &GRPCServer{
@@ -66,14 +73,14 @@ func New(ag *agent.Client, ds *datasource.Client, cfg *config.Config, tasks stor
 		startTime:  time.Now(),
 		tasks:      tasks,
 		logger:     logger,
-		taskSem:    make(chan struct{}, 10), // P29: max 10 concurrent task goroutines
+		taskSem:    make(chan struct{}, 10), // 最大限制 10 个并发异步任务
 		ctx:        ctx,
 		cancel:     cancel,
 	}
 }
 
 // Shutdown gracefully stops all in-flight task goroutines.
-// P51 fix: call during server shutdown to cancel running processTask goroutines.
+// Shutdown 优雅停机方法：通知所有在途 gRPC 任务协程安全退出并阻塞等待收敛。
 func (s *GRPCServer) Shutdown() {
 	s.cancel()
 	s.wg.Wait()
@@ -84,7 +91,7 @@ func (s *GRPCServer) Shutdown() {
 // ─────────────────────────────────────────────────────────────
 
 // Health checks self + upstream agent connectivity.
-// Health 检查自身与上游 agent 的连通性。
+// Health 实现 gRPC 健康检查接口：检测自身并向 Python Agent 发起健康探测。
 func (s *GRPCServer) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
 	start := time.Now()
 	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -115,7 +122,7 @@ func (s *GRPCServer) Health(ctx context.Context, req *pb.HealthRequest) (*pb.Hea
 }
 
 // HubStatus returns the scheduling hub status overview.
-// HubStatus 返回调度中枢的状态概览。
+// HubStatus 实现调度中枢状态概览 RPC 方法：返回排队、活跃、成功与失败任务计数。
 func (s *GRPCServer) HubStatus(ctx context.Context, req *pb.HubStatusRequest) (*pb.HubStatusResponse, error) {
 	counts, err := s.tasks.Counts()
 	if err != nil {
@@ -134,9 +141,12 @@ func (s *GRPCServer) HubStatus(ctx context.Context, req *pb.HubStatusRequest) (*
 }
 
 // Dispatch dispatches a new task to the scheduling pipeline.
-// Dispatch 将新任务分发到调度流水线。
+// Dispatch 实现显式分发任务 RPC 方法：
+// 1. 校验 source 非空、限长 1024 字符，operation 属于有效操作集合；
+// 2. 持久化任务为 pending 状态；
+// 3. 异步拉起 6 阶段流水线协程处理任务并返回 accepted。
 func (s *GRPCServer) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.DispatchResponse, error) {
-	// Input validation / 输入校验
+	// 字段合法性校验
 	if strings.TrimSpace(req.Source) == "" {
 		return nil, status.Error(codes.InvalidArgument, "source must not be empty")
 	}
@@ -179,6 +189,10 @@ func (s *GRPCServer) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb
 }
 
 // ClassifyAndDispatch performs classification first, then auto-dispatches based on sensitivity.
+// ClassifyAndDispatch 动态分类定级并自动分发 RPC 方法：
+// 1. 若载荷为空，自动从数据源服务拉取样本；
+// 2. 调用 Agent Classify 接口完成敏感等级评估；
+// 3. 自适应决策脱敏算子并启动流水线任务。
 func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAndDispatchRequest) (*pb.ClassifyAndDispatchResponse, error) {
 	if strings.TrimSpace(req.Source) == "" {
 		return nil, status.Error(codes.InvalidArgument, "source must not be empty")
@@ -249,6 +263,7 @@ func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAn
 }
 
 // GetTask returns the details of a single task by ID.
+// GetTask 根据 TaskID 查询单个任务详情，若不存在返回 NotFound 错误码。
 func (s *GRPCServer) GetTask(ctx context.Context, req *pb.GetTaskRequest) (*pb.TaskProto, error) {
 	taskID := strings.TrimSpace(req.GetTaskId())
 	if taskID == "" {
@@ -264,6 +279,7 @@ func (s *GRPCServer) GetTask(ctx context.Context, req *pb.GetTaskRequest) (*pb.T
 }
 
 // ListTasks returns all tasks, optionally filtered by status.
+// ListTasks 分页获取任务列表，支持状态过滤白名单校验。
 func (s *GRPCServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*pb.ListTasksResponse, error) {
 	statusFilter := req.GetStatusFilter()
 	if statusFilter != "" {
@@ -294,6 +310,7 @@ func (s *GRPCServer) ListTasks(ctx context.Context, req *pb.ListTasksRequest) (*
 }
 
 // PipelineStatus returns the current status of each pipeline stage.
+// PipelineStatus 获取流水线 6 个阶段的实时任务活跃度与 Agent 连通性。
 func (s *GRPCServer) PipelineStatus(ctx context.Context, req *pb.PipelineStatusRequest) (*pb.PipelineStatusResponse, error) {
 	runningTasks, _, err := s.tasks.List(store.TaskFilter{Status: "running", Limit: 1000})
 	if err != nil {
@@ -334,6 +351,8 @@ func (s *GRPCServer) PipelineStatus(ctx context.Context, req *pb.PipelineStatusR
 // ─────────────────────────────────────────────────────────────
 
 // processTask simulates the scheduling pipeline stages.
+// processTask 内部异步流水线执行器：
+// 顺序流转 ingest ➔ fetch ➔ classify ➔ desensitize ➔ return ➔ audit 6 个阶段。
 func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string) {
 	s.taskSem <- struct{}{}
 	defer func() { <-s.taskSem }()
@@ -372,7 +391,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			return
 		}
 
-		// Stage 2: fetch → if payload is empty, attempt to fetch from datasource-mgr
+		// Stage 2: fetch → 若载荷为空，从数据源微服务拉取
 		if stage == "fetch" && s.datasource != nil {
 			if payloadJSON == "" || payloadJSON == "{}" || payloadJSON == "null" {
 				ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
@@ -386,7 +405,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			}
 		}
 
-		// Stage 3: classify → call agent if operation is classify
+		// Stage 3: classify → 调用 Agent 进行分类
 		if stage == "classify" && operation == "classify" {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_, err := s.agent.Classify(ctx, payloadJSON)
@@ -402,7 +421,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			}
 		}
 
-		// Stage 4: desensitize → call agent masking
+		// Stage 4: desensitize → 调用 Agent 执行脱敏
 		if stage == "desensitize" && (operation == "mask" || operation == "k_anon" || operation == "dp") {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_, err := s.agent.Mask(ctx, payloadJSON)
@@ -427,6 +446,8 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 	_ = s.tasks.Update(task)
 }
 
+// taskToProto converts a store.Task domain model to its Protobuf representation.
+// taskToProto 将领域实体 Task 转换为 gRPC Protobuf 传输对象 TaskProto。
 func taskToProto(t *store.Task) *pb.TaskProto {
 	proto := &pb.TaskProto{
 		Id:         t.ID,
@@ -447,6 +468,7 @@ func taskToProto(t *store.Task) *pb.TaskProto {
 	return proto
 }
 
+// levelToPriority maps a sensitivity level (L1~L5) to a priority score.
 func levelToPriority(level string) int {
 	switch level {
 	case "L5":
@@ -468,6 +490,11 @@ func levelToPriority(level string) int {
 // mTLS Credentials Builder / mTLS 凭证构造
 // ─────────────────────────────────────────────────────────────
 
+// BuildServerCredentials constructs gRPC transport credentials supporting TLS 1.3, mTLS client auth, and public key pinning.
+// BuildServerCredentials 根据配置构造 gRPC TLS 传输凭证：
+// 1. 加载服务端证书与私钥，强制启用 TLS 1.3 最低版本；
+// 2. 若配置了 TLSClientAuth，挂载根 CA 证书池，设置 RequireAndVerifyClientCert 双向认证策略；
+// 3. 若配置了 TLSPinnedPubKeyFile，注入 VerifyPeerCertificate 验证钩子，严格比对客户端公钥指纹。
 func BuildServerCredentials(cfg *config.Config) (credentials.TransportCredentials, error) {
 	if !cfg.TLSEnabled {
 		return nil, fmt.Errorf("TLS is disabled in configuration")
@@ -513,6 +540,7 @@ func BuildServerCredentials(cfg *config.Config) (credentials.TransportCredential
 		}
 	}
 
+	// 注入公钥固定校验器
 	if cfg.TLSPinnedPubKeyFile != "" {
 		pinnedKey, err := loadPublicKey(cfg.TLSPinnedPubKeyFile)
 		if err != nil {
@@ -536,6 +564,8 @@ func BuildServerCredentials(cfg *config.Config) (credentials.TransportCredential
 	return credentials.NewTLS(tlsConfig), nil
 }
 
+// loadPublicKey loads a public key from PEM file (supports PKIX and X.509 Certificate formats).
+// loadPublicKey 从 PEM 格式文件中解析并提取公钥对象。
 func loadPublicKey(path string) (crypto.PublicKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -556,6 +586,8 @@ func loadPublicKey(path string) (crypto.PublicKey, error) {
 	return pub, nil
 }
 
+// publicKeysEqual checks if two public keys are identical (RSA, ECDSA, Ed25519).
+// publicKeysEqual 深度比对两个公钥的数学属性（支持 RSA 模数/指数、ECDSA 椭圆曲线坐标与 Ed25519 字节）。
 func publicKeysEqual(a, b crypto.PublicKey) bool {
 	switch keyA := a.(type) {
 	case *rsa.PublicKey:
@@ -585,6 +617,8 @@ func publicKeysEqual(a, b crypto.PublicKey) bool {
 // Interceptors / 拦截器
 // ─────────────────────────────────────────────────────────────
 
+// UnaryLoggingInterceptor logs method name, status code, latency, and client peer address.
+// UnaryLoggingInterceptor 记录一元 RPC 调用的方法名、耗时、状态码与客户端来源 IP。
 func UnaryLoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		start := time.Now()
@@ -616,6 +650,8 @@ func UnaryLoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	}
 }
 
+// UnaryRecoveryInterceptor catches panics in unary RPCs and returns an Internal gRPC status error.
+// UnaryRecoveryInterceptor 拦截一元 RPC Handler 的 Panic 并安全转换为 Internal gRPC 错误。
 func UnaryRecoveryInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 		defer func() {
@@ -632,6 +668,8 @@ func UnaryRecoveryInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	}
 }
 
+// StreamLoggingInterceptor logs streaming RPC method completions.
+// StreamLoggingInterceptor 记录流式 RPC 调用的执行耗时与完成状态。
 func StreamLoggingInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		start := time.Now()
@@ -647,6 +685,8 @@ func StreamLoggingInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor 
 	}
 }
 
+// StreamRecoveryInterceptor catches panics in stream RPCs and logs the incident.
+// StreamRecoveryInterceptor 拦截流式 RPC 中的 Panic 异常。
 func StreamRecoveryInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		defer func() {
@@ -663,6 +703,8 @@ func StreamRecoveryInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor
 	}
 }
 
+// BuildServerOptions creates server options configuring interceptor chains and transport credentials.
+// BuildServerOptions 组装 gRPC 服务端选项链（Recovery -> Logging 拦截器与可选 TLS 凭证）。
 func BuildServerOptions(logger *slog.Logger, creds credentials.TransportCredentials) []grpc.ServerOption {
 	unaryChain := grpc.ChainUnaryInterceptor(
 		UnaryRecoveryInterceptor(logger),
@@ -680,6 +722,8 @@ func BuildServerOptions(logger *slog.Logger, creds credentials.TransportCredenti
 	return opts
 }
 
+// StartGRPCServer initializes and registers the ServiceHubService gRPC server instance.
+// StartGRPCServer 快速装配并返回配置了 TLS 与拦截器的 grpc.Server 与 GRPCServer 实例。
 func StartGRPCServer(ag *agent.Client, ds *datasource.Client, cfg *config.Config, tasks store.TaskStore, logger *slog.Logger) (*grpc.Server, *GRPCServer, error) {
 	var creds credentials.TransportCredentials
 	if cfg.TLSEnabled {
@@ -698,6 +742,8 @@ func StartGRPCServer(ag *agent.Client, ds *datasource.Client, cfg *config.Config
 	return grpcServer, serviceImpl, nil
 }
 
+// AllowedOperations returns a sorted list of supported hub operations.
+// AllowedOperations 返回排序后的有效操作枚举列表。
 func AllowedOperations() []string {
 	ops := make([]string, len(validation.HubOperations))
 	copy(ops, validation.HubOperations)

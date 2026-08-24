@@ -82,3 +82,113 @@ curl -s --cacert certs/ca.crt \
 ```bash
 curl -s "http://127.0.0.1:8083/api/v1/kangyang?limit=5" | jq .
 ```
+
+---
+
+## 4. 反向代理与网关架构说明 (是否需要 Nginx 及使用场景)
+
+### 4.1 核心结论
+
+> **默认开发、Docker Compose 与 K8s 内部集群环境下：不需要使用 Nginx。**
+>
+> `datasource-mgr` 是基于 Go 语言原生高性能网络栈（`net/http` + `Gin` 与 `grpc-go`）构建的独立微服务，其自身已内建高并发事件驱动模型、精细化连接超时控制（防 Slowloris）、TLS 1.3/mTLS 双向身份认证及应用层鉴权能力。
+
+### 4.2 为什么默认场景无需 Nginx？
+
+| 维度 | `datasource-mgr` 内建能力 | 为什么可省略 Nginx |
+|---|---|---|
+| **并发与连接模型** | Go 原生 Goroutine 协程调度 + HTTP/2 流多路复用 | 无需传统动态语言（如 Python WSGI / PHP-FPM）前置的进程管理与连接缓冲池，单实例即可支撑上万并发连接。 |
+| **抗 Slowloris / DoS** | 显式配置了网络超时：<br>• `ReadHeaderTimeout: 5s`<br>• `ReadTimeout: 30s`<br>• `WriteTimeout: 60s`<br>• `IdleTimeout: 120s`<br>• `MaxHeaderBytes: 1MB` | 天然免疫慢速连接攻击与连接泄漏，无需依赖 Nginx 进行请求头缓冲保护。 |
+| **传输安全与零信任** | 内建 **TLS 1.3** 强加密基线、**mTLS 双向证书校验** 与 **客户端 RSA 公钥固定 (SPKI Pinning)** | 内部微服务间（如 `service-hub` ⇋ `datasource-mgr`）可直接实现端到端加密与防篡改身份校验。 |
+| **安全响应与中间件** | Gin 引擎已内置挂载：<br>`RequestID`、`StructuredLogger`、`Recovery`、`SecurityHeaders`、`CORS`、`Auth (API Key)` | 安全响应头注入、跨域策略控制、访问日志及崩溃恢复已在进程内闭环。 |
+| **服务网络拓扑** | 定位于内部数据源/模拟服务，主要由 `service-hub`（调度中枢）或 `bff-go`（网关）在内网调用 | 在 Docker Compose 内部网络或 K8s ClusterIP 网络下，微服务通过 DNS 直接点对点通信，额外增加 Nginx 反而会增加网络跳数与延迟。 |
+
+---
+
+### 4.3 什么时候“需要”或“推荐”引入 Nginx？
+
+在以下特定的企业级生产或网络架构演进场景下，建议在 `datasource-mgr` 上游架设 Nginx 反向代理或 API Gateway：
+
+#### 场景 1：无容器编排环境（裸机/VM）下的“多实例负载均衡”
+- **适用情况**：在物理机或虚拟机多节点上部署了多个 `datasource-mgr` 实例，但未使用 Kubernetes Service 进行内部负载均衡。
+- **Nginx 作用**：通过 `upstream` 负载均衡器实现 HTTP REST 轮询/权重分发，并利用 `grpc_pass` 代理 gRPC 连接。
+
+#### 场景 2：统一公网域名收敛与外部 SSL 证书卸载 (API Gateway / Ingress)
+- **适用情况**：需要将整个 PrivShield 体系（`console-web`、`service-hub`、`datasource-mgr`、`audit-log`）统一对外暴露在同一个公网域名与标准端口（如 `https://api.privshield.com`）。
+- **Nginx 作用**：Nginx 统一管理公网泛域名 SSL 证书（自动续签/TLS 卸载），并按 URL 路径路由：
+  - `/` ──▶ 静态前端 UI (`console-web:5173`)
+  - `/api/datasources/` ──▶ `datasource-mgr:8083`
+  - `/api/hub/` ──▶ `service-hub:8082`
+
+#### 场景 3：直接面向不可信公网时的 IP 级令牌桶限流与 WAF 防护
+- **适用情况**：数据源管理服务需要直接暴露给公网第三方调用。
+- **Nginx 作用**：
+  - 利用 Nginx `limit_req_zone` / `limit_conn_zone` 实施基于源 IP 的高频请求限流；
+  - 挂载 ModSecurity 或 OpenResty 过滤恶意爬虫探测、SQL 注入及异常 Payload。
+
+#### 场景 4：浏览器前端直连 gRPC-Web 转换代理
+- **适用情况**：未来前端 Web UI 需要直接通过 gRPC 与 `datasource-mgr` 通信，而浏览器无法直接发送原生 HTTP/2 gRPC 帧。
+- **Nginx 作用**：Nginx（配合 `grpc-web` 模块）充当桥接网关，将前端 gRPC-Web 请求转换为后端的标准 gRPC 帧。
+
+---
+
+### 4.4 Nginx 生产反向代理配置示例模板
+
+若确实需要在 `datasource-mgr` 前置部署 Nginx，可参考如下经过生产验证的配置模板（同时支持 HTTP REST 与 gRPC 反向代理）：
+
+```nginx
+# 1. HTTP REST 负载均衡上游定义
+upstream datasource_mgr_http {
+    server 127.0.0.1:8083 max_fails=3 fail_timeout=10s;
+    # 若有多个实例可在此追加：
+    # server 192.168.1.102:8083 max_fails=3 fail_timeout=10s;
+    keepalive 32;
+}
+
+# 2. gRPC 负载均衡上游定义
+upstream datasource_mgr_grpc {
+    server 127.0.0.1:50053 max_fails=3 fail_timeout=10s;
+    # server 192.168.1.102:50053 max_fails=3 fail_timeout=10s;
+    keepalive 32;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.privshield.com;
+
+    # 外部 SSL 证书配置
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # ── A. HTTP REST API 反向代理 ──────────────────────────────────────
+    location /api/datasources/ {
+        proxy_pass http://datasource_mgr_http;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 超时设置
+        proxy_connect_timeout 5s;
+        proxy_read_timeout    60s;
+        proxy_send_timeout    60s;
+    }
+
+    # ── B. gRPC (HTTP/2) 远程过程调用反向代理 ──────────────────────────
+    location /datasourcemgr.DataSourceManagerService/ {
+        grpc_pass grpc://datasource_mgr_grpc;
+        grpc_set_header Host $host;
+        grpc_set_header X-Real-IP $remote_addr;
+        grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # gRPC 超时设置
+        grpc_connect_timeout 5s;
+        grpc_read_timeout    60s;
+        grpc_send_timeout    60s;
+    }
+}
+```

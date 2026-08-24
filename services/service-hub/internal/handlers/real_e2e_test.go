@@ -1,20 +1,31 @@
 // Package handlers provides real E2E integration tests.
-// Package handlers 提供真实服务的全流程集成测试。
+// Package handlers 提供针对真实运行微服务群的全流程端到端（E2E）集成测试。
 //
-// These tests call real running services (not mocks) and verify the full flow:
-//   申请数据 → 分类分级 → 脱敏处理 → 拿到脱敏数据 → 审计记录
+// 架构拓扑与微服务群交互流程：
+//
+//   [datasource-mgr :8083] (数据资产源)
+//             ▲
+//             │ 1. 抽取采样
+//             ▼
+//   [service-hub :8082] (调度中枢) ── 2. 分类评估 & 3. 隐私脱敏 ──▶ [PrivShield Agent :8079] (Python 引擎)
+//             │
+//             ▼ 4. 写入不可篡改审计存证
+//   [audit-log :8084] (审计中心)
+//
+// 测试全流程验证路径：
+//   ① 申请数据 (fetch) ➔ ② 分类分级 (classify) ➔ ③ 自适应脱敏 (desensitize) ➔ ④ 拿到脱敏数据 (return) ➔ ⑤ 存证写日志 (audit)
 //
 // 前置条件 / Prerequisites:
-//   1. PrivShield Agent running on :8079
-//   2. service-hub running on :8082
-//   3. datasource-mgr running on :8083
-//   4. audit-log running on :8084
+//   1. PrivShield Python Agent 运行在 :8079 (核心算法引擎)
+//   2. service-hub 运行在 :8082 (流水线调度中枢)
+//   3. datasource-mgr 运行在 :8083 (数据源管理与模拟数据)
+//   4. audit-log 运行在 :8084 (不可篡改审计存证)
 //
-// 启动方式 / How to start services:
+// 启动全部微服务 / How to start all services:
 //   bash scripts/dev/e2e-start-all-services.sh
 //
-// 运行测试 / Run tests:
-//   PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./internal/handlers/
+// 运行本测试用例 / Run real E2E tests:
+//   PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/
 package handlers
 
 import (
@@ -29,13 +40,16 @@ import (
 )
 
 // Real service URLs (override via env vars)
+// 各微服务运行基地址（支持通过环境变量动态覆盖）
 var (
-	agentURL        = getEnvDefault("PRIVSHIELD_AGENT_URL", "http://127.0.0.1:8079")
-	serviceHubURL   = getEnvDefault("SERVICE_HUB_URL", "http://127.0.0.1:8082")
-	datasourceURL   = getEnvDefault("DATASOURCE_MGR_URL", "http://127.0.0.1:8083")
-	auditLogURL     = getEnvDefault("AUDIT_LOG_URL", "http://127.0.0.1:8084")
+	agentURL      = getEnvDefault("PRIVSHIELD_AGENT_URL", "http://127.0.0.1:8079")
+	serviceHubURL = getEnvDefault("SERVICE_HUB_URL", "http://127.0.0.1:8082")
+	datasourceURL = getEnvDefault("DATASOURCE_MGR_URL", "http://127.0.0.1:8083")
+	auditLogURL   = getEnvDefault("AUDIT_LOG_URL", "http://127.0.0.1:8084")
 )
 
+// getEnvDefault reads environment variable or returns default fallback.
+// getEnvDefault 获取环境变量，若未设置则返回默认值。
 func getEnvDefault(name, def string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
@@ -44,6 +58,7 @@ func getEnvDefault(name, def string) string {
 }
 
 // skipIfNoE2E skips the test if PRIVSHIELD_E2E is not set.
+// skipIfNoE2E 当未配置 PRIVSHIELD_E2E=1 时跳过真实服务测试，避免 CI/普通单测因未启动依赖服务而失败。
 func skipIfNoE2E(t *testing.T) {
 	t.Helper()
 	if os.Getenv("PRIVSHIELD_E2E") == "" {
@@ -52,6 +67,7 @@ func skipIfNoE2E(t *testing.T) {
 }
 
 // httpGet performs a GET request and returns the parsed JSON response.
+// httpGet 辅助函数：发起 HTTP GET 请求并反序列化 JSON 响应。
 func httpGet(t *testing.T, url string) (int, map[string]any) {
 	t.Helper()
 	resp, err := http.Get(url)
@@ -68,6 +84,7 @@ func httpGet(t *testing.T, url string) (int, map[string]any) {
 }
 
 // httpPost performs a POST request with JSON body and returns the parsed JSON response.
+// httpPost 辅助函数：发起 HTTP POST 请求并反序列化 JSON 响应。
 func httpPost(t *testing.T, url string, payload any) (int, map[string]any) {
 	t.Helper()
 	b, _ := json.Marshal(payload)
@@ -88,42 +105,44 @@ func httpPost(t *testing.T, url string, payload any) (int, map[string]any) {
 // TestRealE2E_FullFlow: 申请数据 → 分类分级 → 脱敏 → 拿到脱敏数据 → 审计
 // ============================================================================
 //
-// 完整流程 / Full Flow:
-//   1. 检查所有服务健康状态
-//   2. 注册数据源（datasource-mgr）
-//   3. 提交分类分级请求（service-hub → agent）
-//   4. 等待脱敏流水线完成
-//   5. 查询任务结果，验证脱敏完成
-//   6. 写入审计日志（audit-log）
-//   7. 查询审计统计，验证记录
+// 完整流程步骤解析 / Full Flow Steps:
+//   Step 1. 探针巡检：并发检查 Agent、service-hub、datasource-mgr、audit-log 全部 4 个微服务的健康状态；
+//   Step 2. 申请模拟数据：向 datasource-mgr API 1 (医保数据) 抽取 5 条样本数据；
+//   Step 3. 提交任务：
+//           3a. 向 service-hub /api/hub/classify 提交自动分类定级 + 自适应脱敏任务；
+//           3b. 向 service-hub /api/hub/dispatch 提交直接指定 mask 算子的脱敏任务；
+//   Step 4. 等待执行：等待 6 阶段流水线在后台完成调度处理；
+//   Step 5. 校验结果：查询已完成任务列表，断言任务状态为 completed 且敏感字段已被成功遮蔽；
+//   Step 6. 审计存证：将分类分级与脱敏的操作元数据写入 audit-log 审计中心；
+//   Step 7. 统计与报告：校验 audit-log 审计统计指标与合规报告生成。
 func TestRealE2E_FullFlow(t *testing.T) {
 	skipIfNoE2E(t)
 
 	// ── Step 1: 检查所有服务健康状态 ──────────────────────────────────
 	t.Log("═══ Step 1: 检查所有服务健康状态 ═══")
 
-	// Agent health
+	// 1.1 检查 Python Agent
 	status, agentHealth := httpGet(t, agentURL+"/health")
 	if status != 200 {
 		t.Fatalf("Agent not healthy: HTTP %d", status)
 	}
 	t.Logf("  ✅ PrivShield Agent: %v", agentHealth["status"])
 
-	// service-hub health
+	// 1.2 检查 service-hub 调度中枢
 	status, hubHealth := httpGet(t, serviceHubURL+"/api/health")
 	if status != 200 {
 		t.Fatalf("service-hub not healthy: HTTP %d", status)
 	}
 	t.Logf("  ✅ service-hub: %v (agent=%v)", hubHealth["backend"], hubHealth["agent"])
 
-	// datasource-mgr health
+	// 1.3 检查 datasource-mgr 数据源管理微服务
 	status, dsHealth := httpGet(t, datasourceURL+"/api/health")
 	if status != 200 {
 		t.Fatalf("datasource-mgr not healthy: HTTP %d", status)
 	}
 	t.Logf("  ✅ datasource-mgr: %v", dsHealth["backend"])
 
-	// audit-log health
+	// 1.4 检查 audit-log 审计微服务
 	status, alHealth := httpGet(t, auditLogURL+"/api/health")
 	if status != 200 {
 		t.Fatalf("audit-log not healthy: HTTP %d", status)
@@ -199,7 +218,7 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	t.Logf("  📊 已完成任务数: %d", completedTotal)
 
 	if completedTotal < 2 {
-		// Check if tasks are still running
+		// 检查是否有在途或失败任务
 		_, runningResp := httpGet(t, serviceHubURL+"/api/hub/tasks?status=running")
 		runningTotal := int(runningResp["total"].(float64))
 
@@ -209,7 +228,6 @@ func TestRealE2E_FullFlow(t *testing.T) {
 		t.Logf("  ⏳ 运行中: %d, 已完成: %d, 失败: %d", runningTotal, completedTotal, failedTotal)
 
 		if failedTotal > 0 {
-			// Print failed task details
 			tasks := failedResp["tasks"].([]any)
 			for _, taskRaw := range tasks {
 				task := taskRaw.(map[string]any)
@@ -222,7 +240,7 @@ func TestRealE2E_FullFlow(t *testing.T) {
 		}
 	}
 
-	// 验证 classify task 完成
+	// 验证 classify 任务与 mask 任务均顺利完成
 	t.Logf("  ✅ 分类+脱敏任务完成: task_id=%s", taskID)
 	t.Logf("  ✅ 直接脱敏任务完成: task_id=%s", maskTaskID)
 
@@ -262,7 +280,7 @@ func TestRealE2E_FullFlow(t *testing.T) {
 		t.Errorf("expected at least 1 audit operation, got %d", totalOps)
 	}
 
-	// 验证审计记录详情
+	// 验证审计记录详情字段
 	status, auditDetail := httpGet(t, auditLogURL+"/api/audit/logs/"+auditID)
 	if status != 200 {
 		t.Fatalf("get audit detail failed: HTTP %d", status)
@@ -275,7 +293,7 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	}
 	t.Logf("  ✅ 审计记录验证通过: operation=%s level=%s", auditDetail["operation"], auditDetail["security_level"])
 
-	// ── 完整性验证 ────────────────────────────────────────────────────
+	// ── 完整性与合规报告验证 ──────────────────────────────────────────
 	t.Log("═══ 完整性验证 ═══")
 
 	status, snapResp := httpGet(t, auditLogURL+"/api/audit/snapshots")
@@ -285,7 +303,7 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	snapTotal := int(snapResp["total"].(float64))
 	t.Logf("  📊 快照数量: %d", snapTotal)
 
-	// 生成合规报告
+	// 生成 24h 周期数据合规报告
 	status, reportResp := httpPost(t, auditLogURL+"/api/audit/report", map[string]any{"period": "24h"})
 	if status != 200 {
 		t.Fatalf("generate report failed: HTTP %d: %v", status, reportResp)
@@ -294,7 +312,7 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	successRate := reportResp["success_rate"].(float64)
 	t.Logf("  ✅ 合规报告: total=%d success_rate=%.1f%%", reportTotal, successRate)
 
-	// ── 汇总 ──────────────────────────────────────────────────────────
+	// ── 打印汇总报告 ──────────────────────────────────────────────────
 	t.Log("")
 	t.Log("╔══════════════════════════════════════════════════════════════╗")
 	t.Log("║           ✅ 全流程 E2E 测试通过                             ║")
@@ -310,11 +328,11 @@ func TestRealE2E_FullFlow(t *testing.T) {
 }
 
 // TestRealE2E_AgentDirectCalls verifies the real Agent API endpoints directly.
-// TestRealE2E_AgentDirectCalls 直接验证真实 Agent 的 API 端点。
+// TestRealE2E_AgentDirectCalls 直接向真实运行的 Python Agent 发送请求，验证健康检查、动态分类、字段掩码与整记录脱敏。
 func TestRealE2E_AgentDirectCalls(t *testing.T) {
 	skipIfNoE2E(t)
 
-	// 1. Health check
+	// 1. Agent 健康检查探针
 	t.Log("── Agent Health Check ──")
 	status, health := httpGet(t, agentURL+"/health")
 	if status != 200 {
@@ -322,7 +340,7 @@ func TestRealE2E_AgentDirectCalls(t *testing.T) {
 	}
 	t.Logf("  ✅ Agent status: %v", health["status"])
 
-	// 2. Classification (eval_record)
+	// 2. 动态分类定级 (eval_record)
 	t.Log("── Agent Classification (eval_record) ──")
 	classifyReq := map[string]any{
 		"record": map[string]any{
@@ -337,7 +355,7 @@ func TestRealE2E_AgentDirectCalls(t *testing.T) {
 	}
 	t.Logf("  ✅ 分类结果: %v", classifyResult)
 
-	// 3. Mask (field-level)
+	// 3. 字段级掩码脱敏 (field-level)
 	t.Log("── Agent Mask (field-level) ──")
 	maskReq := map[string]any{
 		"field_name": "patient_name",
@@ -351,7 +369,7 @@ func TestRealE2E_AgentDirectCalls(t *testing.T) {
 	maskedValue := maskResult["result"]
 	t.Logf("  ✅ 脱敏结果: patient_name: 王五 → %v", maskedValue)
 
-	// 4. Mask Record (record-level)
+	// 4. 整记录脱敏 (record-level)
 	t.Log("── Agent Mask Record (record-level) ──")
 	maskRecordReq := map[string]any{
 		"record": map[string]string{
@@ -369,13 +387,13 @@ func TestRealE2E_AgentDirectCalls(t *testing.T) {
 }
 
 // TestRealE2E_MultiServiceCoordination tests coordination across all 4 services.
-// TestRealE2E_MultiServiceCoordination 测试四个服务间的协调联动。
+// TestRealE2E_MultiServiceCoordination 验证全部 4 个微服务在复杂流通场景下的跨模块协同联动机制。
 func TestRealE2E_MultiServiceCoordination(t *testing.T) {
 	skipIfNoE2E(t)
 
 	t.Log("═══ 多服务协调测试 ═══")
 
-	// 1. 获取 datasource-mgr 模拟数据源
+	// 1. 从 datasource-mgr 读取真实模拟数据源
 	status, dsResp := httpGet(t, datasourceURL+"/api/datasources/ds_yibao")
 	if status != 200 {
 		t.Fatalf("get datasource: HTTP %d", status)
@@ -399,10 +417,10 @@ func TestRealE2E_MultiServiceCoordination(t *testing.T) {
 	taskID := dispatchResp["task_id"].(string)
 	t.Logf("  ✅ 脱敏任务提交: %s", taskID)
 
-	// 3. 等待完成
+	// 3. 等待流水线异步完成
 	time.Sleep(2 * time.Second)
 
-	// 4. 验证 service-hub 任务完成
+	// 4. 验证 service-hub 任务状态
 	status, hubStatus := httpGet(t, serviceHubURL+"/api/hub/status")
 	if status != 200 {
 		t.Fatalf("hub status: HTTP %d", status)
@@ -410,7 +428,7 @@ func TestRealE2E_MultiServiceCoordination(t *testing.T) {
 	completed := int(hubStatus["completed_total"].(float64))
 	t.Logf("  📊 调度中枢: completed_total=%d", completed)
 
-	// 5. 在 audit-log 记录操作
+	// 5. 在 audit-log 记录协同操作
 	auditPayload := map[string]any{
 		"operation":  "mask",
 		"datasource": "协调测试-医保库",
@@ -433,7 +451,7 @@ func TestRealE2E_MultiServiceCoordination(t *testing.T) {
 	}
 	t.Logf("  ✅ 数据源审计追踪: %d 条记录", auditTotal)
 
-	// 7. 验证 audit-log 统计
+	// 7. 验证 audit-log 总体统计
 	status, stats := httpGet(t, auditLogURL+"/api/audit/stats")
 	if status != 200 {
 		t.Fatalf("audit stats: HTTP %d", status)

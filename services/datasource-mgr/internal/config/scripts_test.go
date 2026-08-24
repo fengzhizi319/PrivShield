@@ -1,3 +1,12 @@
+// Package config_test contains integration and verification tests for module startup scripts and certificates.
+// Package config_test 包含 datasource-mgr 模块启动脚本、证书生成脚本及子进程生命周期的集成测试套件。
+//
+// 本测试套件覆盖：
+// 1. 脚本文件存在性与可执行权限验证（TestScripts_ExistenceAndExecutable）；
+// 2. Shell 脚本语法静态分析（TestScripts_BashSyntaxCheck：通过 bash -n 验证）；
+// 3. gen-certs.sh 证书生成脚本与 X.509 属性深度校验（TestGenCertsScript_ExecutionAndCertificateVerification）；
+// 4. dev-run.sh 开发模式子进程拉起与 HTTP 健康端点探测（TestDevRunScript_StartupAndHealth）；
+// 5. prod-run.sh 生产加固模式子进程拉起与 mTLS 双向证书校验（TestProdRunScript_StartupAndMTLS）。
 package config
 
 import (
@@ -22,18 +31,24 @@ import (
 )
 
 // getModuleRootDir returns the absolute path to services/datasource-mgr
+// getModuleRootDir 通过 runtime.Caller 获取当前测试文件路径并向上回溯两级，
+// 计算并返回 services/datasource-mgr 模块的绝对根目录路径。
 func getModuleRootDir(t *testing.T) string {
 	t.Helper()
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("failed to get caller information")
 	}
-	// currentFile is services/datasource-mgr/internal/config/scripts_test.go
+	// currentFile 为 services/datasource-mgr/internal/config/scripts_test.go
 	moduleDir := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
 	return moduleDir
 }
 
-// 1. 静态检查：验证所有脚本文件存在且具有可执行权限
+// 1. 静态检查：验证所有脚本文件存在且具有可执行权限 (TestScripts_ExistenceAndExecutable)
+// 执行逻辑：
+// 1. 遍历待测试的脚本清单；
+// 2. 使用 os.Stat 检查文件物理存在；
+// 3. 校验文件的 Unix 权限位 mode&0111 是否包含可执行标记（非 Windows 平台）。
 func TestScripts_ExistenceAndExecutable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping file permission tests on Windows")
@@ -61,7 +76,11 @@ func TestScripts_ExistenceAndExecutable(t *testing.T) {
 	}
 }
 
-// 2. 语法检查：执行 bash -n 验证所有脚本语法合法
+// 2. 语法检查：执行 bash -n 验证所有脚本语法合法 (TestScripts_BashSyntaxCheck)
+// 执行逻辑：
+// 1. 探测宿主系统中是否存在 bash 可执行程序；
+// 2. 对每个脚本执行 "bash -n <script>" 命令，在不实际执行代码的前提下校验语法是否有语法错误；
+// 3. 若返回错误或解析输出，则记录测试失败。
 func TestScripts_BashSyntaxCheck(t *testing.T) {
 	bashPath, err := exec.LookPath("bash")
 	if err != nil {
@@ -88,7 +107,15 @@ func TestScripts_BashSyntaxCheck(t *testing.T) {
 	}
 }
 
-// 3. gen-certs.sh 执行测试：在临时目录生成证书链并深度校验 X.509 属性
+// 3. gen-certs.sh 执行测试：在临时目录生成证书链并深度校验 X.509 属性 (TestGenCertsScript_ExecutionAndCertificateVerification)
+// 执行逻辑：
+// 1. 检查 openssl 命令可用性；
+// 2. 创建临时测试目录 t.TempDir()；
+// 3. 运行 gen-certs.sh 生成证书链；
+// 4. 逐一验证产物文件清单：ca.crt, ca.key, server.crt, server.key, client.crt, client.key, client.pub；
+// 5. 解析并断言 CA 证书属性（IsCA=true, Subject.CN）；
+// 6. 解析并断言服务端证书属性（SAN 包含 localhost）；
+// 7. 解析客户端证书与 client.pub，校验提取的 RSA 公钥与证书内嵌公钥数学一致性（N 模数与 E 指数恒等）。
 func TestGenCertsScript_ExecutionAndCertificateVerification(t *testing.T) {
 	opensslPath, err := exec.LookPath("openssl")
 	if err != nil {
@@ -101,7 +128,7 @@ func TestGenCertsScript_ExecutionAndCertificateVerification(t *testing.T) {
 
 	tempCertDir := t.TempDir()
 
-	// 执行 gen-certs.sh
+	// 执行 gen-certs.sh 生成测试证书链
 	cmd := exec.Command("bash", genScript, tempCertDir)
 	cmd.Dir = moduleDir
 	out, err := cmd.CombinedOutput()
@@ -109,7 +136,7 @@ func TestGenCertsScript_ExecutionAndCertificateVerification(t *testing.T) {
 		t.Fatalf("gen-certs.sh execution failed: %v\nOutput: %s", err, string(out))
 	}
 
-	// 验证生成的文件清单
+	// 验证生成的文件清单完整性
 	expectedFiles := []string{
 		"ca.crt", "ca.key",
 		"server.crt", "server.key",
@@ -124,7 +151,7 @@ func TestGenCertsScript_ExecutionAndCertificateVerification(t *testing.T) {
 		}
 	}
 
-	// 解析 CA 证书
+	// 解析 CA 证书并断言属性
 	caPEM, err := os.ReadFile(filepath.Join(tempCertDir, "ca.crt"))
 	if err != nil {
 		t.Fatalf("read ca.crt: %v", err)
@@ -138,7 +165,7 @@ func TestGenCertsScript_ExecutionAndCertificateVerification(t *testing.T) {
 		t.Errorf("unexpected CA cert properties: isCA=%v, CN=%s", caCert.IsCA, caCert.Subject.CommonName)
 	}
 
-	// 解析服务端证书并验证 SAN
+	// 解析服务端证书并验证 SAN（主体备用名称）
 	serverPEM, err := os.ReadFile(filepath.Join(tempCertDir, "server.crt"))
 	if err != nil {
 		t.Fatalf("read server.crt: %v", err)
@@ -199,7 +226,12 @@ func TestGenCertsScript_ExecutionAndCertificateVerification(t *testing.T) {
 	t.Log("✅ gen-certs.sh 证书链与公钥固定文件验证通过")
 }
 
-// 4. dev-run.sh 开发脚本启动与探活测试
+// 4. dev-run.sh 开发脚本启动与探活测试 (TestDevRunScript_StartupAndHealth)
+// 执行逻辑：
+// 1. 获取本地随机空闲 HTTP/gRPC 端口，避免端口冲突；
+// 2. 注入环境变量并通过子进程拉起 scripts/dev-run.sh；
+// 3. 注册 defer 钩子安全终止子进程；
+// 4. 轮询探测 HTTP /api/health 端点，验证服务在开发模式下能够正常对外响应 200 OK 与 JSON 元数据。
 func TestDevRunScript_StartupAndHealth(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess script test in short mode")
@@ -242,7 +274,7 @@ func TestDevRunScript_StartupAndHealth(t *testing.T) {
 		}
 	}()
 
-	// 探测 HTTP 健康端点
+	// 轮询探测 HTTP 健康端点
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", httpPort)
 	client := &http.Client{Timeout: 1 * time.Second}
 
@@ -273,7 +305,12 @@ func TestDevRunScript_StartupAndHealth(t *testing.T) {
 	t.Logf("✅ dev-run.sh 正常启动并响应 HTTP 200 OK (Port: %d)", httpPort)
 }
 
-// 5. prod-run.sh 生产脚本启动与 mTLS 证书加载测试
+// 5. prod-run.sh 生产脚本启动与 mTLS 证书加载测试 (TestProdRunScript_StartupAndMTLS)
+// 执行逻辑：
+// 1. 分配随机空闲端口并使用 certs 目录证书链启动 prod-run.sh；
+// 2. 构造携带 client.crt 与受信任 CA 的 HTTPS 客户端，发起 mTLS 请求，验证 200 OK 握手成功；
+// 3. 构造未提供客户端证书的 HTTP 客户端发起请求，验证 mTLS 握手被阻断拦截；
+// 4. TCP Dial 验证 gRPC mTLS 端口已正常监听。
 func TestProdRunScript_StartupAndMTLS(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess script test in short mode")
@@ -384,6 +421,8 @@ func TestProdRunScript_StartupAndMTLS(t *testing.T) {
 	t.Logf("✅ prod-run.sh 正常启动，HTTPS REST (Port: %d) 与 gRPC mTLS (Port: %d) 均就绪并通过双向认证校验", httpPort, grpcPort)
 }
 
+// getFreePort listens on a random ephemeral port (":0") to find an available port and releases it.
+// getFreePort 临时监听 ":0" 获取系统随机分配的空闲端口并立即关闭，返回可用端口号。
 func getFreePort(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")

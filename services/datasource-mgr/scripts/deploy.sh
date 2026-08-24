@@ -1,38 +1,54 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Datasource Manager (数据源管理) Production Deployment Script
-# 数据源管理生产部署脚本
+# Datasource Manager (数据源管理) 生产 Docker 容器自动化部署脚本
+#
+# 描述：
+#   本脚本用于在单机或测试服务器上通过 Docker 独立构建并运行 datasource-mgr 容器。
+#   支持配置挂载数据持久化卷、设置网络映射与环境变量，并在容器启动后自动执行
+#   最长 30 秒的健康检查探针轮询，保障服务就绪后再返回成功状态。
+#
+# 用法 (Usage)：
+#   bash scripts/deploy.sh
+#
+# 环境变量配置选项 (Optional Env Vars)：
+#   DATASOURCE_MGR_IMAGE      : Docker 镜像名 (默认 privshield-datasource-mgr:1.8.0)
+#   DATASOURCE_MGR_CONTAINER  : 容器名 (默认 privshield-datasource-mgr)
+#   DATASOURCE_MGR_PORT       : 宿主机对外暴露的 HTTP 端口 (默认 8083)
+#   DATASOURCE_MGR_DATA_DIR   : 数据持久化命名卷/路径
 # ============================================================================
 
 set -euo pipefail
 
-# Dockerfile 要求构建上下文为项目根目录（包含 pkg/ 与 services/）
+# 1. 解析路径：Dockerfile 要求构建上下文为项目根目录（包含共享基础库 pkg/ 与微服务 services/）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
 
+# 2. 从环境变量读取部署参数或使用默认值
 IMAGE_NAME="${DATASOURCE_MGR_IMAGE:-privshield-datasource-mgr:1.8.0}"
 CONTAINER_NAME="${DATASOURCE_MGR_CONTAINER:-privshield-datasource-mgr}"
 HOST="${DATASOURCE_MGR_HOST:-0.0.0.0}"
 PORT="${DATASOURCE_MGR_PORT:-8083}"
-# P63 fix: SQLite data directory for persistent storage (default: named volume)
+# 持久化存储命名卷（默认 privshield-datasource-mgr-data）
 DATA_DIR="${DATASOURCE_MGR_DATA_DIR:-${CONTAINER_NAME}-data}"
 
 echo "=========================================="
 echo "  Deploy Datasource Manager (数据源管理)"
 echo "=========================================="
 
-# Build image (build context = PROJECT_ROOT for shared pkg/ dependency)
+# 3. 构建 Docker 镜像
+# 构建上下文设置为 PROJECT_ROOT，使得 Dockerfile 内的 Go 模块能够顺利拉取本地 pkg/ 共享基础依赖
 echo "[1/3] Building Docker image: $IMAGE_NAME ..."
 docker build -f "$MODULE_DIR/Dockerfile" -t "$IMAGE_NAME" "$PROJECT_ROOT"
 
-# Stop old container
+# 4. 停止并移除同名的历史旧容器（若存在）
 echo "[2/3] Removing old container (if exists)..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
-# Run new container
-# P63 fix: mount data volume for SQLite persistence
-# P64 fix: add post-deploy health check verification
+# 5. 启动新容器实例
+# -p "${PORT}:8083": 宿主机端口映射至容器内 8083 端口；
+# -v "${DATA_DIR}:/app/data": 挂载持久化数据目录；
+# --restart unless-stopped: 容器崩溃或系统重启后自动恢复。
 echo "[3/3] Starting container on port $PORT ..."
 docker run -d \
   --name "$CONTAINER_NAME" \
@@ -47,7 +63,7 @@ docker run -d \
   --restart unless-stopped \
   "$IMAGE_NAME"
 
-# P64 fix: wait for container to become healthy
+# 6. 执行启动后健康检查验证（轮询最长 30 秒）
 echo -n "Waiting for datasource-mgr to be healthy"
 for i in $(seq 1 30); do
   if curl -sf --max-time 3 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
@@ -62,6 +78,8 @@ for i in $(seq 1 30); do
   echo -n "."
   sleep 1
 done
+
+# 若 30 秒超时仍未响应 200，则输出告警并以退出码 1 退出
 echo " TIMEOUT"
 echo "WARNING: container started but health check did not respond within 30s"
 echo "  Logs: docker logs $CONTAINER_NAME"

@@ -5,16 +5,20 @@ import (
 	"testing"
 )
 
+// TestLoadDefaults tests that Load() populates expected default values when no environment variables are set.
+// TestLoadDefaults 测试在未设置任何环境变量时，Load() 能正确赋予安全的默认配置值。
 func TestLoadDefaults(t *testing.T) {
-	// Clear env vars to test defaults
+	// 清理可能存在的环境变量，确保测试默认值不受外部干扰
 	os.Unsetenv("SERVICE_HUB_HOST")
 	os.Unsetenv("SERVICE_HUB_PORT")
 	os.Unsetenv("PRIVACY_AGENT_REST_HOST")
 	os.Unsetenv("PRIVACY_REST_PORT")
 	os.Unsetenv("PRIVACY_AGENT_API_KEY")
 
+	// 执行配置加载
 	cfg := Load()
 
+	// 校验默认 HTTP 主机、端口与上游 Agent 地址
 	if cfg.Host != "127.0.0.1" {
 		t.Errorf("expected host=127.0.0.1, got %s", cfg.Host)
 	}
@@ -32,6 +36,8 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+// TestLoadFromEnv tests that custom environment variables correctly override the default configuration.
+// TestLoadFromEnv 测试当注入自定义环境变量时，Load() 能够精确读取并覆盖默认配置。
 func TestLoadFromEnv(t *testing.T) {
 	os.Setenv("SERVICE_HUB_HOST", "0.0.0.0")
 	os.Setenv("SERVICE_HUB_PORT", "9090")
@@ -65,6 +71,8 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 }
 
+// TestAddress tests the Address() helper string formatting.
+// TestAddress 测试 Address() 方法能正确输出 "host:port" 格式的 HTTP 监听地址字符串。
 func TestAddress(t *testing.T) {
 	cfg := &Config{Host: "127.0.0.1", Port: 8082}
 	if addr := cfg.Address(); addr != "127.0.0.1:8082" {
@@ -72,6 +80,8 @@ func TestAddress(t *testing.T) {
 	}
 }
 
+// TestAgentBaseURL tests the AgentBaseURL() helper method.
+// TestAgentBaseURL 测试 AgentBaseURL() 方法能正确拼接上游 Agent 的 HTTP REST 基础 URL。
 func TestAgentBaseURL(t *testing.T) {
 	cfg := &Config{AgentRESTHost: "10.0.0.1", AgentRESTPort: 8079}
 	if url := cfg.AgentBaseURL(); url != "http://10.0.0.1:8079" {
@@ -79,6 +89,8 @@ func TestAgentBaseURL(t *testing.T) {
 	}
 }
 
+// TestGRPCAddress tests the GRPCAddress() helper method.
+// TestGRPCAddress 测试 GRPCAddress() 方法能正确输出 gRPC 监听网络地址。
 func TestGRPCAddress(t *testing.T) {
 	cfg := &Config{GRPCHost: "127.0.0.1", GRPCPort: 50052}
 	if addr := cfg.GRPCAddress(); addr != "127.0.0.1:50052" {
@@ -86,8 +98,9 @@ func TestGRPCAddress(t *testing.T) {
 	}
 }
 
+// TestLoadProductionHardeningDefaults tests the production hardening defaults (DB, API Key, Log).
+// TestLoadProductionHardeningDefaults 测试生产加固相关的配置默认值（空 API Key、空 DB 路径、json 日志格式、info 级别）。
 func TestLoadProductionHardeningDefaults(t *testing.T) {
-	// Clear env vars to test defaults
 	os.Unsetenv("SERVICE_HUB_API_KEY")
 	os.Unsetenv("SERVICE_HUB_CORS_ORIGINS")
 	os.Unsetenv("SERVICE_HUB_DB_PATH")
@@ -113,6 +126,10 @@ func TestLoadProductionHardeningDefaults(t *testing.T) {
 	}
 }
 
+// TestAgentBaseURLs tests single URL fallback and multiple upstream agent URLs parsing.
+// TestAgentBaseURLs 测试上游 Agent URL 列表获取：
+// 1) 未设置 PRIVACY_AGENT_URLS 时回退为单个 AgentBaseURL；
+// 2) 设置了以逗号分隔的多个 URL 时能正确拆分为切片，供多活/故障转移调用。
 func TestAgentBaseURLs(t *testing.T) {
 	t.Run("DefaultSingleURL", func(t *testing.T) {
 		t.Setenv("PRIVACY_AGENT_URLS", "")
@@ -133,6 +150,8 @@ func TestAgentBaseURLs(t *testing.T) {
 	})
 }
 
+// TestLoadAllEnvVariables tests that all service-hub environment variables are mapped accurately.
+// TestLoadAllEnvVariables 综合测试所有环境变量（gRPC、队列、超时、mTLS 证书/私钥/CA/ClientAuth/公钥固定、跨域、DB 路径、日志）的完整映射。
 func TestLoadAllEnvVariables(t *testing.T) {
 	t.Setenv("SERVICE_HUB_GRPC_HOST", "0.0.0.0")
 	t.Setenv("SERVICE_HUB_GRPC_PORT", "50059")
@@ -168,6 +187,8 @@ func TestLoadAllEnvVariables(t *testing.T) {
 	}
 }
 
+// TestDatasourceConfig tests datasource URL and gRPC address formatting methods.
+// TestDatasourceConfig 测试 DatasourceBaseURL() 与 DatasourceGRPCAddress() 方法的格式化正确性。
 func TestDatasourceConfig(t *testing.T) {
 	cfg := &Config{
 		DatasourceRESTHost: "127.0.0.1",

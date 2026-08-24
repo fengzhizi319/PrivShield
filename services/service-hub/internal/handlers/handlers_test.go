@@ -25,16 +25,19 @@ import (
 )
 
 func init() {
+	// 设置 Gin 为测试模式，避免打印冗余调试路由日志
 	gin.SetMode(gin.TestMode)
 }
 
 // testDeps bundles shared test dependencies (store, logger, metrics).
+// testDeps 聚合测试所需的通用基础依赖：内存任务仓库、日志记录器与指标收集器。
 type testDeps struct {
 	tasks  *memory.TaskStore
 	logger *slog.Logger
 	mc     *metrics.Collector
 }
 
+// newTestDeps creates a new instance of testDeps.
 func newTestDeps() *testDeps {
 	return &testDeps{
 		tasks:  memory.NewTaskStore(),
@@ -44,10 +47,11 @@ func newTestDeps() *testDeps {
 }
 
 // newTestServer creates a Server with a mock upstream (httptest server).
+// newTestServer 启动一个 Mock Upstream Agent HTTP 服务器，并返回初始化的 Server 实例与 Mock 服务。
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 
-	// Mock upstream agent
+	// 构造 Mock Upstream Agent 路由处理器
 	mockAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
@@ -73,7 +77,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 		Host:            "127.0.0.1",
 		Port:            0,
 		AgentRESTHost:   "127.0.0.1",
-		AgentRESTPort:   19999, // unreachable for simple tests
+		AgentRESTPort:   19999, // 设置为不可达端口，用于单元测试快速验证错误分支
 		MaxQueueDepth:   100,
 		ScheduleTimeout: 5,
 	}
@@ -84,12 +88,14 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	return srv, mockAgent
 }
 
+// newSimpleTestServer creates a standalone test Server with in-memory store and mock config.
+// newSimpleTestServer 快速创建无外部依赖的单测用 Server 实例。
 func newSimpleTestServer() *Server {
 	cfg := &config.Config{
 		Host:            "127.0.0.1",
 		Port:            0,
 		AgentRESTHost:   "127.0.0.1",
-		AgentRESTPort:   19999, // unreachable, for unit tests
+		AgentRESTPort:   19999, // 不可达端口，用于孤立单元测试
 		MaxQueueDepth:   100,
 		ScheduleTimeout: 5,
 	}
@@ -106,7 +112,7 @@ func newSimpleTestServer() *Server {
 func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 
-	// Mock upstream agent: simulates real PrivShield Agent REST API
+	// 构造 Mock Upstream Agent：模拟动态分类三层漏斗与隐私脱敏 API
 	mockAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -114,7 +120,7 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 			json.NewEncoder(w).Encode(map[string]any{"status": "ok", "namespace": "default"})
 
 		case "/v1/dynclassification/eval_record":
-			// Simulate 3-layer classification funnel: Rule → NER → LLM
+			// 模拟 Agent 动态分类三层漏斗（Rule -> NER -> LLM）评估
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
 			json.NewEncoder(w).Encode(map[string]any{
@@ -130,7 +136,7 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 			})
 
 		case "/v1/privacy/mask":
-			// Simulate field-level masking: name → 张*, id_card → 110***1234
+			// 模拟字段级掩码脱敏
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
 			json.NewEncoder(w).Encode(map[string]any{
@@ -138,7 +144,7 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 			})
 
 		case "/v1/privacy/mask_record":
-			// Simulate record-level masking
+			// 模拟整行记录脱敏
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
 			json.NewEncoder(w).Encode(map[string]any{
@@ -155,7 +161,7 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 		}
 	}))
 
-	// Parse mock server URL to extract host:port
+	// 解析 mockServer 的主机与动态端口
 	mockURL, _ := url.Parse(mockAgent.URL)
 	mockHost, mockPortStr, _ := net.SplitHostPort(mockURL.Host)
 	mockPort, _ := strconv.Atoi(mockPortStr)
@@ -175,12 +181,15 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 	return srv, mockAgent
 }
 
+// newTestRouter constructs a test Gin engine with all routes registered.
 func newTestRouter(s *Server) *gin.Engine {
 	r := gin.New()
 	s.RegisterRoutes(r)
 	return r
 }
 
+// TestHealth tests the /api/health endpoint when the upstream agent is unreachable.
+// TestHealth 测试健康检查探针在 Agent 未就绪时的降级返回结构。
 func TestHealth(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -203,12 +212,14 @@ func TestHealth(t *testing.T) {
 	if resp["via"] != "service-hub" {
 		t.Errorf("expected via=service-hub, got %v", resp["via"])
 	}
-	// Agent should be unreachable since port 19999 is not listening
+	// 由于单测配置了未监听端口，Agent 应当报告 unreachable
 	if resp["agent"] != "unreachable" {
 		t.Errorf("expected agent=unreachable, got %v", resp["agent"])
 	}
 }
 
+// TestHubStatus tests the /api/hub/status telemetry overview endpoint.
+// TestHubStatus 测试调度中枢状态概览端点返回指标。
 func TestHubStatus(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -233,6 +244,8 @@ func TestHubStatus(t *testing.T) {
 	}
 }
 
+// TestListTasksEmpty tests querying the task list when the repository is empty.
+// TestListTasksEmpty 测试空仓库时的任务列表查询。
 func TestListTasksEmpty(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -252,6 +265,8 @@ func TestListTasksEmpty(t *testing.T) {
 	}
 }
 
+// TestDispatchInvalidBody tests input validation failure on malformed dispatch payloads.
+// TestDispatchInvalidBody 测试提交空体或缺失必填字段时的 400 Bad Request 校验阻断。
 func TestDispatchInvalidBody(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -266,6 +281,8 @@ func TestDispatchInvalidBody(t *testing.T) {
 	}
 }
 
+// TestDispatchAccepted tests normal dispatch flow returning 202 Accepted.
+// TestDispatchAccepted 测试任务合法提交后正确受理并返回 202 Accepted 与 TaskID。
 func TestDispatchAccepted(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -295,10 +312,10 @@ func TestDispatchAccepted(t *testing.T) {
 		t.Error("expected non-empty task_id")
 	}
 
-	// Wait for async processing
+	// 等待后台异步流水线处理
 	time.Sleep(200 * time.Millisecond)
 
-	// Check task list
+	// 校验任务列表已包含该任务
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("GET", "/api/hub/tasks", nil)
 	router.ServeHTTP(w2, req2)
@@ -310,6 +327,8 @@ func TestDispatchAccepted(t *testing.T) {
 	}
 }
 
+// TestPipeline tests the 6-stage pipeline telemetry status endpoint.
+// TestPipeline 测试 /api/hub/pipeline 端点能够准确返回 6 个流水线阶段的实时状态。
 func TestPipeline(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -330,6 +349,8 @@ func TestPipeline(t *testing.T) {
 	}
 }
 
+// TestLevelToOperation tests mapping data security levels to operations.
+// TestLevelToOperation 测试敏感等级到操作类型的映射函数。
 func TestLevelToOperation(t *testing.T) {
 	tests := []struct {
 		level    string
@@ -350,6 +371,8 @@ func TestLevelToOperation(t *testing.T) {
 	}
 }
 
+// TestLevelToPriority tests sensitivity level to task priority calculation.
+// TestLevelToPriority 测试等级到调度优先级的数值映射。
 func TestLevelToPriority(t *testing.T) {
 	tests := []struct {
 		level    string
@@ -370,11 +393,13 @@ func TestLevelToPriority(t *testing.T) {
 	}
 }
 
+// TestListTasksWithFilter tests task list querying with status filtering (completed vs pending).
+// TestListTasksWithFilter 测试基于 status 查询参数的任务列表过滤能力。
 func TestListTasksWithFilter(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
 
-	// Dispatch a task with operation "none" (doesn't call agent, completes successfully)
+	// 分发一个 operation=none 任务（无需上游 agent，可快速跑通全流水线）
 	body := map[string]any{
 		"source":    "test-source",
 		"operation": "none",
@@ -385,10 +410,10 @@ func TestListTasksWithFilter(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	// Wait for async processing (6 stages * 100ms each)
+	// 等待 6 阶段异步流水线执行完成 (6 * 100ms + buffer)
 	time.Sleep(1200 * time.Millisecond)
 
-	// Filter by completed
+	// 过滤已完成任务
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("GET", "/api/hub/tasks?status=completed", nil)
 	router.ServeHTTP(w2, req2)
@@ -400,7 +425,7 @@ func TestListTasksWithFilter(t *testing.T) {
 		t.Errorf("expected 1 completed task, got %v", total)
 	}
 
-	// Filter by pending (should be 0 after completion)
+	// 过滤排队中任务（完成后应为 0）
 	w3 := httptest.NewRecorder()
 	req3, _ := http.NewRequest("GET", "/api/hub/tasks?status=pending", nil)
 	router.ServeHTTP(w3, req3)
@@ -432,7 +457,7 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	defer mockAgent.Close()
 	router := newTestRouter(srv)
 
-	// Step 1: 申请数据 — Submit a masking task with patient PII data
+	// Step 1: 申请数据 — 提交包含医疗 PII 的脱敏请求
 	dispatchBody := map[string]any{
 		"source":    "卫健数据库",
 		"operation": "mask",
@@ -468,7 +493,7 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	// Step 2: 等待流水线处理完成 (6 stages × 100ms each + buffer)
 	time.Sleep(1200 * time.Millisecond)
 
-	// Step 3: 拿到脱敏数据 — Query task by ID directly
+	// Step 3: 拿到脱敏数据 — 根据 TaskID 直接查询任务详情
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("GET", "/api/hub/tasks/"+taskID, nil)
 	router.ServeHTTP(w2, req2)
@@ -481,7 +506,7 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	_ = json.Unmarshal(w2.Body.Bytes(), &getResp)
 	task := getResp["task"].(map[string]any)
 
-	// Verify task completed successfully through all 6 pipeline stages
+	// 校验任务已跨越全部 6 个流水线阶段成功完成
 	if task["status"] != "completed" {
 		t.Errorf("expected status=completed, got %v", task["status"])
 	}
@@ -503,7 +528,7 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	}
 	t.Logf("✅ Step 2 passed: 流水线完成 status=completed stage=done duration=%.0fms", durationMs)
 
-	// Step 4: Verify hub status reflects completed task
+	// Step 4: 校验调度中枢状态中的完成任务计数已增加
 	w3 := httptest.NewRecorder()
 	req3, _ := http.NewRequest("GET", "/api/hub/status", nil)
 	router.ServeHTTP(w3, req3)
@@ -534,7 +559,7 @@ func TestE2E_FullPipeline_ClassifyAndDesensitize(t *testing.T) {
 	defer mockAgent.Close()
 	router := newTestRouter(srv)
 
-	// Step 1: 申请数据 — Submit data for auto classification
+	// Step 1: 申请数据 — 提交待分类的数据载荷
 	classifyBody := map[string]any{
 		"source": "医保数据库",
 		"payload": map[string]any{
@@ -558,7 +583,7 @@ func TestE2E_FullPipeline_ClassifyAndDesensitize(t *testing.T) {
 	var classifyResp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &classifyResp)
 
-	// Step 2: 分类分级结果验证 — Verify classification result
+	// Step 2: 分类分级结果验证 — 校验评估级别与自适应算子决策
 	taskID := classifyResp["task_id"].(string)
 	if taskID == "" {
 		t.Fatal("classify: expected non-empty task_id")
@@ -576,7 +601,7 @@ func TestE2E_FullPipeline_ClassifyAndDesensitize(t *testing.T) {
 	// Step 3: 等待脱敏流水线完成
 	time.Sleep(1200 * time.Millisecond)
 
-	// Step 4: 拿到脱敏数据 — Verify task completed with k_anon operation
+	// Step 4: 拿到脱敏数据 — 校验任务按自动选择的 k_anon 策略执行并完成
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("GET", "/api/hub/tasks?status=completed", nil)
 	router.ServeHTTP(w2, req2)
@@ -632,7 +657,7 @@ func TestE2E_FullPipeline_MultiLevelDesensitize(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// 申请数据 — Submit task
+			// 1. 提交任务
 			body := map[string]any{
 				"source":    tc.source,
 				"operation": tc.operation,
@@ -657,10 +682,10 @@ func TestE2E_FullPipeline_MultiLevelDesensitize(t *testing.T) {
 			taskID := resp["task_id"].(string)
 			t.Logf("  📝 任务已提交: %s (operation=%s)", taskID, tc.operation)
 
-			// 等待脱敏完成
+			// 2. 等待脱敏完成
 			time.Sleep(1000 * time.Millisecond)
 
-			// 拿到脱敏数据 — Verify task completed
+			// 3. 拿到脱敏数据 — 验证已完成列表中的任务匹配
 			w2 := httptest.NewRecorder()
 			req2, _ := http.NewRequest("GET", "/api/hub/tasks?status=completed", nil)
 			router.ServeHTTP(w2, req2)
@@ -669,7 +694,6 @@ func TestE2E_FullPipeline_MultiLevelDesensitize(t *testing.T) {
 			_ = json.Unmarshal(w2.Body.Bytes(), &listResp)
 			tasks := listResp["tasks"].([]any)
 
-			// Find our task
 			found := false
 			for _, taskRaw := range tasks {
 				task := taskRaw.(map[string]any)
@@ -711,7 +735,6 @@ func TestE2E_FullPipeline_HealthCheckWithAgent(t *testing.T) {
 	var resp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
-	// Agent should be reachable (not "unreachable")
 	if resp["agent"] == "unreachable" {
 		t.Error("expected agent to be reachable via mock server")
 	}
@@ -729,7 +752,7 @@ func TestE2E_FullPipeline_PipelineStagesWithAgent(t *testing.T) {
 	defer mockAgent.Close()
 	router := newTestRouter(srv)
 
-	// Submit a task that will call the mock agent
+	// 提交一个会调用 mock agent 的任务
 	body := map[string]any{
 		"source":    "测试数据源",
 		"operation": "mask",
@@ -746,8 +769,8 @@ func TestE2E_FullPipeline_PipelineStagesWithAgent(t *testing.T) {
 		t.Fatalf("expected 202, got %d", w.Code)
 	}
 
-	// Check pipeline while task is processing (should see active stages)
-	time.Sleep(50 * time.Millisecond) // Let task start
+	// 检查处理中的流水线阶段遥测
+	time.Sleep(50 * time.Millisecond)
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("GET", "/api/hub/pipeline", nil)
 	router.ServeHTTP(w2, req2)
@@ -759,7 +782,6 @@ func TestE2E_FullPipeline_PipelineStagesWithAgent(t *testing.T) {
 	var pipelineResp map[string]any
 	_ = json.Unmarshal(w2.Body.Bytes(), &pipelineResp)
 
-	// Agent should be OK
 	if pipelineResp["agent_ok"] != true {
 		t.Error("expected agent_ok=true")
 	}
@@ -770,10 +792,12 @@ func TestE2E_FullPipeline_PipelineStagesWithAgent(t *testing.T) {
 	}
 	t.Logf("✅ 流水线 6 阶段正常, Agent 连接正常")
 
-	// Wait for completion
+	// 等待流水线全部收敛完成
 	time.Sleep(1200 * time.Millisecond)
 }
 
+// TestGetTask_SuccessAndNotFound tests single task lookup with existing ID and non-existing ID.
+// TestGetTask_SuccessAndNotFound 测试单任务详情查询（命中返回 200 与未命中返回 404）。
 func TestGetTask_SuccessAndNotFound(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -808,6 +832,8 @@ func TestGetTask_SuccessAndNotFound(t *testing.T) {
 	})
 }
 
+// TestDispatch_OversizedSource tests rejection of oversized source strings.
+// TestDispatch_OversizedSource 测试超长源名称（>1024 字节）被安全拦截。
 func TestDispatch_OversizedSource(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -828,6 +854,8 @@ func TestDispatch_OversizedSource(t *testing.T) {
 	}
 }
 
+// TestClassifyAndDispatch_Validations tests request body validation on ClassifyAndDispatch.
+// TestClassifyAndDispatch_Validations 测试分类分发端点的各类入参非法分支（非 JSON、空 source、超长 source）。
 func TestClassifyAndDispatch_Validations(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -871,6 +899,8 @@ func TestClassifyAndDispatch_Validations(t *testing.T) {
 	})
 }
 
+// TestListTasks_InvalidStatusFilter tests rejection of illegal status filters.
+// TestListTasks_InvalidStatusFilter 测试非法状态过滤参数被正确拦截。
 func TestListTasks_InvalidStatusFilter(t *testing.T) {
 	s := newSimpleTestServer()
 	router := newTestRouter(s)
@@ -884,6 +914,8 @@ func TestListTasks_InvalidStatusFilter(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_Protection tests API Key authentication middleware protection.
+// TestAuthMiddleware_Protection 测试 API Key 鉴权中间件的防护拦截（无认证头 401、携带有效 Bearer 头 200、Health 接口免密放行）。
 func TestAuthMiddleware_Protection(t *testing.T) {
 	cfg := &config.Config{
 		Host:          "127.0.0.1",
@@ -932,14 +964,16 @@ func TestAuthMiddleware_Protection(t *testing.T) {
 	})
 }
 
+// TestServer_ShutdownGraceful tests graceful shutdown execution without panic.
+// TestServer_ShutdownGraceful 测试优雅停机方法能平滑执行完毕。
 func TestServer_ShutdownGraceful(t *testing.T) {
 	s := newSimpleTestServer()
-	// Call shutdown directly
 	s.Shutdown()
 }
 
+// TestTriggerDataSourcePipeline tests the integrated pipeline trigger from datasource-mgr.
+// TestTriggerDataSourcePipeline 测试从 Mock datasource-mgr 拉取数据并异步派发任务的完整处理。
 func TestTriggerDataSourcePipeline(t *testing.T) {
-	// Mock datasource-mgr
 	mockDS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(datasource.DataQueryResult{
@@ -992,6 +1026,8 @@ func TestTriggerDataSourcePipeline(t *testing.T) {
 	}
 }
 
+// TestListDataSourcesProxy tests proxying datasource metadata list from datasource-mgr.
+// TestListDataSourcesProxy 测试代理转发查询数据源列表端点。
 func TestListDataSourcesProxy(t *testing.T) {
 	mockDS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1025,7 +1061,7 @@ func TestListDataSourcesProxy(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
 
