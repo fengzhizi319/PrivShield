@@ -259,8 +259,15 @@ flowchart LR
   * `deploy/grafana/dashboard.json`（全平台总览大屏）；
   * `deploy/grafana/service-hub-dashboard.json`（Service Hub 专属流水线调度大屏）。
 
-### 6.2 纵深安全防御
-* 支持全局 TLS 1.3 / mTLS 客户端证书白名单校验、Bearer API Key 鉴权与基于令牌桶的 IP/租户级别多维度限流。
+### 6.2 全栈纵深防 DDoS 与安全加固体系
+* **云原生入口层 (L4/L7 Ingress)**：预置 Nginx Ingress / Envoy 注解防护，实施单 IP 连接上限（`limit-connections: 50`）、速率上限（`limit-rps: 100`）与边缘大包拦截（`proxy-body-size: 64m`）；
+* **传输与协议层 (Anti-Slowloris)**：全微服务（Go 与 Python）显式配置 `ReadHeaderTimeout: 5s`、`ReadTimeout: 30s` 与 `MaxHeaderBytes: 1MB`，强力抵御慢速连接与 Slow HTTP Header/POST 挂起攻击；
+* **应用洪峰层 (RateLimit & Concurrency Cap)**：
+  * `pkg/middleware` 内置线程安全 IP 令牌桶限流器（`RateLimit`，自动 GC 10分钟闲置 IP 桶），超额触发 `429 Too Many Requests`；
+  * 内置全局并发信号量中间件（`MaxConcurrent`），超载即刻以 `503 Service Unavailable` 快速失败降级，保护进程协程池不被耗尽；
+* **内存与带宽保护 (Payload Protection)**：
+  * `MaxBodySize` 中间件与网关 `Content-Length` 预检结合，限制最大请求体（32MB/64MB），超出即切断传输并响应 `413 Payload Too Large`；
+* **身份与数据安全**：支持全局 TLS 1.3 / mTLS 客户端证书白名单校验、Bearer API Key 常量时间防时序攻击鉴权、SQLite Limit/Offset 边界夹紧与 CSV 50,000 行加载沙箱保护。
 
 ### 6.3 极限性能压测与 SLA 基准套件
 * 提供 `scripts/test/stress_test_suite.py` 自动化并发压测工具，实时生成包含总吞吐、QPS、P50/P90/P95/P99 延迟及错误率的 SLA 性能报告。

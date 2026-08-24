@@ -1,10 +1,10 @@
 # PrivShield 全平台目录架构重构与平滑迁移设计方案 (Migration Design Document)
 
-> **版本**：v1.5.0  
+> **版本**：v1.6.0  
 > **状态**：✅ **Completed / Implemented (已完全落地并通过全量验证)**  
 > **适用范围**：`PrivShield` 核心引擎、`console` 控制台及全部关联微服务（`service-hub` / `datasource-mgr` / `audit-log` / `bff-go` / `bff-py` / `web`）  
 > **实施分支**：`refactor/directory-restructure`  
-> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容、全栈安全漏洞排查与加固、系统健壮性加固（连接池管理、熔断器 4xx/5xx 精细分流、任务失败耗时归档、gRPC 状态精准映射及 DP 参数极值防护）及全套 CI/CD/E2E 验证。
+> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容、全栈安全漏洞排查与加固、系统健壮性加固、全栈多层次防 DDoS 体系（Slowloris 超时拦截、IP 令牌桶限流、Payload 大包切断、并发容量熔断与 K8s Ingress 边缘防护）及全套 CI/CD/E2E 验证。
 
 ---
 
@@ -735,6 +735,10 @@ gantt
 | 22 | gRPC 状态码与连接状态识别 | `go test -v -run TestProxy ./console/bff-go/internal/handlers/` | 类型化 `status.FromError` 识别 Unavailable/DeadlineExceeded 通过 | ✅ PASS |
 | 23 | 调度中枢流水线失败生命周期 | `go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` | 失败任务准确归档 CompletedAt 与实际耗时 DurationMs 通过 | ✅ PASS |
 | 24 | 解析高斯 DP 参数极值防护 | `pytest tests/privacy/test_dp.py -v` | 校验 epsilon>0、0<delta<1 及非负敏感度，杜绝 NaN 异常通过 | ✅ PASS |
+| 25 | 大包拒绝服务 (Payload DDoS) 防护 | `go test -v -run TestMaxBodySize ./pkg/middleware/` | 超限请求体立即切断并返回 413 Payload Too Large 通过 | ✅ PASS |
+| 26 | 在途请求并发容量硬顶保护 | `go test -v -run TestMaxConcurrent ./pkg/middleware/` | 并发槽位耗尽时快速返回 503 Service Unavailable 保护协程池通过 | ✅ PASS |
+| 27 | 客户端 IP 令牌桶防刷限流 | `go test -v -run TestRateLimit_AllowsUnderBurstAndRejectsOver ./pkg/middleware/` | 超限请求精准响应 429 与 Retry-After 头且自动 GC 闲置桶通过 | ✅ PASS |
+| 28 | 协议级 Slowloris 慢速挂起防护 | `go test -v ./services/service-hub/... ./services/datasource-mgr/...` | ReadHeaderTimeout 5s 强制关闭慢请求头连接通过 | ✅ PASS |
 
 ---
 
@@ -833,11 +837,19 @@ gantt
 - **异常信息脱敏**：修复 `pkg/middleware/middleware.go` 中 Recovery panic 详情回显泄露问题，堆栈收敛至内部日志，HTTP 响应统一安全脱敏；
 - **分页与内存保护**：限制 SQLite 分页参数上限（Limit 1~10000 / Offset >= 0），为 CSV 文件加载增加 50,000 行上限保护，杜绝 DoS/OOM 隐患。
 
-### 11.9 全栈系统健壮性加固与故障容错交付
+### 11.9 全栈系统健壮性加固与故障容错交付 (Commit: `776fe6b`)
 - **HTTP 连接池优化**：`pkg/agent/client.go` 深度配置 `http.Transport`（`MaxIdleConns: 100`、`MaxIdleConnsPerHost: 20` 与 `IdleConnTimeout: 90s`），杜绝高并发下文件句柄泄漏；
 - **熔断器 4xx/5xx 精细分流**：修复客户端 4xx 参数错误错误触发熔断器连带失效的缺陷，熔断器仅对 5xx 故障与网络异常累计，新增 `TestCircuitBreaker_ClientError4xx_NoTrip` 单测；
 - **流水线失败生命周期审计**：在 `services/service-hub`（REST 与 gRPC 两套处理器）中为失败阶段补充 `task.CompletedAt` 与实际耗时 `task.DurationMs` 计算归档；
 - **gRPC 状态码类型化映射**：`console/bff-go` 通过 `status.FromError` 精准映射 `Unavailable` / `DeadlineExceeded` 到 HTTP 502；
 - **DP 极值保护与 Redis 现代 API**：`PrivShield/privacy/dp.py` 增加解析高斯参数极值边界保护，`budget.py` 全面升级至 Redis `hset(mapping=...)`。
+
+### 11.10 全栈多层次防 DDoS 体系交付 (Commit: `82698fe`)
+- **慢速连接与 Slowloris 防护**：在所有 Go 微服务与 BFF 服务端配置 `ReadHeaderTimeout: 5s`、`ReadTimeout: 30s`、`WriteTimeout: 60s` 与 `MaxHeaderBytes: 1MB`；
+- **请求体大包 DoS 防护**：在 `pkg/middleware/ratelimit.go` 中实现 `MaxBodySize`（32MB/64MB），结合 `http.MaxBytesReader` 快速切断超限请求并响应 `413 Payload Too Large`；在 Python 网关 `http_proxy.py` 补充 `Content-Length` 预检与 64MB 限制；
+- **IP 令牌桶限流**：实现线程安全 `IPRateLimiter`（自动后台 GC 10 分钟闲置 IP 桶），超额精准响应 `429 Too Many Requests` 与 `Retry-After: 1` 响应头；
+- **系统并发容量硬顶保护**：引入 `MaxConcurrent` 信号量中间件，突发过载快速返回 `503 Service Unavailable` 保护协程池；
+- **云原生 Ingress 防护模板**：在 Helm `values.yaml` 与生产配置中预置 Nginx Ingress `limit-rps`、`limit-connections` 与 `proxy-body-size` 防护注解。
+
 
 

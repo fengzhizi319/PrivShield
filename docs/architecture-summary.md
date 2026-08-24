@@ -167,6 +167,13 @@ class Accumulator:
 - `services/datasource-mgr` 内置 `yibao.csv`（医保结算）与 `kangyang.csv`（康养慢病）真实模拟数据库；
 - 启动自动执行 `SeedMockDataSources` 注入存储，支持真实字段元数据动态解析与 `/api/datasources/:id/records` 样本抽样。
 
+### 3.7 全栈纵深防 DDoS 体系 (Multi-Tier Anti-DDoS)
+
+- **慢速连接防护 (Anti-Slowloris)**：全微服务配置 `ReadHeaderTimeout(5s)`、`ReadTimeout(30s)` 与 `MaxHeaderBytes(1MB)`；
+- **请求体上限 (Payload Protection)**：`pkg/middleware.MaxBodySize` 与网关 `Content-Length` 预检实施 32MB/64MB 硬顶拦截（413）；
+- **IP 令牌桶限流 (HTTP Flood)**：`pkg/middleware.RateLimit` 基于 IP 提供高精度令牌桶，自动 GC 闲置 IP；
+- **并发容量熔断 (Concurrency Cap)**：`pkg/middleware.MaxConcurrent` 实施全局在途并发信号量拦截（503），保护协程池。
+
 ---
 
 ## 四、工程注意事项与避坑指南
@@ -203,5 +210,6 @@ class Accumulator:
 | **P2C (Power of Two Choices)** | 动态负载均衡 | 随机选取两节点对比在途连接与延迟打分分流 |
 | **Client-Side Balancing** | 微服务高可用 | `pkg/agent/client.go` 多节点平滑轮询与故障转移 |
 | **Accumulator Pattern** | 分布式聚合加噪 | `Accumulator.__add__` + `finalize_dp` 单次注噪 |
-| **Token Bucket** | 租户级流量整形 | `security/ratelimit.py` 基于身份独立限流 |
+| **Token Bucket & DDoS Shield** | 租户级流量整形与防刷 | `security/ratelimit.py` + `pkg/middleware.RateLimit` |
+| **Concurrency Semaphore** | 系统过载容量保护 | `pkg/middleware.MaxConcurrent` + LLM 信号量限流 |
 | **HMAC & Hash Chain** | 防篡改存证审计 | `BudgetAuditLogger` + `audit-log` SHA-256 存证链 |

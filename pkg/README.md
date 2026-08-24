@@ -9,7 +9,7 @@
 | 子包 | 描述 |
 |---|---|
 | [`pkg/store`](./store/store.go) | 任务、数据源与脱敏审计日志的数据模型与存储接口，提供 SQLite 持久化与内存存储两套引擎 |
-| [`pkg/middleware`](./middleware/middleware.go) | 统一 Gin 中间件：API Key 鉴权、CORS 跨域、Request ID 链路追踪、结构化日志、Panic Recovery 与安全响应头 |
+| [`pkg/middleware`](./middleware/middleware.go) | 统一 Gin 中间件：API Key 鉴权、CORS 跨域、Request ID 链路追踪、结构化日志、Panic Recovery、安全响应头以及 **DDoS 纵深防护（IP 令牌桶限流 RateLimit、大包防护 MaxBodySize、并发硬顶 MaxConcurrent）** |
 | [`pkg/metrics`](./metrics/metrics.go) | 基于 Prometheus 的模块级指标收集器（Counter / Histogram）与 `/metrics` HTTP 端点 |
 | [`pkg/agent`](./agent/client.go) | 访问上游 PrivShield Agent REST API 的共享 HTTP 客户端，具备熔断器、超时与 64MB 内存防护 |
 | [`pkg/config`](./config/env.go) | 统一的环境变量解析工具（String/Int/Bool/Slice）与 `slog` 结构化日志器初始化 |
@@ -35,16 +35,19 @@ func initTaskStore(dbPath string, logger *slog.Logger) (store.TaskStore, error) 
 }
 ```
 
-### 2. 注入通用中间件
+### 2. 注入通用中间件与 DDoS 防护链
 
 ```go
 router := gin.New()
 router.Use(middleware.RequestID())
 router.Use(middleware.StructuredLogger(logger, "service-hub"))
+router.Use(middleware.Recovery(logger, "service-hub"))
+router.Use(middleware.SecurityHeaders())
+router.Use(middleware.MaxBodySize(32 << 20)) // 32MB 请求体上限，防 Payload DDoS (413)
+router.Use(middleware.MaxConcurrent(1000))   // 1000 并发硬顶，超载快速失败 (503)
+router.Use(middleware.RateLimit(200, 400))  // 200 RPS 令牌桶限流，防 HTTP Flood (429)
 router.Use(middleware.CORS(cfg.CORSOrigins))
 router.Use(middleware.Auth(cfg.APIKey))
-router.Use(middleware.SecurityHeaders())
-router.Use(middleware.Recovery(logger, "service-hub"))
 ```
 
 ### 3. 收集与暴露指标
