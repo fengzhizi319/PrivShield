@@ -1,15 +1,16 @@
 # 模拟数据源服务 (datasource-mgr) — API 规范
 
-`datasource-mgr` 是 PrivShield 开发与调试专用的模拟数据源服务。生产环境中下游服务将直接对接真实外部数据源，本项目仅用于开发、测试与联调。模块支持 **REST (HTTP/JSON :8083) + gRPC (mTLS :50053)** 双协议接入。
+`datasource-mgr` 是 PrivShield 开发与调试专用的模拟数据源服务。生产环境中下游服务将直接对接真实外部数据源，本项目用于开发、测试、CI 与合规演练。模块支持 **HTTP/HTTPS REST (:8083) + gRPC (mTLS :50053)** 双协议接入与双向 TLS 身份核验。
 
 ---
 
 ## 1. 通信协议与端口规划
 
-| 协议 | 默认地址 | 认证方式 | 说明 |
+| 协议 | 默认地址 | 认证与加密方式 | 说明 |
 |---|---|---|---|
-| **HTTP REST** | `http://127.0.0.1:8083` | Bearer Token / API Key | 供 React 前端与 BFF 开发调试 |
-| **gRPC (mTLS)** | `127.0.0.1:50053` | 双向 TLS (mTLS) + 公钥固定 | 供调度中枢与微服务集群模拟数据采样 |
+| **HTTP REST (开发模式)** | `http://127.0.0.1:8083` | API Key / Bearer Token（免 TLS） | 供本地 React 前端与 BFF 快速开发调试 |
+| **HTTPS REST (生产模式)** | `https://0.0.0.0:8083` | TLS 1.3 双向认证 (mTLS) + 客户端公钥固定 | 供生产加固环境下前端网关与微服务安全调用 |
+| **gRPC (mTLS)** | `0.0.0.0:50053` | TLS 1.3 双向认证 (mTLS) + 客户端公钥固定 | 供调度中枢 (service-hub) 与微服务集群高速数据流转 |
 
 ---
 
