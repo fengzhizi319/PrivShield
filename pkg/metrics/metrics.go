@@ -49,6 +49,28 @@ type Collector struct {
 	// CircuitBreakerState tracks circuit breaker state per node.
 	// CircuitBreakerState 跟踪每个节点的熔断器状态。
 	CircuitBreakerState *prometheus.GaugeVec
+
+	// ── Phase B: Lease metrics / 租约指标 ──
+
+	// TaskLeaseConflicts counts lease ownership conflicts (lost ownership or stale writes).
+	// TaskLeaseConflicts 统计租约所有权冲突数（失去所有权或过期写入）。
+	TaskLeaseConflicts prometheus.Counter
+
+	// TaskLeaseExpired counts lease expiry recovery events.
+	// TaskLeaseExpired 统计租约到期回收事件数。
+	TaskLeaseExpired prometheus.Counter
+
+	// TaskClaimLatency records task claim (ClaimNext) latency in seconds.
+	// TaskClaimLatency 记录任务领取（ClaimNext）延迟直方图（秒）。
+	TaskClaimLatency prometheus.Histogram
+
+	// TaskTransitions counts task state transitions by from/to/result.
+	// TaskTransitions 按 from/to/result 统计任务状态转换次数。
+	TaskTransitions *prometheus.CounterVec
+
+	// ServiceHubReady indicates whether the service-hub is ready to serve traffic.
+	// ServiceHubReady 指示 service-hub 是否就绪可服务流量（1=ready, 0=not ready）。
+	ServiceHubReady prometheus.Gauge
 }
 
 // NewCollector creates and registers a new metrics collector for the given module.
@@ -124,6 +146,37 @@ func NewCollector(module string) *Collector {
 		[]string{"node"},
 	)
 
+	// ── Phase B: Lease metrics / 租约指标 ──
+	c.TaskLeaseConflicts = prometheus.NewCounter(prometheus.CounterOpts{
+		Name:        "task_lease_conflicts_total",
+		Help:        "Total lease ownership conflicts (lost ownership or stale writes).",
+		ConstLabels: prometheus.Labels{"module": module},
+	})
+	c.TaskLeaseExpired = prometheus.NewCounter(prometheus.CounterOpts{
+		Name:        "task_lease_expired_total",
+		Help:        "Total lease expiry recovery events.",
+		ConstLabels: prometheus.Labels{"module": module},
+	})
+	c.TaskClaimLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:        "task_claim_latency_seconds",
+		Help:        "Task claim (ClaimNext) latency in seconds.",
+		ConstLabels: prometheus.Labels{"module": module},
+		Buckets:     prometheus.DefBuckets,
+	})
+	c.TaskTransitions = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name:        "task_transitions_total",
+			Help:        "Total task state transitions by from/to/result.",
+			ConstLabels: prometheus.Labels{"module": module},
+		},
+		[]string{"from", "to", "result"},
+	)
+	c.ServiceHubReady = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "service_hub_ready",
+		Help:        "Whether the service-hub is ready to serve traffic (1=ready, 0=not ready).",
+		ConstLabels: prometheus.Labels{"module": module},
+	})
+
 	reg.MustRegister(
 		c.HTTPRequestsTotal,
 		c.HTTPRequestDuration,
@@ -132,6 +185,11 @@ func NewCollector(module string) *Collector {
 		c.OrphanedTasksRecovered,
 		c.TasksRetried,
 		c.CircuitBreakerState,
+		c.TaskLeaseConflicts,
+		c.TaskLeaseExpired,
+		c.TaskClaimLatency,
+		c.TaskTransitions,
+		c.ServiceHubReady,
 	)
 
 	return c
@@ -200,6 +258,42 @@ func (c *Collector) SetCircuitBreakerState(node string, state string) {
 		val = 2
 	}
 	c.CircuitBreakerState.WithLabelValues(node).Set(val)
+}
+
+// ── Phase B: Lease metric helpers / 租约指标辅助方法 ──
+
+// RecordLeaseConflict increments the lease conflict counter.
+// RecordLeaseConflict 递增租约冲突计数器。
+func (c *Collector) RecordLeaseConflict() {
+	c.TaskLeaseConflicts.Inc()
+}
+
+// RecordLeaseExpired increments the lease expiry recovery counter.
+// RecordLeaseExpired 递增租约到期回收计数器。
+func (c *Collector) RecordLeaseExpired(count int) {
+	c.TaskLeaseExpired.Add(float64(count))
+}
+
+// RecordClaimLatency observes a task claim latency.
+// RecordClaimLatency 记录一次任务领取延迟。
+func (c *Collector) RecordClaimLatency(durationSec float64) {
+	c.TaskClaimLatency.Observe(durationSec)
+}
+
+// RecordTaskTransition records a task state transition.
+// RecordTaskTransition 记录一次任务状态转换。
+func (c *Collector) RecordTaskTransition(from, to, result string) {
+	c.TaskTransitions.WithLabelValues(from, to, result).Inc()
+}
+
+// SetReady sets the service-hub readiness gauge.
+// SetReady 设置 service-hub 就绪状态指标。
+func (c *Collector) SetReady(ready bool) {
+	if ready {
+		c.ServiceHubReady.Set(1)
+	} else {
+		c.ServiceHubReady.Set(0)
+	}
 }
 
 // Handler returns a Gin handler that serves Prometheus /metrics endpoint

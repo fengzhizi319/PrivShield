@@ -60,6 +60,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
+	"github.com/fengzhizi319/PrivShield/pkg/store/postgres"
 	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
 	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 
@@ -274,6 +275,8 @@ func main() {
 		"auth_enabled", cfg.APIKey != "",
 		"cors_origins", len(cfg.CORSOrigins),
 		"db_path", cfg.DBPath,
+		"pg_dsn", redactDSN(cfg.PGDSN),
+		"lease_ttl", cfg.LeaseTTL,
 		"retention_days", cfg.RetentionDays,
 		"shutdown_timeout", cfg.ShutdownTimeout,
 		"log_format", cfg.LogFormat,
@@ -411,6 +414,70 @@ func initTaskStore(dbPath string, logger *slog.Logger) (store.TaskStore, error) 
 
 	logger.Info("sqlite task store initialized", "path", dbPath)
 	return ts, nil
+}
+
+// initLeasedTaskStore initializes the task store with PostgreSQL lease support (Phase B).
+// initLeasedTaskStore 初始化带 PostgreSQL 租约支持的任务存储（Phase B）。
+//
+// 优先级：
+//  1. PG_DSN 非空 → PostgreSQL LeasedTaskStore（支持多副本 Hub）
+//  2. DBPath 非空 → SQLite TaskStore（租约方法返回 ErrLeaseNotSupported）
+//  3. 均为空 → 内存 TaskStore（租约方法返回 ErrLeaseNotSupported）
+func initLeasedTaskStore(cfg *config.Config, logger *slog.Logger) (store.LeasedTaskStore, error) {
+	if cfg.PGDSN != "" {
+		logger.Info("initializing PostgreSQL leased task store (Phase B multi-replica Hub)")
+		pgStore, err := postgres.New(
+			context.Background(),
+			postgres.Config{
+				DSN:     cfg.PGDSN,
+				MaxConn: int32(cfg.PGMaxConn),
+				MinConn: int32(cfg.PGMinConn),
+			},
+			logger,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("init postgres store: %w", err)
+		}
+		logger.Info("postgresql leased task store initialized",
+			"max_conns", cfg.PGMaxConn,
+			"min_conns", cfg.PGMinConn,
+			"lease_ttl", cfg.LeaseTTL,
+		)
+		return pgStore, nil
+	}
+
+	// Fallback to SQLite / memory (lease operations return ErrLeaseNotSupported)
+	// 回退到 SQLite / 内存（租约操作返回 ErrLeaseNotSupported）
+	ts, err := initTaskStore(cfg.DBPath, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// Both sqlite.TaskStore and memory.TaskStore implement LeasedTaskStore
+	// (with lease methods returning ErrLeaseNotSupported).
+	// sqlite.TaskStore 和 memory.TaskStore 均实现 LeasedTaskStore 接口
+	// （租约方法返回 ErrLeaseNotSupported）。
+	leased, ok := ts.(store.LeasedTaskStore)
+	if !ok {
+		return nil, fmt.Errorf("internal: task store does not implement LeasedTaskStore")
+	}
+
+	logger.Warn("using non-PostgreSQL store: lease operations will return ErrLeaseNotSupported. " +
+		"Set SERVICE_HUB_PG_DSN for multi-replica Hub support.")
+	return leased, nil
+}
+
+// redactDSN returns a safe-for-logging version of the PostgreSQL DSN.
+// redactDSN 返回可安全记录日志的 PostgreSQL DSN（隐藏密码）。
+func redactDSN(dsn string) string {
+	if dsn == "" {
+		return "(not configured)"
+	}
+	// Simple redaction: show only first 20 chars / 简单脱敏：仅显示前 20 个字符
+	if len(dsn) > 20 {
+		return dsn[:20] + "...[REDACTED]"
+	}
+	return "[SET]"
 }
 
 // recoverOrphanedTasks scans for tasks stuck in "running" or "pending" state

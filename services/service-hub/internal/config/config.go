@@ -60,6 +60,12 @@ type Config struct {
 
 	// Graceful shutdown / 优雅关闭
 	ShutdownTimeout int // HTTP 优雅关闭超时秒数（默认 5）
+
+	// ── Phase B: PostgreSQL 多副本 Hub 配置 ──
+	PGDSN     string // PostgreSQL 连接字符串（为空时回退 SQLite）
+	PGMaxConn int    // PostgreSQL 最大连接池大小（默认 10）
+	PGMinConn int    // PostgreSQL 最小连接池大小（默认 2）
+	LeaseTTL  int    // 任务租约 TTL 秒数（默认 60）
 }
 
 // Load reads configuration from environment variables with fallback defaults.
@@ -109,6 +115,12 @@ func Load() *Config {
 
 		// Graceful shutdown / 优雅关闭超时（默认 5 秒）
 		ShutdownTimeout: pkgconfig.EnvInt("SERVICE_HUB_SHUTDOWN_TIMEOUT", 5),
+
+		// ── Phase B: PostgreSQL 多副本 Hub 配置 ──
+		PGDSN:     pkgconfig.EnvString("SERVICE_HUB_PG_DSN", ""),
+		PGMaxConn: pkgconfig.EnvInt("SERVICE_HUB_PG_MAX_CONNS", 10),
+		PGMinConn: pkgconfig.EnvInt("SERVICE_HUB_PG_MIN_CONNS", 2),
+		LeaseTTL:  pkgconfig.EnvInt("SERVICE_HUB_LEASE_TTL", 60),
 	}
 }
 

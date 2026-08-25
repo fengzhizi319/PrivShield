@@ -6,6 +6,7 @@ require (
 	github.com/fengzhizi319/PrivShield/pkg v0.0.0
 	github.com/fengzhizi319/PrivShield/services/datasource-mgr v0.0.0
 	github.com/gin-gonic/gin v1.12.0
+	github.com/jackc/pgx/v5 v5.7.4
 	google.golang.org/grpc v1.83.1
 	google.golang.org/protobuf v1.36.11
 )
