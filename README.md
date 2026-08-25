@@ -108,6 +108,9 @@ python -m engine.server
 ### 2. Docker Compose 全栈一键运行
 
 ```bash
+# 启动轻量控制台套件容器（Agent + Go BFF + Web UI）
+bash ./scripts/dev/docker-start-bff-agent.sh
+
 # 启动全栈核心服务（Agent + 3 Go 中台微服务 + Go BFF + Web UI）
 bash ./scripts/dev/docker-start-all.sh
 

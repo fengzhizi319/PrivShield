@@ -19,6 +19,7 @@
   - [`start_all_services.sh` (启动全量服务群)](#start_all_servicessh)
   - [`stop_all_services.sh` (停止全量服务群)](#stop_all_servicessh)
 - [3. Docker 容器化联调脚本](#3-docker-容器化联调脚本)
+  - [`docker-start-bff-agent.sh` / `docker-start-bff-agent.ps1` (控制台三件套容器版)](#docker-start-bff-agentsh--docker-start-bff-agentps1)
   - [`docker-start-all.sh` (启动全栈 Docker 容器)](#docker-start-allsh)
   - [`docker-start-agent.sh` / `docker-start-agent.ps1` (启动 Agent 容器)](#docker-start-agentsh--docker-start-agentps1)
   - [`docker-stop-agent.sh` / `docker-stop-agent.ps1` (停止 Agent 容器)](#docker-stop-agentsh--docker-stop-agentps1)
@@ -133,6 +134,30 @@
 ---
 
 ## 3. Docker 容器化联调脚本
+
+### `docker-start-bff-agent.sh` / `docker-start-bff-agent.ps1`
+- **作用说明**: 【推荐 Docker 开发】通过 Docker Compose 启动控制台三件套核心容器：
+  - `PrivShield` 隐私计算 Agent（REST `:8079`、gRPC `:50051`）
+  - `privacy-console-backend-go` Go BFF 代理网关（`:8081`）
+  - `privacy-console-web` Nginx 前端 Web 控制台（`:5173`）
+  脚本自动预编译宿主机前端产物与 Linux 静态 Go 二进制，跳过容器内慢速下载与编译，实现秒级热启动。
+- **参数选项**:
+  - `--no-build`: 跳过构建直接运行已有本地镜像。
+  - `--build`: 启动前重新构建本地镜像（默认行为）。
+- **执行命令**:
+  ```bash
+  # Linux / macOS (默认构建并启动控制台三件套容器)
+  bash ./scripts/dev/docker-start-bff-agent.sh
+
+  # 跳过构建直接启动
+  bash ./scripts/dev/docker-start-bff-agent.sh --no-build
+  ```
+  ```powershell
+  # Windows (PowerShell)
+  .\scripts\dev\docker-start-bff-agent.ps1
+  ```
+
+---
 
 ### `docker-start-all.sh`
 - **作用说明**: 通过 Docker Compose 一键启动全栈容器集群（Agent + 3 大 Go 中台微服务 + Go BFF + Web 前端）。

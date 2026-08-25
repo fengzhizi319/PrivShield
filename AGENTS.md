@@ -368,7 +368,8 @@ Address these before any hardened production deployment.
 | Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` |
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
-| Run Docker Full Stack (Agent+Go BFF+Web) | `bash ./scripts/dev/docker-start-all.sh [--with-llm]` |
+| Run Docker Console Trio (Agent+BFF+Web) | `bash ./scripts/dev/docker-start-bff-agent.sh` |
+| Run Docker Full Stack (Agent+Go BFF+Web+3 Services) | `bash ./scripts/dev/docker-start-all.sh [--with-llm]` |
 | Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
 | Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |
 | Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
