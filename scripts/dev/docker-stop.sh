@@ -41,7 +41,7 @@ echo "==========================================================================
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
 # shellcheck disable=SC2086
-docker compose --profile llm --profile monitoring down $VOLUMES_FLAG
+docker compose --profile llm --profile monitoring --profile phase-b down $VOLUMES_FLAG
 
 echo ""
 echo "✅ 所有相关容器与网络已成功停止与清理！"

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【Docker 模式】启动全栈服务（Agent + Go BFF + Web UI + 可选 vLLM）
+# 【Docker 模式】启动全栈服务（Agent + Go BFF + Web UI + 可选 vLLM/PG/监控）
 # Launch Full Stack Container Suite in Docker Compose
 #
-# 用法 / Usage: ./scripts/dev/docker-start-all.sh [--with-llm] [--no-build]
+# 用法 / Usage: ./scripts/dev/docker-start-all.sh [--with-llm] [--with-postgres] [--with-monitoring] [--no-build]
 # ============================================================================
 
 set -euo pipefail
@@ -12,16 +12,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WITH_LLM=false
+WITH_POSTGRES=false
+WITH_MONITORING=false
 BUILD_FLAG="--build"   # 默认启动前重新构建镜像
 
 # ── 解析命令行参数 ─────────────────────────────────────────────────────
-#   --with-llm  : 同时启动 vLLM 大模型推理容器（需 GPU 支持）
-#   --no-build  : 跳过镜像构建，直接使用本地已有镜像
-#   --build     : 启动前重新构建本地镜像（默认行为）
+#   --with-llm        : 同时启动 vLLM 大模型推理容器（需 GPU 支持）
+#   --with-postgres   : 同时启动 Phase B PostgreSQL（多副本 Hub 模式）
+#   --with-monitoring : 同时启动 Prometheus + Grafana 监控栈
+#   --no-build        : 跳过镜像构建，直接使用本地已有镜像
+#   --build           : 启动前重新构建本地镜像（默认行为）
 for arg in "$@"; do
     case "$arg" in
         --with-llm)
             WITH_LLM=true
+            ;;
+        --with-postgres)
+            WITH_POSTGRES=true
+            ;;
+        --with-monitoring)
+            WITH_MONITORING=true
             ;;
         --no-build)
             BUILD_FLAG=""
@@ -30,13 +40,15 @@ for arg in "$@"; do
             BUILD_FLAG="--build"
             ;;
         -h|--help)
-            echo "用法 / Usage: $0 [--with-llm] [--build] [--no-build]"
+            echo "用法 / Usage: $0 [--with-llm] [--with-postgres] [--with-monitoring] [--build] [--no-build]"
             echo ""
             echo "选项 / Options:"
-            echo "  --with-llm   同时启动 vLLM 大模型推理容器 (需 GPU)"
-            echo "  --no-build   跳过镜像构建，使用本地已有镜像"
-            echo "  --build      启动前重新构建本地镜像 (默认)"
-            echo "  -h, --help   显示帮助信息"
+            echo "  --with-llm        同时启动 vLLM 大模型推理容器 (需 GPU)"
+            echo "  --with-postgres   同时启动 Phase B PostgreSQL (多副本 Hub 模式)"
+            echo "  --with-monitoring 同时启动 Prometheus + Grafana 监控栈"
+            echo "  --no-build        跳过镜像构建，使用本地已有镜像"
+            echo "  --build           启动前重新构建本地镜像 (默认)"
+            echo "  -h, --help        显示帮助信息"
             exit 0
             ;;
     esac
@@ -76,16 +88,26 @@ docker rm -f PrivShield PrivShield-vllm privacy-console-backend-go privacy-conso
 # ── 进入 docker-compose 目录，启动容器 ──────────────────────────────────
 # 默认仅启动核心服务（Agent + Go BFF + Web UI + 3大中台微服务）
 # 传入 --with-llm 时激活 llm profile，额外启动 vLLM 推理容器
+# 传入 --with-postgres 时激活 phase-b profile，启动 PostgreSQL
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
+# 构建 compose 命令，动态添加 profile
+COMPOSE_CMD="docker compose"
 if [[ "$WITH_LLM" == "true" ]]; then
+    COMPOSE_CMD="$COMPOSE_CMD --profile llm"
     echo "🤖 同时启动 vLLM 大模型推理容器 (GPU)..."
-    # shellcheck disable=SC2086
-    docker compose --profile llm up -d $BUILD_FLAG
-else
-    # shellcheck disable=SC2086
-    docker compose up -d $BUILD_FLAG
 fi
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    COMPOSE_CMD="$COMPOSE_CMD --profile phase-b"
+    echo "🐘 同时启动 Phase B PostgreSQL (多副本 Hub 模式)..."
+fi
+if [[ "$WITH_MONITORING" == "true" ]]; then
+    COMPOSE_CMD="$COMPOSE_CMD --profile monitoring"
+    echo "📊 同时启动 Prometheus + Grafana 监控栈..."
+fi
+
+# shellcheck disable=SC2086
+$COMPOSE_CMD up -d $BUILD_FLAG
 
 echo ""
 echo "✅ 全栈 Docker 容器服务已成功启动！"
@@ -98,5 +120,12 @@ echo "   - Privacy Agent REST      : http://localhost:8079"
 echo "   - Privacy Agent gRPC      : localhost:50051"
 if [[ "$WITH_LLM" == "true" ]]; then
     echo "   - vLLM 本地大模型推理     : http://localhost:8000/v1"
+fi
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    echo "   - PostgreSQL (Phase B)    : localhost:5432"
+fi
+if [[ "$WITH_MONITORING" == "true" ]]; then
+    echo "   - Prometheus 监控         : http://localhost:9090"
+    echo "   - Grafana 可视化面板      : http://localhost:3000"
 fi
 echo "============================================================================"

@@ -43,6 +43,13 @@ volumes:
     driver: local
   phase-b-pg-data-dev:
     driver: local
+  # 微服务 SQLite 持久化卷
+  service-hub-data-dev:
+    driver: local
+  datasource-mgr-data-dev:
+    driver: local
+  audit-log-data-dev:
+    driver: local
 
 services:
 
@@ -143,7 +150,123 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # 5. vLLM 大模型推理服务 (Profile: llm)
+  # ===========================================================================
+  # 5. 数据服务调度中枢 (Service Hub) — 开发模式
+  # ===========================================================================
+  service-hub:
+    build:
+      context: ../..
+      dockerfile: services/service-hub/Dockerfile
+    container_name: privshield-service-hub-dev
+    ports:
+      - "8082:8082"
+    environment:
+      SERVICE_HUB_HOST: "0.0.0.0"
+      SERVICE_HUB_PORT: "8082"
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      SERVICE_HUB_DB_PATH: "/app/data/service-hub.db"
+    volumes:
+      - service-hub-data-dev:/app/data
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+      datasource-mgr:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 6. 数据源管理 (Datasource Manager) — 开发模式
+  # ===========================================================================
+  datasource-mgr:
+    build:
+      context: ../..
+      dockerfile: services/datasource-mgr/Dockerfile
+    container_name: privshield-datasource-mgr-dev
+    ports:
+      - "8083:8083"
+    environment:
+      DATASOURCE_MGR_HOST: "0.0.0.0"
+      DATASOURCE_MGR_PORT: "8083"
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      DATASOURCE_MGR_DB_PATH: "/app/data/datasource-mgr.db"
+    volumes:
+      - datasource-mgr-data-dev:/app/data
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 7. 脱敏审计日志 (Audit Log) — 开发模式
+  # ===========================================================================
+  audit-log:
+    build:
+      context: ../..
+      dockerfile: services/audit-log/Dockerfile
+    container_name: privshield-audit-log-dev
+    ports:
+      - "8084:8084"
+    environment:
+      AUDIT_LOG_HOST: "0.0.0.0"
+      AUDIT_LOG_PORT: "8084"
+      PRIVACY_AGENT_REST_HOST: "PrivShield"
+      PRIVACY_REST_PORT: "8079"
+      AUDIT_LOG_DB_PATH: "/app/data/audit-log.db"
+    volumes:
+      - audit-log-data-dev:/app/data
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8084/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  # 8. vLLM 大模型推理服务 (Profile: llm)
   vllm:
     profiles: ["llm"]
     image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
