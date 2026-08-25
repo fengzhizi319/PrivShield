@@ -72,6 +72,9 @@ volumes:
   # Grafana 面板与用户数据
   grafana-data:
     driver: local
+  # Phase B: PostgreSQL 数据持久化（多副本 Hub 模式）
+  phase-b-pg-data:
+    driver: local
 
 # =============================================================================
 # 服务定义 / Services
@@ -513,6 +516,50 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+
+  # ===========================================================================
+  # 8. Phase B: PostgreSQL 多副本 service-hub 原子租约后端 (Profile: phase-b)
+  #    PORT: 5432
+  #    启用：docker compose -f docker-compose.prod.yml --profile phase-b up -d
+  # ===========================================================================
+  phase-b-postgres:
+    profiles: ["phase-b"]
+    image: postgres:16-alpine
+    container_name: privshield-phase-b-postgres-prod
+    pull_policy: if_not_present
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: "privshield_hub"
+      POSTGRES_USER: "${PG_USER:-privshield}"
+      POSTGRES_PASSWORD: "${PG_PASSWORD:?PG_PASSWORD must be set in .env for production}"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - phase-b-pg-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-privshield} -d privshield_hub"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.1"
+          memory: 256M
     logging:
       driver: json-file
       options:
