@@ -97,6 +97,9 @@ pkg/
 | `Auth()` | Bearer Token 提取，采用 `crypto/subtle.ConstantTimeCompare` 常量时间比对防时序攻击；`/health` 端点自动豁免 |
 | `Recovery()` | 捕获运行时 Handler Panic，记录结构化错误日志，返回标准 500 JSON，防止单个异常请求导致服务崩溃 |
 | `SecurityHeaders()` | 设置 `X-Content-Type-Options: nosniff`、`X-Frame-Options: SAMEORIGIN`、`X-XSS-Protection: 1; mode=block`、`Referrer-Policy: strict-origin-when-cross-origin` |
+| `RateLimit(rps, burst)` | 基于客户端 IP 令牌桶限流，抵御 L7 HTTP Flood DDoS；`/health` 端点自动豁免；响应头注入 `Retry-After` 与 `X-RateLimit-Limit` |
+| `MaxBodySize(maxBytes)` | 限制最大请求体字节数，防止大包 Payload DDoS 攻击（默认 32 MiB），超限返回 413 |
+| `MaxConcurrent(limit)` | 限制服务器最大并发处理请求数，防止突发流量耗尽资源，超载快速失败返回 503 |
 
 ---
 
