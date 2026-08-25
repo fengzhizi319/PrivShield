@@ -10,9 +10,9 @@ PrivShield 针对不同生命周期环境提供了专门优化的 Compose 文件
 
 | 编排文件 | 适用环境 | 核心特性 | 启动命令 |
 |---|---|---|---|
-| [`docker-compose.yml`](file:///home/charles/code/sfwork/PrivShield/deploy/docker-compose/docker-compose.yml) | **通用/默认全栈** | 基础全栈编排，包含 Core Agent、Go/Python 代理、Web UI，支持 `--profile llm` 与 `--profile monitoring` | `docker compose up -d` |
+| [`docker-compose.yml`](file:///home/charles/code/sfwork/PrivShield/deploy/docker-compose/docker-compose.yml) | **通用/默认全栈** | 基础全栈编排，包含 Core Agent、Go BFF、Web UI、3 个中台微服务，支持 `--profile llm` / `monitoring` / `phase-b` | `docker compose up -d` |
 | [`docker-compose.prod.yml`](file:///home/charles/code/sfwork/PrivShield/deploy/docker-compose/docker-compose.prod.yml) | **生产环境 (Prod)** | 全链路 TLS、API Key 强鉴权、Redis 分布式限流、JSON 结构化日志、无源码挂载纯镜像运行、`restart: always`、安全加固 (`no-new-privileges`) | `docker compose -f docker-compose.prod.yml up -d` |
-| [`docker-compose.dev.yml`](file:///home/charles/code/sfwork/PrivShield/deploy/docker-compose/docker-compose.dev.yml) | **开发联调 (Dev)** | 挂载宿主机源码目录（代码热修改生效）、控制台纯文本日志、关闭 TLS/Auth 免密调试、开放全部调试端口 | `docker compose -f docker-compose.dev.yml up -d` |
+| [`docker-compose.dev.yml`](file:///home/charles/code/sfwork/PrivShield/deploy/docker-compose/docker-compose.dev.yml) | **开发联调 (Dev)** | 挂载宿主机源码目录（代码热修改生效）、控制台纯文本日志、关闭 TLS/Auth 免密调试、开放全部调试端口、含 3 个中台微服务 | `docker compose -f docker-compose.dev.yml up -d` |
 | [`docker-compose.test.yml`](file:///home/charles/code/sfwork/PrivShield/deploy/docker-compose/docker-compose.test.yml) | **自动化测试/CI (Test)** | 包含自动化 `test-runner` 容器，等待所有被测服务就绪后执行端到端 API 冒烟测试并自动退出返回退出码 | `docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner` |
 
 ---
@@ -59,13 +59,21 @@ docker compose -f docker-compose.prod.yml logs -f PrivShield
 cd deploy/docker-compose
 
 # 启动开发环境（源码只读挂载，实时热调试）
+# 包含 Core Agent + Go BFF + Web UI + 3 个中台微服务 (service-hub/datasource-mgr/audit-log)
 docker compose -f docker-compose.dev.yml up -d
 
+# 可选：同时启动 Phase B PostgreSQL（多副本 Hub 模式）
+docker compose -f docker-compose.dev.yml --profile phase-b up -d
+
 # 访问服务
-# Web UI:       http://localhost:5173
-# Agent REST:   http://localhost:8079/docs
-# Agent gRPC:   localhost:50051
-# Go 代理:      http://localhost:8081
+# Web UI:           http://localhost:5173
+# Agent REST:       http://localhost:8079/docs
+# Agent gRPC:       localhost:50051
+# Go 代理:          http://localhost:8081
+# Service Hub:      http://localhost:8082
+# Datasource Mgr:   http://localhost:8083
+# Audit Log:        http://localhost:8084
+# PostgreSQL:       localhost:5432 (需启用 phase-b profile)
 ```
 
 ---

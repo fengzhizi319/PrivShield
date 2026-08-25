@@ -128,7 +128,7 @@ check_http_endpoint() {
 }
 
 # ── 步骤 3：REST API 探针巡检 ─────────────────────────────────────────────
-echo -e "${BOLD}[1/5] REST API 与探针检查${NC}"
+echo -e "${BOLD}[1/6] REST API 与探针检查${NC}"
 check_http_endpoint "基础健康探针" "/health" "200"
 check_http_endpoint "K8s 存活探针" "/livez" "200"
 check_http_endpoint "K8s 就绪探针" "/readyz" "200"
@@ -136,7 +136,7 @@ check_http_endpoint "LLM 引擎就绪探针" "/readyz/llm" "200"
 
 # ── 步骤 4：Prometheus Metrics 巡检 ────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[2/5] 生产可观测性 Prometheus Metrics 指标检查${NC}"
+echo -e "${BOLD}[2/6] 生产可观测性 Prometheus Metrics 指标检查${NC}"
 TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
 METRICS_URL="$PROTOCOL://$REST_HOST:$METRICS_PORT/metrics"
 if curl -s -k "${AUTH_HEADER[@]}" "$METRICS_URL" 2>/dev/null | grep -q "privshield"; then
@@ -149,7 +149,7 @@ fi
 
 # ── 步骤 5：gRPC 端口网络连通性 ───────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[3/5] gRPC 核心服务连通性检查${NC}"
+echo -e "${BOLD}[3/6] gRPC 核心服务连通性检查${NC}"
 TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
 if python3 -c "
 import socket, sys
@@ -168,7 +168,7 @@ fi
 
 # ── 步骤 6：TLS 证书有效性检查 ─────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[4/5] TLS 证书安全期巡检${NC}"
+echo -e "${BOLD}[4/6] TLS 证书安全期巡检${NC}"
 if [[ -n "$CERT_FILE" && -f "$CERT_FILE" ]]; then
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     if command -v openssl >/dev/null 2>&1; then
@@ -242,7 +242,7 @@ check_microservice "Service Hub 调度中枢" "http://127.0.0.1:8082/api/health"
 check_microservice "Datasource Mgr 数据源" "http://127.0.0.1:8083/api/health"
 check_microservice "Audit Log 审计日志" "http://127.0.0.1:8084/api/health"
 
-# ── 步骤 7：可选 — PostgreSQL 连通性检查 ────────────────────────────────
+# ── 可选：PostgreSQL 连通性检查 ────────────────────────────────────────
 PG_DSN="${SERVICE_HUB_PG_DSN:-}"
 if [[ -n "$PG_DSN" ]]; then
     echo ""
