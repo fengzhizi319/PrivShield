@@ -22,8 +22,14 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# ── 步骤 0：定位并切换至项目根目录 ──────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
 echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} Console 开发与编译构建环境巡检${NC}"
+echo -e "${BLUE} 工作目录: ${PROJECT_ROOT}${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
 ERRORS=0

@@ -35,7 +35,7 @@ for item in "${TARGETS[@]}"; do
     if [ "$HTTP_CODE" = "200" ]; then
       LINE_COUNT=$(wc -l < /tmp/metric_out.txt | tr -d ' ')
       echo -e "${GREEN}[OK 200]${NC} (${LINE_COUNT} lines of metrics)"
-      ((SUCCESS_COUNT++))
+      SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
       echo -e "${YELLOW}[HTTP ${HTTP_CODE}]${NC}"
     fi

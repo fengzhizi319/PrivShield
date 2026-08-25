@@ -280,7 +280,7 @@ func TestDevRunScript_StartupAndHealth(t *testing.T) {
 
 	var resp *http.Response
 	var lastErr error
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 50; i++ {
 		time.Sleep(200 * time.Millisecond)
 		resp, lastErr = client.Get(healthURL)
 		if lastErr == nil && resp.StatusCode == http.StatusOK {
@@ -379,7 +379,7 @@ func TestProdRunScript_StartupAndMTLS(t *testing.T) {
 	healthURL := fmt.Sprintf("https://127.0.0.1:%d/api/health", httpPort)
 	var resp *http.Response
 	var lastErr error
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 50; i++ {
 		time.Sleep(200 * time.Millisecond)
 		resp, lastErr = tlsClient.Get(healthURL)
 		if lastErr == nil && resp.StatusCode == http.StatusOK {

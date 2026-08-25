@@ -26,6 +26,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+# ── 步骤 0：定位并切换至项目根目录 ────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
 # ── 步骤 1：定位默认参数与环境变量 ────────────────────────────────────────
 REST_HOST="${PRIVACY_REST_HOST:-127.0.0.1}"
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
@@ -35,7 +40,7 @@ METRICS_PORT="${PRIVACY_METRICS_PORT:-$REST_PORT}"
 USE_TLS="${PRIVACY_TLS_ENABLED:-false}"
 API_KEY="${PRIVACY_AUTH_API_KEY:-}"
 CERT_FILE="${PRIVACY_TLS_CERT_FILE:-}"
-DB_PATH="${PRIVACY_BUDGET_DB:-.data/privacy_budget.db}"
+DB_PATH="${PRIVACY_BUDGET_DB:-$PROJECT_ROOT/.data/privacy_budget.db}"
 
 TOTAL_CHECKS=0
 PASSED_CHECKS=0

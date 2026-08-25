@@ -189,7 +189,7 @@ class MedicalPrivacyPipeline:
     def __init__(
         self,
         dyn_service: DynClassificationService | None = None,
-        redact_engine: str = "ner",
+        redact_engine: str | None = None,
         redaction_strategy: RedactionStrategyConfig | None = None,
     ):
         """初始化 Pipeline 引擎，挂载 DynClassificationService 统一分类能力与 Small-NER 抹平引擎。
@@ -197,8 +197,13 @@ class MedicalPrivacyPipeline:
         Args:
             dyn_service: 动态分类服务实例；为 None 时自动创建，并注入医疗文本脱敏回调。
             redact_engine: 文本抹平引擎选择："ner"（Small-NER 推理）或 "rule"（纯正则快速路径）。
+                未指定时根据环境变量 PRIVACY_NER_ENABLE（默认 false 走超快 rule 引擎）自动决定。
             redaction_strategy: 脱敏治理策略配置；为 None 时自动从 YAML 加载（回退到代码默认值）。
         """
+        import os
+        if redact_engine is None:
+            redact_engine = "ner" if os.environ.get("PRIVACY_NER_ENABLE", "false").lower() == "true" else "rule"
+
         if redact_engine not in _SUPPORTED_REDACT_ENGINES:
             supported = ", ".join(sorted(_SUPPORTED_REDACT_ENGINES))
             raise ValueError(
@@ -214,46 +219,41 @@ class MedicalPrivacyPipeline:
         if dyn_service is None:
             # 创建 DynClassificationService 并注入医疗领域文本脱敏回调
             # 解耦 dynclassification 对 medical_pipeline 的反向依赖
-            # （回调引用 pipeline 的方法，而 pipeline 持有 dyn_service，形成闭环但不产生包级循环 import）
             dyn_service = DynClassificationService(text_sanitizer=self._medical_text_sanitizer)
-        self.dyn_service = dyn_service  # 挂载分类引擎（调用方也可注入自定义实例以替换默认漏斗）
+        self.dyn_service = dyn_service  # 挂载分类引擎
         self.redact_engine = redact_engine  # 抹平引擎模式："ner" / "rule"
 
         # 将医疗领域的脱敏回调注册到通用策略注册表 (DomainStrategyRegistry) 中
         from ..dynclassification import default_domain_registry
         default_domain_registry.register_sanitizer("medical", self._medical_text_sanitizer)
-        # 惰性初始化 Small-NER 适配器；依赖缺失时为 None（纯规则降级运行）
-        self.ner_adapter = NerAdapter() if NerAdapter is not None else None
-        self._lock = threading.Lock()  # 全局互斥锁：保护下方两个共享缓存的并发读写
-        # 缓存 _classify_field 中 dyn_service 计算的 sanitized_value，供 _sanitize_field 复用，
-        # 避免同一字段被三层漏斗分类两次（性能优化）。
-        # key = (字段名, 原始字符串值)，value = dyn_service 智能抹平结果
+        # 惰性初始化 Small-NER 适配器：仅在 redact_engine 为 "ner" 且依赖可用时初始化
+        self.ner_adapter = NerAdapter() if (NerAdapter is not None and redact_engine == "ner") else None
+        self._lock = threading.Lock()  # 全局互斥锁：保护共享缓存的并发读写
+        # 缓存 _classify_field 中 dyn_service 计算的 sanitized_value，供 _sanitize_field 复用
         self._sanitized_cache: dict[tuple[str, str], str] = {}
+        # 字段分类分级结果 LRU 缓存：避免 2700+ 字段重复匹配（毫秒级极速响应，容量 4096）
+        self._field_class_cache: dict[tuple[str, str], FieldClassification] = {}
         # NER 抹平结果缓存（受 _NER_CACHE_MAX_SIZE 上限约束，防止无界内存增长）
-        # key = 原始文本，value = NER 抹平后的文本；相同文本复用推理结果
         self._ner_cache: dict[str, str] = {}
 
-    def _cache_ner_result(self, text: str, sanitized: str) -> None:
-        """写入 NER 抹平缓存；超过上限时淘汰最旧条目（dict 保持插入序）。
+    def clear_cache(self) -> None:
+        """清空实例内所有缓存池（支持策略热重载、运行时重置与测试隔离）。"""
+        with self._lock:
+            self._sanitized_cache.clear()
+            self._field_class_cache.clear()
+            self._ner_cache.clear()
 
-        实现细节：Python dict 保持键的插入顺序，next(iter(dict)) 取到的是最早插入的键，
-        因此超出 _NER_CACHE_MAX_SIZE 时弹出最旧条目即等价于 FIFO 淘汰。
-        """
+    def _cache_ner_result(self, text: str, sanitized: str) -> None:
+        """写入 NER 抹平缓存；超过上限时淘汰最旧条目（LRU 语义）。"""
         if len(self._ner_cache) >= _NER_CACHE_MAX_SIZE:
-            # 淘汰最旧条目：先取首个键再弹出；
-            # StopIteration/KeyError 双保护应对极端并发下的竞态（理论上锁内不会发生，双保险）
             try:
                 self._ner_cache.pop(next(iter(self._ner_cache)))
             except (StopIteration, KeyError):
                 pass
-        # 写入新条目（若键已存在则覆盖，同时刷新为"最新"插入位置）
         self._ner_cache[text] = sanitized
 
     def _cache_sanitized_result(self, cache_key: tuple[str, str], sanitized: str) -> None:
-        """写入 sanitized 缓存；超过 _SANITIZED_CACHE_MAX_SIZE 时按 FIFO 淘汰最旧条目。
-
-        与 _cache_ner_result 相同的有界策略：调用方必须持有 self._lock。
-        """
+        """写入 sanitized 缓存；超过 _SANITIZED_CACHE_MAX_SIZE 时淘汰最旧条目。"""
         if len(self._sanitized_cache) >= _SANITIZED_CACHE_MAX_SIZE:
             try:
                 self._sanitized_cache.pop(next(iter(self._sanitized_cache)))
@@ -338,44 +338,31 @@ class MedicalPrivacyPipeline:
         return sanitized_text
 
     def _classify_field(self, key: str, val: str) -> FieldClassification:
-        """单字段分类分级评估算法（优先调度 dynclassification 动态分类引擎）。
-        
-        算法流程：
-        1. 类型安全转换：在 None 时置为空串，保留 0 和 False 等合法数据；
-        2. 调度 dynclassification 引擎评估该字段；
-        3. PII 身份规则拦截：若列名命中 PII 词库，根据 GB 11643 标准设定 ID Card 为 L4，其余为 L3；
-        4. 病史文本深度匹配：扫描 L5 (极高敏: HIV/重度精神障碍/遗传缺陷) 与 L4 (高敏: 肿瘤/性病/乙肝/衰竭) 词库；
-        5. 普通临床与评估字段映射：根据医疗标准规范赋予 L3 (主诉/病史) 与 L2 (健康评估/个人史)；
-        6. 综合 dynclassification 与医疗规则取最高敏等级。
-        """
-        # 前置：类型安全转换。None → 空串（避免后续正则/NER 崩溃），
-        # 但 0/False 等合法数据仍转为 "0"/"False" 保留（不丢失数据语义）
+        """单字段分类分级评估算法（极速确定性前置规则 + DynClassification 智能漏斗兜底融合）。"""
         val_str = "" if val is None else str(val)
-        
-        # ── 第 0 步：调度 dynclassification 动态引擎（3 层漏斗）获取通用/领域分类结果 ──
-        # 优化: 同时请求 sanitize=True，将计算出的 sanitized_value 缓存进 _sanitized_cache，
-        # 供稍后 _sanitize_field 直接复用——同一字段只跑一次漏斗、出两份结果（分级 + 脱敏）。
-        dyn_level: str | None = None
-        try:
-            dyn_resp = self.dyn_service.classify_field(key, val_str, sanitize=True)
-            if dyn_resp and dyn_resp.field_result:
-                dyn_level = dyn_resp.field_result.final_level
-                # 缓存 dyn_service 智能抹平结果（仅缓存确实发生变换的值，避免无意义写入）
-                sanitized_value = dyn_resp.field_result.sanitized_value
-                if isinstance(sanitized_value, str) and sanitized_value != val_str:
-                    with self._lock:
-                        self._cache_sanitized_result((key, val_str), sanitized_value)
-        except Exception:
-            # 漏斗异常（如 LLM 未加载/超时）时静默降级：dyn_level 保持 None，由本地规则接管
-            dyn_level = None
+        cache_key = (key, val_str)
+
+        with self._lock:
+            cached_fc = self._field_class_cache.get(cache_key)
+            if cached_fc is not None:
+                # 刷新访问热度（LRU 语义：命中时移至最新插入位置）
+                self._field_class_cache[cache_key] = self._field_class_cache.pop(cache_key)
+                return FieldClassification(
+                    field_name=cached_fc.field_name,
+                    level=cached_fc.level,
+                    security_tag=cached_fc.security_tag,
+                    description=cached_fc.description,
+                    rule_matched=cached_fc.rule_matched,
+                )
+
+        fc: FieldClassification | None = None
 
         # ── 步骤 1: PII 身份字段检测与分级（最高优先级，最先拦截）──
-        # 依据：字段名命中 PII_FIELD_RULES 即按身份信息定级；
-        # 身份证号（唯一国家法定证件号）按 GB 11643 相关要求定为 L4，其余（姓名/地址等）为 L3。
         canonical_key = canonicalize_pii_field(key)
+        c_key = canonical_key.lower()
         if canonical_key in PII_FIELD_RULES:
             level = "L4" if canonical_key == "id_card_no" else "L3"
-            return FieldClassification(
+            fc = FieldClassification(
                 field_name=key,
                 level=level,
                 security_tag="PII_IDENTITY",
@@ -383,14 +370,12 @@ class MedicalPrivacyPipeline:
                 rule_matched=f"PII_RULE_{PII_FIELD_RULES[canonical_key]}",
             )
 
-        # ── 步骤 1.5: ICD-10 诊断编码字段定级（§9 规约：高危编码段 L4/L5）──
-        # 诊断名称抹平后编码本身仍泄露病种（如 B20.900=HIV、C34.900=肺恶性肿瘤），
-        # 因此编码字段按 ICD-10 章节码段独立定级，先于自由文本词库扫描。
-        if key.strip().lower() in ICD10_FIELD_NAMES:
+        # ── 步骤 1.5: ICD-10 诊断编码字段定级 ──
+        if fc is None and (key.strip().lower() in ICD10_FIELD_NAMES or c_key in ICD10_FIELD_NAMES):
             icd_result = classify_icd10_code(val_str)
             if icd_result is not None:
                 icd_level, icd_category = icd_result
-                return FieldClassification(
+                fc = FieldClassification(
                     field_name=key,
                     level=icd_level,
                     security_tag=f"HIGH_RISK_MEDICAL_{icd_level}",
@@ -399,89 +384,144 @@ class MedicalPrivacyPipeline:
                 )
 
         # ── 步骤 2: 病史文本 L5/L4 术语扫描（正则词库匹配，最高等级优先）──
-        # 设计要点：先扫 L5、再扫 L4。L5 已是全表最高级，命中即提前中断（短路优化，避免多余正则开销）；
-        # 未命中 L5 才继续扫 L4（L4 命中同样中断）。
-        # 枚举型分类字段（科室等）豁免扫描：封闭枚举值的子串命中属于误伤（如"皮肤性病科"含"性病"）。
-        detected_level: str | None = None
-
-        if key.strip().lower() not in _CATEGORICAL_FIELDS:
-            for pat, _replacement in self._l5_patterns:
-                if pat.search(val_str):
-                    detected_level = "L5"
-                    break  # L5 已是最高级，中断循环
-
-            if detected_level is None:
-                for pat, _replacement in self._l4_patterns:
+        if fc is None:
+            detected_level: str | None = None
+            if key.strip().lower() not in _CATEGORICAL_FIELDS and c_key not in _CATEGORICAL_FIELDS:
+                for pat, _replacement in self._l5_patterns:
                     if pat.search(val_str):
-                        detected_level = "L4"
-                        break  # 已找到 L4
+                        detected_level = "L5"
+                        break
 
-        # ── 步骤 2.5: 融合 dynclassification 动态分类引擎的定级结果 ──
-        # 本地正则未命中，但 3 层漏斗（Rule->NER->LLM）识别出 L4/L5 时同样采纳，
-        # 覆盖词库外的同义/变体表达（如 LLM 理解出的"转移癌"等复杂语义）。
-        # 枚举型分类字段同样豁免（避免漏斗对封闭枚举值的误判抬高记录等级）。
-        if detected_level is None and key.strip().lower() not in _CATEGORICAL_FIELDS and dyn_level in ["L4", "L5"]:
-            detected_level = dyn_level
+                if detected_level is None:
+                    for pat, _replacement in self._l4_patterns:
+                        if pat.search(val_str):
+                            detected_level = "L4"
+                            break
 
-        # 依据最终等级构造对应 FieldClassification（L5 > L4 优先返回）
-        if detected_level == "L5":
-            return FieldClassification(
-                field_name=key,
-                level="L5",
-                security_tag="HIGH_RISK_MEDICAL_L5",
-                description="极高风险病史/诊断信息 (L5: 重度精神障碍/HIV/重大遗传缺陷)",
-                rule_matched="MEDICAL_L5_STRICT_RULE",
-            )
-        if detected_level == "L4":
-            return FieldClassification(
-                field_name=key,
-                level="L4",
-                security_tag="HIGH_RISK_MEDICAL_L4",
-                description="高风险病史/诊断信息 (L4: 恶性肿瘤/性病传染病/重度衰竭)",
-                rule_matched="MEDICAL_L4_STRICT_RULE",
-            )
+            if detected_level == "L5":
+                fc = FieldClassification(
+                    field_name=key,
+                    level="L5",
+                    security_tag="HIGH_RISK_MEDICAL_L5",
+                    description="极高风险病史/诊断信息 (L5: 重度精神障碍/HIV/重大遗传缺陷)",
+                    rule_matched="MEDICAL_L5_STRICT_RULE",
+                )
+            elif detected_level == "L4":
+                fc = FieldClassification(
+                    field_name=key,
+                    level="L4",
+                    security_tag="HIGH_RISK_MEDICAL_L4",
+                    description="高风险病史/诊断信息 (L4: 恶性肿瘤/性病传染病/重度衰竭)",
+                    rule_matched="MEDICAL_L4_STRICT_RULE",
+                )
 
         # ── 步骤 3: 普通临床与评估字段按医疗标准规范映射 ──
-        # 未命中高敏词库时，按字段语义定级：
-        # - L3: 临床病史、问诊主诉与诊断名称（主诉/既往史/家族史/过敏史/诊断名称）——敏感度较高；
-        # - L2: 健康与残疾评估信息（残疾类别/等级/评估结果/个人史）、入院病情、
-        #       非高危诊断编码与完整精度日期准标识符——敏感度中等。
-        if key in ["chief_complaint", "past_history", "family_history", "allergic_history", "diagnosis_name"]:
-            return FieldClassification(
-                field_name=key,
-                level="L3",
-                security_tag="CLINICAL_HISTORY",
-                description="临床病史、问诊主诉与诊断信息",
-                rule_matched="CLINICAL_TEXT_RULE",
-            )
+        if fc is None:
+            if (
+                c_key in [
+                    "chief_complaint", "past_history", "family_history", "allergic_history",
+                    "diagnosis_name", "present_illness", "progress_note", "treatment_plan"
+                ]
+                or key.strip().lower() in [
+                    "chief_complaint", "past_history", "family_history", "allergic_history",
+                    "diagnosis_name", "present_illness", "progress_note", "treatment_plan"
+                ]
+            ):
+                fc = FieldClassification(
+                    field_name=key,
+                    level="L3",
+                    security_tag="CLINICAL_HISTORY",
+                    description="临床病史、问诊主诉与诊断信息",
+                    rule_matched="CLINICAL_TEXT_RULE",
+                )
+            elif (
+                c_key in [
+                    "disability_category", "disability_level", "assess_result_name",
+                    "personal_history", "admission_condition"
+                ]
+                or key.strip().lower() in [
+                    "disability_category", "disability_level", "assess_result_name",
+                    "personal_history", "admission_condition"
+                ]
+            ):
+                fc = FieldClassification(
+                    field_name=key,
+                    level="L2",
+                    security_tag="HEALTH_ASSESSMENT",
+                    description="健康与残疾评估信息",
+                    rule_matched="ASSESSMENT_RULE",
+                )
+            elif (
+                key.strip().lower() in ICD10_FIELD_NAMES
+                or c_key in ICD10_FIELD_NAMES
+                or key.strip() in DATE_GENERALIZATION_FIELDS
+                or c_key in DATE_GENERALIZATION_FIELDS
+            ):
+                fc = FieldClassification(
+                    field_name=key,
+                    level="L2",
+                    security_tag="QUASI_IDENTIFIER",
+                    description="诊断编码/日期准标识符信息",
+                    rule_matched="QUASI_IDENTIFIER_RULE",
+                )
 
-        if key in ["disability_category", "disability_level", "assess_result_name", "personal_history", "admission_condition"]:
-            return FieldClassification(
-                field_name=key,
-                level="L2",
-                security_tag="HEALTH_ASSESSMENT",
-                description="健康与残疾评估信息",
-                rule_matched="ASSESSMENT_RULE",
-            )
+        # ── 步骤 3.5: 未知文本字段与三层漏斗（DynClassificationService）融合 ──
+        if fc is None:
+            dyn_level: str | None = None
+            if key.strip().lower() not in _CATEGORICAL_FIELDS and c_key not in _CATEGORICAL_FIELDS:
+                try:
+                    dyn_resp = self.dyn_service.classify_field(key, val_str, sanitize=True)
+                    if dyn_resp and dyn_resp.field_result:
+                        dyn_level = dyn_resp.field_result.final_level
+                        sanitized_value = dyn_resp.field_result.sanitized_value
+                        if isinstance(sanitized_value, str) and sanitized_value != val_str:
+                            with self._lock:
+                                self._cache_sanitized_result((key, val_str), sanitized_value)
+                except Exception:
+                    dyn_level = None
 
-        # 良性 ICD-10 编码（高危编码已在步骤 1.5 拦截）与完整精度日期准标识符
-        if key.strip().lower() in ICD10_FIELD_NAMES or key.strip() in DATE_GENERALIZATION_FIELDS or key.strip().lower() in DATE_GENERALIZATION_FIELDS:
-            return FieldClassification(
-                field_name=key,
-                level="L2",
-                security_tag="QUASI_IDENTIFIER",
-                description="诊断编码/日期准标识符信息",
-                rule_matched="QUASI_IDENTIFIER_RULE",
-            )
+            if dyn_level in ["L4", "L5"]:
+                fc = FieldClassification(
+                    field_name=key,
+                    level=dyn_level,
+                    security_tag=f"HIGH_RISK_MEDICAL_{dyn_level}",
+                    description=f"高风险病史/诊断信息 ({dyn_level})",
+                    rule_matched=f"MEDICAL_{dyn_level}_STRICT_RULE",
+                )
+            elif dyn_level in ["L2", "L3"]:
+                fc = FieldClassification(
+                    field_name=key,
+                    level=dyn_level,
+                    security_tag=f"GENERAL_{dyn_level}",
+                    description=f"医疗领域评估与诊断信息 ({dyn_level})",
+                    rule_matched=f"MEDICAL_{dyn_level}_RULE",
+                )
 
         # ── 步骤 4: 通用 L1 级兜底 ──
-        # 以上均未命中：视为普通健康/人口学统计信息（如年龄、性别、地区编码等），定级 L1
+        if fc is None:
+            fc = FieldClassification(
+                field_name=key,
+                level="L1",
+                security_tag="GENERAL_INFO",
+                description="普通健康/人口学统计信息",
+                rule_matched="DEFAULT_L1_RULE",
+            )
+
+        # 写入分类缓存（FIFO 淘汰防无界增长）
+        with self._lock:
+            if len(self._field_class_cache) >= 4096:
+                try:
+                    self._field_class_cache.pop(next(iter(self._field_class_cache)))
+                except (StopIteration, KeyError):
+                    pass
+            self._field_class_cache[cache_key] = fc
+
         return FieldClassification(
-            field_name=key,
-            level="L1",
-            security_tag="GENERAL_INFO",
-            description="普通健康/人口学统计信息",
-            rule_matched="DEFAULT_L1_RULE",
+            field_name=fc.field_name,
+            level=fc.level,
+            security_tag=fc.security_tag,
+            description=fc.description,
+            rule_matched=fc.rule_matched,
         )
 
     def sanitize_text(self, text: str) -> str:
@@ -541,7 +581,7 @@ class MedicalPrivacyPipeline:
         对短文本/纯数字/英文短串直接跳过推理，防止高并发下推理吞吐被打满。
         """
         if not text or len(text.strip()) < 2:
-            return False  # 空文本或去除空白后不足 4 字符 → 无推理价值
+            return False  # 空文本或去除空白后不足 2 字符 → 无推理价值
         # 至少包含 2 个连续汉字才可能含中文病史实体（英文/纯符号文本交给规则引擎）
         return bool(re.search(r"[\u4e00-\u9fa5]{2,}", text))
 
@@ -602,71 +642,52 @@ class MedicalPrivacyPipeline:
         val_str = "" if val is None else str(val)  # 类型安全转换（与 _classify_field 保持一致）
 
         # 0. 图像病例检测：文件路径或 Base64 Data URI → 调用图像打码（fail-closed）
-        # fail-closed 策略：打码失败绝不返回原图，而是返回固定失败标记供上层计数/告警
         if is_image_input(val_str):
-            # 图像分支提前返回：先消费 _classify_field 阶段可能写入的 sanitized 缓存项，
-            # 否则该条目永久残留（缓存膨胀）
             with self._lock:
                 self._sanitized_cache.pop((key, val_str), None)
             try:
                 from engine.dynclassification.image_redaction import sanitize_image_input
-                return sanitize_image_input(val_str)  # 执行图像级打码（区域遮盖/人脸模糊）
+                return sanitize_image_input(val_str)
             except Exception:
-                return IMAGE_FAILURE  # 任何异常 → 固定失败标记（绝不泄露原图）
+                return IMAGE_FAILURE
 
-        # 1. 优先复用 _classify_field 中 dyn_service 已计算的 sanitized_value
-        # 注意 pop 而非 peek：缓存是"一次性"的——每个字段只消费一次，防脏读也防缓存膨胀
-        cache_key = (key, val_str)
-        cached: str | None = None
-        with self._lock:
-            if cache_key in self._sanitized_cache:
-                cached = self._sanitized_cache.pop(cache_key)
-
-        if cached is not None:
-            # PII 字段保持强掩码规则（dyn_service 的 sanitize 可能不够强，
-            # 例如姓名只做了部分抹平而未按身份证规则掩码）
-            if canonicalize_pii_field(key) in PII_FIELD_RULES:
-                return self._mask_pii_value(key, val_str)
-            # 枚举型分类字段不信任漏斗的文本改写（封闭枚举值抹平属误伤），原样返回
-            if key.strip().lower() in _CATEGORICAL_FIELDS:
-                return val_str
-            return cached  # 非 PII 字段直接信任漏斗结果（已含 NER/LLM 智能抹平）
-
-        # 2. PII 字段始终使用强掩码（缓存未命中时兜底，确保身份信息绝不裸奔）
-        if canonicalize_pii_field(key) in PII_FIELD_RULES:
+        # 1. PII 字段始终使用强掩码
+        canonical_key = canonicalize_pii_field(key)
+        c_key = canonical_key.lower()
+        if canonical_key in PII_FIELD_RULES:
             return self._mask_pii_value(key, val_str)
 
-        # 2.5 ICD-10 诊断编码字段：按章节码段脱敏（L5 整值抹平、L4 替换范畴码），
-        # 防止诊断名称抹平后编码本身泄露病种（如 B20.900=HIV）
-        if key.strip().lower() in ICD10_FIELD_NAMES:
+        # 2. ICD-10 诊断编码字段：按章节码段脱敏
+        if key.strip().lower() in ICD10_FIELD_NAMES or c_key in ICD10_FIELD_NAMES:
             redacted_code = redact_icd10_code(val_str)
             if redacted_code != val_str:
                 return redacted_code
 
-        # 2.6 日期准标识符字段：完整精度日期截断为年月（§9 规约 L2 泛化）
-        if key.strip() in DATE_GENERALIZATION_FIELDS or key.strip().lower() in DATE_GENERALIZATION_FIELDS:
+        # 3. 日期准标识符字段：完整精度日期截断为年月
+        if key.strip() in DATE_GENERALIZATION_FIELDS or c_key in DATE_GENERALIZATION_FIELDS or key.strip().lower() in DATE_GENERALIZATION_FIELDS:
             return truncate_date_to_month(val_str)
 
-        # 3. 备用降级：文本强剥离 L4/L5 术语（纯正则快速路径）
+        # 4. 枚举型分类字段不修改
+        if key.strip().lower() in _CATEGORICAL_FIELDS or c_key in _CATEGORICAL_FIELDS:
+            return val_str
+
+        # 5. 临床自由文本与高风险病史抹平
         clinical_keys = {
             "diagnosis_name", "chief_complaint", "present_illness",
             "past_history", "personal_history", "family_history",
             "allergic_history", "progress_note", "icd10_code", "admission_condition",
+            "treatment_plan",
         }
-        # 三个触发条件满足其一即抹平：
-        # (a) 字段属临床自由文本（病史/诊断类）；
-        # (b) 文本中检测到高敏词（不依赖字段名——未知字段里的敏感词同样必须抹平；
-        #     枚举型分类字段如科室豁免，避免"皮肤性病科"子串误伤）；
-        # (c) 分级为 L4/L5（优先复用调用方传入的 level_hint，避免重入分类造成二次漏斗推理）。
         if (
             key in clinical_keys
-            or canonicalize_pii_field(key) in clinical_keys
-            or (key.strip().lower() not in _CATEGORICAL_FIELDS and self._contains_high_risk_text(val_str))
+            or c_key in clinical_keys
+            or canonical_key in clinical_keys
+            or self._contains_high_risk_text(val_str)
             or (level_hint if level_hint is not None else self._classify_field(key, val_str).level) in ["L4", "L5"]
         ):
-            return self._purge_diagnosis_residual(key, val_str, self.sanitize_text(val_str))
+            return self._purge_diagnosis_residual(key, val_str, redact_medical_text(val_str, strategy=self.redaction_strategy))
 
-        # 4. 低敏/普通字段：不满足任何抹平条件 → 原样返回（避免过度脱敏破坏数据可用性）
+        # 6. 低敏/普通字段：原样返回
         return val_str
 
     def process_records(
@@ -765,8 +786,14 @@ class MedicalPrivacyPipeline:
                         "personal_history", "family_history", "allergic_history",
                         "progress_note", "diagnosis_name",
                     }
-                    # 触发条件与 _medical_text_sanitizer 一致：临床字段或含高敏词，且文本值得推理
-                    if (key in clinical_keys or self._contains_high_risk_text(val_str)) and self._could_benefit_from_ner(val_str):
+                    # 触发条件：仅当显式配置为 ner 引擎且已挂载 ner 适配器时，才对高敏/临床文本执行深度推理；
+                    # 规则模式或未启用 NER 时直接复用规则抹平结果（避免无谓的推理耗时与 CPU 阻塞）
+                    if (
+                        self.redact_engine == "ner"
+                        and self.ner_adapter is not None
+                        and (key in clinical_keys or self._contains_high_risk_text(val_str))
+                        and self._could_benefit_from_ner(val_str)
+                    ):
                         # 带内存缓存的 NER 抹平（相同文本 0ms 闪电响应）；
                         # 双检模式：锁内仅查/写缓存，推理在锁外执行（不阻塞并发线程的缓存访问）
                         with self._lock:
@@ -780,7 +807,7 @@ class MedicalPrivacyPipeline:
                                 self._cache_ner_result(val_str, ner_res)
                             fc.sanitized_value_ner = ner_res
                     else:
-                        # 不值得推理：ner 快照直接等于规则结果（保证字段快照非空）
+                        # 规则模式或无需推理：ner 快照直接等于规则结果（保证字段快照非空）
                         fc.sanitized_value_ner = fc.sanitized_value_rule
 
             # ── 记录级统计：按最高等级计数 ──
@@ -851,14 +878,26 @@ class MedicalPrivacyPipeline:
         )
 
 
+_default_pipeline_lock = threading.Lock()
+_default_pipeline: MedicalPrivacyPipeline | None = None
+
+
+def get_default_pipeline() -> MedicalPrivacyPipeline:
+    """获取或初始化进程级常驻 MedicalPrivacyPipeline 单例。"""
+    global _default_pipeline
+    if _default_pipeline is None:
+        with _default_pipeline_lock:
+            if _default_pipeline is None:
+                _default_pipeline = MedicalPrivacyPipeline()
+    return _default_pipeline
+
+
 def process_medical_dataset(
     records: list[dict[str, str]], sanitize: bool = True
 ) -> MedicalPipelineResult:
     """高层入口：处理医疗数据集并返回分类分级报告与脱敏清洗数据。
 
-    便捷函数：内部自动创建默认配置的 MedicalPrivacyPipeline 实例（
-    默认挂载 DynClassificationService + Small-NER 抹平引擎），
-    然后委托 process_records 执行完整的「逐字段分级 → 脱敏 → 双输出」闭环。
+    复用进程常驻 Pipeline 单例与 LRU 缓存，实现高并发极速处理。
 
     Args:
         records: 输入医疗记录列表（每条记录为 字段名 -> 值 的字典）。
@@ -867,5 +906,13 @@ def process_medical_dataset(
     Returns:
         MedicalPipelineResult：包含分级报告、脱敏数据、原始数据与汇总统计。
     """
-    # 创建默认引擎实例（分类 + NER 抹平）并执行主流程
-    return MedicalPrivacyPipeline().process_records(records, sanitize=sanitize)
+    return get_default_pipeline().process_records(records, sanitize=sanitize)
+
+
+def reset_default_pipeline() -> None:
+    """重置常驻单例 Pipeline 实例（清空所有缓存池并允许重新初始化配置）。"""
+    global _default_pipeline
+    with _default_pipeline_lock:
+        if _default_pipeline is not None:
+            _default_pipeline.clear_cache()
+            _default_pipeline = None

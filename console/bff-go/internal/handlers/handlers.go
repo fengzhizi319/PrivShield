@@ -1301,13 +1301,27 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// loadSampleRecords 读取 internal/samples 下的内置 CSV 样本。
-// 优先解析相对 StaticDistDir 的部署布局路径，其次回退到 CWD 相对路径；
+// loadSampleRecords 读取 internal/samples 或 data 下的内置 CSV 样本。
+// 优先解析相对 StaticDistDir 的部署布局路径，其次多级回退到 CWD 相对路径与 data 根目录；
 // 文件缺失或解析为空时返回明确错误，调用方应映射为 404 而非转发空数据。
 func (s *Server) loadSampleRecords(name string) ([]map[string]string, error) {
-	samplePath := filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", name)
-	if _, err := os.Stat(samplePath); err != nil {
-		samplePath = filepath.Join("internal", "samples", name)
+	candidates := []string{
+		filepath.Join(s.cfg.StaticDistDir, "..", "internal", "samples", name),
+		filepath.Join("internal", "samples", name),
+		filepath.Join("console", "bff-go", "internal", "samples", name),
+		filepath.Join("data", name),
+		filepath.Join("..", "..", "data", name),
+		filepath.Join("..", "data", name),
+	}
+	var samplePath string
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			samplePath = c
+			break
+		}
+	}
+	if samplePath == "" {
+		return nil, fmt.Errorf("示例数据文件缺失: %s", name)
 	}
 	data, err := os.ReadFile(samplePath)
 	if err != nil {

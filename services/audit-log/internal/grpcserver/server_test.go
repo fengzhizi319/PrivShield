@@ -37,6 +37,8 @@ func setupTestGRPCServer(t *testing.T, agentMux http.Handler) (pb.AuditLogServic
 	if agentMux != nil {
 		agentSrv := httptest.NewServer(agentMux)
 		agentURL = agentSrv.URL
+	} else {
+		agentURL = "http://127.0.0.1:59999"
 	}
 
 	t.Setenv("PRIVACY_AGENT_URLS", agentURL)

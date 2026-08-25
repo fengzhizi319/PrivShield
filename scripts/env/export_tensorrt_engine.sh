@@ -22,8 +22,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-ONNX_INPUT=".models/raner_cmeee.onnx"
-ENGINE_OUTPUT=".models/raner_cmeee.engine"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+ONNX_INPUT="$PROJECT_ROOT/.models/raner_cmeee.onnx"
+ENGINE_OUTPUT="$PROJECT_ROOT/.models/raner_cmeee.engine"
 ENABLE_FP16=true
 MIN_SHAPE="input_ids:1x16"
 OPT_SHAPE="input_ids:16x128"

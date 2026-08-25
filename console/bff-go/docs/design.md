@@ -4,7 +4,38 @@
 
 ---
 
-## 1. 背景与选型原因
+## 1. 什么是 BFF (Backend For Frontend)
+
+### 1.1 BFF 概念定义
+**BFF（Backend For Frontend，服务于前端的后端 / 前端专属网关）** 是一种专门为特定前端用户界面（如 Web 控制台、移动端 App、小程序、管理后台等）量身定制的专用后端/服务层架构模式。该概念最早由微服务架构先驱 Sam Newman 等人在微服务实践中提炼并推广。
+
+在传统架构或通用微服务架构中，底层后端服务通常围绕领域模型（Domain Model）设计，偏向通用性与数据持久化；而前端展示层则围绕用户体验与交互视图（View Model）设计，两者在接口粒度、协议偏好及迭代频率上存在天然差异。BFF 模式正是在前端与后端通用微服务之间架设的一层“用户体验与服务适配中介”。
+
+### 1.2 为什么需要 BFF（解决的核心痛点）
+在 `PrivShield` 及现代化复杂系统的架构演进中，引入 BFF 模式主要解决以下核心痛点：
+
+1. **协议转换与适配（Protocol Transformation）**：
+   - **痛点**：底层核心服务（如 `PrivShield Agent` 隐私引擎）为追求高性能、低序列化开销与严格契约，通常采用基于 HTTP/2 的 **gRPC / Protobuf** 二进制协议；而 Web 浏览器端原生且高效支持的交互协议是 **HTTP/1.1 或 HTTP/2 + RESTful JSON**。
+   - **BFF 作用**：BFF 充当协议转换网关（Protocol Adapter），对外向浏览器提供符合前端消费习惯的 REST API，对内通过长连接和连接池与底层服务进行高性能 gRPC 通信。
+2. **数据聚合与裁剪（Data Aggregation & Tailoring）**：
+   - **痛点**：底层的通用微服务通常粒度较细，前端渲染一个完整视图往往需要并发调用多个微服务（增加网络 RTT 往返与前端复杂度），且通用微服务接口容易返回大量前端不需要的冗余字段（Over-fetching），或缺少前端所需的汇总统计指标（Under-fetching）。
+   - **BFF 作用**：BFF 在服务端统一编排并发调用底层多个服务（如同时调用脱敏、分类分级、审计日志服务），进行数据清洗、格式转换与字段裁剪，将最契合当前页面视图的数据结构一次性交付前端。
+3. **前后端关注点解耦与研发自治（Decoupling & Autonomy）**：
+   - **痛点**：前端 UI/UX 变化频繁、展示需求迭代迅速；若每次界面微调都要求修改底层核心微服务的通用接口，不仅协调成本高，还极易影响其他系统调用方。
+   - **BFF 作用**：BFF 归属于前端/控制台技术栈，前端团队可根据 UI 交互需求快速演进接口逻辑与数据格式，使底层核心引擎和中台微服务能够专注于领域业务逻辑与底层稳定性。
+4. **安全边界收敛与统一治理（Security & Governance Boundary）**：
+   - **痛点**：若前端直接对接内部微服务群，会导致内部网络拓扑暴露、CORS 跨域配置碎片化、认证凭证与权限管理分散等安全隐患。
+   - **BFF 作用**：BFF 作为统一安全边界，集中管理 CORS 跨域规则、API Key 认证、IP 速率限制（Rate Limiting）、安全响应头注入以及内部敏感异常信息的脱敏拦截。
+
+### 1.3 BFF 在 PrivShield 中的定位与职责
+在 `PrivShield` 体系中，**`console/bff-go`**（以及同构备用的 `console/bff-py`）承担了控制台专属网关的核心角色：
+- **向上（面向 Web 前端）**：为 React SPA 前端（`console/web`）提供统一的 RESTful JSON 代理接口（如 `/api/proxy`、`/api/batch`、`/api/upload` 等），并负责前端静态构建产物的独立托管与 SPA 路由回退；
+- **向下（面向核心服务群）**：通过 gRPC 长连接与底层 `PrivShield Agent`（`:50051`）高效通信，并联动中台微服务群（`service-hub`、`datasource-mgr`、`audit-log`）；
+- **对内（业务逻辑与仿真）**：实现 REST 路径到 gRPC 方法的智能映射与分发（`internal/mapper`）、CSV/JSON 文件批量脱敏流式解析、医疗/医保多阶段流水线调度仿真，以及网关负载均衡与并发压力测试。
+
+---
+
+## 2. 背景与选型原因
 
 `PrivShield` 的核心隐私治理服务基于 gRPC（默认端口 `50051`）与 REST（默认端口 `8079`）双协议暴露全部隐私原语（脱敏、差分隐私、K-匿名、查询混淆、数据分类分级）。
 
@@ -21,7 +52,7 @@
 
 ---
 
-## 2. 总体架构拓扑
+## 3. 总体架构拓扑
 
 ```mermaid
 graph TD
@@ -61,9 +92,9 @@ graph TD
 
 ---
 
-## 3. 核心子模块与设计细节
+## 4. 核心子模块与设计细节
 
-### 3.1 REST 到 gRPC 的智能映射 (`internal/mapper`)
+### 4.1 REST 到 gRPC 的智能映射 (`internal/mapper`)
 
 前端所有针对隐私原语的操作通过 `POST /api/proxy` 发送统一请求：
 
@@ -95,7 +126,7 @@ graph TD
 
 ---
 
-### 3.2 共享基础库深度整合 (`pkg/`)
+### 4.2 共享基础库深度整合 (`pkg/`)
 
 `backend-go` 全面接入 `pkg/`：
 - **`pkg/middleware`**：集成 `RequestID()`、`StructuredLogger()`、`CORS()`、`SecurityHeaders()`；
@@ -104,7 +135,7 @@ graph TD
 
 ---
 
-### 3.3 静态 UI 独立托管 (`registerStatic`)
+### 4.3 静态 UI 独立托管 (`registerStatic`)
 
 通过 `PRIVACY_CONSOLE_STATIC_DIR` 环境变量配置前端 `web/dist` 路径：
 1. **带哈希静态资源**：`/assets/*` 映射到 `dist/assets`，由 Gin 提供强缓存；
@@ -113,7 +144,7 @@ graph TD
 
 ---
 
-## 4. 路由清单与 API 规范
+## 5. 路由清单与 API 规范
 
 | 方法 | 路径 | 描述 | 响应包装 |
 |---|---|---|---|

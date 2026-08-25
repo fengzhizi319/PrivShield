@@ -132,10 +132,11 @@ def generate_yibao_record(idx: int) -> dict[str, str]:
 
 
 def main():
+    project_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description="生成医保结算数据 yibao.csv")
     parser.add_argument(
         "--output",
-        default="engine/medical_pipeline/samples/yibao.csv",
+        default=str(project_root / "engine/medical_pipeline/samples/yibao.csv"),
         help="输出 CSV 文件路径",
     )
     parser.add_argument("--count", type=int, default=50, help="生成的记录条数 (默认 50)")
@@ -144,6 +145,8 @@ def main():
 
     random.seed(args.seed)
     output_path = Path(args.output)
+    if not output_path.is_absolute():
+        output_path = project_root / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     records = [generate_yibao_record(i) for i in range(args.count)]
@@ -157,12 +160,12 @@ def main():
     print(f"✅ [成功] 顺利生成 {len(records)} 条医保结算仿真数据 -> {output_path}")
 
     # 同时备份到 console 后端样例路径 (如果目录存在)
-    console_backend_path = Path("console/bff-py/samples/yibao.csv")
+    console_backend_path = project_root / "console/bff-py/samples/yibao.csv"
     if console_backend_path.parent.exists():
         console_backend_path.write_bytes(output_path.read_bytes())
         print(f"✅ [副本] 成功将 yibao.csv 复制到 -> {console_backend_path}")
 
-    console_go_path = Path("console/bff-go/internal/samples/yibao.csv")
+    console_go_path = project_root / "console/bff-go/internal/samples/yibao.csv"
     if console_go_path.parent.exists():
         console_go_path.write_bytes(output_path.read_bytes())
         print(f"✅ [副本] 成功将 yibao.csv 复制到 -> {console_go_path}")

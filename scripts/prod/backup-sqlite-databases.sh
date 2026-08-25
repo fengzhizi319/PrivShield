@@ -55,11 +55,30 @@ log_debug() { echo -e "${BLUE}[DEBUG]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 # ============================================================================
 # Default Configuration / 默认配置
 # ============================================================================
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/privshield}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+find_default_db() {
+    local filename="$1"
+    for candidate in "${PROJECT_ROOT}/data/${filename}" "${PROJECT_ROOT}/.data/${filename}" "${PROJECT_ROOT}/${filename}" "/var/lib/privshield/${filename}"; do
+        if [[ -f "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    echo ""
+}
+
+BACKUP_DIR="${BACKUP_DIR:-$PROJECT_ROOT/backups/sqlite}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 COMPRESS_ENABLED="${COMPRESS_ENABLED:-true}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 HASH_FILE="${BACKUP_DIR}/.db_hashes"
+
+SERVICE_HUB_DB_PATH="${SERVICE_HUB_DB_PATH:-$(find_default_db "service_hub.db")}"
+AUDIT_LOG_DB_PATH="${AUDIT_LOG_DB_PATH:-$(find_default_db "audit_log.db")}"
+DATASOURCE_MGR_DB_PATH="${DATASOURCE_MGR_DB_PATH:-$(find_default_db "datasource_mgr.db")}"
+PRIVACY_BUDGET_DB_PATH="${PRIVACY_BUDGET_DB_PATH:-$(find_default_db "privacy_budget.db")}"
 
 # 解析参数
 BACKUP_TYPE="full"
@@ -134,10 +153,10 @@ if [[ "${VERIFY_MODE}" == "true" ]]; then
         result=$(sqlite3 "${VERIFY_TMPDIR}/${db_name}.db" "PRAGMA integrity_check;" 2>&1)
         if [[ "${result}" == "ok" ]]; then
             log_info "${db_name}: integrity check PASSED"
-            ((VERIFY_PASS++))
+            VERIFY_PASS=$((VERIFY_PASS + 1))
         else
             log_error "${db_name}: integrity check FAILED: ${result}"
-            ((VERIFY_FAIL++))
+            VERIFY_FAIL=$((VERIFY_FAIL + 1))
         fi
 
         rm -f "${VERIFY_TMPDIR}/${db_name}.db"
@@ -208,12 +227,14 @@ backup_database() {
     local db_name="$2"
     
     if [[ -z "${db_path}" ]]; then
-        log_warn "${db_name} database path not configured, skipping"
+        log_warn "${db_name} database path not configured or file not present, skipping"
+        BACKUP_SKIPPED=$((BACKUP_SKIPPED + 1))
         return 0
     fi
     
     if [[ ! -f "${db_path}" ]]; then
-        log_warn "${db_name} database file not found: ${db_path}"
+        log_warn "${db_name} database file not found: ${db_path}, skipping"
+        BACKUP_SKIPPED=$((BACKUP_SKIPPED + 1))
         return 0
     fi
     
@@ -226,6 +247,7 @@ backup_database() {
         
         if [[ "${current_hash}" == "${previous_hash}" ]]; then
             log_info "${db_name} database unchanged, skipping backup"
+            BACKUP_SKIPPED=$((BACKUP_SKIPPED + 1))
             return 0
         fi
         
@@ -245,9 +267,12 @@ backup_database() {
             gzip "${backup_file}"
             log_info "${db_name} backup compressed: ${backup_file}.gz"
         fi
+        BACKUP_SUCCESS=$((BACKUP_SUCCESS + 1))
+        return 0
     else
         log_error "${db_name} backup failed"
-        return 1
+        BACKUP_FAILED=$((BACKUP_FAILED + 1))
+        return 0
     fi
 }
 
@@ -255,50 +280,37 @@ backup_database() {
 # Execute Backups / 执行备份
 # ============================================================================
 BACKUP_SUCCESS=0
+BACKUP_SKIPPED=0
 BACKUP_FAILED=0
 
-# 备份 service-hub 数据库
-if backup_database "${SERVICE_HUB_DB_PATH:-}" "service-hub"; then
-    ((BACKUP_SUCCESS++))
-else
-    ((BACKUP_FAILED++))
-fi
-
-# 备份 audit-log 数据库
-if backup_database "${AUDIT_LOG_DB_PATH:-}" "audit-log"; then
-    ((BACKUP_SUCCESS++))
-else
-    ((BACKUP_FAILED++))
-fi
-
-# 备份 datasource-mgr 数据库
-if backup_database "${DATASOURCE_MGR_DB_PATH:-}" "datasource-mgr"; then
-    ((BACKUP_SUCCESS++))
-else
-    ((BACKUP_FAILED++))
-fi
+# 备份中台与核心 SQLite 数据库
+backup_database "${SERVICE_HUB_DB_PATH:-}" "service-hub"
+backup_database "${AUDIT_LOG_DB_PATH:-}" "audit-log"
+backup_database "${DATASOURCE_MGR_DB_PATH:-}" "datasource-mgr"
+backup_database "${PRIVACY_BUDGET_DB_PATH:-}" "privacy-budget"
 
 # ============================================================================
 # Cleanup Old Backups / 清理过期备份
 # ============================================================================
 log_info "Cleaning up backups older than ${RETENTION_DAYS} days..."
-DELETED_COUNT=$(find "${BACKUP_DIR}" -type f -name "*.db*" -mtime "+${RETENTION_DAYS}" -delete -print | wc -l)
+DELETED_COUNT=$(find "${BACKUP_DIR}" -type f -name "*.db*" -mtime "+${RETENTION_DAYS}" -delete -print 2>/dev/null | wc -l)
 log_info "Deleted ${DELETED_COUNT} old backup files"
 
 # ============================================================================
 # Summary / 汇总
 # ============================================================================
-BACKUP_COUNT=$(find "${BACKUP_DIR}" -type f -name "*.db*" | wc -l)
+BACKUP_COUNT=$(find "${BACKUP_DIR}" -type f -name "*.db*" 2>/dev/null | wc -l)
 BACKUP_SIZE=$(du -sh "${BACKUP_DIR}" 2>/dev/null | awk '{print $1}')
 
 log_info "=========================================="
 log_info "Backup Summary / 备份汇总"
 log_info "=========================================="
 log_info "Backup type: ${BACKUP_TYPE}"
-log_info "Successful: ${BACKUP_SUCCESS}"
-log_info "Failed: ${BACKUP_FAILED}"
-log_info "Total backups: ${BACKUP_COUNT}"
-log_info "Total size: ${BACKUP_SIZE}"
+log_info "Successful:  ${BACKUP_SUCCESS}"
+log_info "Skipped:     ${BACKUP_SKIPPED}"
+log_info "Failed:      ${BACKUP_FAILED}"
+log_info "Total files: ${BACKUP_COUNT}"
+log_info "Total size:  ${BACKUP_SIZE}"
 log_info "=========================================="
 
 if [[ ${BACKUP_FAILED} -gt 0 ]]; then

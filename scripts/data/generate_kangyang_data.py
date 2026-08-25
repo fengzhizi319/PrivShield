@@ -427,10 +427,11 @@ for idx in range(100):
 
 
 def main():
+    project_root = Path(__file__).resolve().parents[2]
     target_paths = [
-        Path("data/kangyang.csv"),
-        Path("console/bff-py/samples/kangyang.csv"),
-        Path("console/bff-go/internal/samples/kangyang.csv"),
+        project_root / "data/kangyang.csv",
+        project_root / "console/bff-py/samples/kangyang.csv",
+        project_root / "console/bff-go/internal/samples/kangyang.csv",
     ]
 
     for p in target_paths:

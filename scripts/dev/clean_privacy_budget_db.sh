@@ -82,6 +82,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# 若相对路径在当前目录不存在，尝试回退到项目根目录
+if [[ ! -f "$BUDGET_DB" && -f "$PROJECT_ROOT/$BUDGET_DB" ]]; then
+    BUDGET_DB="$PROJECT_ROOT/$BUDGET_DB"
+fi
+
 echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} 差分隐私预算数据库运维工具${NC}"
 echo -e "${BLUE} 数据库文件路径: ${BUDGET_DB}${NC}"
