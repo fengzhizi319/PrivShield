@@ -171,22 +171,19 @@ services/service-hub/
 │       ├── models.go
 │       └── models_test.go
 ├── proto/                       # gRPC Protobuf 定义与生成代码
-│   ├── service_hub.proto
-│   ├── service_hub.pb.go
-│   └── service_hub_grpc.pb.go
-├── scripts/                     # 部署与模拟测试脚本
-│   ├── deploy.sh                # 生产/单服务容器部署脚本
-│   └── simulate-pipeline.sh     # 并发流水线压力仿真注入脚本
+│   ├── servicehub.proto
+│   ├── servicehub.pb.go
+│   └── servicehub_grpc.pb.go
 ├── docs/                        # SDLC 设计与学习文档
 │   ├── prd.md
 │   ├── design.md
 │   ├── api.md
 │   ├── ops.md
 │   ├── testing.md
+│   ├── reliability.md
 │   └── learning-guide.md        # 本学习文档
 ├── Dockerfile                   # 多阶段轻量镜像构建
-├── Makefile                     # 常用编译与测试指令
-└── run.sh                       # 本地热启脚本
+└── Makefile                     # 常用编译与测试指令
 ```
 
 ---
@@ -199,22 +196,44 @@ services/service-hub/
 
 ```go
 func main() {
-    // 1. 加载配置与结构化日志
+    // 1. 加载配置、一致性校验与结构化日志
     cfg := config.Load()
+    if err := cfg.Validate(); err != nil {
+        log.Fatalf("invalid configuration: %v", err)
+    }
     logger := pkgconfig.SetupLogger(cfg.LogFormat, cfg.LogLevel)
 
-    // 2. 初始化任务存储引擎（支持 Memory 或 SQLite WAL）
+    // 2. 数据库完整性校验与任务存储引擎初始化（支持 Memory 或 SQLite WAL）
+    if cfg.DBPath != "" {
+        if err := sqlite.ValidateIntegrity(cfg.DBPath); err != nil {
+            log.Fatalf("sqlite integrity check failed: %v", err)
+        }
+    }
     taskStore, err := initTaskStore(cfg.DBPath, logger)
     if err != nil {
         log.Fatalf("failed to initialize task store: %v", err)
     }
 
-    // 3. 初始化 Prometheus 指标与下游客户端
+    // 3. 初始化 Prometheus 指标收集器
     mc := metrics.NewCollector("service-hub")
+
+    // 4. 崩溃恢复与自动重试（孤立任务回收 + 失败任务指数退避重试）
+    recoverOrphanedTasks(taskStore, mc, logger)
+    retryFailedTasks(taskStore, mc, logger)
+
+    // 5. 启动后台周期性重试与数据保留清理协程
+    retryCtx, retryCancel := context.WithCancel(context.Background())
+    go periodicRetryLoop(retryCtx, taskStore, mc, logger, 60*time.Second)
+    if cfg.RetentionDays > 0 {
+        retentionCtx, retentionCancel := context.WithCancel(context.Background())
+        go dataRetentionLoop(retentionCtx, taskStore, logger, cfg.RetentionDays)
+    }
+
+    // 6. 实例化下游客户端组件
     agentClient := agent.New(cfg)
     dsClient := datasource.New(cfg)
 
-    // 4. 初始化 Gin REST 路由器与 Slowloris 超时加固 HTTP Server
+    // 7. 初始化 Gin REST 路由器与 Slowloris 超时加固 HTTP Server (支持可选 mTLS)
     server := handlers.New(agentClient, dsClient, cfg, taskStore, logger, mc)
     router := gin.New()
     server.RegisterRoutes(router)
@@ -222,26 +241,25 @@ func main() {
     httpSrv := &http.Server{
         Addr:              cfg.Address(),
         Handler:           router,
-        ReadHeaderTimeout: 5 * time.Second,  // 防范 Slowloris 请求头攻击
+        ReadHeaderTimeout: 5 * time.Second,  // 防范 Slowloris 请求头拒绝服务攻击
         ReadTimeout:       30 * time.Second,
         WriteTimeout:      60 * time.Second,
         IdleTimeout:       120 * time.Second,
         MaxHeaderBytes:    1 << 20, // 1 MiB 最大请求头
     }
 
-    // 5. 启动 gRPC 服务（根据配置选择安全 mTLS 或 Insecure 模式）
+    // 8. 启动 gRPC 服务（根据配置选择安全 mTLS 或 Insecure 模式，支持 SPKI Pinning）
     // ...
 
-    // 6. 注册 SIGINT / SIGTERM 信号监听，启动优雅关闭
+    // 9. 注册 SIGINT / SIGTERM 信号监听，启动优雅关闭
     sigChan := make(chan os.Signal, 1)
     signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
     <-sigChan
 
-    // 7. 5 秒倒计时优雅关停，等待未完成的任务处理并安全释放资源
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    httpSrv.Shutdown(ctx)
+    // 10. 优雅关停：先取消后台协程与任务 Context，再顺序关闭 gRPC 与 HTTP
+    server.Shutdown()
     grpcServer.GracefulStop()
+    httpSrv.Shutdown(shutdownCtx)
     taskStore.Close()
 }
 ```
@@ -252,57 +270,84 @@ func main() {
 
 | 环境变量 | 默认值 | 作用说明 |
 |---|---|---|
-| `SERVICE_HUB_HOST` | `0.0.0.0` | HTTP REST 服务监听地址 |
+| `SERVICE_HUB_HOST` | `127.0.0.1` | HTTP REST 服务监听地址 |
 | `SERVICE_HUB_PORT` | `8082` | HTTP REST 服务监听端口 |
-| `SERVICE_HUB_GRPC_HOST` | `0.0.0.0` | gRPC 服务监听地址 |
+| `SERVICE_HUB_GRPC_HOST` | `127.0.0.1` | gRPC 服务监听地址 |
 | `SERVICE_HUB_GRPC_PORT` | `50052` | gRPC 服务监听端口 |
-| `SERVICE_HUB_DB_PATH` | `""` (内存) | 任务持久化 SQLite 路径（非空时启用 WAL 持久化） |
 | `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | 上游 PrivShield Agent 主机名 |
 | `PRIVACY_REST_PORT` | `8079` | 上游 PrivShield Agent REST 端口 |
+| `PRIVACY_AGENT_API_KEY` | `""` | 上游 PrivShield Agent 访问 API Key |
+| `PRIVACY_AGENT_URLS` | `""` | 多 Agent 负载均衡/故障转移地址列表 |
+| `SERVICE_HUB_MAX_QUEUE` | `1000` | 调度引擎最大任务排队深度 |
+| `SERVICE_HUB_SCHEDULE_TIMEOUT` | `30` | 任务单步调度与执行超时（秒） |
 | `DATASOURCE_MGR_HOST` | `127.0.0.1` | 数据源管理服务主机名 |
 | `DATASOURCE_MGR_PORT` | `8083` | 数据源管理服务端口 |
-| `PRIVACY_TLS_ENABLED` | `false` | 是否开启 gRPC TLS/mTLS 加密通信 |
-| `PRIVACY_TLS_CLIENT_AUTH` | `none` | 客户端证书模式：`none` / `verify_if_given` / `require` |
-| `PRIVACY_TLS_PINNED_PUBKEY_FILE` | `""` | 允许的客户端公钥哈希白名单文件 (SPKI Pinning) |
+| `DATASOURCE_MGR_GRPC_HOST` | `127.0.0.1` | 数据源管理服务 gRPC 主机名 |
+| `DATASOURCE_MGR_GRPC_PORT` | `50053` | 数据源管理服务 gRPC 端口 |
+| `SERVICE_HUB_TLS_ENABLED` | `false` | 是否开启 HTTP/gRPC TLS/mTLS 加密通信 |
+| `SERVICE_HUB_TLS_CERT_FILE` | `""` | 服务端 X.509 证书文件路径 |
+| `SERVICE_HUB_TLS_KEY_FILE` | `""` | 服务端私钥文件路径 |
+| `SERVICE_HUB_TLS_CA_FILE` | `""` | 验证客户端证书的根 CA 证书文件路径 |
+| `SERVICE_HUB_TLS_CLIENT_AUTH` | `""` | 客户端证书模式：`require` / `verify` / `request` |
+| `SERVICE_HUB_TLS_PINNED_PUBKEY_FILE` | `""` | 允许的客户端公钥哈希白名单文件 (SPKI Pinning) |
+| `SERVICE_HUB_API_KEY` | `""` | 本模块对外暴露的入站 API Key 鉴权 |
+| `SERVICE_HUB_CORS_ORIGINS` | `""` | 允许跨域的 CORS 域名白名单 |
+| `SERVICE_HUB_DB_PATH` | `""` (内存) | 任务持久化 SQLite 路径（非空时启用 WAL 持久化） |
+| `SERVICE_HUB_RETENTION_DAYS` | `30` | 终态任务数据保留天数（0 表示禁用清理） |
+| `SERVICE_HUB_SHUTDOWN_TIMEOUT` | `5` | 优雅关机等待超时秒数 |
+| `SERVICE_HUB_LOG_FORMAT` | `json` | 结构化日志格式: `json` / `text` |
+| `SERVICE_HUB_LOG_LEVEL` | `info` | 日志输出级别: `debug` / `info` / `warn` / `error` |
 
 ### 5.3 HTTP 路由与并发调度控制 (`internal/handlers/handlers.go`)
 
-`Server` 结构体持有业务组件依赖，并通过 `semaphore` channel 控制同一时刻并发执行的重量级任务数量（默认上限 10），防止突发流量耗尽 Agent 算力。
+`Server` 结构体持有业务组件依赖，并通过 `taskSem` 信号量 channel 控制同一时刻并发执行的重量级任务数量（默认容量 10），防止突发流量耗尽 Agent 算力。
 
 ```go
 type Server struct {
-    agentClient agent.Client
-    dsClient    datasource.Client
-    cfg         *config.Config
-    store       store.TaskStore
-    logger      *slog.Logger
-    metrics     *metrics.Collector
-    semaphore   chan struct{} // 并发限流信号量
+    agent      *agent.Client      // 上游 PrivShield Python Agent 客户端
+    datasource *datasource.Client // 下游 datasource-mgr 数据源服务客户端
+    cfg        *config.Config     // 模块全局运行配置
+    startTime  time.Time          // 服务启动时间戳
+    tasks      store.TaskStore    // 任务持久化存储介质
+    logger     *slog.Logger       // 结构化日志记录器
+    mc         *metrics.Collector // Prometheus 监控指标收集器
+    taskSem    chan struct{}      // 信号量通道（最大 10 并发）
+    ctx        context.Context    // 广播取消信号的父 Context
+    cancel     context.CancelFunc // 取消函数
+    wg         sync.WaitGroup     // 跟踪执行中的后台任务协程
 }
 
 func (s *Server) RegisterRoutes(r *gin.Engine) {
-    // 注册全局基础中间件
-    r.Use(gin.Recovery())
+    // 挂载通用中间件链
     r.Use(middleware.RequestID())
-    r.Use(middleware.CORS())
-    r.Use(middleware.StructuredLogger(s.logger))
+    r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
+    r.Use(middleware.Recovery(s.logger, "service-hub"))
+    r.Use(middleware.SecurityHeaders())
+    r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB 请求体上限
+    r.Use(middleware.CORS(s.cfg.CORSOrigins))
+    r.Use(middleware.Auth(s.cfg.APIKey))
 
-    // 注册 Prometheus /metrics 端点
-    r.GET("/metrics", gin.WrapH(s.metrics.Handler()))
+    // 基础健康检查与服务概览
+    r.GET("/health", s.Health)     // Liveness probe / 存活探针
+    r.GET("/readyz", s.Readyz)     // Readiness probe / 就绪探针
+    r.GET("/api/health", s.Health) // 兼容别名
+    r.GET("/api/hub/status", s.HubStatus)
 
-    api := r.Group("/api")
-    {
-        api.GET("/health", s.Health)
-        
-        hub := api.Group("/hub")
-        {
-            hub.POST("/tasks", s.CreateTask)          // 创建异步处理任务
-            hub.GET("/tasks", s.ListTasks)             // 任务列表分页与筛选
-            hub.GET("/tasks/:id", s.GetTask)           // 获取单任务状态与结果
-            hub.POST("/classify", s.ClassifyAndMask)   // 同步快捷分类脱敏
-            hub.POST("/pipeline", s.PipelineRun)       // 端到端 6 阶段流水线执行
-        }
-    }
+    // 任务生命周期管理
+    r.GET("/api/hub/tasks", s.ListTasks)
+    r.GET("/api/hub/tasks/:id", s.GetTask)
+    r.POST("/api/hub/dispatch", s.Dispatch)
+
+    // 流水线与自适应分类调度
+    r.GET("/api/hub/pipeline", s.Pipeline)
+    r.POST("/api/hub/classify", s.ClassifyAndDispatch)
+
+    // 模拟数据源联动与代理端点
+    r.POST("/api/hub/pipeline/trigger-datasource", s.TriggerDataSourcePipeline)
+    r.GET("/api/hub/datasources", s.ListDataSources)
+
+    // Prometheus 监控指标导出
+    r.GET("/metrics", s.mc.Handler())
 }
 ```
 

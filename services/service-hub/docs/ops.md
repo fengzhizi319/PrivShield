@@ -6,18 +6,22 @@
 
 ## 1. 运行与启动
 
-### 1.1 开发模式
+### 1.1 本地开发模式
 
 ```bash
+# 方式 1: 直接在模块目录下运行
 cd services/service-hub
-bash run.sh
+go run ./cmd/server
+
+# 方式 2: 使用根目录自动化脚本启动全部微服务
+bash ./scripts/dev/e2e-start-all-services.sh
 ```
 
 默认同时启动：
 - **HTTP REST**：`http://127.0.0.1:8082`
 - **gRPC (insecure)**：`127.0.0.1:50052`
 - 上游 Agent 默认连接：`http://127.0.0.1:8079`
-- 模拟数据源默认连接：`http://127.0.0.1:8083`
+- 模拟数据源默认连接：`http://127.0.0.1:8083`（gRPC `:50053`）
 
 ### 1.2 生产模式（启用 mTLS 与公钥固定）
 
@@ -39,45 +43,62 @@ SERVICE_HUB_TLS_CLIENT_AUTH=require \
 SERVICE_HUB_TLS_PINNED_PUBKEY_FILE=/etc/privshield/certs/client_pub.pem \
 DATASOURCE_MGR_HOST=127.0.0.1 \
 DATASOURCE_MGR_PORT=8083 \
+DATASOURCE_MGR_GRPC_HOST=127.0.0.1 \
+DATASOURCE_MGR_GRPC_PORT=50053 \
 PRIVACY_AGENT_REST_HOST=127.0.0.1 \
 PRIVACY_REST_PORT=8079 \
-./bin/service-hub
+SERVICE_HUB_DB_PATH=/var/lib/privshield/service-hub.db \
+SERVICE_HUB_RETENTION_DAYS=30 \
+./bin/server
 ```
 
 ---
 
 ## 2. 环境变量速查表
 
-| 环境变量 | 默认值 | 说明 |
-|---|---|---|
-| `SERVICE_HUB_HOST` | `127.0.0.1` | HTTP REST 服务监听主机 |
-| `SERVICE_HUB_PORT` | `8082` | HTTP REST 服务监听端口 |
-| `SERVICE_HUB_GRPC_HOST` | `127.0.0.1` | gRPC 服务监听主机 |
-| `SERVICE_HUB_GRPC_PORT` | `50052` | gRPC 服务监听端口 |
-| `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | 上游 Agent REST 主机 |
-| `PRIVACY_REST_PORT` | `8079` | 上游 Agent REST 端口 |
-| `DATASOURCE_MGR_HOST` | `127.0.0.1` | 模拟数据源 HTTP 主机 |
-| `DATASOURCE_MGR_PORT` | `8083` | 模拟数据源 HTTP 端口 |
-| `DATASOURCE_MGR_GRPC_HOST` | `127.0.0.1` | 模拟数据源 gRPC 主机 |
-| `DATASOURCE_MGR_GRPC_PORT` | `50053` | 模拟数据源 gRPC 端口 |
-| `SERVICE_HUB_TLS_ENABLED` | `false` | 是否在 gRPC 服务上启用 TLS/mTLS |
-| `SERVICE_HUB_TLS_CERT_FILE` | (空) | gRPC 服务端 X.509 证书 PEM 路径 |
-| `SERVICE_HUB_TLS_KEY_FILE` | (空) | gRPC 服务端私钥 PEM 路径 |
-| `SERVICE_HUB_TLS_CA_FILE` | (空) | 客户端证书校验 CA 证书 PEM 路径 |
-| `SERVICE_HUB_TLS_CLIENT_AUTH` | (空) | 客户端认证模式: `require` \| `verify` \| `request` |
-| `SERVICE_HUB_TLS_PINNED_PUBKEY_FILE` | (空) | 固定的客户端公钥 PEM 路径 |
-| `SERVICE_HUB_API_KEY` | (空) | 本模块入站 API Key（空表示免密） |
-| `SERVICE_HUB_CORS_ORIGINS` | (空) | 允许的 CORS 跨域源（逗号分隔） |
-| `SERVICE_HUB_DB_PATH` | (空) | SQLite 数据库路径（空表示纯内存模式） |
-| `SERVICE_HUB_LOG_FORMAT` | `json` | 日志格式: `json` \| `text` |
-| `SERVICE_HUB_LOG_LEVEL` | `info` | 日志级别: `debug` \| `info` \| `warn` \| `error` |
+| 环境变量 | 默认值 | 类型 | 说明 |
+|---|---|---|---|
+| `SERVICE_HUB_HOST` | `127.0.0.1` | string | HTTP REST 服务监听主机（生产设为 `0.0.0.0`） |
+| `SERVICE_HUB_PORT` | `8082` | int | HTTP REST 服务监听端口 |
+| `SERVICE_HUB_GRPC_HOST` | `127.0.0.1` | string | gRPC 服务监听主机 |
+| `SERVICE_HUB_GRPC_PORT` | `50052` | int | gRPC 服务监听端口 |
+| `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | string | 上游 Agent REST 主机 |
+| `PRIVACY_REST_PORT` | `8079` | int | 上游 Agent REST 端口 |
+| `PRIVACY_AGENT_API_KEY` | `""` | string | 请求上游 Agent 的 API Key 凭证 |
+| `PRIVACY_AGENT_URLS` | `""` | string | 多 Agent 负载均衡/故障转移地址（逗号分隔） |
+| `SERVICE_HUB_MAX_QUEUE` | `1000` | int | 调度引擎最大排队等待任务数 |
+| `SERVICE_HUB_SCHEDULE_TIMEOUT` | `30` | int | 任务单步调度与执行超时（秒） |
+| `DATASOURCE_MGR_HOST` | `127.0.0.1` | string | 模拟数据源 HTTP 主机 |
+| `DATASOURCE_MGR_PORT` | `8083` | int | 模拟数据源 HTTP 端口 |
+| `DATASOURCE_MGR_GRPC_HOST` | `127.0.0.1` | string | 模拟数据源 gRPC 主机 |
+| `DATASOURCE_MGR_GRPC_PORT` | `50053` | int | 模拟数据源 gRPC 端口 |
+| `SERVICE_HUB_TLS_ENABLED` | `false` | bool | 是否启用 HTTP/gRPC TLS 强加密 |
+| `SERVICE_HUB_TLS_CERT_FILE` | `""` | string | 服务端 X.509 证书 PEM 文件路径 |
+| `SERVICE_HUB_TLS_KEY_FILE` | `""` | string | 服务端私钥 PEM 文件路径 |
+| `SERVICE_HUB_TLS_CA_FILE` | `""` | string | 客户端证书校验根 CA 证书 PEM 路径 |
+| `SERVICE_HUB_TLS_CLIENT_AUTH` | `""` | string | 客户端双向认证模式: `require` \| `verify` \| `request` |
+| `SERVICE_HUB_TLS_PINNED_PUBKEY_FILE` | `""` | string | 固定的客户端 RSA 公钥 PEM 路径 (SPKI Pinning) |
+| `SERVICE_HUB_API_KEY` | `""` | string | 本模块入站 API Key（空表示免密） |
+| `SERVICE_HUB_CORS_ORIGINS` | `""` | string | 允许的 CORS 跨域源（逗号分隔） |
+| `SERVICE_HUB_DB_PATH` | `""` | string | SQLite 数据库路径（空表示纯内存模式） |
+| `SERVICE_HUB_RETENTION_DAYS` | `30` | int | 终态任务保留天数（0 表示禁用清理） |
+| `SERVICE_HUB_SHUTDOWN_TIMEOUT` | `5` | int | 优雅停机等待超时（秒） |
+| `SERVICE_HUB_LOG_FORMAT` | `json` | string | 日志格式: `json`（生产推荐） \| `text` |
+| `SERVICE_HUB_LOG_LEVEL` | `info` | string | 日志级别: `debug` \| `info` \| `warn` \| `error` |
 
 ---
 
 ## 3. 健康检查与运维监控
 
-### 3.1 HTTP 综合健康检查
+### 3.1 探活与就绪检查
 ```bash
+# 存活探针 (Liveness: 进程存活即 200)
+curl -s http://127.0.0.1:8082/health | jq .
+
+# 就绪探针 (Readiness: 深度检查 Agent + Datasource 连通性)
+curl -s http://127.0.0.1:8082/readyz | jq .
+
+# 综合健康状态
 curl -s http://127.0.0.1:8082/api/health | jq .
 ```
 可同时观测：
@@ -90,6 +111,11 @@ curl -s http://127.0.0.1:8082/api/health | jq .
 curl -s -X POST http://127.0.0.1:8082/api/hub/pipeline/trigger-datasource \
   -H "Content-Type: application/json" \
   -d '{"datasource_id": "ds_yibao", "limit": 5, "operation": "mask"}' | jq .
+```
+
+### 3.3 查看 Prometheus 监控指标
+```bash
+curl -s http://127.0.0.1:8082/metrics | head -n 30
 ```
 
 ---

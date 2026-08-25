@@ -22,46 +22,76 @@
 
 ## 快速开始
 
-### 开发模式
+### 本地原生运行
 
 ```bash
+# 方式 1: 直接使用 go 运行
 cd services/service-hub
-bash run.sh
+go run ./cmd/server
+
+# 方式 2: 使用 Makefile 构建并运行
+make build
+./bin/server
 ```
 
-默认监听：
-- HTTP REST: `http://127.0.0.1:8082`
-- gRPC: `127.0.0.1:50052`
-
-### 环境变量
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `SERVICE_HUB_HOST` | `127.0.0.1` | HTTP 监听地址 |
-| `SERVICE_HUB_PORT` | `8082` | HTTP 监听端口 |
-| `SERVICE_HUB_GRPC_PORT` | `50052` | gRPC 监听端口 |
-| `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | 上游 Agent REST 地址 |
-| `PRIVACY_REST_PORT` | `8079` | 上游 Agent REST 端口 |
-| `DATASOURCE_MGR_HOST` | `127.0.0.1` | 模拟数据源 HTTP 地址 |
-| `DATASOURCE_MGR_PORT` | `8083` | 模拟数据源 HTTP 端口 |
-| `SERVICE_HUB_TLS_ENABLED` | `false` | 是否开启 gRPC mTLS 双向认证 |
+默认监听地址与端口：
+- **HTTP REST**: `http://127.0.0.1:8082`
+- **gRPC**: `127.0.0.1:50052`
+- **上游 Agent 依赖**: `http://127.0.0.1:8079`
+- **下游模拟数据源**: `http://127.0.0.1:8083`
 
 ---
 
-## API 接口清单
+## 环境变量速查
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/health` | 健康检查（自身 + 上游 Agent + 下游 Datasource-Mgr） |
-| GET | `/api/hub/status` | 调度中枢状态概览 |
-| GET | `/api/hub/tasks` | 任务列表（支持分页与 `?status=` 过滤） |
-| GET | `/api/hub/tasks/:id` | 获取单个任务详情 |
-| POST | `/api/hub/dispatch` | 手动分发新任务到流水线 |
-| GET | `/api/hub/pipeline` | 流水线各阶段活跃状态 |
-| POST | `/api/hub/classify` | 分类分级 + 自动策略脱敏分发 |
-| POST | `/api/hub/pipeline/trigger-datasource` | 申请模拟数据源数据并触发脱敏流水线 |
-| GET | `/api/hub/datasources` | 代理列出已接入的模拟数据源列表 |
-| GET | `/metrics` | Prometheus 监控指标采集端点 |
+| 环境变量 | 默认值 | 类型 | 说明 |
+|---|---|---|---|
+| `SERVICE_HUB_HOST` | `127.0.0.1` | string | HTTP REST 服务监听主机 |
+| `SERVICE_HUB_PORT` | `8082` | int | HTTP REST 服务监听端口 |
+| `SERVICE_HUB_GRPC_HOST` | `127.0.0.1` | string | gRPC 服务监听主机 |
+| `SERVICE_HUB_GRPC_PORT` | `50052` | int | gRPC 服务监听端口 |
+| `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | string | 上游 PrivShield Agent REST 主机 |
+| `PRIVACY_REST_PORT` | `8079` | int | 上游 PrivShield Agent REST 端口 |
+| `PRIVACY_AGENT_API_KEY` | `""` | string | 请求上游 Agent 的 API Key |
+| `PRIVACY_AGENT_URLS` | `""` | string | 多 Agent 负载均衡/故障转移地址（逗号分隔） |
+| `SERVICE_HUB_MAX_QUEUE` | `1000` | int | 调度引擎最大排队深度 |
+| `SERVICE_HUB_SCHEDULE_TIMEOUT` | `30` | int | 任务单步调度与执行超时（秒） |
+| `DATASOURCE_MGR_HOST` | `127.0.0.1` | string | 模拟数据源 HTTP 主机 |
+| `DATASOURCE_MGR_PORT` | `8083` | int | 模拟数据源 HTTP 端口 |
+| `DATASOURCE_MGR_GRPC_HOST` | `127.0.0.1` | string | 模拟数据源 gRPC 主机 |
+| `DATASOURCE_MGR_GRPC_PORT` | `50053` | int | 模拟数据源 gRPC 端口 |
+| `SERVICE_HUB_TLS_ENABLED` | `false` | bool | 是否启用 HTTP/gRPC TLS 强加密 |
+| `SERVICE_HUB_TLS_CERT_FILE` | `""` | string | 服务端证书 X.509 路径 |
+| `SERVICE_HUB_TLS_KEY_FILE` | `""` | string | 服务端私钥路径 |
+| `SERVICE_HUB_TLS_CA_FILE` | `""` | string | 验证客户端身份的 CA 证书路径 |
+| `SERVICE_HUB_TLS_CLIENT_AUTH` | `""` | string | 客户端双向认证模式 (`require`/`verify`/`request`) |
+| `SERVICE_HUB_TLS_PINNED_PUBKEY_FILE` | `""` | string | 客户端固定公钥 PEM 路径 (SPKI Pinning) |
+| `SERVICE_HUB_API_KEY` | `""` | string | 本模块入站 API Key 鉴权（空表示免密） |
+| `SERVICE_HUB_CORS_ORIGINS` | `""` | string | 允许跨域的 Origin 白名单（逗号分隔） |
+| `SERVICE_HUB_DB_PATH` | `""` | string | SQLite 数据库路径（空表示纯内存模式） |
+| `SERVICE_HUB_RETENTION_DAYS` | `30` | int | 终态任务保留天数（0 表示不清理） |
+| `SERVICE_HUB_SHUTDOWN_TIMEOUT` | `5` | int | 优雅停机超时（秒） |
+| `SERVICE_HUB_LOG_FORMAT` | `json` | string | 结构化日志格式 (`json`/`text`) |
+| `SERVICE_HUB_LOG_LEVEL` | `info` | string | 日志级别 (`debug`/`info`/`warn`/`error`) |
+
+---
+
+## 路由与 API 清单
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/health` | 免密 | 存活探针（Liveness Probe，进程存活即返回 200） |
+| GET | `/readyz` | 免密 | 就绪探针（Readiness Probe，检查 Agent+Datasource 连通性，失败返回 503） |
+| GET | `/api/health` | 免密 | 综合健康检查（兼容别名，返回自身与上下游延迟） |
+| GET | `/api/hub/status` | 可选 | 调度中枢运行状态概览 |
+| GET | `/api/hub/tasks` | 可选 | 任务列表（支持分页与 `?status=` 过滤） |
+| GET | `/api/hub/tasks/:id` | 可选 | 获取单个任务详情 |
+| POST | `/api/hub/dispatch` | 可选 | 手动分发隐私处理任务到流水线 |
+| GET | `/api/hub/pipeline` | 可选 | 流水线 6 阶段实时活跃状态 |
+| POST | `/api/hub/classify` | 可选 | 智能分类分级 + 自动策略脱敏分发 |
+| POST | `/api/hub/pipeline/trigger-datasource` | 可选 | 申请模拟数据源数据并触发脱敏流水线 |
+| GET | `/api/hub/datasources` | 可选 | 代理列出已接入的模拟数据源列表 |
+| GET | `/metrics` | 免密 | Prometheus 监控指标采集端点 |
 
 ---
 
@@ -71,6 +101,9 @@ bash run.sh
 # 运行单元测试
 go test -v ./services/service-hub/...
 
-# 编译二进制
-make build
+# 运行真实跨服务 E2E 全链路流水线测试（需启动 Agent :8079）
+PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/
+
+# 编译 Linux 静态二进制
+CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/server ./cmd/server
 ```

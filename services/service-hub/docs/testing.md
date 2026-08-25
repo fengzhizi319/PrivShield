@@ -1,6 +1,6 @@
 # 数据服务调度中枢 (Service Hub) — 测试规范与用例全集
 
-> 对应模块源码：[services/service-hub](file:///home/charles/code/sfwork/PrivShield/services/service-hub)  
+> 对应模块源码：[services/service-hub](file:///home/charles/code/PrivShield/services/service-hub)  
 > 模块定位：政务云数据流通调度中枢，负责串联模拟数据源、任务流转、敏感度分类分级、动态脱敏处理、存证上链回传 6 阶段流水线。
 
 ---
@@ -9,13 +9,15 @@
 
 | 测试套件 / 层次 | 测试文件 | 覆盖范围与关键断言 | 覆盖率 |
 |---|---|---|:---:|
-| **Agent 客户端** | `internal/agent/client_test.go` | 上游健康检查、字段级脱敏、整记录脱敏、动态分类端点调用 | **100.0%** |
+| **Agent 客户端** | `internal/agent/client_test.go` | 上游健康检查、字段级脱敏、整记录脱敏、动态分类端点调用、熔断器与指数退避重试 | **100.0%** |
 | **模拟数据源客户端** | `internal/datasource/client_test.go` | 医保数据（API 1）、康养数据（API 2）、mock3/4 及通用取数、探活与连通性测试 | **100.0%** |
 | **共享领域模型** | `internal/models/models_test.go` | 敏感度等级到脱敏操作映射 (`LevelToOperation`)、所有核心模型 JSON 序列化与反序列化 | **100.0%** |
 | **配置加载器** | `internal/config/config_test.go` | 默认配置、多节点 `AgentBaseURLs` 轮询解析、Datasource 地址方法、mTLS 与公钥固定环境变量、生产加固参数 | **100.0%** |
-| **HTTP REST 处理器** | `internal/handlers/handlers_test.go` | Health、HubStatus、PipelineStatus、GetTask、ListTasks 分页与状态过滤、Dispatch 边界拦截、Classify 自动编排、TriggerDataSourcePipeline、ListDataSources 代理、API Key 认证、优雅停机 | **85%+** |
-| **gRPC 服务端与 mTLS** | `internal/grpcserver/server_test.go` | Health、HubStatus、Dispatch、ClassifyAndDispatch、GetTask、ListTasks、PipelineStatus、mTLS 证书链生成与校验、公钥比对、流水线异常恢复与停机中断 | **78%+** |
-| **真实跨服务 E2E 流水线** | `internal/handlers/real_e2e_test.go` | 真实 Agent + Service Hub + Datasource Mgr + Audit Log 跨服务 6 阶段完整流水线调度验证 | 条件触发 |
+| **HTTP REST 处理器** | `internal/handlers/handlers_test.go` | Health、HubStatus、PipelineStatus、GetTask、ListTasks 分页与状态过滤、Dispatch 边界拦截、Classify 自动编排、TriggerDataSourcePipeline、ListDataSources 代理、API Key 认证、优雅停机 | **88%+** |
+| **数据源流水线联动** | `internal/handlers/datasource_pipeline_test.go` | 医保与康养数据源端到端自动取数、动态探查与脱敏流水线执行 | **90%+** |
+| **HTTP TLS / mTLS 双向认证** | `internal/handlers/httptls_test.go` | HTTP 协议下的 TLS 1.3、mTLS 客户端证书校验与公钥固定 (SPKI Pinning) 拦截 | **92%+** |
+| **gRPC 服务端与 mTLS** | `internal/grpcserver/server_test.go` | Health、HubStatus、Dispatch、ClassifyAndDispatch、GetTask、ListTasks、PipelineStatus、mTLS 证书链生成与校验、公钥比对、流水线异常恢复与停机中断 | **80%+** |
+| **真实跨服务 E2E 流水线** | `internal/handlers/real_e2e_test.go` | 真实 Agent + Service Hub + Datasource Mgr + Audit Log 跨服务 6 阶段完整流水线调度验证 | 条件触发 (`PRIVSHIELD_E2E=1`) |
 
 ---
 
@@ -31,7 +33,7 @@ go test -v ./services/service-hub/internal/grpcserver/
 # 3. 仅运行 HTTP REST 接口与数据源联动流水线测试
 go test -v ./services/service-hub/internal/handlers/
 
-# 4. 运行全栈真实 E2E 调度测试（需先启动真实 PrivShield Agent 8079）
+# 4. 运行全栈真实 E2E 调度测试（需先启动真实 PrivShield Agent :8079）
 PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/
 ```
 
@@ -43,7 +45,8 @@ PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/han
 
 | 测试函数 | 对应接口 / 场景 | 验证内容与防护重点 |
 |---|---|---|
-| `TestHealth` | `GET /health` / `GET /api/health` | 自身正常 + 上游 Agent + 下游 Datasource-Mgr 连通性探测 |
+| `TestHealth` | `GET /health` / `GET /api/health` | 自身存活探测与模块标识返回 |
+| `TestReadyz` | `GET /readyz` | 深度依赖探活：Agent 与 Datasource-Mgr 连通性探测（不可用时 503） |
 | `TestHubStatus` | `GET /api/hub/status` | 调度中枢运行状态、活跃/排队/完成/失败任务计数汇总 |
 | `TestGetTask_SuccessAndNotFound` | `GET /api/hub/tasks/:id` | 正常查询任务详情与不存在 ID 返回 404 Not Found |
 | `TestListTasksEmpty` | `GET /api/hub/tasks` | 无任务时返回 `total=0` 且任务列表为空切片 |

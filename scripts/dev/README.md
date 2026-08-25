@@ -148,10 +148,13 @@
   ```bash
   # Linux / macOS (默认构建并启动控制台三件套容器)
   bash ./scripts/dev/docker-start-bff-agent.sh
+  ```
 
+ ```bash
   # 跳过构建直接启动
   bash ./scripts/dev/docker-start-bff-agent.sh --no-build
   ```
+
   ```powershell
   # Windows (PowerShell)
   .\scripts\dev\docker-start-bff-agent.ps1
