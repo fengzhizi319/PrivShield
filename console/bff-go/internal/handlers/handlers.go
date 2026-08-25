@@ -257,135 +257,133 @@ func dirExists(path string) bool {
 //   - agent_url：上游 agent 的 gRPC 地址
 //   - latency_ms：Health RPC 调用耗时（毫秒）
 //   - error：连接失败时的错误信息
-//   - via：后端标识 "go-grpc"
-//   - protocol：协议标识 "gRPC"
+// isRestProtocol 检查请求是否显式要求走 REST 协议转发到 Agent
+func isRestProtocol(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("protocol"), "rest") ||
+		strings.EqualFold(c.GetHeader("X-PrivShield-Protocol"), "REST")
+}
+
+// Health 检查 Go 代理自身与上游 agent 的连通性，返回结构化健康状态。
+//
+// 响应字段：
+//   - backend：Go 代理自身状态（始终为 "ok"）
+//   - agent：上游 agent 状态（"ok" 或 "unreachable"）
+//   - agent_url：上游 agent 的 gRPC/REST 地址
+//   - latency_ms：调用耗时（毫秒）
+//   - error：连接失败时的错误信息
+//   - via：后端标识 ("go-grpc" 或 "go-rest-proxy")
+//   - protocol：协议标识 ("gRPC" 或 "REST")
 //
 // 前端通过该接口判断后端连接是否正常，并展示状态灯。
 func (s *Server) Health(c *gin.Context) {
-	// 记录请求开始时间，用于计算 Health RPC 调用耗时
 	start := time.Now()
-	// 使用独立 5 秒超时的 Context 访问上游 gRPC，确保健康检查反馈敏捷
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// 通过 gRPC 客户端调用上游 agent 的 Health RPC
-	resp, err := s.client.Health(ctx)
-	// 计算调用耗时（毫秒）
-	latency := time.Since(start).Milliseconds()
-
-	if err != nil {
-		// 上游 agent 不可达时，backend 仍为 "ok"（Go 代理自身正常），
-		// agent 标记为 "unreachable" 并携带错误信息
+	if isRestProtocol(c) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		respData, statusCode, err := s.callRest(ctx, "GET", "/health", nil, "", "")
+		latency := time.Since(start).Milliseconds()
+		if err != nil || statusCode >= 400 {
+			errMsg := "agent unreachable"
+			if err != nil {
+				errMsg = err.Error()
+			}
+			c.JSON(http.StatusOK, models.ConsoleHealth{
+				Backend:   "ok",
+				Agent:     "unreachable",
+				AgentURL:  s.agentRestBaseURL(),
+				LatencyMs: &latency,
+				Error:     errMsg,
+				Via:       "go-rest-proxy",
+				Protocol:  "REST",
+			})
+			return
+		}
 		c.JSON(http.StatusOK, models.ConsoleHealth{
-			Backend:   "ok",                 // Go 代理自身始终正常
-			Agent:     "unreachable",        // 上游 agent 无法连接
-			AgentURL:  s.cfg.AgentAddress(), // 上游 agent 地址，便于调试
-			LatencyMs: &latency,             // 尝试连接的耗时
-			Error:     err.Error(),          // 具体错误信息
-			Via:       backendVia,           // "go-grpc"
-			Protocol:  agentProtocol,        // "gRPC"
+			Backend:   "ok",
+			Agent:     respData,
+			AgentURL:  s.agentRestBaseURL(),
+			LatencyMs: &latency,
+			Via:       "go-rest-proxy",
+			Protocol:  "REST",
 		})
 		return
 	}
 
-	// 上游 agent 正常时，返回其状态与命名空间信息
+	// 默认使用 gRPC 协议检查
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := s.client.Health(ctx)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		c.JSON(http.StatusOK, models.ConsoleHealth{
+			Backend:   "ok",
+			Agent:     "unreachable",
+			AgentURL:  s.cfg.AgentAddress(),
+			LatencyMs: &latency,
+			Error:     err.Error(),
+			Via:       backendVia,
+			Protocol:  agentProtocol,
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, models.ConsoleHealth{
-		Backend:   "ok",                                                                  // Go 代理自身正常
-		Agent:     map[string]string{"status": resp.Status, "namespace": resp.Namespace}, // agent 状态详情
-		AgentURL:  s.cfg.AgentAddress(),                                                  // 上游 agent 地址
-		LatencyMs: &latency,                                                              // Health RPC 调用耗时
-		Via:       backendVia,                                                            // "go-grpc"
-		Protocol:  agentProtocol,                                                         // "gRPC"
+		Backend:   "ok",
+		Agent:     map[string]string{"status": resp.Status, "namespace": resp.Namespace},
+		AgentURL:  s.cfg.AgentAddress(),
+		LatencyMs: &latency,
+		Via:       backendVia,
+		Protocol:  agentProtocol,
 	})
 }
 
-// Samples 返回所有 gRPC 支持端点的示例 payload 列表。
-//
-// 前端在启动时调用该接口获取所有端点的示例数据，
-// 填充到侧边导航与请求编辑器中，供用户快速测试。
+// Samples 返回所有端点的示例 payload 列表。
 func (s *Server) Samples(c *gin.Context) {
-	// samples.List() 返回内置的示例数据列表，直接序列化为 JSON 返回
 	c.JSON(http.StatusOK, models.SamplesResponse{Samples: samples.List()})
 }
 
-// Proxy 将前端的单请求转发到上游 agent 的对应 gRPC 方法。
-//
-// 请求体格式（前端发送到 POST /api/proxy）：
-//
-//	{
-//	  "method": "POST",
-//	  "path": "/v1/privacy/mask",
-//	  "body": {"field_name":"email","value":"alice@example.com"}
-//	}
-//
-// 响应体格式：
-//
-//	{
-//	  "status": 200,
-//	  "duration_ms": 12,
-//	  "data": { ... },
-//	  "via": "go-grpc",
-//	  "protocol": "gRPC"
-//	}
-//
-// 执行逻辑：
-//  1. 解析前端请求体为 ProxyRequest
-//  2. 通过 mapper.Dispatch 根据 path 查找对应的 gRPC 方法并调用
-//  3. 将 protobuf 响应转换为 JSON 可序列化的 map 结构
-//  4. 返回统一的 ProxyResponse 格式
+// Proxy 将前端的单请求转发到上游 agent 的对应 gRPC 或 REST 方法。
 func (s *Server) Proxy(c *gin.Context) {
-	// 解析请求体 JSON，绑定到 ProxyRequest 结构体
 	var req models.ProxyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		// 请求体格式不合法时返回 400 错误
 		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err)})
 		return
 	}
 
-	// 前端始终 POST 到 /api/proxy，但原始 method 携带在请求体中。
-	// 这里忽略 req.Method，由 mapper 根据 path 决定 gRPC 调用语义。
-	// 记录调用开始时间，用于计算 gRPC 调用耗时
 	start := time.Now()
-	// 拦截并转发纯 REST 路径（无 gRPC 对应）：
-	// - /v1/dynclassification/* 动态分类分级
-	// - /v1/ops/* 运维诊断
-	// - /health 健康检查
-	if restOnlyPath(req.Path) {
+	// 当显式指定 REST 协议或路径属于 REST-only 时走 REST 转发
+	if isRestProtocol(c) || restOnlyPath(req.Path) {
 		s.proxyRest(c, start, req)
 		return
 	}
 
-	// 核心调用：mapper 根据 req.Path 查找对应的 handler，
-	// handler 负责解析 body、构造 protobuf 请求、调用 gRPC、转换响应。
-	// 使用 grpcCallTimeout 超时包裹：waitForReady 开启后，若 agent 重启中请求会
-	// 等待连接恢复后自动发送，超时兜底避免无限挂起。
+	// 核心调用：通过 gRPC mapper 转发
 	ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
 	defer cancel()
 	data, err := s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), req.Path, req.Body)
-	// 计算 gRPC 调用耗时（毫秒）
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
-		// gRPC 调用失败时尝试回退到 REST 转发
 		if strings.Contains(err.Error(), "unsupported gRPC path") {
 			s.proxyRest(c, start, req)
 			return
 		}
 		status := http.StatusBadRequest
 		if isUnavailable(err) {
-			status = http.StatusBadGateway // 上游连接类错误返回 502
+			status = http.StatusBadGateway
 		}
 		c.JSON(status, gin.H{"detail": err.Error(), "status": status})
 		return
 	}
 
-	// 调用成功，返回统一的 ProxyResponse 格式
 	c.JSON(http.StatusOK, models.ProxyResponse{
-		Status:     http.StatusOK, // HTTP 状态码 200
-		DurationMs: duration,      // gRPC 调用耗时（毫秒）
-		Data:       data,          // gRPC 响应转换后的 JSON 可序列化数据
-		Via:        backendVia,    // "go-grpc"，标识响应经由的后端类型
-		Protocol:   agentProtocol, // "gRPC"，标识与 agent 通信的协议
+		Status:     http.StatusOK,
+		DurationMs: duration,
+		Data:       data,
+		Via:        backendVia,
+		Protocol:   agentProtocol,
 	})
 }
 
@@ -627,7 +625,7 @@ func (s *Server) Batch(c *gin.Context) {
 			callErr    error
 		)
 
-		if restOnlyPath(item.Path) {
+		if isRestProtocol(c) || restOnlyPath(item.Path) {
 			data, statusCode, callErr = s.callRest(c.Request.Context(), method, item.Path, item.Body, item.RawPayloadB64, item.ContentType)
 		} else {
 			// 通过 mapper 转发到上游 agent 的对应 gRPC 方法。

@@ -157,7 +157,7 @@ export default function Header({ backend, onBackendChange, health, loading, onHo
         <HealthPill health={health} loading={loading} />
         {/* 中英文切换按钮 / Chinese-English toggle button */}
         <LangSwitch />
-        {/* Python REST / Go gRPC 后端切换下拉框 / Python REST / Go gRPC backend switch dropdown */}
+        {/* gRPC / REST 协议切换下拉框 / gRPC / REST protocol switch dropdown */}
         <BackendSelector value={backend} onChange={onBackendChange} />
       </div>
     </header>

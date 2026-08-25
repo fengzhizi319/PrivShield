@@ -52,7 +52,8 @@ const zh: Record<string, string> = {
   'sidebar.dyn_classify': '通用动态分类分级',
   'sidebar.ops': '运维诊断',
   'sidebar.no_match': '未找到匹配的接口',
-  'sidebar.python_only': '仅 Python REST 后端支持',
+  'sidebar.python_only': 'REST 协议接口',
+  'sidebar.rest_only': 'REST 协议接口',
 
   // Overview
   'overview.title': '接口总览',
@@ -372,7 +373,8 @@ const en: Record<string, string> = {
   'sidebar.dyn_classify': 'Dynamic Classification',
   'sidebar.ops': 'Ops Diagnostics',
   'sidebar.no_match': 'No matching endpoints',
-  'sidebar.python_only': 'Only supported by Python REST backend',
+  'sidebar.python_only': 'REST protocol endpoint',
+  'sidebar.rest_only': 'REST protocol endpoint',
 
   // Overview
   'overview.title': 'API Overview',

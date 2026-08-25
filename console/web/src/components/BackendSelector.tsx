@@ -26,37 +26,26 @@ import { Icon } from '@/components/icons';
  * label for UI display, value is the actual API base URL.
  */
 export interface BackendOption {
-  /** 显示标签（如 "Go gRPC (8081)"）/ Display label */
+  /** 显示标签（如 "gRPC", "REST"）/ Display label */
   label: string;
-  /** API 基址（如 "http://127.0.0.1:8081"）/ API base URL */
+  /** API 基址与协议（如 "http://127.0.0.1:8081?protocol=grpc"）/ API base URL */
   value: string;
 }
 
 /**
- * 可选后端列表 / Available Backend List
+ * 可选协议列表 / Available Protocol List
  *
- * 默认先连接 Go gRPC (8081)，再连接 Python REST (8080)。
- * Defaults to Go gRPC (8081) first, then Python REST (8080).
+ * 统一由 Go BFF 代理后端承接，支持 gRPC 与 REST 两种通信链路。
  */
 export const DEFAULT_BACKENDS: BackendOption[] = [
-  { label: 'Go BFF (8081)', value: 'http://127.0.0.1:8081' },
-  { label: 'Go BFF HTTPS (8443)', value: 'https://127.0.0.1:8443' },
+  { label: 'gRPC', value: 'http://127.0.0.1:8081?protocol=grpc' },
+  { label: 'REST', value: 'http://127.0.0.1:8081?protocol=rest' },
 ];
 
 /**
- * 默认后端选择逻辑 / Default Backend Selection Logic
- *
- * 优先选择与当前页面同源的选项（页面由哪个后端提供服务，就默认调用哪个后端）。
- * 例如由 Go 后端 (8081) 提供 UI 时默认选中 Go gRPC；
- * Vite 开发模式 (5173) 等其他来源则回退到列表第一项（Go gRPC 8081）。
- *
- * Prefers the option matching current page origin (if Go backend serves the UI, default to Go gRPC);
- * Vite dev mode (5173) or other origins fallback to first item (Go gRPC 8081).
+ * 默认协议选择逻辑 / Default Protocol Selection Logic
  */
-export const DEFAULT_BACKEND: BackendOption =
-  // 查找与 window.location.origin 匹配的选项，找不到则用第一项
-  // Find option matching window.location.origin, fallback to first item
-  DEFAULT_BACKENDS.find((b) => b.value === window.location.origin) ?? DEFAULT_BACKENDS[0];
+export const DEFAULT_BACKEND: BackendOption = DEFAULT_BACKENDS[0];
 
 /**
  * BackendSelector 组件属性 / BackendSelector Component Props

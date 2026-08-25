@@ -33,15 +33,22 @@ const MAX_IDEMPOTENT_RETRIES = 2;
  */
 let API_KEY: string = (import.meta.env.VITE_CONSOLE_API_KEY as string | undefined) ?? '';
 
+let PROTOCOL = 'gRPC';
+
 /**
- * 切换后端基址；去掉尾部斜杠避免拼接出双斜杠。
- * Switch backend base URL; strip trailing slash to avoid double slashes in concatenation.
+ * 切换后端基址与通信协议（gRPC / REST）。
+ * Switch backend base URL and communication protocol (gRPC / REST).
  *
- * @param baseUrl - 新后端地址（如 http://127.0.0.1:8080）/ New backend URL
+ * @param baseUrl - 新后端地址或带协议后缀（如 http://127.0.0.1:8081?protocol=rest）
  */
 export function setBaseUrl(baseUrl: string): void {
-  // 去除尾部斜杠，保证后续拼接 path 时不会产生 "//" / Remove trailing slash to prevent "//" when concatenating path
-  API_BASE = baseUrl.replace(/\/$/, '');
+  if (baseUrl.includes('protocol=rest')) {
+    PROTOCOL = 'REST';
+  } else if (baseUrl.includes('protocol=grpc')) {
+    PROTOCOL = 'gRPC';
+  }
+  const cleanUrl = baseUrl.split('?')[0];
+  API_BASE = cleanUrl.replace(/\/$/, '');
 }
 
 /**
@@ -55,61 +62,37 @@ export function setApiKey(key: string): void {
 }
 
 /**
- * 在给定请求头基础上附加可选鉴权头 / Attach optional auth header on top of given headers
- *
- * 详细逻辑 / Detailed Logic：
- *   1. 复制传入的 extra 头（如 Content-Type）；
- *   2. 若 API_KEY 非空，追加 Authorization: Bearer 头；
- *   3. 返回合并后的头对象。
- *
- * @param extra - 额外的请求头（可选）/ Additional request headers (optional)
- * @returns 合并后的完整请求头对象 / Merged complete headers object
+ * 在给定请求头基础上附加可选鉴权头与协议标识 / Attach optional auth header and protocol header
  */
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
-  // 展开传入的额外头（如 Content-Type: application/json）/ Spread incoming extra headers
   const headers: Record<string, string> = { ...extra };
-  // 仅当 API_KEY 非空时才附加鉴权头，不影响无鉴权的本地开发
-  // Only attach auth header when API_KEY is non-empty, doesn't affect local dev without auth
   if (API_KEY) headers['Authorization'] = `Bearer ${API_KEY}`;
+  if (PROTOCOL) headers['X-PrivShield-Protocol'] = PROTOCOL;
   return headers;
 }
 
 /**
  * 统一请求入口 / Unified Request Entry Point
- *
- * 详细逻辑 / Detailed Logic：
- *   1. 创建 AbortController 并设置 60s 超时定时器；
- *   2. 调用 fetch 发送请求（拼接 API_BASE + path）；
- *   3. 非 2xx 响应：解析 JSON 错误体，抛出携带 detail 的 Error；
- *   4. 2xx 响应：读取文本并解析为 JSON，解析失败则抛出友好错误；
- *   5. AbortError 特殊处理：转换为中文超时提示；
- *   6. finally 中清除超时定时器，避免内存泄漏。
- *
- * - 超时通过 ``AbortController`` 实现，触发时抛出友好的“请求超时”错误；
- * - ``init.headers`` 中已显式设置的头（如 JSON 的 Content-Type）会被保留，
- *   上传 multipart 时不传 Content-Type，由浏览器自动生成带 boundary 的头。
- *
- * @typeParam T - 响应数据的期望类型 / Expected type of response data
- * @param path - 请求路径（如 /api/health）/ Request path (e.g. /api/health)
- * @param init - fetch 配置项（method/headers/body 等）/ fetch options (method/headers/body etc.)
- * @returns 解析后的响应数据 / Parsed response data
  */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  // 解构出 headers 与其余配置（method/body 等）/ Destructure headers from rest of config
   const { headers, ...rest } = init;
   const method = (rest.method ?? 'GET').toString().toUpperCase();
   const retryableMethod = ['GET', 'HEAD', 'OPTIONS'].includes(method);
   let lastError: unknown;
+
+  const sep = path.includes('?') ? '&' : '?';
+  const urlWithProtocol = PROTOCOL === 'REST' && !path.includes('protocol=')
+    ? `${API_BASE}${path}${sep}protocol=rest`
+    : `${API_BASE}${path}`;
+
   for (let attempt = 0; attempt <= (retryableMethod ? MAX_IDEMPOTENT_RETRIES : 0); attempt += 1) {
-    // 创建 AbortController 用于超时中断 / Create AbortController for timeout abort
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      // 发送 fetch 请求：拼接基址 + 路径，合并头与 signal / Send fetch: concat base + path, merge headers & signal
-      const res = await fetch(`${API_BASE}${path}`, {
+      const res = await fetch(urlWithProtocol, {
         ...rest,
         headers: buildHeaders(headers as Record<string, string> | undefined),
-        signal: controller.signal, // 绑定中断信号 / Bind abort signal
+        signal: controller.signal,
       });
 
       // 非 2xx 响应统一抛出携带 detail 的 Error / Non-2xx responses throw Error with detail

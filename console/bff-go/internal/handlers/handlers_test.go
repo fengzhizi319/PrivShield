@@ -1160,3 +1160,142 @@ func TestBatchTooLarge(t *testing.T) {
 		t.Errorf("expected 400 for batch > 100, got %d", resp.StatusCode)
 	}
 }
+
+// TestDualProtocolSwitch 验证 gRPC 与 REST 双协议连接与切换能力：
+// 1. 默认或 protocol=grpc 时走 gRPC 链路（via=go-grpc, protocol=gRPC）
+// 2. protocol=rest 或 Header X-PrivShield-Protocol=REST 时走 REST 链路（via=go-rest-proxy, protocol=REST）
+func TestDualProtocolSwitch(t *testing.T) {
+	mockAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/health" {
+			_, _ = w.Write([]byte(`{"status":"ok","mode":"rest"}`))
+			return
+		}
+		if r.URL.Path == "/v1/privacy/mask" {
+			_, _ = w.Write([]byte(`{"result":"a***b@example.com"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer mockAgent.Close()
+
+	u, err := url.Parse(mockAgent.URL)
+	if err != nil {
+		t.Fatalf("parse mock agent url: %v", err)
+	}
+	t.Setenv("PRIVACY_REST_HOST", u.Hostname())
+	t.Setenv("PRIVACY_REST_PORT", u.Port())
+
+	grpcSrv := &testPrivacyServer{
+		MaskFunc: func(ctx context.Context, req *pb.MaskRequest) (*pb.MaskResponse, error) {
+			return &pb.MaskResponse{Result: "a***b@example.com"}, nil
+		},
+	}
+	ts, _ := setupTestServer(t, grpcSrv)
+	defer ts.Close()
+
+	// 1. 测试 Health 默认走 gRPC
+	{
+		resp, err := http.Get(ts.URL + "/api/health")
+		if err != nil {
+			t.Fatalf("GET /api/health failed: %v", err)
+		}
+		var h struct {
+			Backend  string `json:"backend"`
+			Via      string `json:"via"`
+			Protocol string `json:"protocol"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&h)
+		resp.Body.Close()
+		if h.Via != "go-grpc" || h.Protocol != "gRPC" {
+			t.Errorf("expected gRPC health, got via=%s protocol=%s", h.Via, h.Protocol)
+		}
+	}
+
+	// 2. 测试 Health 传 protocol=rest 走 REST
+	{
+		resp, err := http.Get(ts.URL + "/api/health?protocol=rest")
+		if err != nil {
+			t.Fatalf("GET /api/health?protocol=rest failed: %v", err)
+		}
+		var h struct {
+			Backend  string `json:"backend"`
+			Via      string `json:"via"`
+			Protocol string `json:"protocol"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&h)
+		resp.Body.Close()
+		if h.Via != "go-rest-proxy" || h.Protocol != "REST" {
+			t.Errorf("expected REST health, got via=%s protocol=%s", h.Via, h.Protocol)
+		}
+	}
+
+	// 3. 测试 Proxy 默认走 gRPC
+	{
+		reqBody, _ := json.Marshal(map[string]any{
+			"method": "POST",
+			"path":   "/v1/privacy/mask",
+			"body":   map[string]any{"field_name": "email", "value": "alice@example.com"},
+		})
+		resp, err := http.Post(ts.URL+"/api/proxy", "application/json", bytes.NewReader(reqBody))
+		if err != nil {
+			t.Fatalf("POST /api/proxy failed: %v", err)
+		}
+		var p struct {
+			Via      string `json:"via"`
+			Protocol string `json:"protocol"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&p)
+		resp.Body.Close()
+		if p.Via != "go-grpc" || p.Protocol != "gRPC" {
+			t.Errorf("expected gRPC proxy, got via=%s protocol=%s", p.Via, p.Protocol)
+		}
+	}
+
+	// 4. 测试 Proxy 传 protocol=rest 走 REST
+	{
+		reqBody, _ := json.Marshal(map[string]any{
+			"method": "POST",
+			"path":   "/v1/privacy/mask",
+			"body":   map[string]any{"field_name": "email", "value": "alice@example.com"},
+		})
+		resp, err := http.Post(ts.URL+"/api/proxy?protocol=rest", "application/json", bytes.NewReader(reqBody))
+		if err != nil {
+			t.Fatalf("POST /api/proxy?protocol=rest failed: %v", err)
+		}
+		var p struct {
+			Via      string `json:"via"`
+			Protocol string `json:"protocol"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&p)
+		resp.Body.Close()
+		if p.Via != "go-rest-proxy" || p.Protocol != "REST" {
+			t.Errorf("expected REST proxy, got via=%s protocol=%s", p.Via, p.Protocol)
+		}
+	}
+
+	// 5. 测试 Proxy 传 Header X-PrivShield-Protocol: REST 走 REST
+	{
+		reqBody, _ := json.Marshal(map[string]any{
+			"method": "POST",
+			"path":   "/v1/privacy/mask",
+			"body":   map[string]any{"field_name": "email", "value": "alice@example.com"},
+		})
+		httpReq, _ := http.NewRequest("POST", ts.URL+"/api/proxy", bytes.NewReader(reqBody))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("X-PrivShield-Protocol", "REST")
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			t.Fatalf("POST /api/proxy with Header failed: %v", err)
+		}
+		var p struct {
+			Via      string `json:"via"`
+			Protocol string `json:"protocol"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&p)
+		resp.Body.Close()
+		if p.Via != "go-rest-proxy" || p.Protocol != "REST" {
+			t.Errorf("expected REST proxy via Header, got via=%s protocol=%s", p.Via, p.Protocol)
+		}
+	}
+}

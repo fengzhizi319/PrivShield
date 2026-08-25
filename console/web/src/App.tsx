@@ -55,7 +55,7 @@ import YibaoPipelinePanel from '@/components/YibaoPipelinePanel';
 /** 引入错误边界组件：防止单组件崩溃导致整页白屏 / Import error boundary: prevent single component crash from blank page */
 import ErrorBoundary from '@/components/ErrorBoundary';
 /** 引入后端切换器类型与默认值 / Import backend selector type and default value */
-import { DEFAULT_BACKEND, DEFAULT_BACKENDS, type BackendOption } from '@/components/BackendSelector';
+import { DEFAULT_BACKEND, type BackendOption } from '@/components/BackendSelector';
 /** 引入内联 SVG 图标组件 / Import inline SVG icon component */
 import { Icon } from '@/components/icons';
 /** 引入国际化 Hook（提供 t() 翻译函数）/ Import i18n Hook (provides t() translation function) */
@@ -105,56 +105,29 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   /** 错误信息（null 表示无错误）/ Error message (null means no error) */
   const [error, setError] = useState<string | null>(null);
-  /** 当前选中的后端（Python REST / Go gRPC）/ Currently selected backend (Python REST / Go gRPC) */
+  /** 当前选中的通信链路协议（gRPC / REST）/ Currently selected protocol (gRPC / REST) */
   const [backend, setBackend] = useState<BackendOption>(DEFAULT_BACKEND);
 
   /**
    * 并行拉取示例与健康检查 / Fetch samples and health check in parallel
-   *
-   * 详细逻辑 / Detailed Logic：
-   *   1. 设置 loading=true 并清除旧错误；
-   *   2. Promise.all 并行发起两个请求（提升加载速度）；
-   *   3. 成功后更新 samples/health 并回到总览页；
-   *   4. 失败时记录错误、清空数据、重置视图；
-   *   5. finally 中关闭 loading 状态。
    */
   const load = useCallback(async () => {
-    setLoading(true);   // 开启加载状态 / Enable loading state
-    setError(null);     // 清除旧错误 / Clear previous error
+    setLoading(true);
+    setError(null);
     try {
-      // 并行发起两个请求：获取示例列表 + 健康检查 / Fire two requests in parallel: fetch samples + health check
       const [samplesData, healthData] = await Promise.all([fetchSamples(), fetchHealth()]);
-      setSamples(samplesData);  // 更新端点示例列表 / Update endpoint samples list
-      setHealth(healthData);    // 更新健康状态 / Update health status
-      // 加载完成后回到总览页，避免残留上一个后端的选择状态
-      // After loading, go back to overview to avoid stale selection from previous backend
+      setSamples(samplesData);
+      setHealth(healthData);
       setView({ type: 'overview' });
     } catch (e) {
-      // 若当前选中的是首选 Go gRPC 后端且请求失败，静默后连回退至 Python REST 后端
-      if (backend.value === DEFAULT_BACKENDS[0].value && DEFAULT_BACKENDS[1]) {
-        try {
-          const fallbackBackend = DEFAULT_BACKENDS[1];
-          setBaseUrl(fallbackBackend.value);
-          const [samplesData, healthData] = await Promise.all([fetchSamples(), fetchHealth()]);
-          setBackend(fallbackBackend);
-          setSamples(samplesData);
-          setHealth(healthData);
-          setView({ type: 'overview' });
-          return;
-        } catch (_) {
-          // 回退亦失败，重置为原始后端并抛出错误
-          setBaseUrl(backend.value);
-        }
-      }
-      // 请求失败：记录错误消息 / Request failed: record error message
       setError(getErrorMessage(e));
-      setHealth(null);          // 清空健康状态 / Clear health status
-      setSamples([]);           // 清空示例列表 / Clear samples list
-      setView({ type: 'overview' }); // 重置视图 / Reset view
+      setHealth(null);
+      setSamples([]);
+      setView({ type: 'overview' });
     } finally {
-      setLoading(false); // 无论成败都关闭加载状态 / Always disable loading state
+      setLoading(false);
     }
-  }, [backend]);
+  }, []);
 
   /**
    * 后端切换副作用 / Backend switch side effect
