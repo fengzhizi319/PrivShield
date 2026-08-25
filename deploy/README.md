@@ -49,9 +49,9 @@ deploy/
 | **PrivShield (Core Agent)** | 隐私计算引擎（脱敏/DP/K-匿名/分类分级） | REST `8079` / gRPC `50051` | Python (FastAPI + gRPC) |
 | **bff-go** (`console/bff-go`) | Console Go 代理（REST + gRPC 双协议） | `8081` / `50055` | Go (Gin + gRPC) |
 | **console-web** | React 控制台前端（Nginx 托管） | `5173` | React + Nginx |
-| **service-hub** (`services/service-hub`) | 数据服务调度中枢 | `8082` | Go |
-| **datasource-mgr** (`services/datasource-mgr`) | 数据源管理 | `8083` | Go |
-| **audit-log** (`services/audit-log`) | 脱敏审计日志 | `8084` | Go |
+| **service-hub** (`services/service-hub`) | 数据服务调度中枢 | REST `8082` / gRPC `50052` | Go |
+| **datasource-mgr** (`services/datasource-mgr`) | 数据源管理 | REST `8083` / gRPC `50053` | Go |
+| **audit-log** (`services/audit-log`) | 脱敏审计日志 | REST `8084` / gRPC `50054` | Go |
 | **vllm**（可选，`--profile llm`） | Layer-3 LLM 推理（GPU） | `8000` | vLLM |
 | **redis**（仅生产编排） | 分布式限流后端 | `6379`（内部） | Redis |
 | **phase-b-postgres**（可选，`--profile phase-b`） | Phase B 多副本 Hub 原子租约后端 | `5432` | PostgreSQL |

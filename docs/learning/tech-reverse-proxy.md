@@ -20,10 +20,10 @@
 
 | 架构形态 | 部署位置 | 核心职责 | 本项目对应实现 |
 |---|---|---|---|
-| **反向代理 (Reverse Proxy)** | 服务端网络边界 | 协议转发、连接池复用、头部清洗、故障转移 | [`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py) & [`grpc_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/grpc_proxy.py) |
-| **BFF 协议转换网关** | 前端与核心服务之间 | REST JSON $\leftrightarrow$ gRPC Protobuf 协议转换与静态 SPA 托管 | [`console/bff-go/`](file:///home/charles/code/PrivShield/console/bff-go/) (:8081) |
-| **服务治理 Sidecar** | 业务容器同 Pod/同机 | 隐私原语计算、动态分类分级、细粒度审计 | [`engine/server.py`](file:///home/charles/code/PrivShield/engine/server.py) (:8079 & :50051) |
-| **前端开发代理** | 开发者本地电脑 | 解决本地开发跨域（CORS）与 HMR 转发 | [`console/web/vite.config.ts`](file:///home/charles/code/PrivShield/console/web/vite.config.ts) (:5173) |
+| **反向代理 (Reverse Proxy)** | 服务端网络边界 | 协议转发、连接池复用、头部清洗、故障转移 | [`engine/gateway/http_proxy.py`](engine/gateway/http_proxy.py) & [`grpc_proxy.py`](engine/gateway/grpc_proxy.py) |
+| **BFF 协议转换网关** | 前端与核心服务之间 | REST JSON $\leftrightarrow$ gRPC Protobuf 协议转换与静态 SPA 托管 | [`console/bff-go/`](console/bff-go/) (:8081) |
+| **服务治理 Sidecar** | 业务容器同 Pod/同机 | 隐私原语计算、动态分类分级、细粒度审计 | [`engine/server.py`](engine/server.py) (:8079 & :50051) |
+| **前端开发代理** | 开发者本地电脑 | 解决本地开发跨域（CORS）与 HMR 转发 | [`console/web/vite.config.ts`](console/web/vite.config.ts) (:5173) |
 
 ---
 
@@ -80,7 +80,7 @@
 
 若反向代理盲目转发 `Connection: close` 或 `Transfer-Encoding: chunked`，会导致上游与下游协议状态机错位，引发连接提前中断或**HTTP 请求走私（Request Smuggling）**漏洞。
 
-文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py#L45-L65)
+文件 / File：[`engine/gateway/http_proxy.py`](engine/gateway/http_proxy.py#L45-L65)
 
 ```python
 # RFC 7230 规定的逐段传输头集合
@@ -215,7 +215,7 @@ except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
 
 ### 3.1 REST 通配反向代理网关实现
 
-文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py)
+文件 / File：[`engine/gateway/http_proxy.py`](engine/gateway/http_proxy.py)
 
 ```python
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
@@ -253,7 +253,7 @@ async def proxy_http(request: Request, path: str):
 
 ### 3.2 gRPC 泛化动态反射反向代理
 
-文件 / File：[`engine/gateway/grpc_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/grpc_proxy.py)
+文件 / File：[`engine/gateway/grpc_proxy.py`](engine/gateway/grpc_proxy.py)
 
 传统 gRPC 代理需要为每个 RPC 方法手写转发代码。`PrivShield` 网关通过**类级别动态反射（Reflection Binding）**，在启动时自动提取 `PrivacyServiceServicer` 的所有公开 RPC 方法并挂载全双工转发闭包：
 
@@ -293,7 +293,7 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
 
 ### 3.3 Go BFF 协议转换代理网关 (REST $\leftrightarrow$ gRPC)
 
-文件 / File：[`console/bff-go/internal/agent/client.go`](file:///home/charles/code/PrivShield/console/bff-go/internal/agent/client.go) & [`console/bff-go/internal/mapper/mapper.go`](file:///home/charles/code/PrivShield/console/bff-go/internal/mapper/mapper.go)
+文件 / File：[`console/bff-go/internal/agent/client.go`](console/bff-go/internal/agent/client.go) & [`console/bff-go/internal/mapper/mapper.go`](console/bff-go/internal/mapper/mapper.go)
 
 在企业控制台与外部微服务调用中，前端发送标准 HTTP/JSON 请求，Go BFF 充当**协议转换反向代理**：
 1. 接收 HTTP 请求并解析 JSON 载荷；
@@ -306,7 +306,7 @@ class GatewayGrpcServicer(privacy_pb2_grpc.PrivacyServiceServicer):
 
 ### 3.4 前端 Vite 开发服务器反向代理
 
-文件 / File：[`console/web/vite.config.ts`](file:///home/charles/code/PrivShield/console/web/vite.config.ts)
+文件 / File：[`console/web/vite.config.ts`](console/web/vite.config.ts)
 
 在前端本地开发阶段，前端代码运行在 `http://localhost:5173`，若直接请求后端 `http://localhost:8081` 会受到浏览器同源策略（SOP）限制触发跨域（CORS）报错。
 

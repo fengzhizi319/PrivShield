@@ -37,7 +37,7 @@
 
 ### 2.1 负载均衡核心调度算法 / Load Balancing Algorithms
 
-文件 / File：[`engine/gateway/balancer.py`](file:///home/charles/code/PrivShield/engine/gateway/balancer.py#L200-L380)
+文件 / File：[`engine/gateway/balancer.py`](engine/gateway/balancer.py#L200-L380)
 
 #### (1) 平滑加权轮询 (Smooth Weighted Round-Robin, SWRR)
 
@@ -89,7 +89,7 @@ def track_connection(self):
 
 ### 2.2 三态熔断器保护机制 / Three-State Circuit Breaker
 
-文件 / File：[`engine/gateway/balancer.py`](file:///home/charles/code/PrivShield/engine/gateway/balancer.py#L120-L190)
+文件 / File：[`engine/gateway/balancer.py`](engine/gateway/balancer.py#L120-L190)
 
 ```python
 class CircuitBreaker:
@@ -128,7 +128,7 @@ class CircuitBreaker:
 
 ### 2.3 10k QPS 高并发优化与快慢路径分离 / 10k QPS High-Concurrency Optimization
 
-文件 / File：[`engine/privacy/high_concurrency.py`](file:///home/charles/code/PrivShield/engine/privacy/high_concurrency.py)
+文件 / File：[`engine/privacy/high_concurrency.py`](engine/privacy/high_concurrency.py)
 
 为了在单机上达成 10,000 QPS 的吞吐量指标，`PrivShield` 采用了快慢路径分离与线程池调度架构：
 

@@ -36,7 +36,7 @@
 
 ### 2.1 Docker 多阶段构建与镜像轻量化 / Dockerfile Multi-Stage Architecture
 
-文件 / File：[`Dockerfile`](file:///home/charles/code/PrivShield/Dockerfile)
+文件 / File：[`Dockerfile`](Dockerfile)
 
 ```dockerfile
 # ==============================================================================
@@ -104,7 +104,7 @@ docker build --target ml -t privshield:1.8.0-ml .
 
 ### 2.2 Helm Chart 生产级配置与健康探针 / Production Helm Chart
 
-文件 / File：[`deploy/helm/PrivShield/`](file:///home/charles/code/PrivShield/deploy/helm/PrivShield/)
+文件 / File：[`deploy/helm/PrivShield/`](deploy/helm/PrivShield/)
 
 #### 探针与优雅停机设计 (Probes & Lifecycle)
 
@@ -151,7 +151,7 @@ helm install privshield ./deploy/helm/PrivShield \
 
 ### 2.3 Docker Compose 全栈微服务协同编排 / Docker Compose Orchestration
 
-文件 / File：[`deploy/docker-compose/docker-compose.yml`](file:///home/charles/code/PrivShield/deploy/docker-compose/docker-compose.yml)
+文件 / File：[`deploy/docker-compose/docker-compose.yml`](deploy/docker-compose/docker-compose.yml)
 
 `docker-compose.yml` 统领了 1 个 Python Agent、3 个 Go 中台微服务、1 个 Go BFF、1 个 React 前端控制台以及 Prometheus + Grafana：
 

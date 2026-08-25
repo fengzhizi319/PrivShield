@@ -399,9 +399,12 @@ services:
     container_name: privshield-service-hub
     ports:
       - "8082:8082"
+      - "50052:50052"
     environment:
       SERVICE_HUB_HOST: "0.0.0.0"
       SERVICE_HUB_PORT: "8082"
+      SERVICE_HUB_GRPC_HOST: "0.0.0.0"
+      SERVICE_HUB_GRPC_PORT: "50052"
       PRIVACY_AGENT_REST_HOST: "PrivShield"
       PRIVACY_REST_PORT: "8079"
       SERVICE_HUB_DB_PATH: "/app/data/service-hub.db"
@@ -452,9 +455,12 @@ services:
     container_name: privshield-datasource-mgr
     ports:
       - "8083:8083"
+      - "50053:50053"
     environment:
       DATASOURCE_MGR_HOST: "0.0.0.0"
       DATASOURCE_MGR_PORT: "8083"
+      DATASOURCE_MGR_GRPC_HOST: "0.0.0.0"
+      DATASOURCE_MGR_GRPC_PORT: "50053"
       PRIVACY_AGENT_REST_HOST: "PrivShield"
       PRIVACY_REST_PORT: "8079"
       DATASOURCE_MGR_DB_PATH: "/app/data/datasource-mgr.db"
@@ -502,9 +508,12 @@ services:
     container_name: privshield-audit-log
     ports:
       - "8084:8084"
+      - "50054:50054"
     environment:
       AUDIT_LOG_HOST: "0.0.0.0"
       AUDIT_LOG_PORT: "8084"
+      AUDIT_LOG_GRPC_HOST: "0.0.0.0"
+      AUDIT_LOG_GRPC_PORT: "50054"
       # P68 fix: 环境变量名与 config.go 读取一致
       PRIVACY_AGENT_REST_HOST: "PrivShield"
       PRIVACY_REST_PORT: "8079"

@@ -6,7 +6,7 @@
 
 ## 1. 架构与目录结构
 
-在全平台解耦架构重构后，中台核心微服务已提升至顶层 [services/](file:///home/charles/code/sfwork/PrivShield/services/)，控制台目录聚焦于 **Web 前端交互** 与 **BFF 代理网关** 职责：
+在全平台解耦架构重构后，中台核心微服务已提升至顶层 [services/](services/)，控制台目录聚焦于 **Web 前端交互** 与 **BFF 代理网关** 职责：
 
 ```text
 console/
@@ -19,22 +19,22 @@ console/
 └── README.md             # 控制台总览（本文档）
 ```
 
-> 💡 **中台微服务索引**：企业级数据流通调度微服务群位于根目录 [services/](file:///home/charles/code/sfwork/PrivShield/services/)：
-> - [services/service-hub/](file:///home/charles/code/sfwork/PrivShield/services/service-hub/)：数据服务调度中枢（`:8082`）
-> - [services/datasource-mgr/](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/)：数据源与资产管理（`:8083`）
-> - [services/audit-log/](file:///home/charles/code/sfwork/PrivShield/services/audit-log/)：合规存证与审计日志（`:8084`）
-> - 共享基础库提升至根目录 [pkg/](file:///home/charles/code/sfwork/PrivShield/pkg/)，根目录统一通过 [go.work](file:///home/charles/code/sfwork/PrivShield/go.work) 管理。
+> 💡 **中台微服务索引**：企业级数据流通调度微服务群位于根目录 [services/](services/)：
+> - [services/service-hub/](services/service-hub/)：数据服务调度中枢（`:8082`）
+> - [services/datasource-mgr/](services/datasource-mgr/)：数据源与资产管理（`:8083`）
+> - [services/audit-log/](services/audit-log/)：合规存证与审计日志（`:8084`）
+> - 共享基础库提升至根目录 [pkg/](pkg/)，根目录统一通过 [go.work](go.work) 管理。
 
 ---
 
 ## 2. 文档索引
 
-- [docs/modes.md](file:///home/charles/code/sfwork/PrivShield/console/docs/modes.md) — 开发模式 vs 生产模式部署与网络拓扑总览
-- [docs/learning/vite.md](file:///home/charles/code/sfwork/PrivShield/docs/learning/vite.md) — 前端 Vite 热重载与构建原理
-- **Go BFF 文档**：[design](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/design.md) · [api](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/api.md) · [test](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/test.md) · [ops](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/ops.md) · [reliability](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/reliability.md)
-- **调度微服务文档**：[service-hub docs](file:///home/charles/code/sfwork/PrivShield/services/service-hub/docs/design.md) · [datasource-mgr docs](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/docs/design.md) · [audit-log docs](file:///home/charles/code/sfwork/PrivShield/services/audit-log/docs/design.md)
-- **可靠性能力文档**：[engine](file:///home/charles/code/sfwork/PrivShield/docs/reliability.md) · [service-hub](file:///home/charles/code/sfwork/PrivShield/services/service-hub/docs/reliability.md) · [audit-log](file:///home/charles/code/sfwork/PrivShield/services/audit-log/docs/reliability.md) · [datasource-mgr](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/docs/reliability.md) · [gateway](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/reliability.md) · [bff-go](file:///home/charles/code/sfwork/PrivShield/console/bff-go/docs/reliability.md)
-- **脚本手册**：[scripts/dev/](file:///home/charles/code/sfwork/PrivShield/scripts/dev) · [scripts/prod/](file:///home/charles/code/sfwork/PrivShield/scripts/prod)
+- [docs/modes.md](console/docs/modes.md) — 开发模式 vs 生产模式部署与网络拓扑总览
+- [docs/learning/vite.md](docs/learning/vite.md) — 前端 Vite 热重载与构建原理
+- **Go BFF 文档**：[design](console/bff-go/docs/design.md) · [api](console/bff-go/docs/api.md) · [test](console/bff-go/docs/test.md) · [ops](console/bff-go/docs/ops.md) · [reliability](console/bff-go/docs/reliability.md)
+- **调度微服务文档**：[service-hub docs](services/service-hub/docs/design.md) · [datasource-mgr docs](services/datasource-mgr/docs/design.md) · [audit-log docs](services/audit-log/docs/design.md)
+- **可靠性能力文档**：[engine](docs/reliability.md) · [service-hub](services/service-hub/docs/reliability.md) · [audit-log](services/audit-log/docs/reliability.md) · [datasource-mgr](services/datasource-mgr/docs/reliability.md) · [gateway](docs/gateway_balancer/reliability.md) · [bff-go](console/bff-go/docs/reliability.md)
+- **脚本手册**：[scripts/dev/](scripts/dev) · [scripts/prod/](scripts/prod)
 
 ---
 

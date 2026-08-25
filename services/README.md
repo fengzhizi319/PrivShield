@@ -57,7 +57,7 @@ services/
 ## 3. 运行与集成
 
 ### 3.1 本地协同运行
-各微服务依赖根目录共享库 [pkg/](file:///home/charles/code/sfwork/PrivShield/pkg/)，在根目录的 [go.work](file:///home/charles/code/sfwork/PrivShield/go.work) 协同下运行：
+各微服务依赖根目录共享库 [pkg/](../pkg/)，在根目录的 [go.work](../go.work) 协同下运行：
 
 ```bash
 # 启动三大微服务 (需 PrivShield Agent 已在 :8079 运行)

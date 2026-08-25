@@ -29,7 +29,7 @@ Pandas is the core library for Python data analysis, providing DataFrame/Series 
 
 ### 2.1 统一数据适配层架构 / Unified Data Adapter Architecture
 
-文件 / File：[`engine/privacy/data_adapters.py`](file:///home/charles/code/PrivShield/engine/privacy/data_adapters.py)
+文件 / File：[`engine/privacy/data_adapters.py`](engine/privacy/data_adapters.py)
 
 `PrivShield` 实现了多源异构数据适配器 `data_adapters.py`，为差分隐私（DP）、K-匿名（K-Anonymity）等隐私原语提供跨 Pandas、PyArrow、NumPy、SciPy 稀疏矩阵及 SecretFlow 联邦数据集的标准化抽取与转换能力：
 
@@ -57,7 +57,7 @@ Pandas is the core library for Python data analysis, providing DataFrame/Series 
 
 ### 2.2 PyArrow IPC 二进制流解析与零拷贝 / PyArrow IPC Stream Parsing
 
-文件 / File：[`engine/privacy/data_adapters.py`](file:///home/charles/code/PrivShield/engine/privacy/data_adapters.py#L300-L360)
+文件 / File：[`engine/privacy/data_adapters.py`](engine/privacy/data_adapters.py#L300-L360)
 
 ```python
 import pyarrow as pa
@@ -84,7 +84,7 @@ def _extract_from_arrow_ipc(data: bytes, column: str | None = None) -> np.ndarra
 
 ### 2.3 Pandas DataFrame 表格脱敏与 NaN 安全置换 / Pandas DataFrame Masking
 
-文件 / File：[`engine/routers/file.py`](file:///home/charles/code/PrivShield/engine/routers/file.py) & [`engine/privacy/data_adapters.py`](file:///home/charles/code/PrivShield/engine/privacy/data_adapters.py)
+文件 / File：[`engine/routers/file.py`](engine/routers/file.py) & [`engine/privacy/data_adapters.py`](engine/privacy/data_adapters.py)
 
 ```python
 import pandas as pd

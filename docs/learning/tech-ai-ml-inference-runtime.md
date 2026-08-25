@@ -48,7 +48,7 @@
 
 ### 2.1 懒加载与多后端适配器 / Lazy-Loading & Multi-Engine Adapters
 
-文件 / File：[`engine/dynclassification/ner_adapter.py`](file:///home/charles/code/PrivShield/engine/dynclassification/ner_adapter.py) & [`engine/dynclassification/llm_adapter.py`](file:///home/charles/code/PrivShield/engine/dynclassification/llm_adapter.py)
+文件 / File：[`engine/dynclassification/ner_adapter.py`](engine/dynclassification/ner_adapter.py) & [`engine/dynclassification/llm_adapter.py`](engine/dynclassification/llm_adapter.py)
 
 为了防止在模块导入阶段因尝试加载数十 GB 的模型权重导致进程假死，所有模型适配器均采用双重检查锁（Double-Checked Locking）实现按需懒初始化：
 
@@ -91,7 +91,7 @@ class LlmAdapter:
 
 ### 2.2 进程级推理并发控制与内存防 OOM 熔断 / Concurrency Cap & Memory Safety
 
-文件 / File：[`engine/dynclassification/llm_adapter.py`](file:///home/charles/code/PrivShield/engine/dynclassification/llm_adapter.py#L50-L150)
+文件 / File：[`engine/dynclassification/llm_adapter.py`](engine/dynclassification/llm_adapter.py#L50-L150)
 
 在多 Worker 或高并发请求下，多个线程同时调用 LLM 推理会迅速打满 GPU 显存或系统物理内存（RAM），触发操作系统 OOM Killer，导致 gRPC/HTTP 连接被重置（`connection reset by peer`）。
 
@@ -137,7 +137,7 @@ def safe_llm_inference(predict_fn: Callable[[], T]) -> T | None:
 
 ### 2.3 ONNX Runtime 与 StructBERT 轻量实体提取 / ONNX Small-NER
 
-文件 / File：[`engine/dynclassification/ner_engines.py`](file:///home/charles/code/PrivShield/engine/dynclassification/ner_engines.py)
+文件 / File：[`engine/dynclassification/ner_engines.py`](engine/dynclassification/ner_engines.py)
 
 针对 Layer 2 Small-NER，`PrivShield` 将 ModelScope 开源的 StructBERT 中文实体识别模型导出为标准 **ONNX** 格式：
 - 使用 `onnxruntime.InferenceSession` 替代庞大的 PyTorch 运行时；
@@ -148,7 +148,7 @@ def safe_llm_inference(predict_fn: Callable[[], T]) -> T | None:
 
 ### 2.4 LoRA 轻量微调与 PEFT 训练管线 / LoRA Fine-Tuning Pipeline
 
-文档参考 / Docs：[`docs/llmlora/`](file:///home/charles/code/PrivShield/docs/llmlora/)
+文档参考 / Docs：[`docs/llmlora/`](docs/llmlora/)
 
 针对 Qwen-3.5-0.8B / 7B 模型在数据分类分级任务中的定制，`PrivShield` 采用了 **LoRA (Low-Rank Adaptation)** 参数高效微调方案：
 

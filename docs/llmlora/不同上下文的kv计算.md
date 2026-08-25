@@ -2,7 +2,7 @@
 
 > 本文档详细解析 **Qwen3.8-27B**（及 3:1 混合注意力 SSM-Transformer 架构）在不同上下文长度、不同并发 Batch 以及不同精度（**FP16 / BF16**、**FP8**、**INT4**）下的 **KV Cache 显存开销精确计算方法与公式由来源头**，深入剖析 **llama.cpp 处理多路 Agent 并发请求的底层机理**，并针对 **生产级 GPU 服务端（A100/H100/H800）** 以及 **Apple MacBook Pro M4 Max（128GB 统一内存）** 提供全方位的性能调优、上下文配置方案与实战指南。
 > 
-> 相关架构设计可参考：[Qwen3.8-27B-FP8-architecture.md](file:///home/charles/code/sfwork/PrivShield/docs/llmlora/Qwen3.8-27B-FP8-architecture.md)。
+> 相关架构设计可参考：[Qwen3.8-27B-FP8-architecture.md](docs/llmlora/Qwen3.8-27B-FP8-architecture.md)。
 
 ---
 

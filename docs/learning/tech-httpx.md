@@ -19,7 +19,7 @@ httpx is a fully-featured Python HTTP client library supporting both sync and as
 
 ### 2.1 生产级网关长连接池与生命周期绑定 / Gateway Connection Pool & Lifespan
 
-文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py#L110-L160)
+文件 / File：[`engine/gateway/http_proxy.py`](engine/gateway/http_proxy.py#L110-L160)
 
 在 `PrivShield` 网关反向代理层中，为避免高频创建 TCP 套接字导致的连接耗尽（`OSError: Cannot assign requested address`），通过 FastAPI `lifespan` 维护全局单例 `httpx.AsyncClient`，并特别加入了**事件循环漂移自愈机制**（解决跨测试夹具或动态重载时的 `RuntimeError: Event loop is closed`）：
 
@@ -73,7 +73,7 @@ def _get_http_client(request: Request) -> httpx.AsyncClient:
 
 ### 2.2 通配反向代理与流式传输 / Wildcard Reverse Proxy & Stream Transfer
 
-文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py#L250-L380)
+文件 / File：[`engine/gateway/http_proxy.py`](engine/gateway/http_proxy.py#L250-L380)
 
 网关使用通配路由 `/{path:path}`，将请求无损转发至选中的后端工作节点：
 
@@ -114,7 +114,7 @@ async def proxy_http(request: Request, path: str):
 
 ### 2.3 幂等安全重试与毫秒级故障转移 / Idempotent Retry & Fast Failover
 
-文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py#L300-L360)
+文件 / File：[`engine/gateway/http_proxy.py`](engine/gateway/http_proxy.py#L300-L360)
 
 ```python
 # 遇到连接层异常 (httpx.ConnectError) 时，请求尚未送达后端，安全执行重试与故障转移
@@ -129,7 +129,7 @@ except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
 
 ### 2.4 主动健康检查探测 / Active Probing Health Checks
 
-文件 / File：[`engine/gateway/balancer.py`](file:///home/charles/code/PrivShield/engine/gateway/balancer.py)
+文件 / File：[`engine/gateway/balancer.py`](engine/gateway/balancer.py)
 
 ```python
 async def check_health(self, node: Node) -> bool:

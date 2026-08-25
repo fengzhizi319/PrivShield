@@ -14,6 +14,7 @@
 #   DATASOURCE_MGR_IMAGE      : Docker 镜像名 (默认 privshield-datasource-mgr:1.8.0)
 #   DATASOURCE_MGR_CONTAINER  : 容器名 (默认 privshield-datasource-mgr)
 #   DATASOURCE_MGR_PORT       : 宿主机对外暴露的 HTTP 端口 (默认 8083)
+#   DATASOURCE_MGR_GRPC_PORT  : 宿主机对外暴露的 gRPC 端口 (默认 50053)
 #   DATASOURCE_MGR_DATA_DIR   : 数据持久化命名卷/路径
 # ============================================================================
 
@@ -29,6 +30,7 @@ IMAGE_NAME="${DATASOURCE_MGR_IMAGE:-privshield-datasource-mgr:1.8.0}"
 CONTAINER_NAME="${DATASOURCE_MGR_CONTAINER:-privshield-datasource-mgr}"
 HOST="${DATASOURCE_MGR_HOST:-0.0.0.0}"
 PORT="${DATASOURCE_MGR_PORT:-8083}"
+GRPC_PORT="${DATASOURCE_MGR_GRPC_PORT:-50053}"
 # 持久化存储命名卷（默认 privshield-datasource-mgr-data）
 DATA_DIR="${DATASOURCE_MGR_DATA_DIR:-${CONTAINER_NAME}-data}"
 
@@ -49,13 +51,16 @@ docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 # -p "${PORT}:8083": 宿主机端口映射至容器内 8083 端口；
 # -v "${DATA_DIR}:/app/data": 挂载持久化数据目录；
 # --restart unless-stopped: 容器崩溃或系统重启后自动恢复。
-echo "[3/3] Starting container on port $PORT ..."
+echo "[3/3] Starting container on REST port $PORT, gRPC port $GRPC_PORT ..."
 docker run -d \
   --name "$CONTAINER_NAME" \
   -p "${PORT}:8083" \
+  -p "${GRPC_PORT}:50053" \
   -v "${DATA_DIR}:/app/data" \
   -e DATASOURCE_MGR_HOST="$HOST" \
   -e DATASOURCE_MGR_PORT=8083 \
+  -e DATASOURCE_MGR_GRPC_HOST="$HOST" \
+  -e DATASOURCE_MGR_GRPC_PORT=50053 \
   -e PRIVACY_AGENT_REST_HOST="${PRIVACY_AGENT_REST_HOST:-privshield-agent}" \
   -e PRIVACY_REST_PORT="${PRIVACY_REST_PORT:-8079}" \
   -e PRIVACY_AGENT_API_KEY="${PRIVACY_AGENT_API_KEY:-}" \
@@ -70,9 +75,10 @@ for i in $(seq 1 30); do
     echo " OK"
     echo ""
     echo "Datasource Manager deployed successfully!"
-    echo "  Health: http://127.0.0.1:${PORT}/api/health"
-    echo "  List:   http://127.0.0.1:${PORT}/api/datasources"
-    echo "  Data:   ${DATA_DIR} → /app/data (SQLite persistent)"
+    echo "  REST Health: http://127.0.0.1:${PORT}/api/health"
+    echo "  List:        http://127.0.0.1:${PORT}/api/datasources"
+    echo "  gRPC:        127.0.0.1:${GRPC_PORT}"
+    echo "  Data:        ${DATA_DIR} → /app/data (SQLite persistent)"
     exit 0
   fi
   echo -n "."

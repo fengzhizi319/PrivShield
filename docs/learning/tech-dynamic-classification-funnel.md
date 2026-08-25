@@ -44,7 +44,7 @@
 
 ### 2.1 声明式规则模型与算子系统 / Rule Schema & Operator Registry
 
-文件 / File：[`engine/dynclassification/rule_schema.py`](file:///home/charles/code/PrivShield/engine/dynclassification/rule_schema.py) & [`engine/dynclassification/operators.py`](file:///home/charles/code/PrivShield/engine/dynclassification/operators.py)
+文件 / File：[`engine/dynclassification/rule_schema.py`](engine/dynclassification/rule_schema.py) & [`engine/dynclassification/operators.py`](engine/dynclassification/operators.py)
 
 规则包完全与代码解耦，以 YAML 文件维护在 `rules/domains/`（领域规则）与 `rules/taxonomies/`（标准体系）中：
 
@@ -105,7 +105,7 @@ class OperatorRegistry:
 
 ### 2.2 跨字段复合规则引擎 / Composite Rule Engine
 
-文件 / File：[`engine/dynclassification/composite.py`](file:///home/charles/code/PrivShield/engine/dynclassification/composite.py)
+文件 / File：[`engine/dynclassification/composite.py`](engine/dynclassification/composite.py)
 
 单字段可能仅属于低敏感级别（例如单独的“姓名”为 S1），但当多个字段在同一张数据表中联合出现时，重识别风险将发生质变。复合规则引擎负责实现**多字段敏感度联合提级**：
 
@@ -124,7 +124,7 @@ class CompositeRuleEngine:
 
 ### 2.3 三层漏斗编排器与仲裁算法 / Classification Funnel & Adjudication
 
-文件 / File：[`engine/dynclassification/funnel.py`](file:///home/charles/code/PrivShield/engine/dynclassification/funnel.py)
+文件 / File：[`engine/dynclassification/funnel.py`](engine/dynclassification/funnel.py)
 
 #### 漏斗仲裁核心流程与 Fail-Closed 安全底线
 
@@ -191,7 +191,7 @@ class ClassificationFunnel:
 
 ## 3. 多合规标准体系无缝切换 / Standards Switching
 
-文件 / File：[`rules/taxonomies/`](file:///home/charles/code/PrivShield/rules/taxonomies/) & [`engine/dynclassification/models.py`](file:///home/charles/code/PrivShield/engine/dynclassification/models.py)
+文件 / File：[`rules/taxonomies/`](rules/taxonomies/) & [`engine/dynclassification/models.py`](engine/dynclassification/models.py)
 
 `PrivShield` 将“敏感分类/实体类型”与“安全等级（Rank/Level）”解耦：
 

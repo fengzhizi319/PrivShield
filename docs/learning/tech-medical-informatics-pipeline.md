@@ -29,7 +29,7 @@
 
 ### 2.1 结构化病历三层分类分级与自动脱敏 / EMR Classification & Masking Pipeline
 
-文件 / File：[`engine/routers/medical.py`](file:///home/charles/code/PrivShield/engine/routers/medical.py) & [`engine/service.py`](file:///home/charles/code/PrivShield/engine/service.py)
+文件 / File：[`engine/routers/medical.py`](engine/routers/medical.py) & [`engine/service.py`](engine/service.py)
 
 #### 医疗数据请求与资源耗尽保护 (DoS Protection)
 
@@ -52,7 +52,7 @@ class MedicalProcessRequest(BaseModel):
 
 #### ICD-10 疾病编码区间算子
 
-文件 / File：[`engine/dynclassification/operators.py`](file:///home/charles/code/PrivShield/engine/dynclassification/operators.py)
+文件 / File：[`engine/dynclassification/operators.py`](engine/dynclassification/operators.py)
 
 利用 `icd10_range` 算子自动判别传染病、精神类疾病及罕见遗传病等高敏感病种：
 
@@ -72,7 +72,7 @@ class MedicalProcessRequest(BaseModel):
 
 ### 2.2 医学影像与病例图像智能打码引擎 / Medical Image Redaction Engine
 
-文件 / File：[`engine/dynclassification/image_redaction.py`](file:///home/charles/code/PrivShield/engine/dynclassification/image_redaction.py)
+文件 / File：[`engine/dynclassification/image_redaction.py`](engine/dynclassification/image_redaction.py)
 
 医学影像扫描件与放射科报告中，常在图像边缘硬编码患者姓名、检查号与医生签名（Burned-in Annotation）。`PrivShield` 提供了多层智能打码引擎：
 

@@ -2,7 +2,7 @@
 
 > 本手册为 `PrivShield` 代理转发与负载均衡网关（API Gateway & Load Balancer）的生产级部署、运维管理、安全加固、与 Kubernetes 负载均衡协同、可观测性与故障排查提供端到端的操作指南与标准作业程序（SOP）。
 >
-> 关联设计文档：[代理转发与负载均衡网关设计与实现规范](file:///home/charles/code/PrivShield/docs/gateway_balancer/design.md)
+> 关联设计文档：[代理转发与负载均衡网关设计与实现规范](docs/gateway_balancer/design.md)
 
 ---
 
@@ -189,7 +189,7 @@ backends:
 
 ### 2.3 CLI 启动命令行参数
 
-网关入口模块为 [`engine.gateway.server`](file:///home/charles/code/PrivShield/engine/gateway/server.py)：
+网关入口模块为 [`engine.gateway.server`](engine/gateway/server.py)：
 
 ```bash
 # 查看帮助
@@ -412,7 +412,7 @@ SQLite `BEGIN IMMEDIATE` 排他事务机制保障多实例并发更新时不会�
 
 ### 5.2 预算数据库定时备份与恢复
 
-生产环境推荐使用项目内置脚本 [`scripts/prod/backup_privacy_budget.sh`](file:///home/charles/code/PrivShield/scripts/prod/backup_privacy_budget.sh)：
+生产环境推荐使用项目内置脚本 [`scripts/prod/backup_privacy_budget.sh`](scripts/prod/backup_privacy_budget.sh)：
 
 ```bash
 # 1. 手动执行备份
@@ -814,7 +814,7 @@ scrape_configs:
 
 ### 7.3 Prometheus 告警规则矩阵
 
-对应项目告警规则文件 [`deploy/prometheus/alerts.yml`](file:///home/charles/code/PrivShield/deploy/prometheus/alerts.yml)：
+对应项目告警规则文件 [`deploy/prometheus/alerts.yml`](deploy/prometheus/alerts.yml)：
 
 ```yaml
 groups:
@@ -1003,7 +1003,7 @@ cat /var/log/privshield/gateway.log | jq 'select(.message == "Node status change
 
 ## 9. 生产健康巡检与诊断工具
 
-项目提供了开箱即用的生产全链路健康巡检脚本 [`scripts/prod/prod_health_check.sh`](file:///home/charles/code/PrivShield/scripts/prod/prod_health_check.sh)：
+项目提供了开箱即用的生产全链路健康巡检脚本 [`scripts/prod/prod_health_check.sh`](scripts/prod/prod_health_check.sh)：
 
 ```bash
 # 1. 基础巡检 (HTTP/gRPC/Metrics/DB)

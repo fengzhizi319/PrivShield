@@ -20,7 +20,7 @@
 
 ## 2. 在本项目中的用法 / Usage in This Project
 
-`PrivShield` 在 [`engine/privacy/kano.py`](file:///home/charles/code/PrivShield/engine/privacy/kano.py) 中提供了两套互补的 K-匿名能力：
+`PrivShield` 在 [`engine/privacy/kano.py`](engine/privacy/kano.py) 中提供了两套互补的 K-匿名能力：
 1. **面向流式/单记录处理的启发式自适应层级泛化（Record-Level Adaptive Hierarchy）**
 2. **面向批量数据集的 Mondrian 多维空间中位数划分算法（Mondrian Multidimensional Partitioning）**
 
@@ -44,7 +44,7 @@
 
 ### 2.1 单记录自适应分段泛化 / Single-Record Adaptive Generalization
 
-文件 / File：[`engine/privacy/kano.py`](file:///home/charles/code/PrivShield/engine/privacy/kano.py#L150-L240)
+文件 / File：[`engine/privacy/kano.py`](engine/privacy/kano.py#L150-L240)
 
 在医疗健康与养老照护业务中，若对所有年龄统一采用粗粒度区间（例如统一 10 岁一组），会导致 60 岁以上老年慢性病风险评估精度严重受损。`PrivShield` 创新实现了 `adaptive_age_hierarchy`：
 
@@ -91,7 +91,7 @@ def adaptive_age_hierarchy(
 
 ### 2.2 批量数据集 Mondrian 算法实现 / Mondrian Algorithm Deep-Dive
 
-文件 / File：[`engine/privacy/kano.py`](file:///home/charles/code/PrivShield/engine/privacy/kano.py)
+文件 / File：[`engine/privacy/kano.py`](engine/privacy/kano.py)
 
 Mondrian 算法是一种贪心自顶向下的多维空间划分算法。它将多维 QI 数据空间视为一个超矩形，递归寻找归一化跨度最大的维度沿中位数进行切分，直至子空间样本数无法再被二分（$< 2k$）：
 

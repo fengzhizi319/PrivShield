@@ -32,7 +32,7 @@
 
 ### 2.1 Pytest Fixture 依赖注入与测试夹具 / Test Fixtures & In-Process Channels
 
-文件 / File：[`tests/conftest.py`](file:///home/charles/code/PrivShield/tests/conftest.py)
+文件 / File：[`tests/conftest.py`](tests/conftest.py)
 
 #### (1) 同步与异步 FastAPI TestClient
 
@@ -71,7 +71,7 @@ async def grpc_stub(grpc_server):
 
 ### 2.2 重量级 ML 模型测试隔离打桩 / ML Mocking Strategy for CI
 
-文件 / File：[`tests/dynclassification/test_ner_adapter.py`](file:///home/charles/code/PrivShield/tests/dynclassification/test_ner_adapter.py) & [`tests/dynclassification/test_llm_adapter.py`](file:///home/charles/code/PrivShield/tests/dynclassification/test_llm_adapter.py)
+文件 / File：[`tests/dynclassification/test_ner_adapter.py`](tests/dynclassification/test_ner_adapter.py) & [`tests/dynclassification/test_llm_adapter.py`](tests/dynclassification/test_llm_adapter.py)
 
 为了让 CI 流水线脱离数十 GB 的 PyTorch 权重并在纯 CPU 环境高速运行，单元测试通过 `unittest.mock` 对底层适配器打桩：
 
@@ -103,7 +103,7 @@ def test_funnel_arbitration_with_mocked_llm():
 
 ### 2.3 隐私原语微基准性能评测 / Micro-Benchmarking
 
-文件 / File：[`tests/benchmark_primitives.py`](file:///home/charles/code/PrivShield/tests/benchmark_primitives.py)
+文件 / File：[`tests/benchmark_primitives.py`](tests/benchmark_primitives.py)
 
 ```python
 class TestDPBenchmarks:
@@ -132,7 +132,7 @@ PYTHONPATH=. pytest tests/benchmark_primitives.py --benchmark-only
 
 ### 2.4 Go 中台真实 E2E 链路测试 / Real End-to-End Testing
 
-文件 / File：[`services/service-hub/internal/handlers/e2e_test.go`](file:///home/charles/code/PrivShield/services/service-hub/internal/handlers/e2e_test.go)
+文件 / File：[`services/service-hub/internal/handlers/e2e_test.go`](services/service-hub/internal/handlers/e2e_test.go)
 
 在真实集成测试中，Go 测试套件通过设置环境变量 `PRIVSHIELD_E2E=1` 启动对运行中真实微服务群的端到端调用验证：
 

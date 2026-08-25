@@ -18,7 +18,7 @@ Pydantic is the most popular data validation library for Python, using type hint
 
 ### 2.1 隐私原语与请求校验模型 / Privacy Primitives Request Models
 
-文件 / File：[`engine/schemas.py`](file:///home/charles/code/PrivShield/engine/schemas.py)
+文件 / File：[`engine/schemas.py`](engine/schemas.py)
 
 `PrivShield` 在 `schemas.py` 中为所有隐私计算与脱敏原语定义了严格的 Pydantic v2 模型，并配置了针对高并发和超大 Payload 攻击的边界约束（`max_length`、`ge`、`le`）：
 
@@ -47,7 +47,7 @@ class KAnonymizeTableRequest(BaseModel):
 
 ### 2.2 声明式规则体系与元数据 Schema / Declarative Rule Profile Schema
 
-文件 / File：[`engine/dynclassification/rule_schema.py`](file:///home/charles/code/PrivShield/engine/dynclassification/rule_schema.py)
+文件 / File：[`engine/dynclassification/rule_schema.py`](engine/dynclassification/rule_schema.py)
 
 在三层动态分类分级引擎中，YAML 规则文件被深度反序列化为由 Pydantic v2 强类型保证的规则对象树：
 
@@ -82,7 +82,7 @@ class DowngradeRuleDef(BaseModel):
 
 ### 2.3 生产环境安全配置驱动 / Production Security Settings
 
-文件 / File：[`engine/security/config.py`](file:///home/charles/code/PrivShield/engine/security/config.py)
+文件 / File：[`engine/security/config.py`](engine/security/config.py)
 
 ```python
 from pydantic import Field
@@ -107,9 +107,9 @@ class SecuritySettings(BaseSettings):
 
 | 模块 / Module | Pydantic 角色 / Role | 核心收益 / Benefit |
 |---|---|---|
-| [`engine/schemas.py`](file:///home/charles/code/PrivShield/engine/schemas.py) | REST API 输入边界防护 | 自动类型转换、超长字段拦截、422 安全脱敏 |
-| [`engine/dynclassification/rule_schema.py`](file:///home/charles/code/PrivShield/engine/dynclassification/rule_schema.py) | YAML 动态规则解析器 | 校验算子参数完整性、防止非法 AST 配置加载 |
-| [`engine/security/config.py`](file:///home/charles/code/PrivShield/engine/security/config.py) | 环境变量集中配置管理 | 类型安全读取、支持 `.env` 与系统变量透明覆盖 |
+| [`engine/schemas.py`](engine/schemas.py) | REST API 输入边界防护 | 自动类型转换、超长字段拦截、422 安全脱敏 |
+| [`engine/dynclassification/rule_schema.py`](engine/dynclassification/rule_schema.py) | YAML 动态规则解析器 | 校验算子参数完整性、防止非法 AST 配置加载 |
+| [`engine/security/config.py`](engine/security/config.py) | 环境变量集中配置管理 | 类型安全读取、支持 `.env` 与系统变量透明覆盖 |
 
 ### 2.5 Pydantic v2 核心 API 迁移与性能实践 / Pydantic v2 Core API & Performance
 

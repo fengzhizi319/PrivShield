@@ -45,7 +45,7 @@
 
 ### 2.1 gRPC mTLS 客户端证书身份提取与白名单热加载 / gRPC mTLS & Whitelist Hot-Reload
 
-文件 / File：[`engine/security/auth.py`](file:///home/charles/code/PrivShield/engine/security/auth.py#L80-L130) & [`engine/security/whitelist.py`](file:///home/charles/code/PrivShield/engine/security/whitelist.py)
+文件 / File：[`engine/security/auth.py`](engine/security/auth.py#L80-L130) & [`engine/security/whitelist.py`](engine/security/whitelist.py)
 
 #### (1) Common Name 提取与作用域授权
 
@@ -86,7 +86,7 @@ def _authenticate_mtls(
 
 ### 2.2 防范时序攻击的常量时间比对 / Constant-Time API Key Verification
 
-文件 / File：[`engine/security/auth.py`](file:///home/charles/code/PrivShield/engine/security/auth.py#L50-L80)
+文件 / File：[`engine/security/auth.py`](engine/security/auth.py#L50-L80)
 
 传统的 `dict.get()` 或普通字符串 `==` 运算会在遇到首个不匹配字符时立即短路退出，攻击者可通过高精度测量网络 RTT 逐字节推断出有效的 API Key。`PrivShield` 强制采用全量常量时间迭代：
 
@@ -106,7 +106,7 @@ def _constant_time_lookup(keys: dict[str, Any], token: str) -> Any | None:
 
 ### 2.3 基于 SHA-256 前序哈希链的不可篡改审计日志 / Tamper-Evident Audit Chaining
 
-文件 / File：[`services/audit-log/internal/storage/`](file:///home/charles/code/PrivShield/services/audit-log/internal/storage/)
+文件 / File：[`services/audit-log/internal/storage/`](services/audit-log/internal/storage/)
 
 在中台审计服务中，为了防止特权运维人员或攻击者直接修改数据库抹除操作痕迹，所有审计日志采用区块链式的前序哈希指针链接：
 
@@ -148,7 +148,7 @@ func (s *Storage) AppendAuditLog(entry *AuditLogEntry) error {
 
 ### 2.4 路径穿越与符号链接逃逸安全防护 / Path Traversal & Symlink Escape Guard
 
-文件 / File：[`engine/dynclassification/image_redaction.py`](file:///home/charles/code/PrivShield/engine/dynclassification/image_redaction.py)
+文件 / File：[`engine/dynclassification/image_redaction.py`](engine/dynclassification/image_redaction.py)
 
 在处理医学图像与 DICOM 文件时，攻击者可能传入 `../../../../etc/shadow` 或构造恶意软链接（Symlink）。`PrivShield` 实现了严密的路径归一化与白名单隔离：
 

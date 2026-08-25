@@ -1,6 +1,6 @@
 # 数据服务调度中枢 (Service Hub) — 测试规范与用例全集
 
-> 对应模块源码：[services/service-hub](file:///home/charles/code/PrivShield/services/service-hub)  
+> 对应模块源码：[services/service-hub](..)  
 > 模块定位：政务云数据流通调度中枢，负责串联模拟数据源、任务流转、敏感度分类分级、动态脱敏处理、存证上链回传 6 阶段流水线。
 
 ---

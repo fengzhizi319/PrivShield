@@ -42,7 +42,7 @@
 
 ### 2.1 Prometheus 指标体系与业务埋点 / Prometheus Metrics Instrumentation
 
-文件 / File：[`engine/observability/metrics.py`](file:///home/charles/code/PrivShield/engine/observability/metrics.py)
+文件 / File：[`engine/observability/metrics.py`](engine/observability/metrics.py)
 
 `PrivShield` 预设了细粒度的系统级与隐私业务级指标：
 
@@ -81,7 +81,7 @@ DP_QUERIES_TOTAL = Counter(
 
 #### 指标端点安全挂载与鉴权保护
 
-文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L460-L490)
+文件 / File：[`engine/main.py`](engine/main.py#L460-L490)
 
 在启用生产 API 鉴权时，`/metrics` 端点不会裸露，而是由专用 ASGI 中间件拦截并校验调用方是否具备 `ops:metrics` 作用域：
 
@@ -97,7 +97,7 @@ app.mount("/metrics", metrics_app)
 
 ### 2.2 OpenTelemetry 分布式追踪集成 / OpenTelemetry Tracing
 
-文件 / File：[`engine/observability/tracing.py`](file:///home/charles/code/PrivShield/engine/observability/tracing.py)
+文件 / File：[`engine/observability/tracing.py`](engine/observability/tracing.py)
 
 ```python
 from opentelemetry import trace
@@ -124,7 +124,7 @@ def init_tracing(endpoint: str | None, service_name: str = "PrivShield") -> None
 
 ### 2.3 结构化 JSON 日志与请求上下文注入 / Structured Logging & Context Filter
 
-文件 / File：[`engine/observability/logging_config.py`](file:///home/charles/code/PrivShield/engine/observability/logging_config.py) & [`engine/observability/context.py`](file:///home/charles/code/PrivShield/engine/observability/context.py)
+文件 / File：[`engine/observability/logging_config.py`](engine/observability/logging_config.py) & [`engine/observability/context.py`](engine/observability/context.py)
 
 为了在海量日志中实现毫秒级全链路检索，`PrivShield` 使用 Python `contextvars` 在请求入口捕获上下文，并通过自定义 `_ContextFilter` 自动为每条日志追加链路元数据：
 
@@ -160,6 +160,6 @@ class _ContextFilter(logging.Filter):
 
 ## 3. Go 微服务统一可观测性对接 / Go Microservices Observability
 
-文件 / File：[`pkg/metrics/metrics.go`](file:///home/charles/code/PrivShield/pkg/metrics/metrics.go) & [`pkg/middleware/middleware.go`](file:///home/charles/code/PrivShield/pkg/middleware/middleware.go)
+文件 / File：[`pkg/metrics/metrics.go`](pkg/metrics/metrics.go) & [`pkg/middleware/middleware.go`](pkg/middleware/middleware.go)
 
 在 Go 中台微服务（`service-hub`, `datasource-mgr`, `audit-log`, `bff-go`）中，统一引入 `pkg/metrics`，自动为 Gin 路由注入 Prometheus 拦截器，并生成格式完全对齐的指标命名空间。

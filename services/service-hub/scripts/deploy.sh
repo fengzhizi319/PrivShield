@@ -15,6 +15,7 @@
 #   SERVICE_HUB_CONTAINER: 容器运行名称（默认 privshield-service-hub）
 #   SERVICE_HUB_HOST: 容器内监听的主机地址（默认 0.0.0.0）
 #   SERVICE_HUB_PORT: 宿主机对外映射的 HTTP 端口（默认 8082）
+#   SERVICE_HUB_GRPC_PORT: 宿主机对外映射的 gRPC 端口（默认 50052）
 #   SERVICE_HUB_DATA_DIR: SQLite 数据持久化目录或 Docker 卷名（默认 privshield-service-hub-data）
 #   PRIVACY_AGENT_REST_HOST: Python Agent 所在容器名或 IP（默认 privshield-agent）
 #   PRIVACY_REST_PORT: Python Agent 端口（默认 8079）
@@ -36,6 +37,7 @@ IMAGE_NAME="${SERVICE_HUB_IMAGE:-privshield-service-hub:1.8.0}"
 CONTAINER_NAME="${SERVICE_HUB_CONTAINER:-privshield-service-hub}"
 HOST="${SERVICE_HUB_HOST:-0.0.0.0}"
 PORT="${SERVICE_HUB_PORT:-8082}"
+GRPC_PORT="${SERVICE_HUB_GRPC_PORT:-50052}"
 # SQLite 数据持久化目录（默认使用 Docker 命名卷）
 DATA_DIR="${SERVICE_HUB_DATA_DIR:-${CONTAINER_NAME}-data}"
 
@@ -54,13 +56,16 @@ docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 # ── 5. 启动新容器 ────────────────────────────────────────────────────────────
 # 挂载数据卷保障任务与审计元数据在容器重启后不丢失
-echo "[3/3] Starting container on port $PORT ..."
+echo "[3/3] Starting container on REST port $PORT, gRPC port $GRPC_PORT ..."
 docker run -d \
   --name "$CONTAINER_NAME" \
   -p "${PORT}:8082" \
+  -p "${GRPC_PORT}:50052" \
   -v "${DATA_DIR}:/app/data" \
   -e SERVICE_HUB_HOST="$HOST" \
   -e SERVICE_HUB_PORT=8082 \
+  -e SERVICE_HUB_GRPC_HOST="$HOST" \
+  -e SERVICE_HUB_GRPC_PORT=50052 \
   -e PRIVACY_AGENT_REST_HOST="${PRIVACY_AGENT_REST_HOST:-privshield-agent}" \
   -e PRIVACY_REST_PORT="${PRIVACY_REST_PORT:-8079}" \
   -e PRIVACY_AGENT_API_KEY="${PRIVACY_AGENT_API_KEY:-}" \
@@ -78,9 +83,10 @@ for i in $(seq 1 30); do
     echo " OK"
     echo ""
     echo "Service Hub deployed successfully!"
-    echo "  Health: http://127.0.0.1:${PORT}/api/health"
-    echo "  Status: http://127.0.0.1:${PORT}/api/hub/status"
-    echo "  Data:   ${DATA_DIR} → /app/data (SQLite persistent)"
+    echo "  REST Health: http://127.0.0.1:${PORT}/api/health"
+    echo "  Status:      http://127.0.0.1:${PORT}/api/hub/status"
+    echo "  gRPC:        127.0.0.1:${GRPC_PORT}"
+    echo "  Data:        ${DATA_DIR} → /app/data (SQLite persistent)"
     exit 0
   fi
   echo -n "."

@@ -55,7 +55,7 @@
 
 ### 2.1 差分隐私聚合与加噪机制 / DP Aggregation & Noise Generation
 
-文件 / File：[`engine/privacy/dp.py`](file:///home/charles/code/PrivShield/engine/privacy/dp.py)
+文件 / File：[`engine/privacy/dp.py`](engine/privacy/dp.py)
 
 #### (1) Laplace 机制与敏感度计算
 
@@ -128,7 +128,7 @@ def dp_sum(
 
 ### 2.2 本地差分隐私（LDP）与随机响应 / Local DP & Randomized Response
 
-文件 / File：[`engine/privacy/ldp.py`](file:///home/charles/code/PrivShield/engine/privacy/ldp.py)
+文件 / File：[`engine/privacy/ldp.py`](engine/privacy/ldp.py)
 
 #### (1) Warner 经典二元随机响应 (Randomized Response)
 
@@ -166,7 +166,7 @@ class RandomizedResponse:
 
 ### 2.3 隐私预算持久化记账与审计 / Budget Accounting & Audit
 
-文件 / File：[`engine/privacy/budget.py`](file:///home/charles/code/PrivShield/engine/privacy/budget.py)
+文件 / File：[`engine/privacy/budget.py`](engine/privacy/budget.py)
 
 #### (1) 线程安全内存与 SQLite 双后端记账
 

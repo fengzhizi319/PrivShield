@@ -54,8 +54,8 @@ COPY --from=builder /app/server /app/server
 # 创建 SQLite 持久化存储目录并配置目录属主权限
 RUN mkdir -p /app/data && chown -R privacy:privacy /app
 
-# 暴露 HTTP 服务监听端口
-EXPOSE 8082
+# 暴露 HTTP + gRPC 双协议监听端口
+EXPOSE 8082 50052
 
 # 声明数据卷用于 SQLite 数据持久化（生产部署时需绑定挂载到宿主机目录）
 VOLUME ["/app/data"]
@@ -70,6 +70,8 @@ USER privacy
 # 默认运行环境变量
 ENV SERVICE_HUB_HOST=0.0.0.0
 ENV SERVICE_HUB_PORT=8082
+ENV SERVICE_HUB_GRPC_HOST=0.0.0.0
+ENV SERVICE_HUB_GRPC_PORT=50052
 ENV PRIVACY_AGENT_REST_HOST=privshield-agent
 ENV PRIVACY_REST_PORT=8079
 

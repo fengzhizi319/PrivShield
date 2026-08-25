@@ -119,7 +119,7 @@ uvicorn engine.main:app --reload --host 127.0.0.1 --port 8079
 
 ### 2.1 应用创建与生命周期 / App Creation & Lifespan
 
-文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L194-L277)
+文件 / File：[`engine/main.py`](engine/main.py#L194-L277)
 
 `PrivShield` 作为高可用企业级隐私治理边车（Sidecar），其 FastAPI 应用采用 ASGI 统一生命周期管理（`lifespan`），在服务启动时自动初始化结构化日志、加载安全配置、初始化 OpenTelemetry 分布式追踪，并在关停时优雅释放缓冲与链路导出器：
 
@@ -173,7 +173,7 @@ app = FastAPI(
 
 ### 2.2 领域子路由模块化装配 / Domain Routers Modular Assembly
 
-文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L400-L450) & [`engine/routers/`](file:///home/charles/code/PrivShield/engine/routers/)
+文件 / File：[`engine/main.py`](engine/main.py#L400-L450) & [`engine/routers/`](engine/routers/)
 
 `PrivShield` 将所有业务能力按领域拆分独立子路由，在 `main.py` 中统一通过 `include_router` 装配：
 
@@ -210,7 +210,7 @@ app.include_router(dynclassification.router)
 
 ### 2.3 请求与响应契约模型 / Request & Response Schemas
 
-文件 / File：[`engine/schemas.py`](file:///home/charles/code/PrivShield/engine/schemas.py)
+文件 / File：[`engine/schemas.py`](engine/schemas.py)
 
 所有路由请求体严格使用 Pydantic v2 强类型校验与约束，防止恶意超长 Payload 攻击：
 
@@ -238,7 +238,7 @@ class KAnonymizeTableRequest(BaseModel):
 
 ### 2.4 生产级安全中间件洋葱模型 / Production Middleware Onion Stack
 
-文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L312-L380)
+文件 / File：[`engine/main.py`](engine/main.py#L312-L380)
 
 Starlette 中间件采用前插式注册（Last Added = First Executed），`PrivShield` 精心编排了防御纵深层次：
 
@@ -262,7 +262,7 @@ app.add_middleware(ObservabilityMiddleware)
 
 ### 2.5 生产级校验异常脱敏 / Production Validation Sanitization
 
-文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L292-L310)
+文件 / File：[`engine/main.py`](engine/main.py#L292-L310)
 
 FastAPI 默认的 422 异常会向客户端泄露内部 Python 类型的完整结构与堆栈信息。`PrivShield` 实现了安全拦截器，在生产模式下仅返回通用错误，防范探测：
 
@@ -281,7 +281,7 @@ async def _validation_error_handler(request: Request, exc: RequestValidationErro
 
 ### 2.6 Prometheus 指标挂载与子应用保护 / Metrics Mounting & Sub-app Auth
 
-文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L460-L490)
+文件 / File：[`engine/main.py`](engine/main.py#L460-L490)
 
 `/metrics` 作为独立 ASGI 子应用挂载，当开启 API 认证时自动嵌套 ASGI 级 `ApiKeyAuthAsgiMiddleware`，要求 `ops:metrics` 权限：
 
@@ -295,7 +295,7 @@ app.mount("/metrics", metrics_app)
 
 ### 2.7 依赖注入与核心单例服务 / Dependency Injection & Core Service
 
-文件 / File：[`engine/deps.py`](file:///home/charles/code/PrivShield/engine/deps.py) & [`engine/service.py`](file:///home/charles/code/PrivShield/engine/service.py)
+文件 / File：[`engine/deps.py`](engine/deps.py) & [`engine/service.py`](engine/service.py)
 
 ```python
 from fastapi import Depends, Header, HTTPException
