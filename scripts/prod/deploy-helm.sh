@@ -20,6 +20,7 @@
 #   --tls-secret SECRET      已有 TLS Secret 名称 (生产强制建议提供)
 #   --auth-secret SECRET     已有 API Key Auth Secret 名称
 #   --dry-run                执行试运行演练 (不实际修改集群)
+#   --with-postgres          同时部署 Phase B PostgreSQL 资源（多副本 Hub 模式）
 #   -h, --help               显示帮助信息
 # ============================================================================
 
@@ -42,6 +43,7 @@ VALUES_FILE="$CHART_DIR/values-production.yaml"         # 生产环境 values �
 TLS_SECRET=""                                          # 外部 TLS Secret 名称（部署时 --set 注入）
 AUTH_SECRET=""                                         # 外部 API Key Secret 名称（部署时 --set 注入）
 DRY_RUN=""                                             # 非空时 helm 仅演练不实际变更
+WITH_POSTGRES=false                                    # 是否同时部署 Phase B PostgreSQL
 
 # ── 步骤 2：解析命令行参数 ──────────────────────────────────────────────────
 # 遍历所有位置参数，按 --key value 配对消费（shift 2 跳过已处理的两个参数）
@@ -71,6 +73,10 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN="--dry-run"
             shift 1
             ;;
+        --with-postgres)
+            WITH_POSTGRES=true
+            shift 1
+            ;;
         -h|--help)
             echo "用法 / Usage: $0 [选项]"
             echo ""
@@ -81,6 +87,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --tls-secret SECRET      Kubernetes TLS Secret 资源名称"
             echo "  --auth-secret SECRET     Kubernetes API Key Auth Secret 资源名称"
             echo "  --dry-run                执行 dry-run 演练测试"
+            echo "  --with-postgres          同时部署 Phase B PostgreSQL 资源"
             echo "  -h, --help               显示帮助信息并退出"
             exit 0
             ;;
@@ -100,6 +107,9 @@ echo "  • 命名空间 (Namespace) : $NAMESPACE"
 echo "  • Release 名称         : $RELEASE_NAME"
 echo "  • Values 文件          : $VALUES_FILE"
 echo "  • Chart 目录           : $CHART_DIR"
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    echo "  • Phase B PostgreSQL   : 已启用 (多副本 Hub 模式)"
+fi
 
 # ── 步骤 4：前置检查 — 工具链可用性 ────────────────────────────────────────
 # command -v 检查命令是否存在于 PATH 中；缺失则提示安装方式并退出
@@ -188,6 +198,16 @@ helm upgrade --install "$RELEASE_NAME" "$CHART_DIR" \
     $DRY_RUN \
     --wait \
     --timeout 5m
+
+# ── 步骤 8b：可选 — 部署 Phase B PostgreSQL 资源 ─────────────────────
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    PG_DIR="$PROJECT_ROOT/deploy/k8s/service-hub/postgres"
+    echo ""
+    echo "🐘 部署 Phase B PostgreSQL 资源..."
+    kubectl apply -k "$PG_DIR" -n "$NAMESPACE"
+    echo "⏳ 等待 PostgreSQL Deployment 就绪..."
+    kubectl rollout status deployment/service-hub-postgres -n "$NAMESPACE" --timeout=120s || true
+fi
 
 # ── 步骤 9：输出部署结果 ──────────────────────────────────────────────────
 # 根据是否为 dry-run 模式输出不同的成功提示和后续验证命令

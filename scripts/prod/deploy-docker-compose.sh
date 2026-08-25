@@ -20,6 +20,7 @@
 #   -f, --file FILE      指定 Compose 配置文件 (默认: docker-compose.prod.yml)
 #   --with-llm           启用 vLLM 大模型推理容器 (需具备 NVIDIA GPU / CUDA 环境)
 #   --with-monitoring    启用生产监控栈 (Prometheus + Grafana)
+#   --with-postgres      启用 Phase B PostgreSQL 多副本 Hub 模式
 #   --build              强制重新构建容器镜像 (默认使用已有镜像)
 #   --pull               拉取最新基础镜像
 #   -h, --help           显示帮助信息
@@ -41,6 +42,7 @@ COMPOSE_DIR="$PROJECT_ROOT/deploy/docker-compose"      # Docker Compose 编排�
 COMPOSE_FILE="docker-compose.prod.yml"
 WITH_LLM=false                                         # 是否启用 vLLM GPU 推理容器
 WITH_MONITORING=false                                  # 是否启用 Prometheus + Grafana 监控
+WITH_POSTGRES=false                                    # 是否启用 Phase B PostgreSQL
 BUILD_FLAG=""                                          # 非空时 docker compose up 前重新构建镜像
 PULL_FLAG=""                                           # 非空时强制拉取最新基础镜像
 AGENT_ONLY=false                                       # 是否仅启动核心 Agent (不启动前端与代理)
@@ -69,6 +71,11 @@ while [[ $# -gt 0 ]]; do
             WITH_MONITORING=true
             shift 1
             ;;
+        --with-postgres)
+            # 启用 phase-b profile：启动 PostgreSQL 容器（多副本 Hub 模式）
+            WITH_POSTGRES=true
+            shift 1
+            ;;
         --build)
             # 设置 --build 标志：up 前强制重新构建镜像（适用于代码变更后）
             BUILD_FLAG="--build"
@@ -87,6 +94,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --agent-only         仅启动核心 Agent 服务 (不拉起 Web 前端与后端代理)"
             echo "  --with-llm           启用 vLLM 大模型 GPU 推理容器"
             echo "  --with-monitoring    启用 Prometheus + Grafana 生产监控套件"
+            echo "  --with-postgres      启用 Phase B PostgreSQL 多副本 Hub 模式"
             echo "  --build              在启动前重新构建应用镜像"
             echo "  --pull               拉取最新的依赖基础镜像"
             echo "  -h, --help           显示帮助信息并退出"
@@ -147,6 +155,13 @@ if [[ "$WITH_MONITORING" == "true" ]]; then
     echo "   • 生产监控栈 : 已启用 (Prometheus + Grafana)"
 else
     echo "   • 生产监控栈 : 未启用"
+fi
+
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    PROFILES+=("--profile" "phase-b")
+    echo "   • Phase B PG   : 已启用 (多副本 Hub 模式)"
+else
+    echo "   • Phase B PG   : 未启用 (单副本 SQLite 模式)"
 fi
 
 # ── 步骤 7：切换到编排目录 + 检查 compose 文件存在性 ────────────────
@@ -240,6 +255,9 @@ fi
 if [[ "$WITH_MONITORING" == "true" ]]; then
     echo "  • Prometheus 监控指标 : http://127.0.0.1:9090"
     echo "  • Grafana 可视化大屏  : http://127.0.0.1:3000 (admin / privshield_admin)"
+fi
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    echo "  • PostgreSQL (Phase B) : 127.0.0.1:5432 (privshield_hub)"
 fi
 # 常用维护命令提示
 echo "────────────────────────────────────────────────────────────────────────────"

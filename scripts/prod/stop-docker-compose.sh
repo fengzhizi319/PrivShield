@@ -17,6 +17,7 @@
 #   -f, --file FILE      指定 Compose 配置文件 (默认: docker-compose.prod.yml)
 #   --volumes, -v        同时清理挂载的匿名数据卷 (注意：慎用，避免持久化预算丢失)
 #   --remove-orphans     清理孤儿容器
+#   --with-postgres      同时停止 Phase B PostgreSQL 容器
 #   -h, --help           显示帮助信息
 # ============================================================================
 
@@ -35,6 +36,7 @@ COMPOSE_DIR="$PROJECT_ROOT/deploy/docker-compose"      # Docker Compose 编排�
 # 默认使用生产 compose 文件；EXTRA_FLAGS 收集可选的 down 参数（如 --volumes）
 COMPOSE_FILE="docker-compose.prod.yml"
 EXTRA_FLAGS=()
+WITH_POSTGRES=false
 
 # ── 步骤 2：解析命令行参数 ────────────────────────────────────────────────
 # 遍历所有位置参数，按 --key value 配对消费（shift 跳过已处理的参数）
@@ -57,6 +59,10 @@ while [[ $# -gt 0 ]]; do
             EXTRA_FLAGS+=("--remove-orphans")
             shift 1
             ;;
+        --with-postgres)
+            WITH_POSTGRES=true
+            shift 1
+            ;;
         -h|--help)
             echo "用法 / Usage: $0 [选项]"
             echo ""
@@ -64,6 +70,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -f, --file FILE      指定 Compose 配置文件 (默认: docker-compose.prod.yml)"
             echo "  -v, --volumes        同时移除持久化数据卷 (默认保留数据卷)"
             echo "  --remove-orphans     移除未在 compose 文件中定义的孤儿容器"
+            echo "  --with-postgres      同时停止 Phase B PostgreSQL 容器"
             echo "  -h, --help           显示帮助信息并退出"
             exit 0
             ;;
@@ -108,7 +115,11 @@ echo "   • 编排配置文件: $COMPOSE_FILE"
 #
 # "${EXTRA_FLAGS[@]}" 展开为数组元素：
 #   空数组时不传任何额外参数；非空时展开为 --volumes 和/或 --remove-orphans
-docker compose -f "$COMPOSE_FILE" --profile llm --profile monitoring down "${EXTRA_FLAGS[@]}"
+PROFILES=(--profile llm --profile monitoring)
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    PROFILES+=(--profile phase-b)
+fi
+docker compose -f "$COMPOSE_FILE" "${PROFILES[@]}" down "${EXTRA_FLAGS[@]}"
 
 # ── 步骤 7：输出停服完成提示 ──────────────────────────────────────────────
 echo ""

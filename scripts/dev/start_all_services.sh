@@ -36,7 +36,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
 LOG_DIR="$PROJECT_ROOT/.logs"
-mkdir -p "$LOG_DIR"
+PIDS_DIR="$PROJECT_ROOT/.pids"
+mkdir -p "$LOG_DIR" "$PIDS_DIR"
 
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
 GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
@@ -109,7 +110,7 @@ rotate_log "$AGENT_LOG"
 
 nohup python3 -m engine.server < /dev/null > "$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
-echo $AGENT_PID > "${LOG_DIR}/agent.pid"
+echo $AGENT_PID > "${PIDS_DIR}/agent.pid"
 echo -e "Agent 进程 PID: ${GREEN}${AGENT_PID}${NC} (日志: ${AGENT_LOG})"
 
 # 3. 启动 Console BFF 代理 (Go BFF :8081)
@@ -119,9 +120,9 @@ if [ -d "$PROJECT_ROOT/console/bff-go" ]; then
         cd "$PROJECT_ROOT/console/bff-go"
         go build -o bin/backend-go ./cmd/server
         nohup ./bin/backend-go < /dev/null > "${LOG_DIR}/console_bff_go.log" 2>&1 &
-        echo $! > "${LOG_DIR}/console.pid"
+        echo $! > "${PIDS_DIR}/console-go.pid"
     )
-    echo -e "Console Go BFF PID $(cat "${LOG_DIR}/console.pid"), 日志: ${LOG_DIR}/console_bff_go.log"
+    echo -e "Console Go BFF PID $(cat "${PIDS_DIR}/console-go.pid"), 日志: ${LOG_DIR}/console_bff_go.log"
 fi
 
 # 4. 可选拉起中台微服务群
@@ -133,27 +134,27 @@ if [ "$WITH_SERVICES" = true ]; then
         cd "$PROJECT_ROOT/services/service-hub"
         go build -o bin/service-hub ./cmd/server
         nohup ./bin/service-hub < /dev/null > "${LOG_DIR}/service_hub.log" 2>&1 &
-        echo $! > "${LOG_DIR}/service-hub.pid"
+        echo $! > "${PIDS_DIR}/service-hub.pid"
     )
-    echo -e "  • service-hub (PID $(cat "${LOG_DIR}/service-hub.pid"), 日志: ${LOG_DIR}/service_hub.log)"
+    echo -e "  • service-hub (PID $(cat "${PIDS_DIR}/service-hub.pid"), 日志: ${LOG_DIR}/service_hub.log)"
 
     # 4.2 datasource-mgr
     (
         cd "$PROJECT_ROOT/services/datasource-mgr"
         go build -o bin/datasource-mgr ./cmd/server
         nohup ./bin/datasource-mgr < /dev/null > "${LOG_DIR}/datasource_mgr.log" 2>&1 &
-        echo $! > "${LOG_DIR}/datasource-mgr.pid"
+        echo $! > "${PIDS_DIR}/datasource-mgr.pid"
     )
-    echo -e "  • datasource-mgr (PID $(cat "${LOG_DIR}/datasource-mgr.pid"), 日志: ${LOG_DIR}/datasource_mgr.log)"
+    echo -e "  • datasource-mgr (PID $(cat "${PIDS_DIR}/datasource-mgr.pid"), 日志: ${LOG_DIR}/datasource_mgr.log)"
 
     # 4.3 audit-log
     (
         cd "$PROJECT_ROOT/services/audit-log"
         go build -o bin/audit-log ./cmd/server
         nohup ./bin/audit-log < /dev/null > "${LOG_DIR}/audit_log.log" 2>&1 &
-        echo $! > "${LOG_DIR}/audit-log.pid"
+        echo $! > "${PIDS_DIR}/audit-log.pid"
     )
-    echo -e "  • audit-log (PID $(cat "${LOG_DIR}/audit-log.pid"), 日志: ${LOG_DIR}/audit_log.log)"
+    echo -e "  • audit-log (PID $(cat "${PIDS_DIR}/audit-log.pid"), 日志: ${LOG_DIR}/audit_log.log)"
 fi
 
 # 5. 健康轮询就绪探针 (Health Readiness Probe)

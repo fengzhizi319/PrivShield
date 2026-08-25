@@ -66,6 +66,9 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
         kill_by_pid_file "$dir/console-go-mtls.pid" "Go gRPC 代理后端 (mTLS)"
         kill_by_pid_file "$dir/console-go-all.pid" "Go gRPC 代理后端 (all)"
         kill_by_pid_file "$dir/console-go.pid" "Go BFF 代理后端"
+        kill_by_pid_file "$dir/service-hub.pid" "service-hub 调度中枢"
+        kill_by_pid_file "$dir/datasource-mgr.pid" "datasource-mgr 数据源"
+        kill_by_pid_file "$dir/audit-log.pid" "audit-log 审计日志"
         kill_by_pid_file "$dir/agent-go-mtls.pid" "PrivShield (mTLS)"
         kill_by_pid_file "$dir/agent-all.pid" "PrivShield (all)"
         kill_by_pid_file "$dir/agent-go.pid" "PrivShield (gRPC)"
@@ -73,6 +76,9 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
     fi
 done
 
+kill_by_port 8084 "audit-log 审计日志"
+kill_by_port 8083 "datasource-mgr 数据源管理"
+kill_by_port 8082 "service-hub 调度中枢"
 kill_by_port 8081 "Go BFF 代理后端"
 kill_by_port 50051 "PrivShield gRPC"
 kill_by_port 8079 "PrivShield REST"

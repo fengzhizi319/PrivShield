@@ -3,7 +3,7 @@
 # PrivShield - Prometheus 指标端点一键巡检脚本
 # Check Prometheus /metrics endpoints across all services
 # ==============================================================================
-set -e
+set -euo pipefail
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

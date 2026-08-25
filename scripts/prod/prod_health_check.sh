@@ -242,6 +242,41 @@ check_microservice "Service Hub 调度中枢" "http://127.0.0.1:8082/api/health"
 check_microservice "Datasource Mgr 数据源" "http://127.0.0.1:8083/api/health"
 check_microservice "Audit Log 审计日志" "http://127.0.0.1:8084/api/health"
 
+# ── 步骤 7：可选 — PostgreSQL 连通性检查 ────────────────────────────────
+PG_DSN="${SERVICE_HUB_PG_DSN:-}"
+if [[ -n "$PG_DSN" ]]; then
+    echo ""
+    echo -e "${BOLD}[扩展] Phase B PostgreSQL 连通性检查${NC}"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    # 从 DSN 中提取 host 和 port
+    PG_HOST=$(echo "$PG_DSN" | python3 -c "
+import sys, re
+dsn = sys.stdin.read().strip()
+m = re.search(r'//(?:[^@]+@)?([^:/]+)', dsn)
+print(m.group(1) if m else 'localhost')
+" 2>/dev/null || echo "localhost")
+    PG_PORT_NUM=$(echo "$PG_DSN" | python3 -c "
+import sys, re
+dsn = sys.stdin.read().strip()
+m = re.search(r':(\d+)/', dsn)
+print(m.group(1) if m else '5432')
+" 2>/dev/null || echo "5432")
+    if python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(3.0)
+res = s.connect_ex(('$PG_HOST', int('$PG_PORT_NUM')))
+s.close()
+sys.exit(res)
+" 2>/dev/null; then
+        echo -e "  [PASS] PostgreSQL 可达 ($PG_HOST:$PG_PORT_NUM)"
+        PASSED_CHECKS=$((PASSED_CHECKS + 1))
+    else
+        echo -e "  ${RED}[FAIL]${NC} 无法连接 PostgreSQL ($PG_HOST:$PG_PORT_NUM)"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
 # ── 步骤 8：汇总报告输出 ──────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${CYAN}============================================================================${NC}"
