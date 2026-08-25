@@ -59,3 +59,10 @@ categories:
     name: 金融账户数据
     parent_id: PERSONAL_BASIC
 default_level: L3
+confidence_policy:
+  conflict_confidence: 0.7
+  conflict_needs_review: true
+  enable_llm_arbitration: false
+  llm_confidence_threshold: 0.6
+  enable_ner: false
+  enable_llm: false
