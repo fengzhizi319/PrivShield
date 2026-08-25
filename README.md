@@ -54,30 +54,30 @@ PrivShield/ (Repo Root)
 | **医疗数据流水线** | `POST /v1/medical/process` | — | `PrivacyService.process_medical` | DICOM/HL7/FHIR 解析、影像脱敏 |
 | **参数推荐** | `POST /v1/profile/recommend` | — | `PrivacyService.recommend_profile` | 基于数据特征推荐脱敏策略 |
 | **运维诊断** | `GET /v1/ops/diagnostics` | — | — | 运行时健康、依赖与配置快照 |
-| **查询混淆注入** | `POST /v1/privacy/qol/obfuscate` | `ObfuscateQuery` | `PrivacyService.obfuscate_query` | 假查询注入 (Dummy Injection)、KL 散度混淆 |
+| **查询混淆注入** | `POST /v1/privacy/qol/obfuscate` | `ObfuscateQuery` | `PrivacyService.obfuscate_query` | 假查询注入、KL 散度混淆 |
 | **隐私预算记账** | `GET /v1/privacy/budget` | `Health` | `PrivacyService.budget_remaining` | 内存/SQLite/Redis Lua 原子记账、滑动窗口重置 |
 
 ### 2. 动态数据分类分级三层漏斗 (Dynamic Classification Funnel)
 
-引擎创新性地构建了 **「规则引擎 ➔ 实体识别 ➔ 认知仲裁」** 阶梯式识别架构：
+引擎构建了 **“规则引擎 → 实体识别 → 认知仲裁”** 阶梯式识别架构：
 
-1. **Layer-1: 高性能声明式规则引擎 (Rule Engine)**：毫秒级 YAML 规则匹配、正则表达式、关键词字典、校验和算子（如身份证校验码算子）；
-2. **Layer-2: 轻量命名实体识别 (Small-NER)**：采用轻量 ONNX / ModelScope NER 模型，针对无规则显式特征的文本段落提取上下文实体；
-3. **Layer-3: 大语言模型/多模态仲裁 (Local LLM / VLM)**：集成 Qwen3.5 等本地模型，对低置信度、歧义场景或医学影像 (DICOM) 执行语义仲裁；
-4. **安全底座兜底 (Safety Floor)**：高敏安全红线机制，确保任何降级与仲裁均不低于法定最低保护等级。
+1. **Layer-1：高性能声明式规则引擎**：毫秒级 YAML 规则匹配、正则表达式、关键词字典和校验和算子；
+2. **Layer-2：轻量命名实体识别**：采用 ONNX / ModelScope NER，从无显式规则特征的文本中提取上下文实体；
+3. **Layer-3：本地 LLM / VLM 仲裁**：对低置信度、歧义场景或医学影像执行语义仲裁；
+4. **安全底座兜底**：高敏安全红线确保任何降级与仲裁都不低于法定最低保护等级。
 
 ### 3. 企业级数据流通中台微服务群 (Go Microservices)
 
-- **调度中枢 ([services/service-hub](file:///home/charles/code/sfwork/PrivShield/services/service-hub))**：串联国密 VPN 专线网关、任务流转、分类分级打标、动态脱敏处理、存证上链回传 6 阶段流水线；
+- **调度中枢 ([services/service-hub](services/service-hub))**：串联国密 VPN 专线网关、任务流转、分类分级打标、动态脱敏处理、存证上链回传 6 阶段流水线；
   - **崩溃恢复与自动重试**：启动时自动回收孤立任务，周期性后台重试失败任务（指数退避 + RetryCount）；
   - **HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 + 公钥固定；
   - 📖 [可靠性能力详解](services/service-hub/docs/reliability.md)
-- **数据源资产管理 ([services/datasource-mgr](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr))**：提供 4 个模拟数据源接口（医保 `yibao`、康养 `kangyang` 及 2 个预留接口），支持 HTTPS REST + gRPC mTLS 双协议与公钥固定，内置数据抽样与资产目录；
+- **数据源资产管理 ([services/datasource-mgr](services/datasource-mgr))**：提供 4 个模拟数据源接口（医保 `yibao`、康养 `kangyang` 及 2 个预留接口），支持 HTTPS REST + gRPC mTLS 双协议与公钥固定，内置数据抽样与资产目录；
   - 📖 [可靠性能力详解](services/datasource-mgr/docs/reliability.md)
-- **脱敏审计与存证 ([services/audit-log](file:///home/charles/code/sfwork/PrivShield/services/audit-log))**：实时落盘脱敏快照，构建基于 SHA-256 的不可篡改哈希存证链与合规只读看板；
+- **脱敏审计与存证 ([services/audit-log](services/audit-log))**：实时落盘脱敏快照，构建基于 SHA-256 的不可篡改哈希存证链与合规只读看板；
   - **完整性校验**：启动时 `PRAGMA integrity_check` + HMAC-SHA256 签名审计日志 + 独立校验脚本；
   - 📖 [可靠性能力详解](services/audit-log/docs/reliability.md)
-- **控制台 BFF ([console/bff-go](file:///home/charles/code/sfwork/PrivShield/console/bff-go))**：基于 gRPC 连接池实现请求聚合、多节点 Client-Side 轮询与故障转移；
+- **控制台 BFF ([console/bff-go](console/bff-go))**：基于 gRPC 连接池实现请求聚合、多节点 Client-Side 轮询与故障转移；
   - **gRPC 自动重试**：可配置重试策略（默认最多 6 次，指数退避 1s→8s）；
   - 📖 [可靠性能力详解](console/bff-go/docs/reliability.md)
 
@@ -93,16 +93,22 @@ PrivShield/ (Repo Root)
 
 ## 三、 快速开始 (Quick Start)
 
-### 1. 本地快速启动（算力引擎）
+### 1. 本地快速启动（算力引擎与全微服务）
 
 ```bash
-# 1. 激活虚拟环境并安装依赖
+# 1. 激活虚拟环境并安装 Python 引擎依赖
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# 2. 启动 REST + gRPC 联合服务
+# 2. 启动 Python 引擎（REST :8079 + gRPC :50051）
 python -m engine.server
+
+# 3. 启动开发控制台三件套（Agent + Go BFF + Vite Web）
+bash ./scripts/dev/dev-bff-agent.sh
+
+# 4. 启动全量真实 E2E 微服务套件（Agent + 3 个 Go 中台微服务）
+bash ./scripts/dev/e2e-start-all-services.sh
 ```
 
 ### 2. Docker Compose 全栈一键运行
@@ -132,9 +138,9 @@ bash ./scripts/dev/docker-stop.sh
 | **Privacy Engine (gRPC)** | `50051` | Python / gRPC | 核心隐私算法高性能 RPC 通信 |
 | **Console Web UI** | `5173` | React 18 + Vite | 控制台可视化大盘与调试页面 |
 | **Console BFF (Go)** | `8081` | Go / Gin + gRPC | 控制台 BFF 聚合网关，连接池与协议分流 |
-| **Service Hub** | `8082` | Go / Gin + gRPC | 数据流通流水线调度中枢微服务 |
-| **Datasource Mgr** | `8083` | Go / Gin | 数据源管理与敏感特征自动探查微服务 |
-| **Audit Log** | `8084` | Go / Gin | 脱敏审计快照与不可篡改存证微服务 |
+| **Service Hub** | `8082` / `50052` | Go / Gin + gRPC | 数据流通流水线调度中枢微服务 |
+| **Datasource Mgr** | `8083` / `50053` | Go / Gin + gRPC | 数据源管理与敏感特征自动探查微服务 |
+| **Audit Log** | `8084` / `50054` | Go / Gin + gRPC | 脱敏审计快照与不可篡改存证微服务 |
 | **vLLM (可选)** | `8000` | Python / vLLM | GPU 大模型/VLM 本地推理加速服务 |
 | **Prometheus (可选)** | `9090` | Prometheus 容器 | 全微服务指标抓取与告警评估 |
 | **Grafana (可选)** | `3000` | Grafana 容器 | 预置中台调度大盘与集群全景大屏 |
@@ -149,7 +155,7 @@ bash ./scripts/dev/docker-stop.sh
 # 运行 Go 基础库与全部 Go 微服务单测（含 Go BFF）
 make test-go
 
-# 运行 Python 核心算力引擎单测（423 个用例）
+# 运行 Python 核心算力引擎单测（420+ 个用例）
 PYTHONPATH=. pytest tests/ -q
 
 # 运行前端控制台 Vitest 单测（77 个用例）
@@ -205,8 +211,8 @@ python -m engine.server
 
 - **Prometheus 端点**：所有服务均暴露 `/metrics` 指标接口；
 - **Grafana 预置大屏**：
-  - [deploy/grafana/dashboard.json](file:///home/charles/code/sfwork/PrivShield/deploy/grafana/dashboard.json)：PrivShield 集群全景与算力监控大屏；
-  - [deploy/grafana/service-hub-dashboard.json](file:///home/charles/code/sfwork/PrivShield/deploy/grafana/service-hub-dashboard.json)：数联数据服务调度中枢专属大屏。
+  - [deploy/grafana/dashboard.json](deploy/grafana/dashboard.json)：PrivShield 集群全景与算力监控大屏；
+  - [deploy/grafana/service-hub-dashboard.json](deploy/grafana/service-hub-dashboard.json)：数联数据服务调度中枢专属大屏。
 
 ### 3. 云原生 K8s 与 Helm 部署
 
@@ -217,6 +223,21 @@ helm install privshield ./deploy/helm/PrivShield \
   --set security.tls.existingSecret=your-tls-secret \
   --set security.auth.apiKeysSecret=your-apikeys-secret
 ```
+
+#### Service Hub Kubernetes 部署
+
+`service-hub` 的独立 Kubernetes 模板采用单副本 + `ReadWriteOnce` SQLite PVC，Service 提供稳定的集群内 DNS。该模式不能通过增加副本数扩容；多副本调度需要先完成 PostgreSQL 与原子任务租约改造。
+
+```bash
+# 构建 service-hub 镜像（构建上下文必须为仓库根目录）
+docker build -f services/service-hub/Dockerfile -t service-hub:latest .
+
+# 部署 service-hub 的 Service、Deployment 和 SQLite PVC
+kubectl apply -k deploy/k8s/service-hub/
+```
+
+详细的连接、任务租约、多副本迁移和网关启用边界见
+[Service Hub Kubernetes 目标架构](docs/gateway_balancer/new_design.md)。
 
 ---
 
@@ -233,28 +254,29 @@ make docs-build
 ```
 
 ### 核心架构与中台微服务文档
-- **[系统架构与全景设计 (Architecture Design)](file:///home/charles/code/sfwork/PrivShield/docs/architecture/architecture-design.md)**
-- **[全平台目录架构重构方案 (Migration Design)](file:///home/charles/code/sfwork/PrivShield/docs/archive/migration-design.md)**
-- **[企业级中台微服务总览 (Services Overview)](file:///home/charles/code/sfwork/PrivShield/services/README.md)**
-- **[数据服务调度中枢文档 (Service Hub Docs)](file:///home/charles/code/sfwork/PrivShield/services/service-hub/docs/design.md)**
-- **[数据源与资产管理文档 (Datasource Manager Docs)](file:///home/charles/code/sfwork/PrivShield/services/datasource-mgr/docs/design.md)**
-- **[脱敏审计与不可篡改存证文档 (Audit Log Docs)](file:///home/charles/code/sfwork/PrivShield/services/audit-log/docs/design.md)**
-- **[Go 全局共享基础库文档 (Pkg README)](file:///home/charles/code/sfwork/PrivShield/pkg/README.md)**
-- **[统一控制台与接入层手册 (Console README)](file:///home/charles/code/sfwork/PrivShield/console/README.md)**
+- **[系统架构与全景设计 (Architecture Design)](docs/architecture/architecture-design.md)**
+- **[全平台目录架构重构方案 (Migration Design)](docs/archive/migration-design.md)**
+- **[企业级中台微服务总览 (Services Overview)](services/README.md)**
+- **[数据服务调度中枢文档 (Service Hub Docs)](services/service-hub/docs/design.md)**
+- **[数据源与资产管理文档 (Datasource Manager Docs)](services/datasource-mgr/docs/design.md)**
+- **[脱敏审计与不可篡改存证文档 (Audit Log Docs)](services/audit-log/docs/design.md)**
+- **[Go 全局共享基础库文档 (Pkg README)](pkg/README.md)**
+- **[统一控制台与接入层手册 (Console README)](console/README.md)**
 
 ### 隐私原语与分类算法文档
-- **[数据脱敏设计 (Masking Design)](file:///home/charles/code/sfwork/PrivShield/docs/masking/design.md)**
-- **[差分隐私机制 (Differential Privacy Design)](file:///home/charles/code/sfwork/PrivShield/docs/dp/design.md)**
-- **[K-匿名算法 (K-Anonymity Design)](file:///home/charles/code/sfwork/PrivShield/docs/k_anonymity/design.md)**
-- **[查询混淆注入 (Query Obfuscation Design)](file:///home/charles/code/sfwork/PrivShield/docs/qol/design.md)**
-- **[三层动态分类分级漏斗 (3-Layer Funnel Design)](file:///home/charles/code/sfwork/PrivShield/docs/dynclassification/three_layer_funnel_design.md)**
+- **[数据脱敏设计 (Masking Design)](docs/masking/design.md)**
+- **[差分隐私机制 (Differential Privacy Design)](docs/dp/design.md)**
+- **[K-匿名算法 (K-Anonymity Design)](docs/k_anonymity/design.md)**
+- **[查询混淆注入 (Query Obfuscation Design)](docs/qol/design.md)**
+- **[三层动态分类分级漏斗 (3-Layer Funnel Design)](docs/dynclassification/three_layer_funnel_design.md)**
 
 ### 生产治理、安全与部署文档
-- **[生产安全规范与设计 (Production Security Design)](file:///home/charles/code/sfwork/PrivShield/docs/production_security/design.md)**
-- **[安全合规要求与审计修复表 (Security Requirements)](file:///home/charles/code/sfwork/PrivShield/docs/production_security/security_requirements.md)**
-- **[生产可观测性设计 (Observability Design)](file:///home/charles/code/sfwork/PrivShield/docs/production_observability/design.md)**
-- **[云原生多环境部署全景指南 (Deployment Guide)](file:///home/charles/code/sfwork/PrivShield/deploy/README.md)**
-- **[网关负载均衡与 P2C 调度 (Gateway Balancer)](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/design.md)**
+- **[生产安全规范与设计 (Production Security Design)](docs/production_security/design.md)**
+- **[安全合规要求与审计修复表 (Security Requirements)](docs/production_security/security_requirements.md)**
+- **[生产可观测性设计 (Observability Design)](docs/production_observability/design.md)**
+- **[云原生多环境部署全景指南 (Deployment Guide)](deploy/README.md)**
+- **[网关负载均衡与 P2C 调度 (Gateway Balancer)](docs/gateway_balancer/design.md)**
+- **[Service Hub Kubernetes 目标架构](docs/gateway_balancer/new_design.md)**
 
 ---
 
