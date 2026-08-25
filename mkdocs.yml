@@ -122,6 +122,7 @@ nav:
     - 查询混淆 QoL:
       - 概览: qol/README.md
       - 架构设计: qol/design.md
+      - API 参考: qol/api_reference.md
       - 使用示例: qol/examples.md
       - 运维指南: qol/ops.md
       - 需求文档: qol/prd.md
@@ -164,8 +165,13 @@ nav:
   - LoRA 微调:
     - 概览: llmlora/README.md
     - 模型架构图谱: llmlora/qwen3_5_0_8b_architecture.md
+    - Qwen3.8-27B-FP8 架构: llmlora/Qwen3.8-27B-FP8-architecture.md
     - 数据生成方案: llmlora/data_generation_plan.md
     - 微调与评估指南: llmlora/finetuning_and_eval_guide.md
+    - 设计与工作流: llmlora/design_and_workflow.md
+    - 批量训练与推理: llmlora/batch_training_and_inference.md
+    - 推理优化: llmlora/inference_optimization.md
+    - KV Cache 计算详解: llmlora/不同上下文的kv计算.md
 
   - 分类分级标准:
     - GB/T 35273-2020 个人信息安全规范: standard/GB_T_35273-2020_信息安全技术个人信息安全规范.md
@@ -233,6 +239,7 @@ nav:
       - 优化策略: gateway_balancer/optimizations.md
       - 使用示例: gateway_balancer/examples.md
       - 运维指南: gateway_balancer/ops.md
+      - 可靠性能力: gateway_balancer/reliability.md
       - 需求文档: gateway_balancer/prd.md
       - 测试指南: gateway_balancer/testing.md
 
@@ -262,12 +269,31 @@ nav:
       - 运维指南: deployment/ops.md
       - 需求文档: deployment/prd.md
       - 测试指南: deployment/testing.md
+      - 从代码到 K8s: deployment/from_code_to_k8s.md
 
   - 审计与报告:
     - 2026 全项目审计报告: audit_reports/2026_full_project_audit_report.md
     - 生产级演进三周计划: project_management/三周计划.md
     - 全栈代码审计综合分析报告: reports/分析报告.md
     - 主流数据安全产品洞察报告: reports/主流数据安全产品洞察报告.md
+    - 专利技术交底书:
+      - 概览: patent/README.md
+      - 专利1-三层漏斗动态分类分级: patent/patent_01_dynamic_classification_funnel.md
+      - 专利2-统一隐私 Sidecar: patent/patent_02_unified_privacy_sidecar.md
+      - 专利3-差分隐私预算记账: patent/patent_03_differential_privacy_budget_accountant.md
+      - 专利4-K-匿名 Mondrian 优化: patent/patent_04_k_anonymity_mondrian_optimization.md
+      - 专利5-mTLS 白名单作用域访问控制: patent/patent_05_mtls_whitelist_scope_access_control.md
+      - 专利6-声明式规则引擎降级压制: patent/专利2-声明式规则引擎与敏感度降级压制的分类分级方法.md
+      - 专利7-分布式预算记账与防篡改审计: patent/专利3-面向差分隐私的分布式预算记账与防篡改审计方法.md
+      - 专利8-Sidecar 医疗数据隐私治理: patent/专利4-基于Sidecar架构的医疗数据隐私治理方法及系统.md
+      - 专利9-区块链零知识证明预算记账: patent/专利5-基于区块链与零知识证明的差分隐私预算链上记账与合规证明方法.md
+      - 专利10-零知识证明隐私血缘链: patent/专利6-基于零知识证明的医疗数据隐私处理可验证性与血缘链证明方法.md
+      - 专利11-范畴化降级高敏数据抹平: patent/专利7-基于范畴化降级泛化与四柱强剥离的高敏医疗数据抹平方法及系统.md
+      - 专利12-多模态图像打码与联动脱敏: patent/专利8-面向医疗数据的多模态图像安全打码与文本-图像联动脱敏方法及系统.md
+      - 专利13-防前端篡改数据授权仲裁: patent/专利9-一种防前端篡改的乐观数据授权与违规仲裁方法及系统.md
+      - 专利14-双协议负载均衡与分布式预算: patent/专利10-面向隐私计算网关的双协议负载均衡与分布式预算一致性自愈方法及系统.md
+      - 专利15-硬件根密钥会话委托授权: patent/专利11-基于硬件根密钥的多级衰减会话委托授权方法及系统.md
+      - 专利16-零知识证明跨域隐私授权: patent/专利12-结合零知识证明与乐观审计的跨域数据隐私授权方法及系统.md
     - 归档文档:
       - 目录架构重构与迁移设计: archive/migration-design.md
 
@@ -293,6 +319,7 @@ nav:
     - React: learning/tech-react.md
     - TypeScript: learning/tech-typescript.md
     - Vite 热重载与构建: learning/vite.md
+    - Vite 技术栈详解: learning/tech-vite.md
     - TailwindCSS: learning/tech-tailwindcss.md
     - PostCSS: learning/tech-postcss.md
     - pnpm: learning/tech-pnpm.md
