@@ -40,7 +40,7 @@ help:
 	@echo "  helm-template  - helm template 渲染 chart"
 	@echo "  docker-core    - 构建 core 镜像"
 	@echo "  docker-ml      - 构建 ml 镜像"
-	@echo "  docker-services- 构建三大中台微服务 Docker 镜像"
+	@echo "  docker-services  - 构建三大中台微服务 Docker 镜像"
 	@echo "  docker-console - 构建控制台全套 Docker 镜像"
 	@echo "  docker-all     - 构建全套 PrivShield Docker 镜像"
 	@echo ""

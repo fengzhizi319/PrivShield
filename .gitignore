@@ -87,4 +87,4 @@ console/web/dist/
 !.env*.example
 /llmlora/.env
 /llmlora/.env.*
-/llmlora/!.env*.example
+!/llmlora/.env*.example
