@@ -10,7 +10,7 @@
 #   3. 探测 NVIDIA GPU / CUDA / PyTorch / TensorRT 驱动及深度学习框架可用性
 #   4. 探测 核心 Agent REST API 端口连通性及 HTTP /health 端点报文响应
 #   5. 探测 核心 Agent gRPC 服务端口 TCP 连通性
-#   6. 可选探测 BFF 网关与微服务群（service-hub:8082, datasource-mgr:8083, audit-log:8084, bff:8081/8080）
+#   6. 可选探测 BFF 网关与微服务群（service-hub:8082, datasource-mgr:8083, audit-log:8084, bff-go:8081）
 #   7. 巡检本地 SQLite 隐私预算数据库持久化文件状态
 #   8. 输出巡检统计汇总与准确退出码
 #
@@ -114,7 +114,7 @@ if command -v python3 &> /dev/null; then
     echo -e "Python 版本     : ${GREEN}${PY_VER}${NC}"
     PASSED_CHECKS=$((PASSED_CHECKS + 1))
 else
-    echo -e "${RED}[错误] 未检测到 python3，请先安装 Python 3.10+ 环境！${NC}"
+    echo -e "${RED}[错误] 未检测到 python3，请先安装 Python 3.13+ 环境！${NC}"
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
@@ -215,7 +215,6 @@ if [ "$CHECK_ALL" = true ]; then
         fi
     }
     check_http_svc "BFF-Go 网关" "http://127.0.0.1:8081/api/health"
-    check_http_svc "BFF-Py 网关" "http://127.0.0.1:8080/api/health"
     check_http_svc "Service Hub 调度中枢" "http://127.0.0.1:8082/api/health"
     check_http_svc "Datasource Mgr 数据源" "http://127.0.0.1:8083/api/health"
     check_http_svc "Audit Log 审计日志" "http://127.0.0.1:8084/api/health"
