@@ -28,14 +28,14 @@
    - **BFF 作用**：BFF 作为统一安全边界，集中管理 CORS 跨域规则、API Key 认证、IP 速率限制（Rate Limiting）、安全响应头注入以及内部敏感异常信息的脱敏拦截。
 
 ### 1.3 BFF 在 PrivShield 中的定位与职责
-在 `PrivShield` 体系中，**`console/bff-go`**（以及同构备用的 `console/bff-py`）承担了控制台专属网关的核心角色：
-- **向上（面向 Web 前端）**：为 React SPA 前端（`console/web`）提供统一的 RESTful JSON 代理接口（如 `/api/proxy`、`/api/batch`、`/api/upload` 等），并负责前端静态构建产物的独立托管与 SPA 路由回退；
-- **向下（面向核心服务群）**：通过 gRPC 长连接与底层 `PrivShield Agent`（`:50051`）高效通信，并联动中台微服务群（`service-hub`、`datasource-mgr`、`audit-log`）；
+在 `PrivShield` 体系中，**`console/bff-go`** 承担了控制台官方主力专属网关的核心角色：
+- **向上（面向 Web 前端与外部系统）**：为 React SPA 前端（`console/web`）提供统一的 RESTful JSON / HTTPS 代理接口（如 `/api/proxy`、`/api/batch`、`/api/upload` 等），支持 TLS 1.3 及 mTLS 客户端证书校验，并负责前端静态构建产物的独立托管与 SPA 路由回退；同时提供 BFF 原生 gRPC Server 服务，对外暴露与 Agent 同构的 gRPC 契约；
+- **向下（面向核心服务群）**：通过 HTTP/2 gRPC 长连接与底层 `PrivShield Agent`（`:50051`）高效通信（支持 mTLS），并联动中台微服务群（`service-hub`、`datasource-mgr`、`audit-log`）；
 - **对内（业务逻辑与仿真）**：实现 REST 路径到 gRPC 方法的智能映射与分发（`internal/mapper`）、CSV/JSON 文件批量脱敏流式解析、医疗/医保多阶段流水线调度仿真，以及网关负载均衡与并发压力测试。
 
 ---
 
-## 2. 背景与选型原因
+## 2. 背景与核心能力
 
 `PrivShield` 的核心隐私治理服务基于 gRPC（默认端口 `50051`）与 REST（默认端口 `8079`）双协议暴露全部隐私原语（脱敏、差分隐私、K-匿名、查询混淆、数据分类分级）。
 
@@ -43,10 +43,11 @@
 
 1. **强类型编译期校验**：依托 Protobuf 生成的 Go 结构体，消除手写字典在字段类型、拼写错误上的隐患；
 2. **HTTP/2 多路复用与低延迟**：通过 gRPC 长连接复用底层 TCP，吞吐大幅提升，单次原语调用延迟较短连接显著降低；
-3. **与 Python 后端完全一致的契约 (Contract Parity)**：对外提供与 Python 后端（`console/bff-py`）完全相同的 REST JSON 接口，前端只需切换 API Base URL 即可无缝热切换；
-4. **内置单页应用独立托管**：支持直接托管前端构建产物（`web/dist`），使 Go 后端可独立提供完整 Web UI，无需依赖外部 Web 服务器或 Python 环境；
-5. **gRPC 自动重试与连接保活**：内置可配置 gRPC 重试策略（默认最多 6 次，指数退避 1s→8s），`waitForReady=true` 连接等待就绪，HTTP/2 PING 帧心跳保活；
-6. **优雅停机与 Panic 恢复**：SIGINT/SIGTERM 信号优雅停机，Gin Recovery 中间件自动捕获 panic，Goroutine 泄漏防护。
+3. **HTTPS 与 gRPC 双协议暴露**：同时支持 REST/HTTPS 服务与原生 gRPC Server 服务；
+4. **全链路 mTLS 双向认证**：入站 HTTPS/gRPC 与出站 Agent gRPC 均支持严格的 mTLS 双向证书与公钥固定（SPKI Pinning）校验；
+5. **内置单页应用独立托管**：支持直接托管前端构建产物（`web/dist`），使 Go 后端可独立提供完整 Web UI，无需依赖外部 Web 服务器或 Python 环境；
+6. **连接崩溃恢复完备性 (Crash Recovery & Fault Tolerance)**：内置可配置 gRPC 指数退避重试（默认最多 6 次，1s→8s）、`waitForReady=true` 连接等待就绪、HTTP/2 PING 帧心跳保活；
+7. **优雅停机与 Panic 恢复**：SIGINT/SIGTERM 信号优雅双协议停机，Gin Recovery 中间件自动捕获 panic，Goroutine 泄漏防护。
 
 > 📖 **可靠性能力详解**：[docs/reliability.md](docs/reliability.md)
 

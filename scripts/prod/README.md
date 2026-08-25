@@ -18,10 +18,9 @@
   - [`docker-start-agent.sh` / `docker-start-agent.ps1` (生产 Agent 容器启动)](#docker-start-agentsh--docker-start-agentps1)
   - [`docker-stop-agent.sh` / `docker-stop-agent.ps1` (生产 Agent 容器停止)](#docker-stop-agentsh--docker-stop-agentps1)
 - [2. 本地单机生产模式 (Native Process Production)](#2-本地单机生产模式-native-process-production)
-  - [`prod-start-go.sh` (Go BFF 生产模式)](#prod-start-gosh)
+  - [`prod-start.sh` / `prod-start-go.sh` (Go BFF 生产模式)](#prod-startsh--prod-start-gosh)
   - [`prod-start-go-mtls.sh` (Go BFF 生产 mTLS 模式)](#prod-start-go-mtlssh)
-  - [`prod-start.sh` (Python BFF 生产模式)](#prod-startsh)
-  - [`prod-start-all.sh` (双 BFF 生产模式)](#prod-start-allsh)
+  - [`prod-start-all.sh` (全量服务生产模式)](#prod-start-allsh)
   - [`prod-stop.sh` (停止生产单机服务)](#prod-stopsh)
 - [3. 数据备份与生产巡检 (Backup & Health Check)](#3-数据备份与生产巡检-backup--health-check)
   - [`prod_health_check.sh` (生产全链路健康状态巡检)](#prod_health_checksh)
@@ -140,11 +139,11 @@
 
 ## 2. 本地单机生产模式 (Native Process Production)
 
-### `prod-start-go.sh`
+### `prod-start.sh` / `prod-start-go.sh`
 - **作用说明**: 生产单机模式启动 Agent (`:8079/50051`) 与 Go BFF 网关 (`:8081`)。Go BFF 会自动构建前端 Web 静态产物并独立提供生产 SPA 托管服务。
 - **执行命令**:
   ```bash
-  bash ./scripts/prod/prod-start-go.sh
+  bash ./scripts/prod/prod-start.sh
   ```
 
 ---
@@ -158,17 +157,8 @@
 
 ---
 
-### `prod-start.sh`
-- **作用说明**: 生产单机模式启动 Agent 与 Python FastAPI BFF (`:8080`)，由 Python BFF 托管前端静态 SPA。
-- **执行命令**:
-  ```bash
-  bash ./scripts/prod/prod-start.sh
-  ```
-
----
-
 ### `prod-start-all.sh`
-- **作用说明**: 生产单机模式同时启动 Agent、Go BFF (`:8081`) 与 Python BFF (`:8080`)，提供双后端生产代理服务。
+- **作用说明**: 生产单机模式启动全量服务（Agent + Go BFF 静态托管）。
 - **执行命令**:
   ```bash
   bash ./scripts/prod/prod-start-all.sh

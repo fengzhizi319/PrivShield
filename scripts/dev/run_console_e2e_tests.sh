@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # 脚本名称: run_console_e2e_tests.sh
-# 脚本说明: 一键运行 Console 控制台前后端 (Web + Python Backend + Go Proxy + Services)
+# 脚本说明: 一键运行 Console 控制台前后端 (Web + Go BFF Gateway + Services)
 #           的全套端到端 (E2E) 集成自动化回归测试。
 #
 # 执行步骤总览：
 #   0. 自动定位并切换至项目根目录，注册退出清理钩子
 #   1. 启动轻量 Mock Agent 桩服务 (端口 8079)
-#   2. 运行 Console BFF (Python FastAPI) pytest 单元测试与烟雾测试 (端口 8080)
-#   3. 运行 Console BFF-Go (Go gRPC) 与 Pkg 基础库测试
-#   4. 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试
-#   5. 运行 Console Web (React 前端) Vitest 自动化单元与组件测试
-#   6. 统计并输出测试执行汇总（防止全跳过误报成功）
+#   2. 运行 Console BFF-Go (REST/gRPC/mTLS 双协议) 与 Pkg 基础库测试
+#   3. 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试
+#   4. 运行 Console Web (React 前端) Vitest 自动化单元与组件测试
+#   5. 统计并输出测试执行汇总（防止全跳过误报成功）
 #
 # 用法 / Usage:
 #   ./scripts/dev/run_console_e2e_tests.sh
@@ -75,47 +74,22 @@ if ! kill -0 "$MOCK_PID" 2>/dev/null; then
 fi
 echo -e "${GREEN}Mock Agent 已启动 (PID: ${MOCK_PID})${NC}"
 
-# ── 步骤 2：运行 Console Python 后端单元测试与烟雾测试 ────────────────────
-echo -e "\n${YELLOW}[步骤 2/5] 运行 Console BFF (Python) 单元测试与 Smoke Test...${NC}"
-if [ -d "console/bff-py" ]; then
-    TESTS_RUN=$((TESTS_RUN + 1))
-    (
-        cd console/bff-py
-        echo "运行 pytest 路由与降级单元测试..."
-        PYTHONPATH=. pytest tests/ -v
-
-        echo "启动 Console BFF FastAPI 服务 (端口 8080)..."
-        python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8080 &
-        INNER_BACKEND_PID=$!
-        sleep 2
-        
-        echo "运行烟雾测试 (smoke_test.py)..."
-        python3 smoke_test.py
-        kill "$INNER_BACKEND_PID" 2>/dev/null || true
-    )
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}[成功] Python BFF 控制台与 Smoke Test 全部通过！${NC}"
-else
-    TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
-    echo -e "${YELLOW}[跳过] 未发现 console/bff-py 目录。${NC}"
-fi
-
-# ── 步骤 3：运行 Go BFF 与共享库测试 ──────────────────────────────────────
-echo -e "\n${YELLOW}[步骤 3/5] 运行 Console BFF-Go (Go) 与 Pkg 基础库测试...${NC}"
+# ── 步骤 2：运行 Go BFF 网关 (REST/gRPC/mTLS) 与共享库测试 ────────────────
+echo -e "\n${YELLOW}[步骤 2/4] 运行 Console BFF-Go (REST/gRPC/mTLS) 与 Pkg 基础库测试...${NC}"
 if command -v go &> /dev/null && [ -d "console/bff-go" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
     (
-        go test ./pkg/... ./console/bff-go/...
+        go test -v ./pkg/... ./console/bff-go/...
     )
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}[成功] Go BFF 与 Pkg 测试通过！${NC}"
+    echo -e "${GREEN}[成功] Go BFF 与 Pkg 基础库测试通过！${NC}"
 else
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     echo -e "${YELLOW}[跳过] 未发现 go 命令或 console/bff-go 目录。${NC}"
 fi
 
-# ── 步骤 4：运行 Services 微服务群测试 ────────────────────────────────────
-echo -e "\n${YELLOW}[步骤 4/5] 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试...${NC}"
+# ── 步骤 3：运行 Services 微服务群测试 ────────────────────────────────────
+echo -e "\n${YELLOW}[步骤 3/4] 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试...${NC}"
 if command -v go &> /dev/null && [ -d "services" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
     (
@@ -128,8 +102,8 @@ else
     echo -e "${YELLOW}[跳过] 未发现 go 命令或 services 目录。${NC}"
 fi
 
-# ── 步骤 5：运行 Web 前端组件与单元测试 ───────────────────────────────────
-echo -e "\n${YELLOW}[步骤 5/5] 运行 Console Web (React) 组件与自动化测试...${NC}"
+# ── 步骤 4：运行 Web 前端组件与单元测试 ───────────────────────────────────
+echo -e "\n${YELLOW}[步骤 4/4] 运行 Console Web (React) 组件与自动化测试...${NC}"
 if [ -d "console/web" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
     (

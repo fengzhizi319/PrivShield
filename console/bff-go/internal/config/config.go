@@ -130,6 +130,46 @@ type Config struct {
 	// AgentRetryMaxBackoff：重试最大退避时间（秒）。
 	// 对应环境变量 PRIVACY_AGENT_RETRY_MAX_BACKOFF，默认 8。
 	AgentRetryMaxBackoff int
+
+	// ── BFF 入站 HTTP/HTTPS 服务端 TLS 与 mTLS 配置 ─────────────────────
+
+	// ConsoleTLSEnabled：是否为本 BFF HTTP/REST 服务开启 HTTPS (TLS/mTLS)。
+	// 对应环境变量 PRIVACY_CONSOLE_TLS_ENABLED，默认 false。
+	ConsoleTLSEnabled bool
+
+	// ConsoleTLSCertFile：BFF 服务端 X.509 证书路径（PEM）。
+	// 对应环境变量 PRIVACY_CONSOLE_TLS_CERT_FILE。
+	ConsoleTLSCertFile string
+
+	// ConsoleTLSKeyFile：BFF 服务端私钥路径（PEM）。
+	// 对应环境变量 PRIVACY_CONSOLE_TLS_KEY_FILE。
+	ConsoleTLSKeyFile string
+
+	// ConsoleTLSCAFile：用于校验入站客户端证书的 CA 根证书路径（PEM，mTLS 双向认证）。
+	// 对应环境变量 PRIVACY_CONSOLE_TLS_CA_FILE。
+	ConsoleTLSCAFile string
+
+	// ConsoleTLSClientAuth：客户端认证模式："require" | "verify" | "request" | ""。
+	// 对应环境变量 PRIVACY_CONSOLE_TLS_CLIENT_AUTH，默认 ""（单向 TLS）。
+	ConsoleTLSClientAuth string
+
+	// ConsoleTLSPinnedPubKeyFile：可选的客户端公钥固定文件路径（PEM）。
+	// 对应环境变量 PRIVACY_CONSOLE_TLS_PINNED_PUBKEY_FILE。
+	ConsoleTLSPinnedPubKeyFile string
+
+	// ── BFF 入站 gRPC 服务端配置 ─────────────────────────────────────────
+
+	// ConsoleGRPCEnabled：是否同时启动 BFF 自身对外暴露的 gRPC 代理网关服务。
+	// 对应环境变量 PRIVACY_CONSOLE_GRPC_ENABLED，默认 false。
+	ConsoleGRPCEnabled bool
+
+	// ConsoleGRPCHost：BFF gRPC 服务的绑定主机地址。
+	// 对应环境变量 PRIVACY_CONSOLE_GRPC_HOST，默认 "127.0.0.1"。
+	ConsoleGRPCHost string
+
+	// ConsoleGRPCPort：BFF gRPC 服务的监听端口。
+	// 对应环境变量 PRIVACY_CONSOLE_GRPC_PORT，默认 50055。
+	ConsoleGRPCPort int
 }
 
 // Load reads all configuration from environment variables and returns a populated Config.
@@ -184,7 +224,23 @@ func Load() *Config {
 		AgentRetryMaxAttempts:    getEnvInt("PRIVACY_AGENT_RETRY_MAX_ATTEMPTS", 6),
 		AgentRetryInitialBackoff: getEnvInt("PRIVACY_AGENT_RETRY_INITIAL_BACKOFF", 1),
 		AgentRetryMaxBackoff:     getEnvInt("PRIVACY_AGENT_RETRY_MAX_BACKOFF", 8),
+		// BFF 入站 HTTPS/TLS 配置
+		ConsoleTLSEnabled:          getEnvBool("PRIVACY_CONSOLE_TLS_ENABLED", false),
+		ConsoleTLSCertFile:         getEnv("PRIVACY_CONSOLE_TLS_CERT_FILE", ""),
+		ConsoleTLSKeyFile:          getEnv("PRIVACY_CONSOLE_TLS_KEY_FILE", ""),
+		ConsoleTLSCAFile:           getEnv("PRIVACY_CONSOLE_TLS_CA_FILE", ""),
+		ConsoleTLSClientAuth:       getEnv("PRIVACY_CONSOLE_TLS_CLIENT_AUTH", ""),
+		ConsoleTLSPinnedPubKeyFile: getEnv("PRIVACY_CONSOLE_TLS_PINNED_PUBKEY_FILE", ""),
+		// BFF 入站 gRPC 服务端配置
+		ConsoleGRPCEnabled: getEnvBool("PRIVACY_CONSOLE_GRPC_ENABLED", false),
+		ConsoleGRPCHost:    getEnv("PRIVACY_CONSOLE_GRPC_HOST", "127.0.0.1"),
+		ConsoleGRPCPort:    getEnvInt("PRIVACY_CONSOLE_GRPC_PORT", 50055),
 	}
+}
+
+// ConsoleGRPCAddress returns the formatted host:port string for the BFF's gRPC server.
+func (c *Config) ConsoleGRPCAddress() string {
+	return fmt.Sprintf("%s:%d", c.ConsoleGRPCHost, c.ConsoleGRPCPort)
 }
 
 // Validate checks that the configuration is consistent and all required files exist.
@@ -212,6 +268,33 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+
+	// BFF Inbound TLS validation
+	if c.ConsoleTLSEnabled {
+		if c.ConsoleTLSCertFile == "" || c.ConsoleTLSKeyFile == "" {
+			return fmt.Errorf("PRIVACY_CONSOLE_TLS_CERT_FILE and PRIVACY_CONSOLE_TLS_KEY_FILE must be set when console TLS is enabled")
+		}
+		if _, err := os.Stat(c.ConsoleTLSCertFile); err != nil {
+			return fmt.Errorf("Console TLS cert file not accessible: %s: %w", c.ConsoleTLSCertFile, err)
+		}
+		if _, err := os.Stat(c.ConsoleTLSKeyFile); err != nil {
+			return fmt.Errorf("Console TLS key file not accessible: %s: %w", c.ConsoleTLSKeyFile, err)
+		}
+		if strings.TrimSpace(c.ConsoleTLSClientAuth) != "" {
+			if c.ConsoleTLSCAFile == "" {
+				return fmt.Errorf("PRIVACY_CONSOLE_TLS_CA_FILE must be configured when client auth is enabled")
+			}
+			if _, err := os.Stat(c.ConsoleTLSCAFile); err != nil {
+				return fmt.Errorf("Console TLS CA file not accessible: %s: %w", c.ConsoleTLSCAFile, err)
+			}
+		}
+		if c.ConsoleTLSPinnedPubKeyFile != "" {
+			if _, err := os.Stat(c.ConsoleTLSPinnedPubKeyFile); err != nil {
+				return fmt.Errorf("Console TLS pinned pubkey file not accessible: %s: %w", c.ConsoleTLSPinnedPubKeyFile, err)
+			}
+		}
+	}
+
 	if c.AgentRetryMaxAttempts < 1 {
 		return fmt.Errorf("PRIVACY_AGENT_RETRY_MAX_ATTEMPTS must be >= 1, got %d", c.AgentRetryMaxAttempts)
 	}

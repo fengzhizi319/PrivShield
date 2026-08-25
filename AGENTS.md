@@ -86,8 +86,7 @@ PrivShield/
 │   ├── datasource-mgr/            # 数据源资产管理与敏感特征自动探查 (:8083)
 │   └── audit-log/                 # 脱敏审计日志与不可篡改 SHA-256 存证 (:8084)
 ├── console/                       # 统一运维与测试控制台 (Web UI + BFF)
-│   ├── bff-go/                    # Go gRPC 代理网关 / BFF (:8081)
-│   ├── bff-py/                    # Python REST 代理后端 / 备用 BFF (:8080)
+│   ├── bff-go/                    # Go gRPC/HTTPS 代理网关 / BFF (:8081)
 │   └── web/                       # React + TypeScript + Vite 前端控制台 (:5173)
 ├── pkg/                           # Go 共享基础库 (Agent客户端, 中间件, 存储, 指标, 校验)
 ├── proto/privacy.proto            # gRPC service definition
@@ -362,33 +361,23 @@ Address these before any hardened production deployment.
 | Helm lint | `make helm-lint` |
 | Helm template | `make helm-template` |
 | Build core image | `make docker-core` |
-| Build ml image | `make docker-ml` |
-| Run Dev Console (Go + Vite HMR) | `bash ./scripts/dev/dev-start-go.sh` |
-| Run Dev Console (Python + Vite HMR) | `bash ./scripts/dev/dev-start.sh` |
-| Run Dev Console (Dual Backend + Vite) | `bash ./scripts/dev/dev-start-all.sh` |
+| Run Dev Console (Go + Vite HMR) | `bash ./scripts/dev/dev-start.sh` |
 | Run Dev Console (Go mTLS + Vite) | `bash ./scripts/dev/dev-start-go-mtls.sh` |
-| Start All E2E Services (Agent + 3 Go) | `bash ./scripts/dev/e2e-start-all-services.sh` |
-| Stop All E2E Services | `bash ./scripts/dev/e2e-stop-all-services.sh` |
-| Run Dev 3 New Modules (Agent required) | `bash ./scripts/dev/dev-start-new-modules.sh` |
-| Stop 3 New Modules | `bash ./scripts/dev/dev-stop-new-modules.sh` |
+| Start All E2E Services (Agent + 3 Go + BFF) | `bash ./scripts/dev/dev-start-all.sh` |
 | Run Integration Test (curl-based) | `bash ./scripts/dev/integration-test-new-modules.sh` |
 | Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` |
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
 | Run Docker Console (Go Backend + Web) | `bash ./scripts/dev/docker-start-go.sh` |
-| Run Docker Console (Python Backend + Web) | `bash ./scripts/dev/docker-start-python.sh` |
-| Run Docker Full Stack (Agent+Backends+Web) | `bash ./scripts/dev/docker-start-all.sh [--with-llm]` |
+| Run Docker Full Stack (Agent+Go BFF+Web) | `bash ./scripts/dev/docker-start-all.sh [--with-llm]` |
 | Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
 | Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |
 | Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
 | Stop Docker Services | `bash ./scripts/dev/docker-stop.sh` |
-| Run Prod Console (Go + Static) | `bash ./scripts/prod/prod-start-go.sh` |
-| Run Prod Console (Python + Static) | `bash ./scripts/prod/prod-start.sh` |
-| Run Prod Console (Dual Backend + Static) | `bash ./scripts/prod/prod-start-all.sh` |
+| Run Prod Console (Go + Static) | `bash ./scripts/prod/prod-start.sh` |
 | Stop Dev Console | `bash ./scripts/dev/dev-stop.sh` |
 | Stop Prod Console | `bash ./scripts/prod/prod-stop.sh` |
 | Run REST + gRPC | `python -m engine.server` |
-| Run test console backend | `cd console/bff-py && ./run.sh` |
 | Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |
 | Run gateway | `python -m engine.gateway.server` |
 | Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=engine --grpc_python_out=engine proto/privacy.proto` |

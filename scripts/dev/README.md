@@ -9,9 +9,8 @@
 ## 目录索引
 
 - [1. 本地原生开发与控制台启动脚本](#1-本地原生开发与控制台启动脚本)
-  - [`dev-start-go.sh` / `dev-start-go.ps1` (Go BFF + 前端热更新)](#dev-start-gosh--dev-start-gops1)
-  - [`dev-start.sh` (Python BFF + 前端热更新)](#dev-startsh)
-  - [`dev-start-all.sh` (双 BFF + 前端热更新)](#dev-start-allsh)
+  - [`dev-start.sh` / `dev-start-go.sh` (Go BFF + 前端热更新)](#dev-startsh--dev-start-gosh)
+  - [`dev-start-all.sh` (全量服务 + 前端热更新)](#dev-start-allsh)
   - [`dev-start-go-mtls.sh` (Go BFF mTLS 安全模式)](#dev-start-go-mtlssh)
   - [`dev-stop.sh` (停止本地开发服务)](#dev-stopsh)
 - [2. 中台微服务群管理脚本](#2-中台微服务群管理脚本)
@@ -24,7 +23,7 @@
 - [3. Docker 容器化联调脚本](#3-docker-容器化联调脚本)
   - [`docker-start-all.sh` (启动全栈 Docker 容器)](#docker-start-allsh)
   - [`docker-start-go.sh` (启动 Go + Web 容器栈)](#docker-start-gosh)
-  - [`docker-start-python.sh` (启动 Python + Web 容器栈)](#docker-start-pythonsh)
+  - [`docker-start-python.sh` (自动重定向到 Go BFF 容器栈)](#docker-start-pythonsh)
   - [`docker-start-agent.sh` / `docker-start-agent.ps1` (启动 Agent 容器)](#docker-start-agentsh--docker-start-agentps1)
   - [`docker-stop-agent.sh` / `docker-stop-agent.ps1` (停止 Agent 容器)](#docker-stop-agentsh--docker-stop-agentps1)
   - [`docker-start-llm.sh` / `docker-start-llm.ps1` (启动 vLLM 容器)](#docker-start-llmsh--docker-start-llmps1)
@@ -46,33 +45,19 @@
 
 ## 1. 本地原生开发与控制台启动脚本
 
-### `dev-start-go.sh` / `dev-start-go.ps1`
-- **作用说明**: 【推荐主力】一键启动 Python 核心算力 Agent（REST `:8079`、gRPC `:50051`）、Go 语言 gRPC 代理网关 BFF (`:8081`)，以及基于 Vite 的 React Web 前端开发服务器 (`:5173`，支持毫秒级 HMR 热更新）。
+### `dev-start.sh` / `dev-start-go.sh`
+- **作用说明**: 【推荐主力】一键启动 Python 核心算力 Agent（REST `:8079`、gRPC `:50051`）、Go 语言 gRPC/HTTPS 代理网关 BFF (`:8081`)，以及基于 Vite 的 React Web 前端开发服务器 (`:5173`，支持毫秒级 HMR 热更新）。
 - **参数选项**: `--force`（端口被占用时自动释放占用进程）。
 - **执行命令**:
   ```bash
   # Linux / macOS (Bash)
-  bash ./scripts/dev/dev-start-go.sh
-  ```
-  ```powershell
-  # Windows (PowerShell)
-  .\scripts\dev\dev-start-go.ps1
-  ```
-
----
-
-### `dev-start.sh`
-- **作用说明**: 一键启动 Python 核心算力 Agent（REST `:8079`、gRPC `:50051`）、Python REST 代理后端 BFF (`:8080`)，以及前端 Vite 开发服务器 (`:5173`)。
-- **参数选项**: `--force`（非交互模式自动释放占用端口）。
-- **执行命令**:
-  ```bash
   bash ./scripts/dev/dev-start.sh
   ```
 
 ---
 
 ### `dev-start-all.sh`
-- **作用说明**: 【双后端联调】同时启动 Python 核心 Agent、Go gRPC BFF (`:8081`)、Python REST BFF (`:8080`) 和 React Web 前端 (`:5173`)，用于对比双后端代理行为一致性。
+- **作用说明**: 【全量服务】同时启动 Python 核心 Agent、Go gRPC BFF (`:8081`) 和 React Web 前端 (`:5173`)。
 - **参数选项**: `--force`（自动释放占用端口）。
 - **执行命令**:
   ```bash

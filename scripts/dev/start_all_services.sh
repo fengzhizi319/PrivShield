@@ -120,29 +120,16 @@ AGENT_PID=$!
 echo $AGENT_PID > "${LOG_DIR}/agent.pid"
 echo -e "Agent 进程 PID: ${GREEN}${AGENT_PID}${NC} (日志: ${AGENT_LOG})"
 
-# 3. 启动 Console BFF 代理
-echo -e "\n${YELLOW}[2/3] 启动 Console BFF 代理网关...${NC}"
-if [ "$USE_GO_BFF" = true ]; then
-    if [ -d "$PROJECT_ROOT/console/bff-go" ]; then
-        (
-            cd "$PROJECT_ROOT/console/bff-go"
-            go build -o bin/backend-go ./cmd/server
-            nohup ./bin/backend-go < /dev/null > "${LOG_DIR}/console_bff_go.log" 2>&1 &
-            echo $! > "${LOG_DIR}/console.pid"
-        )
-        echo -e "Console Go BFF 日志: ${LOG_DIR}/console_bff_go.log"
-    fi
-else
-    if [ -f "$PROJECT_ROOT/console/bff-py/app/main.py" ]; then
-        CONSOLE_LOG="${LOG_DIR}/console_bff_py.log"
-        rotate_log "$CONSOLE_LOG"
-        (
-            cd "$PROJECT_ROOT/console/bff-py"
-            nohup python3 -m uvicorn app.main:app --host 127.0.0.1 --port "$CONSOLE_PORT" < /dev/null > "$CONSOLE_LOG" 2>&1 &
-            echo $! > "${LOG_DIR}/console.pid"
-        )
-        echo -e "Console Python BFF 日志: ${CONSOLE_LOG}"
-    fi
+# 3. 启动 Console BFF 代理 (Go BFF :8081)
+echo -e "\n${YELLOW}[2/3] 启动 Console BFF 代理网关 (Go gRPC BFF)...${NC}"
+if [ -d "$PROJECT_ROOT/console/bff-go" ]; then
+    (
+        cd "$PROJECT_ROOT/console/bff-go"
+        go build -o bin/backend-go ./cmd/server
+        nohup ./bin/backend-go < /dev/null > "${LOG_DIR}/console_bff_go.log" 2>&1 &
+        echo $! > "${LOG_DIR}/console.pid"
+    )
+    echo -e "Console Go BFF PID $(cat "${LOG_DIR}/console.pid"), 日志: ${LOG_DIR}/console_bff_go.log"
 fi
 
 # 4. 可选拉起中台微服务群

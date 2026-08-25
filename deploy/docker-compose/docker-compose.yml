@@ -330,60 +330,9 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 3. Console Python 后端代理服务 (Python FastAPI REST 代理)
-  #    PORT: 8080
-  #    作用: 备选/兼容通道——以 HTTP 转发到 agent 的 REST 8079（Go 代理之外的 Python 实现）
-  # ===========================================================================
-  console-backend-python:
-    build:
-      context: ../../console/bff-py   # 构建上下文 = Python FastAPI 代理源码目录
-      dockerfile: Dockerfile
-    image: privacy-console-backend-python:1.8.0
-    pull_policy: build
-    container_name: privacy-console-backend-python
-    ports:
-      - "8080:8080"  # 对外暴露 Python 代理 HTTP 端口
-    environment:
-      # PRIVACY_CONSOLE_HOST: Python 代理监听地址（同上，容器内必须 0.0.0.0）
-      PRIVACY_CONSOLE_HOST: "0.0.0.0"
-      # PRIVACY_CONSOLE_PORT: Python 代理监听端口
-      PRIVACY_CONSOLE_PORT: "8080"
-      # PRIVACY_AGENT_URL: 上游 agent 的 REST 基地址（FastAPI 代理仅走 HTTP）
-      #   格式 http://<服务名>:<REST端口>；跨主机部署时替换为 agent 实际地址
-      PRIVACY_AGENT_URL: "http://PrivShield:8079"
-    depends_on:
-      PrivShield:
-        condition: service_healthy  # 等待 agent 健康就绪（同服务 2 说明）
-    networks:
-      - frontend
-      - backend
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    # 资源限制 / Resource limits
-    deploy:
-      resources:
-        limits:           # 硬上限：Python 运行时略重，仍 1 核 512M
-          cpus: "1.0"
-          memory: 512M
-        reservations:
-          cpus: "0.1"
-          memory: 128M
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "3"
-    stop_grace_period: 10s
-    restart: unless-stopped
-
-  # ===========================================================================
-  # 4. Console React 单页测试控制台 Web UI (Nginx 静态服务)
+  # 3. Console React 单页测试控制台 Web UI (Nginx 静态服务)
   #    PORT: 5173
-  #    作用: 前端测试控制台，静态资源由 Nginx 托管；API 请求经后端代理转发
+  #    作用: 前端测试控制台，静态资源由 Nginx 托管；API 请求经 Go BFF 代理转发
   # ===========================================================================
   console-web:
     build:
@@ -394,14 +343,12 @@ services:
     container_name: privacy-console-web
     ports:
       - "5173:5173"  # 对外暴露前端访问端口（与 vite 开发端口保持一致，切换开发/生产无感）
-    # 说明: 前端仅需访问 Go/Python 代理，无需直连 agent，故仅挂 frontend 网络
+    # 说明: 前端仅需访问 Go 代理与微服务群，无需直连 agent，故仅挂 frontend 网络
     depends_on:
       PrivShield:
         condition: service_healthy  # 等核心 agent 就绪
       console-backend-go:
         condition: service_healthy  # nginx 反代 Go BFF，需先就绪避免 502
-      console-backend-python:
-        condition: service_healthy  # nginx 反代 Python BFF
       service-hub:
         condition: service_healthy  # nginx 反代 /api/hub/
       datasource-mgr:

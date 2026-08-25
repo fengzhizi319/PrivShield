@@ -58,26 +58,16 @@ help:
 # ── Quality ──────────────────────────────────────────────────
 
 lint:
-	ruff check engine/ tests/ console/bff-py/
-
-lint-console:
-	ruff check console/bff-py/
+	ruff check engine/ tests/
 
 format:
-	ruff format engine/ tests/ console/bff-py/
-	ruff check --fix engine/ tests/ console/bff-py/
-
-format-console:
-	ruff format console/bff-py/
-	ruff check --fix console/bff-py/
+	ruff format engine/ tests/
+	ruff check --fix engine/ tests/
 
 typecheck:
 	mypy
 
-typecheck-console:
-	mypy console/bff-py
-
-check: lint-console typecheck-console
+check: lint typecheck
 
 # ── Testing ──────────────────────────────────────────────────
 
@@ -89,10 +79,9 @@ test:
 test-unit:
 	pytest tests/ -q --tb=short -m "not integration and not slow"
 
-# 控制台测试分成 Python 后端和 smoke test 两步，确保 UI 代理链路都能跑通。
+# 控制台测试运行 Go BFF 单元测试
 test-console:
-	cd console/bff-py && pytest tests/ -v
-	cd console/bff-py && python smoke_test.py
+	go test -v ./console/bff-go/...
 
 # Go 微服务与 BFF 测试
 test-go:
@@ -154,9 +143,8 @@ docker-services:
 	docker build -f services/audit-log/Dockerfile -t privshield-audit-log:$(VERSION) .
 
 docker-console:
-	# 控制台 Go BFF、Python BFF 与 Web UI Docker 镜像构建
+	# 控制台 Go BFF 与 Web UI Docker 镜像构建
 	docker build -f console/bff-go/Dockerfile -t privacy-console-backend-go:$(VERSION) .
-	docker build -f console/bff-py/Dockerfile -t privacy-console-backend-python:$(VERSION) .
 	docker build -f console/web/Dockerfile -t privacy-console-web:$(VERSION) .
 
 docker-all: docker-core docker-services docker-console

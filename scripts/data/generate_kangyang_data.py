@@ -430,7 +430,6 @@ def main():
     project_root = Path(__file__).resolve().parents[2]
     target_paths = [
         project_root / "data/kangyang.csv",
-        project_root / "console/bff-py/samples/kangyang.csv",
         project_root / "console/bff-go/internal/samples/kangyang.csv",
     ]
 

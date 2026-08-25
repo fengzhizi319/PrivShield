@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【开发模式】一键启动 Python REST 控制台 (Vite 热更新)
-# Launch Python REST proxy console in DEV mode with Vite HMR dev server
+# 【开发模式】一键启动 Go gRPC 控制台 (Vite 热更新)
+# Launch Go gRPC proxy console in DEV mode with Vite HMR dev server
 #
 # 用法 / Usage: ./scripts/dev/dev-start.sh [--force]
 #   --force: 非交互模式，端口被占用时自动终止占用进程（CI/脚本化场景）
 #
 # 启动组件 / Launched Components:
-#   1. PrivShield Engine (REST: 8079)
-#   2. Python REST 代理后端 (API: 8080)
+#   1. PrivShield Engine (REST: 8079, gRPC: 50051)
+#   2. Go gRPC 代理后端 (API: 8081)
 #   3. Vite 前端开发服务器 (UI: 5173, 支持 <50ms HMR 热重载)
 # ============================================================================
 
 set -euo pipefail
 
 # ── 解析命令行参数：仅支持 --force ─────────────────────────────────
-# --force : 非交互模式，端口被占用时自动终止占用进程（CI/脚本化场景）
 FORCE=false
 for arg in "$@"; do
     case "$arg" in
@@ -24,9 +23,6 @@ for arg in "$@"; do
 done
 
 # ── 解析脚本目录，初始化全局变量 ──────────────────────────────────
-# CONSOLE_DIR : 控制台源码目录（console/）
-# PIDS_DIR    : PID 文件存储目录（.pids/）
-# LOGS_DIR    : 日志输出目录（.logs/）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONSOLE_DIR="$PROJECT_ROOT/console"
@@ -36,14 +32,11 @@ LOGS_DIR="$PROJECT_ROOT/.logs"
 mkdir -p "$PIDS_DIR" "$LOGS_DIR"
 
 AGENT_VENV="$PROJECT_ROOT/.venv"
-BACKEND_VENV="$CONSOLE_DIR/bff-py/.venv"
-
 AGENT_URL="http://127.0.0.1:8079"
-CONSOLE_URL="http://127.0.0.1:8080"
+CONSOLE_URL="http://127.0.0.1:8081"
 VITE_URL="http://localhost:5173"
 
-# ── _is_port_in_use: 通过 TCP socket 探测端口是否被占用 ────────────
-# 使用 Python socket 而非 lsof/ss，跨平台兼容性更好
+# ── TCP connect 端口探测 ──────────────────────────────────────────────
 _is_port_in_use() {
     local port="$1"
     python3 -c "
@@ -59,11 +52,6 @@ except (ConnectionRefusedError, socket.timeout, OSError):
 " 2>/dev/null
 }
 
-# ── check_port_available: 端口占用检测 + 交互式/自动释放 ───────────
-# 1. 探测端口是否被占用，未占用则直接返回
-# 2. 占用时显示占用进程信息（lsof/ss/fuser）
-# 3. --force 模式自动终止占用进程；交互模式询问用户
-# 4. 非交互环境（无 TTY）且无 --force 则报错退出
 check_port_available() {
     local port="$1"
     local name="$2"
@@ -73,231 +61,164 @@ check_port_available() {
     fi
 
     echo ""
-    echo "⚠️  端口 $port 已被占用（$name）"
-    echo "────────────────────────────────────────"
+    echo "⚠️  [端口占用] $name 目标端口 $port 已被占用"
 
-    local pids=""
-    if command -v lsof >/dev/null 2>&1; then
-        lsof -i :"$port" 2>/dev/null || true
-        pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')
-    elif command -v ss >/dev/null 2>&1; then
-        ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" || true
-        pids=$(ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
-    elif command -v fuser >/dev/null 2>&1; then
-        pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
-    fi
-
-    if [[ -z "$pids" ]]; then
-        echo "错误：无法定位占用端口 $port 的进程，请手动排查。"
-        exit 1
-    fi
-
-    if [[ "$FORCE" == "true" ]]; then
-        echo "（--force 非交互模式：自动终止占用端口 $port 的进程）"
-        answer="y"
-    elif [[ ! -t 0 ]]; then
-        echo "错误：端口 $port 被占用且当前为非交互环境（无 TTY）。请手动释放端口，或使用 --force 自动处理。"
-        exit 1
-    else
-        read -rp "是否自动终止上述进程以释放端口？[y/N] " answer
-    fi
-    case "$answer" in
-        [yY]|[yY][eE][sS])
-            for pid in $pids; do
-                kill -9 "$pid" 2>/dev/null || true
-            done
+    if [ "$FORCE" = true ]; then
+        echo "   --force 模式：自动查找并终止占用进程..."
+        local pids
+        pids=$(lsof -ti :"$port" 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
             sleep 1
-            if ! _is_port_in_use "$port"; then
-                echo "✅ 端口 $port 已释放"
-            else
-                echo "错误：端口 $port 仍被占用，请手动排查。"
-                exit 1
-            fi
-            ;;
-        *)
-            echo "已取消。请手动释放端口 $port 后重试。"
+            echo "   ✅ 已终止占用端口 $port 的进程: $pids"
+        else
+            echo "   ❌ 未能自动获取占用端口 $port 的 PID，请手动释放后重试"
             exit 1
-            ;;
-    esac
-}
-
-# ── 第一步：自动创建虚拟环境（首次运行时） ────────────────────────
-# 1. Agent 虚拟环境：项目根目录 .venv/，安装 engine 包
-# 2. Python BFF 虚拟环境：console/bff-py/.venv/，安装 BFF 依赖
-# 3. 前端 node_modules：console/web/node_modules/
-
-# 1. Agent 虚拟环境
-if [[ ! -d "$AGENT_VENV" ]]; then
-    echo "未找到 agent 虚拟环境，自动创建并安装依赖：$AGENT_VENV"
-    python3 -m venv "$AGENT_VENV"
-    (
-        source "$AGENT_VENV/bin/activate"
-        cd "$PROJECT_ROOT"
-        pip install --upgrade pip >/dev/null
-        pip install -e .
-    )
-fi
-
-# 2. Python 后端虚拟环境
-if [[ ! -d "$BACKEND_VENV" ]]; then
-    echo "未找到 Python 后端虚拟环境，自动创建并安装依赖：$BACKEND_VENV"
-    python3 -m venv "$BACKEND_VENV"
-    (
-        source "$BACKEND_VENV/bin/activate"
-        pip install --upgrade pip >/dev/null
-        pip install -r "$CONSOLE_DIR/bff-py/requirements.txt"
-    )
-fi
-
-# 3. 确保前端 node_modules 存在
-if [[ ! -d "$CONSOLE_DIR/web/node_modules" ]]; then
-    echo "未找到前端 node_modules，自动安装依赖..."
-    (
-        cd "$CONSOLE_DIR/web"
-        if command -v pnpm >/dev/null 2>&1; then
-            pnpm install
-        elif command -v npm >/dev/null 2>&1; then
-            npm install
         fi
-    )
-fi
-
-# ── 第二步：注册 PID 文件路径 + 退出钩子 ────────────────────────────
-# cleanup(): 捕获 INT/TERM/EXIT 信号，统一停止所有后台进程并删除 PID 文件
-AGENT_PID_FILE="$PIDS_DIR/agent.pid"
-CONSOLE_PID_FILE="$PIDS_DIR/console.pid"
-VITE_PID_FILE="$PIDS_DIR/vite-dev.pid"
-
-write_pid() {
-    echo "$2" > "$1"
+    else
+        read -r -p "   是否自动终止占用端口 $port 的进程？[y/N] " answer
+        case "$answer" in
+            [yY][eE][sS]|[yY])
+                local pids
+                pids=$(lsof -ti :"$port" 2>/dev/null || true)
+                if [ -n "$pids" ]; then
+                    echo "$pids" | xargs kill -9 2>/dev/null || true
+                    sleep 1
+                    echo "   ✅ 已终止进程: $pids"
+                else
+                    echo "   ❌ 未能获取 PID，请手动释放端口 $port"
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "   已取消启动。请手动释放端口 $port 后重新运行本脚本。"
+                exit 1
+                ;;
+        esac
+    fi
 }
 
-PIDS=()
-STOPPING=false
-cleanup() {
-    STOPPING=true
-    echo ""
-    echo "正在停止【开发模式】所有服务..."
-    for pid in "${PIDS[@]}"; do
-        kill "$pid" 2>/dev/null || true
-    done
-    wait 2>/dev/null || true
-    rm -f "$AGENT_PID_FILE" "$CONSOLE_PID_FILE" "$VITE_PID_FILE"
-    echo "已停止。"
-}
-trap cleanup INT TERM EXIT
-
-# ── 第三步：检查端口可用性（8079/8080/5173） ────────────────────────
-check_port_available 8079 "PrivShield REST"
-check_port_available 8080 "Python REST 代理后端"
+# ── 启动前端口检查 ──────────────────────────────────────────────────
+check_port_available 8079 "PrivShield Engine REST"
+check_port_available 50051 "PrivShield Engine gRPC"
+check_port_available 8081 "Go gRPC 代理后端"
 check_port_available 5173 "Vite 前端开发服务器"
 
-# ── 第四步：启动 PrivShield Agent（REST: 8079） ────────────────────
-# 在子 shell 中激活 venv 并后台启动，日志追加到 .logs/agent_rest.log
-launch_agent() {
-    local agent_log="$LOGS_DIR/agent_rest.log"
-    echo "启动 PrivShield (REST: $AGENT_URL)，日志: $agent_log..."
-    (
-        source "$AGENT_VENV/bin/activate"
-        cd "$PROJECT_ROOT"
-        exec python -m engine.main >> "$agent_log" 2>&1
-    ) &
-    AGENT_PID=$!
-    PIDS[0]="$AGENT_PID"
-    write_pid "$AGENT_PID_FILE" "$AGENT_PID"
-}
-launch_agent
-
-# ── wait_for_service: HTTP 健康检查轮询，最多等待 30 秒 ────────────
-wait_for_service() {
+# ── 工具函数：轮询等待 HTTP 端点就绪 ───────────────────────────────────
+wait_for_url() {
     local url="$1"
     local name="$2"
-    local max_attempts=30
-    local attempt=0
-    echo -n "等待 $name 就绪"
-    while [[ $attempt -lt $max_attempts ]]; do
-        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then
-            echo " OK"
+    local max_retries="${3:-30}"
+    local count=0
+
+    printf "  ⏳ 等待 %s 就绪 (%s)..." "$name" "$url"
+    while [ $count -lt "$max_retries" ]; do
+        if curl -sf -o /dev/null --max-time 1 "$url" 2>/dev/null; then
+            printf " \033[32m[就绪]\033[0m\n"
             return 0
         fi
-        echo -n "."
         sleep 1
-        attempt=$((attempt + 1))
+        count=$((count + 1))
+        printf "."
     done
-    echo " 超时"
+    printf " \033[31m[超时]\033[0m\n"
     return 1
 }
 
-wait_for_service "$AGENT_URL/health" "PrivShield"
+# ── 启动组件 1：PrivShield Engine (REST: 8079, gRPC: 50051) ──────────
+echo "▶ 启动 PrivShield Engine (REST: 8079, gRPC: 50051)..."
+if [ -f "$AGENT_VENV/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$AGENT_VENV/bin/activate"
+fi
 
-# ── 第五步：启动 Python REST 代理后端（API: 8080） ────────────────
-echo "启动 Python REST 代理后端 (API: $CONSOLE_URL)..."
+if [ -f "$PROJECT_ROOT/engine/server.py" ]; then
+    (cd "$PROJECT_ROOT" && python3 -m engine.server) \
+        > "$LOGS_DIR/agent.log" 2>&1 &
+    AGENT_PID=$!
+else
+    (cd "$PROJECT_ROOT" && python3 -m engine.main) \
+        > "$LOGS_DIR/agent.log" 2>&1 &
+    AGENT_PID=$!
+fi
+echo "$AGENT_PID" > "$PIDS_DIR/agent.pid"
+echo "  PID: $AGENT_PID | 日志: $LOGS_DIR/agent.log"
+
+if ! wait_for_url "$AGENT_URL/health" "PrivShield Engine"; then
+    echo "❌ PrivShield Engine 启动失败，请检查日志: $LOGS_DIR/agent.log"
+    exit 1
+fi
+
+# ── 启动组件 2：Go gRPC 代理后端 (API: 8081) ───────────────────────
+echo "▶ 启动 Go gRPC 代理后端 (API: 8081)..."
+BACKEND_GO_DIR="$CONSOLE_DIR/bff-go"
+mkdir -p "$BACKEND_GO_DIR/bin"
+
+if ! command -v go &>/dev/null; then
+    echo "❌ 未找到 go 命令，请先安装 Go 1.22+ 编译环境"
+    exit 1
+fi
+
+echo "  正在编译 Go gRPC 代理后端..."
+(cd "$BACKEND_GO_DIR" && go build -o bin/backend-go ./cmd/server)
+if [ ! -f "$BACKEND_GO_DIR/bin/backend-go" ]; then
+    echo "❌ Go 代理后端编译失败！"
+    exit 1
+fi
+
 (
-    source "$BACKEND_VENV/bin/activate"
-    cd "$CONSOLE_DIR/bff-py"
-    exec uvicorn app.main:app --host 127.0.0.1 --port 8080
-) &
-CONSOLE_PID=$!
-PIDS+=("$CONSOLE_PID")
-write_pid "$CONSOLE_PID_FILE" "$CONSOLE_PID"
+    cd "$BACKEND_GO_DIR"
+    export PRIVACY_AGENT_GRPC_HOST=127.0.0.1
+    export PRIVACY_AGENT_GRPC_PORT=50051
+    export PRIVACY_CONSOLE_HOST=127.0.0.1
+    export PRIVACY_CONSOLE_PORT=8081
+    export PRIVACY_CONSOLE_STATIC_DIR=""
+    ./bin/backend-go
+) > "$LOGS_DIR/backend-go.log" 2>&1 &
+BACKEND_GO_PID=$!
+echo "$BACKEND_GO_PID" > "$PIDS_DIR/backend-go.pid"
+echo "  PID: $BACKEND_GO_PID | 日志: $LOGS_DIR/backend-go.log"
 
-wait_for_service "$CONSOLE_URL/api/health" "Python REST 代理后端"
+if ! wait_for_url "$CONSOLE_URL/api/health" "Go gRPC 代理后端"; then
+    echo "❌ Go gRPC 代理后端启动失败，请检查日志: $LOGS_DIR/backend-go.log"
+    exit 1
+fi
 
-# ── 第六步：启动 Vite 前端开发服务器（HMR 模式，端口 5173） ───────
-echo "启动 Vite 前端开发服务器 (HMR 模式)..."
+# ── 启动组件 3：Vite 前端开发服务器 (UI: 5173, HMR) ─────────────────
+echo "▶ 启动 Vite 前端开发服务器 (UI: 5173, 支持 <50ms 热更新)..."
+WEB_DIR="$CONSOLE_DIR/web"
+if [ ! -d "$WEB_DIR/node_modules" ]; then
+    echo "  首次运行，正在安装前端依赖 (corepack pnpm install)..."
+    (cd "$WEB_DIR" && corepack pnpm install)
+fi
+
 (
-    cd "$CONSOLE_DIR/web"
-    if command -v pnpm >/dev/null 2>&1; then
-        exec pnpm dev
-    else
-        exec npm run dev
-    fi
-) &
+    cd "$WEB_DIR"
+    export VITE_PROXY_TARGET="http://127.0.0.1:8081"
+    corepack pnpm dev
+) > "$LOGS_DIR/vite.log" 2>&1 &
 VITE_PID=$!
-PIDS+=("$VITE_PID")
-write_pid "$VITE_PID_FILE" "$VITE_PID"
+echo "$VITE_PID" > "$PIDS_DIR/vite.pid"
+echo "  PID: $VITE_PID | 日志: $LOGS_DIR/vite.log"
 
-echo -n "等待 Vite 开发服务器就绪"
-for i in $(seq 1 30); do
-    if _is_port_in_use 5173; then
-        echo " OK"
-        break
-    fi
-    echo -n "."
-    sleep 1
-done
+if ! wait_for_url "$VITE_URL" "Vite 前端开发服务器"; then
+    echo "❌ Vite 前端服务器启动失败，请检查日志: $LOGS_DIR/vite.log"
+    exit 1
+fi
 
+# ── 启动完成提示 ────────────────────────────────────────────────────
 echo ""
-echo "======================================================================"
-echo "🚀【开发模式】 Python REST 隐私测试控制台已成功启动！"
-echo "======================================================================"
-echo "  前端 UI (Vite HMR):  $VITE_URL  <-- 在浏览器中打开（支持热更新）"
-echo "  Python REST 代理:    $CONSOLE_URL"
-echo "  Agent REST:          $AGENT_URL"
-echo "──────────────────────────────────────────────────────────────────────"
-echo "  按 Ctrl+C 停止所有开发服务"
-echo "======================================================================"
-
-# ── 第七步：Watchdog 看门狗机制 ──────────────────────────────────
-# 主进程 wait Agent PID，若 Agent 意外退出则自动重启
-# 循环检测：启动 → wait → 退出 → 1s 后重启 → 健康检查 → 继续 wait
-set +e
-wait "$AGENT_PID" 2>/dev/null
-wait_rc=$?
-set -e
-
-while [[ "$STOPPING" != "true" ]]; do
-    echo "[watchdog] agent 已退出 (PID $AGENT_PID, exit code $wait_rc)，1 秒后自动重启..."
-    sleep 1
-    if [[ "$STOPPING" == "true" ]]; then
-        break
-    fi
-    launch_agent
-    if ! wait_for_service "$AGENT_URL/health" "重启后的 PrivShield"; then
-        echo "[watchdog] 警告：agent 重启后未在 30 秒内就绪。"
-    fi
-    set +e
-    wait "$AGENT_PID" 2>/dev/null
-    wait_rc=$?
-    set -e
-done
+echo "================================================================="
+echo "🎉 PrivShield 控制台 (Go gRPC 代理 + Vite HMR) 启动成功！"
+echo ""
+echo "  🌐 前端界面 (UI):    $VITE_URL"
+echo "  🔌 代理后端 (API):   $CONSOLE_URL"
+echo "  🛡️  隐私引擎 (Agent): $AGENT_URL (REST) / 127.0.0.1:50051 (gRPC)"
+echo ""
+echo "  📁 日志文件:"
+echo "     - Engine:     $LOGS_DIR/agent.log"
+echo "     - Backend-Go: $LOGS_DIR/backend-go.log"
+echo "     - Vite:       $LOGS_DIR/vite.log"
+echo ""
+echo "  🛑 停止服务: ./scripts/dev/dev-stop.sh"
+echo "================================================================="

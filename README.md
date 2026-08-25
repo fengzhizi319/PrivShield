@@ -25,8 +25,7 @@ PrivShield/ (Repo Root)
 │   └── audit-log/                # 脱敏审计与存证微服务 (:8084) - 审计快照、SHA-256 存证哈希链
 ├── console/                      # 【统一控制台与接入层】
 │   ├── web/                      # React 18 + TS + Vite + TailwindCSS 交互控制台 (:5173)
-│   ├── bff-go/                   # 主力 Go gRPC API Gateway / BFF (:8081)
-│   └── bff-py/                   # 备用 Python FastAPI 代理网关 (:8080)
+│   └── bff-go/                   # Go gRPC/HTTPS API Gateway / BFF (:8081)
 ├── pkg/                          # 【Go 全局共享基础库】连接池、中间件、安全防御、SQLite/Memory 存储
 ├── proto/                        # 【Protobuf 契约定义】privacy.proto / servicehub.proto
 ├── deploy/                       # 【云原生运维套件】Docker Compose / Helm / K8s / Prometheus / Grafana
@@ -148,14 +147,11 @@ bash ./scripts/dev/docker-stop.sh
 ### 1. 运行多语言全量测试
 
 ```bash
-# 运行 Go 基础库与全部 4 个 Go 微服务单测
+# 运行 Go 基础库与全部 Go 微服务单测（含 Go BFF）
 make test-go
 
 # 运行 Python 核心算力引擎单测（423 个用例）
 PYTHONPATH=. pytest tests/ -q
-
-# 运行 Python BFF 网关单测（37 个用例）
-cd console/bff-py && pytest tests/ -v
 
 # 运行前端控制台 Vitest 单测（77 个用例）
 cd console/web && corepack pnpm test -- --run

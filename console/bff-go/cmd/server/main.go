@@ -31,9 +31,11 @@ import (
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/config"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/handlers"
 )
 
@@ -85,8 +87,7 @@ func main() {
 	// 包括 CORS 中间件、健康检查、代理转发、批量测试、静态文件服务等
 	server.RegisterRoutes(router)
 
-	// ── 步骤 4：配置并启动 HTTP 服务器 ───────────────────────────────
-	// 创建标准库 HTTP 服务器实例，将 Gin 引擎作为 Handler
+	// ── 步骤 4：配置 HTTP/HTTPS 服务器 ───────────────────────────────
 	srv := &http.Server{
 		Addr:              cfg.ConsoleAddress(),
 		Handler:           router,
@@ -97,27 +98,48 @@ func main() {
 		MaxHeaderBytes:    1 << 20, // 1 MiB max header size
 	}
 
+	if cfg.ConsoleTLSEnabled {
+		tlsConfig, err := tlsutil.BuildServerTLSConfig(&tlsutil.ServerTLSConfig{
+			Enabled:          cfg.ConsoleTLSEnabled,
+			CertFile:         cfg.ConsoleTLSCertFile,
+			KeyFile:          cfg.ConsoleTLSKeyFile,
+			CAFile:           cfg.ConsoleTLSCAFile,
+			ClientAuth:       cfg.ConsoleTLSClientAuth,
+			PinnedPubKeyFile: cfg.ConsoleTLSPinnedPubKeyFile,
+		})
+		if err != nil {
+			log.Fatalf("failed to build console server TLS config: %v", err)
+		}
+		srv.TLSConfig = tlsConfig
+	}
+
+	// ── 步骤 4.5：可选启动 gRPC 网关服务 ──────────────────────────────
+	var grpcSrv *grpcserver.Server
+	if cfg.ConsoleGRPCEnabled {
+		grpcSrv = grpcserver.New(client, cfg, logger)
+		go func() {
+			if err := grpcSrv.Start(cfg.ConsoleGRPCAddress()); err != nil {
+				logger.Error("bff grpc server failed", "error", err.Error())
+			}
+		}()
+	}
+
 	// ── 步骤 5：启动优雅关闭协程 ─────────────────────────────────────
 	// 在独立 goroutine 中监听系统信号，主协程继续执行到 ListenAndServe
 	go func() {
-		// 创建一个带缓冲的信号通道，容量为 1 避免信号丢失
 		sigChan := make(chan os.Signal, 1)
-		// 将 SIGINT（Ctrl+C）和 SIGTERM（kill/容器停止）信号注册到通道
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		// 阻塞等待，直到收到任意一个系统信号
 		<-sigChan
 
-		// P57 fix: stop securityMiddleware ticker goroutine before stopping HTTP server.
+		logger.Info("shutting down bff-go servers...")
 		server.Shutdown()
+		if grpcSrv != nil {
+			grpcSrv.Stop()
+		}
 
-		// 收到关闭信号后，创建带 5 秒超时的上下文，
-		// 确保优雅关闭不会无限阻塞（如存在未完成的长连接）
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		// 注册 defer：函数退出时释放上下文资源
 		defer cancel()
-		// 调用 Shutdown：停止接收新连接，等待所有活跃请求处理完毕或超时
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			// 超时或关闭异常时仅打印日志（此时主协程可能已退出）
 			logger.Error("http server shutdown error", "error", err.Error())
 		}
 	}()
@@ -125,10 +147,20 @@ func main() {
 	// ── 步骤 6：启动服务 ──────────────────────────────────────────────
 	logger.Info("backend-go started",
 		"http_addr", cfg.ConsoleAddress(),
+		"tls_enabled", cfg.ConsoleTLSEnabled,
+		"mTLS", cfg.ConsoleTLSClientAuth != "",
+		"grpc_enabled", cfg.ConsoleGRPCEnabled,
 		"agent_grpc", cfg.AgentAddress(),
 	)
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("http server failed: %v", err)
+	var srvErr error
+	if cfg.ConsoleTLSEnabled {
+		srvErr = srv.ListenAndServeTLS("", "")
+	} else {
+		srvErr = srv.ListenAndServe()
+	}
+
+	if srvErr != nil && srvErr != http.ErrServerClosed {
+		log.Fatalf("http server failed: %v", srvErr)
 	}
 }

@@ -35,13 +35,13 @@ echo -e "${BLUE}====================================================${NC}"
 ERRORS=0
 
 # ── 步骤 1：检查 Python 运行环境 ──────────────────────────────────────────
-echo -e "\n${YELLOW}[1/4] 检查 Python 开发环境...${NC}"
+echo -e "\n${YELLOW}[1/4] 检查 Python 开发环境 (PrivShield Engine)...${NC}"
 if command -v python3 &> /dev/null; then
     PY_VER=$(python3 -c "import sys; print(sys.version.split()[0])")
     echo -e "Python 版本: ${GREEN}${PY_VER}${NC}"
     
-    python3 -c "import fastapi, httpx, pytest; print('Python 依赖包: [OK]')" 2>/dev/null || {
-        echo -e "${YELLOW}警告: 缺少某些后端测试包 (fastapi/httpx/pytest)。${NC}"
+    python3 -c "import pydantic, pytest; print('Python 核心依赖包: [OK]')" 2>/dev/null || {
+        echo -e "${YELLOW}警告: 缺少某些引擎开发包 (pydantic/pytest)。${NC}"
     }
 else
     echo -e "${RED}[错误] 未安装 python3！${NC}"

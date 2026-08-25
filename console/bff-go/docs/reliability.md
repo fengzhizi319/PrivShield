@@ -8,14 +8,17 @@
 
 | 能力维度 | 支持状态 | 实现方式 |
 |---|---|---|
-| 崩溃恢复 | ⚪ 不适用 | 无状态代理，无持久化任务状态 |
+| 崩溃恢复 | ✅ | 上游 gRPC 自动重连与指数退避重试（最多 6 次，1s→8s，覆盖 Agent 重启故障窗口） |
 | gRPC 自动重试 | ✅ | gRPC 内置重试策略，环境变量可配置，默认最多 6 次，指数退避 1s→8s |
 | 连接等待就绪 | ✅ | `waitForReady=true`，Agent 重启中 RPC 自动等待恢复 |
 | 连接保活心跳 | ✅ | HTTP/2 PING 帧，30s 间隔，10s 超时检测 |
-| 优雅停机 | ✅ | SIGINT/SIGTERM → 清理 goroutine → HTTP Shutdown(5s) |
+| HTTPS / TLS 1.3 | ✅ | 原生支持 TLS 1.3 加密，防范中间人窃听与降级攻击 |
+| mTLS 双向认证 | ✅ | 入站 HTTPS/gRPC 与出站 Agent 均支持客户端证书与 SPKI 公钥固定校验 |
+| 双协议服务暴露 | ✅ | 同时支持 REST/HTTPS 与原生 gRPC Server 代理网关服务 |
+| 优雅停机 | ✅ | SIGINT/SIGTERM → 清理 goroutine → 关闭 gRPC Server → HTTP/HTTPS Shutdown(5s) |
 | Panic 恢复 | ✅ | Gin Recovery 中间件 + securityMiddleware ticker 清理 |
 | Goroutine 泄漏防护 | ✅ | Shutdown 时显式清理 securityMiddleware 定时器 |
-| 备份 | ⚪ 不适用 | 无持久化数据 |
+| 备份 | ⚪ 不适用 | 无持久化状态，纯无状态网关 |
 
 ---
 
