@@ -28,6 +28,7 @@ deploy/
 ├── k8s/                         # 原生 K8s 最小清单（Kustomize，适合学习/最小化部署）
 │   ├── kustomization.yaml
 │   ├── namespace.yaml / configmap.yaml / deployment.yaml / service.yaml
+│   ├── service-hub/postgres/    #   Phase B: PostgreSQL 多副本 Hub 资源
 │   └── secret.example.yaml      #   TLS + API Key 示例（需自行填值）
 ├── prometheus/                  # Prometheus 采集配置与告警规则
 │   ├── prometheus.yml
@@ -163,6 +164,9 @@ kubectl get pods -n PrivShield -w
 kubectl port-forward -n PrivShield svc/PrivShield 8079:8079 50051:50051
 curl http://localhost:8079/health
 
+# 启用 Phase B PostgreSQL（多副本 Hub 模式）
+bash ./scripts/prod/deploy-k8s.sh --with-postgres
+
 # 停止
 bash ./scripts/prod/stop-k8s.sh
 ```
@@ -191,7 +195,7 @@ bash ./scripts/prod/stop-k8s.sh
 | 生产 Compose 部署 | `bash ./scripts/prod/deploy-docker-compose.sh` |
 | 停止生产 Compose | `bash ./scripts/prod/stop-docker-compose.sh` |
 | Helm 部署 / 卸载 | `bash ./scripts/prod/deploy-helm.sh` / `uninstall-helm.sh` |
-| K8s 部署 / 停止 | `bash ./scripts/prod/deploy-k8s.sh` / `stop-k8s.sh` |
+| K8s 部署 / 停止 | `bash ./scripts/prod/deploy-k8s.sh [--with-postgres]` / `stop-k8s.sh [--with-postgres]` |
 | 生产健康检查 | `bash ./scripts/prod/prod_health_check.sh` |
 | 备份隐私预算库 | `bash ./scripts/prod/backup_privacy_budget.sh` |
 | 构建 core / ml 镜像 | `make docker-core` / `make docker-ml` |

@@ -91,16 +91,23 @@
 ---
 
 ### `deploy-k8s.sh`
-- **作用说明**: 使用原生 Kubernetes 资源清单（基于 Kustomize）发布生产集群服务。
+- **作用说明**: 使用原生 Kubernetes 配置清单（基于 Kustomize）发布生产集群服务。
+- **参数选项**:
+  - `--with-postgres`: 同时部署 Phase B PostgreSQL 资源（service-hub 多副本模式）。
 - **执行命令**:
   ```bash
   bash ./scripts/prod/deploy-k8s.sh
+
+  # 启用 Phase B PostgreSQL 多副本 Hub 模式
+  bash ./scripts/prod/deploy-k8s.sh --with-postgres
   ```
 
 ---
 
 ### `stop-k8s.sh`
 - **作用说明**: 卸载并删除由 `deploy-k8s.sh` 创建的原生 Kubernetes 资源清单。
+- **参数选项**:
+  - `--with-postgres`: 同时删除 Phase B PostgreSQL 资源。
 - **执行命令**:
   ```bash
   bash ./scripts/prod/stop-k8s.sh

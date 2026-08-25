@@ -394,7 +394,7 @@ Address these before any hardened production deployment.
 | Stop Prod Docker Agent | `bash ./scripts/prod/docker-stop-agent.sh` |
 | Deploy Prod Helm | `bash ./scripts/prod/deploy-helm.sh` |
 | Uninstall Prod Helm | `bash ./scripts/prod/uninstall-helm.sh` |
-| Deploy Prod K8s | `bash ./scripts/prod/deploy-k8s.sh` |
-| Stop Prod K8s | `bash ./scripts/prod/stop-k8s.sh` |
+| Deploy Prod K8s | `bash ./scripts/prod/deploy-k8s.sh [--with-postgres]` |
+| Stop Prod K8s | `bash ./scripts/prod/stop-k8s.sh [--with-postgres]` |
 | Run Prod Health Check | `bash ./scripts/prod/prod_health_check.sh` |
 | Backup Budget DB | `bash ./scripts/prod/backup_privacy_budget.sh` |
