@@ -1,16 +1,18 @@
 """临时诊断：复刻 Qwen3Classifier 完整 prompt，检查生成 token 序列。"""
 import os
 import sys
+from pathlib import Path
 
 os.environ["PRIVACY_ENV_PROFILE"] = ""
-sys.path.insert(0, "/home/charles/code/sfwork/PrivShield")
+PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+sys.path.insert(0, PROJECT_ROOT)
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from privacy_local_agent.dynclassification.utils import wrap_untrusted_text
+from engine.dynclassification.utils import wrap_untrusted_text
 
-mp = "/home/charles/code/sfwork/PrivShield/.models/Qwen3.5-0.8B-Privacy-Classifier-Smoother"
+mp = os.path.join(PROJECT_ROOT, ".models/Qwen3.5-0.8B-Privacy-Classifier-Smoother")
 tok = AutoTokenizer.from_pretrained(mp, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(
     mp, dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True

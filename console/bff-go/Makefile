@@ -74,8 +74,8 @@ dev: run
 # test - 运行全部测试（单元测试 + 集成测试）
 # Run all tests (unit + integration)
 #
-# 注意：集成测试需要 privacy_local_agent 在 127.0.0.1:50051 运行
-# Note: integration tests require privacy_local_agent running on 127.0.0.1:50051
+# 注意：集成测试需要 PrivShield Agent (engine) 在 127.0.0.1:50051 运行
+# Note: integration tests require PrivShield Agent (engine) running on 127.0.0.1:50051
 test:
 	go test ./...  # 递归测试所有包 / recursively test all packages
 

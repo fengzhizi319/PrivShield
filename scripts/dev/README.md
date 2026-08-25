@@ -26,6 +26,7 @@
   - [`docker-start-llm.sh` / `docker-start-llm.ps1` (启动 vLLM 容器)](#docker-start-llmsh--docker-start-llmps1)
   - [`docker-stop-llm.sh` / `docker-stop-llm.ps1` (停止 vLLM 容器)](#docker-stop-llmsh--docker-stop-llmps1)
   - [`docker-stop.sh` (停止全部 Docker 容器)](#docker-stopsh)
+  - [`start-postgres.sh` (独立启动 Phase B PostgreSQL)](#start-postgressh)
 - [4. 自动化测试、基准压测与环境工具](#4-自动化测试基准压测与环境工具)
   - [`run_console_e2e_tests.sh` (全套 E2E 自动化测试)](#run_console_e2e_testssh)
   - [`integration-test-new-modules.sh` (微服务集成测试)](#integration-test-new-modulessh)
@@ -230,10 +231,28 @@
 ---
 
 ### `docker-stop.sh`
-- **作用说明**: 一键停止并清理所有通过 Docker Compose 启动的开发容器及网络。
+- **作用说明**: 一键停止并清理所有通过 Docker Compose 启动的开发容器及网络（含 llm/monitoring/phase-b 全部 profile）。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/docker-stop.sh
+  ```
+
+---
+
+### `start-postgres.sh`
+- **作用说明**: 独立启动一个 PostgreSQL 16 Docker 容器，供 Phase B LeasedTaskStore 开发调试。支持 `--stop` 停止并移除容器。
+- **参数选项**:
+  - `--stop`: 停止并移除 PostgreSQL 容器。
+- **环境变量**:
+  - `PG_PORT`: 宿主机映射端口 (默认: 5432)。
+  - `PG_PASSWORD`: 数据库密码 (默认: privshield_dev)。
+- **执行命令**:
+  ```bash
+  # 启动 PostgreSQL
+  bash ./scripts/dev/start-postgres.sh
+
+  # 停止并移除
+  bash ./scripts/dev/start-postgres.sh --stop
   ```
 
 ---

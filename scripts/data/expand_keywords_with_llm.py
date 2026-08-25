@@ -26,7 +26,7 @@ from typing import Any, List
 
 import yaml
 
-# 项目跟路径引入
+# 项目根路径引入
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 

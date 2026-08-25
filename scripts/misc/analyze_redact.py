@@ -1,9 +1,10 @@
 """临时分析脚本：验证 redact_medical_text 的若干疑点（不改动源码）。"""
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, ".")
-from privacy_local_agent.medical_pipeline.rules import redact_medical_text, _REDACT_MAX_TEXT_LENGTH
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from engine.medical_pipeline.rules import redact_medical_text, _REDACT_MAX_TEXT_LENGTH
 
 cases = [
     # 1. 干净文本（无任何 L4/L5 词）是否被“自愈”逻辑篡改

@@ -34,7 +34,8 @@ deploy/
 │   ├── prometheus.yml
 │   └── alerts.yml
 └── grafana/                     # Grafana 预置仪表盘（JSON 大屏）
-    └── dashboard.json
+    ├── dashboard.json           #   PrivShield 全景总览大屏
+    └── service-hub-dashboard.json  #   调度中枢专属大屏
 ```
 
 ---
@@ -179,9 +180,11 @@ bash ./scripts/prod/stop-k8s.sh
 
 - **指标**：Agent 内置 `/metrics`（`privacy_*` 前缀），采集配置见
   `deploy/prometheus/prometheus.yml`，告警规则见 `deploy/prometheus/alerts.yml`。
-- **大屏**：`deploy/grafana/dashboard.json` 为预置仪表盘，
-  启用 `--profile monitoring` 时经 `deploy/grafana/` provisioning 自动加载；
-  也可在 Grafana 中手动 Import。
+- **大屏**：`deploy/grafana/` 下预置两个 Grafana 仪表盘：
+  - `dashboard.json` — PrivShield 全景总览（引擎吞吐/预算消耗/分类漏斗分布）
+  - `service-hub-dashboard.json` — 调度中枢专属大屏（租约状态/微服务健康/Go 协程池）
+  
+  启用 `--profile monitoring` 时经 provisioning 自动加载；也可在 Grafana 中手动 Import。
 - **健康检查**：`bash ./scripts/prod/prod_health_check.sh`（REST `/health`、`/readyz`、gRPC 探活）。
 - **日志**：生产编排使用 JSON 结构化日志（`PRIVACY_LOG_FORMAT=json`），便于 ELK / Loki 收集。
 - 深度文档：[`docs/production_observability/`](../docs/production_observability/)。
