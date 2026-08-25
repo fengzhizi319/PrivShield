@@ -85,13 +85,13 @@ snapshots (id, audit_log_id, input_sample, output_sample, integrity_hash, ...)
 
 ```bash
 # 基本用法
-python -m PrivShield.privacy.verify_audit --log-file /path/to/audit.log --key "your-secret-key"
+python -m engine.privacy.verify_audit --log-file /path/to/audit.log --key "your-secret-key"
 
 # 通过文件提供密钥
-python -m PrivShield.privacy.verify_audit --log-file /path/to/audit.log --key-file /path/to/key
+python -m engine.privacy.verify_audit --log-file /path/to/audit.log --key-file /path/to/key
 
 # 使用环境变量 PRIVACY_AUDIT_KEY
-python -m PrivShield.privacy.verify_audit --log-file /path/to/audit.log
+python -m engine.privacy.verify_audit --log-file /path/to/audit.log
 ```
 
 **功能特性：**
@@ -210,7 +210,7 @@ SIGINT/SIGTERM → gRPC GracefulStop → HTTP Shutdown(5s) → 进程退出
 - [ ] 配置 `DB_PATH` 启用 SQLite 持久化；
 - [ ] 配置 `AUDIT_LOG_DB_PATH` 并定期执行备份脚本；
 - [ ] 设置 `PRIVACY_AUDIT_KEY` 环境变量（高强度随机密钥），确保审计签名跨重启可校验；
-- [ ] 定期使用 `python -m PrivShield.privacy.verify_audit` 校验审计日志签名完整性；
+- [ ] 定期使用 `python -m engine.privacy.verify_audit` 校验审计日志签名完整性；
 - [ ] 定期执行备份脚本的 `--verify` 模式验证备份可恢复性；
 - [ ] 监控启动日志中的 `integrity check` 状态。
 

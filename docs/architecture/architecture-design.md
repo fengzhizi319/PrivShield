@@ -169,7 +169,7 @@ graph TB
 ### 3.3 脱敏合规存证审计 (Audit Log :8084)
 * **不可篡改哈希链**：基于 8 维度特征（时间戳、任务 ID、用户、源库、操作、明文哈希、脱敏后哈希、上链指纹）生成 SHA-256 存证校验链，支持合规审计报告导出；
 * **完整性校验与备份**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量备份；
-* **独立校验脚本**：`scripts/prod/verify_audit.py` 独立验证审计数据完整性，支持 CI/CD 集成；
+* **独立校验脚本**：`scripts/prod/verify_audit.sh` 独立验证审计数据完整性，支持 CI/CD 集成；
 * 📖 **可靠性能力详解**：[audit-log/docs/reliability.md](../../services/audit-log/docs/reliability.md)
 
 ---

@@ -84,7 +84,7 @@ gRPC (grpcio, :50051)  ←→  PrivacyService (业务中枢)  ←→  隐私算�
   - 📖 [可靠性能力详解](../../services/datasource-mgr/docs/reliability.md)
 - **`audit-log` (:8084)**：基于 8 维度特征的不可篡改 SHA-256 存证哈希链；
   - **完整性校验**：启动时 `PRAGMA integrity_check` + HMAC-SHA256 签名审计日志；
-  - **独立校验脚本**：`scripts/prod/verify_audit.py` 独立验证审计数据完整性；
+  - **独立校验脚本**：`scripts/prod/verify_audit.sh` 独立验证审计数据完整性；
   - 📖 [可靠性能力详解](../../services/audit-log/docs/reliability.md)
 
 ### 2.7 测试与自动化验证矩阵

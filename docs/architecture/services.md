@@ -67,7 +67,7 @@ graph LR
 * **在线核验**：提供不可篡改性校验接口，实时识别任何底层数据变动；
 * **合规报告**：基于 SQLite 引擎秒级生成合规评估与多维统计图表；
 * **完整性校验**：启动时 `PRAGMA integrity_check` 阻断损坏数据库，统一备份脚本支持全量/增量备份；
-* **独立校验脚本**：`scripts/prod/verify_audit.py` 独立验证审计数据完整性，支持 CI/CD 集成；
+* **独立校验脚本**：`scripts/prod/verify_audit.sh`（封装 `engine/privacy/verify_audit.py`）独立验证审计数据完整性，支持 CI/CD 集成；
 * 📖 学习与设计文档：[学习指南](../../services/audit-log/docs/learning-guide.md) · [详细设计](../../services/audit-log/docs/design.md) · [可靠性能力](../../services/audit-log/docs/reliability.md)
 
 ---

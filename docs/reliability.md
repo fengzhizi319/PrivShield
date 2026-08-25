@@ -192,7 +192,7 @@ SIGINT/SIGTERM → Uvicorn 停止接受新连接 → 等待在途请求完成 �
 - [ ] 配置 `PRIVACY_LLM_MAX_CONCURRENCY` 限制 LLM 并发，防止 OOM；
 - [ ] 配置 `PRIVACY_LLM_MIN_FREE_MEM_MB` 设置内存安全阈值；
 - [ ] 定期备份隐私预算数据库；
-- [ ] 定期使用 `python -m PrivShield.privacy.verify_audit` 校验审计日志签名完整性。
+- [ ] 定期使用 `python -m engine.privacy.verify_audit` 校验审计日志签名完整性。
 
 ### 9.2 故障排查
 

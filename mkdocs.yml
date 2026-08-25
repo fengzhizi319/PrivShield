@@ -176,9 +176,50 @@ nav:
 
   - 企业级中台微服务:
     - 架构与流通模型: architecture/services.md
+    - Service Hub 调度中枢:
+      - 学习指南: services/service-hub/learning-guide.md
+      - 详细设计: services/service-hub/design.md
+      - API 参考: services/service-hub/api.md
+      - 运维指南: services/service-hub/ops.md
+      - 需求文档: services/service-hub/prd.md
+      - 可靠性能力: services/service-hub/reliability.md
+      - 测试指南: services/service-hub/testing.md
+    - Datasource Mgr 数据源:
+      - 学习指南: services/datasource-mgr/learning-guide.md
+      - 详细设计: services/datasource-mgr/design.md
+      - API 参考: services/datasource-mgr/api.md
+      - 运维指南: services/datasource-mgr/ops.md
+      - 需求文档: services/datasource-mgr/prd.md
+      - 可靠性能力: services/datasource-mgr/reliability.md
+      - 测试指南: services/datasource-mgr/testing.md
+    - Audit Log 审计存证:
+      - 学习指南: services/audit-log/learning-guide.md
+      - 详细设计: services/audit-log/design.md
+      - API 参考: services/audit-log/api.md
+      - 运维指南: services/audit-log/ops.md
+      - 需求文档: services/audit-log/prd.md
+      - 可靠性能力: services/audit-log/reliability.md
+      - 测试指南: services/audit-log/testing.md
 
   - 统一控制台与 BFF:
     - 控制台与双 BFF 架构: architecture/console.md
+    - 运行模式说明: console/modes.md
+    - 控制台学习指南: console/learning-guide.md
+    - Go BFF 网关:
+      - 概览: console/bff-go/README.md
+      - 详细设计: console/bff-go/design.md
+      - API 参考: console/bff-go/api_reference.md
+      - 运维指南: console/bff-go/ops.md
+      - 需求文档: console/bff-go/prd.md
+      - 可靠性能力: console/bff-go/reliability.md
+      - 测试指南: console/bff-go/testing.md
+    - Web 前端控制台:
+      - 概览: console/web/README.md
+      - 详细设计: console/web/design.md
+      - API 参考: console/web/api_reference.md
+      - 运维指南: console/web/ops.md
+      - 需求文档: console/web/prd.md
+      - 测试指南: console/web/testing.md
 
   - 基础设施:
     - 高并发架构设计 (10k QPS):
@@ -258,6 +299,9 @@ nav:
     - ESLint: learning/tech-eslint.md
     - Vitest: learning/tech-vitest.md
     - Testing Library: learning/tech-testing-library.md
+
+  - 共享基础库:
+    - Go 共享包设计: pkg/design.md
 
   - 附录:
     - 个性化配置: dynclassification/personalized_profiles.md

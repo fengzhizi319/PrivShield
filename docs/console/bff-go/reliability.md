@@ -1,0 +1,1 @@
+../../../console/bff-go/docs/reliability.md
