@@ -33,11 +33,12 @@
 | 分类 REST API | `engine/routers/dynclassification.py` | Console 的动态分类请求经 `/api/proxy` 透传 |
 | 分类 gRPC API | `engine/grpc_server.py`、`proto/privacy.proto` | Go 对已有可映射 RPC 使用 gRPC；无映射的动态分类路径明确走 REST fallback 或补充正式 RPC |
 | 字段/记录脱敏 | `engine/privacy/masking.py` | 复用 `mask_value()`、`mask_record()` 或批量接口，不复制字段规则 |
-| Python Console | `console/backend/app/main.py` | 新增专用流水线请求时保持既有 `ProxyResponse` 包装 |
-| Go Console | `console/backend-go/internal/handlers`、`internal/mapper` | 与 Python 保持相同 `/api/*` 契约；动态分类当前必须处理 REST fallback 差异 |
+| Go Console | `console/bff-go/internal/handlers`、`internal/mapper` | 新增专用流水线请求时保持既有 `ProxyResponse` 包装；动态分类当前必须处理 REST fallback 差异 |
 | Web 动态分类页 | `console/web/src/components/DynClassificationPanel.tsx` | 新增“病例流水线”视图或 Tab，沿用现有标准选择、结果徽章和原始 JSON 展示 |
 
-现有 `scripts/data/generate_medical_data.py` 已会向 Agent、Python Console 和 Go Console 的 sample 目录分发 CSV。新设计应把这些路径统一为可配置的复制目标，并避免三份内容分别生成导致数据不一致。
+现有 `scripts/data/generate_medical_data.py` 已会向 Agent 与 Go Console 的 sample 目录分发 CSV。新设计应把这些路径统一为可配置的复制目标，并避免多份内容分别生成导致数据不一致。
+
+> **历史说明**：早期同时存在 Python Console（`console/backend`），会向该目录分发 CSV，该实现已移除。
 
 ## 3. 总体架构
 
@@ -51,12 +52,8 @@ graph LR
     P --> M[privacy.masking\nmask field/record]
     C --> R1[classification_result.json/csv\n等级与审计元数据]
     M --> R2[masked_data.csv\n仅保留 L1-L3]
-    UI[React Console] --> PY[Python Console /api/proxy]
-    UI --> GO[Go Console /api/proxy]
-    PY --> A[Agent REST]
+    UI[React Console] --> GO[Go Console /api/proxy]
     GO --> A2[Agent gRPC 或 REST fallback]
-    A --> C
-    A --> M
     A2 --> C
     A2 --> M
 ```
@@ -263,18 +260,20 @@ POST /v1/medical-pipeline/process
 
 默认不返回原始值；若实现阶段认为通用 `/api/proxy` 足够，则不新增此端点，只由包级流水线提供 CLI。
 
-### 7.2 Python Console
+### 7.2 Go BFF Console
 
-Python Console 继续作为薄 REST 代理：
+Go BFF（`console/bff-go`）作为统一代理：
 
-- `/api/proxy` 透传 pipeline、动态分类和 masking 请求。
+- `/api/proxy` 透传 pipeline、动态分类和 masking 请求（优先 gRPC，必要时 REST fallback）。
 - `/api/upload` 支持上传 `kangyang.csv`，文件由 Agent 解析；后端不执行算法。
-- `/api/samples` 增加一个医疗流水线示例，标注 `backend: both`，请求体使用与 Agent 一致的字段命名。
-- 响应继续包装为 `status`、`duration_ms`、`data`、`via="python-rest"`、`protocol="REST"`。
+- `/api/samples` 增加一个医疗流水线示例，请求体使用与 Agent 一致的字段命名。
+- 响应继续包装为 `status`、`duration_ms`、`data`、`via="go-grpc"` 或 `via="go-rest-proxy"`、`protocol="gRPC"` 或 `protocol="REST"`。
 
-### 7.3 Go Console
+> **历史说明**：早期由 Python Console（`console/backend`）作为薄 REST 代理返回 `via="python-rest"`，该实现已移除。
 
-Go Console 必须与 Python Console 暴露完全相同的 `/api/*` JSON 契约：
+### 7.3 Go BFF 与 Agent 契约对齐
+
+Go BFF 必须与 Agent 暴露完全相同的 `/api/*` JSON 契约：
 
 - 若 Agent proto 已有可用的 `DynClassify`/mask RPC，在 `internal/mapper` 增加医疗流水线所需路径映射、请求转换和响应转换。
 - 动态分类当前不在固定 mapper 表中，必须显式测试其 REST fallback；不能仅因 Go 服务名为 gRPC 就假定该请求走 gRPC。
@@ -294,7 +293,9 @@ Go Console 必须与 Python Console 暴露完全相同的 `/api/*` JSON 契约�
    - 脱敏数据：仅展示脱敏后的 L1-L3 字段；L4/L5 字段显示“已移除”，不展示原文。
 5. 图片病例缩略图只在原始/分类测试区展示；被判为 L4/L5 的图片在脱敏区不可预览、不可下载。
 6. 支持下载分类 JSON/CSV 和脱敏 CSV；下载前再次检查 manifest 的安全门禁状态。
-7. 显示当前后端标识，确保切换 Python REST 与 Go gRPC 后结果结构一致。
+7. 显示当前后端标识，确保 Go gRPC BFF 返回的结果结构一致。
+
+> **历史说明**：早期页面支持在 Python REST 与 Go gRPC 后端之间切换，该双后端模式已移除。
 
 前端类型应采用 camelCase 的 Agent 响应模型（如 `fieldName`、`finalLevel`、`engineLayer`），代理请求体只在明确需要时保留 snake_case。接口适配应集中在 API client，不在多个组件中手工转换。
 
@@ -331,9 +332,10 @@ Go Console 必须与 Python Console 暴露完全相同的 `/api/*` JSON 契约�
 
 ### 9.4 Console 与前端测试
 
-- `console/backend/tests/`：mock `agent_client.request`/`request_multipart`，验证 `/api/samples`、`/api/proxy`、`/api/upload` 的医疗流水线样例和错误透传。
-- `console/backend-go`：补充 handler/mapper 单测和真实 Agent 可选集成测试，覆盖上传、动态分类 fallback、双结果响应。
-- `console/web`：测试标准参数、CSV 选择/上传、两块结果渲染、L4/L5 隐藏、图片不可下载、Python/Go 后端切换和错误提示。
+- `console/bff-go`：补充 handler/mapper 单测和真实 Agent 可选集成测试，覆盖上传、动态分类 fallback、双结果响应。
+- `console/web`：测试标准参数、CSV 选择/上传、两块结果渲染、L4/L5 隐藏、图片不可下载、错误提示。
+
+> **历史说明**：早期同时存在 Python REST BFF（`console/backend/tests/`）与双后端切换测试，该实现已移除。
 - 真实 VLM 测试继续标记为 slow/integration，并在无 `.models/Qwen2-VL-2B-Instruct` 时跳过；常规 CI 使用 mock 图片分类结果。
 
 推荐验证命令：
@@ -342,12 +344,8 @@ Go Console 必须与 Python Console 暴露完全相同的 `/api/*` JSON 契约�
 # 主包与流水线单元测试
 pytest tests/medical_pipeline -q
 
-# Python Console
-cd console/backend
-pytest tests -v
-
 # Go Console
-cd ../backend-go
+cd console/bff-go
 go test -short ./...
 go test ./tests -v
 

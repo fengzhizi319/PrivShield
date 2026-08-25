@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【Docker 模式】启动全栈服务（Agent + 双后端 + Web UI + 可选 vLLM）
+# 【Docker 模式】启动全栈服务（Agent + Go BFF + Web UI + 可选 vLLM）
 # Launch Full Stack Container Suite in Docker Compose
 #
 # 用法 / Usage: ./scripts/dev/docker-start-all.sh [--with-llm] [--no-build]
@@ -47,7 +47,7 @@ echo "🌟 [Docker Mode] 正在启动 PrivShield 全栈容器套件..."
 echo "============================================================================"
 
 # ── 进入 docker-compose 目录，启动容器 ──────────────────────────────────
-# 默认仅启动核心服务（Agent + 双后端 + Web UI）
+# 默认仅启动核心服务（Agent + Go BFF + Web UI）
 # 传入 --with-llm 时激活 llm profile，额外启动 vLLM 推理容器
 cd "$PROJECT_ROOT/deploy/docker-compose"
 
@@ -64,7 +64,6 @@ echo ""
 echo "✅ 全栈 Docker 容器服务已成功启动！"
 echo "   - React 控制台 Web UI     : http://localhost:5173"
 echo "   - Go BFF 代理网关 REST     : http://localhost:8081"
-echo "   - Python BFF 代理后端 REST : http://localhost:8080"
 echo "   - Service Hub 调度中枢    : http://localhost:8082"
 echo "   - Datasource Mgr 数据源   : http://localhost:8083"
 echo "   - Audit Log 脱敏审计日志  : http://localhost:8084"

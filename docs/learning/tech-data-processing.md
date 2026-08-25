@@ -45,7 +45,7 @@ then converts to JSON-serializable record lists via Pandas for the frontend.
 
 ### 2.2 Arrow IPC 响应解析 / Arrow IPC Response Parsing
 
-文件 / File：`console/backend/app/client.py`
+文件 / File：`console/backend/app/client.py`（历史实现，已移除；当前等效逻辑位于 `engine/privacy/data_adapters.py`）
 
 ```python
 @staticmethod
@@ -96,7 +96,7 @@ def forward(self, method, path, body, ...):
 
 ### 2.4 示例 Payload 生成 / Sample Payload Generation
 
-文件 / File：`console/backend/app/fixtures/samples.py`
+文件 / File：`console/backend/app/fixtures/samples.py`（历史实现，已移除）
 
 ```python
 def _arrow_ipc_payload() -> str:
@@ -864,7 +864,7 @@ request_payload = {
 # Content-Type: application/json
 
 # 2. Protocol Buffers：gRPC 通信 / gRPC communication
-# Console Backend-Go → PrivShield Agent (gRPC)
+# Console BFF-Go → PrivShield Agent (gRPC)
 # proto/privacy.proto 定义消息结构 / Defines message structure
 
 # 3. Arrow IPC：内部数据处理 / Internal data processing
@@ -881,7 +881,7 @@ table = pa.Table.from_pylist(request_payload["data"])
 |---|---|---|
 | 浏览器 → Console Backend | JSON | 浏览器原生支持 / Browser native |
 | Console Backend → Agent REST | JSON | FastAPI 原生解析 / FastAPI native |
-| Console Backend-Go → Agent gRPC | Protobuf | 强类型 + 高性能 / Strong type + fast |
+| Console BFF-Go → Agent gRPC | Protobuf | 强类型 + 高性能 / Strong type + fast |
 | Agent 内部计算 / Internal compute | Arrow | 零拷贝向量化 / Zero-copy vectorized |
 | 配置文件 / Config files | YAML | 人类可读 / Human readable |
 

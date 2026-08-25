@@ -82,4 +82,6 @@
 1. **身份证校验格式**: `gen_id_card()` 生成的所有身份证号必须 100% 通过 GB 11643-1999 校验码计算。
 2. **零 L4/L5 原始词汇泄露**: 治理后 `sanitized_data` 中包含的任意字段，绝不出现 `HIV`、`恶性肿瘤`、`精神分裂症` 等原始中英文敏词。
 3. **测试覆盖率**: 单元测试 `tests/test_medical_pipeline.py` 与 `tests/test_pipeline.py` 全部 100% 通过。
-4. **双后端可切换**: Web 控制台切换 Python REST 或 Go 后端（REST 代理通道）均能成功跑通。
+4. **Go BFF 可跑通**: Web 控制台经 Go gRPC BFF（`:8081`，必要时 REST fallback）能成功跑通医疗流水线。
+
+> **历史说明**：早期需求支持在 Python REST BFF（`:8080`）与 Go gRPC BFF（`:8081`）之间切换，双后端模式已移除。

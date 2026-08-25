@@ -987,9 +987,11 @@ async def concurrency_test(req: ConcurrencyTestRequest):
     return await _run_concurrency_test(req)
 ```
 
-**为什么 Python/Go 两种后端必须保持安全策略一致？**
-- 前端可无缝切换 Python REST / Go gRPC 两种后端
-- 若一种后端有防护而另一种没有，攻击者可切换到防护弱的后端发起攻击
+> 历史说明：`console/bff-py` 已删除，当前统一由 `console/bff-go` 提供 REST/gRPC 上游代理；以下段落保留用于记录 Python 后端历史实现，当前前端不再存在第二种后端实现。
+
+**为什么 REST/gRPC 两种上游协议必须保持安全策略一致？**
+- 前端可无缝切换 REST / gRPC 两种上游协议
+- 若一种协议有防护而另一种没有，攻击者可切换到防护弱的协议发起攻击
 - `posixpath.normpath` / `path.Clean` 分别防止 Python/Go 中的路径穿越
 
 ### Python 客户端响应体限制详情（P40）
@@ -1518,13 +1520,13 @@ location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
 ```nginx
 # 修复前：默认 HTTP/1.0，无法利用上游 keepalive
 location /api/v1/ {
-    proxy_pass http://console-backend-python:8080/v1/;
+    proxy_pass http://console-backend-go:8081/v1/;
     # ✗ 默认 proxy_http_version 1.0，每次请求新建 TCP 连接
 }
 
 # 修复后：HTTP/1.1 + 清空 Connection 头，支持上游 keepalive
 location /api/v1/ {
-    proxy_pass http://console-backend-python:8080/v1/;
+    proxy_pass http://console-backend-go:8081/v1/;
     proxy_http_version 1.1;           # ✓ 启用 HTTP/1.1
     proxy_set_header Connection "";    # ✓ 清空 Connection，允许 keepalive 复用
 }

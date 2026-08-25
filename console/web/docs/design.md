@@ -1,6 +1,6 @@
 # 测试控制台前端 (React Web SPA) — 详细设计文档
 
-> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 测试控制台 Web 前端（`console/web`）的系统架构、组件层级、双后端热切换、多流水线交互与国际化设计。
+> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 测试控制台 Web 前端（`console/web`）的系统架构、组件层级、双协议热切换、多流水线交互与国际化设计。
 
 ---
 
@@ -47,9 +47,8 @@ graph TD
         FetchCore[Fetch 核心封装<br/>BaseURL 动态更新]
     end
 
-    subgraph BackendProxies [双代理网关]
-        PythonBFF[Python REST 后端 :8080]
-        GoBFF[Go gRPC 后端 :8081]
+    subgraph BackendProxies [Go BFF 代理网关]
+        GoBFF[Go BFF :8081]
     end
 
     AppRoot --> APIClient
@@ -61,12 +60,14 @@ graph TD
 
 ## 3. 核心设计与交互机制
 
-### 3.1 双后端一键热切换 (Dual-Backend Switching)
+### 3.1 双协议一键热切换 (Dual-Protocol Switching)
 
-前端同时支持通过 Python REST 代理或 Go gRPC 代理与核心 Agent 通信：
-1. **统一契约保障**：两个后端均对前端暴露完全相同的 `/api/*` 路由与 JSON 返回结构；
-2. **基地址热切换**：用户通过顶栏 `BackendSelector` 切换时，调用 `setBaseUrl('http://localhost:8081')` 即时切换底层请求目标；
-3. **协议与路径透传验证**：响应面板根据返回体中的 `via`（`python-rest` / `go-grpc`）与 `protocol`（`REST` / `gRPC`）实时显示通信徽标，验证切换生效。
+前端通过 Go BFF 与核心 Agent 通信，支持在 REST 与 gRPC 两种上游协议间切换：
+1. **统一契约保障**：Go BFF 对前端暴露 `/api/*` 路由与统一 JSON 返回结构；
+2. **协议热切换**：用户通过顶栏 `BackendSelector` 切换时，调用 `setBaseUrl('?protocol=rest')` 或 `setBaseUrl('?protocol=grpc')` 切换上游协议标识；
+3. **协议透传验证**：响应面板根据返回体中的 `via`（`go-grpc`）与 `protocol`（`REST` / `gRPC`）实时显示通信徽标，验证切换生效。
+
+> 历史说明：`console/bff-py` 已删除，当前统一由 `console/bff-go` 提供 REST/gRPC 上游代理；原先的「双后端」概念已收窄为同一 Go BFF 上的两种上游协议。
 
 ---
 
@@ -96,12 +97,12 @@ graph TD
 生产镜像内嵌 Nginx 监听 `5173` 端口，反向代理各后端微服务：
 
 ```nginx
-# Python 代理
-location /api/v1/ {
-    proxy_pass http://console-backend-python:8080/v1/;
+# Go BFF 代理
+location /api/ {
+    proxy_pass http://console-backend-go:8081/api/;
 }
 
-# Go 代理
+# Go BFF 兼容别名
 location /api/go/ {
     proxy_pass http://console-backend-go:8081/;
 }

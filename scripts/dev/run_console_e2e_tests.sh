@@ -57,8 +57,8 @@ echo -e "${BLUE} 工作目录: ${PROJECT_ROOT}${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
 # ── 检查端口占用情况 ──────────────────────────────────────────────────────
-if command -v ss &>/dev/null && ss -tulpn | grep -q -E ':8079 |:8080 '; then
-    echo -e "${RED}[错误] 端口 8079 或 8080 已被占用！${NC}"
+if command -v ss &>/dev/null && ss -tulpn | grep -q -E ':8079 '; then
+    echo -e "${RED}[错误] 端口 8079 已被占用！${NC}"
     echo -e "${YELLOW}提示: 请先停止正在运行的 PrivShield 容器或本地服务 (例如执行: bash ./scripts/dev/docker-stop.sh 或 bash ./scripts/dev/dev-stop.sh)${NC}"
     exit 1
 fi

@@ -71,7 +71,7 @@ npm run lint         # eslint . --ext ts,tsx --max-warnings 0
 
 ### 3.5 后端切换与异常
 
-- [ ] 切换后端（Python REST ↔ Go gRPC），samples 与状态灯刷新。
+- [ ] 切换协议（REST ↔ gRPC），samples 与状态灯刷新。
 - [ ] 默认选中的后端与页面来源一致。
 - [ ] 停止后端后刷新页面，展示错误页与「重试」按钮；恢复后端后点击重试可正常加载。
 
@@ -80,13 +80,13 @@ npm run lint         # eslint . --ext ts,tsx --max-warnings 0
 连接真实后端走通核心链路（可用浏览器自动化或手工）：
 
 ```bash
-# 1. 启动 agent + Python 后端
+# 1. 启动 agent + Go BFF
 ./scripts/dev/dev-start.sh
 
 # 2. 构建前端（若未构建）
 cd console/web && npm run build
 
-# 3. 浏览器访问 http://127.0.0.1:8080
+# 3. 浏览器访问 http://127.0.0.1:8081
 #    - 总览页 → 选择 Masking 某接口 → 发送 → 确认高亮响应
 #    - 批量测试 → 选择 Masking → 确认 100% 通过
 ```

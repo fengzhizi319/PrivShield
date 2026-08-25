@@ -258,8 +258,8 @@ export async function lbTest(req: LbTestRequest): Promise<LbTestResponse> {
  * Forwards GET /v1/ops/diagnostics to agent via generic proxy, returns
  * NER/LLM degradation chain, dependency installation, model files and hardware acceleration status.
  *
- * 该端点为 REST 专用：Python 后端直接转发；Go 后端 gRPC 无对应方法时
- * 会自动回退到 REST 代理（proxyRest），因此两种后端均可使用。
+ * 该端点为 REST 专用：Go 后端 gRPC 无对应方法时会自动回退到 REST 代理
+ *（proxyRest），因此 REST 与 gRPC 两种协议均可使用。
  * This endpoint is REST-only: Python backend forwards directly; Go backend
  * automatically falls back to REST proxy when gRPC has no matching method.
  *
@@ -272,7 +272,7 @@ export async function lbTest(req: LbTestRequest): Promise<LbTestResponse> {
  */
 export async function fetchDiagnostics(refresh = false): Promise<OpsDiagnostics> {
   // 经通用代理转发 GET 请求到 agent 的诊断端点 / Forward GET request to agent diagnostics endpoint via generic proxy
-  // 查询串随 path 一并传递，Python/Go 两种代理后端均原样转发到 agent
+  // 查询串随 path 一并传递，Go BFF 原样转发到 agent
   // Query string travels with path; both Python/Go proxy backends forward it as-is
   const path = refresh ? '/v1/ops/diagnostics?refresh=true' : '/v1/ops/diagnostics';
   const resp = await proxyRequest({ method: 'GET', path });

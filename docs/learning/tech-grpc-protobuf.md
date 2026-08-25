@@ -257,14 +257,16 @@ message DynSecurityTagProto {
 
 ### 2.10 gRPC vs REST 对比（本项目视角）/ gRPC vs REST (Project Perspective)
 
-| 维度 / Dimension | Python REST 后端 | Go gRPC 后端 |
+> **历史说明**：下表早期对比 Python REST BFF（`:8080`）与 Go gRPC BFF（`:8081`）。Python REST BFF 已移除，当前统一由 Go gRPC BFF（`console/bff-go:8081`）承载，必要时通过 REST fallback 访问 Agent。
+
+| 维度 / Dimension | REST fallback | Go gRPC BFF |
 |---|---|---|
 | 前端 → 后端 | HTTP/JSON | HTTP/JSON（相同）|
 | 后端 → Agent | HTTP/REST | gRPC/protobuf |
 | 序列化开销 | JSON 文本解析 / JSON text parse | 二进制编解码 / Binary encode/decode |
 | 类型安全 | 运行时校验 / Runtime check | 编译期保证 / Compile-time guarantee |
 | 连接效率 | 每次新建 HTTP 连接 / New HTTP conn each time | HTTP/2 多路复用 / HTTP/2 multiplexing |
-| 前端标识 | `via: "python-rest"` | `via: "go-grpc"` |
+| 前端标识 | `via: "go-rest-proxy"` | `via: "go-grpc"` |
 | 消息大小限制 | 无显式限制 / No explicit limit | 64 MiB（显式配置）/ 64 MiB (explicit) |
 | 心跳检测 | 无 / None | 30s keepalive PING |
 | 双向认证 | 不支持 / Not supported | mTLS 可选 / mTLS optional |

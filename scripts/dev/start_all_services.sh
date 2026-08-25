@@ -6,10 +6,10 @@
 #           并自动检测健康就绪探针。
 #
 # 执行步骤总览：
-#   1. 初始化工作目录与端口配置（REST: 8079, gRPC: 50051, BFF-Py: 8080, BFF-Go: 8081, Services: 8082~8084）
+#   1. 初始化工作目录与端口配置（REST: 8079, gRPC: 50051, BFF: 8081, Services: 8082~8084）
 #   2. 检查端口占用并执行日志文件轮转备份（保留最近 5 份）
 #   3. 使用 nohup 后台拉起 PrivShield Core REST & gRPC Agent 主进程并记录 PID
-#   4. 后台拉起 Console BFF (Python 或 Go) 代理服务并记录 PID
+#   4. 后台拉起 Console BFF (Go) 代理服务并记录 PID
 #   5. 可选拉起 中台 3 大微服务群 (service-hub, datasource-mgr, audit-log) 并记录 PID
 #   6. 轮询健康探针（GET /health 最长等待 15 秒）直至服务完全就绪
 #
@@ -18,7 +18,6 @@
 #
 # 选项:
 #   --with-services      同时启动中台三大微服务群 (service-hub: 8082, datasource-mgr: 8083, audit-log: 8084)
-#   --go-bff             使用 Go gRPC BFF (8081) 代替默认 Python BFF (8080)
 #   -h, --help           显示帮助信息
 # ==============================================================================
 
@@ -41,9 +40,8 @@ mkdir -p "$LOG_DIR"
 
 REST_PORT="${PRIVACY_REST_PORT:-8079}"
 GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}"
-CONSOLE_PORT="${PRIVACY_CONSOLE_PORT:-8080}"
+CONSOLE_PORT="${PRIVACY_CONSOLE_PORT:-8081}"
 WITH_SERVICES=false
-USE_GO_BFF=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -51,15 +49,9 @@ while [[ $# -gt 0 ]]; do
             WITH_SERVICES=true
             shift 1
             ;;
-        --go-bff)
-            USE_GO_BFF=true
-            CONSOLE_PORT="8081"
-            shift 1
-            ;;
         -h|--help)
-            echo "用法: $0 [--with-services] [--go-bff]"
+            echo "用法: $0 [--with-services]"
             echo "  --with-services: 联动启动中台三大微服务 (service-hub, datasource-mgr, audit-log)"
-            echo "  --go-bff:        启动 Go gRPC BFF (8081) 而非 Python BFF (8080)"
             exit 0
             ;;
         *)
@@ -75,7 +67,7 @@ echo -e "${BLUE} 工作目录     : ${PROJECT_ROOT}${NC}"
 echo -e "${BLUE} 日志输出目录 : ${LOG_DIR}/${NC}"
 echo -e "${BLUE} REST 端口    : ${REST_PORT}${NC}"
 echo -e "${BLUE} gRPC 端口    : ${GRPC_PORT}${NC}"
-echo -e "${BLUE} 控制台 BFF   : ${CONSOLE_PORT} ($([ "$USE_GO_BFF" = true ] && echo "Go gRPC" || echo "Python REST"))${NC}"
+echo -e "${BLUE} 控制台 BFF   : ${CONSOLE_PORT} (Go BFF)${NC}"
 if [ "$WITH_SERVICES" = true ]; then
     echo -e "${BLUE} 微服务集群   : service-hub(:8082), datasource-mgr(:8083), audit-log(:8084)${NC}"
 fi

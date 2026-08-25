@@ -103,7 +103,7 @@ include = ["engine*"]
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-src = ["engine", "tests", "console/bff-py"]
+src = ["engine", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -139,8 +139,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "B011"]
-"console/bff-py/tests/**" = ["S", "B011"]
-"console/bff-py/app/fixtures/samples.py" = ["E501"]
 "engine/privacy_pb2*.py" = ["E", "F", "N", "UP"]
 "engine/grpc_server.py" = ["N802"]
 "engine/classification_grpc.py" = ["N802"]
@@ -154,8 +152,6 @@ indent-style = "space"
 
 # ── mypy ─────────────────────────────────────────────────────
 [tool.mypy]
-# 这里同样覆盖 `console/bff-py`，因为它共享一部分仓库级约束和公共代码风格。
-# 统一检查可以减少主包与控制台 BFF 之间的接口漂移。
 # python_version 与运行时下限（requires-python >=3.13）保持一致；
 # 3.13 同样兼容 numpy 2.x stub 中的 PEP 695 type 语句。
 python_version = "3.13"
@@ -166,11 +162,10 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 ignore_missing_imports = true
 implicit_optional = true
-files = ["engine", "console/bff-py", "tests"]
+files = ["engine", "tests"]
 exclude = [
     "engine/privacy_pb2.*",
     "engine/privacy_pb2_grpc.*",
-    "console/bff-py/tests",
 ]
 
 [[tool.mypy.overrides]]

@@ -18,7 +18,7 @@ Pydantic is the most popular data validation library for Python, using type hint
 
 ### 2.1 请求/响应模型 / Request/Response Models
 
-文件 / File：`console/bff-py/app/main.py`
+文件 / File：`console/bff-py/app/main.py`（历史实现，已移除；当前等效模型位于 `engine/schemas.py`）
 
 ```python
 from pydantic import BaseModel, Field
@@ -42,7 +42,7 @@ class LbTestRequest(BaseModel):
 
 ### 2.2 配置管理 / Configuration Management
 
-文件 / File：`console/bff-py/app/config.py`
+文件 / File：`console/bff-py/app/config.py`（历史实现，已移除；当前配置入口位于 `console/bff-go/internal/config/config.go`）
 
 ```python
 from pydantic import Field
@@ -407,7 +407,7 @@ class ProxyResponse(BaseModel):
     duration_ms: float
     data: Any
     timestamp: datetime = Field(default_factory=datetime.now)
-    via: str = "python-rest"
+    via: str = "go-grpc"  # 历史示例曾为 "python-rest"，当前 BFF 为 go-grpc
 
     @field_serializer("duration_ms")
     def serialize_duration(self, v: float) -> float:
@@ -423,7 +423,7 @@ class ProxyResponse(BaseModel):
 resp = ProxyResponse(status=200, duration_ms=123.456789, data={"ok": True})
 resp.model_dump()
 # {"status": 200, "duration_ms": 123.46, "data": {"ok": True},
-#  "timestamp": "2024-01-15T10:30:45.123", "via": "python-rest"}
+#  "timestamp": "2024-01-15T10:30:45.123", "via": "go-grpc"}
 
 # 排除字段 / Exclude fields
 resp.model_dump(exclude={"timestamp"})

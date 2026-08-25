@@ -36,8 +36,7 @@
 │                     控制台微服务与代理网关集群                      │
 │                                                                  │
 │   • 统一代理网关：                                                │
-│     - 方案 A：Python FastAPI REST 代理 (console/bff-py/ :8080)   │
-│     - 方案 B：Go gRPC 代理网关 (console/bff-go/ :8081)        │
+│     - Go BFF：REST 入口 + gRPC 上游 (console/bff-go/ :8081)        │
 │                                                                  │
 │   • 专项治理微服务 (Go/Gin + SQLite 持久化)：                     │
 │     - 调度中枢：services/service-hub/ (:8082 / :50052 gRPC)       │
@@ -65,8 +64,7 @@
 | 前端 | Vite | 开发服务器 + 生产构建工具 |
 | 前端 | Tailwind CSS | 原子化 CSS 样式 |
 | 前端 | Vitest + Testing Library | 前端单元测试 |
-| 代理网关 A | Python + FastAPI + Uvicorn | REST 代理层与 Arrow IPC 解码 |
-| 代理网关 B | Go + Gin + Protobuf | 高性能 gRPC 代理网关与静态托管 |
+| 代理网关 | Go + Gin + Protobuf | 高性能 REST/gRPC 代理网关与静态托管 |
 | 调度中枢 | Go + Gin + gRPC (mTLS) | 6 阶段流水线编排调度 |
 | 数据源管理 | Go + Gin + SQLite | 多源异构数据源纳管与元数据分类 |
 | 脱敏审计日志 | Go + Gin + SHA-256 | 8 要素防篡改存证与合规报告 |
@@ -346,7 +344,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:8080',  // 开发时代理到后端
+      '/api': 'http://127.0.0.1:8081',  // 开发时代理到 Go BFF
     },
   },
 });
@@ -392,7 +390,7 @@ test('显示加载文本', () => {
 
 ## 5. 第三阶段：后端核心
 
-### 5.1 Python 后端（FastAPI）
+### 5.1 Agent 后端（FastAPI）
 
 **学什么（按顺序）：**
 
@@ -433,15 +431,15 @@ async with httpx.AsyncClient(timeout=60) as client:
 ```
 
 **在本项目中阅读：**
-- `console/bff-py/app/main.py` — 所有路由定义
-- `console/bff-py/app/config.py` — 环境变量配置
-- `console/bff-py/app/security.py` — API Key + 限流中间件
+- `console/bff-go/cmd/server/main.go` — 程序入口
+- `console/bff-go/internal/handlers/handlers.go` — HTTP 路由
+- `console/bff-go/internal/config/config.go` — 环境变量配置
+- `console/bff-go/internal/agent/client.go` — gRPC 客户端
 
 **启动方式：**
 ```bash
-cd console/bff-py
-pip install -r requirements.txt
-./run.sh   # 或 uvicorn app.main:app --reload --port 8080
+cd console/bff-go
+go run ./cmd/server   # 默认监听 :8081
 ```
 
 ### 5.2 Go 后端（Gin + gRPC）
@@ -462,7 +460,7 @@ r := gin.Default()
 r.GET("/api/health", func(c *gin.Context) {
     c.JSON(200, gin.H{"status": "ok"})
 })
-r.Run(":8080")
+r.Run(":8081")
 ```
 
 3. **gRPC + Protobuf**
@@ -491,20 +489,20 @@ resp, err := client.Mask(ctx, &pb.MaskRequest{
 **启动方式：**
 ```bash
 cd console/bff-go
-go run ./cmd/server   # 默认监听 :8080
+go run ./cmd/server   # 默认监听 :8081
 ```
 
-### 5.3 两种后端对比
+### 5.3 Go BFF 特点
 
-| 维度 | Python FastAPI | Go Gin |
-|------|---------------|--------|
-| 与 agent 通信 | REST (HTTP/JSON) | gRPC (Protobuf) |
-| 性能 | 中等（异步 I/O） | 高（编译型 + goroutine） |
-| 开发速度 | 快（动态类型） | 中（强类型 + 编译） |
-| 部署 | 需要 Python 运行时 | 单个二进制文件 |
-| 适用场景 | 快速迭代、ML 生态 | 高并发、资源受限 |
+| 维度 | Go BFF |
+|------|--------|
+| 前端入口 | REST (HTTP/JSON) |
+| 与 agent 通信 | gRPC (Protobuf) |
+| 性能 | 高（编译型 + goroutine） |
+| 部署 | 单个静态二进制文件 |
+| 适用场景 | 高并发、生产部署 |
 
-**前端不关心用哪个后端！** 两个后端对外暴露完全相同的 JSON API，前端通过 `BackendSelector` 组件切换 base URL 即可。
+前端通过 `BackendSelector` 在 REST 与 gRPC 两种上游协议间切换，统一由 Go BFF 承接。
 
 ---
 
@@ -586,7 +584,7 @@ cd console/web && corepack pnpm dev
 ```bash
 # 从仓库根目录执行
 ./scripts/dev/dev-start-go.sh     # 启动 Go 后端 + 前端
-./scripts/dev/dev-start.sh        # 启动 Python 后端 + 前端
+./scripts/dev/dev-start.sh        # 启动 Agent 后端 + 前端
 ./scripts/dev/dev-start-all.sh    # 启动 agent + 后端 + 前端
 ./scripts/dev/dev-stop.sh         # 停止所有
 ```
@@ -607,7 +605,7 @@ docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
 |------|--------|------|
 | `PRIVACY_REST_PORT` | 8079 | Agent REST 端口 |
 | `PRIVACY_GRPC_PORT` | 50051 | Agent gRPC 端口 |
-| `PRIVACY_AGENT_URL` | http://127.0.0.1:8079 | Python 后端连 agent 的地址 |
+| `PRIVACY_AGENT_URL` | http://127.0.0.1:8079 | Agent REST 监听地址 |
 | `PRIVACY_AGENT_GRPC_HOST` | 127.0.0.1 | Go 后端连 agent 的 gRPC 地址 |
 | `PRIVACY_TLS_ENABLED` | false | 是否启用 TLS |
 | `PRIVACY_AUTH_ENABLED` | false | 是否启用 API Key 认证 |
@@ -720,20 +718,24 @@ console/bff-go/
 └── proto/                   ← Protobuf 生成的 Go 代码
 ```
 
-### 8.3 Python REST 代理网关代码地图
+### 8.3 Go BFF 代理网关代码地图
 
 ```
-console/bff-py/
-├── app/
-│   ├── main.py          ← FastAPI 应用 + 所有路由 (:8080)
-│   ├── config.py        ← 环境变量配置 (Pydantic-Settings)
-│   ├── client.py        ← httpx 异步客户端连接池
-│   ├── security.py      ← API Key + 限流中间件
-│   └── fixtures/
-│       └── samples.py   ← 示例数据
-├── tests/               ← pytest 测试套件
-├── requirements.txt     ← 依赖清单
-└── run.sh               ← 启动脚本
+console/bff-go/
+├── cmd/server/
+│   └── main.go          ← 程序入口 (:8081 HTTP / :50055 gRPC)
+├── internal/
+│   ├── config/          ← 环境变量配置
+│   ├── handlers/        ← HTTP 路由（REST 入口）
+│   ├── grpcserver/      ← gRPC 网关服务端
+│   ├── agent/           ← 上游 Agent gRPC 客户端
+│   ├── mapper/          ← REST→gRPC 映射
+│   ├── samples/         ← 示例数据
+│   └── ...
+├── proto/               ← Protobuf 生成代码
+├── tests/               ← 集成测试
+├── docs/                ← BFF 文档
+└── Dockerfile
 ```
 
 ---
@@ -779,20 +781,17 @@ console/bff-py/
 
 ### Q: 前端请求报 CORS 错误？
 
-开发时前端在 `:5173`，后端在 `:8080`，端口不同触发跨域。解决方案：
+开发时前端在 `:5173`，Go BFF 在 `:8081`，端口不同触发跨域。解决方案：
 - 方案 A：使用 `vite.config.ts` 中的 `server.proxy` 配置
-- 方案 B：后端已配置 CORS 中间件，确认后端正在运行
+- 方案 B：Go BFF 已配置 CORS 中间件，确认后端正在运行
 
-### Q: Go 后端和 Python 后端可以同时运行吗？
+### Q: 前端如何切换协议？
 
-可以。它们监听不同端口（Go 默认 8080，Python 默认 8080 但可配置）。前端通过 `BackendSelector` 切换。
+页面顶部 `BackendSelector` 可在 REST 与 gRPC 两种上游协议间切换。两者均由 Go BFF 承接，切换通过请求头 `X-PrivShield-Protocol` 标记。
 
-### Q: 为什么有两个后端？
+### Q: 为什么只有 Go BFF？
 
-- Python 后端：开发快，直接 REST 转发，适合快速迭代
-- Go 后端：性能高，走 gRPC 协议，适合生产部署
-
-两者对前端暴露完全相同的 JSON API，前端无感知切换。
+项目已统一收敛到单个 Go BFF，对外提供 REST 入口，内部通过 gRPC 与 Agent 通信。这样可减少维护成本并提升生产性能。
 
 ### Q: 怎么跑测试？
 
@@ -800,8 +799,8 @@ console/bff-py/
 # 前端测试
 cd console/web && ./node_modules/.bin/vitest run
 
-# Python 后端测试
-cd console/bff-py && python -m pytest tests/ -v
+# Go BFF 测试
+cd console/bff-go && go test ./...
 
 # Agent 测试
 PYTHONPATH=. pytest tests -q

@@ -2,7 +2,7 @@
 
 为测试控制台提供一站式运维诊断信息，帮助快速定位问题出在哪一层：
 
-    前端（浏览器） → 控制台后端（Python REST / Go gRPC） → Agent（本服务）
+    前端（浏览器） → 控制台后端（统一由 Go BFF 提供 REST/gRPC 代理） → Agent（本服务）
 
 并进一步报告 Agent 内部：
     - 三层分类漏斗中 NER（Layer-2）/ LLM（Layer-3）引擎的降级链路；

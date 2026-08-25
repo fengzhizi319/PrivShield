@@ -167,10 +167,6 @@ result: PipelineResult = service.process_csv("data/kangyang.csv")
 
 ## 3. 控制台代理 API
 
-### 3.1 Python 后端代理 (`console/bff-py`)
-- `POST /api/medical_pipeline`: 未传 `records` 时自动读取 `console/bff-py/samples/kangyang.csv`。
-- `POST /api/pipeline/process`: 通用代理端点。
-
-### 3.2 Go 后端代理 (`console/bff-go`)
+### 3.1 Go BFF 代理 (`console/bff-go`)
 - `POST /api/medical_pipeline`: 未传 `records` 时自动读取 `console/bff-go/internal/samples/kangyang.csv`。
 - `POST /api/pipeline/process`: 通用代理端点。

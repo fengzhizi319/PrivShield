@@ -4,7 +4,7 @@
 
 - 契约定义于 `console/web/src/types/api.ts`，与后端 Pydantic 模型一一对应；
 - 前端通过 `console/web/src/api/client.ts` 调用后端，基址由 `setBaseUrl()` 控制（默认同源）；
-- 后端接口的完整说明见 [console_backend/api_reference.md](../console_backend/api_reference.md)。
+- 后端接口的完整说明见 [console/bff-go/docs/api_reference.md](../../bff-go/docs/api_reference.md)。
 
 ## 1. 后端接口约定（前端视角）
 

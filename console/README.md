@@ -48,8 +48,8 @@ console/
 # 启动 PrivShield Agent + Go BFF + Web 前端 (Vite HMR: http://localhost:5173)
 bash ./scripts/dev/dev-start-go.sh
 
-# 或启动 PrivShield Agent + 双 BFF (Go :8081 + Python :8080) + Web 前端
-bash ./scripts/dev/dev-start-all.sh
+# 或仅启动 PrivShield Agent + Go BFF(:8081) + Web 前端（与 dev-start-go.sh 等价）
+bash ./scripts/dev/dev-start-go.sh
 
 # 停止开发服务
 bash ./scripts/dev/dev-stop.sh
@@ -74,7 +74,7 @@ bash ./scripts/dev/dev-stop-new-modules.sh
 # 启动 Agent + Go BFF + React Web UI
 bash ./scripts/dev/docker-start-go.sh
 
-# 启动全栈容器套件（Agent + 双后端 + Web UI + 可选 vLLM）
+# 启动全栈容器套件（Agent + Go BFF + Web UI + 可选 vLLM）
 bash ./scripts/dev/docker-start-all.sh [--with-llm]
 
 # 停止并清理容器服务

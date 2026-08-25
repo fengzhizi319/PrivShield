@@ -445,11 +445,11 @@ export default function Sidebar({
                           </span>
                           {/* 接口名称（溢出截断）/ Endpoint label (truncate on overflow) */}
                           <span className="flex-1 truncate">{sample.label}</span>
-                          {/* 仅 REST 后端支持的接口显示 REST 标记 / Endpoints only supported by REST backend show REST tag */}
+                          {/* 仅 REST 协议支持的接口显示 REST 标记 / Endpoints only supported by REST protocol show REST tag */}
                           {sample.backend === 'rest' && (
                             <span
                               className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-amber-600"
-                              title={t('sidebar.python_only')}
+                              title={t('sidebar.rest_only')}
                             >
                               REST
                             </span>

@@ -70,7 +70,7 @@
 flowchart TB
     subgraph Clients [客户端接入层]
         Web[React 前端控制台<br/>:5173]
-        BFF[Go / Python BFF<br/>:8081 / :8080]
+        BFF[Go BFF<br/>:8081]
         ExtRPC[外部高性能业务微服务<br/>gRPC Client]
     end
 

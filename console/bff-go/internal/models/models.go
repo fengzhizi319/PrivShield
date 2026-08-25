@@ -1,11 +1,11 @@
-// Package models defines the shared JSON data structures between frontend and Go gRPC proxy backend.
-// Package models 定义前端与 Go gRPC 代理后端之间共享的 JSON 数据结构。
+// Package models defines the shared JSON data structures between frontend and Go BFF.
+// Package models 定义前端与 Go BFF 之间共享的 JSON 数据结构。
 //
 // Design principles / 设计原则：
-//   - All struct JSON tags are fully consistent with the Python REST proxy backend
-//     所有结构体的 JSON 标签与 Python REST 代理后端完全一致
-//   - Frontend can communicate with either Python REST or Go gRPC proxy using the same JSON contract
-//     前端可以用同一套 JSON 契约与 Python REST 或 Go gRPC 代理通信
+//   - All struct JSON tags are aligned with the upstream agent REST/JSON contract
+//     所有结构体的 JSON 标签与上游 agent 的 REST/JSON 契约保持一致
+//   - Frontend communicates with the single Go BFF using the same JSON contract for both REST and gRPC upstream protocols
+//     前端通过同一套 JSON 契约与统一的 Go BFF 交互，无论上游走 REST 还是 gRPC
 //   - Structs are only for JSON serialization/deserialization, containing no business logic
 //     结构体仅用于 JSON 序列化/反序列化，不包含业务逻辑
 //
@@ -36,9 +36,9 @@ import (
 // 前端在启动时通过 /api/samples 获取全部端点示例，
 // 展示在侧边导航中，用户点击后即可填充请求编辑器。
 //
-// backend 字段用于前端过滤当前后端支持的端点：
-//   - "rest"：仅 Python REST 后端支持
-//   - "grpc"：仅 Go gRPC 后端支持
+// backend 字段用于前端过滤当前上游协议支持的端点：
+//   - "rest"：仅 REST 上游协议支持
+//   - "grpc"：仅 gRPC 上游协议支持
 //   - "both"：两者均支持
 type EndpointSample struct {
 	// Method：HTTP 方法（如 "POST"），用于请求编辑器预填充
@@ -80,8 +80,7 @@ type ProxyRequest struct {
 
 // ProxyResponse 是 /api/proxy 返回的统一 JSON 包装响应。
 //
-// 所有 gRPC 调用的结果都统一包装为该格式返回前端，
-// 与 Python REST 后端的响应格式完全一致。
+// 所有 gRPC 调用的结果都统一包装为该格式返回前端。
 type ProxyResponse struct {
 	// Status：HTTP 状态码（如 200），用于前端判断请求是否成功
 	Status int `json:"status"`
@@ -172,7 +171,7 @@ type BatchResponse struct {
 
 // UploadData 是 /api/upload 包装在 ProxyResponse.Data 中的文件处理结果。
 //
-// 与 Python 后端保持一致：
+// 与 Agent REST 响应格式保持一致：
 //   - operation 为操作类型（mask_dataframe / k_anonymize / classify_table）
 //   - rows_in / rows_out 为输入/输出记录数
 //   - result 为具体处理结果（脱敏/K-匿名为记录数组，分类为结果对象）

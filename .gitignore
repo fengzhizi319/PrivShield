@@ -73,8 +73,6 @@ site/
 console/*/server
 console/*/bin/
 
-# Old Python BFF cache
-console/backend/
 
 # Node modules (console/web)
 console/web/node_modules/

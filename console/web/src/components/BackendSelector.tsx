@@ -1,14 +1,13 @@
 /**
  * 后端切换器组件 / Backend Selector Component
  *
- * 功能：在 Go gRPC（8081）与 Python REST（8080）两个代理后端间切换。
- * Function: Switch between Go gRPC (8081) and Python REST (8080) proxy backends.
+ * 功能：在 REST 与 gRPC 两种代理协议间切换（统一由 Go BFF 承接，通过请求头区分）。
+ * Function: Switch between REST and gRPC proxy protocols (both served by the Go BFF, distinguished via request header).
  *
  * 详细逻辑 / Detailed Logic：
- *   1. 切换时通过 ``setBaseUrl`` 更新全局 API 基址；
- *   2. 后续所有请求都会发往新选中的后端；
- *   3. 默认优先选择与当前页面同源的后端（页面由哪个后端提供 UI 就默认调用哪个）；
- *   4. Vite 开发模式等其他来源默认优先连接 Go gRPC 代理 (8081)。
+ *   1. 切换时通过 ``setBaseUrl`` 更新全局通信协议标识；
+ *   2. 后续所有请求仍发往当前页面同源的 Go BFF；
+ *   3. 默认优先选择 gRPC 协议。
  *
  * On switch, updates global API base URL via ``setBaseUrl``;
  * all subsequent requests will go to the newly selected backend.

@@ -57,7 +57,7 @@
 #### 3.1.5 服务暴露与集群内集成
 
 - REST 经 **Ingress**（TLS 终结）暴露给外部调用方（医院/数据局/业务平台）；
-- gRPC 走 ClusterIP Service 供集群内调用方访问（如 console-backend-go 代理）；
+- gRPC 走 ClusterIP Service 供集群内调用方访问（如 `console/bff-go` Go BFF 代理）；
 - 与 vLLM 推理服务同集群部署时，`PRIVACY_LLM_API_BASE` 指向集群 DNS 而非 `127.0.0.1`（`config/env/vllm.env` 的本地默认值不适用）。
 
 #### 3.1.6 不需要 K8s 的场景（对照）
@@ -641,14 +641,16 @@ strategy:
 
 ## 13. 容器化部署实战排坑与经验总结 / Deployment Pitfalls & Best Practices
 
-在 `PrivShield` 项目全栈微服务（Python Agent + Go gRPC 代理 + Python REST 代理 + React 前端 + vLLM GPU 推理）的容器化与多环境交付过程中，总结沉淀了以下关键技术陷阱与最佳实践方案。
+在 `PrivShield` 项目全栈微服务（Python Agent + Go gRPC BFF + React 前端 + vLLM GPU 推理）的容器化与多环境交付过程中，总结沉淀了以下关键技术陷阱与最佳实践方案。
+
+> **历史说明**：早期全栈还包含 Python REST 代理（`console/bff-py`），该实现已移除，当前统一由 `console/bff-go` 承载 BFF 职责。
 
 ### 13.1 本地与私有镜像拉取策略（`pull_policy: build`）
 
 #### 陷阱场景
-执行 `docker compose up -d` 启动包含本地 Dockerfile 构建的服务时，Docker Compose 遇到未在本地缓存的自定义镜像 Tag（如 `privacy-console-backend-python:0.1.0`），默认策略仍会尝试向 Docker Hub（`docker.io`）发起 HEAD / Manifest 查询请求。在受限网络或无公共推送权限的环境下，会导致：
+执行 `docker compose up -d` 启动包含本地 Dockerfile 构建的服务时，Docker Compose 遇到未在本地缓存的自定义镜像 Tag（如 `privacy-console-backend-go:0.1.0`），默认策略仍会尝试向 Docker Hub（`docker.io`）发起 HEAD / Manifest 查询请求。在受限网络或无公共推送权限的环境下，会导致：
 ```text
-failed to resolve reference "docker.io/library/privacy-console-backend-python:0.1.0": unexpected status from HEAD request
+failed to resolve reference "docker.io/library/privacy-console-backend-go:0.1.0": unexpected status from HEAD request
 ```
 
 #### 根本原因
@@ -657,11 +659,11 @@ Docker Compose 2.x 的 `pull_policy` 默认值为 `missing`。如果服务指定
 #### 最佳实践与解法
 1. **显式声明拉取策略**：在 `docker-compose.yml` 中为所有本地构建服务显式添加 `pull_policy: build`：
    ```yaml
-   console-backend-python:
+   console-backend-go:
      build:
-       context: ../../console/bff-py
+       context: ../../console/bff-go
        dockerfile: Dockerfile
-     image: privacy-console-backend-python:0.1.0
+     image: privacy-console-backend-go:0.1.0
      pull_policy: build  # 强制本地构建，禁止向远程 Registry 拉取未推送 Tag
    ```
 2. **启动脚本默认注入 `--build`**：在 `docker-start-all.sh` / `docker-start-go.sh` 等脚本中，默认追加 `--build` 参数，并提供 `--no-build` 选项供快速重用。

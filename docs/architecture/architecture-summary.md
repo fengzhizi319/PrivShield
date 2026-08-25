@@ -1,7 +1,7 @@
 # PrivShield 架构设计与工程实践总结 (Architecture & Engineering Summary)
 
 > **版本**：v2.0.0  
-> **适用范围**：`PrivShield` 核心算力引擎、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台 BFF 体系（`bff-go` / `bff-py` / `web`）及全局云原生基础设施。  
+> **适用范围**：`PrivShield` 核心算力引擎、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台 BFF 体系（`bff-go` / `web`）及全局云原生基础设施。  
 > **关联文档**：[architecture-design.md](architecture-design.md)（详细架构设计）、[production_optimization_design.md](production_optimization_design.md)（生产级优化设计）。
 
 ---
@@ -11,7 +11,7 @@
 PrivShield 是一个**企业级数据安全流通与隐私治理 Sidecar / 中台系统**，实现**「三层四柱五御六类」**安全治理体系：
 - **算力面 (PrivShield Core)**：Python 3.13+ 实现的高性能无状态隐私原语（脱敏、差分隐私、K-匿名、查询混淆）与 3 层动态分类分级漏斗；
 - **调度面 (Enterprise Services)**：Go 1.25 微服务集群负责多源数据资产管理、流水线任务编排调度与不可篡改存证；
-- **展现面 (Console & BFF)**：双 BFF（Go gRPC / Python REST）网关与 React 18 现代化测试控制台。
+- **展现面 (Console & BFF)**：统一 Go BFF（REST 入口 / gRPC 上游）与 React 18 现代化测试控制台。
 
 ---
 
@@ -32,8 +32,7 @@ PrivShield/ (Repo Root)
 │   ├── datasource-mgr/   → 数据源与资产管理微服务 (:8083)
 │   └── audit-log/        → 合规存证与审计日志微服务 (:8084)
 ├── console/              → 统一管理控制台
-│   ├── bff-go/           → Go gRPC 聚合网关 / 主力 BFF (:8081)
-│   ├── bff-py/           → Python REST 代理网关 / 备用 BFF (:8080)
+│   ├── bff-go/           → Go BFF 代理网关 / REST 入口 + gRPC 上游 (:8081)
 │   └── web/              → React 18 + TS + Vite 前端单页应用 (:5173)
 ├── pkg/                  → Go 全局共享基础库 (Client-Side LB, Store, Metrics)
 ├── deploy/               → 云原生部署套件 (Helm, K8s, Compose, Prometheus, Grafana)

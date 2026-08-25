@@ -80,6 +80,20 @@ func (s *GRPCServer) Shutdown() {
 	s.wg.Wait()
 }
 
+// persistTask writes a task state transition before the pipeline continues.
+func (s *GRPCServer) persistTask(task *store.Task, transition string) error {
+	if err := s.tasks.Update(task); err != nil {
+		s.logger.Error("failed to persist task state",
+			"task_id", task.ID,
+			"transition", transition,
+			"status", task.Status,
+			"stage", task.Stage,
+			"error", err.Error())
+		return err
+	}
+	return nil
+}
+
 // ─────────────────────────────────────────────────────────────
 // gRPC Service Methods / gRPC 服务方法
 // ─────────────────────────────────────────────────────────────
@@ -360,7 +374,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			now := time.Now()
 			task.CompletedAt = &now
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-			_ = s.tasks.Update(task)
+			_ = s.persistTask(task, "panic recovery")
 		}
 	}()
 
@@ -371,7 +385,9 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 		task.Status = "running"
 		now := time.Now()
 		task.StartedAt = &now
-		_ = s.tasks.Update(task)
+		if err := s.persistTask(task, "stage started"); err != nil {
+			return
+		}
 
 		select {
 		case <-time.After(100 * time.Millisecond):
@@ -381,7 +397,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			now := time.Now()
 			task.CompletedAt = &now
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-			_ = s.tasks.Update(task)
+			_ = s.persistTask(task, "shutdown failure")
 			return
 		}
 
@@ -393,7 +409,9 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 					b, _ := json.Marshal(res.Records)
 					payloadJSON = string(b)
 					task.PayloadJSON = payloadJSON
-					_ = s.tasks.Update(task)
+					if err := s.persistTask(task, "payload fetched"); err != nil {
+						return
+					}
 				}
 				cancel()
 			}
@@ -410,7 +428,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 				now := time.Now()
 				task.CompletedAt = &now
 				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.tasks.Update(task)
+				_ = s.persistTask(task, "classification failure")
 				return
 			}
 		}
@@ -426,7 +444,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 				now := time.Now()
 				task.CompletedAt = &now
 				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.tasks.Update(task)
+				_ = s.persistTask(task, "desensitization failure")
 				return
 			}
 		}
@@ -437,7 +455,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 	now := time.Now()
 	task.CompletedAt = &now
 	task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-	_ = s.tasks.Update(task)
+	_ = s.persistTask(task, "task completed")
 }
 
 // taskToProto converts a store.Task domain model to its Protobuf representation.

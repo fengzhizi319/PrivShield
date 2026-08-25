@@ -101,6 +101,20 @@ func (s *Server) Shutdown() {
 	s.wg.Wait()
 }
 
+// persistTask writes a task state transition before the pipeline continues.
+func (s *Server) persistTask(task *store.Task, transition string) error {
+	if err := s.tasks.Update(task); err != nil {
+		s.logger.Error("failed to persist task state",
+			"task_id", task.ID,
+			"transition", transition,
+			"status", task.Status,
+			"stage", task.Stage,
+			"error", err.Error())
+		return err
+	}
+	return nil
+}
+
 // RegisterRoutes registers all HTTP routes on the Gin engine.
 // RegisterRoutes 在 Gin 路由引擎上挂载完整的中间件链与 REST API 端点。
 // 中间件装配顺序：
@@ -121,9 +135,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
 	// 基础健康检查与服务概览
-	r.GET("/health", s.Health)       // Liveness probe / 存活探针
-	r.GET("/readyz", s.Readyz)       // Readiness probe / 就绪探针
-	r.GET("/api/health", s.Health)   // Alias for backward compat / 向后兼容别名
+	r.GET("/health", s.Health)     // Liveness probe / 存活探针
+	r.GET("/readyz", s.Readyz)     // Readiness probe / 就绪探针
+	r.GET("/api/health", s.Health) // Alias for backward compat / 向后兼容别名
 	r.GET("/api/hub/status", s.HubStatus)
 
 	// 任务生命周期管理
@@ -365,7 +379,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 			now := time.Now()
 			task.CompletedAt = &now
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-			_ = s.tasks.Update(task)
+			_ = s.persistTask(task, "panic recovery")
 		}
 	}()
 
@@ -376,7 +390,9 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 		task.Status = "running"
 		now := time.Now()
 		task.StartedAt = &now
-		_ = s.tasks.Update(task)
+		if err := s.persistTask(task, "stage started"); err != nil {
+			return
+		}
 
 		// 检查优雅停机信号
 		select {
@@ -387,7 +403,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 			now := time.Now()
 			task.CompletedAt = &now
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-			_ = s.tasks.Update(task)
+			_ = s.persistTask(task, "shutdown failure")
 			return
 		}
 
@@ -399,7 +415,9 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 					req.Payload = res.Records
 					payloadBytes, _ := json.Marshal(req.Payload)
 					task.PayloadJSON = string(payloadBytes)
-					_ = s.tasks.Update(task)
+					if err := s.persistTask(task, "payload fetched"); err != nil {
+						return
+					}
 				}
 				cancel()
 			}
@@ -416,7 +434,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 				now := time.Now()
 				task.CompletedAt = &now
 				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.tasks.Update(task)
+				_ = s.persistTask(task, "classification failure")
 				return
 			}
 		}
@@ -438,7 +456,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 				now := time.Now()
 				task.CompletedAt = &now
 				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.tasks.Update(task)
+				_ = s.persistTask(task, "desensitization failure")
 				return
 			}
 		}
@@ -450,7 +468,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 	now := time.Now()
 	task.CompletedAt = &now
 	task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-	_ = s.tasks.Update(task)
+	_ = s.persistTask(task, "task completed")
 }
 
 // Pipeline returns the status of each pipeline stage.

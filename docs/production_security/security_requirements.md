@@ -8,7 +8,7 @@
 
 `PrivShield` 是一个本地/Sidecar 部署的隐私计算与数据分类分级代理服务。主要技术栈组成如下：
 
-- **核心语言与运行时**：Python 3.13+、Go (控制台代理 `console/backend-go`)
+- **核心语言与运行时**：Python 3.13+、Go (控制台 BFF `console/bff-go`)
 - **Web / RPC 框架**：FastAPI (ASGI REST)、Uvicorn、gRPC (`grpcio`)、Gin (Go 后端)
 - **数据模型与序列化**：Pydantic v2、PyYAML、Protocol Buffers
 - **持久化与嵌入式数据库**：SQLite3 (隐私预算与审查记录)
@@ -125,7 +125,7 @@
 1. **Python 静态代码安全扫描**：
    ```bash
    pip install bandit
-   bandit -r PrivShield/ console/bff-py/
+   bandit -r engine/
    ```
 2. **依赖包漏洞扫描**：
    ```bash

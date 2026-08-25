@@ -78,7 +78,7 @@
 ---
 
 ### `dev-stop.sh`
-- **作用说明**: 一键优雅停止本地由上述开发脚本启动的所有进程（Agent、Go/Python BFF、Vite 前端），释放相关端口资源。
+- **作用说明**: 一键优雅停止本地由上述开发脚本启动的所有进程（Agent、Go BFF、Vite 前端），释放相关端口资源。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/dev-stop.sh
@@ -129,7 +129,7 @@
 ---
 
 ### `start_all_services.sh`
-- **作用说明**: 本地全量单机进程启动脚本，一键启动 Agent、3 大中台微服务、双 BFF 网关以及前端 UI 控制台。
+- **作用说明**: 本地全量单机进程启动脚本，一键启动 Agent、3 大中台微服务、Go BFF 网关以及前端 UI 控制台。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/start_all_services.sh
@@ -149,14 +149,16 @@
 ## 3. Docker 容器化联调脚本
 
 ### `docker-start-all.sh`
-- **作用说明**: 通过 Docker Compose 一键启动全栈容器集群（Agent + Python BFF + Go BFF + Nginx 静态前端 Web）。
+- **作用说明**: 通过 Docker Compose 一键启动全栈容器集群（Agent + Go BFF + Nginx 静态前端 Web）。
 - **参数选项**:
   - `--with-llm`: 联动启动本地 vLLM 大语言模型推理容器 (`:8000`)。
 - **执行命令**:
   ```bash
   # 标准启动全栈容器
   bash ./scripts/dev/docker-start-all.sh
-
+   ```
+  
+  ```bash
   # 带本地 vLLM 大模型容器联动启动
   bash ./scripts/dev/docker-start-all.sh --with-llm
   ```
@@ -173,7 +175,7 @@
 ---
 
 ### `docker-start-python.sh`
-- **作用说明**: 通过 Docker Compose 启动由 **Agent + Python BFF 网关 + Web 控制台** 构成的容器化服务组合。
+- **作用说明**: 历史脚本，已自动重定向到 `docker-start-go.sh`；通过 Docker Compose 启动由 **Agent + Go BFF 网关 + Web 控制台** 构成的容器化服务组合。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/docker-start-python.sh
@@ -253,7 +255,7 @@
 ## 4. 自动化测试、基准压测与环境工具
 
 ### `run_console_e2e_tests.sh`
-- **作用说明**: 【CI/回归基准】运行控制台全套端到端 (E2E) 自动化测试。自动拉起 Mock Agent 桩服务，依次执行 Python BFF 冒烟测试、Go BFF 与 Pkg 单元测试、Services 微服务群测试以及 Web 前端 Vitest 组件测试，提供全链路 100% 覆盖校验。
+- **作用说明**: 【CI/回归基准】运行控制台全套端到端 (E2E) 自动化测试。自动拉起 Mock Agent 桩服务，依次执行 Go BFF 与 Pkg 单元测试、Services 微服务群测试以及 Web 前端 Vitest 组件测试，提供全链路 100% 覆盖校验。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/run_console_e2e_tests.sh

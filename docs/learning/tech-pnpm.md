@@ -1392,10 +1392,7 @@ pnpm 原生支持 Monorepo，通过 workspace 协议管理多包项目：
 │  │   │   ├── package.json                                       │
 │  │   │   └── src/                                               │
 │  │   │                                                          │
-│  │   ├── backend/               ← Python 后端 / Python backend │
-│  │   │   └── requirements.txt   (非 pnpm 管理 / Not pnpm)       │
-│  │   │                                                          │
-│  │   └── backend-go/            ← Go 后端 / Go backend         │
+│  │   └── bff-go/               ← Go BFF / Go BFF            │
 │  │       └── go.mod             (非 pnpm 管理 / Not pnpm)       │
 │  │                                                              │
 │  └── packages/                  ← 共享包 / Shared packages     │

@@ -482,7 +482,7 @@ Root CA (PrivShield-test-ca)
 
 ```bash
 # 生成完整证书链（CA + 服务端 + 客户端）
-bash console/backend-go/scripts/gen-certs.sh console/backend-go/certs
+bash console/bff-go/scripts/gen-certs.sh console/bff-go/certs
 ```
 
 生成的文件：

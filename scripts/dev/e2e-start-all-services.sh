@@ -4,7 +4,7 @@
 # 启动全部真实服务（用于全流程集成测试）
 #
 # 启动服务：
-#   1. PrivShield Agent  (Python REST)  :8079  — 分级脱敏核心引擎
+#   1. PrivShield Agent  (REST + gRPC)  :8079  — 分级脱敏核心引擎
 #   2. service-hub       (Go)           :8082  — 数据服务调度中枢
 #   3. datasource-mgr    (Go)           :8083  — 数据源管理
 #   4. audit-log         (Go)           :8084  — 脱敏审计日志
@@ -104,7 +104,7 @@ wait_for_service() {
 #   4. 通过 HTTP 健康检查轮询等待服务就绪
 #   5. 超时则报错退出
 #
-# ── 1. PrivShield Agent (Python REST) ────────────────────────────────
+# ── 1. PrivShield Agent (REST + gRPC) ────────────────────────────────
 start_agent() {
     local port="${PRIVACY_REST_PORT:-8079}"
     local pid_file="${PIDS_DIR}/agent.pid"

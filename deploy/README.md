@@ -45,8 +45,7 @@ deploy/
 | 服务 | 角色 | 端口 | 技术栈 |
 |---|---|---|---|
 | **PrivShield (Core Agent)** | 隐私计算引擎（脱敏/DP/K-匿名/分类分级） | REST `8079` / gRPC `50051` | Python (FastAPI + gRPC) |
-| **bff-go** (`console/bff-go`) | Console Go 高性能代理（gRPC 直连） | `8081` | Go (Gin) |
-| **bff-py** (`console/bff-py`) | Console Python 代理（REST 转发） | `8080` | Python (FastAPI) |
+| **bff-go** (`console/bff-go`) | Console Go 代理（REST + gRPC 双协议） | `8081` / `50055` | Go (Gin + gRPC) |
 | **console-web** | React 控制台前端（Nginx 托管） | `5173` | React + Nginx |
 | **service-hub** (`services/service-hub`) | 数据服务调度中枢 | `8082` | Go |
 | **datasource-mgr** (`services/datasource-mgr`) | 数据源管理 | `8083` | Go |
@@ -55,7 +54,7 @@ deploy/
 | **redis**（仅生产编排） | 分布式限流后端 | `6379`（内部） | Redis |
 | **prometheus / grafana**（可选，`--profile monitoring`） | 监控与可视化 | `9090` / `3000` | Prometheus / Grafana |
 
-调用链路：`console-web → bff-go/bff-py → PrivShield(REST/gRPC)`；
+调用链路：`console-web → bff-go → PrivShield(REST/gRPC)`；
 `service-hub / datasource-mgr / audit-log → PrivShield(REST)`；
 `PrivShield → vllm`（Layer-3 分类）。
 

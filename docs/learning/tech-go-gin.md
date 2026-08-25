@@ -25,8 +25,8 @@ Gin is the most popular HTTP web framework in the Go ecosystem, known for high p
 本项目采用 **Go 1.21+ 多模块工作区（Go Workspace, `go.work`）** 架构，将控制台划分为 4 个独立微服务与 1 个共享公共包：
 
 ```
-console/
-├── go.work                     # Go 工作区定义 (包含 pkg, backend-go, service-hub, datasource-mgr, audit-log)
+项目根目录/
+├── go.work                     # Go 工作区定义 (包含 pkg, console/bff-go, services/*)
 │
 ├── pkg/                        # 共享基础公共库 (github.com/fengzhizi319/PrivShield/pkg)
 │   ├── store/                  # 存储接口 (TaskStore, DataSourceStore, AuditStore)
@@ -38,26 +38,28 @@ console/
 │   ├── config/                 # 统一环境变量解析与 slog 结构化日志器
 │   └── validation/             # 白名单校验、端口范围与抗碰撞 ID 生成
 │
-├── service-hub/                # 调度中枢微服务 (HTTP :8082 + gRPC :50052)
-│   ├── cmd/server/main.go      # 服务启动入口 (双协议监听 + 优雅关停)
-│   ├── internal/handlers/      # 6 阶段流水线编排 (ingest → fetch → classify → desensitize → return → audit)
-│   ├── internal/grpcserver/    # gRPC 服务实现 (mTLS 双向认证 + 公钥固定)
-│   └── proto/servicehub.proto  # gRPC 服务契约
+├── services/
+│   ├── service-hub/            # 调度中枢微服务 (HTTP :8082 + gRPC :50052)
+│   │   ├── cmd/server/main.go  # 服务启动入口 (双协议监听 + 优雅关停)
+│   │   ├── internal/handlers/  # 6 阶段流水线编排
+│   │   ├── internal/grpcserver/# gRPC 服务实现
+│   │   └── proto/servicehub.proto
+│   │
+│   ├── datasource-mgr/         # 数据源管理微服务 (HTTP :8083)
+│   │   ├── cmd/server/main.go  # 服务入口
+│   │   └── internal/handlers/  # 数据源 CRUD、连通性探测
+│   │
+│   └── audit-log/              # 脱敏审计日志微服务 (HTTP :8084)
+│       ├── cmd/server/main.go  # 服务入口
+│       └── internal/handlers/  # 审计存证、SHA-256 防篡改校验
 │
-├── datasource-mgr/             # 数据源管理微服务 (HTTP :8083)
-│   ├── cmd/server/main.go      # 服务入口
-│   └── internal/handlers/      # 数据源 CRUD、连通性探测、元数据智能分类与访问审计
-│
-├── audit-log/                  # 脱敏审计日志微服务 (HTTP :8084)
-│   ├── cmd/server/main.go      # 服务入口
-│   └── internal/handlers/      # 审计存证、8 要素 SHA-256 防篡改校验与 SQL 级合规报告
-│
-└── backend-go/                 # gRPC 代理网关 (HTTP :8081)
-    ├── cmd/server/main.go      # 程序入口 (代理转发 + 静态 SPA 托管)
-    ├── internal/agent/client.go# gRPC 客户端 (HTTP/2 多路复用)
-    ├── internal/handlers/      # HTTP 路由处理器
-    ├── internal/mapper/        # REST path → gRPC method 映射调度表
-    └── proto/                  # Protobuf 生成代码
+└── console/
+    └── bff-go/                 # gRPC 代理网关 (HTTP :8081)
+        ├── cmd/server/main.go  # 程序入口 (代理转发 + 静态 SPA 托管)
+        ├── internal/agent/client.go # gRPC 客户端 (HTTP/2 多路复用)
+        ├── internal/handlers/  # HTTP 路由处理器
+        ├── internal/mapper/  # REST path → gRPC method 映射调度表
+        └── proto/            # Protobuf 生成代码
 ```
 
 ### 2.2 服务启动 / Server Startup

@@ -6,7 +6,7 @@
 # - 只改控制台时优先跑 `test-console` / `lint-console` / `typecheck-console`
 # - 构建部署产物时使用 `docker-*`、`helm-*`、`docs-*`
 
-.PHONY: help test test-unit test-console test-go test-services test-perf test-load test-mem test-cov lint lint-console format format-console typecheck typecheck-console check cover cover-html bench \
+.PHONY: help test test-unit test-console test-go test-services test-perf test-load test-mem test-cov lint format typecheck check cover cover-html bench \
         helm-lint helm-template docker-core docker-ml docker-services docker-console docker-all clean docs-serve docs-build docs-clean
 
 VERSION ?= 1.8.0
@@ -18,7 +18,7 @@ help:
 	@echo "Testing:"
 	@echo "  test           - 运行 pytest 测试套件（核心 Agent）"
 	@echo "  test-unit      - 仅运行 Agent 单元测试（排除 integration/slow）"
-	@echo "  test-console   - 运行 console/bff-py 单元与冒烟测试"
+	@echo "  test-console   - 运行 console/bff-go 单元测试"
 	@echo "  test-go        - 运行 Go 全量测试（共享库 + 微服务群 + BFF-Go）"
 	@echo "  test-services  - 运行三大中台微服务单元测试"
 	@echo "  test-perf      - 运行性能与内存回归测试套件"
@@ -30,12 +30,9 @@ help:
 	@echo "  bench          - 运行性能基准测试"
 	@echo ""
 	@echo "Quality:"
-	@echo "  lint           - ruff 静态检查（主项目 + 控制台后端）"
-	@echo "  lint-console   - ruff 静态检查（仅控制台后端）"
-	@echo "  format         - ruff 自动格式化（主项目 + 控制台后端）"
-	@echo "  format-console - ruff 自动格式化（仅控制台后端）"
-	@echo "  typecheck      - mypy 类型检查（主项目 + 控制台后端）"
-	@echo "  typecheck-console - mypy 类型检查（仅控制台后端）"
+	@echo "  lint           - ruff 静态检查（主项目）"
+	@echo "  format         - ruff 自动格式化（主项目）"
+	@echo "  typecheck      - mypy 类型检查（主项目）"
 	@echo "  check          - lint + typecheck 一键检查"
 	@echo ""
 	@echo "Deployment:"

@@ -2,7 +2,7 @@
 
 > **文档版本**: 1.1 (已实操落盘与全栈贯通)  
 > **关联文档**: [`docs/medical_pipeline/prd-legacy.md`](prd-legacy.md)  
-> **关键组件**: `scripts/data/generate_medical_data.py`, `engine/pipeline`, `engine/medical_pipeline`, `console/bff-py`, `console/bff-go`, `console/web`
+> **关键组件**: `scripts/data/generate_medical_data.py`, `engine/pipeline`, `engine/medical_pipeline`, `console/bff-go`, `console/web`
 
 ---
 
@@ -109,19 +109,13 @@ class PipelineResult(BaseModel):
 
 ---
 
-## 4. 双后端代理与全栈集成
+## 4. 后端代理与全栈集成
 
-### 4.1 Python 后端 (`console/bff-py`)
-- 扩展 `console/backend/app/main.py`:
+### 4.1 Go BFF (`console/bff-go`)
+- 扩展 `console/bff-go/internal/handlers/handlers.go`:
   - `POST /api/pipeline/process`
   - `POST /api/medical_pipeline`
-- 若请求体未提供 `records`，自动读取 `console/backend/samples/kangyang.csv`。
-
-### 4.2 Go 后端 (`console/backend-go`)
-- 扩展 `console/backend-go/internal/handlers/handlers.go`:
-  - `POST /api/pipeline/process`
-  - `POST /api/medical_pipeline`
-- 若请求体未提供 `records`，自动读取 `console/backend-go/internal/samples/kangyang.csv` 并在 HTTP 代理层透传到 Agent。
+- 若请求体未提供 `records`，自动读取 `console/bff-go/internal/samples/kangyang.csv` 并在 HTTP 代理层透传到 Agent。
 
 ### 4.3 Web 前端 (`console/web`)
 - 组件: `MedicalPipelinePanel.tsx`
@@ -137,6 +131,7 @@ class PipelineResult(BaseModel):
 |---|---|---|
 | `tests/test_pipeline.py` | `PipelineService` 分类、脱敏、CSV 解析及 REST 端点 | `PYTHONPATH=. pytest tests/test_pipeline.py -v` |
 | `tests/test_medical_pipeline.py` | GB 11643-1999 校验、L4/L5 泄漏测试、双输出结构 | `PYTHONPATH=. pytest tests/test_medical_pipeline.py -v` |
-| Python 后端测试 | `/api/pipeline/process` 与 `/api/medical_pipeline` | `pytest console/backend/tests -v` |
-| Go 后端测试 | `/api/pipeline/process` 与 `/api/medical_pipeline` | `go test -v ./...` (在 `console/backend-go` 下) |
+| Go BFF 测试 | `/api/pipeline/process` 与 `/api/medical_pipeline` | `go test -v ./...` (在 `console/bff-go` 下) |
+
+> **历史说明**：早期同时存在 Python REST BFF（`console/backend`）实现相同路由，该实现已移除。
 | 前端构建测试 | TypeScript 类型检查与 Vite 编译 | `corepack pnpm build` (在 `console/web` 下) |

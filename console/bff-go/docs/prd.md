@@ -1,4 +1,6 @@
-# 测试控制台后端（Python）产品需求文档（PRD）
+# 测试控制台后端（Python）产品需求文档（PRD）— 历史归档
+
+> 历史说明：`console/bff-py` 已删除，当前统一由 `console/bff-go`（端口 8081）提供 REST/gRPC 上游代理。本文档保留为 Python 后端历史 PRD，不再描述当前实现。
 
 ## 1. 概述
 
@@ -92,5 +94,5 @@ Python 后端在其中的定位是「**代理层 + 静态服务器**」：
 - [ ] agent 停止时，`/api/health` 返回 200 且 `agent: "unreachable"`，`/api/proxy` 返回 502。
 - [ ] `POST /api/batch` 对混合成功/失败的请求返回正确的 `total/passed/failed`。
 - [ ] `GET /api/samples` 返回的示例数量与 `get_samples()` 一致。
-- [ ] 构建前端后，浏览器访问 `http://127.0.0.1:8080` 可打开控制台。
+- [ ] 构建前端后，浏览器访问 `http://127.0.0.1:8081` 可打开控制台（当前由 Go BFF 托管；历史 Python 后端使用 8080）。
 - [ ] `pytest tests -v` 全部通过。

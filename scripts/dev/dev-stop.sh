@@ -5,7 +5,7 @@
 #
 # ⚠️ 注意 / WARNING:
 #   本脚本按 .pids/ 中的 PID 文件精确停止，并对开发常用端口
-#   (5173/8080/8081/8082/8083/8084/8079/50051) 上残留的任何进程执行清理。
+#   (5173/8081/8082/8083/8084/8079/50051) 上残留的任何进程执行清理。
 #   清理策略为先 SIGTERM 优雅退出、1 秒后仍存活再 SIGKILL 强杀。
 # ============================================================================
 
@@ -75,9 +75,7 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
         kill_by_pid_file "$dir/vite-dev.pid" "Vite 开发服务器"
         kill_by_pid_file "$dir/console-go-mtls.pid" "Go gRPC 代理后端 (mTLS)"
         kill_by_pid_file "$dir/console-go-all.pid" "Go gRPC 代理后端 (all)"
-        kill_by_pid_file "$dir/console-go.pid" "Go gRPC 代理后端"
-        kill_by_pid_file "$dir/console-all.pid" "Python REST 代理后端 (all)"
-        kill_by_pid_file "$dir/console.pid" "Python REST 代理后端"
+        kill_by_pid_file "$dir/console-go.pid" "Go BFF 代理后端"
         kill_by_pid_file "$dir/service-hub.pid" "service-hub 调度中枢"
         kill_by_pid_file "$dir/datasource-mgr.pid" "datasource-mgr 数据源"
         kill_by_pid_file "$dir/audit-log.pid" "audit-log 审计日志"
@@ -94,8 +92,7 @@ kill_by_port 5173 "Vite 前端开发服务器"
 kill_by_port 8084 "audit-log 审计日志"
 kill_by_port 8083 "datasource-mgr 数据源管理"
 kill_by_port 8082 "service-hub 调度中枢"
-kill_by_port 8081 "Go gRPC 代理后端"
-kill_by_port 8080 "Python REST 代理后端"
+kill_by_port 8081 "Go BFF 代理后端"
 kill_by_port 50051 "PrivShield gRPC"
 kill_by_port 8079 "PrivShield REST"
 

@@ -1,107 +1,117 @@
-# 测试控制台后端（Python）测试文档
+# 测试控制台后端（Go BFF）测试文档
 
 ## 1. 测试目的与策略
 
-控制台后端的测试目标是保证**代理转发逻辑**与**接口契约**的正确性。由于后端只是薄代理，测试重点不在算法，而在：
+Go BFF（`console/bff-go`）是控制台与 PrivShield Agent 之间的薄代理层，测试重点是：
 
-- 请求/响应的格式包装是否正确；
-- 错误（校验失败、上游不可达、上游错误）是否按约定转换；
-- 批量执行的容错与汇总统计是否准确。
+- HTTP/REST 路由与请求/响应包装是否正确；
+- gRPC 到上游 Agent 的转发、错误转换、认证元数据是否按约定工作；
+- TLS/mTLS 服务端配置与握手是否可正常建立；
+- 批量执行、文件上传、负载均衡探测等复合接口的容错与汇总统计是否准确。
 
-测试分两层：
+测试分三层：
 
 | 层次 | 工具 | 是否依赖真实 agent | 位置 |
 |---|---|---|---|
-| 单元测试 | `pytest` + `fastapi.testclient.TestClient` + `unittest.mock` | 否（mock `agent_client.request`） | `console/bff-py/tests/test_routes.py` |
-| 冒烟测试 | `httpx`（真实 HTTP 调用） | 是（需 agent + 后端运行） | `console/bff-py/smoke_test.py` |
+| 单元测试 | `go test` + `httptest` / `bufconn` | 否（mock gRPC server） | `console/bff-go/internal/**/*_test.go` |
+| 集成测试 | `go test` + 真实 HTTP 调用 | 是（需 agent + BFF 运行） | `console/bff-go/tests/integration_test.go` |
+| 端到端测试 | `bash ./scripts/dev/run_console_e2e_tests.sh` | 是 | 覆盖 BFF + Services + Web |
 
-**关键设计**：单元测试通过 `AsyncMock` 对模块级单例 `app.main.agent_client.request` 打桩，完全隔离对真实 agent 的依赖，可在 CI 中快速、稳定地运行。
+**关键设计**：单元测试通过 `bufconn` 内存 gRPC 连接或 mock handler 隔离真实 agent；集成测试通过本地启动 BFF 并调用真实 HTTP 端口验证端到端转发。
 
 ## 2. 单元测试用例说明
-
-测试文件 `console/bff-py/tests/test_routes.py` 覆盖以下场景：
 
 ### 2.1 `/api/health`
 
 | 用例 | 场景 | 断言要点 |
 |---|---|---|
-| `test_health_ok` | agent 可达 | 返回 200；`backend == "ok"`；`agent.status == "ok"`；含 `agent_url` 与 `latency_ms` |
-| `test_health_agent_unreachable` | agent 抛 502 | 仍返回 **200**；`agent == "unreachable"`；含 `error` 字段 |
+| `TestHealth_OK` | agent 可达 | 返回 200；`status == "ok"`；含 `via` 与 `protocol` |
+| `TestHealth_AgentUnreachable` | agent 不可达 | 仍返回 **200**；agent 状态为 `"unreachable"`；含 `error` 字段 |
 
 ### 2.2 `/api/samples`
 
 | 用例 | 场景 | 断言要点 |
 |---|---|---|
-| `test_samples` | 获取示例 | 返回 200；`samples` 数量与 `get_samples()` 一致；首条含 `path` |
+| `TestSamples` | 获取示例 | 返回 200；`samples` 数量与 `get_samples()` 一致；首条含 `path` |
 
 ### 2.3 `/api/proxy`
 
 | 用例 | 场景 | 断言要点 |
 |---|---|---|
-| `test_proxy_json` | 转发 JSON 请求 | 返回 200；包装为 `status/duration_ms/data`；`data` 为上游返回 |
-| `test_proxy_invalid_body` | 缺少必填字段 `path` | Pydantic 返回 **422**；响应含 `detail` |
-| `test_proxy_upstream_error` | 上游返回 422 | **透传**状态码 422 与 `detail == "invalid field"` |
+| `TestProxy_JSON` | 转发 JSON 请求 | 返回 200；包装为 `status/duration_ms/data`；`data` 为上游返回 |
+| `TestProxy_InvalidBody` | 缺少必填字段 `path` | 返回 **400**；响应含 `error` 字段 |
+| `TestProxy_UpstreamError` | 上游返回错误 | **透传**状态码与错误信息 |
 
-### 2.4 测试夹具
+### 2.4 `/api/batch`
 
-- `client`：`TestClient(app)`，直接调用路由，无需真实监听端口。
-- `mock_agent_client`：`patch("app.main.agent_client.request", new_callable=AsyncMock)`，用 `return_value` / `side_effect` 控制上游返回与异常。
+| 用例 | 场景 | 断言要点 |
+|---|---|---|
+| `TestBatch_OK` | 批量转发 | 返回 200；`total/passed/failed` 统计正确；单个失败不中断 |
 
-## 3. 冒烟测试说明
+## 3. gRPC Server 与 mTLS 测试
 
-`console/bff-py/smoke_test.py` 遍历 `get_samples()` 返回的全部示例端点，通过后端代理**真实**发送请求并统计成功 / 失败 / 跳过：
+`console/bff-go/internal/grpcserver/server_test.go` 覆盖：
 
-- 需要 agent 与控制台后端均已启动；
-- 需预存资源的端点（如异步任务查询、复核确认）会被自动跳过；
-- 输出每个端点的状态码与耗时，并在末尾给出汇总。
+- 基础 gRPC 转发：`Mask` / `Health` 请求能正确透传到上游 Agent；
+- TLS/mTLS 握手：使用自签名测试证书验证 `ConsoleTLSEnabled` + `ConsoleTLSClientAuth=require` 配置。
 
-## 4. 测试执行与结果
-
-### 4.1 运行单元测试
+运行方式：
 
 ```bash
-cd console/bff-py
-source .venv/bin/activate
-pytest tests -v
+cd console/bff-go
+go test -v ./internal/grpcserver
 ```
 
-预期输出（示意）：
+## 4. 集成测试说明
 
-```text
-tests/test_routes.py::test_health_ok PASSED
-tests/test_routes.py::test_health_agent_unreachable PASSED
-tests/test_routes.py::test_samples PASSED
-tests/test_routes.py::test_proxy_json PASSED
-tests/test_routes.py::test_proxy_invalid_body PASSED
-tests/test_routes.py::test_proxy_upstream_error PASSED
-====== 6 passed ======
-```
+`console/bff-go/tests/integration_test.go` 在真实端口上启动 BFF，并连接 mock 或真实 agent：
 
-### 4.2 运行冒烟测试
+- 探测 `/api/health`、`/api/samples` 是否能正常返回；
+- 验证 `/api/proxy` 路径转发与响应包装；
+- 验证文件上传 `/api/upload` 的 multipart 处理。
+
+前置条件：
 
 ```bash
-# 前置：先启动 agent 与控制台后端
-./scripts/dev/dev-start.sh
+# 方式 1：使用真实 agent
+cd /path/to/PrivShield
+python -m engine.server &
 
-# 另一终端
-cd console/bff-py
-source .venv/bin/activate
-python smoke_test.py
+# 方式 2：使用 mock agent
+python3 scripts/dev/mock_agent_server.py 8079 &
 ```
 
-### 4.3 CI 集成
-
-单元测试不依赖外部服务，可直接纳入 CI：
+运行：
 
 ```bash
-pip install -r console/bff-py/requirements.txt
-pytest console/bff-py/tests -q
+cd console/bff-go
+go test -v ./tests
 ```
 
-## 5. 测试覆盖建议
+## 5. 端到端测试
 
-现有单元测试聚焦 `/api/health`、`/api/samples`、`/api/proxy`。后续可补充：
+```bash
+bash ./scripts/dev/run_console_e2e_tests.sh
+```
 
-- `/api/batch` 的汇总统计与「单个失败不中断」行为；
-- `raw_payload_b64` 解码失败返回 400 的分支；
-- Arrow IPC 响应解析（`_parse_arrow_response`）的单元测试（mock 二进制响应）。
+该脚本会：
+
+1. 启动 Mock Agent（8079）；
+2. 运行 `go test ./pkg/... ./console/bff-go/...`；
+3. 运行 Services 微服务测试；
+4. 运行 React Web 前端 Vitest 测试。
+
+## 6. CI 集成
+
+Go BFF 测试不依赖 Python 依赖，可在标准 Go 环境中运行：
+
+```bash
+go test ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/... -race -count=1
+```
+
+## 7. 测试覆盖建议
+
+- `/api/upload` 大文件/超大文件拒绝分支；
+- gRPC Server 在 `ConsoleGRPCEnabled=false` 时不启动分支；
+- mTLS 公钥固定（`ConsoleTLSPinnedPubKeyFile`）拒绝非法客户端分支；
+- 限流中间件（`CONSOLE_RATE_LIMIT`）命中与跳过分支。

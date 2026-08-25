@@ -278,7 +278,7 @@ export default function ResponsePanel({ response, error, duration, path = 'respo
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             {response?.status ?? 200}
           </span>
-          {/* 后端身份徽章（如 "python-rest" / "go-grpc")/ Backend identity badge (e.g. "python-rest" / "go-grpc") */}
+          {/* 后端身份徽章（如 "go-grpc") / Backend identity badge (e.g. "go-grpc") */}
           {via && (
             <span
               className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700"

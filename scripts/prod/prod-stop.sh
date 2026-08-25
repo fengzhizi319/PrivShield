@@ -5,7 +5,7 @@
 #
 # ⚠️ 注意 / WARNING:
 #   本脚本按 .pids/ 中的 PID 文件精确停止，并对生产端口
-#   (8080/8081/8079/50051) 上残留的任何进程执行清理。
+#   (8081/8079/50051) 上残留的任何进程执行清理。
 #   清理策略为先 SIGTERM 优雅退出、1 秒后仍存活再 SIGKILL 强杀。
 # ============================================================================
 
@@ -65,9 +65,7 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
     if [[ -d "$dir" ]]; then
         kill_by_pid_file "$dir/console-go-mtls.pid" "Go gRPC 代理后端 (mTLS)"
         kill_by_pid_file "$dir/console-go-all.pid" "Go gRPC 代理后端 (all)"
-        kill_by_pid_file "$dir/console-go.pid" "Go gRPC 代理后端"
-        kill_by_pid_file "$dir/console-all.pid" "Python REST 代理后端 (all)"
-        kill_by_pid_file "$dir/console.pid" "Python REST 代理后端"
+        kill_by_pid_file "$dir/console-go.pid" "Go BFF 代理后端"
         kill_by_pid_file "$dir/agent-go-mtls.pid" "PrivShield (mTLS)"
         kill_by_pid_file "$dir/agent-all.pid" "PrivShield (all)"
         kill_by_pid_file "$dir/agent-go.pid" "PrivShield (gRPC)"
@@ -75,8 +73,7 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
     fi
 done
 
-kill_by_port 8081 "Go gRPC 代理后端"
-kill_by_port 8080 "Python REST 代理后端"
+kill_by_port 8081 "Go BFF 代理后端"
 kill_by_port 50051 "PrivShield gRPC"
 kill_by_port 8079 "PrivShield REST"
 

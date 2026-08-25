@@ -140,6 +140,31 @@ export default function App() {
     load();                    // 触发数据重新加载 / Trigger data reload
   }, [backend, load]);
 
+  /**
+   * 定期心跳健康探测 / Periodic health polling
+   *
+   * 每 5 秒静默检测一次上游连通性，在服务就绪或协议恢复时自动刷新状态灯。
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const data = await fetchHealth();
+        if (!cancelled) {
+          setHealth(data);
+        }
+      } catch {
+        // 忽略轮询失败，保留已有状态并在下次轮询重试
+      }
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [backend]);
+
   /** 当前选中的端点示例（仅 endpoint 视图非空）/ Currently selected endpoint sample (non-null only in endpoint view) */
   const selected = view.type === 'endpoint' ? view.sample : null;
   /** 导航到总览页 / Navigate to overview page */

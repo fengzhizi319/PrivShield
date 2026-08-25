@@ -2,9 +2,11 @@
 
 > **版本**：v1.8.0  
 > **状态**：✅ **Completed / Implemented (全量落地、全流程重构与全部遗留项均已实测通过)**  
-> **适用范围**：`PrivShield` 核心引擎（`engine/`）、`console` 控制台及全部关联微服务（`service-hub` / `datasource-mgr` / `audit-log` / `bff-go` / `bff-py` / `web`）  
+> **适用范围**：`PrivShield` 核心引擎（`engine/`）、`console` 控制台及全部关联微服务（`service-hub` / `datasource-mgr` / `audit-log` / `bff-go` / `web`）  
 > **实施分支**：`refactor/directory-restructure`  
-> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、双 BFF 重命名、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容、全栈安全漏洞排查与加固、系统健壮性加固、全栈多层次防 DDoS 体系、`PrivShield`→`engine` 模块改名与平滑兼容层落地、`servicehub.pb.go` 重新生成以及全套 CI/CD/E2E 验证。
+> **最后更新**：2026-08-24 — 全流程重构完毕：完成微服务拆分、共享库提升、BFF 单轨化、Prometheus/Grafana 监控面板扩充、模拟 CSV 数据源注入、多节点 Client-Side 负载均衡、网关 P2C 动态分流、Redis 分布式预算、KEDA/CronHPA 云原生扩缩容、全栈安全漏洞排查与加固、系统健壮性加固、全栈多层次防 DDoS 体系、`PrivShield`→`engine` 模块改名与平滑兼容层落地、`servicehub.pb.go` 重新生成以及全套 CI/CD/E2E 验证。
+>
+> **历史说明**：本文档编写时控制台同时存在 `bff-go` 与 `bff-py` 双 BFF。后续项目已进一步收敛，删除 `console/bff-py`，统一由 `console/bff-go` 承担 REST 入口与 gRPC 上游代理。文档中涉及 `bff-py` 的内容保留作为演进记录，实际运行请以当前仓库代码为准。
 
 ---
 
@@ -18,7 +20,7 @@
 1. **调度中枢 S (`service-hub`)**：作为政务云内部边界中枢，串联国密 VPN 专线网关、数据源拉取、分类分级打标、动态脱敏处理、存证上链回传全生命周期流水线。已扩充专属 Prometheus 监控与 Grafana 调度大屏。
 2. **数据源管理 D (`datasource-mgr`)**：实现多源异构数据库连接池管理、元数据自动探查探测与字段级自动分类分级打标。已内置 `yibao.csv`（医保）与 `kangyang.csv`（康养）真实模拟数据源与记录抽样接口。
 3. **脱敏审计日志服务器 L (`audit-log`)**：实现脱敏明文快照留存、不可篡改 SHA-256 哈希链存证与合规审计看板。
-4. **统一管理控制台 (`console/web` + `bff-go` / `bff-py`)**：提供全景资产大盘、规则编排、隐私预算管控与调试测试能力。
+4. **统一管理控制台 (`console/web` + `bff-go`)**：提供全景资产大盘、规则编排、隐私预算管控与调试测试能力。历史 `bff-py` Python 备用代理已移除。
 
 ### 1.2 现行目录组织的核心矛盾与痛点
 

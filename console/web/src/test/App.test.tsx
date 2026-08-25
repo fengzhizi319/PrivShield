@@ -43,7 +43,7 @@ describe('Console Web App.tsx UI 单元与视图切换集成测试', () => {
 
   const mockHealth = {
     status: 'healthy',
-    backend: 'Python REST',
+    backend: 'gRPC',
     agent_url: 'http://127.0.0.1:8079',
     mode: 'test',
   };

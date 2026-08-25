@@ -38,16 +38,10 @@ PYTHONPATH=. pytest tests/test_medical_pipeline.py -v
 PYTHONPATH=. pytest tests/test_pipeline.py -v
 ```
 
-### 2.3 运行控制台 Python 后端测试
+### 2.3 运行控制台 Go 后端测试
 
 ```bash
-pytest console/bff-py/tests -v
-```
-
-### 2.4 运行控制台 Go 后端测试
-
-```bash
-cd console/backend-go
+cd console/bff-go
 go test -v ./...
 ```
 

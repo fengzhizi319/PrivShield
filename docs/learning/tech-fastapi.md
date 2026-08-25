@@ -18,7 +18,7 @@ FastAPI is a modern, high-performance Python web framework for building APIs, ba
 
 ### 2.1 应用创建与生命周期 / App Creation & Lifespan
 
-文件 / File：`console/bff-py/app/main.py`
+文件 / File：`console/bff-py/app/main.py`（历史实现，已移除；当前 REST 入口位于 `engine/main.py`）
 
 ```python
 from contextlib import asynccontextmanager
@@ -54,8 +54,8 @@ class ProxyResponse(BaseModel):
     status: int
     duration_ms: float
     data: Any
-    via: str = Field(default="python-rest")
-    protocol: str = Field(default="REST")
+    via: str = Field(default="go-grpc")       # 历史示例曾为 "python-rest"，当前 BFF 为 go-grpc
+    protocol: str = Field(default="gRPC")
 ```
 
 ### 2.3 路由定义 / Route Definitions
@@ -116,7 +116,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 ### 2.7 安全中间件详解 / Security Middleware Details
 
-文件 / File：`console/bff-py/app/security.py`
+文件 / File：`console/bff-py/app/security.py`（历史实现，已移除；当前等效安全中间件位于 `engine/security/`）
 
 本项目实现了基于 Starlette `BaseHTTPMiddleware` 的安全中间件：
 This project implements a security middleware based on Starlette `BaseHTTPMiddleware`:
@@ -476,8 +476,8 @@ class BaseResponse(BaseModel):
 class ProxyResponse(BaseResponse):
     """代理转发响应 / Proxy forwarding response"""
     data: Any = None
-    via: str = "python-rest"       # 经由哪个后端 / Via which backend
-    protocol: str = "REST"         # 使用的协议 / Protocol used
+    via: str = "go-grpc"           # 经由哪个后端 / Via which backend（历史示例曾为 "python-rest"）
+    protocol: str = "gRPC"         # 使用的协议 / Protocol used
 
 # 批量响应 / Batch response
 class BatchResponse(BaseResponse):

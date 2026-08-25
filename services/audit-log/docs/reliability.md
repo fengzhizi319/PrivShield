@@ -110,6 +110,16 @@ python -m PrivShield.privacy.verify_audit --log-file /path/to/audit.log
 | `audit_logs` | 脱敏操作审计记录 | `input_hash`, `output_hash`, `algorithm`, `security_level` |
 | `snapshots` | 审计快照（含输入/输出样本） | `integrity_hash`, `input_sample`, `output_sample` |
 
+### 3.5 审计写入持久化保证与性能评估
+
+生产环境必须配置非空的 `DB_PATH`，使 audit-log 使用 SQLite `AuditStore`；内存回退仅适合测试或临时开发，重启后数据会丢失，并且内存实现会在达到容量上限后丢弃最早的记录，不能作为合规存证的持久化方案。SQLite 模式下，`SaveLog()` 以参数化单条 `INSERT INTO audit_logs (...)` 写入完整主审计记录。HTTP `POST /api/audit/logs` 仅在该调用成功后才返回 `201 Created`，写入失败则返回 `500`；gRPC `RecordAudit` 同样仅在 `SaveLog()` 成功后返回 `success = true`，失败时返回 `Internal`。因此，调用方收到成功响应至少可确认主审计记录已由存储层接受，而不是仅保存在服务进程内存中。
+
+主审计记录与快照的原子性边界必须明确：HTTP 创建接口先写入 `audit_logs`，再单独调用 `SaveSnapshot()` 写入 `snapshots`。两次写入目前不是同一个 SQLite 事务；快照写入失败时服务记录错误日志，但 HTTP 响应仍为 `201`，所以该响应不保证关联快照已经存在。gRPC `RecordAudit` 当前只创建主审计记录，不自动创建快照。外键约束确保已写入的快照必须引用已有主记录，但不能使两个独立 `INSERT` 自动共同提交。对“日志和快照必须同时存在”的强合规要求，应将二者封装为同一 `sql.Tx` 中的写入操作，并在任一语句失败时回滚；在此改动完成前，运维应将主记录和快照数量差异、快照写入失败日志及完整性校验失败作为告警信号。
+
+每条仅含主记录的审计请求产生 1 次 SQLite 写入；通过 HTTP 同时创建快照的请求通常产生 2 次顺序写入。WAL 允许审计查询与写入并发进行，`busy_timeout=5000` 在短暂写锁竞争时等待最多 5 秒，连接池限制为 4 个打开连接、2 个空闲连接以限制竞争；但 SQLite 仍只有一个写入者，高并发审计提交、慢磁盘或大尺寸 `parameters_json`/快照样本都会提升写入尾延迟。接口将 `parameters` 序列化后的大小限制为 1 MiB，可避免单条参数无限制放大数据库和 I/O 成本，但输入/输出样本的大小仍应通过网关或调用方约束并纳入容量规划。
+
+性能验收必须在实际存储卷、文件系统和容器限额下执行，至少采集 `SaveLog` 与 `SaveSnapshot` 的成功率和 P50/P95/P99 延迟、SQLite busy/错误次数、WAL 文件大小、每秒写入数，以及主记录与快照的数量差异。基准应分别覆盖单并发主记录写入、多并发主记录写入和 HTTP 双写路径；不要将开发机吞吐量作为生产承诺。可靠性验收还应注入锁竞争和磁盘错误，确认主记录失败会向调用方暴露，而快照失败会被日志与监控及时发现并补偿。
+
 ---
 
 ## 4. 数据库备份（Backup）

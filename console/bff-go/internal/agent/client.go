@@ -1,5 +1,5 @@
-// Package agent encapsulates the gRPC client connection to the PrivShield Python service.
-// Package agent 封装到 PrivShield Python gRPC 服务的客户端连接。
+// Package agent encapsulates the gRPC client connection to the PrivShield service.
+// Package agent 封装到 PrivShield gRPC 服务的客户端连接。
 //
 // Responsibilities / 职责：
 //   - Establish and manage the gRPC connection to the upstream agent
@@ -10,7 +10,7 @@
 //     在每次调用时自动附加可选的认证元数据（API Key Bearer Token）
 //
 // Dependency chain / 依赖关系：
-//   handlers → agent.Client → proto.PrivacyServiceClient → gRPC → Python agent
+//   handlers → agent.Client → proto.PrivacyServiceClient → gRPC → PrivShield Agent
 //
 // All RPC timeouts are controlled via caller-provided context; this package hardcodes none.
 // 所有 RPC 超时通过调用方传入的 context 控制，本包不硬编码超时。

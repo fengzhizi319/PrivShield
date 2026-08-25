@@ -11,11 +11,11 @@ React 18 + TypeScript + Vite + Tailwind CSS 实现的前端测试控制台。
 ```bash
 cd console/web
 npm install
-# 启动开发服务器（自动代理 /api 到 127.0.0.1:8080）
+# 启动开发服务器（自动代理 /api 到 127.0.0.1:8081）
 npm run dev
 ```
 
-开发服务器默认在 `http://127.0.0.1:5173` 启动，需先启动 Python 后端（`cd ../backend && ./run.sh`）。
+开发服务器默认在 `http://127.0.0.1:5173` 启动，需先启动 Go 后端（`cd ../bff-go && go run ./cmd/server`）。
 
 ## 前端模式切换说明
 
@@ -26,7 +26,7 @@ npm run dev
 开发模式适合本地联调和快速改 UI：
 
 - 前端由 Vite 开发服务器提供，默认地址是 `http://127.0.0.1:5173`
-- 后端通常运行在 `http://127.0.0.1:8080`（Python REST）或 `http://127.0.0.1:8081`（Go gRPC）
+- 后端运行在 `http://127.0.0.1:8081`（Go BFF，同时提供 REST 入口与 gRPC 上游协议）
 - 前端会通过绝对地址访问后端，因此经常会触发跨域
 - 此时优先依赖后端 CORS 中间件，或使用 Vite 的 `/api` 代理做同源回退
 
@@ -41,8 +41,8 @@ npm run dev
 如果你同时在调试后端，通常再配合：
 
 ```bash
-cd ../backend
-./run.sh
+cd ../bff-go
+go run ./cmd/server
 ```
 
 ### 2. 商业化产品模式
@@ -50,7 +50,7 @@ cd ../backend
 商业化产品模式更接近正式交付或客户环境部署：
 
 - 先执行 `npm run build`，生成 `dist/`
-- 由 Python 后端、Go 后端、Nginx 或网关托管静态资源
+- 由 Go 后端、Nginx 或网关托管静态资源
 - 前端页面与 API 尽量同源，减少跨域和浏览器兼容问题
 - 浏览器不直接连接开发服务器，也不依赖热更新
 
@@ -70,10 +70,10 @@ npm run build
 
 前端顶部的 Backend Selector 主要切换的是 **API 的上游后端**，不是切换前端本身：
 
-- `Python REST`：前端请求发到 Python 后端，再由它转发到 `PrivShield`
-- `Go gRPC`：前端请求发到 Go 后端，再由它通过 gRPC 转发到 `PrivShield`
+- `REST`：前端请求通过 Go BFF 的 REST 入口转发到 `PrivShield`
+- `gRPC`：前端请求仍发往 Go BFF，由 BFF 通过 gRPC 转发到 `PrivShield`
 
-在开发模式下，切换后端通常意味着不同端口之间的跨域请求；在商业化产品模式下，最好把它们都收敛到同一个对外入口，避免浏览器端感知多个后端地址。
+在开发模式下，切换协议通常通过请求头标记区分；在商业化产品模式下，建议收敛到同一个对外入口，避免浏览器端感知多个后端地址。
 
 ### 4. 什么时候用哪种模式
 
@@ -94,8 +94,7 @@ npm run build        # 等价于 tsc && vite build
 
 产物输出到 `dist/`，由后端挂载为静态资源：
 
-- Python 后端：`console/backend/app/main.py`（`PRIVACY_CONSOLE_STATIC_DIR`，默认 `../web/dist`）
-- Go 后端：`console/backend-go`（同样挂载 `web/dist`）
+- Go BFF：`console/bff-go/cmd/server`（`PRIVACY_CONSOLE_STATIC_DIR`，默认 `../web/dist`）
 
 ## 主要文件
 

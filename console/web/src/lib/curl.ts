@@ -96,9 +96,9 @@ export function buildCurl({ method, path, body, baseUrl = 'http://127.0.0.1:8079
  * 从健康信息推断 agent REST 基础地址 / Derive agent REST base URL from health info.
  *
  * 详细逻辑 / Detailed Logic：
- *   - Python 后端的 agent_url 形如 http://127.0.0.1:8079，可直接使用；
- *   - Go 后端的 agent_url 是 gRPC 地址（如 127.0.0.1:50051），无 http 前缀，
- *     此时回退到默认 REST 地址 http://127.0.0.1:8079。
+ *   - agent_url 若为 REST 地址（形如 http://127.0.0.1:8079），可直接使用；
+ *   - agent_url 若为 gRPC 地址（如 127.0.0.1:50051）且无 http 前缀，
+ *     则回退到默认 REST 地址 http://127.0.0.1:8079。
  *
  * @param agentUrl - 健康检查返回的 agent 地址（可能为 REST 或 gRPC）/ Agent URL from health check (may be REST or gRPC)
  * @returns 可用的 REST 基础地址 / Usable REST base URL

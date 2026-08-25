@@ -918,7 +918,7 @@ PrivShield/
 │       ├── package.json      ← 独立依赖 / Independent deps
 │       └── src/
 ├── engine/          ← Python（无 ESLint）/ Python (no ESLint)
-└── console/backend-go/       ← Go（无 ESLint）/ Go (no ESLint)
+└── console/bff-go/       ← Go（无 ESLint）/ Go (no ESLint)
 
 本项目结构特点 / This project's structure:
 - 仅 console/web 使用 ESLint / Only console/web uses ESLint
@@ -960,7 +960,7 @@ pnpm lint:fix          # 自动修复 / Auto-fix
 
 # Go 质量检查（非 ESLint）/ Go quality (not ESLint)
 - name: Lint Go backend
-  working-directory: console/backend-go
+  working-directory: console/bff-go
   run: |
     go vet ./...
     staticcheck ./...
@@ -1526,14 +1526,14 @@ export default [
 │  │  - 类型感知规则 / Type-aware rules                  │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                                 │
-│  Python (console/backend/):                                    │
+│  Python (engine/):                                    │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  Ruff (替代 flake8 + black + isort)                  │   │
 │  │  - 超快 linter + formatter / Ultra-fast              │   │
 │  │  - 单一工具 / Single tool                            │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                                 │
-│  Go (console/backend-go/):                                     │
+│  Go (console/bff-go/):                                     │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  go vet + staticcheck + gofmt                       │   │
 │  │  - 官方工具链 / Official toolchain                   │   │
@@ -1579,9 +1579,9 @@ indent-style = "space"
 
 ```bash
 # Python lint 命令 / Python lint commands
-ruff check console/backend/          # 检查 / Check
-ruff check console/backend/ --fix    # 修复 / Fix
-ruff format console/backend/         # 格式化 / Format
+ruff check engine/          # 检查 / Check
+ruff check engine/ --fix    # 修复 / Fix
+ruff format engine/         # 格式化 / Format
 ```
 
 ### 19.3 Go Lint 配置 / Go Lint Configuration
@@ -1641,8 +1641,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install ruff
-      - run: ruff check console/backend/
-      - run: ruff format --check console/backend/
+      - run: ruff check engine/
+      - run: ruff format --check engine/
 
   go:
     runs-on: ubuntu-latest
@@ -1651,10 +1651,10 @@ jobs:
       - uses: actions/setup-go@v5
         with: { go-version: '1.22' }
       - run: go vet ./...
-        working-directory: console/backend-go
+        working-directory: console/bff-go
       - run: go install honnef.co/go/tools/cmd/staticcheck@latest
       - run: staticcheck ./...
-        working-directory: console/backend-go
+        working-directory: console/bff-go
 ```
 
 ### 19.5 Lint 工具对比总结 / Lint Tool Comparison Summary

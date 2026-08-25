@@ -72,7 +72,7 @@ flowchart TB
     subgraph Producers [日志生成方]
         ServiceHub[service-hub 调度中枢<br/>:8082]
         Agent[PrivShield 核心引擎<br/>:8079]
-        BFF[Go / Python BFF<br/>:8081 / :8080]
+        BFF[Go BFF<br/>:8081]
     end
 
     subgraph AuditLogService ["audit-log 审计存证中心 (:8084 / :50054)"]

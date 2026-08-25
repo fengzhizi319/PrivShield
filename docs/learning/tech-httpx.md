@@ -19,7 +19,7 @@ httpx is a fully-featured Python HTTP client library supporting both sync and as
 
 ### 2.1 异步代理客户端 / Async Proxy Client
 
-文件 / File：`console/bff-py/app/client.py`
+文件 / File：`console/bff-py/app/client.py`（历史实现，已移除；当前 BFF 使用 Go 标准库 `net/http` 与 gRPC，参见 `console/bff-go/internal/client/agent.go`）
 
 ```python
 import httpx
@@ -77,7 +77,7 @@ except httpx.HTTPStatusError as exc:
 
 ### 2.4 负载均衡探测 / Load Balancer Probing
 
-文件 / File：`console/bff-py/app/main.py`
+文件 / File：`console/bff-py/app/main.py`（历史实现，已移除；当前 BFF 入口位于 `console/bff-go/internal/handlers/handlers.go`）
 
 ```python
 # 临时客户端用于 LB 探测（transport 可注入 MockTransport 供测试）
@@ -782,7 +782,7 @@ HTTPError (基类 / Base)
 ### 11.2 本项目错误处理实践 / This Project's Error Handling Practice
 
 ```python
-# console/bff-py/app/client.py — 代理请求错误处理
+# console/bff-py/app/client.py — 代理请求错误处理（历史实现，已移除）
 # Proxy request error handling
 import httpx
 from fastapi import HTTPException
@@ -1308,7 +1308,7 @@ async def mask_via_aiohttp(payload: dict) -> dict:
 ### 17.2 httpx 作为反向代理客户端 / httpx as Reverse Proxy Client
 
 ```python
-# console/bff-py/app/client.py
+# console/bff-py/app/client.py（历史实现，已移除）
 import httpx
 from contextlib import asynccontextmanager
 

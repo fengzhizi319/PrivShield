@@ -13,10 +13,9 @@
 //
 // Design goal / 设计目标：
 //
-//	Maintain fully consistent JSON contract with the Python REST proxy backend;
-//	frontend only needs to switch base URL to seamlessly switch between backends.
-//	与 Python REST 代理后端保持完全一致的 JSON 契约，
-//	前端只需切换 base URL 即可在两种后端之间无缝切换。
+//	Expose a unified REST/JSON contract for the React console and proxy requests
+//	to the upstream PrivShield agent via gRPC.
+//	为 React 控制台提供统一的 REST/JSON 契约，并通过 gRPC 代理到上游 PrivShield agent。
 //
 // Route list / 路由清单：
 //
@@ -71,7 +70,7 @@ import (
 // 本控制台后端的身份标识常量，随每个响应下发给前端。
 //
 // 用途：前端界面展示"当前请求由哪个后端、以何种协议与 agent 通信"，
-// 使 Python REST / Go gRPC 两种通信方式的切换可被直观验证。
+// 使 REST / gRPC 两种上游协议切换可被直观验证。
 const (
 	// backendVia：标识响应经由的后端类型，"go-grpc" 表示通过 Go 代理后端转发
 	backendVia = "go-grpc"
@@ -172,8 +171,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	s.registerStatic(r)
 }
 
-// registerStatic 挂载前端构建产物（SPA），使 Go 后端能独立提供 Console UI，
-// 无需依赖 Python 后端。
+// registerStatic 挂载前端构建产物（SPA），使 Go 后端能独立提供 Console UI。
 //
 // 执行逻辑：
 //  1. 检查配置中的 StaticDistDir 是否为空，空则跳过（纯 API 模式）
@@ -182,7 +180,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 //  4. 挂载 /assets 静态资源目录
 //  5. 注册 SPA 回退路由：非 /api 路由一律返回 index.html
 //
-// 路由规则与 Python 后端保持一致：
+// 路由规则与历史 Python 后端保持一致：
 //   - /assets/* → 静态资源（带内容哈希，可强缓存）
 //   - 其余非 /api 路由 → 返回 index.html（SPA 回退，禁止缓存）
 func (s *Server) registerStatic(r *gin.Engine) {
@@ -251,7 +249,7 @@ func dirExists(path string) bool {
 
 // Health 检查 Go 代理自身与上游 agent 的连通性，返回结构化健康状态。
 //
-// 响应字段与 Python 后端保持一致：
+// 响应字段与历史 Python 后端保持一致：
 //   - backend：Go 代理自身状态（始终为 "ok"）
 //   - agent：上游 agent 状态（"ok" 或 "unreachable"）
 //   - agent_url：上游 agent 的 gRPC 地址
@@ -310,10 +308,16 @@ func (s *Server) Health(c *gin.Context) {
 	}
 
 	// 默认使用 gRPC 协议检查
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	resp, err := s.client.Health(ctx)
+	if err != nil {
+		// 瞬态重试一次（处理连接握手与初始化期间的抖动）
+		retryCtx, retryCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		resp, err = s.client.Health(retryCtx)
+		retryCancel()
+	}
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -444,8 +448,7 @@ func (s *Server) agentRestBaseURL() string {
 }
 
 // extractRestErrorDetail 从上游错误响应体中提取可读的错误描述。
-// 优先取 JSON 体中的 detail 字段（FastAPI 规范，对齐 Python 后端
-// console/bff-py/app/client.py 的 _extract_detail 行为）；
+// 优先取 JSON 体中的 detail 字段（FastAPI 规范，与上游 agent 的错误格式保持一致）；
 // 非 JSON 或无 detail 字段时降级为截断后的原始文本，避免把整段
 // HTML/堆栈塞进响应 detail。
 func extractRestErrorDetail(body []byte, statusCode int) string {
@@ -678,7 +681,7 @@ func (s *Server) callRestOnce(method, path string, body json.RawMessage) error {
 // Batch 逐个转发一组请求并汇总成功/失败统计。
 //
 // 用于前端“一键批量测试”：单个请求失败不会中断整个批次，
-// 返回与 Python 后端一致的 {total, passed, failed, results} 结构。
+// 返回与历史 Python 后端保持一致的 {total, passed, failed, results} 结构。
 //
 // 执行逻辑：
 //  1. 解析请求体为 BatchRequest（包含多个待转发请求）

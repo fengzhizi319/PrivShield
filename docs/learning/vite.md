@@ -65,43 +65,30 @@ flowchart LR
         DEV1[React + Vite dev server]
         DEV2[访问 5173]
         DEV3[开发代理 /api]
-        DEV4[Python 后端 8080]
-        DEV5[Go 后端 8081]
-        DEV6[PrivShield]
+        DEV4[Go BFF 后端 8081]
+        DEV5[PrivShield]
 
         DEV1 --> DEV2 --> DEV3
-        DEV3 --> DEV4 --> DEV6
-        DEV3 -. 可选切换 .-> DEV5 --> DEV6
+        DEV3 --> DEV4 --> DEV5
     end
 
     subgraph PROD[生产模式]
         PROD1[构建 dist 静态产物]
         PROD2[后端或 Nginx 托管]
         PROD3[同源访问页面与 API]
-        PROD4[Python 后端 8080 或 Go 后端 8081]
+        PROD4[Go BFF 后端 8081]
         PROD5[PrivShield]
 
         PROD1 --> PROD2 --> PROD3 --> PROD4 --> PROD5
-    end
-
-    subgraph DUAL[双后端模式]
-        DUAL1[前端顶部 Backend Selector]
-        DUAL2[Python REST 8080]
-        DUAL3[Go gRPC 8081]
-        DUAL4[同一前端页面]
-        DUAL5[PrivShield]
-
-        DUAL4 --> DUAL1
-        DUAL1 --> DUAL2 --> DUAL5
-        DUAL1 --> DUAL3 --> DUAL5
     end
 ```
 
 从这张图可以直接看出：
 
 - **开发模式**：重点是热更新、快速联调和 `/api` 代理；
-- **生产模式**：重点是 `dist/` 静态托管、同源访问和稳定部署；
-- **双后端模式**：重点是前端可以在 Python REST 和 Go gRPC 两条后端链路之间切换。
+- **生产模式**：重点是 `dist/` 静态产物托管、同源访问和稳定部署。
+
+> **历史说明**：早期版本支持在 Python REST BFF（`:8080`）与 Go gRPC BFF（`:8081`）之间切换，该双后端模式已移除，当前统一由 Go BFF 承载。
 
 ---
 
@@ -548,22 +535,21 @@ Vite 正好负责它的：
 
 ### 9.1.1 `console/web` 请求链路图
 
-下面这张图把前端请求在两种后端之间的流向画出来。无论选 Python REST 还是 Go gRPC，前端本质上都是先把请求发到对应的控制台后端，再由后端转发到 `PrivShield`：
+当前前端请求统一流向 Go gRPC BFF，再由其转发到 `PrivShield`：
 
 ```mermaid
 flowchart LR
     U[浏览器]
     F[console web 前端]
-    P[Python 后端 8080]
-    G[Go 后端 8081]
+    G[Go BFF 后端 8081]
     A[PrivShield]
 
     U --> F
-    F -->|Python REST| P
-    F -->|Go gRPC| G
-    P -->|REST| A
-    G -->|gRPC| A
+    F -->|HTTP/REST| G
+    G -->|gRPC / REST fallback| A
 ```
+
+> **历史说明**：早期版本前端可在 Python REST BFF（`:8080`）与 Go gRPC BFF（`:8081`）之间切换，双后端模式已移除。
 
 这张图对应的实际含义是：
 
@@ -588,11 +574,11 @@ npm run dev
 http://127.0.0.1:5173
 ```
 
-同时，你还需要启动后端，例如 Python 后端：
+同时，你还需要启动 Go BFF 后端：
 
 ```bash
-cd ../backend
-./run.sh
+cd ../bff-go
+go run ./cmd/server
 ```
 
 为什么要这样？因为前端页面要去请求 `/api/*`，而真正的 API 在后端。
@@ -605,7 +591,7 @@ cd ../backend
 server: {
   proxy: {
     '/api': {
-      target: 'http://127.0.0.1:8080',
+      target: 'http://127.0.0.1:8081',
       changeOrigin: true,
     },
   },
@@ -615,7 +601,7 @@ server: {
 这意味着：
 
 - 前端开发服务器收到 `/api` 请求；
-- 它会转发到 Python 后端 `8080`；
+- 它会转发到 Go BFF 后端 `8081`；
 - 这样开发时就更像“同源访问”；
 - 有助于减少浏览器跨域问题。
 
@@ -644,18 +630,20 @@ console/web/dist/
 
 在这个项目里：
 
-- Python 后端会把 `dist/` 当静态资源；
-- Go 后端也可以挂载相同的 `dist/`；
+- Go BFF 后端会挂载 `console/web/dist/` 作为静态资源；
 - `scripts/dev/dev-start.sh`、`scripts/dev/dev-start-go.sh` 等脚本会自动帮你处理这部分流程。
+
+> **历史说明**：早期 Python REST BFF（`console/bff-py`）也曾托管 `dist/`，该实现已移除。
 
 ### 9.5 后端切换和 Vite 的关系
 
-页面里的 Backend Selector 负责切换前端请求的上游后端：
+当前前端请求统一发往 Go gRPC BFF：
 
-- Python REST 后端：`8080`
-- Go gRPC 后端：`8081`
+- Go gRPC BFF：`8081`
 
 Vite 本身并不决定你最终调用谁，它只负责：
+
+> **历史说明**：早期页面提供 Backend Selector，可在 Python REST 后端（`:8080`）与 Go gRPC 后端（`:8081`）之间切换，该双后端模式已移除。
 
 - 在开发时提供一个本地前端运行环境；
 - 必要时帮你把 `/api` 转发出去。

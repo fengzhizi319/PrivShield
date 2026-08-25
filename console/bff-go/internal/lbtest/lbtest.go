@@ -177,7 +177,7 @@ func Run(ctx context.Context, req models.LbTestRequest, client *http.Client) (mo
 	if req.NumRequests <= 0 {
 		req.NumRequests = 10
 	}
-	// 上限与 Python 侧 console/bff-py/app/main.py 的 le=1000 对齐，
+	// 上限固定为 1000，与 REST 接口约定保持一致，
 	// 防止探测端点被用作请求放大攻击。
 	if req.NumRequests > 1000 {
 		req.NumRequests = 1000

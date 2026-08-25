@@ -4,8 +4,8 @@
 // 执行流程 / Execution flow:
 //   1. 从环境变量加载配置（agent 地址、监听端口、API Key 等）
 //      Load configuration from env vars (agent address, listen port, API Key, etc.)
-//   2. 创建到 PrivShield Python gRPC 服务的客户端连接
-//      Create gRPC client connection to PrivShield Python service
+//   2. 创建到 PrivShield gRPC 服务的客户端连接
+//      Create gRPC client connection to PrivShield service
 //   3. 初始化 Gin HTTP 路由，注册所有 REST 代理接口与静态 UI 托管
 //      Initialize Gin HTTP routes, register all REST proxy endpoints and static UI hosting
 //   4. 启动 HTTP 服务器，监听前端请求
@@ -14,8 +14,8 @@
 //      Listen for system signals (SIGINT/SIGTERM), perform graceful shutdown on receipt
 //
 // 整体架构 / Overall architecture:
-//   React 前端  ──HTTP/JSON──▶  本程序(Go)  ──gRPC──▶  PrivShield(Python)
-//   React frontend  ──HTTP/JSON──▶  This program(Go)  ──gRPC──▶  PrivShield(Python)
+//   React 前端  ──HTTP/JSON──▶  本程序(Go)  ──gRPC──▶  PrivShield Agent
+//   React frontend  ──HTTP/JSON──▶  This program(Go)  ──gRPC──▶  PrivShield Agent
 package main
 
 import (

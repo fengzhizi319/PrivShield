@@ -1,7 +1,7 @@
 # PrivShield 架构设计文档 (Architecture Design Document)
 
 > **版本**：v2.0.0  
-> **适用范围**：`PrivShield` 核心算力引擎、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台 BFF 体系（`bff-go` / `bff-py` / `web`）及云原生部署与监控套件。  
+> **适用范围**：`PrivShield` 核心算力引擎、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台 BFF 体系（`bff-go` / `web`）及云原生部署与监控套件。  
 > **关联文档**：[architecture-summary.md](architecture-summary.md)（工程实践速览）、[services.md](services.md)（微服务体系）、[console.md](console.md)（控制台体系）、[production_optimization_design.md](production_optimization_design.md)（生产级优化设计）。
 
 ---
@@ -21,7 +21,6 @@ flowchart TD
     subgraph Presentation [表现与接入层]
         WebUI[React 18 + TypeScript 控制台 :5173]
         GoBFF[Go gRPC API Gateway / BFF :8081]
-        PyBFF[Python REST 代理网关 :8080]
     end
 
     subgraph ServiceCluster [企业级中台微服务群 :8082~:8084]
@@ -45,7 +44,6 @@ flowchart TD
     end
 
     WebUI -->|HTTP| GoBFF
-    WebUI -->|HTTP| PyBFF
     GoBFF -->|gRPC| GRPC
     GoBFF -->|HTTP| ServiceHub
     GoBFF -->|HTTP| DatasourceMgr
@@ -99,8 +97,7 @@ PrivShield/ (Repo Root)
 │   └── audit-log/             # 脱敏审计与 SHA-256 存证 (:8084)
 │
 ├── console/                   # 统一管理与测试控制台
-│   ├── bff-go/                # Go gRPC 聚合网关 / 主力 BFF (:8081)
-│   ├── bff-py/                # Python REST 代理网关 / 备用 BFF (:8080)
+│   ├── bff-go/                # Go BFF 代理网关 / REST 入口 + gRPC 上游 (:8081)
 │   └── web/                   # React 18 + TypeScript 前端单页应用 (:5173)
 │
 ├── pkg/                       # Go 全局共享基础库 (Client-Side LB, Store, Metrics)
@@ -221,21 +218,20 @@ flowchart LR
 
 ## 五、统一管理与测试控制台（Console & BFF）
 
-### 5.1 双 BFF 网关架构
-* **`bff-go` (:8081)**：主力 BFF，采用 Go 1.25 + Gin + ByteDance Sonic，通过 gRPC 直连 Agent 算力层并聚合 3 大微服务 REST 接口；
+### 5.1 统一 Go BFF 网关架构
+* **`bff-go` (:8081)**：统一 BFF，采用 Go + Gin + gRPC，对外暴露 REST/JSON 接口，内部通过 gRPC 直连 Agent 算力层并聚合 3 大微服务 REST 接口；
   * **gRPC 自动重试**：内置可配置重试策略（默认最多 6 次，指数退避 1s→8s），`waitForReady=true` 连接等待就绪；
   * 📖 **可靠性能力详解**：[console/bff-go/docs/reliability.md](../../console/bff-go/docs/reliability.md)
-* **`bff-py` (:8080)**：备用/开发调试 BFF，采用 Python FastAPI，支持 Arrow 零拷贝流式解析。
 
 ### 5.2 前端 React 18 架构
-* 基于 Vite 5 + React 18 + TypeScript + TailwindCSS 构建，具备毫秒级 HMR、强类型数据契约与双后端无感热切换能力。
+* 基于 Vite 5 + React 18 + TypeScript + TailwindCSS 构建，具备毫秒级 HMR、强类型数据契约与 REST/gRPC 协议无感热切换能力。
 
 ---
 
 ## 六、可观测性、安全加固与压测基准
 
 ### 6.1 Prometheus 5 大组件监控与 Grafana 双大屏
-* **采集全覆盖**：统一抓取 `Agent:8079`、`BFF-Go:8081`、`Service-Hub:8082`、`Datasource-Mgr:8083`、`Audit-Log:8084`；
+* **采集全覆盖**：统一抓取 `Agent:8079`、`BFF-Go:8081`、`BFF-Go-gRPC:50055`、`Service-Hub:8082`、`Datasource-Mgr:8083`、`Audit-Log:8084`；
 * **预置双仪表盘**：
   * `deploy/grafana/dashboard.json`（全平台总览大屏）；
   * `deploy/grafana/service-hub-dashboard.json`（Service Hub 专属流水线调度大屏）；

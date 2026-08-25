@@ -8,7 +8,7 @@
  *   - 点击品牌区可返回总览页（触发 onHome 回调）；
  *   - HealthPill 实时反映 agent 连通性（绿色=正常 / 红色=不可达）；
  *   - LangSwitch 在中英文之间切换，状态持久化到 localStorage；
- *   - BackendSelector 在 Python REST / Go gRPC 两个后端间切换。
+ *   - BackendSelector 在 REST / gRPC 两种协议间切换。
  *
  * Clicking the brand area returns to the overview page (triggers onHome callback);
  * HealthPill reflects agent connectivity in real-time (green=OK / red=unreachable).
@@ -52,10 +52,10 @@ interface HeaderProps {
  *   - 有数据且无 error：绿色圆点 + "Agent 正常"；
  *   - 有数据且有 error：红色圆点 + "Agent 不可达"；
  *   - 同时展示后端与 agent 的通信协议（REST / gRPC），
- *     切换 Python REST / Go gRPC 后该标识随之变化，可直观验证切换生效。
+ *     切换 REST / gRPC 协议后该标识随之变化，可直观验证切换生效。
  *
  * Also displays the communication protocol (REST / gRPC) between backend and agent;
- * the badge changes after switching Python REST / Go gRPC, visually verifying the switch.
+ * the badge changes after switching REST / gRPC protocol, visually verifying the switch.
  */
 function HealthPill({ health, loading }: { health: ConsoleHealth | null; loading: boolean }) {
   const { t } = useI18n(); // 获取翻译函数 / Get translation function
@@ -82,7 +82,7 @@ function HealthPill({ health, loading }: { health: ConsoleHealth | null; loading
         ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700',
       ].join(' ')}
       // 悬停提示显示 agent 地址与协议 / Hover tooltip shows agent URL and protocol
-      title={`${health.agent_url}${health.protocol ? ` · ${health.protocol}` : ''}`}
+      title={`${health.agent_url}${health.protocol ? ` · ${health.protocol}` : ''}${health.error ? ` (${health.error})` : ''}`}
     >
       {/* 状态圆点：绿色=正常 / 红色=不可达 / Status dot: green=OK / red=unreachable */}
       <span className={['h-1.5 w-1.5 rounded-full', ok ? 'bg-emerald-500' : 'bg-red-500'].join(' ')} />

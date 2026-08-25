@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -44,6 +45,16 @@ func newTestDeps() *testDeps {
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		mc:     metrics.NewCollector("service-hub-test"),
 	}
+}
+
+type failingUpdateTaskStore struct {
+	*memory.TaskStore
+	updateCalls int
+}
+
+func (s *failingUpdateTaskStore) Update(task *store.Task) error {
+	s.updateCalls++
+	return errors.New("simulated task state persistence failure")
 }
 
 // newTestServer creates a Server with a mock upstream (httptest server).
@@ -346,6 +357,30 @@ func TestDispatchAccepted(t *testing.T) {
 	_ = json.Unmarshal(w2.Body.Bytes(), &resp2)
 	if resp2["total"].(float64) != 1 {
 		t.Errorf("expected 1 task, got %v", resp2["total"])
+	}
+}
+
+func TestProcessTask_StopsWhenStatePersistenceFails(t *testing.T) {
+	s := newSimpleTestServer()
+	failingStore := &failingUpdateTaskStore{TaskStore: memory.NewTaskStore()}
+	s.tasks = failingStore
+
+	task := &store.Task{
+		ID:        "task-persist-failure",
+		Status:    "pending",
+		Stage:     "queued",
+		Source:    "test-source",
+		Operation: "none",
+		CreatedAt: time.Now(),
+	}
+	if err := failingStore.Save(task); err != nil {
+		t.Fatalf("save task: %v", err)
+	}
+
+	s.processTask(task, dispatchRequest{Source: task.Source, Operation: task.Operation})
+
+	if failingStore.updateCalls != 1 {
+		t.Fatalf("expected one failed stage-state write before stopping, got %d", failingStore.updateCalls)
 	}
 }
 
@@ -1086,4 +1121,3 @@ func TestListDataSourcesProxy(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
-

@@ -26,13 +26,15 @@ Uvicorn is a high-performance ASGI web server built on `uvloop` and `httptools`,
 ### 2.1 架构角色 / Architecture Role
 
 ```
-浏览器 ──HTTP──▶ Uvicorn (port 8080) ──▶ FastAPI App ──httpx──▶ PrivShield (port 8079)
-                 ASGI 服务器               Python REST 代理后端
-                 ASGI Server               Python REST Proxy Backend
+浏览器 / 客户端 ──HTTP──▶ Uvicorn (port 8079) ──▶ FastAPI App ──▶ 隐私算力原语
+                 ASGI 服务器               Agent REST 入口
+                 ASGI Server               Agent REST Entrypoint
 ```
 
-Uvicorn 作为 Python REST 代理后端的 HTTP 服务器：
-Uvicorn serves as the HTTP server for the Python REST proxy backend:
+> **历史说明**：早期 Uvicorn 也曾用于 `console/bff-py/app/main.py`（Python REST BFF，端口 `8080`），该实现已移除。
+
+Uvicorn 作为 Agent REST 入口的 HTTP 服务器：
+Uvicorn serves as the HTTP server for the Agent REST entrypoint:
 - 接收前端 HTTP 请求 / Receives frontend HTTP requests
 - 将请求交给 FastAPI 路由处理 / Hands requests to FastAPI routing
 - FastAPI 通过 httpx 转发到 agent / FastAPI forwards to agent via httpx
@@ -42,41 +44,51 @@ Uvicorn serves as the HTTP server for the Python REST proxy backend:
 
 #### 开发模式（启动脚本）/ Development Mode (Startup Script)
 
-文件 / File：`scripts/dev/dev-start.sh`
+文件 / File：`engine/main.py`、`engine/server.py`
 
 ```bash
-# 在虚拟环境中启动 Uvicorn
-# Start Uvicorn in virtual environment
+# 在虚拟环境中启动 Agent REST（单独入口）
+# Start Agent REST in virtual environment
 (
-    source "$BACKEND_VENV/bin/activate"
-    cd "$SCRIPT_DIR/backend"
-    exec uvicorn app.main:app --host 127.0.0.1 --port 8080
+    source "$AGENT_VENV/bin/activate"
+    cd "$PROJECT_ROOT"
+    exec python -m engine.main
 ) &
 ```
 
+或统一启动 REST + gRPC：
+
+```bash
+python -m engine.server
+```
+
 参数说明 / Parameter Notes：
-- `app.main:app`：模块路径 `app/main.py` 中的 `app` 对象（FastAPI 实例）
-  Module path `app/main.py`'s `app` object (FastAPI instance)
+- `engine.main:app`：模块路径 `engine/main.py` 中的 `app` 对象（FastAPI 实例）
+  Module path `engine/main.py`'s `app` object (FastAPI instance)
 - `--host 127.0.0.1`：仅监听本地回环地址（安全：不暴露到外网）
   Listen on loopback only (security: not exposed to external network)
-- `--port 8080`：控制台后端端口 / Console backend port
+- `--port 8079`：Agent REST 端口 / Agent REST port
+
+> **历史说明**：早期示例 `console/backend/app/main.py` / `console/bff-py/app/main.py`（端口 `8080`）为已移除的 Python REST BFF。
 
 #### 开发模式（手动 + 热重载）/ Development Mode (Manual + Hot Reload)
 
-文件 / File：`console/backend/run.sh`
+文件 / File：`engine/main.py`（开发模式）
 
 ```bash
 # 带热重载的开发服务器（文件变更自动重启）
 # Dev server with hot reload (auto-restart on file changes)
-uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
+python -m engine.main --reload
 ```
 
-`--reload` 参数启用 watchfiles 监控 `app/` 目录，任何 `.py` 文件变更触发自动重启。
+`--reload` 参数启用 watchfiles 监控 `engine/` 目录，任何 `.py` 文件变更触发自动重启。
+
+> **历史说明**：早期 `console/backend/run.sh` / `console/bff-py/run.sh`（端口 `8080`）为已移除的 Python REST BFF。
 `--reload` enables watchfiles monitoring of `app/` directory, any `.py` change triggers auto-restart.
 
 ### 2.3 与 FastAPI 的集成 / Integration with FastAPI
 
-文件 / File：`console/backend/app/main.py`
+文件 / File：`engine/main.py`
 
 ```python
 from fastapi import FastAPI
@@ -566,7 +578,7 @@ ASGI 中间件采用"洋葱模型"（Onion Model），请求从外向内穿过�
 
 ### 6.2 本项目中间件栈 / Project Middleware Stack
 
-文件 / File：`console/backend/app/main.py`
+文件 / File：`engine/main.py`
 
 ```python
 from fastapi.middleware.cors import CORSMiddleware
@@ -711,10 +723,10 @@ uvicorn app.main:app --port 8081
 # 3. 依赖未安装 / Dependencies not installed
 
 # 解决 / Solution:
-cd console/backend
+cd /path/to/PrivShield
 source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --port 8080
+pip install -e .
+python -m engine.main
 ```
 
 ### 8.3 Worker 超时 / Worker Timeout

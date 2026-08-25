@@ -120,6 +120,18 @@ class TestCircuitBreaker:
         assert cb.state == "open"
         assert cb.allow_request() is False
 
+    def test_half_open_allows_only_one_in_flight_probe(self, monkeypatch):
+        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=5.0)
+        cb.record_failure()
+        monkeypatch.setattr(time, "monotonic", lambda: cb._opened_at + 6.0)
+
+        assert cb.allow_request() is True
+        assert cb.allow_request() is False
+
+        cb.record_success()
+        assert cb.state == "closed"
+        assert cb.allow_request() is True
+
 
 # ===========================================================================
 # 2. BackendNode 工作节点模型测试
@@ -250,6 +262,21 @@ class TestLoadBalancer:
         healthy = balancer.get_healthy_nodes()
         assert len(healthy) == 1
         assert healthy[0].http_url == "http://node-1"
+
+    @pytest.mark.anyio
+    async def test_half_open_node_is_excluded_after_probe_is_reserved(self, monkeypatch):
+        balancer = LoadBalancer(strategy="round_robin")
+        balancer.add_node("http://node-a", "127.0.0.1:1")
+        balancer.add_node("http://node-b", "127.0.0.1:2")
+        half_open = balancer.nodes[0]
+        for _ in range(half_open.circuit_breaker.failure_threshold):
+            half_open.circuit_breaker.record_failure()
+        monkeypatch.setattr(time, "monotonic", lambda: half_open.circuit_breaker._opened_at + 31.0)
+
+        assert half_open.circuit_breaker.allow_request() is True
+        selected = await balancer.select_node()
+
+        assert selected is balancer.nodes[1]
 
     @pytest.mark.anyio
     async def test_round_robin_strategy(self):

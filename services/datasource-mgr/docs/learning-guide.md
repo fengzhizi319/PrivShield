@@ -75,7 +75,7 @@ flowchart TB
     subgraph UpstreamConsumers [调用方集群]
         WebConsole[Web 前端控制台<br/>:5173]
         ServiceHub[service-hub 调度中枢<br/>:8082 / :50052]
-        ConsoleBFF[Go / Python BFF<br/>:8081 / :8080]
+        ConsoleBFF[Go BFF<br/>:8081]
     end
 
     subgraph DSMgrService ["datasource-mgr 数据源管理中台 (:8083 / :50053)"]

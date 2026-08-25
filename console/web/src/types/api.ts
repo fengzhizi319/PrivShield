@@ -22,7 +22,7 @@ export interface EndpointSample {
   contentType?: string | null;
   /** 二进制载荷的 base64 编码 */
   rawPayloadB64?: string | null;
-  /** 可用性标识：rest 仅 Python 后端，both 两后端都支持 */
+  /** 可用性标识：rest 仅 REST 上游协议支持，both 两种协议都支持 */
   backend?: "rest" | "grpc" | "both";
 }
 
@@ -41,7 +41,7 @@ export interface ProxyResponse {
   /** 转发耗时（毫秒） */
   duration_ms: number;
   data: any;
-  /** 处理本请求的控制台后端标识（python-rest / go-grpc） */
+  /** 处理本请求的控制台后端标识（固定为 go-grpc） */
   via?: string;
   /** 该后端与 agent 的通信协议（REST / gRPC） */
   protocol?: string;
@@ -55,7 +55,7 @@ export interface ConsoleHealth {
   agent_url: string;
   latency_ms?: number;
   error?: string;
-  /** 处理本请求的控制台后端标识（python-rest / go-grpc） */
+  /** 处理本请求的控制台后端标识（固定为 go-grpc） */
   via?: string;
   /** 该后端与 agent 的通信协议（REST / gRPC） */
   protocol?: string;
@@ -86,7 +86,7 @@ export interface BatchResponse {
   passed: number;
   failed: number;
   results: BatchResultItem[];
-  /** 处理本请求的控制台后端标识（python-rest / go-grpc） */
+  /** 处理本请求的控制台后端标识（固定为 go-grpc） */
   via?: string;
   /** 该后端与 agent 的通信协议（REST / gRPC） */
   protocol?: string;
@@ -123,7 +123,7 @@ export interface UploadResponse {
   status: number;
   duration_ms: number;
   data: UploadData;
-  /** 处理本请求的控制台后端标识（python-rest / go-grpc） */
+  /** 处理本请求的控制台后端标识（固定为 go-grpc） */
   via?: string;
   /** 该后端与 agent 的通信协议（REST / gRPC） */
   protocol?: string;

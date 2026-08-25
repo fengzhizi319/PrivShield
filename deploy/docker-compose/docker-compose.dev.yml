@@ -9,7 +9,7 @@
 #   5. 轻量资源配额，降低本机 CPU/内存占用
 #
 # 🚀 启动方式 / Usage:
-#   # 启动全部核心开发组件 (Agent + Go 代理 + Python 代理 + 前端 Web)
+#   # 启动全部核心开发组件 (Agent + Go 代理 + 前端 Web)
 #   docker compose -f docker-compose.dev.yml up -d
 #
 #   # 启动并启用 vLLM 本地大模型容器 (需 GPU)
@@ -116,34 +116,7 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # 3. Console Python 后端代理 (备选 REST 通道)
-  console-backend-python:
-    build:
-      context: ../../console/bff-py
-      dockerfile: Dockerfile
-    image: privacy-console-backend-python:1.8.0-dev
-    container_name: privacy-console-backend-python-dev
-    ports:
-      - "8080:8080"
-    environment:
-      PRIVACY_CONSOLE_HOST: "0.0.0.0"
-      PRIVACY_CONSOLE_PORT: "8080"
-      PRIVACY_AGENT_URL: "http://PrivShield:8079"
-    depends_on:
-      PrivShield:
-        condition: service_healthy
-    networks:
-      - frontend
-      - backend
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    restart: unless-stopped
-
-  # 4. Console 前端 Web UI (Nginx 托管)
+  # 3. Console 前端 Web UI (Nginx 托管)
   console-web:
     build:
       context: ../../console/web

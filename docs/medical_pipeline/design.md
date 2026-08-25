@@ -191,9 +191,10 @@ class MedicalPrivacyPipeline:
    - REST 路由: `POST /v1/medical/process`（已实现，`engine/routers/medical.py`）
    - gRPC 接口: ~~在 `proto/privacy.proto` 补充 `MedicalProcessRequest` 与 `MedicalProcessResponse`~~ **（未实现，规划中）**——当前 `proto/privacy.proto` 与 `grpc_server.py` 均无医疗 Pipeline 消息与方法；Go 控制台的 `/api/medical_pipeline` 实际走 REST 代理通道。
 2. **Go & Python 控制台后端**：
-   - Python: 在 `console/backend/app/main.py` 增加 `POST /api/medical_pipeline`。
-   - Go: 在 `console/backend-go/internal/handlers/handlers.go` 增加 `POST /api/medical_pipeline`。
-   - 将 `kangyang.csv` 部署到 `console/backend/samples/kangyang.csv` 及 `console/backend-go/internal/samples/kangyang.csv`。
+   - Go BFF: 在 `console/bff-go/internal/handlers/handlers.go` 增加 `POST /api/medical_pipeline`。
+   - 将 `kangyang.csv` 部署到 `console/bff-go/internal/samples/kangyang.csv`。
+
+> **历史说明**：早期设计同时要求 Python REST BFF（`console/backend/app/main.py`）实现相同路由，该实现已移除。
 3. **Web 控制台 (`console/web`)**：
    - 新增 `MedicalPipelinePanel.tsx` 视图组件。
    - 在左侧侧边栏增加“医疗数据治理 (Medical Pipeline)”入口。
@@ -247,7 +248,9 @@ class MedicalPrivacyPipeline:
 | Q-19 | **【Medium】NER 降级路径干净文本误篡改**：fallback 在 `redact_medical_text` 结果上再套一层 `_clean_orphan_syntax`，清理正则（删"出现/进一步/伴瘙痒"等）误伤干净文本（`患者出现皮疹3天，伴瘙痒。` → `患者皮疹3天。`） | fallback 直接返回 `redact_medical_text(text)`（其内部已对敏感文本完成自愈、对干净文本 Fast-Path 原样返回） | `medical_pipeline/rules.py` |
 | Q-20 | 拼音/形近覆盖表面化：仅修审计样例（`aizibing`/`肺ai`/`霉毒`），同族变体（`精神分lie`/`乙gan`/`xingbing`/`乳腺ai`/`H1V`/`HlV`）仍泄露 | 系统化补词：字符替换型（`H1V`/`HlV`）、中英混合型（`精神分lie`/`乙gan`/`丙gan`）、器官+`ai` 系列（乳腺/肠/食道/胰/宫颈/前列腺等 20 部位）、`xingbing`/`linbing` 等 | `medical_pipeline/rules.py` |
 | Q-21 | Fast-Path 性能退化：词边界零宽断言使交替匹配失预过滤，49KB 干净文本扫描 233ms | 增加词库首字符预筛正则（未命中直接短路）+ 三级检测变体集合去重，降回 ~80ms/49KB（典型字段 <2ms） | `medical_pipeline/rules.py`、`medical_pipeline/pipeline.py` |
-| Q-22 | 控制台后端读取带 BOM 的 CSV 时首列键带 `\ufeff` 前缀（Python `utf-8`、Go `ParseCSV` 均未处理） | Python 后端改 `utf-8-sig`；Go `ParseCSV` 入口剥离 BOM | `console/backend/app/main.py`、`console/backend-go/internal/fileparse/fileparse.go` |
+| Q-22 | 控制台后端读取带 BOM 的 CSV 时首列键带 `\ufeff` 前缀（Python `utf-8`、Go `ParseCSV` 均未处理） | Go BFF `ParseCSV` 入口剥离 BOM | `console/bff-go/internal/fileparse/fileparse.go` |
+
+> **历史说明**：早期由 Python REST BFF（`console/backend/app/main.py`）处理 BOM，该实现已移除。
 | Q-23 | NER 分支仅做实体锚定擦除，`确诊艾滋病` 经 NER 路径残留 `确诊`（句法残渣） | NER 分支重构为「先规则全量句法擦除（复用 `redact_medical_text` 主路径）→ 再 NER 实体锚定擦除词库外实体」，两引擎输出收敛一致 | `medical_pipeline/rules.py` |
 
 > 同期 `dynclassification` 内核侧修复（路径穿越白名单校验、文本脱敏 fail-closed、LLM 裁定地板校验与 Prompt 注入中和、图片路径沙箱 `PRIVACY_IMAGE_ALLOWED_DIRS`、仲裁默认值对齐 0.75/true、MLX `sanitize` 形参补齐等）详见 `docs/dynclassification/` 与对应模块变更记录。

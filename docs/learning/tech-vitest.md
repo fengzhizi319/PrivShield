@@ -529,10 +529,11 @@ export default defineWorkspace([
     },
   },
   // 后端测试（如果有）/ Backend tests (if any)
+  // 历史示例：原 Python REST BFF 已移除，当前 BFF 为 Go 实现（console/bff-go）
   {
     test: {
       name: 'backend',
-      root: './console/bff-py',
+      root: './console/bff-go',
       environment: 'node',
     },
   },
@@ -1500,9 +1501,8 @@ jobs:
       
       - name: Start backend
         run: |
-          cd console/bff-py
-          pip install -r requirements.txt
-          python -m uvicorn app.main:app --port 8080 &
+          cd console/bff-go
+          go run ./cmd/server &
       
       - name: Run E2E
         run: cd console/web && pnpm test:e2e

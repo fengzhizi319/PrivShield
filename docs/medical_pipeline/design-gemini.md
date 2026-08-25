@@ -137,9 +137,10 @@ class MedicalPrivacyPipeline:
    - REST 路由: `POST /v1/medical/process`
    - gRPC 接口: 在 `proto/privacy.proto` 补充 `MedicalProcessRequest` 与 `MedicalProcessResponse`，更新存根。
 2. **Go & Python 控制台后端**：
-   - Python: 在 `console/backend/app/main.py` 增加 `POST /api/medical_pipeline`。
-   - Go: 在 `console/backend-go/internal/handlers/handlers.go` 增加 `POST /api/medical_pipeline`。
-   - 将 `kangyang.csv` 部署到 `console/backend/samples/kangyang.csv` 及 `console/backend-go/internal/samples/kangyang.csv`。
+   - Go BFF: 在 `console/bff-go/internal/handlers/handlers.go` 增加 `POST /api/medical_pipeline`。
+   - 将 `kangyang.csv` 部署到 `console/bff-go/internal/samples/kangyang.csv`。
+
+> **历史说明**：早期设计同时要求 Python REST BFF（`console/backend/app/main.py`）实现相同路由，该实现已移除。
 3. **Web 控制台 (`console/web`)**：
    - 新增 `MedicalPipelinePanel.tsx` 视图组件。
    - 在左侧侧边栏增加“医疗数据治理 (Medical Pipeline)”入口。

@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"log/slog"
 	"math/big"
 	"net"
@@ -39,6 +40,16 @@ type testCerts struct {
 	clientCert string // 客户端证书文件路径
 	clientKey  string // 客户端私钥文件路径
 	clientPub  string // 客户端公钥 PEM 文件路径
+}
+
+type failingUpdateTaskStore struct {
+	*memory.TaskStore
+	updateCalls int
+}
+
+func (s *failingUpdateTaskStore) Update(task *store.Task) error {
+	s.updateCalls++
+	return errors.New("simulated task state persistence failure")
 }
 
 // genTestCerts generates a complete test certificate chain in a temp directory.
@@ -600,6 +611,32 @@ func TestGRPCServer_PipelineStatus(t *testing.T) {
 	}
 }
 
+func TestGRPCServer_ProcessTask_StopsWhenStatePersistenceFails(t *testing.T) {
+	srv, mockServer, _ := setupTestGRPCServer(t, nil)
+	defer mockServer.Close()
+	defer srv.Shutdown()
+
+	failingStore := &failingUpdateTaskStore{TaskStore: memory.NewTaskStore()}
+	srv.tasks = failingStore
+	task := &store.Task{
+		ID:        "task-persist-failure",
+		Status:    "pending",
+		Stage:     "queued",
+		Source:    "test-source",
+		Operation: "none",
+		CreatedAt: time.Now(),
+	}
+	if err := failingStore.Save(task); err != nil {
+		t.Fatalf("save task: %v", err)
+	}
+
+	srv.processTask(task, task.Operation, "{}")
+
+	if failingStore.updateCalls != 1 {
+		t.Fatalf("expected one failed stage-state write before stopping, got %d", failingStore.updateCalls)
+	}
+}
+
 // TestGRPCServer_ProcessTask_FailureBranches tests error branches during asynchronous pipeline processing.
 // TestGRPCServer_ProcessTask_FailureBranches 测试异步流水线各异常分支（分类失败、脱敏失败、优雅停机取消）。
 func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
@@ -711,6 +748,3 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		}
 	})
 }
-
-
-

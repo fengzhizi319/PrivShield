@@ -814,8 +814,7 @@ PrivShield 在 `deploy/docker-compose/` 下提供了面向不同生命周期环�
 |---|---|---|---|---|
 | `PrivShield` | `Dockerfile` (`target: core`) | 8079 (REST) / 50051 (gRPC) | 全部 | 隐私 Agent 核心 Sidecar 服务 |
 | `redis` | `redis:7.2-alpine` | 6379 (仅内部 backend 网络) | 生产 (`.prod.yml`) | 分布式速率限制后端与缓存存储 |
-| `console-backend-go` | `console/backend-go/Dockerfile` | 8081 | 全部 | Go gRPC 高性能代理后端 |
-| `console-backend-python` | `console/backend/Dockerfile` | 8080 | 通用/开发 | Python FastAPI REST 代理后端（备选通道） |
+| `console-backend-go` | `console/bff-go/Dockerfile` | 8081 | 全部 | Go BFF 代理网关（REST 入口 + gRPC 上游） |
 | `console-web` | `console/web/Dockerfile` | 5173 | 全部 | React 单页控制台 Nginx 静态服务 |
 | `vllm` | `vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}` | 8000 (profile: `llm`) | 按需开启 | vLLM Layer-3 本地大模型推理（GPU；需 vLLM 0.26+） |
 | `prometheus` | `prom/prometheus:v2.54.1` | 9090 (profile: `monitoring`) | 生产/监控 | 生产监控指标时序数据库与采集端点 |
@@ -827,7 +826,7 @@ PrivShield 在 `deploy/docker-compose/` 下提供了面向不同生命周期环�
 ```bash
 cd deploy/docker-compose
 
-# 1. 通用默认启动 (Core Agent + Go/Python 代理 + Web UI)
+# 1. 通用默认启动 (Core Agent + Go BFF + Web UI)
 docker compose up -d
 
 # 2. 生产环境启动 (TLS + API Key + Redis + Core + Go Proxy + Web UI)
@@ -886,7 +885,7 @@ docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-co
 
 | 验证点 | 结果 |
 |---|---|
-| 无 profile 的服务 | `PrivShield`、`console-backend-go`、`console-backend-python`、`console-web`（4 个） |
+| 无 profile 的服务 | `PrivShield`、`console-backend-go`、`console-web`（3 个） |
 | `--profile llm` 追加 | + `vllm`（共 5 个） |
 | vllm 镜像 | `vllm/vllm-openai:latest`（`${VLLM_IMAGE_TAG:-latest}` 替换生效） |
 | env_file 合并 | agent 容器环境含根目录 `.env` 的值：`PRIVACY_ENV_PROFILE=qwen3`、`PRIVACY_LOG_LEVEL=INFO`、`PRIVACY_REST_PORT=8079` 等 |
@@ -910,7 +909,7 @@ docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-co
 | 服务 | 环境变量来源 |
 |---|---|
 | `PrivShield` | env_file（根目录 `.env` 其余项）+ environment 覆盖 8 项（容器必须 0.0.0.0、LLM provider 等）+ `${LLM_API_BASE}` / `${LLM_API_KEY}` 变量替换（跨主机部署用） |
-| `console-backend-go` / `console-backend-python` / `console-web` | 全部 environment 硬编码（compose 内部 DNS 服务名，跨环境不变） |
+| `console-backend-go` / `console-web` | 全部 environment 硬编码（compose 内部 DNS 服务名，跨环境不变） |
 | `vllm` | 无环境变量；仅 `image` 的 `${VLLM_IMAGE_TAG:-latest}` 编排替换 |
 | `grafana` | GF_* 硬编码 + `${GRAFANA_ADMIN_PASSWORD:-changeme}` 替换 |
 
@@ -1267,7 +1266,7 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 | `scripts/dev/docker-stop-agent.sh` | 【开发】停止并删除 Agent 单容器 | — | `tests/scripts/test_docker_start_agent.py` |
 | `scripts/dev/docker-start-llm.sh` | 【开发】启动独立 vLLM 大模型 GPU 推理容器 | HTTP: 8000 (OpenAI 兼容) | `tests/scripts/test_docker_start_llm.py` |
 | `scripts/dev/docker-stop-llm.sh` | 【开发】停止并删除 vLLM 大模型容器 | — | `tests/scripts/test_docker_start_llm.py` |
-| `scripts/dev/docker-start-all.sh` | 一键拉起 Agent + 双代理后端 + Web UI（可选 `--with-llm`） | Web: 5173, Go: 8081, Py: 8080 | Docker Compose 全栈编排 |
+| `scripts/dev/docker-start-all.sh` | 一键拉起 Agent + Go BFF + Web UI（可选 `--with-llm`） | Web: 5173, Go: 8081 | Docker Compose 全栈编排 |
 | `scripts/dev/docker-stop.sh` | 一键停止并清理所有全栈 Compose 容器 | — | 执行 `docker compose down` |
 
 > **自动化测试建议**：
@@ -2302,9 +2301,9 @@ docker run --rm --gpus 1 <镜像> python3 -c "import torch; print(torch.cuda.is_
 ### 15.3 本地镜像与构建拉取异常（`pull_policy: build` 与 Tag 规范）
 
 **现象**：
-在执行 `docker compose up -d` 启动微服务套件（包含 `PrivShield`、`console-backend-go`、`console-backend-python`、`console-web`）时，终端报错：
+在执行 `docker compose up -d` 启动微服务套件（包含 `PrivShield`、`console-backend-go`、`console-web`）时，终端报错：
 ```text
-failed to resolve reference "docker.io/library/privacy-console-backend-python:0.1.0": unexpected status from HEAD request to https://registry-1.docker.io/v2/...
+failed to resolve reference "docker.io/library/privacy-console-backend-go:0.1.0": unexpected status from HEAD request to https://registry-1.docker.io/v2/...
 ```
 或报错：
 ```text
@@ -2328,11 +2327,11 @@ docker images | grep -E "(privshield|privacy-console)"
 **解决方案**：
 1. 在 `deploy/docker-compose/docker-compose.yml` 中为所有本地构建服务添加 `pull_policy: build`：
    ```yaml
-   console-backend-python:
+   console-backend-go:
      build:
-       context: ../../console/backend
+       context: ../../console/bff-go
        dockerfile: Dockerfile
-     image: privacy-console-backend-python:0.1.0
+     image: privacy-console-backend-go:0.1.0
      pull_policy: build
    ```
 2. 统一修正各 Dockerfile 中的基础镜像 Tag 为标准规范：
@@ -2401,7 +2400,7 @@ docker buildx ls
 ### 15.6 Go 编译工具链与高版本依赖协同（`GOTOOLCHAIN=auto`）
 
 **现象**：
-编译 Go 代理后端（`console/backend-go`）时，`go mod download` 阶段报错中断：
+编译 Go 代理后端（`console/bff-go`）时，`go mod download` 阶段报错中断：
 ```text
 go: github.com/gin-gonic/gin@v1.12.0 requires go >= 1.25.0 (running go 1.23.4; GOTOOLCHAIN=local)
 ```
@@ -2410,7 +2409,7 @@ go: github.com/gin-gonic/gin@v1.12.0 requires go >= 1.25.0 (running go 1.23.4; G
 Go 1.21+ 引入版本协同工具链机制。在 Alpine 基础镜像（如 `golang:1.23.4-alpine`）中，默认环境变量为 `GOTOOLCHAIN=local`，拒绝自动升级工具链版本以满足间接依赖库声明的最小 Go 版本要求。
 
 **解决方案**：
-在 `console/backend-go/Dockerfile` 编译阶段声明 `ENV GOTOOLCHAIN=auto`：
+在 `console/bff-go/Dockerfile` 编译阶段声明 `ENV GOTOOLCHAIN=auto`：
 ```dockerfile
 FROM golang:1.23.4-alpine3.20 AS builder
 
@@ -2475,29 +2474,23 @@ docker exec PrivShield ls -ld /data/budget /var/log/privacy
 ### 15.8 容器探针与健康检查端点一致性（`/health` vs `/api/health`）
 
 **现象**：
-`privacy-console-backend-python` 或 `privacy-console-backend-go` 容器状态长时间停留在 `(health: starting)`，最终因连续 3 次探测失败被标记为 `unhealthy`。
+`privacy-console-backend-go` 容器状态长时间停留在 `(health: starting)`，最终因连续 3 次探测失败被标记为 `unhealthy`。
 
 **根因**：
-- Dockerfile / Compose 的 HEALTHCHECK 命令探测的是 `http://localhost:8080/health`；
+- Dockerfile / Compose 的 HEALTHCHECK 命令探测的是 `http://localhost:8081/health`；
 - 控制台代理后端路由原本仅挂载了带前缀的 `/api/health`，导致根路径 `/health` 返回 HTTP 404。
 
 **排查命令**：
 ```bash
 # 测试两个不同路径的响应状态码
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/health
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/health
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8081/health
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8081/api/health
 ```
 
 **解决方案**：
-在 Python FastAPI 与 Go Gin 代理后端中**双重注册**健康检查路由：
-```python
-# FastAPI: console/backend/app/main.py
-@app.get("/health")
-@app.get("/api/health")
-async def health(): ...
-```
+在 Go Gin 代理后端中**双重注册**健康检查路由：
 ```go
-// Gin: console/backend-go/internal/handlers/handlers.go
+// Gin: console/bff-go/internal/handlers/handlers.go
 r.GET("/health", s.Health)
 r.GET("/api/health", s.Health)
 ```

@@ -3,33 +3,33 @@
 > 面向本地开发与部署运维的操作手册：开发模式与生产模式的区别、配置方式、跨域（CORS）解决方案、启停与排障。
 >
 > 关联文档：[design.md](design.md)（架构设计）、[api.md](api.md)（接口参考）、[test.md](test.md)（测试策略）。
-> Python REST 后端的对应运维文档见 [backend/docs/ops.md](../../backend/docs/ops.md)。
+> 历史说明：`console/bff-py` 已删除，当前统一由 `console/bff-go` 提供 REST/gRPC 上游代理。
 
 ---
 
 ## 1. 定位与端口总览
 
-本后端（`console/bff-go`）是测试控制台的 **Go gRPC 代理**，基于 Gin + grpc-go，把前端的 REST 请求**转换为 gRPC 调用**转发给 `PrivShield`，并可选地托管前端构建产物（SPA）。它与 Python 后端对前端暴露**一致的 JSON 契约**，二者可通过页面顶部 Backend Selector 自由切换。
+本后端（`console/bff-go`）是测试控制台的 **Go BFF 代理网关**，基于 Gin + grpc-go，把前端的 REST 请求**转换为 gRPC 调用**转发给 `PrivShield`，并可选地托管前端构建产物（SPA）。它对前端暴露统一的 JSON 契约，页面顶部 Backend Selector 仅用于在 REST 与 gRPC 两种上游协议间切换。
 
 控制台涉及的进程与默认端口：
 
 | 进程 | 默认地址 | 协议 | 说明 |
 |---|---|---|---|
-| `PrivShield` | `127.0.0.1:8079` | REST | 隐私能力服务（供 Python 后端使用） |
+| `PrivShield` | `127.0.0.1:8079` | REST | 隐私能力服务 REST 接口 |
 | `PrivShield` | `127.0.0.1:50051` | gRPC | 隐私能力服务（上游，本后端调用） |
-| Python REST 代理后端 | `127.0.0.1:8080` | HTTP | 另一可选后端，转发 REST + 托管 UI |
-| **Go gRPC 代理后端** | `127.0.0.1:8081` | HTTP | 本文档主角，转发 gRPC + 托管 UI |
+| **Go BFF 代理后端** | `127.0.0.1:8081` | HTTP | 本文档主角，转发 REST/gRPC + 托管 UI |
 | Vite 开发服务器 | `localhost:5173` | HTTP | 仅前端开发模式使用 |
 
 整体链路：
 
 ```mermaid
 graph LR
-    A[React 前端] -->|HTTP/JSON| B[Go gRPC 代理 8081]
-    B -->|gRPC| C[PrivShield 50051]
-    A -.->|可选 切换| D[Python REST 代理 8080]
-    D -->|HTTP/REST| E[PrivShield 8079]
+    A[React 前端] -->|HTTP/JSON| B[Go BFF 8081]
+    B -->|gRPC 默认| C[PrivShield 50051]
+    B -.->|?protocol=rest| E[PrivShield REST 8079]
 ```
+
+> 历史说明：`console/bff-py` 已删除，当前统一由 `console/bff-go` 提供 REST/gRPC 上游代理。
 
 ---
 
@@ -109,16 +109,16 @@ go build -o bin/backend-go ./cmd/server
 
 后端启动时若检测到 `../web/dist` 存在（由 `PRIVACY_CONSOLE_STATIC_DIR` 控制），会自动挂载 `/assets` 静态资源并注册 SPA 回退路由（非 `/api` 路由一律返回 `index.html`）；若目录不存在则打印日志并退化为「API 模式」，仅提供 `/api/*`。
 
-### 2.4 双后端模式（可选）
+### 2.4 双协议切换模式
 
-如需在页面顶部 Backend Selector 中自由切换 Python REST / Go gRPC 两个后端：
+页面顶部 Backend Selector 仅在 REST 与 gRPC 两种上游协议间切换，二者统一由 Go BFF（`console/bff-go`）承接：
 
 ```bash
-./scripts/dev/dev-start-all.sh    # 同时启动 agent + Python(8080) + Go(8081)
-./scripts/dev/dev-stop.sh     # 停止
+./scripts/dev/dev-start-go.sh    # 启动 agent + Go BFF(8081)
+./scripts/dev/dev-stop.sh        # 停止
 ```
 
-打开 `http://127.0.0.1:8080` 或 `http://127.0.0.1:8081` 均可，切换后端时请求会跨域到另一端口，同样依赖 CORS 中间件。
+打开 `http://127.0.0.1:8081` 后，通过 `?protocol=rest` 或 `?protocol=grpc` 切换上游协议。
 
 ---
 
@@ -167,8 +167,7 @@ PRIVACY_CONSOLE_STATIC_DIR= ./bin/backend-go
 浏览器同源策略要求「协议 + 域名 + 端口」三者一致，否则为跨域。本控制台在以下三种场景触发跨域：
 
 1. **开发模式**：页面在 `localhost:5173`（Vite），API 在 `127.0.0.1:8081`，端口不同；
-2. **双后端切换**：页面由 8081 提供，但用户切到 Python 后端 `127.0.0.1:8080`（反向亦然）；
-3. **分离部署**：UI 与后端部署在不同域名/端口（如 nginx 单独托管 dist）。
+2. **分离部署**：UI 与后端部署在不同域名/端口（如 nginx 单独托管 dist）。
 
 ### 4.2 方案一：同源部署（生产推荐）
 
@@ -200,7 +199,7 @@ func corsMiddleware() gin.HandlerFunc {
 
 ### 4.4 方案三：Vite 开发代理（同源回退）
 
-`vite.config.ts` 配置了 `/api` 代理（默认指向 Python 后端 8080）。若想在 Vite 开发模式下同源访问 Go 后端，可把代理目标改为 8081：
+`vite.config.ts` 配置了 `/api` 代理（默认指向 Go BFF 8081）。在 Vite 开发模式下请求会被透明转发到 Go 后端，不触发 CORS：
 
 ```ts
 // console/web/vite.config.ts
@@ -412,7 +411,7 @@ go test ./...
 | 访问 `/` 返回 404 | `web/dist` 未构建 | `cd console/web && corepack pnpm build` 后重启 |
 | 静态托管未生效 | `PRIVACY_CONSOLE_STATIC_DIR` 被设为空 | 去掉该变量或指向正确的 dist 目录 |
 | 端口被占用 `http server failed` | 8081 已被其他进程使用 | 改 `PRIVACY_CONSOLE_PORT`，或 `./scripts/dev/dev-stop.sh` 清理残留 |
-| 部分端点 404 / 不支持 | 该端点为 REST 专属（如 `/livez`、`/v1/privacy/budget`） | 切回 Python REST 后端（见 README「已知限制」） |
+| 部分端点 404 / 不支持 | 该端点在 gRPC 侧未实现，或路径拼写错误 | 切换到 REST 上游协议（`?protocol=rest`）后重试；若仍不支持，则该端点未在 gRPC 侧暴露 |
 | 改后端代码不生效 | Go 无热重载 | 重新 `go run` 或重新编译二进制 |
 
 ---

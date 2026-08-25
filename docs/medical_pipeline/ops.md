@@ -23,13 +23,9 @@ python scripts/data/generate_medical_data.py --output tmp/custom_data.csv --coun
 
 ### 1.2 分发脚本至控制台后端样例目录
 
-生成的 `kangyang.csv` 需要自动分发给测试控制台的 Python 与 Go 后端：
+生成的 `kangyang.csv` 需要复制到 Go BFF 样例目录：
 
 ```bash
-# 复制至 Python 后端样例目录
-cp data/kangyang.csv console/bff-py/samples/kangyang.csv
-
-# 复制至 Go 后端样例目录
 cp data/kangyang.csv console/bff-go/internal/samples/kangyang.csv
 ```
 
@@ -61,23 +57,15 @@ make run-server
 
 ## 3. 控制台代理后端启动
 
-### 3.1 启动 Python 控制台后端
-
-```bash
-cd console/bff-py
-./run.sh
-# 服务监听在 http://127.0.0.1:8000
-```
-
-### 3.2 启动 Go 控制台后端
+### 3.1 启动 Go 控制台后端
 
 ```bash
 cd console/bff-go
-go run cmd/server/main.go
-# 服务监听在 http://127.0.0.1:8080
+go run ./cmd/server
+# 服务监听在 http://127.0.0.1:8081
 ```
 
-### 3.3 快速同时启动开发环境 (Go + Vite HMR)
+### 3.2 快速同时启动开发环境 (Go + Vite HMR)
 
 ```bash
 ./scripts/dev/dev-start-go.sh
@@ -88,7 +76,7 @@ go run cmd/server/main.go
 ## 4. 常见问题排查 (Troubleshooting)
 
 ### Q1: 前端请求 `/api/medical_pipeline` 返回 502 Bad Gateway
-- **原因**: 控制台代理后端无法连接上游 `PrivShield` REST 服务 (默认 `127.0.0.1:8079`)。
+- **原因**: Go BFF 无法连接上游 `PrivShield` gRPC 服务 (默认 `127.0.0.1:50051`)。
 - **解决**:
   1. 确认 `python -m engine.server` 正常启动并在 `8079` 监听。
   2. 检查 `PRIVACY_REST_HOST` 与 `PRIVACY_REST_PORT` 配置。

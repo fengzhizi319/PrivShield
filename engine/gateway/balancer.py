@@ -186,6 +186,7 @@ class CircuitBreaker:
         self._failure_count = 0
         self._state = "closed"
         self._opened_at: float = 0.0
+        self._half_open_probe_in_flight = False
         self._lock = threading.Lock()
 
     @property
@@ -211,6 +212,7 @@ class CircuitBreaker:
         with self._lock:
             self._failure_count = 0
             self._state = "closed"
+            self._half_open_probe_in_flight = False
 
     def record_failure(self) -> None:
         """记录一次失败的请求（5xx 或网络连接中断）。
@@ -224,15 +226,38 @@ class CircuitBreaker:
             if self._failure_count >= self.failure_threshold:
                 self._state = "open"
                 self._opened_at = time.monotonic()
+                self._half_open_probe_in_flight = False
+
+    def is_available(self) -> bool:
+        """Return whether the breaker can be considered during node selection.
+
+        A half-open breaker remains available only while its single recovery probe
+        slot is unclaimed. This method does not reserve the slot.
+        """
+        with self._lock:
+            if self._state == "open" and (time.monotonic() - self._opened_at) >= self.recovery_timeout:
+                self._state = "half_open"
+            return self._state == "closed" or (
+                self._state == "half_open" and not self._half_open_probe_in_flight
+            )
 
     def allow_request(self) -> bool:
-        """判断熔断器当前是否允许请求通过。
+        """Atomically reserve permission for a request to pass the breaker.
 
         Returns:
-            bool: 处于 "closed" 或 "half_open" 状态时返回 True，处于 "open" 熔断时返回 False。
+            bool: Closed breakers allow requests. Half-open breakers allow exactly
+            one in-flight recovery probe; concurrent requests are rejected until
+            that probe records success or failure.
         """
-        state = self.state
-        return state in ("closed", "half_open")
+        with self._lock:
+            if self._state == "open" and (time.monotonic() - self._opened_at) >= self.recovery_timeout:
+                self._state = "half_open"
+            if self._state == "closed":
+                return True
+            if self._state == "half_open" and not self._half_open_probe_in_flight:
+                self._half_open_probe_in_flight = True
+                return True
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +469,7 @@ class LoadBalancer:
             for node in nodes
             if node.is_healthy
             and now >= node.passive_unhealthy_until
-            and node.circuit_breaker.allow_request()
+            and node.circuit_breaker.is_available()
             and node.admin_state == "active"
         ]
 
@@ -603,18 +628,22 @@ class LoadBalancer:
 
                     if self.strategy in ("random", "weighted_random"):
                         weights = [n.weight for n in healthy]
-                        return random.choices(healthy, weights=weights, k=1)[0]
+                        node = random.choices(healthy, weights=weights, k=1)[0]
+                        return node if node.circuit_breaker.allow_request() else None
 
                     if self.strategy in ("p2c", "power_of_two_choices"):
                         if len(healthy) == 1:
-                            return healthy[0]
+                            node = healthy[0]
+                            return node if node.circuit_breaker.allow_request() else None
                         n1, n2 = random.sample(healthy, 2)
                         score1 = n1.active_connections / max(1, n1.weight)
                         score2 = n2.active_connections / max(1, n2.weight)
-                        return n1 if score1 <= score2 else n2
+                        node = n1 if score1 <= score2 else n2
+                        return node if node.circuit_breaker.allow_request() else None
 
                     if self.strategy == "least_connections":
-                        return min(healthy, key=lambda n: n.active_connections)
+                        node = min(healthy, key=lambda n: n.active_connections)
+                        return node if node.circuit_breaker.allow_request() else None
 
                     if self.strategy == "weighted_round_robin":
                         # Smooth Weighted Round-Robin (Nginx Algorithm)
@@ -626,12 +655,13 @@ class LoadBalancer:
                                 best_node = node
                         if best_node is not None:
                             best_node.current_weight -= total_weight
-                        return best_node
+                            return best_node if best_node.circuit_breaker.allow_request() else None
+                        return None
 
                     # round_robin
                     node = healthy[self.rr_index % len(healthy)]
                     self.rr_index = (self.rr_index + 1) % len(healthy)
-                    return node
+                    return node if node.circuit_breaker.allow_request() else None
 
             return await asyncio.to_thread(_select)
 
