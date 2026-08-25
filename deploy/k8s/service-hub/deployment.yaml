@@ -67,6 +67,17 @@ spec:
               value: "datasource-mgr"
             - name: DATASOURCE_MGR_GRPC_PORT
               value: "50053"
+            # ── Phase B: PostgreSQL multi-replica Hub (uncomment to enable) ──
+            # ── 阶段 B：PostgreSQL 多副本 Hub（取消注释以启用）──
+            # - name: SERVICE_HUB_PG_DSN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: service-hub-postgres-secret
+            #       key: dsn
+            # - name: SERVICE_HUB_LEASE_TTL
+            #   value: "60"
+            # - name: SERVICE_HUB_PG_MAX_CONNS
+            #   value: "10"
           volumeMounts:
             - name: task-store
               mountPath: /app/data

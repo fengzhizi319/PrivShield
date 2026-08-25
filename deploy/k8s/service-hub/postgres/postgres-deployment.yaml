@@ -1,0 +1,97 @@
+# Phase B: PostgreSQL for multi-replica service-hub.
+# 阶段 B：用于多副本 service-hub 的 PostgreSQL 数据库。
+#
+# 此资源仅在启用 Phase B 多副本 Hub 时部署。
+# 阶段 A（单副本 SQLite）不需要此资源。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-hub-postgres
+  labels:
+    app.kubernetes.io/name: service-hub-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: service-hub
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: service-hub-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: service-hub-postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: service-hub
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: "privshield_hub"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: service-hub-postgres-secret
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: service-hub-postgres-secret
+                  key: password
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "$(POSTGRES_USER)"
+                - -d
+                - privshield_hub
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "$(POSTGRES_USER)"
+                - -d
+                - privshield_hub
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: service-hub-postgres-data

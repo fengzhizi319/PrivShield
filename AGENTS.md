@@ -27,6 +27,7 @@
 | Dataset-level K-anonymity | ✅ Ready | Implemented via Mondrian algorithm |
 | DP Gaussian / clipping | ✅ Ready | Gaussian mechanism & clipping bounds supported |
 | ML dependency split | ✅ Ready | Single Dockerfile with `--target core|ml` |
+| LeasedTaskStore (Phase B) | ✅ Ready | PostgreSQL atomic task lease via `FOR UPDATE SKIP LOCKED`; SQLite/memory stubs return `ErrLeaseNotSupported` |
 
 ## 2. Technology Stack
 
@@ -351,6 +352,7 @@ Address these before any hardened production deployment.
 | **Audit Log reliability** | `services/audit-log/docs/reliability.md` | **审计存证可靠性（完整性校验/HMAC 审计/备份）** |
 | **Datasource Mgr reliability** | `services/datasource-mgr/docs/reliability.md` | **数据源可靠性（无状态设计/双协议 mTLS）** |
 | **BFF-Go reliability** | `console/bff-go/docs/reliability.md` | **Go BFF 可靠性（gRPC 重试/连接保活/优雅停机）** |
+| **Service Hub K8s 接入架构** | `docs/gateway_balancer/new_design.md` | **service-hub 固定入口/多副本 Hub/PostgreSQL 租约目标架构** |
 
 ## 14. Quick Reference
 

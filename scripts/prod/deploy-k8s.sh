@@ -20,6 +20,7 @@
 #
 # 选项 / Options:
 #   -n, --namespace NS    Kubernetes 命名空间 (默认: privshield 或环境变量 K8S_NAMESPACE)
+#   --with-postgres       同时部署 Phase B PostgreSQL 资源（service-hub 多副本模式）
 #   -h, --help            显示帮助信息并退出
 # ============================================================================
 
@@ -37,6 +38,7 @@ K8S_DIR="$PROJECT_ROOT/deploy/k8s"                     # 原生 K8s 清单目录
 # ── 步骤 1：设置参数默认值并解析命令行参数 ────────────────────────────────
 # 命名空间优先级：命令行 -n > 环境变量 K8S_NAMESPACE > 默认值 privshield
 NAMESPACE="${K8S_NAMESPACE:-privshield}"
+WITH_POSTGRES=false
 
 # 遍历所有位置参数，按 --key value 配对消费（shift 2 跳过已处理的两个参数）
 while [[ $# -gt 0 ]]; do
@@ -45,11 +47,16 @@ while [[ $# -gt 0 ]]; do
             NAMESPACE="$2"
             shift 2
             ;;
+        --with-postgres)
+            WITH_POSTGRES=true
+            shift
+            ;;
         -h|--help)
             echo "用法 / Usage: $0 [选项]"
             echo ""
             echo "选项 / Options:"
             echo "  -n, --namespace NS    Kubernetes 命名空间 (默认: privshield 或 K8S_NAMESPACE)"
+            echo "  --with-postgres       同时部署 Phase B PostgreSQL 资源"
             echo "  -h, --help            显示帮助信息并退出"
             exit 0
             ;;
@@ -94,6 +101,18 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 echo "🚀 应用 Kustomize 资源清单 ($K8S_DIR)..."
 kubectl apply -k "$K8S_DIR" -n "$NAMESPACE"
 
+# ── 步骤 5b：可选 — 部署 Phase B PostgreSQL 资源 ─────────────────────────
+# 当指定 --with-postgres 时，额外应用 service-hub/postgres/ 下的 K8s 资源
+# 包括 PostgreSQL Deployment、Service、PVC、Secret
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    PG_DIR="$K8S_DIR/service-hub/postgres"
+    echo ""
+    echo "🐘 应用 Phase B PostgreSQL 资源 ($PG_DIR)..."
+    kubectl apply -k "$PG_DIR" -n "$NAMESPACE"
+    echo "⏳ 等待 PostgreSQL Deployment 就绪..."
+    kubectl rollout status deployment/privshield-postgres -n "$NAMESPACE" --timeout=120s || true
+fi
+
 # ── 步骤 6：等待 Deployment 滚动更新就绪 ────────────────────────────────
 # kubectl rollout status 阻塞等待直至 Deployment 所有副本更新完毕（新 Pod Ready + 旧 Pod 终止）
 # --timeout=180s  最大等待 3 分钟，超时则返回非零
@@ -109,6 +128,9 @@ kubectl rollout status deployment/privshield -n "$NAMESPACE" --timeout=180s || t
 echo ""
 echo "============================================================================"
 echo "🎉 Kubernetes 资源部署完成！"
+if [[ "$WITH_POSTGRES" == "true" ]]; then
+    echo "  🐘 PostgreSQL 已部署 (Phase B)"
+fi
 echo "  - 查看 Pods    : kubectl get pods -n $NAMESPACE"
 echo "  - 查看 Services: kubectl get svc -n $NAMESPACE"
 echo "============================================================================"

@@ -1,0 +1,14 @@
+# Phase B: PostgreSQL Kustomization for multi-replica service-hub.
+# 阶段 B：多副本 service-hub 的 PostgreSQL Kustomize 编排。
+#
+# 用法：
+#   阶段 A（单副本 SQLite）：使用上级目录 kustomization.yaml，不包含此子目录。
+#   阶段 B（多副本 PostgreSQL）：kubectl apply -k deploy/k8s/service-hub/postgres/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: privshield
+resources:
+  - postgres-secret.yaml
+  - postgres-pvc.yaml
+  - postgres-deployment.yaml
+  - postgres-service.yaml

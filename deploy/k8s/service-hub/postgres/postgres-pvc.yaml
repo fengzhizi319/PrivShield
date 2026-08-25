@@ -1,0 +1,16 @@
+# Phase B: PostgreSQL data PVC.
+# 阶段 B：PostgreSQL 数据持久卷声明。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: service-hub-postgres-data
+  labels:
+    app.kubernetes.io/name: service-hub-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: service-hub
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

@@ -516,3 +516,75 @@ HTTP TLS/mTLS 集成测试位于 `internal/handlers/httptls_test.go`，覆盖：
 | 启动时 integrity check failed | SQLite 文件损坏（断电/磁盘故障） | 检查磁盘健康，从备份恢复 |
 | 大量 orphaned tasks | 频繁 OOM Kill 或 kill -9 | 检查内存使用，调整资源限制 |
 | 重试任务持续失败 | 下游 Agent/datasource 不可达 | 检查网络连通性和服务健康状态 |
+
+---
+
+## 10. Phase B: PostgreSQL 原子租约与多副本 Hub
+
+> 本节描述 Phase B 多副本 Hub 的核心能力：基于 PostgreSQL 的原子任务租约。
+> 架构设计详见 [`docs/gateway_balancer/new_design.md`](../../../../docs/gateway_balancer/new_design.md)。
+
+### 10.1 能力概述
+
+当 service-hub 需要多副本高可用部署时，SQLite 的单写入者限制无法满足并发任务领取需求。Phase B 引入 `LeasedTaskStore` 接口，通过 PostgreSQL 的 `FOR UPDATE SKIP LOCKED` 实现无阻塞竞争领取：
+
+| 能力 | 说明 |
+|---|---|
+| 原子任务领取 | `ClaimNext` 使用 `FOR UPDATE SKIP LOCKED`，多副本互不阻塞 |
+| 租约保护 | 每个领取携带唯一 `lease_token`，防止过期副本覆盖结果 |
+| 自动续租 | `RenewLease` 延长租约，条件为所有权有效且未过期 |
+| 条件完成/失败 | `CompleteLease` / `FailLease` 仅在持有有效租约时生效 |
+| 过期回收 | `RequeueExpiredLeases` 批量回收过期租约，回退为 pending |
+| 可重试失败 | `FailLease` 支持自动回退 pending + 指数退避 |
+
+### 10.2 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `SERVICE_HUB_PG_DSN` | 空 | PostgreSQL 连接字符串（为空时回退 SQLite） |
+| `SERVICE_HUB_PG_MAX_CONNS` | `10` | 连接池最大连接数 |
+| `SERVICE_HUB_PG_MIN_CONNS` | `2` | 连接池最小连接数 |
+| `SERVICE_HUB_LEASE_TTL` | `60` | 任务租约 TTL（秒） |
+
+### 10.3 存储后端选择逻辑
+
+```
+SERVICE_HUB_PG_DSN 非空 → PostgreSQL LeasedTaskStore（多副本 Hub）
+SERVICE_HUB_PG_DSN 为空 + SERVICE_HUB_DB_PATH 非空 → SQLite TaskStore（单副本）
+两者均为空 → 内存 TaskStore（开发/测试）
+```
+
+SQLite 和内存后端的租约方法返回 `ErrLeaseNotSupported`，防止误配置。
+
+### 10.4 时钟同步要求
+
+租约过期时间以 PostgreSQL 服务器时间（`NOW()`）为权威。所有 Hub 副本在判断本地租约有效性时依赖本地时钟。部署必须保证所有 Hub 副本通过 NTP 与数据库服务器保持时钟同步。
+
+### 10.5 K8s 部署
+
+阶段 B PostgreSQL 资源位于 `deploy/k8s/service-hub/postgres/`：
+
+```bash
+# 部署 PostgreSQL（阶段 B）
+kubectl apply -k deploy/k8s/service-hub/postgres/
+
+# 更新 service-hub Deployment 中的 PG_DSN 环境变量后重新部署
+kubectl apply -k deploy/k8s/service-hub/
+```
+
+### 10.6 Prometheus 租约指标
+
+| 指标 | 用途 |
+|---|---|
+| `task_lease_conflicts_total` | 租约所有权冲突数 |
+| `task_lease_expired_total` | 租约到期回收次数 |
+| `task_claim_latency_seconds` | 任务领取延迟直方图 |
+| `task_transitions_total{from,to,result}` | 状态转换计数 |
+| `service_hub_ready` | 服务就绪状态 (1/0) |
+
+### 10.7 后续工作
+
+- 下游 Agent 接口幂等键集成
+- 多副本压测与领取吞吐基准
+- PostgreSQL 主从切换故障演练
+- 生产环境 PITR 备份策略配置

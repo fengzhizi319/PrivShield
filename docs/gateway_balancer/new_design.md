@@ -385,7 +385,19 @@ Service DNS 不是认证机制。mTLS 的客户端身份与服务端 SAN 校验�
 
 ## 12. 实施状态
 
-已提供阶段 A 的 Kubernetes 资源：[Service](../../deploy/k8s/service-hub/service.yaml)、[Deployment](../../deploy/k8s/service-hub/deployment.yaml)、[PVC](../../deploy/k8s/service-hub/persistentvolumeclaim.yaml) 与 [Kustomization](../../deploy/k8s/service-hub/kustomization.yaml)。阶段 B 的 PostgreSQL `LeasedTaskStore`、任务 schema migration、下游幂等键和多副本验证仍是后续实现工作，本文档不得被解读为它们已在代码中完成。
+已提供阶段 A 的 Kubernetes 资源：[Service](../../deploy/k8s/service-hub/service.yaml)、[Deployment](../../deploy/k8s/service-hub/deployment.yaml)、[PVC](../../deploy/k8s/service-hub/persistentvolumeclaim.yaml) 与 [Kustomization](../../deploy/k8s/service-hub/kustomization.yaml)。
+
+阶段 B 核心代码已实现：
+
+- **`LeasedTaskStore` 接口**：定义于 `pkg/store/store.go`，包含 `ClaimNext`、`RenewLease`、`CompleteLease`、`FailLease`、`RequeueExpiredLeases` 五个原子租约方法。
+- **PostgreSQL 实现**：`pkg/store/postgres/` 提供完整的 `LeasedTaskStore` 实现，使用 `FOR UPDATE SKIP LOCKED` 实现无阻塞竞争领取。
+- **SQLite / 内存桩实现**：所有租约方法返回 `ErrLeaseNotSupported`，防止单副本部署意外启用多副本语义。
+- **Task 模型扩展**：新增 `LeaseOwner`、`LeaseToken`、`LeaseExpiresAt`、`Version`、`MaxRetries` 字段。
+- **Prometheus 租约指标**：`task_lease_conflicts_total`、`task_lease_expired_total`、`task_claim_latency_seconds`、`task_transitions_total`、`service_hub_ready`。
+- **Service-Hub 集成**：`initLeasedTaskStore()` 根据 `SERVICE_HUB_PG_DSN` 自动选择 PostgreSQL 或回退 SQLite。
+- **K8s PostgreSQL 资源**：`deploy/k8s/service-hub/postgres/` 提供可选的 PostgreSQL Deployment/Service/PVC/Secret。
+
+阶段 B 的下游幂等键集成、多副本压测验证与生产故障演练仍是后续工作。
 
 ## 13. 相关文档
 
