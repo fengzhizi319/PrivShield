@@ -19,7 +19,7 @@
 ### `install_cuda_pytorch_sm120.sh`
 - **作用说明**: 自动化安装 NVIDIA Blackwell (如 RTX 50 系列 / B100 / B200, 计算能力 `sm_120`) 及 Ampere/Ada 架构所需的 CUDA 12.8 Toolkit 和最新 PyTorch 运行时，并执行 GPU 张量计算与算力探针校验。
 - **参数选项**:
-  - `--install-toolkit`: 同时安装系统级 CUDA Toolkit（含 `nvcc` 编译器）。
+  - `--install-cuda-toolkit`: 同时安装系统级 CUDA Toolkit（含 `nvcc` 编译器）。
   - `--pytorch-channel <CHANNEL>`: 指定 PyTorch 下载通道（如 `nightly/cu128`）。
 - **执行命令**:
   ```bash
@@ -28,7 +28,7 @@
   ```
   ```bash
   # 完整安装系统级 CUDA Toolkit 与 nvcc 编译器
-  bash ./scripts/env/install_cuda_pytorch_sm120.sh --install-toolkit
+  bash ./scripts/env/install_cuda_pytorch_sm120.sh --install-cuda-toolkit
   ```
 
 ---
@@ -37,7 +37,7 @@
 - **作用说明**: 安装针对 CUDA 12.8 与新一代 GPU 架构优化的 TensorRT 10.x 运行库（`tensorrt`, `tensorrt-cu12`, `tensorrt-lean` 等）及 `onnxruntime-gpu` 执行提供程序。
 - **参数选项**:
   - `-v, --version <VER>`: 指定 TensorRT 版本（默认 `10.8.0`）。
-  - `--system-debs`: 同时安装系统 APT 底层依赖。
+  - `--system-install`: 同时安装系统 APT 底层依赖。
   - `--no-onnx-gpu`: 跳过 onnxruntime-gpu 仅安装核心 TensorRT。
 - **执行命令**:
   ```bash
