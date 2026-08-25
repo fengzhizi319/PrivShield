@@ -38,8 +38,8 @@ export interface BackendOption {
  * 统一由 Go BFF 代理后端承接，支持 gRPC 与 REST 两种通信链路。
  */
 export const DEFAULT_BACKENDS: BackendOption[] = [
-  { label: 'gRPC', value: 'http://127.0.0.1:8081?protocol=grpc' },
-  { label: 'REST', value: 'http://127.0.0.1:8081?protocol=rest' },
+  { label: 'gRPC', value: '?protocol=grpc' },
+  { label: 'REST', value: '?protocol=rest' },
 ];
 
 /**
