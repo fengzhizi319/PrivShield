@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **企业级 Monorepo 目录分层解耦**：
   - 中台微服务群解耦提至根目录 `services/{service-hub,datasource-mgr,audit-log}`。
-  - Go 共享基础库提至根目录 `pkg/`，根目录 `go.work` 统一纳管全部 5 个 Go 模块（Go 1.27）。
+  - Go 共享基础库提至根目录 `pkg/`，根目录 `go.work` 统一纳管全部 5 个 Go 模块（Go 1.25）。
   - 控制台职责收敛为 `console/{bff-go,web}`，统一由 Go BFF 提供 REST 入口与 gRPC 上游代理；已移除 `console/bff-py` Python REST 备用 BFF。
 - **运维与启停脚本体系全面收敛**：
   - `console/scripts/` 下 20+ 个启停、Docker 编排及测试脚本全面归并至 `scripts/dev/` 与 `scripts/prod/`。
@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rule_schema.py` 核心架构与系统流转图 Docstring 文档
 - 全面扩充 `general-pii` / `finance` / `medical` / `sc_health_db51` 领域规则包关键词词库
 - Apache-2.0 LICENSE
-- GitHub Actions CI: lint (ruff + mypy) / test (Python 3.10/3.11/3.12) / security (pip-audit) / docker build
+- GitHub Actions CI: lint (ruff + mypy) / test (Python 3.13) / security (pip-audit) / docker build
 - Ruff lint + format 配置 (pyproject.toml)
 - mypy 类型检查配置
 - pytest 覆盖率配置 (pytest-cov, fail_under=60)

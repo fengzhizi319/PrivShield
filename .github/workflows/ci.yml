@@ -108,8 +108,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # 与根目录 go.work 声明的 go 1.27.0 保持一致，避免依赖 GOTOOLCHAIN 自动下载
-          go-version: "1.27"
+          # 与根目录 go.work 声明的 go 1.25.0 保持一致，避免依赖 GOTOOLCHAIN 自动下载
+          go-version: "1.25"
           cache-dependency-path: go.work.sum
 
       - name: Vet all Go packages
