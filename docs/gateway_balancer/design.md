@@ -92,15 +92,15 @@ graph LR
 ```mermaid
 graph TD
     subgraph RR ["1. 轮询 (Round-Robin)"]
-        RRDesc["简单报数: 节点 1, 节点 2, 节点 3, 节点 1...<br/>适合: 机器配置一样、任务耗时差不多的场景"]
+        RRDesc["简单报数: 节点 1, 节点 2, <br/>节点 3, 节点 1...<br/>适合: 机器配置一样、<br/>任务耗时差不多的场景"]
     end
 
     subgraph SWRR ["2. 平滑加权轮询 (Smooth Weighted Round-Robin)"]
-        SWRRDesc["高性能节点多干活，但绝不连续扎堆<br/>权重 5:1 时生成序列: A, A, A, B, A, A<br/>适合: 混合机型配置 (如 8核机 与 2核机 混部)"]
+        SWRRDesc["高性能节点多干活，<br/>但绝不连续扎堆<br/>权重 5:1 时生成序列: <br/>A, A, A, B, A, A<br/>适合: 混合机型配置<br/> (如 8核机 与 2核机 混部)"]
     end
 
     subgraph LC ["3. 最小连接数 (Least Connections)"]
-        LCDesc["谁当前手里在处理的在途请求最少，就把新活派给谁<br/>适合: 大模型分类、海量数据差分隐私等耗时极不均衡的重型计算场景"]
+        LCDesc["谁当前手里在处理的<br/>在途请求最少，<br/>就把新活派给谁<br/>适合: 大模型分类、<br/>海量数据<br/>差分隐私等耗时<br/>极不均衡的重型计算场景"]
     end
 ```
 
