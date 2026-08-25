@@ -1,6 +1,6 @@
 # 控制台共享公共库 (Shared PKG) — 设计文档
 
-> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 控制台共享基础包（`console/pkg`）的架构设计、接口契约与通用组件实现。
+> 本文档定义 **数联天下 · 数盾 (`PrivShield`)** 共享基础包（`pkg`）的架构设计、接口契约与通用组件实现。
 
 ---
 
@@ -8,7 +8,7 @@
 
 控制台包含多个独立的 Go 微服务（`backend-go`、`service-hub`、`datasource-mgr`、`audit-log`）。在初期演进中，各服务各自维护了相似的配置读取、中间件、指标采集、Agent 客户端以及内存存储代码。
 
-为了消灭重复代码、统一安全标准、实现生产级持久化与高可用治理，我们将通用能力抽取为独立的 Go 模块 **`console/pkg`**。
+为了消灭重复代码、统一安全标准、实现生产级持久化与高可用治理，我们将通用能力抽取为独立的 Go 模块 **`pkg`**。
 
 ### 1.1 设计目标
 
@@ -23,7 +23,7 @@
 ## 2. 模块结构与包划分
 
 ```text
-console/pkg/
+pkg/
 ├── agent/                  # 上游 PrivShield Agent REST API 客户端封装
 │   ├── client.go           # Client（熔断器、鉴权头、超时、64MiB 限制）
 │   └── client_test.go      # 基础请求、鉴权、熔断器状态流转单测
@@ -42,12 +42,20 @@ console/pkg/
 │   ├── memory/             # 内存存储实现（带安全切片与容量上限控制）
 │   │   ├── memory.go
 │   │   └── memory_test.go
-│   └── sqlite/             # SQLite 纯 Go 驱动持久化（无 CGO，WAL 模式，连接池）
-│       ├── init.go         # 数据库连接池初始化与 DDL 迁移
-│       ├── tasks.go        # 任务流水线持久化
-│       ├── datasources.go  # 数据源与访问审计持久化
-│       ├── audit.go        # 脱敏审计日志与快照持久化，SQL 级聚合统计
-│       └── sqlite_test.go
+│   ├── sqlite/             # SQLite 纯 Go 驱动持久化（无 CGO，WAL 模式，连接池）
+│   │   ├── init.go         # 数据库连接池初始化与 DDL 迁移
+│   │   ├── tasks.go        # 任务流水线持久化
+│   │   ├── datasources.go  # 数据源与访问审计持久化
+│   │   ├── audit.go        # 脱敏审计日志与快照持久化，SQL 级聚合统计
+│   │   └── sqlite_test.go
+│   └── postgres/           # Phase B PostgreSQL 原子任务租约存储
+│       ├── postgres.go     # 连接池初始化与自动 Schema 迁移
+│       ├── schema.go       # DDL 迁移与版本管理
+│       ├── tasks.go        # 任务 CRUD 与分页查询
+│       ├── leased.go       # FOR UPDATE SKIP LOCKED 竞争领取/租约续期/完成/失败
+│       └── leased_test.go  # 多副本租约竞争与过期回收单测
+├── tlsutil/                # 共享 TLS 配置工具
+│   └── tlsutil.go          # TLS 1.3 强制、mTLS 双向认证、SPKI 公钥固定
 ├── validation/             # 输入安全校验与工具函数
 │   ├── validation.go       # AllowedValues, PortRange, GenerateID, ParsePagination
 │   └── validation_test.go
@@ -132,3 +140,26 @@ graph LR
 - **参数范围与长度**：`PortRange(port)`（1~65535）、`MaxLength(field, value, max)`（防止大字符串耗尽 SQLite 空间）。
 - **抗碰撞 ID**：`GenerateID(prefix)` 采用 `<prefix>-<unix_seconds>-<8_random_hex>` 格式，高并发下无碰撞风险。
 - **统一安全分页**：`ParsePagination(c, defaultLimit, maxLimit)` 自动解析 `limit` 与 `offset` 查询参数并设置安全阈值边界。
+
+---
+
+### 3.6 PostgreSQL 原子任务租约存储 (`pkg/store/postgres`)
+
+Phase B 引入 PostgreSQL 作为多副本 Hub 部署的后端存储，实现基于租约的分布式任务所有权管理：
+
+- **无阻塞竞争领取**：`ClaimNext(owner, leaseTTL)` 使用 `FOR UPDATE SKIP LOCKED` 实现多副本间的无锁竞争领取，无可用任务时立即返回 `(nil, nil)`。
+- **租约生命周期**：每个租约携带 16 字节随机令牌（`lease_token`），支持续期（`RenewLease`）、条件完成（`CompleteLease`）、条件失败（`FailLease`）。
+- **可重试失败与指数退避**：`FailLease` 对可重试失败自动回退为 `pending`，退避策略为 `LEAST(5 * 2^retry_count, 60)` 秒。
+- **过期租约回收**：`RequeueExpiredLeases(limit)` 批量回收过期租约，将 `running` 但租约已过期的任务回退为 `pending`。
+- **自动 Schema 迁移**：初始化时自动执行 DDL 迁移，确保表结构与当前版本一致。
+
+---
+
+### 3.7 共享 TLS 配置工具 (`pkg/tlsutil`)
+
+提供跨 gRPC 与 HTTP 服务器的统一 TLS 配置构建能力：
+
+- **TLS 1.3 强制**：`BuildServerTLSConfig` 强制设置 `MinVersion: tls.VersionTLS13`，禁用旧版协议。
+- **多客户端认证模式**：支持 `require`/`requireandverify`（强制双向校验）、`verify`（可选校验）、`request`（请求证书）四种模式。
+- **公钥固定防御**：通过 `PinnedPubKeyFile` 注入 `VerifyPeerCertificate` 验证钩子，严格比对客户端公钥指纹（支持 RSA、ECDSA、Ed25519），防御 CA 劫持与证书伪造攻击。
+- **工具函数**：`LoadPublicKey` 支持 PKIX 与 X.509 Certificate 两种 PEM 格式；`PublicKeysEqual` 深度比对公钥数学属性。

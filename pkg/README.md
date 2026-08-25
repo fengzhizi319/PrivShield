@@ -9,11 +9,13 @@
 | 子包 | 描述 |
 |---|---|
 | [`pkg/store`](./store/store.go) | 任务、数据源与脱敏审计日志的数据模型与存储接口，提供 SQLite 持久化与内存存储两套引擎 |
+| [`pkg/store/postgres`](./store/postgres/postgres.go) | Phase B 基于 PostgreSQL 的原子任务租约存储（`FOR UPDATE SKIP LOCKED` 多副本竞争领取、租约续期/完成/失败/过期回收） |
 | [`pkg/middleware`](./middleware/middleware.go) | 统一 Gin 中间件：API Key 鉴权、CORS 跨域、Request ID 链路追踪、结构化日志、Panic Recovery、安全响应头以及 **DDoS 纵深防护（IP 令牌桶限流 RateLimit、大包防护 MaxBodySize、并发硬顶 MaxConcurrent）** |
 | [`pkg/metrics`](./metrics/metrics.go) | 基于 Prometheus 的模块级指标收集器（Counter / Histogram）与 `/metrics` HTTP 端点 |
 | [`pkg/agent`](./agent/client.go) | 访问上游 PrivShield Agent REST API 的共享 HTTP 客户端，具备熔断器、超时与 64MB 内存防护 |
 | [`pkg/config`](./config/env.go) | 统一的环境变量解析工具（String/Int/Bool/Slice）与 `slog` 结构化日志器初始化 |
 | [`pkg/validation`](./validation/validation.go) | 参数白名单校验、端口范围检查、字符串长度检查、抗碰撞唯一 ID 生成与安全分页解析 |
+| [`pkg/tlsutil`](./tlsutil/tlsutil.go) | 共享 TLS 配置工具：TLS 1.3 强制最低版本、mTLS 双向认证、公钥固定（SPKI Pinning），同时支持 gRPC 与 HTTP 服务器 |
 
 ---
 

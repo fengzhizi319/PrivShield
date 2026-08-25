@@ -2,7 +2,7 @@
 // Package agent 封装到上游 PrivShield agent 的 HTTP 客户端。
 //
 // 本模块的 agent 客户端已精简为 thin wrapper，
-// 通用 HTTP 逻辑由 console/pkg/agent 共享库提供。
+// 通用 HTTP 逻辑由 pkg/agent 共享库提供。
 package agent
 
 import (
