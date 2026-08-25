@@ -17,87 +17,130 @@ httpx is a fully-featured Python HTTP client library supporting both sync and as
 
 ## 2. 在本项目中的用法 / Usage in This Project
 
-### 2.1 异步代理客户端 / Async Proxy Client
+### 2.1 生产级网关长连接池与生命周期绑定 / Gateway Connection Pool & Lifespan
 
-文件 / File：`console/bff-py/app/client.py`（历史实现，已移除；当前 BFF 使用 Go 标准库 `net/http` 与 gRPC，参见 `console/bff-go/internal/client/agent.go`）
+文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py#L110-L160)
+
+在 `PrivShield` 网关反向代理层中，为避免高频创建 TCP 套接字导致的连接耗尽（`OSError: Cannot assign requested address`），通过 FastAPI `lifespan` 维护全局单例 `httpx.AsyncClient`，并特别加入了**事件循环漂移自愈机制**（解决跨测试夹具或动态重载时的 `RuntimeError: Event loop is closed`）：
 
 ```python
+import asyncio
 import httpx
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from .balancer import LoadBalancer, backend_tls_verify
 
-class PrivacyAgentClient:
-    """转发请求到 PrivShield 的异步客户端。
-    Async client forwarding requests to PrivShield."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """网关生命周期：创建全局长连接池，并在退出时优雅关闭。"""
+    app.state.http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0),
+        limits=httpx.Limits(
+            max_keepalive_connections=100,
+            max_connections=500,
+            keepalive_expiry=30.0,
+        ),
+        verify=backend_tls_verify(),
+        follow_redirects=False,
+    )
+    app.state.http_client_loop = asyncio.get_running_loop()
+    try:
+        yield
+    finally:
+        client = getattr(app.state, "http_client", None)
+        if client is not None:
+            await client.aclose()
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        """懒初始化连接池客户端 / Lazy-init pooled client"""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self.base_url,
-                timeout=60.0,
-                follow_redirects=False,  # 安全：不跟随重定向 / Security: no redirect follow
-                trust_env=False,         # 直连：不走系统代理 / Direct: bypass system proxy
-            )
-        return self._client
+def _get_http_client(request: Request) -> httpx.AsyncClient:
+    """获取请求级 HTTP 客户端，具备事件循环漂移自愈能力。"""
+    current_loop = asyncio.get_running_loop()
+    client = getattr(request.app.state, "http_client", None)
+    cached_loop = getattr(request.app.state, "http_client_loop", None)
+
+    # 循环不一致时，异步淘汰旧客户端并重建新实例
+    if client is None or client.is_closed or cached_loop is not current_loop:
+        if client is not None and not client.is_closed:
+            asyncio.create_task(client.aclose())
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(max_keepalive_connections=100, max_connections=500),
+            verify=backend_tls_verify(),
+        )
+        request.app.state.http_client = client
+        request.app.state.http_client_loop = current_loop
+    return client
 ```
 
-### 2.2 请求转发 / Request Forwarding
+### 2.2 通配反向代理与流式传输 / Wildcard Reverse Proxy & Stream Transfer
+
+文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py#L250-L380)
+
+网关使用通配路由 `/{path:path}`，将请求无损转发至选中的后端工作节点：
 
 ```python
-async def request(self, method, path, body=None, raw_content=None, content_type=None):
-    client = await self._get_client()
+# RFC 7230 逐段传输头与响应压缩头过滤
+EXCLUDE_HEADERS = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade", "content-length", "host"
+}
+RESPONSE_EXCLUDE_HEADERS = EXCLUDE_HEADERS | {"content-encoding"}
 
-    if raw_content is not None:
-        # 二进制载荷（如 Arrow IPC）/ Binary payload (e.g. Arrow IPC)
-        response = await client.request(method, url, content=raw_content, headers=headers)
-    elif body is not None:
-        # JSON 载荷 / JSON payload
-        response = await client.request(method, url, json=body, headers=headers)
-    else:
-        # 无请求体（GET）/ No body (GET)
-        response = await client.request(method, url, headers=headers)
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+async def proxy_http(request: Request, path: str):
+    client = _get_http_client(request)
+    body = await request.body()
+    
+    # 负载均衡器选路
+    node = balancer.select_http_node()
+    url = f"{node.http_url.rstrip('/')}/{path}"
+    
+    # 构造清洗后的转发请求头
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in EXCLUDE_HEADERS}
+    
+    # 发送请求并统计在途连接
+    with node.track_connection():
+        backend_resp = await client.request(
+            method=request.method,
+            url=url,
+            content=body,
+            headers=headers,
+            params=request.query_params,
+        )
+        
+    # 响应头清洗（剥离 content-encoding 防止客户端二次解压崩溃）
+    resp_headers = {k: v for k, v in backend_resp.headers.items() if k.lower() not in RESPONSE_EXCLUDE_HEADERS}
+    return Response(content=backend_resp.content, status_code=backend_resp.status_code, headers=resp_headers)
 ```
 
-### 2.3 错误处理 / Error Handling
+### 2.3 幂等安全重试与毫秒级故障转移 / Idempotent Retry & Fast Failover
+
+文件 / File：[`engine/gateway/http_proxy.py`](file:///home/charles/code/PrivShield/engine/gateway/http_proxy.py#L300-L360)
 
 ```python
+# 遇到连接层异常 (httpx.ConnectError) 时，请求尚未送达后端，安全执行重试与故障转移
 try:
-    response = await client.request(...)
-except httpx.RequestError as exc:
-    # 网络层错误 → 502 Bad Gateway
-    # Network error → 502 Bad Gateway
-    raise HTTPException(status_code=502, detail=f"Unable to reach agent: {exc}")
-
-try:
-    response.raise_for_status()
-except httpx.HTTPStatusError as exc:
-    # agent 返回非 2xx → 透传状态码
-    # Agent non-2xx → passthrough status code
-    raise HTTPException(status_code=response.status_code, detail=detail)
+    backend_resp = await client.request(...)
+except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+    balancer.mark_unhealthy(node, reason="connect_error")
+    # 非幂等写操作如果在连接未建立时失败，仍可安全重试到其他健康节点
+    retry_node = balancer.select_http_node(exclude={node})
+    ...
 ```
 
-### 2.4 负载均衡探测 / Load Balancer Probing
+### 2.4 主动健康检查探测 / Active Probing Health Checks
 
-文件 / File：`console/bff-py/app/main.py`（历史实现，已移除；当前 BFF 入口位于 `console/bff-go/internal/handlers/handlers.go`）
+文件 / File：[`engine/gateway/balancer.py`](file:///home/charles/code/PrivShield/engine/gateway/balancer.py)
 
 ```python
-# 临时客户端用于 LB 探测（transport 可注入 MockTransport 供测试）
-# Temporary client for LB probing (transport injectable for testing)
-async with httpx.AsyncClient(transport=transport, timeout=10.0, trust_env=False) as lb_client:
-    await asyncio.gather(*(probe(i) for i in seq))  # 并发探测 / Concurrent probing
+async def check_health(self, node: Node) -> bool:
+    """利用 httpx 发送短超时探测请求评估节点健康状态。"""
+    try:
+        async with httpx.AsyncClient(timeout=2.0, verify=backend_tls_verify()) as client:
+            resp = await client.get(f"{node.http_url}/health")
+            return resp.status_code == 200
+    except (httpx.RequestError, Exception):
+        return False
 ```
-
-### 2.5 连接池管理与生命周期 / Connection Pool Management & Lifecycle
-
-```python
-# 应用级单例客户端，通过 lifespan 管理生命周期 / App-level singleton client, managed via lifespan
-class PrivacyAgentClient:
-    def __init__(self):
-        self._client: httpx.AsyncClient | None = None  # 懒初始化 / Lazy init
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """懒初始化连接池客户端 / Lazy-init pooled client
-
-        详细逻辑 / Detailed Logic：
           1. 检查客户端是否已初始化且未关闭
           2. 未初始化时创建新的 AsyncClient（复用 TCP 连接）
           3. 已关闭时重新创建（优雅重连）

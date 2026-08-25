@@ -2,7 +2,7 @@
 
 > 本手册为 `PrivShield` 代理转发与负载均衡网关（API Gateway & Load Balancer）的生产级部署、运维管理、安全加固、与 Kubernetes 负载均衡协同、可观测性与故障排查提供端到端的操作指南与标准作业程序（SOP）。
 >
-> 关联设计文档：[代理转发与负载均衡网关设计与实现规范](file:///home/charles/code/sfwork/PrivShield/docs/gateway_balancer/design.md)
+> 关联设计文档：[代理转发与负载均衡网关设计与实现规范](file:///home/charles/code/PrivShield/docs/gateway_balancer/design.md)
 
 ---
 
@@ -73,6 +73,39 @@ graph TD
         Pod1 -.-> SharedDB
         Pod2 -.-> SharedDB
         Pod3 -.-> SharedDB
+    end
+```
+
+### 1.3 单机多核绑核调度模式 (Bare-Metal / Single-Host CPU-Pinned Multi-Worker Mode)
+
+在裸金属服务器或单台高配物理机（如 16/32/64 核）部署场景下，为了**彻底突破 Python GIL（全局解释器锁）瓶颈**并最大化 CPU 缓存命中率：
+- 为每个物理核心启动一个独立的 Agent 进程（分别监听不同端口），并通过 Linux `taskset -c <core_id>` 将其亲和性硬绑定到特定 CPU 核心；
+- 网关在本地将这多个单核进程分别注册为独立的 `BackendNode`（如 `http://127.0.0.1:8080|127.0.0.1:50050` 等）；
+- 所有进程统一挂载共享的 `PRIVACY_BUDGET_DB`（通过 SQLite `BEGIN IMMEDIATE` 强一致记账）；
+- 网关通过 `least_connections`（最小连接数）或 `weighted_round_robin` 在多核进程间均匀分发流量，实现单机算力的线性扩展。
+
+```mermaid
+graph TD
+    Client[客户端] -->|"REST (8000) / gRPC (50000)"| GW["PrivShield Gateway (七层调度器)"]
+
+    subgraph Host ["单台多核物理机 / 裸金属服务器 (Bare-Metal Host)"]
+        subgraph CPU_Cores ["CPU 物理核心硬绑定 (taskset -c)"]
+            P0["Worker 0 (Core #0)<br/>REST:8080 / gRPC:50050"]
+            P1["Worker 1 (Core #1)<br/>REST:8081 / gRPC:50051"]
+            PN["Worker N (Core #N)<br/>REST:808N / gRPC:5005N"]
+        end
+
+        subgraph LocalStorage ["本地共享预算账本"]
+            BudgetDB[("privacy_budget.db<br/>(BEGIN IMMEDIATE 排他锁)")]
+        end
+
+        GW -->|per-RPC 调度| P0
+        GW -->|per-RPC 调度| P1
+        GW -->|per-RPC 调度| PN
+
+        P0 -.-> BudgetDB
+        P1 -.-> BudgetDB
+        PN -.-> BudgetDB
     end
 ```
 
@@ -156,7 +189,7 @@ backends:
 
 ### 2.3 CLI 启动命令行参数
 
-网关入口模块为 [`engine.gateway.server`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/server.py)：
+网关入口模块为 [`engine.gateway.server`](file:///home/charles/code/PrivShield/engine/gateway/server.py)：
 
 ```bash
 # 查看帮助
@@ -379,7 +412,7 @@ SQLite `BEGIN IMMEDIATE` 排他事务机制保障多实例并发更新时不会�
 
 ### 5.2 预算数据库定时备份与恢复
 
-生产环境推荐使用项目内置脚本 [`scripts/prod/backup_privacy_budget.sh`](file:///home/charles/code/sfwork/PrivShield/scripts/prod/backup_privacy_budget.sh)：
+生产环境推荐使用项目内置脚本 [`scripts/prod/backup_privacy_budget.sh`](file:///home/charles/code/PrivShield/scripts/prod/backup_privacy_budget.sh)：
 
 ```bash
 # 1. 手动执行备份
@@ -781,7 +814,7 @@ scrape_configs:
 
 ### 7.3 Prometheus 告警规则矩阵
 
-对应项目告警规则文件 [`deploy/prometheus/alerts.yml`](file:///home/charles/code/sfwork/PrivShield/deploy/prometheus/alerts.yml)：
+对应项目告警规则文件 [`deploy/prometheus/alerts.yml`](file:///home/charles/code/PrivShield/deploy/prometheus/alerts.yml)：
 
 ```yaml
 groups:
@@ -970,7 +1003,7 @@ cat /var/log/privshield/gateway.log | jq 'select(.message == "Node status change
 
 ## 9. 生产健康巡检与诊断工具
 
-项目提供了开箱即用的生产全链路健康巡检脚本 [`scripts/prod/prod_health_check.sh`](file:///home/charles/code/sfwork/PrivShield/scripts/prod/prod_health_check.sh)：
+项目提供了开箱即用的生产全链路健康巡检脚本 [`scripts/prod/prod_health_check.sh`](file:///home/charles/code/PrivShield/scripts/prod/prod_health_check.sh)：
 
 ```bash
 # 1. 基础巡检 (HTTP/gRPC/Metrics/DB)

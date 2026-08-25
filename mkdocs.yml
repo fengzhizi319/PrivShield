@@ -231,22 +231,33 @@ nav:
       - 目录架构重构与迁移设计: archive/migration-design.md
 
   - 技术学习指南:
-    - Vite 热重载与构建: learning/vite.md
+    - 差分隐私与预算记账: learning/tech-differential-privacy.md
+    - K-匿名与 Mondrian 泛化: learning/tech-k-anonymity.md
+    - 动态分类分级与三层漏斗: learning/tech-dynamic-classification-funnel.md
+    - AI/ML 推理加速与微调: learning/tech-ai-ml-inference-runtime.md
+    - 医疗数据治理与图像打码: learning/tech-medical-informatics-pipeline.md
+    - 反向代理与网关技术: learning/tech-reverse-proxy.md
+    - 高性能网关与负载均衡: learning/tech-gateway-load-balancer.md
+    - 双向 mTLS 与安全治理: learning/tech-security-mtls-cryptography.md
+    - 可观测性与分布式追踪: learning/tech-observability-metrics-tracing.md
+    - 测试工程与性能基准: learning/tech-testing-benchmark-qa.md
+    - Docker 与云原生部署: learning/tech-docker-cloud-native-devops.md
+    - FastAPI: learning/tech-fastapi.md
+    - uvicorn: learning/tech-uvicorn.md
+    - Pydantic: learning/tech-pydantic.md
+    - gRPC & Protobuf: learning/tech-grpc-protobuf.md
+    - httpx: learning/tech-httpx.md
+    - Go + Gin: learning/tech-go-gin.md
+    - 数据处理: learning/tech-data-processing.md
     - React: learning/tech-react.md
     - TypeScript: learning/tech-typescript.md
-    - Go + Gin: learning/tech-go-gin.md
-    - FastAPI: learning/tech-fastapi.md
-    - gRPC & Protobuf: learning/tech-grpc-protobuf.md
-    - Pydantic: learning/tech-pydantic.md
-    - httpx: learning/tech-httpx.md
-    - ESLint: learning/tech-eslint.md
+    - Vite 热重载与构建: learning/vite.md
     - TailwindCSS: learning/tech-tailwindcss.md
     - PostCSS: learning/tech-postcss.md
     - pnpm: learning/tech-pnpm.md
+    - ESLint: learning/tech-eslint.md
     - Vitest: learning/tech-vitest.md
     - Testing Library: learning/tech-testing-library.md
-    - 数据处理: learning/tech-data-processing.md
-    - uvicorn: learning/tech-uvicorn.md
 
   - 附录:
     - 个性化配置: dynclassification/personalized_profiles.md

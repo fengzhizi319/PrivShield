@@ -16,87 +16,115 @@ Pydantic is the most popular data validation library for Python, using type hint
 
 ## 2. 在本项目中的用法 / Usage in This Project
 
-### 2.1 请求/响应模型 / Request/Response Models
+### 2.1 隐私原语与请求校验模型 / Privacy Primitives Request Models
 
-文件 / File：`console/bff-py/app/main.py`（历史实现，已移除；当前等效模型位于 `engine/schemas.py`）
+文件 / File：[`engine/schemas.py`](file:///home/charles/code/PrivShield/engine/schemas.py)
+
+`PrivShield` 在 `schemas.py` 中为所有隐私计算与脱敏原语定义了严格的 Pydantic v2 模型，并配置了针对高并发和超大 Payload 攻击的边界约束（`max_length`、`ge`、`le`）：
 
 ```python
+from typing import Any
 from pydantic import BaseModel, Field
 
-class ProxyRequest(BaseModel):
-    """通用代理请求体 - Pydantic 自动校验字段类型与约束。
-    Generic proxy request - Pydantic auto-validates field types and constraints."""
-    method: str = Field(..., examples=["POST"])           # 必填字段 / Required field
-    path: str = Field(..., examples=["/v1/privacy/mask"]) # 必填字段 / Required field
-    body: dict[str, Any] | None = Field(default=None)     # 可选字段 / Optional field
-    raw_payload_b64: str | None = Field(default=None)
-    content_type: str | None = Field(default=None)
+class MaskRequest(BaseModel):
+    """单字段脱敏请求模型 / Single-field masking model."""
+    field_name: str = Field(max_length=200, description="待脱敏字段名，如 phone, id_card")
+    value: str = Field(max_length=100_000, description="待脱敏值（最大 100KB 防止内存耗尽）")
+    context: str = Field(default="", max_length=10_000, description="上下文信息")
 
-class LbTestRequest(BaseModel):
-    """负载均衡测试请求 - 展示 Field 约束能力。
-    LB test request - demonstrates Field constraint capabilities."""
-    backends: list[LbBackend] = Field(default_factory=list)  # 避免可变默认参数 / Avoid mutable default
-    num_requests: int = Field(default=10, ge=1, le=1000)     # 范围约束 1~1000 / Range constraint
-    strategy: str = Field(default="round_robin")
+class DPRequest(BaseModel):
+    """差分隐私聚合请求模型 / DP aggregation request model."""
+    values: list[float] = Field(max_length=10_000, description="数值序列（单次最大 10000 条）")
+    params: dict[str, object] = Field(default_factory=dict, max_length=100, description="动态参数覆盖")
+
+class KAnonymizeTableRequest(BaseModel):
+    """表格 K-匿名化请求模型 / Tabular K-Anonymity model."""
+    dataset: list[dict[str, Any]] = Field(max_length=10_000, description="原始记录集")
+    quasi_identifiers: list[str] = Field(max_length=50, description="准标识符集合")
+    k: int = Field(default=3, ge=2, le=1000, description="匿名度 K，范围 2~1000")
+    strategy: str = Field(default="mondrian", description="多维划分算法")
 ```
 
-### 2.2 配置管理 / Configuration Management
+### 2.2 声明式规则体系与元数据 Schema / Declarative Rule Profile Schema
 
-文件 / File：`console/bff-py/app/config.py`（历史实现，已移除；当前配置入口位于 `console/bff-go/internal/config/config.go`）
+文件 / File：[`engine/dynclassification/rule_schema.py`](file:///home/charles/code/PrivShield/engine/dynclassification/rule_schema.py)
+
+在三层动态分类分级引擎中，YAML 规则文件被深度反序列化为由 Pydantic v2 强类型保证的规则对象树：
+
+```python
+from pydantic import BaseModel, ConfigDict, Field
+
+class MatcherDef(BaseModel):
+    """匹配器原子定义 / Atomic matcher definition."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    target: str = Field(description="匹配目标: 'field_name' | 'field_value'")
+    operator: str = Field(description="算子名称: 'regex' | 'keyword_contains' | 'id_card_checksum' 等")
+    params: dict[str, Any] = Field(default_factory=dict, description="算子专用参数")
+
+class RuleDef(BaseModel):
+    """单条字段分类分级规则 / Single classification rule."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(description="规则唯一标识")
+    category: str = Field(description="敏感数据分类 (如 个人基本信息, 医疗生理健康)")
+    level: str = Field(description="敏感级别 (如 S1, S2, S3, S4, L1, L2, L3)")
+    match_logic: str = Field(default="ALL", description="多匹配器逻辑关系: 'ALL' | 'ANY'")
+    matchers: list[MatcherDef] = Field(description="包含的匹配器列表")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="规则命中静态置信度")
+
+class DowngradeRuleDef(BaseModel):
+    """降级与压制规则 / Downgrade and suppression rule."""
+    keywords: list[str] = Field(description="降级触发关键词")
+    level: str = Field(description="目标降级级别")
+    force_suppress: bool = Field(default=False, description="是否完全压制不打标")
+```
+
+### 2.3 生产环境安全配置驱动 / Production Security Settings
+
+文件 / File：[`engine/security/config.py`](file:///home/charles/code/PrivShield/engine/security/config.py)
 
 ```python
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-class Settings(BaseSettings):
-    """从环境变量加载配置 - 零配置即可本地运行。
-    Load config from env vars - zero-config local development."""
-
-    # 通过 alias 映射到环境变量名 / Map to env var names via alias
-    privacy_agent_url: str = Field(default="http://127.0.0.1:8079", alias="PRIVACY_AGENT_URL")
-    console_port: int = Field(default=8080, alias="PRIVACY_CONSOLE_PORT")
-    max_upload_bytes: int = Field(default=10 * 1024 * 1024, alias="CONSOLE_MAX_UPLOAD_BYTES")
+class SecuritySettings(BaseSettings):
+    """全局安全配置管理（12-Factor 原则）/ Global security settings."""
+    auth_enabled: bool = Field(default=False, alias="PRIVACY_AUTH_ENABLED")
+    rate_limit_enabled: bool = Field(default=False, alias="PRIVACY_RATE_LIMIT_ENABLED")
+    rate_limit_rpm: int = Field(default=1000, alias="PRIVACY_RATE_LIMIT_RPM")
+    tls_enabled: bool = Field(default=False, alias="PRIVACY_TLS_ENABLED")
 
     model_config = SettingsConfigDict(
-        env_file=".env",              # 支持 .env 文件 / Support .env file
+        env_file=".env",
         env_file_encoding="utf-8",
-        populate_by_name=True,        # 允许按字段名或 alias 赋值 / Allow by name or alias
+        populate_by_name=True,
+        extra="ignore",
     )
-
-# 全局单例：模块导入时即完成环境变量解析
-# Global singleton: env vars parsed at import time
-settings = Settings()
 ```
 
-### 2.3 Pydantic 在本项目中的三重角色 / Triple Role in This Project
+### 2.4 Pydantic 在本项目中的关键收益 / Key Benefits in PrivShield
 
-| 角色 / Role | 实现 / Implementation | 收益 / Benefit |
+| 模块 / Module | Pydantic 角色 / Role | 核心收益 / Benefit |
 |---|---|---|
-| **输入校验 / Input Validation** | 请求体自动校验类型与约束 | 拦截非法输入，减少 400 错误处理代码 |
-| **配置管理 / Config Management** | pydantic-settings + 环境变量 | 零配置启动 + 12-Factor App 合规 |
-| **序列化 / Serialization** | 响应模型自动转 JSON | 类型安全的 API 响应 |
+| [`engine/schemas.py`](file:///home/charles/code/PrivShield/engine/schemas.py) | REST API 输入边界防护 | 自动类型转换、超长字段拦截、422 安全脱敏 |
+| [`engine/dynclassification/rule_schema.py`](file:///home/charles/code/PrivShield/engine/dynclassification/rule_schema.py) | YAML 动态规则解析器 | 校验算子参数完整性、防止非法 AST 配置加载 |
+| [`engine/security/config.py`](file:///home/charles/code/PrivShield/engine/security/config.py) | 环境变量集中配置管理 | 类型安全读取、支持 `.env` 与系统变量透明覆盖 |
 
-### 2.4 Pydantic v2 新特性使用 / Pydantic v2 New Features Used
+### 2.5 Pydantic v2 核心 API 迁移与性能实践 / Pydantic v2 Core API & Performance
 
-本项目充分利用 Pydantic v2 的新 API：
-This project fully leverages Pydantic v2's new APIs:
+本项目采用 Pydantic v2（核心由 Rust 编写，提速 5~50 倍）：
 
 ```python
-# v2 风格：model_config 替代旧版 class Config / v2 style: model_config replaces old class Config
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",              # .env 文件支持 / .env file support
-        env_file_encoding="utf-8",    # 编码指定 / Encoding specification
-        populate_by_name=True,        # 允许字段名或 alias 赋值 / Allow by name or alias
-    )
+# 1. model_config 替代旧版 inner class Config
+model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-# v2 序列化 API / v2 serialization API
-response_data = model.model_dump()          # 转为 dict / Convert to dict
-json_str = model.model_dump_json()          # 转为 JSON 字符串 / Convert to JSON string
-validated = Model.model_validate(raw_dict)  # 从 dict 校验创建 / Validate and create from dict
+# 2. 现代化序列化 API
+data_dict = rule.model_dump(exclude_unset=True)
+json_output = req.model_dump_json(indent=2)
 
-# v2 JSON Schema 生成（FastAPI 自动文档依赖）/ v2 JSON Schema generation (FastAPI auto-docs)
-schema = ProxyRequest.model_json_schema()   # 生成 OpenAPI 兼容 schema / Generate OpenAPI schema
+# 3. 严格数据校验
+rule_obj = RuleDef.model_validate(yaml_parsed_dict)
 ```
 
 ### 2.5 Field 约束与验证器 / Field Constraints & Validators

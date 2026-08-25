@@ -14,11 +14,31 @@ FastAPI is a modern, high-performance Python web framework for building APIs, ba
 
 本项目使用版本 / Version Used：`fastapi >= 0.110.0`
 
-## 2. 在本项目中的用法 / Usage in This Project
+## 项目现状补充 / Current Project Notes
 
-### 2.1 应用创建与生命周期 / App Creation & Lifespan
+当前 FastAPI 应用定义在 `engine/main.py` 的 `app` 对象中，定位为隐私治理 Agent 的 REST API，
+不是已经移除的 Python BFF。应用由 Uvicorn 作为 ASGI 服务器承载：
 
-文件 / File：`console/bff-py/app/main.py`（历史实现，已移除；当前 REST 入口位于 `engine/main.py`）
+```text
+HTTP 客户端
+    │
+    ▼
+Uvicorn (ASGI server, 默认 REST 端口 8079)
+    │
+    ▼
+FastAPI app (`engine.main:app`)
+    ├── 安全、请求体大小、GZip、CORS、可观测性中间件
+    ├── `/health`、`/livez`、`/readyz` 健康与就绪探针
+    ├── `/v1/privacy/*` 隐私原语与预算接口
+    ├── `/v1/medical/*` 医疗数据处理接口
+    └── `/metrics` Prometheus 指标接口
+```
+
+### 应用创建与生命周期 / App Creation & Lifespan
+
+`engine.main:app` 使用 `lifespan` 管理进程级资源。启动阶段初始化配置、服务依赖和可选模型预热；
+关闭阶段停止后台任务、释放资源并结束 tracing。生命周期由 Uvicorn 的 ASGI lifespan 事件触发，
+业务代码不应在模块导入时创建需要显式关闭的连接。
 
 ```python
 from contextlib import asynccontextmanager
@@ -26,177 +46,273 @@ from fastapi import FastAPI
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时预热连接池，关闭时释放资源。
-    App lifespan: warm up connection pool on start, release on shutdown."""
-    _ = await agent_client._get_client()  # 预热 httpx 连接池 / Warm up httpx pool
+    # startup: 初始化应用依赖 / initialize application dependencies
     yield
-    if agent_client._client is not None:
-        await agent_client._client.aclose()  # 优雅关闭 / Graceful close
+    # shutdown: 释放资源 / release resources
 
-app = FastAPI(title="Privacy Test Console", lifespan=lifespan)
+app = FastAPI(
+    title="数盾 (PrivShield) 隐私治理边车",
+    version="1.8.0",
+    lifespan=lifespan,
+)
 ```
 
-### 2.2 请求/响应模型 / Request/Response Models
+### 路由与请求校验 / Routers and Validation
+
+业务接口按领域拆分在 `engine/routers/`，由 `engine/main.py` 使用 `include_router()` 统一注册。
+请求体和响应模型使用 Pydantic v2；校验失败返回 HTTP `422`。生产模式默认将校验错误压缩为通用提示，
+如需本地排查可临时设置 `PRIVACY_DEBUG_VALIDATION=true`，但不要在生产环境长期开启。
+
+常用探针如下：
+
+| Endpoint | 用途 |
+|---|---|
+| `GET /health` | 基础健康检查，返回 `status=ok` |
+| `GET /livez` | Kubernetes 存活探针 |
+| `GET /readyz` | 检查配置解析器及可选预算数据库是否可用；失败返回 `503` |
+| `GET /readyz/llm` | 报告可选 LLM 层是否可用，不代表核心 REST 不可用 |
+| `GET /metrics` | Prometheus 指标；启用认证后需要 `ops:metrics` 权限 |
+
+### 中间件与安全边界 / Middleware and Security Boundary
+
+请求通常依次经过可观测性、可选 CORS、GZip、请求体大小限制和安全响应头中间件，最后进入路由。
+认证、限流和 TLS 由 `engine/security/` 提供并通过环境变量启用。认证开启时，FastAPI 自动生成的
+`/docs` 和 `/openapi.json` 会关闭，避免未认证用户枚举完整 API；开发调试可在关闭认证的本地环境访问
+`/docs`（Swagger UI）和 `/redoc`（ReDoc）。
+
+### 运行入口 / Run Entrypoints
+
+```bash
+# 本地 REST-only，默认只监听 127.0.0.1:8079
+python -m engine.main
+
+# 推荐的容器/生产入口，同时启动 REST 和 gRPC
+python -m engine.server
+
+# 开发热重载：直接调用 Uvicorn CLI，而不是传给 engine.main
+uvicorn engine.main:app --reload --host 127.0.0.1 --port 8079
+```
+
+`engine.main` 的命令行只接受 `--host` 和 `--port`；`--reload`、`--workers` 等是 Uvicorn CLI
+选项，不能写成 `python -m engine.main --reload`。生产环境优先使用 `engine.server`，并显式设置
+监听地址、TLS、认证和限流配置，避免把默认的未启用安全能力暴露到不可信网络。
+
+### 配置优先级 / Configuration Precedence
+
+统一入口 `engine.server` 遵循“命令行参数 > 环境变量 > 默认值”。常用变量包括：
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PRIVACY_REST_HOST` | `0.0.0.0`（统一入口） | REST 监听地址 |
+| `PRIVACY_REST_PORT` | `8079` | REST 监听端口 |
+| `PRIVACY_LIMIT_CONCURRENCY` | `10000` | Uvicorn 最大并发连接数 |
+| `PRIVACY_LIMIT_MAX_REQUESTS` | `100000` | 单连接最大请求数 |
+| `PRIVACY_TIMEOUT_KEEP_ALIVE` | `30` 秒 | Keep-alive 超时 |
+| `PRIVACY_TIMEOUT_GRACEFUL_SHUTDOWN` | `10` 秒 | 优雅关闭等待时间 |
+| `PRIVACY_TLS_ENABLED` | `false` | 启用 REST/gRPC TLS |
+| `PRIVACY_AUTH_ENABLED` | `false` | 启用 API Key 认证 |
+| `PRIVACY_RATE_LIMIT_ENABLED` | `false` | 启用限流 |
+
+完整变量表见 `AGENTS.md` 第 6 节及 `docs/production_security/ops.md`。
+
+## 2. 在本项目中的用法 / Usage in This Project
+
+### 2.1 应用创建与生命周期 / App Creation & Lifespan
+
+文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L194-L277)
+
+`PrivShield` 作为高可用企业级隐私治理边车（Sidecar），其 FastAPI 应用采用 ASGI 统一生命周期管理（`lifespan`），在服务启动时自动初始化结构化日志、加载安全配置、初始化 OpenTelemetry 分布式追踪，并在关停时优雅释放缓冲与链路导出器：
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from .observability.logging_config import configure_logging, get_logger
+from .observability.tracing import init_tracing, shutdown_tracing
+from .security.config import get_security_settings
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理器 / Application lifespan manager.
+    
+    Startup:  初始化结构化日志、OpenTelemetry 追踪。
+    Shutdown: 记录关闭审计日志，刷新并关闭分布式追踪缓冲区。
+    """
+    # --- 启动阶段 / Startup Phase ---
+    configure_logging(
+        log_level=os.environ.get("PRIVACY_LOG_LEVEL", "INFO"),
+        json_format=os.environ.get("PRIVACY_LOG_FORMAT", "text").lower() == "json",
+        service_name=os.environ.get("PRIVACY_SERVICE_NAME", "PrivShield"),
+    )
+    init_tracing(
+        endpoint=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        service_name=os.environ.get("OTEL_SERVICE_NAME", "PrivShield"),
+    )
+    
+    try:
+        yield
+    finally:
+        # --- 关停阶段 / Shutdown Phase ---
+        logger = get_logger(__name__)
+        logger.info("PrivShield Agent shutting down — flushing buffers and releasing resources")
+        try:
+            shutdown_tracing()
+        except Exception:
+            pass
+
+_auth_enabled = get_security_settings().auth_enabled
+app = FastAPI(
+    title="数盾 (PrivShield) 隐私治理边车",
+    description="数联天下企业级数据隐私计算、多原语脱敏与三层动态分类分级治理服务",
+    version="1.8.0",
+    lifespan=lifespan,
+    # 启用认证时关闭 /docs 与 /openapi.json，防止攻击者枚举接口缩小攻击面
+    docs_url=None if _auth_enabled else "/docs",
+    openapi_url=None if _auth_enabled else "/openapi.json",
+)
+```
+
+### 2.2 领域子路由模块化装配 / Domain Routers Modular Assembly
+
+文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L400-L450) & [`engine/routers/`](file:///home/charles/code/PrivShield/engine/routers/)
+
+`PrivShield` 将所有业务能力按领域拆分独立子路由，在 `main.py` 中统一通过 `include_router` 装配：
+
+```python
+from .routers import (
+    budget,            # /v1/privacy/budget          (预算查询与重置)
+    dp,                # /v1/privacy/dp/*            (差分隐私: Laplace/Gaussian/聚合)
+    dynclassification, # /v1/classify/*              (三层漏斗动态分类分级)
+    file,              # /v1/privacy/file/*          (CSV/Excel/JSON 批量文件隐私治理)
+    health,            # /v1/health, /livez, /readyz (K8s 探针与服务诊断)
+    kano,              # /v1/privacy/k_anonymize/*   (Mondrian K-匿名泛化)
+    ldp,               # /v1/privacy/ldp/*           (本地差分隐私: Randomized Response/频数)
+    mask,              # /v1/privacy/mask/*          (字段级与记录级通用脱敏)
+    medical,           # /v1/medical/*               (DICOM/HL7/医学图像打码流水线)
+    ops,               # /v1/ops/diagnostics         (系统运维诊断快照)
+    profile,           # /v1/privacy/profile         (隐私参数配置推荐与加载)
+    qol,               # /v1/privacy/qol/*           (查询混淆与虚拟扰动)
+)
+
+# 统一挂载子路由到根应用
+app.include_router(health.router)
+app.include_router(mask.router)
+app.include_router(dp.router)
+app.include_router(ldp.router)
+app.include_router(kano.router)
+app.include_router(qol.router)
+app.include_router(budget.router)
+app.include_router(profile.router)
+app.include_router(file.router)
+app.include_router(ops.router)
+app.include_router(medical.router)
+app.include_router(dynclassification.router)
+```
+
+### 2.3 请求与响应契约模型 / Request & Response Schemas
+
+文件 / File：[`engine/schemas.py`](file:///home/charles/code/PrivShield/engine/schemas.py)
+
+所有路由请求体严格使用 Pydantic v2 强类型校验与约束，防止恶意超长 Payload 攻击：
 
 ```python
 from pydantic import BaseModel, Field
 
-class ProxyRequest(BaseModel):
-    """通用代理请求体 / Generic proxy request body"""
-    method: str = Field(..., examples=["POST"])
-    path: str = Field(..., examples=["/v1/privacy/mask"])
-    body: dict[str, Any] | None = Field(default=None)
-    raw_payload_b64: str | None = Field(default=None)
-    content_type: str | None = Field(default=None)
+class MaskRequest(BaseModel):
+    """单字段脱敏请求模型 / Single-field masking request model."""
+    field_name: str = Field(max_length=200, description="字段名称 (如 phone, id_card)")
+    value: str = Field(max_length=100_000, description="待脱敏明文字符串")
+    context: str = Field(default="", max_length=10_000, description="脱敏上下文")
 
-class ProxyResponse(BaseModel):
-    """统一响应包装 / Unified response wrapper"""
-    status: int
-    duration_ms: float
-    data: Any
-    via: str = Field(default="go-grpc")       # 历史示例曾为 "python-rest"，当前 BFF 为 go-grpc
-    protocol: str = Field(default="gRPC")
+class DPRequest(BaseModel):
+    """差分隐私聚合请求模型 / Differential privacy aggregation model."""
+    values: list[float] = Field(max_length=10_000, description="数值序列")
+    params: dict[str, object] = Field(default_factory=dict, max_length=100, description="DP 参数 (epsilon, delta, mechanism)")
+
+class KAnonymizeTableRequest(BaseModel):
+    """数据表 K-匿名化请求模型 / Tabular K-Anonymity request model."""
+    dataset: list[dict[str, Any]] = Field(max_length=10_000, description="原始记录集")
+    quasi_identifiers: list[str] = Field(max_length=50, description="准标识符列名")
+    k: int = Field(default=3, ge=2, le=1000, description="匿名度 K")
+    strategy: str = Field(default="mondrian", description="泛化算法 (mondrian/strict)")
 ```
 
-### 2.3 路由定义 / Route Definitions
+### 2.4 生产级安全中间件洋葱模型 / Production Middleware Onion Stack
+
+文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L312-L380)
+
+Starlette 中间件采用前插式注册（Last Added = First Executed），`PrivShield` 精心编排了防御纵深层次：
 
 ```python
-@app.get("/api/health")
-async def health():
-    """健康检查：返回后端与 agent 的连通性。
-    Health check: returns backend and agent connectivity."""
+# 1. 安全响应头注入 (最靠近业务处理的内层)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 2. 请求体大小防御限制 (DoS 防护，默认 32MB)
+app.add_middleware(MaxBodySizeMiddleware)
+
+# 3. GZip 响应压缩 (对 >= 1KB 的响应进行透明压缩)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# 4. 可选 CORS 中间件 (跨域支持与通配符安全校验)
+if _cors_enabled:
+    app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, ...)
+
+# 5. 可观测性中间件 (最外层：Request-ID 注入、访问日志、Prometheus 耗时直方图)
+app.add_middleware(ObservabilityMiddleware)
+```
+
+### 2.5 生产级校验异常脱敏 / Production Validation Sanitization
+
+文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L292-L310)
+
+FastAPI 默认的 422 异常会向客户端泄露内部 Python 类型的完整结构与堆栈信息。`PrivShield` 实现了安全拦截器，在生产模式下仅返回通用错误，防范探测：
+
+```python
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """422 请求校验异常脱敏处理器 / Sanitized validation error handler."""
+    _debug = os.environ.get("PRIVACY_DEBUG_VALIDATION", "false").lower() == "true"
+    if _debug:
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Invalid request: one or more fields failed validation"},
+    )
+```
+
+### 2.6 Prometheus 指标挂载与子应用保护 / Metrics Mounting & Sub-app Auth
+
+文件 / File：[`engine/main.py`](file:///home/charles/code/PrivShield/engine/main.py#L460-L490)
+
+`/metrics` 作为独立 ASGI 子应用挂载，当开启 API 认证时自动嵌套 ASGI 级 `ApiKeyAuthAsgiMiddleware`，要求 `ops:metrics` 权限：
+
+```python
+metrics_app = make_asgi_app()
+if _auth_enabled:
+    metrics_app = ApiKeyAuthAsgiMiddleware(metrics_app, required_scope="ops:metrics")
+
+app.mount("/metrics", metrics_app)
+```
+
+### 2.7 依赖注入与核心单例服务 / Dependency Injection & Core Service
+
+文件 / File：[`engine/deps.py`](file:///home/charles/code/PrivShield/engine/deps.py) & [`engine/service.py`](file:///home/charles/code/PrivShield/engine/service.py)
+
+```python
+from fastapi import Depends, Header, HTTPException
+from .service import PrivacyService
+
+# 全局 PrivacyService 单例（管理脱敏规则、预算记账器与动态分类引擎）
+service = PrivacyService()
+
+def get_service() -> PrivacyService:
+    """FastAPI 依赖注入 Provider / Dependency Injection Provider"""
+    return service
+
+def require_api_key(authorization: str = Header(None)):
+    """API Key 鉴权依赖注入"""
+    # 校验 Header 中的 Bearer Token 并比对 scope 权限
     ...
-
-@app.post("/api/proxy")
-async def proxy(req: ProxyRequest):
-    """通用代理：转发请求到 PrivShield。
-    Generic proxy: forward request to PrivShield."""
-    ...
-
-@app.post("/api/batch")
-async def batch(req: BatchRequest):
-    """批量测试：逐个转发并汇总统计。
-    Batch test: forward sequentially and aggregate stats."""
-    ...
 ```
-
-### 2.4 中间件 / Middleware
-
-```python
-# CORS 中间件：允许 Vite 开发服务器跨域调用
-# CORS middleware: allow Vite dev server cross-origin calls
-app.add_middleware(CORSMiddleware, allow_origins=["*"], ...)
-
-# 安全中间件：可选 API Key 鉴权 + 限流
-# Security middleware: optional API Key auth + rate limiting
-app.add_middleware(ConsoleSecurityMiddleware, api_key=..., rate_limit=...)
-```
-
-### 2.5 静态文件托管 / Static File Serving
-
-```python
-# SPA 托管：/assets 静态资源 + 其余路径回退 index.html
-# SPA hosting: /assets static files + fallback to index.html
-app.mount("/assets", StaticFiles(directory="..."), name="assets")
-
-@app.get("/{full_path:path}")
-async def serve_spa(request: Request, full_path: str):
-    return FileResponse(index_file, headers={"Cache-Control": "no-cache"})
-```
-
-### 2.6 异常处理 / Exception Handling
-
-```python
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """统一错误格式：{"detail": ..., "status": ...}
-    Unified error format for frontend parsing."""
-    return JSONResponse(status_code=exc.status_code, content={...})
-```
-
-### 2.7 安全中间件详解 / Security Middleware Details
-
-文件 / File：`console/bff-py/app/security.py`（历史实现，已移除；当前等效安全中间件位于 `engine/security/`）
-
-本项目实现了基于 Starlette `BaseHTTPMiddleware` 的安全中间件：
-This project implements a security middleware based on Starlette `BaseHTTPMiddleware`:
-
-```python
-class ConsoleSecurityMiddleware(BaseHTTPMiddleware):
-    """可选的 API Key 鉴权 + 限流中间件（默认关闭 / 宽松）。
-    Optional API Key auth + rate limiting middleware (disabled/relaxed by default)."""
-
-    async def dispatch(self, request: Request, call_next) -> Response:
-        # 1. CORS 预检直接放行 / CORS preflight passes through
-        if request.method == "OPTIONS":
-            return await call_next(request)
-
-        # 2. 仅对 /api/* 生效；/api/health 豁免 / Only /api/*; health exempt
-        if not path.startswith("/api/") or path == "/api/health":
-            return await call_next(request)
-
-        # 3. API Key 鉴权（常量时间比较防时序攻击）/ API Key auth (constant-time compare)
-        if self._api_key is not None:
-            token = _extract_bearer(request.headers.get("authorization"))
-            if token is None or not hmac.compare_digest(token, self._api_key):
-                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-
-        # 4. 滑动窗口限流 / Sliding window rate limiting
-        if self._rate_limited(self._client_ip(request)):
-            return JSONResponse(status_code=429, content={"detail": "Too many requests"})
-
-        return await call_next(request)
-```
-
-安全设计要点 / Security Design Highlights：
-
-| 特性 / Feature | 实现 / Implementation |
-|---|---|
-| 时序攻击防护 / Timing attack protection | `hmac.compare_digest()` 常量时间比较 / Constant-time comparison |
-| 滑动窗口限流 / Sliding window rate limit | `deque` 记录 60s 内时间戳 / Timestamps in deque within 60s |
-| 健康检查豁免 / Health check exemption | 便于 K8s/负载均衡器探测 / Facilitate K8s/LB probing |
-| 默认关闭 / Disabled by default | 未配置环境变量时完全放行 / Fully permissive when unconfigured |
-
-### 2.8 依赖注入与测试 / Dependency Injection & Testing
-
-```python
-# 测试中使用 AsyncMock 打桩客户端，无需真实 agent / Mock client in tests, no real agent needed
-from unittest.mock import AsyncMock, patch
-
-@pytest.fixture
-def mock_client():
-    with patch("app.main.agent_client") as m:
-        m.request = AsyncMock(return_value={"result": "ok"})
-        yield m
-
-# TestClient 同步测试异步路由 / TestClient tests async routes synchronously
-from fastapi.testclient import TestClient
-client = TestClient(app)
-resp = client.get("/api/health")
-assert resp.status_code == 200
-```
-
-### 2.9 关键设计决策 / Key Design Decisions
-
-| 决策 / Decision | 原因 / Reason |
-|---|---|
-| 异步路由（async def）| 代理转发为 I/O 密集，异步提升并发 / Proxy is I/O bound, async improves concurrency |
-| Pydantic v2 模型 | 自动校验 + 序列化 + 文档生成 / Auto validation + serialization + docs |
-| lifespan 管理连接池 | 避免首请求延迟 + 优雅释放资源 / Avoid first-request latency + graceful release |
-| 统一异常处理器 | 前端可依赖固定错误结构解析 / Frontend can rely on fixed error structure |
-| hmac.compare_digest | 防止时序攻击泄露 API Key 前缀 / Prevent timing attack leaking API Key prefix |
-| 进程内 deque 限流 | 单进程场景无需 Redis，简化部署 / Single process needs no Redis |
-| BaseHTTPMiddleware | Starlette 原生支持，无需第三方库 / Starlette native, no third-party lib |
-
-### 2.10 请求生命周期 / Request Lifecycle
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│  1. HTTP 请求到达 / HTTP Request arrives                     │
-│     Uvicorn 接收并解析 / Uvicorn receives and parses          │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  2. 中间件链（洋葱模型）/ Middleware chain (onion model)      │
 │     CORSMiddleware → SecurityMiddleware → ...                │

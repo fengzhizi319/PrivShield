@@ -27,76 +27,90 @@ Pandas is the core library for Python data analysis, providing DataFrame/Series 
 
 ## 2. 在本项目中的用法 / Usage in This Project
 
-### 2.1 架构角色 / Architecture Role
+### 2.1 统一数据适配层架构 / Unified Data Adapter Architecture
+
+文件 / File：[`engine/privacy/data_adapters.py`](file:///home/charles/code/PrivShield/engine/privacy/data_adapters.py)
+
+`PrivShield` 实现了多源异构数据适配器 `data_adapters.py`，为差分隐私（DP）、K-匿名（K-Anonymity）等隐私原语提供跨 Pandas、PyArrow、NumPy、SciPy 稀疏矩阵及 SecretFlow 联邦数据集的标准化抽取与转换能力：
 
 ```
-前端 React ──HTTP/JSON──▶ Python 代理后端 ──HTTP/REST──▶ PrivShield
-                              │                              │
-                              │    ◀── Arrow IPC 二进制流 ────┘
-                              │         (application/vnd.apache.arrow.stream)
-                              ▼
-                     PyArrow 解析 → Pandas 转换 → JSON 返回前端
+输入数据源 (Multi-Source Inputs)
+  ├── Python list / tuple / dict
+  ├── NumPy ndarray
+  ├── Pandas DataFrame / Series
+  ├── PyArrow IPC Stream / Table (二进制零拷贝流)
+  ├── SciPy.sparse 稀疏矩阵 (CSR / CSC)
+  └── SecretFlow 联邦数据 (FedNdarray / HDataFrame / VDataFrame)
+                │
+                ▼
+  ┌────────────────────────────────────────────────────────┐
+  │ ★ engine/privacy/data_adapters.py: extract_column()   │
+  │   - 零拷贝解包 & 类型规整化                              │
+  │   - NaN / Inf 异常值安全过滤与置换                      │
+  │   - 稀疏矩阵展开与稠密化缓存控制                        │
+  │   - Prometheus 数据抽取指标自动记录                     │
+  └────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
+  标准化 NumPy 一维数值数组 (np.ndarray) 供 DP / LDP / Kano 消费
 ```
 
-Python 代理后端在接收到 Agent 返回的 Arrow IPC 二进制流时，使用 PyArrow 解析为 Table，
-再通过 Pandas 转换为 JSON 可序列化的记录列表返回给前端。
-The Python proxy backend uses PyArrow to parse Arrow IPC binary streams from the Agent into Tables,
-then converts to JSON-serializable record lists via Pandas for the frontend.
+### 2.2 PyArrow IPC 二进制流解析与零拷贝 / PyArrow IPC Stream Parsing
 
-### 2.2 Arrow IPC 响应解析 / Arrow IPC Response Parsing
-
-文件 / File：`console/backend/app/client.py`（历史实现，已移除；当前等效逻辑位于 `engine/privacy/data_adapters.py`）
+文件 / File：[`engine/privacy/data_adapters.py`](file:///home/charles/code/PrivShield/engine/privacy/data_adapters.py#L300-L360)
 
 ```python
-@staticmethod
-def _parse_arrow_response(response: httpx.Response) -> dict[str, Any]:
-    """
-    解析 Arrow IPC 二进制流响应 / Parse Arrow IPC binary stream response
+import pyarrow as pa
+import numpy as np
 
-    详细逻辑 / Detailed Logic：
-      1. 延迟导入 pyarrow（避免未使用 Arrow 时引入重量级依赖）
-      2. 从响应 body 字节流中读取 Arrow IPC RecordBatchStreamReader
-      3. 将所有 RecordBatch 合并为单个 Table
-      4. Table → Pandas DataFrame → 记录列表（orient="records"）
-      5. NaN 替换为 None（JSON 不支持 NaN 值）
+def _extract_from_arrow_ipc(data: bytes, column: str | None = None) -> np.ndarray:
+    """从 PyArrow IPC 二进制字节流中高效提取目标数值列。
+    
+    详细逻辑：
+      1. 通过 pa.ipc.open_stream 建立无复制流读取器
+      2. 读取所有 RecordBatch 并合并为 Arrow Table
+      3. 提取目标列为 ChunkedArray 并转换为 NumPy 数组
     """
-    # 延迟导入 pyarrow：避免在未用到 Arrow 的场景下引入重量级依赖
-    import pyarrow as pa
-
-    # 从 HTTP 响应体创建 Arrow IPC 流读取器
-    reader = pa.ipc.open_stream(response.content)
-    # 读取所有 RecordBatch 并合并为单一 Table
+    reader = pa.ipc.open_stream(data)
     table = reader.read_all()
-
-    return {
-        "schema": table.schema.names,  # 列名列表 / Column name list
-        "_content_type": "application/vnd.apache.arrow.stream",
-        # 表格转 pandas 再转记录列表；NaN 替换为 None（JSON 无 NaN）
-        "records": table.to_pandas().replace({float("nan"): None}).to_dict(orient="records"),
-        "num_rows": table.num_rows,  # 总行数 / Total row count
-    }
+    
+    target_col = column or table.column_names[0]
+    if target_col not in table.column_names:
+        raise ValueError(f"Column '{target_col}' not found in Arrow IPC table")
+        
+    chunked_array = table[target_col]
+    return chunked_array.to_numpy(zero_copy_only=False)
 ```
 
-### 2.3 内容类型自动检测 / Content-Type Auto Detection
+### 2.3 Pandas DataFrame 表格脱敏与 NaN 安全置换 / Pandas DataFrame Masking
+
+文件 / File：[`engine/routers/file.py`](file:///home/charles/code/PrivShield/engine/routers/file.py) & [`engine/privacy/data_adapters.py`](file:///home/charles/code/PrivShield/engine/privacy/data_adapters.py)
 
 ```python
-# client.py 中的响应分发逻辑 / Response dispatch logic in client.py
-def forward(self, method, path, body, ...):
-    response = self._client.request(...)
-    ct = response.headers.get("content-type", "")
+import pandas as pd
+import numpy as np
 
-    # 根据 Content-Type 决定解析策略 / Decide parsing strategy by Content-Type
-    if "application/vnd.apache.arrow.stream" in ct:
-        # Arrow IPC 二进制流 → PyArrow 解析 / Arrow IPC binary → PyArrow parse
-        return self._parse_arrow_response(response)
-    else:
-        # 标准 JSON 响应 → 直接反序列化 / Standard JSON → direct deserialization
-        return response.json()
+def normalize_dataframe_records(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """将 DataFrame 转换为 JSON 安全的记录列表（解决 JSON 不支持 NaN/Infinity 的痛点）。"""
+    # 1. 替换浮点数异常值
+    cleaned_df = df.replace([np.inf, -np.inf], None).where(pd.notnull(df), None)
+    # 2. 转换为 records 字典列表
+    return cleaned_df.to_dict(orient="records")
 ```
 
-### 2.4 示例 Payload 生成 / Sample Payload Generation
+### 2.4 SciPy 稀疏矩阵稠密化与内存保护 / Sparse Matrix Adaptation
 
-文件 / File：`console/backend/app/fixtures/samples.py`（历史实现，已移除）
+```python
+import scipy.sparse as sp
+
+def _extract_from_sparse(data: Any, column: int = 0) -> np.ndarray:
+    """提取 CSR/CSC 稀疏矩阵特定列，防止因超大矩阵整体 toarray() 导致内存 OOM。"""
+    if sp.issparse(data):
+        # 仅将目标列切片转为稠密数组，避免全量矩阵内存膨胀
+        col_slice = data.getcol(column).toarray().ravel()
+        return col_slice
+    raise TypeError(f"Expected scipy.sparse matrix, got {type(data)}")
+```
 
 ```python
 def _arrow_ipc_payload() -> str:

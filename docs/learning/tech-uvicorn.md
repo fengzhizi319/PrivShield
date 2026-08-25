@@ -21,7 +21,91 @@ Uvicorn is a high-performance ASGI web server built on `uvloop` and `httptools`,
 - `websockets`：WebSocket 协议支持
 - `watchfiles`：文件监控（热重载用）
 
+## 项目现状补充 / Current Project Notes
+
+本项目中 Uvicorn 是 FastAPI REST 应用的 ASGI 服务器，不是业务逻辑层。请求链路为：
+
+```text
+客户端 ──HTTP──▶ Uvicorn ──ASGI──▶ `engine.main:app` (FastAPI)
+                                      ├── 路由与 Pydantic 校验
+                                      ├── 隐私原语/医疗/分类分级服务
+                                      └── `/metrics` 指标端点
+```
+
+当前入口和适用场景：
+
+| 入口 | 默认监听 | 用途 |
+|---|---|---|
+| `python -m engine.main` | `127.0.0.1:8079` | 本地 REST-only，安全默认值 |
+| `python -m engine.server` | `0.0.0.0:8079` + `0.0.0.0:50051` | 推荐的容器/生产 REST + gRPC 统一入口 |
+| `python -m engine.launcher --workers 4` | 可配置 | 多进程部署；需评估状态、预算数据库和模型内存 |
+| `uvicorn engine.main:app --reload ...` | 按参数 | 本地开发热重载，仅启动 REST |
+
+其中 `engine.server` 会在后台线程运行 Uvicorn，同时启动 gRPC 服务，并处理 SIGTERM/SIGINT。
+停止时先等待在途 gRPC 调用，再设置 Uvicorn 的 `should_exit`，最后等待 REST 线程退出。
+容器中应让 `python -m engine.server` 作为前台 PID 1 的子进程运行，以便正确接收停止信号。
+
+## Uvicorn 配置补充 / Uvicorn Configuration Notes
+
+统一入口使用 `uvicorn.Config`，会自动探测可选的 `uvloop` 和 `httptools`；未安装时回退到
+标准 asyncio 事件循环和 HTTP 解析器。核心运行参数如下：
+
+| Environment variable | Default | Uvicorn effect |
+|---|---:|---|
+| `PRIVACY_REST_HOST` | `0.0.0.0` | REST bind address |
+| `PRIVACY_REST_PORT` | `8079` | REST listen port |
+| `PRIVACY_LIMIT_CONCURRENCY` | `10000` | `limit_concurrency`，防止连接无限增长 |
+| `PRIVACY_LIMIT_MAX_REQUESTS` | `100000` | `limit_max_requests`，定期回收 worker |
+| `PRIVACY_TIMEOUT_KEEP_ALIVE` | `30` 秒 | 空闲 keep-alive 连接超时 |
+| `PRIVACY_TIMEOUT_GRACEFUL_SHUTDOWN` | `10` 秒 | 优雅关闭等待上限 |
+
+命令行参数优先于环境变量。开发环境可以使用：
+
+```bash
+uvicorn engine.main:app --reload --host 127.0.0.1 --port 8079
+```
+
+不要使用 `python -m engine.main --reload`：`engine.main` 的独立入口只解析 `--host` 和
+`--port`，`--reload` 是 Uvicorn CLI 参数。生产环境不建议使用 `--reload`。
+
+## FastAPI 集成与生命周期补充 / FastAPI Integration and Lifespan Notes
+
+`engine.main:app` 通过 FastAPI 的 `lifespan` 注册启动和关闭逻辑。Uvicorn 发送
+`lifespan.startup` 后，应用才开始接收流量；收到终止信号后发送 `lifespan.shutdown`，
+触发资源清理。典型结构如下：
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动：初始化依赖、可选模型预热
+    yield
+    # 关闭：取消后台任务、释放连接和 tracing
+
+app = FastAPI(lifespan=lifespan)
+```
+
+这意味着需要释放的客户端、数据库连接或后台任务应放在 lifespan 中管理，避免在模块导入时
+启动线程或打开连接。健康探针可用于编排系统：`/livez` 判断进程存活，`/readyz` 判断应用
+依赖是否可用；就绪检查失败返回 `503`，不应将其与进程崩溃混为一谈。
+
+## 生产部署注意事项补充 / Production Notes
+
+- 容器或 Kubernetes 中通常每个容器运行一个进程/一个 Uvicorn worker，由副本数承担扩展；
+  不要在已有进程管理器外层再无规划地叠加 `--workers`。
+- 多 worker 会复制进程内缓存和模型内存；涉及隐私预算时使用 `PRIVACY_BUDGET_DB`，
+  不要依赖单进程内存状态实现跨实例一致性。
+- TLS、API Key 认证和限流通过 `PRIVACY_TLS_ENABLED`、`PRIVACY_AUTH_ENABLED`、
+  `PRIVACY_RATE_LIMIT_ENABLED` 开启。未启用时服务会输出安全警告，不应直接暴露到公网。
+- 反向代理负责证书终止时，Uvicorn 仍应绑定受控网络接口；直接对外提供 TLS 时按
+  `docs/production_security/ops.md` 配置证书和私钥。
+- 生产探针优先使用 `/livez` 与 `/readyz`，不要用 Swagger 页面判断服务可用性。
+
 ## 2. 在本项目中的用法 / Usage in This Project
+
+> **阅读说明 / Reading note**：本节后续较长篇幅用于解释 Uvicorn 的通用机制，部分代码仍使用
+> `app.main:app`、`8080` 等教学占位示例，并不代表当前 PrivShield 入口。针对本项目，请以本页
+> 上方“项目现状补充”中的 `engine.main:app`、REST 端口 `8079` 及 `python -m engine.server`
+> 为准。
 
 ### 2.1 架构角色 / Architecture Role
 
@@ -37,8 +121,8 @@ Uvicorn 作为 Agent REST 入口的 HTTP 服务器：
 Uvicorn serves as the HTTP server for the Agent REST entrypoint:
 - 接收前端 HTTP 请求 / Receives frontend HTTP requests
 - 将请求交给 FastAPI 路由处理 / Hands requests to FastAPI routing
-- FastAPI 通过 httpx 转发到 agent / FastAPI forwards to agent via httpx
-- 返回 JSON 响应给前端 / Returns JSON response to frontend
+- FastAPI 在 engine 内执行隐私服务与路由逻辑 / FastAPI executes engine services and routes
+- 返回 JSON 响应给调用方 / Returns JSON responses to callers
 
 ### 2.2 启动方式 / Startup Methods
 
@@ -78,10 +162,10 @@ python -m engine.server
 ```bash
 # 带热重载的开发服务器（文件变更自动重启）
 # Dev server with hot reload (auto-restart on file changes)
-python -m engine.main --reload
+uvicorn engine.main:app --reload --host 127.0.0.1 --port 8079
 ```
 
-`--reload` 参数启用 watchfiles 监控 `engine/` 目录，任何 `.py` 文件变更触发自动重启。
+`--reload` 参数启用 watchfiles 监控应用目录，任何 `.py` 文件变更触发自动重启。
 
 > **历史说明**：早期 `console/backend/run.sh` / `console/bff-py/run.sh`（端口 `8080`）为已移除的 Python REST BFF。
 `--reload` enables watchfiles monitoring of `app/` directory, any `.py` change triggers auto-restart.
@@ -117,8 +201,8 @@ on SIGTERM sends `lifespan.shutdown`, triggering cleanup code after `yield`.
 
 | 场景 / Scenario | 推荐配置 / Recommended Config |
 |---|---|
-| 本地开发 / Local dev | `uvicorn app.main:app --reload --port 8080` |
-| 单实例生产 / Single instance prod | `uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 4` |
+| 本地开发 / Local dev | `uvicorn engine.main:app --reload --host 127.0.0.1 --port 8079` |
+| 单实例生产 / Single instance prod | `python -m engine.server` |
 | 容器化 / Containerized | 由 K8s/Docker 管理进程，单 worker 即可 / Process managed by K8s/Docker, single worker suffices |
 | 反向代理后 / Behind reverse proxy | Nginx/Caddy 处理 TLS，Uvicorn 仅监听 127.0.0.1 / Nginx/Caddy handles TLS, Uvicorn listens on 127.0.0.1 only |
 
