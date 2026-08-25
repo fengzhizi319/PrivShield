@@ -187,6 +187,7 @@ nav:
     - 网关与负载均衡:
       - 概览: gateway_balancer/README.md
       - 架构设计: gateway_balancer/design.md
+      - Hub Kubernetes 目标架构: gateway_balancer/new_design.md
       - API 参考: gateway_balancer/api_reference.md
       - 优化策略: gateway_balancer/optimizations.md
       - 使用示例: gateway_balancer/examples.md

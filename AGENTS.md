@@ -361,20 +361,20 @@ Address these before any hardened production deployment.
 | Helm lint | `make helm-lint` |
 | Helm template | `make helm-template` |
 | Build core image | `make docker-core` |
-| Run Dev Console (Go + Vite HMR) | `bash ./scripts/dev/dev-start.sh` |
-| Run Dev Console (Go mTLS + Vite) | `bash ./scripts/dev/dev-start-go-mtls.sh` |
-| Start All E2E Services (Agent + 3 Go + BFF) | `bash ./scripts/dev/dev-start-all.sh` |
+| Run Dev Console (Agent + Go BFF + Vite HMR) | `bash ./scripts/dev/dev-bff-agent.sh` |
+| Run Dev Console (mTLS + Vite) | `bash ./scripts/dev/dev-bff-agent.sh --mtls` |
+| Start All Real E2E Services (Agent + 3 Go) | `bash ./scripts/dev/e2e-start-all-services.sh` |
 | Run Integration Test (curl-based) | `bash ./scripts/dev/integration-test-new-modules.sh` |
 | Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` |
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
-| Run Docker Console (Go Backend + Web) | `bash ./scripts/dev/docker-start-go.sh` |
 | Run Docker Full Stack (Agent+Go BFF+Web) | `bash ./scripts/dev/docker-start-all.sh [--with-llm]` |
 | Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
 | Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |
 | Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
 | Stop Docker Services | `bash ./scripts/dev/docker-stop.sh` |
-| Run Prod Console (Go + Static) | `bash ./scripts/prod/prod-start.sh` |
+| Run Prod Console (Agent + Go BFF + Static) | `bash ./scripts/prod/prod-bff-agent.sh` |
+| Run Prod Console (mTLS) | `bash ./scripts/prod/prod-bff-agent.sh --mtls` |
 | Stop Dev Console | `bash ./scripts/dev/dev-stop.sh` |
 | Stop Prod Console | `bash ./scripts/prod/prod-stop.sh` |
 | Run REST + gRPC | `python -m engine.server` |

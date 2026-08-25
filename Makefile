@@ -163,29 +163,20 @@ docs-clean:
 
 # ── Console Launchers ────────────────────────────────────────
 
-dev-go:
-	./scripts/dev/dev-start-go.sh
+dev-bff-agent:
+	./scripts/dev/dev-bff-agent.sh
 
-dev-python:
-	./scripts/dev/dev-start.sh
+dev-bff-agent-mtls:
+	./scripts/dev/dev-bff-agent.sh --mtls
 
-dev-all:
-	./scripts/dev/dev-start-all.sh
+dev-docker-all:
+	./scripts/dev/docker-start-all.sh
 
-dev-go-mtls:
-	./scripts/dev/dev-start-go-mtls.sh
+prod-bff-agent:
+	./scripts/prod/prod-bff-agent.sh
 
-prod-go:
-	./scripts/prod/prod-start-go.sh
-
-prod-python:
-	./scripts/prod/prod-start.sh
-
-prod-all:
-	./scripts/prod/prod-start-all.sh
-
-prod-go-mtls:
-	./scripts/prod/prod-start-go-mtls.sh
+prod-bff-agent-mtls:
+	./scripts/prod/prod-bff-agent.sh --mtls
 
 stop:
 	./scripts/dev/dev-stop.sh

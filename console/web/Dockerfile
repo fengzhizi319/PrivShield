@@ -46,39 +46,20 @@
 #   - 此阶段安装 pnpm（更快的包管理器）并通过国内镜像加速依赖下载
 #   - 构建产出：Vite 将 React/TypeScript 源码编译为静态 HTML/CSS/JS（dist 目录）
 #   - 该阶段的所有内容（源码、node_modules、Node.js 运行时）不会进入最终镜像
-# ==============================================================================
 FROM node:20.18.0-alpine3.20 AS builder
 
 WORKDIR /app
 
-# 先复制依赖文件，利用 Docker 层缓存
-# Copy dependency files first for Docker layer caching
-# 只要 package.json / pnpm-lock.yaml 未变，后续的 npm install 层会命中缓存，避免重复下载
-# As long as lock files are unchanged, the install layer hits cache
-# 同时复制 package-lock.json*（npm 锁文件），通配符 * 允许文件不存在时不报错
-COPY package.json pnpm-lock.yaml* package-lock.json* ./
-
-# 安装 pnpm 并安装依赖（配置国内镜像加速）
-# Install pnpm and dependencies (with China mirror for faster downloads)
-#
-# ① npm config set registry  设置 npm 全局镜像为淘宝/npmmirror，加速 npm 包下载
-# ② npm install -g pnpm      全局安装 pnpm（比 npm 快 2-3x 的包管理器，硬链接复用磁盘缓存）
-# ③ pnpm config set registry 设置 pnpm 镜像（与 npm 相同的 npmmirror 源）
-# ④ pnpm install --frozen-lockfile  严格按锁文件安装（保证依赖版本与开发环境一致）
-#    || npm install           pnpm 不可用时回退到 npm（容错处理）
-RUN npm config set registry https://registry.npmmirror.com \
-    && npm install -g pnpm \
-    && pnpm config set registry https://registry.npmmirror.com \
-    && (pnpm install --frozen-lockfile || npm install)
-
-# 复制源码并构建
-# Copy source and build
-# 复制全部前端源码（React/TypeScript/Vite 配置等）
+# 复制全部前端文件（若已在宿主机编译出 dist/ 则直接复用，秒级构建）
+# Copy all frontend files (if dist/ is already built on host, reuse directly)
 COPY . .
-# Vite 构建：将 React/TypeScript 源码编译 + Tree-shaking + 代码分割 + 资源哈希
-# 产出 dist/ 目录：纯静态 HTML/CSS/JS，可被任何静态服务器（Nginx）直接托管
-# || npm run build  pnpm 不可用时回退到 npm
-RUN pnpm run build || npm run build
+
+RUN if [ ! -d "dist" ] || [ ! -f "dist/index.html" ]; then \
+        npm config set registry https://registry.npmmirror.com \
+        && npm config set fetch-retries 5 \
+        && npm install --no-audit \
+        && npm run build; \
+    fi
 
 # ==============================================================================
 # Stage 2: Runtime（Nginx 静态文件服务阶段 — 最小化攻击面）

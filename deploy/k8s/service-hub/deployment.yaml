@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-hub
+  labels:
+    app.kubernetes.io/name: service-hub
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: service-hub
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: service-hub
+        app.kubernetes.io/component: scheduler
+    spec:
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: service-hub
+          image: service-hub:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8082
+              protocol: TCP
+            - name: grpc
+              containerPort: 50052
+              protocol: TCP
+          env:
+            - name: SERVICE_HUB_HOST
+              value: "0.0.0.0"
+            - name: SERVICE_HUB_PORT
+              value: "8082"
+            - name: SERVICE_HUB_GRPC_HOST
+              value: "0.0.0.0"
+            - name: SERVICE_HUB_GRPC_PORT
+              value: "50052"
+            - name: SERVICE_HUB_DB_PATH
+              value: "/app/data/service-hub.db"
+            - name: SERVICE_HUB_LOG_FORMAT
+              value: "json"
+            - name: SERVICE_HUB_LOG_LEVEL
+              value: "info"
+            - name: PRIVACY_AGENT_REST_HOST
+              value: "privshield"
+            - name: PRIVACY_REST_PORT
+              value: "8079"
+            - name: DATASOURCE_MGR_HOST
+              value: "datasource-mgr"
+            - name: DATASOURCE_MGR_PORT
+              value: "8083"
+            - name: DATASOURCE_MGR_GRPC_HOST
+              value: "datasource-mgr"
+            - name: DATASOURCE_MGR_GRPC_PORT
+              value: "50053"
+          volumeMounts:
+            - name: task-store
+              mountPath: /app/data
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: task-store
+          persistentVolumeClaim:
+            claimName: service-hub-data

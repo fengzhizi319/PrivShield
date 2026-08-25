@@ -68,7 +68,7 @@ go run ./cmd/server
 ### 3.2 快速同时启动开发环境 (Go + Vite HMR)
 
 ```bash
-./scripts/dev/dev-start-go.sh
+./scripts/dev/dev-bff-agent.sh
 ```
 
 ---

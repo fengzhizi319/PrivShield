@@ -18,26 +18,24 @@ FROM golang:1.25-alpine3.21 AS builder
 WORKDIR /app
 
 # 配置 国内加速 Go 模块代理与自动工具链升级
-ENV GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,https://mirrors.aliyun.com/goproxy/,direct
 ENV GOTOOLCHAIN=auto
 
 # 配置 阿里云 Alpine 软件源镜像并安装必要编译工具
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
     && apk add --no-cache git ca-certificates
 
-# 复制共享公共基础库 pkg/
+# 复制共享公共基础库与依赖模块源码
 COPY pkg/ ./pkg/
+COPY services/datasource-mgr/ ./services/datasource-mgr/
+COPY services/service-hub/ ./services/service-hub/
 
-# 预先复制 go.mod 与 go.sum 以最大化利用 Docker 缓存层
-COPY services/service-hub/go.mod services/service-hub/go.sum ./services/service-hub/
-COPY services/datasource-mgr/go.mod services/datasource-mgr/go.sum ./services/datasource-mgr/
 WORKDIR /app/services/service-hub
-RUN go mod download
-
-# 复制模块全部源码并进行无 CGO 静态编译（-ldflags="-w -s" 去除符号表与调试信息）
-COPY services/service-hub/ ./
-COPY services/datasource-mgr/ ../datasource-mgr/
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server
+RUN if [ -f "./bin/server" ]; then \
+        cp ./bin/server /app/server; \
+    else \
+        GOWORK=off CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server; \
+    fi
 
 # ── Stage 2: 生产运行时阶段 ─────────────────────────────────────────────────
 FROM alpine:3.21

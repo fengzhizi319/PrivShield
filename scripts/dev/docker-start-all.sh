@@ -46,8 +46,35 @@ echo "==========================================================================
 echo "🌟 [Docker Mode] 正在启动 PrivShield 全栈容器套件..."
 echo "============================================================================"
 
+# ── 前置准备：确保前端与 Go 微服务二进制已就绪 ───────────────────────────
+if [[ ! -d "$PROJECT_ROOT/console/web/dist" || "$BUILD_FLAG" == "--build" ]]; then
+    echo "📦 准备前端静态资源 (Vite build)..."
+    (
+        cd "$PROJECT_ROOT/console/web"
+        if command -v corepack >/dev/null 2>&1; then
+            corepack pnpm build 2>/dev/null || npm run build
+        elif command -v pnpm >/dev/null 2>&1; then
+            pnpm build 2>/dev/null || npm run build
+        elif command -v npm >/dev/null 2>&1; then
+            npm run build
+        fi
+    )
+fi
+
+if [[ "$BUILD_FLAG" == "--build" ]]; then
+    echo "🔨 准备 Go 微服务二进制构建产物 (加速 Docker 本地构建)..."
+    export GOPROXY="${GOPROXY:-https://goproxy.cn,https://goproxy.io,https://mirrors.aliyun.com/goproxy/,direct}"
+    (cd "$PROJECT_ROOT/console/bff-go" && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o bin/server ./cmd/server 2>/dev/null || true)
+    (cd "$PROJECT_ROOT/services/service-hub" && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o bin/server ./cmd/server 2>/dev/null || true)
+    (cd "$PROJECT_ROOT/services/datasource-mgr" && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o bin/server ./cmd/server 2>/dev/null || true)
+    (cd "$PROJECT_ROOT/services/audit-log" && CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o bin/server ./cmd/server 2>/dev/null || true)
+fi
+
+# ── 清理可能残留的同名独立单容器 ─────────────────────────────────────────
+docker rm -f PrivShield PrivShield-vllm privacy-console-backend-go privacy-console-web privshield-service-hub privshield-datasource-mgr privshield-audit-log 2>/dev/null || true
+
 # ── 进入 docker-compose 目录，启动容器 ──────────────────────────────────
-# 默认仅启动核心服务（Agent + Go BFF + Web UI）
+# 默认仅启动核心服务（Agent + Go BFF + Web UI + 3大中台微服务）
 # 传入 --with-llm 时激活 llm profile，额外启动 vLLM 推理容器
 cd "$PROJECT_ROOT/deploy/docker-compose"
 

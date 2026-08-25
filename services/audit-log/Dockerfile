@@ -12,23 +12,22 @@ FROM golang:1.25-alpine3.21 AS builder
 
 WORKDIR /app
 
-ENV GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,https://mirrors.aliyun.com/goproxy/,direct
 ENV GOTOOLCHAIN=auto
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
     && apk add --no-cache git ca-certificates
 
-# Copy shared pkg/
+# Copy shared pkg/ and module source
 COPY pkg/ ./pkg/
+COPY services/audit-log/ ./services/audit-log/
 
-# Copy module dependencies for layer caching
-COPY services/audit-log/go.mod services/audit-log/go.sum ./services/audit-log/
 WORKDIR /app/services/audit-log
-RUN go mod download
-
-# Copy module source
-COPY services/audit-log/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server
+RUN if [ -f "./bin/server" ]; then \
+        cp ./bin/server /app/server; \
+    else \
+        GOWORK=off CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/server ./cmd/server; \
+    fi
 
 # Stage 2: Runtime
 FROM alpine:3.21

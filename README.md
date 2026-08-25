@@ -108,10 +108,7 @@ python -m engine.server
 ### 2. Docker Compose 全栈一键运行
 
 ```bash
-# 启动核心服务（Agent + Go BFF + Web UI）
-bash ./scripts/dev/docker-start-go.sh
-
-# 启动全栈微服务群（Agent + 3 Go 中台微服务 + 双 BFF + Web UI）
+# 启动全栈核心服务（Agent + 3 Go 中台微服务 + Go BFF + Web UI）
 bash ./scripts/dev/docker-start-all.sh
 
 # 启动全栈 + vLLM 本地大模型推理
@@ -131,8 +128,7 @@ bash ./scripts/dev/docker-stop.sh
 | **Privacy Engine (REST)** | `8079` | Python / FastAPI | 核心隐私算法与分类分级 REST 接口 |
 | **Privacy Engine (gRPC)** | `50051` | Python / gRPC | 核心隐私算法高性能 RPC 通信 |
 | **Console Web UI** | `5173` | React 18 + Vite | 控制台可视化大盘与调试页面 |
-| **Console BFF (Go)** | `8081` | Go / Gin + gRPC | 主力 BFF 聚合网关，连接池与多节点分流 |
-| **Console BFF (Python)** | `8080` | Python / FastAPI | 备用 BFF 代理网关，支持流式解析 |
+| **Console BFF (Go)** | `8081` | Go / Gin + gRPC | 控制台 BFF 聚合网关，连接池与协议分流 |
 | **Service Hub** | `8082` | Go / Gin + gRPC | 数据流通流水线调度中枢微服务 |
 | **Datasource Mgr** | `8083` | Go / Gin | 数据源管理与敏感特征自动探查微服务 |
 | **Audit Log** | `8084` | Go / Gin | 脱敏审计快照与不可篡改存证微服务 |

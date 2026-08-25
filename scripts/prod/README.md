@@ -18,9 +18,7 @@
   - [`docker-start-agent.sh` / `docker-start-agent.ps1` (生产 Agent 容器启动)](#docker-start-agentsh--docker-start-agentps1)
   - [`docker-stop-agent.sh` / `docker-stop-agent.ps1` (生产 Agent 容器停止)](#docker-stop-agentsh--docker-stop-agentps1)
 - [2. 本地单机生产模式 (Native Process Production)](#2-本地单机生产模式-native-process-production)
-  - [`prod-start.sh` / `prod-start-go.sh` (Go BFF 生产模式)](#prod-startsh--prod-start-gosh)
-  - [`prod-start-go-mtls.sh` (Go BFF 生产 mTLS 模式)](#prod-start-go-mtlssh)
-  - [`prod-start-all.sh` (全量服务生产模式)](#prod-start-allsh)
+  - [`prod-bff-agent.sh` (Agent + Go BFF 生产模式，支持 mTLS)](#prod-bff-agentsh)
   - [`prod-stop.sh` (停止生产单机服务)](#prod-stopsh)
 - [3. 数据备份与生产巡检 (Backup & Health Check)](#3-数据备份与生产巡检-backup--health-check)
   - [`prod_health_check.sh` (生产全链路健康状态巡检)](#prod_health_checksh)
@@ -106,68 +104,44 @@
 ---
 
 ### `docker-start-agent.sh` / `docker-start-agent.ps1`
-- **作用说明**: 生产环境下单独启动 PrivShield 核心 Agent 容器，映射 REST 端口 `:8079` 与 gRPC 端口 `:50051`。
-- **参数选项**: `core`（轻量 CPU 镜像，默认）或 `ml`（包含大模型与深度学习库的镜像）。
+- **作用说明**: 启动生产加固的独立 PrivShield Agent 容器，挂载数据卷与安全配置。
 - **执行命令**:
   ```bash
-  # Linux / macOS (默认 core 镜像)
   bash ./scripts/prod/docker-start-agent.sh core
-
-  # Linux / macOS (ml 镜像)
-  bash ./scripts/prod/docker-start-agent.sh ml
-  ```
-  ```powershell
-  # Windows (PowerShell)
-  .\scripts\prod\docker-start-agent.ps1 -Target core
   ```
 
 ---
 
 ### `docker-stop-agent.sh` / `docker-stop-agent.ps1`
-- **作用说明**: 停止并清理生产环境单独运行的 PrivShield Agent 容器。
+- **作用说明**: 停止生产环境的 PrivShield Agent 容器。
 - **执行命令**:
   ```bash
-  # Linux / macOS (Bash)
   bash ./scripts/prod/docker-stop-agent.sh
-  ```
-  ```powershell
-  # Windows (PowerShell)
-  .\scripts\prod\docker-stop-agent.ps1
   ```
 
 ---
 
 ## 2. 本地单机生产模式 (Native Process Production)
 
-### `prod-start.sh` / `prod-start-go.sh`
-- **作用说明**: 生产单机模式启动 Agent (`:8079/50051`) 与 Go BFF 网关 (`:8081`)。Go BFF 会自动构建前端 Web 静态产物并独立提供生产 SPA 托管服务。
+### `prod-bff-agent.sh`
+- **作用说明**: 在本地或单机以生产模式启动 Agent 算力层与 Go BFF 服务（Go BFF 直接托管已编译打包的 Web 控制台前端静态资源，端口 `:8081`）。
+- **参数选项**:
+  - `--rebuild`: 启动前强制重新构建 Web 静态文件与 Go 二进制。
+  - `--force`: 端口被占用时自动释放占用进程。
+  - `--mtls`: 启用 mTLS 双向认证模式。
 - **执行命令**:
   ```bash
-  bash ./scripts/prod/prod-start.sh
-  ```
+  # 标准生产单机模式
+  bash ./scripts/prod/prod-bff-agent.sh
 
----
-
-### `prod-start-go-mtls.sh`
-- **作用说明**: 生产单机模式以严格的 **mTLS 双向 TLS 证书认证** 启动 Go BFF 网关 (`:8443`) 与 Agent，验证生产零信任证书体系。
-- **执行命令**:
-  ```bash
-  bash ./scripts/prod/prod-start-go-mtls.sh
-  ```
-
----
-
-### `prod-start-all.sh`
-- **作用说明**: 生产单机模式启动全量服务（Agent + Go BFF 静态托管）。
-- **执行命令**:
-  ```bash
-  bash ./scripts/prod/prod-start-all.sh
+  # 强制重新构建并以 mTLS 安全模式启动
+  bash ./scripts/prod/prod-bff-agent.sh --rebuild --mtls
   ```
 
 ---
 
 ### `prod-stop.sh`
-- **作用说明**: 一键优雅停止本地生产模式下的所有服务进程，释放端口资源。
+- **作用说明**: 优雅停止本地单机生产模式下的 Agent 与 Go BFF 进程。
 - **执行命令**:
   ```bash
   bash ./scripts/prod/prod-stop.sh
@@ -178,7 +152,7 @@
 ## 3. 数据备份与生产巡检 (Backup & Health Check)
 
 ### `prod_health_check.sh`
-- **作用说明**: 生产级全链路健康状态自动化巡检工具。全面探针核心 Agent、Go BFF、中台微服务群连通性、TLS 证书有效性及持久化存储健康度。
+- **作用说明**: 全链路生产健康巡检脚本，检查 Agent、BFF、微服务群、数据库与 TLS 连通性。
 - **执行命令**:
   ```bash
   bash ./scripts/prod/prod_health_check.sh
@@ -187,7 +161,7 @@
 ---
 
 ### `backup-sqlite-databases.sh`
-- **作用说明**: 全量业务 SQLite 数据库冷热备份脚本。自动扫描并备份隐私预算库、数据源探查库与审计存证库，为每个备份文件计算 SHA-256 校验和防篡改存证，输出到 `backups/sqlite_YYYYMMDD_HHMMSS/`。
+- **作用说明**: 全量 SQLite 数据库冷热备份脚本，生成带时间戳与 SHA-256 校验和的 tar.gz 备份包。
 - **执行命令**:
   ```bash
   bash ./scripts/prod/backup-sqlite-databases.sh
@@ -196,7 +170,7 @@
 ---
 
 ### `backup_privacy_budget.sh`
-- **作用说明**: 差分隐私持久化预算 SQLite 数据库专项热备份工具，执行 `VACUUM INTO` 并生成数据完整性校验摘要。
+- **作用说明**: 专项备份隐私预算（Privacy Budget）SQLite 数据库。
 - **执行命令**:
   ```bash
   bash ./scripts/prod/backup_privacy_budget.sh

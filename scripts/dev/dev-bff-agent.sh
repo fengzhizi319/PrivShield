@@ -1,24 +1,34 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【开发模式】一键启动 Go gRPC 控制台 (Vite 热更新)
-# Launch Go gRPC proxy console in DEV mode with Vite HMR dev server
+# 【开发模式】一键启动 PrivShield 引擎 + Go BFF + Vite 控制台 (HMR 热更新)
+# Launch PrivShield Agent + Go BFF + Vite Dev UI in DEV mode
 #
-# 用法 / Usage: ./scripts/dev/dev-start-go.sh [--force]
+# 用法 / Usage:
+#   ./scripts/dev/dev-bff-agent.sh [--force] [--mtls]
+#
+# 参数说明 / Options:
 #   --force: 非交互模式，端口被占用时自动终止占用进程（CI/脚本化场景）
-#
-# 启动组件 / Launched Components:
-#   1. PrivShield Engine (REST: 8079, gRPC: 50051)
-#   2. Go gRPC 代理后端 (API: 8081)
-#   3. Vite 前端开发服务器 (UI: 5173, 支持 <50ms HMR 热重载)
+#   --mtls:  启用 mTLS 双向认证（自动配置/生成证书与双向鉴权环境）
+#   -h, --help: 查看帮助说明
 # ============================================================================
 
 set -euo pipefail
 
-# ── 解析命令行参数：仅支持 --force ─────────────────────────────────
+# ── 解析命令行参数 ───────────────────────────────────────────────────
 FORCE=false
+MTLS_MODE=false
+
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
+        --mtls)  MTLS_MODE=true ;;
+        -h|--help)
+            echo "用法: $0 [选项]"
+            echo "  --force   端口被占用时自动终止占用进程（非交互模式）"
+            echo "  --mtls    以 mTLS 双向认证模式启动 Agent 与 Go BFF"
+            echo "  -h, --help 显示此帮助信息"
+            exit 0
+            ;;
     esac
 done
 
@@ -32,11 +42,17 @@ LOGS_DIR="$PROJECT_ROOT/.logs"
 mkdir -p "$PIDS_DIR" "$LOGS_DIR"
 
 AGENT_VENV="$PROJECT_ROOT/.venv"
-AGENT_URL="http://127.0.0.1:8079"
+CERT_DIR="$CONSOLE_DIR/bff-go/certs"
+GEN_CERTS="$CONSOLE_DIR/bff-go/scripts/gen-certs.sh"
+
 CONSOLE_URL="http://127.0.0.1:8081"
+AGENT_URL="http://127.0.0.1:8079"
+if [[ "$MTLS_MODE" == "true" ]]; then
+    AGENT_URL="https://127.0.0.1:8079"
+fi
+AGENT_GRPC_ADDR="127.0.0.1:50051"
 VITE_URL="http://localhost:5173"
 
-# ── TCP connect 端口探测 ──────────────────────────────────────────────
 _is_port_in_use() {
     local port="$1"
     python3 -c "
@@ -109,7 +125,7 @@ check_port_available() {
     esac
 }
 
-# ── 1. 确保 Agent 虚拟环境存在 ───────────────────────────────────────
+# 1. Agent 虚拟环境检查与初始化
 if [[ ! -d "$AGENT_VENV" ]]; then
     echo "未找到 agent 虚拟环境，自动创建并安装依赖：$AGENT_VENV"
     python3 -m venv "$AGENT_VENV"
@@ -121,25 +137,28 @@ if [[ ! -d "$AGENT_VENV" ]]; then
     )
 fi
 
-# macOS Apple Silicon 提示
-if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
-    if ! "$AGENT_VENV/bin/python" -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('mlx') else 1)" 2>/dev/null; then
-        echo "ℹ️  检测到 macOS Apple Silicon，未安装 mlx，NER 将降级到 ONNX。"
-    fi
-fi
-
-# Go 工具链检查
+# 2. Go 工具链检查
 if ! command -v go >/dev/null 2>&1; then
     echo "错误：未找到 Go 工具链，请先安装 Go。"
     exit 1
 fi
 
-# ── 2. 确保前端 node_modules 依赖存在 ─────────────────────────────────
+# 3. mTLS 模式下自动确保测试证书存在
+if [[ "$MTLS_MODE" == "true" ]]; then
+    if [[ ! -f "$CERT_DIR/ca.crt" || ! -f "$CERT_DIR/server.crt" || ! -f "$CERT_DIR/client.crt" ]]; then
+        echo "未检测到完整证书，正在自动生成开发用自签名证书..."
+        bash "$GEN_CERTS" "$CERT_DIR"
+    fi
+fi
+
+# 4. 确保前端 node_modules 存在
 if [[ ! -d "$CONSOLE_DIR/web/node_modules" ]]; then
     echo "未找到前端 node_modules，自动安装依赖..."
     (
         cd "$CONSOLE_DIR/web"
-        if command -v pnpm >/dev/null 2>&1; then
+        if command -v corepack >/dev/null 2>&1; then
+            corepack pnpm install
+        elif command -v pnpm >/dev/null 2>&1; then
             pnpm install
         elif command -v npm >/dev/null 2>&1; then
             npm install
@@ -147,12 +166,12 @@ if [[ ! -d "$CONSOLE_DIR/web/node_modules" ]]; then
     )
 fi
 
-# ── 3. 编译 Go gRPC 代理后端 ────────────────────────────────────────
+# 5. 编译 Go BFF
 echo "编译 Go gRPC 代理后端..."
 (cd "$CONSOLE_DIR/bff-go" && go build -o bin/backend-go ./cmd/server)
 
-AGENT_PID_FILE="$PIDS_DIR/agent-go.pid"
-CONSOLE_PID_FILE="$PIDS_DIR/console-go.pid"
+AGENT_PID_FILE="$PIDS_DIR/agent-all.pid"
+GO_CONSOLE_PID_FILE="$PIDS_DIR/console-go-all.pid"
 VITE_PID_FILE="$PIDS_DIR/vite-dev.pid"
 
 write_pid() {
@@ -164,29 +183,38 @@ STOPPING=false
 cleanup() {
     STOPPING=true
     echo ""
-    echo "正在停止【开发模式】所有服务..."
+    echo "正在停止【开发模式】控制台所有服务..."
     for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
     wait 2>/dev/null || true
-    rm -f "$AGENT_PID_FILE" "$CONSOLE_PID_FILE" "$VITE_PID_FILE"
+    rm -f "$AGENT_PID_FILE" "$GO_CONSOLE_PID_FILE" "$VITE_PID_FILE"
     echo "已停止。"
 }
 trap cleanup INT TERM EXIT
 
-# 端口预检
 check_port_available 8079 "PrivShield REST"
 check_port_available 50051 "PrivShield gRPC"
 check_port_available 8081 "Go gRPC 代理后端"
 check_port_available 5173 "Vite 前端开发服务器"
 
-# ── 4. 启动 Python Agent ────────────────────────────────────────────
+# 6. 启动 Python Agent 核心引擎
 launch_agent() {
-    local agent_log="$LOGS_DIR/agent_go.log"
-    echo "启动 PrivShield (REST: $AGENT_URL, gRPC: 127.0.0.1:50051)，日志: $agent_log..."
+    local agent_log="$LOGS_DIR/agent_all.log"
+    echo "启动 PrivShield (REST: $AGENT_URL, gRPC: $AGENT_GRPC_ADDR)，日志: $agent_log..."
     (
-        source "$AGENT_VENV/bin/activate"
+        if [ -f "$AGENT_VENV/bin/activate" ]; then
+            source "$AGENT_VENV/bin/activate"
+        fi
         cd "$PROJECT_ROOT"
+        if [[ "$MTLS_MODE" == "true" ]]; then
+            export PRIVACY_TLS_ENABLED=true
+            export PRIVACY_TLS_CERT_FILE="$CERT_DIR/server.crt"
+            export PRIVACY_TLS_KEY_FILE="$CERT_DIR/server.key"
+            export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
+            export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true
+            export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["privshield-client"]'
+        fi
         exec python -m engine.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
@@ -200,9 +228,13 @@ wait_for_service() {
     local name="$2"
     local max_attempts=30
     local attempt=0
+    local curl_opts=("-s" "-o" "/dev/null" "-w" "%{http_code}")
+    if [[ "$MTLS_MODE" == "true" ]]; then
+        curl_opts+=("-k")
+    fi
     echo -n "等待 $name 就绪"
     while [[ $attempt -lt $max_attempts ]]; do
-        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then
+        if curl "${curl_opts[@]}" "$url" | grep -q '^200$'; then
             echo " OK"
             return 0
         fi
@@ -216,7 +248,7 @@ wait_for_service() {
 
 wait_for_service "$AGENT_URL/health" "PrivShield"
 
-echo -n "等待 agent gRPC (127.0.0.1:50051) 就绪"
+echo -n "等待 agent gRPC ($AGENT_GRPC_ADDR) 就绪"
 for i in $(seq 1 30); do
     if _is_port_in_use 50051; then
         echo " OK"
@@ -230,85 +262,58 @@ for i in $(seq 1 30); do
     fi
 done
 
-# ── 5. 启动 Go gRPC 代理后端 ────────────────────────────────────────
+# 7. 启动 Go BFF 代理网关
 echo "启动 Go gRPC 代理后端 (API: $CONSOLE_URL)..."
 (
     cd "$CONSOLE_DIR/bff-go"
+    if [[ "$MTLS_MODE" == "true" ]]; then
+        export PRIVACY_AGENT_TLS_ENABLED=true
+        export PRIVACY_AGENT_TLS_CA_FILE="$CERT_DIR/ca.crt"
+        export PRIVACY_AGENT_TLS_CERT_FILE="$CERT_DIR/client.crt"
+        export PRIVACY_AGENT_TLS_KEY_FILE="$CERT_DIR/client.key"
+        export PRIVACY_AGENT_TLS_SERVER_NAME="localhost"
+    fi
     exec ./bin/backend-go
-) &
-CONSOLE_PID=$!
-PIDS+=("$CONSOLE_PID")
-write_pid "$CONSOLE_PID_FILE" "$CONSOLE_PID"
+) > "$LOGS_DIR/backend-go-all.log" 2>&1 &
+GO_CONSOLE_PID=$!
+PIDS+=("$GO_CONSOLE_PID")
+write_pid "$GO_CONSOLE_PID_FILE" "$GO_CONSOLE_PID"
 
 wait_for_service "$CONSOLE_URL/api/health" "Go gRPC 代理后端"
 
-# ── 6. 启动 Vite 前端开发服务器 (HMR 模式) ──────────────────────────
-echo "启动 Vite 前端开发服务器 (HMR 模式)..."
+# 8. 启动 Vite 前端热开发服务器
+echo "启动 Vite 前端开发服务器 (UI: $VITE_URL)..."
 (
     cd "$CONSOLE_DIR/web"
-    if command -v pnpm >/dev/null 2>&1; then
-        exec pnpm dev
+    export VITE_PROXY_TARGET="$CONSOLE_URL"
+    if command -v corepack >/dev/null 2>&1; then
+        corepack pnpm dev
+    elif command -v pnpm >/dev/null 2>&1; then
+        pnpm dev
     else
-        exec npm run dev
+        npm run dev
     fi
-) &
+) > "$LOGS_DIR/vite-all.log" 2>&1 &
 VITE_PID=$!
 PIDS+=("$VITE_PID")
 write_pid "$VITE_PID_FILE" "$VITE_PID"
 
-echo -n "等待 Vite 开发服务器就绪"
-for i in $(seq 1 30); do
-    if _is_port_in_use 5173; then
-        echo " OK"
-        break
-    fi
-    echo -n "."
-    sleep 1
-done
+wait_for_service "$VITE_URL" "Vite 前端"
 
 echo ""
-echo "======================================================================"
-echo "🚀【开发模式】 Go gRPC 隐私测试控制台已成功启动！"
-echo "======================================================================"
-echo "  前端 UI (Vite HMR):  $VITE_URL  <-- 在浏览器中打开（支持热更新）"
-echo "  Go gRPC 代理后端:    $CONSOLE_URL"
-echo "  Agent REST:          $AGENT_URL"
-echo "  Agent gRPC:          127.0.0.1:50051"
-echo "──────────────────────────────────────────────────────────────────────"
-echo "  按 Ctrl+C 停止所有开发服务"
-echo "======================================================================"
+echo "================================================================="
+if [[ "$MTLS_MODE" == "true" ]]; then
+    echo "🎉 PrivShield 全量服务 (Agent + Go BFF + Vite UI) [mTLS 双向认证] 已就绪！"
+else
+    echo "🎉 PrivShield 全量服务 (Agent + Go BFF + Vite UI) 已全部启动！"
+fi
+echo "  🌐 前端界面 (UI):    $VITE_URL"
+echo "  🔌 代理后端 (Go):    $CONSOLE_URL"
+echo "  🛡️  隐私引擎 (Agent): $AGENT_URL (REST) / $AGENT_GRPC_ADDR (gRPC)"
+if [[ "$MTLS_MODE" == "true" ]]; then
+    echo "  🔒 安全模式 (mTLS):  已启用 (CA: $CERT_DIR/ca.crt)"
+fi
+echo "  🛑 停止所有服务: 按 Ctrl+C 或运行 ./scripts/dev/dev-stop.sh"
+echo "================================================================="
 
-# ── Watchdog 看门狗：守护 Agent 进程 ────────────────────────────
-# Agent 意外退出时自动重启，同时等待 REST + gRPC 两个端口均就绪后继续
-set +e
-wait "$AGENT_PID" 2>/dev/null
-wait_rc=$?
-set -e
-
-while [[ "$STOPPING" != "true" ]]; do
-    echo "[watchdog] agent 已退出 (PID $AGENT_PID, exit code $wait_rc)，1 秒后自动重启..."
-    sleep 1
-    if [[ "$STOPPING" == "true" ]]; then
-        break
-    fi
-    launch_agent
-    if ! wait_for_service "$AGENT_URL/health" "重启后的 PrivShield"; then
-        echo "[watchdog] 警告：agent 重启后未在 30 秒内就绪（REST）。"
-    fi
-    echo -n "等待重启后的 agent gRPC (127.0.0.1:50051) 就绪"
-    for i in $(seq 1 30); do
-        if _is_port_in_use 50051; then
-            echo " OK"
-            break
-        fi
-        echo -n "."
-        sleep 1
-        if [[ $i -eq 30 ]]; then
-            echo " 超时"
-        fi
-    done
-    set +e
-    wait "$AGENT_PID" 2>/dev/null
-    wait_rc=$?
-    set -e
-done
+wait

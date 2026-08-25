@@ -1243,16 +1243,10 @@ docker exec PrivShield getent hosts vllm   # 容器内解析服务名 → 返回
 ./scripts/dev/docker-start-llm.sh
 ./scripts/dev/docker-stop-llm.sh
 
-# 3. 启动 Agent + Go 代理后端 + Web UI 容器套件
-./scripts/dev/docker-start-go.sh
-
-# 4. 启动 Agent + Python 代理后端 + Web UI 容器套件
-./scripts/dev/docker-start-python.sh
-
-# 5. 启动全栈 Docker 容器套件 (Agent + 双后端 + Web UI + 可选 vLLM)
+# 3. 启动全栈 Docker 容器套件 (Agent + 3 大中台微服务 + Go BFF + Web UI + 可选 vLLM)
 ./scripts/dev/docker-start-all.sh [--with-llm]
 
-# 6. 一键停止并清理全栈 Docker 容器与 Compose 栈
+# 4. 一键停止并清理全栈 Docker 容器与 Compose 栈
 ./scripts/dev/docker-stop.sh
 ```
 

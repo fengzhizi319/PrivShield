@@ -46,10 +46,10 @@ console/
 
 ```bash
 # 启动 PrivShield Agent + Go BFF + Web 前端 (Vite HMR: http://localhost:5173)
-bash ./scripts/dev/dev-start-go.sh
+bash ./scripts/dev/dev-bff-agent.sh
 
-# 或仅启动 PrivShield Agent + Go BFF(:8081) + Web 前端（与 dev-start-go.sh 等价）
-bash ./scripts/dev/dev-start-go.sh
+# 启用 mTLS 双向认证模式启动
+bash ./scripts/dev/dev-bff-agent.sh --mtls
 
 # 停止开发服务
 bash ./scripts/dev/dev-stop.sh
@@ -71,11 +71,11 @@ bash ./scripts/dev/dev-stop-new-modules.sh
 ### 3.3 Docker 容器化启动
 
 ```bash
-# 启动 Agent + Go BFF + React Web UI
-bash ./scripts/dev/docker-start-go.sh
+# 启动全栈容器套件（Agent + Go BFF + Web UI + 3 大中台微服务）
+bash ./scripts/dev/docker-start-all.sh
 
-# 启动全栈容器套件（Agent + Go BFF + Web UI + 可选 vLLM）
-bash ./scripts/dev/docker-start-all.sh [--with-llm]
+# 启动全栈容器 + vLLM 大模型推理容器
+bash ./scripts/dev/docker-start-all.sh --with-llm
 
 # 停止并清理容器服务
 bash ./scripts/dev/docker-stop.sh

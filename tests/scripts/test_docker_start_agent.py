@@ -1343,7 +1343,7 @@ def live_docker_agent_service(bash_bin: str, docker_available: bool):
             s.bind(("0.0.0.0", 0))
             return s.getsockname()[1]
 
-    # 若 8079 / 50051 已被宿主机本地服务（如 dev-start-all.sh）占用，自动分配空闲端口避免端口冲突
+    # 若 8079 / 50051 已被宿主机本地服务（如 dev-bff-agent.sh）占用，自动分配空闲端口避免端口冲突
     rest_port = 8079 if not _is_tcp_port_in_use(8079) else _get_free_tcp_port()
     grpc_port = 50051 if not _is_tcp_port_in_use(50051) else _get_free_tcp_port()
 

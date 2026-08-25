@@ -80,8 +80,8 @@ npm run lint         # eslint . --ext ts,tsx --max-warnings 0
 连接真实后端走通核心链路（可用浏览器自动化或手工）：
 
 ```bash
-# 1. 启动 agent + Go BFF
-./scripts/dev/dev-start.sh
+# 1. 启动 agent + Go BFF + 前端
+./scripts/dev/dev-bff-agent.sh
 
 # 2. 构建前端（若未构建）
 cd console/web && npm run build

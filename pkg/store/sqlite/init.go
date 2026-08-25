@@ -122,7 +122,6 @@ func InitTaskTables(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 		CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
-		CREATE INDEX IF NOT EXISTS idx_tasks_retry_after ON tasks(retry_after);
 	`)
 	if err != nil {
 		return err
@@ -161,6 +160,10 @@ func InitTaskTables(db *sql.DB) error {
 		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN retry_after DATETIME"); err != nil {
 			return err
 		}
+	}
+
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_retry_after ON tasks(retry_after)"); err != nil {
+		return err
 	}
 
 	return nil

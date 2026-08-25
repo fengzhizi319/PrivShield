@@ -222,14 +222,14 @@ class DynClassificationService:
         # 1. 优先使用实例上注入的可插拔文本脱敏回调
         if self._text_sanitizer is not None:
             sanitized = self._text_sanitizer(field_name, val_str, final_level)
+        elif getattr(funnel_result, "sanitized_value", None):
+            sanitized = funnel_result.sanitized_value
         else:
             # 2. 其次查询领域注册表 (DomainStrategyRegistry) 中注册的回调
             from .domain_registry import default_domain_registry
             reg_sanitizer = default_domain_registry.get_sanitizer("medical")
             if reg_sanitizer is not None:
                 sanitized = reg_sanitizer(field_name, val_str, final_level, "redact")
-            elif getattr(funnel_result, "sanitized_value", None):
-                sanitized = funnel_result.sanitized_value
             else:
                 # 向后兼容：尝试使用医疗领域规则进行文本脱敏
                 sanitized = self._fallback_text_sanitizer(field_name, val_str, final_level)

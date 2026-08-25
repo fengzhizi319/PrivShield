@@ -9,9 +9,7 @@
 ## 目录索引
 
 - [1. 本地原生开发与控制台启动脚本](#1-本地原生开发与控制台启动脚本)
-  - [`dev-start.sh` / `dev-start-go.sh` (Go BFF + 前端热更新)](#dev-startsh--dev-start-gosh)
-  - [`dev-start-all.sh` (全量服务 + 前端热更新)](#dev-start-allsh)
-  - [`dev-start-go-mtls.sh` (Go BFF mTLS 安全模式)](#dev-start-go-mtlssh)
+  - [`dev-bff-agent.sh` / `dev-bff-agent.ps1` (Agent + Go BFF + 前端热更新)](#dev-bff-agentsh--dev-bff-agentps1)
   - [`dev-stop.sh` (停止本地开发服务)](#dev-stopsh)
 - [2. 中台微服务群管理脚本](#2-中台微服务群管理脚本)
   - [`dev-start-new-modules.sh` (启动 3 大中台微服务)](#dev-start-new-modulessh)
@@ -22,8 +20,6 @@
   - [`stop_all_services.sh` (停止全量服务群)](#stop_all_servicessh)
 - [3. Docker 容器化联调脚本](#3-docker-容器化联调脚本)
   - [`docker-start-all.sh` (启动全栈 Docker 容器)](#docker-start-allsh)
-  - [`docker-start-go.sh` (启动 Go + Web 容器栈)](#docker-start-gosh)
-  - [`docker-start-python.sh` (自动重定向到 Go BFF 容器栈)](#docker-start-pythonsh)
   - [`docker-start-agent.sh` / `docker-start-agent.ps1` (启动 Agent 容器)](#docker-start-agentsh--docker-start-agentps1)
   - [`docker-stop-agent.sh` / `docker-stop-agent.ps1` (停止 Agent 容器)](#docker-stop-agentsh--docker-stop-agentps1)
   - [`docker-start-llm.sh` / `docker-start-llm.ps1` (启动 vLLM 容器)](#docker-start-llmsh--docker-start-llmps1)
@@ -46,39 +42,29 @@
 
 ## 1. 本地原生开发与控制台启动脚本
 
-### `dev-start.sh` / `dev-start-go.sh`
-- **作用说明**: 【推荐主力】一键启动 Python 核心算力 Agent（REST `:8079`、gRPC `:50051`）、Go 语言 gRPC/HTTPS 代理网关 BFF (`:8081`)，以及基于 Vite 的 React Web 前端开发服务器 (`:5173`，支持毫秒级 HMR 热更新）。
-- **参数选项**: `--force`（端口被占用时自动释放占用进程）。
+### `dev-bff-agent.sh` / `dev-bff-agent.ps1`
+- **作用说明**: 【推荐主力】一键启动 Python 核心算力 Agent（REST `:8079`、gRPC `:50051`）、Go 语言 gRPC/HTTPS 代理网关 BFF (`:8081`)，以及基于 Vite 的 React Web 前端开发服务器 (`:5173`，支持毫秒级 HMR 热更新）。同时支持 `--mtls` 参数以 mTLS 双向认证模式启动。
+- **参数选项**:
+  - `--force`: 端口被占用时自动释放占用进程。
+  - `--mtls`: 启用 mTLS 双向认证模式（自动生成/挂载自签名证书）。
 - **执行命令**:
   ```bash
-  # Linux / macOS (Bash)
-  bash ./scripts/dev/dev-start.sh
+  # Linux / macOS (标准开发模式)
+  bash ./scripts/dev/dev-bff-agent.sh
   ```
-
----
-
-### `dev-start-all.sh`
-- **作用说明**: 【全量服务】同时启动 Python 核心 Agent、Go gRPC BFF (`:8081`) 和 React Web 前端 (`:5173`)。
-- **参数选项**: `--force`（自动释放占用端口）。
-- **执行命令**:
   ```bash
-  bash ./scripts/dev/dev-start-all.sh
+  # Linux / macOS (mTLS 安全模式)
+  bash ./scripts/dev/dev-bff-agent.sh --mtls
   ```
-
----
-
-### `dev-start-go-mtls.sh`
-- **作用说明**: 以严格的 **mTLS 双向 TLS 证书认证** 模式启动 Go BFF 网关 (`:8443`) 和 Python Agent，用于验证零信任网络与安全通道传输。
-- **参数选项**: `--force`（自动释放占用端口）。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/dev-start-go-mtls.sh
+  ```powershell
+  # Windows (PowerShell)
+  .\scripts\dev\dev-bff-agent.ps1
   ```
 
 ---
 
 ### `dev-stop.sh`
-- **作用说明**: 一键优雅停止本地由上述开发脚本启动的所有进程（Agent、Go BFF、Vite 前端），释放相关端口资源。
+- **作用说明**: 一键优雅停止本地由 `dev-bff-agent.sh` 启动的所有进程（Agent、Go BFF、Vite 前端），释放相关端口资源。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/dev-stop.sh
@@ -102,7 +88,7 @@
 ---
 
 ### `dev-stop-new-modules.sh`
-- **作用说明**: 一键停止 3 大中台微服务进程（`service-hub`、`datasource-mgr`、`audit-log`），释放端口 `:8082`、`:8083`、`:8084`。
+- **作用说明**: 停止由 `dev-start-new-modules.sh` 启动的 3 大微服务进程。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/dev-stop-new-modules.sh
@@ -111,7 +97,7 @@
 ---
 
 ### `e2e-start-all-services.sh`
-- **作用说明**: 一键联动启动 **核心算力 Agent (`:8079/50051`)** 以及 **3 大 Go 中台微服务 (`:8082`, `:8083`, `:8084`)**，为端到端全链路业务测试提供基础环境。
+- **作用说明**: 【真实全量环境】一键顺序启动 Python Agent + 3 大 Go 中台微服务，构建真实 E2E 运行环境。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/e2e-start-all-services.sh
@@ -120,7 +106,7 @@
 ---
 
 ### `e2e-stop-all-services.sh`
-- **作用说明**: 一键优雅停止由 `e2e-start-all-services.sh` 启动的 Agent 算力层与 3 大中台微服务所有后台进程。
+- **作用说明**: 停止由 `e2e-start-all-services.sh` 启动的所有真实服务进程。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/e2e-stop-all-services.sh
@@ -129,10 +115,10 @@
 ---
 
 ### `start_all_services.sh`
-- **作用说明**: 本地全量单机进程启动脚本，一键启动 Agent、3 大中台微服务、Go BFF 网关以及前端 UI 控制台。
+- **作用说明**: 一键后台启动核心 Agent、Go BFF 以及可选的中台微服务群（支持 `--with-services`）。
 - **执行命令**:
   ```bash
-  bash ./scripts/dev/start_all_services.sh
+  bash ./scripts/dev/start_all_services.sh --with-services
   ```
 
 ---
@@ -149,36 +135,18 @@
 ## 3. Docker 容器化联调脚本
 
 ### `docker-start-all.sh`
-- **作用说明**: 通过 Docker Compose 一键启动全栈容器集群（Agent + Go BFF + Nginx 静态前端 Web）。
+- **作用说明**: 通过 Docker Compose 一键启动全栈容器集群（Agent + 3 大 Go 中台微服务 + Go BFF + Web 前端）。
 - **参数选项**:
   - `--with-llm`: 联动启动本地 vLLM 大语言模型推理容器 (`:8000`)。
+  - `--no-build`: 跳过构建直接运行。
 - **执行命令**:
   ```bash
   # 标准启动全栈容器
   bash ./scripts/dev/docker-start-all.sh
-   ```
-  
+  ```
   ```bash
   # 带本地 vLLM 大模型容器联动启动
   bash ./scripts/dev/docker-start-all.sh --with-llm
-  ```
-
----
-
-### `docker-start-go.sh`
-- **作用说明**: 通过 Docker Compose 启动由 **Agent + Go BFF 网关 + Web 控制台** 构成的轻量化生产级镜像组合。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-start-go.sh
-  ```
-
----
-
-### `docker-start-python.sh`
-- **作用说明**: 历史脚本，已自动重定向到 `docker-start-go.sh`；通过 Docker Compose 启动由 **Agent + Go BFF 网关 + Web 控制台** 构成的容器化服务组合。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-start-python.sh
   ```
 
 ---
@@ -202,49 +170,34 @@
 ---
 
 ### `docker-stop-agent.sh` / `docker-stop-agent.ps1`
-- **作用说明**: 停止并移除单独运行的核心 Agent Docker 容器。
+- **作用说明**: 停止由 `docker-start-agent.sh` 启动的 Agent 容器。
 - **执行命令**:
   ```bash
-  # Linux / macOS (Bash)
   bash ./scripts/dev/docker-stop-agent.sh
-  ```
-  ```powershell
-  # Windows (PowerShell)
-  .\scripts\dev\docker-stop-agent.ps1
   ```
 
 ---
 
 ### `docker-start-llm.sh` / `docker-start-llm.ps1`
-- **作用说明**: 启动独立的本地 vLLM 高性能推理容器（基于 Qwen3.5 模型），对外提供 OpenAI 兼容的 `/v1/chat/completions` API 接口 (`:8000`)。
+- **作用说明**: 启动专用的 vLLM 本地大模型推理容器 (`:8000`)，需宿主机具备 NVIDIA GPU 与 Container Toolkit。
 - **执行命令**:
   ```bash
-  # Linux / macOS (Bash)
   bash ./scripts/dev/docker-start-llm.sh
-  ```
-  ```powershell
-  # Windows (PowerShell)
-  .\scripts\dev\docker-start-llm.ps1
   ```
 
 ---
 
 ### `docker-stop-llm.sh` / `docker-stop-llm.ps1`
-- **作用说明**: 停止并清理运行中的 vLLM 本地大模型推理容器。
+- **作用说明**: 停止由 `docker-start-llm.sh` 启动的 vLLM 容器。
 - **执行命令**:
   ```bash
-  # Linux / macOS (Bash)
   bash ./scripts/dev/docker-stop-llm.sh
-  ```
-  ```powershell
-  # Windows (PowerShell)
-  .\scripts\dev\docker-stop-llm.ps1
   ```
 
 ---
 
 ### `docker-stop.sh`
-- **作用说明**: 一键停止并彻底清理开发模式下运行的所有 Docker 容器实例、虚拟网络及临时卷。
+- **作用说明**: 一键停止并清理所有通过 Docker Compose 启动的开发容器及网络。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/docker-stop.sh
@@ -255,7 +208,7 @@
 ## 4. 自动化测试、基准压测与环境工具
 
 ### `run_console_e2e_tests.sh`
-- **作用说明**: 【CI/回归基准】运行控制台全套端到端 (E2E) 自动化测试。自动拉起 Mock Agent 桩服务，依次执行 Go BFF 与 Pkg 单元测试、Services 微服务群测试以及 Web 前端 Vitest 组件测试，提供全链路 100% 覆盖校验。
+- **作用说明**: 自动化启动 Mock Agent + Go BFF + Vite 前端，并执行端到端自动化测试与连通性验证。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/run_console_e2e_tests.sh
@@ -264,7 +217,7 @@
 ---
 
 ### `integration-test-new-modules.sh`
-- **作用说明**: 使用 `curl` 针对运行中的 3 大中台微服务（调度中枢、数据源探查、审计日志不可篡改存证）发起全流程业务集成测试。
+- **作用说明**: 对 `service-hub`、`datasource-mgr` 与 `audit-log` 三大微服务执行全流程接口与数据流测试。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/integration-test-new-modules.sh
@@ -273,7 +226,7 @@
 ---
 
 ### `benchmark_performance.sh`
-- **作用说明**: 自动化执行本地脱敏、差分隐私（DP/LDP）、K-匿名、查询混淆等核心隐私原语的高并发与极限吞吐基准压测。
+- **作用说明**: 对核心脱敏算法、差分隐私加噪、K-Anonymity 等原语进行 CPU/内存吞吐与基准压测。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/benchmark_performance.sh
@@ -282,22 +235,16 @@
 ---
 
 ### `health_check.sh`
-- **作用说明**: 本地基础环境与服务健康状态全面巡检工具。探针 Python 3、CUDA / PyTorch 算力架构、Agent REST/gRPC 端口，以及微服务群存活状态。
-- **参数选项**:
-  - `--all`: 全面探测包括 BFF 与 3 大中台微服务在内的全量组件。
+- **作用说明**: 对所有开发环境微服务（Agent、Go BFF、三大中台服务）进行健康探针巡检。
 - **执行命令**:
   ```bash
-  # 基础 Agent 健康探针
   bash ./scripts/dev/health_check.sh
-
-  # 全量中台微服务群探针
-  bash ./scripts/dev/health_check.sh --all
   ```
 
 ---
 
 ### `check_metrics_endpoints.sh`
-- **作用说明**: 批量扫描并校验 Agent、Go BFF、Service Hub、Datasource Mgr、Audit Log 等所有微服务的 Prometheus `/metrics` 端点是否正常输出指标数据。
+- **作用说明**: 检查各服务的 `/metrics` Prometheus 指标暴露端点连通性。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/check_metrics_endpoints.sh
@@ -305,26 +252,18 @@
 
 ---
 
-### `start_monitoring.sh`
-- **作用说明**: 启动本地 Prometheus (`:9090`) 与 Grafana (`:3000`) 监控可视化容器栈，自动加载仪表盘。
+### `start_monitoring.sh` / `stop_monitoring.sh`
+- **作用说明**: 启动/停止 Prometheus (`:9090`) 与 Grafana (`:3000`) 监控大屏。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/start_monitoring.sh
-  ```
-
----
-
-### `stop_monitoring.sh`
-- **作用说明**: 停止本地 Prometheus 与 Grafana 监控容器栈。
-- **执行命令**:
-  ```bash
   bash ./scripts/dev/stop_monitoring.sh
   ```
 
 ---
 
 ### `verify_console_environment.sh`
-- **作用说明**: 巡检本地开发工具链依赖是否就绪（Python 3.10+、Node.js、pnpm、Go 1.22+、Web TypeScript 编译检查）。
+- **作用说明**: 检查本地 Go、Node.js、Python、pnpm、端口占用等依赖环境完整性。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/verify_console_environment.sh
@@ -333,7 +272,7 @@
 ---
 
 ### `generate_all_test_certs.sh`
-- **作用说明**: 一键为 PrivShield 全项目生成统一的 10 年（3650天）有效期自签名 mTLS 测试证书链（含 Root CA、服务端证书、客户端证书及 SPKI 客户端公钥固定文件），自动存放在 `config/certs/` 及各微服务 `certs/` 目录下并受 Git 追踪管理，供本地开发与 E2E 自动化测试开箱即用。
+- **作用说明**: 重新生成全套 mTLS 开发测试证书链（CA、Server、Client 证书及私钥）。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/generate_all_test_certs.sh
@@ -342,25 +281,17 @@
 ---
 
 ### `clean_privacy_budget_db.sh`
-- **作用说明**: 差分隐私持久化预算 SQLite 数据库运维管理工具。支持查询当前各 Namespace 预算消耗、重置指定 Namespace 或清空压缩数据库。
-- **参数选项**:
-  - `--info-only`: 仅查询并输出各 Namespace 预算消耗，不执行清空。
-  - `--reset-all`: 清空并压缩重置所有预算。
-  - `-n, --namespace <NAME>`: 指定重置特定命名空间。
+- **作用说明**: 重置并清理开发阶段生成的 SQLite 隐私预算消费数据库。
 - **执行命令**:
   ```bash
-  # 仅查看预算消耗情况
-  bash ./scripts/dev/clean_privacy_budget_db.sh --info-only
-
-  # 重置所有预算
-  bash ./scripts/dev/clean_privacy_budget_db.sh --reset-all
+  bash ./scripts/dev/clean_privacy_budget_db.sh
   ```
 
 ---
 
 ### `mock_agent_server.py`
-- **作用说明**: 轻量级 Python Mock Agent 桩服务（监听 `:8079`）。无需加载真实 AI 模型或重型依赖即可响应脱敏、分类、诊断等 REST/JSON 报文，供前端和代理网关快速单元测试与联调。
+- **作用说明**: 提供轻量级的 Python Mock Agent 服务，用于无 Python ML 依赖环境下的 Go BFF 与前端快速联调。
 - **执行命令**:
   ```bash
-  python3 ./scripts/dev/mock_agent_server.py --port 8079
+  python scripts/dev/mock_agent_server.py
   ```

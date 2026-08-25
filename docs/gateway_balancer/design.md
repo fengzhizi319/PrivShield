@@ -319,37 +319,91 @@ stateDiagram-v2
 
 ### 5.3 LoadBalancer（负载均衡调度引擎）
 
-模块路径：[`engine/gateway/balancer.py`](file:///home/charles/code/sfwork/PrivShield/engine/gateway/balancer.py)（`class LoadBalancer`）
+模块路径：`engine/gateway/balancer.py`（`class LoadBalancer`）
 
-负责节点池管理、调度策略执行及 Prometheus 指标同步。
+`LoadBalancer` 负责节点池管理、候选过滤、调度策略执行及 Prometheus 指标同步；它**不直接转发** HTTP 或 gRPC 报文。HTTP/gRPC 代理在每次尝试前调用 `await balancer.select_node()`，随后在 `async with node.track_connection()` 内向选中节点发起回源请求。代理根据调用结果更新熔断器、被动健康状态和重试流程。这种职责分离使选路逻辑不需要理解具体业务 RPC 或 HTTP 路径。
 
 ```python
 class LoadBalancer:
-    strategy: str                  # 调度策略 (round_robin | weighted_round_robin | random | weighted_random | least_connections)
+  strategy: str                  # 调度策略（RR/SWRR/LeastConn/P2C/Random）
     nodes: list[BackendNode]       # 注册的所有后端节点列表
     rr_index: int                  # 轮询游标索引
-    modify_lock: threading.Lock    # 节点列表增删改的线程锁
+  _nodes_lock: threading.Lock    # 节点池、轮询游标和动态权重的同步锁
     _selection_lock: asyncio.Lock  # 节点选择调度过程的协程并发锁
 ```
 
-#### 核心方法实现细节：
-1. **`add_node(http_url, grpc_address, weight)`**：
-   - 地址正规化：自动去除 `http_url` 尾部斜杠。
-   - 幂等去重与热更新：若已存在相同 `(http_url, grpc_address)`，则直接就地更新权重、重置健康状态（`is_healthy = True`）、重置熔断器（`record_success()`）并清零活跃连接，防止动态自注册引发地址池膨胀。
-   - 同步刷新 `privacy_gateway_healthy_nodes` 指标。
-2. **`remove_node(http_url, grpc_address)`**：
-   - 线程安全过滤移除指定节点。
-   - **双环境优雅销毁**：
-     - 若当前处于运行中的 AsyncIO 事件循环（如 REST 注销路由），通过 `loop.create_task(node.close())` 异步销毁 gRPC 通道；
-     - 若处于同步上下文（如管理脚本、测试析构），降级采用 `asyncio.run(node.close())` 避免 `RuntimeError: no running event loop` 异常。
-3. **`get_healthy_nodes()`**：
-   - 必须同时满足三个硬性条件：
-     1. `node.is_healthy is True`（主动探针判定通过）；
-     2. `time.monotonic() >= node.passive_unhealthy_until`（被动故障 5 秒冷却已过）；
-     3. `node.circuit_breaker.allow_request() is True`（熔断器处于 Closed 或 Half-Open 状态）。
-4. **`select_node()`**：
-   - 在 `_selection_lock` 保护下执行策略选择；
-   - 若无可路由节点，立即返回 `None`，上层代理模块据此快速失败（HTTP 503 / gRPC UNAVAILABLE）。
+#### 5.3.1 节点状态与候选过滤
+
+`BackendNode` 保存所有影响调度的状态：`weight` 是静态容量权重，`current_weight` 是 SWRR 的动态累计权重，`active_connections` 记录在途回源请求数；`is_healthy` 来自主动双协议探针，`passive_unhealthy_until` 表示请求失败后的单调时钟冷却截止点；`circuit_breaker` 管理节点独立熔断状态；`admin_state` 表示 `active`、`isolated`、`drained` 的人工运维状态。
+
+节点只有同时满足以下条件才成为候选节点：
+
+$$
+	ext{routable}(n) = \text{active}(n) \land \text{healthy}(n) \land
+(t \ge \text{passive\_unhealthy\_until}(n)) \land
+	ext{circuit\_available}(n)
+$$
+
+候选过滤调用 `CircuitBreaker.is_available()`，只检查半开节点的单个恢复探测许可证是否空闲；最终选中节点后才调用 `allow_request()` 原子占用许可证。这样，策略比较不会消耗恢复机会，且并发请求不能同时穿过同一 Half-Open 熔断器。
+
+```python
+healthy = self._get_healthy_nodes_locked(self.nodes)
+if not healthy:
+  return None
+
+node = choose_by_strategy(healthy)
+return node if node.circuit_breaker.allow_request() else None
+```
+
+无候选节点时 `select_node()` 返回 `None`；HTTP 代理返回 503，gRPC 代理以 `UNAVAILABLE` 中止。本设计不会为提高瞬时可用性而绕过熔断、健康检查或人工排空状态。
+
+#### 5.3.2 并发模型
+
+`_nodes_lock` 保护节点列表、`rr_index` 与 `current_weight`。同步管理 API 直接持锁；异步选路与健康检查通过 `asyncio.to_thread()` 执行短同步临界区，避免阻塞事件循环。`_selection_lock` 串行化“过滤候选节点 → 更新策略状态 → 占用半开许可证”这一完整选择过程；节点 `_state_lock` 保护健康、冷却、管理状态与连接数。
+
+代理的网络 I/O 不在这些锁内执行。`track_connection()` 在进入回源调用前增加 `active_connections`，并在 `finally` 中递减，因此异常和取消不会遗留虚高连接数。代价是单实例的选路步骤会串行化；在极高请求率或超大节点池场景，应测量选路延迟并横向扩展无状态网关，而不是放松一致性约束。
+
+#### 5.3.3 策略实现与复杂度
+
+所有策略先执行 $O(N)$ 候选过滤；以下复杂度仅描述策略选择本身。
+
+| 策略 | 核心选择逻辑 | 复杂度 | 设计边界 |
+|---|---|---:|---|
+| `round_robin` | `healthy[rr_index % len(healthy)]`，随后移动游标 | $O(1)$ | 同构节点、耗时相近；不感知负载。 |
+| `weighted_round_robin` | 所有候选累加 `weight`，选择最大 `current_weight`，再减总权重 | $O(N)$ | 异构节点且需要短时间平滑比例分流。 |
+| `least_connections` | 选择最小 `active_connections` | $O(N)$ | 长耗时/流式请求；连接数不能完全代表 CPU、GPU 或载荷。 |
+| `p2c` | 随机抽两个节点，选较小的归一化连接负载 | $O(1)$ | 大节点池，避免全量最小连接数的集中选择。 |
+| `random` | 对候选均匀随机抽样 | $O(1)$ | 简单同构场景，短时间不保证严格均衡。 |
+| `weighted_random` | 使用节点权重概率抽样 | $O(1)$ | 异构场景，可接受短时间统计波动。 |
+
+普通轮询的核心代码如下：
+
+```python
+node = healthy[self.rr_index % len(healthy)]
+self.rr_index = (self.rr_index + 1) % len(healthy)
+```
+
+SWRR 对每个候选节点 $i$ 的更新规则为：
+
+$$
+c_i \leftarrow c_i + w_i, \qquad
+k = \arg\max_i c_i, \qquad
+c_k \leftarrow c_k - \sum_i w_i
+$$
+
+因此权重 $5:1$ 的节点会产生 `A, A, A, B, A, A` 的平滑序列，不会先连续分配五个请求给 `A` 再分配一个给 `B`。P2C 比较的归一化负载为 $\frac{\text{active\_connections}}{\max(1, \text{weight})}$，使高权重节点可承担相应更多的并发请求。
+
+#### 5.3.4 节点生命周期与调度联动
+
+`add_node()` 按 `(http_url, grpc_address)` 幂等去重。重复注册会原地更新权重、恢复健康、清除冷却和连接计数，并以 `record_success()` 复位熔断器；新增或更新都会刷新 `privacy_gateway_healthy_nodes`。`remove_node()` 在锁内先将节点从候选池删除，再在后台守护线程中关闭已建立的 gRPC Channel，因此后续请求不会再选中该节点。
+
+`drain_node()` 将节点设为 `drained`，停止新分配但不取消在途请求；`isolate_node()` 将节点设为 `isolated` 且不健康，用于故障隔离；`activate_node()` 恢复 `active` 并清除被动不健康状态。人工管理状态优先于所有负载均衡算法。
+
+#### 5.3.5 与代理和测试的协作
+
+HTTP 与 gRPC 代理共享同一个 `LoadBalancer`。每一次故障转移尝试都会重新调用 `select_node()`，因此已被被动下线、熔断或排空的节点不会再次被选中。HTTP 仅对幂等请求或 `ConnectError` 的非幂等请求重试；gRPC 对 `UNAVAILABLE` 和未知传输异常重试，均最多三次。
+
+`tests/gateway/test_balancer_unit.py` 覆盖轮询顺序、SWRR 权重分布、最少连接、加权随机、候选过滤、节点生命周期和 Half-Open 单探测限制；`tests/gateway/test_gateway.py` 与 `tests/gateway/test_http_proxy_edge.py` 验证代理故障转移与非幂等请求防重复投递。变更权重或策略时，应在接近生产的节点数量、请求耗时和并发下观察分布、P99 延迟、重试次数与健康节点数，再逐步发布。
 
 ---
 

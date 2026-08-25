@@ -56,13 +56,10 @@ graph TD
 
 ```bash
 # 启动 Agent + Go BFF + Web 前端（Vite 热更新）
-bash ./scripts/dev/dev-start.sh
+bash ./scripts/dev/dev-bff-agent.sh
 
-# 或启动 Go BFF + Web 前端（不复用已有 Agent 时）
-bash ./scripts/dev/dev-start-go.sh
-
-# 启动 Agent + Go BFF + Web 前端 + 可选 vLLM
-bash ./scripts/dev/dev-start-all.sh
+# 启用 mTLS 双向认证模式启动
+bash ./scripts/dev/dev-bff-agent.sh --mtls
 
 # 停止控制台服务
 bash ./scripts/dev/dev-stop.sh

@@ -666,7 +666,7 @@ Docker Compose 2.x 的 `pull_policy` 默认值为 `missing`。如果服务指定
      image: privacy-console-backend-go:0.1.0
      pull_policy: build  # 强制本地构建，禁止向远程 Registry 拉取未推送 Tag
    ```
-2. **启动脚本默认注入 `--build`**：在 `docker-start-all.sh` / `docker-start-go.sh` 等脚本中，默认追加 `--build` 参数，并提供 `--no-build` 选项供快速重用。
+2. **启动脚本默认注入 `--build`**：在 `docker-start-all.sh` 等脚本中，默认追加 `--build` 参数，并提供 `--no-build` 选项供快速重用。
 
 ---
 

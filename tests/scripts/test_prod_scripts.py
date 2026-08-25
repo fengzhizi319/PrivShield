@@ -60,8 +60,11 @@ class TestProdScriptsStaticChecks:
             "uninstall-helm.sh",
             "deploy-k8s.sh",
             "stop-k8s.sh",
+            "prod-bff-agent.sh",
+            "prod-stop.sh",
             "prod_health_check.sh",
             "backup_privacy_budget.sh",
+            "backup-sqlite-databases.sh",
         ]
         for script_name in expected_scripts:
             script_path = PROD_SCRIPTS_DIR / script_name
@@ -95,6 +98,7 @@ class TestProdScriptsHelpAndExecution:
             "uninstall-helm.sh",
             "deploy-k8s.sh",
             "stop-k8s.sh",
+            "prod-bff-agent.sh",
             "prod_health_check.sh",
             "backup_privacy_budget.sh",
         ],
