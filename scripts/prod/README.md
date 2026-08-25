@@ -24,6 +24,7 @@
   - [`prod_health_check.sh` (生产全链路健康状态巡检)](#prod_health_checksh)
   - [`backup-sqlite-databases.sh` (全量 SQLite 数据库备份与存证)](#backup-sqlite-databasessh)
   - [`backup_privacy_budget.sh` (隐私预算库专项备份)](#backup_privacy_budgetsh)
+  - [`verify_audit.sh` (审计日志 HMAC 签名完整性校验)](#verify_auditsh)
 
 ---
 
@@ -186,4 +187,21 @@
 - **执行命令**:
   ```bash
   bash ./scripts/prod/backup_privacy_budget.sh
+  ```
+
+---
+
+### `verify_audit.sh`
+- **作用说明**: 审计日志 HMAC-SHA256 签名完整性校验工具（`engine/privacy/verify_audit.py` 的运维便捷包装），校验 BudgetAuditLogger 写入的审计日志是否被篡改。
+- **参数选项**:
+  - `--key KEY`: HMAC-SHA256 签名密钥（也可通过 `PRIVACY_AUDIT_KEY` 环境变量提供）。
+  - `--key-file PATH`: 从文件读取 HMAC 密钥。
+  - `--log-file PATH`: 审计日志文件路径（默认: `$PRIVACY_BUDGET_AUDIT_LOG` 或 `/tmp/budget_audit.log`）。
+- **执行命令**:
+  ```bash
+  # 使用环境变量
+  PRIVACY_AUDIT_KEY=my-secret bash ./scripts/prod/verify_audit.sh
+
+  # 显式指定密钥与日志文件
+  bash ./scripts/prod/verify_audit.sh --key my-secret --log-file /var/log/privshield/budget_audit.log
   ```

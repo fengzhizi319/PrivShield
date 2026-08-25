@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **gateway 熔断器 Prometheus 指标**：`circuit_breaker_state{node="..."}` 实时暴露熔断器状态。
   - **gateway 动态拓扑管理**：运行时 API 注册/注销/隔离/排空/激活后端节点。
   - **engine 预算 DB 启动完整性校验**：`PRAGMA integrity_check` + WAL 模式 + BEGIN IMMEDIATE 排他事务。
-  - **audit-log 独立校验脚本**：`scripts/prod/verify_audit.py` 独立验证审计数据完整性，支持 CI/CD 集成。
+  - **audit-log 独立校验脚本**：`engine/privacy/verify_audit.py` 独立验证审计数据完整性，支持 CI/CD 集成。
   - **bff-go gRPC 重试策略可配置**：环境变量配置重试次数与退避参数，默认最多 6 次，指数退避 1s→8s。
   - **备份脚本 --verify 模式**：支持备份恢复验证，自动过期清理。
   - **全量可靠性文档体系**：每个微服务/模块均具备专属 `docs/reliability.md`，架构设计文档同步添加可靠性能力矩阵与交叉引用。
