@@ -5,7 +5,7 @@
 
 运行方式：
 
-    cd /home/charles/code/sfwork/PrivShield
+    cd /path/to/PrivShield
     source .venv/bin/activate
     PYTHONPATH=. python docs/gateway_balancer/examples/gateway_usage.py
 """
