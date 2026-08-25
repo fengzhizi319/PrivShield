@@ -115,10 +115,10 @@ graph TD
     HubGRPC --> PipelineEngine
     PipelineEngine --> TaskStore
 
-    PipelineEngine -->|1. 拉取数据 (Fetch)| DSGRPC
-    PipelineEngine -->|2. 分类打标 (Classify)| FunnelEngine
-    PipelineEngine -->|3. 执行脱敏 (Desensitize)| PrivacyPrimitives
-    PipelineEngine -->|4. 存证上链 (Audit)| AuditGRPC
+    PipelineEngine -->|"1. 拉取数据 (Fetch)"| DSGRPC
+    PipelineEngine -->|"2. 分类打标 (Classify)"| FunnelEngine
+    PipelineEngine -->|"3. 执行脱敏 (Desensitize)"| PrivacyPrimitives
+    PipelineEngine -->|"4. 存证上链 (Audit)"| AuditGRPC
 
     DSHTTP --> DS1 & DS2 & DS3 & DS4
     DSGRPC --> DS1 & DS2 & DS3 & DS4
@@ -208,16 +208,24 @@ graph TD
 # 1. 启动本地开发控制台三件套（【主力推荐】Python Agent :8079/:50051 + Go BFF :8081 + Vite 前端 :5173 HMR）
 # 脚本会自动按序拉起 Agent 与 BFF，前端支持毫秒级热更新；--force 自动释放占用端口
 bash ./scripts/dev/dev-bff-agent.sh
+```
 
+```bash
 # 2. 启用 mTLS 双向认证模式启动控制台
 bash ./scripts/dev/dev-bff-agent.sh --mtls
+```
 
+```bash
 # 3. Windows PowerShell 环境运行
 .\scripts\dev\dev-bff-agent.ps1
+```
 
+```bash
 # 4. 一键优雅停止本地开发控制台服务群
 bash ./scripts/dev/dev-stop.sh
+```
 
+```bash
 # 5. 仅独立运行 Python 核心隐私计算引擎（REST :8079 + gRPC :50051）
 python -m engine.server
 ```
@@ -230,19 +238,29 @@ python -m engine.server
 # 1. 仅启动 3 大 Go 中台微服务（service-hub :8082, datasource-mgr :8083, audit-log :8084）
 # （前提：Python 核心 Agent 已在 :8079 独立运行）
 bash ./scripts/dev/dev-start-new-modules.sh
+```
 
+```bash
 # 2. 停止由上述脚本启动的 3 大微服务
 bash ./scripts/dev/dev-stop-new-modules.sh
+```
 
+```bash
 # 3. 【真实全量环境】一键按序启动 Agent + 3 大 Go 中台微服务（真实 E2E 联调推荐）
 bash ./scripts/dev/e2e-start-all-services.sh
+```
 
+```bash
 # 4. 停止真实全量 E2E 服务集
 bash ./scripts/dev/e2e-stop-all-services.sh
+```
 
+```bash
 # 5. 后台守护进程模式启动全量服务群（Agent + BFF + 3 大中台微服务，自动生成 PID 文件）
 bash ./scripts/dev/start_all_services.sh --with-services
+```
 
+```bash
 # 6. 停止全量后台服务群
 bash ./scripts/dev/stop_all_services.sh
 ```
@@ -254,28 +272,54 @@ bash ./scripts/dev/stop_all_services.sh
 ```bash
 # 1. 【推荐 Docker 开发】启动控制台三件套容器（Agent + Go BFF :8081 + Web UI :5173）
 bash ./scripts/dev/docker-start-bff-agent.sh
+```
 
+```bash
 # 2. 跳过本地镜像重新构建直接启动
 bash ./scripts/dev/docker-start-bff-agent.sh --no-build
+```
 
+```bash
 # 3. 一键启动全栈容器集群（Agent + 3 大 Go 中台微服务 + Go BFF + Web UI）
 bash ./scripts/dev/docker-start-all.sh
+```
 
+```bash
 # 4. 联动启动本地 vLLM 大模型推理容器（需要 NVIDIA GPU 与 Container Toolkit）
 bash ./scripts/dev/docker-start-all.sh --with-llm
+```
 
+```bash
 # 5. 独立启动 Agent 容器（core 为轻量纯 CPU 镜像，ml 为含 PyTorch/Transformers 的重型镜像）
-bash ./scripts/dev/docker-start-agent.sh core    # 启动 core 镜像
-bash ./scripts/dev/docker-start-agent.sh ml      # 启动 ml 镜像
-bash ./scripts/dev/docker-stop-agent.sh         # 停止 Agent 容器
+# 启动 core 镜像
+bash ./scripts/dev/docker-start-agent.sh core    
+```
 
+```bash
+# 启动 ml 镜像
+bash ./scripts/dev/docker-start-agent.sh ml      
+```
+
+```bash
+# 停止 Agent 容器
+bash ./scripts/dev/docker-stop-agent.sh         
+```
+
+```bash
 # 6. 独立启动/停止本地 vLLM 大模型容器 (:8000)
 bash ./scripts/dev/docker-start-llm.sh
-bash ./scripts/dev/docker-stop-llm.sh
+```
 
+```bash
+bash ./scripts/dev/docker-stop-llm.sh
+```
+
+```bash
 # 7. 启动 Prometheus (:9090) + Grafana (:3000) 监控大屏
 docker compose --profile monitoring up -d
+```
 
+```bash
 # 8. 一键停止全部开发容器及虚拟网络
 bash ./scripts/dev/docker-stop.sh
 ```
@@ -285,33 +329,57 @@ bash ./scripts/dev/docker-stop.sh
 ```bash
 # 1. 运行控制台全套 E2E 自动化测试（Mock Agent + Go BFF + Vite Web 自动化联测）
 bash ./scripts/dev/run_console_e2e_tests.sh
+```
 
+```bash
 # 2. 运行 3 大中台微服务全流程集成测试（接口连通性、流水线调度与审计存证）
 bash ./scripts/dev/integration-test-new-modules.sh
+```
 
+```bash
 # 3. 运行隐私保护原语（脱敏/DP/K-Anon）基准性能压测
 bash ./scripts/dev/benchmark_performance.sh
+```
 
+```bash
 # 4. 全微服务健康诊断探针巡检（检查 Agent、BFF 与 3 大中台服务存活性）
 bash ./scripts/dev/health_check.sh
-bash ./scripts/dev/health_check.sh --all
+```
 
+```bash
+bash ./scripts/dev/health_check.sh --all
+```
+
+```bash
 # 5. 检查各微服务 Prometheus /metrics 端点连通性
 bash ./scripts/dev/check_metrics_endpoints.sh
+```
 
+```bash
 # 6. 启动 / 停止 Prometheus 与 Grafana 本地监控栈
 bash ./scripts/dev/start_monitoring.sh
-bash ./scripts/dev/stop_monitoring.sh
+```
 
+```bash
+bash ./scripts/dev/stop_monitoring.sh
+```
+
+```bash
 # 7. 本地开发环境依赖巡检（检查 Python, Go, Node.js, pnpm 及端口占用）
 bash ./scripts/dev/verify_console_environment.sh
+```
 
+```bash
 # 8. 一键重新生成全套 mTLS 开发测试证书链（CA, Server, Client 证书与私钥）
 bash ./scripts/dev/generate_all_test_certs.sh
+```
 
+```bash
 # 9. 重置并清理开发阶段生成的 SQLite 隐私预算数据库
 bash ./scripts/dev/clean_privacy_budget_db.sh
+```
 
+```bash
 # 10. 启动轻量级 Python Mock Agent 桩服务（无 ML 依赖快速联调）
 python scripts/dev/mock_agent_server.py
 ```
@@ -387,10 +455,14 @@ PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/han
 ```bash
 # 构建 core 镜像（推荐，轻量算力镜像，不含 ML 大依赖）
 make docker-core
+```
 
+```bash
 # 构建 ml 镜像（含 Torch/Transformers/ModelScope 依赖）
 make docker-ml
+```
 
+```bash
 # 校验 Helm 语法与模板渲染
 make helm-lint && make helm-template
 ```
@@ -399,6 +471,9 @@ make helm-lint && make helm-template
 
 ```bash
 pip install -e .
+```
+
+```bash
 # 或安装完整开发依赖
 pip install -e ".[dev,observability,docs]"
 ```
@@ -448,7 +523,9 @@ helm install privshield ./deploy/helm/PrivShield \
 ```bash
 # 构建 service-hub 镜像（构建上下文必须为仓库根目录）
 docker build -f services/service-hub/Dockerfile -t service-hub:latest .
+```
 
+```bash
 # 部署 service-hub 的 Service、Deployment 和 SQLite PVC
 kubectl apply -k deploy/k8s/service-hub/
 ```
@@ -465,7 +542,9 @@ kubectl apply -k deploy/k8s/service-hub/
 ```bash
 # 本地热重载预览 (http://127.0.0.1:8000)
 make docs-serve
+```
 
+```bash
 # 静态站点全量构建 (site/)
 make docs-build
 ```
