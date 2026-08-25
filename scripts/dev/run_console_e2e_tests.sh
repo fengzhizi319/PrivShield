@@ -75,58 +75,59 @@ fi
 echo -e "${GREEN}Mock Agent 已启动 (PID: ${MOCK_PID})${NC}"
 
 # ── 步骤 2：运行 Go BFF 网关 (REST/gRPC/mTLS) 与共享库测试 ────────────────
-echo -e "\n${YELLOW}[步骤 2/4] 运行 Console BFF-Go (REST/gRPC/mTLS) 与 Pkg 基础库测试...${NC}"
+echo -e "\n${YELLOW}[步骤 2/3] 运行 Console BFF-Go (REST/gRPC/mTLS) 与 Pkg 基础库测试...${NC}"
 if command -v go &> /dev/null && [ -d "console/bff-go" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
-    (
-        go test -v ./pkg/... ./console/bff-go/...
-    )
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}[成功] Go BFF 与 Pkg 基础库测试通过！${NC}"
+    if go test -v ./pkg/... ./console/bff-go/...; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "${GREEN}[成功] Go BFF 与 Pkg 基础库测试通过！${NC}"
+    else
+        echo -e "${RED}[失败] Go BFF 与 Pkg 基础库测试未通过！${NC}"
+    fi
 else
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     echo -e "${YELLOW}[跳过] 未发现 go 命令或 console/bff-go 目录。${NC}"
 fi
 
 # ── 步骤 3：运行 Services 微服务群测试 ────────────────────────────────────
-echo -e "\n${YELLOW}[步骤 3/4] 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试...${NC}"
+echo -e "\n${YELLOW}[步骤 3/3] 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试...${NC}"
 if command -v go &> /dev/null && [ -d "services" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
-    (
-        go test ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...
-    )
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}[成功] Services 中台微服务群测试通过！${NC}"
+    if go test ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "${GREEN}[成功] Services 中台微服务群测试通过！${NC}"
+    else
+        echo -e "${RED}[失败] Services 中台微服务群测试未通过！${NC}"
+    fi
 else
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     echo -e "${YELLOW}[跳过] 未发现 go 命令或 services 目录。${NC}"
 fi
 
 # ── 步骤 4：运行 Web 前端组件与单元测试 ───────────────────────────────────
-echo -e "\n${YELLOW}[步骤 4/4] 运行 Console Web (React) 组件与自动化测试...${NC}"
+echo -e "\n${YELLOW}[步骤 3/3] 运行 Console Web (React) 组件与自动化测试...${NC}"
 if [ -d "console/web" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
-    (
-        cd console/web
-        if command -v corepack &> /dev/null; then
-            corepack pnpm test -- --run
-        elif command -v pnpm &> /dev/null; then
-            pnpm test -- --run
-        elif command -v npm &> /dev/null; then
-            npm test -- --run
-        else
-            echo "未找到 pnpm 或 npm 包管理器，跳过前端测试运行"
-            exit 1
-        fi
-    )
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}[成功] React 前端组件测试通过！${NC}"
+    WEB_TEST_OK=false
+    if (cd console/web && command -v corepack &> /dev/null && corepack pnpm test -- --run); then
+        WEB_TEST_OK=true
+    elif (cd console/web && command -v pnpm &> /dev/null && pnpm test -- --run); then
+        WEB_TEST_OK=true
+    elif (cd console/web && command -v npm &> /dev/null && npm test -- --run); then
+        WEB_TEST_OK=true
+    fi
+    if [ "$WEB_TEST_OK" = true ]; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "${GREEN}[成功] React 前端组件测试通过！${NC}"
+    else
+        echo -e "${RED}[失败] React 前端组件测试未通过！${NC}"
+    fi
 else
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     echo -e "${YELLOW}[跳过] 未发现 console/web 目录。${NC}"
 fi
 
-# ── 步骤 6：汇总测试结果与状态输出 ────────────────────────────────────────
+# ── 步骤 4：汇总测试结果与状态输出 ────────────────────────────────────────
 echo -e "\n${BLUE}====================================================${NC}"
 echo -e "${BLUE}           E2E 集成测试执行结果汇总                ${NC}"
 echo -e "${BLUE}====================================================${NC}"

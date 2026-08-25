@@ -48,7 +48,7 @@ log_step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
 
 check_go() {
     if ! command -v "$GO_BIN" &>/dev/null; then
-        for p in /Users/charles/go/go1.27.0/bin/go /usr/local/go/bin/go; do
+        for p in /usr/local/go/bin/go /opt/homebrew/bin/go; do
             if [ -x "$p" ]; then
                 GO_BIN="$p"
                 break

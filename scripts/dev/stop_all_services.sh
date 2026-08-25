@@ -4,9 +4,9 @@
 # 脚本说明: 优雅关闭 PrivShield 后台拉起的所有服务实例（Agent、BFF、微服务群）。
 #
 # 执行步骤总览：
-#   1. 读取 .logs/agent.pid 并发送 SIGTERM 终止 Agent 主进程
-#   2. 读取 .logs/console.pid 并发送 SIGTERM 终止 Console 代理后端进程
-#   3. 读取 .logs/*.pid 终止各微服务进程 (service-hub, datasource-mgr, audit-log)
+#   1. 读取 .pids/agent.pid 并发送 SIGTERM 终止 Agent 主进程
+#   2. 读取 .pids/console.pid 并发送 SIGTERM 终止 Console 代理后端进程
+#   3. 读取 .pids/*.pid 终止各微服务进程 (service-hub, datasource-mgr, audit-log)
 #   4. 通过 pkill 按进程全名进行幂等兜底清理，确保无残留后台孤儿进程
 #
 # 用法 / Usage:
@@ -26,7 +26,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
-LOG_DIR="$PROJECT_ROOT/.logs"
+PIDS_DIR="$PROJECT_ROOT/.pids"
+LEGACY_PIDS_DIR="$PROJECT_ROOT/console/.pids"
 
 echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} 正在优雅停止 PrivShield 全栈服务集群...${NC}"
@@ -46,12 +47,16 @@ stop_by_pid() {
     fi
 }
 
-# ── 步骤 1：按 PID 文件停止各服务进程 ─────────────────────────────────────
-stop_by_pid "${LOG_DIR}/agent.pid" "Agent 侧边栏引擎"
-stop_by_pid "${LOG_DIR}/console.pid" "Console BFF 代理网关"
-stop_by_pid "${LOG_DIR}/service-hub.pid" "Service Hub 调度中枢"
-stop_by_pid "${LOG_DIR}/datasource-mgr.pid" "Datasource Mgr 数据源管理"
-stop_by_pid "${LOG_DIR}/audit-log.pid" "Audit Log 审计日志"
+# ── 步骤 1：按 PID 文件停止各服务进程（新版 .pids/ + 旧版 console/.pids/）──
+for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
+    if [[ -d "$dir" ]]; then
+        stop_by_pid "${dir}/agent.pid" "Agent 侧边栏引擎"
+        stop_by_pid "${dir}/console.pid" "Console BFF 代理网关"
+        stop_by_pid "${dir}/service-hub.pid" "Service Hub 调度中枢"
+        stop_by_pid "${dir}/datasource-mgr.pid" "Datasource Mgr 数据源管理"
+        stop_by_pid "${dir}/audit-log.pid" "Audit Log 审计日志"
+    fi
+done
 
 # ── 步骤 2：按进程名兜底清理 (确保无残留孤儿进程) ─────────────────────────
 pkill -f "engine.server" 2>/dev/null || true

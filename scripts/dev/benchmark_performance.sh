@@ -83,7 +83,7 @@ echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE} PrivShield 性能基准测试与吞吐压测${NC}"
 echo -e "${BLUE} 目标服务器 : ${BASE_URL}${NC}"
 echo -e "${BLUE} 总请求量   : ${NUM_REQUESTS} 次${NC}"
-echo -e "${BLUE} 并发并发数 : ${CONCURRENCY} 线程${NC}"
+echo -e "${BLUE} 并发线程数 : ${CONCURRENCY} 线程${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
 # 使用内嵌 Python 脚本并发发送 HTTP 请求，精准统计时延分布与 RPS

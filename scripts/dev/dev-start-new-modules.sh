@@ -43,7 +43,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # ── Go 编译器自动探测：优先 PATH，回退到常见安装路径 ──────────────────
 if ! command -v "$GO_BIN" &>/dev/null; then
-    for p in /Users/charles/go/go1.27.0/bin/go /usr/local/go/bin/go; do
+    for p in /usr/local/go/bin/go /opt/homebrew/bin/go; do
         if [ -x "$p" ]; then
             GO_BIN="$p"
             break

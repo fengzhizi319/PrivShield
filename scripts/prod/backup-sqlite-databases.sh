@@ -75,9 +75,9 @@ COMPRESS_ENABLED="${COMPRESS_ENABLED:-true}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 HASH_FILE="${BACKUP_DIR}/.db_hashes"
 
-SERVICE_HUB_DB_PATH="${SERVICE_HUB_DB_PATH:-$(find_default_db "service_hub.db")}"
-AUDIT_LOG_DB_PATH="${AUDIT_LOG_DB_PATH:-$(find_default_db "audit_log.db")}"
-DATASOURCE_MGR_DB_PATH="${DATASOURCE_MGR_DB_PATH:-$(find_default_db "datasource_mgr.db")}"
+SERVICE_HUB_DB_PATH="${SERVICE_HUB_DB_PATH:-$(find_default_db "service-hub.db")}"
+AUDIT_LOG_DB_PATH="${AUDIT_LOG_DB_PATH:-$(find_default_db "audit-log.db")}"
+DATASOURCE_MGR_DB_PATH="${DATASOURCE_MGR_DB_PATH:-$(find_default_db "datasource-mgr.db")}"
 PRIVACY_BUDGET_DB_PATH="${PRIVACY_BUDGET_DB_PATH:-$(find_default_db "privacy_budget.db")}"
 
 # 解析参数

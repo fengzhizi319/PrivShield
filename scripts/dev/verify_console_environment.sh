@@ -77,18 +77,15 @@ fi
 # 4. 执行前端静态编译类型检查
 echo -e "\n${YELLOW}[4/4] 验证 Web 前端 TypeScript 类型系统...${NC}"
 if [ -d "console/web" ]; then
-    (
-        cd console/web
-        if [ -d "node_modules" ]; then
-            echo -e "正在执行 TypeScript 类型构建校验 (tsc)..."
-            npx tsc --noEmit && echo -e "${GREEN}TypeScript 类型检查通过！${NC}" || {
-                echo -e "${RED}[错误] TypeScript 类型校验报错，请修正！${NC}"
-                ERRORS=$((ERRORS + 1))
-            }
-        else
-            echo -e "${YELLOW}未找到 console/web/node_modules。请先执行: cd console/web && pnpm install${NC}"
-        fi
-    )
+    if [ -d "console/web/node_modules" ]; then
+        echo -e "正在执行 TypeScript 类型构建校验 (tsc)..."
+        (cd console/web && npx tsc --noEmit) && echo -e "${GREEN}TypeScript 类型检查通过！${NC}" || {
+            echo -e "${RED}[错误] TypeScript 类型校验报错，请修正！${NC}"
+            ERRORS=$((ERRORS + 1))
+        }
+    else
+        echo -e "${YELLOW}未找到 console/web/node_modules。请先执行: cd console/web && pnpm install${NC}"
+    fi
 fi
 
 echo -e "\n${BLUE}====================================================${NC}"
