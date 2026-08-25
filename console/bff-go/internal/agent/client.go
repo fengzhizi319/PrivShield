@@ -135,6 +135,9 @@ func New(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to dial agent gRPC %s: %w", target, err)
 	}
 
+	// 立即主动发起子通道连接与 TCP 握手，消除首个请求冷启动 2 秒级别的连接等待开销
+	conn.Connect()
+
 	// 组装 Client 结构体并返回
 	return &Client{
 		conn:   conn,                                              // 保存 gRPC 连接引用，供 Close() 使用

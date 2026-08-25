@@ -75,6 +75,13 @@ func main() {
 	// 注册 defer：main 函数退出前自动关闭 gRPC 连接，释放底层 TCP 连接与 HTTP/2 流
 	defer func() { _ = client.Close() }()
 
+	// 异步预热上游 gRPC 与 REST 连接，彻底消除首次请求的冷启动延迟
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _ = client.Health(ctx)
+	}()
+
 	// ── 步骤 3：初始化 HTTP 路由 ─────────────────────────────────────
 	// 将 Gin 设置为发布模式，关闭调试日志输出，提升性能
 	gin.SetMode(gin.ReleaseMode)
