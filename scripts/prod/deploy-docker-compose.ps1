@@ -19,6 +19,9 @@
 .PARAMETER WithMonitoring
     启用 Prometheus + Grafana 生产监控套件
 
+.PARAMETER WithPostgres
+    启用 Phase B PostgreSQL 多副本 Hub 模式
+
 .PARAMETER Build
     强制重新构建容器镜像
 #>
@@ -27,6 +30,7 @@
 param (
     [switch]$WithLlm,
     [switch]$WithMonitoring,
+    [switch]$WithPostgres,
     [switch]$Build,
     [switch]$Help
 )
@@ -35,7 +39,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "用法 / Usage: .\scripts\prod\deploy-docker-compose.ps1 [-WithLlm] [-WithMonitoring] [-Build]"
+    Write-Host "用法 / Usage: .\scripts\prod\deploy-docker-compose.ps1 [-WithLlm] [-WithMonitoring] [-WithPostgres] [-Build]"
     exit 0
 }
 
@@ -62,6 +66,7 @@ if (-not (Test-Path $LogsDir)) { New-Item -ItemType Directory -Path $LogsDir | O
 $Profiles = @()
 if ($WithLlm) { $Profiles += @("--profile", "llm") }
 if ($WithMonitoring) { $Profiles += @("--profile", "monitoring") }
+if ($WithPostgres) { $Profiles += @("--profile", "phase-b") }
 
 Set-Location $ComposeDir
 
@@ -76,5 +81,11 @@ Write-Host "🎉 PrivShield 生产级服务已成功启动！" -ForegroundColor 
 Write-Host "  • 核心 Agent REST API : http://127.0.0.1:8079" -ForegroundColor Green
 Write-Host "  • 核心 Agent gRPC RPC : 127.0.0.1:50051" -ForegroundColor Green
 Write-Host "  • Web 控制台 UI       : http://127.0.0.1:5173" -ForegroundColor Green
-Write-Host "  • Go 代理后端 REST    : http://127.0.0.1:8081" -ForegroundColor Green
+Write-Host "  • Go BFF 代理网关 REST: http://127.0.0.1:8081" -ForegroundColor Green
+Write-Host "  • 调度中枢 Service Hub: http://127.0.0.1:8082" -ForegroundColor Green
+Write-Host "  • 数据源管理 Datasource: http://127.0.0.1:8083" -ForegroundColor Green
+Write-Host "  • 脱敏审计日志 AuditLog: http://127.0.0.1:8084" -ForegroundColor Green
+if ($WithPostgres) {
+    Write-Host "  • PostgreSQL (Phase B) : 127.0.0.1:5432 (privshield_hub)" -ForegroundColor Green
+}
 Write-Host "============================================================================" -ForegroundColor Cyan

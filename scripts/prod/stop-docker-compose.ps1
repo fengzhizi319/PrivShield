@@ -12,11 +12,15 @@
 
 .PARAMETER Volumes
     同时清理持久化数据卷 (慎用)
+
+.PARAMETER WithPostgres
+    同时停止 Phase B PostgreSQL 容器
 #>
 
 [CmdletBinding()]
 param (
     [switch]$Volumes,
+    [switch]$WithPostgres,
     [switch]$Help
 )
 
@@ -24,7 +28,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "用法 / Usage: .\scripts\prod\stop-docker-compose.ps1 [-Volumes]"
+    Write-Host "用法 / Usage: .\scripts\prod\stop-docker-compose.ps1 [-Volumes] [-WithPostgres]"
     exit 0
 }
 
@@ -39,7 +43,9 @@ Write-Host "====================================================================
 Set-Location $ComposeDir
 
 $VolArg = if ($Volumes) { "--volumes" } else { "" }
-& docker compose --profile llm --profile monitoring down $VolArg
+$Profiles = @("--profile", "llm", "--profile", "monitoring")
+if ($WithPostgres) { $Profiles += @("--profile", "phase-b") }
+& docker compose @Profiles down $VolArg
 
 Write-Host ""
 Write-Host "✅ PrivShield 生产容器集群已成功停止。" -ForegroundColor Green
