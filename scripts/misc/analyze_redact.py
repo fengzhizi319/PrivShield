@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """临时分析脚本：验证 redact_medical_text 的若干疑点（不改动源码）。"""
 import sys
 import time

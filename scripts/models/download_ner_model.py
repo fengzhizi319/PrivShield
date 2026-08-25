@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """下载 Small-NER ONNX 模型与词表文件。
 
 支持通过 ModelScope 社区进行本地下载，以及使用对应的 urllib 镜像下载。

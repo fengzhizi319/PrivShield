@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """临时诊断：复刻 Qwen3Classifier 完整 prompt，检查生成 token 序列。"""
 import os
 import sys

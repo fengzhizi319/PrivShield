@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """本地多模态大模型一键下载工具。
 
 支持通过 ModelScope (首选) 或 Hugging Face 镜像站高速下载 Qwen2-VL-2B-Instruct 模型权重。
