@@ -34,6 +34,7 @@
 - **参数选项**:
   - `--with-llm`: 联动部署本地 vLLM 大模型推理服务容器 (`:8000`)。
   - `--with-monitoring`: 联动部署 Prometheus 与 Grafana 监控容器。
+  - `--with-postgres`: 启用 Phase B PostgreSQL 多副本 Hub 模式。
   - `--agent-only`: 仅部署核心 PrivShield Agent 容器。
 - **执行命令**:
   ```bash
@@ -42,6 +43,9 @@
 
   # Linux / macOS: 带本地大模型与监控部署
   bash ./scripts/prod/deploy-docker-compose.sh --with-llm --with-monitoring
+
+  # Linux / macOS: 启用 Phase B PostgreSQL 多副本 Hub 模式
+  bash ./scripts/prod/deploy-docker-compose.sh --with-postgres
   ```
   ```powershell
   # Windows (PowerShell)
@@ -54,6 +58,7 @@
 - **作用说明**: 优雅停止并销毁由生产 Docker Compose 启动的全部容器服务。
 - **参数选项**:
   - `--volumes`: 同时清理生产挂载的数据卷。
+  - `--with-postgres`: 同时停止 Phase B PostgreSQL 容器。
 - **执行命令**:
   ```bash
   # Linux / macOS (Bash)

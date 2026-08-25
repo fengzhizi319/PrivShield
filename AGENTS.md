@@ -371,7 +371,7 @@ Address these before any hardened production deployment.
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
 | Run Docker Console Trio (Agent+BFF+Web) | `bash ./scripts/dev/docker-start-bff-agent.sh` |
-| Run Docker Full Stack (Agent+Go BFF+Web+3 Services) | `bash ./scripts/dev/docker-start-all.sh [--with-llm]` |
+| Run Docker Full Stack (Agent+Go BFF+Web+3 Services) | `bash ./scripts/dev/docker-start-all.sh [--with-llm] [--with-postgres] [--with-monitoring]` |
 | Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
 | Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |
 | Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
@@ -388,8 +388,8 @@ Address these before any hardened production deployment.
 | Serve docs | `make docs-serve` |
 | Download LLM | `python -m engine.privacy.download_model` |
 | Download NER | `python -m engine.privacy.download_ner_model` |
-| Deploy Prod Compose | `bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--agent-only]` |
-| Stop Prod Compose | `bash ./scripts/prod/stop-docker-compose.sh` |
+| Deploy Prod Compose | `bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--with-postgres] [--agent-only]` |
+| Stop Prod Compose | `bash ./scripts/prod/stop-docker-compose.sh [--with-postgres]` |
 | Run Prod Docker Agent | `bash ./scripts/prod/docker-start-agent.sh [core|ml]` |
 | Stop Prod Docker Agent | `bash ./scripts/prod/docker-stop-agent.sh` |
 | Deploy Prod Helm | `bash ./scripts/prod/deploy-helm.sh` |

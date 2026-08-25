@@ -306,7 +306,7 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  # 6. Prometheus 监控 (Profile: monitoring)
+  # 9. Prometheus 监控 (Profile: monitoring)
   prometheus:
     profiles: ["monitoring"]
     image: prom/prometheus:v2.54.1
@@ -326,7 +326,7 @@ services:
       - "--web.enable-lifecycle"
     restart: unless-stopped
 
-  # 7. Grafana 可视化面板 (Profile: monitoring)
+  # 10. Grafana 可视化面板 (Profile: monitoring)
   grafana:
     profiles: ["monitoring"]
     image: grafana/grafana:11.2.0
@@ -347,7 +347,7 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 8. 可选：Phase B PostgreSQL（多副本 service-hub 原子租约后端）
+  # 11. 可选：Phase B PostgreSQL（多副本 service-hub 原子租约后端）
   #    PORT: 5432
   #    启用：docker compose -f docker-compose.dev.yml --profile phase-b up -d
   #    Phase B: PostgreSQL for multi-replica service-hub with atomic leases

@@ -52,6 +52,7 @@ deploy/
 | **audit-log** (`services/audit-log`) | 脱敏审计日志 | `8084` | Go |
 | **vllm**（可选，`--profile llm`） | Layer-3 LLM 推理（GPU） | `8000` | vLLM |
 | **redis**（仅生产编排） | 分布式限流后端 | `6379`（内部） | Redis |
+| **phase-b-postgres**（可选，`--profile phase-b`） | Phase B 多副本 Hub 原子租约后端 | `5432` | PostgreSQL |
 | **prometheus / grafana**（可选，`--profile monitoring`） | 监控与可视化 | `9090` / `3000` | Prometheus / Grafana |
 
 调用链路：`console-web → bff-go → PrivShield(REST/gRPC)`；
@@ -87,6 +88,7 @@ cd deploy/docker-compose
 docker compose up -d                              # 基础全栈
 docker compose --profile llm up -d                # + vLLM GPU 推理
 docker compose --profile monitoring up -d         # + Prometheus/Grafana
+docker compose --profile phase-b up -d            # + Phase B PostgreSQL (多副本 Hub)
 ```
 
 ### 4.2 生产编排
@@ -115,7 +117,7 @@ JSON 结构化日志（json-file 滚动）、命名卷持久化（预算库/审�
 或使用一键脚本：
 
 ```bash
-bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--agent-only]
+bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--with-postgres] [--agent-only]
 bash ./scripts/prod/stop-docker-compose.sh
 ```
 

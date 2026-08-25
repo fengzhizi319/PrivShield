@@ -616,7 +616,7 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 6. 可选：Prometheus 监控服务（抓取 agent /metrics 指标）
+  # 9. 可选：Prometheus 监控服务（抓取 agent /metrics 指标）
   #     PORT: 9090
   #     启用：docker compose --profile monitoring up -d
   # ===========================================================================
@@ -651,7 +651,7 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 7. 可选：Grafana 可视化面板（对接 Prometheus 数据源）
+  # 10. 可选：Grafana 可视化面板（对接 Prometheus 数据源）
   #     PORT: 3000
   #     启用：docker compose --profile monitoring up -d
   # ===========================================================================
@@ -693,7 +693,7 @@ services:
     restart: unless-stopped
 
   # ===========================================================================
-  # 8. 可选：Phase B PostgreSQL（多副本 service-hub 原子租约后端）
+  # 11. 可选：Phase B PostgreSQL（多副本 service-hub 原子租约后端）
   #    PORT: 5432
   #    启用：docker compose --profile phase-b up -d
   #    Phase B: PostgreSQL for multi-replica service-hub with atomic leases

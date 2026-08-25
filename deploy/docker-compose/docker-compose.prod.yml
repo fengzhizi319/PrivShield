@@ -458,7 +458,7 @@ services:
     restart: always
 
   # ===========================================================================
-  # 6. Prometheus 生产监控指标采集 (Profile: monitoring)
+  # 9. Prometheus 生产监控指标采集 (Profile: monitoring)
   #    PORT: 9090
   # ===========================================================================
   prometheus:
@@ -491,7 +491,7 @@ services:
     restart: always
 
   # ===========================================================================
-  # 7. Grafana 可视化监控大屏 (Profile: monitoring)
+  # 10. Grafana 可视化监控大屏 (Profile: monitoring)
   #    PORT: 3000
   # ===========================================================================
   grafana:
@@ -524,7 +524,7 @@ services:
     restart: always
 
   # ===========================================================================
-  # 8. Phase B: PostgreSQL 多副本 service-hub 原子租约后端 (Profile: phase-b)
+  # 11. Phase B: PostgreSQL 多副本 service-hub 原子租约后端 (Profile: phase-b)
   #    PORT: 5432
   #    启用：docker compose -f docker-compose.prod.yml --profile phase-b up -d
   # ===========================================================================
