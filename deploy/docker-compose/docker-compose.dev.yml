@@ -17,6 +17,9 @@
 #
 #   # 启动并启用监控套件
 #   docker compose -f docker-compose.dev.yml --profile monitoring up -d
+#
+#   # 启动 Phase B PostgreSQL（多副本 Hub 模式）
+#   docker compose -f docker-compose.dev.yml --profile phase-b up -d
 # =============================================================================
 
 networks:
@@ -37,6 +40,8 @@ volumes:
   prometheus-data-dev:
     driver: local
   grafana-data-dev:
+    driver: local
+  phase-b-pg-data-dev:
     driver: local
 
 services:
@@ -216,4 +221,34 @@ services:
       - frontend
     depends_on:
       - prometheus
+    restart: unless-stopped
+
+  # ===========================================================================
+  # 8. 可选：Phase B PostgreSQL（多副本 service-hub 原子租约后端）
+  #    PORT: 5432
+  #    启用：docker compose -f docker-compose.dev.yml --profile phase-b up -d
+  #    Phase B: PostgreSQL for multi-replica service-hub with atomic leases
+  #    Enable: docker compose -f docker-compose.dev.yml --profile phase-b up -d
+  # ===========================================================================
+  phase-b-postgres:
+    profiles: ["phase-b"]
+    image: postgres:16-alpine
+    container_name: privshield-phase-b-postgres-dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: "privshield_hub"
+      POSTGRES_USER: "${PG_USER:-privshield}"
+      POSTGRES_PASSWORD: "${PG_PASSWORD:-privshield_dev}"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - phase-b-pg-data-dev:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-privshield} -d privshield_hub"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
