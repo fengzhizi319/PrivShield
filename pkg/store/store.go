@@ -6,7 +6,10 @@
 // 各模块可独立选择内存实现（开发）或 SQLite 实现（生产）。
 package store
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // ─────────────────────────────────────────────────────────────
 // Task Store (service-hub) / 任务存储
@@ -28,6 +31,13 @@ type Task struct {
 	PayloadJSON string     `json:"-"`             // Raw payload (not exposed in JSON)
 	RetryCount  int        `json:"retry_count"`   // Number of retry attempts (replaces fragile string matching)
 	RetryAfter  *time.Time `json:"retry_after,omitempty"` // Earliest time for next retry (backoff delay)
+
+	// ── Phase B: Lease fields for multi-replica Hub / 多副本 Hub 租约字段 ──
+	LeaseOwner     string     `json:"lease_owner,omitempty"`      // Hub instance that owns the current lease
+	LeaseToken     string     `json:"lease_token,omitempty"`      // Unique token for this lease (prevents stale writes)
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"` // When the lease expires (nil = not leased)
+	Version        int        `json:"version"`                    // Optimistic concurrency version counter
+	MaxRetries     int        `json:"max_retries"`                // Maximum retry attempts allowed (default 3)
 }
 
 // TaskFilter specifies filtering criteria for listing tasks.
@@ -53,6 +63,69 @@ type TaskStore interface {
 	Update(task *Task) error
 	Counts() (TaskCounts, error)
 	CleanupOld(before time.Time) (int64, error) // Delete terminal tasks older than cutoff / 清理过期终态任务
+}
+
+// ─────────────────────────────────────────────────────────────
+// LeasedTaskStore — Phase B: Atomic task ownership for multi-replica Hub
+// 原子任务领取与租约接口，支持多副本 Hub 安全并发调度。
+// ─────────────────────────────────────────────────────────────
+
+// ErrLeaseNotSupported is returned by backends that cannot provide lease semantics.
+// 当存储后端不支持租约语义时返回此错误（如 SQLite / 内存实现）。
+var ErrLeaseNotSupported = errors.New("this store backend does not support multi-replica task leases; use PostgreSQL for Phase B deployment")
+
+// TaskLease wraps a claimed task with its ownership metadata.
+// TaskLease 封装已领取的任务及其所有权元数据。
+type TaskLease struct {
+	Task      *Task     // The claimed task / 已领取的任务
+	Owner     string    // Hub instance identifier that claimed this task
+	Token     string    // Unique token for this lease (prevents stale writes)
+	ExpiresAt time.Time // Absolute lease expiry time
+}
+
+// TaskResult encapsulates the successful output of a task.
+// TaskResult 封装任务成功执行的结果。
+type TaskResult struct {
+	OutputJSON string // Serialized output payload
+	Stage      string // Final pipeline stage reached (typically "done")
+}
+
+// TaskFailure encapsulates the reason a task failed.
+// TaskFailure 封装任务失败的原因与分类。
+type TaskFailure struct {
+	Error       string // Human-readable error description
+	Retryable   bool   // Whether the failure is transient and worth retrying
+	ErrorClass  string // Error classification (e.g. "timeout", "downstream", "internal")
+}
+
+// LeasedTaskStore extends TaskStore with atomic lease operations for multi-replica Hub.
+// 所有条件更新方法返回 (bool, error)：bool 表示条件更新是否实际取得一行（即是否仍持有所有权）。
+// 调用方不得忽略 bool 返回值——当返回 false 时，当前副本已失去任务所有权，必须停止处理。
+//
+// SQLite / 内存实现返回 ErrLeaseNotSupported；PostgreSQL 实现提供完整原子语义。
+type LeasedTaskStore interface {
+	TaskStore
+
+	// ClaimNext atomically claims the next pending task for the given owner.
+	// 使用 FOR UPDATE SKIP LOCKED 实现无阻塞竞争领取；无可用任务时返回 (nil, nil)。
+	ClaimNext(owner string, leaseTTL time.Duration) (*TaskLease, error)
+
+	// RenewLease extends the lease for a task, conditional on ownership and non-expiry.
+	// 返回 false 表示租约已过期或所有权已丢失。
+	RenewLease(id, owner, token string, leaseTTL time.Duration) (bool, error)
+
+	// CompleteLease marks a task as completed, conditional on ownership.
+	// 返回 false 表示当前副本已失去所有权。
+	CompleteLease(id, owner, token string, result TaskResult) (bool, error)
+
+	// FailLease marks a task as failed, conditional on ownership.
+	// 若 failure.Retryable 为 true 且重试次数未耗尽，任务回退为 pending。
+	// 返回 false 表示当前副本已失去所有权。
+	FailLease(id, owner, token string, failure TaskFailure) (bool, error)
+
+	// RequeueExpiredLeases reclaims tasks whose lease has expired.
+	// 返回回收的任务数量。
+	RequeueExpiredLeases(limit int) (int, error)
 }
 
 // ─────────────────────────────────────────────────────────────

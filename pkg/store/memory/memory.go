@@ -128,6 +128,33 @@ func (s *TaskStore) CleanupOld(before time.Time) (int64, error) {
 	return count, nil
 }
 
+// ── Phase B: LeasedTaskStore stubs (not supported) / 租约桩实现（不支持） ──
+
+// ClaimNext is not supported on in-memory store; returns ErrLeaseNotSupported.
+func (s *TaskStore) ClaimNext(owner string, leaseTTL time.Duration) (*store.TaskLease, error) {
+	return nil, store.ErrLeaseNotSupported
+}
+
+// RenewLease is not supported on in-memory store; returns ErrLeaseNotSupported.
+func (s *TaskStore) RenewLease(id, owner, token string, leaseTTL time.Duration) (bool, error) {
+	return false, store.ErrLeaseNotSupported
+}
+
+// CompleteLease is not supported on in-memory store; returns ErrLeaseNotSupported.
+func (s *TaskStore) CompleteLease(id, owner, token string, result store.TaskResult) (bool, error) {
+	return false, store.ErrLeaseNotSupported
+}
+
+// FailLease is not supported on in-memory store; returns ErrLeaseNotSupported.
+func (s *TaskStore) FailLease(id, owner, token string, failure store.TaskFailure) (bool, error) {
+	return false, store.ErrLeaseNotSupported
+}
+
+// RequeueExpiredLeases is not supported on in-memory store; returns ErrLeaseNotSupported.
+func (s *TaskStore) RequeueExpiredLeases(limit int) (int, error) {
+	return 0, store.ErrLeaseNotSupported
+}
+
 // ─────────────────────────────────────────────────────────────
 // DataSourceStore / 数据源内存存储
 // ─────────────────────────────────────────────────────────────
@@ -565,9 +592,10 @@ func (s *AuditStore) CleanupOld(before time.Time) (int64, error) {
 
 // Ensure interface compliance at compile time.
 var (
-	_ store.TaskStore    = (*TaskStore)(nil)
+	_ store.TaskStore       = (*TaskStore)(nil)
+	_ store.LeasedTaskStore = (*TaskStore)(nil) // Methods return ErrLeaseNotSupported at runtime.
 	_ store.DataSourceStore = (*DataSourceStore)(nil)
-	_ store.AuditStore   = (*AuditStore)(nil)
+	_ store.AuditStore      = (*AuditStore)(nil)
 )
 
 // Unused import guard.

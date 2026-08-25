@@ -118,7 +118,12 @@ func InitTaskTables(db *sql.DB) error {
 			error TEXT,
 			payload_json TEXT,
 			retry_count INTEGER DEFAULT 0,
-			retry_after DATETIME
+			retry_after DATETIME,
+			lease_owner TEXT DEFAULT '',
+			lease_token TEXT DEFAULT '',
+			lease_expires_at DATETIME,
+			version INTEGER DEFAULT 0,
+			max_retries INTEGER DEFAULT 3
 		);
 		CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 		CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
@@ -162,7 +167,40 @@ func InitTaskTables(db *sql.DB) error {
 		}
 	}
 
+	// ── Phase B: Lease columns for multi-replica Hub / 多副本 Hub 租约列 ──
+	if !columns["lease_owner"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN lease_owner TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["lease_token"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN lease_token TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["lease_expires_at"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN lease_expires_at DATETIME"); err != nil {
+			return err
+		}
+	}
+	if !columns["version"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN version INTEGER DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	if !columns["max_retries"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN max_retries INTEGER DEFAULT 3"); err != nil {
+			return err
+		}
+	}
+
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_retry_after ON tasks(retry_after)"); err != nil {
+		return err
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_lease_expires ON tasks(lease_expires_at)"); err != nil {
+		return err
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, priority DESC, created_at) WHERE status='pending'"); err != nil {
 		return err
 	}
 

@@ -579,3 +579,55 @@ func TestValidateIntegrity_CorruptedDatabase(t *testing.T) {
 		t.Fatal("expected error for corrupted database")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase B: LeasedTaskStore rejection tests
+// SQLite 租约拒绝测试：验证所有租约方法返回 ErrLeaseNotSupported
+// ─────────────────────────────────────────────────────────────
+
+func TestLeasedTaskStore_ClaimNext_ReturnsNotSupported(t *testing.T) {
+	ts := setupTaskStore(t)
+	lease, err := ts.ClaimNext("hub-1", 60*time.Second)
+	if err != store.ErrLeaseNotSupported {
+		t.Fatalf("expected ErrLeaseNotSupported, got lease=%v err=%v", lease, err)
+	}
+}
+
+func TestLeasedTaskStore_RenewLease_ReturnsNotSupported(t *testing.T) {
+	ts := setupTaskStore(t)
+	ok, err := ts.RenewLease("task-1", "hub-1", "token", 60*time.Second)
+	if err != store.ErrLeaseNotSupported {
+		t.Fatalf("expected ErrLeaseNotSupported, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestLeasedTaskStore_CompleteLease_ReturnsNotSupported(t *testing.T) {
+	ts := setupTaskStore(t)
+	ok, err := ts.CompleteLease("task-1", "hub-1", "token", store.TaskResult{})
+	if err != store.ErrLeaseNotSupported {
+		t.Fatalf("expected ErrLeaseNotSupported, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestLeasedTaskStore_FailLease_ReturnsNotSupported(t *testing.T) {
+	ts := setupTaskStore(t)
+	ok, err := ts.FailLease("task-1", "hub-1", "token", store.TaskFailure{Error: "test"})
+	if err != store.ErrLeaseNotSupported {
+		t.Fatalf("expected ErrLeaseNotSupported, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestLeasedTaskStore_RequeueExpiredLeases_ReturnsNotSupported(t *testing.T) {
+	ts := setupTaskStore(t)
+	count, err := ts.RequeueExpiredLeases(10)
+	if err != store.ErrLeaseNotSupported {
+		t.Fatalf("expected ErrLeaseNotSupported, got count=%v err=%v", count, err)
+	}
+}
+
+// TestLeasedTaskStore_InterfaceCompliance verifies compile-time interface assertion.
+func TestLeasedTaskStore_InterfaceCompliance(t *testing.T) {
+	ts := setupTaskStore(t)
+	// This will fail at compile time if sqlite.TaskStore doesn't implement LeasedTaskStore.
+	var _ store.LeasedTaskStore = ts
+}
