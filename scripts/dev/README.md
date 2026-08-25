@@ -166,6 +166,8 @@
 - **作用说明**: 通过 Docker Compose 一键启动全栈容器集群（Agent + 3 大 Go 中台微服务 + Go BFF + Web 前端）。
 - **参数选项**:
   - `--with-llm`: 联动启动本地 vLLM 大语言模型推理容器 (`:8000`)。
+  - `--with-postgres`: 启动 Phase B PostgreSQL 多副本 Hub 模式。
+  - `--with-monitoring`: 启动 Prometheus + Grafana 监控栈。
   - `--no-build`: 跳过构建直接运行。
 - **执行命令**:
   ```bash
@@ -175,6 +177,9 @@
   ```bash
   # 带本地 vLLM 大模型容器联动启动
   bash ./scripts/dev/docker-start-all.sh --with-llm
+
+  # 全量启动 (LLM + PostgreSQL + 监控)
+  bash ./scripts/dev/docker-start-all.sh --with-llm --with-postgres --with-monitoring
   ```
 
 ---
