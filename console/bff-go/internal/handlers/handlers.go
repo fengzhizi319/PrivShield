@@ -474,13 +474,111 @@ func extractRestErrorDetail(body []byte, statusCode int) string {
 	return text
 }
 
+// normalizeRestPath 规范化 REST 路径别名与映射
+func normalizeRestPath(path string) string {
+	switch path {
+	case "/v1/privacy/health":
+		return "/health"
+	case "/v1/privacy/mask_batch":
+		return "/v1/privacy/mask/batch"
+	case "/v1/privacy/mask_dataframe":
+		return "/v1/privacy/mask/dataframe"
+	default:
+		return path
+	}
+}
+
+// normalizeRestPayload 将 gRPC 风格的 payload 自动转换为 FastAPI 期望的模型结构
+func normalizeRestPayload(path string, body json.RawMessage) (string, json.RawMessage) {
+	normPath := normalizeRestPath(path)
+	if len(body) == 0 {
+		return normPath, body
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return normPath, body
+	}
+
+	// 1. 扁平化 rows / data (protobuf Repeated Struct {"fields": {...}} -> 普通 JSON 字典切片)
+	for _, key := range []string{"rows", "data"} {
+		if rawSlice, ok := m[key].([]any); ok {
+			newSlice := make([]any, len(rawSlice))
+			for i, elem := range rawSlice {
+				if elemMap, ok := elem.(map[string]any); ok {
+					if fields, ok := elemMap["fields"].(map[string]any); ok {
+						newSlice[i] = fields
+						continue
+					}
+				}
+				newSlice[i] = elem
+			}
+			m[key] = newSlice
+		}
+	}
+
+	// 2. 扁平化 chunks / vectors (protobuf repeated Chunk {"values": [...]} -> 普通二维切片)
+	for _, key := range []string{"chunks", "vectors"} {
+		if rawSlice, ok := m[key].([]any); ok {
+			newSlice := make([]any, len(rawSlice))
+			for i, elem := range rawSlice {
+				if elemMap, ok := elem.(map[string]any); ok {
+					if values, ok := elemMap["values"]; ok {
+						newSlice[i] = values
+						continue
+					}
+				}
+				newSlice[i] = elem
+			}
+			m[key] = newSlice
+		}
+	}
+
+	// 3. 将 specs_json 解析为 specs 字典
+	if specsJSON, ok := m["specs_json"].(string); ok && specsJSON != "" {
+		var specs map[string]any
+		if err := json.Unmarshal([]byte(specsJSON), &specs); err == nil {
+			m["specs"] = specs
+		}
+		delete(m, "specs_json")
+	}
+
+	// 4. 针对 DP 接口，将顶层调优参数打包进 params 字典
+	if strings.HasPrefix(normPath, "/v1/privacy/dp/") {
+		params, _ := m["params"].(map[string]any)
+		if params == nil {
+			params = make(map[string]any)
+		}
+		dpParamKeys := []string{
+			"epsilon", "delta", "mechanism", "clip_lower", "clip_upper",
+			"sensitivity", "min_count", "target_quantile", "num_iterations",
+			"initial_clip", "max_norm",
+		}
+		for _, k := range dpParamKeys {
+			if v, exists := m[k]; exists {
+				params[k] = v
+			}
+		}
+		if len(params) > 0 {
+			m["params"] = params
+		}
+	}
+
+	newBytes, err := json.Marshal(m)
+	if err != nil {
+		return normPath, body
+	}
+	return normPath, json.RawMessage(newBytes)
+}
+
 // callRest 执行底层的 HTTP REST 请求并返回解析后的数据、HTTP 状态码和可能的错误。
 func (s *Server) callRest(ctx context.Context, method, path string, body json.RawMessage, rawPayloadB64, contentType string) (any, int, error) {
 	method = strings.ToUpper(method)
 	if method == "" {
 		method = "POST"
 	}
-	targetURL := s.agentRestBaseURL() + path
+	normPath, normBody := normalizeRestPayload(path, body)
+	targetURL := s.agentRestBaseURL() + normPath
 
 	var reqBodyReader io.Reader
 	if rawPayloadB64 != "" {
@@ -490,9 +588,9 @@ func (s *Server) callRest(ctx context.Context, method, path string, body json.Ra
 		}
 		reqBodyReader = bytes.NewReader(rawBytes)
 		// 二进制请求（如 Arrow IPC）：若附带 JSON body，将其作为 URL query params 传递
-		if len(body) > 0 {
+		if len(normBody) > 0 {
 			var paramsMap map[string]any
-			if err := json.Unmarshal(body, &paramsMap); err == nil && len(paramsMap) > 0 {
+			if err := json.Unmarshal(normBody, &paramsMap); err == nil && len(paramsMap) > 0 {
 				q := url.Values{}
 				for k, v := range paramsMap {
 					q.Set(k, fmt.Sprintf("%v", v))
@@ -504,8 +602,8 @@ func (s *Server) callRest(ctx context.Context, method, path string, body json.Ra
 				}
 			}
 		}
-	} else if len(body) > 0 {
-		reqBodyReader = bytes.NewReader(body)
+	} else if len(normBody) > 0 {
+		reqBodyReader = bytes.NewReader(normBody)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, method, targetURL, reqBodyReader)
@@ -604,6 +702,9 @@ func (s *Server) Batch(c *gin.Context) {
 		})
 		return
 	}
+
+	// 批量测试前重置预算，防止自动化测试/回归测试因预算耗尽而报错
+	_, _, _ = s.callRest(c.Request.Context(), "POST", "/v1/privacy/budget/reset", nil, "", "")
 
 	// 预分配结果切片，容量为请求数量以避免多次扩容
 	results := make([]models.BatchResultItem, 0, len(req.Requests))

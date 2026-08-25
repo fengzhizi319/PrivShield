@@ -758,3 +758,17 @@ class PrivacyService:
             当前命名空间下 epsilon 与 delta 的剩余量字典。
         """
         return self.registry.get_or_create(self.namespace).remaining()
+
+    def budget_reset(self, namespace: str | None = None) -> dict[str, float]:
+        """重置指定（或当前）命名空间的隐私预算。
+
+        Args:
+            namespace: 可选命名空间，默认为当前服务配置的命名空间。
+
+        Returns:
+            重置后当前命名空间的预算剩余字典。
+        """
+        ns = namespace or self.namespace
+        acct = self.registry.get_or_create(ns)
+        acct.reset()
+        return acct.remaining()

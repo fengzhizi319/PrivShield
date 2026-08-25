@@ -708,6 +708,38 @@ class BudgetAccountant:
                     "delta": self.delta_total - self.delta_spent,
                 }
 
+    def reset(self) -> None:
+        """重置已消耗隐私预算为 0。"""
+        with self._mu:
+            self.epsilon_spent = 0.0
+            self.delta_spent = 0.0
+            self._window_start = self._now()
+            if self._redis_client:
+                try:
+                    redis_key = f"privshield:budget:{self.namespace}"
+                    self._redis_client.hset(
+                        redis_key,
+                        mapping={
+                            "eps_spent": 0.0,
+                            "del_spent": 0.0,
+                            "win_start": self._window_start,
+                        },
+                    )
+                except Exception:
+                    pass
+            db_path = os.environ.get("PRIVACY_BUDGET_DB")
+            if db_path:
+                try:
+                    with self._db_conn(db_path) as conn:
+                        conn.execute(
+                            "UPDATE privacy_budgets SET epsilon_spent = 0.0, delta_spent = 0.0, window_start = ? WHERE namespace = ?",
+                            (self._window_start, self.namespace),
+                        )
+                        conn.commit()
+                except Exception:
+                    pass
+            self._update_metrics(self.epsilon_total, self.delta_total, 0.0, 0.0)
+
     def __repr__(self) -> str:
         """返回 BudgetAccountant 的可读字符串表示。"""
         eps_rem = self.epsilon_total - self.epsilon_spent

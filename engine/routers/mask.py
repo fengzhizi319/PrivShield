@@ -48,6 +48,7 @@ def mask_record(req: MaskRecordRequest):
 
 
 @router.post("/v1/privacy/mask/batch", dependencies=[*SECURITY_DEPS, require_permission("privacy:mask")])
+@router.post("/v1/privacy/mask_batch", dependencies=[*SECURITY_DEPS, require_permission("privacy:mask")])
 def mask_batch(req: MaskBatchRequest):
     """批量字段脱敏接口。"""
     try:
@@ -57,6 +58,7 @@ def mask_batch(req: MaskBatchRequest):
 
 
 @router.post("/v1/privacy/mask/dataframe", dependencies=[*SECURITY_DEPS, require_permission("privacy:mask")])
+@router.post("/v1/privacy/mask_dataframe", dependencies=[*SECURITY_DEPS, require_permission("privacy:mask")])
 def mask_dataframe(req: MaskDataFrameRequest):
     """DataFrame 脱敏接口。
 

@@ -15,6 +15,9 @@ _HEALTH_DEPS = [Depends(get_current_identity), Depends(rate_limit_dependency)]
 
 
 @router.get("/health", dependencies=_HEALTH_DEPS)
+@router.post("/health", dependencies=_HEALTH_DEPS)
+@router.get("/v1/privacy/health", dependencies=_HEALTH_DEPS)
+@router.post("/v1/privacy/health", dependencies=_HEALTH_DEPS)
 def health():
     """健康检查接口。
 
