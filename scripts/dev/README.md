@@ -38,6 +38,7 @@
   - [`start_monitoring.sh` (启动监控栈)](#start_monitoringsh)
   - [`stop_monitoring.sh` (停止监控栈)](#stop_monitoringsh)
   - [`verify_console_environment.sh` (开发环境巡检)](#verify_console_environmentsh)
+  - [`generate_all_test_certs.sh` (一键生成全量 mTLS 测试证书链)](#generate_all_test_certssh)
   - [`clean_privacy_budget_db.sh` (清理隐私预算数据库)](#clean_privacy_budget_dbsh)
   - [`mock_agent_server.py` (Mock Agent 桩服务)](#mock_agent_serverpy)
 
@@ -325,6 +326,15 @@
 - **执行命令**:
   ```bash
   bash ./scripts/dev/verify_console_environment.sh
+  ```
+
+---
+
+### `generate_all_test_certs.sh`
+- **作用说明**: 一键为 PrivShield 全项目生成统一的 10 年（3650天）有效期自签名 mTLS 测试证书链（含 Root CA、服务端证书、客户端证书及 SPKI 客户端公钥固定文件），自动存放在 `config/certs/` 及各微服务 `certs/` 目录下并受 Git 追踪管理，供本地开发与 E2E 自动化测试开箱即用。
+- **执行命令**:
+  ```bash
+  bash ./scripts/dev/generate_all_test_certs.sh
   ```
 
 ---

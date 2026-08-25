@@ -1,35 +1,26 @@
 #!/usr/bin/env bash
-# Generate mTLS test certificate chain (CA + server cert + client cert).
-# 生成 mTLS 测试证书链（CA + 服务端证书 + 客户端证书）。
+# ============================================================================
+# Generate mTLS test certificate chain for Go BFF proxy and Agent.
+# 为 Go BFF 代理网关与 PrivShield 算力 Agent 生成 mTLS 双向认证测试证书链。
 #
-# Purpose / 用途：
-#   Generate a set of self-signed test certificates for mTLS mutual authentication
-#   between the Go gRPC proxy (client) and PrivShield (gRPC server),
-#   facilitating local integration testing.
-#   为 Go gRPC 代理（客户端）与 PrivShield（gRPC 服务端）之间的
-#   mTLS 双向认证生成一套自签名测试证书，方便本地联调与集成测试。
+# 生成的文件清单 (默认输出目录: console/bff-go/certs/)：
+#   ca.crt / ca.key         受信任根 CA 证书与私钥 (RSA 4096-bit)
+#   server.crt / server.key 服务端证书与私钥 (Agent/BFF 服务端，SAN: localhost/127.0.0.1)
+#   client.crt / client.key 客户端证书与私钥 (BFF/Agent 客户端，EKU: clientAuth)
+#   client.pub              客户端公钥 PEM (用于 SPKI 公钥固定 Pinning 校验)
 #
-# Generated files (default output: console/bff-go/certs/) / 生成的文件：
-#   ca.crt / ca.key         Trusted root CA (signs server & client certs)
-#                           受信任根 CA（签发服务端与客户端证书）
-#   server.crt / server.key Server cert (Python agent, SAN: localhost/127.0.0.1)
-#                           服务端证书（Python agent，SAN: localhost/127.0.0.1）
-#   client.crt / client.key Client cert (Go proxy, EKU: clientAuth)
-#                           客户端证书（Go 代理，EKU: clientAuth）
-#
-# Usage / 用法：
+# 用法 / Usage：
 #   ./scripts/gen-certs.sh [output_dir]
-#   CERT_DAYS=730 ./scripts/gen-certs.sh        # Custom validity (default 365 days)
-#                                                自定义有效期（默认 365 天）
 #
-# WARNING: Generated certs are for testing/dev ONLY. Do NOT use in production or commit to git.
-# 注意：生成的证书仅用于测试/开发，请勿用于生产环境，也不要提交到 git。
+# 环境变量：
+#   CERT_DAYS: 证书有效天数（默认 3650 天 / 10 年）
+# ============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="${1:-$SCRIPT_DIR/../certs}"
-DAYS="${CERT_DAYS:-365}"
+DAYS="${CERT_DAYS:-3650}"
 SERVER_CN="${SERVER_CN:-localhost}"
 
 if ! command -v openssl >/dev/null 2>&1; then
@@ -45,14 +36,14 @@ echo ">> 有效期:   ${DAYS} 天"
 echo ">> 服务端 CN: ${SERVER_CN}"
 
 # ── 1. 根 CA ──────────────────────────────────────────────────────────
-echo ">> [1/3] 生成根 CA..."
+echo ">> [1/4] 生成根 CA (4096-bit RSA)..."
 openssl genrsa -out ca.key 4096
 openssl req -x509 -new -nodes -key ca.key -sha256 -days "$DAYS" \
     -subj "/CN=PrivShield-test-ca" \
     -out ca.crt
 
-# ── 2. 服务端证书（Python agent gRPC 服务端）──────────────────────────
-echo ">> [2/3] 生成服务端证书（含 localhost/127.0.0.1 SAN）..."
+# ── 2. 服务端证书（Agent / Go BFF gRPC 服务端）──────────────────────────
+echo ">> [2/4] 生成服务端证书（含 localhost/127.0.0.1 SAN）..."
 openssl genrsa -out server.key 2048
 openssl req -new -key server.key -subj "/CN=${SERVER_CN}" -out server.csr
 cat > server.ext <<EOF
@@ -69,8 +60,8 @@ EOF
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
     -out server.crt -days "$DAYS" -sha256 -extfile server.ext
 
-# ── 3. 客户端证书（Go 代理 gRPC 客户端）──────────────────────────────
-echo ">> [3/3] 生成客户端证书（EKU: clientAuth）..."
+# ── 3. 客户端证书（Go BFF / Agent gRPC 客户端）──────────────────────────────
+echo ">> [3/4] 生成客户端证书（EKU: clientAuth）..."
 openssl genrsa -out client.key 2048
 openssl req -new -key client.key -subj "/CN=privacy-console-go-client" -out client.csr
 cat > client.ext <<EOF
@@ -82,6 +73,10 @@ EOF
 openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
     -out client.crt -days "$DAYS" -sha256 -extfile client.ext
 
+# ── 4. 导出客户端公钥（用于 SPKI 公钥固定）───────────────────────────
+echo ">> [4/4] 提取客户端公钥（用于公钥固定）..."
+openssl rsa -in client.key -pubout -out client.pub
+
 # ── 清理中间文件并收紧私钥权限 ────────────────────────────────────────
 rm -f server.csr client.csr server.ext client.ext ca.srl
 chmod 600 ./*.key
@@ -89,17 +84,3 @@ chmod 600 ./*.key
 echo ""
 echo ">> 完成，生成文件："
 ls -1 "$OUT_DIR"
-echo ""
-echo ">> Python agent 端（服务端）启用 mTLS："
-echo "   PRIVACY_TLS_ENABLED=true \\"
-echo "   PRIVACY_TLS_CERT_FILE=$OUT_DIR/server.crt \\"
-echo "   PRIVACY_TLS_KEY_FILE=$OUT_DIR/server.key \\"
-echo "   PRIVACY_TLS_CA_FILE=$OUT_DIR/ca.crt \\"
-echo "   PRIVACY_TLS_CLIENT_AUTH=require"
-echo ""
-echo ">> Go 代理端（客户端）启用 mTLS："
-echo "   PRIVACY_AGENT_TLS_ENABLED=true \\"
-echo "   PRIVACY_AGENT_TLS_CERT_FILE=$OUT_DIR/client.crt \\"
-echo "   PRIVACY_AGENT_TLS_KEY_FILE=$OUT_DIR/client.key \\"
-echo "   PRIVACY_AGENT_TLS_CA_FILE=$OUT_DIR/ca.crt \\"
-echo "   PRIVACY_AGENT_TLS_SERVER_NAME=localhost"

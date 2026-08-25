@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Generate mTLS test certificate chain for audit-log gRPC server.
+# 为 audit-log 审计存证 gRPC 服务端生成 mTLS 双向认证测试证书链与公钥固定文件。
+#
+# 生成的文件清单 (默认输出目录: services/audit-log/certs/)：
+#   ca.crt / ca.key                 受信任的根 CA 证书与私钥 (RSA 4096-bit)
+#   server.crt / server.key         服务端操作证书与私钥 (RSA 2048-bit, SAN: localhost/127.0.0.1, EKU: serverAuth)
+#   client.crt / client.key         客户端操作证书与私钥 (RSA 2048-bit, CN: audit-log-client, EKU: clientAuth)
+#   client.pub                      客户端公钥 PEM 文件 (用于应用层公钥指纹固定 SPKI Pinning)
+#
+# 用法 (Usage)：
+#   ./scripts/gen-certs.sh [output_dir]
+#
+# 环境变量：
+#   CERT_DAYS: 证书有效天数（默认 3650 天 / 10 年）
+# ============================================================================
+
+set -euo pipefail
+
+OUT_DIR="${1:-$(dirname "$0")/../certs}"
+DAYS="${CERT_DAYS:-3650}"
+
+OUT_DIR="$(cd "$(dirname "$OUT_DIR")" && pwd)/$(basename "$OUT_DIR")"
+
+mkdir -p "$OUT_DIR"
+cd "$OUT_DIR"
+
+echo ">> 生成 audit-log mTLS 测试证书到: $OUT_DIR"
+echo "   有效期: $DAYS 天"
+echo ""
+
+# ── 1. 生成自签名根 CA ────────────────────────────────────────────────────────
+echo ">> [1/4] 生成根 CA (4096-bit RSA)..."
+openssl genrsa -out ca.key 4096
+openssl req -x509 -new -nodes -key ca.key -sha256 -days "$DAYS" \
+    -out ca.crt -subj "/CN=audit-log-test-ca"
+
+# ── 2. 生成服务端证书与私钥 ────────────────────────────────────────────────────
+echo ">> [2/4] 生成服务端证书（SAN: localhost / 127.0.0.1）..."
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -subj "/CN=localhost" -out server.csr
+
+cat > server.ext <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=@alt_names
+
+[alt_names]
+DNS.1=localhost
+IP.1=127.0.0.1
+EOF
+
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -out server.crt -days "$DAYS" -sha256 -extfile server.ext
+
+# ── 3. 生成客户端证书与私钥 ────────────────────────────────────────────────────
+echo ">> [3/4] 生成客户端证书（EKU: clientAuth）..."
+openssl genrsa -out client.key 2048
+openssl req -new -key client.key -subj "/CN=audit-log-client" -out client.csr
+
+cat > client.ext <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+EOF
+
+openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -out client.crt -days "$DAYS" -sha256 -extfile client.ext
+
+# ── 4. 导出客户端公钥（用于服务端 Public Key Pinning）───────────────────────────
+echo ">> [4/4] 提取客户端公钥（用于公钥固定）..."
+openssl rsa -in client.key -pubout -out client.pub
+
+# ── 5. 清理中间临时文件并收紧私钥文件系统权限 ─────────────────────────────────
+rm -f server.csr client.csr server.ext client.ext ca.srl
+chmod 600 ./*.key
+
+echo ""
+echo ">> 证书生成完成，生成清单："
+ls -1 "$OUT_DIR"/*.crt "$OUT_DIR"/*.key "$OUT_DIR"/*.pub 2>/dev/null || ls -1 "$OUT_DIR"
