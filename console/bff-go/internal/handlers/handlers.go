@@ -32,6 +32,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	// encoding/json：用于 JSON 序列化/反序列化（params 解析、RecordEntry 转换）
 	"encoding/json"
@@ -92,6 +94,35 @@ func New(client *agent.Client, cfg *config.Config, logger *slog.Logger, mc *metr
 	if logger == nil {
 		logger = slog.Default()
 	}
+
+	var tlsClientConfig *tls.Config
+	if cfg.AgentTLSEnabled {
+		tlsClientConfig = &tls.Config{
+			ServerName:         cfg.AgentTLSServerName,
+			InsecureSkipVerify: cfg.AgentTLSInsecureSkipVerify,
+		}
+		if cfg.AgentTLSCAFile != "" {
+			if caPEM, err := os.ReadFile(cfg.AgentTLSCAFile); err == nil {
+				caPool := x509.NewCertPool()
+				if caPool.AppendCertsFromPEM(caPEM) {
+					tlsClientConfig.RootCAs = caPool
+				}
+			}
+		}
+		if cfg.AgentTLSCertFile != "" && cfg.AgentTLSKeyFile != "" {
+			if cert, err := tls.LoadX509KeyPair(cfg.AgentTLSCertFile, cfg.AgentTLSKeyFile); err == nil {
+				tlsClientConfig.Certificates = []tls.Certificate{cert}
+			}
+		}
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig:     tlsClientConfig,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
 	return &Server{
 		client: client,
 		mapper: mapper.New(),
@@ -99,7 +130,8 @@ func New(client *agent.Client, cfg *config.Config, logger *slog.Logger, mc *metr
 		logger: logger,
 		mc:     mc,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout:   60 * time.Second,
+			Transport: transport,
 		},
 	}
 }
@@ -232,11 +264,8 @@ func dirExists(path string) bool {
 func (s *Server) Health(c *gin.Context) {
 	// 记录请求开始时间，用于计算 Health RPC 调用耗时
 	start := time.Now()
-	// 使用独立 30 秒超时的 Context 访问上游 gRPC：
-	// - 避免前端快速频繁点击连发切断 HTTP 请求时，c.Request.Context() 被取消导致 gRPC Health 连带报错；
-	// - 30 秒与客户端 waitForReady + 重试窗口匹配，agent 崩溃/重启期间（约 10~30 秒）
-	//   健康检查会等待连接恢复而不是立即失败，agent 起来后自动返回 ok。
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// 使用独立 5 秒超时的 Context 访问上游 gRPC，确保健康检查反馈敏捷
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// 通过 gRPC 客户端调用上游 agent 的 Health RPC
@@ -383,14 +412,18 @@ func isAllowedConcurrencyPath(rawPath string) bool {
 
 // agentRestBaseURL 返回 agent REST 服务的基础地址。
 // REST 与 gRPC 是 agent 的两个独立服务，主机/端口可能不同，
-// 因此默认值使用 agent REST 默认地址（127.0.0.1:8079），
-// 而非 gRPC 主机（AgentGRPCHost），避免配置不一致时路由到错误地址。
-func agentRestBaseURL() string {
+// 当开启 TLS 时自动将协议切换为 https://。
+func (s *Server) agentRestBaseURL() string {
+	if u := os.Getenv("PRIVACY_AGENT_REST_URL"); u != "" {
+		return strings.TrimRight(u, "/")
+	}
 	if u := os.Getenv("PRIVACY_AGENT_URL"); u != "" {
 		return strings.TrimRight(u, "/")
 	}
-	if u := os.Getenv("PRIVACY_AGENT_REST_URL"); u != "" {
-		return strings.TrimRight(u, "/")
+
+	scheme := "http"
+	if s.cfg.AgentTLSEnabled || os.Getenv("PRIVACY_TLS_ENABLED") == "true" {
+		scheme = "https"
 	}
 
 	restHost := os.Getenv("PRIVACY_AGENT_REST_HOST")
@@ -398,7 +431,7 @@ func agentRestBaseURL() string {
 		restHost = os.Getenv("PRIVACY_REST_HOST")
 	}
 	if restHost == "" {
-		restHost = os.Getenv("PRIVACY_AGENT_GRPC_HOST")
+		restHost = s.cfg.AgentGRPCHost
 	}
 	if restHost == "" {
 		restHost = "127.0.0.1"
@@ -409,7 +442,7 @@ func agentRestBaseURL() string {
 		restPort = "8079"
 	}
 
-	return fmt.Sprintf("http://%s:%s", restHost, restPort)
+	return fmt.Sprintf("%s://%s:%s", scheme, restHost, restPort)
 }
 
 // extractRestErrorDetail 从上游错误响应体中提取可读的错误描述。
@@ -449,7 +482,7 @@ func (s *Server) callRest(ctx context.Context, method, path string, body json.Ra
 	if method == "" {
 		method = "POST"
 	}
-	targetURL := agentRestBaseURL() + path
+	targetURL := s.agentRestBaseURL() + path
 
 	var reqBodyReader io.Reader
 	if rawPayloadB64 != "" {

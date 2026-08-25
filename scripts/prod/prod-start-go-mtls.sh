@@ -197,9 +197,10 @@ launch_agent() {
         export PRIVACY_TLS_ENABLED=true
         export PRIVACY_TLS_CERT_FILE="$CERT_DIR/server.crt"
         export PRIVACY_TLS_KEY_FILE="$CERT_DIR/server.key"
+        export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
+        export PRIVACY_TLS_CLIENT_AUTH="optional"
         export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true
-        export PRIVACY_AUTH_MTLS_CA_CERT_FILE="$CERT_DIR/ca.crt"
-        export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["privshield-console","privshield-client"]'
+        export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["privacy-console-go-client","privshield-console","privshield-client","localhost"]'
         exec python -m engine.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
@@ -215,7 +216,7 @@ wait_for_service() {
     local attempt=0
     echo -n "等待 $name 就绪"
     while [[ $attempt -lt $max_attempts ]]; do
-        if curl -s -k -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then
+        if curl -s -k --cert "$CERT_DIR/client.crt" --key "$CERT_DIR/client.key" -o /dev/null -w "%{http_code}" "$url" | grep -q '^200$'; then
             echo " OK"
             return 0
         fi
@@ -247,11 +248,12 @@ done
 echo "启动 Go gRPC 代理后端 (mTLS 连接 agent, 托管静态 UI)..."
 (
     cd "$CONSOLE_DIR/bff-go"
-    export PRIVACY_AGENT_MTLS_ENABLED=true
-    export PRIVACY_AGENT_CA_CERT="$CERT_DIR/ca.crt"
-    export PRIVACY_AGENT_CLIENT_CERT="$CERT_DIR/client.crt"
-    export PRIVACY_AGENT_CLIENT_KEY="$CERT_DIR/client.key"
-    export PRIVACY_AGENT_SERVER_NAME="localhost"
+    export PRIVACY_AGENT_TLS_ENABLED=true
+    export PRIVACY_AGENT_TLS_CA_FILE="$CERT_DIR/ca.crt"
+    export PRIVACY_AGENT_TLS_CERT_FILE="$CERT_DIR/client.crt"
+    export PRIVACY_AGENT_TLS_KEY_FILE="$CERT_DIR/client.key"
+    export PRIVACY_AGENT_TLS_SERVER_NAME="localhost"
+    export PRIVACY_AGENT_REST_URL="https://127.0.0.1:8079"
     exec ./bin/backend-go
 ) &
 CONSOLE_PID=$!

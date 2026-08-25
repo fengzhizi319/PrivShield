@@ -39,8 +39,8 @@ export interface BackendOption {
  * Defaults to Go gRPC (8081) first, then Python REST (8080).
  */
 export const DEFAULT_BACKENDS: BackendOption[] = [
-  { label: 'Go gRPC (8081)', value: 'http://127.0.0.1:8081' },      // Go gRPC 代理 (首选) / Go gRPC proxy (preferred)
-  { label: 'Python REST (8080)', value: 'http://127.0.0.1:8080' },  // Python REST 代理 / Python REST proxy
+  { label: 'Go BFF (8081)', value: 'http://127.0.0.1:8081' },
+  { label: 'Go BFF HTTPS (8443)', value: 'https://127.0.0.1:8443' },
 ];
 
 /**

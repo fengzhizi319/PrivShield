@@ -201,15 +201,15 @@ func Load() *Config {
 		// 前端静态文件目录，使用 getEnvOptional 以支持"设为空即禁用"语义
 		StaticDistDir: getEnvOptional("PRIVACY_CONSOLE_STATIC_DIR", "../web/dist"),
 		// 是否启用上游 gRPC 连接的 TLS/mTLS，默认关闭（非安全传输）
-		AgentTLSEnabled: getEnvBool("PRIVACY_AGENT_TLS_ENABLED", false),
+		AgentTLSEnabled: getEnvBool("PRIVACY_AGENT_TLS_ENABLED", false) || getEnvBool("PRIVACY_AGENT_MTLS_ENABLED", false),
 		// 客户端证书文件（mTLS 双向认证），默认空
-		AgentTLSCertFile: getEnv("PRIVACY_AGENT_TLS_CERT_FILE", ""),
+		AgentTLSCertFile: getEnvWithFallback("PRIVACY_AGENT_TLS_CERT_FILE", "PRIVACY_AGENT_CLIENT_CERT"),
 		// 客户端私钥文件（mTLS 双向认证），默认空
-		AgentTLSKeyFile: getEnv("PRIVACY_AGENT_TLS_KEY_FILE", ""),
+		AgentTLSKeyFile: getEnvWithFallback("PRIVACY_AGENT_TLS_KEY_FILE", "PRIVACY_AGENT_CLIENT_KEY"),
 		// 校验服务端证书的 CA 文件，TLS 启用时必填
-		AgentTLSCAFile: getEnv("PRIVACY_AGENT_TLS_CA_FILE", ""),
+		AgentTLSCAFile: getEnvWithFallback("PRIVACY_AGENT_TLS_CA_FILE", "PRIVACY_AGENT_CA_CERT"),
 		// 服务端证书主机名覆盖值，默认空（使用连接目标地址）
-		AgentTLSServerName: getEnv("PRIVACY_AGENT_TLS_SERVER_NAME", ""),
+		AgentTLSServerName: getEnvWithFallback("PRIVACY_AGENT_TLS_SERVER_NAME", "PRIVACY_AGENT_SERVER_NAME"),
 		// 是否跳过服务端证书校验（仅测试用），默认关闭
 		AgentTLSInsecureSkipVerify: getEnvBool("PRIVACY_AGENT_TLS_INSECURE_SKIP_VERIFY", false),
 		// 可选控制台 API Key，默认空（不鉴权）
@@ -323,6 +323,16 @@ func getEnv(name, defaultValue string) string {
 		return v // 环境变量存在且非空，直接使用
 	}
 	return defaultValue // 环境变量不存在或为空，回退到默认值
+}
+
+// getEnvWithFallback 尝试依次读取给定的环境变量列表，返回第一个非空值；全为空时返回空字符串。
+func getEnvWithFallback(names ...string) string {
+	for _, name := range names {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // getEnvOptional reads an env var, distinguishing "unset" from "explicitly set to empty".
