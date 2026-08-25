@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-log
+  labels:
+    app.kubernetes.io/name: audit-log
+    app.kubernetes.io/component: audit
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: audit-log
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: audit-log
+        app.kubernetes.io/component: audit
+    spec:
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: audit-log
+          image: privshield-audit-log:1.8.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8084
+              protocol: TCP
+            - name: grpc
+              containerPort: 50054
+              protocol: TCP
+          env:
+            - name: AUDIT_LOG_HOST
+              value: "0.0.0.0"
+            - name: AUDIT_LOG_PORT
+              value: "8084"
+            - name: AUDIT_LOG_GRPC_HOST
+              value: "0.0.0.0"
+            - name: AUDIT_LOG_GRPC_PORT
+              value: "50054"
+            - name: PRIVACY_AGENT_REST_HOST
+              value: "privshield"
+            - name: PRIVACY_REST_PORT
+              value: "8079"
+            - name: AUDIT_LOG_DB_PATH
+              value: "/app/data/audit-log.db"
+            - name: AUDIT_LOG_LOG_FORMAT
+              value: "json"
+            - name: AUDIT_LOG_LOG_LEVEL
+              value: "info"
+          volumeMounts:
+            - name: audit-store
+              mountPath: /app/data
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: audit-store
+          persistentVolumeClaim:
+            claimName: audit-log-data

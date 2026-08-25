@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 llmlora 评估与 Benchmark 验证脚本 / Evaluation & benchmark script.

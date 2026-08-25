@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 训练数据自动生成与蒸馏脚本（规则驱动版） / Rule-driven SFT data generation.

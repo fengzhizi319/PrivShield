@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 llmlora 训练一键启动脚本 / One-command training launcher.

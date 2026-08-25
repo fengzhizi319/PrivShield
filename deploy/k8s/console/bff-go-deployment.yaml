@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: console-backend-go
+  labels:
+    app.kubernetes.io/name: console-backend-go
+    app.kubernetes.io/component: console-bff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: console-backend-go
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: console-backend-go
+        app.kubernetes.io/component: console-bff
+    spec:
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: console-backend-go
+          image: privacy-console-backend-go:1.8.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: PRIVACY_CONSOLE_HOST
+              value: "0.0.0.0"
+            - name: PRIVACY_CONSOLE_PORT
+              value: "8081"
+            - name: PRIVACY_AGENT_GRPC_HOST
+              value: "privshield"
+            - name: PRIVACY_AGENT_GRPC_PORT
+              value: "50051"
+            - name: PRIVACY_AGENT_URL
+              value: "http://privshield:8079"
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

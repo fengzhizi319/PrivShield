@@ -12,3 +12,9 @@ resources:
   # LLM 升级/重启不影响 core；LLM 挂掉时 core 自动降级 Layer-1+2
   # - llm-deployment.yaml
   # - llm-service.yaml
+  # ── Go 微服务群（service-hub / datasource-mgr / audit-log）──
+  - service-hub
+  - datasource-mgr
+  - audit-log
+  # ── 统一控制台（Go BFF + Web 前端）──
+  - console

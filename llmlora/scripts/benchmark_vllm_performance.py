@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 llmlora vLLM 推理性能 Benchmark 测试脚本 / vLLM Performance Benchmark Script.
