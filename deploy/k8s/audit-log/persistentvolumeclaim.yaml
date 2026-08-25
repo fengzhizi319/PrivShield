@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audit-log-data
+  labels:
+    app.kubernetes.io/name: audit-log
+    app.kubernetes.io/component: audit
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
