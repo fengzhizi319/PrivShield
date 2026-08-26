@@ -1,3 +1,22 @@
+/**
+ * TaskLifecyclePanel — 任务全生命周期与 Phase B 租约看板。
+ *
+ * 功能概述：
+ *  1. 任务列表展示（支持按状态过滤：all/pending/running/completed/failed）
+ *  2. 任务详情查看（点击任务弹出详细信息）
+ *  3. 手动创建任务（表单填写 source/operation/priority/payload）
+ *  4. Phase B PostgreSQL 原子租约视图（展示 Worker 租约状态）
+ *
+ * 数据来源：
+ *  - tasks: App.tsx 中 fetchTasksAndLeases() 拉取
+ *  - leases: 同上，包含 Worker 租约信息
+ *
+ * 状态管理：
+ *  - filterStatus: 任务状态过滤器
+ *  - selectedTask: 当前查看详情的任务
+ *  - showCreateForm: 是否显示任务创建表单
+ *  - creating: 是否正在创建任务
+ */
 import React, { useState } from 'react';
 import { Task, LeasedTasksResponse } from '../types/api';
 import { api } from '../api/client';
@@ -12,10 +31,15 @@ import {
   IconPlay,
 } from './icons';
 
+/** TaskLifecyclePanel 组件的 Props */
 interface TaskLifecyclePanelProps {
+  /** 任务列表数据 */
   tasks: Task[];
+  /** Phase B 租约信息 */
   leases: LeasedTasksResponse | null;
+  /** 刷新回调（重新拉取任务+租约） */
   onRefresh: () => Promise<void>;
+  /** 是否正在加载中 */
   loading: boolean;
 }
 

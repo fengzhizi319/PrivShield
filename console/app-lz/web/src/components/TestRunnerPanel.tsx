@@ -1,3 +1,23 @@
+/**
+ * TestRunnerPanel — E2E 测试套件运行器大屏。
+ *
+ * 功能概述：
+ *  1. 展示可用测试套件（TS-01 审计验真 / TS-02 高并发压测 / TS-03 租约争抢）
+ *  2. 支持全选/反选、指定并发数和压测请求量
+ *  3. 执行测试套件并展示结果（通过率、断言详情、终端日志流）
+ *  4. 支持导出 Markdown 测试报告
+ *
+ * 数据来源：
+ *  - suites: App.tsx 中 fetchSuites() 拉取
+ *  - 执行结果通过 onRunSuites 回调获取
+ *
+ * 状态管理：
+ *  - selectedIds: 选中的测试套件 ID 列表
+ *  - concurrency: TS-02 并发数（默认 20）
+ *  - benchmarkRequests: TS-02 压测请求数（默认 50）
+ *  - lastRun: 最近一次执行结果
+ *  - activeLogs: 终端日志流
+ */
 import React, { useState } from 'react';
 import { TestSuiteCase, RunTestSuiteRequest, RunTestSuiteResponse } from '../types/api';
 import { useI18n } from '../i18n';
@@ -10,9 +30,13 @@ import {
   IconActivity,
 } from './icons';
 
+/** TestRunnerPanel 组件的 Props */
 interface TestRunnerPanelProps {
+  /** 可用测试套件定义列表 */
   suites: TestSuiteCase[];
+  /** 执行测试套件回调（由 App.tsx 提供） */
   onRunSuites: (req: RunTestSuiteRequest) => Promise<RunTestSuiteResponse>;
+  /** 是否正在执行中 */
   loading: boolean;
 }
 
@@ -185,7 +209,9 @@ export const TestRunnerPanel: React.FC<TestRunnerPanelProps> = ({
             <span className="text-slate-400">测试通过率:</span>
             <span className="font-bold text-emerald-400 font-mono text-sm">
               {lastRun.passed_cases} / {lastRun.total_cases} (
-              {((lastRun.passed_cases / lastRun.total_cases) * 100).toFixed(0)}%)
+              {lastRun.total_cases > 0
+                ? ((lastRun.passed_cases / lastRun.total_cases) * 100).toFixed(0) + '%'
+                : 'N/A'})
             </span>
           </div>
         )}

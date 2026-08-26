@@ -1,3 +1,24 @@
+/**
+ * TopologyPanel — 四微服务网格拓扑与健康矩阵大屏。
+ *
+ * 功能概述：
+ *  1. 展示 4 个微服务节点的实时状态（REST/gRPC 双协议视角）
+ *  2. 支持协议切换（REST ↔ gRPC），切换后自动触发重新探测
+ *  3. 服务卡片固定顺序：Hub(#1) → Engine(#2) → Datasource(#3) → Audit(#4)
+ *  4. 点击服务卡片弹出详情模态框（双协议地址 + RTT + 健康探针详情）
+ *  5. 底部双协议架构说明卡片（REST vs gRPC 对比）
+ *
+ * 数据来源：
+ *  - App.tsx 中的 fetchTopology() 每 15 秒自动刷新
+ *  - BFF 并发探测 4 服务后返回 TopologyResponse
+ *
+ * 渲染结构：
+ *  1. 顶部 Banner：标题 + 刷新按钮
+ *  2. 协议切换工具栏：REST/gRPC 切换 + 当前模式指示
+ *  3. 四服务网格卡片：2×2 布局，每个卡片显示状态/RTT/地址
+ *  4. 双协议架构说明：REST vs gRPC 对比卡片
+ *  5. 节点详情模态框：点击卡片后弹出
+ */
 import React, { useState } from 'react';
 import { TopologyResponse, ServiceNode, ProtocolType } from '../types/api';
 import { useI18n } from '../i18n';
@@ -14,11 +35,17 @@ import {
   IconSparkles,
 } from './icons';
 
+/** TopologyPanel 组件的 Props */
 interface TopologyPanelProps {
+  /** 拓扑数据（null 表示尚未加载） */
   topology: TopologyResponse | null;
+  /** 当前协议视角 */
   activeProtocol: ProtocolType;
+  /** 协议切换回调 */
   onProtocolChange: (proto: ProtocolType) => void;
+  /** 刷新回调（触发 BFF 重新探测） */
   onRefresh: (proto?: ProtocolType) => Promise<void>;
+  /** 是否正在探测中 */
   loading: boolean;
 }
 
@@ -30,6 +57,7 @@ export const TopologyPanel: React.FC<TopologyPanelProps> = ({
   loading,
 }) => {
   const { t } = useI18n();
+  /** 当前选中的服务节点（用于详情模态框） */
   const [selectedNode, setSelectedNode] = useState<ServiceNode | null>(null);
 
   // 严格固定四微服务的显示位置顺序：
@@ -46,6 +74,10 @@ export const TopologyPanel: React.FC<TopologyPanelProps> = ({
     return (idxA >= 0 ? idxA : 99) - (idxB >= 0 ? idxB : 99);
   });
 
+  /**
+   * 获取服务节点的元数据（显示顺序、角色描述、主题色、图标、端口号）。
+   * 用于为每个服务卡片定制展示样式。
+   */
   const getServiceMeta = (id: string, index: number) => {
     switch (id) {
       case 'service-hub':
@@ -96,6 +128,10 @@ export const TopologyPanel: React.FC<TopologyPanelProps> = ({
     }
   };
 
+  /**
+   * 协议切换处理：同时更新协议状态并触发重新探测。
+   * 切换后 BFF 会使用新协议重新探测所有 4 个服务。
+   */
   const handleToggleProtocol = (proto: ProtocolType) => {
     onProtocolChange(proto);
     onRefresh(proto);

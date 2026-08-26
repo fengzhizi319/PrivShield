@@ -1,13 +1,43 @@
+/**
+ * 国际化 (i18n) 模块 — 提供中英文双语支持。
+ *
+ * 架构设计：
+ *  1. 使用 React Context + Provider 模式，任何子组件可通过 useI18n() Hook 获取翻译函数
+ *  2. 翻译表使用扁平的 key-value 结构，key 格式为 '模块.字段名'
+ *  3. 默认语言为 zh-CN，当某个 key 在当前语言中缺失时回退到 zh-CN
+ *
+ * 使用方式：
+ *  const { lang, setLang, t } = useI18n();
+ *  <span>{t('topo.title')}</span>
+ *
+ * 翻译分组（按面板组件）：
+ *  - app.*   : 应用标题与导航
+ *  - topo.*  : 拓扑大屏
+ *  - tasks.* : 任务生命周期与租约
+ *  - runner.*: E2E 测试套件
+ *  - audit.* : 审计验真
+ *  - metrics.*: 性能指标
+ *  - dataApi.*: 预设数据 API
+ */
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 
+/** 支持的语言类型 */
 export type Language = 'zh-CN' | 'en-US';
 
+/** i18n Context 提供的接口：当前语言、切换语言、翻译函数 */
 export interface I18nContextType {
+  /** 当前语言 */
   lang: Language;
+  /** 切换语言 */
   setLang: (lang: Language) => void;
+  /** 翻译函数：根据 key 返回当前语言的翻译文本 */
   t: (key: string) => string;
 }
 
+/**
+ * 翻译表 — 扁平 key-value 结构，按面板分组。
+ * key 格式：'模块.字段名'，如 'topo.title' / 'tasks.filter.all'
+ */
 const translations: Record<Language, Record<string, string>> = {
   'zh-CN': {
     // App Header & Nav
@@ -56,7 +86,7 @@ const translations: Record<Language, Record<string, string>> = {
     'tasks.leaseDesc': '展示多 Worker 节点在并发认领任务时的行锁状态与孤儿任务自愈回收。',
 
     // Test Suite Runner
-    'runner.title': '自动化测试套件 (TS-04 / TS-06 / TS-07)',
+    'runner.title': '自动化测试套件 (TS-01 / TS-02 / TS-03)',
     'runner.desc': '执行审计存证验真、高并发压测与 Phase B 租约争抢的测试用例。',
     'runner.runAll': '一键执行全部套件',
     'runner.runSelected': '执行选应用例',
@@ -151,7 +181,7 @@ const translations: Record<Language, Record<string, string>> = {
     'tasks.leaseDesc': 'Live display of worker task claims, row-level locks, and orphan lease reclamation.',
 
     // Test Suite Runner
-    'runner.title': 'E2E Test Suites (TS-04 / TS-06 / TS-07)',
+    'runner.title': 'E2E Test Suites (TS-01 / TS-02 / TS-03)',
     'runner.desc': 'Execute audit verification, concurrency stress test, and atomic lease contention test cases.',
     'runner.runAll': 'Run All Test Suites',
     'runner.runSelected': 'Run Selected Suites',
@@ -201,11 +231,22 @@ const translations: Record<Language, Record<string, string>> = {
   },
 };
 
+/** React Context 实例（初始为 null，由 I18nProvider 填充） */
 const I18nContext = createContext<I18nContextType | null>(null);
 
+/**
+ * I18nProvider — 国际化上下文提供者。
+ * 挂载在 main.tsx 中 App 组件的外层，为所有子组件提供翻译能力。
+ *
+ * 翻译回退策略：当前语言翻译 → zh-CN 回退 → 原始 key
+ */
 export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [lang, setLang] = useState<Language>('zh-CN');
 
+  /**
+   * 翻译函数 — 根据 key 查找当前语言的翻译文本。
+   * 回退链：translations[当前语言][key] → translations['zh-CN'][key] → key 本身
+   */
   const t = (key: string): string => {
     return translations[lang]?.[key] || translations['zh-CN']?.[key] || key;
   };
@@ -217,6 +258,12 @@ export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
+/**
+ * useI18n Hook — 在组件中获取国际化接口。
+ * 必须在 I18nProvider 内部使用，否则抛出错误。
+ *
+ * @returns { lang, setLang, t } 当前语言、切换函数、翻译函数
+ */
 export const useI18n = (): I18nContextType => {
   const ctx = useContext(I18nContext);
   if (!ctx) {

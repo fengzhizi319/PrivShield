@@ -15,25 +15,22 @@
 | 模块 | HTTP 方法 | 端点路径 | 调用模式 | 上游映射 |
 |---|---|---|---|---|
 | **健康与拓扑** | `GET` | `/api/health` | 本地 | BFF 自身存活探针 |
-| | `GET` | `/api/lz/topology` | **[聚合]** | 并发调用 4 服务 `/health` + `/readyz` |
-| | `POST` | `/api/lz/probe/all` | **[聚合]** | 并发调用 4 服务 `/readyz` 深度探测 |
-| **流水线调度** | `GET` | `/api/lz/pipeline/status` | **[聚合]** | `service-hub` `/api/hub/pipeline` + `/api/hub/status` |
-| | `POST` | `/api/lz/pipeline/dispatch` | **[转发]** | → `service-hub` `POST /api/hub/dispatch` |
-| | `POST` | `/api/lz/pipeline/classify-dispatch` | **[转发]** | → `service-hub` `POST /api/hub/classify` |
-| | `POST` | `/api/lz/pipeline/trigger-datasource` | **[转发]** | → `service-hub` `POST /api/hub/pipeline/trigger-datasource` |
+| | `GET` | `/api/lz/topology` | **[聚合]** | 并发调用 4 服务 `/health` + TCP gRPC 拨测 |
+| | `POST` | `/api/lz/probe/all` | **[聚合]** | 强制全集群主动并发重探测 |
 | **任务与租约** | `GET` | `/api/lz/tasks` | **[转发]** | → `service-hub` `GET /api/hub/tasks` |
 | | `GET` | `/api/lz/tasks/:id` | **[转发]** | → `service-hub` `GET /api/hub/tasks/:id` |
 | | `GET` | `/api/lz/tasks/leases` | **[聚合]** | `service-hub` 存储后端检测 + 租约状态 |
-| **自动化测试** | `GET` | `/api/lz/suites` | 本地 | BFF 内置测试用例定义 |
+| | `POST` | `/api/lz/tasks/dispatch` | **[转发]** | → `service-hub` `POST /api/hub/dispatch` |
+| **自动化测试** | `GET` | `/api/lz/suites` | 本地 | BFF 内置测试用例定义 (TS-01~TS-03) |
 | | `POST` | `/api/lz/suites/run` | 本地 | BFF 测试执行引擎（调用上游服务执行断言） |
-| | `GET` | `/api/lz/suites/stream/:run_id` | 本地 (SSE) | BFF 测试日志流推送 |
-| **数据源直通** | `GET` | `/api/lz/datasources` | **[转发]** | → `datasource-mgr` `GET /api/datasources` |
-| | `GET` | `/api/lz/datasources/:id/slice` | **[转发]** | → `datasource-mgr` `GET /api/datasources/:id/slice` |
 | **审计验真** | `GET` | `/api/lz/audit/logs` | **[转发]** | → `audit-log` `GET /api/audit/logs` |
 | | `POST` | `/api/lz/audit/verify` | **[转发]** | → `audit-log` `POST /api/audit/snapshots/verify` |
-| **监控指标** | `GET` | `/metrics` | 本地 | BFF 自身 Prometheus 指标 |
+| **监控指标** | `GET` | `/api/lz/metrics` | **[转发]** | → `service-hub` `GET /metrics` (Prometheus 原始文本) |
+| | `GET` | `/api/lz/metrics/parsed` | **[本地]** | BFF 解析 Prometheus 文本 → 结构化指标 |
+| **预设数据 API** | `GET` | `/api/lz/data-api/definitions` | 本地 | BFF 内置 4 个预设数据 API 定义 |
+| | `POST` | `/api/lz/data-api/invoke` | **[聚合]** | 编排 4 阶段会话：fetch → classify+desensitize → audit → return |
 
-> **[聚合]** = BFF 并发调用多个上游服务并合并结果；**[转发]** = BFF 透传请求到单一上游，附加认证头与 `X-Request-ID`。
+> **[聚合]** = BFF 并发调用多个上游服务并合并结果；**[转发]** = BFF 透传请求到单一上游，附加认证头与 `X-Request-ID`；**[本地]** = BFF 内部直接处理。
 
 ---
 
@@ -229,46 +226,7 @@ SSE 端点通过 URL 查询参数认证：`GET /api/lz/suites/stream/:run_id?tok
 
 ---
 
-### 4.2 6 阶段流水线大屏状态 (`GET /api/lz/pipeline/status`)
-
-- **调用模式**：[聚合] 合并 `service-hub` 的 `/api/hub/pipeline` + `/api/hub/status`
-- **字段映射**：BFF 字段与上游 `service-hub` 字段的对应关系：
-
-| BFF 响应字段 | 上游 `service-hub` 字段 | 说明 |
-|---|---|---|
-| `stages[].avg_latency_ms` | `PipelineStage.avg_latency_ms` | 直接映射，保持命名一致 |
-| `stages[].throughput` | `PipelineStage.throughput` | 每分钟处理任务数 |
-| `total_rps` | `PipelineStatus.total_rps` | 聚合每秒请求数 |
-| `agent_ok` | `PipelineStatus.agent_ok` | Agent 连通状态 |
-| `hub_status.*` | `HubStatus.*` | 来自 `/api/hub/status` 的队列深度 |
-
-- **响应示例**：
-```json
-{
-  "stages": [
-    {"name": "ingest", "title": "任务接收与解析", "status": "idle", "active_count": 0, "avg_latency_ms": 1.2, "throughput": 450},
-    {"name": "fetch", "title": "数据源切片拉取", "status": "idle", "active_count": 0, "avg_latency_ms": 8.5, "throughput": 320},
-    {"name": "classify", "title": "动态分类分级评估", "status": "processing", "active_count": 1, "avg_latency_ms": 15.2, "throughput": 180},
-    {"name": "desensitize", "title": "自适应隐私脱敏治理", "status": "processing", "active_count": 1, "avg_latency_ms": 6.8, "throughput": 260},
-    {"name": "return", "title": "结果封装与回传", "status": "idle", "active_count": 0, "avg_latency_ms": 0.8, "throughput": 480},
-    {"name": "audit", "title": "不可篡改审计存证", "status": "idle", "active_count": 0, "avg_latency_ms": 3.4, "throughput": 400}
-  ],
-  "total_rps": 45.2,
-  "agent_ok": true,
-  "hub_status": {
-    "active_tasks": 2,
-    "queued_tasks": 5,
-    "completed_total": 128,
-    "failed_total": 3,
-    "uptime": "12h34m56s"
-  },
-  "via": "app-lz-bff"
-}
-```
-
----
-
-### 4.3 任务分发 (`POST /api/lz/pipeline/dispatch`)
+### 4.2 任务分发 (`POST /api/lz/tasks/dispatch`)
 
 - **调用模式**：[转发] → `service-hub` `POST /api/hub/dispatch`
 - **请求体**：
@@ -295,35 +253,7 @@ SSE 端点通过 URL 查询参数认证：`GET /api/lz/suites/stream/:run_id?tok
 
 ---
 
-### 4.4 自适应分类分级调度 (`POST /api/lz/pipeline/classify-dispatch`)
-
-- **调用模式**：[转发] → `service-hub` `POST /api/hub/classify`
-- **请求体**：
-```json
-{
-  "source": "ds_kangyang",
-  "payload": {
-    "patient_name": "李四",
-    "diagnosis": "高血压",
-    "blood_pressure": "160/100"
-  },
-  "priority": 80
-}
-```
-- **响应**（HTTP 202）：
-```json
-{
-  "task_id": "task-1787554501-89bcdef1",
-  "status": "accepted",
-  "classified_level": "L3",
-  "selected_operation": "k_anon",
-  "via": "service-hub"
-}
-```
-
----
-
-### 4.5 任务列表查询 (`GET /api/lz/tasks`)
+### 4.3 任务列表查询 (`GET /api/lz/tasks`)
 
 - **调用模式**：[转发] → `service-hub` `GET /api/hub/tasks`
 - **查询参数**：
@@ -359,7 +289,7 @@ SSE 端点通过 URL 查询参数认证：`GET /api/lz/suites/stream/:run_id?tok
 
 ---
 
-### 4.6 Phase B 租约看板 (`GET /api/lz/tasks/leases`)
+### 4.4 Phase B 租约看板 (`GET /api/lz/tasks/leases`)
 
 - **调用模式**：[聚合] 查询 `service-hub` 存储后端类型，PostgreSQL 模式下返回租约详情
 - **存储后端自适应**：
@@ -424,7 +354,7 @@ SSE 端点通过 URL 查询参数认证：`GET /api/lz/suites/stream/:run_id?tok
 
 ---
 
-### 4.7 自动化测试套件执行 (`POST /api/lz/suites/run`)
+### 4.5 自动化测试套件执行 (`POST /api/lz/suites/run`)
 
 - **调用模式**：本地执行（BFF 测试引擎调用上游服务执行断言）
 - **请求体**：
@@ -456,27 +386,41 @@ SSE 端点通过 URL 查询参数认证：`GET /api/lz/suites/stream/:run_id?tok
 
 ---
 
-### 4.8 SSE 测试日志流 (`GET /api/lz/suites/stream/:run_id`)
+### 4.6 审计存证与监控指标
 
-- **调用模式**：本地 SSE 流
-- **认证**：URL 参数 `?token=<run_token>`
-- **事件类型**：
+- `GET /api/lz/audit/logs`：直通转发至 `audit-log` `GET /api/audit/logs`，支持 `limit`/`offset` 分页。
+- `POST /api/lz/audit/verify`：直通转发至 `audit-log` `POST /api/audit/snapshots/verify`。
+- `GET /api/lz/metrics`：直通转发至 `service-hub` `GET /metrics`，返回 Prometheus 原始文本格式。
+- `GET /api/lz/metrics/parsed`：BFF 本地解析 Prometheus 文本，返回结构化指标：
 
-| 事件类型 | 数据格式 | 说明 |
-|---|---|---|
-| `log` | `{"timestamp": "...", "level": "info", "message": "...", "suite_id": "TS-01"}` | 测试执行日志行 |
-| `assertion` | `{"suite_id": "TS-01", "name": "status_code", "expected": 202, "actual": 202, "passed": true}` | 断言结果 |
-| `suite_complete` | `{"suite_id": "TS-01", "status": "pass", "duration_ms": 1234, "assertions_total": 5, "assertions_passed": 5}` | 单个用例完成 |
-| `run_complete` | `{"status": "completed", "total": 7, "passed": 6, "failed": 1, "duration_ms": 45678}` | 全部执行完成 |
-| `error` | `{"code": "UPSTREAM_UNAVAILABLE", "message": "..."}` | 执行过程错误 |
+```json
+{
+  "stage_durations": { "ingest": 1.2, "fetch": 4.8, "classify": 12.5, "desensitize": 6.8, "return": 0.8, "audit": 3.4 },
+  "qps": 45.2,
+  "percentiles": { "p50": 12.5, "p90": 28.3, "p95": 35.1, "p99": 48.7 },
+  "total_requests": 12345,
+  "source": "prometheus"
+}
+```
+
+> 当上游不可达时，`metrics/parsed` 返回 `source: "fallback"` 及默认值。
 
 ---
 
-### 4.9 数据源与审计直通
+### 4.7 预设数据 API
 
-- `GET /api/lz/datasources`：直通转发至 `datasource-mgr` `GET /api/datasources`，响应格式与上游一致。
-- `GET /api/lz/datasources/:id/slice`：直通转发至 `datasource-mgr` `GET /api/datasources/:id/slice`，支持 `limit` 参数（1~100）。
-- `GET /api/lz/audit/logs`：直通转发至 `audit-log` `GET /api/audit/logs`，支持 `limit`/`offset` 分页。
-- `POST /api/lz/audit/verify`：直通转发至 `audit-log` `POST /api/audit/snapshots/verify`。
+- `GET /api/lz/data-api/definitions`：返回 BFF 内置的 4 个预设数据 API 定义。
+- `POST /api/lz/data-api/invoke`：编排完整的 4 阶段会话（fetch → classify+desensitize → audit → return）。
 
-> 直通转发接口的响应格式完全由上游服务定义，BFF 仅透传响应体和状态码。若上游不可达，BFF 返回统一错误格式（见第 3 节）。
+**请求体**：
+```json
+{ "api_id": 1, "limit": 5 }
+```
+
+**会话链路**：
+1. **Fetch** — 从 `datasource-mgr` 拉取原始数据切片
+2. **Classify + Desensitize** — 调用 `engine /v1/medical/process` 执行三层分类分级 + 隐私脱敏；降级时 BFF 本地 `applyMasking()` 字段级掩码
+3. **Audit** — 验证 `audit-log` 服务可达
+4. **Return** — 组装完整会话结果（原始数据 + 脱敏数据 + 各阶段耗时）
+
+> 详细响应结构参见 [frontend_backend_mapping.md](frontend_backend_mapping.md) §8.2。

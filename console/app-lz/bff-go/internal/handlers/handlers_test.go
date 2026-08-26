@@ -1,3 +1,11 @@
+// Package handlers 的单元测试。
+//
+// 测试策略：使用 httptest 构造本地 HTTP 请求，验证路由注册、响应格式和业务逻辑。
+// 测试用例：
+//   - TestHealthCheck: 验证健康检查端点返回 200 + status=ok
+//   - TestGetTopology: 验证拓扑返回固定 4 服务顺序 + REST/gRPC 双协议
+//   - TestGetSuitesAndRun: 验证获取套件列表 + 执行 TS-01/02/03
+//   - TestGetLeases: 验证租约查询返回 sqlite 后端标识
 package handlers
 
 import (
@@ -13,6 +21,8 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/runner"
 )
 
+// setupTestRouter 创建测试用的 Handler 实例。
+// 使用本地默认地址构造配置，无需真实上游服务运行。
 func setupTestRouter() *Handler {
 	cfg := &config.Config{
 		Host:          "127.0.0.1",
@@ -27,6 +37,8 @@ func setupTestRouter() *Handler {
 	return NewHandler(cfg, pool, testRunner)
 }
 
+// TestHealthCheck 验证健康检查端点。
+// 期望：HTTP 200，响应体包含 status="ok"。
 func TestHealthCheck(t *testing.T) {
 	h := setupTestRouter()
 	router := SetupRouter(h)
@@ -48,6 +60,12 @@ func TestHealthCheck(t *testing.T) {
 	}
 }
 
+// TestGetTopology 验证服务拓扑探测端点。
+//
+// 测试步骤：
+//  1. GET /api/lz/topology?protocol=rest → 验证返回 4 个服务
+//  2. 验证固定顺序：service-hub → engine → datasource-mgr → audit-log
+//  3. GET /api/lz/topology?protocol=grpc → 验证 gRPC 协议视角也能正常返回
 func TestGetTopology(t *testing.T) {
 	h := setupTestRouter()
 	router := SetupRouter(h)
@@ -68,7 +86,7 @@ func TestGetTopology(t *testing.T) {
 		t.Fatalf("expected 4 services, got %d", len(topo.Services))
 	}
 
-	// Verify strictly fixed order: 1. Hub, 2. Agent, 3. Datasource, 4. Audit
+	// 验证固定 4 服务顺序（前端拓扑大屏依赖此顺序）
 	expectedOrder := []string{"service-hub", "engine", "datasource-mgr", "audit-log"}
 	for i, exp := range expectedOrder {
 		if topo.Services[i].ID != exp {
@@ -76,7 +94,7 @@ func TestGetTopology(t *testing.T) {
 		}
 	}
 
-	// Test gRPC protocol query
+	// 测试 gRPC 协议视角的拓扑查询
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest(http.MethodGet, "/api/lz/topology?protocol=grpc", nil)
 	router.ServeHTTP(w2, req2)
@@ -85,11 +103,16 @@ func TestGetTopology(t *testing.T) {
 	}
 }
 
+// TestGetSuitesAndRun 验证测试套件的获取和执行。
+//
+// 测试步骤：
+//  1. GET /api/lz/suites → 验证返回可用套件列表
+//  2. POST /api/lz/suites/run → 执行 TS-01/02/03，验证返回 3 个结果
 func TestGetSuitesAndRun(t *testing.T) {
 	h := setupTestRouter()
 	router := SetupRouter(h)
 
-	// 1. Get Suites
+	// 步骤 1：获取可用套件列表
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/lz/suites", nil)
 	router.ServeHTTP(w, req)
@@ -98,7 +121,7 @@ func TestGetSuitesAndRun(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", w.Code)
 	}
 
-	// 2. Run Suites (TS-01, TS-02, TS-03)
+	// 步骤 2：执行 TS-01/02/03 三个套件
 	runPayload := models.RunTestSuiteRequest{
 		SuiteIDs:          []string{"TS-01", "TS-02", "TS-03"},
 		Concurrency:       5,
@@ -124,6 +147,8 @@ func TestGetSuitesAndRun(t *testing.T) {
 	}
 }
 
+// TestGetLeases 验证租约查询端点。
+// 期望：HTTP 200，StoreBackend 为 "sqlite"（测试环境无真实 Hub）。
 func TestGetLeases(t *testing.T) {
 	h := setupTestRouter()
 	router := SetupRouter(h)

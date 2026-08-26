@@ -1,3 +1,20 @@
+/**
+ * MetricsPanel — 实时性能指标与分位数监控大屏。
+ *
+ * 功能概述：
+ *  1. 展示实时 QPS、6 阶段平均耗时瀑布图
+ *  2. 展示 P50/P90/P95/P99 延迟分位数（带说明）
+ *  3. 支持查看 Prometheus 原始文本指标
+ *  4. 内置前端压测工具（可指定并发数和 API 目标）
+ *
+ * 数据来源：
+ *  - metricsRaw: Prometheus 原始文本（BFF GET /metrics）
+ *  - parsedMetrics: BFF 解析后的结构化指标（含 histogram 线性插值 P50/P90/P95/P99）
+ *
+ * 压测工具：
+ *  - 使用 Promise.all + AbortController 实现并发压测
+ *  - 计算实际 QPS、成功率、P50/P90/P95/P99 延迟
+ */
 import React, { useState, useRef, useCallback } from 'react';
 import { useI18n } from '../i18n';
 import { api } from '../api/client';
@@ -8,6 +25,7 @@ import {
   IconCheckCircle,
 } from './icons';
 
+/** BFF 解析后的结构化指标 */
 interface ParsedMetrics {
   stage_durations: Record<string, number>;
   qps: number;
@@ -16,13 +34,19 @@ interface ParsedMetrics {
   source: string;
 }
 
+/** MetricsPanel 组件的 Props */
 interface MetricsPanelProps {
+  /** Prometheus 原始文本 */
   metricsRaw: string;
+  /** 解析后的结构化指标 */
   parsedMetrics: ParsedMetrics | null;
+  /** 刷新指标回调 */
   onRefreshMetrics: () => Promise<void>;
+  /** 是否正在加载中 */
   loading: boolean;
 }
 
+/** 前端压测结果 */
 interface StressTestResult {
   totalRequests: number;
   successCount: number;

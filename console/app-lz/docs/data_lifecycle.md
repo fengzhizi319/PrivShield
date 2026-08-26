@@ -318,18 +318,17 @@ graph TD
 | 接口 | 上游不可达时的 BFF 行为 | 前端 catch 兜底 |
 |---|---|---|
 | `GET /api/lz/topology` | 返回各节点 `status: "unreachable"` | ✅ 硬编码 4 服务假数据 |
-| `GET /api/lz/pipeline/status` | 返回 `defaultStages()` 全 idle 状态 | ❌ 无（显示空状态） |
-| `POST /api/lz/pipeline/dispatch` | 返回含 `error` 的 DispatchResponse | ❌ 无（alert 报错） |
+| `POST /api/lz/tasks/dispatch` | 返回含 `error` 的 DispatchResponse | ❌ 无（alert 报错） |
 | `GET /api/lz/tasks` | 返回 `{total:0, tasks:[]}` | ✅ 硬编码 2 条样本任务 |
 | `GET /api/lz/tasks/leases` | 调用 `service-hub /api/hub/tasks?status=running` 按 lease_owner 分组 ✅ G-1 | ❌ 不需要（返回空列表） |
 | `GET /api/lz/suites` | 返回 BFF 内存中的用例定义 | ❌ 无 |
 | `POST /api/lz/suites/run` | 执行测试（部分用例会因上游不可达而 FAIL） | ❌ 无 |
-| `GET /api/lz/datasources` | 返回 `defaultDatasources()` | ❌ 无 |
-| `GET /api/lz/datasources/:id/slice` | 返回 `generateSampleSlice()` 合成数据 | ❌ 无 |
 | `GET /api/lz/audit/logs` | 返回 `defaultAuditLogs()` 2 条假记录 | ❌ 无 |
 | `POST /api/lz/audit/verify` | 返回硬编码 `merkle_valid: true` | ❌ 无 |
 | `GET /api/lz/metrics` | 返回静态 Prometheus 文本 | ❌ 无 |
 | `GET /api/lz/metrics/parsed` ✅ G-2 | 解析 Prometheus 返回 stage_durations/qps/percentiles | 返回 fallback 默认值 |
+| `GET /api/lz/data-api/definitions` | 返回 BFF 内存中的 4 个预设 API 定义 | ❌ 无 |
+| `POST /api/lz/data-api/invoke` | 各阶段独立降级（engine 不可达→本地掩码；audit 不可达→标记 error） | ❌ 无 |
 
 ---
 
@@ -345,7 +344,7 @@ curl -s http://localhost:8085/api/lz/topology?protocol=rest | jq .
 # 3. 检查四微服务拓扑探针状态 (gRPC 模式)
 curl -s http://localhost:8085/api/lz/topology?protocol=grpc | jq .
 
-# 4. 执行全量 7 项端到端自动化测试套件
+# 4. 执行全量 3 项端到端自动化测试套件
 curl -s -X POST http://localhost:8085/api/lz/suites/run \
   -H "Content-Type: application/json" \
   -d '{"suite_ids": []}' | jq .
@@ -359,10 +358,15 @@ curl -s http://localhost:8085/api/lz/tasks/leases | jq .
 # 7. 校验审计存证 Merkle 树真实性
 curl -s -X POST http://localhost:8085/api/lz/audit/verify | jq .
 
-# 8. 查看数据源元数据（可能为 L1 真实数据或 L2 兜底数据）
-curl -s http://localhost:8085/api/lz/datasources | jq .
+# 8. 查看预设数据 API 定义
+curl -s http://localhost:8085/api/lz/data-api/definitions | jq .
 
-# 9. 一键停止所有测试容器并清理临时数据
+# 9. 调用预设数据 API（全链路会话）
+curl -s -X POST http://localhost:8085/api/lz/data-api/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"api_id": 1, "limit": 5}' | jq .
+
+# 10. 一键停止所有测试容器并清理临时数据
 bash ./scripts/dev/docker-stop-app-lz.sh
 ```
 

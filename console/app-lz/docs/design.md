@@ -294,32 +294,31 @@ App-LZ 共划分为 **7 大核心功能工作台**，全方位覆盖 `service-hu
 `console/app-lz/bff-go` 提供统一的聚合 REST API，监听端口 **`:8085`**（gRPC 端口 **`:50055`**）：
 
 ### 4.1 集群拓扑与健康聚合
+- `GET /api/health`：BFF 自身存活探针。
 - `GET /api/lz/topology`：**[聚合]** 并发探测 4 大服务健康状态，返回统一拓扑矩阵。
-- `POST /api/lz/probe/all`：**[聚合]** 并发执行全集群深度自检探针（`/readyz`）。
+- `POST /api/lz/probe/all`：**[聚合]** 强制全集群主动并发重探测。
 
-### 4.2 调度流水线交互
-- `GET /api/lz/pipeline/status`：**[聚合]** 合并 `service-hub` 的 `/api/hub/pipeline` + `/api/hub/status`。
-- `POST /api/lz/pipeline/dispatch`：**[转发]** → `service-hub` `POST /api/hub/dispatch`。
-- `POST /api/lz/pipeline/classify-dispatch`：**[转发]** → `service-hub` `POST /api/hub/classify`。
-- `POST /api/lz/pipeline/trigger-datasource`：**[转发]** → `service-hub` `POST /api/hub/pipeline/trigger-datasource`。
-
-### 4.3 任务生命周期与租约
-- `GET /api/lz/tasks`：**[转发]** → `service-hub` `GET /api/hub/tasks`（支持 `status`, `operation`, `limit`, `offset` 过滤）。
+### 4.2 任务调度与流水线
+- `GET /api/lz/tasks`：**[转发]** → `service-hub` `GET /api/hub/tasks`（支持 `status`, `limit`, `offset` 过滤）。
 - `GET /api/lz/tasks/:id`：**[转发]** → `service-hub` `GET /api/hub/tasks/:id`。
 - `GET /api/lz/tasks/leases`：**[聚合]** 查询 `service-hub` 存储后端类型与租约状态（SQLite/内存模式返回简化信息）。
+- `POST /api/lz/tasks/dispatch`：**[转发]** → `service-hub` `POST /api/hub/dispatch`。
 
-### 4.4 自动化测试套件
-- `GET /api/lz/suites`：获取所有内置 E2E 测试用例列表与历史运行记录。
+### 4.3 自动化测试套件
+- `GET /api/lz/suites`：获取所有内置 E2E 测试用例列表（TS-01~TS-03）。
 - `POST /api/lz/suites/run`：执行指定测试用例或全量测试套件（支持并发压测参数）。
-- `GET /api/lz/suites/stream/:run_id`：通过 SSE (Server-Sent Events) 流式推送测试执行日志。
 
-### 4.5 数据源与审计直通
-- `GET /api/lz/datasources`：**[转发]** → `datasource-mgr` `GET /api/datasources`。
-- `GET /api/lz/datasources/:id/slice`：**[转发]** → `datasource-mgr` `GET /api/datasources/:id/slice`。
+### 4.4 审计存证与监控指标
 - `GET /api/lz/audit/logs`：**[转发]** → `audit-log` `GET /api/audit/logs`。
 - `POST /api/lz/audit/verify`：**[转发]** → `audit-log` `POST /api/audit/snapshots/verify`。
+- `GET /api/lz/metrics`：**[转发]** → `service-hub` `GET /metrics`（Prometheus 原始文本）。
+- `GET /api/lz/metrics/parsed`：**[本地]** BFF 解析 Prometheus 文本，返回结构化指标（阶段耗时/QPS/P50~P99）。
 
-> **[聚合]** = BFF 并发调用多个上游并合并结果；**[转发]** = BFF 透传请求到单一上游，附加认证头与 RequestID。
+### 4.5 预设数据 API
+- `GET /api/lz/data-api/definitions`：**[本地]** 返回 4 个预设数据 API 定义（医保/康养/预留×2）。
+- `POST /api/lz/data-api/invoke`：**[聚合]** 编排 4 阶段会话：fetch → classify+desensitize → audit → return。
+
+> **[聚合]** = BFF 并发调用多个上游并合并结果；**[转发]** = BFF 透传请求到单一上游，附加认证头与 RequestID；**[本地]** = BFF 内部直接处理，不调用上游。
 
 ---
 
@@ -425,72 +424,60 @@ App-LZ 遵循与 `console/web` 高度一致的企业级现代设计语言：
 console/app-lz/
 ├── docs/                                  # App-LZ 文档目录
 │   ├── design.md                          # 本设计文档（系统架构与全景规划）
-│   ├── api.md                             # REST & gRPC API 契约文档
-│   ├── prd.md                             # 产品需求与测试用例文档
-│   └── testing.md                         # 测试与运维验证手册
+│   ├── api.md                             # REST API 契约文档
+│   ├── data_lifecycle.md                  # 测试数据来源与生命周期全景
+│   └── frontend_backend_mapping.md        # 前端功能 ↔ BFF 接口 ↔ 上游服务映射
 ├── bff-go/                                # App-LZ Go 聚合代理后端
-│   ├── cmd/server/main.go                 # BFF 启动入口 (:8085)
+│   ├── cmd/server/main.go                 # BFF 启动入口 (:8085)，Gin 路由/中间件/SPA/优雅停机
 │   ├── internal/
-│   │   ├── config/config.go               # 环境变量与上游服务地址配置
-│   │   ├── handlers/                      # Gin HTTP 路由处理器（按功能域分组）
-│   │   │   ├── topology/
-│   │   │   │   └── handler.go             # 集群拓扑与健康探测（聚合 4 服务）
-│   │   │   ├── pipeline/
-│   │   │   │   └── handler.go             # 流水线与任务调度（转发 + 聚合）
-│   │   │   ├── suites/
-│   │   │   │   └── handler.go             # E2E 自动化测试执行入口 + SSE 流
-│   │   │   ├── datasource/
-│   │   │   │   └── handler.go             # 数据源探查（直通转发）
-│   │   │   └── audit/
-│   │   │       └── handler.go             # 审计存证与验真（直通转发）
-│   │   ├── clients/                       # 4 大上游服务客户端池（REST + gRPC）
-│   │   │   ├── hub_client.go              # service-hub 客户端
-│   │   │   ├── datasource_client.go       # datasource-mgr 客户端
-│   │   │   ├── audit_client.go            # audit-log 客户端
-│   │   │   └── agent_client.go            # engine Agent 客户端
-│   │   ├── models/models.go               # BFF 层数据模型（聚合响应、前端契约）
-│   │   └── runner/                        # E2E 测试执行引擎
-│   │       └── runner.go                  # TS-01~TS-03 测试用例定义与执行引擎
-│   ├── proto/                             # gRPC proto 生成代码
-│   │   ├── servicehub/                    # service-hub proto stub
-│   │   ├── datasourcemgr/                 # datasource-mgr proto stub
-│   │   └── auditlog/                      # audit-log proto stub
+│   │   ├── config/
+│   │   │   ├── config.go                  # 环境变量与上游服务地址配置
+│   │   │   └── config_test.go             # 配置加载单元测试
+│   │   ├── handlers/
+│   │   │   ├── handlers.go                # Gin HTTP 路由注册与全部 Handler 实现
+│   │   │   │                              #   （拓扑/任务/测试/审计/指标/预设数据API）
+│   │   │   └── handlers_test.go           # Handler 单元测试
+│   │   ├── clients/
+│   │   │   └── clients.go                 # 4 大上游服务统一客户端池
+│   │   │                                  #   （双协议探针/转发/聚合/降级兜底/Engine脱敏/Metrics解析）
+│   │   ├── models/
+│   │   │   └── models.go                  # BFF 层数据模型（聚合响应/前端契约/降级数据）
+│   │   └── runner/
+│   │       └── runner.go                  # E2E 测试执行引擎（TS-01~TS-03 用例定义+断言+压测+报告）
 │   ├── go.mod                             # Go module（引用 pkg/ + proto 依赖）
-│   └── Makefile                           # BFF 构建、测试、proto 生成
+│   └── Makefile                           # BFF 构建与测试
 ├── web/                                   # App-LZ React 前端项目
 │   ├── src/
-│   │   ├── api/client.ts                  # BFF API 请求客户端（Axios/fetch 封装）
-│   │   ├── features/                      # 按功能域组织（非平铺 components/）
-│   │   │   ├── topology/
-│   │   │   │   └── TopologyPanel.tsx      # 模块 1: 集群拓扑与健康矩阵
-│   │   │   ├── pipeline/
-│   │   │   │   └── PipelineVisualizer.tsx # 模块 2: 6 阶段流水线大屏
-│   │   │   ├── tasks/
-│   │   │   │   └── TaskLifecyclePanel.tsx # 模块 3: 任务管理与租约看板
-│   │   │   ├── suites/
-│   │   │   │   └── TestRunnerPanel.tsx    # 模块 4: 一键自动化测试执行器
-│   │   │   ├── datasource/
-│   │   │   │   └── DatasourceExplorer.tsx # 模块 5: 数据源资产探查器
-│   │   │   ├── audit/
-│   │   │   │   └── AuditVerifierPanel.tsx # 模块 6: 不可篡改审计验真
-│   │   │   └── metrics/
-│   │   │       └── MetricsPanel.tsx       # 模块 7: 性能监控与耗时直方图
-│   │   ├── shared/                        # 跨功能域共享组件
-│   │   │   ├── Sidebar.tsx                # 左侧导航栏
-│   │   │   ├── Header.tsx                 # 顶部操作栏
-│   │   │   └── common/                    # 公共 UI 组件 (Card, Badge, Tooltip)
-│   │   ├── hooks/                         # 自定义 React Hooks
-│   │   │   ├── useTopology.ts             # 拓扑数据轮询与缓存
-│   │   │   ├── useSSE.ts                  # SSE 流连接管理
-│   │   │   └── useHealthProbe.ts          # 健康探针定时探测
-│   │   ├── i18n/index.tsx                 # 中英文国际化字典
-│   │   ├── types/api.ts                   # TypeScript 类型定义（与 BFF API 契约对齐）
-│   │   ├── App.tsx                        # 顶层应用路由与布局
-│   │   └── main.tsx                       # 入口渲染文件
-│   ├── package.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   └── tsconfig.json
+│   │   ├── api/
+│   │   │   └── client.ts                  # BFF API 请求客户端（fetchJSON 封装 + 6 组 API 方法）
+│   │   ├── types/
+│   │   │   └── api.ts                     # TypeScript 类型定义（与 BFF models.go 一一对应）
+│   │   ├── i18n/
+│   │   │   └── index.tsx                  # 中英文国际化（React Context + Provider + useI18n）
+│   │   ├── components/
+│   │   │   ├── TopologyPanel.tsx          # 模块 1: 四微服务固定网格拓扑与双协议健康矩阵
+│   │   │   ├── PipelineVisualizer.tsx     # 模块 2: 6 阶段流水线可视化与任务派发
+│   │   │   ├── TaskLifecyclePanel.tsx     # 模块 3: 任务全生命周期与 Phase B 租约看板
+│   │   │   ├── TestRunnerPanel.tsx        # 模块 4: E2E 测试套件运行器
+│   │   │   ├── DataApiPanel.tsx           # 模块 5: 预设数据 API 全链路会话大屏
+│   │   │   ├── DatasourceExplorer.tsx     # 模块 6: 数据源切片浏览器
+│   │   │   ├── AuditVerifierPanel.tsx     # 模块 7: 不可篡改审计存证与 Merkle 验真
+│   │   │   ├── MetricsPanel.tsx           # 模块 8: 实时性能指标与分位数监控
+│   │   │   ├── Sidebar.tsx                # 左侧固定导航栏
+│   │   │   ├── icons.tsx                  # SVG 图标组件库（14 个图标）
+│   │   │   └── __tests__/                 # 组件单元测试
+│   │   │       ├── TopologyPanel.test.tsx
+│   │   │       └── PipelineVisualizer.test.tsx
+│   │   ├── test/
+│   │   │   └── setup.ts                   # Vitest 测试环境配置
+│   │   ├── App.tsx                        # 顶层应用布局（7 个 fetch 函数 + 15s 拓扑轮询）
+│   │   └── main.tsx                       # React 入口渲染文件
+│   ├── index.html                         # HTML 入口
+│   ├── vite.config.ts                     # Vite 构建配置（:5174 + API 代理到 :8085）
+│   ├── tailwind.config.js                 # Tailwind CSS 配置
+│   ├── tsconfig.json                      # TypeScript 配置
+│   ├── package.json                       # 前端依赖（React 18 + Tailwind + ECharts）
+│   └── nginx.conf                         # 生产模式 Nginx 静态托管配置
 ├── scripts/                               # 自动化启停与验证脚本
 │   ├── dev-app-lz.sh                      # 开发模式一键拉起 (BFF + Vite HMR)
 │   ├── prod-app-lz.sh                     # 生产模式一键拉起 (BFF + 静态托管)
@@ -584,29 +571,33 @@ App-LZ 的脚本与现有脚本体系**并行共存、互不干扰**：
 - 支持一键导出标准 Markdown 测试验收报告。
 
 #### 3. Gin HTTP 网关路由与静态托管 (`internal/handlers/handlers.go`)
-- **路由矩阵**：
-  - `/api/health`: BFF 自身健康探针
+- **路由矩阵**（与 `handlers.go` 中 `RegisterRoutes()` 保持同步）：
+  - `/api/health` 和 `/health`: BFF 自身健康探针
   - `/api/lz/topology`: 四微服务拓扑与双协议健康矩阵查询
   - `/api/lz/probe/all`: 强制全集群主动并发重探测
-  - `/api/lz/pipeline/status`: 6 阶段流水线与队列深度状态
-  - `/api/lz/dispatch`: 手动任务分发
-  - `/api/lz/dispatch/classify`: 三层智能分类分级联动分发
-  - `/api/lz/tasks` & `/api/lz/leases`: 任务全生命周期与 Phase B 租约
+  - `/api/lz/tasks`: 任务列表查询（转发 → service-hub）
+  - `/api/lz/tasks/:id`: 单任务详情查询
+  - `/api/lz/tasks/leases`: Phase B 租约看板（聚合 running tasks 按 worker 分组）
+  - `/api/lz/tasks/dispatch`: 手动任务分发（转发 → service-hub）
   - `/api/lz/suites` & `/api/lz/suites/run`: TS-01~TS-03 测试用例运行
-  - `/api/lz/datasources` & `/api/lz/datasources/:id/slice`: 数据源资产与采样
   - `/api/lz/audit/logs` & `/api/lz/audit/verify`: 审计日志流与 Merkle 验真
-  - `/api/lz/metrics`: Prometheus 监控指标与阶段耗时
+  - `/api/lz/metrics`: Prometheus 原始监控指标
+  - `/api/lz/metrics/parsed`: BFF 解析后的结构化指标（阶段耗时/QPS/P50~P99）
+  - `/api/lz/data-api/definitions`: 预设数据 API 定义列表
+  - `/api/lz/data-api/invoke`: 预设数据 API 全链路会话（fetch → classify → audit → return）
+  - `/*` (NoRoute): SPA Fallback → 返回 `dist/index.html`
 
 ---
 
-### 11.2 前端 React 7 大工作台组件架构
+### 11.2 前端 React 工作台组件架构
 
 | 组件文件 | 核心技术点 | 业务职责 |
 |---|---|---|
-| [`TopologyPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/TopologyPanel.tsx) | `FIXED_ORDER` 排序锁、REST/gRPC 工具栏、实时 RTT 徽标 | 展示四微服务固定网格拓扑、通信协议切换与探针明细 |
-| [`PipelineVisualizer.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/PipelineVisualizer.tsx) | 6 阶段状态机动效、医保/康养预设、双栏 JSON Diff | 实时渲染 Ingest➔Fetch➔Classify➔Desensitize➔Return➔Audit 流转 |
-| [`TaskLifecyclePanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/TaskLifecyclePanel.tsx) | 任务多维过滤、Phase B 租约表、TTL 倒计时 | 观测任务执行阶段、Worker 分布与 `FOR UPDATE SKIP LOCKED` |
-| [`TestRunnerPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/TestRunnerPanel.tsx) | 多用例勾选、并发压测滑块、暗黑终端流、MD 导出 | TS-01~TS-03 一键执行、实时断言判定与测试报告生成 |
-| [`DatasourceExplorer.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/DatasourceExplorer.tsx) | 动态 Schema 解析、切片采样分页、一键流水线联动 | 医保与康养数据源探查，实时提取切片并直接打通脱敏流水线 |
-| [`AuditVerifierPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/AuditVerifierPanel.tsx) | SHA-256 存证流、Merkle 根哈希展示、数字签名校验 | 脱敏存证审计，在线执行 Merkle Tree 防篡改链式验真 |
-| [`MetricsPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/MetricsPanel.tsx) | 6 阶段耗时瀑布图、P50/P90/P95/P99 统计释义卡片 | 实时 QPS 吞吐分析与 Prometheus 指标流监控 |
+| [`TopologyPanel.tsx`](../web/src/components/TopologyPanel.tsx) | `FIXED_ORDER` 排序锁、REST/gRPC 工具栏、实时 RTT 徽标 | 展示四微服务固定网格拓扑、通信协议切换与探针明细 |
+| [`PipelineVisualizer.tsx`](../web/src/components/PipelineVisualizer.tsx) | 6 阶段状态机动效、医保/康养预设、双栏 JSON Diff | 实时渲染 Ingest➔Fetch➔Classify➔Desensitize➔Return➔Audit 流转 |
+| [`TaskLifecyclePanel.tsx`](../web/src/components/TaskLifecyclePanel.tsx) | 任务多维过滤、Phase B 租约表、TTL 倒计时 | 观测任务执行阶段、Worker 分布与 `FOR UPDATE SKIP LOCKED` |
+| [`TestRunnerPanel.tsx`](../web/src/components/TestRunnerPanel.tsx) | 多用例勾选、并发压测滑块、暗黑终端流、MD 导出 | TS-01~TS-03 一键执行、实时断言判定与测试报告生成 |
+| [`DataApiPanel.tsx`](../web/src/components/DataApiPanel.tsx) | 4 阶段全链路会话、原始/脱敏数据逐行对比、字段高亮 | 预设数据 API 调用与脱敏效果可视化 |
+| [`DatasourceExplorer.tsx`](../web/src/components/DatasourceExplorer.tsx) | 动态 Schema 解析、切片采样分页 | 医保与康养数据源探查与切片采样 |
+| [`AuditVerifierPanel.tsx`](../web/src/components/AuditVerifierPanel.tsx) | SHA-256 存证流、Merkle 根哈希展示、数字签名校验 | 脱敏存证审计，在线执行 Merkle Tree 防篡改链式验真 |
+| [`MetricsPanel.tsx`](../web/src/components/MetricsPanel.tsx) | 6 阶段耗时瀑布图、P50/P90/P95/P99 统计释义卡片 | 实时 QPS 吞吐分析与 Prometheus 指标流监控 |

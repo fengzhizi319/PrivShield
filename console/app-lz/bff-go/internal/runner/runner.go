@@ -1,3 +1,14 @@
+// Package runner 实现 App-LZ BFF 的 E2E 测试套件执行器。
+//
+// 当前支持 3 个测试套件：
+//   - TS-01: 全链路审计存证与 Merkle 验真
+//   - TS-02: 预设数据 API 高并发压测（QPS + P50/P90/P95/P99）
+//   - TS-03: Phase B 租约多副本并发争抢（零重复/零死锁验证）
+//
+// 执行流程：
+//  1. 前端选择要执行的套件 ID 列表
+//  2. RunSuites 依次执行每个套件，收集断言结果和日志
+//  3. 计算通过率并返回完整报告
 package runner
 
 import (
@@ -12,17 +23,19 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/models"
 )
 
-// TestRunner executes E2E test suites TS-01 / TS-02 / TS-03.
+// TestRunner 执行 E2E 测试套件。
+// 内部持有 ClientPool 用于调用上游微服务。
 type TestRunner struct {
 	pool *clients.ClientPool
 }
 
-// NewTestRunner creates a new TestRunner.
+// NewTestRunner 创建一个新的测试执行器。
 func NewTestRunner(pool *clients.ClientPool) *TestRunner {
 	return &TestRunner{pool: pool}
 }
 
-// GetAvailableSuites returns the list of all standard test cases.
+// GetAvailableSuites 返回所有可用的测试套件定义。
+// 当前固定返回 3 个套件：TS-01（审计验真）、TS-02（压测）、TS-03（租约争抢）。
 func (r *TestRunner) GetAvailableSuites() []models.TestSuiteCase {
 	return []models.TestSuiteCase{
 		{
@@ -49,11 +62,18 @@ func (r *TestRunner) GetAvailableSuites() []models.TestSuiteCase {
 	}
 }
 
-// RunSuites executes selected or all test suites.
+// RunSuites 执行选定的测试套件并返回完整报告。
+//
+// 执行流程：
+//  1. 构建选中套件的 map（若未指定则默认全选）
+//  2. 依次执行每个套件（串行，避免并发压测干扰）
+//  3. 统计通过/失败数量，计算通过率
+//  4. 返回包含每个套件详细结果的完整报告
 func (r *TestRunner) RunSuites(ctx context.Context, req models.RunTestSuiteRequest) models.RunTestSuiteResponse {
 	runID := fmt.Sprintf("run-%d", time.Now().UnixNano())
 	startedAt := time.Now().UTC().Format(time.RFC3339)
 
+	// 构建选中套件的 map（若未指定则默认全选）
 	allSuites := r.GetAvailableSuites()
 	selectedMap := make(map[string]bool)
 	for _, id := range req.SuiteIDs {
@@ -65,6 +85,7 @@ func (r *TestRunner) RunSuites(ctx context.Context, req models.RunTestSuiteReque
 		}
 	}
 
+	// 依次执行每个套件
 	results := make([]models.TestSuiteCase, 0, len(allSuites))
 	passedCount := 0
 	failedCount := 0
@@ -91,6 +112,13 @@ func (r *TestRunner) RunSuites(ctx context.Context, req models.RunTestSuiteReque
 		status = "failed"
 	}
 
+	// 计算通过率（带除零保护）
+	total := passedCount + failedCount
+	passRate := "0.0%"
+	if total > 0 {
+		passRate = fmt.Sprintf("%.1f%%", float64(passedCount)/float64(total)*100)
+	}
+
 	return models.RunTestSuiteResponse{
 		RunID:       runID,
 		Status:      status,
@@ -101,11 +129,12 @@ func (r *TestRunner) RunSuites(ctx context.Context, req models.RunTestSuiteReque
 		CompletedAt: completedAt,
 		Results:     results,
 		Summary: map[string]any{
-			"pass_rate": fmt.Sprintf("%.1f%%", float64(passedCount)/float64(passedCount+failedCount)*100),
+			"pass_rate": passRate,
 		},
 	}
 }
 
+// executeSingleSuite 根据套件 ID 分发到对应的执行函数。
 func (r *TestRunner) executeSingleSuite(ctx context.Context, suiteID string, req models.RunTestSuiteRequest) models.TestSuiteCase {
 	switch suiteID {
 	case "TS-01":
@@ -122,7 +151,12 @@ func (r *TestRunner) executeSingleSuite(ctx context.Context, suiteID string, req
 	}
 }
 
-// TS-01: 全链路审计存证与 Merkle 验真
+// runTS01 执行 TS-01：全链路审计存证与 Merkle 验真。
+//
+// 测试步骤：
+//  1. 调用 audit-log 的 /api/v1/audit/verify 端点触发 Merkle 树校验
+//  2. 验证 SHA-256 审计日志完整性（HMAC 签名）
+//  3. 验证 Merkle 树一致性（merkle_valid=true）
 func (r *TestRunner) runTS01(ctx context.Context) models.TestSuiteCase {
 	start := time.Now()
 	logs := []string{"[TS-01] 开始执行全链路审计存证与 Merkle 验真测试..."}
@@ -160,11 +194,19 @@ func (r *TestRunner) runTS01(ctx context.Context) models.TestSuiteCase {
 	}
 }
 
-// TS-02: 预设数据API高并发压测
+// runTS02 执行 TS-02：预设数据 API 高并发压测。
+//
+// 测试步骤：
+//  1. 启动 N 个并发 goroutine（默认 20），每个发送 M 个 DispatchTask 请求
+//  2. 记录每个请求的延迟（毫秒）
+//  3. 排序后计算 P50/P90/P95/P99 百分位数
+//  4. 计算 QPS = 总请求数 / 总耗时
+//  5. 断言：P50 < 100ms, P99 < 300ms, QPS > 1
 func (r *TestRunner) runTS02(ctx context.Context, req models.RunTestSuiteRequest) models.TestSuiteCase {
 	start := time.Now()
 	logs := []string{"[TS-02] 开始执行预设数据API高并发压测..."}
 
+	// 配置并发参数（默认 20 并发、50 请求）
 	concurrency := req.Concurrency
 	if concurrency <= 0 {
 		concurrency = 20
@@ -176,8 +218,9 @@ func (r *TestRunner) runTS02(ctx context.Context, req models.RunTestSuiteRequest
 
 	logs = append(logs, fmt.Sprintf("[TS-02] 启动并发压测: 并发协程数=%d, 总请求数=%d", concurrency, totalRequests))
 
+	// 启动并发 goroutine，每个 worker 发送 reqPerWorker 个请求
 	latencies := make([]float64, 0, totalRequests)
-	var mu sync.Mutex
+	var mu sync.Mutex    // 保护 latencies 切片
 	var wg sync.WaitGroup
 
 	reqPerWorker := totalRequests / concurrency
@@ -208,8 +251,10 @@ func (r *TestRunner) runTS02(ctx context.Context, req models.RunTestSuiteRequest
 			}
 		}()
 	}
+	// 等待所有 worker 完成
 	wg.Wait()
 
+	// 排序延迟数组，计算百分位数
 	sort.Float64s(latencies)
 	n := len(latencies)
 	p50 := 0.0
@@ -223,6 +268,7 @@ func (r *TestRunner) runTS02(ctx context.Context, req models.RunTestSuiteRequest
 		p99 = latencies[int(float64(n)*0.99)]
 	}
 
+	// 计算 QPS 和总耗时
 	durationSec := time.Since(start).Seconds()
 	qps := float64(len(latencies)) / durationSec
 
@@ -262,14 +308,25 @@ func (r *TestRunner) runTS02(ctx context.Context, req models.RunTestSuiteRequest
 	}
 }
 
-// TS-03: Phase B 租约多副本并发争抢
-// G-4: Real concurrent dispatch to service-hub instead of pure in-memory simulation.
-// Graceful degradation: when service-hub is unreachable, generates synthetic task IDs
-// to still validate the concurrency model (zero-duplicate / zero-deadlock).
+// runTS03 执行 TS-03：Phase B 租约多副本并发争抢。
+//
+// 测试步骤：
+//  1. 启动 5 个并发 Worker，每个分发 4 个任务（共 20 个）
+//  2. 每个 Worker 调用 DispatchTask 向 Service Hub 提交任务
+//  3. 若 Hub 不可达，生成 synthetic ID 作为降级兆底
+//  4. 检查任务 ID 零重复（验证 FOR UPDATE SKIP LOCKED 原子性）
+//  5. 检查零死锁
+//
+// 断言：
+//   - 零重复执行保证
+//   - 零死锁验证
+//   - 并发分发吞吐量
+//   - 孤儿租约自动过期回收
 func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 	start := time.Now()
 	logs := []string{"[TS-03] 开始执行 Phase B 原子租约并发争抢测试..."}
 
+	// 启动 5 个并发 Worker，每个分发 4 个任务
 	workersCount := 5
 	tasksPerWorker := 4
 	totalTasks := workersCount * tasksPerWorker
@@ -300,10 +357,11 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 				latency := time.Since(t0).Milliseconds()
 
 				mu.Lock()
+				// 派发失败时生成 synthetic ID（降级兆底，仍验证并发模型）
 				var taskID string
 				if err != nil {
 					logs = append(logs, fmt.Sprintf("[TS-03] Worker%d task%d dispatch failed (%dms): %v → fallback synthetic ID", workerID, j, latency, err))
-					// Generate synthetic task ID to validate concurrency model
+					// 派发失败 → 生成 synthetic ID
 					taskID = fmt.Sprintf("synthetic-w%d-t%d-%s", workerID, j, shortRandomID())
 				} else if resp.TaskID != "" {
 					taskID = resp.TaskID
@@ -314,7 +372,7 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 					logs = append(logs, fmt.Sprintf("[TS-03] Worker%d task%d empty task_id (%dms) → fallback synthetic ID", workerID, j, latency))
 				}
 
-				// Check for duplicate task IDs (validates zero-duplicate guarantee)
+				// 检查任务 ID 零重复（验证原子租约的零重复保证）
 				for _, existing := range taskIDs {
 					if existing == taskID {
 						duplicateCount++
@@ -328,6 +386,7 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 	}
 	wg.Wait()
 
+	// 判定执行模式：live（至少有一个真实 dispatch）或 fallback（全部 synthetic）
 	mode := "live"
 	if realDispatchCount == 0 {
 		mode = "fallback"
@@ -336,7 +395,7 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 	logs = append(logs, fmt.Sprintf("[TS-03] ✅ 并发分发完成 [%s 模式]: 收集 %d/%d 任务 ID (真实 dispatch=%d), 重复认领=%d, 死锁=%d",
 		mode, len(taskIDs), totalTasks, realDispatchCount, duplicateCount, deadlockCount))
 
-	// G-5: Assertions based on actual dispatch results
+	// 构造断言结果
 	assertions := []models.TestSuiteAssertion{
 		{
 			Name:     "Zero Duplicate Execution Guarantee",
@@ -364,6 +423,7 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 		},
 	}
 
+	// 根据所有断言是否通过判定整体状态
 	duration := float64(time.Since(start).Microseconds()) / 1000.0
 	allPassed := true
 	for _, a := range assertions {
@@ -388,7 +448,7 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 	}
 }
 
-// shortRandomID generates a 6-character random hex string for synthetic task IDs.
+// shortRandomID 生成 6 字符的随机十六进制字符串，用于 synthetic task ID。
 func shortRandomID() string {
 	b := make([]byte, 3)
 	_, _ = rand.Read(b)

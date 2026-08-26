@@ -1,3 +1,13 @@
+/**
+ * DatasourceExplorer — 数据源切片浏览器。
+ *
+ * 功能概述：
+ *  1. 选择数据源并拉取数据切片（分页查看数据源中的记录）
+ *  2. 触发流水线处理（将数据源记录发送到 Service Hub 执行脱敏等操作）
+ *
+ * 注意：此组件目前未在 App.tsx 中直接使用（已被 DataApiPanel 替代），
+ * 但保留作为数据源级别的浏览能力。
+ */
 import React, { useState } from 'react';
 import { Datasource, DatasourceSliceResponse } from '../types/api';
 import { useI18n } from '../i18n';
@@ -8,9 +18,13 @@ import {
   IconCheckCircle,
 } from './icons';
 
+/** DatasourceExplorer 组件的 Props */
 interface DatasourceExplorerProps {
+  /** 可用数据源列表 */
   datasources: Datasource[];
+  /** 拉取数据切片的回调 */
   onFetchSlice: (id: string, limit: number) => Promise<DatasourceSliceResponse>;
+  /** 触发流水线处理的回调 */
   onTriggerPipeline: (dsID: string, limit: number) => Promise<any>;
 }
 

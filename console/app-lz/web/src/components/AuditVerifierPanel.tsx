@@ -1,3 +1,19 @@
+/**
+ * AuditVerifierPanel — 不可篡改脱敏审计存证与 Merkle 验真大屏。
+ *
+ * 功能概述：
+ *  1. 展示审计日志条目列表（含数据哈希、操作者、加密方式等）
+ *  2. 触发 Merkle 树完整性验证（校验哈希链是否被篡改）
+ *  3. 展示验证结果（Merkle Root Hash、总条目数、数字签名）
+ *
+ * 数据来源：
+ *  - logs: App.tsx 中 fetchAuditLogs() 拉取
+ *  - 验证结果通过 onVerify 回调触发
+ *
+ * Merkle 验真原理：
+ *  Audit Log 服务将每条日志的 SHA-256 哈希构建为 Merkle 树，
+ *  验证时比对根哈希是否一致，任何单条篡改都会导致根哈希不匹配。
+ */
 import React, { useState } from 'react';
 import { AuditLogItem, AuditVerifyResponse } from '../types/api';
 import { useI18n } from '../i18n';
@@ -8,10 +24,15 @@ import {
   IconRefresh,
 } from './icons';
 
+/** AuditVerifierPanel 组件的 Props */
 interface AuditVerifierPanelProps {
+  /** 审计日志条目列表 */
   logs: AuditLogItem[];
+  /** Merkle 验真回调 */
   onVerify: () => Promise<AuditVerifyResponse>;
+  /** 刷新日志列表回调 */
   onRefreshLogs: () => Promise<void>;
+  /** 是否正在加载中 */
   loading: boolean;
 }
 

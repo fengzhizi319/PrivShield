@@ -1,3 +1,20 @@
+// Package handlers 实现 App-LZ BFF 的所有 HTTP 请求处理逻辑。
+//
+// 核心组件：
+//   - Handler: 持有所有依赖（config, ClientPool, TestRunner）
+//   - SetupRouter: 注册所有 API 路由 + SPA 静态文件回退
+//
+// API 路由分组（/api/lz/*）：
+//  1. 拓扑探测：GET /topology, POST /probe/all
+//  2. 任务管理：GET /tasks, GET /tasks/:id, GET /tasks/leases, POST /tasks/dispatch
+//  3. 测试套件：GET /suites, POST /suites/run
+//  4. 审计验证：GET /audit/logs, POST /audit/verify
+//  5. 性能指标：GET /metrics, GET /metrics/parsed
+//  6. 预设数据 API：GET /data-api/definitions, POST /data-api/invoke
+//
+// 关键流程：
+//   - InvokeDataApi: 编排完整的 4 阶段会话（fetch → classify+desensitize → audit → return）
+//   - applyMasking: 本地降级掩码（当 engine 不可达时使用）
 package handlers
 
 import (
@@ -17,14 +34,15 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/runner"
 )
 
-// Handler holds the dependencies for the HTTP handlers.
+// Handler 持有所有 HTTP 处理器的依赖。
+// 所有 handler 方法共享同一个 Handler 实例，通过它访问配置、客户端池和测试执行器。
 type Handler struct {
-	cfg    *config.Config
-	pool   *clients.ClientPool
-	runner *runner.TestRunner
+	cfg    *config.Config       // 运行时配置
+	pool   *clients.ClientPool  // 上游微服务 HTTP 客户端池
+	runner *runner.TestRunner   // E2E 测试套件执行器
 }
 
-// NewHandler creates a new Handler instance.
+// NewHandler 创建一个新的 Handler 实例。
 func NewHandler(cfg *config.Config, pool *clients.ClientPool, testRunner *runner.TestRunner) *Handler {
 	return &Handler{
 		cfg:    cfg,
@@ -33,53 +51,65 @@ func NewHandler(cfg *config.Config, pool *clients.ClientPool, testRunner *runner
 	}
 }
 
-// SetupRouter initializes the Gin engine and mounts all API routes and static asset handlers.
+// SetupRouter 初始化 Gin 引擎并注册所有 API 路由和静态文件服务。
+//
+// 路由结构：
+//   /api/health          — BFF 自身健康检查
+//   /api/lz/topology     — 服务拓扑探测
+//   /api/lz/tasks/*      — 任务管理（列表/详情/租约/派发）
+//   /api/lz/suites/*     — E2E 测试套件
+//   /api/lz/audit/*      — 审计日志与 Merkle 验真
+//   /api/lz/metrics*     — Prometheus 指标
+//   /api/lz/data-api/*   — 预设数据 API
+//   /*                   — SPA 静态文件回退（NoRoute handler）
 func SetupRouter(h *Handler) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
+	gin.SetMode(gin.ReleaseMode) // 生产模式，关闭 Gin 调试日志
 	r := gin.New()
-	r.Use(gin.Recovery())
-	r.Use(corsMiddleware())
+	r.Use(gin.Recovery())      // 全局 panic 恢复中间件
+	r.Use(corsMiddleware())    // 全局 CORS 中间件
 
-	// Health Check
+	// ── 健康检查（两个路径均支持，兼容不同探测配置）──
 	r.GET("/api/health", h.HealthCheck)
 	r.GET("/health", h.HealthCheck)
 
-	// App-LZ API Group
+	// ── App-LZ API 分组 ──
 	api := r.Group("/api/lz")
 	{
-		// 1. Topology & Probes
+		// 1. 拓扑探测（GET 和 POST 均支持，POST 用于强制刷新）
 		api.GET("/topology", h.GetTopology)
 		api.POST("/probe/all", h.GetTopology)
 
-		// 2. Tasks & Leases
+		// 2. 任务管理（列表/详情/租约/派发）
 		api.GET("/tasks", h.ListTasks)
 		api.GET("/tasks/:id", h.GetTask)
 		api.GET("/tasks/leases", h.GetLeases)
 		api.POST("/tasks/dispatch", h.DispatchTask)
 
-		// 3. Test Suites Runner
+		// 3. E2E 测试套件（获取可用套件 / 执行套件）
 		api.GET("/suites", h.GetSuites)
 		api.POST("/suites/run", h.RunSuites)
 
-		// 4. Audit Log & Merkle
+		// 4. 审计日志与 Merkle 验真
 		api.GET("/audit/logs", h.GetAuditLogs)
 		api.POST("/audit/verify", h.VerifyAudit)
 
-		// 5. Metrics
+		// 5. Prometheus 性能指标（原始 / 解析后）
 		api.GET("/metrics", h.GetMetrics)
 		api.GET("/metrics/parsed", h.GetParsedMetrics)
 
-		// 6. Preset Data APIs (4 预设数据 API)
+		// 6. 预设数据 API（获取定义 / 调用会话）
 		api.GET("/data-api/definitions", h.GetDataApiDefinitions)
 		api.POST("/data-api/invoke", h.InvokeDataApi)
 	}
 
-	// Static Web Assets / SPA Fallback
+	// ── SPA 静态文件服务 ──
 	setupStaticServing(r, h.cfg.StaticDir)
 
 	return r
 }
 
+// corsMiddleware 返回 CORS 中间件，允许所有来源的跨域请求。
+// 对 OPTIONS 预检请求直接返回 204，不继续向下路由。
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -93,6 +123,15 @@ func corsMiddleware() gin.HandlerFunc {
 	}
 }
 
+// setupStaticServing 配置 SPA 静态文件服务。
+//
+// 逻辑：
+//  1. 检查 staticDir 是否存在，不存在则跳过
+//  2. 注册 NoRoute handler：对所有未匹配 API 路由的请求
+//     a. /api/* 路径 → 返回 404 JSON
+//     b. 磁盘上存在的文件 → 直接返回静态文件
+//     c. 其他路径 → 回退到 index.html（SPA 前端路由）
+//     d. index.html 也不存在 → 返回纯文本提示
 func setupStaticServing(r *gin.Engine, staticDir string) {
 	if staticDir == "" {
 		return
@@ -105,18 +144,21 @@ func setupStaticServing(r *gin.Engine, staticDir string) {
 		return
 	}
 
+	// NoRoute handler：处理所有未匹配的路由
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
+		// /api/* 路径不应回退到 SPA，直接返回 404
 		if strings.HasPrefix(path, "/api") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "api route not found"})
 			return
 		}
+		// 尝试返回静态文件
 		reqFile := filepath.Join(absDir, filepath.Clean(path))
 		if stat, err := os.Stat(reqFile); err == nil && !stat.IsDir() {
 			c.File(reqFile)
 			return
 		}
-		// Fallback to index.html for SPA router
+		// SPA 回退：返回 index.html（前端 React Router 接管路由）
 		indexFile := filepath.Join(absDir, "index.html")
 		if _, err := os.Stat(indexFile); err == nil {
 			c.File(indexFile)
@@ -126,7 +168,8 @@ func setupStaticServing(r *gin.Engine, staticDir string) {
 	})
 }
 
-// HealthCheck handles /api/health.
+// HealthCheck 处理 BFF 自身的健康检查请求。
+// 返回服务名称、版本号和来源标识。
 func (h *Handler) HealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
@@ -136,14 +179,16 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 	})
 }
 
-// GetTopology returns live topology of 4 services.
+// GetTopology 返回 4 个微服务的实时拓扑状态。
+// 支持通过 ?protocol=grpc 查询参数切换协议视角。
 func (h *Handler) GetTopology(c *gin.Context) {
 	protocol := c.DefaultQuery("protocol", "rest")
 	topo := h.pool.GetTopology(c.Request.Context(), protocol)
 	c.JSON(http.StatusOK, topo)
 }
 
-// DispatchTask handles manual task dispatch.
+// DispatchTask 处理手动任务派发请求。
+// 将前端提交的任务转发到 Service Hub，失败时返回 503。
 func (h *Handler) DispatchTask(c *gin.Context) {
 	var req models.DispatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -152,13 +197,14 @@ func (h *Handler) DispatchTask(c *gin.Context) {
 	}
 	resp, err := h.pool.DispatchTask(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusAccepted, resp)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusAccepted, resp)
+	c.JSON(http.StatusOK, resp)
 }
 
-// ListTasks returns paginated tasks.
+// ListTasks 返回分页的任务列表。
+// 支持查询参数：status（筛选）、limit（每页数量，默认 50）、offset（偏移量，默认 0）。
 func (h *Handler) ListTasks(c *gin.Context) {
 	status := c.Query("status")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
@@ -172,7 +218,8 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, tasksResp)
 }
 
-// GetTask returns a single task.
+// GetTask 返回单个任务的完整详情。
+// 通过 URL 路径参数 :id 指定任务 ID。
 func (h *Handler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	task, err := h.pool.GetTask(c.Request.Context(), id)
@@ -183,8 +230,9 @@ func (h *Handler) GetTask(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
-// GetLeases returns Phase B PostgreSQL lease status.
-// G-1: Queries real service-hub running tasks instead of returning hardcoded data.
+// GetLeases 返回 Phase B PostgreSQL 租约状态。
+// 从 Service Hub 查询 running 状态的任务并推导租约信息。
+// 当 Hub 不可达或无租约任务时，返回空结构（含元数据）。
 func (h *Handler) GetLeases(c *gin.Context) {
 	leaseResp, err := h.pool.GetLeasesFromHub(c.Request.Context())
 	if err != nil || leaseResp.TotalLeasedTasks == 0 {
@@ -205,22 +253,27 @@ func (h *Handler) GetLeases(c *gin.Context) {
 	c.JSON(http.StatusOK, leaseResp)
 }
 
-// GetSuites returns available test cases.
+// GetSuites 返回所有可用的 E2E 测试套件定义。
 func (h *Handler) GetSuites(c *gin.Context) {
 	suites := h.runner.GetAvailableSuites()
 	c.JSON(http.StatusOK, gin.H{"suites": suites})
 }
 
-// RunSuites executes test cases.
+// RunSuites 执行选定的 E2E 测试套件。
+// 请求体包含要执行的套件 ID 列表、并发数和压测请求数。
 func (h *Handler) RunSuites(c *gin.Context) {
 	var req models.RunTestSuiteRequest
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	resp := h.runner.RunSuites(c.Request.Context(), req)
 	c.JSON(http.StatusOK, resp)
 }
 
-// GetAuditLogs returns audit logs.
+// GetAuditLogs 返回审计日志条目列表。
+// 支持查询参数：limit（默认 50）、offset（默认 0）。
 func (h *Handler) GetAuditLogs(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
@@ -233,7 +286,7 @@ func (h *Handler) GetAuditLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"logs": logs})
 }
 
-// VerifyAudit triggers Merkle verification.
+// VerifyAudit 触发 Merkle 树完整性验证。
 func (h *Handler) VerifyAudit(c *gin.Context) {
 	resp, err := h.pool.VerifyAudit(c.Request.Context())
 	if err != nil {
@@ -243,7 +296,8 @@ func (h *Handler) VerifyAudit(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// GetMetrics returns raw Prometheus metrics.
+// GetMetrics 返回 Service Hub 的原始 Prometheus 指标文本。
+// 当上游不可达时返回合成的最小指标。
 func (h *Handler) GetMetrics(c *gin.Context) {
 	metrics, err := h.pool.GetHubMetrics(c.Request.Context())
 	if err != nil {
@@ -253,8 +307,8 @@ func (h *Handler) GetMetrics(c *gin.Context) {
 	c.String(http.StatusOK, metrics)
 }
 
-// GetParsedMetrics returns parsed metrics from Prometheus output.
-// G-2/G-3: Returns real stage durations, QPS, and percentiles instead of hardcoded values.
+// GetParsedMetrics 返回解析后的 Prometheus 指标（各阶段耗时、QPS、百分位数）。
+// 当上游不可达时返回硬编码的默认值，source 标记为 "fallback"。
 func (h *Handler) GetParsedMetrics(c *gin.Context) {
 	parsed, err := h.pool.GetParsedMetrics(c.Request.Context())
 	if err != nil {
@@ -282,31 +336,37 @@ func (h *Handler) GetParsedMetrics(c *gin.Context) {
 	})
 }
 
-// GetDataApiDefinitions returns the 4 preset data API definitions.
+// GetDataApiDefinitions 返回 4 个预设数据 API 的定义。
 func (h *Handler) GetDataApiDefinitions(c *gin.Context) {
 	defs := presetDataApiDefinitions()
 	c.JSON(http.StatusOK, gin.H{"apis": defs, "via": "app-lz-bff"})
 }
 
-// InvokeDataApi orchestrates a full data session:
-// 1. Fetch raw data from datasource-mgr (via service-hub)
-// 2. Send to engine for desensitization
-// 3. Save audit record to audit-log
-// 4. Return complete session result to frontend
+// InvokeDataApi 编排完整的预设数据 API 会话。
+//
+// 执行流程（4 阶段）：
+//  1. Fetch — 从 datasource-mgr 拉取原始数据
+//  2. Classify + Desensitize — 调用 engine 医疗流水线进行分类分级 + 脱敏
+//     （降级：engine 不可达时走本地字段级掩码 applyMasking）
+//  3. Audit — 向 audit-log 写入审计存证
+//  4. Return — 返回完整会话结果（原始数据 + 脱敏数据 + 各阶段状态）
 func (h *Handler) InvokeDataApi(c *gin.Context) {
 	var req models.DataApiInvokeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// 参数校验：api_id 必须在 1~4 范围内
 	if req.ApiID < 1 || req.ApiID > 4 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "api_id must be 1-4"})
 		return
 	}
+	// 默认返回 5 条记录
 	if req.Limit <= 0 {
 		req.Limit = 5
 	}
 
+	// 查找目标 API 定义
 	defs := presetDataApiDefinitions()
 	var apiDef *models.DataApiDef
 	for i := range defs {
@@ -315,6 +375,7 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 			break
 		}
 	}
+	// 预留 API（status != "active"）直接返回 skipped
 	if apiDef == nil || apiDef.Status != "active" {
 		c.JSON(http.StatusOK, models.DataApiSessionResponse{
 			SessionID: fmt.Sprintf("session-%d-%d", req.ApiID, time.Now().UnixNano()),
@@ -333,7 +394,7 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 	var sanitizedData []map[string]any
 	overallStatus := "completed"
 
-	// --- Stage 1: Fetch raw data from datasource-mgr ---
+	// ── 阶段 1：从 datasource-mgr 拉取原始数据 ────────────────────────
 	fetchStart := time.Now()
 	sliceResp, fetchErr := h.pool.GetDatasourceSlice(c.Request.Context(), apiDef.DatasourceID, req.Limit)
 	fetchDuration := time.Since(fetchStart).Milliseconds()
@@ -352,10 +413,10 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 		})
 	}
 
-	// --- Stage 2: Classify & Desensitize via engine medical pipeline ---
-	// 与 console/bff-go 的 MedicalPipeline/YibaoPipeline 保持一致：
-	// 调用 engine /v1/medical/process 专业医疗流水线（3-Layer 分类分级 + L4/L5 高敏文本剥离 +
-	// PII 强掩码 + ICD-10 编码脱敏 + 诊断残留清除），而非通用 mask_record。
+	// ── 阶段 2：分类分级 + 脱敏治理 ─────────────────────────────────
+	// 优先调用 engine 医疗流水线（/v1/medical/process），
+	// 包含 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + ICD-10 脱敏。
+	// 若 engine 不可达，降级到本地字段级掩码（applyMasking）。
 	desensitizeStart := time.Now()
 	if len(rawRecords) > 0 {
 		engineUsed := false
@@ -375,7 +436,7 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 				Detail:     fmt.Sprintf("对 %d 条记录执行医疗流水线脱敏 (via engine-agent, L4/L5 高敏剥离)", len(sanitizedData)),
 			})
 		} else {
-			// 降级兆底：engine 不可达时走本地字段级掩码
+			// 降级兆底：engine 不可达 → 本地字段级掩码
 			sanitizedData = make([]map[string]any, 0, len(rawRecords))
 			for _, rec := range rawRecords {
 				sanitized := make(map[string]any)
@@ -409,7 +470,7 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 		})
 	}
 
-	// --- Stage 3: Audit log entry ---
+	// ── 阶段 3：审计存证 ───────────────────────────────────────────
 	auditStart := time.Now()
 	auditEntryID := ""
 	_, auditErr := h.pool.GetAuditLogs(c.Request.Context(), 1, 0)
@@ -431,6 +492,7 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 		})
 	}
 
+	// 计算会话总耗时
 	totalDuration := int64(0)
 	for _, s := range stages {
 		totalDuration += s.DurationMs
@@ -450,8 +512,9 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// presetDataApiDefinitions returns the 4 preset data API definitions.
+// presetDataApiDefinitions 返回 4 个预设数据 API 的定义。
 // 字段定义与 engine/medical_pipeline/samples 及 scripts/data/ 生成脚本保持严格一致。
+// API 1/2 为 active 状态，API 3/4 为 reserved 预留状态。
 func presetDataApiDefinitions() []models.DataApiDef {
 	return []models.DataApiDef{
 		{
@@ -506,58 +569,69 @@ func presetDataApiDefinitions() []models.DataApiDef {
 	}
 }
 
-// applyMasking applies simple field-name-aware masking to a value.
+// applyMasking 对单个字段值应用基于字段名的本地掩码。
+//
 // 字段名与 yibao.csv (18 字段) / kangyang.csv (27 字段) 严格对齐。
 // 仅作为 engine MaskRecordViaEngine 失败时的降级兆底，生产环境应由引擎处理。
+//
+// 掩码规则：
+//   - 身份证类：保留前 4 后 4，中间星化
+//   - 手机/联系人/医保编号：保留前 3 后 4，中间星化
+//   - 姓名类：保留首字，其余星化
+//   - 人员标识/结算流水号：保留前 4，其余星化
+//   - 地址类：保留前 3 后 3，中间星化
+//   - 日期类：保留年月，隐藏日
+//   - 诊断/病情/病史类：保留首字，其余全星化
+//   - 数值/枚举类：不脱敏
 func applyMasking(field string, value any) any {
 	s, ok := value.(string)
 	if !ok {
 		return value
 	}
 	switch field {
-	// --- 身份证类 ---
+	// ── 身份证类（保留前 4 后 4）──
 	case "id_card", "id_card_no":
 		if len(s) >= 15 {
 			return s[:4] + "**********" + s[len(s)-4:]
 		}
 		return "****"
-	// --- 手机/联系人/医保编号 ---
+	// ── 手机/联系人/医保编号（保留前 3 后 4）──
 	case "phone", "emergency_contact", "medical_insurance_no":
 		if len(s) >= 7 {
 			return s[:3] + "****" + s[len(s)-4:]
 		}
 		return "****"
-	// --- 姓名类 ---
+	// ── 姓名类（保留首字）──
 	case "patient_name", "name":
 		if len(s) >= 2 {
 			return string(s[0]) + "*"
 		}
 		return "*"
-	// --- 人员标识 / 结算流水号 ---
+	// ── 人员标识 / 结算流水号（保留前 4）──
 	case "person_id", "insurance_settlement_id", "settlement_seq_no":
 		if len(s) >= 6 {
 			return s[:4] + "****"
 		}
 		return "****"
-	// --- 地址类 ---
+	// ── 地址类（保留前 3 后 3）──
 	case "registered_address":
 		if len(s) >= 6 {
 			return s[:3] + "****" + s[len(s)-3:]
 		}
 		return "****"
-	// --- 证照编号类 ---
+	// ── 证照编号类（保留前 4 后 4）──
 	case "disability_cert_no":
 		if len(s) >= 8 {
 			return s[:4] + "********" + s[len(s)-4:]
 		}
 		return "****"
-	// --- 医院编码 ---
+	// ── 医院编码（保留前 3）──
 	case "hospital_code":
 		if len(s) >= 6 {
 			return s[:3] + "***"
 		}
 		return "***"
-	// --- 日期类（出生日期、入院/出院日期） ---
+	// ── 日期类（保留年月，隐藏日）──
 	case "birth_date":
 		if len(s) >= 4 {
 			return s[:4] + "-**-**"
@@ -569,7 +643,7 @@ func applyMasking(field string, value any) any {
 			return s[:7] + "-**"
 		}
 		return s
-	// --- 诊断/病情/病史类（首字保留，其余全星化，彻底消除疾病关键词泄露） ---
+	// ── 诊断/病情/病史类（首字保留，其余全星化）──
 	case "diagnosis", "diagnosis_name", "chief_complaint", "present_illness",
 		"past_history", "personal_history", "family_history", "progress_note",
 		"allergic_history":
@@ -577,7 +651,7 @@ func applyMasking(field string, value any) any {
 			return "*"
 		}
 		return string(s[0]) + strings.Repeat("*", len(s)-1)
-	// --- 数值/枚举类（不脱敏） ---
+	// ── 数值/枚举类（不脱敏）──
 	// gender, age, length_of_stay, height, weight, department,
 	// is_smoking, smoking_duration, disability_category, disability_level,
 	// assess_type_name, assess_result_name, assess_score, progress_note_time,

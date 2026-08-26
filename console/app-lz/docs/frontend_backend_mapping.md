@@ -19,6 +19,8 @@
 | 7 | MetricsPanel | [7. 可观测性指标面板](#7-可观测性指标面板) |
 | 8 | DataApiPanel | [8. 预设数据 API（医保/康养）](#8-预设数据-api医保康养) |
 
+> **注意**：实际 BFF 路由与最初设计有所不同。当前实现中无独立的 `/pipeline/*` 和 `/datasources/*` 路由组，任务分发通过 `/api/lz/tasks/dispatch` 进行，数据源访问通过预设数据 API (`/api/lz/data-api/*`) 进行。
+
 ---
 
 ## 1. 四微服务网格拓扑与健康矩阵
@@ -56,35 +58,15 @@ BFF 并发探测 4 个微服务的 REST + gRPC 健康端点：
 **前端组件**: `PipelineVisualizer.tsx`
 **切换到此 Tab 时按需加载**
 
-### 2.1 流水线状态
-
-| 层 | 接口 |
-|----|------|
-| **前端** | `api.getPipelineStatus()` |
-| **BFF** | `GET /api/lz/pipeline/status` → `GetPipelineStatus()` |
-| **上游** | `GET :8082/api/hub/pipeline` (service-hub) |
-
-返回 6 个流水线阶段的实时状态：`ingest → fetch → classify → desensitize → return → audit`
-
-### 2.2 手动任务调度
+### 2.1 任务分发
 
 | 层 | 接口 |
 |----|------|
 | **前端** | `api.dispatchTask(req)` |
-| **BFF** | `POST /api/lz/pipeline/dispatch` → `DispatchTask()` |
+| **BFF** | `POST /api/lz/tasks/dispatch` → `DispatchTask()` |
 | **上游** | `POST :8082/api/hub/dispatch` (service-hub) |
 
 请求体：`{ source: "ds_yibao", operation: "mask", payload: {...}, priority: 50 }`
-
-### 2.3 分类调度
-
-| 层 | 接口 |
-|----|------|
-| **前端** | `api.classifyDispatch(req)` |
-| **BFF** | `POST /api/lz/pipeline/classify-dispatch` → `ClassifyDispatch()` |
-| **上游** | `POST :8082/api/hub/classify` (service-hub) |
-
-请求体：`{ source: "ds_kangyang", payload: {...}, priority: 50 }`
 
 ### 降级策略
 
@@ -162,36 +144,7 @@ BFF 从 service-hub 查询 running 状态任务，按 `lease_owner` (worker) 分
 **前端组件**: `DatasourceExplorer.tsx`
 **页面加载时自动拉取数据源列表**
 
-### 5.1 数据源列表
-
-| 层 | 接口 |
-|----|------|
-| **前端** | `api.getDatasources()` |
-| **BFF** | `GET /api/lz/datasources` → `GetDatasources()` |
-| **上游** | `GET :8083/api/v1/datasources` (datasource-mgr) |
-| **回退** | `GET :8082/api/hub/datasources` (service-hub) |
-
-返回 `ds_yibao` (医保 18 字段) 和 `ds_kangyang` (康养 27 字段) 的元数据。
-
-### 5.2 数据源切片
-
-| 层 | 接口 |
-|----|------|
-| **前端** | `api.getDatasourceSlice(id, limit)` |
-| **BFF** | `GET /api/lz/datasources/:id/slice?limit=10` → `GetDatasourceSlice()` |
-| **上游** | `GET :8083/api/v1/yibao?limit=10` 或 `GET :8083/api/v1/kangyang?limit=10` (datasource-mgr) |
-
-datasource-mgr 从 CSV 文件加载真实数据（yibao.csv 50 行 / kangyang.csv 100 行）。
-
-### 5.3 触发数据源流水线
-
-| 层 | 接口 |
-|----|------|
-| **前端** | `api.triggerDatasource(req)` |
-| **BFF** | `POST /api/lz/pipeline/trigger-datasource` → `TriggerDatasource()` |
-| **上游** | `POST :8082/api/hub/pipeline/trigger-datasource` (service-hub) |
-
-请求体：`{ datasource_id: "ds_yibao", limit: 10, operation: "mask" }`
+> **注意**：数据源相关功能在当前实现中主要通过预设数据 API (`/api/lz/data-api/*`) 访问，而非独立的 datasource 路由。详见 [§8. 预设数据 API](#8-预设数据-api医保康养)。
 
 ### 降级策略
 
@@ -367,10 +320,7 @@ BFF 从 Prometheus 文本格式中提取：
 | BFF Client 方法 | 上游服务 | HTTP 端点 |
 |----------------|---------|----------|
 | `ProbeNode()` | 全部 4 个 | `GET /api/health` (回退 `/health`) + TCP dial |
-| `GetPipelineStatus()` | service-hub | `GET /api/hub/pipeline` |
 | `DispatchTask()` | service-hub | `POST /api/hub/dispatch` |
-| `ClassifyDispatch()` | service-hub | `POST /api/hub/classify` |
-| `TriggerDatasourcePipeline()` | service-hub | `POST /api/hub/pipeline/trigger-datasource` |
 | `ListTasks()` | service-hub | `GET /api/hub/tasks` |
 | `GetTask()` | service-hub | `GET /api/hub/tasks/:id` |
 | `GetLeasesFromHub()` | service-hub | `GET /api/hub/tasks?status=running&limit=100` |
@@ -379,26 +329,22 @@ BFF 从 Prometheus 文本格式中提取：
 | `GetAuditLogs()` | audit-log | `GET /api/v1/audit/logs` |
 | `VerifyAudit()` | audit-log | `POST /api/v1/audit/verify` |
 | `GetHubMetrics()` | service-hub | `GET /metrics` |
+| `GetParsedMetrics()` | service-hub | `GET /metrics` → BFF 本地解析 |
 | `ProcessMedicalRecords()` | **engine** | `POST /v1/medical/process` |
 | `MaskRecordViaEngine()` | **engine** | `POST /v1/privacy/mask_record` |
 
 ## 附录 B：前端 API Client → BFF 路由速查表
 
 | 前端 `api.*` 方法 | HTTP | BFF 路由 | Handler |
-|------------------|------|---------|---------|
+|------------------|------|---------|----------|
 | `getTopology()` | GET | `/api/lz/topology` | `GetTopology` |
 | `probeAll()` | POST | `/api/lz/probe/all` | `GetTopology` |
-| `getPipelineStatus()` | GET | `/api/lz/pipeline/status` | `GetPipelineStatus` |
-| `dispatchTask()` | POST | `/api/lz/pipeline/dispatch` | `DispatchTask` |
-| `classifyDispatch()` | POST | `/api/lz/pipeline/classify-dispatch` | `ClassifyDispatch` |
-| `triggerDatasource()` | POST | `/api/lz/pipeline/trigger-datasource` | `TriggerDatasource` |
 | `listTasks()` | GET | `/api/lz/tasks` | `ListTasks` |
 | `getTask()` | GET | `/api/lz/tasks/:id` | `GetTask` |
 | `getLeases()` | GET | `/api/lz/tasks/leases` | `GetLeases` |
+| `dispatchTask()` | POST | `/api/lz/tasks/dispatch` | `DispatchTask` |
 | `getSuites()` | GET | `/api/lz/suites` | `GetSuites` |
 | `runSuites()` | POST | `/api/lz/suites/run` | `RunSuites` |
-| `getDatasources()` | GET | `/api/lz/datasources` | `GetDatasources` |
-| `getDatasourceSlice()` | GET | `/api/lz/datasources/:id/slice` | `GetDatasourceSlice` |
 | `getAuditLogs()` | GET | `/api/lz/audit/logs` | `GetAuditLogs` |
 | `verifyAudit()` | POST | `/api/lz/audit/verify` | `VerifyAudit` |
 | `getMetrics()` | GET | `/api/lz/metrics` | `GetMetrics` |

@@ -1,3 +1,15 @@
+/**
+ * PipelineVisualizer — 流水线可视化与任务派发组件。
+ *
+ * 功能概述：
+ *  1. 展示 6 阶段流水线的实时状态（ingest→fetch→classify→desensitize→return→audit）
+ *  2. 支持手动派发任务到 Service Hub（选择数据源/操作/优先级）
+ *  3. 支持自动分类分级模式（三层漏斗：Rule→NER→LLM）
+ *  4. 内置示例数据（医保/康养）方便快速测试
+ *
+ * 注意：此组件目前未在 App.tsx 中直接使用，
+ * 其功能已被 TaskLifecyclePanel 和 DataApiPanel 分别承担。
+ */
 import React, { useState } from 'react';
 import { PipelineStatusResponse, DispatchRequest, DispatchResponse } from '../types/api';
 import { useI18n } from '../i18n';
@@ -11,9 +23,13 @@ import {
   IconRefresh,
 } from './icons';
 
+/** PipelineVisualizer 组件的 Props */
 interface PipelineVisualizerProps {
+  /** 流水线实时状态（各阶段活跃数/平均耗时） */
   status: PipelineStatusResponse | null;
+  /** 任务派发回调 */
   onDispatch: (req: DispatchRequest) => Promise<DispatchResponse>;
+  /** 分类分级派发回调 */
   onClassifyDispatch: (source: string, payload: Record<string, any>) => Promise<any>;
 }
 

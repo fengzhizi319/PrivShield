@@ -1,3 +1,23 @@
+/**
+ * DataApiPanel — 预设数据 API 全链路会话测试大屏。
+ *
+ * 功能概述：
+ *  1. 展示 4 个预设数据 API 卡片（医保/康养/预留×2），支持点击“申请”触发全链路会话
+ *  2. 6 阶段流水线可视化：Ingest → Fetch → Classify → Desensitize → Return → Audit
+ *  3. 会话结果展示：状态指示 + 各阶段耗时 + 原始数据 vs 脱敏数据对比
+ *  4. 手风琴式数据对比视图（DataAccordionView）：支持逐行展开查看字段级脱敏详情
+ *
+ * 全链路会话流程：
+ *  前端 → BFF → Service Hub 调度 → Datasource Mgr 拉取原始数据
+ *  → Engine 分类脱敏 → Audit Log 存证 → 前端展示
+ *
+ * 状态管理：
+ *  - selectedApiId: 当前选中的 API
+ *  - limit: 采样条数（3/5/10/20）
+ *  - session: 会话结果（含原始数据 + 脱敏数据 + 各阶段状态）
+ *  - showRaw: 是否显示原始 JSON（vs 手风琴模式）
+ *  - expandedRows: 手风琴模式中展开的行
+ */
 import React, { useState, useMemo } from 'react';
 import { DataApiDef, DataApiSessionResponse } from '../types/api';
 import { useI18n } from '../i18n';
@@ -12,9 +32,13 @@ import {
   IconActivity,
 } from './icons';
 
+/** DataApiPanel 组件的 Props */
 interface DataApiPanelProps {
+  /** 预设数据 API 定义列表（4 个） */
   apis: DataApiDef[];
+  /** 调用数据 API 的回调（触发全链路会话） */
   onInvoke: (apiId: number, limit: number) => Promise<DataApiSessionResponse>;
+  /** 是否正在加载中 */
   loading: boolean;
 }
 
@@ -31,6 +55,7 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
   const [showRaw, setShowRaw] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
+  /** 调用指定 API 的全链路会话 */
   const handleInvoke = async (apiId: number) => {
     setInvoking(true);
     setSession(null);
@@ -44,6 +69,7 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
     }
   };
 
+  /** 根据阶段状态返回对应图标（success=勾号, error=叉号, 其他=-） */
   const getStageIcon = (status: string) => {
     switch (status) {
       case 'success':
@@ -325,10 +351,16 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
   );
 };
 
-// ---------------------------------------------------------------------------
-// DataAccordionView — Accordion-style record display
-// ---------------------------------------------------------------------------
-
+/**
+ * DataAccordionView — 手风琴式数据对比视图。
+ *
+ * 功能：
+ *  1. 逐行展示脱敏前后的数据对比（每条记录可展开/收起）
+ *  2. 展开后按字段对比原始值 vs 脱敏值，被脱敏的字段高亮显示
+ *  3. 支持“全部展开/全部收起”快捷按钮
+ *  4. 支持切换“原始 JSON”模式（直接显示完整 JSON 文本）
+ *  5. 自动统计每条记录中被脱敏的字段数
+ */
 interface DataAccordionViewProps {
   rawRecords: Record<string, any>[];
   sanitizedData: Record<string, any>[];
@@ -348,7 +380,7 @@ const DataAccordionView: React.FC<DataAccordionViewProps> = ({
   setExpandedRows,
   t,
 }) => {
-  // Collect all field keys from both raw and sanitized
+  /** 合并原始数据和脱敏数据中的所有字段名（去重） */
   const allFields = useMemo(() => {
     const keys = new Set<string>();
     rawRecords.forEach((r) => Object.keys(r).forEach((k) => keys.add(k)));
@@ -356,7 +388,7 @@ const DataAccordionView: React.FC<DataAccordionViewProps> = ({
     return Array.from(keys);
   }, [rawRecords, sanitizedData]);
 
-  // Get a summary label for a collapsed record row
+  /** 获取记录的摘要标签（优先使用 ID 字段，否则取第一个字段） */
   const getRecordSummary = (raw: Record<string, any>, sanitized: Record<string, any>): string => {
     // Try common ID fields first
     const idFields = ['record_id', 'elder_id', 'id', 'patient_name', 'name'];
@@ -369,7 +401,7 @@ const DataAccordionView: React.FC<DataAccordionViewProps> = ({
     return '(empty record)';
   };
 
-  // Count masked fields in a record
+  /** 统计记录中被脱敏的字段数（原始值 !== 脱敏值） */
   const countMasked = (raw: Record<string, any>, sanitized: Record<string, any>): number => {
     let count = 0;
     for (const key of Object.keys(raw)) {

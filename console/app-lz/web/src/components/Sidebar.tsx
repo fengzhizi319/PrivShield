@@ -1,3 +1,16 @@
+/**
+ * Sidebar — 左侧固定导航栏组件。
+ *
+ * 布局结构（从上到下）：
+ *  1. 品牌标识区：LZ Logo + 应用标题 + 版本号 + 集群状态指示灯
+ *  2. 导航菜单区：6 个标签页按钮（拓扑/数据API/任务/测试/审计/指标）
+ *  3. 底部区：中英文语言切换开关 + 版权信息
+ *
+ * 交互逻辑：
+ *  - 点击导航按钮触发 onSelectTab，由 App.tsx 中的 currentTab 状态控制右侧面板切换
+ *  - 当前激活的标签页高亮显示（indigo 主题色）
+ *  - 集群状态灯：healthy=绿色脉冲，其他=琥珀色
+ */
 import React from 'react';
 import { useI18n } from '../i18n';
 import {
@@ -9,11 +22,16 @@ import {
   IconGlobe,
 } from './icons';
 
+/** 6 个标签页类型，对应 6 个面板组件 */
 export type TabType = 'topology' | 'tasks' | 'runner' | 'audit' | 'metrics' | 'dataApi';
 
+/** Sidebar 组件的 Props */
 interface SidebarProps {
+  /** 当前激活的标签页 */
   currentTab: TabType;
+  /** 标签页切换回调 */
   onSelectTab: (tab: TabType) => void;
+  /** 集群整体状态（来自拓扑探测结果） */
   clusterStatus: string;
 }
 
@@ -24,6 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { lang, setLang, t } = useI18n();
 
+  /** 导航菜单项定义（6 个标签页，每个包含 ID、翻译 key、图标） */
   const navItems: { id: TabType; labelKey: string; icon: React.ReactNode }[] = [
     { id: 'topology', labelKey: 'nav.topology', icon: <IconServer className="w-5 h-5" /> },
     { id: 'dataApi', labelKey: 'nav.dataApi', icon: <IconGlobe className="w-5 h-5" /> },

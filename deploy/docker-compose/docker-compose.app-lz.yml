@@ -175,14 +175,6 @@ services:
       APP_LZ_AUDIT_GRPC: "audit-log:50054"
       APP_LZ_AGENT_URL: "http://PrivShield:8079"
       APP_LZ_AGENT_GRPC: "PrivShield:50051"
-      HUB_URL: "http://service-hub:8082"
-      HUB_GRPC: "service-hub:50052"
-      DATASOURCE_URL: "http://datasource-mgr:8083"
-      DATASOURCE_GRPC: "datasource-mgr:50053"
-      AUDIT_URL: "http://audit-log:8084"
-      AUDIT_GRPC: "audit-log:50054"
-      AGENT_URL: "http://PrivShield:8079"
-      AGENT_GRPC: "PrivShield:50051"
     depends_on:
       PrivShield:
         condition: service_healthy
