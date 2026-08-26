@@ -37,21 +37,21 @@
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│                      上游调用方 (Web 控制台 / BFF / 外部业务系统)         │
+│                      上游调用方 (Web 控制台 / BFF / 外部业务系统)           │
 └─────────────────────────────────────┬─────────────────────────────────────┘
                                       │ HTTP REST (:8082) / gRPC (:50052)
                                       ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
-│                    service-hub 调度中枢 (Go 1.24+ / Gin / gRPC)           │
+│                    service-hub 调度中枢 (Go 1.24+ / Gin / gRPC)            │
 │                                                                           │
-│   • 接入认证与校验  • 任务生命周期管理  • 动态分类决策  • 隐私策略映射    │
+│   • 接入认证与校验  • 任务生命周期管理  • 动态分类决策  • 隐私策略映射        │
 └───────────┬─────────────────────────┬──────────────────────────┬──────────┘
             │ HTTP                    │ HTTP / gRPC              │ HTTP / gRPC
             ▼                         ▼                          ▼
-┌───────────────────────┐ ┌───────────────────────┐ ┌───────────────────────┐
-│ datasource-mgr (:8083)│ │ PrivShield 引擎 (:8079)│ │  audit-log (:8084)   │
-│ 数据源资产与模拟数据抽取 │ │ 三层分类漏斗与脱敏原语   │ │ SHA-256 存证与合规报告 │
-└───────────────────────┘ └───────────────────────┘ └───────────────────────┘
+┌──────────────────────────┐ ┌──────────────────────────┐ ┌──────────────────────────┐
+│ datasource-mgr (:8083)   │ │ PrivShield 引擎 (:8079)  │ │  audit-log (:8084)       │
+│ 数据源资产与模拟数据抽取   │ │ 三层分类漏斗与脱敏原语     │ │ SHA-256 存证与合规报告   │
+└──────────────────────────┘ └──────────────────────────┘ └──────────────────────────┘
 ```
 
 ### 核心职责与设计目标
@@ -74,7 +74,7 @@ flowchart TB
         ExtRPC[外部高性能业务微服务<br/>gRPC Client]
     end
 
-    subgraph ServiceHub [service-hub 调度中枢 (:8082 / :50052)]
+    subgraph ServiceHub ["service-hub 调度中枢 (:8082 / :50052)"]
         Router[Gin Router<br/>/api/hub/*]
         GRPCSrv[gRPC Server<br/>ServiceHubServiceServer]
         MW[中间件链: CORS / Auth / RequestID / Recover / Metrics]
@@ -89,8 +89,8 @@ flowchart TB
 
     subgraph Downstream [协同下游服务]
         DSMgr[datasource-mgr :8083<br/>数据资产与真实/模拟源]
-        Agent[PrivShield 核心引擎 :8079<br/>Rule → NER → LLM 动态分类<br/>Mask / DP / K-Anon 隐私原语]
-        Audit[audit-log :8084<br/>SHA-256 存证与快照校验]
+        Agent["PrivShield核心引擎:8079<br/>Rule→NER→LLM动态分类<br/>Mask/DP/K-Anon隐私原语"]
+        Audit[audit-log:8084<br/>SHA-256存证与快照校验]
     end
 
     Web -->|HTTP JSON| Router
@@ -132,11 +132,11 @@ flowchart TB
 ```mermaid
 graph LR
     Input[待处理字段] --> Funnel[PrivShield 三层分类漏斗]
-    Funnel -->|L1 公开| OpNone[无脱敏直接流通 (none)]
-    Funnel -->|L2 内部| OpMask[字段级动态掩码 (mask)]
-    Funnel -->|L3 敏感| OpKAnon[K-匿名化泛化 (k_anon)]
-    Funnel -->|L4 极敏| OpDP[差分隐私加噪 / 强脱敏 (dp)]
-    Funnel -->|L5 绝密| OpDeny[禁止流通 / 阻断 (deny)]
+    Funnel -->|L1 公开| OpNone["无脱敏直接流通 (none)"]
+    Funnel -->|L2 内部| OpMask["字段级动态掩码 (mask)"]
+    Funnel -->|L3 敏感| OpKAnon["K-匿名化泛化 (k_anon)"]
+    Funnel -->|L4 极敏| OpDP["差分隐私加噪 / 强脱敏 (dp)"]
+    Funnel -->|L5 绝密| OpDeny["禁止流通 / 阻断 (deny)"]
 ```
 
 ---
@@ -564,14 +564,14 @@ docker run -d \
 ```mermaid
 flowchart TD
     subgraph gRPC_Flow [1. gRPC 协议开发]
-        G1[1.1 在 proto/service_hub.proto 声明 RPC 契约] --> G2[1.2 执行 protoc 编译生成 Go 桩代码]
-        G2 --> G3[1.3 在 internal/grpcserver/server.go 实现业务编排]
-        G3 --> G4[1.4 在 internal/grpcserver/server_test.go 编写单测]
+        G1[1.1 在 proto/service_hub</br>.proto 声明 RPC 契约] --> G2[1.2 执行 protoc 编译</br>生成 Go 桩代码]
+        G2 --> G3[1.3 在 internal/grpcserver</br>/server.go 实现业务编排]
+        G3 --> G4[1.4 在 internal/grpcserver</br>/server_test.go 编写单测]
     end
 
     subgraph REST_Flow [2. REST 协议开发]
-        R1[2.1 在 internal/models/models.go 定义请求响应 DTO] --> R2[2.2 在 internal/handlers/handlers.go 编写 Controller 并绑定路由]
-        R2 --> R3[2.3 在 internal/handlers/handlers_test.go 编写 HTTP 测试]
+        R1[2.1 在 internal/models</br>/models.go 定义请求</br>响应 DTO] --> R2[2.2 在 internal/handlers/handlers.go </br>编写 Controller 并绑定路由]
+        R2 --> R3[2.3 在 internal/handlers</br>/handlers_test.go </br>编写 HTTP 测试]
     end
 
     gRPC_Flow --> E2E[3. 运行 make test-services 进行全链路回归]
