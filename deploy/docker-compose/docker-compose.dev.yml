@@ -97,7 +97,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    restart: unless-stopped
+    restart: "no"
 
   # 2. Console Go 后端代理
   console-backend-go:
@@ -126,7 +126,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
-    restart: unless-stopped
+    restart: "no"
 
   # 3. Console 前端 Web UI (Nginx 托管)
   console-web:
@@ -148,7 +148,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 5. 数据服务调度中枢 (Service Hub) — 开发模式
@@ -191,7 +191,7 @@ services:
         max-size: "10m"
         max-file: "3"
     stop_grace_period: 40s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 6. 数据源管理 (Datasource Manager) — 开发模式
@@ -232,7 +232,7 @@ services:
         max-size: "10m"
         max-file: "3"
     stop_grace_period: 40s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 7. 脱敏审计日志 (Audit Log) — 开发模式
@@ -273,7 +273,7 @@ services:
         max-size: "10m"
         max-file: "3"
     stop_grace_period: 40s
-    restart: unless-stopped
+    restart: "no"
 
   # 8. vLLM 大模型推理服务 (Profile: llm)
   vllm:
@@ -313,7 +313,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    restart: unless-stopped
+    restart: "no"
 
   # 9. Prometheus 监控 (Profile: monitoring)
   prometheus:
@@ -333,7 +333,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=7d"
       - "--web.enable-lifecycle"
-    restart: unless-stopped
+    restart: "no"
 
   # 10. Grafana 可视化面板 (Profile: monitoring)
   grafana:
@@ -353,7 +353,7 @@ services:
       - frontend
     depends_on:
       - prometheus
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 11. 可选：Phase B PostgreSQL（多副本 service-hub 原子租约后端）
@@ -383,4 +383,4 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    restart: unless-stopped
+    restart: "no"

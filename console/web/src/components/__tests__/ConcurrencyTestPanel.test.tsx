@@ -46,6 +46,21 @@ vi.mock('@/i18n', () => ({
         'concurrency.max': '最大',
         'concurrency.metric': '指标',
         'concurrency.value_ms': '数值 (ms)',
+        'concurrency.meaning': '统计含义与解释',
+        'concurrency.desc.p50': '50% 的请求在此耗时内完成（中位数）',
+        'concurrency.desc.p90': '90% 的请求在此耗时内完成',
+        'concurrency.desc.p95': '95% 的请求在此耗时内完成',
+        'concurrency.desc.p99': '99% 的请求在此耗时内完成',
+        'concurrency.desc.avg': '所有请求的算术平均耗时',
+        'concurrency.desc.min': '单次最快请求耗时',
+        'concurrency.desc.max': '单次最慢请求耗时',
+        'concurrency.guide.title': '性能指标与分位数 (P50/P90/P95/P99) 名词指南',
+        'concurrency.guide.what_is_p': '什么是分位数 (Percentile)？',
+        'concurrency.guide.what_is_p_desc': '分位数说明',
+        'concurrency.guide.why_not_avg': '为什么压测必须看分位数？',
+        'concurrency.guide.why_not_avg_desc': '平均值易被拉偏说明',
+        'concurrency.guide.how_to_use': '如何根据分位数进行调优？',
+        'concurrency.guide.how_to_use_desc': '调优建议说明',
       };
       return map[key] || key;
     },
@@ -68,6 +83,7 @@ const mockResponse: ConcurrencyTestResponse = {
   min_latency_ms: 1.2,
   max_latency_ms: 85.0,
   p50_latency_ms: 8.0,
+  p90_latency_ms: 25.0,
   p95_latency_ms: 35.0,
   p99_latency_ms: 70.0,
 };
@@ -123,8 +139,10 @@ describe('ConcurrencyTestPanel', () => {
 
     // 验证延迟统计（条形图 + 表格各出现一次，用 getAllByText）
     expect(screen.getAllByText('8.00 ms').length).toBeGreaterThanOrEqual(1); // P50
+    expect(screen.getAllByText('25.00 ms').length).toBeGreaterThanOrEqual(1); // P90
     expect(screen.getAllByText('35.00 ms').length).toBeGreaterThanOrEqual(1); // P95
     expect(screen.getAllByText('70.00 ms').length).toBeGreaterThanOrEqual(1); // P99
+    expect(screen.getByText('性能指标与分位数 (P50/P90/P95/P99) 名词指南')).toBeInTheDocument();
   });
 
   it('运行压测：失败时显示错误信息', async () => {

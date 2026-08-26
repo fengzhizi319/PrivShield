@@ -276,14 +276,14 @@ services:
         # max-file: 保留的日志文件最大数量（超出后删除最旧文件）
         max-file: "5"
     # restart: 容器退出后的重启策略
-    #   no（默认）          : 不自动重启
-    #   always              : 任何退出都重启（含 daemon 启动时）
+    #   no（默认）          : 不自动重启（开发/本地测试环境推荐，防止开机自启占用端口）
+    #   always              : 任何退出都重启（含 daemon 启动时，生产环境推荐）
     #   on-failure[:3]      : 仅非零退出码时重启（可带最大重试次数）
-    #   unless-stopped      : 除非手动 stop，否则总是重启（本配置，兼顾手动停止需求）
+    #   unless-stopped      : 除非手动 stop，否则总是重启
     # stop_grace_period: Docker 发送 SIGTERM 后等待容器优雅关闭的时间。
     # PrivShield Agent: gRPC GracefulStop 30s + REST shutdown，需留足余量。
     stop_grace_period: 40s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 2. Console Go 后端代理服务 (Go gRPC / REST 高性能代理)
@@ -332,7 +332,7 @@ services:
         max-file: "3"
     # stop_grace_period: Go HTTP server Shutdown 5s，10s 足够。
     stop_grace_period: 10s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 3. Console React 单页测试控制台 Web UI (Nginx 静态服务)
@@ -383,7 +383,7 @@ services:
       options:
         max-size: "10m"   # 访问日志量大，单文件 10MB 滚动
         max-file: "2"     # 仅保留 2 个
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 5. 数据服务调度中枢 (Service Hub)
@@ -439,7 +439,7 @@ services:
         max-file: "3"
     # stop_grace_period: Go gRPC GracefulStop 30s + HTTP shutdown，需留足余量。
     stop_grace_period: 40s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 6. 数据源管理 (Datasource Manager)
@@ -492,7 +492,7 @@ services:
         max-size: "20m"
         max-file: "3"
     stop_grace_period: 40s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 7. 脱敏审计日志 (Audit Log)
@@ -547,7 +547,7 @@ services:
         max-size: "20m"
         max-file: "3"
     stop_grace_period: 40s
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 8. 可选：vLLM Layer-3 本地大模型推理服务 (GPU 加速，独立容器)
@@ -622,7 +622,7 @@ services:
       options:
         max-size: "100m"  # vLLM 日志含推理统计较庞大，单文件 100MB
         max-file: "3"
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 9. 可选：Prometheus 监控服务（抓取 agent /metrics 指标）
@@ -657,7 +657,7 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 10. 可选：Grafana 可视化面板（对接 Prometheus 数据源）
@@ -699,7 +699,7 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
-    restart: unless-stopped
+    restart: "no"
 
   # ===========================================================================
   # 11. 可选：Phase B PostgreSQL（多副本 service-hub 原子租约后端）
@@ -742,4 +742,4 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
-    restart: unless-stopped
+    restart: "no"

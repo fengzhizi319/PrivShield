@@ -37,19 +37,33 @@ kill_by_pid_file() {
     fi
 }
 
-# ── kill_by_port: 清理指定端口上的残余进程 ────────────────────────────
+# ── kill_by_port: 清理指定端口上的残余进程与 Docker 容器 ──────────────
 # 作为 PID 文件的补充安全网，确保端口完全释放
-# 支持三种工具：lsof（macOS/Linux）、ss（Linux）、fuser（备选）
+# 支持三种工具：lsof（macOS/Linux）、ss（Linux）、fuser（备选），以及 Docker 容器检测
 kill_by_port() {
     local port="$1"
     local name="$2"
+
+    # 1. 检查并停止占用该端口的 Docker 容器
+    if command -v docker >/dev/null 2>&1; then
+        local cids=""
+        cids=$(docker ps -q --filter "publish=$port" 2>/dev/null || true)
+        if [[ -n "$cids" ]]; then
+            echo "停止占用端口 $port 的 Docker 容器 ($name)..."
+            for cid in $cids; do
+                docker stop "$cid" >/dev/null 2>&1 || docker kill "$cid" >/dev/null 2>&1 || true
+            done
+        fi
+    fi
+
+    # 2. 清理宿主机残余进程
     local pids=""
     if command -v lsof >/dev/null 2>&1; then
-        pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')
+        pids=$( (lsof -t -i :"$port" 2>/dev/null || true) | sort -u | tr '\n' ' ')
     elif command -v ss >/dev/null 2>&1; then
-        pids=$(ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
+        pids=$( (ss -tlnp 2>/dev/null || true) | (grep -E "LISTEN.*:$port\\s" || true) | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
     elif command -v fuser >/dev/null 2>&1; then
-        pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
+        pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ' || true)
     fi
 
     if [[ -n "$pids" ]]; then
@@ -57,7 +71,7 @@ kill_by_port() {
         for pid in $pids; do
             kill -15 "$pid" 2>/dev/null || true
         done
-        sleep 1
+        sleep 0.5
         for pid in $pids; do
             if kill -0 "$pid" 2>/dev/null; then
                 kill -9 "$pid" 2>/dev/null || true

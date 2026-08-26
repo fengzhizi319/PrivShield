@@ -322,42 +322,189 @@ export default function ConcurrencyTestPanel({ agentUrl }: ConcurrencyTestPanelP
 
               {/* 延迟分布 / Latency distribution */}
               <div className="rounded-xl border border-gray-200 bg-white p-5">
-                <h3 className="mb-4 text-sm font-semibold text-gray-800">
-                  {t('concurrency.latency_distribution')}
-                </h3>
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-800">
+                    {t('concurrency.latency_distribution')}
+                  </h3>
+                  <span className="text-xs text-gray-400">
+                    {t('concurrency.concurrency_hint')}
+                  </span>
+                </div>
                 <div className="space-y-3">
-                  <LatencyRow label="P50" value={result.p50_latency_ms} max={maxLatency} color="bg-green-500" />
-                  <LatencyRow label="P95" value={result.p95_latency_ms} max={maxLatency} color="bg-yellow-500" />
-                  <LatencyRow label="P99" value={result.p99_latency_ms} max={maxLatency} color="bg-red-500" />
-                  <LatencyRow label={t('concurrency.avg')} value={result.avg_latency_ms} max={maxLatency} color="bg-blue-500" />
-                  <LatencyRow label={t('concurrency.min')} value={result.min_latency_ms} max={maxLatency} color="bg-teal-400" />
-                  <LatencyRow label={t('concurrency.max')} value={result.max_latency_ms} max={maxLatency} color="bg-purple-500" />
+                  <LatencyRow
+                    label="P50"
+                    desc={t('concurrency.desc.p50')}
+                    value={result.p50_latency_ms}
+                    max={maxLatency}
+                    color="bg-green-500"
+                  />
+                  {result.p90_latency_ms !== undefined && (
+                    <LatencyRow
+                      label="P90"
+                      desc={t('concurrency.desc.p90')}
+                      value={result.p90_latency_ms}
+                      max={maxLatency}
+                      color="bg-lime-500"
+                    />
+                  )}
+                  <LatencyRow
+                    label="P95"
+                    desc={t('concurrency.desc.p95')}
+                    value={result.p95_latency_ms}
+                    max={maxLatency}
+                    color="bg-yellow-500"
+                  />
+                  <LatencyRow
+                    label="P99"
+                    desc={t('concurrency.desc.p99')}
+                    value={result.p99_latency_ms}
+                    max={maxLatency}
+                    color="bg-red-500"
+                  />
+                  <LatencyRow
+                    label={t('concurrency.avg')}
+                    desc={t('concurrency.desc.avg')}
+                    value={result.avg_latency_ms}
+                    max={maxLatency}
+                    color="bg-blue-500"
+                  />
+                  <LatencyRow
+                    label={t('concurrency.min')}
+                    desc={t('concurrency.desc.min')}
+                    value={result.min_latency_ms}
+                    max={maxLatency}
+                    color="bg-teal-400"
+                  />
+                  <LatencyRow
+                    label={t('concurrency.max')}
+                    desc={t('concurrency.desc.max')}
+                    value={result.max_latency_ms}
+                    max={maxLatency}
+                    color="bg-purple-500"
+                  />
                 </div>
               </div>
 
-              {/* 延迟统计表格 / Latency stats table */}
+              {/* 延迟统计与含义解释表格 / Latency stats & explanation table */}
               <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50">
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">{t('concurrency.metric')}</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">{t('concurrency.value_ms')}</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500">{t('concurrency.metric')}</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500">{t('concurrency.meaning')}</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500">{t('concurrency.value_ms')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    <tr><td className="px-4 py-2 text-gray-600">P50</td><td className="px-4 py-2 text-right font-mono text-gray-800">{result.p50_latency_ms.toFixed(2)} ms</td></tr>
-                    <tr><td className="px-4 py-2 text-gray-600">P95</td><td className="px-4 py-2 text-right font-mono text-gray-800">{result.p95_latency_ms.toFixed(2)} ms</td></tr>
-                    <tr><td className="px-4 py-2 text-gray-600">P99</td><td className="px-4 py-2 text-right font-mono text-gray-800">{result.p99_latency_ms.toFixed(2)} ms</td></tr>
-                    <tr><td className="px-4 py-2 text-gray-600">{t('concurrency.avg')}</td><td className="px-4 py-2 text-right font-mono text-gray-800">{result.avg_latency_ms.toFixed(2)} ms</td></tr>
-                    <tr><td className="px-4 py-2 text-gray-600">{t('concurrency.min')}</td><td className="px-4 py-2 text-right font-mono text-gray-800">{result.min_latency_ms.toFixed(2)} ms</td></tr>
-                    <tr><td className="px-4 py-2 text-gray-600">{t('concurrency.max')}</td><td className="px-4 py-2 text-right font-mono text-gray-800">{result.max_latency_ms.toFixed(2)} ms</td></tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">
+                        <span className="inline-flex items-center rounded bg-green-50 px-1.5 py-0.5 text-xs font-semibold text-green-700">P50</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-600">{t('concurrency.desc.p50')}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-gray-800">{result.p50_latency_ms.toFixed(2)} ms</td>
+                    </tr>
+                    {result.p90_latency_ms !== undefined && (
+                      <tr>
+                        <td className="px-4 py-2.5 font-medium text-gray-800">
+                          <span className="inline-flex items-center rounded bg-lime-50 px-1.5 py-0.5 text-xs font-semibold text-lime-700">P90</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-gray-600">{t('concurrency.desc.p90')}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-gray-800">{result.p90_latency_ms.toFixed(2)} ms</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">
+                        <span className="inline-flex items-center rounded bg-yellow-50 px-1.5 py-0.5 text-xs font-semibold text-yellow-700">P95</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-600">{t('concurrency.desc.p95')}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-gray-800">{result.p95_latency_ms.toFixed(2)} ms</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">
+                        <span className="inline-flex items-center rounded bg-red-50 px-1.5 py-0.5 text-xs font-semibold text-red-700">P99</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-600">{t('concurrency.desc.p99')}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-gray-800">{result.p99_latency_ms.toFixed(2)} ms</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">
+                        <span className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-xs font-semibold text-blue-700">{t('concurrency.avg')}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-600">{t('concurrency.desc.avg')}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-gray-800">{result.avg_latency_ms.toFixed(2)} ms</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">
+                        <span className="inline-flex items-center rounded bg-teal-50 px-1.5 py-0.5 text-xs font-semibold text-teal-700">{t('concurrency.min')}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-600">{t('concurrency.desc.min')}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-gray-800">{result.min_latency_ms.toFixed(2)} ms</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">
+                        <span className="inline-flex items-center rounded bg-purple-50 px-1.5 py-0.5 text-xs font-semibold text-purple-700">{t('concurrency.max')}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-600">{t('concurrency.desc.max')}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-gray-800">{result.max_latency_ms.toFixed(2)} ms</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+
+              {/* 指标名词详细指南卡片 / Metrics & Percentiles Guide Card */}
+              <MetricsGuideCard />
             </div>
           );
         })()}
       </div>
+    </div>
+  );
+}
+
+/** 指标名词解释与调优指南卡片 / Metrics & Percentiles Guide Card */
+function MetricsGuideCard() {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4 transition-all">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between text-left text-xs font-semibold text-indigo-900"
+      >
+        <span className="flex items-center gap-1.5">
+          <span className="text-indigo-600">💡</span>
+          {t('concurrency.guide.title')}
+        </span>
+        <span className="text-indigo-500 hover:text-indigo-700">
+          {open ? '▲ 收起' : '▼ 展开查看'}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3 text-xs leading-relaxed text-indigo-950/80">
+          <div className="rounded-lg bg-white/80 p-3 shadow-sm border border-indigo-100/60">
+            <h4 className="font-semibold text-indigo-900 mb-1">
+              📌 {t('concurrency.guide.what_is_p')}
+            </h4>
+            <p className="text-gray-600">{t('concurrency.guide.what_is_p_desc')}</p>
+          </div>
+
+          <div className="rounded-lg bg-white/80 p-3 shadow-sm border border-indigo-100/60">
+            <h4 className="font-semibold text-indigo-900 mb-1">
+              ⚖️ {t('concurrency.guide.why_not_avg')}
+            </h4>
+            <p className="text-gray-600">{t('concurrency.guide.why_not_avg_desc')}</p>
+          </div>
+
+          <div className="rounded-lg bg-white/80 p-3 shadow-sm border border-indigo-100/60">
+            <h4 className="font-semibold text-indigo-900 mb-1">
+              🚀 {t('concurrency.guide.how_to_use')}
+            </h4>
+            <p className="whitespace-pre-line text-gray-600">{t('concurrency.guide.how_to_use_desc')}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -382,12 +529,26 @@ function SummaryCard({ label, value, unit, color }: { label: string; value: stri
 }
 
 /** 延迟条形图行 / Latency bar row */
-function LatencyRow({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+function LatencyRow({
+  label,
+  desc,
+  value,
+  max,
+  color,
+}: {
+  label: string;
+  desc?: string;
+  value: number;
+  max: number;
+  color: string;
+}) {
   const pct = max > 0 ? Math.max(2, (value / max) * 100) : 2;
   return (
     <div className="flex items-center gap-3">
-      <span className="w-8 text-xs font-medium text-gray-500">{label}</span>
-      <div className="flex-1">
+      <div className="w-12 shrink-0">
+        <span className="text-xs font-semibold text-gray-700" title={desc}>{label}</span>
+      </div>
+      <div className="flex-1" title={desc ? `${label}: ${desc}` : undefined}>
         <div className="h-5 w-full overflow-hidden rounded-full bg-gray-100">
           <div
             className={`h-full rounded-full ${color} transition-all duration-500`}

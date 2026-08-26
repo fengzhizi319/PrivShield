@@ -477,6 +477,8 @@ export interface ConcurrencyTestResponse {
   max_latency_ms: number;
   /** P50 延迟（毫秒） */
   p50_latency_ms: number;
+  /** P90 延迟（毫秒） */
+  p90_latency_ms?: number;
   /** P95 延迟（毫秒） */
   p95_latency_ms: number;
   /** P99 延迟（毫秒） */

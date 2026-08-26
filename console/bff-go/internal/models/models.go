@@ -281,6 +281,7 @@ type ConcurrencyTestResponse struct {
 	MinLatencyMs float64 `json:"min_latency_ms"`
 	MaxLatencyMs float64 `json:"max_latency_ms"`
 	P50LatencyMs float64 `json:"p50_latency_ms"`
+	P90LatencyMs float64 `json:"p90_latency_ms"`
 	P95LatencyMs float64 `json:"p95_latency_ms"`
 	P99LatencyMs float64 `json:"p99_latency_ms"`
 }

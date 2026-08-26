@@ -67,4 +67,16 @@ pkill -f "bin/service-hub" 2>/dev/null || true
 pkill -f "bin/datasource-mgr" 2>/dev/null || true
 pkill -f "bin/audit-log" 2>/dev/null || true
 
+# ── 步骤 3：停止可能占用开发端口的 Docker 容器 ─────────────────────────────
+if command -v docker >/dev/null 2>&1; then
+    for port in 8079 50051 8081 8082 8083 8084 5173; do
+        cids=$(docker ps -q --filter "publish=$port" 2>/dev/null || true)
+        if [[ -n "$cids" ]]; then
+            for cid in $cids; do
+                docker stop "$cid" >/dev/null 2>&1 || true
+            done
+        fi
+    done
+fi
+
 echo -e "${GREEN}所有相关服务实例已成功停止！${NC}"

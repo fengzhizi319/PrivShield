@@ -58,6 +58,22 @@ fi
 
 log_info "Using Go: $GO_BIN ($($GO_BIN version))"
 
+_ensure_port_free() {
+    local port="$1"
+    local name="$2"
+    if command -v docker >/dev/null 2>&1; then
+        local cids
+        cids=$(docker ps -q --filter "publish=$port" 2>/dev/null || true)
+        if [[ -n "$cids" ]]; then
+            log_warn "Port $port ($name) is occupied by Docker container(s). Automatically stopping..."
+            for cid in $cids; do
+                docker stop "$cid" >/dev/null 2>&1 || true
+            done
+            sleep 1
+        fi
+    fi
+}
+
 # ── 每个模块的启动流程：─────────────────────────────────────────────
 #   1. 检查 PID 文件，若已存在且进程存活则跳过（幂等性）
 #   2. go build 编译最新二进制
@@ -68,6 +84,8 @@ log_info "Using Go: $GO_BIN ($($GO_BIN version))"
 start_service_hub() {
     local port="${SERVICE_HUB_PORT:-8082}"
     local pid_file="${PIDS_DIR}/service-hub.pid"
+
+    _ensure_port_free "$port" "service-hub"
 
     if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
         log_warn "service-hub already running (PID $(cat "$pid_file"))"
@@ -93,6 +111,8 @@ start_datasource_mgr() {
     local port="${DATASOURCE_MGR_PORT:-8083}"
     local pid_file="${PIDS_DIR}/datasource-mgr.pid"
 
+    _ensure_port_free "$port" "datasource-mgr"
+
     if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
         log_warn "datasource-mgr already running (PID $(cat "$pid_file"))"
         return
@@ -116,6 +136,8 @@ start_datasource_mgr() {
 start_audit_log() {
     local port="${AUDIT_LOG_PORT:-8084}"
     local pid_file="${PIDS_DIR}/audit-log.pid"
+
+    _ensure_port_free "$port" "audit-log"
 
     if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
         log_warn "audit-log already running (PID $(cat "$pid_file"))"

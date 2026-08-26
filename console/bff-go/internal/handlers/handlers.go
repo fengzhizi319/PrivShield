@@ -1387,6 +1387,7 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 			MinLatencyMs: 0,
 			MaxLatencyMs: 0,
 			P50LatencyMs: 0,
+			P90LatencyMs: 0,
 			P95LatencyMs: 0,
 			P99LatencyMs: 0,
 		})
@@ -1429,6 +1430,7 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 		MinLatencyMs: math.Round(latencies[0]*100) / 100,
 		MaxLatencyMs: math.Round(latencies[n-1]*100) / 100,
 		P50LatencyMs: math.Round(percentile(50)*100) / 100,
+		P90LatencyMs: math.Round(percentile(90)*100) / 100,
 		P95LatencyMs: math.Round(percentile(95)*100) / 100,
 		P99LatencyMs: math.Round(percentile(99)*100) / 100,
 	}

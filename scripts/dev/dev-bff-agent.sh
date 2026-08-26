@@ -80,22 +80,68 @@ check_port_available() {
     echo "⚠️  端口 $port 已被占用（$name）"
     echo "────────────────────────────────────────"
 
+    # 1. 检查是否有 Docker 容器映射/占用了该端口
+    if command -v docker >/dev/null 2>&1; then
+        local docker_containers=""
+        docker_containers=$(docker ps --filter "publish=$port" --format "{{.ID}} ({{.Names}})" 2>/dev/null || true)
+        if [[ -n "$docker_containers" ]]; then
+            echo "📦 检测到 Docker 容器正在占用此端口:"
+            echo "$docker_containers"
+            local docker_answer=""
+            if [[ "$FORCE" == "true" ]]; then
+                echo "（--force 非交互模式：自动停止占用端口 $port 的 Docker 容器）"
+                docker_answer="y"
+            elif [[ ! -t 0 ]]; then
+                echo "错误：端口 $port 被 Docker 容器占用且当前为非交互环境。请使用 --force 自动停止容器，或先运行 ./scripts/dev/docker-stop.sh。"
+                exit 1
+            else
+                read -rp "是否自动停止上述 Docker 容器以释放端口？[y/N] " docker_answer
+            fi
+            case "$docker_answer" in
+                [yY]|[yY][eE][sS])
+                    for cid in $(docker ps -q --filter "publish=$port" 2>/dev/null); do
+                        echo "正在停止 Docker 容器 $cid..."
+                        docker stop "$cid" >/dev/null 2>&1 || docker kill "$cid" >/dev/null 2>&1 || true
+                    done
+                    sleep 1
+                    if ! _is_port_in_use "$port"; then
+                        echo "✅ 端口 $port 已成功释放 (Docker 容器已停止)"
+                        return 0
+                    fi
+                    ;;
+                *)
+                    echo "已取消。请手动停止 Docker 容器或释放端口 $port 后重试。"
+                    exit 1
+                    ;;
+            esac
+        fi
+    fi
+
+    # 2. 检查宿主机本地进程 PID
     local pids=""
     if command -v lsof >/dev/null 2>&1; then
-        lsof -i :"$port" 2>/dev/null || true
-        pids=$(lsof -t -i :"$port" 2>/dev/null | sort -u | tr '\n' ' ')
+        pids=$( (lsof -t -i :"$port" 2>/dev/null || true) | sort -u | tr '\n' ' ')
     elif command -v ss >/dev/null 2>&1; then
-        ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" || true
-        pids=$(ss -tlnp 2>/dev/null | grep -E "LISTEN.*:$port\\s" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
+        pids=$( (ss -tlnp 2>/dev/null || true) | (grep -E "LISTEN.*:$port\\s" || true) | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')
     elif command -v fuser >/dev/null 2>&1; then
-        pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ')
+        pids=$(fuser "$port"/tcp 2>/dev/null | tr -s ' ' || true)
     fi
 
     if [[ -z "$pids" ]]; then
+        if [[ "$FORCE" == "true" ]] && command -v fuser >/dev/null 2>&1; then
+            echo "（--force 模式：尝试使用 fuser 释放端口 $port）"
+            fuser -k -9 "$port/tcp" 2>/dev/null || true
+            sleep 1
+            if ! _is_port_in_use "$port"; then
+                echo "✅ 端口 $port 已释放"
+                return 0
+            fi
+        fi
         echo "错误：无法定位占用端口 $port 的进程，请手动排查。"
         exit 1
     fi
 
+    local answer=""
     if [[ "$FORCE" == "true" ]]; then
         echo "（--force 非交互模式：自动终止占用端口 $port 的进程）"
         answer="y"
