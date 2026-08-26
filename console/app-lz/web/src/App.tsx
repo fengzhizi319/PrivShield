@@ -10,6 +10,8 @@ import {
   AuditLogItem,
   DispatchRequest,
   ProtocolType,
+  DataApiDef,
+  DataApiSessionResponse,
 } from './types/api';
 import { Sidebar, TabType } from './components/Sidebar';
 import { TopologyPanel } from './components/TopologyPanel';
@@ -19,6 +21,7 @@ import { TestRunnerPanel } from './components/TestRunnerPanel';
 import { DatasourceExplorer } from './components/DatasourceExplorer';
 import { AuditVerifierPanel } from './components/AuditVerifierPanel';
 import { MetricsPanel } from './components/MetricsPanel';
+import { DataApiPanel } from './components/DataApiPanel';
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabType>('topology');
@@ -31,6 +34,9 @@ export const App: React.FC = () => {
   const [datasources, setDatasources] = useState<Datasource[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [metricsRaw, setMetricsRaw] = useState<string>('');
+  const [parsedMetrics, setParsedMetrics] = useState<{ stage_durations: Record<string, number>; qps: number; percentiles: Record<string, number>; total_requests: number; source: string } | null>(null);
+  const [dataApiDefs, setDataApiDefs] = useState<DataApiDef[]>([]);
+  const [loadingDataApi, setLoadingDataApi] = useState(false);
 
   const [loadingTopo, setLoadingTopo] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -142,14 +148,58 @@ export const App: React.FC = () => {
   const fetchMetrics = useCallback(async () => {
     setLoadingMetrics(true);
     try {
-      const res = await api.getMetrics();
-      setMetricsRaw(res);
+      const [rawRes, parsedRes] = await Promise.all([
+        api.getMetrics(),
+        api.getParsedMetrics().catch(() => null),
+      ]);
+      setMetricsRaw(rawRes);
+      if (parsedRes) {
+        setParsedMetrics(parsedRes);
+      }
     } catch {
       // ignore
     } finally {
       setLoadingMetrics(false);
     }
   }, []);
+
+  // 7. Fetch Data API Definitions
+  const fetchDataApiDefs = useCallback(async () => {
+    try {
+      const res = await api.getDataApiDefinitions();
+      setDataApiDefs(res.apis || []);
+    } catch {
+      // Fallback: 4 preset definitions
+      setDataApiDefs([
+        { id: 1, name: '医保结算数据 API', datasource_id: 'ds_yibao', category: 'medical', description: '城镇职工基本医疗保险结算数据', fields: ['record_id', 'patient_name', 'id_card', 'phone', 'diagnosis'], status: 'active' },
+        { id: 2, name: '康养体征数据 API', datasource_id: 'ds_kangyang', category: 'healthcare', description: '智慧养老健康监护与体征数据', fields: ['elder_id', 'name', 'age', 'heart_rate', 'blood_pressure'], status: 'active' },
+        { id: 3, name: '预留数据 API #3', datasource_id: '', category: 'reserved', description: '预留接口，待后续业务接入', fields: [], status: 'reserved' },
+        { id: 4, name: '预留数据 API #4', datasource_id: '', category: 'reserved', description: '预留接口，待后续业务接入', fields: [], status: 'reserved' },
+      ]);
+    }
+  }, []);
+
+  // 8. Invoke Data API Session
+  const invokeDataApi = useCallback(async (apiId: number, limit: number): Promise<DataApiSessionResponse> => {
+    setLoadingDataApi(true);
+    try {
+      return await api.invokeDataApi(apiId, limit);
+    } catch (err: any) {
+      return {
+        session_id: `session-${apiId}-fallback`,
+        api_id: apiId,
+        api_name: dataApiDefs.find(d => d.id === apiId)?.name || `API ${apiId}`,
+        status: 'failed',
+        raw_records: [],
+        sanitized_data: [],
+        stages: [],
+        total_duration_ms: 0,
+        error: err.message || 'Session failed',
+      };
+    } finally {
+      setLoadingDataApi(false);
+    }
+  }, [dataApiDefs]);
 
   useEffect(() => {
     fetchTopology();
@@ -158,13 +208,14 @@ export const App: React.FC = () => {
     fetchDatasources();
     fetchAuditLogs();
     fetchMetrics();
+    fetchDataApiDefs();
 
     // Auto-refresh topology every 15s
     const timer = setInterval(() => {
       fetchTopology();
     }, 15000);
     return () => clearInterval(timer);
-  }, [fetchTopology, fetchTasksAndLeases, fetchSuites, fetchDatasources, fetchAuditLogs, fetchMetrics]);
+  }, [fetchTopology, fetchTasksAndLeases, fetchSuites, fetchDatasources, fetchAuditLogs, fetchMetrics, fetchDataApiDefs]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
@@ -253,8 +304,17 @@ export const App: React.FC = () => {
         {currentTab === 'metrics' && (
           <MetricsPanel
             metricsRaw={metricsRaw}
+            parsedMetrics={parsedMetrics}
             onRefreshMetrics={fetchMetrics}
             loading={loadingMetrics}
+          />
+        )}
+
+        {currentTab === 'dataApi' && (
+          <DataApiPanel
+            apis={dataApiDefs}
+            onInvoke={invokeDataApi}
+            loading={loadingDataApi}
           />
         )}
       </main>

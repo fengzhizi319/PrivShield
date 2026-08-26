@@ -58,10 +58,12 @@
   # Linux / macOS (标准开发模式)
   bash ./scripts/dev/dev-bff-agent.sh
   ```
+  
   ```bash
   # Linux / macOS (mTLS 安全模式)
   bash ./scripts/dev/dev-bff-agent.sh --mtls
   ```
+  
   ```powershell
   # Windows (PowerShell)
   .\scripts\dev\dev-bff-agent.ps1
@@ -81,7 +83,10 @@
   # 启动 App-LZ 开发控制台 (BFF :8085 + Vite :5174)
   bash ./scripts/dev/dev-app-lz.sh --force
   ```
-
+  ```bash
+  # 启动 App-LZ 开发控制台 (BFF :8085 + Vite :5174) mtls
+  bash ./scripts/dev/dev-app-lz.sh  --mtls --force
+  ```
 ---
 
 ### `dev-stop.sh`
@@ -184,10 +189,15 @@
   ```bash
   # 1. 启动标准非 mTLS 版本 (默认，HTTP + 明文 gRPC)
   bash ./scripts/dev/docker-start-bff-agent.sh --force
+  ```
+
+  ```bash
 
   # 2. 启动 mTLS 双向认证版本 (HTTPS + mTLS gRPC)
   bash ./scripts/dev/docker-start-bff-agent.sh --mtls --force
+  ```
 
+  ```bash
   # 3. 跳过构建快速拉起
   bash ./scripts/dev/docker-start-bff-agent.sh --mtls --no-build
   ```
@@ -195,7 +205,9 @@
   ```powershell
   # Windows (PowerShell 标准非 mTLS)
   .\scripts\dev\docker-start-bff-agent.ps1
-
+  ```
+  
+  ```powershell
   # Windows (PowerShell mTLS 双向认证)
   .\scripts\dev\docker-start-bff-agent.ps1 -MTLS
   ```
@@ -252,6 +264,9 @@
   ```bash
   # 带本地 vLLM 大模型容器联动启动
   bash ./scripts/dev/docker-start-all.sh --with-llm
+  ```
+  
+  ```bash
 
   # 全量启动 (LLM + PostgreSQL + 监控)
   bash ./scripts/dev/docker-start-all.sh --with-llm --with-postgres --with-monitoring
@@ -266,10 +281,14 @@
   ```bash
   # Linux / macOS (默认 core 镜像)
   bash ./scripts/dev/docker-start-agent.sh core
+  ```
+  
+  ```bash 
 
   # Linux / macOS (ml 镜像)
   bash ./scripts/dev/docker-start-agent.sh ml
   ```
+  
   ```powershell
   # Windows (PowerShell)
   .\scripts\dev\docker-start-agent.ps1 -Target core
@@ -324,6 +343,9 @@
   ```bash
   # 启动 PostgreSQL
   bash ./scripts/dev/start-postgres.sh
+  ```
+  
+  ```bash
 
   # 停止并移除
   bash ./scripts/dev/start-postgres.sh --stop
@@ -383,6 +405,9 @@
 - **执行命令**:
   ```bash
   bash ./scripts/dev/start_monitoring.sh
+  ```
+
+  ```bash
   bash ./scripts/dev/stop_monitoring.sh
   ```
 

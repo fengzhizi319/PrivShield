@@ -17,6 +17,8 @@ import {
   DatasourceSliceResponse,
   AuditLogItem,
   AuditVerifyResponse,
+  DataApiDef,
+  DataApiSessionResponse,
 } from '../types/api';
 
 const BASE_URL = '/api/lz';
@@ -131,5 +133,27 @@ export const api = {
   async getMetrics(): Promise<string> {
     const res = await fetch(`${BASE_URL}/metrics`);
     return res.text();
+  },
+
+  async getParsedMetrics(): Promise<{
+    stage_durations: Record<string, number>;
+    qps: number;
+    percentiles: Record<string, number>;
+    total_requests: number;
+    source: string;
+  }> {
+    return fetchJSON(`${BASE_URL}/metrics/parsed`);
+  },
+
+  // 8. Preset Data APIs (4 预设数据 API)
+  async getDataApiDefinitions(): Promise<{ apis: DataApiDef[] }> {
+    return fetchJSON<{ apis: DataApiDef[] }>(`${BASE_URL}/data-api/definitions`);
+  },
+
+  async invokeDataApi(apiId: number, limit = 5): Promise<DataApiSessionResponse> {
+    return fetchJSON<DataApiSessionResponse>(`${BASE_URL}/data-api/invoke`, {
+      method: 'POST',
+      body: JSON.stringify({ api_id: apiId, limit }),
+    });
   },
 };

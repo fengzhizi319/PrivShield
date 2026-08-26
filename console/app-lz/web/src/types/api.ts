@@ -204,3 +204,38 @@ export interface AuditVerifyResponse {
   signature?: string;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Preset Data API Session Types (4 预设数据 API)
+// ---------------------------------------------------------------------------
+
+export interface DataApiDef {
+  id: number;
+  name: string;
+  datasource_id: string;
+  category: string;
+  description: string;
+  fields: string[];
+  status: 'active' | 'reserved';
+}
+
+export interface DataApiSessionStage {
+  name: string;
+  title: string;
+  status: 'success' | 'error' | 'skipped';
+  duration_ms: number;
+  detail?: string;
+}
+
+export interface DataApiSessionResponse {
+  session_id: string;
+  api_id: number;
+  api_name: string;
+  status: 'completed' | 'partial' | 'failed' | 'skipped';
+  raw_records: Record<string, any>[];
+  sanitized_data: Record<string, any>[];
+  stages: DataApiSessionStage[];
+  audit_entry_id?: string;
+  total_duration_ms: number;
+  error?: string;
+}

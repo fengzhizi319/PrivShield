@@ -260,6 +260,10 @@ launch_agent() {
             export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
             export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true
             export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["privshield-client"]'
+        else
+            # 开发明文模式必须覆盖 shell/.env 可能遗留的 TLS 配置，否则
+            # Agent 会监听 HTTPS，而下面的健康探针仍使用 HTTP。
+            export PRIVACY_TLS_ENABLED=false
         fi
         exec python -m engine.server >> "$agent_log" 2>&1
     ) &
@@ -274,12 +278,19 @@ wait_for_service() {
     local name="$2"
     local max_attempts=30
     local attempt=0
-    local curl_opts=("-s" "-o" "/dev/null" "-w" "%{http_code}")
+    # 本地服务不能经过 HTTP(S)_PROXY；否则代理可能把 127.0.0.1 请求吞掉。
+    local curl_opts=("--noproxy" "*" "--connect-timeout" "1" "--max-time" "3" "-s" "-o" "/dev/null" "-w" "%{http_code}")
     if [[ "$MTLS_MODE" == "true" ]]; then
         curl_opts+=("-k")
     fi
     echo -n "等待 $name 就绪"
     while [[ $attempt -lt $max_attempts ]]; do
+        if [[ "$name" == "PrivShield" ]] && ! kill -0 "$AGENT_PID" 2>/dev/null; then
+            echo " 失败（Agent 进程已退出）"
+            echo "最近日志："
+            tail -n 40 "$LOGS_DIR/agent_all.log" >&2 || true
+            return 1
+        fi
         if curl "${curl_opts[@]}" "$url" | grep -q '^200$'; then
             echo " OK"
             return 0
@@ -288,7 +299,11 @@ wait_for_service() {
         sleep 1
         attempt=$((attempt + 1))
     done
-    echo " 超时"
+    echo " 超时（$url）"
+    if [[ "$name" == "PrivShield" ]]; then
+        echo "最近日志："
+        tail -n 40 "$LOGS_DIR/agent_all.log" >&2 || true
+    fi
     return 1
 }
 
@@ -318,6 +333,9 @@ echo "启动 Go gRPC 代理后端 (API: $CONSOLE_URL)..."
         export PRIVACY_AGENT_TLS_CERT_FILE="$CERT_DIR/client.crt"
         export PRIVACY_AGENT_TLS_KEY_FILE="$CERT_DIR/client.key"
         export PRIVACY_AGENT_TLS_SERVER_NAME="localhost"
+    else
+        # 避免 BFF 继承全局 PRIVACY_TLS_ENABLED=true 后错误地按 TLS 连接 Agent。
+        export PRIVACY_AGENT_TLS_ENABLED=false
     fi
     exec ./bin/backend-go
 ) > "$LOGS_DIR/backend-go-all.log" 2>&1 &

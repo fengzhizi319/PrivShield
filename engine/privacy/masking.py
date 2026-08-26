@@ -69,7 +69,8 @@ class FieldType(str, Enum):
     BANK_CARD = "bank_card"  # 银行卡类型（匹配 bank/card_no/银行卡 等，card 为边界匹配）
     EMAIL = "email"          # 邮箱类型（匹配 email/mail/邮箱）
     ADDRESS = "address"      # 地址类型（匹配 addr/address/地址/住址）
-    DEFAULT = "default"      # 默认类型（未匹配到任何规则时的兜底）
+    MEDICAL = "medical"      # 医疗诊断类型（匹配 diagnosis/诊断/病史/主诉/过敏史 等高敏医疗文本）
+    DEFAULT = "default"      # 默认类型（未匹配到任何规则时的兆底）
 
 
 class MaskingOperation(str, Enum):
@@ -247,6 +248,14 @@ _FIELD_TYPE_RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     (FieldType.ADDRESS.value,
      ("addr", "address", "地址", "住址"),
      ()),
+    # MEDICAL 必须在 NAME 之前：diagnosis_name/past_history 等复合字段
+    # 含 _name/_history 后缀，若 NAME 优先则边界匹配 "name" 会误伤。
+    (FieldType.MEDICAL.value,
+     ("diagnosis", "diagnosis_name", "chief_complaint", "present_illness",
+      "past_history", "personal_history", "family_history", "allergic_history",
+      "progress_note", "诊断", "病史", "主诉", "过敏史", "既往史", "个人史",
+      "家族史", "现病史"),
+     ()),
     (FieldType.NAME.value,
      # fullname/surname/nickname 等常见复合姓名词显式列入，避免被边界规则误排除
      ("姓名", "名字", "fullname", "surname", "nickname"),
@@ -419,8 +428,29 @@ def mask_address(value: str) -> str:
     # 守卫：地址太短时全部保留无意义，原样返回
     if len(value) <= 6:
         return value
-    # 前 6 字符通常是"北京市朝阳区"等行政区划，保留以维持数据分析可用性
+    # 前 6 字符通常是“北京市朝阳区”等行政区划，保留以维持数据分析可用性
     return f"{value[:6]}****"
+
+
+def mask_medical(value: str) -> str:
+    """医疗诊断/病史文本脱敏 / Medical Diagnosis & History Text Masking.
+
+    医疗诊断文本包含高敏感疾病信息（如梅毒、HIV、癌症等），
+    直接保留原文会泄露患者疾病隐私。本函数采用“首字保留 + 其余全星化”策略：
+    - 保留首字符（用于确认非空），其余全部替换为 *。
+    - 长度 <= 1 时直接返回 "*"。
+
+    Medical diagnosis texts contain highly sensitive disease information
+    (e.g. syphilis, HIV, cancer). Keeping original text leaks patient
+    disease privacy. This function retains only the first character and
+    replaces the rest with asterisks.
+    """
+    if not value:
+        return value
+    if len(value) <= 1:
+        return "*"
+    # 保留首字符，其余全部星化，彻底消除疾病关键词泄露
+    return value[0] + "*" * (len(value) - 1)
 
 
 def mask_default(value: str, prefix: int = 3, suffix: int = 3) -> str:
@@ -492,6 +522,8 @@ def mask_value(
         masked_val = mask_email(value)
     elif ft == FieldType.ADDRESS:       # 地址 → 前6字符保留
         masked_val = mask_address(value)
+    elif ft == FieldType.MEDICAL:       # 医疗诊断 → 首字保留+其余全星化
+        masked_val = mask_medical(value)
     else:                               # 默认 → 前3后3通用策略
         masked_val = mask_default(value)
 
@@ -881,6 +913,19 @@ def _mask_arrow_column(col: Any, col_name: str, context: str) -> Any:
         )
         # 条件选择：仅长度 > 6 时脱敏（短地址信息量不足，原样保留）
         return pc.if_else(pc.greater(length, 6), masked, col)
+
+    if ft == FieldType.MEDICAL:
+        # 医疗诊断/病史文本脱敏：保留首字符，其余全星化
+        # 彻底消除疾病关键词（梅毒、HIV、癌等）泄露
+        length = pc.utf8_length(col)
+        first_char = pc.utf8_slice_codeunits(col, 0, 1)
+        masked = pc.binary_join_element_wise(
+            first_char,
+            pc.binary_repeat("*", pc.max_element_wise(pc.subtract(length, 1), 0)),
+            "",
+        )
+        # 空串原样返回，长度>=1 时应用掩码
+        return pc.if_else(pc.greater_equal(length, 1), masked, col)
 
     # DEFAULT 默认脱敏：保留前3后3，中间用等量 * 填充；长度<=6原样返回
     length = pc.utf8_length(col)  # 向量化计算字符长度

@@ -6,35 +6,61 @@ import {
   IconActivity,
 } from './icons';
 
+interface ParsedMetrics {
+  stage_durations: Record<string, number>;
+  qps: number;
+  percentiles: Record<string, number>;
+  total_requests: number;
+  source: string;
+}
+
 interface MetricsPanelProps {
   metricsRaw: string;
+  parsedMetrics: ParsedMetrics | null;
   onRefreshMetrics: () => Promise<void>;
   loading: boolean;
 }
 
 export const MetricsPanel: React.FC<MetricsPanelProps> = ({
   metricsRaw,
+  parsedMetrics,
   onRefreshMetrics,
   loading,
 }) => {
   const { t } = useI18n();
   const [showRaw, setShowRaw] = useState(false);
 
+  // G-2: Use real parsed metrics from Prometheus, fallback to defaults
   const stageDurations = [
-    { name: '1. Ingest (接收与校验)', ms: 1.2, pct: 5, color: 'bg-indigo-500' },
-    { name: '2. Fetch (数据源切片抽取)', ms: 4.8, pct: 15, color: 'bg-amber-500' },
-    { name: '3. Classify (三层漏斗评级)', ms: 12.5, pct: 45, color: 'bg-rose-500' },
-    { name: '4. Desensitize (隐私脱敏治理)', ms: 6.2, pct: 20, color: 'bg-emerald-500' },
-    { name: '5. Return (合规结果装配)', ms: 0.9, pct: 3, color: 'bg-cyan-500' },
-    { name: '6. Audit (不可篡改存证)', ms: 3.1, pct: 12, color: 'bg-purple-500' },
+    { key: 'ingest', name: '1. Ingest (接收与校验)', color: 'bg-indigo-500' },
+    { key: 'fetch', name: '2. Fetch (数据源切片抽取)', color: 'bg-amber-500' },
+    { key: 'classify', name: '3. Classify (三层漏斗评级)', color: 'bg-rose-500' },
+    { key: 'desensitize', name: '4. Desensitize (隐私脱敏治理)', color: 'bg-emerald-500' },
+    { key: 'return', name: '5. Return (合规结果装配)', color: 'bg-cyan-500' },
+    { key: 'audit', name: '6. Audit (不可篡改存证)', color: 'bg-purple-500' },
+  ].map((s) => ({
+    ...s,
+    ms: parsedMetrics?.stage_durations?.[s.key] ?? 0,
+  }));
+
+  const totalDuration = stageDurations.reduce((sum, s) => sum + s.ms, 0);
+  const stageWithPct = stageDurations.map((s) => ({
+    ...s,
+    pct: totalDuration > 0 ? Math.round((s.ms / totalDuration) * 100) : 0,
+  }));
+
+  // G-2: Real percentiles from parsed metrics
+  const percentileMetrics = [
+    { key: 'P50', label: '中位数延迟 (Median)', value: `${(parsedMetrics?.percentiles?.p50 ?? 0).toFixed(1)} ms`, desc: t('metrics.p50Desc'), color: 'text-emerald-400' },
+    { key: 'P90', label: '九成分位数 (90th)', value: `${(parsedMetrics?.percentiles?.p90 ?? 0).toFixed(1)} ms`, desc: t('metrics.p90Desc'), color: 'text-indigo-400' },
+    { key: 'P95', label: '核心 SLA 基准 (95th)', value: `${(parsedMetrics?.percentiles?.p95 ?? 0).toFixed(1)} ms`, desc: t('metrics.p95Desc'), color: 'text-amber-400' },
+    { key: 'P99', label: '长尾延迟极限 (99th)', value: `${(parsedMetrics?.percentiles?.p99 ?? 0).toFixed(1)} ms`, desc: t('metrics.p99Desc'), color: 'text-rose-400' },
   ];
 
-  const percentileMetrics = [
-    { key: 'P50', label: '中位数延迟 (Median)', value: '8.4 ms', desc: t('metrics.p50Desc'), color: 'text-emerald-400' },
-    { key: 'P90', label: '九成分位数 (90th)', value: '14.2 ms', desc: t('metrics.p90Desc'), color: 'text-indigo-400' },
-    { key: 'P95', label: '核心 SLA 基准 (95th)', value: '18.8 ms', desc: t('metrics.p95Desc'), color: 'text-amber-400' },
-    { key: 'P99', label: '长尾延迟极限 (99th)', value: '28.5 ms', desc: t('metrics.p99Desc'), color: 'text-rose-400' },
-  ];
+  // G-3: Real QPS from parsed metrics
+  const currentQPS = parsedMetrics?.qps ?? 0;
+  const totalRequests = parsedMetrics?.total_requests ?? 0;
+  const metricsSource = parsedMetrics?.source ?? 'fallback';
 
   return (
     <div className="space-y-6">
@@ -51,6 +77,14 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          <span className={`text-[10px] font-mono px-2 py-1 rounded-full border ${
+            metricsSource === 'prometheus'
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+          }`}>
+            {metricsSource === 'prometheus' ? '● LIVE Prometheus' : '○ Fallback Defaults'}
+          </span>
+
           <button
             onClick={() => setShowRaw(!showRaw)}
             className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
@@ -66,6 +100,20 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
             <IconRefresh className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>刷新指标</span>
           </button>
+        </div>
+      </div>
+
+      {/* Real-time QPS & Total Requests */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t('metrics.qps')}</div>
+          <div className="text-3xl font-bold font-mono text-cyan-400">{currentQPS.toFixed(1)}</div>
+          <div className="text-[11px] text-slate-500 mt-1">总请求数: {totalRequests.toFixed(0)}</div>
+        </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">流水线总平均耗时</div>
+          <div className="text-3xl font-bold font-mono text-emerald-400">{totalDuration.toFixed(1)} <span className="text-sm text-slate-500">ms</span></div>
+          <div className="text-[11px] text-slate-500 mt-1">6 阶段累计</div>
         </div>
       </div>
 
@@ -96,18 +144,18 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
             <IconActivity className="w-5 h-5 text-indigo-400" />
             <h2 className="text-sm font-bold text-slate-100">{t('metrics.waterfall')}</h2>
           </div>
-          <span className="text-xs text-slate-400">流水线总平均耗时: <strong className="text-emerald-400 font-mono">28.7 ms</strong></span>
+          <span className="text-xs text-slate-400">流水线总平均耗时: <strong className="text-emerald-400 font-mono">{totalDuration.toFixed(1)} ms</strong></span>
         </div>
 
         <div className="space-y-3">
-          {stageDurations.map((st) => (
-            <div key={st.name} className="space-y-1">
+          {stageWithPct.map((st) => (
+            <div key={st.key} className="space-y-1">
               <div className="flex justify-between text-xs font-mono">
                 <span className="text-slate-300">{st.name}</span>
                 <span className="text-slate-400 font-bold">{st.ms} ms ({st.pct}%)</span>
               </div>
               <div className="h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5">
-                <div className={`h-full rounded-full ${st.color} transition-all duration-500`} style={{ width: `${st.pct * 2}%` }} />
+                <div className={`h-full rounded-full ${st.color} transition-all duration-500`} style={{ width: `${Math.max(st.pct * 2, 1)}%` }} />
               </div>
             </div>
           ))}
@@ -119,7 +167,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-3">
           <h2 className="text-sm font-bold text-slate-100">Prometheus Metrics Stream (/metrics)</h2>
           <pre className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-emerald-400/90 max-h-64 overflow-y-auto">
-            {metricsRaw || '# service_hub_status 1\n# service_hub_qps 45.2'}
+            {metricsRaw || '# service_hub_status 1\n# service_hub_qps 0'}
           </pre>
         </div>
       )}

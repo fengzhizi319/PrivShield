@@ -315,10 +315,8 @@ func paginateSlice(rows []map[string]any, limit, offset int) []map[string]any {
 }
 
 // GetMetadata returns table schema for a mock source.
-// GetMetadata 根据数据源 ID 生成并返回对应的数据表模式（Schema）元数据定义，执行逻辑如下：
-// 1. 查询数据源基础元数据（调用 GetMockDataSource）；
-// 2. 根据数据源 ID 动态装配对应的表字段定义列表（包含字段名与数据类型）；
-// 3. 构造并返回标准的 models.MetadataResponse 对象。
+// GetMetadata 根据数据源 ID 生成并返回对应的数据表模式（Schema）元数据定义。
+// 字段定义与 engine/medical_pipeline/samples 及 scripts/data/ 生成脚本保持严格一致。
 func GetMetadata(sourceID string) (*models.MetadataResponse, error) {
 	ds, err := GetMockDataSource(sourceID)
 	if err != nil {
@@ -332,23 +330,59 @@ func GetMetadata(sourceID string) (*models.MetadataResponse, error) {
 		{Name: "created_at", Type: "timestamp"},
 	}
 
-	// 针对特定数据集定制其业务 Schema
+	// 针对特定数据集定制其业务 Schema，与 CSV 表头严格对齐
 	if ds.ID == "ds_yibao" {
+		// yibao.csv 18 字段
 		fields = []models.MetadataField{
 			{Name: "insurance_settlement_id", Type: "string"},
 			{Name: "person_id", Type: "string"},
 			{Name: "gender", Type: "string"},
 			{Name: "birth_date", Type: "string"},
+			{Name: "admission_date", Type: "string"},
+			{Name: "discharge_date", Type: "string"},
+			{Name: "length_of_stay", Type: "integer"},
+			{Name: "admission_dept", Type: "string"},
+			{Name: "discharge_dept", Type: "string"},
+			{Name: "hospital_code", Type: "string"},
+			{Name: "medical_category", Type: "string"},
+			{Name: "discharge_mode", Type: "string"},
+			{Name: "settlement_seq_no", Type: "string"},
+			{Name: "diagnosis_seq", Type: "integer"},
+			{Name: "diagnosis_type", Type: "string"},
+			{Name: "icd10_code", Type: "string"},
 			{Name: "diagnosis_name", Type: "string"},
-			{Name: "settlement_amount", Type: "float"},
+			{Name: "admission_condition", Type: "string"},
 		}
 	} else if ds.ID == "ds_kangyang" {
+		// kangyang.csv 27 字段
 		fields = []models.MetadataField{
-			{Name: "elder_id", Type: "string"},
-			{Name: "name", Type: "string"},
+			{Name: "gender", Type: "string"},
 			{Name: "age", Type: "integer"},
-			{Name: "chronic_disease", Type: "string"},
-			{Name: "blood_pressure", Type: "string"},
+			{Name: "diagnosis_name", Type: "string"},
+			{Name: "chief_complaint", Type: "string"},
+			{Name: "present_illness", Type: "string"},
+			{Name: "past_history", Type: "string"},
+			{Name: "personal_history", Type: "string"},
+			{Name: "is_smoking", Type: "string"},
+			{Name: "smoking_duration", Type: "string"},
+			{Name: "family_history", Type: "string"},
+			{Name: "allergic_history", Type: "string"},
+			{Name: "department", Type: "string"},
+			{Name: "height", Type: "integer"},
+			{Name: "weight", Type: "integer"},
+			{Name: "disability_category", Type: "string"},
+			{Name: "disability_level", Type: "string"},
+			{Name: "assess_type_name", Type: "string"},
+			{Name: "assess_result_name", Type: "string"},
+			{Name: "assess_score", Type: "integer"},
+			{Name: "assess_time", Type: "string"},
+			{Name: "progress_note", Type: "string"},
+			{Name: "progress_note_time", Type: "string"},
+			{Name: "name", Type: "string"},
+			{Name: "id_card_no", Type: "string"},
+			{Name: "registered_address", Type: "string"},
+			{Name: "disability_cert_no", Type: "string"},
+			{Name: "medical_insurance_no", Type: "string"},
 		}
 	}
 

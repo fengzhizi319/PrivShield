@@ -1,22 +1,30 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 【开发模式】一键启动 PrivShield 调度之眼控制台 (App-LZ BFF + Vite HMR)
-# Launch PrivShield App-LZ Console in DEV mode (:8085 BFF + :5174 Web)
+# 【开发模式】一键启动 PrivShield 调度之眼控制台 (全部 4 上游 + App-LZ BFF + Vite HMR)
+# Launch PrivShield App-LZ Console in DEV mode
+#   (Engine :8079 + Hub :8082 + Datasource :8083 + Audit :8084 + BFF :8085 + Web :5174)
 #
 # 用法 / Usage:
-#   ./scripts/dev/dev-app-lz.sh [--force]
+#   ./scripts/dev/dev-app-lz.sh [--force] [--skip-upstream]
+#
+# 选项:
+#   --force           端口被占用时自动终止占用进程（非交互模式）
+#   --skip-upstream   跳过上游服务启动（假设 4 个微服务已在运行）
 # ============================================================================
 
 set -euo pipefail
 
 FORCE=false
+SKIP_UPSTREAM=false
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
+        --skip-upstream) SKIP_UPSTREAM=true ;;
         -h|--help)
             echo "用法: $0 [选项]"
-            echo "  --force   端口被占用时自动终止占用进程（非交互模式）"
-            echo "  -h, --help 显示此帮助信息"
+            echo "  --force           端口被占用时自动终止占用进程（非交互模式）"
+            echo "  --skip-upstream   跳过上游服务启动（假设 4 个微服务已在运行）"
+            echo "  -h, --help        显示此帮助信息"
             exit 0
             ;;
     esac
@@ -27,8 +35,17 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 APP_LZ_DIR="$PROJECT_ROOT/console/app-lz"
 PIDS_DIR="$PROJECT_ROOT/.pids"
 LOGS_DIR="$PROJECT_ROOT/.logs"
+DATA_DIR="$PROJECT_ROOT/data"
+GO_BIN="${GO_BIN:-go}"
 
-mkdir -p "$PIDS_DIR" "$LOGS_DIR"
+# Python 解释器自动探测
+if [ -x "${PROJECT_ROOT}/.venv/bin/python" ]; then
+    PYTHON="${PYTHON:-${PROJECT_ROOT}/.venv/bin/python}"
+else
+    PYTHON="${PYTHON:-python3}"
+fi
+
+mkdir -p "$PIDS_DIR" "$LOGS_DIR" "$DATA_DIR"
 
 BFF_PORT=8085
 VITE_PORT=5174
@@ -72,12 +89,129 @@ check_and_free_port() {
 check_and_free_port "$BFF_PORT" "App-LZ Go BFF"
 check_and_free_port "$VITE_PORT" "App-LZ Vite Web"
 
+# ── 上游服务自动启动 ─────────────────────────────────────────────────
+# 检查服务是否可达，若不可达则自动启动
+_wait_for_http() {
+    local name="$1" url="$2" max_wait="${3:-15}"
+    local i=0
+    while [ $i -lt "$max_wait" ]; do
+        if curl -sf -o /dev/null "$url" 2>/dev/null; then return 0; fi
+        sleep 1; i=$((i + 1))
+    done
+    echo "⚠️  $name 在 ${max_wait}s 内未就绪 ($url)"
+    return 1
+}
+
+_start_upstream_if_needed() {
+    local name="$1" port="$2" health_url="$3"
+    # 已可达则跳过
+    if curl -sf -o /dev/null "$health_url" 2>/dev/null; then
+        echo "✅ $name 已在运行 (port $port)"
+        return
+    fi
+    # --force 模式下清理端口
+    if _is_port_in_use "$port"; then
+        if [[ "$FORCE" == "true" ]]; then
+            echo "⚠️  端口 $port ($name) 被占用，--force 模式下自动清理..."
+            _kill_port "$port"
+        else
+            echo "❌ 端口 $port ($name) 被占用，使用 --force 自动清理"
+            return
+        fi
+    fi
+}
+
+start_engine() {
+    local port=8079 pid_file="$PIDS_DIR/agent.pid"
+    _start_upstream_if_needed "Engine" "$port" "http://127.0.0.1:$port/health"
+    curl -sf -o /dev/null "http://127.0.0.1:$port/health" 2>/dev/null && return
+
+    echo "🔄 启动 PrivShield Engine (REST :$port)..."
+    cd "$PROJECT_ROOT"
+    PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT="$port" \
+        $PYTHON -m engine.main --host 127.0.0.1 --port "$port" \
+        > "${LOGS_DIR}/agent_app_lz.log" 2>&1 &
+    echo $! > "$pid_file"
+    _wait_for_http "Engine" "http://127.0.0.1:$port/health" 20 && \
+        echo "✅ Engine 已就绪 (PID $(cat "$pid_file"))" || \
+        echo "⚠️  Engine 启动超时，请检查 ${LOGS_DIR}/agent_app_lz.log"
+}
+
+start_service_hub() {
+    local port=8082 pid_file="$PIDS_DIR/service-hub.pid"
+    _start_upstream_if_needed "Service Hub" "$port" "http://127.0.0.1:$port/health"
+    curl -sf -o /dev/null "http://127.0.0.1:$port/health" 2>/dev/null && return
+
+    echo "🔄 编译并启动 Service Hub (:$port)..."
+    cd "${PROJECT_ROOT}/services/service-hub"
+    "$GO_BIN" build -o bin/service-hub ./cmd/server
+    SERVICE_HUB_HOST=127.0.0.1 SERVICE_HUB_PORT="$port" \
+        SERVICE_HUB_AGENT_REST_HOST=127.0.0.1 SERVICE_HUB_AGENT_REST_PORT=8079 \
+        SERVICE_HUB_DB_PATH="${DATA_DIR}/service-hub.db" \
+        ./bin/service-hub > "${LOGS_DIR}/service-hub_app_lz.log" 2>&1 &
+    echo $! > "$pid_file"
+    _wait_for_http "Service Hub" "http://127.0.0.1:$port/health" 10 && \
+        echo "✅ Service Hub 已就绪 (PID $(cat "$pid_file"))" || \
+        echo "⚠️  Service Hub 启动超时"
+}
+
+start_datasource_mgr() {
+    local port=8083 pid_file="$PIDS_DIR/datasource-mgr.pid"
+    _start_upstream_if_needed "Datasource Mgr" "$port" "http://127.0.0.1:$port/health"
+    curl -sf -o /dev/null "http://127.0.0.1:$port/health" 2>/dev/null && return
+
+    echo "🔄 编译并启动 Datasource Mgr (:$port)..."
+    cd "${PROJECT_ROOT}/services/datasource-mgr"
+    "$GO_BIN" build -o bin/datasource-mgr ./cmd/server
+    DATASOURCE_MGR_HOST=127.0.0.1 DATASOURCE_MGR_PORT="$port" \
+        DATASOURCE_MGR_AGENT_REST_HOST=127.0.0.1 DATASOURCE_MGR_AGENT_REST_PORT=8079 \
+        ./bin/datasource-mgr > "${LOGS_DIR}/datasource-mgr_app_lz.log" 2>&1 &
+    echo $! > "$pid_file"
+    _wait_for_http "Datasource Mgr" "http://127.0.0.1:$port/health" 10 && \
+        echo "✅ Datasource Mgr 已就绪 (PID $(cat "$pid_file"))" || \
+        echo "⚠️  Datasource Mgr 启动超时"
+}
+
+start_audit_log() {
+    local port=8084 pid_file="$PIDS_DIR/audit-log.pid"
+    _start_upstream_if_needed "Audit Log" "$port" "http://127.0.0.1:$port/health"
+    curl -sf -o /dev/null "http://127.0.0.1:$port/health" 2>/dev/null && return
+
+    echo "🔄 编译并启动 Audit Log (:$port)..."
+    cd "${PROJECT_ROOT}/services/audit-log"
+    "$GO_BIN" build -o bin/audit-log ./cmd/server
+    AUDIT_LOG_HOST=127.0.0.1 AUDIT_LOG_PORT="$port" \
+        AUDIT_LOG_AGENT_REST_HOST=127.0.0.1 AUDIT_LOG_AGENT_REST_PORT=8079 \
+        AUDIT_LOG_DB_PATH="${DATA_DIR}/audit-log.db" \
+        ./bin/audit-log > "${LOGS_DIR}/audit-log_app_lz.log" 2>&1 &
+    echo $! > "$pid_file"
+    _wait_for_http "Audit Log" "http://127.0.0.1:$port/health" 10 && \
+        echo "✅ Audit Log 已就绪 (PID $(cat "$pid_file"))" || \
+        echo "⚠️  Audit Log 启动超时"
+}
+
+# ── 0. 启动上游服务（Engine + 3 Go 微服务）──────────────────────────
+if [[ "$SKIP_UPSTREAM" != "true" ]]; then
+    echo ""
+    echo "── 检查并启动上游微服务 ──"
+    start_engine
+    start_service_hub
+    start_datasource_mgr
+    start_audit_log
+    echo ""
+else
+    echo "⏭️  跳过上游服务启动 (--skip-upstream)"
+fi
+
 echo "=================================================================="
 echo " 🚀 启动 PrivShield App-LZ 调度全景控制台 [开发模式 (HMR)]"
 echo "=================================================================="
-echo "  BFF 后端端口:   http://127.0.0.1:$BFF_PORT"
-echo "  Web 前端端口:   http://localhost:$VITE_PORT"
+echo "  Engine 引擎:    http://127.0.0.1:8079"
 echo "  调度中枢 (Hub): http://127.0.0.1:8082"
+echo "  数据源管理:     http://127.0.0.1:8083"
+echo "  审计日志:       http://127.0.0.1:8084"
+echo "  BFF 后端:       http://127.0.0.1:$BFF_PORT"
+echo "  Web 前端:       http://localhost:$VITE_PORT"
 echo "=================================================================="
 
 # 1. 编译并启动 Go BFF
@@ -110,6 +244,14 @@ cleanup() {
     kill "$BFF_PID" 2>/dev/null || true
     kill "$WEB_PID" 2>/dev/null || true
     rm -f "$PIDS_DIR/app-lz-bff.pid" "$PIDS_DIR/app-lz-web.pid"
+    # 停止上游服务（仅停止本脚本启动的）
+    for svc in agent service-hub datasource-mgr audit-log; do
+        local pf="$PIDS_DIR/${svc}.pid"
+        if [ -f "$pf" ]; then
+            kill "$(cat "$pf")" 2>/dev/null || true
+            rm -f "$pf"
+        fi
+    done
     echo "已停止。"
     exit 0
 }

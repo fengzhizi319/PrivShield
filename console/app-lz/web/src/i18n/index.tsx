@@ -20,6 +20,7 @@ const translations: Record<Language, Record<string, string>> = {
     'nav.datasources': '数据源资产探查',
     'nav.audit': '不可篡改审计验真',
     'nav.metrics': '实时性能与分位数',
+    'nav.dataApi': '预设数据 API 测试',
 
     // Topology
     'topo.title': '四微服务网格拓扑与健康矩阵',
@@ -117,6 +118,22 @@ const translations: Record<Language, Record<string, string>> = {
     'metrics.p90Desc': '90% 的请求耗时低于该值，反映大多数用户实际延迟',
     'metrics.p95Desc': '95% 的请求耗时低于该值，核心 SLA 达标基准线',
     'metrics.p99Desc': '99% 的请求耗时低于该值，排查极端长尾与垃圾回收停顿',
+
+    // Data API Session
+    'dataApi.title': '预设数据 API 全链路会话测试',
+    'dataApi.desc': 'service-hub 与 datasource-mgr 之间预设 4 个业务数据 API。点击“申请”触发完整链路：前端 → service-hub 调度 → datasource-mgr 拉取原始数据 → engine 分类脱敏 → audit-log 存证 → 前端展示。',
+    'dataApi.flowTitle': '全链路会话流转',
+    'dataApi.sampleLimit': '采样条数',
+    'dataApi.invokeBtn': '申请数据 (触发全链路)',
+    'dataApi.invoking': '会话执行中...',
+    'dataApi.reserved': '预留接口，待后续业务接入',
+    'dataApi.sessionResult': '会话结果',
+    'dataApi.dataDiff': '原始数据 vs 脱敏数据',
+    'dataApi.showRaw': '展示原始 JSON',
+    'dataApi.hideRaw': '隐藏原始 JSON',
+    'dataApi.rawRecords': '原始明文记录',
+    'dataApi.sanitizedRecords': '脱敏合规记录',
+    'dataApi.auditWritten': '审计存证 ID',
   },
   'en-US': {
     // App Header & Nav
@@ -129,6 +146,7 @@ const translations: Record<Language, Record<string, string>> = {
     'nav.datasources': 'Datasource Explorer',
     'nav.audit': 'Audit & Merkle',
     'nav.metrics': 'Metrics & Percentiles',
+    'nav.dataApi': 'Preset Data APIs',
 
     // Topology
     'topo.title': '4-Microservice Topology & Health Matrix',
@@ -226,6 +244,22 @@ const translations: Record<Language, Record<string, string>> = {
     'metrics.p90Desc': '90% of requests complete within this time (majority experience)',
     'metrics.p95Desc': '95% of requests complete within this time (core SLA baseline)',
     'metrics.p99Desc': '99% of requests complete within this time (tail latency & GC pauses)',
+
+    // Data API Session
+    'dataApi.title': 'Preset Data API Full-Chain Session Test',
+    'dataApi.desc': '4 preset business data APIs between service-hub and datasource-mgr. Click "Apply" to trigger the full chain: Frontend → service-hub dispatch → datasource-mgr fetch → engine classify & mask → audit-log store → Frontend display.',
+    'dataApi.flowTitle': 'Full-Chain Session Flow',
+    'dataApi.sampleLimit': 'Sample Limit',
+    'dataApi.invokeBtn': 'Apply Data (Full Chain)',
+    'dataApi.invoking': 'Executing Session...',
+    'dataApi.reserved': 'Reserved, pending business integration',
+    'dataApi.sessionResult': 'Session Result',
+    'dataApi.dataDiff': 'Raw Data vs Sanitized Data',
+    'dataApi.showRaw': 'Show Raw JSON',
+    'dataApi.hideRaw': 'Hide Raw JSON',
+    'dataApi.rawRecords': 'Raw Plaint Records',
+    'dataApi.sanitizedRecords': 'Sanitized Compliant Records',
+    'dataApi.auditWritten': 'Audit Entry ID',
   },
 };
 

@@ -1,0 +1,532 @@
+import React, { useState, useMemo } from 'react';
+import { DataApiDef, DataApiSessionResponse } from '../types/api';
+import { useI18n } from '../i18n';
+import {
+  IconDatabase,
+  IconPlay,
+  IconCheckCircle,
+  IconXCircle,
+  IconRefresh,
+  IconShieldCheck,
+  IconLock,
+  IconActivity,
+} from './icons';
+
+interface DataApiPanelProps {
+  apis: DataApiDef[];
+  onInvoke: (apiId: number, limit: number) => Promise<DataApiSessionResponse>;
+  loading: boolean;
+}
+
+export const DataApiPanel: React.FC<DataApiPanelProps> = ({
+  apis,
+  onInvoke,
+  loading,
+}) => {
+  const { t } = useI18n();
+  const [selectedApiId, setSelectedApiId] = useState<number | null>(null);
+  const [limit, setLimit] = useState(5);
+  const [session, setSession] = useState<DataApiSessionResponse | null>(null);
+  const [invoking, setInvoking] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+
+  const handleInvoke = async (apiId: number) => {
+    setInvoking(true);
+    setSession(null);
+    try {
+      const res = await onInvoke(apiId, limit);
+      setSession(res);
+    } catch (err: any) {
+      alert(`API 调用失败: ${err.message}`);
+    } finally {
+      setInvoking(false);
+    }
+  };
+
+  const getStageIcon = (status: string) => {
+    switch (status) {
+      case 'success':
+        return <IconCheckCircle className="w-4 h-4 text-emerald-400" />;
+      case 'error':
+        return <IconXCircle className="w-4 h-4 text-rose-400" />;
+      default:
+        return <span className="w-4 h-4 flex items-center justify-center text-xs text-slate-500">-</span>;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Banner */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+              <IconDatabase className="w-6 h-6" />
+            </span>
+            <h1 className="text-xl font-bold text-slate-100">{t('dataApi.title')}</h1>
+          </div>
+          <p className="text-sm text-slate-400 mt-1 max-w-2xl">{t('dataApi.desc')}</p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-400">{t('dataApi.sampleLimit')}:</span>
+            <select
+              value={limit}
+              onChange={(e) => setLimit(Number(e.target.value))}
+              className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
+            >
+              <option value={3}>3 条</option>
+              <option value={5}>5 条</option>
+              <option value={10}>10 条</option>
+              <option value={20}>20 条</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Session Flow Diagram */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
+          {t('dataApi.flowTitle')}
+        </h2>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          {[
+            { key: 'user', label: '前端申请', icon: '🖥️', color: 'cyan' },
+            { key: 'hub', label: 'service-hub\n调度编排', icon: '🔀', color: 'indigo' },
+            { key: 'ds', label: 'datasource-mgr\n原始数据拉取', icon: '📊', color: 'amber' },
+            { key: 'engine', label: 'engine Agent\n分类 & 脱敏', icon: '🔒', color: 'emerald' },
+            { key: 'audit', label: 'audit-log\n审计存证', icon: '📝', color: 'purple' },
+          ].map((step, idx) => (
+            <div key={step.key} className="flex items-center gap-2">
+              <div className={`flex-1 p-3 rounded-xl border text-center ${
+                session?.stages.some(s => s.status === 'error')
+                  ? 'bg-slate-950/60 border-slate-800/60'
+                  : 'bg-slate-950 border-slate-800'
+              }`}>
+                <div className="text-lg mb-1">{step.icon}</div>
+                <div className="text-[10px] font-semibold text-slate-300 whitespace-pre-line leading-tight">
+                  {step.label}
+                </div>
+              </div>
+              {idx < 4 && (
+                <span className="text-slate-600 text-xs font-bold shrink-0">→</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 4 API Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {apis.map((api) => {
+          const isActive = api.status === 'active';
+          const isSelected = selectedApiId === api.id;
+          const isInvoking = invoking && isSelected;
+
+          return (
+            <div
+              key={api.id}
+              onClick={() => isActive && setSelectedApiId(api.id)}
+              className={`p-5 rounded-2xl border transition-all duration-200 ${
+                !isActive
+                  ? 'bg-slate-900/50 border-slate-800/60 opacity-60 cursor-not-allowed'
+                  : isSelected
+                  ? 'bg-cyan-950/20 border-cyan-500/60 ring-2 ring-cyan-500/20 cursor-pointer'
+                  : 'bg-slate-900 border-slate-800 hover:border-slate-700 cursor-pointer'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-extrabold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                    API {api.id}
+                  </span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                    isActive
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700'
+                  }`}>
+                    {isActive ? 'Active' : 'Reserved'}
+                  </span>
+                </div>
+                <span className="text-xs text-slate-400 font-mono">{api.datasource_id || '-'}</span>
+              </div>
+
+              <h3 className="text-base font-bold text-slate-100">{api.name}</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">{api.description}</p>
+
+              {api.fields.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {api.fields.map((f) => (
+                    <span key={f} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800">
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {isActive && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleInvoke(api.id);
+                  }}
+                  disabled={isInvoking}
+                  className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition-all shadow-lg shadow-cyan-600/20 disabled:opacity-50"
+                >
+                  {isInvoking ? (
+                    <>
+                      <IconRefresh className="w-3.5 h-3.5 animate-spin" />
+                      <span>{t('dataApi.invoking')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <IconPlay className="w-3.5 h-3.5" />
+                      <span>{t('dataApi.invokeBtn')}</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {!isActive && (
+                <div className="mt-4 py-2 rounded-xl bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-500">
+                  {t('dataApi.reserved')}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Session Result */}
+      {session && (
+        <div className="space-y-4">
+          {/* Session Header */}
+          <div className={`border rounded-2xl p-5 shadow-xl ${
+            session.status === 'completed'
+              ? 'bg-gradient-to-r from-emerald-950/30 via-slate-900 to-slate-900 border-emerald-500/40'
+              : session.status === 'partial'
+              ? 'bg-gradient-to-r from-amber-950/30 via-slate-900 to-slate-900 border-amber-500/40'
+              : 'bg-gradient-to-r from-rose-950/30 via-slate-900 to-slate-900 border-rose-500/40'
+          }`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                {session.status === 'completed' ? (
+                  <IconCheckCircle className="w-6 h-6 text-emerald-400" />
+                ) : session.status === 'partial' ? (
+                  <IconActivity className="w-6 h-6 text-amber-400" />
+                ) : (
+                  <IconXCircle className="w-6 h-6 text-rose-400" />
+                )}
+                <div>
+                  <h2 className="text-sm font-bold text-slate-100">
+                    {t('dataApi.sessionResult')} — {session.api_name}
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    Session: {session.session_id} · {session.total_duration_ms}ms
+                  </p>
+                </div>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                session.status === 'completed'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                  : session.status === 'partial'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+              }`}>
+                {session.status.toUpperCase()}
+              </span>
+            </div>
+
+            {/* Stage Timeline */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+              {session.stages.map((stage) => (
+                <div key={stage.name} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {getStageIcon(stage.status)}
+                    <span className="text-xs font-bold text-slate-200">{stage.title}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    {stage.duration_ms}ms
+                  </div>
+                  {stage.detail && (
+                    <div className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                      {stage.detail}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Data Diff View — Accordion Style */}
+          {session.raw_records.length > 0 && (
+            <DataAccordionView
+              rawRecords={session.raw_records}
+              sanitizedData={session.sanitized_data}
+              showRaw={showRaw}
+              onToggleRaw={() => setShowRaw(!showRaw)}
+              expandedRows={expandedRows}
+              setExpandedRows={setExpandedRows}
+              t={t}
+            />
+          )}
+
+          {/* Audit Entry */}
+          {session.audit_entry_id && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex items-center gap-3 text-xs">
+              <IconShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+              <div>
+                <span className="text-slate-300 font-semibold">{t('dataApi.auditWritten')}:</span>
+                <span className="text-emerald-400 font-mono ml-2">{session.audit_entry_id}</span>
+              </div>
+            </div>
+          )}
+
+          {session.error && (
+            <div className="bg-rose-950/30 border border-rose-500/30 rounded-2xl p-4 text-xs text-rose-300">
+              {session.error}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// DataAccordionView — Accordion-style record display
+// ---------------------------------------------------------------------------
+
+interface DataAccordionViewProps {
+  rawRecords: Record<string, any>[];
+  sanitizedData: Record<string, any>[];
+  showRaw: boolean;
+  onToggleRaw: () => void;
+  expandedRows: Set<number>;
+  setExpandedRows: React.Dispatch<React.SetStateAction<Set<number>>>;
+  t: (key: string) => string;
+}
+
+const DataAccordionView: React.FC<DataAccordionViewProps> = ({
+  rawRecords,
+  sanitizedData,
+  showRaw,
+  onToggleRaw,
+  expandedRows,
+  setExpandedRows,
+  t,
+}) => {
+  // Collect all field keys from both raw and sanitized
+  const allFields = useMemo(() => {
+    const keys = new Set<string>();
+    rawRecords.forEach((r) => Object.keys(r).forEach((k) => keys.add(k)));
+    sanitizedData.forEach((r) => Object.keys(r).forEach((k) => keys.add(k)));
+    return Array.from(keys);
+  }, [rawRecords, sanitizedData]);
+
+  // Get a summary label for a collapsed record row
+  const getRecordSummary = (raw: Record<string, any>, sanitized: Record<string, any>): string => {
+    // Try common ID fields first
+    const idFields = ['record_id', 'elder_id', 'id', 'patient_name', 'name'];
+    for (const f of idFields) {
+      if (raw[f] !== undefined) return `${f}: ${raw[f]}`;
+    }
+    // Fallback: first field value
+    const firstKey = Object.keys(raw)[0];
+    if (firstKey) return `${firstKey}: ${raw[firstKey]}`;
+    return '(empty record)';
+  };
+
+  // Count masked fields in a record
+  const countMasked = (raw: Record<string, any>, sanitized: Record<string, any>): number => {
+    let count = 0;
+    for (const key of Object.keys(raw)) {
+      if (String(raw[key]) !== String(sanitized[key] ?? raw[key])) count++;
+    }
+    return count;
+  };
+
+  const toggleRow = (idx: number) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  };
+
+  const expandAll = () => {
+    setExpandedRows(new Set(sanitizedData.map((_, i) => i)));
+  };
+
+  const collapseAll = () => {
+    setExpandedRows(new Set());
+  };
+
+  const formatValue = (v: any): string => {
+    if (v === null || v === undefined) return '-';
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  };
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+        <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+          <IconLock className="w-4 h-4 text-emerald-400" />
+          {t('dataApi.dataDiff')}
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+            {sanitizedData.length} {t('dataApi.rawRecords').replace(/\(.*\)/, '').trim()}
+          </span>
+        </h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={expandAll}
+            className="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition"
+          >
+            全部展开
+          </button>
+          <button
+            onClick={collapseAll}
+            className="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition"
+          >
+            全部收起
+          </button>
+          <button
+            onClick={onToggleRaw}
+            className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+          >
+            {showRaw ? t('dataApi.hideRaw') : t('dataApi.showRaw')}
+          </button>
+        </div>
+      </div>
+
+      {/* Raw JSON mode */}
+      {showRaw ? (
+        <div className="grid grid-cols-1 gap-4">
+          <div>
+            <div className="text-xs font-semibold text-rose-400 mb-1 flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-rose-400" />
+              {t('dataApi.rawRecords')} ({rawRecords.length})
+            </div>
+            <pre className="p-3 bg-slate-950 border border-rose-500/20 rounded-xl text-xs font-mono text-rose-200/90 overflow-x-auto max-h-80">
+              {JSON.stringify(rawRecords, null, 2)}
+            </pre>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-emerald-400 mb-1 flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              {t('dataApi.sanitizedRecords')} ({sanitizedData.length})
+            </div>
+            <pre className="p-3 bg-slate-950 border border-emerald-500/20 rounded-xl text-xs font-mono text-emerald-200/90 overflow-x-auto max-h-80">
+              {JSON.stringify(sanitizedData, null, 2)}
+            </pre>
+          </div>
+        </div>
+      ) : (
+        /* Accordion mode — one card per record */
+        <div className="space-y-2">
+          {sanitizedData.map((sanitized, i) => {
+            const raw = rawRecords[i] || {};
+            const isExpanded = expandedRows.has(i);
+            const maskedCount = countMasked(raw, sanitized);
+            const summary = getRecordSummary(raw, sanitized);
+
+            return (
+              <div
+                key={i}
+                className={`rounded-xl border transition-all duration-200 ${
+                  isExpanded
+                    ? 'bg-slate-950 border-cyan-500/40 ring-1 ring-cyan-500/10'
+                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                {/* Collapsed row header — clickable */}
+                <button
+                  onClick={() => toggleRow(i)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-left transition hover:bg-slate-800/30 rounded-xl"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-bold font-mono">
+                      {i + 1}
+                    </span>
+                    <span className="text-sm font-mono text-slate-200 truncate">
+                      {summary}
+                    </span>
+                    {maskedCount > 0 && (
+                      <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        {maskedCount} 字段已脱敏
+                      </span>
+                    )}
+                    {maskedCount === 0 && (
+                      <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        无敏感字段
+                      </span>
+                    )}
+                  </div>
+                  <svg
+                    className={`w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Expanded field details */}
+                {isExpanded && (
+                  <div className="px-4 pb-4 border-t border-slate-800/80">
+                    <div className="grid grid-cols-1 gap-1.5 mt-3">
+                      {allFields.map((field) => {
+                        const rawVal = formatValue(raw[field]);
+                        const sanitizedVal = formatValue(sanitized[field]);
+                        const isMasked = rawVal !== sanitizedVal;
+                        const fieldExists = raw[field] !== undefined || sanitized[field] !== undefined;
+                        if (!fieldExists) return null;
+
+                        return (
+                          <div
+                            key={field}
+                            className={`grid grid-cols-[140px_1fr_1fr] gap-3 items-center px-3 py-2 rounded-lg text-xs font-mono ${
+                              isMasked
+                                ? 'bg-amber-500/5 border border-amber-500/10'
+                                : 'bg-slate-900/60 border border-slate-800/60'
+                            }`}
+                          >
+                            <span className="text-slate-400 font-semibold truncate" title={field}>
+                              {field}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-[9px] text-slate-600 uppercase mb-0.5">原始值</div>
+                              <div className={`truncate ${isMasked ? 'text-rose-300' : 'text-slate-300'}`} title={rawVal}>
+                                {rawVal}
+                              </div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-[9px] text-slate-600 uppercase mb-0.5">脱敏值</div>
+                              <div className={`truncate ${isMasked ? 'text-amber-300 font-semibold' : 'text-slate-300'}`} title={sanitizedVal}>
+                                {sanitizedVal}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};

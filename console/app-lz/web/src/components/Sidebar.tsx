@@ -8,9 +8,10 @@ import {
   IconPlay,
   IconLayers,
   IconSparkles,
+  IconGlobe,
 } from './icons';
 
-export type TabType = 'topology' | 'pipeline' | 'tasks' | 'runner' | 'datasources' | 'audit' | 'metrics';
+export type TabType = 'topology' | 'pipeline' | 'tasks' | 'runner' | 'datasources' | 'audit' | 'metrics' | 'dataApi';
 
 interface SidebarProps {
   currentTab: TabType;
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'datasources', labelKey: 'nav.datasources', icon: <IconDatabase className="w-5 h-5" /> },
     { id: 'audit', labelKey: 'nav.audit', icon: <IconShieldCheck className="w-5 h-5" /> },
     { id: 'metrics', labelKey: 'nav.metrics', icon: <IconSparkles className="w-5 h-5" /> },
+    { id: 'dataApi', labelKey: 'nav.dataApi', icon: <IconGlobe className="w-5 h-5" /> },
   ];
 
   return (

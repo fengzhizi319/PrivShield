@@ -229,3 +229,47 @@ type AuditVerifyResponse struct {
 	Signature    string `json:"signature,omitempty"`
 	Error        string `json:"error,omitempty"`
 }
+
+// ---------------------------------------------------------------------------
+// Preset Data API Session Models (4 预设数据 API)
+// ---------------------------------------------------------------------------
+
+// DataApiDef describes one of the 4 preset data APIs between service-hub and datasource-mgr.
+type DataApiDef struct {
+	ID           int      `json:"id"`
+	Name         string   `json:"name"`
+	DatasourceID string   `json:"datasource_id"`
+	Category     string   `json:"category"`
+	Description  string   `json:"description"`
+	Fields       []string `json:"fields"`
+	Status       string   `json:"status"` // "active" | "reserved"
+}
+
+// DataApiInvokeRequest is the payload to invoke a preset data API session.
+type DataApiInvokeRequest struct {
+	ApiID int `json:"api_id" binding:"required,min=1,max=4"`
+	Limit int `json:"limit"`
+}
+
+// DataApiSessionStage records one step in the full session lifecycle.
+type DataApiSessionStage struct {
+	Name       string `json:"name"`        // "fetch" | "classify" | "desensitize" | "audit"
+	Title      string `json:"title"`
+	Status     string `json:"status"`      // "success" | "error" | "skipped"
+	DurationMs int64  `json:"duration_ms"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+// DataApiSessionResponse is the full session result returned to the frontend.
+type DataApiSessionResponse struct {
+	SessionID     string                `json:"session_id"`
+	ApiID         int                   `json:"api_id"`
+	ApiName       string                `json:"api_name"`
+	Status        string                `json:"status"` // "completed" | "partial" | "failed"
+	RawRecords    []map[string]any      `json:"raw_records"`
+	SanitizedData []map[string]any      `json:"sanitized_data"`
+	Stages        []DataApiSessionStage `json:"stages"`
+	AuditEntryID  string                `json:"audit_entry_id,omitempty"`
+	TotalDuration int64                 `json:"total_duration_ms"`
+	Error         string                `json:"error,omitempty"`
+}
