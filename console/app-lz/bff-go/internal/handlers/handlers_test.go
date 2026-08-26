@@ -85,27 +85,6 @@ func TestGetTopology(t *testing.T) {
 	}
 }
 
-func TestGetPipelineStatus(t *testing.T) {
-	h := setupTestRouter()
-	router := SetupRouter(h)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/lz/pipeline/status", nil)
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
-	}
-
-	var status models.PipelineStatusResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
-		t.Fatalf("failed to parse pipeline status: %v", err)
-	}
-	if len(status.Stages) != 6 {
-		t.Errorf("expected 6 pipeline stages, got %d", len(status.Stages))
-	}
-}
-
 func TestGetSuitesAndRun(t *testing.T) {
 	h := setupTestRouter()
 	router := SetupRouter(h)
@@ -119,9 +98,9 @@ func TestGetSuitesAndRun(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", w.Code)
 	}
 
-	// 2. Run Suites (TS-01, TS-06, TS-07)
+	// 2. Run Suites (TS-01, TS-02, TS-03)
 	runPayload := models.RunTestSuiteRequest{
-		SuiteIDs:          []string{"TS-01", "TS-06", "TS-07"},
+		SuiteIDs:          []string{"TS-01", "TS-02", "TS-03"},
 		Concurrency:       5,
 		BenchmarkRequests: 10,
 	}
@@ -140,8 +119,8 @@ func TestGetSuitesAndRun(t *testing.T) {
 	if err := json.Unmarshal(w2.Body.Bytes(), &runResp); err != nil {
 		t.Fatalf("failed to parse run response: %v", err)
 	}
-	if runResp.TotalCases != 7 {
-		t.Errorf("expected 7 total suite items, got %d", runResp.TotalCases)
+	if runResp.TotalCases != 3 {
+		t.Errorf("expected 3 total suite items, got %d", runResp.TotalCases)
 	}
 }
 
@@ -161,7 +140,7 @@ func TestGetLeases(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &leases); err != nil {
 		t.Fatalf("failed to parse leases: %v", err)
 	}
-	if leases.StoreBackend != "postgres" {
-		t.Errorf("expected postgres store, got %s", leases.StoreBackend)
+	if leases.StoreBackend != "sqlite" {
+		t.Errorf("expected sqlite store, got %s", leases.StoreBackend)
 	}
 }

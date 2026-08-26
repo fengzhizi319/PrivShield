@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useI18n } from '../i18n';
+import { api } from '../api/client';
 import {
   IconSparkles,
   IconRefresh,
-  IconActivity,
+  IconPlay,
+  IconCheckCircle,
 } from './icons';
 
 interface ParsedMetrics {
@@ -21,6 +23,18 @@ interface MetricsPanelProps {
   loading: boolean;
 }
 
+interface StressTestResult {
+  totalRequests: number;
+  successCount: number;
+  failCount: number;
+  durationMs: number;
+  qps: number;
+  p50: number;
+  p90: number;
+  p95: number;
+  p99: number;
+}
+
 export const MetricsPanel: React.FC<MetricsPanelProps> = ({
   metricsRaw,
   parsedMetrics,
@@ -29,38 +43,62 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
 }) => {
   const { t } = useI18n();
   const [showRaw, setShowRaw] = useState(false);
+  const [stressConcurrency, setStressConcurrency] = useState(5);
+  const [stressApiId, setStressApiId] = useState(1);
+  const [stressResult, setStressResult] = useState<StressTestResult | null>(null);
+  const [stressRunning, setStressRunning] = useState(false);
+  const abortRef = useRef(false);
 
-  // G-2: Use real parsed metrics from Prometheus, fallback to defaults
-  const stageDurations = [
-    { key: 'ingest', name: '1. Ingest (接收与校验)', color: 'bg-indigo-500' },
-    { key: 'fetch', name: '2. Fetch (数据源切片抽取)', color: 'bg-amber-500' },
-    { key: 'classify', name: '3. Classify (三层漏斗评级)', color: 'bg-rose-500' },
-    { key: 'desensitize', name: '4. Desensitize (隐私脱敏治理)', color: 'bg-emerald-500' },
-    { key: 'return', name: '5. Return (合规结果装配)', color: 'bg-cyan-500' },
-    { key: 'audit', name: '6. Audit (不可篡改存证)', color: 'bg-purple-500' },
-  ].map((s) => ({
-    ...s,
-    ms: parsedMetrics?.stage_durations?.[s.key] ?? 0,
-  }));
-
-  const totalDuration = stageDurations.reduce((sum, s) => sum + s.ms, 0);
-  const stageWithPct = stageDurations.map((s) => ({
-    ...s,
-    pct: totalDuration > 0 ? Math.round((s.ms / totalDuration) * 100) : 0,
-  }));
-
-  // G-2: Real percentiles from parsed metrics
-  const percentileMetrics = [
-    { key: 'P50', label: '中位数延迟 (Median)', value: `${(parsedMetrics?.percentiles?.p50 ?? 0).toFixed(1)} ms`, desc: t('metrics.p50Desc'), color: 'text-emerald-400' },
-    { key: 'P90', label: '九成分位数 (90th)', value: `${(parsedMetrics?.percentiles?.p90 ?? 0).toFixed(1)} ms`, desc: t('metrics.p90Desc'), color: 'text-indigo-400' },
-    { key: 'P95', label: '核心 SLA 基准 (95th)', value: `${(parsedMetrics?.percentiles?.p95 ?? 0).toFixed(1)} ms`, desc: t('metrics.p95Desc'), color: 'text-amber-400' },
-    { key: 'P99', label: '长尾延迟极限 (99th)', value: `${(parsedMetrics?.percentiles?.p99 ?? 0).toFixed(1)} ms`, desc: t('metrics.p99Desc'), color: 'text-rose-400' },
-  ];
-
-  // G-3: Real QPS from parsed metrics
-  const currentQPS = parsedMetrics?.qps ?? 0;
-  const totalRequests = parsedMetrics?.total_requests ?? 0;
   const metricsSource = parsedMetrics?.source ?? 'fallback';
+
+  const handleStressTest = useCallback(async () => {
+    abortRef.current = false;
+    setStressRunning(true);
+    setStressResult(null);
+
+    const latencies: number[] = [];
+    let successCount = 0;
+    let failCount = 0;
+    const totalRequests = stressConcurrency;
+    const startAll = performance.now();
+
+    const promises = Array.from({ length: totalRequests }, async (_, i) => {
+      if (abortRef.current) return;
+      const t0 = performance.now();
+      try {
+        await api.invokeDataApi(stressApiId, 3);
+        latencies.push(performance.now() - t0);
+        successCount++;
+      } catch {
+        latencies.push(performance.now() - t0);
+        failCount++;
+      }
+    });
+
+    await Promise.all(promises);
+    const totalDuration = performance.now() - startAll;
+
+    latencies.sort((a, b) => a - b);
+    const n = latencies.length;
+    const p50 = n > 0 ? latencies[Math.floor(n * 0.50)] : 0;
+    const p90 = n > 0 ? latencies[Math.floor(n * 0.90)] : 0;
+    const p95 = n > 0 ? latencies[Math.floor(n * 0.95)] : 0;
+    const p99 = n > 0 ? latencies[Math.floor(n * 0.99)] : 0;
+    const qps = totalDuration > 0 ? (n / totalDuration) * 1000 : 0;
+
+    setStressResult({
+      totalRequests: n,
+      successCount,
+      failCount,
+      durationMs: Math.round(totalDuration),
+      qps: Math.round(qps * 10) / 10,
+      p50: Math.round(p50 * 10) / 10,
+      p90: Math.round(p90 * 10) / 10,
+      p95: Math.round(p95 * 10) / 10,
+      p99: Math.round(p99 * 10) / 10,
+    });
+    setStressRunning(false);
+  }, [stressConcurrency, stressApiId]);
 
   return (
     <div className="space-y-6">
@@ -73,7 +111,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
             </span>
             <h1 className="text-xl font-bold text-slate-100">{t('metrics.title')}</h1>
           </div>
-          <p className="text-sm text-slate-400 mt-1 max-w-2xl">{t('metrics.desc')}</p>
+          <p className="text-sm text-slate-400 mt-1 max-w-2xl">预设数据 API 性能指标与压力测试</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -89,7 +127,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
             onClick={() => setShowRaw(!showRaw)}
             className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
           >
-            {showRaw ? '隐藏 Prometheus 文本' : '查看 Prometheus 指标'}
+            {showRaw ? '隐藏 Prometheus' : '查看 Prometheus'}
           </button>
 
           <button
@@ -98,67 +136,163 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-lg shadow-indigo-600/30 transition disabled:opacity-50"
           >
             <IconRefresh className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>刷新指标</span>
+            <span>刷新</span>
           </button>
         </div>
       </div>
 
-      {/* Real-time QPS & Total Requests */}
+      {/* Stress Test Section */}
+      <div className="bg-gradient-to-br from-purple-950/30 via-slate-900 to-slate-900 border border-purple-500/30 rounded-2xl p-6 shadow-xl">
+        <div className="flex items-center justify-between border-b border-purple-500/20 pb-3 mb-4">
+          <div className="flex items-center gap-2">
+            <IconPlay className="w-5 h-5 text-purple-400" />
+            <h2 className="text-sm font-bold text-slate-100">预设数据 API 压力测试</h2>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              并发发送多个 InvokeDataApi 请求
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-4 mb-4">
+          <div>
+            <label className="text-xs text-slate-400 font-medium mb-1 block">目标 API</label>
+            <select
+              value={stressApiId}
+              onChange={(e) => setStressApiId(Number(e.target.value))}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+            >
+              <option value={1}>API 1 — 医保结算</option>
+              <option value={2}>API 2 — 康养体征</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 font-medium mb-1 block">并发数</label>
+            <input
+              type="number"
+              value={stressConcurrency}
+              onChange={(e) => setStressConcurrency(Number(e.target.value))}
+              min={1}
+              max={50}
+              className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-purple-500"
+            />
+          </div>
+          <button
+            onClick={handleStressTest}
+            disabled={stressRunning}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm transition-all shadow-lg shadow-purple-600/30 disabled:opacity-50"
+          >
+            {stressRunning ? (
+              <><IconRefresh className="w-4 h-4 animate-spin" /><span>压测中...</span></>
+            ) : (
+              <><IconPlay className="w-4 h-4" /><span>开始压测</span></>
+            )}
+          </button>
+        </div>
+
+        {/* Stress Test Results */}
+        {stressResult && (
+          <div className="space-y-4">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                <div className="text-[10px] text-slate-500 uppercase mb-1">吞吐量 QPS</div>
+                <div className="text-2xl font-bold font-mono text-cyan-400">{stressResult.qps}</div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {stressResult.successCount}/{stressResult.totalRequests} 成功
+                </div>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                <div className="text-[10px] text-slate-500 uppercase mb-1">总耗时</div>
+                <div className="text-2xl font-bold font-mono text-emerald-400">{stressResult.durationMs}</div>
+                <div className="text-[10px] text-slate-500 mt-1">ms (wall clock)</div>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                <div className="text-[10px] text-slate-500 uppercase mb-1">成功 / 失败</div>
+                <div className="text-2xl font-bold font-mono">
+                  <span className="text-emerald-400">{stressResult.successCount}</span>
+                  <span className="text-slate-600"> / </span>
+                  <span className="text-rose-400">{stressResult.failCount}</span>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">共 {stressResult.totalRequests} 请求</div>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                <div className="text-[10px] text-slate-500 uppercase mb-1">并发数</div>
+                <div className="text-2xl font-bold font-mono text-purple-400">{stressConcurrency}</div>
+                <div className="text-[10px] text-slate-500 mt-1">同时发出</div>
+              </div>
+            </div>
+
+            {/* Latency Percentiles */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-xs font-semibold text-slate-300">延迟分位数分布</h3>
+                <span className="text-[10px] text-slate-500">| P50=中位延迟 P90=90%请求低于此值 P95=95%请求低于此值 P99=尾部延迟</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'P50', value: stressResult.p50, color: 'text-emerald-400', desc: '中位延迟 — 50% 请求低于此值，反映典型用户体验' },
+                  { label: 'P90', value: stressResult.p90, color: 'text-indigo-400', desc: '90% 分位 — 仅 10% 请求慢于此值，反映大多数用户体感' },
+                  { label: 'P95', value: stressResult.p95, color: 'text-amber-400', desc: '95% 分位 — SLA 常用指标，衡量服务承诺达标线' },
+                  { label: 'P99', value: stressResult.p99, color: 'text-rose-400', desc: '尾部延迟 — 仅 1% 请求超此值，揭示长尾异常与系统瓶颈' },
+                ].map((p) => (
+                  <div key={p.label} className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                        {p.label}
+                      </span>
+                    </div>
+                    <div className={`text-2xl font-bold font-mono ${p.color}`}>
+                      {p.value} <span className="text-sm text-slate-500">ms</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">{p.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Latency Bar */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+              <div className="text-xs font-semibold text-slate-400 mb-3">延迟分布 (相对比例)</div>
+              <div className="space-y-2">
+                {[
+                  { label: 'P50', value: stressResult.p50, color: 'bg-emerald-500', max: stressResult.p99 || 1 },
+                  { label: 'P90', value: stressResult.p90, color: 'bg-indigo-500', max: stressResult.p99 || 1 },
+                  { label: 'P95', value: stressResult.p95, color: 'bg-amber-500', max: stressResult.p99 || 1 },
+                  { label: 'P99', value: stressResult.p99, color: 'bg-rose-500', max: stressResult.p99 || 1 },
+                ].map((p) => (
+                  <div key={p.label} className="flex items-center gap-3">
+                    <span className="w-8 text-xs font-mono text-slate-400">{p.label}</span>
+                    <div className="flex-1 h-3 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                      <div
+                        className={`h-full rounded-full ${p.color} transition-all duration-500`}
+                        style={{ width: `${Math.max((p.value / p.max) * 100, 2)}%` }}
+                      />
+                    </div>
+                    <span className="w-20 text-right text-xs font-mono text-slate-400">{p.value} ms</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Prometheus Parsed Metrics (from service-hub /metrics) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
           <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t('metrics.qps')}</div>
-          <div className="text-3xl font-bold font-mono text-cyan-400">{currentQPS.toFixed(1)}</div>
-          <div className="text-[11px] text-slate-500 mt-1">总请求数: {totalRequests.toFixed(0)}</div>
+          <div className="text-3xl font-bold font-mono text-cyan-400">{(parsedMetrics?.qps ?? 0).toFixed(1)}</div>
+          <div className="text-[11px] text-slate-500 mt-1">总请求数: {(parsedMetrics?.total_requests ?? 0).toFixed(0)}</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">流水线总平均耗时</div>
-          <div className="text-3xl font-bold font-mono text-emerald-400">{totalDuration.toFixed(1)} <span className="text-sm text-slate-500">ms</span></div>
-          <div className="text-[11px] text-slate-500 mt-1">6 阶段累计</div>
-        </div>
-      </div>
-
-      {/* Real-time Latency Percentiles Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {percentileMetrics.map((m) => (
-          <div key={m.key} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300">
-                  {m.key}
-                </span>
-                <span className="text-xs text-slate-400">{m.label}</span>
-              </div>
-              <div className={`text-2xl font-bold font-mono ${m.color} mt-2`}>{m.value}</div>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-800/80 leading-relaxed">
-              {m.desc}
-            </p>
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">延迟分位数 (Hub Prometheus)</div>
+          <div className="flex items-center gap-4 mt-2">
+            <span className="text-sm font-mono text-emerald-400">P50: {(parsedMetrics?.percentiles?.p50 ?? 0).toFixed(1)}ms</span>
+            <span className="text-sm font-mono text-indigo-400">P90: {(parsedMetrics?.percentiles?.p90 ?? 0).toFixed(1)}ms</span>
+            <span className="text-sm font-mono text-amber-400">P95: {(parsedMetrics?.percentiles?.p95 ?? 0).toFixed(1)}ms</span>
+            <span className="text-sm font-mono text-rose-400">P99: {(parsedMetrics?.percentiles?.p99 ?? 0).toFixed(1)}ms</span>
           </div>
-        ))}
-      </div>
-
-      {/* 6-Stage Waterfall Duration Chart */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <IconActivity className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-bold text-slate-100">{t('metrics.waterfall')}</h2>
-          </div>
-          <span className="text-xs text-slate-400">流水线总平均耗时: <strong className="text-emerald-400 font-mono">{totalDuration.toFixed(1)} ms</strong></span>
-        </div>
-
-        <div className="space-y-3">
-          {stageWithPct.map((st) => (
-            <div key={st.key} className="space-y-1">
-              <div className="flex justify-between text-xs font-mono">
-                <span className="text-slate-300">{st.name}</span>
-                <span className="text-slate-400 font-bold">{st.ms} ms ({st.pct}%)</span>
-              </div>
-              <div className="h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5">
-                <div className={`h-full rounded-full ${st.color} transition-all duration-500`} style={{ width: `${Math.max(st.pct * 2, 1)}%` }} />
-              </div>
-            </div>
-          ))}
+          <div className="text-[11px] text-slate-500 mt-2">来源: service-hub /metrics (Prometheus)</div>
         </div>
       </div>
 

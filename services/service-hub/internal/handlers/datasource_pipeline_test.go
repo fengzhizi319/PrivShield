@@ -8,7 +8,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -21,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
@@ -603,104 +601,6 @@ func TestPipeline_API2_Kangyang_GRPC_ClassifyAndDesensitize(t *testing.T) {
 	t.Logf("✅ Step 3 & 4 (gRPC 康养数据脱敏完成并验证通过): %+v", maskedRecord)
 }
 
-// ─────────────────────────────────────────────────────────────
-// 5. 调度中枢整套流水线 TriggerDataSourcePipeline 自动全流程验证
-// ─────────────────────────────────────────────────────────────
-
-// TestPipeline_ServiceHub_AutoTriggerAndExecute tests asynchronous 6-stage pipeline execution via trigger endpoint.
-// TestPipeline_ServiceHub_AutoTriggerAndExecute 测试服务调度中枢的 /api/hub/pipeline/trigger-datasource 接口异步触发与全生命周期状态流转。
-func TestPipeline_ServiceHub_AutoTriggerAndExecute(t *testing.T) {
-	_, _, hubSrv, _, cleanup := setupFullIntegrationEnvironment(t)
-	defer cleanup()
-
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	hubSrv.RegisterRoutes(r)
-
-	// Case A: 触发医保数据源流水线 (API 1)
-	t.Run("Trigger_Yibao_Pipeline", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]any{
-			"datasource_id": "ds_yibao",
-			"limit":         5,
-			"operation":     "mask",
-		})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/hub/pipeline/trigger-datasource", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-
-		if w.Code != http.StatusAccepted {
-			t.Fatalf("expected 202 Accepted, got %d: %s", w.Code, w.Body.String())
-		}
-
-		var resp map[string]any
-		_ = json.Unmarshal(w.Body.Bytes(), &resp)
-		taskID := resp["task_id"].(string)
-		t.Logf("✅ 医保数据源流水线已成功触发, TaskID=%s", taskID)
-
-		// 等待流水线异步处理完毕 (ingest ➔ fetch ➔ classify ➔ desensitize ➔ return ➔ audit)
-		time.Sleep(1200 * time.Millisecond)
-
-		// 查询任务详情
-		wTask := httptest.NewRecorder()
-		reqTask, _ := http.NewRequest("GET", "/api/hub/tasks/"+taskID, nil)
-		r.ServeHTTP(wTask, reqTask)
-
-		if wTask.Code != http.StatusOK {
-			t.Fatalf("get task failed: %d: %s", wTask.Code, wTask.Body.String())
-		}
-		var taskResp map[string]any
-		_ = json.Unmarshal(wTask.Body.Bytes(), &taskResp)
-		taskObj := taskResp["task"].(map[string]any)
-
-		if taskObj["status"] != "completed" {
-			t.Errorf("expected task status completed, got %v (error: %v)", taskObj["status"], taskObj["error"])
-		}
-		t.Logf("🎉 医保数据源全流程流水线执行成功: status=%v, stage=%v, duration=%vms",
-			taskObj["status"], taskObj["stage"], taskObj["duration_ms"])
-	})
-
-	// Case B: 触发康养数据源流水线 (API 2)
-	t.Run("Trigger_Kangyang_Pipeline", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]any{
-			"datasource_id": "ds_kangyang",
-			"limit":         5,
-			"operation":     "mask",
-		})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/hub/pipeline/trigger-datasource", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-
-		if w.Code != http.StatusAccepted {
-			t.Fatalf("expected 202 Accepted, got %d: %s", w.Code, w.Body.String())
-		}
-
-		var resp map[string]any
-		_ = json.Unmarshal(w.Body.Bytes(), &resp)
-		taskID := resp["task_id"].(string)
-		t.Logf("✅ 康养数据源流水线已成功触发, TaskID=%s", taskID)
-
-		time.Sleep(1200 * time.Millisecond)
-
-		wTask := httptest.NewRecorder()
-		reqTask, _ := http.NewRequest("GET", "/api/hub/tasks/"+taskID, nil)
-		r.ServeHTTP(wTask, reqTask)
-
-		if wTask.Code != http.StatusOK {
-			t.Fatalf("get task failed: %d", wTask.Code)
-		}
-		var taskResp map[string]any
-		_ = json.Unmarshal(wTask.Body.Bytes(), &taskResp)
-		taskObj := taskResp["task"].(map[string]any)
-
-		if taskObj["status"] != "completed" {
-			t.Errorf("expected task status completed, got %v (error: %v)", taskObj["status"], taskObj["error"])
-		}
-		t.Logf("🎉 康养数据源全流程流水线执行成功: status=%v, stage=%v, duration=%vms",
-			taskObj["status"], taskObj["stage"], taskObj["duration_ms"])
-	})
-}
 
 // toStringVal converts any scalar value to a string for masking payloads.
 // toStringVal 辅助函数：将任意基础类型转换为统一的字符串表示。

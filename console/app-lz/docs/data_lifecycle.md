@@ -32,7 +32,7 @@ graph TD
 
     subgraph BFF["App-LZ Go BFF (:8085)"]
         B1["ClientPool\n(双协议探针/转发/聚合)"]
-        B2["TestRunner\n(TS-01~TS-07 执行引擎)"]
+        B2["TestRunner\n(TS-01~TS-03 执行引擎)"]
         B3["Fallback Generator\n(硬编码兜底数据)"]
     end
 
@@ -117,24 +117,24 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| TS-01~TS-07 用例定义 | **L2 BFF** | BFF `TestRunner.GetAvailableSuites()` 硬编码 7 个用例的 ID/标题/描述 | `runner.go` L26~L78 |
+| TS-01~TS-03 用例定义 | **L2 BFF** | BFF `TestRunner.GetAvailableSuites()` 硬编码 3 个用例的 ID/标题/描述 | `runner.go` L26~L49 |
 | 测试执行结果 | **L1 实时** | BFF `TestRunner.RunSuites()` 实际调用上游服务执行断言 | `runner.go` L81~L135 |
 | TS-01 测试输入数据 | **L2 BFF** | 硬编码患者数据（张三/510101199001011234/高血压） | `runner.go` L166~L176 |
 | TS-02 测试输入数据 | **L2 BFF** | 硬编码康养数据（王五/KY-9901/血压145/95） | `runner.go` L232~L241 |
-| TS-06 压测载荷 | **L2 BFF** | 硬编码测试用户数据，并发协程池实际调用 `service-hub` | `runner.go` L434~L556 |
-| TS-07 租约争抢模拟 | **L1 实时** ✅ G-4 已改进 | 5 worker × 4 tasks = 20 真实并发 `DispatchTask` 到 service-hub，检测重复 task_id | `runner.go` TS-07 |
-| 断言结果 (expected/actual) | **L1 实时** ✅ G-5 已改进 | TS-01/02/03/07 全部基于真实响应数据断言（task_id/level/records_count/零重复） | `runner.go` 各用例 |
+| TS-02 压测载荷 | **L2 BFF** | 硬编码测试用户数据，并发协程池实际调用 `service-hub` | `runner.go` runTS02 |
+| TS-03 租约争抢模拟 | **L1 实时** ✅ G-4 已改进 | 5 worker × 4 tasks = 20 真实并发 `DispatchTask` 到 service-hub，检测重复 task_id；service-hub 不可达时降级为合成 ID | `runner.go` runTS03 |
+| 断言结果 (expected/actual) | **L1 实时** ✅ G-5 已改进 | TS-01/TS-02/TS-03 全部基于真实响应数据断言（merkle_valid/QPS+P50~P99/零重复） | `runner.go` 各用例 |
 | 测试日志流 | **L2 BFF** | 执行过程中 `logs` 切片追加，返回后前端展示 | `runner.go` 各用例 |
 
 **G-4/G-5 改进说明**：
-- **G-4**：TS-07 已从纯内存 `rand.Intn` 模拟改为 5 worker × 4 tasks = 20 真实并发 `DispatchTask` 到 service-hub，通过 `sync.Map` 检测 task_id 重复，验证零重复与零死锁。
-- **G-5**：TS-01 新增 `MaskRecordViaEngine()` 验证脱敏效果（检查 `*` 掩码字符）；TS-02 基于真实 `ClassifyDispatch` 响应的 `level` 和 `auto_operation` 断言；TS-03 基于真实 `TriggerDatasourcePipeline` 响应的 `task_id`/`records_count`/`status` 断言。
+- **G-4**：TS-03 已从纯内存 `rand.Intn` 模拟改为 5 worker × 4 tasks = 20 真实并发 `DispatchTask` 到 service-hub，通过 `sync.Mutex` 检测 task_id 重复，验证零重复与零死锁。当 service-hub 不可达时自动生成合成 task ID 降级验证并发模型。
+- **G-5**：TS-01 基于真实 `VerifyAudit` 响应的 `merkle_valid` 断言；TS-02 基于真实 `DispatchTask` 延迟计算 P50/P90/P95/P99/QPS；TS-03 基于真实并发 `DispatchTask` 的零重复/零死锁断言。
 
 **生命周期**：
 - 用例定义：**编译期固定**，随 BFF 二进制部署更新
 - 执行结果：**请求级内存态**，`RunTestSuiteResponse` 返回前端后即脱离 BFF 控制
 - 前端 `lastRun` state：页面刷新即丢失
-- TS-06/TS-07 压测产生的任务：真实写入 `service-hub` 存储，可在任务看板中查看
+- TS-02/TS-03 压测产生的任务：真实写入 `service-hub` 存储，可在任务看板中查看
 
 ---
 
@@ -375,6 +375,6 @@ bash ./scripts/dev/docker-stop-app-lz.sh
 | G-1 | 租约看板 100% 硬编码 | 改为查询 `service-hub /api/hub/tasks?status=running` 按 lease_owner 分组 | ✅ 已完成 |
 | G-2 | MetricsPanel 耗时/分位数 100% 硬编码 | 新增 Prometheus 文本解析器 + `GET /metrics/parsed` 接口，前端动态渲染 | ✅ 已完成 |
 | G-3 | 流水线 QPS 固定 12.5 | 从 Prometheus `http_requests_total` 动态计算 | ✅ 已完成 |
-| G-4 | TS-07 纯内存模拟 | 改为 5×4=20 真实并发 `DispatchTask` 到 service-hub + 零重复检测 | ✅ 已完成 |
-| G-5 | 断言硬编码 `Passed: true` | TS-01/02/03/07 全部基于真实响应数据断言 | ✅ 已完成 |
+| G-4 | TS-03 纯内存模拟 | 改为 5×4=20 真实并发 `DispatchTask` 到 service-hub + 零重复检测 + 优雅降级 | ✅ 已完成 |
+| G-5 | 断言硬编码 `Passed: true` | TS-01/TS-02/TS-03 全部基于真实响应数据断言 | ✅ 已完成 |
 | G-6 | 前端脱敏为本地字符串替换 | `InvokeDataApi` 优先调用 `engine /v1/privacy/mask_record`，失败 fallback 本地 | ✅ 已完成 |

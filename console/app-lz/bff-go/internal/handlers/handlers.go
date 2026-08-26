@@ -51,34 +51,25 @@ func SetupRouter(h *Handler) *gin.Engine {
 		api.GET("/topology", h.GetTopology)
 		api.POST("/probe/all", h.GetTopology)
 
-		// 2. Pipeline & Dispatch
-		api.GET("/pipeline/status", h.GetPipelineStatus)
-		api.POST("/pipeline/dispatch", h.DispatchTask)
-		api.POST("/pipeline/classify-dispatch", h.ClassifyDispatch)
-		api.POST("/pipeline/trigger-datasource", h.TriggerDatasource)
-
-		// 3. Tasks & Leases
+		// 2. Tasks & Leases
 		api.GET("/tasks", h.ListTasks)
 		api.GET("/tasks/:id", h.GetTask)
 		api.GET("/tasks/leases", h.GetLeases)
+		api.POST("/tasks/dispatch", h.DispatchTask)
 
-		// 4. Test Suites Runner
+		// 3. Test Suites Runner
 		api.GET("/suites", h.GetSuites)
 		api.POST("/suites/run", h.RunSuites)
 
-		// 5. Datasources
-		api.GET("/datasources", h.GetDatasources)
-		api.GET("/datasources/:id/slice", h.GetDatasourceSlice)
-
-		// 6. Audit Log & Merkle
+		// 4. Audit Log & Merkle
 		api.GET("/audit/logs", h.GetAuditLogs)
 		api.POST("/audit/verify", h.VerifyAudit)
 
-		// 7. Metrics
+		// 5. Metrics
 		api.GET("/metrics", h.GetMetrics)
 		api.GET("/metrics/parsed", h.GetParsedMetrics)
 
-		// 8. Preset Data APIs (4 预设数据 API)
+		// 6. Preset Data APIs (4 预设数据 API)
 		api.GET("/data-api/definitions", h.GetDataApiDefinitions)
 		api.POST("/data-api/invoke", h.InvokeDataApi)
 	}
@@ -152,16 +143,6 @@ func (h *Handler) GetTopology(c *gin.Context) {
 	c.JSON(http.StatusOK, topo)
 }
 
-// GetPipelineStatus returns pipeline stage activity.
-func (h *Handler) GetPipelineStatus(c *gin.Context) {
-	status, err := h.pool.GetPipelineStatus(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusOK, status)
-		return
-	}
-	c.JSON(http.StatusOK, status)
-}
-
 // DispatchTask handles manual task dispatch.
 func (h *Handler) DispatchTask(c *gin.Context) {
 	var req models.DispatchRequest
@@ -170,36 +151,6 @@ func (h *Handler) DispatchTask(c *gin.Context) {
 		return
 	}
 	resp, err := h.pool.DispatchTask(c.Request.Context(), req)
-	if err != nil {
-		c.JSON(http.StatusAccepted, resp)
-		return
-	}
-	c.JSON(http.StatusAccepted, resp)
-}
-
-// ClassifyDispatch handles auto-classification dispatch.
-func (h *Handler) ClassifyDispatch(c *gin.Context) {
-	var req models.ClassifyDispatchRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	resp, err := h.pool.ClassifyDispatch(c.Request.Context(), req)
-	if err != nil {
-		c.JSON(http.StatusAccepted, resp)
-		return
-	}
-	c.JSON(http.StatusAccepted, resp)
-}
-
-// TriggerDatasource handles datasource slice dispatch.
-func (h *Handler) TriggerDatasource(c *gin.Context) {
-	var req models.TriggerDatasourceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	resp, err := h.pool.TriggerDatasourcePipeline(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusAccepted, resp)
 		return
@@ -267,29 +218,6 @@ func (h *Handler) RunSuites(c *gin.Context) {
 
 	resp := h.runner.RunSuites(c.Request.Context(), req)
 	c.JSON(http.StatusOK, resp)
-}
-
-// GetDatasources returns registered datasources.
-func (h *Handler) GetDatasources(c *gin.Context) {
-	ds, err := h.pool.GetDatasources(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"datasources": ds})
-}
-
-// GetDatasourceSlice returns data slices from a datasource.
-func (h *Handler) GetDatasourceSlice(c *gin.Context) {
-	id := c.Param("id")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
-
-	sliceResp, err := h.pool.GetDatasourceSlice(c.Request.Context(), id, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, sliceResp)
 }
 
 // GetAuditLogs returns audit logs.

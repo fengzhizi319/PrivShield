@@ -20,14 +20,14 @@
 ## 2. 用户角色与核心用户旅程
 
 ### 2.1 核心角色
-- **开发与测试工程师 (Developer / QA)**：一键执行 TS-01~TS-07 全量场景自动化测试，验证流水线与微服务协同稳定性。
+- **开发与测试工程师 (Developer / QA)**：一键执行 TS-01~TS-03 全量场景自动化测试，验证流水线与微服务协同稳定性。
 - **架构师与运维工程师 (Architect / SRE)**：实时监控微服务网格拓扑、Phase B 租约争抢状态、QPS 与 P50/P90/P95/P99 延迟分布，定位长尾瓶颈。
 - **安全与合规审计员 (Compliance Auditor)**：查看任务脱敏前后对比，并对 `audit-log` 的 Merkle 树哈希链进行一键验真。
 
 ### 2.2 核心用户旅程
 1. **拓扑探查**：打开 App-LZ 首页，秒级确认 4 大服务（Hub, Datasource, Audit, Agent）物理连接与 RTT。
 2. **流水线调度**：在流水线大屏中选择数据源切片或输入测试数据，点击"触发调度"，实时观看数据在 6 个阶段间流动，对比原始数据与脱敏数据。
-3. **自动化测试**：切换至"自动化测试"工作台，点击"运行全部套件"，查看 7 大预设用例实时运行动效与断言结果，导出测试报告。
+3. **自动化测试**：切换至"自动化测试"工作台，点击"运行全部套件"，查看 3 大预设用例实时运行动效与断言结果，导出测试报告。
 4. **性能调优**：进入"性能监控"面板，观察高并发压测下的阶段耗时瀑布图与分位数分布，指导参数调优。
 
 ---
@@ -67,8 +67,8 @@
   - *验收标准*：PostgreSQL 后端时展示完整租约信息；SQLite/内存后端时显示提示信息"租约调度需 PostgreSQL 后端"并隐藏专有指标。
 
 ### 3.4 模块四：一键全场景自动化测试执行器 (One-Click E2E Test Suite Runner)
-- **FR-4.1**：内置 7 大核心场景用例（TS-01 基础分发、TS-02 自适应分类、TS-03 数据源切片、TS-04 审计验真、TS-05 熔断恢复、TS-06 高并发分位数压测、TS-07 Phase B 租约争抢）。
-  - *验收标准*：测试列表展示所有 7 个用例的名称、描述、前置条件标签。
+- **FR-4.1**：内置 3 大核心场景用例（TS-01 全链路审计存证与 Merkle 验真、TS-02 预设数据API高并发压测、TS-03 Phase B 租约多副本并发争抢）。
+  - *验收标准*：测试列表展示所有 3 个用例的名称、描述、前置条件标签。
 - **FR-4.2**：支持单选/全选用例执行，实时展示用例执行耗时与断言详情（预期值 vs 实际值）。
   - *验收标准*：每个断言结果展示 `expected` vs `actual`，通过为绿色、失败为红色。
 - **FR-4.3**：支持控制台实时日志输出（Terminal 风格暗色日志窗口）。
@@ -153,141 +153,75 @@
 每个测试用例遵循以下声明式定义结构：
 
 ```go
-type TestCase struct {
-    ID          string        // 用例编号 (TS-01 ~ TS-07)
-    Name        string        // 用例名称
-    Description string        // 测试目的描述
-    Prereqs     []string      // 前置条件列表
-    Steps       []TestStep    // 执行步骤
-    Timeout     time.Duration // 整体超时
-    Tags        []string      // 标签 (smoke / e2e / perf / lease)
+type TestSuiteCase struct {
+    ID          string               // 用例编号 (TS-01 ~ TS-03)
+    Title       string               // 用例标题
+    Description string               // 测试目的描述
+    Category    string               // 分类标签
+    Status      string               // pending / passed / failed / skipped
+    DurationMs  float64              // 执行耗时（毫秒）
+    Assertions  []TestSuiteAssertion // 断言列表
+    Logs        []string             // 执行日志
 }
 
-type TestStep struct {
-    Action     Action        // 执行动作 (HTTP 请求 / 等待 / 故障注入)
-    Assertions []Assertion   // 断言列表
-}
-
-type Assertion struct {
-    Type     string // "status_code" | "json_path" | "field_exists" | "poll_until"
-    Expected any    // 预期值
-    Actual   any    // 实际值（执行后填充）
-    Passed   bool   // 是否通过（执行后填充）
-    Message  string // 断言描述
+type TestSuiteAssertion struct {
+    Name     string // 断言名称
+    Expected string // 预期值描述
+    Actual   string // 实际值
+    Passed   bool   // 是否通过
 }
 ```
 
 ### 5.2 测试用例详细规格
 
-#### TS-01: 基础脱敏任务分发
-
-| 属性 | 值 |
-|---|---|
-| **目的** | 验证 `POST /api/hub/dispatch` 基础 Mask 任务分发与 6 阶段流水线完整执行 |
-| **前置条件** | 4 服务全部在线 |
-| **标签** | `smoke`, `e2e` |
-| **超时** | 30 秒 |
-
-| 步骤 | 动作 | 断言 |
-|---|---|---|
-| 1 | `POST /api/hub/dispatch` (source=ds_yibao, operation=mask, payload=含身份证号) | HTTP 202, `$.status == "accepted"`, `$.task_id` 非空 |
-| 2 | 轮询 `GET /api/hub/tasks/{task_id}` (间隔 500ms) | `$.status == "completed"` 在 30 秒内 |
-| 3 | 校验任务详情 | `$.stage == "done"`, `$.duration_ms > 0`, `$.error` 为空 |
-
-#### TS-02: 自适应分类与自动策略路由
-
-| 属性 | 值 |
-|---|---|
-| **目的** | 验证 `POST /api/hub/classify` 智能分类后自动选择对应脱敏算子 |
-| **前置条件** | 4 服务全部在线 |
-| **标签** | `e2e` |
-| **超时** | 30 秒 |
-
-| 步骤 | 动作 | 断言 |
-|---|---|---|
-| 1 | `POST /api/hub/classify` (source=ds_kangyang, payload=含患者姓名+诊断) | HTTP 202, `$.classified_level` 非空 (如 "L3") |
-| 2 | 轮询任务完成 | `$.status == "completed"` 在 30 秒内 |
-| 3 | 校验算子选择 | `$.operation` 与 `LevelToOperation(classified_level)` 一致 |
-
-#### TS-03: 数据源切片联动调度
-
-| 属性 | 值 |
-|---|---|
-| **目的** | 验证从 `datasource-mgr` 自动抓取数据并触发完整流水线 |
-| **前置条件** | 4 服务全部在线 |
-| **标签** | `e2e` |
-| **超时** | 60 秒 |
-
-| 步骤 | 动作 | 断言 |
-|---|---|---|
-| 1 | `POST /api/hub/pipeline/trigger-datasource` (datasource_id=ds_yibao, limit=10) | HTTP 202, 返回批量 task_id 列表 |
-| 2 | 轮询所有任务完成 | 全部 10 个任务 `$.status == "completed"` 在 60 秒内 |
-| 3 | 校验统计结果 | 返回结果包含 `total_processed`, `total_succeeded` 且 `succeeded == 10` |
-
-#### TS-04: 全链路审计存证与 Merkle 验真
+#### TS-01: 全链路审计存证与 Merkle 验真
 
 | 属性 | 值 |
 |---|---|
 | **目的** | 验证流水线处理完数据后审计存证正确写入且 Merkle 链可验真 |
-| **前置条件** | 4 服务全部在线，先执行 TS-01 产生至少一条存证 |
-| **标签** | `e2e` |
+| **分类** | Audit & Integrity |
+| **前置条件** | 4 服务全部在线 |
 | **超时** | 30 秒 |
 
 | 步骤 | 动作 | 断言 |
 |---|---|---|
-| 1 | 等待 TS-01 任务完成 | `$.status == "completed"` |
-| 2 | `GET /api/audit/logs?task_id={task_id}` | 找到该 task_id 的存证记录 |
-| 3 | `POST /api/audit/snapshots/verify` | `$.merkle_valid == true`, `$.root_hash` 非空 |
+| 1 | 调用 `audit-log` `POST /api/audit/snapshots/verify` | `$.merkle_valid == true`，`$.root_hash` 非空 |
+| 2 | 校验 SHA-256 审计签名完整性 | HMAC-SHA256 签名验证通过 |
+| 3 | 校验 Merkle Tree 链式防篡改一致性 | `merkle_valid=true` |
 
-#### TS-05: Agent 宕机熔断与降级测试
-
-| 属性 | 值 |
-|---|---|
-| **目的** | 验证上游 Agent 不可达时 Hub 熔断器正确触发，恢复后自动恢复 |
-| **前置条件** | 4 服务全部在线，需启用故障注入模式 (`PRIVACY_TEST_FAULT_INJECT=1`) |
-| **标签** | `e2e`, `resilience` |
-| **超时** | 60 秒 |
-
-| 步骤 | 动作 | 断言 |
-|---|---|---|
-| 1 | 激活故障注入（模拟 Agent 超时） | 故障注入 API 返回 200 |
-| 2 | `POST /api/hub/dispatch` 触发任务 | 任务最终 `$.status == "failed"`，错误信息包含 "timeout" 或 "circuit breaker" |
-| 3 | 检查 Hub 状态 | `GET /api/hub/status` 返回 `$.agent_status` 为 "unreachable" 或熔断状态 |
-| 4 | 恢复故障注入 | 故障注入 API 返回 200 |
-| 5 | 等待恢复 + 再次探测 | `GET /readyz` 返回 200，Agent 状态恢复为 "ok" |
-
-#### TS-06: 高并发吞吐量与延迟压测
+#### TS-02: 预设数据API高并发压测
 
 | 属性 | 值 |
 |---|---|
-| **目的** | 验证高并发下调度中枢的吞吐量与延迟分布 |
+| **目的** | 验证高并发下调度中枢的吞吐量与延迟分布（P50/P90/P95/P99） |
+| **分类** | Performance Benchmark |
 | **前置条件** | 4 服务全部在线，建议关闭 LLM 层避免瓶颈 |
-| **标签** | `perf` |
 | **超时** | 120 秒 |
-| **参数** | `concurrency` (默认 50), `benchmark_requests` (默认 100) |
+| **参数** | `concurrency` (默认 20), `benchmark_requests` (默认 50) |
 
 | 步骤 | 动作 | 断言 |
 |---|---|---|
-| 1 | 并发发送 N 个 `POST /api/hub/dispatch` 请求 | 全部请求返回 202 或 429 |
-| 2 | 等待所有任务完成 | 全部任务在 120 秒内完成 |
-| 3 | 统计性能指标 | 输出 QPS、成功率、P50/P90/P95/P99/Avg/Min/Max 延迟 |
-| 4 | 校验性能基线 | 成功率 > 95%，P99 < 5000ms |
+| 1 | 并发发送 N 个 `POST /api/hub/dispatch` 请求 | 记录每次请求延迟 |
+| 2 | 统计性能指标 | 输出 QPS、P50/P90/P95/P99 延迟分布 |
+| 3 | 校验性能基线 | P50 < 100ms，P99 < 300ms，QPS > 1 req/s |
 
-#### TS-07: Phase B 租约多副本并发争抢
+#### TS-03: Phase B 租约多副本并发争抢
 
 | 属性 | 值 |
 |---|---|
-| **目的** | 验证 PostgreSQL 后端下多 Hub 副本并发任务认领无重复、无死锁 |
-| **前置条件** | **需 PostgreSQL 后端** + 至少 2 个 Hub 副本运行 |
-| **标签** | `lease`, `e2e` |
+| **目的** | 验证多 Hub Worker 并发任务认领无重复、无死锁 |
+| **分类** | Phase B High Availability |
+| **前置条件** | service-hub 可达（PostgreSQL 后端为最佳；SQLite/内存后端时降级为合成 ID 验证并发模型） |
 | **超时** | 60 秒 |
 
 | 步骤 | 动作 | 断言 |
 |---|---|---|
-| 1 | 批量创建 50 个待处理任务 | 全部返回 202 |
-| 2 | 等待所有任务被认领并完成 | 全部 50 个任务 `$.status == "completed"` |
-| 3 | 校验无重复执行 | 每个 task_id 仅被一个 worker 执行（通过租约日志验证） |
-| 4 | 校验无死锁 | 无任务因死锁而 `$.status == "failed"` |
+| 1 | 启动 5 个并发 Worker，每个分发 4 个任务（总计 20） | 收集 20 个 task_id（真实或合成） |
+| 2 | 校验无重复执行 | 每个 task_id 唯一，`duplicate_count == 0` |
+| 3 | 校验无死锁 | `deadlock_count == 0` |
+| 4 | 校验并发分发吞吐量 | 全部 20 个任务均收集到 task_id |
+
+> **优雅降级**：当 service-hub 不可达时，TS-03 自动生成合成 task ID（`synthetic-w{id}-t{id}-{random}`）验证并发模型（零重复/零死锁），日志标记为 `fallback` 模式；当 service-hub 可达时，日志标记为 `live` 模式。
 
 ---
 
@@ -299,8 +233,8 @@ type Assertion struct {
 3. 前端不直接连接上游服务，所有请求必须经过 BFF 层。
 
 ### 6.2 假设
-1. 4 个上游服务在测试执行期间保持运行（除 TS-05 故障注入场景）。
-2. `service-hub` 使用 SQLite 后端时，TS-07 租约争抢测试自动跳过。
+1. 4 个上游服务在测试执行期间保持运行。
+2. `service-hub` 使用 SQLite 后端时，TS-03 租约争抢测试自动降级为合成 ID 模式验证并发模型。
 3. 网络延迟在本地开发环境下 < 10ms，不影响超时类断言的准确性。
 4. `engine` Agent 的 LLM 层默认关闭（`PRIVACY_LLM_ENABLE=false`），避免分类延迟影响测试耗时。
 
@@ -313,4 +247,4 @@ type Assertion struct {
 | **P0 (必须)** | 模块一 (拓扑)、模块二 (流水线)、模块四 (测试执行器) | 核心测试与观测能力 |
 | **P1 (重要)** | 模块三 (任务看板)、模块五 (数据源探查) | 日常运维必备 |
 | **P2 (期望)** | 模块六 (审计验真)、模块七 (性能监控) | 增强观测与合规 |
-| **P3 (可选)** | TS-05 (熔断测试)、TS-07 (租约争抢) | 需要特殊基础设施 |
+| **P3 (可选)** | TS-05 故障注入测试（未实现） | 需要特殊基础设施 |

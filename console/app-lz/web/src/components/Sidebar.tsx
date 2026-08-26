@@ -2,8 +2,6 @@ import React from 'react';
 import { useI18n } from '../i18n';
 import {
   IconServer,
-  IconActivity,
-  IconDatabase,
   IconShieldCheck,
   IconPlay,
   IconLayers,
@@ -11,7 +9,7 @@ import {
   IconGlobe,
 } from './icons';
 
-export type TabType = 'topology' | 'pipeline' | 'tasks' | 'runner' | 'datasources' | 'audit' | 'metrics' | 'dataApi';
+export type TabType = 'topology' | 'tasks' | 'runner' | 'audit' | 'metrics' | 'dataApi';
 
 interface SidebarProps {
   currentTab: TabType;
@@ -28,13 +26,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems: { id: TabType; labelKey: string; icon: React.ReactNode }[] = [
     { id: 'topology', labelKey: 'nav.topology', icon: <IconServer className="w-5 h-5" /> },
-    { id: 'pipeline', labelKey: 'nav.pipeline', icon: <IconActivity className="w-5 h-5" /> },
+    { id: 'dataApi', labelKey: 'nav.dataApi', icon: <IconGlobe className="w-5 h-5" /> },
     { id: 'tasks', labelKey: 'nav.tasks', icon: <IconLayers className="w-5 h-5" /> },
     { id: 'runner', labelKey: 'nav.runner', icon: <IconPlay className="w-5 h-5" /> },
-    { id: 'datasources', labelKey: 'nav.datasources', icon: <IconDatabase className="w-5 h-5" /> },
     { id: 'audit', labelKey: 'nav.audit', icon: <IconShieldCheck className="w-5 h-5" /> },
     { id: 'metrics', labelKey: 'nav.metrics', icon: <IconSparkles className="w-5 h-5" /> },
-    { id: 'dataApi', labelKey: 'nav.dataApi', icon: <IconGlobe className="w-5 h-5" /> },
   ];
 
   return (

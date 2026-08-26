@@ -642,7 +642,7 @@ func TestGRPCServer_ProcessTask_StopsWhenStatePersistenceFails(t *testing.T) {
 func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 	t.Run("ClassifyFails", func(t *testing.T) {
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/v1/dynclassification/eval_record" {
+			if r.URL.Path == "/v1/medical/process" {
 				http.Error(w, "internal model error", http.StatusInternalServerError)
 				return
 			}
@@ -674,14 +674,14 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get task failed: %v", err)
 		}
-		if updated.Status != "failed" || !strings.Contains(updated.Error, "classify failed") {
-			t.Errorf("expected failed status with classify error, got: %+v", updated)
+		if updated.Status != "failed" || !strings.Contains(updated.Error, "medical pipeline failed") {
+			t.Errorf("expected failed status with medical pipeline error, got: %+v", updated)
 		}
 	})
 
 	t.Run("MaskFails", func(t *testing.T) {
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/v1/privacy/mask" {
+			if r.URL.Path == "/v1/medical/process" {
 				http.Error(w, "masking engine down", http.StatusInternalServerError)
 				return
 			}
@@ -712,8 +712,8 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get task failed: %v", err)
 		}
-		if updated.Status != "failed" || !strings.Contains(updated.Error, "desensitize failed") {
-			t.Errorf("expected failed status with desensitize error, got: %+v", updated)
+		if updated.Status != "failed" || !strings.Contains(updated.Error, "medical pipeline failed") {
+			t.Errorf("expected failed status with medical pipeline error, got: %+v", updated)
 		}
 	})
 

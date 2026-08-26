@@ -137,7 +137,7 @@ BFF 从 service-hub 查询 running 状态任务，按 `lease_owner` (worker) 分
 | **BFF** | `GET /api/lz/suites` → `GetSuites()` |
 | **上游** | **无** — BFF 本地 `runner.GetAvailableSuites()` 返回预定义套件 |
 
-预定义 7 个测试套件：TS-01 ~ TS-07
+预定义 3 个测试套件：TS-01 ~ TS-03
 
 ### 4.2 运行测试套件
 
@@ -150,14 +150,10 @@ BFF 从 service-hub 查询 running 状态任务，按 `lease_owner` (worker) 分
 ### 各套件上游调用明细
 
 | 套件 | 标题 | 上游调用 |
-|------|------|---------|
-| **TS-01** | 隐私脱敏原语验证 | `POST :8079/v1/privacy/mask_record` (engine) |
-| **TS-02** | 动态分类分级验证 | `POST :8082/api/hub/classify` (service-hub) |
-| **TS-03** | 数据源切片联动 | `POST :8082/api/hub/pipeline/trigger-datasource` (service-hub) |
-| **TS-04** | 审计存证完整性 | 本地 Merkle 树校验逻辑 |
-| **TS-05** | 端到端流水线治理 | 组合 TS-01 ~ TS-03 |
-| **TS-06** | 高并发压测 | `POST :8082/api/hub/dispatch` × N 次并发 (service-hub) |
-| **TS-07** | 并发租约唯一性 | `POST :8082/api/hub/dispatch` × 5×4=20 并发 (service-hub) + `sync.Map` 零重复检测 |
+|------|------|--------|
+| **TS-01** | 全链路审计存证与 Merkle 验真 | `POST :8084/api/audit/snapshots/verify` (audit-log) |
+| **TS-02** | 预设数据API高并发压测 | `POST :8082/api/hub/dispatch` × N 次并发 (service-hub) |
+| **TS-03** | 并发租约唯一性 | `POST :8082/api/hub/dispatch` × 5×4=20 并发 (service-hub) + `sync.Mutex` 零重复检测；service-hub 不可达时降级为合成 ID |
 
 ---
 

@@ -14,10 +14,8 @@ const translations: Record<Language, Record<string, string>> = {
     'app.title': '数盾 · 调度之眼',
     'app.subtitle': '数据服务调度中枢 (Service Hub) 全景测试与治理工作台',
     'nav.topology': '四服务集群拓扑',
-    'nav.pipeline': '6阶段流水线大屏',
     'nav.tasks': '任务生命周期与租约',
     'nav.runner': '自动化测试套件',
-    'nav.datasources': '数据源资产探查',
     'nav.audit': '不可篡改审计验真',
     'nav.metrics': '实时性能与分位数',
     'nav.dataApi': '预设数据 API 测试',
@@ -39,27 +37,6 @@ const translations: Record<Language, Record<string, string>> = {
     'topo.protocol.grpcDesc': 'HTTP/2 gRPC 二进制高性能接口，支持 mTLS 双向证书鉴权、SPKI 公钥固定与微服务高吞吐编排。',
     'topo.fixedOrder': '四服务固定全景顺序: 1. 调度中枢 ➔ 2. 隐私与分类引擎 ➔ 3. 数据源管理 ➔ 4. 脱敏审计日志',
 
-    // Pipeline Visualizer
-    'pipe.title': '6 阶段流水线动态流转大屏',
-    'pipe.desc': '可视化观测数据在 Ingest ➔ Fetch ➔ Classify ➔ Desensitize ➔ Return ➔ Audit 间的实时流转与脱敏前后比对。',
-    'pipe.stage.ingest': '1. 任务解析 (Ingest)',
-    'pipe.stage.fetch': '2. 切片抽取 (Fetch)',
-    'pipe.stage.classify': '3. 智能评级 (Classify)',
-    'pipe.stage.desensitize': '4. 隐私治理 (Desensitize)',
-    'pipe.stage.return': '5. 结果装配 (Return)',
-    'pipe.stage.audit': '6. 存证验真 (Audit)',
-    'pipe.dispatch': '提交调度任务',
-    'pipe.source': '数据源标识',
-    'pipe.operation': '脱敏原语',
-    'pipe.payload': '输入测试数据 (JSON)',
-    'pipe.submitting': '提交中...',
-    'pipe.rawInput': '原始明文输入',
-    'pipe.sanitizedOutput': '脱敏合规输出',
-    'pipe.diff': '数据穿透前后对比',
-    'pipe.loadPreset': '加载预设数据',
-    'pipe.preset.yibao': '医保报销结算数据',
-    'pipe.preset.kangyang': '智慧康养生命体征',
-
     // Tasks & Leases
     'tasks.title': '任务全生命周期与 Phase B 租约看板',
     'tasks.desc': '按状态过滤检索历史任务，并对 PostgreSQL 多副本 FOR UPDATE SKIP LOCKED 原子租约进行深度观测。',
@@ -79,8 +56,8 @@ const translations: Record<Language, Record<string, string>> = {
     'tasks.leaseDesc': '展示多 Worker 节点在并发认领任务时的行锁状态与孤儿任务自愈回收。',
 
     // Test Suite Runner
-    'runner.title': '一键全场景自动化测试执行器 (TS-01 ~ TS-07)',
-    'runner.desc': '全面执行涵盖基础分发、自适应分类、数据源联动、审计验真、熔断恢复、高并发压测与租约争抢的全量测试用例。',
+    'runner.title': '自动化测试套件 (TS-04 / TS-06 / TS-07)',
+    'runner.desc': '执行审计存证验真、高并发压测与 Phase B 租约争抢的测试用例。',
     'runner.runAll': '一键执行全部套件',
     'runner.runSelected': '执行选应用例',
     'runner.running': '测试执行中...',
@@ -90,14 +67,6 @@ const translations: Record<Language, Record<string, string>> = {
     'runner.passRate': '测试通过率',
     'runner.assertions': '断言详情',
     'runner.terminalLogs': '实时执行日志流',
-
-    // Datasource Explorer
-    'ds.title': '模拟数据源资产探查与切片采样',
-    'ds.desc': '直连 datasource-mgr 查看医保与康养资产画像，在线抽取切片并一键派发至调度中枢。',
-    'ds.sampleSlice': '抽取数据切片',
-    'ds.dispatchSlice': '派发至调度流水线',
-    'ds.recordCount': '总记录数',
-    'ds.fields': '字段列表',
 
     // Audit Log & Merkle
     'audit.title': '不可篡改脱敏审计存证与 Merkle 验真',
@@ -140,10 +109,8 @@ const translations: Record<Language, Record<string, string>> = {
     'app.title': 'PrivShield · Eye of Hub (App-LZ)',
     'app.subtitle': 'Service Hub E2E Testing, Full-Chain Observability & Mesh Governance Console',
     'nav.topology': 'Cluster Topology',
-    'nav.pipeline': '6-Stage Pipeline',
     'nav.tasks': 'Task & Lease',
     'nav.runner': 'E2E Test Suites',
-    'nav.datasources': 'Datasource Explorer',
     'nav.audit': 'Audit & Merkle',
     'nav.metrics': 'Metrics & Percentiles',
     'nav.dataApi': 'Preset Data APIs',
@@ -165,27 +132,6 @@ const translations: Record<Language, Record<string, string>> = {
     'topo.protocol.grpcDesc': 'HTTP/2 gRPC binary high-throughput endpoints with mTLS mutual certificate authentication and SPKI pinning.',
     'topo.fixedOrder': 'Fixed Service Order: 1. Service Hub ➔ 2. PrivShield Agent ➔ 3. Datasource Mgr ➔ 4. Audit Log',
 
-    // Pipeline Visualizer
-    'pipe.title': '6-Stage Pipeline Live Visualizer',
-    'pipe.desc': 'Live data flow animation across Ingest ➔ Fetch ➔ Classify ➔ Desensitize ➔ Return ➔ Audit with dual-pane diff.',
-    'pipe.stage.ingest': '1. Ingest & Parse',
-    'pipe.stage.fetch': '2. Slice Fetch',
-    'pipe.stage.classify': '3. Funnel Classify',
-    'pipe.stage.desensitize': '4. Desensitize',
-    'pipe.stage.return': '5. Assemble & Return',
-    'pipe.stage.audit': '6. Audit Log',
-    'pipe.dispatch': 'Dispatch Pipeline Task',
-    'pipe.source': 'Datasource ID',
-    'pipe.operation': 'Privacy Primitive',
-    'pipe.payload': 'Input Payload (JSON)',
-    'pipe.submitting': 'Dispatching...',
-    'pipe.rawInput': 'Raw Input Payload',
-    'pipe.sanitizedOutput': 'Sanitized Compliant Output',
-    'pipe.diff': 'Data Transformation Diff',
-    'pipe.loadPreset': 'Load Sample Data',
-    'pipe.preset.yibao': 'Medical Insurance Settlement',
-    'pipe.preset.kangyang': 'Elderly Healthcare Vitals',
-
     // Tasks & Leases
     'tasks.title': 'Task Lifecycle & Phase B Lease Inspector',
     'tasks.desc': 'Filter historical tasks by status and observe PostgreSQL multi-worker FOR UPDATE SKIP LOCKED atomic leases.',
@@ -205,8 +151,8 @@ const translations: Record<Language, Record<string, string>> = {
     'tasks.leaseDesc': 'Live display of worker task claims, row-level locks, and orphan lease reclamation.',
 
     // Test Suite Runner
-    'runner.title': 'One-Click E2E Test Suite Runner (TS-01 ~ TS-07)',
-    'runner.desc': 'Execute all test scenarios covering dispatch, classification, datasource fetch, audit verification, circuit breaking, concurrency, and atomic leases.',
+    'runner.title': 'E2E Test Suites (TS-04 / TS-06 / TS-07)',
+    'runner.desc': 'Execute audit verification, concurrency stress test, and atomic lease contention test cases.',
     'runner.runAll': 'Run All Test Suites',
     'runner.runSelected': 'Run Selected Suites',
     'runner.running': 'Executing Suites...',
@@ -216,14 +162,6 @@ const translations: Record<Language, Record<string, string>> = {
     'runner.passRate': 'Pass Rate',
     'runner.assertions': 'Assertions',
     'runner.terminalLogs': 'Terminal Execution Logs',
-
-    // Datasource Explorer
-    'ds.title': 'Simulated Datasource Explorer & Slice Sampler',
-    'ds.desc': 'Direct connection to datasource-mgr for dataset metadata and slice sampling with one-click pipeline dispatch.',
-    'ds.sampleSlice': 'Fetch Data Slice',
-    'ds.dispatchSlice': 'Dispatch Slice to Pipeline',
-    'ds.recordCount': 'Total Records',
-    'ds.fields': 'Field Schema',
 
     // Audit Log & Merkle
     'audit.title': 'Immutable Audit Log & Merkle Verification',

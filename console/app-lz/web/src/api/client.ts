@@ -1,20 +1,13 @@
 import {
   TopologyResponse,
-  PipelineStatusResponse,
   DispatchRequest,
   DispatchResponse,
-  ClassifyDispatchRequest,
-  ClassifyDispatchResponse,
-  TriggerDatasourceRequest,
-  TriggerDatasourceResponse,
   TasksResponse,
   Task,
   LeasedTasksResponse,
   TestSuiteCase,
   RunTestSuiteRequest,
   RunTestSuiteResponse,
-  Datasource,
-  DatasourceSliceResponse,
   AuditLogItem,
   AuditVerifyResponse,
   DataApiDef,
@@ -56,33 +49,7 @@ export const api = {
     return fetchJSON<TopologyResponse>(`${BASE_URL}/probe/all?protocol=${protocol}`, { method: 'POST' });
   },
 
-  // 2. Pipeline & Dispatch
-  async getPipelineStatus(): Promise<PipelineStatusResponse> {
-    return fetchJSON<PipelineStatusResponse>(`${BASE_URL}/pipeline/status`);
-  },
-
-  async dispatchTask(req: DispatchRequest): Promise<DispatchResponse> {
-    return fetchJSON<DispatchResponse>(`${BASE_URL}/pipeline/dispatch`, {
-      method: 'POST',
-      body: JSON.stringify(req),
-    });
-  },
-
-  async classifyDispatch(req: ClassifyDispatchRequest): Promise<ClassifyDispatchResponse> {
-    return fetchJSON<ClassifyDispatchResponse>(`${BASE_URL}/pipeline/classify-dispatch`, {
-      method: 'POST',
-      body: JSON.stringify(req),
-    });
-  },
-
-  async triggerDatasource(req: TriggerDatasourceRequest): Promise<TriggerDatasourceResponse> {
-    return fetchJSON<TriggerDatasourceResponse>(`${BASE_URL}/pipeline/trigger-datasource`, {
-      method: 'POST',
-      body: JSON.stringify(req),
-    });
-  },
-
-  // 3. Tasks & Leases
+  // 2. Tasks & Leases
   async listTasks(status = '', limit = 50, offset = 0): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
@@ -99,6 +66,13 @@ export const api = {
     return fetchJSON<LeasedTasksResponse>(`${BASE_URL}/tasks/leases`);
   },
 
+  async dispatchTask(req: DispatchRequest): Promise<DispatchResponse> {
+    return fetchJSON<DispatchResponse>(`${BASE_URL}/tasks/dispatch`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  },
+
   // 4. Test Suites Runner
   async getSuites(): Promise<{ suites: TestSuiteCase[] }> {
     return fetchJSON<{ suites: TestSuiteCase[] }>(`${BASE_URL}/suites`);
@@ -111,14 +85,7 @@ export const api = {
     });
   },
 
-  // 5. Datasources
-  async getDatasources(): Promise<{ datasources: Datasource[] }> {
-    return fetchJSON<{ datasources: Datasource[] }>(`${BASE_URL}/datasources`);
-  },
-
-  async getDatasourceSlice(id: string, limit = 10): Promise<DatasourceSliceResponse> {
-    return fetchJSON<DatasourceSliceResponse>(`${BASE_URL}/datasources/${id}/slice?limit=${limit}`);
-  },
+  // 5. Datasources (removed — use Data API instead)
 
   // 6. Audit & Merkle
   async getAuditLogs(limit = 50, offset = 0): Promise<{ logs: AuditLogItem[] }> {

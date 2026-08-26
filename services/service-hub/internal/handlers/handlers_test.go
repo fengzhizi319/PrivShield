@@ -166,6 +166,35 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 				},
 			})
 
+		case "/v1/medical/process":
+			// 模拟医疗流水线：分类+脱敏一体化（3-Layer 分类 + PII 掩码 + ICD-10 脱敏）
+			var payload map[string]any
+			json.NewDecoder(r.Body).Decode(&payload)
+			records, _ := payload["records"].([]any)
+			sanitized := make([]map[string]any, 0, len(records))
+			for _, rec := range records {
+				if m, ok := rec.(map[string]any); ok {
+					s := make(map[string]any, len(m))
+					for k, v := range m {
+						s[k] = v
+					}
+					if name, ok := s["patient_name"].(string); ok && len(name) > 1 {
+						s["patient_name"] = string(name[0]) + "*"
+					}
+					if id, ok := s["id_card"].(string); ok && len(id) > 8 {
+						s["id_card"] = id[:4] + "***********" + id[len(id)-4:]
+					}
+					sanitized = append(sanitized, s)
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"classification_report": []map[string]any{
+					{"level": "L3", "confidence": 0.92, "engine": "rule"},
+				},
+				"sanitized_data": sanitized,
+				"summary":        map[string]any{"total_records": len(records), "pipeline": "medical"},
+			})
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]any{"detail": "not found"})
@@ -406,50 +435,6 @@ func TestPipeline(t *testing.T) {
 	}
 }
 
-// TestLevelToOperation tests mapping data security levels to operations.
-// TestLevelToOperation 测试敏感等级到操作类型的映射函数。
-func TestLevelToOperation(t *testing.T) {
-	tests := []struct {
-		level    string
-		expected string
-	}{
-		{"L1", "none"},
-		{"L2", "mask"},
-		{"L3", "k_anon"},
-		{"L4", "dp"},
-		{"L5", "dp"},
-		{"unknown", "mask"},
-	}
-	for _, tt := range tests {
-		got := levelToOperation(tt.level)
-		if got != tt.expected {
-			t.Errorf("levelToOperation(%q) = %q, want %q", tt.level, got, tt.expected)
-		}
-	}
-}
-
-// TestLevelToPriority tests sensitivity level to task priority calculation.
-// TestLevelToPriority 测试等级到调度优先级的数值映射。
-func TestLevelToPriority(t *testing.T) {
-	tests := []struct {
-		level    string
-		expected int
-	}{
-		{"L5", 100},
-		{"L4", 80},
-		{"L3", 60},
-		{"L2", 40},
-		{"L1", 10},
-		{"unknown", 40},
-	}
-	for _, tt := range tests {
-		got := levelToPriority(tt.level)
-		if got != tt.expected {
-			t.Errorf("levelToPriority(%q) = %d, want %d", tt.level, got, tt.expected)
-		}
-	}
-}
-
 // TestListTasksWithFilter tests task list querying with status filtering (completed vs pending).
 // TestListTasksWithFilter 测试基于 status 查询参数的任务列表过滤能力。
 func TestListTasksWithFilter(t *testing.T) {
@@ -598,91 +583,6 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	t.Logf("✅ Step 3 passed: 调度中枢状态已更新 completed_total=1")
 }
 
-// TestE2E_FullPipeline_ClassifyAndDesensitize tests the classify-then-desensitize flow:
-//  1. Submit data for automatic classification via POST /api/hub/classify
-//  2. Mock agent classifies data as L3 (confidential)
-//  3. System auto-selects k_anon operation based on L3 level
-//  4. Pipeline processes: classify → desensitize (k_anon) → complete
-//  5. Verify task completes with auto-selected operation
-//
-// TestE2E_FullPipeline_ClassifyAndDesensitize 测试自动分类分级 + 脱敏全流程：
-//  1. 提交数据到分类分级端点
-//  2. 模拟 Agent 返回 L3（敏感）级别
-//  3. 系统自动选择 k_anon 脱敏策略
-//  4. 流水线处理：分类分级 → K匿名脱敏 → 完成
-//  5. 验证任务以自动选择的操作完成
-func TestE2E_FullPipeline_ClassifyAndDesensitize(t *testing.T) {
-	srv, mockAgent := newMockE2EServer(t)
-	defer mockAgent.Close()
-	router := newTestRouter(srv)
-
-	// Step 1: 申请数据 — 提交待分类的数据载荷
-	classifyBody := map[string]any{
-		"source": "医保数据库",
-		"payload": map[string]any{
-			"patient_name": "李四",
-			"id_card":      "310101198505051234",
-			"diagnosis":    "糖尿病",
-			"medical_fee":  15000,
-		},
-	}
-	b, _ := json.Marshal(classifyBody)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/hub/classify", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("classify: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var classifyResp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &classifyResp)
-
-	// Step 2: 分类分级结果验证 — 校验评估级别与自适应算子决策
-	taskID := classifyResp["task_id"].(string)
-	if taskID == "" {
-		t.Fatal("classify: expected non-empty task_id")
-	}
-	level := classifyResp["level"].(string)
-	if level != "L3" {
-		t.Errorf("classify: expected level=L3, got %v", level)
-	}
-	autoOp := classifyResp["auto_operation"].(string)
-	if autoOp != "k_anon" {
-		t.Errorf("classify: expected auto_operation=k_anon (L3→k_anon), got %v", autoOp)
-	}
-	t.Logf("✅ Step 1 passed: 分类分级完成 level=%s auto_operation=%s", level, autoOp)
-
-	// Step 3: 等待脱敏流水线完成
-	time.Sleep(1200 * time.Millisecond)
-
-	// Step 4: 拿到脱敏数据 — 校验任务按自动选择的 k_anon 策略执行并完成
-	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("GET", "/api/hub/tasks?status=completed", nil)
-	router.ServeHTTP(w2, req2)
-
-	var listResp map[string]any
-	_ = json.Unmarshal(w2.Body.Bytes(), &listResp)
-	total := listResp["total"].(float64)
-	if total != 1 {
-		t.Fatalf("expected 1 completed task, got %v", total)
-	}
-
-	tasks := listResp["tasks"].([]any)
-	task := tasks[0].(map[string]any)
-	if task["status"] != "completed" {
-		t.Errorf("expected status=completed, got %v", task["status"])
-	}
-	if task["operation"] != "k_anon" {
-		t.Errorf("expected operation=k_anon, got %v", task["operation"])
-	}
-	if task["stage"] != "done" {
-		t.Errorf("expected stage=done, got %v", task["stage"])
-	}
-	t.Logf("✅ Step 2 passed: 脱敏完成 operation=k_anon stage=done")
-}
 
 // TestE2E_FullPipeline_MultiLevelDesensitize tests multiple sensitivity levels
 // and their corresponding desensitization operations:
@@ -911,51 +811,6 @@ func TestDispatch_OversizedSource(t *testing.T) {
 	}
 }
 
-// TestClassifyAndDispatch_Validations tests request body validation on ClassifyAndDispatch.
-// TestClassifyAndDispatch_Validations 测试分类分发端点的各类入参非法分支（非 JSON、空 source、超长 source）。
-func TestClassifyAndDispatch_Validations(t *testing.T) {
-	s := newSimpleTestServer()
-	router := newTestRouter(s)
-
-	t.Run("InvalidJSON", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/hub/classify", bytes.NewReader([]byte("{invalid-json")))
-		req.Header.Set("Content-Type", "application/json")
-		router.ServeHTTP(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", w.Code)
-		}
-	})
-
-	t.Run("EmptySource", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/hub/classify", bytes.NewReader([]byte("{}")))
-		req.Header.Set("Content-Type", "application/json")
-		router.ServeHTTP(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", w.Code)
-		}
-	})
-
-	t.Run("OversizedSource", func(t *testing.T) {
-		oversized := map[string]any{
-			"source": string(make([]byte, 1025)),
-		}
-		body, _ := json.Marshal(oversized)
-
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/hub/classify", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		router.ServeHTTP(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", w.Code)
-		}
-	})
-}
-
 // TestListTasks_InvalidStatusFilter tests rejection of illegal status filters.
 // TestListTasks_InvalidStatusFilter 测试非法状态过滤参数被正确拦截。
 func TestListTasks_InvalidStatusFilter(t *testing.T) {
@@ -1028,96 +883,4 @@ func TestServer_ShutdownGraceful(t *testing.T) {
 	s.Shutdown()
 }
 
-// TestTriggerDataSourcePipeline tests the integrated pipeline trigger from datasource-mgr.
-// TestTriggerDataSourcePipeline 测试从 Mock datasource-mgr 拉取数据并异步派发任务的完整处理。
-func TestTriggerDataSourcePipeline(t *testing.T) {
-	mockDS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(datasource.DataQueryResult{
-			SourceID:   "ds_yibao",
-			SourceName: "医保就医结算",
-			Total:      50,
-			Records:    []map[string]any{{"name": "张三", "id_card": "510101199001011234"}},
-		})
-	}))
-	defer mockDS.Close()
 
-	u, _ := url.Parse(mockDS.URL)
-	port, _ := strconv.Atoi(u.Port())
-
-	cfg := &config.Config{
-		Host:               "127.0.0.1",
-		Port:               0,
-		AgentRESTHost:      "127.0.0.1",
-		AgentRESTPort:      19999,
-		DatasourceRESTHost: u.Hostname(),
-		DatasourceRESTPort: port,
-		MaxQueueDepth:      100,
-		ScheduleTimeout:    5,
-	}
-
-	d := newTestDeps()
-	ag := agent.New(cfg)
-	ds := datasource.New(cfg)
-	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
-	r := newTestRouter(srv)
-
-	body, _ := json.Marshal(map[string]any{
-		"datasource_id": "ds_yibao",
-		"limit":         5,
-		"operation":     "mask",
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/hub/pipeline/trigger-datasource", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["datasource_id"] != "ds_yibao" || resp["records_count"].(float64) != 1 {
-		t.Errorf("unexpected trigger response: %+v", resp)
-	}
-}
-
-// TestListDataSourcesProxy tests proxying datasource metadata list from datasource-mgr.
-// TestListDataSourcesProxy 测试代理转发查询数据源列表端点。
-func TestListDataSourcesProxy(t *testing.T) {
-	mockDS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"total":       2,
-			"datasources": []string{"ds_yibao", "ds_kangyang"},
-		})
-	}))
-	defer mockDS.Close()
-
-	u, _ := url.Parse(mockDS.URL)
-	port, _ := strconv.Atoi(u.Port())
-
-	cfg := &config.Config{
-		Host:               "127.0.0.1",
-		Port:               0,
-		AgentRESTHost:      "127.0.0.1",
-		AgentRESTPort:      19999,
-		DatasourceRESTHost: u.Hostname(),
-		DatasourceRESTPort: port,
-	}
-
-	d := newTestDeps()
-	ag := agent.New(cfg)
-	ds := datasource.New(cfg)
-	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
-	r := newTestRouter(srv)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/hub/datasources", nil)
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-}

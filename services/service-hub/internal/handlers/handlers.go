@@ -17,11 +17,8 @@
 //   GET  /api/hub/status                 → 调度中枢运行状态与队列深度概览
 //   GET  /api/hub/tasks                  → 分页查询任务列表 (支持 status 状态过滤)
 //   GET  /api/hub/tasks/:id              → 根据 TaskID 查询单个任务详情
-//   POST /api/hub/dispatch               → 直接分发指定算子的隐私处理任务
+//   POST /api/hub/dispatch               → 直接分发指定算子的隐私处理任务 (API1/2/3/4 核心)
 //   GET  /api/hub/pipeline               → 6 阶段流水线监控遥测与 QPS 统计
-//   POST /api/hub/classify               → 智能探查分类分级并根据等级（L1~L5）自动下发对应算子
-//   POST /api/hub/pipeline/trigger-ds    → 从 datasource-mgr 自动抓取样本并全自动触发流水线
-//   GET  /api/hub/datasources            → 代理查询 datasource-mgr 的全部数据源元数据
 //   GET  /metrics                        → Prometheus 格式监控指标导出端点
 // ==============================================================================
 
@@ -46,7 +43,6 @@ import (
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/datasource"
-	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/models"
 )
 
 const moduleVia = "service-hub"
@@ -145,13 +141,8 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/api/hub/tasks/:id", s.GetTask)
 	r.POST("/api/hub/dispatch", s.Dispatch)
 
-	// 流水线与自适应分类调度
+	// 流水线监控遥测
 	r.GET("/api/hub/pipeline", s.Pipeline)
-	r.POST("/api/hub/classify", s.ClassifyAndDispatch)
-
-	// 模拟数据源联动与代理端点
-	r.POST("/api/hub/pipeline/trigger-datasource", s.TriggerDataSourcePipeline)
-	r.GET("/api/hub/datasources", s.ListDataSources)
 
 	// Prometheus 监控指标导出
 	r.GET("/metrics", s.mc.Handler())
@@ -357,11 +348,12 @@ func (s *Server) Dispatch(c *gin.Context) {
 // processTask executes the full 6-stage scheduling pipeline.
 // processTask 完整驱动 6 阶段数据安全流通流水线执行：
 //
-// 流水线 6 阶段执行逻辑：
+// 流水线执行逻辑（API1/2/3/4 医疗数据核心场景）：
 // ① 请求接入 (ingest)：更新状态为 running，初始化任务元数据；
 // ② 申请原数 (fetch)：若 Payload 为空，自动向 datasource-mgr 发起远程抽样获取数据；
-// ③ 分类分级 (classify)：若为动态分类任务，调用 PrivShield Agent /v1/dynclassification/eval_record 进行三层漏斗定级；
-// ④ 下发脱敏 (desensitize)：根据算子类型（mask/k_anon/dp）调用 Agent 执行字段/记录级脱敏保护；
+// ③ 分类+脱敏 (classify)：一次调用 engine /v1/medical/process 医疗流水线，
+//    同时完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + ICD-10 脱敏 + 诊断残留清除；
+// ④ 脱敏治理 (desensitize)：已由 ③ 合并完成，快速通过（保留阶段状态追踪）；
 // ⑤ 结果返回 (return)：组装脱敏后的数据对象；
 // ⑥ 审计存证 (audit/done)：记录执行耗时与完成状态并落盘存证。
 func (s *Server) processTask(task *store.Task, req dispatchRequest) {
@@ -416,6 +408,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 					payloadBytes, _ := json.Marshal(req.Payload)
 					task.PayloadJSON = string(payloadBytes)
 					if err := s.persistTask(task, "payload fetched"); err != nil {
+						cancel()
 						return
 					}
 				}
@@ -423,43 +416,29 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 			}
 		}
 
-		// 阶段 ③：分类分级 (classify) ── 调用 Agent 三层漏斗评估
-		if stage == "classify" && req.Operation == "classify" {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_, err := s.agent.Classify(ctx, req.Payload)
-			cancel()
-			if err != nil {
-				task.Status = "failed"
-				task.Error = fmt.Sprintf("classify failed at stage %s: %v", stage, err)
-				now := time.Now()
-				task.CompletedAt = &now
-				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.persistTask(task, "classification failure")
-				return
+		// 阶段 ③：分类+脱敏一体化 (classify) ── 一次调用 engine 医疗流水线
+		// 替代原先 classify + desensitize 两步分离调用，减少一次网络往返。
+		if stage == "classify" && isPrivacyOperation(req.Operation) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			records := agent.ToRecords(req.Payload)
+			if len(records) > 0 {
+				_, err := s.agent.ProcessMedical(ctx, records)
+				cancel()
+				if err != nil {
+					task.Status = "failed"
+					task.Error = fmt.Sprintf("medical pipeline failed at stage %s: %v", stage, err)
+					now := time.Now()
+					task.CompletedAt = &now
+					task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+					_ = s.persistTask(task, "medical pipeline failure")
+					return
+				}
+			} else {
+				cancel()
 			}
 		}
 
-		// 阶段 ④：下发脱敏 (desensitize) ── 调用 Agent 执行脱敏算子
-		if stage == "desensitize" && (req.Operation == "mask" || req.Operation == "k_anon" || req.Operation == "dp") {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			record := toStringMap(req.Payload)
-			var err error
-			if len(record) > 0 {
-				_, err = s.agent.MaskRecord(ctx, record)
-			} else {
-				_, err = s.agent.Mask(ctx, req.Payload)
-			}
-			cancel()
-			if err != nil {
-				task.Status = "failed"
-				task.Error = fmt.Sprintf("desensitize failed at stage %s: %v", stage, err)
-				now := time.Now()
-				task.CompletedAt = &now
-				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.persistTask(task, "desensitization failure")
-				return
-			}
-		}
+		// 阶段 ④：脱敏治理 (desensitize) ── 已由 ③ 医疗流水线合并完成，快速通过
 	}
 
 	// 阶段 ⑤/⑥ 顺利完成：标记任务为 completed 并计算端到端总耗时
@@ -510,202 +489,14 @@ func (s *Server) Pipeline(c *gin.Context) {
 	})
 }
 
-// ClassifyAndDispatch performs classification first, then auto-dispatches.
-// ClassifyAndDispatch 智能分类定级分发端点：
-// 1. 若 Payload 为空，自动从 datasource-mgr 抓取样本；
-// 2. 调用 Agent Classify 接口完成动态分类定级；
-// 3. 根据识别出的等级（如 L1/L2/L3/L4/L5）自动决策脱敏算子（none/mask/k_anon/dp）；
-// 4. 生成任务并异步启动流水线，返回分类分级与自动决标决策结果。
-func (s *Server) ClassifyAndDispatch(c *gin.Context) {
-	var req struct {
-		Source  string `json:"source" binding:"required"`
-		Payload any    `json:"payload"`
+// isPrivacyOperation returns true if the operation requires engine privacy processing.
+// isPrivacyOperation 判断算子是否需要调用 engine 医疗流水线（分类+脱敏一体化）。
+func isPrivacyOperation(op string) bool {
+	switch op {
+	case "classify", "mask", "k_anon", "dp":
+		return true
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
-		return
-	}
-
-	if err := validation.MaxLength("source", req.Source, 1024); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
-		return
-	}
-
-	// 若载荷为空，自动从数据源服务拉取样本
-	if (req.Payload == nil || isEmptyPayload(req.Payload)) && s.datasource != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if res, err := s.datasource.FetchDataBySource(ctx, req.Source, 5, 0); err == nil && len(res.Records) > 0 {
-			req.Payload = res.Records[0]
-		}
-		cancel()
-	}
-
-	// 步骤 1：调用 Agent 进行动态分类定级
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	classifyResult, err := s.agent.Classify(ctx, req.Payload)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"detail": fmt.Sprintf("classification failed: %v", err),
-			"via":    moduleVia,
-		})
-		return
-	}
-
-	// 步骤 2：根据分类级别映射脱敏算子
-	level := "L2"
-	if lvl, ok := classifyResult["level"].(string); ok {
-		level = lvl
-	}
-
-	operation := levelToOperation(level)
-
-	// 步骤 3：根据判定结果自动分发新任务
-	taskID := validation.GenerateID("task")
-	now := time.Now()
-
-	payloadJSON, _ := json.Marshal(req.Payload)
-	task := &store.Task{
-		ID:          taskID,
-		Status:      "pending",
-		Stage:       "queued",
-		Source:      req.Source,
-		Operation:   operation,
-		Priority:    levelToPriority(level),
-		CreatedAt:   now,
-		PayloadJSON: string(payloadJSON),
-	}
-
-	if err := s.tasks.Save(task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
-		return
-	}
-
-	dispatchReq := dispatchRequest{
-		Source:    req.Source,
-		Operation: operation,
-		Payload:   req.Payload,
-		Priority:  levelToPriority(level),
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.processTask(task, dispatchReq)
-	}()
-
-	c.JSON(http.StatusOK, gin.H{
-		"task_id":         taskID,
-		"classify_result": classifyResult,
-		"auto_operation":  operation,
-		"level":           level,
-		"via":             moduleVia,
-	})
-}
-
-// TriggerDataSourcePipeline requests mock data from datasource-mgr, classifies and executes desensitization.
-// TriggerDataSourcePipeline 联动触发端点：
-// 指定 DataSourceID 后，service-hub 自动从 datasource-mgr 调取指定条数的数据，并以预设或自动算子触发 6 阶段流水线。
-func (s *Server) TriggerDataSourcePipeline(c *gin.Context) {
-	var req struct {
-		DataSourceID string `json:"datasource_id" binding:"required"`
-		Limit        int    `json:"limit"`
-		Operation    string `json:"operation"` // 可选，默认为 "auto"
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
-		return
-	}
-
-	if req.Limit <= 0 {
-		req.Limit = 10
-	}
-	if req.Limit > 100 {
-		req.Limit = 100
-	}
-
-	if s.datasource == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "datasource client not configured", "via": moduleVia})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	dsResp, err := s.datasource.FetchDataBySource(ctx, req.DataSourceID, req.Limit, 0)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"detail": fmt.Sprintf("fetch data from datasource-mgr failed: %v", err),
-			"via":    moduleVia,
-		})
-		return
-	}
-
-	operation := req.Operation
-	if operation == "" || operation == "auto" {
-		operation = "mask"
-	}
-
-	taskID := validation.GenerateID("task")
-	now := time.Now()
-	payloadJSON, _ := json.Marshal(dsResp.Records)
-
-	task := &store.Task{
-		ID:          taskID,
-		Status:      "pending",
-		Stage:       "queued",
-		Source:      dsResp.SourceName,
-		Operation:   operation,
-		Priority:    50,
-		CreatedAt:   now,
-		PayloadJSON: string(payloadJSON),
-	}
-
-	if err := s.tasks.Save(task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
-		return
-	}
-
-	dispatchReq := dispatchRequest{
-		Source:    dsResp.SourceName,
-		Operation: operation,
-		Payload:   dsResp.Records,
-		Priority:  50,
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.processTask(task, dispatchReq)
-	}()
-
-	c.JSON(http.StatusAccepted, gin.H{
-		"task_id":       taskID,
-		"datasource_id": req.DataSourceID,
-		"records_count": len(dsResp.Records),
-		"operation":     operation,
-		"status":        "accepted",
-		"via":           moduleVia,
-	})
-}
-
-// ListDataSources proxies datasource list from datasource-mgr.
-// ListDataSources 代理转发端点：从 datasource-mgr 透明拉取所有数据源资产清单。
-func (s *Server) ListDataSources(c *gin.Context) {
-	if s.datasource == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "datasource client not configured", "via": moduleVia})
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	list, err := s.datasource.ListDataSources(ctx)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"detail": fmt.Sprintf("list datasources failed: %v", err), "via": moduleVia})
-		return
-	}
-	c.JSON(http.StatusOK, list)
+	return false
 }
 
 // isEmptyPayload checks whether a generic payload is nil or empty.
@@ -725,60 +516,4 @@ func isEmptyPayload(p any) bool {
 		return len(v) == 0
 	}
 	return false
-}
-
-// levelToOperation delegates to the shared models.LevelToOperation helper.
-// levelToOperation 将敏感等级转换为脱敏操作算子。
-func levelToOperation(level string) string {
-	return models.LevelToOperation(level)
-}
-
-// levelToPriority calculates task execution priority based on sensitivity level.
-// levelToPriority 根据敏感级别计算任务调度优先级（L5=100, L4=80, L3=60, L2=40, L1=10）。
-func levelToPriority(level string) int {
-	switch level {
-	case "L5":
-		return 100
-	case "L4":
-		return 80
-	case "L3":
-		return 60
-	case "L2":
-		return 40
-	case "L1":
-		return 10
-	default:
-		return 40
-	}
-}
-
-// toStringMap converts a generic map[string]any or slice of maps to map[string]string for Agent masking calls.
-// toStringMap 辅助函数：将通用的 map[string]any 或切片转换为单行记录的 map[string]string 字符串键值对。
-func toStringMap(payload any) map[string]string {
-	result := make(map[string]string)
-	m, ok := payload.(map[string]any)
-	if !ok {
-		// 若 payload 为 map 切片，则提取第一条记录作为样本
-		if slice, ok := payload.([]map[string]any); ok && len(slice) > 0 {
-			m = slice[0]
-		} else {
-			return result
-		}
-	}
-	for k, v := range m {
-		switch val := v.(type) {
-		case string:
-			result[k] = val
-		case float64:
-			result[k] = fmt.Sprintf("%v", val)
-		case bool:
-			result[k] = fmt.Sprintf("%v", val)
-		default:
-			b, err := json.Marshal(v)
-			if err == nil {
-				result[k] = string(b)
-			}
-		}
-	}
-	return result
 }

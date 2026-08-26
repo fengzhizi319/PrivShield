@@ -1,37 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from './api/client';
 import {
+  ProtocolType,
   TopologyResponse,
-  PipelineStatusResponse,
   Task,
   LeasedTasksResponse,
   TestSuiteCase,
-  Datasource,
   AuditLogItem,
-  DispatchRequest,
-  ProtocolType,
   DataApiDef,
   DataApiSessionResponse,
 } from './types/api';
 import { Sidebar, TabType } from './components/Sidebar';
 import { TopologyPanel } from './components/TopologyPanel';
-import { PipelineVisualizer } from './components/PipelineVisualizer';
 import { TaskLifecyclePanel } from './components/TaskLifecyclePanel';
 import { TestRunnerPanel } from './components/TestRunnerPanel';
-import { DatasourceExplorer } from './components/DatasourceExplorer';
 import { AuditVerifierPanel } from './components/AuditVerifierPanel';
 import { MetricsPanel } from './components/MetricsPanel';
 import { DataApiPanel } from './components/DataApiPanel';
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabType>('topology');
-  const [activeProtocol, setActiveProtocol] = useState<ProtocolType>('rest');
+  const [activeProtocol, setActiveProtocol] = useState<'rest' | 'grpc'>('rest');
   const [topology, setTopology] = useState<TopologyResponse | null>(null);
-  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatusResponse | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [leases, setLeases] = useState<LeasedTasksResponse | null>(null);
   const [suites, setSuites] = useState<TestSuiteCase[]>([]);
-  const [datasources, setDatasources] = useState<Datasource[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [metricsRaw, setMetricsRaw] = useState<string>('');
   const [parsedMetrics, setParsedMetrics] = useState<{ stage_durations: Record<string, number>; qps: number; percentiles: Record<string, number>; total_requests: number; source: string } | null>(null);
@@ -121,17 +114,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // 4. Fetch Datasources
-  const fetchDatasources = useCallback(async () => {
-    try {
-      const res = await api.getDatasources();
-      setDatasources(res.datasources || []);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // 5. Fetch Audit Logs
+  // 4. Fetch Audit Logs
   const fetchAuditLogs = useCallback(async () => {
     setLoadingAudit(true);
     try {
@@ -144,7 +127,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // 6. Fetch Metrics
+  // 5. Fetch Metrics
   const fetchMetrics = useCallback(async () => {
     setLoadingMetrics(true);
     try {
@@ -163,7 +146,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // 7. Fetch Data API Definitions
+  // 6. Fetch Data API Definitions
   const fetchDataApiDefs = useCallback(async () => {
     try {
       const res = await api.getDataApiDefinitions();
@@ -179,7 +162,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // 8. Invoke Data API Session
+  // 7. Invoke Data API Session
   const invokeDataApi = useCallback(async (apiId: number, limit: number): Promise<DataApiSessionResponse> => {
     setLoadingDataApi(true);
     try {
@@ -205,7 +188,6 @@ export const App: React.FC = () => {
     fetchTopology();
     fetchTasksAndLeases();
     fetchSuites();
-    fetchDatasources();
     fetchAuditLogs();
     fetchMetrics();
     fetchDataApiDefs();
@@ -215,7 +197,7 @@ export const App: React.FC = () => {
       fetchTopology();
     }, 15000);
     return () => clearInterval(timer);
-  }, [fetchTopology, fetchTasksAndLeases, fetchSuites, fetchDatasources, fetchAuditLogs, fetchMetrics, fetchDataApiDefs]);
+  }, [fetchTopology, fetchTasksAndLeases, fetchSuites, fetchAuditLogs, fetchMetrics, fetchDataApiDefs]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
@@ -235,22 +217,6 @@ export const App: React.FC = () => {
             onProtocolChange={setActiveProtocol}
             onRefresh={fetchTopology}
             loading={loadingTopo}
-          />
-        )}
-
-        {currentTab === 'pipeline' && (
-          <PipelineVisualizer
-            status={pipelineStatus}
-            onDispatch={async (req: DispatchRequest) => {
-              const res = await api.dispatchTask(req);
-              fetchTasksAndLeases();
-              return res;
-            }}
-            onClassifyDispatch={async (src: string, p: Record<string, any>) => {
-              const res = await api.classifyDispatch({ source: src, payload: p, priority: 50 });
-              fetchTasksAndLeases();
-              return res;
-            }}
           />
         )}
 
@@ -277,18 +243,6 @@ export const App: React.FC = () => {
               }
             }}
             loading={loadingRunner}
-          />
-        )}
-
-        {currentTab === 'datasources' && (
-          <DatasourceExplorer
-            datasources={datasources}
-            onFetchSlice={(id, limit) => api.getDatasourceSlice(id, limit)}
-            onTriggerPipeline={async (dsID, limit) => {
-              const res = await api.triggerDatasource({ datasource_id: dsID, limit, operation: 'mask' });
-              fetchTasksAndLeases();
-              return res;
-            }}
           />
         )}
 

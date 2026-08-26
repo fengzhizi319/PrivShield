@@ -12,6 +12,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 
 	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
@@ -80,4 +81,75 @@ func (c *Client) MaskRecord(ctx context.Context, record map[string]string) (map[
 		"context": "",
 	}
 	return c.Post(ctx, "/v1/privacy/mask_record", payload)
+}
+
+// MedicalProcessResult holds the response from engine's /v1/medical/process endpoint.
+// MedicalProcessResult 医疗流水线一次调用的返回结构：分类分级报告 + 脱敏合规数据 + 汇总统计。
+type MedicalProcessResult struct {
+	ClassificationReport []map[string]any `json:"classification_report"`
+	SanitizedData        []map[string]any `json:"sanitized_data"`
+	Summary              map[string]any   `json:"summary"`
+}
+
+// ProcessMedical sends records to the engine's medical pipeline endpoint.
+// ProcessMedical 将批量记录发送至 engine /v1/medical/process 专业医疗流水线，
+// 一次 HTTP 调用同时完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 +
+// ICD-10 编码脱敏 + 诊断残留清除，替代原先 classify + desensitize 两步分离调用。
+//
+// Agent 端点规范：
+// - URL: POST /v1/medical/process
+// - 请求结构: {"records": [{...}, {...}, ...]}
+// - 响应结构: {"classification_report": [...], "sanitized_data": [...], "summary": {...}}
+func (c *Client) ProcessMedical(ctx context.Context, records []map[string]any) (*MedicalProcessResult, error) {
+	payload := map[string]any{
+		"records": records,
+	}
+	result, err := c.Post(ctx, "/v1/medical/process", payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// 将通用 map 解析为结构化结果
+	mpr := &MedicalProcessResult{}
+	if report, ok := result["classification_report"]; ok {
+		if items, ok := report.([]map[string]any); ok {
+			mpr.ClassificationReport = items
+		}
+	}
+	if sanitized, ok := result["sanitized_data"]; ok {
+		if items, ok := sanitized.([]map[string]any); ok {
+			mpr.SanitizedData = items
+		}
+	}
+	if summary, ok := result["summary"]; ok {
+		if m, ok := summary.(map[string]any); ok {
+			mpr.Summary = m
+		}
+	}
+	return mpr, nil
+}
+
+// ToRecords normalizes a generic payload into []map[string]any for ProcessMedical.
+// ToRecords 将通用载荷（单条 map、切片、JSON 字符串）统一转换为记录切片。
+func ToRecords(payload any) []map[string]any {
+	switch v := payload.(type) {
+	case []map[string]any:
+		return v
+	case map[string]any:
+		return []map[string]any{v}
+	case []any:
+		records := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				records = append(records, m)
+			}
+		}
+		return records
+	case string:
+		var parsed any
+		if err := json.Unmarshal([]byte(v), &parsed); err == nil {
+			return ToRecords(parsed)
+		}
+	}
+	return nil
 }

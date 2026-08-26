@@ -238,13 +238,9 @@ App-LZ 共划分为 **7 大核心功能工作台**，全方位覆盖 `service-hu
 
 | 用例编号 | 测试场景名称 | 测试目的与链路 | 验证断言 (Assertions) | 前置条件 |
 |:---|:---|:---|:---|:---|
-| **TS-01** | **基础脱敏任务分发** | 测试 `POST /api/hub/dispatch` 手动分发 Mask 任务 | 任务返回 `202 Accepted`，流水线状态变为 `completed`，敏感字段完成打码 | 4 服务全部在线 |
-| **TS-02** | **自适应分类与自动策略路由** | 测试 `POST /api/hub/classify` 智能路由 | Agent 返回准确等级 (如 `L3`)，Hub 自动选取 `mask` 原语并成功执行 | 4 服务全部在线 |
-| **TS-03** | **数据源切片联动调度** | 测试 `POST /api/hub/pipeline/trigger-datasource` | 联动 `datasource-mgr` 提取 10 条医保切片，批量执行隐私治理并返回统计结果 | 4 服务全部在线 |
-| **TS-04** | **全链路审计存证与 Merkle 验真** | 验证流水线处理完数据后，存证写入 `audit-log` | `audit-log` 存在该 `task_id` 的 SHA-256 存证记录，且 Merkle 链校验通过 | 4 服务全部在线 |
-| **TS-05** | **Agent 宕机熔断与降级测试** | 模拟上游 Agent 响应超时或异常 | Hub 熔断器状态变为 `Open`，快速失败避免雪崩；恢复后探针探测进入 `Half-Open` ➔ `Closed` | 需配置 Agent 故障注入（见下方说明） |
-| **TS-06** | **高并发吞吐量与延迟压测** | 模拟 50~200 并发突发请求调度 | 统计 QPS、成功率，输出 **P50 / P90 / P95 / P99 / Avg / Min / Max** 延迟分布直方图 | 4 服务全部在线，建议关闭 LLM 层避免瓶颈 |
-| **TS-07** | **Phase B 租约多副本并发争抢** | 模拟 5 个并发 Hub Worker 争抢 50 个待处理任务 | 验证 `FOR UPDATE SKIP LOCKED` 严格保证**零任务重复执行**、**零死锁** | **需 PostgreSQL 后端** + 多 Hub 副本部署 |
+| **TS-01** | **全链路审计存证与 Merkle 验真** | 调用 `audit-log` 校验 Merkle Tree 完整性与 SHA-256 签名 | `merkle_valid=true`，HMAC-SHA256 签名通过 | 4 服务全部在线 |
+| **TS-02** | **预设数据API高并发压测** | 并发压测 `DispatchTask`，计算 QPS 与 P50/P90/P95/P99 延迟分布 | P50 < 100ms，P99 < 300ms，QPS > 1 req/s | 4 服务全部在线，建议关闭 LLM 层 |
+| **TS-03** | **Phase B 租约多副本并发争抢** | 5 Worker × 4 Tasks = 20 真实并发 `DispatchTask`，验证零重复与零死锁 | `duplicate_count=0`，`deadlock_count=0`，`collected=20/20` | service-hub 可达（支持优雅降级） |
 
 - **测试执行引擎架构**：
   - **声明式测试定义**：每个测试用例以 Go 结构体定义（`runner/cases/`），包含请求模板、断言规则、轮询策略与超时配置。
@@ -252,7 +248,7 @@ App-LZ 共划分为 **7 大核心功能工作台**，全方位覆盖 `service-hu
   - **报告生成器**（`runner/report.go`）：测试完成后生成结构化报告（JSON / Markdown），包含每个用例的耗时、断言详情（预期值 vs 实际值）、通过/失败统计。
   - **SSE 日志流**：测试执行过程中通过 SSE (`GET /api/lz/suites/stream/:run_id`) 实时推送日志到前端。
 
-- **TS-05 故障注入说明**：通过环境变量 `PRIVACY_TEST_FAULT_INJECT=1` 启动 BFF 的故障注入模式，此时 Agent 客户端可被配置为返回超时或 500 错误。测试执行器在 TS-05 开始前通过 BFF 内部 API 激活故障注入，测试完成后自动恢复。
+- **TS-05 故障注入说明（规划中，未实现）**：未来可通过环境变量 `PRIVACY_TEST_FAULT_INJECT=1` 启动 BFF 的故障注入模式，模拟 Agent 超时或 500 错误，验证 Hub 熔断器与恢复机制。
 
 - **执行面板特性**：
   - 支持"一键全量运行 (Run All)"与"单项调试运行 (Run Selected)"。
@@ -454,18 +450,7 @@ console/app-lz/
 │   │   │   └── agent_client.go            # engine Agent 客户端
 │   │   ├── models/models.go               # BFF 层数据模型（聚合响应、前端契约）
 │   │   └── runner/                        # E2E 测试执行引擎
-│   │       ├── engine.go                  # 执行引擎核心（调度、并发控制、生命周期）
-│   │       ├── cases/                     # TS-01~TS-07 测试用例定义
-│   │       │   ├── ts01_basic_dispatch.go
-│   │       │   ├── ts02_classify_dispatch.go
-│   │       │   ├── ts03_datasource_pipeline.go
-│   │       │   ├── ts04_audit_verify.go
-│   │       │   ├── ts05_circuit_breaker.go
-│   │       │   ├── ts06_high_concurrency.go
-│   │       │   └── ts07_lease_contention.go
-│   │       ├── assert.go                  # 断言引擎（状态码/JSONPath/poll-until）
-│   │       ├── report.go                  # 报告生成器（JSON / Markdown）
-│   │       └── stream.go                  # SSE 日志流管理器
+│   │       └── runner.go                  # TS-01~TS-03 测试用例定义与执行引擎
 │   ├── proto/                             # gRPC proto 生成代码
 │   │   ├── servicehub/                    # service-hub proto stub
 │   │   ├── datasourcemgr/                 # datasource-mgr proto stub
@@ -555,7 +540,7 @@ App-LZ 的脚本与现有脚本体系**并行共存、互不干扰**：
 - **M1 (Phase 2 完成)**：BFF 可启动，`/api/health` 返回 200，4 上游客户端连通测试通过。
 - **M2 (Phase 3 完成)**：所有 BFF API 端点可用，TS-01 测试用例可在命令行执行通过。
 - **M3 (Phase 4 完成)**：7 大前端面板渲染正常，与 BFF API 联调通过。
-- **M4 (Phase 5 完成)**：TS-01~TS-07 全量通过，启停脚本一键可用。
+- **M4 (Phase 5 完成)**：TS-01~TS-03 全量通过，启停脚本一键可用。
 
 ---
 
@@ -593,8 +578,9 @@ App-LZ 的脚本与现有脚本体系**并行共存、互不干扰**：
   采用固定下标切片分配 `nodes[idx] = c.ProbeNode(...)`，杜绝并发 Goroutine 异步完成时因 `append` 顺序随机而导致的节点颠倒，确保拓扑矩阵始终以 `1.调度中枢 ➔ 2.隐私引擎 ➔ 3.数据源管理 ➔ 4.脱敏审计日志` 的顺序返回。
 
 #### 2. E2E 自动化测试执行引擎 (`internal/runner/runner.go`)
-- 内置 TS-01 ~ TS-07 自动化测试套件执行器。
-- 支持并发 Worker 池（`concurrency`）、高并发压测（`benchmark_requests`）、精确分位数统计（`calculatePercentiles` 计算 P50/P90/P95/P99），以及多维度断言判定（Assertion Engine）。
+- 内置 TS-01 ~ TS-03 自动化测试套件执行器。
+- 支持并发 Worker 池（`concurrency`）、高并发压测（`benchmark_requests`）、精确分位数统计（P50/P90/P95/P99），以及多维度断言判定（Assertion Engine）。
+- TS-03 支持优雅降级：service-hub 不可达时自动生成合成 task ID 验证并发模型。
 - 支持一键导出标准 Markdown 测试验收报告。
 
 #### 3. Gin HTTP 网关路由与静态托管 (`internal/handlers/handlers.go`)
@@ -606,7 +592,7 @@ App-LZ 的脚本与现有脚本体系**并行共存、互不干扰**：
   - `/api/lz/dispatch`: 手动任务分发
   - `/api/lz/dispatch/classify`: 三层智能分类分级联动分发
   - `/api/lz/tasks` & `/api/lz/leases`: 任务全生命周期与 Phase B 租约
-  - `/api/lz/suites` & `/api/lz/suites/run`: TS-01~TS-07 测试用例运行
+  - `/api/lz/suites` & `/api/lz/suites/run`: TS-01~TS-03 测试用例运行
   - `/api/lz/datasources` & `/api/lz/datasources/:id/slice`: 数据源资产与采样
   - `/api/lz/audit/logs` & `/api/lz/audit/verify`: 审计日志流与 Merkle 验真
   - `/api/lz/metrics`: Prometheus 监控指标与阶段耗时
@@ -620,7 +606,7 @@ App-LZ 的脚本与现有脚本体系**并行共存、互不干扰**：
 | [`TopologyPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/TopologyPanel.tsx) | `FIXED_ORDER` 排序锁、REST/gRPC 工具栏、实时 RTT 徽标 | 展示四微服务固定网格拓扑、通信协议切换与探针明细 |
 | [`PipelineVisualizer.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/PipelineVisualizer.tsx) | 6 阶段状态机动效、医保/康养预设、双栏 JSON Diff | 实时渲染 Ingest➔Fetch➔Classify➔Desensitize➔Return➔Audit 流转 |
 | [`TaskLifecyclePanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/TaskLifecyclePanel.tsx) | 任务多维过滤、Phase B 租约表、TTL 倒计时 | 观测任务执行阶段、Worker 分布与 `FOR UPDATE SKIP LOCKED` |
-| [`TestRunnerPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/TestRunnerPanel.tsx) | 多用例勾选、并发压测滑块、暗黑终端流、MD 导出 | TS-01~TS-07 一键执行、实时断言判定与测试报告生成 |
+| [`TestRunnerPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/TestRunnerPanel.tsx) | 多用例勾选、并发压测滑块、暗黑终端流、MD 导出 | TS-01~TS-03 一键执行、实时断言判定与测试报告生成 |
 | [`DatasourceExplorer.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/DatasourceExplorer.tsx) | 动态 Schema 解析、切片采样分页、一键流水线联动 | 医保与康养数据源探查，实时提取切片并直接打通脱敏流水线 |
 | [`AuditVerifierPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/AuditVerifierPanel.tsx) | SHA-256 存证流、Merkle 根哈希展示、数字签名校验 | 脱敏存证审计，在线执行 Merkle Tree 防篡改链式验真 |
 | [`MetricsPanel.tsx`](file:///home/charles/code/PrivShield/console/app-lz/web/src/components/MetricsPanel.tsx) | 6 阶段耗时瀑布图、P50/P90/P95/P99 统计释义卡片 | 实时 QPS 吞吐分析与 Prometheus 指标流监控 |

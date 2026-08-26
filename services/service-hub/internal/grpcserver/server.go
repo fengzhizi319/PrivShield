@@ -410,6 +410,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 					payloadJSON = string(b)
 					task.PayloadJSON = payloadJSON
 					if err := s.persistTask(task, "payload fetched"); err != nil {
+						cancel()
 						return
 					}
 				}
@@ -417,37 +418,29 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 			}
 		}
 
-		// Stage 3: classify → 调用 Agent 进行分类
-		if stage == "classify" && operation == "classify" {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_, err := s.agent.Classify(ctx, payloadJSON)
-			cancel()
-			if err != nil {
-				task.Status = "failed"
-				task.Error = fmt.Sprintf("classify failed at stage %s: %v", stage, err)
-				now := time.Now()
-				task.CompletedAt = &now
-				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.persistTask(task, "classification failure")
-				return
+		// Stage 3: classify → 分类+脱敏一体化，一次调用 engine 医疗流水线
+		// 替代原先 classify + desensitize 两步分离调用，减少一次网络往返。
+		if stage == "classify" && isPrivacyOp(operation) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			records := agent.ToRecords(payloadJSON)
+			if len(records) > 0 {
+				_, err := s.agent.ProcessMedical(ctx, records)
+				cancel()
+				if err != nil {
+					task.Status = "failed"
+					task.Error = fmt.Sprintf("medical pipeline failed at stage %s: %v", stage, err)
+					now := time.Now()
+					task.CompletedAt = &now
+					task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+					_ = s.persistTask(task, "medical pipeline failure")
+					return
+				}
+			} else {
+				cancel()
 			}
 		}
 
-		// Stage 4: desensitize → 调用 Agent 执行脱敏
-		if stage == "desensitize" && (operation == "mask" || operation == "k_anon" || operation == "dp") {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_, err := s.agent.Mask(ctx, payloadJSON)
-			cancel()
-			if err != nil {
-				task.Status = "failed"
-				task.Error = fmt.Sprintf("desensitize failed at stage %s: %v", stage, err)
-				now := time.Now()
-				task.CompletedAt = &now
-				task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
-				_ = s.persistTask(task, "desensitization failure")
-				return
-			}
-		}
+		// Stage 4: desensitize → 已由 ③ 医疗流水线合并完成，快速通过
 	}
 
 	task.Status = "completed"
@@ -496,6 +489,16 @@ func levelToPriority(level string) int {
 	default:
 		return 40
 	}
+}
+
+// isPrivacyOp returns true if the operation requires engine privacy processing.
+// isPrivacyOp 判断算子是否需要调用 engine 医疗流水线（分类+脱敏一体化）。
+func isPrivacyOp(op string) bool {
+	switch op {
+	case "classify", "mask", "k_anon", "dp":
+		return true
+	}
+	return false
 }
 
 // ─────────────────────────────────────────────────────────────

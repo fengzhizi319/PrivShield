@@ -86,41 +86,69 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
         </div>
       </div>
 
-      {/* Session Flow Diagram */}
+      {/* Session Flow Diagram — 6-Stage Pipeline */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
         <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
-          {t('dataApi.flowTitle')}
+          {t('dataApi.flowTitle')} — 6 阶段流水线
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
           {[
-            { key: 'user', label: '前端申请', icon: '🖥️', color: 'cyan' },
-            { key: 'hub', label: 'service-hub\n调度编排', icon: '🔀', color: 'indigo' },
-            { key: 'ds', label: 'datasource-mgr\n原始数据拉取', icon: '📊', color: 'amber' },
-            { key: 'engine', label: 'engine Agent\n分类 & 脱敏', icon: '🔒', color: 'emerald' },
-            { key: 'audit', label: 'audit-log\n审计存证', icon: '📝', color: 'purple' },
-          ].map((step, idx) => (
-            <div key={step.key} className="flex items-center gap-2">
-              <div className={`flex-1 p-3 rounded-xl border text-center ${
-                session?.stages.some(s => s.status === 'error')
-                  ? 'bg-slate-950/60 border-slate-800/60'
-                  : 'bg-slate-950 border-slate-800'
-              }`}>
-                <div className="text-lg mb-1">{step.icon}</div>
-                <div className="text-[10px] font-semibold text-slate-300 whitespace-pre-line leading-tight">
-                  {step.label}
+            { key: 'ingest', label: '1. Ingest\n任务接收校验', icon: '📥', color: 'indigo' },
+            { key: 'fetch', label: '2. Fetch\n数据源切片抽取', icon: '📊', color: 'amber' },
+            { key: 'classify', label: '3. Classify\n三层漏斗评级', icon: '🔍', color: 'rose' },
+            { key: 'desensitize', label: '4. Desensitize\n隐私脱敏治理', icon: '🔒', color: 'emerald' },
+            { key: 'return', label: '5. Return\n合规结果装配', icon: '📦', color: 'cyan' },
+            { key: 'audit', label: '6. Audit\n不可篡改存证', icon: '📝', color: 'purple' },
+          ].map((step, idx) => {
+            const stageData = session?.stages.find(s => s.name === step.key);
+            const isActive = stageData?.status === 'success';
+            const isError = stageData?.status === 'error';
+            return (
+              <div key={step.key} className="flex items-center gap-1.5">
+                <div className={`flex-1 p-3 rounded-xl border text-center transition-all ${
+                  isError
+                    ? 'bg-rose-950/20 border-rose-500/40'
+                    : isActive
+                    ? 'bg-emerald-950/20 border-emerald-500/30'
+                    : 'bg-slate-950 border-slate-800'
+                }`}>
+                  <div className="text-lg mb-1">{step.icon}</div>
+                  <div className="text-[10px] font-semibold text-slate-300 whitespace-pre-line leading-tight">
+                    {step.label}
+                  </div>
+                  {stageData && (
+                    <div className={`text-[9px] font-mono mt-1 ${
+                      isError ? 'text-rose-400' : isActive ? 'text-emerald-400' : 'text-slate-500'
+                    }`}>
+                      {stageData.duration_ms}ms
+                    </div>
+                  )}
                 </div>
+                {idx < 5 && (
+                  <span className="text-slate-600 text-xs font-bold shrink-0">›</span>
+                )}
               </div>
-              {idx < 4 && (
-                <span className="text-slate-600 text-xs font-bold shrink-0">→</span>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
-      {/* 4 API Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {apis.map((api) => {
+      {/* API Cards — active APIs + merged reserved slot */}
+      {(() => {
+        const activeApis = apis.filter(a => a.status === 'active');
+        const reservedApis = apis.filter(a => a.status === 'reserved');
+        const displayApis = [...activeApis];
+        if (reservedApis.length > 0) {
+          displayApis.push({
+            ...reservedApis[0],
+            name: `预留数据 API #${reservedApis.length} 合井位`,
+            description: `${reservedApis.length} 个预留接口已合并，待后续业务接入新的数据源。实现层已统一为单一调用入口。`,
+            id: reservedApis[0].id,
+          });
+        }
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {displayApis.map((api) => {
           const isActive = api.status === 'active';
           const isSelected = selectedApiId === api.id;
           const isInvoking = invoking && isSelected;
@@ -196,8 +224,10 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
               )}
             </div>
           );
-        })}
-      </div>
+            })}
+          </div>
+        );
+      })()}
 
       {/* Session Result */}
       {session && (

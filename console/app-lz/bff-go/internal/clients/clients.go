@@ -193,74 +193,6 @@ func (c *ClientPool) GetTopology(ctx context.Context, protocol string) models.To
 	}
 }
 
-// GetPipelineStatus queries service-hub for active pipeline stages.
-func (c *ClientPool) GetPipelineStatus(ctx context.Context) (models.PipelineStatusResponse, error) {
-	url := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/pipeline"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return models.PipelineStatusResponse{}, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return models.PipelineStatusResponse{
-			Stages: defaultStages(),
-		}, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Stages []struct {
-			Name        string `json:"name"`
-			Status      string `json:"status"`
-			ActiveCount int    `json:"active_count"`
-		} `json:"stages"`
-		AgentOK bool `json:"agent_ok"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return models.PipelineStatusResponse{
-			Stages: defaultStages(),
-		}, err
-	}
-
-	stages := defaultStages()
-	for i, s := range stages {
-		for _, rs := range result.Stages {
-			if rs.Name == s.Name {
-				stages[i].Status = rs.Status
-				stages[i].ActiveCount = rs.ActiveCount
-			}
-		}
-	}
-
-	// G-3: Dynamic QPS calculation from Prometheus metrics instead of hardcoded value
-	qps := 0.0
-	if parsed, err := c.GetParsedMetrics(ctx); err == nil {
-		qps = parsed.QPS
-	}
-
-	return models.PipelineStatusResponse{
-		Stages:              stages,
-		AgentConnected:      result.AgentOK,
-		DatasourceConnected: true,
-		AuditConnected:      true,
-		QPS:                 qps,
-		RecentTasksCount:    len(stages),
-	}, nil
-}
-
-func defaultStages() []models.PipelineStage {
-	return []models.PipelineStage{
-		{Name: "ingest", Title: "任务接收与解析", Status: "idle", ActiveCount: 0, AvgDurationMs: 1.2},
-		{Name: "fetch", Title: "数据源切片拉取", Status: "idle", ActiveCount: 0, AvgDurationMs: 4.8},
-		{Name: "classify", Title: "动态分类分级评估", Status: "idle", ActiveCount: 0, AvgDurationMs: 12.5},
-		{Name: "desensitize", Title: "自适应隐私脱敏治理", Status: "idle", ActiveCount: 0, AvgDurationMs: 6.2},
-		{Name: "return", Title: "结果封装与回传", Status: "idle", ActiveCount: 0, AvgDurationMs: 0.9},
-		{Name: "audit", Title: "不可篡改审计存证", Status: "idle", ActiveCount: 0, AvgDurationMs: 3.1},
-	}
-}
-
 // DispatchTask dispatches a task to service-hub.
 func (c *ClientPool) DispatchTask(ctx context.Context, req models.DispatchRequest) (models.DispatchResponse, error) {
 	url := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/dispatch"
@@ -283,54 +215,6 @@ func (c *ClientPool) DispatchTask(ctx context.Context, req models.DispatchReques
 		return models.DispatchResponse{Error: err.Error()}, err
 	}
 	return dispatchResp, nil
-}
-
-// ClassifyDispatch dispatches an auto-classify task to service-hub.
-func (c *ClientPool) ClassifyDispatch(ctx context.Context, req models.ClassifyDispatchRequest) (models.ClassifyDispatchResponse, error) {
-	url := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/classify"
-	data, _ := json.Marshal(req)
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
-		return models.ClassifyDispatchResponse{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return models.ClassifyDispatchResponse{Error: err.Error()}, err
-	}
-	defer resp.Body.Close()
-
-	var classifyResp models.ClassifyDispatchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&classifyResp); err != nil {
-		return models.ClassifyDispatchResponse{Error: err.Error()}, err
-	}
-	return classifyResp, nil
-}
-
-// TriggerDatasourcePipeline triggers datasource slice extraction and processing in service-hub.
-func (c *ClientPool) TriggerDatasourcePipeline(ctx context.Context, req models.TriggerDatasourceRequest) (models.TriggerDatasourceResponse, error) {
-	url := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/pipeline/trigger-datasource"
-	data, _ := json.Marshal(req)
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
-		return models.TriggerDatasourceResponse{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return models.TriggerDatasourceResponse{Error: err.Error()}, err
-	}
-	defer resp.Body.Close()
-
-	var triggerResp models.TriggerDatasourceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&triggerResp); err != nil {
-		return models.TriggerDatasourceResponse{Error: err.Error()}, err
-	}
-	return triggerResp, nil
 }
 
 // ListTasks queries tasks from service-hub with filtering.
@@ -390,18 +274,6 @@ func (c *ClientPool) GetDatasources(ctx context.Context) ([]models.Datasource, e
 	}
 
 	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		// Fallback to hub proxy
-		urlHub := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/datasources"
-		reqHub, errHub := http.NewRequestWithContext(ctx, http.MethodGet, urlHub, nil)
-		if errHub == nil {
-			if respHub, errHub := c.httpClient.Do(reqHub); errHub == nil {
-				resp = respHub
-				err = nil
-			}
-		}
-	}
-
 	if err != nil {
 		// Return static fallback metadata
 		return defaultDatasources(), nil

@@ -438,9 +438,9 @@ SSE 端点通过 URL 查询参数认证：`GET /api/lz/suites/stream/:run_id?tok
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `suite_ids` | string[] | 否 | 全部 TS-01~TS-07 | 指定执行的用例 ID 列表 |
-| `concurrency` | int | 否 | 10 | TS-06 压测并发数 |
-| `benchmark_requests` | int | 否 | 100 | TS-06 压测总请求数 |
+| `suite_ids` | string[] | 否 | 全部 TS-01~TS-03 | 指定执行的用例 ID 列表 |
+| `concurrency` | int | 否 | 10 | TS-02 压测并发数 |
+| `benchmark_requests` | int | 否 | 100 | TS-02 压测总请求数 |
 
 - **响应示例**：
 ```json

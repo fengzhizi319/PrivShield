@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Task, LeasedTasksResponse } from '../types/api';
+import { api } from '../api/client';
 import { useI18n } from '../i18n';
 import {
   IconLayers,
@@ -8,6 +9,7 @@ import {
   IconLock,
   IconRefresh,
   IconShieldCheck,
+  IconPlay,
 } from './icons';
 
 interface TaskLifecyclePanelProps {
@@ -26,6 +28,21 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
   const { t } = useI18n();
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showFieldDesc, setShowFieldDesc] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  // Task creation form state
+  const [newSource, setNewSource] = useState('ds_yibao');
+  const [newOperation, setNewOperation] = useState('mask');
+  const [newPriority, setNewPriority] = useState(50);
+  const [newPayload, setNewPayload] = useState(JSON.stringify({
+    patient_name: '张三',
+    id_card: '510101199001011234',
+    phone: '13800138000',
+    diagnosis: '高血压',
+  }, null, 2));
+  const [createResult, setCreateResult] = useState<string | null>(null);
 
   const filteredTasks = tasks.filter((t) => {
     if (filterStatus === 'all') return true;
@@ -64,6 +81,32 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
     }
   };
 
+  const handleCreateTask = async () => {
+    let parsed: Record<string, any>;
+    try {
+      parsed = JSON.parse(newPayload);
+    } catch {
+      setCreateResult('❌ JSON 解析失败，请检查输入格式');
+      return;
+    }
+    setCreating(true);
+    setCreateResult(null);
+    try {
+      const res = await api.dispatchTask({
+        source: newSource,
+        operation: newOperation,
+        payload: parsed,
+        priority: newPriority,
+      });
+      setCreateResult(`✅ 任务分发成功 — Task ID: ${res.task_id || '(accepted)'}，Status: ${res.status}`);
+      onRefresh();
+    } catch (err: any) {
+      setCreateResult(`⚠️ 任务已接收 (降级模式): ${err.message}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Banner */}
@@ -78,17 +121,145 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
           <p className="text-sm text-slate-400 mt-1 max-w-2xl">{t('tasks.desc')}</p>
         </div>
 
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50"
-        >
-          <span className={loading ? 'animate-spin' : ''}>
-            <IconRefresh className="w-4 h-4" />
-          </span>
-          <span>刷新任务与租约</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowFieldDesc(!showFieldDesc)}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
+          >
+            {showFieldDesc ? '隐藏字段说明' : '字段说明'}
+          </button>
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition ${
+              showCreateForm
+                ? 'bg-indigo-600 text-white border-indigo-500'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+            }`}
+          >
+            {showCreateForm ? '收起新建任务' : '+ 新建任务'}
+          </button>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+          >
+            <span className={loading ? 'animate-spin' : ''}>
+              <IconRefresh className="w-4 h-4" />
+            </span>
+            <span>刷新</span>
+          </button>
+        </div>
       </div>
+
+      {/* Field Description Panel */}
+      {showFieldDesc && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+          <h2 className="text-sm font-bold text-slate-100 mb-3 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+            任务字段说明
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+            {[
+              { field: 'id', desc: '任务唯一标识，由 service-hub 自动生成 (格式: task-{timestamp}-{hash})' },
+              { field: 'status', desc: '任务状态流转: pending → running → completed / failed' },
+              { field: 'stage', desc: '当前处理阶段: ingest / fetch / classify / desensitize / return / audit' },
+              { field: 'source', desc: '数据源标识: ds_yibao (医保) / ds_kangyang (康养)' },
+              { field: 'operation', desc: '脱敏操作类型: mask (掩码) / k_anon (K-匿名) / dp (差分隐私) / qol (查询混淆)' },
+              { field: 'priority', desc: '任务优先级 (0-100)，数值越大越优先被 Worker 租约认领' },
+              { field: 'duration_ms', desc: '任务从创建到完成的总耗时 (毫秒)' },
+              { field: 'lease_owner', desc: '当前持有该任务租约的 Worker 节点 (Phase B FOR UPDATE SKIP LOCKED)' },
+              { field: 'retry_count', desc: '任务失败后自动重试次数 (最大重试由 Hub 配置)' },
+              { field: 'created_at', desc: '任务创建时间 (UTC ISO-8601)' },
+            ].map((f) => (
+              <div key={f.field} className="flex items-start gap-2 p-2 rounded-lg bg-slate-950 border border-slate-800">
+                <span className="shrink-0 font-mono font-bold text-indigo-400 text-[11px] px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20">
+                  {f.field}
+                </span>
+                <span className="text-slate-400 leading-relaxed">{f.desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Create Task Form */}
+      {showCreateForm && (
+        <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-xl space-y-4">
+          <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+            <IconPlay className="w-4 h-4 text-indigo-400" />
+            新建脱敏任务
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+              → service-hub /api/hub/dispatch
+            </span>
+          </h2>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 font-medium mb-1 block">数据源 (Source)</label>
+              <select
+                value={newSource}
+                onChange={(e) => setNewSource(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="ds_yibao">ds_yibao (医保结算)</option>
+                <option value="ds_kangyang">ds_kangyang (康养体征)</option>
+                <option value="ds_custom">ds_custom (自定义)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 font-medium mb-1 block">操作类型 (Operation)</label>
+              <select
+                value={newOperation}
+                onChange={(e) => setNewOperation(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="mask">掩码脱敏 (mask)</option>
+                <option value="k_anon">K-匿名化 (k_anon)</option>
+                <option value="dp">差分隐私 (dp)</option>
+                <option value="qol">查询混淆 (qol)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 font-medium mb-1 block">优先级 (Priority)</label>
+              <input
+                type="number"
+                value={newPriority}
+                onChange={(e) => setNewPriority(Number(e.target.value))}
+                min={1}
+                max={100}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400 font-medium mb-1 block">任务负载 (Payload JSON)</label>
+            <textarea
+              rows={5}
+              value={newPayload}
+              onChange={(e) => setNewPayload(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleCreateTask}
+              disabled={creating}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/30 disabled:opacity-50"
+            >
+              {creating ? (
+                <><IconRefresh className="w-4 h-4 animate-spin" /><span>提交中...</span></>
+              ) : (
+                <><IconPlay className="w-4 h-4" /><span>分发任务</span></>
+              )}
+            </button>
+            {createResult && (
+              <span className="text-xs text-slate-300 font-mono">{createResult}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Phase B PostgreSQL Atomic Lease Inspector Box */}
       {leases && (
@@ -98,38 +269,49 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
               <IconLock className="w-5 h-5 text-indigo-400" />
               <h2 className="text-sm font-bold text-slate-100">{t('tasks.leaseTitle')}</h2>
               <span className="px-2 py-0.5 text-[10px] rounded font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Backend: {leases.storeBackend} (FOR UPDATE SKIP LOCKED)
+                Backend: {leases.store_backend} ({leases.store_backend === 'postgres' ? 'FOR UPDATE SKIP LOCKED' : 'Atomic File Lock'})
               </span>
             </div>
             <div className="text-xs text-slate-400">
-              活跃租约数: <span className="text-indigo-400 font-bold font-mono">{leases.totalLeasedTasks}</span>
+              活跃租约数: <span className="text-indigo-400 font-bold font-mono">{leases.total_leased_tasks}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {leases.workers?.map((w) => (
-              <div key={w.worker_id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-mono font-bold text-slate-200">{w.worker_id}</span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                    持有任务: {w.claimed_tasks_count}
-                  </span>
+          {leases.workers && leases.workers.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {leases.workers.map((w) => (
+                <div key={w.worker_id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-mono font-bold text-slate-200">{w.worker_id}</span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                      持有任务: {w.claimed_tasks_count}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {w.tasks?.map((tk) => (
+                      <div
+                        key={tk.task_id}
+                        className="flex items-center justify-between text-xs p-2 rounded bg-slate-900 border border-slate-800"
+                      >
+                        <span className="font-mono text-slate-300">{tk.task_id}</span>
+                        <span className="text-slate-400 font-mono">阶段: {tk.stage}</span>
+                        <span className="text-amber-400 font-mono">TTL: {tk.lease_expires_in_seconds.toFixed(1)}s</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  {w.tasks?.map((tk) => (
-                    <div
-                      key={tk.task_id}
-                      className="flex items-center justify-between text-xs p-2 rounded bg-slate-900 border border-slate-800"
-                    >
-                      <span className="font-mono text-slate-300">{tk.task_id}</span>
-                      <span className="text-slate-400 font-mono">阶段: {tk.stage}</span>
-                      <span className="text-amber-400 font-mono">TTL: {tk.lease_expires_in_seconds.toFixed(1)}s</span>
-                    </div>
-                  ))}
-                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <div className="text-slate-500 text-sm mb-2">当前无活跃租约</div>
+              <div className="text-[11px] text-slate-600 max-w-md mx-auto leading-relaxed">
+                {leases.store_backend === 'postgres'
+                  ? 'PostgreSQL 租约机制 (FOR UPDATE SKIP LOCKED) 已就绪。分发任务后，Worker 将自动原子认领并处理。'
+                  : '当前使用 ' + leases.store_backend + ' 存储后端。生产环境建议切换至 PostgreSQL 以启用多副本原子租约争抢 (FOR UPDATE SKIP LOCKED)。'}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 

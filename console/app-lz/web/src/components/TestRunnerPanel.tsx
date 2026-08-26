@@ -23,7 +23,7 @@ export const TestRunnerPanel: React.FC<TestRunnerPanelProps> = ({
 }) => {
   const { t } = useI18n();
 
-  const [selectedIds, setSelectedIds] = useState<string[]>(['TS-01', 'TS-02', 'TS-03', 'TS-04', 'TS-05', 'TS-06', 'TS-07']);
+  const [selectedIds, setSelectedIds] = useState<string[]>(['TS-01', 'TS-02', 'TS-03']);
   const [concurrency, setConcurrency] = useState(20);
   const [benchmarkRequests, setBenchmarkRequests] = useState(50);
   const [lastRun, setLastRun] = useState<RunTestSuiteResponse | null>(null);
@@ -42,7 +42,7 @@ export const TestRunnerPanel: React.FC<TestRunnerPanelProps> = ({
     if (selectedIds.length === suites.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(suites.map((s) => s.ID || s.id));
+      setSelectedIds(suites.map((s) => s.id));
     }
   };
 
@@ -82,7 +82,7 @@ export const TestRunnerPanel: React.FC<TestRunnerPanelProps> = ({
 
     let md = `# PrivShield Service Hub E2E 测试套件执行报告\n\n`;
     md += `- **运行 ID**: \`${lastRun.run_id}\`\n`;
-    md += `- **执行时间**: \`${lastRun.startedAt || lastRun.started_at}\`\n`;
+    md += `- **执行时间**: \`${lastRun.started_at}\`\n`;
     md += `- **用例总数**: ${lastRun.total_cases} (通过: ${lastRun.passed_cases}, 失败: ${lastRun.failed_cases})\n\n`;
     md += `## 测试用例结果\n\n`;
 
@@ -196,14 +196,14 @@ export const TestRunnerPanel: React.FC<TestRunnerPanelProps> = ({
         {/* Left: Suite Cards */}
         <div className="lg:col-span-7 space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-            <span>用例清单 (TS-01 ~ TS-07)</span>
+            <span>用例清单 (TS-01 / TS-02 / TS-03)</span>
             <button onClick={handleSelectAll} className="text-indigo-400 hover:underline">
               {selectedIds.length === suites.length ? '取消全选' : '全选'}
             </button>
           </div>
 
           {displaySuites.map((suite) => {
-            const suiteID = suite.ID || suite.id;
+            const suiteID = suite.id;
             const isSelected = selectedIds.includes(suiteID);
             const isPassed = suite.status === 'passed';
             const isFailed = suite.status === 'failed';
@@ -300,7 +300,7 @@ export const TestRunnerPanel: React.FC<TestRunnerPanelProps> = ({
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-2">
               <div className="font-bold text-slate-200">{selectedSuiteId} 断言明细:</div>
               {displaySuites
-                .find((s) => (s.ID || s.id) === selectedSuiteId)
+                .find((s) => s.id === selectedSuiteId)
                 ?.assertions?.map((a, idx) => (
                   <div key={idx} className="flex items-start justify-between gap-2 p-1.5 rounded bg-slate-900">
                     <span className="text-slate-300 font-mono">{a.name}</span>

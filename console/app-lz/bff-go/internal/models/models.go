@@ -28,25 +28,6 @@ type TopologyResponse struct {
 	Services       []ServiceNode `json:"services"`
 }
 
-// PipelineStage represents a single stage in the 6-stage service-hub pipeline.
-type PipelineStage struct {
-	Name          string  `json:"name"` // "ingest" | "fetch" | "classify" | "desensitize" | "return" | "audit"
-	Title         string  `json:"title"`
-	Status        string  `json:"status"` // "idle" | "processing" | "error"
-	ActiveCount   int     `json:"active_count"`
-	AvgDurationMs float64 `json:"avg_duration_ms"`
-}
-
-// PipelineStatusResponse represents the overall status of the pipeline and upstreams.
-type PipelineStatusResponse struct {
-	Stages              []PipelineStage `json:"stages"`
-	AgentConnected      bool            `json:"agent_connected"`
-	DatasourceConnected bool            `json:"datasource_connected"`
-	AuditConnected      bool            `json:"audit_connected"`
-	QPS                 float64         `json:"qps"`
-	RecentTasksCount    int             `json:"recent_tasks_count"`
-}
-
 // DispatchRequest is the payload for manual task dispatch.
 type DispatchRequest struct {
 	Source    string         `json:"source" binding:"required"`
@@ -61,41 +42,6 @@ type DispatchResponse struct {
 	Status string `json:"status"`
 	Via    string `json:"via,omitempty"`
 	Error  string `json:"error,omitempty"`
-}
-
-// ClassifyDispatchRequest is the payload for auto-classification dispatch.
-type ClassifyDispatchRequest struct {
-	Source   string         `json:"source" binding:"required"`
-	Payload  map[string]any `json:"payload" binding:"required"`
-	Priority int            `json:"priority"`
-}
-
-// ClassifyDispatchResponse is returned after auto-classification dispatch.
-type ClassifyDispatchResponse struct {
-	TaskID         string         `json:"task_id"`
-	Level          string         `json:"level"`
-	AutoOperation  string         `json:"auto_operation"`
-	ClassifyResult map[string]any `json:"classify_result"`
-	Via            string         `json:"via,omitempty"`
-	Error          string         `json:"error,omitempty"`
-}
-
-// TriggerDatasourceRequest is the payload for triggering datasource slice processing.
-type TriggerDatasourceRequest struct {
-	DatasourceID string `json:"datasource_id" binding:"required"`
-	Limit        int    `json:"limit"`
-	Operation    string `json:"operation"`
-}
-
-// TriggerDatasourceResponse is returned after triggering datasource slice pipeline.
-type TriggerDatasourceResponse struct {
-	TaskID       string `json:"task_id"`
-	DatasourceID string `json:"datasource_id"`
-	RecordsCount int    `json:"records_count"`
-	Operation    string `json:"operation"`
-	Status       string `json:"status"`
-	Via          string `json:"via,omitempty"`
-	Error        string `json:"error,omitempty"`
 }
 
 // Task represents a service-hub task with full lifecycle and lease metadata.
