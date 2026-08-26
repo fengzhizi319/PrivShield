@@ -77,11 +77,13 @@ services/*/bin/
 
 
 # Node modules & build artifacts (console/web & console/app-lz)
+.vite/
 console/web/node_modules/
 console/web/dist/
 console/app-lz/web/node_modules
 console/app-lz/web/node_modules/
 console/app-lz/web/dist/
+console/app-lz/web/.vite/
 console/app-lz/bff-go/bin/
 
 # Secrets: 环境密钥文件一律不入库（模板 .env*.example 除外）

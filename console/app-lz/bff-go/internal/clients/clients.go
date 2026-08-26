@@ -62,15 +62,20 @@ func (c *ClientPool) ProbeNode(ctx context.Context, id, name, httpURL, grpcAddr,
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 	if err == nil {
 		resp, errREST := c.httpClient.Do(req)
-		if errREST != nil {
+		if errREST != nil || (resp != nil && resp.StatusCode >= 400) {
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
 			// Fallback to /health without /api prefix
 			healthURL2 := strings.TrimRight(httpURL, "/") + "/health"
 			req2, err2 := http.NewRequestWithContext(ctx, http.MethodGet, healthURL2, nil)
 			if err2 == nil {
 				resp2, err2Resp := c.httpClient.Do(req2)
-				if err2Resp == nil {
+				if err2Resp == nil && resp2.StatusCode < 400 {
 					resp = resp2
 					errREST = nil
+				} else if resp2 != nil {
+					_ = resp2.Body.Close()
 				}
 			}
 		}
@@ -140,13 +145,13 @@ func (c *ClientPool) GetTopology(ctx context.Context, protocol string) models.To
 		grpcAddr string
 	}{
 		// 1. 调度中枢 (第一个)
-		{"service-hub", "调度中枢 (Service Hub)", c.cfg.HubURL, "127.0.0.1:50052"},
+		{"service-hub", "调度中枢 (Service Hub)", c.cfg.HubURL, c.cfg.HubGRPC},
 		// 2. 隐私与分类引擎 (第二个)
-		{"engine", "隐私与分类引擎 (PrivShield Agent)", c.cfg.AgentURL, "127.0.0.1:50051"},
+		{"engine", "隐私与分类引擎 (PrivShield Agent)", c.cfg.AgentURL, c.cfg.AgentGRPC},
 		// 3. 数据源管理 (第三个)
-		{"datasource-mgr", "数据源管理 (Datasource Mgr)", c.cfg.DatasourceURL, "127.0.0.1:50053"},
+		{"datasource-mgr", "数据源管理 (Datasource Mgr)", c.cfg.DatasourceURL, c.cfg.DatasourceGRPC},
 		// 4. 脱敏审计日志 (第四个)
-		{"audit-log", "脱敏审计日志 (Audit Log)", c.cfg.AuditURL, "127.0.0.1:50054"},
+		{"audit-log", "脱敏审计日志 (Audit Log)", c.cfg.AuditURL, c.cfg.AuditGRPC},
 	}
 
 	nodes := make([]models.ServiceNode, len(targets))

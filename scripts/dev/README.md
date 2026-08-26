@@ -208,7 +208,9 @@
   ```bash
   # 构建并启动 App-LZ 全栈容器测试集群
   bash ./scripts/dev/docker-start-app-lz.sh --force
-
+  ```
+  
+  ```bash
   # 跳过构建快速启动
   bash ./scripts/dev/docker-start-app-lz.sh --no-build
   ```

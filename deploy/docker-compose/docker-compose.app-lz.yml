@@ -41,9 +41,10 @@ services:
       PRIVACY_PROFILE: "/etc/PrivShield/privacy-profile.yaml"
       PRIVACY_BUDGET_DB: "/data/budget/budget.db"
     volumes:
+      - ./privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro
+      - ../../docs/standard:/app/docs/standard:ro
       - budget-db:/data/budget
-      - audit-logs:/data/audit
-      - ../../config/profiles/privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro
+      - audit-logs:/var/log/privacy
     networks:
       - frontend
       - backend
@@ -166,6 +167,14 @@ services:
     environment:
       APP_LZ_HOST: "0.0.0.0"
       APP_LZ_PORT: "8085"
+      APP_LZ_HUB_URL: "http://service-hub:8082"
+      APP_LZ_HUB_GRPC: "service-hub:50052"
+      APP_LZ_DATASOURCE_URL: "http://datasource-mgr:8083"
+      APP_LZ_DATASOURCE_GRPC: "datasource-mgr:50053"
+      APP_LZ_AUDIT_URL: "http://audit-log:8084"
+      APP_LZ_AUDIT_GRPC: "audit-log:50054"
+      APP_LZ_AGENT_URL: "http://PrivShield:8079"
+      APP_LZ_AGENT_GRPC: "PrivShield:50051"
       HUB_URL: "http://service-hub:8082"
       HUB_GRPC: "service-hub:50052"
       DATASOURCE_URL: "http://datasource-mgr:8083"
