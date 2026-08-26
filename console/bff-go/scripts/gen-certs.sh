@@ -19,7 +19,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="${1:-$SCRIPT_DIR/../certs}"
+TARGET_DIR="${1:-$SCRIPT_DIR/../certs}"
+mkdir -p "$TARGET_DIR"
+OUT_DIR="$(cd "$TARGET_DIR" && pwd)"
 DAYS="${CERT_DAYS:-3650}"
 SERVER_CN="${SERVER_CN:-localhost}"
 
@@ -28,7 +30,6 @@ if ! command -v openssl >/dev/null 2>&1; then
     exit 1
 fi
 
-mkdir -p "$OUT_DIR"
 cd "$OUT_DIR"
 
 echo ">> 输出目录: $OUT_DIR"
@@ -55,7 +56,15 @@ subjectAltName=@alt_names
 
 [alt_names]
 DNS.1=localhost
+DNS.2=PrivShield
+DNS.3=privshield
+DNS.4=console-backend-go
+DNS.5=app-lz-bff
+DNS.6=service-hub
+DNS.7=datasource-mgr
+DNS.8=audit-log
 IP.1=127.0.0.1
+IP.2=0.0.0.0
 EOF
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
     -out server.crt -days "$DAYS" -sha256 -extfile server.ext
@@ -77,9 +86,9 @@ openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
 echo ">> [4/4] 提取客户端公钥（用于公钥固定）..."
 openssl rsa -in client.key -pubout -out client.pub
 
-# ── 清理中间文件并收紧私钥权限 ────────────────────────────────────────
+# ── 清理中间文件并设置容器读取权限 ────────────────────────────────────
 rm -f server.csr client.csr server.ext client.ext ca.srl
-chmod 600 ./*.key
+chmod 644 ./*.key ./*.crt ./*.pub
 
 echo ""
 echo ">> 完成，生成文件："

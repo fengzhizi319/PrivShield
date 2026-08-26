@@ -371,6 +371,7 @@ Address these before any hardened production deployment.
 | Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
 | Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
 | Run Docker Console Trio (Agent+BFF+Web) | `bash ./scripts/dev/docker-start-bff-agent.sh` |
+| Run Docker Console Trio (mTLS) | `bash ./scripts/dev/docker-start-bff-agent.sh --mtls` |
 | Run Docker Full Stack (Agent+Go BFF+Web+3 Services) | `bash ./scripts/dev/docker-start-all.sh [--with-llm] [--with-postgres] [--with-monitoring]` |
 | Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
 | Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |

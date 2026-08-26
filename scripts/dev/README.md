@@ -165,28 +165,39 @@
 ## 3. Docker 容器化联调脚本
 
 ### `docker-start-bff-agent.sh` / `docker-start-bff-agent.ps1`
-- **作用说明**: 【推荐 Docker 开发】通过 Docker Compose 启动控制台三件套核心容器：
-  - `PrivShield` 隐私计算 Agent（REST `:8079`、gRPC `:50051`）
-  - `privacy-console-backend-go` Go BFF 代理网关（`:8081`）
-  - `privacy-console-web` Nginx 前端 Web 控制台（`:5173`）
-  脚本自动预编译宿主机前端产物与 Linux 静态 Go 二进制，跳过容器内慢速下载与编译，实现秒级热启动。
+- **作用说明**: 【推荐 Docker 开发】通过 Docker Compose 启动控制台三件套核心容器（`PrivShield` 隐私 Agent + `privacy-console-backend-go` Go BFF 网关 + `privacy-console-web` Nginx 前端）。脚本自动预编译宿主机产物加速构建，并提供**标准非 mTLS**与 **mTLS 双向认证**两个版本，**REST 与 gRPC 双协议均获得完整支持**。
+- **模式与协议说明**:
+  1. **标准非 mTLS 版本（默认模式 / Standard Non-mTLS）**：
+     - **REST 支持**：Agent REST 端点 `http://localhost:8079`（明文 HTTP）；Go BFF 代理接口 `http://localhost:8081`（明文 HTTP）；React Web `http://localhost:5173`。
+     - **gRPC 支持**：Agent 监听明文 gRPC `localhost:50051`；Go BFF 通过明文 gRPC (`PrivShield:50051`) 代理通信。
+  2. **mTLS 双向安全认证版本 (`--mtls` / Mutual TLS Mode)**：
+     - **REST 支持**：Agent REST 端点升级为 HTTPS `https://localhost:8079`（TLS 强加密）；Go BFF 通过 HTTPS 代理上游；React Web `http://localhost:5173`。
+     - **gRPC 支持**：Agent 开启 mTLS 双向证书鉴权（端口 `:50051`），严格校验客户端 CN 白名单（`privshield-client` / `privacy-console-go-client`）；Go BFF 自动挂载客户端证书私钥（`/certs/client.crt`）完成安全握手。
+     - 证书若缺失将自动调用 `console/bff-go/scripts/gen-certs.sh` 生成自签名根 CA 与带 Docker 容器名 SAN 的证书链。
 - **参数选项**:
+  - `--mtls`: 以 mTLS 双向认证模式启动（开启 REST HTTPS + gRPC mTLS）。
+  - `--no-mtls`: 以标准明文模式启动（默认）。
   - `--no-build`: 跳过构建直接运行已有本地镜像。
   - `--build`: 启动前重新构建本地镜像（默认行为）。
+  - `--force`: 端口被占用时自动释放占用进程。
 - **执行命令**:
   ```bash
-  # Linux / macOS (默认构建并启动控制台三件套容器)
-  bash ./scripts/dev/docker-start-bff-agent.sh
-  ```
+  # 1. 启动标准非 mTLS 版本 (默认，HTTP + 明文 gRPC)
+  bash ./scripts/dev/docker-start-bff-agent.sh --force
 
- ```bash
-  # 跳过构建直接启动
-  bash ./scripts/dev/docker-start-bff-agent.sh --no-build
+  # 2. 启动 mTLS 双向认证版本 (HTTPS + mTLS gRPC)
+  bash ./scripts/dev/docker-start-bff-agent.sh --mtls --force
+
+  # 3. 跳过构建快速拉起
+  bash ./scripts/dev/docker-start-bff-agent.sh --mtls --no-build
   ```
 
   ```powershell
-  # Windows (PowerShell)
+  # Windows (PowerShell 标准非 mTLS)
   .\scripts\dev\docker-start-bff-agent.ps1
+
+  # Windows (PowerShell mTLS 双向认证)
+  .\scripts\dev\docker-start-bff-agent.ps1 -MTLS
   ```
 
 ---
