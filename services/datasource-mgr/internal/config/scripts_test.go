@@ -274,13 +274,13 @@ func TestDevRunScript_StartupAndHealth(t *testing.T) {
 		}
 	}()
 
-	// 轮询探测 HTTP 健康端点
+	// 轮询探测 HTTP 健康端点（最多等待 20s，兼容高并发下 go build 耗时）
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", httpPort)
 	client := &http.Client{Timeout: 1 * time.Second}
 
 	var resp *http.Response
 	var lastErr error
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		time.Sleep(200 * time.Millisecond)
 		resp, lastErr = client.Get(healthURL)
 		if lastErr == nil && resp.StatusCode == http.StatusOK {
@@ -375,11 +375,11 @@ func TestProdRunScript_StartupAndMTLS(t *testing.T) {
 		},
 	}
 
-	// 2. 探测 HTTPS REST mTLS 端点
+	// 2. 探测 HTTPS REST mTLS 端点（最多等待 20s，兼容高并发下 go build 耗时）
 	healthURL := fmt.Sprintf("https://127.0.0.1:%d/api/health", httpPort)
 	var resp *http.Response
 	var lastErr error
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		time.Sleep(200 * time.Millisecond)
 		resp, lastErr = tlsClient.Get(healthURL)
 		if lastErr == nil && resp.StatusCode == http.StatusOK {
