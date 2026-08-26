@@ -1,0 +1,214 @@
+# =============================================================================
+# PrivShield - Docker Compose App-LZ 调度之眼全景测试集群编排
+# PrivShield - App-LZ Service Hub Testing Orchestration
+# =============================================================================
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  budget-db:
+    driver: local
+  audit-logs:
+    driver: local
+  service-hub-data:
+    driver: local
+  datasource-mgr-data:
+    driver: local
+  audit-log-data:
+    driver: local
+
+services:
+  # 1. PrivShield 引擎 Sidecar (:8079 / :50051)
+  PrivShield:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: core
+    image: privshield:1.8.0
+    pull_policy: build
+    container_name: PrivShield
+    ports:
+      - "8079:8079"
+      - "50051:50051"
+    environment:
+      PRIVACY_REST_HOST: "0.0.0.0"
+      PRIVACY_GRPC_HOST: "0.0.0.0"
+      PRIVACY_LOG_FORMAT: "json"
+      PRIVACY_PROFILE: "/etc/PrivShield/privacy-profile.yaml"
+      PRIVACY_BUDGET_DB: "/data/budget/budget.db"
+    volumes:
+      - budget-db:/data/budget
+      - audit-logs:/data/audit
+      - ../../config/profiles/privacy-profile.yaml:/etc/PrivShield/privacy-profile.yaml:ro
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8079/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: "no"
+
+  # 2. Service Hub 调度中枢 (:8082 / :50052)
+  service-hub:
+    build:
+      context: ../..
+      dockerfile: services/service-hub/Dockerfile
+    image: privshield-service-hub:1.8.0
+    pull_policy: build
+    container_name: privshield-service-hub
+    ports:
+      - "8082:8082"
+      - "50052:50052"
+    environment:
+      SERVICE_HUB_HOST: "0.0.0.0"
+      SERVICE_HUB_PORT: "8082"
+      SERVICE_HUB_GRPC_PORT: "50052"
+      SERVICE_HUB_AGENT_ADDR: "PrivShield:50051"
+      SERVICE_HUB_AGENT_HTTP: "http://PrivShield:8079"
+      SERVICE_HUB_DATASOURCE_ADDR: "datasource-mgr:50053"
+      SERVICE_HUB_DATASOURCE_HTTP: "http://datasource-mgr:8083"
+      SERVICE_HUB_AUDIT_ADDR: "audit-log:50054"
+      SERVICE_HUB_AUDIT_HTTP: "http://audit-log:8084"
+      SERVICE_HUB_STORE_BACKEND: "sqlite"
+      SERVICE_HUB_SQLITE_PATH: "/data/service-hub.db"
+    volumes:
+      - service-hub-data:/data
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: "no"
+
+  # 3. Datasource Mgr 数据源管理 (:8083 / :50053)
+  datasource-mgr:
+    build:
+      context: ../..
+      dockerfile: services/datasource-mgr/Dockerfile
+    image: privshield-datasource-mgr:1.8.0
+    pull_policy: build
+    container_name: privshield-datasource-mgr
+    ports:
+      - "8083:8083"
+      - "50053:50053"
+    environment:
+      DATASOURCE_MGR_HOST: "0.0.0.0"
+      DATASOURCE_MGR_PORT: "8083"
+      DATASOURCE_MGR_GRPC_PORT: "50053"
+      DATASOURCE_MGR_SQLITE_PATH: "/data/datasource-mgr.db"
+    volumes:
+      - datasource-mgr-data:/data
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: "no"
+
+  # 4. Audit Log 审计存证 (:8084 / :50054)
+  audit-log:
+    build:
+      context: ../..
+      dockerfile: services/audit-log/Dockerfile
+    image: privshield-audit-log:1.8.0
+    pull_policy: build
+    container_name: privshield-audit-log
+    ports:
+      - "8084:8084"
+      - "50054:50054"
+    environment:
+      AUDIT_LOG_HOST: "0.0.0.0"
+      AUDIT_LOG_PORT: "8084"
+      AUDIT_LOG_GRPC_PORT: "50054"
+      AUDIT_LOG_SQLITE_PATH: "/data/audit-log.db"
+    volumes:
+      - audit-log-data:/data
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8084/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: "no"
+
+  # 5. App-LZ Go BFF 聚合后端 (:8085 / :50055)
+  app-lz-bff:
+    build:
+      context: ../..
+      dockerfile: console/app-lz/bff-go/Dockerfile
+    image: privshield-app-lz-bff:1.8.0
+    pull_policy: build
+    container_name: privshield-app-lz-bff
+    ports:
+      - "8085:8085"
+      - "50055:50055"
+    environment:
+      APP_LZ_HOST: "0.0.0.0"
+      APP_LZ_PORT: "8085"
+      HUB_URL: "http://service-hub:8082"
+      HUB_GRPC: "service-hub:50052"
+      DATASOURCE_URL: "http://datasource-mgr:8083"
+      DATASOURCE_GRPC: "datasource-mgr:50053"
+      AUDIT_URL: "http://audit-log:8084"
+      AUDIT_GRPC: "audit-log:50054"
+      AGENT_URL: "http://PrivShield:8079"
+      AGENT_GRPC: "PrivShield:50051"
+    depends_on:
+      PrivShield:
+        condition: service_healthy
+      service-hub:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8085/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: "no"
+
+  # 6. App-LZ React 前端大屏 (:5174 Nginx 托管)
+  app-lz-web:
+    build:
+      context: ../../console/app-lz/web
+      dockerfile: Dockerfile
+    image: privshield-app-lz-web:1.8.0
+    pull_policy: build
+    container_name: privshield-app-lz-web
+    ports:
+      - "5174:5174"
+    depends_on:
+      app-lz-bff:
+        condition: service_healthy
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:5174/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: "no"

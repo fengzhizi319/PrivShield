@@ -1,0 +1,120 @@
+import React from 'react';
+import { useI18n } from '../i18n';
+import {
+  IconServer,
+  IconActivity,
+  IconDatabase,
+  IconShieldCheck,
+  IconPlay,
+  IconLayers,
+  IconSparkles,
+} from './icons';
+
+export type TabType = 'topology' | 'pipeline' | 'tasks' | 'runner' | 'datasources' | 'audit' | 'metrics';
+
+interface SidebarProps {
+  currentTab: TabType;
+  onSelectTab: (tab: TabType) => void;
+  clusterStatus: string;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({
+  currentTab,
+  onSelectTab,
+  clusterStatus,
+}) => {
+  const { lang, setLang, t } = useI18n();
+
+  const navItems: { id: TabType; labelKey: string; icon: React.ReactNode }[] = [
+    { id: 'topology', labelKey: 'nav.topology', icon: <IconServer className="w-5 h-5" /> },
+    { id: 'pipeline', labelKey: 'nav.pipeline', icon: <IconActivity className="w-5 h-5" /> },
+    { id: 'tasks', labelKey: 'nav.tasks', icon: <IconLayers className="w-5 h-5" /> },
+    { id: 'runner', labelKey: 'nav.runner', icon: <IconPlay className="w-5 h-5" /> },
+    { id: 'datasources', labelKey: 'nav.datasources', icon: <IconDatabase className="w-5 h-5" /> },
+    { id: 'audit', labelKey: 'nav.audit', icon: <IconShieldCheck className="w-5 h-5" /> },
+    { id: 'metrics', labelKey: 'nav.metrics', icon: <IconSparkles className="w-5 h-5" /> },
+  ];
+
+  return (
+    <aside className="w-72 bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0 h-screen sticky top-0">
+      <div>
+        {/* Branding Header */}
+        <div className="p-5 border-b border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-amber-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white font-bold text-lg">
+              LZ
+            </div>
+            <div>
+              <div className="font-bold text-slate-100 text-base tracking-wide flex items-center gap-1.5">
+                {t('app.title')}
+                <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-mono px-1.5 py-0.5 rounded border border-indigo-500/30">v1.8.0</span>
+              </div>
+              <p className="text-xs text-slate-400 truncate max-w-[170px] mt-0.5" title={t('app.subtitle')}>
+                {t('app.subtitle')}
+              </p>
+            </div>
+          </div>
+
+          {/* Cluster Status Quick Pill */}
+          <div className="mt-4 flex items-center justify-between px-3 py-2 rounded-lg bg-slate-900 border border-slate-800/80">
+            <span className="text-xs text-slate-400 font-medium">四服务状态</span>
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full animate-pulse ${clusterStatus === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              <span className={`text-xs font-semibold ${clusterStatus === 'healthy' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {clusterStatus === 'healthy' ? 'All Ready' : 'Degraded'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation Menu */}
+        <nav className="p-3 space-y-1">
+          {navItems.map((item) => {
+            const active = currentTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectTab(item.id)}
+                className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+                  active
+                    ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                }`}
+              >
+                <span className={active ? 'text-indigo-400' : 'text-slate-500'}>
+                  {item.icon}
+                </span>
+                <span>{t(item.labelKey)}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Footer & Language Toggle */}
+      <div className="p-4 border-t border-slate-800/80 space-y-3">
+        <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-800 text-xs">
+          <button
+            onClick={() => setLang('zh-CN')}
+            className={`flex-1 py-1 text-center rounded-md font-medium transition-colors ${
+              lang === 'zh-CN' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            中文
+          </button>
+          <button
+            onClick={() => setLang('en-US')}
+            className={`flex-1 py-1 text-center rounded-md font-medium transition-colors ${
+              lang === 'en-US' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            EN
+          </button>
+        </div>
+        <div className="text-[11px] text-slate-500 text-center font-mono">
+          PrivShield Service Hub Hub &copy; 2026
+        </div>
+      </div>
+    </aside>
+  );
+};

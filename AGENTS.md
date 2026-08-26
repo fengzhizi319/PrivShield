@@ -378,6 +378,11 @@ Address these before any hardened production deployment.
 | Stop Docker Services | `bash ./scripts/dev/docker-stop.sh` |
 | Run Prod Console (Agent + Go BFF + Static) | `bash ./scripts/prod/prod-bff-agent.sh` |
 | Run Prod Console (mTLS) | `bash ./scripts/prod/prod-bff-agent.sh --mtls` |
+| Run App-LZ Dev Console (Hub Testing) | `bash ./scripts/dev/dev-app-lz.sh` |
+| Run App-LZ Prod Console | `bash ./scripts/prod/prod-app-lz.sh` |
+| Run Docker App-LZ Stack | `bash ./scripts/dev/docker-start-app-lz.sh` |
+| Stop App-LZ Console | `bash ./scripts/dev/stop-app-lz.sh` |
+| Stop Docker App-LZ Stack | `bash ./scripts/dev/docker-stop-app-lz.sh` |
 | Stop Dev Console | `bash ./scripts/dev/dev-stop.sh` |
 | Stop Prod Console | `bash ./scripts/prod/prod-stop.sh` |
 | Run REST + gRPC | `python -m engine.server` |

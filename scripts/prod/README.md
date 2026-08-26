@@ -19,6 +19,7 @@
   - [`docker-stop-agent.sh` / `docker-stop-agent.ps1` (生产 Agent 容器停止)](#docker-stop-agentsh--docker-stop-agentps1)
 - [2. 本地单机生产模式 (Native Process Production)](#2-本地单机生产模式-native-process-production)
   - [`prod-bff-agent.sh` (Agent + Go BFF 生产模式，支持 mTLS)](#prod-bff-agentsh)
+  - [`prod-app-lz.sh` (调度之眼 App-LZ 生产静态托管模式)](#prod-app-lzsh)
   - [`prod-stop.sh` (停止生产单机服务)](#prod-stopsh)
 - [3. 数据备份与生产巡检 (Backup & Health Check)](#3-数据备份与生产巡检-backup--health-check)
   - [`prod_health_check.sh` (生产全链路健康状态巡检)](#prod_health_checksh)
@@ -149,6 +150,17 @@
 
   # 强制重新构建并以 mTLS 安全模式启动
   bash ./scripts/prod/prod-bff-agent.sh --rebuild --mtls
+  ```
+
+---
+
+### `prod-app-lz.sh`
+- **作用说明**: 【调度之眼 · 生产托管模式】自动执行 App-LZ Web 前端生产打包（`npx vite build`），并启动 Go BFF 服务（`:8085`）直接托管编译后的静态 SPA 页面与全量聚合 API，实现零 Node 运行时的轻量单机生产交付。
+- **参数选项**:
+  - `--force`: 端口被占用时自动释放占用进程。
+- **执行命令**:
+  ```bash
+  bash ./scripts/prod/prod-app-lz.sh --force
   ```
 
 ---

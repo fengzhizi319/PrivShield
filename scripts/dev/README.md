@@ -10,7 +10,9 @@
 
 - [1. 本地原生开发与控制台启动脚本](#1-本地原生开发与控制台启动脚本)
   - [`dev-bff-agent.sh` / `dev-bff-agent.ps1` (Agent + Go BFF + 前端热更新)](#dev-bff-agentsh--dev-bff-agentps1)
+  - [`dev-app-lz.sh` (调度之眼 App-LZ: Go BFF + 前端热更新)](#dev-app-lzsh)
   - [`dev-stop.sh` (停止本地开发服务)](#dev-stopsh)
+  - [`stop-app-lz.sh` (停止 App-LZ 控制台服务)](#stop-app-lzsh)
 - [2. 中台微服务群管理脚本](#2-中台微服务群管理脚本)
   - [`dev-start-new-modules.sh` (启动 3 大中台微服务)](#dev-start-new-modulessh)
   - [`dev-stop-new-modules.sh` (停止 3 大中台微服务)](#dev-stop-new-modulessh)
@@ -20,6 +22,8 @@
   - [`stop_all_services.sh` (停止全量服务群)](#stop_all_servicessh)
 - [3. Docker 容器化联调脚本](#3-docker-容器化联调脚本)
   - [`docker-start-bff-agent.sh` / `docker-start-bff-agent.ps1` (控制台三件套容器版)](#docker-start-bff-agentsh--docker-start-bff-agentps1)
+  - [`docker-start-app-lz.sh` (调度之眼 App-LZ 全栈容器版)](#docker-start-app-lzsh)
+  - [`docker-stop-app-lz.sh` (停止 App-LZ 容器集群)](#docker-stop-app-lzsh)
   - [`docker-start-all.sh` (启动全栈 Docker 容器)](#docker-start-allsh)
   - [`docker-start-agent.sh` / `docker-start-agent.ps1` (启动 Agent 容器)](#docker-start-agentsh--docker-start-agentps1)
   - [`docker-stop-agent.sh` / `docker-stop-agent.ps1` (停止 Agent 容器)](#docker-stop-agentsh--docker-stop-agentps1)
@@ -65,11 +69,35 @@
 
 ---
 
+### `dev-app-lz.sh`
+- **作用说明**: 【调度之眼 · 全景测试工作台】一键启动专用于 `services/service-hub` 深度测试与观测的 `console/app-lz` 前后端控制台：
+  - App-LZ Go BFF 聚合代理后端（REST `:8085`）
+  - App-LZ React Web 前端开发服务器（`:5174`，支持毫秒级 HMR 热更新）
+  脚本自动打通 4 大核心服务（`service-hub` `:8082`、`datasource-mgr` `:8083`、`audit-log` `:8084`、`engine` `:8079`），提供 6 阶段流水线动态流转大屏、TS-01~TS-07 一键自动化测试套件、数据源切片探查与 Phase B PostgreSQL 原子租约争抢看板。
+- **参数选项**:
+  - `--force`: 端口被占用时自动释放占用进程。
+- **执行命令**:
+  ```bash
+  # 启动 App-LZ 开发控制台 (BFF :8085 + Vite :5174)
+  bash ./scripts/dev/dev-app-lz.sh --force
+  ```
+
+---
+
 ### `dev-stop.sh`
 - **作用说明**: 一键优雅停止本地由 `dev-bff-agent.sh` 启动的所有进程（Agent、Go BFF、Vite 前端），释放相关端口资源。
 - **执行命令**:
   ```bash
   bash ./scripts/dev/dev-stop.sh
+  ```
+
+---
+
+### `stop-app-lz.sh`
+- **作用说明**: 一键优雅停止由 `dev-app-lz.sh` 或 `prod-app-lz.sh` 启动的 App-LZ 控制台进程（Go BFF `:8085` 与 Web 前端 `:5174`），清理 PID 文件并释放端口。
+- **执行命令**:
+  ```bash
+  bash ./scripts/dev/stop-app-lz.sh
   ```
 
 ---
@@ -159,6 +187,39 @@
   ```powershell
   # Windows (PowerShell)
   .\scripts\dev\docker-start-bff-agent.ps1
+  ```
+
+---
+
+### `docker-start-app-lz.sh`
+- **作用说明**: 【调度之眼 · Docker 全栈环境】通过 Docker Compose（`deploy/docker-compose/docker-compose.app-lz.yml`）一键拉起 App-LZ 调度之眼专属容器测试集群：
+  - `privshield-app-lz-web`: Nginx 托管的 React 前端控制台大屏（`:5174`）
+  - `privshield-app-lz-bff`: Go 语言聚合代理后端（`:8085`，gRPC `:50055`）
+  - `privshield-service-hub`: 数据流通调度中枢（`:8082`，gRPC `:50052`）
+  - `privshield-datasource-mgr`: 数据源资产探查（`:8083`，gRPC `:50053`）
+  - `privshield-audit-log`: 脱敏审计日志存证（`:8084`，gRPC `:50054`）
+  - `PrivShield`: 核心隐私与动态分类引擎（`:8079`，gRPC `:50051`）
+  支持预编译宿主机产物，秒级启动完整的 4 微服务网格与端到端测试链路。
+- **参数选项**:
+  - `--build`: 启动前重新构建镜像（默认）。
+  - `--no-build`: 使用本地已有镜像快速拉起。
+  - `--force`: 自动清理占用端口的非容器进程。
+- **执行命令**:
+  ```bash
+  # 构建并启动 App-LZ 全栈容器测试集群
+  bash ./scripts/dev/docker-start-app-lz.sh --force
+
+  # 跳过构建快速启动
+  bash ./scripts/dev/docker-start-app-lz.sh --no-build
+  ```
+
+---
+
+### `docker-stop-app-lz.sh`
+- **作用说明**: 一键停止并销毁由 `docker-start-app-lz.sh` 启动的 App-LZ 容器集群及 Docker 网络。
+- **执行命令**:
+  ```bash
+  bash ./scripts/dev/docker-stop-app-lz.sh
   ```
 
 ---

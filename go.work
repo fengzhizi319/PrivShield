@@ -6,4 +6,5 @@ use (
 	./services/datasource-mgr
 	./services/audit-log
 	./console/bff-go
+	./console/app-lz/bff-go
 )
