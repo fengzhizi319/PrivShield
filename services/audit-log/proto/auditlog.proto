@@ -10,7 +10,7 @@ service AuditLogService {
   // Health 健康检查（自检 + 上游 Agent 连通性）
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // RecordAudit 写入单条审计存证日志
+  // RecordAudit 写入单条审计存证日志（支持联动生成快照与防篡改哈希链）
   rpc RecordAudit(RecordAuditRequest) returns (RecordAuditResponse);
 
   // GetAuditLog 查询单条审计日志
@@ -27,6 +27,9 @@ service AuditLogService {
 
   // VerifyIntegrity 校验审计快照的 SHA-256 完整性与防篡改存证
   rpc VerifyIntegrity(VerifyIntegrityRequest) returns (VerifyIntegrityResponse);
+
+  // VerifyChain 校验全局或指定范围内的防篡改哈希链（Hash Chain）连续性
+  rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
 
   // GenerateReport 生成合规审计与治理效能报告
   rpc GenerateReport(GenerateReportRequest) returns (ComplianceReportResponse);
@@ -70,6 +73,8 @@ message AuditLogProto {
   string task_id = 16;        // 关联任务 ID
   string api_code = 17;       // API 编码
   string datasource_id = 18;  // canonical 数据源 ID
+  string prev_hash = 19;      // 前序存证哈希
+  string integrity_hash = 20; // 综合密码学完整性哈希
 }
 
 message RecordAuditRequest {
@@ -89,12 +94,17 @@ message RecordAuditRequest {
   string task_id = 14;
   string api_code = 15;
   string datasource_id = 16;
+  string input_sample = 17;   // 输入样本（可选，用于生成快照）
+  string output_sample = 18;  // 输出样本（可选，用于生成快照）
+  string prev_hash = 19;      // 指定的前序哈希（可选，留空时自动关联最新）
 }
 
 message RecordAuditResponse {
   string id = 1;
   bool   success = 2;
   string via = 3;
+  string snapshot_id = 4;     // 生成的快照 ID
+  string integrity_hash = 5;  // 存证哈希
 }
 
 message GetAuditLogRequest {
@@ -153,6 +163,7 @@ message SnapshotProto {
   string algorithm = 6;
   string parameters_json = 7;
   string integrity_hash = 8;
+  string prev_hash = 9;
 }
 
 message ListSnapshotsRequest {
@@ -180,6 +191,20 @@ message VerifyIntegrityResponse {
   string expected_hash = 4;
   string message = 5;
   string via = 6;
+}
+
+message VerifyChainRequest {
+  int32 limit = 1;
+}
+
+message VerifyChainResponse {
+  int32 total_verified = 1;
+  bool  valid = 2;
+  string broken_at_id = 3;
+  string expected_hash = 4;
+  string actual_hash = 5;
+  string message = 6;
+  string via = 7;
 }
 
 // ─────────────────────────────────────────────────────────────

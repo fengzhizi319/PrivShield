@@ -2679,3 +2679,198 @@ helm template privshield ./deploy/helm/PrivShield \
   -f ./deploy/helm/PrivShield/values-production.yaml \
   --set security.tls.existingSecret=privshield-tls
 ```
+
+---
+
+## 17. 硬件服务器选型配置与多并发参数调优速查 (Hardware Sizing & Performance Tuning Runbook)
+
+> 📖 **架构设计与容量测算模型**：详见详细设计文档 [docs/deployment/design.md §14](design.md#14-双物理节点服务器拆分部署与多并发场景资源评估-resource-sizing--concurrency-capacity-planning)。
+
+本章节面向基础设施运维工程师与交付团队，提供在**双服务器物理拆分部署架构**（服务器 A：`engine` + `services/service-hub`；服务器 B：`services/audit-log`）下，处理 `ds_yibao`（医保结算）与 `ds_kangyang`（康养体征）数据流转时的**硬件选型推荐表**与**多并发环境变量调优速查配置**。
+
+---
+
+### 17.1 硬件选型与配置推荐速查表
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 双服务器拆分部署架构硬件规格选型矩阵                                              │
+├───────────────┬───────────────────────────────┬───────────────────────────────┬────────────────────────────────┤
+│ 并发梯度 / 场景│ 服务器 A (计算与调度中枢)        │ 服务器 B (审计存证中心)        │ 网络与存储选型建议              │
+│               │ engine + service-hub + bff-go │ audit-log (+ DB 底座)         │                                │
+├───────────────┼───────────────────────────────┼───────────────────────────────┼────────────────────────────────┤
+│ **低并发**    │ • 4 核 vCPU                   │ • 2 核 vCPU                   │ • 网络: 100 Mbps 内网互通       │
+│ (10 ~ 50 QPS) │ • 8 GB 内存                   │ • 4 GB 内存                   │ • A 节点磁盘: 100 GB SSD       │
+│               │ • 虚拟机 / 轻量云主机          │ • 虚拟机 / 轻量云主机          │ • B 节点磁盘: 500 GB SSD (WAL) │
+├───────────────┼───────────────────────────────┼───────────────────────────────┼────────────────────────────────┤
+│ **中并发**    │ • 8 ~ 16 核 vCPU              │ • 4 ~ 8 核 vCPU               │ • 网络: 1 Gbps (千兆内网)       │
+│ (100~500 QPS) │ • 16 ~ 32 GB 内存             │ • 8 ~ 16 GB 内存              │ • A 节点磁盘: 200 GB NVMe SSD  │
+│               │ • 物理机 / 企业级计算型实例   │ • 物理机 / 通用型实例         │ • B 节点磁盘: 1~2 TB NVMe SSD  │
+├───────────────┼───────────────────────────────┼───────────────────────────────┼────────────────────────────────┤
+│ **高并发**    │ • 32 ~ 64 核物理 CPU          │ • 16 ~ 32 核 CPU              │ • 网络: 10 Gbps (万兆网卡)      │
+│ (1k ~ 3k QPS) │ • 64 ~ 128 GB 内存            │ • 32 ~ 64 GB 内存             │ • A 节点磁盘: 500 GB NVMe RAID │
+│               │ • 高性能物理服务器            │ • 高性能存储型物理机          │ • B 节点磁盘: 4~8 TB NVMe RAID │
+├───────────────┼───────────────────────────────┼───────────────────────────────┼────────────────────────────────┤
+│ **超高并发**  │ • 2~4 台多节点集群 / K8s HPA  │ • 独立高可用 PostgreSQL 集群  │ • 网络: 10 Gbps+ 双网卡绑定     │
+│ (5,000+ QPS)  │ • 单机 64核/128GB+ (共128核+) │ • 32核/64GB+ 读写分离实例     │ • B 节点挂载冷存储对象存储归档  │
+└───────────────┴───────────────────────────────┴───────────────────────────────┴────────────────────────────────┘
+```
+
+---
+
+### 17.2 多并发梯度软件参数配置模板与调优速查
+
+#### 梯度 1：低并发场景 (10 ~ 50 QPS) — 环境变量模板
+
+**服务器 A (`engine` + `service-hub`)**：
+```bash
+# Engine (Python FastAPI/gRPC)
+PRIVACY_REST_HOST=0.0.0.0
+PRIVACY_REST_PORT=8079
+PRIVACY_GRPC_HOST=0.0.0.0
+PRIVACY_GRPC_PORT=50051
+PRIVACY_GRPC_MAX_WORKERS=16
+PRIVACY_LIMIT_CONCURRENCY=1000
+PRIVACY_ENGINE_CACHE_MAX_SIZE=2048
+
+# Service Hub (Go 调度中枢)
+SERVICE_HUB_HOST=0.0.0.0
+SERVICE_HUB_PORT=8082
+SERVICE_HUB_GRPC_HOST=0.0.0.0
+SERVICE_HUB_GRPC_PORT=50052
+SERVICE_HUB_MAX_QUEUE=1000
+SERVICE_HUB_SCHEDULE_TIMEOUT=30
+SERVICE_HUB_DB_PATH=/var/lib/privshield/service-hub.db
+PRIVACY_AGENT_REST_HOST=127.0.0.1
+PRIVACY_REST_PORT=8079
+```
+
+**服务器 B (`audit-log`)**：
+```bash
+AUDIT_LOG_HOST=0.0.0.0
+AUDIT_LOG_PORT=8084
+AUDIT_LOG_GRPC_HOST=0.0.0.0
+AUDIT_LOG_GRPC_PORT=50054
+AUDIT_LOG_DB_PATH=/var/lib/privshield/audit-log.db
+AUDIT_LOG_RETENTION_DAYS=30
+AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-aes-key-here
+```
+
+---
+
+#### 梯度 2：中并发场景 (100 ~ 500 QPS) — 环境变量模板
+
+**服务器 A (`engine` + `service-hub`)**：
+```bash
+# Engine (Python FastAPI/gRPC)
+PRIVACY_REST_HOST=0.0.0.0
+PRIVACY_REST_PORT=8079
+PRIVACY_GRPC_HOST=0.0.0.0
+PRIVACY_GRPC_PORT=50051
+PRIVACY_GRPC_MAX_WORKERS=64
+PRIVACY_LIMIT_CONCURRENCY=5000
+PRIVACY_TIMEOUT_KEEP_ALIVE=30
+PRIVACY_ENGINE_CACHE_MAX_SIZE=4096
+
+# Service Hub (Go 调度中枢)
+SERVICE_HUB_HOST=0.0.0.0
+SERVICE_HUB_PORT=8082
+SERVICE_HUB_GRPC_HOST=0.0.0.0
+SERVICE_HUB_GRPC_PORT=50052
+SERVICE_HUB_MAX_QUEUE=5000
+SERVICE_HUB_SCHEDULE_TIMEOUT=30
+SERVICE_HUB_DB_PATH=/var/lib/privshield/service-hub.db
+SERVICE_HUB_RETENTION_DAYS=60
+PRIVACY_AGENT_REST_HOST=127.0.0.1
+PRIVACY_REST_PORT=8079
+```
+
+**服务器 B (`audit-log`)**：
+```bash
+AUDIT_LOG_HOST=0.0.0.0
+AUDIT_LOG_PORT=8084
+AUDIT_LOG_GRPC_HOST=0.0.0.0
+AUDIT_LOG_GRPC_PORT=50054
+AUDIT_LOG_DB_PATH=/var/lib/privshield/audit-log.db
+# 或启用轻量 PostgreSQL: AUDIT_LOG_PG_DSN=postgres://audit:pwd@127.0.0.1:5432/privshield_audit?sslmode=disable
+AUDIT_LOG_RETENTION_DAYS=60
+AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-aes-key-here
+```
+
+---
+
+#### 梯度 3：高并发生产场景 (1,000 ~ 3,000 QPS) — 环境变量模板
+
+**服务器 A (`engine` + `service-hub`)**：
+```bash
+# Engine (Python FastAPI/gRPC - 启用多进程/高并发 worker 线程池)
+PRIVACY_REST_HOST=0.0.0.0
+PRIVACY_REST_PORT=8079
+PRIVACY_GRPC_HOST=0.0.0.0
+PRIVACY_GRPC_PORT=50051
+PRIVACY_GRPC_MAX_WORKERS=128
+PRIVACY_LIMIT_CONCURRENCY=20000
+PRIVACY_LIMIT_MAX_REQUESTS=200000
+PRIVACY_TIMEOUT_KEEP_ALIVE=60
+PRIVACY_ENGINE_CACHE_MAX_SIZE=8192
+
+# Service Hub (Go 调度中枢 - 接入 PostgreSQL 租约引擎)
+SERVICE_HUB_HOST=0.0.0.0
+SERVICE_HUB_PORT=8082
+SERVICE_HUB_GRPC_HOST=0.0.0.0
+SERVICE_HUB_GRPC_PORT=50052
+SERVICE_HUB_MAX_QUEUE=20000
+SERVICE_HUB_SCHEDULE_TIMEOUT=30
+SERVICE_HUB_PG_DSN=postgres://hub:hubpwd@127.0.0.1:5432/privshield_hub?sslmode=disable
+SERVICE_HUB_PG_MAX_CONNS=50
+SERVICE_HUB_PG_MIN_CONNS=10
+SERVICE_HUB_LEASE_TTL=60
+SERVICE_HUB_RETENTION_DAYS=90
+PRIVACY_AGENT_REST_HOST=127.0.0.1
+PRIVACY_REST_PORT=8079
+```
+
+**服务器 B (`audit-log` + PostgreSQL Phase B 存储底座)**：
+```bash
+AUDIT_LOG_HOST=0.0.0.0
+AUDIT_LOG_PORT=8084
+AUDIT_LOG_GRPC_HOST=0.0.0.0
+AUDIT_LOG_GRPC_PORT=50054
+# 强制启用 PostgreSQL Phase B 多副本高效批量存证存储
+AUDIT_LOG_PG_DSN=postgres://audit:auditpwd@127.0.0.1:5432/privshield_audit?sslmode=disable&pool_max_conns=50&pool_min_conns=10
+AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-aes-key-here
+AUDIT_LOG_RETENTION_DAYS=90
+AUDIT_LOG_ARCHIVE_DIR=/data/audit_archive
+```
+
+---
+
+### 17.3 关键系统内核参数优化与运维监控告警阈值
+
+#### 1. Linux 操作系统内核优化 (`/etc/sysctl.conf`)
+```ini
+# 最大文件打开数与 Socket 队列
+fs.file-max = 2097152
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 65535
+
+# TCP 端口范围与快速回收
+net.ipv4.ip_local_port_range = 1024 65535
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
+
+# 内存过载分配与防 OOM
+vm.overcommit_memory = 1
+vm.swappiness = 10
+```
+
+#### 2. 容量预警与 Prometheus 告警阈值配置
+
+| 监控指标 | 告警阈值 | 处理与扩容预案 |
+|---|---|---|
+| **服务器 A CPU 利用率** | 持续 3 分钟 $> 80\%$ | 增加 Engine / Uvicorn worker 进程数或执行 HPA Pod 横向扩容 |
+| **服务器 A 内存使用率** | 持续 3 分钟 $> 85\%$ | 检查是否存在超大批次请求堆积，调小单批抓取步长（Batch Size） |
+| **Service Hub 排队任务数** | `service_hub_queued_tasks > 1,000` | 扩充 Worker 节点实例，加速任务租约领取与消费 |
+| **服务器 B 磁盘剩余空间** | 剩余空间 $< 20\%$ 或 $< 100 \text{ GB}$ | 触发 `/api/audit/report` 归档与历史冷存证转储（S3/MinIO），调小 `AUDIT_LOG_RETENTION_DAYS` |
+| **服务器 B 写入延迟** | P99 写入延迟 $> 50 \text{ ms}$ | 检查 PostgreSQL 是否发生锁等待或磁盘 IOPS 达到物理瓶颈，开启分区表维护 |
+

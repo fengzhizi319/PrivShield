@@ -22,8 +22,10 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
+	"github.com/fengzhizi319/PrivShield/pkg/crypto"
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
+	"github.com/fengzhizi319/PrivShield/pkg/validation"
 	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/config"
 	pb "github.com/fengzhizi319/PrivShield/services/audit-log/proto"
@@ -164,37 +166,78 @@ func (s *GRPCServer) RecordAudit(ctx context.Context, req *pb.RecordAuditRequest
 		outputHash = hex.EncodeToString(h[:])
 	}
 
+	// Resolve Hash Chain
+	prevHash := req.PrevHash
+	if prevHash == "" {
+		if latest, err := s.audit.GetLatestLog(); err == nil && latest != nil {
+			prevHash = latest.IntegrityHash
+		}
+	}
+
+	integrityHash := computeGRPCIntegrityHash(id, prevHash, now, req.Algorithm, inputHash, outputHash, user, secLevel, req.ParametersJson)
+
 	logEntry := &store.AuditLog{
-		ID:            id,
-		TaskID:        req.TaskId,
-		APICode:       normAPICode,
-		DatasourceID:  normID,
-		Timestamp:     now,
-		Operation:     req.Operation,
-		DataSource:    normID,
-		InputHash:     inputHash,
-		OutputHash:    outputHash,
-		Algorithm:     req.Algorithm,
-		Parameters:    params,
-		InputRows:     int(req.InputRows),
-		OutputRows:    int(req.OutputRows),
-		DurationMs:    req.DurationMs,
-		User:          user,
-		Status:        opStatus,
-		ErrorMessage:  req.ErrorMessage,
-		SecurityLevel: secLevel,
+		ID:             id,
+		TaskID:         req.TaskId,
+		APICode:        normAPICode,
+		DatasourceID:   normID,
+		Timestamp:      now,
+		Operation:      req.Operation,
+		DataSource:     normID,
+		InputHash:      inputHash,
+		OutputHash:     outputHash,
+		Algorithm:      req.Algorithm,
+		Parameters:     params,
+		ParametersJSON: req.ParametersJson,
+		InputRows:      int(req.InputRows),
+		OutputRows:     int(req.OutputRows),
+		DurationMs:     req.DurationMs,
+		User:           user,
+		Status:         opStatus,
+		ErrorMessage:   req.ErrorMessage,
+		SecurityLevel:  secLevel,
+		PrevHash:       prevHash,
+		IntegrityHash:  integrityHash,
 	}
 
-	if err := s.audit.SaveLog(logEntry); err != nil {
-		return nil, status.Errorf(codes.Internal, "save audit log: %v", err)
+	// Envelope encrypt sample fields if key is configured
+	encInput := req.InputSample
+	encOutput := req.OutputSample
+	if s.cfg.EncryptionKey != "" {
+		if enc, err := crypto.EncryptString(req.InputSample, s.cfg.EncryptionKey); err == nil {
+			encInput = enc
+		}
+		if enc, err := crypto.EncryptString(req.OutputSample, s.cfg.EncryptionKey); err == nil {
+			encOutput = enc
+		}
 	}
 
-	s.logger.Info("gRPC recorded audit log", "id", id, "op", req.Operation, "status", opStatus)
+	snapID := validation.GenerateID("snap")
+	snapshot := &store.SnapshotRecord{
+		ID:             snapID,
+		AuditLogID:     id,
+		Timestamp:      now,
+		InputSample:    encInput,
+		OutputSample:   encOutput,
+		Algorithm:      req.Algorithm,
+		Parameters:     params,
+		ParametersJSON: req.ParametersJson,
+		IntegrityHash:  integrityHash,
+		PrevHash:       prevHash,
+	}
+
+	if err := s.audit.SaveLogWithSnapshot(logEntry, snapshot); err != nil {
+		return nil, status.Errorf(codes.Internal, "save audit log and snapshot: %v", err)
+	}
+
+	s.logger.Info("gRPC recorded audit log with snapshot", "id", id, "op", req.Operation, "status", opStatus, "snap_id", snapID)
 
 	return &pb.RecordAuditResponse{
-		Id:      id,
-		Success: true,
-		Via:     moduleVia,
+		Id:            id,
+		Success:       true,
+		Via:           moduleVia,
+		SnapshotId:    snapID,
+		IntegrityHash: integrityHash,
 	}, nil
 }
 
@@ -314,7 +357,7 @@ func (s *GRPCServer) GetAuditStats(ctx context.Context, req *pb.GetAuditStatsReq
 	}, nil
 }
 
-// ListSnapshots returns desensitization snapshots.
+// ListSnapshots returns desensitization snapshots (decrypting samples if key configured).
 func (s *GRPCServer) ListSnapshots(ctx context.Context, req *pb.ListSnapshotsRequest) (*pb.ListSnapshotsResponse, error) {
 	limit := int(req.Limit)
 	if limit <= 0 {
@@ -332,16 +375,28 @@ func (s *GRPCServer) ListSnapshots(ctx context.Context, req *pb.ListSnapshotsReq
 
 	protos := make([]*pb.SnapshotProto, 0, len(snapshots))
 	for _, snap := range snapshots {
+		inSample := snap.InputSample
+		outSample := snap.OutputSample
+		if s.cfg.EncryptionKey != "" {
+			if dec, err := crypto.DecryptString(inSample, s.cfg.EncryptionKey); err == nil {
+				inSample = dec
+			}
+			if dec, err := crypto.DecryptString(outSample, s.cfg.EncryptionKey); err == nil {
+				outSample = dec
+			}
+		}
+
 		paramsJSON, _ := json.Marshal(snap.Parameters)
 		protos = append(protos, &pb.SnapshotProto{
 			Id:             snap.ID,
 			AuditLogId:     snap.AuditLogID,
 			Timestamp:      snap.Timestamp.Format(time.RFC3339),
-			InputSample:    snap.InputSample,
-			OutputSample:   snap.OutputSample,
+			InputSample:    inSample,
+			OutputSample:   outSample,
 			Algorithm:      snap.Algorithm,
 			ParametersJson: string(paramsJSON),
 			IntegrityHash:  snap.IntegrityHash,
+			PrevHash:       snap.PrevHash,
 		})
 	}
 
@@ -365,9 +420,17 @@ func (s *GRPCServer) VerifyIntegrity(ctx context.Context, req *pb.VerifyIntegrit
 		return nil, status.Errorf(codes.NotFound, "snapshot not found: %s", req.SnapshotId)
 	}
 
-	h := sha256.New()
-	h.Write([]byte(snap.InputSample + snap.OutputSample + snap.Algorithm))
-	computed := hex.EncodeToString(h.Sum(nil))
+	log, err := s.audit.GetLog(snap.AuditLogID)
+	if err != nil || log == nil {
+		return nil, status.Errorf(codes.NotFound, "associated audit log not found: %s", snap.AuditLogID)
+	}
+
+	prevHash := snap.PrevHash
+	if prevHash == "" {
+		prevHash = log.PrevHash
+	}
+
+	computed := computeGRPCIntegrityHash(snap.AuditLogID, prevHash, snap.Timestamp, snap.Algorithm, log.InputHash, log.OutputHash, log.User, log.SecurityLevel, snap.ParametersJSON)
 
 	expected := req.ExpectedHash
 	if expected == "" {
@@ -387,6 +450,29 @@ func (s *GRPCServer) VerifyIntegrity(ctx context.Context, req *pb.VerifyIntegrit
 		ExpectedHash: expected,
 		Message:      msg,
 		Via:          moduleVia,
+	}, nil
+}
+
+// VerifyChain verifies the unbroken cryptographic hash chain of recent records.
+func (s *GRPCServer) VerifyChain(ctx context.Context, req *pb.VerifyChainRequest) (*pb.VerifyChainResponse, error) {
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	res, err := s.audit.VerifyChain(limit)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "verify chain: %v", err)
+	}
+
+	return &pb.VerifyChainResponse{
+		TotalVerified: int32(res.TotalVerified),
+		Valid:         res.Valid,
+		BrokenAtId:    res.BrokenAtID,
+		ExpectedHash:  res.ExpectedHash,
+		ActualHash:    res.ActualHash,
+		Message:       res.Message,
+		Via:           moduleVia,
 	}, nil
 }
 
@@ -470,7 +556,17 @@ func recordToProto(rec *store.AuditLog) *pb.AuditLogProto {
 		TaskId:         rec.TaskID,
 		ApiCode:        rec.APICode,
 		DatasourceId:   rec.DatasourceID,
+		PrevHash:       rec.PrevHash,
+		IntegrityHash:  rec.IntegrityHash,
 	}
+}
+
+func computeGRPCIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
+	data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%v",
+		prevHash, logID, timestamp.Format(time.RFC3339Nano), algorithm,
+		inputHash, outputHash, user, securityLevel, paramsJSON)
+	hash := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("%x", hash)
 }
 
 // ─────────────────────────────────────────────────────────────

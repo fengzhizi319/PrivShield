@@ -206,6 +206,8 @@ type AuditLog struct {
 	Status         string    `json:"status"`
 	ErrorMessage   string    `json:"error,omitempty"`
 	SecurityLevel  string    `json:"security_level"`
+	PrevHash       string    `json:"prev_hash,omitempty"`       // 前序存证哈希（形成防篡改哈希链）
+	IntegrityHash  string    `json:"integrity_hash,omitempty"`  // 本条记录的综合密码学完整性哈希
 }
 
 // AuditFilter specifies filtering criteria for listing audit logs.
@@ -233,6 +235,7 @@ type SnapshotRecord struct {
 	ParametersJSON string    `json:"-"`
 	Parameters     any       `json:"parameters"`
 	IntegrityHash  string    `json:"integrity_hash"`
+	PrevHash       string    `json:"prev_hash,omitempty"` // 关联的前序哈希
 }
 
 // AuditStats holds aggregated audit statistics.
@@ -255,11 +258,23 @@ type AuditReport struct {
 	Recommendations []string       `json:"recommendations"`
 }
 
+// ChainVerificationResult represents the result of cryptographic hash chain verification.
+type ChainVerificationResult struct {
+	TotalVerified int    `json:"total_verified"`
+	Valid         bool   `json:"valid"`
+	BrokenAtID    string `json:"broken_at_id,omitempty"`
+	ExpectedHash  string `json:"expected_hash,omitempty"`
+	ActualHash    string `json:"actual_hash,omitempty"`
+	Message       string `json:"message"`
+}
+
 // AuditStore defines the persistence interface for audit logs and snapshots.
 type AuditStore interface {
 	SaveLog(log *AuditLog) error
 	SaveLogWithSnapshot(log *AuditLog, snapshot *SnapshotRecord) error
+	SaveLogsBatch(logs []AuditLog, snapshots []SnapshotRecord) error // 高并发批量刷盘支持
 	GetLog(id string) (*AuditLog, error)
+	GetLatestLog() (*AuditLog, error) // 获取最新一条日志用于构建防篡改哈希链
 	ListLogs(filter AuditFilter) ([]AuditLog, int, error)
 	GetStats() (*AuditStats, error)                     // P31: SQL-level aggregation
 	GenerateReport(period string) (*AuditReport, error) // P33: SQL-level filtering + aggregation
@@ -267,5 +282,6 @@ type AuditStore interface {
 	SaveSnapshot(snap *SnapshotRecord) error
 	ListSnapshots(limit, offset int) ([]SnapshotRecord, int, error) // P35: return total count for pagination
 	GetSnapshot(id string) (*SnapshotRecord, error)
-	CleanupOld(before time.Time) (int64, error) // Delete audit logs older than cutoff / 清理过期审计日志
+	VerifyChain(limit int) (*ChainVerificationResult, error) // 全局/区间防篡改哈希链对账核验
+	CleanupOld(before time.Time) (int64, error)              // Delete audit logs older than cutoff / 清理过期审计日志
 }

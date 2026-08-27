@@ -310,7 +310,9 @@ func InitAuditTables(db *sql.DB) error {
 			user_name TEXT,
 			status TEXT,
 			error_message TEXT,
-			security_level TEXT
+			security_level TEXT,
+			prev_hash TEXT DEFAULT '',
+			integrity_hash TEXT DEFAULT ''
 		);
 		CREATE TABLE IF NOT EXISTS snapshots (
 			id TEXT PRIMARY KEY,
@@ -321,6 +323,7 @@ func InitAuditTables(db *sql.DB) error {
 			algorithm TEXT,
 			parameters_json TEXT,
 			integrity_hash TEXT,
+			prev_hash TEXT DEFAULT '',
 			FOREIGN KEY(audit_log_id) REFERENCES audit_logs(id)
 		);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_ts ON audit_logs(timestamp);
@@ -366,6 +369,16 @@ func InitAuditTables(db *sql.DB) error {
 	}
 	if !columns["datasource_id"] {
 		if _, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN datasource_id TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["prev_hash"] {
+		if _, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN prev_hash TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["integrity_hash"] {
+		if _, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN integrity_hash TEXT DEFAULT ''"); err != nil {
 			return err
 		}
 	}

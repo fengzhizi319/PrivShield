@@ -726,13 +726,13 @@ func defaultAuditLogs() []models.AuditLogItem {
 			Timestamp:     now,
 			Datasource:    naming.DSKangyang,
 			APICode:       naming.API2Kangyang,
-			Operation:     "k_anon",
+			Operation:     "mask",
 			InputHash:     "",
 			OutputHash:    "",
-			Algorithm:     "mondrian",
+			Algorithm:     "field_mask",
 			User:          "app-lz-bff",
 			Status:        "synthetic",
-			SecurityLevel: "L4",
+			SecurityLevel: "L3",
 		},
 	}
 	for i := range items {

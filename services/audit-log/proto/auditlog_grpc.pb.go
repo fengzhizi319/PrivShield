@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v7.35.0
-// source: services/audit-log/proto/auditlog.proto
+// source: auditlog.proto
 
 package proto
 
@@ -26,6 +26,7 @@ const (
 	AuditLogService_GetAuditStats_FullMethodName   = "/auditlog.AuditLogService/GetAuditStats"
 	AuditLogService_ListSnapshots_FullMethodName   = "/auditlog.AuditLogService/ListSnapshots"
 	AuditLogService_VerifyIntegrity_FullMethodName = "/auditlog.AuditLogService/VerifyIntegrity"
+	AuditLogService_VerifyChain_FullMethodName     = "/auditlog.AuditLogService/VerifyChain"
 	AuditLogService_GenerateReport_FullMethodName  = "/auditlog.AuditLogService/GenerateReport"
 )
 
@@ -38,7 +39,7 @@ const (
 type AuditLogServiceClient interface {
 	// Health 健康检查（自检 + 上游 Agent 连通性）
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
-	// RecordAudit 写入单条审计存证日志
+	// RecordAudit 写入单条审计存证日志（支持联动生成快照与防篡改哈希链）
 	RecordAudit(ctx context.Context, in *RecordAuditRequest, opts ...grpc.CallOption) (*RecordAuditResponse, error)
 	// GetAuditLog 查询单条审计日志
 	GetAuditLog(ctx context.Context, in *GetAuditLogRequest, opts ...grpc.CallOption) (*AuditLogProto, error)
@@ -50,6 +51,8 @@ type AuditLogServiceClient interface {
 	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
 	// VerifyIntegrity 校验审计快照的 SHA-256 完整性与防篡改存证
 	VerifyIntegrity(ctx context.Context, in *VerifyIntegrityRequest, opts ...grpc.CallOption) (*VerifyIntegrityResponse, error)
+	// VerifyChain 校验全局或指定范围内的防篡改哈希链（Hash Chain）连续性
+	VerifyChain(ctx context.Context, in *VerifyChainRequest, opts ...grpc.CallOption) (*VerifyChainResponse, error)
 	// GenerateReport 生成合规审计与治理效能报告
 	GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (*ComplianceReportResponse, error)
 }
@@ -132,6 +135,16 @@ func (c *auditLogServiceClient) VerifyIntegrity(ctx context.Context, in *VerifyI
 	return out, nil
 }
 
+func (c *auditLogServiceClient) VerifyChain(ctx context.Context, in *VerifyChainRequest, opts ...grpc.CallOption) (*VerifyChainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyChainResponse)
+	err := c.cc.Invoke(ctx, AuditLogService_VerifyChain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *auditLogServiceClient) GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (*ComplianceReportResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ComplianceReportResponse)
@@ -151,7 +164,7 @@ func (c *auditLogServiceClient) GenerateReport(ctx context.Context, in *Generate
 type AuditLogServiceServer interface {
 	// Health 健康检查（自检 + 上游 Agent 连通性）
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
-	// RecordAudit 写入单条审计存证日志
+	// RecordAudit 写入单条审计存证日志（支持联动生成快照与防篡改哈希链）
 	RecordAudit(context.Context, *RecordAuditRequest) (*RecordAuditResponse, error)
 	// GetAuditLog 查询单条审计日志
 	GetAuditLog(context.Context, *GetAuditLogRequest) (*AuditLogProto, error)
@@ -163,6 +176,8 @@ type AuditLogServiceServer interface {
 	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
 	// VerifyIntegrity 校验审计快照的 SHA-256 完整性与防篡改存证
 	VerifyIntegrity(context.Context, *VerifyIntegrityRequest) (*VerifyIntegrityResponse, error)
+	// VerifyChain 校验全局或指定范围内的防篡改哈希链（Hash Chain）连续性
+	VerifyChain(context.Context, *VerifyChainRequest) (*VerifyChainResponse, error)
 	// GenerateReport 生成合规审计与治理效能报告
 	GenerateReport(context.Context, *GenerateReportRequest) (*ComplianceReportResponse, error)
 	mustEmbedUnimplementedAuditLogServiceServer()
@@ -195,6 +210,9 @@ func (UnimplementedAuditLogServiceServer) ListSnapshots(context.Context, *ListSn
 }
 func (UnimplementedAuditLogServiceServer) VerifyIntegrity(context.Context, *VerifyIntegrityRequest) (*VerifyIntegrityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyIntegrity not implemented")
+}
+func (UnimplementedAuditLogServiceServer) VerifyChain(context.Context, *VerifyChainRequest) (*VerifyChainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyChain not implemented")
 }
 func (UnimplementedAuditLogServiceServer) GenerateReport(context.Context, *GenerateReportRequest) (*ComplianceReportResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GenerateReport not implemented")
@@ -346,6 +364,24 @@ func _AuditLogService_VerifyIntegrity_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuditLogService_VerifyChain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyChainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuditLogServiceServer).VerifyChain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuditLogService_VerifyChain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuditLogServiceServer).VerifyChain(ctx, req.(*VerifyChainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuditLogService_GenerateReport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GenerateReportRequest)
 	if err := dec(in); err != nil {
@@ -400,10 +436,14 @@ var AuditLogService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AuditLogService_VerifyIntegrity_Handler,
 		},
 		{
+			MethodName: "VerifyChain",
+			Handler:    _AuditLogService_VerifyChain_Handler,
+		},
+		{
 			MethodName: "GenerateReport",
 			Handler:    _AuditLogService_GenerateReport_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "services/audit-log/proto/auditlog.proto",
+	Metadata: "auditlog.proto",
 }

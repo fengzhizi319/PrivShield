@@ -434,9 +434,9 @@ func TestListLogsWithFilter(t *testing.T) {
 
 func TestComputeIntegrityHash(t *testing.T) {
 	ts := time.Now()
-	hash1 := computeIntegrityHash("log-1", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
-	hash2 := computeIntegrityHash("log-1", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
-	hash3 := computeIntegrityHash("log-2", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
+	hash1 := computeIntegrityHash("log-1", "prev-1", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
+	hash2 := computeIntegrityHash("log-1", "prev-1", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
+	hash3 := computeIntegrityHash("log-2", "prev-1", ts, "field_mask", "abc", "def", "admin", "L3", "{}")
 
 	if hash1 != hash2 {
 		t.Error("same inputs should produce same hash")
@@ -446,6 +446,45 @@ func TestComputeIntegrityHash(t *testing.T) {
 	}
 	if len(hash1) != 64 { // SHA256 hex = 64 chars
 		t.Errorf("expected 64-char hex hash, got %d chars", len(hash1))
+	}
+}
+
+func TestVerifyChainEndpoint(t *testing.T) {
+	s := newTestServer()
+	router := newTestRouter(s)
+
+	// Create 2 logs via API
+	body1 := `{"operation":"mask","datasource":"ds_yibao","status":"success"}`
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("POST", "/api/audit/logs", bytes.NewBufferString(body1))
+	req1.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("create log 1 failed: %d", w1.Code)
+	}
+
+	body2 := `{"operation":"dp","datasource":"ds_yibao","status":"success"}`
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("POST", "/api/audit/logs", bytes.NewBufferString(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("create log 2 failed: %d", w2.Code)
+	}
+
+	// Verify chain
+	wVerify := httptest.NewRecorder()
+	reqVerify, _ := http.NewRequest("POST", "/api/audit/chain/verify", bytes.NewBufferString(`{"limit":10}`))
+	reqVerify.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wVerify, reqVerify)
+	if wVerify.Code != http.StatusOK {
+		t.Fatalf("verify chain failed: %d", wVerify.Code)
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(wVerify.Body.Bytes(), &resp)
+	if resp["valid"] != true || resp["total_verified"].(float64) < 2 {
+		t.Fatalf("expected valid chain, got %+v", resp)
 	}
 }
 
@@ -473,5 +512,52 @@ func TestCreateLogParametersTooLarge(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for parameters > 1 MB, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestEnvelopeEncryptionOfSnapshots(t *testing.T) {
+	s := newTestServer()
+	s.cfg.EncryptionKey = "test-secret-key-12345"
+	router := newTestRouter(s)
+
+	body := map[string]any{
+		"operation":     "mask",
+		"datasource":    "ds_yibao",
+		"status":        "success",
+		"input_sample":  "secret_input_sample",
+		"output_sample": "secret_output_sample",
+	}
+	b, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/audit/logs", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create log failed: %d", w.Code)
+	}
+
+	// Verify the snapshot in storage is encrypted
+	snaps, total, err := s.audit.ListSnapshots(10, 0)
+	if err != nil || total == 0 {
+		t.Fatalf("list snapshots from store error: %v", err)
+	}
+	if snaps[0].InputSample == "secret_input_sample" {
+		t.Fatal("expected stored sample to be encrypted, but found cleartext")
+	}
+
+	// Verify HTTP API decrypts transparently
+	wList := httptest.NewRecorder()
+	reqList, _ := http.NewRequest("GET", "/api/audit/snapshots", nil)
+	router.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusOK {
+		t.Fatalf("list snapshots API failed: %d", wList.Code)
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(wList.Body.Bytes(), &resp)
+	apiSnaps := resp["snapshots"].([]any)
+	firstSnap := apiSnaps[0].(map[string]any)
+	if firstSnap["input_sample"] != "secret_input_sample" {
+		t.Errorf("expected API to return decrypted sample, got %v", firstSnap["input_sample"])
 	}
 }

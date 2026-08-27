@@ -110,7 +110,7 @@ func TestGRPCHealthAgentUnreachable(t *testing.T) {
 }
 
 func TestGRPCAuditLogOperations(t *testing.T) {
-	client, auditStore, cleanup := setupTestGRPCServer(t, nil)
+	client, _, cleanup := setupTestGRPCServer(t, nil)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -179,34 +179,37 @@ func TestGRPCAuditLogOperations(t *testing.T) {
 		t.Errorf("unexpected compliance report: %+v", repResp)
 	}
 
-	// 6. Save a snapshot directly to store to test ListSnapshots & VerifyIntegrity
-	_ = auditStore.SaveSnapshot(&store.SnapshotRecord{
-		ID:            "snap_test_1",
-		AuditLogID:    logID,
-		Timestamp:     time.Now(),
-		InputSample:   "raw_data",
-		OutputSample:  "masked_data",
-		Algorithm:     "field_mask",
-		IntegrityHash: "ca978112ca1bbdcafac231b39a23dc4da786081998d6365faf57629009733549",
-	})
-
+	// 6. ListSnapshots (auto-created by RecordAudit)
 	snapListResp, err := client.ListSnapshots(ctx, &pb.ListSnapshotsRequest{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListSnapshots failed: %v", err)
 	}
-	if snapListResp.Total != 1 || len(snapListResp.Snapshots) != 1 {
+	if snapListResp.Total < 1 || len(snapListResp.Snapshots) < 1 {
 		t.Errorf("unexpected snapshots list: %+v", snapListResp)
 	}
 
-	// 7. VerifyIntegrity
+	// 7. VerifyIntegrity on the auto-created snapshot
+	snapID := recResp.SnapshotId
+	if snapID == "" && len(snapListResp.Snapshots) > 0 {
+		snapID = snapListResp.Snapshots[0].Id
+	}
 	verifyResp, err := client.VerifyIntegrity(ctx, &pb.VerifyIntegrityRequest{
-		SnapshotId: "snap_test_1",
+		SnapshotId: snapID,
 	})
 	if err != nil {
 		t.Fatalf("VerifyIntegrity failed: %v", err)
 	}
-	if verifyResp.ComputedHash == "" {
-		t.Errorf("expected computed hash in verify response: %+v", verifyResp)
+	if verifyResp.ComputedHash == "" || !verifyResp.Valid {
+		t.Errorf("expected valid computed hash in verify response: %+v", verifyResp)
+	}
+
+	// 8. VerifyChain
+	chainResp, err := client.VerifyChain(ctx, &pb.VerifyChainRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("VerifyChain failed: %v", err)
+	}
+	if !chainResp.Valid || chainResp.TotalVerified < 1 {
+		t.Errorf("expected valid hash chain, got: %+v", chainResp)
 	}
 }
 

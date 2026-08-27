@@ -96,54 +96,79 @@ sequenceDiagram
 
 ---
 
-## 4. 8 要素增强完整性哈希算法
+## 4. 连续防篡改哈希链 (Hash Chain) 与 9 要素密码学完整性
 
-新版实现将所有关键治理要素全面纳入哈希计算：
+为了彻底防止特权用户物理删除/篡改中间日志行或注入虚假记录，系统引入了**前序哈希链（Blockchain-like Linked Hash Chain）**：
 
-$$\text{Data} = \text{logID} \parallel \text{timestamp (RFC3339Nano)} \parallel \text{algorithm} \parallel \text{inputHash} \parallel \text{outputHash} \parallel \text{user} \parallel \text{securityLevel} \parallel \text{parametersJSON}$$
+$$\text{Data} = \text{prevHash} \parallel \text{logID} \parallel \text{timestamp (RFC3339Nano)} \parallel \text{algorithm} \parallel \text{inputHash} \parallel \text{outputHash} \parallel \text{user} \parallel \text{securityLevel} \parallel \text{parametersJSON}$$
 
 $$\text{IntegrityHash} = \text{SHA256}(\text{Data})$$
 
 ```go
-func computeIntegrityHash(logID string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
-    data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%v",
-        logID, timestamp.Format(time.RFC3339Nano), algorithm,
+func computeIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
+    data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%v",
+        prevHash, logID, timestamp.Format(time.RFC3339Nano), algorithm,
         inputHash, outputHash, user, securityLevel, paramsJSON)
     hash := sha256.Sum256([]byte(data))
     return fmt.Sprintf("%x", hash)
 }
 ```
 
-任何微小篡改（甚至是配置 JSON 中的空格或敏感度等级由 L4 改为 L3）都将导致 SHA-256 产生雪崩效应，使 `VerifyIntegrity` 立即识别并报警。
+- **创世存证与链式关联**：第一条记录的 `prev_hash` 为空；后续每条记录在生成时自动关联上一条记录的 `integrity_hash`。
+- **全链对账核验**：提供 `POST /api/audit/chain/verify` 及 gRPC `VerifyChain` 接口，按时序逐行重算与比对链条连续性。任何删行、篡改或调序均会立即引起雪崩断链并精准定位断点。
 
 ---
 
-## 5. 业务合规存证与基础设施运维日志 (Loki / ELK) 的架构定位辨析
+## 5. 快照样本应用层信封加密 (Envelope Encryption)
+
+快照表（`snapshots`）存储了脱敏前后的数据样本（`input_sample` 与 `output_sample`）。为了彻底避免审计数据库本身成为敏感 PII 泄露源，系统引入了应用层 AES-256-GCM 信封加密：
+
+1. **落盘加密**：配置 `AUDIT_LOG_ENCRYPTION_KEY`（或 `PRIVACY_AUDIT_KEY`）后，样本在入库前自动以随机 12-byte Nonce 进行 AES-256-GCM 加密，存储格式为 `enc:v1:<base64>`；
+2. **透明解密**：仅在经过认证与鉴权的 API 调用方查询快照时，在内存中动态解密呈现；
+3. **向后兼容**：未加密的历史遗留样本与未配置密钥环境平滑兼容。
+
+---
+
+## 6. 存储引擎架构（SQLite WAL / PostgreSQL Phase B）
+
+系统支持根据部署规模无缝切换存储引擎底座：
+
+1. **单机/轻量模式 (SQLite WAL)**：
+   - 采用纯 Go SQLite 驱动，配置 `PRAGMA journal_mode=WAL` 与 `PRAGMA busy_timeout=5000`；
+   - 启动时执行 `PRAGMA integrity_check` 进行损坏防御；
+2. **企业级集群模式 (PostgreSQL Phase B)**：
+   - 通过配置 `AUDIT_LOG_PG_DSN`（或 `PG_DSN`）启用 `postgres.AuditStore`；
+   - 消除 SQLite 单写者锁限制，支持 `audit-log` 多副本水平扩展与超高吞吐并发存证；
+   - 支持 `SaveLogsBatch` 批量管道聚合刷盘。
+
+---
+
+## 7. 业务合规存证与基础设施运维日志 (Loki / ELK) 的架构定位辨析
 
 在系统总体架构与运维体系中，必须清晰区分 **「业务级数据脱敏合规存证」** 与 **「基础设施级运行日志聚合 (如 Grafana Loki / ELK)」** 两个维度的概念：
 
-### 5.1 核心差异矩阵
+### 7.1 核心差异矩阵
 
 | 维度 | `services/audit-log` (业务存证中台) | Grafana Loki / ELK (运维日志平台) |
 |---|---|---|
 | **核心定位** | **业务合规与法律证据**（解决“谁在何时对什么数据执行了何种脱敏”的法定合规溯源） | **系统运维与故障排查**（解决“服务是否健康、报错堆栈为何、请求延迟与网络抖动”的 SRE 观测） |
-| **存储内容** | 8 要素存证实体、原始数据 SHA-256 哈希、脱敏结果哈希、快照哈希链 | 容器与进程标准输出 stdout / stderr 的非结构化/半结构化文本或 JSON |
-| **密码学防篡改** | **必须具备**（内置 SHA-256 密码学生成与动态核验接口，防止 DBA 或黑客改库） | **不具备**（日志以分块 Chunk 或倒排索引存储，依赖存储介质本身的写保护） |
+| **存储内容** | 9 要素哈希链、原始数据 SHA-256 哈希、脱敏结果哈希、AES 密文快照 | 容器与进程标准输出 stdout / stderr 的非结构化/半结构化文本或 JSON |
+| **密码学防篡改** | **链式防篡改**（SHA-256 连续哈希链 + 动态核验对账接口，杜绝任何删改） | **不具备**（日志以分块 Chunk 或倒排索引存储，依赖存储介质本身的写保护） |
 | **法律合规效力** | 满足《数据安全法》第二十七条、《个人信息保护法》第六十九条与 GDPR 第三十条之规定 | 面向运维与内部分析，通常不具备直接的抗抵赖与司法存证签名能力 |
-| **存储底座** | 独立 SQLite WAL 读写分离引擎 / 专用关系型存证库（Append-Only） | 分布式对象存储（S3/MinIO）+ 索引存储（BoltDB/Cassandra/DynamoDB） |
+| **存储底座** | 独立 SQLite WAL 读写分离引擎 / 专用关系型 PostgreSQL 存证库（Append-Only） | 分布式对象存储（S3/MinIO）+ 索引存储（BoltDB/Cassandra/DynamoDB） |
 | **查询接口** | 结构化 RESTful API (`:8084`) + 高并发 gRPC 接口 (`:50054`) | LogQL / Kibana 查询语言与 Grafana 仪表盘 |
 
-### 5.2 与集中式日志平台 (Loki / ELK) 的协同集成方案
+### 7.2 与集中式日志平台 (Loki / ELK) 的协同集成方案
 
 `services/audit-log` 自身**不依赖 Loki 作为业务存证底座**，但其作为企业级微服务，**完全原生支持接入 Grafana Loki / Promtail / ELK** 作为运维可观测底座：
 
 ```mermaid
 flowchart TB
     subgraph AuditLogNode [audit-log 微服务节点]
-        BusinessEngine[8要素业务存证引擎]
+        BusinessEngine[9要素哈希链存证引擎]
         SlogLogger[Go log/slog 结构化日志组件]
         
-        TaskStore[(SQLite WAL 存证库<br/>Append-Only 业务账本)]
+        TaskStore[(PostgreSQL / SQLite WAL 存证库<br/>Append-Only 业务账本)]
         StdOut[标准输出 stdout / stderr<br/>PRIVACY_LOG_FORMAT=json]
     end
 
@@ -159,9 +184,9 @@ flowchart TB
         GrafanaUI[Grafana SRE 监控面板]
     end
 
-    ServiceHub -->|1. 提交 8 要素存证| BusinessEngine
-    BusinessEngine -->|2. SHA-256 签名存证落盘| TaskStore
-    Auditor -->|3. 在线完整性核验 / 调取合规报告| BusinessEngine
+    ServiceHub -->|1. 提交存证与快照| BusinessEngine
+    BusinessEngine -->|2. 哈希链加密落盘| TaskStore
+    Auditor -->|3. 全链核验 / 调取合规报告| BusinessEngine
     WebConsole -->|3. 存证列表查询| BusinessEngine
 
     BusinessEngine -.->|"运行时记录 (RequestID/耗时/握手)"| SlogLogger

@@ -57,16 +57,36 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
   const [creating, setCreating] = useState(false);
 
   // Task creation form state
-  const [newSource, setNewSource] = useState('ds_yibao');
+  const [newSource, setNewSource] = useState<'ds_yibao' | 'ds_kangyang'>('ds_yibao');
   const [newOperation, setNewOperation] = useState('mask');
   const [newPriority, setNewPriority] = useState(50);
-  const [newPayload, setNewPayload] = useState(JSON.stringify({
+
+  const yibaoPayloadTemplate = {
     patient_name: '张三',
     id_card: '510101199001011234',
     phone: '13800138000',
-    diagnosis: '高血压',
-  }, null, 2));
+    diagnosis: '2型糖尿病',
+  };
+
+  const kangyangPayloadTemplate = {
+    name: '李建国',
+    age: 78,
+    heart_rate: 82,
+    blood_pressure: '142/90',
+    chief_complaint: '口渴多饮多尿半年',
+  };
+
+  const [newPayload, setNewPayload] = useState(JSON.stringify(yibaoPayloadTemplate, null, 2));
   const [createResult, setCreateResult] = useState<string | null>(null);
+
+  const handleSourceChange = (sourceKey: 'ds_yibao' | 'ds_kangyang') => {
+    setNewSource(sourceKey);
+    if (sourceKey === 'ds_yibao') {
+      setNewPayload(JSON.stringify(yibaoPayloadTemplate, null, 2));
+    } else {
+      setNewPayload(JSON.stringify(kangyangPayloadTemplate, null, 2));
+    }
+  };
 
   const filteredTasks = tasks.filter((t) => {
     if (filterStatus === 'all') return true;
@@ -189,8 +209,8 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
               { field: 'id', desc: '任务唯一标识，由 service-hub 自动生成 (格式: task-{timestamp}-{hash})' },
               { field: 'status', desc: '任务状态流转: pending → running → completed / failed' },
               { field: 'stage', desc: '当前处理阶段: ingest / fetch / classify / desensitize / return / audit' },
-              { field: 'source', desc: '数据源标识: ds_yibao (医保) / ds_kangyang (康养)' },
-              { field: 'operation', desc: '脱敏操作类型: mask (掩码) / k_anon (K-匿名) / dp (差分隐私) / qol (查询混淆)' },
+              { field: 'source', desc: '数据源标识: ds_yibao (医保结算数据 API) / ds_kangyang (康养体征数据 API)' },
+              { field: 'operation', desc: '脱敏治理操作: mask (针对 ds_yibao / ds_kangyang 的脱敏治理流水线；全量四大原语在 PrivShield 控制台测试)' },
               { field: 'priority', desc: '任务优先级 (0-100)，数值越大越优先被 Worker 租约认领' },
               { field: 'duration_ms', desc: '任务从创建到完成的总耗时 (毫秒)' },
               { field: 'lease_owner', desc: '当前持有该任务租约的 Worker 节点 (Phase B FOR UPDATE SKIP LOCKED)' },
@@ -224,12 +244,11 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
               <label className="text-xs text-slate-400 font-medium mb-1 block">数据源 (Source)</label>
               <select
                 value={newSource}
-                onChange={(e) => setNewSource(e.target.value)}
+                onChange={(e) => handleSourceChange(e.target.value as 'ds_yibao' | 'ds_kangyang')}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
               >
-                <option value="ds_yibao">ds_yibao (医保结算)</option>
-                <option value="ds_kangyang">ds_kangyang (康养体征)</option>
-                <option value="ds_custom">ds_custom (自定义)</option>
+                <option value="ds_yibao">ds_yibao (医保结算数据 API)</option>
+                <option value="ds_kangyang">ds_kangyang (康养体征数据 API)</option>
               </select>
             </div>
             <div>
@@ -239,10 +258,7 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
                 onChange={(e) => setNewOperation(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
               >
-                <option value="mask">掩码脱敏 (mask)</option>
-                <option value="k_anon">K-匿名化 (k_anon)</option>
-                <option value="dp">差分隐私 (dp)</option>
-                <option value="qol">查询混淆 (qol)</option>
+                <option value="mask">脱敏治理流水线 (mask)</option>
               </select>
             </div>
             <div>

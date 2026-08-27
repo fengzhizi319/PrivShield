@@ -285,9 +285,8 @@ export const PipelineVisualizer: React.FC<PipelineVisualizerProps> = ({
                 onChange={(e) => setSource(e.target.value)}
                 className="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
               >
-                <option value="ds_yibao">ds_yibao (医保结算)</option>
-                <option value="ds_kangyang">ds_kangyang (养老健康)</option>
-                <option value="ds_custom">ds_custom (自定义源)</option>
+                <option value="ds_yibao">ds_yibao (医保结算数据 API)</option>
+                <option value="ds_kangyang">ds_kangyang (康养体征数据 API)</option>
               </select>
             </div>
           </div>
@@ -301,11 +300,7 @@ export const PipelineVisualizer: React.FC<PipelineVisualizerProps> = ({
                 onChange={(e) => setOperation(e.target.value)}
                 className="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
               >
-                <option value="mask">掩码脱敏 (Mask)</option>
-                <option value="k_anon">K-匿名化 (K-Anon)</option>
-                <option value="dp">差分隐私 (DP Laplace)</option>
-                <option value="qol">查询混淆 (QoL Dummy)</option>
-                <option value="none">原样透传 (None)</option>
+                <option value="mask">脱敏治理流水线 (Mask)</option>
               </select>
             </div>
           </div>

@@ -34,11 +34,14 @@ type Config struct {
 	TLSPinnedPubKeyFile string // Pinned client public key PEM / 固定的客户端公钥文件路径
 
 	// Production hardening / 生产加固
-	APIKey      string   // Inbound API key for this module / 本模块入站 API Key
-	CORSOrigins []string // Allowed CORS origins / 允许的 CORS 来源
-	DBPath      string   // SQLite database path (empty = in-memory) / SQLite 数据库路径
-	LogFormat   string   // "json" or "text" / 日志格式
-	LogLevel    string   // "debug", "info", "warn", "error" / 日志级别
+	APIKey        string   // Inbound API key for this module / 本模块入站 API Key
+	CORSOrigins   []string // Allowed CORS origins / 允许的 CORS 来源
+	DBPath        string   // SQLite database path (empty = in-memory) / SQLite 数据库路径
+	PGDSN         string   // PostgreSQL connection DSN (Phase B / high-concurrency multi-replica)
+	EncryptionKey string   // Master key for envelope encryption of sensitive snapshot samples
+	ArchiveDir    string   // Archive destination directory for old audit records
+	LogFormat     string   // "json" or "text" / 日志格式
+	LogLevel      string   // "debug", "info", "warn", "error" / 日志级别
 
 	// Data retention / 数据保留策略
 	RetentionDays int // 审计日志保留天数，超期自动清理（0 = 不清理）
@@ -50,6 +53,16 @@ type Config struct {
 // Load reads configuration from environment variables.
 // Load 从环境变量读取所有配置项。
 func Load() *Config {
+	pgDSN := pkgconfig.EnvString("AUDIT_LOG_PG_DSN", "")
+	if pgDSN == "" {
+		pgDSN = pkgconfig.EnvString("PG_DSN", "")
+	}
+
+	encKey := pkgconfig.EnvString("AUDIT_LOG_ENCRYPTION_KEY", "")
+	if encKey == "" {
+		encKey = pkgconfig.EnvString("PRIVACY_AUDIT_KEY", "")
+	}
+
 	return &Config{
 		Host:          pkgconfig.EnvString("AUDIT_LOG_HOST", "127.0.0.1"),
 		Port:          pkgconfig.EnvInt("AUDIT_LOG_PORT", 8084),
@@ -72,11 +85,14 @@ func Load() *Config {
 		TLSPinnedPubKeyFile: pkgconfig.EnvString("AUDIT_LOG_TLS_PINNED_PUBKEY_FILE", ""),
 
 		// Production hardening / 生产加固
-		APIKey:      pkgconfig.EnvString("AUDIT_LOG_API_KEY", ""),
-		CORSOrigins: pkgconfig.EnvStringSlice("AUDIT_LOG_CORS_ORIGINS"),
-		DBPath:      pkgconfig.EnvString("AUDIT_LOG_DB_PATH", ""),
-		LogFormat:   pkgconfig.EnvString("AUDIT_LOG_LOG_FORMAT", "json"),
-		LogLevel:    pkgconfig.EnvString("AUDIT_LOG_LOG_LEVEL", "info"),
+		APIKey:        pkgconfig.EnvString("AUDIT_LOG_API_KEY", ""),
+		CORSOrigins:   pkgconfig.EnvStringSlice("AUDIT_LOG_CORS_ORIGINS"),
+		DBPath:        pkgconfig.EnvString("AUDIT_LOG_DB_PATH", ""),
+		PGDSN:         pgDSN,
+		EncryptionKey: encKey,
+		ArchiveDir:    pkgconfig.EnvString("AUDIT_LOG_ARCHIVE_DIR", "data/archives"),
+		LogFormat:     pkgconfig.EnvString("AUDIT_LOG_LOG_FORMAT", "json"),
+		LogLevel:      pkgconfig.EnvString("AUDIT_LOG_LOG_LEVEL", "info"),
 
 		// Data retention / 数据保留策略（默认 90 天，审计日志保留期较长）
 		RetentionDays: pkgconfig.EnvInt("AUDIT_LOG_RETENTION_DAYS", 90),

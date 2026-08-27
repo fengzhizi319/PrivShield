@@ -932,3 +932,128 @@ FileNotFoundError: [Errno 2] No such file or directory: '/app/docs/standard/四�
    volumes:
      - ../../docs/standard:/app/docs/standard:ro  # 实时感知宿主机文档更新
    ```
+
+---
+
+## 14. 双物理节点/服务器拆分部署与多并发场景资源评估 (Resource Sizing & Concurrency Capacity Planning)
+
+### 14.1 部署架构拓扑与核心工作负载模型
+
+针对政务云与医疗健康大数据典型流通场景，系统采用**计算调度与合规审计物理隔离的双节点部署架构**：
+
+```mermaid
+flowchart LR
+    subgraph NodeA ["服务器 A：计算与调度中枢节点 (Compute & Orchestration Node)"]
+        direction TB
+        Hub["services/service-hub<br/>(流水线编排 / 任务租约 / 限流控制 :8082/:50052)"]
+        Engine["engine (PrivShield Core Agent)<br/>(3-Layer 分类漏斗 / 医疗流水线 / PII 掩码脱敏 :8079/:50051)"]
+        DSMgr["services/datasource-mgr<br/>(数据源管理与抽样 :8083/:50053)"]
+        BFF["console/bff-go<br/>(API 网关与大屏聚合 :8081)"]
+        
+        Hub <-->|Unix Domain Socket / 本地网络 gRPC| Engine
+        Hub <-->|本地 HTTP/gRPC| DSMgr
+    end
+
+    subgraph NodeB ["服务器 B：审计存证与合规账本节点 (Audit & Evidence Node)"]
+        direction TB
+        AuditLog["services/audit-log<br/>(9要素区块链式哈希链 / AES-256-GCM 信封加密 / 快照验真 :8084/:50054)"]
+        AuditDB[(不可篡改存储底座<br/>SQLite WAL / PostgreSQL Phase B)]
+        
+        AuditLog --> AuditDB
+    end
+
+    Client[客户端/医院/医保局应用] -->|HTTP / gRPC| NodeA
+    NodeA -->|"跨机 gRPC mTLS (专用内网)"| NodeB
+```
+
+#### 典型业务负载特征
+1. **数据源 1: `ds_yibao` (城镇职工基本医疗保险结算数据)**
+   - 单条记录字段数：18 字段（`record_id`、`patient_name`、`id_card`、`phone`、`diagnosis_name`、`icd10_code`、`total_fee`、`yibao_pay` 等）
+   - 单条原始 JSON 体积：$\approx 450 \sim 650 \text{ 字节}$
+   - 处理链路：PII 敏感字段掩码（姓名、身份证、电话）+ 临床诊断与 ICD-10 敏感病种脱敏治理 + 分类分级评级 + 9 要素哈希链与加密快照。
+2. **数据源 2: `ds_kangyang` (智慧养老健康监护与体征数据)**
+   - 单条记录字段数：27 字段（`elder_id`、`name`、`age`、`heart_rate`、`blood_pressure`、`blood_glucose`、`chief_complaint`、`present_illness`、`past_history` 等）
+   - 单条原始 JSON 体积：$\approx 700 \sim 1,100 \text{ 字节}$
+   - 处理链路：老人身份识别码脱敏 + 血压/心率/血糖体征泛化 + 既往史病历文本敏感信息剥离 + 9 要素哈希链存证。
+
+---
+
+### 14.2 单次请求资源开销基准与测算公式 (Micro-benchmark Model)
+
+通过对核心代码与算子的单点压测与分析，单条医保/康养数据在全链路各阶段的微观资源消耗如下：
+
+| 处理环节 | 核心执行操作 | 单记录 CPU 耗时 (x86_64 3.0GHz) | 内存工作集分配 | 典型 I/O 开销 |
+|---|---|---|---|---|
+| **接入与调度 (`service-hub`)** | 请求参数解析、鉴权、生成 TaskID、任务持久化 | $0.2 \sim 0.5 \text{ ms}$ | $\approx 4 \text{ KB}$ | 内存/SQLite 1 次写入（$\approx 1 \text{ KB}$） |
+| **规则与脱敏 (`engine`)** | Layer-1 正则/字典匹配 + Layer-2 Small-NER + PII 掩码 + ICD-10 敏感诊断脱敏 | $2.5 \sim 6.0 \text{ ms}$（CPU 纯规则）<br/>$15 \sim 35 \text{ ms}$（启用 Small-NER ONNX） | $\approx 32 \text{ KB}$ (临时缓存) | 零磁盘 I/O（全内存流式处理） |
+| **审计存证 (`audit-log`)** | 追溯前序哈希 + 计算 9 要素 SHA-256 + AES-256-GCM 样本信封加密 + 批量落盘 | $0.8 \sim 1.5 \text{ ms}$ (硬件加速 AES-NI/SHA-NI) | $\approx 8 \text{ KB}$ | 磁盘写入 $\approx 1.2 \text{ KB}$ (含快照与哈希链索引) |
+
+#### 容量测算关键公式：
+1. **内网带宽开销**：
+   $$\text{Bandwidth (Mbps)} = \text{QPS} \times \text{BatchSize} \times \text{AvgRecordSize (B)} \times 8 \times 2.5 (\text{JSON协议膨胀与跨节点传输系数}) / 1,000,000$$
+2. **审计存储日增量**：
+   $$\text{Daily Audit Storage (GB/Day)} = \text{QPS} \times 86,400 \text{ s} \times 1.2 \text{ KB (单条主日志+加密快照+索引)} / 1,048,576 \text{ KB/GB}$$
+   *(按 100 QPS 持续负载计算，每天约产生 9.88 GB 存证日志；按 1,000 QPS 计算，每天约产生 98.8 GB 存证日志)*
+
+---
+
+### 14.3 不同并发梯度的资源需求与配置规格矩阵
+
+根据不同的业务吞吐量与并发需求，将系统划分为 4 个并发梯度：
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                       并发梯度划分与推荐场景                                       │
+├───────────────────┬───────────────────┬─────────────────────────────────────────────────────────┤
+│ 梯度               │ QPS 范围          │ 典型业务场景                                             │
+├───────────────────┼───────────────────┼─────────────────────────────────────────────────────────┤
+│ 梯度 1：低并发     │ 10 ~ 50 QPS       │ 联调测试、小型诊所/单科室数据接入、低频离线批量申请         │
+│ 梯度 2：中并发     │ 100 ~ 500 QPS     │ 二级/三级医院日常门诊与医保结算实时脱敏、智慧康养日常上报 │
+│ 梯度 3：高并发     │ 1,000 ~ 3,000 QPS │ 地市级医保结算高峰、区域医疗数据要素流通中枢、多院区汇聚  │
+│ 梯度 4：超高并发   │ 5,000+ QPS        │ 省级/国家级医保集中结算、大规模数据资产全量探查与批量流通 │
+└───────────────────┴───────────────────┴─────────────────────────────────────────────────────────┘
+```
+
+#### 梯度 1：低并发场景 (10 ~ 50 QPS，日请求量 50万 ~ 250万次)
+
+| 节点 | 推荐规格 | CPU / 内存 | 存储选型与配置 | 网络需求 | 软件参数调优 |
+|---|---|---|---|---|---|
+| **服务器 A**<br/>(engine + service-hub) | 虚拟机 / 轻量云主机 | **4 核 vCPU / 8 GB 内存** | 系统盘 100 GB SSD | 100 Mbps | • Uvicorn workers: 2<br/>• Hub Task Queue: 1,000<br/>• Hub 并发信号量: 10 |
+| **服务器 B**<br/>(audit-log) | 虚拟机 / 轻量云主机 | **2 核 vCPU / 4 GB 内存** | 500 GB SSD (IOPS $\ge$ 1,000) | 100 Mbps | • 存储引擎: SQLite WAL 模式<br/>• 本地日志保留: 30 天 |
+
+#### 梯度 2：中并发场景 (100 ~ 500 QPS，日请求量 500万 ~ 2,500万次)
+
+| 节点 | 推荐规格 | CPU / 内存 | 存储选型与配置 | 网络需求 | 软件参数调优 |
+|---|---|---|---|---|---|
+| **服务器 A**<br/>(engine + service-hub) | 物理机 / 企业级云主机 | **8 ~ 16 核 vCPU / 16 ~ 32 GB 内存** | 200 GB NVMe SSD | 1 Gbps (千兆网) | • Uvicorn workers: 4~8<br/>• gRPC MaxWorkers: 64<br/>• Hub 并发信号量: 30<br/>• 开启规则引擎 LRU 缓存 (4096) |
+| **服务器 B**<br/>(audit-log) | 物理机 / 企业级云主机 | **4 ~ 8 核 vCPU / 8 ~ 16 GB 内存** | 1 TB ~ 2 TB NVMe SSD<br/>(写入吞吐 $\ge 20 \text{MB/s}$, IOPS $\ge 3,000$) | 1 Gbps | • 存储引擎: SQLite WAL 或 PostgreSQL Phase B<br/>• 开启 AES-256-GCM 硬件指令集加速<br/>• 本地保留: 60 天 + 定期归档 |
+
+#### 梯度 3：高并发场景 (1,000 ~ 3,000 QPS，日请求量 5,000万 ~ 1.5亿次)
+
+| 节点 | 推荐规格 | CPU / 内存 | 存储选型与配置 | 网络需求 | 软件参数调优 |
+|---|---|---|---|---|---|
+| **服务器 A**<br/>(engine + service-hub) | 高性能物理服务器 / 计算型云主机 | **32 ~ 64 核物理 CPU / 64 ~ 128 GB 内存** | 500 GB NVMe 阵列 (RAID 10) | 10 Gbps (万兆网卡) | • gRPC 进程/线程池: 128<br/>• Uvicorn: 多进程集群 / Gunicorn 16 workers<br/>• Hub 信号量: 100 并发<br/>• 启用 Linux TCP `SO_REUSEPORT` 与 `epoll` |
+| **服务器 B**<br/>(audit-log) | 高性能存储型物理服务器 | **16 ~ 32 核 CPU / 32 ~ 64 GB 内存** | 4 TB ~ 8 TB 企业级 NVMe SSD<br/>(写入吞吐 $\ge 100 \text{MB/s}$, IOPS $\ge 20,000$) | 10 Gbps | • **存储引擎强制切换为 PostgreSQL Phase B**<br/>• `pgxpool` 连接池: `MaxConns=50, MinConns=10`<br/>• 批量流水线入库: 采用 `SaveLogsBatch` (每批 100~500 条)<br/>• 开启数据库时间范围分区表 (Partition by Month) |
+
+#### 梯度 4：超高并发 / 峰值压测场景 (5,000+ QPS，峰值数据吞吐 50,000+ records/s)
+
+| 节点 | 推荐架构形态 | 资源配置要求 | 存储与 I/O 架构 | 关键高可用保障机制 |
+|---|---|---|---|---|
+| **服务器 A**<br/>(计算与调度集群) | **多节点横向扩展 / K8s HPA 集群**<br/>(2~4 台计算物理机或 K8s 动态伸缩 Pods) | 每台物理机 **64核 CPU / 128GB+ 内存**，集群总计 128~256 核 | 高速内存虚拟盘 (tmpfs) 缓存高频字典与规则编译树 | • 网关层负载均衡 (`engine/gateway` / Nginx)<br/>• Service Hub 基于 PostgreSQL `FOR UPDATE SKIP LOCKED` 分布式原子租约争抢<br/>• 背压控制：当队列超过上限时自动触发快速拒绝 (HTTP 429 / 503) |
+| **服务器 B**<br/>(审计存证集群) | **PostgreSQL 主从复制集群 / 独立高性能存证库** | 独立物理机 **32核 CPU / 64GB 内存** + 专有 NVMe 存储阵列 | 8 TB+ NVMe RAID 10 (IOPS $\ge 50,000$) + 挂载冷存储对象存储 (S3/MinIO) 自动归档 | • 写入端：采用异步环形缓冲池 + 批量 Copy / Batch Insert<br/>• 验真端：分库分表 / 读写分离，历史哈希链对账在从库执行<br/>• 自动定期将历史快照压缩转储至冷存储，降低热库空间膨胀 |
+
+---
+
+### 14.4 资源瓶颈点分析与性能优化建议
+
+1. **CPU 算力瓶颈与优化**：
+   - **动态脱敏规则匹配**：`engine` 内部正则编译已通过 `ConfigurableRuleEngine` 实现全局 LRU 预编译缓存（`PRIVACY_ENGINE_CACHE_MAX_SIZE=4096`），避免单次请求重复编译正则；
+   - **密码学哈希与加密**：SHA-256 哈希链与 AES-256-GCM 运算尽量确保宿主机 CPU 支持并启用了 `Intel SHA-NI` 与 `AES-NI` 扩展指令集，可降低 70% 的 CPU 存证开销。
+2. **内存消耗与 OOM 防御**：
+   - `services/service-hub` 与 `services/audit-log` 配置了 HTTP `MaxBodySize(32MB)` 保护，杜绝超大 Payload 请求撑爆内存；
+   - 在高并发数据导入时，优先采用批次分片（Batch Chunking，单批 100~500 行），避免一次加载上万条完整记录到单请求上下文中。
+3. **磁盘 I/O 瓶颈与存储引擎选型边界**：
+   - **QPS < 500**：SQLite WAL 模式表现优异，单文件免运维，单机读写吞吐可达 3,000~5,000 ops/s；
+   - **QPS > 1,000**：SQLite 会受限于单写者锁（Single Writer Lock）导致事务排队，**必须开启 Phase B PostgreSQL 存储底座**（配置 `AUDIT_LOG_PG_DSN` 与 `SERVICE_HUB_PG_DSN`），通过多连接池与批量操作释放写吞吐。
+4. **网络与连接保活**：
+   - 服务器 A 与 服务器 B 之间跨机通信强制启用 **gRPC mTLS 且保持长连接（Keepalive）**，避免每次审计存证重新进行 TLS 握手导致的延迟抖动。

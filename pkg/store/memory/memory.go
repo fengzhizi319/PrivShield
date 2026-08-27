@@ -6,6 +6,7 @@
 package memory
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"sync"
@@ -343,6 +344,27 @@ func (s *AuditStore) SaveLogWithSnapshot(log *store.AuditLog, snapshot *store.Sn
 	return nil
 }
 
+// SaveLogsBatch saves multiple logs and snapshots in memory atomically.
+func (s *AuditStore) SaveLogsBatch(logs []store.AuditLog, snapshots []store.SnapshotRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, l := range logs {
+		s.logs = append(s.logs, l)
+	}
+	for _, snap := range snapshots {
+		s.snapshots = append(s.snapshots, snap)
+	}
+
+	if len(s.logs) > maxAuditLogs {
+		s.logs = s.logs[len(s.logs)-maxAuditLogs:]
+	}
+	if len(s.snapshots) > maxSnapshots {
+		s.snapshots = s.snapshots[len(s.snapshots)-maxSnapshots:]
+	}
+	return nil
+}
+
 func (s *AuditStore) GetLog(id string) (*store.AuditLog, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -353,6 +375,17 @@ func (s *AuditStore) GetLog(id string) (*store.AuditLog, error) {
 		}
 	}
 	return nil, fmt.Errorf("audit log %s not found", id)
+}
+
+// GetLatestLog returns the most recently written audit log.
+func (s *AuditStore) GetLatestLog() (*store.AuditLog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.logs) == 0 {
+		return nil, nil
+	}
+	cp := s.logs[len(s.logs)-1]
+	return &cp, nil
 }
 
 func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, error) {
@@ -615,6 +648,66 @@ func (s *AuditStore) CleanupOld(before time.Time) (int64, error) {
 	}
 	s.snapshots = keptSnaps
 	return count, nil
+}
+
+// VerifyChain verifies the unbroken cryptographic hash chain of recent in-memory logs.
+func (s *AuditStore) VerifyChain(limit int) (*store.ChainVerificationResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 || limit > len(s.logs) {
+		limit = len(s.logs)
+	}
+
+	var previousHash string
+	count := 0
+
+	for i := 0; i < limit; i++ {
+		l := s.logs[i]
+		expectedHash := computeMemoryIntegrityHash(l.ID, l.PrevHash, l.Timestamp, l.Algorithm, l.InputHash, l.OutputHash, l.User, l.SecurityLevel, l.ParametersJSON)
+
+		if l.IntegrityHash != "" && l.IntegrityHash != expectedHash {
+			return &store.ChainVerificationResult{
+				TotalVerified: count,
+				Valid:         false,
+				BrokenAtID:    l.ID,
+				ExpectedHash:  expectedHash,
+				ActualHash:    l.IntegrityHash,
+				Message:       fmt.Sprintf("integrity hash mismatch at log %s", l.ID),
+			}, nil
+		}
+
+		if count > 0 && l.PrevHash != previousHash {
+			return &store.ChainVerificationResult{
+				TotalVerified: count,
+				Valid:         false,
+				BrokenAtID:    l.ID,
+				ExpectedHash:  previousHash,
+				ActualHash:    l.PrevHash,
+				Message:       fmt.Sprintf("hash chain broken at log %s: expected prev_hash %s, got %s", l.ID, previousHash, l.PrevHash),
+			}, nil
+		}
+
+		previousHash = l.IntegrityHash
+		if previousHash == "" {
+			previousHash = expectedHash
+		}
+		count++
+	}
+
+	return &store.ChainVerificationResult{
+		TotalVerified: count,
+		Valid:         true,
+		Message:       fmt.Sprintf("hash chain verified successfully (%d records checked)", count),
+	}, nil
+}
+
+func computeMemoryIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
+	data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%v",
+		prevHash, logID, timestamp.Format(time.RFC3339Nano), algorithm,
+		inputHash, outputHash, user, securityLevel, paramsJSON)
+	hash := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("%x", hash)
 }
 
 // Ensure interface compliance at compile time.

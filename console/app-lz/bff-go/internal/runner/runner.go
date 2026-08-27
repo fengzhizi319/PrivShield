@@ -164,21 +164,43 @@ func (r *TestRunner) executeSingleSuite(ctx context.Context, suiteID string, req
 // runTS01 执行 TS-01：全链路审计存证与 Merkle 验真。
 //
 // 测试步骤：
-//  1. 调用 audit-log 的 /api/v1/audit/verify 端点触发 Merkle 树校验
-//  2. 验证 SHA-256 审计日志完整性（HMAC 签名）
-//  3. 验证 Merkle 树一致性（merkle_valid=true）
+//  1. 触发脱敏任务并落盘 SHA-256 审计存证（含快照）
+//  2. 验证 SHA-256 审计日志完整性（非空且来自 live audit-log 服务）
+//  3. 验证快照 Merkle 树 / 密码学完整性（merkle_valid=true）
 func (r *TestRunner) runTS01(ctx context.Context) models.TestSuiteCase {
 	start := time.Now()
 	logs := []string{"[TS-01] 开始执行全链路审计存证与 Merkle 验真测试..."}
 
-	logs = append(logs, "[TS-01] 查询 audit-log 审计记录并校验 Merkle Tree 完整性...")
+	// 1. 触发脱敏任务并落盘真实 SHA-256 审计存证与快照
+	logs = append(logs, "[TS-01] 1. 触发脱敏任务并落盘 SHA-256 审计存证...")
+	recID, errRec := r.pool.RecordAudit(ctx, models.AuditRecordRequest{
+		Datasource:    naming.DSYibao,
+		APICode:       naming.API1Yibao,
+		Operation:     "mask",
+		Algorithm:     "field_mask",
+		User:          "TS-01-TestRunner",
+		Status:        "success",
+		SecurityLevel: "L3",
+		InputSample:   "{\"patient_name\":\"张三\",\"id_card\":\"510101199001011234\"}",
+		OutputSample:  "{\"patient_name\":\"张*\",\"id_card\":\"5101**********1234\"}",
+		Parameters:    map[string]any{"pattern": "id_card"},
+	})
+	if errRec == nil {
+		logs = append(logs, fmt.Sprintf("[TS-01] ✅ 成功写入测试审计存证记录: %s", recID))
+	} else {
+		logs = append(logs, fmt.Sprintf("[TS-01] ⚠️ 写入测试存证 (可能处于只读或降级环境): %v", errRec))
+	}
+
+	// 2. 查询 audit-log 审计记录并校验快照
+	logs = append(logs, "[TS-01] 2. 查询 audit-log 审计记录并校验 Merkle Tree 完整性...")
 	auditResp, _ := r.pool.GetAuditLogs(ctx, 5, 0, "")
 	verifyResp, _ := r.pool.VerifyAudit(ctx)
 
 	hasLogs := len(auditResp.Logs) > 0 && auditResp.Source != "fallback"
 	integrityPassed := verifyResp.MerkleValid && verifyResp.Source == "audit-log"
 
-	logs = append(logs, fmt.Sprintf("[TS-01] ✅ Merkle 树校验结果: merkle_valid=%v, root_hash=%s, source=%s", verifyResp.MerkleValid, verifyResp.RootHash, verifyResp.Source))
+	logs = append(logs, fmt.Sprintf("[TS-01] ✅ Merkle 树校验结果: merkle_valid=%v, root_hash=%s, source=%s, total_logs=%d",
+		verifyResp.MerkleValid, verifyResp.RootHash, verifyResp.Source, len(auditResp.Logs)))
 
 	assertions := []models.TestSuiteAssertion{
 		{
@@ -363,22 +385,33 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 			defer func() { <-sem }()
 
 			op := "mask"
-			if idx%3 == 1 {
-				op = "k_anon"
-			} else if idx%3 == 2 {
-				op = "dp"
+			dsID := naming.DSYibao
+			apiCode := naming.API1Yibao
+			if idx%2 == 1 {
+				dsID = naming.DSKangyang
+				apiCode = naming.API2Kangyang
+			}
+
+			payload := map[string]any{
+				"record_id": fmt.Sprintf("TS03-%s-%06d", dsID, idx),
+				"idx":       idx,
+			}
+			if dsID == naming.DSYibao {
+				payload["patient_name"] = fmt.Sprintf("张三_%d", idx)
+				payload["insurance_settlement_id"] = fmt.Sprintf("TS03-YB-%06d", idx)
+				payload["person_id"] = fmt.Sprintf("TS03-PID-%06d", idx)
+			} else {
+				payload["elder_id"] = fmt.Sprintf("TS03-KY-%06d", idx)
+				payload["name"] = fmt.Sprintf("李建国_%d", idx)
+				payload["age"] = 70 + (idx % 20)
 			}
 
 			dispResp, err := r.pool.DispatchTask(ctx, models.DispatchRequest{
-				APICode:      naming.API1Yibao,
-				DatasourceID: naming.DSYibao,
+				APICode:      apiCode,
+				DatasourceID: dsID,
 				Operation:    op,
 				Priority:     (idx % 100) + 1,
-				Payload: map[string]any{
-					"insurance_settlement_id": fmt.Sprintf("TS03-YB-%06d", idx),
-					"person_id":               fmt.Sprintf("TS03-PID-%06d", idx),
-					"idx":                     idx,
-				},
+				Payload:      payload,
 			})
 
 			mu.Lock()

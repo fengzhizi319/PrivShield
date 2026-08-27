@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -23,18 +24,32 @@ func NewAuditStore(db *sql.DB) (*AuditStore, error) {
 }
 
 func (s *AuditStore) SaveLog(log *store.AuditLog) error {
+	if log.IntegrityHash == "" {
+		log.IntegrityHash = ComputeAuditIntegrityHash(log.ID, log.PrevHash, log.Timestamp, log.Algorithm, log.InputHash, log.OutputHash, log.User, log.SecurityLevel, log.ParametersJSON)
+	}
 	_, err := s.db.Exec(`
 		INSERT INTO audit_logs (id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash,
-			algorithm, parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			algorithm, parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level, prev_hash, integrity_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, log.ID, log.TaskID, log.APICode, log.DatasourceID, log.Timestamp.Format(time.RFC3339Nano), log.Operation, log.DataSource,
 		log.InputHash, log.OutputHash, log.Algorithm, log.ParametersJSON,
-		log.InputRows, log.OutputRows, log.DurationMs, log.User, log.Status, log.ErrorMessage, log.SecurityLevel)
+		log.InputRows, log.OutputRows, log.DurationMs, log.User, log.Status, log.ErrorMessage, log.SecurityLevel,
+		log.PrevHash, log.IntegrityHash)
 	return err
 }
 
 // SaveLogWithSnapshot persists an audit log and its snapshot as one transaction.
 func (s *AuditStore) SaveLogWithSnapshot(log *store.AuditLog, snapshot *store.SnapshotRecord) error {
+	if log.IntegrityHash == "" {
+		log.IntegrityHash = ComputeAuditIntegrityHash(log.ID, log.PrevHash, log.Timestamp, log.Algorithm, log.InputHash, log.OutputHash, log.User, log.SecurityLevel, log.ParametersJSON)
+	}
+	if snapshot.IntegrityHash == "" {
+		snapshot.IntegrityHash = log.IntegrityHash
+	}
+	if snapshot.PrevHash == "" {
+		snapshot.PrevHash = log.PrevHash
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -43,30 +58,103 @@ func (s *AuditStore) SaveLogWithSnapshot(log *store.AuditLog, snapshot *store.Sn
 
 	if _, err := tx.Exec(`
 		INSERT INTO audit_logs (id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash,
-			algorithm, parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			algorithm, parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level, prev_hash, integrity_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, log.ID, log.TaskID, log.APICode, log.DatasourceID, log.Timestamp.Format(time.RFC3339Nano), log.Operation, log.DataSource,
 		log.InputHash, log.OutputHash, log.Algorithm, log.ParametersJSON,
-		log.InputRows, log.OutputRows, log.DurationMs, log.User, log.Status, log.ErrorMessage, log.SecurityLevel); err != nil {
+		log.InputRows, log.OutputRows, log.DurationMs, log.User, log.Status, log.ErrorMessage, log.SecurityLevel,
+		log.PrevHash, log.IntegrityHash); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO snapshots (id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO snapshots (id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash, prev_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, snapshot.ID, snapshot.AuditLogID, snapshot.Timestamp.Format(time.RFC3339Nano),
-		snapshot.InputSample, snapshot.OutputSample, snapshot.Algorithm, snapshot.ParametersJSON, snapshot.IntegrityHash); err != nil {
+		snapshot.InputSample, snapshot.OutputSample, snapshot.Algorithm, snapshot.ParametersJSON, snapshot.IntegrityHash, snapshot.PrevHash); err != nil {
 		return err
 	}
+	return tx.Commit()
+}
+
+// SaveLogsBatch saves multiple logs and optional snapshots in a single atomic transaction.
+func (s *AuditStore) SaveLogsBatch(logs []store.AuditLog, snapshots []store.SnapshotRecord) error {
+	if len(logs) == 0 && len(snapshots) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	logStmt, err := tx.Prepare(`
+		INSERT INTO audit_logs (id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash,
+			algorithm, parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level, prev_hash, integrity_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer logStmt.Close()
+
+	for _, log := range logs {
+		if log.IntegrityHash == "" {
+			log.IntegrityHash = ComputeAuditIntegrityHash(log.ID, log.PrevHash, log.Timestamp, log.Algorithm, log.InputHash, log.OutputHash, log.User, log.SecurityLevel, log.ParametersJSON)
+		}
+		if _, err := logStmt.Exec(log.ID, log.TaskID, log.APICode, log.DatasourceID, log.Timestamp.Format(time.RFC3339Nano), log.Operation, log.DataSource,
+			log.InputHash, log.OutputHash, log.Algorithm, log.ParametersJSON,
+			log.InputRows, log.OutputRows, log.DurationMs, log.User, log.Status, log.ErrorMessage, log.SecurityLevel,
+			log.PrevHash, log.IntegrityHash); err != nil {
+			return err
+		}
+	}
+
+	if len(snapshots) > 0 {
+		snapStmt, err := tx.Prepare(`
+			INSERT INTO snapshots (id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash, prev_hash)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`)
+		if err != nil {
+			return err
+		}
+		defer snapStmt.Close()
+
+		for _, snap := range snapshots {
+			if _, err := snapStmt.Exec(snap.ID, snap.AuditLogID, snap.Timestamp.Format(time.RFC3339Nano),
+				snap.InputSample, snap.OutputSample, snap.Algorithm, snap.ParametersJSON, snap.IntegrityHash, snap.PrevHash); err != nil {
+				return err
+			}
+		}
+	}
+
 	return tx.Commit()
 }
 
 func (s *AuditStore) GetLog(id string) (*store.AuditLog, error) {
 	row := s.db.QueryRow(`
 		SELECT id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
-			parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level
+			parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level, prev_hash, integrity_hash
 		FROM audit_logs WHERE id = ?
 	`, id)
 	return scanAuditLog(row)
+}
+
+// GetLatestLog returns the most recently written audit log.
+func (s *AuditStore) GetLatestLog() (*store.AuditLog, error) {
+	row := s.db.QueryRow(`
+		SELECT id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
+			parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level, prev_hash, integrity_hash
+		FROM audit_logs ORDER BY timestamp DESC, rowid DESC LIMIT 1
+	`)
+	log, err := scanAuditLog(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return log, nil
 }
 
 func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, error) {
@@ -81,7 +169,7 @@ func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, 
 
 	// Fetch rows
 	query := `SELECT id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
-		parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level
+		parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level, prev_hash, integrity_hash
 		FROM audit_logs` + where + " ORDER BY timestamp DESC"
 	if filter.Limit > 0 {
 		limit := filter.Limit
@@ -178,9 +266,7 @@ func (s *AuditStore) GetStats() (*store.AuditStats, error) {
 }
 
 // GenerateReport generates a compliance audit report with SQL-level filtering and aggregation.
-// P33 fix: use SQL WHERE for period filtering and SQL aggregation instead of loading 10k records.
 func (s *AuditStore) GenerateReport(period string) (*store.AuditReport, error) {
-	// Parse period to duration
 	var periodDuration string
 	switch period {
 	case "1h":
@@ -197,10 +283,6 @@ func (s *AuditStore) GenerateReport(period string) (*store.AuditReport, error) {
 		BySecurityLevel: make(map[string]int),
 	}
 
-	// Build WHERE clause for period filtering
-	// P56 fix: use parameterized query instead of fmt.Sprintf for period value,
-	// defense-in-hardening even though periodDuration comes from a switch whitelist.
-	// SQLite datetime function: timestamp > datetime('now', '-24 hours')
 	whereClause := "WHERE timestamp > datetime('now', ?)"
 	periodParam := "-" + periodDuration
 
@@ -255,16 +337,12 @@ func (s *AuditStore) GenerateReport(period string) (*store.AuditReport, error) {
 		return nil, err
 	}
 
-	// 4. Generate recommendations based on statistics
 	report.Recommendations = generateRecommendations(report.BySecurityLevel, report.SuccessRate)
-
 	return report, nil
 }
 
-// generateRecommendations generates audit recommendations based on statistics.
 func generateRecommendations(byLevel map[string]int, successRate float64) []string {
 	recs := make([]string, 0)
-
 	if l4 := byLevel["L4"]; l4 > 100 {
 		recs = append(recs, "L4 级别操作频繁，建议审查差分隐私预算消耗")
 	}
@@ -277,29 +355,25 @@ func generateRecommendations(byLevel map[string]int, successRate float64) []stri
 	if len(recs) == 0 {
 		recs = append(recs, "审计指标正常，无需特别关注")
 	}
-
 	return recs
 }
 
 func (s *AuditStore) SaveSnapshot(snap *store.SnapshotRecord) error {
 	_, err := s.db.Exec(`
-		INSERT INTO snapshots (id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO snapshots (id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash, prev_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, snap.ID, snap.AuditLogID, snap.Timestamp.Format(time.RFC3339Nano),
-		snap.InputSample, snap.OutputSample, snap.Algorithm, snap.ParametersJSON, snap.IntegrityHash)
+		snap.InputSample, snap.OutputSample, snap.Algorithm, snap.ParametersJSON, snap.IntegrityHash, snap.PrevHash)
 	return err
 }
 
-// ListSnapshots returns paginated snapshots with total count.
-// P35 fix: return total count for proper pagination instead of len(snaps).
 func (s *AuditStore) ListSnapshots(limit, offset int) ([]store.SnapshotRecord, int, error) {
-	// Count total
 	var total int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM snapshots").Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
-	query := "SELECT id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash FROM snapshots ORDER BY timestamp DESC"
+	query := "SELECT id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash, prev_hash FROM snapshots ORDER BY timestamp DESC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 		if offset > 0 {
@@ -325,28 +399,77 @@ func (s *AuditStore) ListSnapshots(limit, offset int) ([]store.SnapshotRecord, i
 
 func (s *AuditStore) GetSnapshot(id string) (*store.SnapshotRecord, error) {
 	row := s.db.QueryRow(`
-		SELECT id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash
+		SELECT id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash, prev_hash
 		FROM snapshots WHERE id = ?
 	`, id)
+	return scanSnapshotRowScanner(row.Scan)
+}
 
-	var snap store.SnapshotRecord
-	var ts string
-	var paramsJSON sql.NullString
+// VerifyChain verifies the unbroken cryptographic hash chain of recent logs.
+func (s *AuditStore) VerifyChain(limit int) (*store.ChainVerificationResult, error) {
+	if limit <= 0 || limit > 10000 {
+		limit = 1000
+	}
 
-	err := row.Scan(&snap.ID, &snap.AuditLogID, &ts, &snap.InputSample, &snap.OutputSample,
-		&snap.Algorithm, &paramsJSON, &snap.IntegrityHash)
+	query := fmt.Sprintf(`SELECT id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
+		parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level, prev_hash, integrity_hash
+		FROM audit_logs ORDER BY timestamp ASC, rowid ASC LIMIT %d`, limit)
+
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	snap.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
-	if paramsJSON.Valid {
-		_ = json.Unmarshal([]byte(paramsJSON.String), &snap.Parameters)
+	var previousHash string
+	count := 0
+
+	for rows.Next() {
+		log, err := scanAuditLogRow(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		expectedHash := ComputeAuditIntegrityHash(log.ID, log.PrevHash, log.Timestamp, log.Algorithm, log.InputHash, log.OutputHash, log.User, log.SecurityLevel, log.ParametersJSON)
+
+		// Check internal hash integrity
+		if log.IntegrityHash != "" && log.IntegrityHash != expectedHash {
+			return &store.ChainVerificationResult{
+				TotalVerified: count,
+				Valid:         false,
+				BrokenAtID:    log.ID,
+				ExpectedHash:  expectedHash,
+				ActualHash:    log.IntegrityHash,
+				Message:       fmt.Sprintf("integrity hash mismatch at log %s: content modified", log.ID),
+			}, nil
+		}
+
+		// Check chain continuity with previous record
+		if count > 0 && log.PrevHash != previousHash {
+			return &store.ChainVerificationResult{
+				TotalVerified: count,
+				Valid:         false,
+				BrokenAtID:    log.ID,
+				ExpectedHash:  previousHash,
+				ActualHash:    log.PrevHash,
+				Message:       fmt.Sprintf("hash chain broken at log %s: expected prev_hash %s, got %s", log.ID, previousHash, log.PrevHash),
+			}, nil
+		}
+
+		previousHash = log.IntegrityHash
+		if previousHash == "" {
+			previousHash = expectedHash
+		}
+		count++
 	}
-	return &snap, nil
+
+	return &store.ChainVerificationResult{
+		TotalVerified: count,
+		Valid:         true,
+		Message:       fmt.Sprintf("hash chain verified successfully (%d records checked)", count),
+	}, rows.Err()
 }
 
-// buildAuditWhere builds the WHERE clause for audit log queries.
 func buildAuditWhere(filter store.AuditFilter) (string, []any) {
 	conditions := make([]string, 0)
 	args := make([]any, 0)
@@ -398,10 +521,8 @@ func buildAuditWhere(filter store.AuditFilter) (string, []any) {
 }
 
 // CleanupOld deletes audit logs and their associated snapshots older than the cutoff time.
-// CleanupOld 删除早于截止时间的审计日志及其关联快照，防止 SQLite 无限膨胀。
 func (s *AuditStore) CleanupOld(before time.Time) (int64, error) {
 	cutoff := before.Format(time.RFC3339Nano)
-	// Delete associated snapshots first (foreign key dependency)
 	_, _ = s.db.Exec(`DELETE FROM snapshots WHERE audit_log_id IN (SELECT id FROM audit_logs WHERE timestamp < ?)`, cutoff)
 	result, err := s.db.Exec(`DELETE FROM audit_logs WHERE timestamp < ?`, cutoff)
 	if err != nil {
@@ -410,18 +531,15 @@ func (s *AuditStore) CleanupOld(before time.Time) (int64, error) {
 	return result.RowsAffected()
 }
 
-// scanAuditFields scans common audit log fields from any scanner interface.
-// P55 fix: extract common scanning logic to eliminate duplication between
-// scanAuditLog (*sql.Row) and scanAuditLogRow (*sql.Rows).
 func scanAuditFields(scan func(dest ...any) error) (*store.AuditLog, error) {
 	var l store.AuditLog
 	var ts string
 	var paramsJSON sql.NullString
-	var taskID, apiCode, datasourceID sql.NullString
+	var taskID, apiCode, datasourceID, prevHash, integrityHash sql.NullString
 
 	err := scan(&l.ID, &taskID, &apiCode, &datasourceID, &ts, &l.Operation, &l.DataSource, &l.InputHash, &l.OutputHash,
 		&l.Algorithm, &paramsJSON, &l.InputRows, &l.OutputRows, &l.DurationMs,
-		&l.User, &l.Status, &l.ErrorMessage, &l.SecurityLevel)
+		&l.User, &l.Status, &l.ErrorMessage, &l.SecurityLevel, &prevHash, &integrityHash)
 	if err != nil {
 		return nil, err
 	}
@@ -429,6 +547,8 @@ func scanAuditFields(scan func(dest ...any) error) (*store.AuditLog, error) {
 	l.TaskID = taskID.String
 	l.APICode = apiCode.String
 	l.DatasourceID = datasourceID.String
+	l.PrevHash = prevHash.String
+	l.IntegrityHash = integrityHash.String
 	if l.DatasourceID == "" && l.DataSource != "" {
 		l.DatasourceID = l.DataSource
 	}
@@ -444,31 +564,44 @@ func scanAuditFields(scan func(dest ...any) error) (*store.AuditLog, error) {
 	return &l, nil
 }
 
-// scanAuditLog scans a single AuditLog from a QueryRow.
 func scanAuditLog(row *sql.Row) (*store.AuditLog, error) {
 	return scanAuditFields(row.Scan)
 }
 
-// scanAuditLogRow scans a single AuditLog from a Rows iterator.
 func scanAuditLogRow(rows *sql.Rows) (*store.AuditLog, error) {
 	return scanAuditFields(rows.Scan)
 }
 
-// scanSnapshotRow scans a SnapshotRecord from a Rows iterator.
-func scanSnapshotRow(rows *sql.Rows) (*store.SnapshotRecord, error) {
+func scanSnapshotRowScanner(scan func(dest ...any) error) (*store.SnapshotRecord, error) {
 	var snap store.SnapshotRecord
 	var ts string
 	var paramsJSON sql.NullString
+	var prevHash sql.NullString
 
-	err := rows.Scan(&snap.ID, &snap.AuditLogID, &ts, &snap.InputSample, &snap.OutputSample,
-		&snap.Algorithm, &paramsJSON, &snap.IntegrityHash)
+	err := scan(&snap.ID, &snap.AuditLogID, &ts, &snap.InputSample, &snap.OutputSample,
+		&snap.Algorithm, &paramsJSON, &snap.IntegrityHash, &prevHash)
 	if err != nil {
 		return nil, err
 	}
 
 	snap.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
+	snap.PrevHash = prevHash.String
+	snap.ParametersJSON = paramsJSON.String
 	if paramsJSON.Valid {
 		_ = json.Unmarshal([]byte(paramsJSON.String), &snap.Parameters)
 	}
 	return &snap, nil
+}
+
+func scanSnapshotRow(rows *sql.Rows) (*store.SnapshotRecord, error) {
+	return scanSnapshotRowScanner(rows.Scan)
+}
+
+// ComputeAuditIntegrityHash computes an enhanced SHA-256 integrity hash with prev_hash chaining.
+func ComputeAuditIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
+	data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%v",
+		prevHash, logID, timestamp.Format(time.RFC3339Nano), algorithm,
+		inputHash, outputHash, user, securityLevel, paramsJSON)
+	hash := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("%x", hash)
 }

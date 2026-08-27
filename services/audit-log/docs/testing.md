@@ -10,11 +10,13 @@
 
 | 测试包 | 测试文件 | 覆盖内容与核心断言 |
 |---|---|---|
-| `internal/grpcserver` | `server_test.go` | **全部 8 个 gRPC 方法**（Health/RecordAudit/GetAuditLog/ListAuditLogs/GetAuditStats/ListSnapshots/VerifyIntegrity/GenerateReport）、输入校验、mTLS 凭证构造、CA 链校验与公钥固定 (Public Key Pinning) |
-| `internal/handlers` | `handlers_test.go` | **HTTP REST Handler 层**（Health、创建审计日志、日志检索过滤、统计概览、快照列表、SHA-256 防篡改完整性校验、合规报告生成、参数超大拦截防 DoS） |
-| `internal/config` | `config_test.go` | 默认配置、自定义环境变量加载、`Address()`、`GRPCAddress()`、`AgentBaseURLs()` 多节点轮询与 mTLS 配置解析 |
+| `internal/grpcserver` | `server_test.go` | **全部 9 个 gRPC 方法**（Health/RecordAudit/GetAuditLog/ListAuditLogs/GetAuditStats/ListSnapshots/VerifyIntegrity/VerifyChain/GenerateReport）、原子快照创建与样本信封解密、mTLS 凭证构造、CA 链校验与公钥固定 (Public Key Pinning) |
+| `internal/handlers` | `handlers_test.go` | **HTTP REST Handler 层**（Health、创建审计日志、日志检索过滤、统计概览、快照列表、快照样本 AES-256-GCM 信封加密/解密、SHA-256 9 要素完整性校验、全链路连续哈希链验真 `/api/audit/chain/verify`、合规报告生成、参数超大拦截防 DoS） |
+| `internal/config` | `config_test.go` | 默认配置、自定义环境变量加载（`PGDSN`、`EncryptionKey`、`ArchiveDir`）、`Address()`、`GRPCAddress()`、`AgentBaseURLs()` 多节点轮询与 mTLS 配置解析 |
 | `internal/models` | `models_test.go` | 审计日志、快照存证、合规报告等核心数据结构的 JSON 序列化与反序列化双向无损性验证 |
 | `internal/agent` | `client_test.go` | 上游 Agent HTTP 客户端（Health 探活） |
+| `pkg/crypto` | `envelope_test.go` | AES-256-GCM 信封加密、解密、防篡改、空密钥降级与明文向后兼容性验证 |
+| `pkg/store/postgres` | `postgres_test.go` (Phase B) | PostgreSQL 多副本连接池初始化、批量高效入库 `SaveLogsBatch`、前序哈希追溯 `GetLatestLog`、全链验真 `VerifyChain` |
 
 ---
 
@@ -29,7 +31,7 @@ go test -coverprofile=coverage.out ./services/audit-log/...
 go tool cover -func=coverage.out
 
 # 3. 运行根工作区全量 Go 测试
-make test-go
+go test ./pkg/... ./services/... ./console/bff-go/... ./console/app-lz/bff-go/...
 ```
 
 ---
@@ -39,13 +41,15 @@ make test-go
 ### 3.1 gRPC 与 mTLS 测试 (`internal/grpcserver/server_test.go`)
 - `TestGRPCHealth`：验证 gRPC 探活接口及上游 Agent 状态解析；
 - `TestGRPCHealthAgentUnreachable`：验证 Agent 宕机时的容错降级；
-- `TestGRPCAuditLogOperations`：全流程存证闭环（RecordAudit -> GetAuditLog -> ListAuditLogs -> GetAuditStats -> GenerateReport -> ListSnapshots -> VerifyIntegrity）；
+- `TestGRPCAuditLogOperations`：全流程存证闭环（RecordAudit 自动快照 -> GetAuditLog -> ListAuditLogs -> GetAuditStats -> GenerateReport -> ListSnapshots -> VerifyIntegrity -> VerifyChain）；
 - `TestGRPCValidationErrors`：空操作、空 ID、不存在日志与空快照 ID 的 ArgumentError 拦截；
 - `TestBuildServerCredentials`：覆盖 7 类 TLS/mTLS 场景（未启用、缺少证书、单向 TLS、mTLS 强制校验、公钥固定校验、CA 缺失失败、非法 client auth 模式）。
 
 ### 3.2 HTTP REST 测试 (`internal/handlers/handlers_test.go`)
 - `TestHealth`：GET `/api/health` 探活及响应头；
 - `TestCreateLog` / `TestGetLog` / `TestListLogsWithFilter`；
-- `TestVerifyIntegrity`：验证 8 要素 SHA-256 存证完整性；
+- `TestVerifyIntegrity`：验证 9 要素 SHA-256 存证完整性；
+- `TestVerifyChainEndpoint`：验证 POST `/api/audit/chain/verify` 对历史区块链式哈希链的连续性对账；
+- `TestEnvelopeEncryptionOfSnapshots`：验证快照落盘时的 `enc:v1:` AES-256-GCM 加密以及读取时的透明解密；
 - `TestCreateLogParametersTooLarge`：超大参数攻击拦截（防内存耗尽 DoS）；
-- `TestComputeIntegrityHash`：验证哈希确定性与雪崩效应。
+- `TestComputeIntegrityHash`：验证哈希确定性、哈希链连续性与雪崩效应。

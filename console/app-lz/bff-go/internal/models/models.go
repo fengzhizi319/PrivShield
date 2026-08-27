@@ -329,7 +329,10 @@ type AuditRecordRequest struct {
 	Operation     string `json:"operation"`
 	InputHash     string `json:"input_hash,omitempty"`
 	OutputHash    string `json:"output_hash,omitempty"`
+	InputSample   string `json:"input_sample,omitempty"`
+	OutputSample  string `json:"output_sample,omitempty"`
 	Algorithm     string `json:"algorithm,omitempty"`
+	Parameters    any    `json:"parameters,omitempty"`
 	User          string `json:"user,omitempty"`
 	Status        string `json:"status"`
 	SecurityLevel string `json:"security_level,omitempty"`

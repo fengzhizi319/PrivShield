@@ -28,6 +28,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
+	"github.com/fengzhizi319/PrivShield/pkg/store/postgres"
 	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
 
 	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/agent"
@@ -51,7 +52,7 @@ func main() {
 	// ── SQLite Integrity Check / SQLite 完整性校验 ──────────────
 	// 启动时校验 SQLite 数据库完整性，检测损坏并阻止服务启动。
 	// 使用共享库 sqlite.ValidateIntegrity() 统一实现，避免各模块重复代码。
-	if cfg.DBPath != "" {
+	if cfg.PGDSN == "" && cfg.DBPath != "" {
 		if err := sqlite.ValidateIntegrity(cfg.DBPath); err != nil {
 			log.Fatalf("sqlite integrity check failed: %v", err)
 		}
@@ -59,7 +60,7 @@ func main() {
 	}
 
 	// ── Audit store / 审计存储 ─────────────────────────────────
-	auditStore, err := initAuditStore(cfg.DBPath, logger)
+	auditStore, err := initAuditStore(cfg, logger)
 	if err != nil {
 		log.Fatalf("failed to initialize audit store: %v", err)
 	}
@@ -294,13 +295,24 @@ func auditRetentionLoop(ctx context.Context, auditStore store.AuditStore, logger
 	}
 }
 
-func initAuditStore(dbPath string, logger *slog.Logger) (store.AuditStore, error) {
-	if dbPath == "" {
+func initAuditStore(cfg *config.Config, logger *slog.Logger) (store.AuditStore, error) {
+	if cfg.PGDSN != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		pgStore, err := postgres.NewAuditStore(ctx, postgres.Config{DSN: cfg.PGDSN}, logger)
+		if err != nil {
+			return nil, fmt.Errorf("open postgres audit store: %w", err)
+		}
+		logger.Info("postgresql audit store initialized (Phase B)")
+		return pgStore, nil
+	}
+
+	if cfg.DBPath == "" {
 		logger.Info("using in-memory audit store (no persistence)")
 		return memory.NewAuditStore(), nil
 	}
 
-	db, err := sqlite.Open(dbPath, logger)
+	db, err := sqlite.Open(cfg.DBPath, logger)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -311,6 +323,6 @@ func initAuditStore(dbPath string, logger *slog.Logger) (store.AuditStore, error
 		return nil, fmt.Errorf("create audit store: %w", err)
 	}
 
-	logger.Info("sqlite audit store initialized", "path", dbPath)
+	logger.Info("sqlite audit store initialized", "path", cfg.DBPath)
 	return as, nil
 }

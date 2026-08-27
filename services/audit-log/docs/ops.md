@@ -86,6 +86,10 @@ docker run -d \
 | `AUDIT_LOG_API_KEY` | (空) | 本模块入站 API Key（空表示免密） |
 | `AUDIT_LOG_CORS_ORIGINS` | (空) | 允许的 CORS 跨域源（逗号分隔） |
 | `AUDIT_LOG_DB_PATH` | (空) | SQLite 数据库路径（空表示纯内存模式） |
+| `AUDIT_LOG_PG_DSN` / `PG_DSN` | (空) | PostgreSQL 存证库 DSN（Phase B 架构，启用多副本水平扩展） |
+| `AUDIT_LOG_ENCRYPTION_KEY` | (空) | 快照敏感样本 AES-256-GCM 信封加密主密钥 |
+| `AUDIT_LOG_ARCHIVE_DIR` | (空) | 审计归档导出目录 |
+| `AUDIT_LOG_RETENTION_DAYS` | `90` | 审计日志本地保留天数（0 表示禁用自动清理） |
 | `AUDIT_LOG_LOG_FORMAT` | `json` | 日志格式: `json` \| `text` |
 | `AUDIT_LOG_LOG_LEVEL` | `info` | 日志级别: `debug` \| `info` \| `warn` \| `error` |
 
@@ -98,7 +102,20 @@ docker run -d \
 curl -s http://127.0.0.1:8084/api/health | jq .
 ```
 
-### 3.2 gRPC 健康检查与探活
+### 3.2 密码学哈希链与快照验真
+```bash
+# 1. 验证最近存证的区块链式连续哈希链 (Hash Chain)
+curl -s -X POST http://127.0.0.1:8084/api/audit/chain/verify \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 500}' | jq .
+
+# 2. 验证指定快照的 SHA-256 完整性
+curl -s -X POST http://127.0.0.1:8084/api/audit/snapshots/verify \
+  -H "Content-Type: application/json" \
+  -d '{"snapshot_id": "snap-xxx"}' | jq .
+```
+
+### 3.3 gRPC 健康检查与探活
 使用 `grpcurl` 工具：
 ```bash
 # 明文连接模式
@@ -107,9 +124,12 @@ grpcurl -plaintext 127.0.0.1:50054 auditlog.AuditLogService/Health
 # mTLS 认证模式
 grpcurl -cacert /certs/ca.crt -cert /certs/client.crt -key /certs/client.key \
   127.0.0.1:50054 auditlog.AuditLogService/Health
+
+# 链式验真 gRPC
+grpcurl -plaintext -d '{"limit": 500}' 127.0.0.1:50054 auditlog.AuditLogService/VerifyChain
 ```
 
-### 3.3 Prometheus 监控
+### 3.4 Prometheus 监控
 ```bash
 curl -s http://127.0.0.1:8084/metrics
 ```
@@ -123,4 +143,6 @@ curl -s http://127.0.0.1:8084/metrics
 | **Agent unreachable** | Agent 进程未就绪或端口错误 | 检查 `curl http://127.0.0.1:8079/health`；确认 `PRIVACY_AGENT_REST_HOST` 配置 |
 | **gRPC Handshake Failed** | 客户端证书不匹配或 CA 未信任 | 检查 `AUDIT_LOG_TLS_CA_FILE` 是否包含签名 CA；验证证书有效期 |
 | **client public key mismatch** | 客户端公钥与固定公钥文件不符 | 检查客户端证书公钥与 `AUDIT_LOG_TLS_PINNED_PUBKEY_FILE` 的一致性 |
-| **Integrity Violation** | 审计数据遭受篡改或底层 SQLite 损坏 | 调用 `/api/audit/snapshots/verify` 定位异常 snapshot_id，排查文件篡改 |
+| **Integrity Violation** | 审计数据遭受篡改或底层存储损坏 | 调用 `/api/audit/snapshots/verify` 定位异常 snapshot_id，排查记录篡改 |
+| **Hash Chain Broken** | 存在物理删行、调序或未授权中间修改 | 调用 `/api/audit/chain/verify` 获取 `broken_at_id`，定位断链根源 |
+| **Decryption Failed** | 信封加密密钥与原写入密钥不一致 | 检查 `AUDIT_LOG_ENCRYPTION_KEY` 配置；未配置密钥时系统降级为明文读取 |

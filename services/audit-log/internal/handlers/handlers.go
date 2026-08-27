@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fengzhizi319/PrivShield/pkg/crypto"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
@@ -65,13 +66,12 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/api/audit/stats", s.GetStats)
 	r.GET("/api/audit/snapshots", s.ListSnapshots)
 	r.POST("/api/audit/snapshots/verify", s.VerifyIntegrity)
+	r.POST("/api/audit/chain/verify", s.VerifyChain) // Hash chain continuous integrity verification
 	r.POST("/api/audit/report", s.GenerateReport)
 	r.GET("/metrics", s.mc.Handler())
 }
 
 // Health is a liveness probe — returns 200 if the process is alive.
-// Use /readyz for deep upstream dependency checks.
-// Health 存活探针 — 进程存活即返回 200。
 func (s *Server) Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
@@ -80,10 +80,6 @@ func (s *Server) Health(c *gin.Context) {
 }
 
 // Readyz is a readiness probe — checks upstream agent connectivity.
-// Returns 503 when the agent is unreachable so K8s won't route traffic
-// until the dependency is ready.
-// Readyz 就绪探针 — 检查上游 Agent 连通性。
-// 当 Agent 不可用时返回 503，K8s 不会将流量路由到该 Pod。
 func (s *Server) Readyz(c *gin.Context) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -116,9 +112,7 @@ func (s *Server) Readyz(c *gin.Context) {
 }
 
 // ListLogs returns audit logs with optional filtering.
-// P21 fix: added offset support for proper pagination.
 func (s *Server) ListLogs(c *gin.Context) {
-	// P61 fix: use shared ParsePagination helper instead of duplicated parsing logic.
 	limit, offset := validation.ParsePagination(c, 100, 1000)
 
 	rawDS := c.Query("datasource_id")
@@ -162,16 +156,7 @@ func (s *Server) ListLogs(c *gin.Context) {
 	})
 }
 
-// CreateLog creates a new audit log entry.
-//
-// Input validation / 输入校验：
-//   - operation 白名单: mask / classify / k_anon / dp / qol
-//   - status 白名单: success / failed
-//   - security_level 白名单: L1-L5（如果提供）
-//
-// Enhanced integrity hash / 增强完整性哈希：
-//   - 将 input_hash + output_hash + parameters + user + security_level 全部纳入哈希计算
-//   - 防止攻击者篡改输入/输出数据而不被检测
+// CreateLog creates a new audit log entry with cryptographic hash chain and sample envelope encryption.
 func (s *Server) CreateLog(c *gin.Context) {
 	var req struct {
 		TaskID        string `json:"task_id"`
@@ -192,6 +177,7 @@ func (s *Server) CreateLog(c *gin.Context) {
 		Status        string `json:"status" binding:"required"`
 		ErrorMessage  string `json:"error"`
 		SecurityLevel string `json:"security_level"`
+		PrevHash      string `json:"prev_hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
@@ -226,7 +212,7 @@ func (s *Server) CreateLog(c *gin.Context) {
 		normAPICode = entry.APICode
 	}
 
-	// Input validation / 输入校验
+	// Input validation
 	if err := validation.AllowedValues("operation", req.Operation, validation.AuditOperations); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
@@ -246,9 +232,6 @@ func (s *Server) CreateLog(c *gin.Context) {
 	now := time.Now()
 
 	paramsJSON, _ := json.Marshal(req.Parameters)
-
-	// P44 fix: 限制 parameters JSON 序列化后的大小，防止超大 JSON 对象耗尽存储空间。
-	// 1 MB 上限足以覆盖正常审计参数（算法配置、字段列表等）。
 	const maxParamsSize = 1 << 20 // 1 MB
 	if len(paramsJSON) > maxParamsSize {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -267,6 +250,16 @@ func (s *Server) CreateLog(c *gin.Context) {
 		h := sha256.Sum256([]byte(fmt.Sprintf("output|%s|%d|%s|%s|%s", normID, req.OutputRows, req.Status, req.SecurityLevel, string(paramsJSON))))
 		outputHash = hex.EncodeToString(h[:])
 	}
+
+	// Resolve Hash Chain: find preceding hash if not explicitly provided
+	prevHash := req.PrevHash
+	if prevHash == "" {
+		if latest, err := s.audit.GetLatestLog(); err == nil && latest != nil {
+			prevHash = latest.IntegrityHash
+		}
+	}
+
+	integrityHash := computeIntegrityHash(logID, prevHash, now, req.Algorithm, inputHash, outputHash, req.User, req.SecurityLevel, string(paramsJSON))
 
 	log := &store.AuditLog{
 		ID:             logID,
@@ -288,20 +281,33 @@ func (s *Server) CreateLog(c *gin.Context) {
 		Status:         req.Status,
 		ErrorMessage:   req.ErrorMessage,
 		SecurityLevel:  req.SecurityLevel,
+		PrevHash:       prevHash,
+		IntegrityHash:  integrityHash,
 	}
 
-	// Auto-generate snapshot with ENHANCED integrity hash
-	// 自动生成快照，使用增强完整性哈希（包含 input_hash/output_hash/parameters/user/security_level）
+	// Encrypt sensitive snapshot samples before storage (Envelope Encryption)
+	encInputSample := req.InputSample
+	encOutputSample := req.OutputSample
+	if s.cfg.EncryptionKey != "" {
+		if enc, err := crypto.EncryptString(req.InputSample, s.cfg.EncryptionKey); err == nil {
+			encInputSample = enc
+		}
+		if enc, err := crypto.EncryptString(req.OutputSample, s.cfg.EncryptionKey); err == nil {
+			encOutputSample = enc
+		}
+	}
+
 	snapshot := &store.SnapshotRecord{
 		ID:             validation.GenerateID("snap"),
 		AuditLogID:     logID,
 		Timestamp:      now,
-		InputSample:    req.InputSample,
-		OutputSample:   req.OutputSample,
+		InputSample:    encInputSample,
+		OutputSample:   encOutputSample,
 		Algorithm:      req.Algorithm,
 		Parameters:     req.Parameters,
 		ParametersJSON: string(paramsJSON),
-		IntegrityHash:  computeIntegrityHash(logID, now, req.Algorithm, inputHash, outputHash, req.User, req.SecurityLevel, string(paramsJSON)),
+		IntegrityHash:  integrityHash,
+		PrevHash:       prevHash,
 	}
 
 	if err := s.audit.SaveLogWithSnapshot(log, snapshot); err != nil {
@@ -311,8 +317,11 @@ func (s *Server) CreateLog(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"id":  logID,
-		"via": moduleVia,
+		"id":             logID,
+		"snapshot_id":    snapshot.ID,
+		"integrity_hash": integrityHash,
+		"prev_hash":      prevHash,
+		"via":            moduleVia,
 	})
 }
 
@@ -329,7 +338,6 @@ func (s *Server) GetLog(c *gin.Context) {
 }
 
 // GetStats returns aggregated audit statistics.
-// P31 fix: use SQL-level aggregation instead of loading 10k records into memory.
 func (s *Server) GetStats(c *gin.Context) {
 	stats, err := s.audit.GetStats()
 	if err != nil {
@@ -347,17 +355,30 @@ func (s *Server) GetStats(c *gin.Context) {
 	})
 }
 
-// ListSnapshots returns desensitization snapshots.
-// P30 fix: added offset support for proper pagination.
+// ListSnapshots returns desensitization snapshots (decrypting samples if key configured).
 func (s *Server) ListSnapshots(c *gin.Context) {
-	// P61 fix: use shared ParsePagination helper instead of duplicated parsing logic.
 	limit, offset := validation.ParsePagination(c, 50, 500)
 
-	// P35 fix: use SQL-level total count instead of len(snaps) for proper pagination
 	snaps, total, err := s.audit.ListSnapshots(limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
 		return
+	}
+
+	// Decrypt sample fields transparently if encrypted
+	if s.cfg.EncryptionKey != "" {
+		for i := range snaps {
+			if crypto.IsEncrypted(snaps[i].InputSample) {
+				if dec, err := crypto.DecryptString(snaps[i].InputSample, s.cfg.EncryptionKey); err == nil {
+					snaps[i].InputSample = dec
+				}
+			}
+			if crypto.IsEncrypted(snaps[i].OutputSample) {
+				if dec, err := crypto.DecryptString(snaps[i].OutputSample, s.cfg.EncryptionKey); err == nil {
+					snaps[i].OutputSample = dec
+				}
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -385,16 +406,19 @@ func (s *Server) VerifyIntegrity(c *gin.Context) {
 		return
 	}
 
-	// Get the associated audit log for full hash computation
 	log, err := s.audit.GetLog(snap.AuditLogID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "associated audit log not found"})
 		return
 	}
 
-	// Recompute hash with enhanced fields and compare
+	prevHash := snap.PrevHash
+	if prevHash == "" {
+		prevHash = log.PrevHash
+	}
+
 	expectedHash := computeIntegrityHash(
-		snap.AuditLogID, snap.Timestamp, snap.Algorithm,
+		snap.AuditLogID, prevHash, snap.Timestamp, snap.Algorithm,
 		log.InputHash, log.OutputHash, log.User, log.SecurityLevel, snap.ParametersJSON,
 	)
 	valid := snap.IntegrityHash == expectedHash
@@ -404,12 +428,39 @@ func (s *Server) VerifyIntegrity(c *gin.Context) {
 		"valid":       valid,
 		"expected":    expectedHash,
 		"actual":      snap.IntegrityHash,
+		"prev_hash":   prevHash,
 		"via":         moduleVia,
 	})
 }
 
+// VerifyChain verifies the cryptographic hash chain of recent records.
+func (s *Server) VerifyChain(c *gin.Context) {
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.Limit <= 0 {
+		req.Limit = 1000
+	}
+
+	res, err := s.audit.VerifyChain(req.Limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_verified": res.TotalVerified,
+		"valid":          res.Valid,
+		"broken_at_id":   res.BrokenAtID,
+		"expected_hash":  res.ExpectedHash,
+		"actual_hash":    res.ActualHash,
+		"message":        res.Message,
+		"via":            moduleVia,
+	})
+}
+
 // GenerateReport generates a compliance audit report.
-// P33 fix: use SQL-level filtering and aggregation instead of loading 10k records.
 func (s *Server) GenerateReport(c *gin.Context) {
 	var req struct {
 		Period string `json:"period"`
@@ -418,7 +469,6 @@ func (s *Server) GenerateReport(c *gin.Context) {
 		req.Period = "24h"
 	}
 
-	// Use SQL-level filtering and aggregation
 	report, err := s.audit.GenerateReport(req.Period)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
@@ -437,15 +487,10 @@ func (s *Server) GenerateReport(c *gin.Context) {
 	})
 }
 
-// computeIntegrityHash computes an enhanced SHA-256 integrity hash.
-//
-// Security fix / 安全修复：
-// 原实现仅哈希 3 个字段（logID, timestamp, algorithm），攻击者可篡改
-// 输入/输出数据而不被检测。增强版将 input_hash + output_hash + parameters
-// + user + security_level 全部纳入哈希计算。
-func computeIntegrityHash(logID string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
-	data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%v",
-		logID, timestamp.Format(time.RFC3339Nano), algorithm,
+// computeIntegrityHash computes an enhanced SHA-256 integrity hash including prev_hash chaining.
+func computeIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
+	data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%v",
+		prevHash, logID, timestamp.Format(time.RFC3339Nano), algorithm,
 		inputHash, outputHash, user, securityLevel, paramsJSON)
 	hash := sha256.Sum256([]byte(data))
 	return fmt.Sprintf("%x", hash)

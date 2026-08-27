@@ -81,6 +81,10 @@ SERVICE_HUB_RETENTION_DAYS=30 \
 | `SERVICE_HUB_API_KEY` | `""` | string | 本模块入站 API Key（空表示免密） |
 | `SERVICE_HUB_CORS_ORIGINS` | `""` | string | 允许的 CORS 跨域源（逗号分隔） |
 | `SERVICE_HUB_DB_PATH` | `""` | string | SQLite 数据库路径（空表示纯内存模式） |
+| `SERVICE_HUB_PG_DSN` / `PG_DSN` | `""` | string | Phase B PostgreSQL 连接串（启用多副本 Hub 原子租约争抢） |
+| `SERVICE_HUB_PG_MAX_CONNS` | `10` | int | PostgreSQL 连接池最大连接数 |
+| `SERVICE_HUB_PG_MIN_CONNS` | `2` | int | PostgreSQL 连接池最小连接数 |
+| `SERVICE_HUB_LEASE_TTL` | `60` | int | 任务租约有效时间（秒，超时自动被其他 Worker 认领） |
 | `SERVICE_HUB_RETENTION_DAYS` | `30` | int | 终态任务保留天数（0 表示禁用清理） |
 | `SERVICE_HUB_SHUTDOWN_TIMEOUT` | `5` | int | 优雅停机等待超时（秒） |
 | `SERVICE_HUB_LOG_FORMAT` | `json` | string | 日志格式: `json`（生产推荐） \| `text` |

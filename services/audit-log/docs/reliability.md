@@ -112,13 +112,19 @@ python -m engine.privacy.verify_audit --log-file /path/to/audit.log
 
 ### 3.5 审计写入持久化保证与性能评估
 
-生产环境必须配置非空的 `AUDIT_LOG_DB_PATH`，使 audit-log 使用 SQLite `AuditStore`；内存回退仅适合测试或临时开发，重启后数据会丢失，并且内存实现会在达到容量上限后丢弃最早的记录，不能作为合规存证的持久化方案。SQLite 模式下，`SaveLog()` 以参数化单条 `INSERT INTO audit_logs (...)` 写入主审计记录。HTTP `POST /api/audit/logs` 使用 `SaveLogWithSnapshot()`：主记录与关联快照在同一 SQLite 事务内写入，任一 `INSERT` 失败都会回滚并返回 `500`；只有两者都提交成功才返回 `201 Created`。gRPC `RecordAudit` 当前只创建主审计记录，`SaveLog()` 成功后才返回 `success = true`，失败时返回 `Internal`。因此，HTTP 调用方收到创建成功响应可确认主记录和快照已共同持久化。
+生产环境推荐配置 `AUDIT_LOG_PG_DSN`（PostgreSQL Phase B）或非空的 `AUDIT_LOG_DB_PATH`（SQLite WAL 模式）；内存回退仅适合测试或临时开发。
 
-“原子写入”表示主审计记录与快照要么同时提交、要么都不提交，不会留下只有一侧存在的部分状态。SQLite 用 `sql.Tx` 实现这项保证；内存存储在同一把锁保护下写入两类对象，以保持相同的接口语义。`audit_logs` 与 `snapshots` 的外键继续保证快照只能引用已存在的主记录，但事务性提交才是防止部分成功的核心机制。
+1. **HTTP 与 gRPC 双协议原子快照联动**：
+   - HTTP `POST /api/audit/logs` 与 gRPC `RecordAudit` 均通过 `SaveLogWithSnapshot()` 实现主记录与关联快照的单事务原子提交；任一写入失败均会完整回滚，绝不产生悬挂孤立记录。
+2. **前后防篡改哈希链 (Hash Chain)**：
+   - 每条审计记录在落盘时包含 `prev_hash`，指向上一条记录的综合密码学哈希；
+   - 提供 `VerifyChain` 端点支持全量/区间连续性核验，杜绝物理删行或记录插入攻击。
+3. **敏感样本应用层信封加密 (Envelope Encryption)**：
+   - 快照表中的 `input_sample` 和 `output_sample` 由 `pkg/crypto` 采用 AES-256-GCM 密文落盘，防止数据库文件被拖库导致隐私外泄。
+4. **PostgreSQL Phase B 高并发与多副本扩容**：
+   - 在高吞吐集群环境下，通过配置 PostgreSQL DSN 消除 SQLite 单写锁瓶颈，支持多副本并发存证与 `SaveLogsBatch` 批量管道刷盘。
 
-每条仅含主记录的审计请求产生 1 次 SQLite 写入；通过 HTTP 同时创建快照的请求通常产生 2 次顺序写入。WAL 允许审计查询与写入并发进行，`busy_timeout=5000` 在短暂写锁竞争时等待最多 5 秒，连接池限制为 4 个打开连接、2 个空闲连接以限制竞争；但 SQLite 仍只有一个写入者，高并发审计提交、慢磁盘或大尺寸 `parameters_json`/快照样本都会提升写入尾延迟。接口将 `parameters` 序列化后的大小限制为 1 MiB，可避免单条参数无限制放大数据库和 I/O 成本，但输入/输出样本的大小仍应通过网关或调用方约束并纳入容量规划。
-
-性能验收必须在实际存储卷、文件系统和容器限额下执行，至少采集 `SaveLog` 与 `SaveSnapshot` 的成功率和 P50/P95/P99 延迟、SQLite busy/错误次数、WAL 文件大小、每秒写入数，以及主记录与快照的数量差异。基准应分别覆盖单并发主记录写入、多并发主记录写入和 HTTP 双写路径；不要将开发机吞吐量作为生产承诺。可靠性验收还应注入锁竞争和磁盘错误，确认主记录失败会向调用方暴露，而快照失败会被日志与监控及时发现并补偿。
+WAL 模式允许 SQLite 读写并发，`busy_timeout=5000` 在短暂写锁竞争时等待最多 5 秒；而在 PostgreSQL 模式下支持行级并发事务与连接池自动弹性伸缩。接口将 `parameters` 序列化后的大小限制为 1 MiB，有效防范超大报文对存储的非预期占用。
 
 ---
 

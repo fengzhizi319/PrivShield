@@ -816,3 +816,90 @@ func TestInitTaskTables_LegacyMigration(t *testing.T) {
 		t.Fatalf("canonical fields not preserved on get: %+v", gotNew)
 	}
 }
+
+func TestAuditStore_HashChainAndVerify(t *testing.T) {
+	as := setupAuditStore(t)
+
+	// 1. Genesis log
+	t1 := time.Now().Add(-2 * time.Minute)
+	log1 := &store.AuditLog{
+		ID:            "chain-1",
+		Timestamp:     t1,
+		Operation:     "mask",
+		DataSource:    "ds_yibao",
+		DatasourceID:  "ds_yibao",
+		InputHash:     "hash-in-1",
+		OutputHash:    "hash-out-1",
+		Algorithm:     "mask",
+		User:          "alice",
+		Status:        "success",
+		SecurityLevel: "L3",
+		PrevHash:      "",
+	}
+	if err := as.SaveLog(log1); err != nil {
+		t.Fatalf("save log 1: %v", err)
+	}
+
+	latest, err := as.GetLatestLog()
+	if err != nil || latest == nil {
+		t.Fatalf("get latest log: %v", err)
+	}
+	if latest.IntegrityHash == "" {
+		t.Fatal("expected non-empty integrity_hash for genesis log")
+	}
+
+	// 2. Second log linked to genesis
+	t2 := time.Now().Add(-1 * time.Minute)
+	log2 := &store.AuditLog{
+		ID:            "chain-2",
+		Timestamp:     t2,
+		Operation:     "dp",
+		DataSource:    "ds_yibao",
+		DatasourceID:  "ds_yibao",
+		InputHash:     "hash-in-2",
+		OutputHash:    "hash-out-2",
+		Algorithm:     "dp_laplace",
+		User:          "bob",
+		Status:        "success",
+		SecurityLevel: "L4",
+		PrevHash:      latest.IntegrityHash,
+	}
+	if err := as.SaveLog(log2); err != nil {
+		t.Fatalf("save log 2: %v", err)
+	}
+
+	// 3. Verify unbroken chain
+	res, err := as.VerifyChain(10)
+	if err != nil {
+		t.Fatalf("verify chain error: %v", err)
+	}
+	if !res.Valid || res.TotalVerified != 2 {
+		t.Fatalf("expected valid chain with 2 logs, got valid=%v, count=%d, msg=%s", res.Valid, res.TotalVerified, res.Message)
+	}
+}
+
+func TestAuditStore_BatchSave(t *testing.T) {
+	as := setupAuditStore(t)
+
+	now := time.Now()
+	logs := []store.AuditLog{
+		{ID: "batch-1", Timestamp: now, Operation: "mask", DataSource: "ds_kangyang", Status: "success"},
+		{ID: "batch-2", Timestamp: now.Add(time.Second), Operation: "k_anon", DataSource: "ds_kangyang", Status: "success"},
+	}
+	snaps := []store.SnapshotRecord{
+		{ID: "snap-b-1", AuditLogID: "batch-1", Timestamp: now, InputSample: "s1", OutputSample: "s2"},
+	}
+
+	if err := as.SaveLogsBatch(logs, snaps); err != nil {
+		t.Fatalf("batch save: %v", err)
+	}
+
+	l1, err := as.GetLog("batch-1")
+	if err != nil || l1 == nil {
+		t.Fatalf("get batch-1: %v", err)
+	}
+	snap, err := as.GetSnapshot("snap-b-1")
+	if err != nil || snap == nil {
+		t.Fatalf("get snapshot snap-b-1: %v", err)
+	}
+}

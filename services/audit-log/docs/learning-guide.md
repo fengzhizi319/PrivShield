@@ -259,6 +259,10 @@ func main() {
 | `AUDIT_LOG_GRPC_HOST` | `0.0.0.0` | gRPC 服务监听地址 |
 | `AUDIT_LOG_GRPC_PORT` | `50054` | gRPC 服务监听端口 |
 | `AUDIT_LOG_DB_PATH` | `""` (内存) | 审计日志 SQLite 存储路径 (配置时开启 WAL 持久化) |
+| `AUDIT_LOG_PG_DSN` / `PG_DSN` | `""` | Phase B PostgreSQL 存证库 DSN 连接串（启用多副本高可用存储） |
+| `AUDIT_LOG_ENCRYPTION_KEY` | `""` | 快照敏感样本 AES-256-GCM 信封加密主密钥 |
+| `AUDIT_LOG_ARCHIVE_DIR` | `""` | 审计归档导出目录 |
+| `AUDIT_LOG_RETENTION_DAYS` | `90` | 审计日志本地保留天数（0 表示禁用自动清理） |
 | `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | PrivShield Agent 连通性探针地址 |
 | `PRIVACY_REST_PORT` | `8079` | PrivShield Agent 端口 |
 | `PRIVACY_TLS_ENABLED` | `false` | 是否开启 gRPC TLS/mTLS 加密 |
@@ -269,32 +273,36 @@ func main() {
 
 `handlers.go` 提供了完备的存证生命周期 API：
 
-1. `CreateLog`：接收存证请求，若未显式提供哈希，自动利用 `crypto/sha256` 计算 `InputHash` 与 `OutputHash` 并写入存储。
-2. `ListLogs`：支持基于 `start_time`、`end_time`、`operation`、`datasource`、`security_level` 的高效复合过滤与分页。
-3. `VerifyIntegrity`：快照完整性动态校验。
-4. `GenerateReport`：汇总时间窗口内的治理执行情况，输出成功率、各等级（L1~L5）分布并自动生成合规建议。
+1. `CreateLog`：接收存证请求，自动进行哈希链关联（`prev_hash`）、计算 9 要素完整性哈希，并对快照样本自动实施 AES-256-GCM 信封加密落盘。
+2. `ListLogs`：支持基于 `task_id`、`api_code`、`datasource_id`、`operation`、`user`、`status`、`security_level` 的高效复合过滤与分页。
+3. `ListSnapshots`：查询脱敏前后快照，向鉴权调用方动态解密样本明文。
+4. `VerifyIntegrity`：快照完整性单点校验。
+5. `VerifyChain`：全链路防篡改哈希链（Hash Chain）连续性核验，检测任何删行、篡改或调序。
+6. `GenerateReport`：汇总时间窗口内的治理执行情况，输出成功率、各等级（L1~L5）分布并自动生成合规建议。
 
 ### 5.4 存储引擎与 Append-only 存证 (`pkg/store`)
 
 `store.AuditStore` 接口定义了存证存储规范：
+- 支持 **SQLite WAL** 引擎（单机高吞吐）与 **PostgreSQL Phase B** 引擎（多副本水平扩展）；
+- 支持 `SaveLogsBatch` 高吞吐批量流水线入库与 `VerifyChain` 链式验真；
 - 日志只允许 **追加写入 (Append-only)** 与 **按条件检索 (Read-only)**，对外不暴露 Update/Delete 接口，从代码设计层面保障存证的不可篡改性。
 
 ### 5.5 gRPC 高性能存证写入与 mTLS 加固 (`internal/grpcserver/server.go`)
 
 `internal/grpcserver/server.go` 实现了高吞吐、低延迟的 `AuditLogServiceServer`：
-- 支持 `LogAudit`、`VerifySnapshot` 与 `GetAuditStats` RPC 接口。
+- 支持 `RecordAudit`（自动原子写入主记录与快照）、`GetAuditLog`、`ListAuditLogs`、`ListSnapshots`、`VerifyIntegrity`、`VerifyChain` 与 `GetAuditStats` RPC 接口。
 - 内置零信任 mTLS 与客户端公钥固定 (SPKI Pinning) 防护。
 
-### 5.6 gRPC 桩代码 (`audit_log_grpc.pb.go`) 与服务端实现 (`server.go`) 的核心关联
+### 5.6 gRPC 桩代码 (`auditlog_grpc.pb.go`) 与服务端实现 (`server.go`) 的核心关联
 
-在 `audit-log` 模块中，`proto/audit_log_grpc.pb.go` 与 `internal/grpcserver/server.go` 遵循标准的契约与落地架构模式：
+在 `audit-log` 模块中，`proto/auditlog_grpc.pb.go` 与 `internal/grpcserver/server.go` 遵循标准的契约与落地架构模式：
 
 1. **接口契约 (Server Interface)**：
-   `AuditLogServiceServer` 接口定义了存证系统的 RPC 方法规范（如 `LogAudit`、`VerifySnapshot`、`GetAuditStats`）；
+   `AuditLogServiceServer` 接口定义了存证系统的 RPC 方法规范（如 `RecordAudit`、`VerifyIntegrity`、`VerifyChain`、`GetAuditStats`）；
 2. **方法分发器 (Dispatcher)**：
-   `_AuditLogService_LogAudit_Handler` 等自动生成的内部调度函数接收 HTTP/2 网络流，反序列化 `*LogAuditRequest`，并转发给服务端实例；
+   `_AuditLogService_RecordAudit_Handler` 等自动生成的内部调度函数接收 HTTP/2 网络流，反序列化 `*RecordAuditRequest`，并转发给服务端实例；
 3. **业务落地实现 (Server Implementation)**：
-   `internal/grpcserver/server.go` 中的 `(*GRPCServer).LogAudit` 等方法实现了真实的存证持久化与 SHA-256 完整性哈希计算；
+   `internal/grpcserver/server.go` 中的 `(*GRPCServer).RecordAudit` 等方法实现了真实的存证持久化与 9 要素完整性哈希链计算；
 4. **生命周期绑定**：
    在 `cmd/server/main.go` 中通过 `pb.RegisterAuditLogServiceServer(grpcServer, serviceImpl)` 完成服务注册与监听启动。
 

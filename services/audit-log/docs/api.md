@@ -174,6 +174,22 @@ message VerifyIntegrityResponse {
 }
 ```
 
+#### `POST /api/audit/chain/verify`
+- **说明**：全链路防篡改哈希链（Hash Chain）连续性核验，检测是否有任何历史记录被物理删除、篡改或乱序。
+- **请求体**：`{"limit": 1000}`
+- **响应**：
+```json
+{
+  "total_verified": 150,
+  "valid": true,
+  "broken_at_id": "",
+  "expected_hash": "",
+  "actual_hash": "",
+  "message": "hash chain verified successfully (150 records checked)",
+  "via": "audit-log"
+}
+```
+
 ---
 
 ### 3.3 统计分析与合规报告

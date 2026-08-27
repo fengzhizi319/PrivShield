@@ -2,7 +2,7 @@
 
 > **版本**：v2.0.0  
 > **适用范围**：`PrivShield` 核心算力引擎、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台 BFF 体系（`bff-go` / `web`）及云原生部署与监控套件。  
-> **关联文档**：[architecture-summary.md](architecture-summary.md)（工程实践速览）、[services.md](services.md)（微服务体系）、[console.md](console.md)（控制台体系）、[production_optimization_design.md](production_optimization_design.md)（生产级优化设计）。
+> **关联文档**：[unified_design_specifications.md](unified_design_specifications.md)（全栈统一设计规范）、[new_api_design.md](new_api_design.md)（新增数据接口扩展 SOP）、[architecture-summary.md](architecture-summary.md)（工程实践速览）、[services.md](services.md)（微服务体系）、[console.md](console.md)（控制台体系）、[production_optimization_design.md](production_optimization_design.md)（生产级优化设计）。
 
 ---
 
