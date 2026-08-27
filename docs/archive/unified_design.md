@@ -52,12 +52,15 @@ flowchart TD
         WebAppLZ["console/app-lz/web<br/>(医保/康养政务流水线)"]
         BFFGo["console/bff-go (:8081)<br/>REST/gRPC 聚合网关"]
         BFFLZ["app-lz/bff-go (:8080)<br/>会话调度与 E2E 测试器"]
+        PyGW["engine/gateway<br/>Python 负载均衡网关<br/>(6算法/熔断/重试/动态拓扑)"]
     end
 
     subgraph LayerMiddleware ["2. 统一中间件与上下文透传层 (Cross-Cutting Middleware)"]
         TraceMW["TraceID 自动注入与 Header 传递"]
         AuthMW["API Key 鉴权与 Leaky Bucket 限流"]
         EnvelopeMW["统一 JSON 响应信封包裹器"]
+        DDoSMW["DDoS 防护<br/>(MaxBodySize/MaxConcurrent/RateLimit)"]
+        SecHeaders["安全响应头<br/>(CSP/HSTS/X-Frame-Options)"]
     end
 
     subgraph LayerGovernance ["3. 企业级数据流通调度与存证层 (Services Cluster)"]
@@ -69,6 +72,7 @@ flowchart TD
     subgraph LayerCoreCompute ["4. 核心隐私计算与动态分类引擎 (Core Engine)"]
         Funnel["3-Layer 动态分类漏斗<br/>(Rule → Small-NER → Local LLM)"]
         Primitives["四大隐私原语<br/>(Masking / DP / K-Anon / QoL)"]
+        Budget["隐私预算会计<br/>(Epsilon/Delta + 时间窗口重置)"]
         EngineMW["FastAPI 全局异常信封拦截器"]
     end
 
@@ -79,12 +83,24 @@ flowchart TD
         mTLSAuth["pkg/tlsutil<br/>(TLS 1.3 mTLS + CN 白名单)"]
     end
 
+    subgraph LayerObservability ["6. 全栈可观测性体系 (Observability)"]
+        Metrics["Prometheus Metrics<br/>(Python prometheus_client + Go client_golang)"]
+        StructLog["结构化日志<br/>(JSON/Text 双格式)"]
+        Tracing["OpenTelemetry Tracing<br/>(可选 OTLP 导出)"]
+        Grafana["Grafana Dashboard + ServiceMonitor"]
+    end
+
     WebFull --> BFFGo
     WebAppLZ --> BFFLZ
     BFFGo & BFFLZ --> LayerMiddleware
     LayerMiddleware --> Hub & DSMgr & Audit & LayerCoreCompute
+    LayerMiddleware --> PyGW
+    PyGW --> LayerCoreCompute
     LayerGovernance --> LayerStorageSecurity
     LayerCoreCompute --> LayerStorageSecurity
+    LayerCoreCompute --> LayerObservability
+    LayerGovernance --> LayerObservability
+    LayerMiddleware --> LayerObservability
 ```
 
 ---
@@ -628,12 +644,24 @@ func (dw *DynamicWhitelist) UnaryServerInterceptor() grpc.UnaryServerInterceptor
 ├───────────────────┼──────────┼───────────────────────┼──────────────────────────────────────────┤
 │ **4. mTLS 热重载** │ High     │ 正常客户端报 403 /    │ 恢复 `mtls-whitelist.yaml.bak` 备份文件， │
 │ 配置文件格式损坏   │          │ PermissionDenied      │ 监听器毫秒级自动热更新重载恢复            │
+├───────────────────┼──────────┼───────────────────────┼──────────────────────────────────────────┤
+│ **5. 隐私预算耗尽** │ High     │ DP 查询返回 429 /     │ 配置 `PRIVACY_BUDGET_WINDOW_SECONDS` 自动  │
+│ 导致服务不可用     │          │ BudgetExhausted 异常  │ 重置；多实例部署启用 `PRIVACY_BUDGET_DB`   │
+├───────────────────┼──────────┼───────────────────────┼──────────────────────────────────────────┤
+│ **6. 审计日志膨胀** │ Medium   │ 磁盘空间告警 /        │ 配置 `AUDIT_LOG_RETENTION_DAYS`（默认 90） │
+│ 超出存储配额       │          │ 查询延迟上升          │ 自动清理超期记录；PG 启用分区表            │
+├───────────────────┼──────────┼───────────────────────┼──────────────────────────────────────────┤
+│ **7. LLM 推理 OOM** │ High     │ 进程崩溃 /            │ `PRIVACY_LLM_MAX_CONCURRENCY` 信号量限流； │
+│ 或推理超时         │          │ OOM Killer 杀进程     │ `PRIVACY_LLM_MIN_FREE_MEM_MB` 内存阈值降级│
+├───────────────────┼──────────┼───────────────────────┼──────────────────────────────────────────┤
+│ **8. 网关后端全部熔断**│ High  │ 所有请求返回 503     │ 主动健康检查持续探测，半开状态单请求恢复； │
+│                    │          │                       │ 全部节点故障时检查后端进程与网络连通性    │
 └───────────────────┴──────────┴───────────────────────┴──────────────────────────────────────────┘
 ```
 
 ---
 
-## 5. 全链路迁移验证与验收测试套件 (Verification DoD)
+## 5. 全栈迁移验证与验收测试套件 (Verification DoD)
 
 迁移完成后，需依次执行以下验收测试套件，满足 **100% 通过（Definition of Done）** 准则：
 
@@ -662,4 +690,232 @@ cd ../../web && pnpm build
 - [x] **9 要素哈希链与验真**：`POST /api/audit/chain/verify` 返回 `valid: true`，哈希链无任何断裂；
 - [x] **信封加密**：数据库中快照样本全部携带 `enc:v1:` 密文前缀，读取时透明还原；
 - [x] **Phase B 租约并发**：20 个并发任务无死锁、无重复执行（TS-03 100% 通过）；
-- [x] **全链路追踪**：各服务日志中均输出一致的 `X-Request-ID`。
+- [x] **全链路追踪**：各服务日志中均输出一致的 `X-Request-ID`；
+- [x] **Prometheus 指标暴露**：Python `/metrics` 与 Go `/metrics` 均可抓取，包含请求计数、延迟直方图、隐私原语操作计数；
+- [x] **DDoS 防护中间件**：所有 Go 服务启用 `MaxBodySize` + `MaxConcurrent` + `RateLimit`，Python 启用 `limit_concurrency` + `limit_max_requests`；
+- [x] **优雅停机**：所有服务捕获 SIGTERM/SIGINT，在途请求排空完成后再退出；
+- [x] **熔断器保护**：Agent 客户端与 Gateway 负载均衡器均具备三态熔断器（Closed/Open/Half-Open）；
+- [x] **数据保留策略**：审计日志超期自动清理（`AUDIT_LOG_RETENTION_DAYS`，默认 90 天）。
+
+---
+
+## 6. 全栈可观测性体系设计 (Observability Architecture)
+
+> 原设计仅覆盖了分布式追踪（专项 2），缺失了 Prometheus 指标体系、结构化日志规范与 OpenTelemetry 集成设计。本节补齐。
+
+### 6.1 Prometheus 指标体系
+
+#### Python 引擎端 (`engine/observability/metrics.py`)
+
+| 指标名称 | 类型 | 标签 | 用途 |
+|---|---|---|---|
+| `privacy_requests_total` | Counter | `method`, `path`, `status` | REST/gRPC 请求计数 |
+| `privacy_request_duration_seconds` | Histogram | `method`, `path` | 请求延迟分布（P50/P95/P99） |
+| `privacy_dp_queries_total` | Counter | `mechanism`, `noise` | 差分隐私查询计数 |
+| `privacy_classification_results_total` | Counter | `layer`, `level` | 分类漏斗各层结果计数 |
+| `privacy_masking_operations_total` | Counter | `field_type` | 脱敏操作计数 |
+| `privacy_kano_operations_total` | Counter | `algorithm` | K-匿名操作计数 |
+| `privacy_qol_operations_total` | Counter | `strategy` | 查询混淆操作计数 |
+| `privacy_gateway_healthy_nodes` | Gauge | — | 网关健康后端节点数 |
+| `privacy_gateway_retries_total` | Counter | `node` | 网关重试计数 |
+| `privacy_gateway_circuit_breaker_state` | Gauge | `node` | 熔断器状态（0=closed, 1=open, 2=half_open） |
+
+#### Go 微服务端 (`pkg/metrics/metrics.go`)
+
+| 指标名称 | 类型 | 标签 | 用途 |
+|---|---|---|---|
+| `https_requests_total` | Counter | `method`, `path`, `status` | HTTP 请求计数 |
+| `http_request_duration_seconds` | Histogram | `method`, `path` | HTTP 请求延迟 |
+| `agent_requests_total` | Counter | `method`, `status` | Agent gRPC 调用计数 |
+| `agent_request_duration_seconds` | Histogram | `method` | Agent gRPC 调用延迟 |
+| `orphaned_tasks_recovered_total` | Counter | — | 崩溃恢复时回收的孤儿任务数 |
+| `tasks_retried_total` | Counter | — | 自动重试的任务数 |
+| `circuit_breaker_state` | Gauge | `target` | Agent 客户端熔断器状态 |
+| `task_lease_conflicts` | Counter | — | 租约争抢冲突计数 |
+
+每个 Go 服务使用独立的 `prometheus.Registry`，避免全局注册冲突。暴露 `/metrics` 端点供 Prometheus 或 ServiceMonitor 抓取。
+
+### 6.2 结构化日志规范
+
+#### Python 引擎
+- 通过 `PRIVACY_LOG_FORMAT` 环境变量切换 `text`（开发）或 `json`（生产）格式。
+- JSON 格式使用 `python-json-logger`，每条日志自动注入 `service`、`trace_id`、`timestamp` 字段。
+- 所有隐私操作日志强制携带 `extra={"trace_id": ...}` 上下文。
+
+#### Go 微服务
+- 使用标准 `log/slog` 结构化日志，JSON 格式输出。
+- 每条日志自动注入 `trace_id`、`service`、`component` 字段。
+- 审计日志额外携带 `integrity_hash` 与 `prev_hash` 用于哈希链验真。
+
+### 6.3 OpenTelemetry 分布式追踪
+
+Python 引擎可选启用 OpenTelemetry（`engine/observability/tracing.py`）：
+
+```text
+┌────────────────┐     OTLP/gRPC      ┌──────────────────┐
+│  Python Engine  │ ─────────────────▶ │ Jaeger / Tempo   │
+│  (SpanExporter) │                    │ (Trace Backend)  │
+└────────────────┘                    └──────────────────┘
+```
+
+- 通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 环境变量激活，未设置时为 no-op。
+- 支持 `BatchSpanProcessor` 批量导出，减少网络开销。
+- Span 自动关联 `X-Request-ID`，与 Go 端 TraceMiddleware 形成完整调用链。
+
+### 6.4 Grafana 仪表盘与告警
+
+- 预置仪表盘模板：`deploy/grafana/dashboard.json` 与 `deploy/grafana/service-hub-dashboard.json`。
+- K8s 部署通过 `ServiceMonitor` CRD 自动注册 Prometheus 抓取目标（`deploy/helm/PrivShield/templates/servicemonitor.yaml`）。
+- 推荐告警规则：
+  - `privacy_requests_total{status=~"5.."}` 5 分钟速率突增 → P1 告警
+  - `privacy_gateway_healthy_nodes == 0` → P0 告警（全后端不可用）
+  - `circuit_breaker_state > 0` 持续 5 分钟 → P2 告警（后端异常）
+
+---
+
+## 7. 韧性与安全加固设计 (Resilience & Security Hardening)
+
+> 原设计缺失跨服务韧性模式（熔断/重试/降级）、DDoS 防护中间件层、优雅停机协议与隐私预算会计模型的设计说明。本节补齐。
+
+### 7.1 跨服务韧性模式
+
+#### 7.1.1 熔断器（Circuit Breaker）
+
+系统中有两处关键熔断器实现：
+
+| 位置 | 保护目标 | 参数 |
+|---|---|---|
+| `pkg/agent/client.go` | Agent gRPC 客户端 → Engine | 连续失败 5 次触发，30 秒冷却 |
+| `engine/gateway/balancer.py` | Gateway → 多后端 Engine 节点 | 连续失败 5 次触发，30 秒冷却，半开单探测许可证 |
+
+三态模型：`Closed`（正常）→ `Open`（熔断）→ `Half-Open`（单请求探测恢复）。
+
+#### 7.1.2 重试策略
+
+| 组件 | 重试条件 | 最大次数 | 退避策略 |
+|---|---|---|---|
+| Gateway HTTP 代理 | 幂等方法或 ConnectError | 3 | 指数退避 + 随机抖动 |
+| Gateway gRPC 代理 | UNAVAILABLE 或未知异常 | 3 | 指数退避 + 随机抖动 |
+| BFF-Go → Agent gRPC | gRPC 服务配置 `retryPolicy` | 按配置 | 指数退避 |
+| Service-Hub → Datasource | HTTP 连接失败 | 按配置 | 指数退避 |
+
+#### 7.1.3 分类漏斗降级链
+
+```
+Layer-1 Rule Engine (确定性规则匹配)
+  ↓ 低置信度
+Layer-2 Small-NER (轻量实体识别，ONNX Runtime)
+  ↓ 仍低于阈值
+Layer-3 Local LLM (本地大模型仲裁，可选)
+  ↓ LLM 不可用或内存不足
+Conservative Fallback (保守回退，不降级安全等级)
+```
+
+降级触发条件：
+- `PRIVACY_LLM_MIN_FREE_MEM_MB`：系统可用内存低于阈值时跳过 LLM 层
+- `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS`：LLM 推理信号量等待超时后降级
+- NER/LLM 模型加载失败：缓存错误，后续调用直接走降级路径
+
+### 7.2 DDoS 防护与安全中间件层
+
+#### Go 微服务中间件栈 (`pkg/middleware/`)
+
+所有 Go 服务（service-hub, datasource-mgr, audit-log, bff-go, app-lz）统一启用以下中间件链：
+
+| 中间件 | 功能 | 配置参数 |
+|---|---|---|
+| `MaxBodySize(maxBytes)` | 限制请求体大小，防止大包 OOM | 32 MB (`32 << 20`) |
+| `MaxConcurrent(limit)` | 限制在途请求总数，防止并发耗尽资源 | 按服务配置 |
+| `RateLimit(rps, burst)` | 每客户端 IP 令牌桶限流 | 按服务配置 |
+| `SecurityHeaders()` | 注入 CSP/HSTS/X-Frame-Options/X-Content-Type-Options | 固定值 |
+| `CORS(origins)` | 可配置跨域来源 | 环境变量 |
+| `TraceMiddleware()` | 自动注入/传播 X-Request-ID | — |
+
+#### Python 引擎防护
+
+| 参数 | 默认值 | 用途 |
+|---|---|---|
+| `PRIVACY_LIMIT_CONCURRENCY` | 10000 | Uvicorn 最大并发连接数 |
+| `PRIVACY_LIMIT_MAX_REQUESTS` | 100000 | 单连接最大请求数（防内存泄漏） |
+| `PRIVACY_TIMEOUT_KEEP_ALIVE` | 30 | 空闲连接超时（秒） |
+| Python `RateLimitInterceptor` | 按路径配置 | gRPC 拦截器级限流 |
+
+### 7.3 优雅停机协议
+
+#### Go 服务
+
+```text
+SIGTERM/SIGINT 到达
+  → 停止接收新连接
+  → 排空在途请求（最长 shutdown_timeout 秒）
+  → 持久化未完成任务状态到 SQLite/PG
+  → 关闭数据库连接池
+  → 退出（exit 0）
+```
+
+所有 Go 服务使用 `signal.NotifyContext` 监听 SIGINT/SIGTERM，通过 `http.Server.Shutdown(ctx)` 或 `grpcServer.GracefulStop()` 实现排空。
+
+#### Python 服务
+
+所有 4 个 Python 入口（`main.py`, `server.py`, `launcher.py`, `gateway/server.py`）统一使用 uvicorn 的 `timeout_graceful_shutdown` 参数（默认 10 秒）。Python gRPC 独立模式使用 `server.stop(grace=5)` 排空在途 RPC。
+
+### 7.4 隐私预算会计模型
+
+`BudgetAccountant`（`engine/privacy/budget.py`）提供严格的差分隐私预算管理：
+
+| 能力 | 实现 |
+|---|---|
+| 命名空间隔离 | 每个 `namespace` 独立追踪 epsilon/delta 消耗 |
+| 预算耗尽保护 | 累计消耗超过上限时抛出 `PrivacyBudgetExhaustedError` |
+| 时间窗口自动重置 | `PRIVACY_BUDGET_WINDOW_SECONDS` 配置周期重置 |
+| 多实例一致性 | `PRIVACY_BUDGET_DB` (SQLite/PG) 支持跨实例预算同步 |
+| 审计日志 | `BudgetAuditLogger` 记录每次 epsilon/delta 支出到防篡改日志 |
+
+### 7.5 数据生命周期管理
+
+| 数据类型 | 保留策略 | 清理机制 |
+|---|---|---|
+| 审计日志 (`audit_logs`) | `AUDIT_LOG_RETENTION_DAYS`（默认 90 天） | 超期自动清理，保留哈希链完整性 |
+| 任务记录 (`tasks`) | 按服务配置 | 已完成任务定期归档 |
+| 隐私预算日志 | 永久保留 | 仅追加，不删除 |
+| 快照加密数据 | 跟随审计日志 | AES-256-GCM 密文随日志一同清理 |
+
+---
+
+## 8. 生产部署基础设施设计 (Production Deployment Infrastructure)
+
+> 原设计仅提及 Docker/Helm/K8s 的基本安装命令，缺失 K8s 生产级基础设施的架构设计。本节补齐。
+
+### 8.1 K8s 生产级能力矩阵
+
+| 能力 | Helm 模板 | 生产启用条件 |
+|---|---|---|
+| 水平自动扩缩 (HPA) | `templates/hpa.yaml` | `autoscaling.enabled=true`，CPU 70% / 内存 80% 阈值，2~10 副本 |
+| 潮汐预测扩缩 (CronHPA) | `templates/cron-hpa.yaml` | 业务高峰期定时扩容 |
+| Pod 中断预算 (PDB) | `templates/pdb.yaml` | `podDisruptionBudget.enabled=true`，保障滚动更新时最小可用副本数 |
+| 网络策略 (NetworkPolicy) | `templates/networkpolicy.yaml` | `networkPolicy.enabled=true`，同命名空间隔离 |
+| Prometheus 集成 (ServiceMonitor) | `templates/servicemonitor.yaml` | `serviceMonitor.enabled=true`，自动注册抓取目标 |
+| 启动探针 (startupProbe) | `templates/deployment.yaml` | 保护慢启动应用（ML 模型加载），最长 150 秒 |
+| 存活探针 (livenessProbe) | `templates/deployment.yaml` | `/health` 端点，周期性检查 |
+| 就绪探针 (readinessProbe) | `templates/deployment.yaml` | `/api/health` 端点，检查上游连通性 |
+
+### 8.2 数据库 Schema 迁移策略
+
+当前采用**增量 ALTER TABLE** 模式（`pkg/store/sqlite/init.go` 与 `pkg/store/postgres/schema.go`）：
+
+- **Phase A (SQLite)**：服务启动时自动执行 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`，幂等安全。
+- **Phase B (PostgreSQL)**：使用 `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 增量演进。
+- **迁移工具**：`scripts/prod/migrate_sqlite_to_pg.go` 提供 SQLite → PostgreSQL 的原子割接，带哈希链完整性校验。
+
+> **设计改进方向**：当 Schema 变更频率增加时，应引入正式的迁移框架（如 `golang-migrate` 或 `goose`），
+> 支持版本号追踪、回滚和 CI 集成。当前增量 ALTER 模式适用于低频变更阶段。
+
+### 8.3 API 版本控制策略
+
+当前代码库使用 `/v1/` 路径前缀（如 `/v1/privacy/mask`、`/v1/dynclassification/classify`），但尚未制定正式的 API 版本演进策略。
+
+**推荐策略**：
+- URL 路径版本控制：`/v1/...` → `/v2/...`
+- 旧版本至少维护 2 个发布周期后标记 Deprecated
+- BFF 层负责版本路由与协议转换
+- gRPC 通过 `.proto` 文件的 `package` 版本实现向后兼容
