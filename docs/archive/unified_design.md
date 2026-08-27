@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v3.0.0  
+> **版本**：v4.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-27 — 全栈审计对齐、中间件链统一、信号处理升级
+> **最后更新**：2026-08-27 — 全栈中间件链统一、迁移方案精简归档、服务通信拓扑矩阵
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -31,16 +31,14 @@
 └──────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────────────────┘
 ```
 
-### 1.2 核心技术代差与协同短板诊断
+### 1.2 已消除的核心协同短板（全部 ✅ 已收敛）
 
-1. **错误响应信封与状态码代差**：
-   - Python FastAPI 默认返回 `{"detail": [...]}`，而 Go Gin 返回 `{ "error": "...", "message": "..." }` 或 `{ "code": 400, "msg": "..." }`，前端缺乏单一拦截模型；
-2. **追踪上下文（Trace Context）断链风险**：
-   - 在高并发与异步 Worker 任务调度场景下，部分协程或 gRPC 调用缺少自动化的 `X-Request-ID` / `traceparent` 上下文继承机制；
-3. **数据源命名历史包袱**：
-   - 历史代码中偶存裸字符串字面量（如 `"yibao"`、`"kangyang"`），需全面平滑收敛至 `pkg/naming` 的 Canonical ID（`ds_yibao`、`ds_kangyang`）；
-4. **单机存储（SQLite）向企业多副本集群（PostgreSQL Phase B）切换的数据平滑割接挑战**：
-   - 生产环境中存在存量 SQLite WAL 数据库，需要一套安全无损、保持 9 要素哈希链连续性与 AES-256-GCM 快照密文完整性的迁移割接方案。
+> 以下 4 项历史短板已在六大迁移专项中全部解决，当前全栈处于统一标准状态。
+
+1. ~~**错误响应信封格式差异**~~ ✅ — Python/Go 双端统一输出 `{code, message, detail, trace_id, timestamp}` JSON 信封（`engine/observability/envelope.py` + `pkg/middleware/envelope.go`），前端双控制台统一解析；
+2. ~~**追踪上下文断链风险**~~ ✅ — `TraceMiddleware` 双头下发 `X-Request-ID` + `X-Trace-ID`，gRPC 双向拦截器透传，异步任务 Worker 显式持久化 `TraceID`；
+3. ~~**数据源命名硬编码**~~ ✅ — 全栈收敛至 `pkg/naming` SSOT（`ds_yibao` / `ds_kangyang`），`Makefile naming-lint` 自动扫描；
+4. ~~**SQLite → PostgreSQL 割接**~~ ✅ — `scripts/prod/migrate_sqlite_to_pg.go` 提供原子迁移工具，带 9 要素哈希链完整性校验与 AES-256-GCM 密文验真。
 
 ---
 
@@ -104,11 +102,66 @@ flowchart TD
     LayerMiddleware --> LayerObservability
 ```
 
+### 2.1 服务通信拓扑矩阵
+
+| 调用方 → 被调方 | 协议 | 端口 | 认证方式 | 追踪透传 |
+|---|---|---|---|---|
+| console/web → console/bff-go | HTTPS | :8081 | API Key (可选) | X-Request-ID |
+| console/app-lz/web → app-lz/bff-go | HTTPS | :8085 | API Key (可选) | X-Request-ID |
+| console/bff-go → service-hub | HTTP | :8082 | API Key | X-Request-ID + X-Trace-ID |
+| console/bff-go → datasource-mgr | HTTP | :8083 | API Key | X-Request-ID + X-Trace-ID |
+| console/bff-go → audit-log | HTTP | :8084 | API Key | X-Request-ID + X-Trace-ID |
+| console/bff-go → engine (REST) | HTTP | :8079 | API Key | X-Request-ID |
+| console/bff-go → engine (gRPC) | gRPC | :50051 | mTLS (可选) | x-request-id metadata |
+| app-lz/bff-go → service-hub | HTTP | :8082 | API Key | X-Request-ID + X-Trace-ID |
+| app-lz/bff-go → datasource-mgr | HTTP | :8083 | API Key | X-Request-ID + X-Trace-ID |
+| app-lz/bff-go → audit-log | HTTP | :8084 | API Key | X-Request-ID + X-Trace-ID |
+| app-lz/bff-go → engine (REST) | HTTP | :8079 | API Key | X-Request-ID |
+| service-hub → engine (gRPC) | gRPC | :50051 | mTLS (可选) | x-request-id metadata |
+| service-hub → datasource-mgr | HTTP | :8083 | API Key | X-Request-ID |
+| service-hub → audit-log | HTTP | :8084 | API Key | X-Request-ID |
+| engine/gateway → engine worker | HTTP | :8079 | 无（内部） | X-Request-ID |
+
+### 2.2 全栈环境变量速查
+
+<details>
+<summary>点击展开完整环境变量参考表</summary>
+
+#### Python 引擎 (`engine/`)
+
+| 变量 | 默认值 | 用途 |
+|---|---|---|
+| `PRIVACY_REST_HOST` / `PRIVACY_REST_PORT` | `0.0.0.0` / `8079` | REST 监听地址 |
+| `PRIVACY_GRPC_HOST` / `PRIVACY_GRPC_PORT` | `0.0.0.0` / `50051` | gRPC 监听地址 |
+| `PRIVACY_LOG_FORMAT` / `PRIVACY_LOG_LEVEL` | `text` / `INFO` | 日志格式与级别 |
+| `PRIVACY_TLS_ENABLED` | `false` | 启用 TLS |
+| `PRIVACY_AUTH_ENABLED` | `false` | 启用 API Key 鉴权 |
+| `PRIVACY_RATE_LIMIT_ENABLED` | `false` | 启用限流 |
+| `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | LLM 推理并发上限 |
+| `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | 内存阈值降级 |
+| `PRIVACY_BUDGET_DB` | — | 分布式预算 DB 路径 |
+| `PRIVACY_BUDGET_WINDOW_SECONDS` | — | 预算自动重置周期 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OpenTelemetry OTLP 端点 |
+
+#### Go 微服务 (`services/`, `console/`, `pkg/`)
+
+| 变量前缀 | 示例 | 用途 |
+|---|---|---|
+| `SERVICE_HUB_*` | `SERVICE_HUB_PG_DSN` | 调度中枢配置 |
+| `AUDIT_LOG_*` | `AUDIT_LOG_RETENTION_DAYS` (90) | 审计存证配置 |
+| `DATASOURCE_MGR_*` | `DATASOURCE_MGR_API_KEY` | 数据源管理配置 |
+| `BFF_*` | `BFF_AGENT_URL`, `BFF_API_KEY` | 主控制台 BFF 配置 |
+| `APP_LZ_*` | `APP_LZ_RATE_LIMIT_RPS` (100) | 调度之眼 BFF 配置 |
+| `PRIVACY_GRPC_MAX_WORKERS` | `64` | gRPC 线程池大小 |
+| `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | `config/mtls-whitelist.yaml` | mTLS CN 白名单路径 |
+
+</details>
+
 ---
 
-## 3. 六大专项技术迁移实施方案 (Detailed Migration Playbooks)
+## 3. 六大专项技术迁移实施方案 (Migration Playbooks — Reference Summary)
 
-> **实施状态总览**：六大专项已全部完成核心实现（✅ = 已完成，🔄 = 持续演进中）。
+> **实施状态总览**：六大专项已全部完成核心实现（✅ = 已完成）。以下为各专项的目标、关键实现文件与要点摘要，详细代码实现请直接参考对应源文件。
 
 ---
 
@@ -127,123 +180,11 @@ flowchart TD
 }
 ```
 
-#### 2. 双轨兼容过渡策略 (Dual-Track Compatibility)
-为了防止旧版本客户端解析失败，在迁移过渡期采用**双向兼容包装**：
-- 响应体中同时保留 `code`（枚举字串）、`message`（人读摘要）、`detail`（兼容原 FastAPI/Gin 的 detail 字段）；
-- 响应头中强制下发 `X-Request-ID` 与 `X-Trace-ID`。
-
-#### 3. 详细实施步骤
-
-##### Step 1.1：Python FastAPI 引擎端改造 ([`engine/main.py`](../../engine/main.py))
-在 FastAPI 入口注册全局异常处理器，统一捕获 `RequestValidationError`、`HTTPException` 与未捕获异常：
-
-```python
-# engine/observability/envelope.py
-import time
-from datetime import datetime
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-def create_error_envelope(code: str, message: str, detail: any, request: Request, status_code: int) -> JSONResponse:
-    trace_id = request.headers.get("X-Request-ID") or request.state.trace_id if hasattr(request.state, "trace_id") else f"req-{int(time.time())}"
-    return JSONResponse(
-        status_code=status_code,
-        headers={"X-Request-ID": trace_id},
-        content={
-            "code": code,
-            "message": message,
-            "detail": detail,
-            "trace_id": trace_id,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-    )
-
-def register_exception_handlers(app):
-    @app.exception_handler(RequestValidationError)
-    async def validation_handler(request: Request, exc: RequestValidationError):
-        return create_error_envelope(
-            code="INVALID_ARGUMENT",
-            message="请求参数校验失败",
-            detail=exc.errors(),
-            request=request,
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
-
-    @app.exception_handler(StarletteHTTPException)
-    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-        code_map = {
-            400: "INVALID_ARGUMENT",
-            401: "UNAUTHORIZED",
-            403: "FORBIDDEN",
-            404: "NOT_FOUND",
-            409: "CONFLICT",
-            429: "RATE_LIMITED",
-            503: "UPSTREAM_UNAVAILABLE",
-        }
-        err_code = code_map.get(exc.status_code, "INTERNAL_ERROR")
-        return create_error_envelope(
-            code=err_code,
-            message=str(exc.detail),
-            detail=str(exc.detail),
-            request=request,
-            status_code=exc.status_code
-        )
-```
-
-##### Step 1.2：Go 中台微服务与 BFF 改造 (`pkg/middleware/envelope.go`)
-在 `pkg/middleware` 引入标准响应函数，各 Go 微服务（`service-hub`, `datasource-mgr`, `audit-log`, `bff-go`, `app-lz`）统一调用：
-
-```go
-package middleware
-
-import (
-	"net/http"
-	"time"
-
-	"github.com/gin-gonic/gin"
-)
-
-type ErrorEnvelope struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Detail    any    `json:"detail,omitempty"`
-	TraceID   string `json:"trace_id"`
-	Timestamp string `json:"timestamp"`
-}
-
-func AbortWithError(c *gin.Context, httpStatus int, code string, message string, detail any) {
-	traceID := GetTraceID(c)
-	c.Header("X-Request-ID", traceID)
-	c.AbortWithStatusJSON(httpStatus, ErrorEnvelope{
-		Code:      code,
-		Message:   message,
-		Detail:    detail,
-		TraceID:   traceID,
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
-}
-```
-
-##### Step 1.3：前端 Axios 全局拦截器对齐 (`console/app-lz/web/src/api/client.ts`)
-```typescript
-apiClient.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const res = error.response;
-    if (res && res.data && res.data.code) {
-      const { code, message, detail, trace_id } = res.data;
-      console.error(`[PrivShield API Error] ${code} (TraceID: ${trace_id}): ${message}`);
-      // 触发全局 Toast 提示
-      window.dispatchEvent(new CustomEvent('privshield:api-error', {
-        detail: { code, message, detail, trace_id }
-      }));
-    }
-    return Promise.reject(error);
-  }
-);
-```
+#### 2. 实现要点
+- **Python 端** (`engine/observability/envelope.py`)：FastAPI 全局异常处理器统一捕获 `RequestValidationError` / `HTTPException` / 未捕获异常，输出标准信封；
+- **Go 端** (`pkg/middleware/envelope.go`)：`AbortWithError(c, httpStatus, code, message, detail)` 标准响应函数，所有 5 个 Go 服务统一调用；
+- **前端双控制台** (`console/web/src/api/client.ts`, `console/app-lz/web/src/api/client.ts`)：统一解析 `{code, message, detail, trace_id}` 信封，向后兼容旧格式；
+- **双轨兼容**：响应头强制下发 `X-Request-ID` + `X-Trace-ID`，过渡期保留 `detail` 字段兼容旧客户端。
 
 ---
 
@@ -259,67 +200,11 @@ apiClient.interceptors.response.use(
 └────────────────┘                      └────────────────┘                 └────────────────┘
 ```
 
-#### 2. 详细实施步骤
-
-##### Step 2.1：HTTP Trace 中间件 (`pkg/middleware/trace.go`)
-```go
-package middleware
-
-import (
-	"fmt"
-	"time"
-
-	"github.com/gin-gonic/gin"
-)
-
-const TraceIDKey = "PrivShield-Trace-ID"
-const TraceHeader = "X-Request-ID"
-
-func TraceMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		traceID := c.GetHeader(TraceHeader)
-		if traceID == "" {
-			traceID = fmt.Sprintf("req-%d-%06x", time.Now().Unix(), time.Now().Nanosecond()%0x1000000)
-		}
-		c.Set(TraceIDKey, traceID)
-		c.Header(TraceHeader, traceID)
-		c.Header("X-Trace-ID", traceID)
-		c.Next()
-	}
-}
-
-func GetTraceID(c *gin.Context) string {
-	if val, ok := c.Get(TraceIDKey); ok {
-		if s, ok := val.(string); ok && s != "" {
-			return s
-		}
-	}
-	return c.GetHeader(TraceHeader)
-}
-```
-
-##### Step 2.2：gRPC 客户端与服务端双向拦截器
-- **Go 客户端外发拦截器 (`pkg/agent/grpc_client.go`)**：
-  ```go
-  func (c *Client) attachTraceMD(ctx context.Context) context.Context {
-      traceID, _ := ctx.Value(middleware.TraceIDKey).(string)
-      if traceID == "" {
-          traceID = fmt.Sprintf("req-%d", time.Now().Unix())
-      }
-      return metadata.AppendToOutgoingContext(ctx, "x-request-id", traceID, "x-trace-id", traceID)
-  }
-  ```
-- **Python gRPC 服务端元数据提取 (`engine/grpc_server.py`)**：
-  ```python
-  def _extract_trace_id(context: grpc.ServicerContext) -> str:
-      for key, val in context.invocation_metadata():
-          if key in ("x-request-id", "x-trace-id"):
-              return val
-      return f"req-{int(time.time())}"
-  ```
-
-##### Step 2.3：异步任务 Worker 上下文继承 (`services/service-hub/internal/handlers/handlers.go`)
-在任务分发时，将 `TraceID` 显式持久化至 `models.Task.TraceID`，Worker 消费时还原为 `context.Context`，杜绝孤儿日志。
+#### 2. 实现要点
+- **HTTP 层** (`pkg/middleware/trace.go`)：`TraceMiddleware()` 自动注入/传播 `X-Request-ID` + `X-Trace-ID` 双头下发；
+- **gRPC 客户端** (`pkg/agent/grpc_client.go`)：外发拦截器将 trace ID 写入 `metadata.AppendToOutgoingContext`；
+- **gRPC 服务端** (`engine/grpc_server.py`)：元数据提取器从 `invocation_metadata()` 读取 `x-request-id` / `x-trace-id`；
+- **异步任务** (`services/service-hub/internal/handlers/handlers.go`)：`Dispatch` 时将 `TraceID` 持久化至 `models.Task.TraceID`，Worker 消费时还原为 `context.Context`。
 
 ---
 
@@ -336,12 +221,9 @@ func GetTraceID(c *gin.Context) string {
 | `"kangyang"`, `"kangyang.csv"`, `"康养"` | `ds_kangyang` (常量: `naming.DSKangyang`) | `api2_kangyang` | 边界自动归一化，返回 `Warning: 299 Deprecated alias` |
 | 任意未知标识 (如 `"custom_test"`) | 拦截拒绝 | N/A | **Fail-Closed 阻断**，返回 `400 INVALID_DATASOURCE_ID` |
 
-#### 3. 自动化检查与静态代码扫描规则
-在 Makefile 中增加 `naming-lint` 检查命令，扫描业务代码中是否包含硬编码字面量：
-```bash
-# 检查 Go 代码中是否存在裸字符串 "ds_yibao" 而非 naming.DSYibao
-! grep -rn '"ds_yibao"' services/ console/ | grep -v 'pkg/naming'
-```
+#### 3. 实现要点
+- **核心库** (`pkg/naming/`)：常量定义 + 别名归一化函数 + Observer 模式上报 Prometheus 指标；
+- **自动化检查**：`Makefile naming-lint` 目标扫描业务代码中的裸字符串硬编码。
 
 ---
 
@@ -363,84 +245,17 @@ func GetTraceID(c *gin.Context) string {
 
 #### 2. 数据迁移与割接实施流程
 
-##### Step 4.1：准备 PostgreSQL 生产表结构与索引
-执行建表脚本（已在 `pkg/store/postgres/audit.go` 与 `task.go` 固化）：
-```sql
--- 启用 UUID 扩展
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+##### Step 4.1：PostgreSQL 生产表结构
+已在 `pkg/store/postgres/` 中固化 3 张核心表（`tasks`、`audit_logs`、`snapshots`）的建表与索引脚本，支持 `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN IF NOT EXISTS` 增量演进。
 
--- 任务表 (Phase B 租约争抢)
-CREATE TABLE IF NOT EXISTS tasks (
-    id VARCHAR(128) PRIMARY KEY,
-    status VARCHAR(32) NOT NULL,
-    stage VARCHAR(32) NOT NULL,
-    source VARCHAR(64) NOT NULL,
-    operation VARCHAR(32) NOT NULL,
-    priority INT NOT NULL DEFAULT 50,
-    created_at TIMESTAMPTZ NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL,
-    duration_ms BIGINT DEFAULT 0,
-    error TEXT DEFAULT '',
-    retry_count INT DEFAULT 0,
-    lease_owner VARCHAR(128) DEFAULT '',
-    lease_expire TIMESTAMPTZ,
-    payload JSONB
-);
-CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks (status, priority DESC, lease_expire);
+##### Step 4.2：迁移工具 (`scripts/prod/migrate_sqlite_to_pg.go`, 564 行)
+原子执行以下关键步骤：
+1. **只读锁定源库** → 2. **按哈希链顺序流式抽取** → 3. **逐条重算 9 要素哈希链** → 4. **批量注入 PG (`pgx.Batch`, 500 条/批)** → 5. **迁移后 `VerifyChain(0)` 全量验真**
 
--- 审计日志表 (9 要素连续哈希链)
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id VARCHAR(128) PRIMARY KEY,
-    timestamp TIMESTAMPTZ NOT NULL,
-    datasource VARCHAR(64) NOT NULL,
-    api_code VARCHAR(64),
-    operation VARCHAR(32) NOT NULL,
-    input_hash VARCHAR(128) NOT NULL,
-    output_hash VARCHAR(128) NOT NULL,
-    algorithm VARCHAR(64) NOT NULL,
-    user_name VARCHAR(128) NOT NULL,
-    status VARCHAR(32) NOT NULL,
-    security_level VARCHAR(16) NOT NULL,
-    params_json TEXT,
-    snapshot_id VARCHAR(128),
-    prev_hash VARCHAR(128) NOT NULL,
-    integrity_hash VARCHAR(128) NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs (timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_prev_hash ON audit_logs (prev_hash);
+支持 `--dry-run` 模式预检验证。
 
--- 快照加密表 (AES-256-GCM)
-CREATE TABLE IF NOT EXISTS snapshots (
-    id VARCHAR(128) PRIMARY KEY,
-    log_id VARCHAR(128) NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL,
-    datasource VARCHAR(64) NOT NULL,
-    operation VARCHAR(32) NOT NULL,
-    input_sample TEXT NOT NULL,
-    output_sample TEXT NOT NULL,
-    parameters TEXT,
-    created_at TIMESTAMPTZ NOT NULL
-);
-```
-
-##### Step 4.2：开发专用数据迁移与连续性核验脚本 (`scripts/prod/migrate_sqlite_to_pg.go`)
-迁移脚本执行以下关键原子步骤：
-1. **只读锁定源库**：暂停外部写流量或在只读副本上执行抽取；
-2. **按哈希链顺序流式抽取**：`SELECT * FROM audit_logs ORDER BY rowid ASC`；
-3. **逐条重算 9 要素哈希链**：验证每一条记录的 `prev_hash` 是否严格等于上一条的 `integrity_hash`；
-4. **批量注入 PostgreSQL (`pgx.Batch`)**：单批次 500 条原子提交；
-5. **迁移后验真**：在 PostgreSQL 上立即调用 `store.VerifyChain(0)` 全量验真，断链立即报警并回滚。
-
-##### Step 4.3：生产环境变量切换与平滑重启
-```bash
-# 1. 注入 PostgreSQL 环境变量
-export AUDIT_LOG_PG_DSN="postgres://audit_user:audit_pass@pg-prod:5432/privshield_audit?sslmode=verify-full&pool_max_conns=50"
-export SERVICE_HUB_PG_DSN="postgres://hub_user:hub_pass@pg-prod:5432/privshield_hub?sslmode=verify-full&pool_max_conns=50"
-
-# 2. 启动服务，自动激活 Phase B 存储后端
-./services/audit-log/cmd/server/main &
-./services/service-hub/cmd/server/main &
-```
+##### Step 4.3：生产环境变量切换
+设置 `*_PG_DSN` 环境变量后重启服务，自动激活 Phase B 存储后端（`AUDIT_LOG_PG_DSN`、`SERVICE_HUB_PG_DSN`）。
 
 ---
 
@@ -485,129 +300,11 @@ clients:
       - "/ServiceHub/DispatchTask"
 ```
 
-#### 3. 动态热重载与权限校验实现 (`pkg/tlsutil/whitelist.go`)
-```go
-package tlsutil
-
-import (
-	"context"
-	"log"
-	"os"
-	"sync"
-
-	"github.com/fsnotify/fsnotify"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
-	"gopkg.in/yaml.v3"
-)
-
-type DynamicWhitelist struct {
-	mu      sync.RWMutex
-	clients map[string][]string // CN -> Scopes
-	path    string
-}
-
-func NewDynamicWhitelist(path string) (*DynamicWhitelist, error) {
-	dw := &DynamicWhitelist{
-		clients: make(map[string][]string),
-		path:    path,
-	}
-	if err := dw.reload(); err != nil {
-		return nil, err
-	}
-	go dw.watch()
-	return dw, nil
-}
-
-func (dw *DynamicWhitelist) reload() error {
-	data, err := os.ReadFile(dw.path)
-	if err != nil {
-		return err
-	}
-	var conf struct {
-		Clients []struct {
-			CN     string   `yaml:"cn"`
-			Scopes []string `yaml:"allowed_scopes"`
-		} `yaml:"clients"`
-	}
-	if err := yaml.Unmarshal(data, &conf); err != nil {
-		return err
-	}
-
-	dw.mu.Lock()
-	defer dw.mu.Unlock()
-	dw.clients = make(map[string][]string)
-	for _, c := range conf.Clients {
-		dw.clients[c.CN] = c.Scopes
-	}
-	log.Printf("[mTLS Whitelist] Successfully reloaded %d authorized CN entries", len(dw.clients))
-	return nil
-}
-
-func (dw *DynamicWhitelist) watch() {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return
-	}
-	defer watcher.Close()
-	_ = watcher.Add(dw.path)
-
-	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
-				_ = dw.reload()
-			}
-		case <-watcher.Errors:
-			return
-		}
-	}
-}
-
-// UnaryServerInterceptor 提供 gRPC 双向证书 CN 校验与授权
-func (dw *DynamicWhitelist) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		p, ok := peer.FromContext(ctx)
-		if !ok || p.AuthInfo == nil {
-			return nil, status.Error(codes.Unauthenticated, "missing peer authentication info")
-		}
-		tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
-		if !ok || len(tlsInfo.State.VerifiedChains) == 0 || len(tlsInfo.State.VerifiedChains[0]) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "invalid or unverified client certificate")
-		}
-
-		clientCN := tlsInfo.State.VerifiedChains[0][0].Subject.CommonName
-		dw.mu.RLock()
-		scopes, exists := dw.clients[clientCN]
-		dw.mu.RUnlock()
-
-		if !exists {
-			log.Printf("[mTLS Auth Failed] Unauthorized Client CN: %s", clientCN)
-			return nil, status.Errorf(codes.PermissionDenied, "client CN '%s' is not authorized", clientCN)
-		}
-
-		// 校验 Scope
-		authorized := false
-		for _, s := range scopes {
-			if s == "*" || s == info.FullMethod {
-				authorized = true
-				break
-			}
-		}
-		if !authorized {
-			return nil, status.Errorf(codes.PermissionDenied, "client CN '%s' lacks scope for method '%s'", clientCN, info.FullMethod)
-		}
-
-		return handler(ctx, req)
-	}
-}
-```
+#### 3. 实现要点
+- **白名单配置** (`config/mtls-whitelist.yaml`)：YAML 格式定义 CN → role → allowed_scopes 映射，支持通配符 `"*"` 和精确 gRPC 方法匹配；
+- **动态热重载** (`pkg/tlsutil/whitelist.go`)：`DynamicWhitelist` 通过 `fsnotify` 监听文件变更，毫秒级自动重载授权列表；
+- **gRPC 拦截器**：`UnaryServerInterceptor()` 从 TLS peer 证书提取 CN，与白名单比对并校验 Scope，未授权 CN 返回 `PermissionDenied`；
+- **Fail-Closed 策略**：无证书、未验证证书或 CN 不在白名单中的请求一律拒绝。
 
 ---
 

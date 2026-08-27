@@ -36,6 +36,7 @@ type Config struct {
 
 	// ── 静态文件 & 日志 ──
 	StaticDir string // 前端 SPA 构建产物目录（默认 ./web/dist）
+	LogFormat string // 日志输出格式："json"（生产推荐）或 "text"（开发可读）
 	LogLevel  string // 日志级别（默认 info）
 
 	// ── TLS 配置 ──
@@ -75,6 +76,7 @@ func Load() *Config {
 
 	// ── 静态文件 & 日志 ──
 	staticDir := getEnv("APP_LZ_STATIC_DIR", "./web/dist")
+	logFormat := getEnv("APP_LZ_LOG_FORMAT", "json")
 	logLevel := getEnv("APP_LZ_LOG_LEVEL", "info")
 
 	// ── TLS 配置 ──
@@ -99,6 +101,7 @@ func Load() *Config {
 		AgentURL:       agentURL,
 		AgentGRPC:      agentGRPC,
 		StaticDir:      staticDir,
+		LogFormat:      logFormat,
 		LogLevel:       logLevel,
 		TLSEnabled:     tlsEnabled,
 		CertFile:       certFile,

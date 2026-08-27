@@ -29,6 +29,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/handlers"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/runner"
+	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
 )
@@ -45,6 +46,10 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 
+	// ── 第 2.5 步：初始化结构化日志记录器 ──────────────────────────────
+	// 使用共享库 pkgconfig.SetupLogger 初始化基于 slog 的全局日志记录器（支持 json/text 格式）。
+	logger := pkgconfig.SetupLogger(cfg.LogFormat, cfg.LogLevel)
+
 	// ── 第 3 步：初始化核心组件 ────────────────────────────────────────
 	// Collector: Prometheus 指标收集器；注册为 naming 的观测器后，
 	// 别名流量 / 归一化失败会在解析收口处自动上报（api_rename_design.md §7.2）。
@@ -55,7 +60,7 @@ func main() {
 	// TestRunner: E2E 测试套件执行器（TS-01 审计验真 / TS-02 压测 / TS-03 租约争抢）
 	testRunner := runner.NewTestRunner(pool)
 	// Handler: 所有 HTTP 请求的处理层，编排 ClientPool 和 TestRunner
-	h := handlers.NewHandler(cfg, pool, testRunner, mc)
+	h := handlers.NewHandler(cfg, pool, testRunner, mc, logger)
 	// SetupRouter: 注册所有 API 路由 + SPA 静态文件回退
 	router := handlers.SetupRouter(h)
 

@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -48,15 +49,20 @@ type Handler struct {
 	pool   *clients.ClientPool // 上游微服务 HTTP 客户端池
 	runner *runner.TestRunner  // E2E 测试套件执行器
 	mc     *metrics.Collector  // 本 BFF 自身的 Prometheus 指标（可为 nil）
+	logger *slog.Logger        // 结构化日志记录器
 }
 
 // NewHandler 创建一个新的 Handler 实例；mc 可为 nil（不暴露 /metrics）。
-func NewHandler(cfg *config.Config, pool *clients.ClientPool, runner *runner.TestRunner, mc *metrics.Collector) *Handler {
+func NewHandler(cfg *config.Config, pool *clients.ClientPool, runner *runner.TestRunner, mc *metrics.Collector, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Handler{
 		cfg:    cfg,
 		pool:   pool,
 		runner: runner,
 		mc:     mc,
+		logger: logger,
 	}
 }
 
@@ -76,15 +82,17 @@ func NewHandler(cfg *config.Config, pool *clients.ClientPool, runner *runner.Tes
 func SetupRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode) // 生产模式，关闭 Gin 调试日志
 	r := gin.New()
-	r.Use(gin.Recovery())                        // 全局 panic 恢复中间件
-	r.Use(middleware.TraceMiddleware())           // 分布式追踪 ID 自动注入与双头下发
-	r.Use(middleware.SecurityHeaders())           // 安全响应头 (CSP/HSTS/X-Frame-Options)
-	r.Use(middleware.MaxBodySize(32 << 20))       // 32 MiB 请求体最大保护
-	r.Use(middleware.MaxConcurrent(1000))         // 并发在途请求上限，超限返回 503
+	r.Use(middleware.TraceMiddleware())                      // 分布式追踪 ID 自动注入与双头下发
+	r.Use(middleware.StructuredLogger(h.logger, "app-lz"))  // 每请求结构化日志（method/path/status/latency）
+	r.Use(middleware.Recovery(h.logger, "app-lz"))           // 全局 panic 恢复中间件
+	r.Use(middleware.SecurityHeaders())                      // 安全响应头 (CSP/HSTS/X-Frame-Options)
+	r.Use(middleware.MaxBodySize(32 << 20))                  // 32 MiB 请求体最大保护
+	r.Use(middleware.MaxConcurrent(1000))                    // 并发在途请求上限，超限返回 503
 	if h.cfg.RateLimitRPS > 0 {
 		r.Use(middleware.RateLimit(h.cfg.RateLimitRPS, h.cfg.RateLimitBurst)) // 每客户端 IP 令牌桶限流
 	}
-	r.Use(corsMiddleware())                       // 全局 CORS 中间件
+	r.Use(corsMiddleware())                                  // 全局 CORS 中间件
+	r.Use(middleware.Auth(h.cfg.APIKey))                     // API Key 鉴权（为空时跳过）
 
 	// ── 健康检查（两个路径均支持，兼容不同探测配置）──
 	r.GET("/api/health", h.HealthCheck)
