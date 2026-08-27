@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v7.0.0  
+> **版本**：v8.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 服务拓扑补齐 gRPC 端口、mTLS 配置精简、验收测试统计摘要
+> **最后更新**：2026-08-28 — 指标体系审计修正（Python/Go 指标名·标签与代码精确对齐）、Makefile 目标名修正、Helm 模板文件名修正
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -291,7 +291,7 @@ flowchart TD
 
 #### 3. 实现要点
 - **核心库** (`pkg/naming/`)：常量定义 + 别名归一化函数 + Observer 模式上报 Prometheus 指标；
-- **自动化检查**：`Makefile naming-lint` 目标扫描业务代码中的裸字符串硬编码。
+- **自动化检查**：`Makefile lint-naming` 目标扫描业务代码中的裸字符串硬编码。
 
 ---
 
@@ -465,28 +465,76 @@ cd ../../web && pnpm build
 
 ### 6.1 Prometheus 指标体系
 
-#### Python 引擎端 (`engine/observability/metrics.py`)
+#### Python 引擎端 (`engine/observability/metrics.py` + `engine/dynclassification/metrics.py`)
+
+<details>
+<summary>点击展开完整 Python 指标参考表（40 个指标）</summary>
+
+##### 核心隐私原语
 
 | 指标名称 | 类型 | 标签 | 用途 |
 |---|---|---|---|
 | `privacy_requests_total` | Counter | `method`, `path`, `status` | REST/gRPC 请求计数 |
 | `privacy_request_duration_seconds` | Histogram | `method`, `path` | 请求延迟分布（P50/P95/P99） |
 | `privacy_dp_queries_total` | Counter | `mechanism`, `aggregation` | 差分隐私查询计数 |
-| `privacy_classification_total` | Counter | `final_level`, `layer` | 分类漏斗各层结果计数 |
+| `privacy_dp_duration_seconds` | Histogram | `mechanism` | DP 操作延迟 |
 | `privacy_masking_operations_total` | Counter | `operation` | 脱敏操作计数 |
+| `privacy_masking_duration_seconds` | Histogram | `operation` | 脱敏操作延迟 |
 | `privacy_kano_operations_total` | Counter | `operation` | K-匿名操作计数 |
+| `privacy_kano_duration_seconds` | Histogram | `operation` | K-匿名操作延迟 |
 | `privacy_qol_operations_total` | Counter | `domain` | 查询混淆操作计数 |
-| `privacy_budget_remaining` | Gauge | `namespace` | 剩余隐私预算（epsilon/delta） |
+| `privacy_qol_duration_seconds` | Histogram | `domain` | 查询混淆操作延迟 |
 | `privacy_auth_denials_total` | Counter | `reason` | 认证拒绝计数 |
-| `privacy_traffic_bytes_total` | Counter | `direction` | 网络流量字节数 |
-| `privacy_classification_jobs_total` | Counter | `source` | 分类任务触发计数 |
-| `privacy_classification_jobs_duration` | Histogram | `source` | 分类任务延迟 |
-| `privacy_classification_rule_hits_total` | Counter | `rule_id`, `level` | 规则引擎命中计数 |
-| `privacy_classification_ner_total` | Counter | `entity_type` | NER 实体识别计数 |
-| `privacy_classification_llm_total` | Counter | `result_level` | LLM 仲裁结果计数 |
+| `privacy_auth_duration_seconds` | Histogram | — | 认证操作延迟 |
+| `privacy_traffic_bytes_total` | Counter | `method`, `path`, `direction` | 网络流量字节数 |
+| `privacy_profile_resolve_total` | Counter | `profile` | 隐私配置解析计数 |
+| `privacy_data_extraction_total` | Counter | `source` | 数据提取操作计数 |
+
+##### 隐私预算
+
+| 指标名称 | 类型 | 标签 | 用途 |
+|---|---|---|---|
+| `privacy_budget_remaining` | Gauge | `namespace`, `budget_type` | 剩余隐私预算（epsilon/delta） |
+
+##### 动态分类漏斗
+
+| 指标名称 | 类型 | 标签 | 用途 |
+|---|---|---|---|
+| `privacy_classification_total` | Counter | `final_level`, `layer` | 分类漏斗各层结果计数 |
+| `privacy_classification_jobs_total` | Counter | `status` | 分类任务触发计数 |
+| `privacy_classification_jobs_duration_seconds` | Histogram | `status` | 分类任务延迟 |
+| `privacy_classification_rule_hits_total` | Counter | `rule_id` | 规则引擎命中计数 |
+| `privacy_classification_ner_total` | Counter | `status` | NER 实体识别计数 |
+| `privacy_classification_llm_total` | Counter | `status` | LLM 仲裁结果计数 |
+| `privacy_classification_composite_hits_total` | Counter | `rule_id` | 复合规则命中计数 |
+| `privacy_classification_ner_duration_seconds` | Histogram | — | NER 推理延迟 |
+| `privacy_classification_llm_duration_seconds` | Histogram | — | LLM 推理延迟 |
+| `privacy_classification_llm_tokens_total` | Counter | `direction` | LLM Token 消耗量 |
+| `privacy_classification_duration_seconds` | Histogram | `source` | 分类端到端延迟 |
+
+##### 分类引擎内部（`dynclassification/metrics.py`）
+
+| 指标名称 | 类型 | 标签 | 用途 |
+|---|---|---|---|
+| `classification_rule_hits_total` | Counter | `rule_id`, `level` | 规则命中计数（含级别） |
+| `classification_operator_calls_total` | Counter | `operator` | 算子调用计数 |
+| `classification_operator_errors_total` | Counter | `operator` | 算子错误计数 |
+| `classification_engine_load_duration_seconds` | Histogram | — | 规则引擎加载延迟 |
+| `classification_profile_cache_size` | Gauge | — | 配置 Profile 缓存大小 |
+| `classification_override_suppressed_total` | Counter | `rule_id` | 安全覆盖抑制计数 |
+
+##### 网关
+
+| 指标名称 | 类型 | 标签 | 用途 |
+|---|---|---|---|
 | `privacy_gateway_healthy_nodes` | Gauge | — | 网关健康后端节点数 |
 | `privacy_gateway_retries_total` | Counter | `protocol`, `reason` | 网关重试计数 |
 | `privacy_gateway_circuit_breaker_state` | Gauge | `node` | 熔断器状态（0=closed, 1=open, 2=half_open） |
+| `privacy_gateway_requests_total` | Counter | `method`, `status` | 网关请求计数 |
+| `privacy_gateway_latency_seconds` | Histogram | `method` | 网关请求延迟 |
+| `privacy_gateway_node_admin_state` | Gauge | `node` | 网关节点管理状态 |
+
+</details>
 
 #### Go 微服务端 (`pkg/metrics/metrics.go`)
 
@@ -498,15 +546,15 @@ cd ../../web && pnpm build
 | `agent_request_duration_seconds` | Histogram | `method` | Agent gRPC 调用延迟 |
 | `orphaned_tasks_recovered_total` | Counter | — | 崩溃恢复时回收的孤儿任务数 |
 | `tasks_retried_total` | Counter | — | 自动重试的任务数 |
-| `circuit_breaker_state` | Gauge | `target` | Agent 客户端熔断器状态 |
-| `task_lease_conflicts` | Counter | — | 租约争抢冲突计数 |
-| `task_lease_expired` | Counter | — | 超期失效的租约计数 |
+| `circuit_breaker_state` | Gauge | `node` | Agent 客户端熔断器状态 |
+| `task_lease_conflicts_total` | Counter | — | 租约争抢冲突计数 |
+| `task_lease_expired_total` | Counter | — | 超期失效的租约计数 |
 | `task_claim_latency_seconds` | Histogram | — | 任务领取延迟 |
-| `task_transitions_total` | Counter | `from`, `to` | 任务状态转换计数 |
+| `task_transitions_total` | Counter | `from`, `to`, `result` | 任务状态转换计数 |
 | `service_hub_ready` | Gauge | — | Service-Hub 就绪状态（1=就绪） |
-| `api_alias_requests_total` | Counter | `alias`, `canonical` | 别名 API 请求计数 |
-| `datasource_normalize_errors_total` | Counter | `source` | 数据源归一化失败计数 |
-| `datasource_requests_total` | Counter | `source`, `status` | 数据源请求计数 |
+| `privshield_api_alias_requests_total` | Counter | `alias`, `canonical`, `target` | 别名 API 请求计数 |
+| `privshield_datasource_normalize_errors_total` | Counter | `reason` | 数据源归一化失败计数 |
+| `privshield_datasource_requests_total` | Counter | `datasource_id`, `api_code`, `status` | 数据源请求计数 |
 
 每个 Go 服务使用独立的 `prometheus.Registry`，避免全局注册冲突。暴露 `/metrics` 端点供 Prometheus 或 ServiceMonitor 抓取。
 
@@ -676,7 +724,7 @@ SIGTERM/SIGINT 到达
 |---|---|---|
 | 水平自动扩缩 (HPA) | `templates/hpa.yaml` | `autoscaling.enabled=true`，CPU 70% / 内存 80% 阈值，2~10 副本 |
 | 潮汐预测扩缩 (CronHPA) | `templates/cron-hpa.yaml` | 业务高峰期定时扩容 |
-| Pod 中断预算 (PDB) | `templates/pdb.yaml` | `podDisruptionBudget.enabled=true`，保障滚动更新时最小可用副本数 |
+| Pod 中断预算 (PDB) | `templates/poddisruptionbudget.yaml` | `podDisruptionBudget.enabled=true`，保障滚动更新时最小可用副本数 |
 | 网络策略 (NetworkPolicy) | `templates/networkpolicy.yaml` | `networkPolicy.enabled=true`，同命名空间隔离 |
 | Prometheus 集成 (ServiceMonitor) | `templates/servicemonitor.yaml` | `serviceMonitor.enabled=true`，自动注册抓取目标 |
 | 启动探针 (startupProbe) | `templates/deployment.yaml` | 保护慢启动应用（ML 模型加载），最长 150 秒 |
