@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v10.0.0  
+> **版本**：v11.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 成熟度矩阵校准、新增 Python 引擎 API 端点、中间件描述精确化
+> **最后更新**：2026-08-28 — 架构图补齐服务间链路、新增快速参考卡与修订历史
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -95,6 +95,8 @@ flowchart TD
     LayerMiddleware --> Hub & DSMgr & Audit & LayerCoreCompute
     LayerMiddleware --> PyGW
     PyGW --> LayerCoreCompute
+    Hub -->|HTTP| DSMgr
+    Hub -->|gRPC| LayerCoreCompute
     LayerGovernance --> LayerStorageSecurity
     LayerCoreCompute --> LayerStorageSecurity
     LayerCoreCompute --> LayerObservability
@@ -805,3 +807,94 @@ SIGTERM/SIGINT 到达
 - 旧版本至少维护 2 个发布周期后标记 Deprecated
 - BFF 层负责版本路由与协议转换
 - gRPC 通过 `.proto` 文件的 `package` 版本实现向后兼容
+
+---
+
+## 9. 开发者快速参考卡 (Developer Quick Reference)
+
+<details>
+<summary>点击展开常用命令速查</summary>
+
+### 本地开发启动
+
+```bash
+# Python 引擎 (REST + gRPC)
+python -m engine.server                    # http://127.0.0.1:8079 + grpc://127.0.0.1:50051
+
+# Go 微服务群 (需分别启动)
+cd services/service-hub && go run cmd/server/main.go        # :8082
+cd services/datasource-mgr && go run cmd/server/main.go     # :8083
+cd services/audit-log && go run cmd/server/main.go          # :8084
+
+# 控制台 (Agent + Go BFF + Vite HMR)
+bash ./scripts/dev/dev-bff-agent.sh        # :8079 + :8081 + :5173
+
+# App-LZ 测试控制台
+bash ./scripts/dev/dev-app-lz.sh           # :8085
+```
+
+### 测试
+
+```bash
+# Go 全量测试（禁用缓存）
+go test -count=1 ./pkg/... ./services/... ./console/...
+
+# Python 全量测试
+PYTHONPATH=. pytest tests/ -q
+
+# 集成测试
+bash ./scripts/dev/integration-test-new-modules.sh
+
+# App-LZ E2E 测试
+PRIVSHIELD_E2E=1 go test -v -run TestRunSuites ./console/app-lz/bff-go/internal/runner/
+```
+
+### 构建与部署
+
+```bash
+# Docker 镜像
+docker build --target core -t privshield:1.8.0 .    # 轻量核心镜像
+docker build --target ml -t privshield:1.8.0-ml .   # 含 ML 依赖镜像
+
+# Helm 部署
+helm install privshield ./deploy/helm/PrivShield
+
+# Docker Compose 全栈
+bash ./scripts/prod/deploy-docker-compose.sh --with-postgres
+```
+
+### 运维工具
+
+```bash
+# 隐私预算备份
+bash ./scripts/prod/backup_privacy_budget.sh
+
+# SQLite → PostgreSQL 迁移（干运行）
+go run scripts/prod/migrate_sqlite_to_pg.go --dry-run
+
+# 审计哈希链验真
+curl -X POST http://localhost:8084/api/audit/chain/verify
+
+# 生产健康检查
+bash ./scripts/prod/prod_health_check.sh
+```
+
+</details>
+
+---
+
+## 附录 A. 文档修订历史
+
+| 版本 | 日期 | 核心变更 |
+|---|---|---|
+| v1.0 | 2026-08 | 初始版本：全栈协同度评估 + 六大专项迁移方案 |
+| v2.0 | 2026-08-27 | 新增 §6 可观测性 + §7 韧性安全 + §8 部署基础设施 |
+| v3.0 | 2026-08-28 | 设计文档优化 + app-lz RateLimit 补齐 |
+| v4.0 | 2026-08-28 | §1.2 短板标记已消除、§3 代码块精简（-350 行）、§2.1 服务通信拓扑、§2.2 环境变量速查 |
+| v5.0 | 2026-08-28 | 指标名拼写修正、中间件链差异化说明、Makefile `-count=1` |
+| v6.0 | 2026-08-28 | §2.3 REST API 端点速查、Go 环境变量扩展、移除不存在的 `FEATURE_FLAG` |
+| v7.0 | 2026-08-28 | 服务拓扑补齐 gRPC :50055、mTLS YAML 精简、测试统计摘要 |
+| v8.0 | 2026-08-28 | Python 指标 18→40 精确对齐、Go 指标 7 处修正、Helm 文件名修正 |
+| v9.0 | 2026-08-28 | 移除拓扑矩阵虚假链路、§1.2/§8.3 细节修正 |
+| v10.0 | 2026-08-28 | datasource-mgr 升级至 Level 5、新增 Python 引擎 50+ API 端点速查 |
+| **v11.0** | **2026-08-28** | **架构图补齐服务间链路、新增 §9 快速参考卡 + 附录 A 修订历史** |
