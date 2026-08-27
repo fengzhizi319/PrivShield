@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v9.0.0  
+> **版本**：v10.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 修正服务拓扑虚假链路、§1.2 Makefile 目标名、§8.3 API 端点示例
+> **最后更新**：2026-08-28 — 成熟度矩阵校准、新增 Python 引擎 API 端点、中间件描述精确化
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -23,7 +23,7 @@
 │ **pkg/ 基础共享库**   │ ★★★★★    │ ★★★★☆    │ ★★★★★    │ ★★★★★    │ ★★★★★    │ **Level 5 (准生产)**│
 │ **services/audit-log**│ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ ★★★★★    │ **Level 5 (准生产)**│
 │ **services/service-hub**│ ★★★★★  │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ ★★★★☆    │ **Level 5 (准生产)**│
-│ **services/datasource-mgr**│ ★★★★☆│ ★★★☆☆   │ ★★★☆☆    │ ★★★★☆    │ ★★★★☆    │ **Level 4 (就绪)** │
+│ **services/datasource-mgr**│ ★★★★★│ ★★★★☆   │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ **Level 5 (准生产)**│
 │ **console/app-lz**   │ ★★★★★    │ ★★★★★    │ ★★★★★    │ ★★★★☆    │ ★★★★★    │ **Level 5 (准生产)**│
 │ **console/bff-go**   │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ **Level 5 (准生产)**│
 │ **engine (Python)**  │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★☆☆    │ ★★★★☆    │ **Level 5 (准生产)**│
@@ -173,7 +173,62 @@ flowchart TD
 
 </details>
 
-### 2.3 Go 微服务 REST API 端点速查
+### 2.3 Python 引擎 REST API 端点速查
+
+<details>
+<summary>点击展开 Python 引擎 API 端点参考表</summary>
+
+#### 健康检查与运维
+
+| 方法 | 端点 | 功能 |
+|---|---|---|
+| GET/POST | `/health`, `/livez`, `/readyz` | 健康检查 / 存活 / 就绪探针 |
+| GET | `/v1/privacy/health` | 引擎运行状态摘要 |
+| GET | `/v1/ops/diagnostics` | 运行时诊断快照 |
+| GET | `/metrics` | Prometheus 指标 |
+
+#### 四大隐私原语
+
+| 方法 | 端点 | 功能 |
+|---|---|---|
+| POST | `/v1/privacy/mask` | 字段级脱敏 |
+| POST | `/v1/privacy/mask_record` | 单条记录脱敏 |
+| POST | `/v1/privacy/mask/batch`, `/v1/privacy/mask/dataframe` | 批量/DataFrame 脱敏 |
+| POST | `/v1/privacy/hash` | HMAC 哈希 |
+| POST | `/v1/privacy/dp/count`, `/sum`, `/mean`, `/histogram` | 差分隐私聚合（4 种） |
+| POST | `/v1/privacy/dp/noisy_count`, `/noisy_sum`, `/noisy_mean`, `/noisy_histogram` | 噪声聚合变体 |
+| POST | `/v1/privacy/dp/aggregate`, `/vector_sum`, `/vector_mean` | 向量聚合 |
+| POST | `/v1/privacy/dp/adaptive_clip`, `/groupby`, `/chunked_count`, `/chunked_sum` | 高级 DP |
+| POST | `/v1/privacy/ldp/perturb/binary`, `/perturb/categorical` | 本地 DP 扰动 |
+| POST | `/v1/privacy/ldp/estimate/binary`, `/estimate/categorical` | 本地 DP 估计 |
+| POST | `/v1/privacy/k_anonymize/record`, `/table`, `/dataframe` | K-匿名（3 粒度） |
+| POST | `/v1/privacy/qol/obfuscate`, `/obfuscate/batch` | 查询混淆 |
+
+#### 分类漏斗与配置
+
+| 方法 | 端点 | 功能 |
+|---|---|---|
+| POST | `/v1/dynclassification/eval` | 单字段分类评估 |
+| POST | `/v1/dynclassification/eval_record` | 单记录多字段分类 |
+| POST | `/v1/dynclassification/eval_table` | 表级批量分类 |
+| POST | `/v1/dynclassification/dry_run` | 分类干运行（不生效） |
+| POST | `/v1/dynclassification/profiles/reload` | 热重载分类配置 |
+| POST | `/v1/dynclassification/generate_profile` | 生成分类 Profile |
+| POST | `/v1/dynclassification/validate` | 校验分类规则 |
+| GET | `/v1/dynclassification/standards`, `/domains`, `/operators` | 查询已注册体系/领域/算子 |
+
+#### 预算、配置与文件
+
+| 方法 | 端点 | 功能 |
+|---|---|---|
+| GET | `/v1/privacy/budget` | 隐私预算查询 |
+| POST | `/v1/privacy/budget/reset` | 重置隐私预算 |
+| POST | `/v1/privacy/profile/recommend` | 隐私配置推荐 |
+| POST | `/v1/privacy/process_file` | 文件级隐私处理（CSV/Excel/JSON） |
+
+</details>
+
+### 2.4 Go 微服务 REST API 端点速查
 
 <details>
 <summary>点击展开完整 API 端点参考表</summary>
@@ -642,7 +697,7 @@ Conservative Fallback (保守回退，不降级安全等级)
 
 #### Go 微服务中间件栈 (`pkg/middleware/`)
 
-所有 Go 服务统一启用以下 9 层中间件链（顺序严格一致）：
+4 个核心 Go 服务（service-hub, audit-log, datasource-mgr, app-lz/bff-go）统一启用以下 9 层中间件链（顺序严格一致）：
 
 ```text
 TraceMiddleware → StructuredLogger → Recovery → SecurityHeaders → MaxBodySize → MaxConcurrent → [RateLimit] → CORS → Auth
