@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v5.0.0  
+> **版本**：v6.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 指标名修正、中间件链差异化说明、成熟度矩阵校准、测试命令补齐
+> **最后更新**：2026-08-28 — 新增 API 端点速查表、扩展环境变量参考、修正风险预案
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -145,15 +145,82 @@ flowchart TD
 
 #### Go 微服务 (`services/`, `console/`, `pkg/`)
 
-| 变量前缀 | 示例 | 用途 |
+| 服务 | 关键环境变量 | 默认值 |
 |---|---|---|
-| `SERVICE_HUB_*` | `SERVICE_HUB_PG_DSN` | 调度中枢配置 |
-| `AUDIT_LOG_*` | `AUDIT_LOG_RETENTION_DAYS` (90) | 审计存证配置 |
-| `DATASOURCE_MGR_*` | `DATASOURCE_MGR_API_KEY` | 数据源管理配置 |
-| `BFF_*` | `BFF_AGENT_URL`, `BFF_API_KEY` | 主控制台 BFF 配置 |
-| `APP_LZ_*` | `APP_LZ_RATE_LIMIT_RPS` (100) | 调度之眼 BFF 配置 |
-| `PRIVACY_GRPC_MAX_WORKERS` | `64` | gRPC 线程池大小 |
-| `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | `config/mtls-whitelist.yaml` | mTLS CN 白名单路径 |
+| service-hub | `SERVICE_HUB_HOST` / `_PORT` | `127.0.0.1:8082` |
+| | `SERVICE_HUB_GRPC_HOST` / `_PORT` | `127.0.0.1:50052` |
+| | `SERVICE_HUB_PG_DSN` / `_PG_MAX_CONNS` | `` / `10` |
+| | `SERVICE_HUB_RATE_LIMIT_RPS` / `_BURST` | `100` / `200` |
+| | `SERVICE_HUB_LOG_FORMAT` / `_LOG_LEVEL` | `json` / `info` |
+| | `SERVICE_HUB_SHUTDOWN_TIMEOUT` | `5` (秒) |
+| | `SERVICE_HUB_LEASE_TTL` | `60` (秒) |
+| datasource-mgr | `DATASOURCE_MGR_HOST` / `_PORT` | `127.0.0.1:8083` |
+| | `DATASOURCE_MGR_GRPC_HOST` / `_PORT` | `127.0.0.1:50053` |
+| | `DATASOURCE_MGR_RATE_LIMIT_RPS` / `_BURST` | `100` / `200` |
+| audit-log | `AUDIT_LOG_HOST` / `_PORT` | `127.0.0.1:8084` |
+| | `AUDIT_LOG_GRPC_HOST` / `_PORT` | `127.0.0.1:50054` |
+| | `AUDIT_LOG_PG_DSN` (回退: `PG_DSN`) | `""` |
+| | `AUDIT_LOG_RETENTION_DAYS` | `90` |
+| | `AUDIT_LOG_ENCRYPTION_KEY` (回退: `PRIVACY_AUDIT_KEY`) | `""` |
+| console/bff-go | `PRIVACY_CONSOLE_HOST` / `_PORT` | `127.0.0.1:8081` |
+| | `CONSOLE_API_KEY` / `CONSOLE_RATE_LIMIT` | `""` / `600` (req/min) |
+| | `PRIVACY_CONSOLE_GRPC_ENABLED` / `_PORT` | `false` / `50055` |
+| app-lz/bff-go | `APP_LZ_HOST` / `_PORT` | `0.0.0.0:8085` |
+| | `APP_LZ_HUB_URL` / `_DATASOURCE_URL` / `_AUDIT_URL` | 各上游服务地址 |
+| | `APP_LZ_RATE_LIMIT_RPS` / `_BURST` | `100` / `200` |
+| 通用 | `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | `config/mtls-whitelist.yaml` |
+| | `PRIVACY_GRPC_MAX_WORKERS` | `64` |
+
+</details>
+
+### 2.3 Go 微服务 REST API 端点速查
+
+<details>
+<summary>点击展开完整 API 端点参考表</summary>
+
+#### Service Hub (:8082)
+
+| 方法 | 端点 | 功能 |
+|---|---|---|
+| GET | `/health`, `/api/health`, `/readyz` | 健康检查 / 就绪探针 |
+| GET | `/api/hub/status` | 调度中枢运行状态快照 |
+| GET | `/api/hub/tasks` | 任务列表（支持分页） |
+| GET | `/api/hub/tasks/:id` | 任务详情 |
+| POST | `/api/hub/dispatch` | 分发新任务 |
+| GET | `/api/hub/pipeline` | 6 阶段流水线状态 |
+| GET | `/metrics` | Prometheus 指标 |
+
+#### Datasource Mgr (:8083)
+
+| 方法 | 端点 | 功能 |
+|---|---|---|
+| GET | `/health`, `/api/health`, `/readyz` | 健康检查 / 就绪探针 |
+| GET | `/api/v1/yibao` | 医保数据（`ds_yibao`） |
+| GET | `/api/v1/kangyang` | 康养数据（`ds_kangyang`） |
+| GET | `/api/datasources` | 数据源列表 |
+| GET | `/api/datasources/:id` | 数据源详情 |
+| GET | `/api/datasources/:id/records` | 数据源记录查询 |
+| GET | `/api/datasources/:id/sample` | 样本切片提取 |
+| POST | `/api/datasources/:id/test` | 连接测试 |
+| GET | `/api/datasources/:id/metadata` | 元数据查询 |
+| GET | `/api/datasources/:id/audit` | 访问审计日志 |
+| POST | `/api/datasources/seed` | 初始化种子数据 |
+| GET | `/metrics` | Prometheus 指标 |
+
+#### Audit Log (:8084)
+
+| 方法 | 端点 | 功能 |
+|---|---|---|
+| GET | `/health`, `/api/health`, `/readyz` | 健康检查 / 就绪探针 |
+| GET | `/api/audit/logs` | 审计日志列表 |
+| POST | `/api/audit/logs` | 创建审计日志条目 |
+| GET | `/api/audit/logs/:id` | 审计日志详情 |
+| GET | `/api/audit/stats` | 审计统计概览 |
+| GET | `/api/audit/snapshots` | 快照列表 |
+| POST | `/api/audit/snapshots/verify` | 快照完整性验真 |
+| POST | `/api/audit/chain/verify` | 9 要素哈希链验真 |
+| POST | `/api/audit/report` | 生成审计报告 |
+| GET | `/metrics` | Prometheus 指标 |
 
 </details>
 
@@ -333,8 +400,8 @@ clients:
 ├───────────────────┬──────────┬───────────────────────┬──────────────────────────────────────────┤
 │ 潜在故障风险       │ 严重等级 │ 触发指征              │ 应急处置与一键回滚操作                   │
 ├───────────────────┼──────────┼───────────────────────┼──────────────────────────────────────────┤
-│ **1. 错误信封解析** │ High     │ 前端抛出 Unhandled     │ 设置 `FEATURE_FLAG_LEGACY_ERROR=true`，  │
-│ 导致老客户端报错   │          │ Exception 或无法渲染  │ 网关自动退化为兼容双轨模式                │
+│ **1. 错误信封解析** │ High     │ 前端抛出 Unhandled     │ 信封设计已向后兼容：响应体保留 `detail`   │
+│ 导致老客户端报错   │          │ Exception 或无法渲染  │ 字段兼容旧格式；紧急时可回滚前端至上一版本│
 ├───────────────────┼──────────┼───────────────────────┼──────────────────────────────────────────┤
 │ **2. PostgreSQL** │ Critical │ PG 写入超时、租约争抢 │ 清除 `PG_DSN` 环境变量，自动回滚至本地    │
 │ 数据库连接池耗尽   │          │ 报错连接拒绝          │ SQLite WAL 模式，保障核心流通不中断       │
