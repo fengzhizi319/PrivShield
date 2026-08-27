@@ -81,6 +81,9 @@ func SetupRouter(h *Handler) *gin.Engine {
 	r.Use(middleware.SecurityHeaders())           // 安全响应头 (CSP/HSTS/X-Frame-Options)
 	r.Use(middleware.MaxBodySize(32 << 20))       // 32 MiB 请求体最大保护
 	r.Use(middleware.MaxConcurrent(1000))         // 并发在途请求上限，超限返回 503
+	if h.cfg.RateLimitRPS > 0 {
+		r.Use(middleware.RateLimit(h.cfg.RateLimitRPS, h.cfg.RateLimitBurst)) // 每客户端 IP 令牌桶限流
+	}
 	r.Use(corsMiddleware())                       // 全局 CORS 中间件
 
 	// ── 健康检查（两个路径均支持，兼容不同探测配置）──

@@ -1,8 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v2.0.0  
+> **版本**：v3.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
+> **最后更新**：2026-08-27 — 全栈审计对齐、中间件链统一、信号处理升级
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -23,9 +24,9 @@
 │ **services/audit-log**│ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ ★★★★★    │ **Level 5 (准生产)**│
 │ **services/service-hub**│ ★★★★★  │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ ★★★★☆    │ **Level 5 (准生产)**│
 │ **services/datasource-mgr**│ ★★★★☆│ ★★★☆☆   │ ★★★☆☆    │ ★★★★☆    │ ★★★★☆    │ **Level 4 (就绪)** │
-│ **console/app-lz**   │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ **Level 5 (就绪)** │
-│ **console/bff-go**   │ ★★★★☆    │ ★★★☆☆    │ ★★★☆☆    │ ★★★☆☆    │ ★★★★☆    │ **Level 4 (就绪)** │
-│ **engine (Python)**  │ ★★★★☆    │ ★★★☆☆    │ ★★★☆☆    │ ★★★☆☆    │ ★★★★☆    │ **Level 4 (就绪)** │
+│ **console/app-lz**   │ ★★★★★    │ ★★★★★    │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ **Level 5 (准生产)**│
+│ **console/bff-go**   │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ **Level 5 (准生产)**│
+│ **engine (Python)**  │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★☆☆    │ ★★★★☆    │ **Level 5 (准生产)**│
 │ **console 前端群**   │ ★★★★☆    │ ★★★★☆    │ ★★★☆☆    │ N/A      │ N/A      │ **Level 4 (就绪)** │
 └──────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────────────────┘
 ```
@@ -51,7 +52,7 @@ flowchart TD
         WebFull["console/web<br/>(4大隐私原语 + 分类漏斗)"]
         WebAppLZ["console/app-lz/web<br/>(医保/康养政务流水线)"]
         BFFGo["console/bff-go (:8081)<br/>REST/gRPC 聚合网关"]
-        BFFLZ["app-lz/bff-go (:8080)<br/>会话调度与 E2E 测试器"]
+        BFFLZ["app-lz/bff-go (:8085)<br/>会话调度与 E2E 测试器"]
         PyGW["engine/gateway<br/>Python 负载均衡网关<br/>(6算法/熔断/重试/动态拓扑)"]
     end
 
@@ -107,9 +108,11 @@ flowchart TD
 
 ## 3. 六大专项技术迁移实施方案 (Detailed Migration Playbooks)
 
+> **实施状态总览**：六大专项已全部完成核心实现（✅ = 已完成，🔄 = 持续演进中）。
+
 ---
 
-### 专项方案 1：跨语言统一 API 错误信封与状态码平滑迁移
+### 专项方案 1：跨语言统一 API 错误信封与状态码平滑迁移 ✅
 
 #### 1. 迁移目标
 消除各微服务（Python + Go）在错误响应上的格式差异，统一输出遵循以下规范的 JSON 响应信封：
@@ -244,7 +247,7 @@ apiClient.interceptors.response.use(
 
 ---
 
-### 专项方案 2：全链路分布式追踪 (Trace Context) 贯穿迁移
+### 专项方案 2：全链路分布式追踪 (Trace Context) 贯穿迁移 ✅
 
 #### 1. 迁移目标
 确保由前端生成的 `X-Request-ID`，在跨越 HTTP REST、Go 内部调度流水线、gRPC 跨机调用、异步 Goroutine 消费以及 Audit Log 存证数据库落盘的全生命周期中**保持绝对单调且不丢失**。
@@ -320,7 +323,7 @@ func GetTraceID(c *gin.Context) string {
 
 ---
 
-### 专项方案 3：业务标识统一与别名归一化迁移 (SSOT Naming)
+### 专项方案 3：业务标识统一与别名归一化迁移 (SSOT Naming) ✅
 
 #### 1. 迁移目标
 彻底消除全栈代码中对数据源名称、API 编号的硬编码，将所有识别、校验与展示逻辑统一收敛至 [`pkg/naming`](../../pkg/naming/)。
@@ -342,7 +345,7 @@ func GetTraceID(c *gin.Context) string {
 
 ---
 
-### 专项方案 4：存储底座 Phase A (SQLite) 到 Phase B (PostgreSQL) 生产平滑迁移
+### 专项方案 4：存储底座 Phase A (SQLite) 到 Phase B (PostgreSQL) 生产平滑迁移 ✅
 
 #### 1. 迁移目标与挑战
 在单机环境下，PrivShield 使用 SQLite WAL 模式（`service-hub.db` 与 `audit-log.db`）。当升级到多节点企业级高并发集群时，需切换至 PostgreSQL Phase B 存储底座。  
@@ -441,7 +444,7 @@ export SERVICE_HUB_PG_DSN="postgres://hub_user:hub_pass@pg-prod:5432/privshield_
 
 ---
 
-### 专项方案 5：零信任通信与 mTLS CN 白名单动态热重载迁移
+### 专项方案 5：零信任通信与 mTLS CN 白名单动态热重载迁移 ✅
 
 #### 1. 迁移目标
 将静态编译在代码或单机环境变量中的证书 CN 列表，迁移为基于动态配置文件的 **微服务访问控制白名单 (`mtls-whitelist.yaml`)**，支持在不停机的情况下通过文件监听（`fsnotify`）实现毫秒级授权热生效。
@@ -608,7 +611,7 @@ func (dw *DynamicWhitelist) UnaryServerInterceptor() grpc.UnaryServerInterceptor
 
 ---
 
-### 专项方案 6：前端双控制台（Web & App-LZ）组件与规范收敛迁移
+### 专项方案 6：前端双控制台（Web & App-LZ）组件与规范收敛迁移 ✅
 
 #### 1. 迁移目标与职责边界划分
 - **`console/web`（全量隐私控制台）**：面向数据安全工程师，提供 4 大通用隐私原语、三层漏斗策略调优与算子性能基准测试；
@@ -692,8 +695,8 @@ cd ../../web && pnpm build
 - [x] **Phase B 租约并发**：20 个并发任务无死锁、无重复执行（TS-03 100% 通过）；
 - [x] **全链路追踪**：各服务日志中均输出一致的 `X-Request-ID`；
 - [x] **Prometheus 指标暴露**：Python `/metrics` 与 Go `/metrics` 均可抓取，包含请求计数、延迟直方图、隐私原语操作计数；
-- [x] **DDoS 防护中间件**：所有 Go 服务启用 `MaxBodySize` + `MaxConcurrent` + `RateLimit`，Python 启用 `limit_concurrency` + `limit_max_requests`；
-- [x] **优雅停机**：所有服务捕获 SIGTERM/SIGINT，在途请求排空完成后再退出；
+- [x] **DDoS 防护中间件**：所有 Go 服务启用 `MaxBodySize` + `MaxConcurrent` + `RateLimit`（RPS=0 可关闭），Python 启用 `limit_concurrency` + `limit_max_requests`；
+- [x] **优雅停机**：所有 Go 服务使用 `signal.NotifyContext`，Python 使用 `timeout_graceful_shutdown`，在途请求排空完成后再退出；
 - [x] **熔断器保护**：Agent 客户端与 Gateway 负载均衡器均具备三态熔断器（Closed/Open/Half-Open）；
 - [x] **数据保留策略**：审计日志超期自动清理（`AUDIT_LOG_RETENTION_DAYS`，默认 90 天）。
 
@@ -711,13 +714,21 @@ cd ../../web && pnpm build
 |---|---|---|---|
 | `privacy_requests_total` | Counter | `method`, `path`, `status` | REST/gRPC 请求计数 |
 | `privacy_request_duration_seconds` | Histogram | `method`, `path` | 请求延迟分布（P50/P95/P99） |
-| `privacy_dp_queries_total` | Counter | `mechanism`, `noise` | 差分隐私查询计数 |
-| `privacy_classification_results_total` | Counter | `layer`, `level` | 分类漏斗各层结果计数 |
-| `privacy_masking_operations_total` | Counter | `field_type` | 脱敏操作计数 |
-| `privacy_kano_operations_total` | Counter | `algorithm` | K-匿名操作计数 |
-| `privacy_qol_operations_total` | Counter | `strategy` | 查询混淆操作计数 |
+| `privacy_dp_queries_total` | Counter | `mechanism`, `aggregation` | 差分隐私查询计数 |
+| `privacy_classification_total` | Counter | `final_level`, `layer` | 分类漏斗各层结果计数 |
+| `privacy_masking_operations_total` | Counter | `operation` | 脱敏操作计数 |
+| `privacy_kano_operations_total` | Counter | `operation` | K-匿名操作计数 |
+| `privacy_qol_operations_total` | Counter | `domain` | 查询混淆操作计数 |
+| `privacy_budget_remaining` | Gauge | `namespace` | 剩余隐私预算（epsilon/delta） |
+| `privacy_auth_denials_total` | Counter | `reason` | 认证拒绝计数 |
+| `privacy_traffic_bytes_total` | Counter | `direction` | 网络流量字节数 |
+| `privacy_classification_jobs_total` | Counter | `source` | 分类任务触发计数 |
+| `privacy_classification_jobs_duration` | Histogram | `source` | 分类任务延迟 |
+| `privacy_classification_rule_hits_total` | Counter | `rule_id`, `level` | 规则引擎命中计数 |
+| `privacy_classification_ner_total` | Counter | `entity_type` | NER 实体识别计数 |
+| `privacy_classification_llm_total` | Counter | `result_level` | LLM 仲裁结果计数 |
 | `privacy_gateway_healthy_nodes` | Gauge | — | 网关健康后端节点数 |
-| `privacy_gateway_retries_total` | Counter | `node` | 网关重试计数 |
+| `privacy_gateway_retries_total` | Counter | `protocol`, `reason` | 网关重试计数 |
 | `privacy_gateway_circuit_breaker_state` | Gauge | `node` | 熔断器状态（0=closed, 1=open, 2=half_open） |
 
 #### Go 微服务端 (`pkg/metrics/metrics.go`)
@@ -732,6 +743,13 @@ cd ../../web && pnpm build
 | `tasks_retried_total` | Counter | — | 自动重试的任务数 |
 | `circuit_breaker_state` | Gauge | `target` | Agent 客户端熔断器状态 |
 | `task_lease_conflicts` | Counter | — | 租约争抢冲突计数 |
+| `task_lease_expired` | Counter | — | 超期失效的租约计数 |
+| `task_claim_latency_seconds` | Histogram | — | 任务领取延迟 |
+| `task_transitions_total` | Counter | `from`, `to` | 任务状态转换计数 |
+| `service_hub_ready` | Gauge | — | Service-Hub 就绪状态（1=就绪） |
+| `api_alias_requests_total` | Counter | `alias`, `canonical` | 别名 API 请求计数 |
+| `datasource_normalize_errors_total` | Counter | `source` | 数据源归一化失败计数 |
+| `datasource_requests_total` | Counter | `source`, `status` | 数据源请求计数 |
 
 每个 Go 服务使用独立的 `prometheus.Registry`，避免全局注册冲突。暴露 `/metrics` 端点供 Prometheus 或 ServiceMonitor 抓取。
 
@@ -822,14 +840,21 @@ Conservative Fallback (保守回退，不降级安全等级)
 
 所有 Go 服务（service-hub, datasource-mgr, audit-log, bff-go, app-lz）统一启用以下中间件链：
 
+```text
+TraceMiddleware → StructuredLogger → Recovery → SecurityHeaders → MaxBodySize → MaxConcurrent → [RateLimit] → CORS → Auth
+```
+
 | 中间件 | 功能 | 配置参数 |
 |---|---|---|
-| `MaxBodySize(maxBytes)` | 限制请求体大小，防止大包 OOM | 32 MB (`32 << 20`) |
-| `MaxConcurrent(limit)` | 限制在途请求总数，防止并发耗尽资源 | 按服务配置 |
-| `RateLimit(rps, burst)` | 每客户端 IP 令牌桶限流 | 按服务配置 |
+| `TraceMiddleware()` | 自动注入/传播 X-Request-ID，双头下发 | — |
+| `StructuredLogger(logger, module)` | 每请求结构化日志（method/path/status/latency） | `*_LOG_FORMAT` |
+| `Recovery(logger, module)` | 全局 panic 恢复，返回 500 而非崩溃 | — |
 | `SecurityHeaders()` | 注入 CSP/HSTS/X-Frame-Options/X-Content-Type-Options | 固定值 |
+| `MaxBodySize(maxBytes)` | 限制请求体大小，防止大包 OOM | 32 MB (`32 << 20`) |
+| `MaxConcurrent(limit)` | 限制在途请求总数，防止并发耗尽资源 | 1000（默认） |
+| `RateLimit(rps, burst)` | 每客户端 IP 令牌桶限流（RPS=0 时跳过） | 100 rps / 200 burst（默认） |
 | `CORS(origins)` | 可配置跨域来源 | 环境变量 |
-| `TraceMiddleware()` | 自动注入/传播 X-Request-ID | — |
+| `Auth(apiKey)` | API Key 鉴权（为空时跳过） | 环境变量 |
 
 #### Python 引擎防护
 
@@ -853,7 +878,7 @@ SIGTERM/SIGINT 到达
   → 退出（exit 0）
 ```
 
-所有 Go 服务使用 `signal.NotifyContext` 监听 SIGINT/SIGTERM，通过 `http.Server.Shutdown(ctx)` 或 `grpcServer.GracefulStop()` 实现排空。
+所有 5 个 Go 服务（service-hub, audit-log, datasource-mgr, console/bff-go, console/app-lz/bff-go）统一使用 `signal.NotifyContext`（Go 1.16+）监听 SIGINT/SIGTERM，信号到达时自动取消 context，通过 `http.Server.Shutdown(ctx)` 或 `grpcServer.GracefulStop()` 实现排空。
 
 #### Python 服务
 

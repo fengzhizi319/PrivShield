@@ -315,3 +315,68 @@ func TestTraceMiddlewareRegistered(t *testing.T) {
 		t.Errorf("expected X-Trace-ID passthrough, got %q", got)
 	}
 }
+
+// TestRateLimitMiddleware 验证令牌桶限流中间件：
+// 1. RPS > 0 时，超限请求返回 429 Too Many Requests
+// 2. RPS = 0 时，限流中间件不启用，所有请求正常通过
+func TestRateLimitMiddleware(t *testing.T) {
+	// 1. 低 RPS 配置：突发 2，每秒 1 个请求
+	cfg := &config.Config{
+		Host:           "127.0.0.1",
+		Port:           "8085",
+		HubURL:         "http://127.0.0.1:8082",
+		DatasourceURL:  "http://127.0.0.1:8083",
+		AuditURL:       "http://127.0.0.1:8084",
+		AgentURL:       "http://127.0.0.1:8079",
+		RateLimitRPS:   1,
+		RateLimitBurst: 2,
+	}
+	pool := clients.NewClientPool(cfg)
+	h := NewHandler(cfg, pool, runner.NewTestRunner(pool), nil)
+	router := SetupRouter(h)
+
+	// 突发 2 次应成功（桶容量 2）
+	// 注意：/health 和 /api/health 被 RateLimit 中间件豁免，使用 /api/lz/topology 测试
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/lz/topology", nil)
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", i+1, w.Code)
+		}
+	}
+
+	// 第 3 次应被限流（桶已耗尽）
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/lz/topology", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 after burst exhausted, got %d", w.Code)
+	}
+	if retry := w.Header().Get("Retry-After"); retry == "" {
+		t.Error("expected Retry-After header on 429 response")
+	}
+
+	// 2. RPS=0 配置：限流禁用，所有请求应通过
+	cfg2 := &config.Config{
+		Host:         "127.0.0.1",
+		Port:         "8085",
+		HubURL:       "http://127.0.0.1:8082",
+		DatasourceURL: "http://127.0.0.1:8083",
+		AuditURL:     "http://127.0.0.1:8084",
+		AgentURL:     "http://127.0.0.1:8079",
+		RateLimitRPS: 0, // 禁用限流
+	}
+	pool2 := clients.NewClientPool(cfg2)
+	h2 := NewHandler(cfg2, pool2, runner.NewTestRunner(pool2), nil)
+	router2 := SetupRouter(h2)
+
+	for i := 0; i < 10; i++ {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/lz/topology", nil)
+		router2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("RPS=0: request %d: expected 200, got %d", i+1, w.Code)
+		}
+	}
+}

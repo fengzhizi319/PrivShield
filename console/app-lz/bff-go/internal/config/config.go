@@ -46,6 +46,10 @@ type Config struct {
 
 	// ── 认证配置 ──
 	APIKey string // API Key（用于 BFF 自身的认证校验）
+
+	// ── 限流配置 ──
+	RateLimitRPS   int // 每客户端 IP 每秒允许请求数（默认 100，0 = 不限流）
+	RateLimitBurst int // 令牌桶突发容量（默认 200）
 }
 
 // Load 从环境变量加载配置，未设置时使用合理默认值。
@@ -101,6 +105,10 @@ func Load() *Config {
 		KeyFile:        keyFile,
 		ClientCAFile:   clientCAFile,
 		APIKey:         apiKey,
+
+		// ── 限流 ──
+		RateLimitRPS:   getEnvInt("APP_LZ_RATE_LIMIT_RPS", 100),
+		RateLimitBurst: getEnvInt("APP_LZ_RATE_LIMIT_BURST", 200),
 	}
 }
 
@@ -111,6 +119,19 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// getEnvInt 读取环境变量并解析为 int，解析失败时回退到默认值。
+func getEnvInt(key string, defaultVal int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return defaultVal
+	}
+	return n
 }
 
 // Validate 校验配置的一致性，在启动早期（fail-fast）发现致命配置错误。
