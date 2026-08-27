@@ -57,10 +57,17 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     // 尝试从响应体提取人类可读的错误信息
+    // 兼容统一信封格式 {code, message, detail, trace_id, timestamp} 与旧格式 {error/detail}
     let errMsg = `HTTP Error ${res.status}`;
     try {
       const errBody = await res.json();
-      if (errBody.error || errBody.detail) {
+      if (errBody.code) {
+        // 统一信封格式：优先使用 message，附带 trace_id 便于排查
+        errMsg = errBody.message || errBody.detail || errBody.code;
+        if (errBody.trace_id) {
+          console.error(`[PrivShield API Error] ${errBody.code} (TraceID: ${errBody.trace_id}): ${errMsg}`);
+        }
+      } else if (errBody.error || errBody.detail) {
         errMsg = errBody.error || errBody.detail;
       }
     } catch {

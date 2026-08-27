@@ -79,6 +79,36 @@ describe('client request()', () => {
     await expect(proxyRequest({ path: '/x', method: 'POST', body: {} })).rejects.toThrow('不支持的操作');
   });
 
+  it('统一信封格式错误优先使用 message 字段', async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse(
+        { code: 'INVALID_ARGUMENT', message: '请求参数校验失败', detail: 'field X is required', trace_id: 'req-123' },
+        400,
+      ),
+    );
+
+    await expect(proxyRequest({ path: '/x', method: 'POST', body: {} })).rejects.toThrow('请求参数校验失败');
+  });
+
+  it('统一信封格式错误携带 code 和 traceId', async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse(
+        { code: 'NOT_FOUND', message: '资源不存在', detail: '', trace_id: 'req-456' },
+        404,
+      ),
+    );
+
+    try {
+      await proxyRequest({ path: '/x', method: 'GET' });
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      const err = e as Error & { code?: string; traceId?: string };
+      expect(err.message).toBe('资源不存在');
+      expect(err.code).toBe('NOT_FOUND');
+      expect(err.traceId).toBe('req-456');
+    }
+  });
+
   it('非 2xx 且无 JSON body 时使用 statusText', async () => {
     mockFetch.mockReturnValue(
       Promise.resolve({
