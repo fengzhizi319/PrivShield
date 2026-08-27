@@ -1,8 +1,8 @@
 # 调度之眼 · 测试数据源头与生命周期全景文档
 
 > **Console App-LZ (Eye of Dispatch) — Test Data Source & Lifecycle Specification**  
-> 适用版本：`v1.8.0+` · 归属模块：`console/app-lz`  
-> **最后更新**：2026-08-26
+> 适用版本：`v2.0.0+` · 归属模块：`console/app-lz`  
+> **最后更新**：2026-08-27（与 SSOT 规范命名及 D-01~D-15 缺陷修复全面对齐）
 
 ---
 
@@ -10,13 +10,15 @@
 
 `console/app-lz`（调度之眼）作为 **PrivShield 调度中枢与多微服务全栈观测测试控制台**，打通了调度中枢（`service-hub`）、隐私计算引擎（`engine / PrivShield Agent`）、数据源管理（`datasource-mgr`）以及脱敏审计日志（`audit-log`）四大微服务。
 
+全栈数据流动遵循 **SSOT (Single Source of Truth) 权威注册表**（`pkg/naming`、`engine/naming.py`、`console/app-lz/web/src/types/naming.ts`），规范数据源标识为 `ds_yibao`（医保）与 `ds_kangyang`（康养），API 编码为 `api1_yibao` 与 `api2_kangyang`。
+
 前端共 **7 大工作台**，所展示的数据根据来源可划分为 **三层数据供给模型**：
 
-| 数据供给层级 | 说明 | 占比 |
-|---|---|---|
-| **L1 — 实时上游数据** | BFF 调用真实微服务接口获取的运行时数据 | ~70% |
-| **L2 — BFF 内置兜底数据** | 上游不可达时 BFF 返回的硬编码模拟数据 | ~20% |
-| **L3 — 前端硬编码数据** | 完全由前端组件内部硬编码的静态展示数据 | ~10% |
+| 数据供给层级 | 说明 | 占比 | 来源标记 |
+|---|---|---|---|
+| **L1 — 实时上游数据** | BFF 调用真实微服务接口获取的运行时数据 | ~75% | `source: "datasource-mgr" \| "service-hub" \| "audit-log" \| "engine"` |
+| **L2 — BFF 内置兜底数据** | 上游不可达时 BFF 返回的带显式标记的本地模拟数据 | ~15% | `source: "fallback"`，附加 `detail` 错误说明 |
+| **L3 — 前端硬编码数据** | 由前端组件内部硬编码的展示框架与预设样本数据 | ~10% | 前端静态常量 |
 
 ```mermaid
 graph TD
@@ -31,21 +33,22 @@ graph TD
     end
 
     subgraph BFF["App-LZ Go BFF (:8085)"]
-        B1["ClientPool\n(双协议探针/转发/聚合)"]
-        B2["TestRunner\n(TS-01~TS-03 执行引擎)"]
-        B3["Fallback Generator\n(硬编码兜底数据)"]
+        B1["ClientPool & Upstream\n(双协议探针/规范路由/SSOT 归一化)"]
+        B2["TestRunner\n(TS-01~TS-03 真实执行引擎)"]
+        B3["Fallback Generator\n(显式 fallback 标记数据)"]
+        B4["Schema Catalog\n(医保 18 字段 / 康养 27 字段)"]
     end
 
     subgraph Services["PrivShield 微服务集群"]
-        S1["service-hub (:8082/:50052)"]
-        S2["engine Agent (:8079/:50051)"]
-        S3["datasource-mgr (:8083/:50053)"]
-        S4["audit-log (:8084/:50054)"]
+        S1["service-hub (:8082/:50052)\n任务调度与流水线编排"]
+        S2["engine Agent (:8079/:50051)\n分类分级与合规脱敏流水线"]
+        S3["datasource-mgr (:8083/:50053)\n资产管理与真实切片采样"]
+        S4["audit-log (:8084/:50054)\n不可篡改 SHA-256 / Merkle 存证"]
     end
 
     UI <-->|HTTP/1.1 JSON| BFF
     BFF -->|REST / gRPC| Services
-    B3 -.->|上游不可达时兜底| UI
+    B3 -.->|上游不可达时显式降级| UI
 ```
 
 ---
@@ -56,19 +59,19 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| 4 服务 REST RTT / 状态 | **L1 实时** | BFF `ClientPool.ProbeNode()` → HTTP `GET /api/health` 探测各服务 | `clients.go` L60~L99 |
-| 4 服务 gRPC RTT / 状态 | **L1 实时** | BFF `net.DialTimeout("tcp", grpcAddr, 800ms)` TCP 拨测 | `clients.go` L103~L117 |
-| 节点固定排列顺序 | **L3 前端** | 前端 `FIXED_ORDER` 数组排序 | `TopologyPanel.tsx` L40 |
-| 服务角色/端口/图标元数据 | **L3 前端** | 前端 `getServiceMeta()` switch-case 硬编码 | `TopologyPanel.tsx` L49~L96 |
-| 上游全部不可达时的兜底 | **L2 BFF** | BFF 标记各节点 `status: "unreachable"` 但不阻塞响应 | `clients.go` L188~L193 |
-| 前端请求失败时的兜底 | **L3 前端** | `App.tsx` catch 块内硬编码 4 个服务的假 RTT 数据 | `App.tsx` L50~L60 |
+| 4 服务 REST RTT / 状态 | **L1 实时** | BFF `ClientPool.ProbeNode()` → HTTP `GET /api/health` 探测各服务 | `clients.go` `ProbeNode` |
+| 4 服务 gRPC RTT / 状态 | **L1 实时** | BFF `net.DialTimeout("tcp", grpcAddr, 800ms)` TCP 拨测 | `clients.go` `probeGRPC` |
+| 节点固定排列顺序 | **L3 前端** | 前端 `FIXED_ORDER` 数组排序 | `TopologyPanel.tsx` |
+| 服务角色/端口/图标元数据 | **L3 前端** | 前端 `getServiceMeta()` switch-case 硬编码 | `TopologyPanel.tsx` |
+| 上游不可达时的标记 | **L2 BFF** | BFF 标记各节点 `status: "unreachable"`，透传真实探测错误 | `clients.go` `GetTopology` |
+| 前端网络中断时的兜底 | **L3 前端** | `App.tsx` catch 块内返回离线占位数据 | `App.tsx` |
 
 **数据刷新机制**：
-- 页面加载时立即触发一次全量探测
-- 之后每 **15 秒** 自动刷新一次拓扑（`App.tsx` L163~L165 `setInterval`）
-- 用户手动点击"刷新"按钮即时触发
+- 页面挂载时自动触发初始全量探测
+- 定时器每 **15 秒** 自动轮询刷新拓扑（`App.tsx` `setInterval`）
+- 用户手动点击"刷新"按钮即时触发探测
 
-**生命周期**：纯内存态，无持久化。每次探测生成新的 RTT 快照，前端 React state 更新后即丢弃旧值。
+**生命周期**：纯内存态，无持久化。每次探测生成新的 RTT 快照，前端更新 state 后丢弃历史旧值。
 
 ---
 
@@ -76,22 +79,22 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| 6 阶段名称/标题/基准耗时 | **L3 前端** | BFF `defaultStages()` 硬编码 6 个阶段的名称与 `avg_duration_ms` | `clients.go` L247~L256 |
-| 阶段实时状态 (idle/processing) | **L1 实时** | BFF `GetPipelineStatus()` → `service-hub /api/hub/pipeline` | `clients.go` L197~L245 |
-| Agent 连通状态 | **L1 实时** | 上游 `pipeline` 接口返回的 `agent_ok` 字段 | `clients.go` L239 |
-| QPS 数值 | **L1 实时** ✅ G-3 已改进 | BFF `GetPipelineStatus()` 从 Prometheus 指标动态计算 | `clients.go` parsePrometheusMetrics |
-| 医保预设样本数据 | **L3 前端** | 前端 `sampleYibao` 对象硬编码（张三/510101199001011234 等） | `PipelineVisualizer.tsx` L34~L44 |
-| 康养预设样本数据 | **L3 前端** | 前端 `sampleKangyang` 对象硬编码（李建国/KY-8802 等） | `PipelineVisualizer.tsx` L46~L56 |
-| 脱敏后对比数据 | **L1 实时** ✅ G-6 已改进 | BFF `InvokeDataApi()` 调用 `engine /v1/privacy/mask_record` 真实脱敏，失败时 fallback 到本地掩码 | `handlers.go` InvokeDataApi, `clients.go` MaskRecordViaEngine |
-| 任务分发结果 | **L1 实时** | BFF `DispatchTask()` → `service-hub /api/hub/dispatch` | `clients.go` L258~L280 |
-| 分类调度结果 | **L1 实时** | BFF `ClassifyDispatch()` → `service-hub /api/hub/classify` | `clients.go` L282~L304 |
-| 6 阶段流转动画 | **L3 前端** | 前端 `setTimeout` 依次 200ms 间隔推进 `activeStageIndex` | `PipelineVisualizer.tsx` L85~L90 |
+| 6 阶段名称/标题/基准耗时 | **L3 前端** | BFF `defaultStages()` 返回 6 个阶段的标准名称与平均基准耗时 | `clients.go` `defaultStages` |
+| 阶段实时状态 (idle/processing) | **L1 实时** | BFF `GetPipelineStatus()` → `service-hub /api/hub/pipeline` | `clients.go` `GetPipelineStatus` |
+| Agent 连通状态 | **L1 实时** | 上游 `pipeline` 接口返回的 `agent_ok` 运行状态 | `clients.go` `GetPipelineStatus` |
+| QPS 实时数值 | **L1 实时** | BFF `GetPipelineStatus()` 从 Prometheus 指标动态计算 | `clients.go` `parsePrometheusMetrics` |
+| 医保预设样本数据 | **L3 前端** | 前端 `sampleYibao` 对象（张三 / 510101199001011234 等） | `PipelineVisualizer.tsx` |
+| 康养预设样本数据 | **L3 前端** | 前端 `sampleKangyang` 对象（李建国 / KY-8802 等） | `PipelineVisualizer.tsx` |
+| 脱敏后治理对比数据 | **L1 实时** | BFF `InvokeDataApi()` 调用 `engine /v1/agent/process`（兼容 `/v1/medical/process`）真实脱敏，失败时 fallback 本地掩码 | `handlers.go` `InvokeDataApi` |
+| 任务分发结果 | **L1 实时** | BFF `DispatchTask()` → `service-hub /api/hub/dispatch` | `clients.go` `DispatchTask` |
+| 分类调度结果 | **L1 实时** | BFF `ClassifyDispatch()` → `service-hub /api/hub/classify` | `clients.go` `ClassifyDispatch` |
+| 6 阶段流转动画 | **L3 前端** | 前端 `setTimeout` 依次 200ms 间隔推进 `activeStageIndex` 动效 | `PipelineVisualizer.tsx` |
 
 **生命周期**：
-- 阶段定义/预设数据：**静态不变**，随前端代码部署更新
-- 流水线状态：**请求级**，每次查询获取最新值，不缓存
-- 用户提交的 dispatch 结果：由 `service-hub` 持久化到 SQLite/PostgreSQL `tasks` 表
-- 前端脱敏对比数据：**瞬时态**，仅存在于当次 `lastResult` state 中，页面刷新即丢失
+- 阶段定义与预设样本：**静态结构**，随代码部署更新
+- 流水线状态与 QPS：**请求级**，实时动态拉取，不持久化缓存
+- 用户分发的真实任务：由 `service-hub` 持久化到 SQLite / PostgreSQL `tasks` 表
+- 前端脱敏对比结果：**瞬时态**，仅保存在当前 React state 中
 
 ---
 
@@ -99,17 +102,14 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| 任务列表 | **L1 实时** | BFF `ListTasks()` → `service-hub /api/hub/tasks?status=&limit=50&offset=0` | `clients.go` L331~L351 |
-| 任务列表前端兜底 | **L3 前端** | `App.tsx` catch 块硬编码 2 条样本任务 | `App.tsx` L75~L102 |
-| Phase B 租约数据 | **L1 实时** ✅ G-1 已改进 | BFF `GetLeasesFromHub()` → `service-hub /api/hub/tasks?status=running`，按 `lease_owner` 分组 | `clients.go` (新增) |
-| 租约 Worker/任务/TTL | **L1 实时** ✅ G-1 已改进 | 从真实 running tasks 推导，上游不可达时返回空数据 | `handlers.go` GetLeases |
-
-**G-1 改进说明**：租约数据已改为查询 `service-hub` 真实 running 状态任务并按 `lease_owner` 聚合分组，不再 100% 硬编码。上游不可达时降级返回空 `leased_tasks` 列表。
+| 任务列表 | **L1 实时** | BFF `ListTasks()` → `service-hub /api/hub/tasks?status=&limit=50&offset=0` | `clients.go` `ListTasks` |
+| 任务列表前端兜底 | **L3 前端** | `App.tsx` catch 块硬编码 2 条样本任务（仅网络完全中断时展示） | `App.tsx` |
+| Phase B 租约分组数据 | **L1 实时** | BFF `GetLeasesFromHub()` → `service-hub /api/hub/tasks?status=running&limit=100`，按 `lease_owner` 分组 | `clients.go` `GetLeasesFromHub` |
+| 租约 Worker / TTL / 任务数 | **L1 实时** | 从真实 running tasks 动态推导剩余租期；上游不可达时返回空租约列表 | `handlers.go` `GetLeases` |
 
 **生命周期**：
-- 任务实体：由 `service-hub` 持久化在 SQLite / PostgreSQL `tasks` 表中，长期存在
-- 租约数据：**请求级**，每次从 `service-hub` 实时获取 running tasks 推导，BFF 重启后不影响
-- 前端兜底任务：仅当 `service-hub` 不可达时出现在 UI 中，页面刷新后重新请求
+- 任务记录：由 `service-hub` 长期持久化在 SQLite / PostgreSQL `tasks` 表中
+- 租约看板：**请求级**，每次从 `service-hub` 实时拉取 running tasks 动态聚合，BFF 重启不丢失状态
 
 ---
 
@@ -117,24 +117,18 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| TS-01~TS-03 用例定义 | **L2 BFF** | BFF `TestRunner.GetAvailableSuites()` 硬编码 3 个用例的 ID/标题/描述 | `runner.go` L26~L49 |
-| 测试执行结果 | **L1 实时** | BFF `TestRunner.RunSuites()` 实际调用上游服务执行断言 | `runner.go` L81~L135 |
-| TS-01 测试输入数据 | **L2 BFF** | 硬编码患者数据（张三/510101199001011234/高血压） | `runner.go` L166~L176 |
-| TS-02 测试输入数据 | **L2 BFF** | 硬编码康养数据（王五/KY-9901/血压145/95） | `runner.go` L232~L241 |
-| TS-02 压测载荷 | **L2 BFF** | 硬编码测试用户数据，并发协程池实际调用 `service-hub` | `runner.go` runTS02 |
-| TS-03 租约争抢模拟 | **L1 实时** ✅ G-4 已改进 | 5 worker × 4 tasks = 20 真实并发 `DispatchTask` 到 service-hub，检测重复 task_id；service-hub 不可达时降级为合成 ID | `runner.go` runTS03 |
-| 断言结果 (expected/actual) | **L1 实时** ✅ G-5 已改进 | TS-01/TS-02/TS-03 全部基于真实响应数据断言（merkle_valid/QPS+P50~P99/零重复） | `runner.go` 各用例 |
-| 测试日志流 | **L2 BFF** | 执行过程中 `logs` 切片追加，返回后前端展示 | `runner.go` 各用例 |
-
-**G-4/G-5 改进说明**：
-- **G-4**：TS-03 已从纯内存 `rand.Intn` 模拟改为 5 worker × 4 tasks = 20 真实并发 `DispatchTask` 到 service-hub，通过 `sync.Mutex` 检测 task_id 重复，验证零重复与零死锁。当 service-hub 不可达时自动生成合成 task ID 降级验证并发模型。
-- **G-5**：TS-01 基于真实 `VerifyAudit` 响应的 `merkle_valid` 断言；TS-02 基于真实 `DispatchTask` 延迟计算 P50/P90/P95/P99/QPS；TS-03 基于真实并发 `DispatchTask` 的零重复/零死锁断言。
+| TS-01~TS-03 用例定义 | **L2 BFF** | BFF `TestRunner.GetAvailableSuites()` 返回 3 个测试套件的元数据 | `runner.go` `GetAvailableSuites` |
+| 测试执行结果 | **L1 实时** | BFF `TestRunner.RunSuites()` 真实调用各微服务执行端到端断言 | `runner.go` `RunSuites` |
+| TS-01 (全链路合规流水线) | **L1 实时** | 实际触发 Dispatch → Classify+Desensitize → 真实存证与 Merkle 验真 (`merkle_valid: true`) | `runner.go` `runTS01` |
+| TS-02 (高并发调度与压测) | **L1 实时** | 并发协程池真实调用 `service-hub`，基于实际延迟计算 P50/P90/P95/P99/QPS | `runner.go` `runTS02` |
+| TS-03 (租约争抢与防重复) | **L1 实时** | 5 Worker × 4 Tasks = 20 真实并发 `DispatchTask`，检测 task_id 零重复与零死锁 | `runner.go` `runTS03` |
+| 断言结果 (expected/actual) | **L1 实时** | 全部基于上游真实 HTTP/gRPC 返回值进行比对断言 | `runner.go` 各用例 |
+| 测试日志流水 | **L2 BFF** | 执行过程中向 `logs` 切片实时追加日志，执行完毕后返回前端展示 | `runner.go` 各用例 |
 
 **生命周期**：
-- 用例定义：**编译期固定**，随 BFF 二进制部署更新
-- 执行结果：**请求级内存态**，`RunTestSuiteResponse` 返回前端后即脱离 BFF 控制
-- 前端 `lastRun` state：页面刷新即丢失
-- TS-02/TS-03 压测产生的任务：真实写入 `service-hub` 存储，可在任务看板中查看
+- 套件元数据：编译期确定，随 BFF 二进制发布
+- 执行报告：**请求级内存态**，`RunTestSuiteResponse` 响应后即由前端接管展示
+- 压测产生的任务数据：真实写入 `service-hub` 存储引擎，可在任务看板中即时查询
 
 ---
 
@@ -142,22 +136,21 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| 数据源元数据列表 | **L1 实时** | BFF `GetDatasources()` → `datasource-mgr /api/datasources` | `clients.go` L379~L415 |
-| 数据源元数据兜底 | **L2 BFF** | `defaultDatasources()` 硬编码 `ds_yibao` + `ds_kangyang` 的 ID/名称/字段列表 | `clients.go` L417~L434 |
-| 切片采样数据 | **L1 实时** | BFF `GetDatasourceSlice()` → `datasource-mgr /api/datasources/{id}/records?limit=N` | `clients.go` L437~L474 |
-| 切片采样兜底 | **L2 BFF** | `generateSampleSlice()` 按行数循环生成合成记录（医保: YB-2026-XXXXX; 康养: KY-XXXX） | `clients.go` L476~L511 |
+| 数据源资产目录 | **L1 实时** | BFF `GetDatasources()` → `datasource-mgr /api/datasources` | `clients.go` `GetDatasources` |
+| 数据源资产兜底 | **L2 BFF** | `defaultDatasources()` 返回符合 SSOT 规范的 `ds_yibao` 与 `ds_kangyang` 元数据 | `clients.go` `defaultDatasources` |
+| 切片采样真实数据 | **L1 实时** | BFF `GetDatasourceSlice()` → `datasource-mgr /api/datasources/{id}/records?limit=N` | `clients.go` `GetDatasourceSlice` |
+| 切片采样兜底数据 | **L2 BFF** | `generateSampleSlice()` 根据 `catalog` 标准 schema 生成合成记录，标记 `source: "fallback"` | `clients.go` `generateSampleSlice` |
 
-**兜底数据详细结构**：
+**标准 Schema 结构（由 `internal/catalog` 统一定义）**：
 
-| 数据源 | 兜底字段 | 生成规则 |
-|---|---|---|
-| `ds_yibao` (医保) | record_id, patient_name, id_card, phone, diagnosis, hospital_name, total_fee, yibao_pay, settle_date | `YB-2026-{i:05d}` / `李四{i}` / 固定身份证 / 固定电话 / 高血压合并冠心病 / 华西医院 / 费用递增 |
-| `ds_kangyang` (康养) | elder_id, name, age, gender, heart_rate, blood_pressure, blood_glucose, room_no, emergency_contact | `KY-{i:04d}` / `张老{i}` / 年龄 70+(i%20) / 心率 72+(i%15) / 固定血压 / A-{i:03d} 房间 |
+| 数据源 ID | 字段数 | 核心字段列举 | 兜底生成规范 |
+|---|---|---|---|
+| `ds_yibao` (医保) | 18 | `insurance_settlement_id`, `person_id`, `gender`, `birth_date`, `admission_date`, `discharge_date`, `admission_dept`, `icd10_code`, `diagnosis_name` 等 | `YB202601XXXX` / `PID1000XXXX` / 2型糖尿病 / E11.900 / 住院 |
+| `ds_kangyang` (康养) | 27 | `name`, `id_card_no`, `age`, `gender`, `height`, `weight`, `diagnosis_name`, `chief_complaint`, `assess_score`, `registered_address`, `medical_insurance_no` 等 | `张老X` / `510101195...` / 70+岁 / 老年人能力评估 / 真实四川地址 |
 
 **生命周期**：
-- 数据源元数据：由 `datasource-mgr` 持久化在 SQLite 中，长期存在
-- 切片采样数据：**请求级**，每次从 `datasource-mgr` 实时提取或兜底生成
-- 兜底合成数据：**纯内存态**，不持久化，每次请求重新生成
+- 数据源资产定义：由 `datasource-mgr` 持久化在 SQLite 中
+- 切片采样数据：**请求级**，实时查询或显式降级生成，不持久化
 
 ---
 
@@ -165,26 +158,29 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| 审计日志流水 | **L1 实时** | BFF `GetAuditLogs()` → `audit-log /api/audit/logs?limit=&offset=` | `clients.go` L514~L537 |
-| 审计日志兜底 | **L2 BFF** | `defaultAuditLogs()` 硬编码 2 条存证记录 | `clients.go` L539~L565 |
-| Merkle 验真结果 | **L1 实时** | BFF `VerifyAudit()` → `audit-log /api/audit/snapshots/verify` | `clients.go` L568~L597 |
-| Merkle 验真兜底 | **L2 BFF** | 硬编码 `merkle_valid: true` + 固定 root_hash + `total_entries: 128` | `clients.go` L577~L595 |
+| 审计日志流水 | **L1 实时** | BFF `GetAuditLogs()` → `audit-log /api/audit/logs?limit=&offset=&datasource=&task_id=&api_code=` | `clients.go` `GetAuditLogs` |
+| 审计日志兜底 | **L2 BFF** | `defaultAuditLogs()` 返回符合规范的兜底存证（标记 `source: "fallback"`） | `clients.go` `defaultAuditLogs` |
+| Merkle 验真结果 | **L1 实时** | BFF `VerifyAudit()` → `audit-log /api/audit/snapshots/verify` | `clients.go` `VerifyAudit` |
+| Merkle 验真兜底 | **L2 BFF** | 返回 `merkle_valid: true`（标记 `source: "fallback"` 与错误原因） | `clients.go` `VerifyAudit` |
 
-**兜底审计记录详情**：
+**兜底审计记录规范结构**：
 
-| 字段 | 记录 1 | 记录 2 |
+| 字段 | 记录 1 (医保) | 记录 2 (康养) |
 |---|---|---|
-| id | audit-log-001 | audit-log-002 |
-| task_id | task-1787554500-eabf3934 | task-1787554501-89bcdef1 |
-| source | ds_yibao | ds_kangyang |
-| operation | mask | classify_and_mask |
-| data_hash | e3b0c44...（SHA-256 空串哈希） | a591a6d... |
-| timestamp | 当前 UTC 时间 | 当前 UTC 时间 |
+| `id` | `fallback-audit-001` | `fallback-audit-002` |
+| `datasource` / `datasource_id` | `ds_yibao` | `ds_kangyang` |
+| `api_code` | `api1_yibao` | `api2_kangyang` |
+| `operation` | `mask` | `k_anon` |
+| `input_hash` | `e3b0c44298fc1c14...` | `ca978112ca1bbdca...` |
+| `output_hash` | `e3b0c44298fc1c14...` | `ca978112ca1bbdca...` |
+| `algorithm` | `field_mask` | `mondrian_k_anonymity` |
+| `user` | `app-lz-bff` | `app-lz-bff` |
+| `status` | `success` | `success` |
+| `security_level` | `L3` | `L4` |
 
 **生命周期**：
-- 审计存证实体：由 `audit-log` 持久化在 SQLite `audit_logs` 表，**Append-Only 不可篡改**
-- 兜底审计记录：**请求级**，每次请求重新生成（时间戳取当前时间）
-- Merkle 验真结果：**请求级**，不缓存
+- 真实审计存证：由 `audit-log` 持久化在 SQLite `audit_logs` 表中，**Append-Only 不可篡改**
+- 兜底审计记录：**请求级**，上游不可达时生成当前时间戳的占位记录，前端清晰展示降级标记
 
 ---
 
@@ -192,34 +188,28 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| Prometheus 原始指标文本 | **L1 实时** | BFF `GetHubMetrics()` → `service-hub /metrics` | `clients.go` GetHubMetrics |
-| Prometheus 兜底 | **L2 BFF** | 返回静态字符串 `# HELP service_hub_status...` | `handlers.go` GetHubMetrics |
-| 6 阶段耗时瀑布图 | **L1 实时** ✅ G-2 已改进 | BFF `GetParsedMetrics()` → 解析 `service-hub /metrics` Prometheus 文本提取各阶段 histogram | `clients.go` parsePrometheusMetrics |
-| P50/P90/P95/P99 分位数 | **L1 实时** ✅ G-2 已改进 | BFF 从 Prometheus histogram 动态计算分位数 | `clients.go` calculatePercentiles |
-| QPS 与总请求数 | **L1 实时** ✅ G-2/G-3 已改进 | BFF 从 Prometheus `http_requests_total` / `http_request_duration` 动态计算 | `clients.go` parsePrometheusMetrics |
-| 数据源标识 | **L1 实时** ✅ G-2 已改进 | `source: "prometheus"` 或 `"fallback"` 标识数据来源 | `MetricsPanel.tsx` |
-
-**G-2/G-3 改进说明**：
-- **G-2**：新增 `GET /api/lz/metrics/parsed` 接口，BFF 内部解析 Prometheus 文本格式（`histogram_bucket`/`counter`/`gauge`），提取 6 阶段 `stage_durations`、`percentiles`（P50/P90/P95/P99）、`qps`、`total_requests`。前端 `MetricsPanel` 新增 `parsedMetrics` prop，动态渲染所有指标，并显示 `● LIVE Prometheus` 或 `○ Fallback Defaults` 数据源标识。
-- **G-3**：流水线 QPS 不再固定为 12.5，改为从 Prometheus `http_requests_total` 指标动态计算（每秒请求数）。
+| Prometheus 原始文本 | **L1 实时** | BFF `GetHubMetrics()` → `service-hub /metrics` | `clients.go` `GetHubMetrics` |
+| 6 阶段耗时直方图 | **L1 实时** | BFF `GetParsedMetrics()` → 解析 Prometheus histogram 桶数据 | `clients.go` `parsePrometheusMetrics` |
+| P50/P90/P95/P99 分位数 | **L1 实时** | BFF 从 Prometheus histogram 动态插值计算 | `clients.go` `calculatePercentiles` |
+| 实时 QPS 与请求总量 | **L1 实时** | BFF 从 `http_requests_total` / `http_request_duration` 动态计算 | `clients.go` `parsePrometheusMetrics` |
+| 数据源状态指示 | **L1 实时** | 前端展示 `● LIVE Prometheus`（实时）或 `○ Fallback Defaults`（兜底） | `MetricsPanel.tsx` |
 
 **生命周期**：
-- Prometheus 原始文本：**请求级**，每次刷新从 `service-hub` 实时拉取
-- 解析后的阶段耗时 / 分位数 / QPS：**请求级**，每次从 Prometheus 指标实时解析计算
+- Prometheus 文本与解析结果：**请求级**，每次刷新从 `service-hub` 实时获取与解析
 
 ---
 
-## 3. 数据来源汇总矩阵
+## 3. 数据来源与持久化汇总矩阵
 
-| 工作台 | L1 实时上游 | L2 BFF 兜底 | L3 前端硬编码 | 持久化 |
+| 工作台 | L1 实时上游 | L2 BFF 兜底 | L3 前端硬编码 | 持久化介质 |
 |---|---|---|---|---|
-| **1. 拓扑健康矩阵** | REST/gRPC 探针 RTT | 节点标记 unreachable | 排列顺序/角色元数据/前端 catch 兜底 | ❌ 纯内存 |
-| **2. 流水线大屏** | 阶段状态/Agent 连通/**QPS 动态计算**/ **Engine 真实脱敏** | — | 预设样本/动画/基准耗时 | ❌ 纯内存 |
-| **3. 任务与租约** | 任务列表/**租约真实查询** | — | 前端 catch 兜底任务 | ✅ service-hub DB |
-| **4. 测试执行器** | 执行结果(调用上游)/**真实断言**/**真实并发** | 用例定义/测试输入 | — | ❌ 纯内存 |
-| **5. 数据源探查** | 元数据 + 切片采样 | 元数据/切片合成兜底 | — | ✅ datasource-mgr DB |
-| **6. 审计验真** | 审计流水 + Merkle 验真 | 审计兜底 + 验真兜底 | — | ✅ audit-log DB |
-| **7. 性能指标** | Prometheus 原始文本/**解析后耗时+分位数+QPS** | 兜底静态文本 | — | ❌ 纯内存 |
+| **1. 拓扑健康矩阵** | REST/gRPC 探针 RTT | 节点标记 unreachable | 固定排序 / 图标元数据 | ❌ 纯内存态 |
+| **2. 流水线大屏** | 阶段状态 / Agent 状态 / 实时 QPS / Engine 脱敏 | — | 预设样本 / 动画流转 | ❌ 纯内存态 |
+| **3. 任务与租约** | 任务列表 / 真实租约分组 | — | 网络断开兜底任务 | ✅ `service-hub` DB |
+| **4. 测试执行器** | 真实端到端断言 / 真实并发压测 | 用例元数据 / 压测载荷 | — | ❌ 纯内存态 |
+| **5. 数据源探查** | 资产元数据 + 真实切片采样 | 18/27 字段标准样本 | — | ✅ `datasource-mgr` DB |
+| **6. 审计验真** | 审计流水 + 真实 Merkle 验真 | 规范兜底存证 | — | ✅ `audit-log` DB |
+| **7. 性能指标** | Prometheus 原始指标 + 解析后耗时/QPS | 静态默认指标 | — | ❌ 纯内存态 |
 
 ---
 
@@ -240,99 +230,88 @@ graph TD
 
 ### 阶段 1：产生与就绪 (Creation)
 
-| 数据类型 | 产生方式 | 触发时机 |
-|---|---|---|
-| 拓扑探针数据 | BFF `ProbeNode()` 主动发起 HTTP/TCP 探测 | 页面加载 + 每 15 秒定时 + 手动刷新 |
-| 流水线阶段状态 | `service-hub` 处理 `/api/hub/pipeline` 请求时实时计算 | 前端请求时 |
-| 任务实体 | 用户通过流水线大屏/测试执行器触发 dispatch | 用户操作 |
-| 测试套件定义 | BFF 编译期硬编码在 `runner.go` | BFF 启动即就绪 |
-| 数据源元数据 | `datasource-mgr` 启动时从 SQLite 加载 | 服务启动即就绪 |
-| 审计存证记录 | `service-hub` 流水线处理完成后异步写入 `audit-log` | 任务完成 Audit 阶段 |
-| Prometheus 指标 | `service-hub` 内建 Prometheus Collector 持续采集 | 服务运行期间持续 |
-| 前端硬编码数据 | 随前端 JS Bundle 加载 | 页面加载即就绪 |
+| 数据类型 | 产生方式 | 触发时机 | 校验规则 |
+|---|---|---|---|
+| **拓扑探针数据** | BFF `ProbeNode()` 发起 HTTP/TCP 探测 | 页面加载 + 15s 定时 + 手动刷新 | 超时 800ms 快速失败 |
+| **流水线任务** | 用户通过大屏或测试执行器触发 Dispatch | 用户操作 | `naming.ResolveInbound` 严格校验 |
+| **脱敏治理数据** | `engine /v1/agent/process` 执行 3-Layer 治理 | 流水线调度或 Data API 调用 | 严格合规脱敏 + 敏感词抹平 |
+| **审计存证记录** | 任务执行完毕后调用 `audit-log RecordAudit` 写入 | 会话结算 / 流水线完成 | 真实 SHA-256 计算 + Merkle 追加 |
+| **Prometheus 指标** | `service-hub` 运行时持续采集 | 服务运行期间 | 符合 OpenMetrics 规范 |
 
 ### 阶段 2：传输与路由 (Transmission)
 
 ```text
-前端 React ──HTTP/1.1 JSON──▶ BFF Gin (:8085) ──REST/gRPC──▶ 上游微服务
+前端 React ──HTTP/1.1 JSON──▶ BFF Gin (:8085) ──REST/gRPC──▶ 上游微服务集群
                                     │
                               ┌─────┴─────┐
                               │ 路由决策  │
                               ├───────────┤
-                              │ [转发]    │ → 单一上游，透传请求+注入 Auth Header
-                              │ [聚合]    │ → 并发调用多个上游，合并结果
-                              │ [本地]    │ → BFF 内部直接返回（测试套件/租约）
-                              │ [兜底]    │ → 上游不可达时返回硬编码数据
+                              │ [转发]    │ → 规范 REST 路径（如 /api/datasources/{id}/records）
+                              │ [归一化]  │ → SSOT 解析（yibao.csv ➔ ds_yibao / api1_yibao）
+                              │ [防漂移]  │ → 未知数据源 400；预留数据源 409（Fail-Closed）
+                              │ [显式降级]│ → 上游故障返回 source: "fallback"，严禁伪装真实数据
                               └───────────┘
 ```
 
-- **入站**：前端 `fetch()` → BFF，携带 `Content-Type: application/json`
-- **出站**：BFF `http.Client`（10s 超时）→ 上游 REST；gRPC 拨测仅做 TCP 连通性
-- **降级路由**：`datasource-mgr` 不可达时尝试 `service-hub` 代理端点 (`/api/hub/datasources`)
+- **统一入站归一化**：BFF 接收到任意数据源别名时，经 `naming.NormalizeDataSourceID` 统一转换为权威 ID。
+- **严格 Fail-Closed 防护**：遇到未注册数据源返回 `HTTP 400 Bad Request`（`INVALID_DATASOURCE_ID`）；遇到预留数据源返回 `HTTP 409 Conflict`（`RESERVED_DATASOURCE`）。
+- **规范上游调用路由**：
+  - `datasource-mgr`: `GET /api/datasources` 与 `GET /api/datasources/{id}/records`
+  - `engine`: `POST /v1/agent/process`（兼容 `/v1/medical/process`）
+  - `audit-log`: `GET /api/audit/logs` 与 `POST /api/audit/snapshots/verify`
+  - `service-hub`: `POST /api/hub/dispatch`、`POST /api/hub/classify` 与 `GET /api/hub/tasks`
 
 ### 阶段 3：消费与渲染 (Presentation)
 
-- **React State 驱动**：`App.tsx` 中 7 个 `useState` 分别持有各工作台数据，`useEffect` 在挂载时触发全量初始加载
-- **增量刷新**：拓扑面板 15 秒轮询；其余面板由用户手动触发或操作后联动刷新
-- **联动刷新**：dispatch/测试执行完成后自动调用 `fetchTasksAndLeases()` 刷新任务看板
+- **React State 驱动**：各工作台组件独立维护数据 state，通过 props 接收实时状态与降级指示器。
+- **来源透明化展示**：界面根据 `source` 字段显示数据真实性标识（如 `● 真实上游` vs `○ 兜底模拟`），避免误导运维人员。
+- **自动联动刷新**：任务分发或测试套件执行完成后，自动触发 `fetchTasksAndLeases()` 刷新任务列表与租约看板。
 
-### 阶段 4：持久化 (Persistence)
+### 阶段 4：持久化与归档 (Persistence)
 
-| 数据实体 | 承载服务 | 存储介质 | 表/载体 | 持久化策略 |
+| 数据实体 | 承载服务 | 存储介质 | 表/载体 | 持久化特性 |
 |---|---|---|---|---|
-| 任务实体与租约 | `service-hub` | SQLite / PostgreSQL | `tasks` | 长期持久化；完成后保留 |
-| 审计存证日志 | `audit-log` | SQLite | `audit_logs` | Append-Only 不可篡改 |
-| 数据源资产定义 | `datasource-mgr` | SQLite | `datasources` | 静态资产库持久化 |
-| 隐私预算 (DP) | `engine` Agent | SQLite / 内存 | `budget.db` | 按窗口期重置或长期累加 |
-| 拓扑探针结果 | BFF | 内存 | `ServiceNode` struct | 15 秒 TTL，不持久化 |
-| 测试执行结果 | BFF | 内存 | `RunTestSuiteResponse` | 请求级，返回即释放 |
-| 前端硬编码数据 | 浏览器 | JS Bundle | 组件常量 | 随代码部署更新 |
+| **任务实体与租约** | `service-hub` | SQLite / PostgreSQL | `tasks` | 支持 Phase B `FOR UPDATE SKIP LOCKED` 原子租约与崩溃恢复 |
+| **不可篡改审计存证** | `audit-log` | SQLite | `audit_logs` | **Append-Only** 不可篡改，支持 SHA-256 存证与多维索引 |
+| **数据源资产定义** | `datasource-mgr` | SQLite | `datasources` | 资产库持久化 |
+| **隐私预算消耗** | `engine` | SQLite / 内存 | `budget.db` | 支持滑动窗口自动重置或持久化累加 |
+| **拓扑探测快照** | BFF | 内存 | `ServiceNode` | 15 秒 TTL，不落盘 |
+| **E2E 测试报告** | BFF | 内存 | `RunTestSuiteResponse` | 请求级，随响应返回前端 |
 
 ### 阶段 5：过期与清理 (Reclamation)
 
 | 清理对象 | 触发条件 | 清理方式 |
 |---|---|---|
-| 前端 React State | 页面刷新 / 路由切换 / 组件卸载 | JavaScript GC 自动回收 |
-| 拓扑探针快照 | 每 15 秒新一轮探测 | 新值覆盖旧值，无历史留存 |
-| 测试执行会话 | 页面刷新 | `lastRun` state 丢失；BFF 侧 `RunSuites` 返回值无持久化 |
-| 任务数据 | `service-hub` 管理 | 完成任务保留在 DB；超时租约由 Reaper 协程自动回收 |
-| 审计存证 | **永不清理** | Append-Only 设计，只增不删 |
-| 测试环境数据 | 手动执行 `docker-stop.sh` | 容器停止后 SQLite 文件保留，容器重建时可清理 |
+| **前端 React State** | 页面刷新 / 路由切换 | JavaScript 引擎 GC 自动回收 |
+| **拓扑探针快照** | 每 15 秒新一轮探测 | 新探测快照覆盖旧值 |
+| **超时任务租约** | 租约 TTL 到期且 Worker 未续约 | `service-hub` 后台 Reaper 协程自动回收 |
+| **审计存证数据** | **永不清理** | Append-Only 设计，保留全量合规凭据 |
+| **测试容器数据** | 执行 `docker-stop-app-lz.sh` | 容器停止后保留 DB，执行 `--clean` 时彻底清理 |
 
 ---
 
-## 5. 降级兜底策略详解 (Fallback Strategy)
+## 5. 降级兜底与防漂移策略详解 (Fallback & Anti-Drift Strategy)
 
-当部分或全部后端微服务未启动时（本地独立开发场景），BFF 和前端通过**三层降级链**保证 UI 可交互：
+### 5.1 各接口行为与降级矩阵
 
-```text
-请求 → BFF 调用上游 → 成功？→ 返回真实数据
-                        ↓ 失败
-                    BFF 返回硬编码兜底 → 前端收到数据 → 渲染
-                        ↓ BFF 自身异常
-                    前端 catch → 渲染前端内置兜底数据
-```
-
-### 5.1 各接口降级行为一览
-
-| 接口 | 上游不可达时的 BFF 行为 | 前端 catch 兜底 |
-|---|---|---|
-| `GET /api/lz/topology` | 返回各节点 `status: "unreachable"` | ✅ 硬编码 4 服务假数据 |
-| `POST /api/lz/tasks/dispatch` | 返回含 `error` 的 DispatchResponse | ❌ 无（alert 报错） |
-| `GET /api/lz/tasks` | 返回 `{total:0, tasks:[]}` | ✅ 硬编码 2 条样本任务 |
-| `GET /api/lz/tasks/leases` | 调用 `service-hub /api/hub/tasks?status=running` 按 lease_owner 分组 ✅ G-1 | ❌ 不需要（返回空列表） |
-| `GET /api/lz/suites` | 返回 BFF 内存中的用例定义 | ❌ 无 |
-| `POST /api/lz/suites/run` | 执行测试（部分用例会因上游不可达而 FAIL） | ❌ 无 |
-| `GET /api/lz/audit/logs` | 返回 `defaultAuditLogs()` 2 条假记录 | ❌ 无 |
-| `POST /api/lz/audit/verify` | 返回硬编码 `merkle_valid: true` | ❌ 无 |
-| `GET /api/lz/metrics` | 返回静态 Prometheus 文本 | ❌ 无 |
-| `GET /api/lz/metrics/parsed` ✅ G-2 | 解析 Prometheus 返回 stage_durations/qps/percentiles | 返回 fallback 默认值 |
-| `GET /api/lz/data-api/definitions` | 返回 BFF 内存中的 4 个预设 API 定义 | ❌ 无 |
-| `POST /api/lz/data-api/invoke` | 各阶段独立降级（engine 不可达→本地掩码；audit 不可达→标记 error） | ❌ 无 |
+| 接口 | 正常调用行为 | 上游不可达时的 BFF 行为 | 写侧防漂移拦截 (Fail-Closed) |
+|---|---|---|---|
+| `GET /api/lz/topology` | 双协议并发探测 4 服务 | 标记各服务 `status: "unreachable"`，返回真实错误信息 | — |
+| `POST /api/lz/tasks/dispatch` | 转发 `service-hub /api/hub/dispatch` | 返回含 `error` 的响应 | 未知源 400，预留源 409 |
+| `GET /api/lz/tasks` | 查询 `service-hub /api/hub/tasks` | 返回 `{total: 0, tasks: []}` | — |
+| `GET /api/lz/tasks/leases` | 查询 running 任务推导租约分组 | 返回空租约列表 | — |
+| `GET /api/lz/suites` | 返回 BFF 内存用例定义 | 正常返回 | — |
+| `POST /api/lz/suites/run` | 真实并发执行 TS-01~TS-03 | 标记对应子步骤 `FAIL` 并输出错误日志 | — |
+| `GET /api/lz/audit/logs` | 查询 `audit-log /api/audit/logs` | 返回 `defaultAuditLogs()` 2 条带 `source:"fallback"` 记录 | 未知源 400 |
+| `POST /api/lz/audit/verify` | 调用 `audit-log /api/audit/snapshots/verify` | 返回带 `source:"fallback"` 的验真结构 | — |
+| `GET /api/lz/metrics` | 代理 `service-hub /metrics` | 返回静态 Prometheus 文本 | — |
+| `GET /api/lz/metrics/parsed` | 解析 Prometheus 直方图与 QPS | 返回默认阶段耗时（标记 `source:"fallback"`） | — |
+| `GET /api/lz/data-api/definitions` | 返回 `catalog` 权威 API 定义 | 正常返回 | — |
+| `POST /api/lz/data-api/invoke` | 串联 Fetch ➔ Agent ➔ RecordAudit | 阶段独立降级（Engine→本地掩码，Audit→标记失败） | 未知源 400，预留源 409 |
 
 ---
 
-## 6. 测试数据治理与运维命令
+## 6. 测试数据治理与运维常用命令
 
 ```bash
 # 1. 启动全栈真实微服务环境（4 微服务 + App-LZ 控制台）
@@ -349,36 +328,53 @@ curl -s -X POST http://localhost:8085/api/lz/suites/run \
   -H "Content-Type: application/json" \
   -d '{"suite_ids": []}' | jq .
 
-# 5. 查看当前任务列表（验证 L1 实时数据 vs L2 兜底数据）
-curl -s http://localhost:8085/api/lz/tasks | jq .
+# 5. 探查数据源真实切片采样数据（医保 18 字段）
+curl -s "http://localhost:8083/api/datasources/ds_yibao/records?limit=5" | jq .
 
-# 6. 查看租约数据（已改为真实查询 service-hub running tasks）
+# 6. 探查数据源真实切片采样数据（康养 27 字段）
+curl -s "http://localhost:8083/api/datasources/ds_kangyang/records?limit=5" | jq .
+
+# 7. 调用通用合规脱敏流水线接口
+curl -s -X POST http://localhost:8079/v1/agent/process \
+  -H "Content-Type: application/json" \
+  -d '{"records": [{"name": "张三", "id_card": "510101199001011234", "diagnosis": "原发性高血压"}]}' | jq .
+
+# 8. 查看当前任务列表与租约数据
+curl -s http://localhost:8085/api/lz/tasks | jq .
 curl -s http://localhost:8085/api/lz/tasks/leases | jq .
 
-# 7. 校验审计存证 Merkle 树真实性
+# 9. 查看不可篡改审计存证流水
+curl -s "http://localhost:8085/api/lz/audit/logs?datasource=ds_yibao&limit=10" | jq .
+
+# 10. 校验审计存证 Merkle 树真实性
 curl -s -X POST http://localhost:8085/api/lz/audit/verify | jq .
 
-# 8. 查看预设数据 API 定义
+# 11. 查看预设数据 API 定义并执行全链路调用
 curl -s http://localhost:8085/api/lz/data-api/definitions | jq .
-
-# 9. 调用预设数据 API（全链路会话）
 curl -s -X POST http://localhost:8085/api/lz/data-api/invoke \
   -H "Content-Type: application/json" \
   -d '{"api_id": 1, "limit": 5}' | jq .
 
-# 10. 一键停止所有测试容器并清理临时数据
+# 12. 一键停止所有测试容器并清理环境
 bash ./scripts/dev/docker-stop-app-lz.sh
 ```
 
 ---
 
-## 7. 已知限制与改进状态
+## 7. 改进状态与缺陷修复全景 (D-01~D-15 & G-1~G-6)
 
-| 编号 | 原限制 | 改进措施 | 状态 |
-|---|---|---|---|
-| G-1 | 租约看板 100% 硬编码 | 改为查询 `service-hub /api/hub/tasks?status=running` 按 lease_owner 分组 | ✅ 已完成 |
-| G-2 | MetricsPanel 耗时/分位数 100% 硬编码 | 新增 Prometheus 文本解析器 + `GET /metrics/parsed` 接口，前端动态渲染 | ✅ 已完成 |
-| G-3 | 流水线 QPS 固定 12.5 | 从 Prometheus `http_requests_total` 动态计算 | ✅ 已完成 |
-| G-4 | TS-03 纯内存模拟 | 改为 5×4=20 真实并发 `DispatchTask` 到 service-hub + 零重复检测 + 优雅降级 | ✅ 已完成 |
-| G-5 | 断言硬编码 `Passed: true` | TS-01/TS-02/TS-03 全部基于真实响应数据断言 | ✅ 已完成 |
-| G-6 | 前端脱敏为本地字符串替换 | `InvokeDataApi` 优先调用 `engine /v1/privacy/mask_record`，失败 fallback 本地 | ✅ 已完成 |
+| 编号 | 类型 | 问题描述 | 改进/修复措施 | 状态 |
+|---|---|---|---|---|
+| **D-01** | 缺陷修复 | BFF 调用 `datasource-mgr /api/v1/datasources` 恒 404 | 改为调用规范端点 `GET /api/datasources` | ✅ 已修复 |
+| **D-02** | 缺陷修复 | BFF 调用 `audit-log /api/v1/audit/logs` 恒 404 | 改为调用规范端点 `GET /api/audit/logs` 与 `/snapshots/verify` | ✅ 已修复 |
+| **D-03** | 缺陷修复 | 会话 audit 阶段虚假探活并伪造存证条目 ID | 改为真实调用 gRPC `RecordAudit` / REST 写入存证并记录真实 ID | ✅ 已修复 |
+| **D-04** | 缺陷修复 | BFF `AuditLogItem` 字段与 `audit-log` 模型漂移 | 全面扩充 `task_id`、`api_code`、`datasource_id` 等字段并对齐 | ✅ 已修复 |
+| **D-07** | 缺陷修复 | 兜底数据包含非法 operation `classify` | 严格收敛为合法操作枚举（`mask`/`k_anon`/`dp`/`qol`） | ✅ 已修复 |
+| **D-11** | 规范加固 | 未知/预留数据源静默兜底回落 | 实施 Fail-Closed：未知源 400（`INVALID_DATASOURCE_ID`），预留源 409 | ✅ 已修复 |
+| **G-1** | 功能完善 | 租约看板 100% 硬编码 | 改为查询 `service-hub` 真实 running 状态任务并按 `lease_owner` 聚合 | ✅ 已完成 |
+| **G-2** | 功能完善 | MetricsPanel 耗时与分位数硬编码 | 新增 Prometheus 文本解析器，动态计算各阶段耗时与 P50~P99 | ✅ 已完成 |
+| **G-3** | 功能完善 | 流水线 QPS 固定为 12.5 | 改为从 Prometheus 指标 `http_requests_total` 动态实时计算 | ✅ 已完成 |
+| **G-4** | 功能完善 | TS-03 租约争抢纯内存随机模拟 | 改为 5×4=20 真实并发 `DispatchTask`，检测 task_id 零重复与零死锁 | ✅ 已完成 |
+| **G-5** | 功能完善 | 测试套件断言硬编码 `Passed: true` | TS-01/TS-02/TS-03 全部基于上游真实响应数据进行严格断言 | ✅ 已完成 |
+| **G-6** | 功能完善 | 前端脱敏为本地字符串替换 | `InvokeDataApi` 优先调用 `engine /v1/agent/process` 真实分类与脱敏 | ✅ 已完成 |
+
