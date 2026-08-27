@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v8.0.0  
+> **版本**：v9.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 指标体系审计修正（Python/Go 指标名·标签与代码精确对齐）、Makefile 目标名修正、Helm 模板文件名修正
+> **最后更新**：2026-08-28 — 修正服务拓扑虚假链路、§1.2 Makefile 目标名、§8.3 API 端点示例
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -37,7 +37,7 @@
 
 1. ~~**错误响应信封格式差异**~~ ✅ — Python/Go 双端统一输出 `{code, message, detail, trace_id, timestamp}` JSON 信封（`engine/observability/envelope.py` + `pkg/middleware/envelope.go`），前端双控制台统一解析；
 2. ~~**追踪上下文断链风险**~~ ✅ — `TraceMiddleware` 双头下发 `X-Request-ID` + `X-Trace-ID`，gRPC 双向拦截器透传，异步任务 Worker 显式持久化 `TraceID`；
-3. ~~**数据源命名硬编码**~~ ✅ — 全栈收敛至 `pkg/naming` SSOT（`ds_yibao` / `ds_kangyang`），`Makefile naming-lint` 自动扫描；
+3. ~~**数据源命名硬编码**~~ ✅ — 全栈收敛至 `pkg/naming` SSOT（`ds_yibao` / `ds_kangyang`），`Makefile lint-naming` 自动扫描；
 4. ~~**SQLite → PostgreSQL 割接**~~ ✅ — `scripts/prod/migrate_sqlite_to_pg.go` 提供原子迁移工具，带 9 要素哈希链完整性校验与 AES-256-GCM 密文验真。
 
 ---
@@ -120,7 +120,6 @@ flowchart TD
 | app-lz/bff-go → engine (REST) | HTTP | :8079 | API Key | X-Request-ID |
 | service-hub → engine (gRPC) | gRPC | :50051 | mTLS (可选) | x-request-id metadata |
 | service-hub → datasource-mgr | HTTP | :8083 | API Key | X-Request-ID |
-| service-hub → audit-log | HTTP | :8084 | API Key | X-Request-ID |
 | engine/gateway → engine worker | HTTP | :8079 | 无（内部） | X-Request-ID |
 
 ### 2.2 全栈环境变量速查
@@ -744,7 +743,7 @@ SIGTERM/SIGINT 到达
 
 ### 8.3 API 版本控制策略
 
-当前代码库使用 `/v1/` 路径前缀（如 `/v1/privacy/mask`、`/v1/dynclassification/classify`），但尚未制定正式的 API 版本演进策略。
+当前代码库使用 `/v1/` 路径前缀（如 `/v1/privacy/mask`、`/v1/dynclassification/eval`），但尚未制定正式的 API 版本演进策略。
 
 **推荐策略**：
 - URL 路径版本控制：`/v1/...` → `/v2/...`
