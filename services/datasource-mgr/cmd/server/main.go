@@ -38,7 +38,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -206,10 +205,11 @@ func main() {
 	// =========================================================================
 	// 5. Operating System Signal Registration / 系统中断信号监听
 	// =========================================================================
-	// 创建带缓冲的信号通道，监听终端中断信号（SIGINT, 如 Ctrl+C）与容器编排停止信号（SIGTERM, 如 k8s pod 终止），
+	// 使用 signal.NotifyContext（Go 1.16+）替代传统的 signal.Notify + channel 模式，
+	// 信号到达时自动取消 context，与下游协程的 ctx.Done() 无缝衔接。
 	// 确保服务在收到退出指令时能够完成正在处理中的请求，防止数据损坏或客户端异常断连。
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigCtx, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer sigStop()
 
 	// =========================================================================
 	// 6. Dual-Protocol Concurrent Listeners / 双协议并发监听启动
@@ -290,8 +290,8 @@ func main() {
 	// 7. Graceful Shutdown Workflow / 优雅停机收敛流程
 	// =========================================================================
 	// 1) 阻塞等待退出信号到达
-	sig := <-sigChan
-	logger.Info("shutting down mock datasource-mgr servers...", "signal", sig.String())
+	<-sigCtx.Done()
+	logger.Info("shutting down mock datasource-mgr servers...")
 
 	// 2) 优雅关闭 gRPC 内部后台任务与服务：
 	//    - serviceImpl.Shutdown(): 发送内部 context 取消通知并等待后台异步任务完成；

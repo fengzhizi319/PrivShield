@@ -199,6 +199,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.MaxBodySize(32 << 20))   // 32 MiB 请求体最大保护
 	r.Use(middleware.MaxConcurrent(1000))      // 并发在途请求上限，超限返回 503
+	if s.cfg.RateLimitRPS > 0 {
+		r.Use(middleware.RateLimit(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst)) // 每客户端 IP 令牌桶限流
+	}
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 

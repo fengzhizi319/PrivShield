@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -92,12 +91,13 @@ func main() {
 	}()
 
 	// ── 第 7 步：优雅停机 ─────────────────────────────────────────────
+	// 使用 signal.NotifyContext（Go 1.16+）监听系统信号，信号到达时自动取消 context。
 	// 阻塞等待 SIGINT（Ctrl+C）或 SIGTERM（K8s kill）信号。
 	// 收到信号后，调用 srv.Shutdown 给已连接客户端 5 秒时间完成请求，
 	// 超时后强制退出。
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	sigCtx, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer sigStop()
+	<-sigCtx.Done()
 
 	log.Println("Shutting down Console App-LZ BFF gracefully...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -48,6 +48,10 @@ type Config struct {
 
 	// Graceful shutdown / 优雅关闭
 	ShutdownTimeout int // HTTP 优雅关闭超时秒数（默认 5）
+
+	// Rate limiting / 每客户端 IP 令牌桶限流
+	RateLimitRPS   int // 每秒允许的请求数（默认 100，0 = 不限流）
+	RateLimitBurst int // 令牌桶突发容量（默认 200）
 }
 
 // Load reads configuration from environment variables.
@@ -99,6 +103,10 @@ func Load() *Config {
 
 		// Graceful shutdown / 优雅关闭超时（默认 5 秒）
 		ShutdownTimeout: pkgconfig.EnvInt("AUDIT_LOG_SHUTDOWN_TIMEOUT", 5),
+
+		// Rate limiting / 每客户端 IP 令牌桶限流（默认 100 rps，突发 200）
+		RateLimitRPS:   pkgconfig.EnvInt("AUDIT_LOG_RATE_LIMIT_RPS", 100),
+		RateLimitBurst: pkgconfig.EnvInt("AUDIT_LOG_RATE_LIMIT_BURST", 200),
 	}
 }
 
