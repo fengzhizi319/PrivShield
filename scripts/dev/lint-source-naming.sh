@@ -12,6 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 echo "=== [Lint] Starting PrivShield Source & Naming Consistency Check ==="
+echo ""
+echo "Checks:"
+echo "  [1/4] Deprecated API routes"
+echo "  [2/4] Obsolete mock identifiers"
+echo "  [3/4] Hardcoded datasource name literals"
+echo "  [4/4] Cross-language SSOT parity tests"
 
 ERRORS=0
 
@@ -50,8 +56,35 @@ for obs in "${OBSOLETE_IDS[@]}"; do
     fi
 done
 
-# 3. 运行 Go 与 Python 命名一致性单元测试
-echo "[3/3] Running Cross-Language SSOT Parity Unit Tests..."
+# 3. 检查硬编码数据源名称（应使用 pkg/naming 常量而非裸字符串字面量）
+echo "[3/4] Checking for hardcoded datasource name literals..."
+HARDCODED_IDS=(
+    "ds_yibao"
+    "ds_kangyang"
+)
+
+for hid in "${HARDCODED_IDS[@]}"; do
+    # 排除 pkg/naming（SSOT 定义处）、测试文件、文档、注释、E2E 测试运行器和前端 UI 组件
+    # E2E runner 中的字面量是归一化测试的故意输入（验证别名→canonical 映射），必须保留裸字符串
+    # 前端 UI 组件中的字面量是 HTML 表单值，无法引用 Go 常量，属于数据契约而非业务逻辑
+    MATCHES=$(grep -rn "\"${hid}\"" "${ROOT_DIR}/services" "${ROOT_DIR}/console" "${ROOT_DIR}/pkg" 2>/dev/null \
+        | grep -v 'pkg/naming' \
+        | grep -v '_test.go' \
+        | grep -v 'test_' \
+        | grep -v '\.md' \
+        | grep -v '// ' \
+        | grep -v 'runner/runner.go' \
+        | grep -v 'console/.*/web/src/' \
+        || true)
+    if [ -n "${MATCHES}" ]; then
+        echo "❌ ERROR: Found hardcoded datasource ID '${hid}' — use naming constants instead:"
+        echo "${MATCHES}"
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+
+# 4. 运行 Go 与 Python 命名一致性单元测试
+echo "[4/4] Running Cross-Language SSOT Parity Unit Tests..."
 cd "${ROOT_DIR}"
 if ! go test -v ./pkg/naming/... > /dev/null 2>&1; then
     echo "❌ ERROR: Go pkg/naming unit tests failed!"

@@ -109,6 +109,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         if (err.trace_id) {
           console.error(`[PrivShield API Error] ${err.code || 'UNKNOWN'} (TraceID: ${err.trace_id}): ${errMsg}`);
         }
+        // Dispatch global error event for unified toast/notification handling
+        // 派发全局错误事件，供统一 Toast/通知组件监听
+        if (err.code) {
+          window.dispatchEvent(new CustomEvent('privshield:api-error', {
+            detail: { code: err.code, message: errMsg, detail: err.detail, trace_id: err.trace_id },
+          }));
+        }
         if (![502, 503, 504].includes(res.status) || attempt >= MAX_IDEMPOTENT_RETRIES) throw error;
         lastError = error;
       } else {

@@ -67,6 +67,11 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
         if (errBody.trace_id) {
           console.error(`[PrivShield API Error] ${errBody.code} (TraceID: ${errBody.trace_id}): ${errMsg}`);
         }
+        // Dispatch global error event for unified toast/notification handling
+        // 派发全局错误事件，供统一 Toast/通知组件监听
+        window.dispatchEvent(new CustomEvent('privshield:api-error', {
+          detail: { code: errBody.code, message: errMsg, detail: errBody.detail, trace_id: errBody.trace_id },
+        }));
       } else if (errBody.error || errBody.detail) {
         errMsg = errBody.error || errBody.detail;
       }
