@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v4.0.0  
+> **版本**：v5.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-27 — 全栈中间件链统一、迁移方案精简归档、服务通信拓扑矩阵
+> **最后更新**：2026-08-28 — 指标名修正、中间件链差异化说明、成熟度矩阵校准、测试命令补齐
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -24,8 +24,8 @@
 │ **services/audit-log**│ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ ★★★★★    │ **Level 5 (准生产)**│
 │ **services/service-hub**│ ★★★★★  │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ ★★★★☆    │ **Level 5 (准生产)**│
 │ **services/datasource-mgr**│ ★★★★☆│ ★★★☆☆   │ ★★★☆☆    │ ★★★★☆    │ ★★★★☆    │ **Level 4 (就绪)** │
-│ **console/app-lz**   │ ★★★★★    │ ★★★★★    │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ **Level 5 (准生产)**│
-│ **console/bff-go**   │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ **Level 5 (准生产)**│
+│ **console/app-lz**   │ ★★★★★    │ ★★★★★    │ ★★★★★    │ ★★★★☆    │ ★★★★★    │ **Level 5 (准生产)**│
+│ **console/bff-go**   │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★★☆    │ ★★★★★    │ **Level 5 (准生产)**│
 │ **engine (Python)**  │ ★★★★★    │ ★★★★☆    │ ★★★★☆    │ ★★★☆☆    │ ★★★★☆    │ **Level 5 (准生产)**│
 │ **console 前端群**   │ ★★★★☆    │ ★★★★☆    │ ★★★☆☆    │ N/A      │ N/A      │ **Level 4 (就绪)** │
 └──────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────────────────┘
@@ -368,8 +368,8 @@ clients:
 ### 5.1 自动化测试命令清单
 
 ```bash
-# 1. 运行所有 Go 共享库与核心微服务测试
-go test -v ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/... ./console/app-lz/bff-go/...
+# 1. 运行所有 Go 共享库与核心微服务测试（-count=1 禁用缓存）
+go test -count=1 ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/... ./console/app-lz/bff-go/...
 
 # 2. 运行 Python 核心隐私引擎测试
 PYTHONPATH=. pytest tests/ -q
@@ -432,7 +432,7 @@ cd ../../web && pnpm build
 
 | 指标名称 | 类型 | 标签 | 用途 |
 |---|---|---|---|
-| `https_requests_total` | Counter | `method`, `path`, `status` | HTTP 请求计数 |
+| `http_requests_total` | Counter | `method`, `path`, `status` | HTTP 请求计数 |
 | `http_request_duration_seconds` | Histogram | `method`, `path` | HTTP 请求延迟 |
 | `agent_requests_total` | Counter | `method`, `status` | Agent gRPC 调用计数 |
 | `agent_request_duration_seconds` | Histogram | `method` | Agent gRPC 调用延迟 |
@@ -535,7 +535,7 @@ Conservative Fallback (保守回退，不降级安全等级)
 
 #### Go 微服务中间件栈 (`pkg/middleware/`)
 
-所有 Go 服务（service-hub, datasource-mgr, audit-log, bff-go, app-lz）统一启用以下中间件链：
+所有 Go 服务统一启用以下 9 层中间件链（顺序严格一致）：
 
 ```text
 TraceMiddleware → StructuredLogger → Recovery → SecurityHeaders → MaxBodySize → MaxConcurrent → [RateLimit] → CORS → Auth
@@ -547,11 +547,13 @@ TraceMiddleware → StructuredLogger → Recovery → SecurityHeaders → MaxBod
 | `StructuredLogger(logger, module)` | 每请求结构化日志（method/path/status/latency） | `*_LOG_FORMAT` |
 | `Recovery(logger, module)` | 全局 panic 恢复，返回 500 而非崩溃 | — |
 | `SecurityHeaders()` | 注入 CSP/HSTS/X-Frame-Options/X-Content-Type-Options | 固定值 |
-| `MaxBodySize(maxBytes)` | 限制请求体大小，防止大包 OOM | 32 MB (`32 << 20`) |
+| `MaxBodySize(maxBytes)` | 限制请求体大小，防止大包 OOM | 32 MB（默认）；bff-go 为 64 MB（支持大文件上传） |
 | `MaxConcurrent(limit)` | 限制在途请求总数，防止并发耗尽资源 | 1000（默认） |
 | `RateLimit(rps, burst)` | 每客户端 IP 令牌桶限流（RPS=0 时跳过） | 100 rps / 200 burst（默认） |
 | `CORS(origins)` | 可配置跨域来源 | 环境变量 |
 | `Auth(apiKey)` | API Key 鉴权（为空时跳过） | 环境变量 |
+
+> **特殊说明**：`console/bff-go` 使用本地 `securityMiddleware()` 替代独立的 `RateLimit` + `Auth`，该函数将 API Key 鉴权与滑动窗口限流（`CONSOLE_RATE_LIMIT`，默认 600 req/min）合并为单一中间件，并配备后台 goroutine 定期清理过期 IP 条目防止内存泄漏。
 
 #### Python 引擎防护
 
