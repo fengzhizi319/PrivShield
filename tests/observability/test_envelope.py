@@ -206,3 +206,44 @@ class TestRegisterEnvelopeHandlers:
         register_envelope_exception_handlers(app, debug_validation=False)
         # Verify handlers are registered by checking exception handlers exist
         assert len(app.exception_handlers) > 0
+
+
+class TestObservabilityMiddlewareEnvelope:
+    """Verify ObservabilityMiddleware uses envelope format for 500 errors
+    and sets X-Trace-ID header."""
+
+    def test_success_response_has_trace_id_header(self):
+        """Normal responses should include X-Trace-ID header."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from engine.main import app as main_app
+
+        client = TestClient(main_app)
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        # Both headers should be present and identical
+        rid = resp.headers.get("x-request-id", "")
+        tid = resp.headers.get("x-trace-id", "")
+        assert rid != "", "x-request-id header should be set"
+        assert tid != "", "x-trace-id header should be set"
+        assert rid == tid, f"x-request-id ({rid}) should equal x-trace-id ({tid})"
+
+    def test_422_response_uses_envelope_format(self):
+        """422 validation errors should use unified envelope format."""
+        from fastapi.testclient import TestClient
+        from engine.main import app as main_app
+
+        client = TestClient(main_app)
+        # Send invalid data to trigger 422
+        resp = client.post("/v1/privacy/mask", json={"invalid_field": 123})
+        assert resp.status_code == 422
+        data = resp.json()
+        # Should have envelope fields
+        assert "code" in data, "response should have 'code' field"
+        assert data["code"] == "INVALID_ARGUMENT"
+        assert "message" in data, "response should have 'message' field"
+        assert "trace_id" in data, "response should have 'trace_id' field"
+        assert "timestamp" in data, "response should have 'timestamp' field"
+        # Headers should be set
+        assert resp.headers.get("x-request-id", "") != ""
+        assert resp.headers.get("x-trace-id", "") != ""

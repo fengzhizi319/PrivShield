@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _REQUEST_ID_HEADER = "x-request-id"
+_TRACE_ID_HEADER = "x-trace-id"
 
 
 def _generate_request_id() -> str:
@@ -133,6 +134,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             )
 
             response.headers[_REQUEST_ID_HEADER] = request_id
+            response.headers[_TRACE_ID_HEADER] = request_id
             return response
         except Exception as exc:
             duration = time.perf_counter() - start
@@ -148,15 +150,26 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 request_size,
                 exc,
             )
-            # Return an error response with X-Request-ID header set, so clients
-            # can correlate error responses with request logs/traces.
-            # 返回带 X-Request-ID 的错误响应，便于客户端关联日志/追踪。
+            # Return a unified error envelope with X-Request-ID/X-Trace-ID headers,
+            # aligned with Go middleware.ErrorEnvelope format.
+            # 返回统一错误信封格式，携带 X-Request-ID/X-Trace-ID 头，
+            # 与 Go 端 middleware.ErrorEnvelope 格式对齐。
+            from datetime import datetime, timezone
             from starlette.responses import JSONResponse
 
             return JSONResponse(
                 status_code=500,
-                content={"detail": "Internal server error"},
-                headers={_REQUEST_ID_HEADER: request_id},
+                content={
+                    "code": "INTERNAL_ERROR",
+                    "message": "Internal server error",
+                    "detail": "Internal server error",
+                    "trace_id": request_id,
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                },
+                headers={
+                    _REQUEST_ID_HEADER: request_id,
+                    _TRACE_ID_HEADER: request_id,
+                },
             )
 
 

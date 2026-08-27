@@ -45,17 +45,21 @@ func Auth(apiKey string) gin.HandlerFunc {
 		// 提取 Bearer token
 		token := extractBearer(c.GetHeader("Authorization"))
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"detail": "Unauthorized: missing or invalid bearer token",
-			})
+			AbortWithError(c, http.StatusUnauthorized,
+				"UNAUTHORIZED",
+				"Unauthorized: missing or invalid bearer token",
+				nil,
+			)
 			return
 		}
 
 		// 常量时间比较，防止时序攻击
 		if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"detail": "Unauthorized: invalid api key",
-			})
+			AbortWithError(c, http.StatusUnauthorized,
+				"UNAUTHORIZED",
+				"Unauthorized: invalid api key",
+				nil,
+			)
 			return
 		}
 
