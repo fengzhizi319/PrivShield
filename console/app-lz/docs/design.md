@@ -389,7 +389,7 @@ SSE 端点 (`GET /api/lz/suites/stream/:run_id`) 通过 URL 查询参数 `?token
 ### 5.4 中间件链装配顺序
 
 ```
-RequestID() → StructuredLogger() → Recovery() → SecurityHeaders() → MaxBodySize(32MiB) → CORS() → Auth()
+TraceMiddleware() → StructuredLogger() → Recovery() → SecurityHeaders() → MaxBodySize(32MiB) → CORS() → Auth()
 ```
 
 与 `console/bff-go` 和 3 个 Go 微服务保持完全一致的中间件装配模式。

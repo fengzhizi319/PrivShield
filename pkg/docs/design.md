@@ -34,9 +34,13 @@ pkg/
 │   ├── metrics.go          # Collector（CounterVec, HistogramVec, HTTPMiddleware, Handler）
 │   └── metrics_test.go     # 指标记录与 HTTP 端点单测
 ├── middleware/             # Gin 共享中间件链
-│   ├── auth.go             # API Key / Bearer 鉴权（常量时间比较）
+│   ├── auth.go             # API Key / Bearer 鉴权（常量时间比较）→ 统一信封格式
+│   ├── envelope.go         # 跨语言统一 API 错误信封（ErrorEnvelope / AbortWithError / RespondWithSuccess）
+│   ├── envelope_test.go    # 信封格式与错误码映射单测
 │   ├── middleware.go       # CORS, RequestID, StructuredLogger, Recovery, SecurityHeaders
-│   └── middleware_test.go  # 跨域、鉴权、请求 ID、Panic 恢复单测
+│   ├── trace.go            # TraceMiddleware 全链路追踪（X-Request-ID + X-Trace-ID 双头注入）
+│   ├── trace_test.go       # 追踪中间件与向后兼容单测
+│   └── middleware_test.go  # 跨域、鉴权、请求 ID、Panic 恢复、信封格式单测
 ├── store/                  # 数据持久化接口与实现
 │   ├── store.go            # 核心数据模型与 TaskStore/DataSourceStore/AuditStore 接口
 │   ├── memory/             # 内存存储实现（带安全切片与容量上限控制）
@@ -55,7 +59,9 @@ pkg/
 │       ├── leased.go       # FOR UPDATE SKIP LOCKED 竞争领取/租约续期/完成/失败
 │       └── leased_test.go  # 多副本租约竞争与过期回收单测
 ├── tlsutil/                # 共享 TLS 配置工具
-│   └── tlsutil.go          # TLS 1.3 强制、mTLS 双向认证、SPKI 公钥固定
+│   ├── tlsutil.go          # TLS 1.3 强制、mTLS 双向认证、SPKI 公钥固定
+│   ├── whitelist.go        # mTLS CN 动态白名单（YAML 加载 + 文件 mtime 轮询热重载 + per-CN scope）
+│   └── whitelist_test.go   # 白名单加载、热重载与 scope 校验单测
 ├── validation/             # 输入安全校验与工具函数
 │   ├── validation.go       # AllowedValues, PortRange, GenerateID, ParsePagination
 │   └── validation_test.go
@@ -91,15 +97,18 @@ pkg/
 
 | 中间件 | 职责与安全特性 |
 |---|---|
-| `RequestID()` | 读取或使用 `crypto/rand` 密码学随机数生成 `req-<timestamp>-<8_hex>` 唯一追踪 ID，注入 Context 与响应头 |
+| `RequestID()` | 读取或使用 `crypto/rand` 密码学随机数生成 `req-<timestamp>-<8_hex>` 唯一追踪 ID，注入 Context 与响应头（保留向后兼容） |
+| `TraceMiddleware()` | 在 `RequestID()` 基础上额外注入 `X-Trace-ID` 响应头与 `TraceIDContextKey` 上下文键，实现全链路追踪双头透传；所有 Go 服务已迁移使用 |
+| `AbortWithError()` | 中断请求并返回统一错误信封 `{code, message, detail, trace_id, timestamp}`，自动注入 `X-Request-ID` / `X-Trace-ID` 响应头 |
+| `RespondWithSuccess()` | 返回统一成功信封 `{code: "OK", message, data, trace_id, timestamp}`，与错误信封格式对齐 |
 | `StructuredLogger()` | 基于 Go 标准库 `log/slog` 输出包含 `time, level, request_id, method, path, status, latency_ms, client_ip, module` 的结构化日志 |
 | `CORS()` | 支持特定来源列表精确匹配（附带 `Vary: Origin`），开发模式可配置 `*` 通配放行 |
-| `Auth()` | Bearer Token 提取，采用 `crypto/subtle.ConstantTimeCompare` 常量时间比对防时序攻击；`/health` 端点自动豁免 |
-| `Recovery()` | 捕获运行时 Handler Panic，记录结构化错误日志，返回标准 500 JSON，防止单个异常请求导致服务崩溃 |
+| `Auth()` | Bearer Token 提取，采用 `crypto/subtle.ConstantTimeCompare` 常量时间比对防时序攻击；`/health` 端点自动豁免；拒绝返回统一信封格式（`UNAUTHORIZED`） |
+| `Recovery()` | 捕获运行时 Handler Panic，记录结构化错误日志，返回统一错误信封格式（`INTERNAL_ERROR`），防止单个异常请求导致服务崩溃 |
 | `SecurityHeaders()` | 设置 `X-Content-Type-Options: nosniff`、`X-Frame-Options: SAMEORIGIN`、`X-XSS-Protection: 1; mode=block`、`Referrer-Policy: strict-origin-when-cross-origin` |
-| `RateLimit(rps, burst)` | 基于客户端 IP 令牌桶限流，抵御 L7 HTTP Flood DDoS；`/health` 端点自动豁免；响应头注入 `Retry-After` 与 `X-RateLimit-Limit` |
+| `RateLimit(rps, burst)` | 基于客户端 IP 令牌桶限流，抵御 L7 HTTP Flood DDoS；`/health` 端点自动豁免；响应头注入 `Retry-After` 与 `X-RateLimit-Limit`；拒绝返回统一信封格式（`RATE_LIMITED`） |
 | `MaxBodySize(maxBytes)` | 限制最大请求体字节数，防止大包 Payload DDoS 攻击（默认 32 MiB），超限返回 413 |
-| `MaxConcurrent(limit)` | 限制服务器最大并发处理请求数，防止突发流量耗尽资源，超载快速失败返回 503 |
+| `MaxConcurrent(limit)` | 限制服务器最大并发处理请求数，防止突发流量耗尽资源，超载返回统一信封格式（`UPSTREAM_UNAVAILABLE`）快速失败 |
 
 ---
 
@@ -166,3 +175,12 @@ Phase B 引入 PostgreSQL 作为多副本 Hub 部署的后端存储，实现基�
 - **多客户端认证模式**：支持 `require`/`requireandverify`（强制双向校验）、`verify`（可选校验）、`request`（请求证书）四种模式。
 - **公钥固定防御**：通过 `PinnedPubKeyFile` 注入 `VerifyPeerCertificate` 验证钩子，严格比对客户端公钥指纹（支持 RSA、ECDSA、Ed25519），防御 CA 劫持与证书伪造攻击。
 - **工具函数**：`LoadPublicKey` 支持 PKIX 与 X.509 Certificate 两种 PEM 格式；`PublicKeysEqual` 深度比对公钥数学属性。
+
+### 3.8 mTLS CN 动态白名单 (`pkg/tlsutil/whitelist.go`)
+
+提供基于 YAML 配置文件的客户端 CN 动态授权与热重载能力：
+
+- **双格式兼容**：支持 `clients`（设计文档标准格式，使用 `allowed_scopes`）和 `entries`（旧格式，使用 `scopes`）两种 YAML 键，优先 `clients`。
+- **文件 mtime 轮询热重载**：每 5 秒检查文件修改时间，变更时自动重新加载到内存，无需 `fsnotify` 外部依赖。
+- **per-CN Scope 授权**：`CheckScope(cn, method)` 支持通配符 `*`（全权限）和前缀匹配（如 `/PrivacyService/*`）。
+- **安全加固**：`filepath.Clean` 路径清洗防穿越，两阶段提交保证加载失败时保留旧配置。

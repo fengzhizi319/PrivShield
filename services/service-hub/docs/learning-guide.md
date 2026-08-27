@@ -319,7 +319,7 @@ type Server struct {
 
 func (s *Server) RegisterRoutes(r *gin.Engine) {
     // 挂载通用中间件链
-    r.Use(middleware.RequestID())
+    r.Use(middleware.TraceMiddleware())  // 全链路追踪（X-Request-ID + X-Trace-ID）
     r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
     r.Use(middleware.Recovery(s.logger, "service-hub"))
     r.Use(middleware.SecurityHeaders())

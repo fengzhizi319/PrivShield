@@ -42,7 +42,7 @@ flowchart TD
 
     subgraph S6 ["6. 统一配置管理与环境级联 (Configuration Hierarchy & Cascading)"]
         Hierarchy["优先级: CLI Flags ➔ Env Vars ➔ Profile .env ➔ Defaults"]
-        HotReload["动态规则与白名单热重载 (fsnotify / REST reload)"]
+        HotReload["动态规则与白名单热重载 (REST reload / mtime polling)"]
     end
 
     S1 --> S2 --> S3 --> S4 --> S5 --> S6
@@ -61,7 +61,7 @@ flowchart TD
 #### 成功响应信封 (Success Envelope)
 ```json
 {
-  "code": 0,
+  "code": "OK",
   "message": "success",
   "data": { ... },
   "trace_id": "req-1787554500-abc12345",
@@ -84,7 +84,7 @@ flowchart TD
 
 | 错误编码 (`code`) | HTTP 状态码 | gRPC 状态码 | 说明与处理建议 |
 |---|---|---|---|
-| `OK` / `0` | 200 OK | `OK` (0) | 请求成功处理 |
+| `OK` / `"OK"` | 200 OK | `OK` (0) | 请求成功处理（Go 成功响应 `code: "OK"`，Python 成功响应无 `code` 字段） |
 | `INVALID_ARGUMENT` | 400 Bad Request | `InvalidArgument` (3) | 参数校验失败（Pydantic / Go 校验器拦截） |
 | `INVALID_DATASOURCE_ID` | 400 Bad Request | `InvalidArgument` (3) | 未知数据源标识（`pkg/naming` 拦截） |
 | `UNAUTHORIZED` | 401 Unauthorized | `Unauthenticated` (16) | API Key 缺失或无效 / mTLS 证书校验失败 |
@@ -167,7 +167,7 @@ flowchart TD
 2. **证书 CN 授权与热重载 (`mtls-whitelist.yaml`)**：
    - 服务端提取客户端证书的 `Common Name (CN)`；
    - 根据白名单配置匹配客户端角色与允许调用的 RPC 方法（Scopes，如 `["*"]` 或 `["/PrivacyService/Process"]`）；
-   - 支持通过 `fsnotify` 监听白名单文件，**动态热更新授权无需重启服务**。
+   - 支持通过文件 mtime 轮询（5 秒间隔）监听白名单文件，**动态热更新授权无需重启服务**。
 
 ### 4.2 数据安全：快照样本 AES-256-GCM 信封加密规范
 
@@ -302,7 +302,7 @@ classDiagram
 ### 7.1 动态热重载规范 (Zero-Downtime Reload)
 以下配置项支持在**不重启微服务进程**的情况下动态重载生效：
 1. **分类脱敏规则库 (`rules/domains/*.yaml`)**：调用 `POST /v1/dynclassification/reload` 触发引擎无锁重载；
-2. **mTLS CN 访问控制白名单 (`mtls-whitelist.yaml`)**：内置文件监听器（Watcher）在文件保存时毫秒级自动热更新内存白名单；
+2. **mTLS CN 访问控制白名单 (`mtls-whitelist.yaml`)**：Go 端 `pkg/tlsutil/whitelist.go` 内置文件 mtime 轮询监听器（5 秒间隔）在文件变更时自动热更新内存白名单；Python 端 `engine/security/whitelist.py` 采用请求驱动被动检查模式；
 3. **数据源定义与别名注册 (`pkg/naming`)**：作为静态事实源编译固化，保证分布式集群间的一致性。
 
 ---

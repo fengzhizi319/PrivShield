@@ -386,10 +386,12 @@ replace github.com/fengzhizi319/PrivShield/pkg => ../../pkg
 |---|---|---|
 | `CORS(origins)` | 可配置来源的跨域策略 | 空列表=允许所有（开发）；非空=精确匹配（生产） |
 | `Auth(apiKey)` | API Key 鉴权 | `crypto/subtle.ConstantTimeCompare` 防时序攻击 |
-| `RequestID()` | 请求 ID 注入 | 透传上游 `X-Request-ID` 或自动生成 |
+| `RequestID()` | 请求 ID 注入 | 透传上游 `X-Request-ID` 或自动生成（保留向后兼容） |
+| `TraceMiddleware()` | 全链路追踪双头注入 | 在 `RequestID()` 基础上额外注入 `X-Trace-ID` 响应头，所有 Go 服务已迁移使用 |
+| `AbortWithError()` | 统一错误信封响应 | 返回 `{code, message, detail, trace_id, timestamp}` 格式，自动注入追踪头 |
 | `StructuredLogger(logger, module)` | 结构化访问日志 | `log/slog` JSON 格式，含 request_id / latency / status |
 
-**中间件链推荐顺序**：`RequestID()` → `StructuredLogger()` → `CORS()` → `Auth()`
+**中间件链推荐顺序**：`TraceMiddleware()` → `StructuredLogger()` → `CORS()` → `Auth()`
 
 #### `pkg/metrics` — 共享 Prometheus 指标
 
@@ -1142,7 +1144,7 @@ setTimeout(() => URL.revokeObjectURL(url), 10_000);
 ```go
 // datasource-mgr/internal/handlers/handlers.go — CreateDataSource
 if err := validation.MaxLength("name", req.Name, 1024); err != nil {
-    c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+    middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
     return
 }
 ```
