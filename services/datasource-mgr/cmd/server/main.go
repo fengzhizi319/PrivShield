@@ -48,6 +48,8 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/handlers"
@@ -87,7 +89,11 @@ func main() {
 	//    - CORS: 跨域资源共享策略；
 	//    - Auth: 基于 Header API Key 的身份认证（配置时生效）。
 	gin.SetMode(gin.ReleaseMode)
-	server := handlers.New(cfg, logger)
+	// Prometheus 指标收集器（§7.2）：暴露 GET /metrics，并注册为 pkg/naming 观测器，
+	// 使别名流量 / 脏 ID 计数在归一化统一入口自动上报。
+	mc := metrics.NewCollector("datasource-mgr")
+	naming.SetObserver(mc)
+	server := handlers.New(cfg, logger, mc)
 	router := gin.New()
 	server.RegisterRoutes(router)
 

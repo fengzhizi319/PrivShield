@@ -100,6 +100,73 @@ func (s *Server) Shutdown() {
 	s.wg.Wait()
 }
 
+// StartLocalWorker starts a local worker loop for consuming pending/recovered tasks in SQLite/memory mode.
+// StartLocalWorker 启动本地待处理任务消费协程（用于 SQLite/内存模式下的崩溃恢复与重试任务拉取）。
+func (s *Server) StartLocalWorker() error {
+	s.wg.Add(1)
+	go s.localWorkerLoop()
+	s.logger.Info("local pending task worker started (SQLite/memory mode)")
+	return nil
+}
+
+func (s *Server) localWorkerLoop() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.processPendingTasks()
+		}
+	}
+}
+
+func (s *Server) processPendingTasks() {
+	pendingTasks, _, err := s.tasks.List(store.TaskFilter{Status: "pending", Limit: 10})
+	if err != nil || len(pendingTasks) == 0 {
+		return
+	}
+
+	for i := range pendingTasks {
+		task := pendingTasks[i]
+		if task.RetryAfter != nil && time.Now().Before(*task.RetryAfter) {
+			continue
+		}
+
+		// Atomically mark task as running in SQLite before processing to avoid race
+		now := time.Now()
+		task.Status = "running"
+		task.Stage = "ingest"
+		task.StartedAt = &now
+		if err := s.persistTask(&task, "local worker claim"); err != nil {
+			continue
+		}
+
+		var payload any
+		if task.PayloadJSON != "" && task.PayloadJSON != "null" {
+			_ = json.Unmarshal([]byte(task.PayloadJSON), &payload)
+		}
+		req := dispatchRequest{
+			APICode:      task.APICode,
+			DatasourceID: task.DatasourceID,
+			Source:       task.Source,
+			Operation:    task.Operation,
+			Payload:      payload,
+			Priority:     task.Priority,
+		}
+
+		s.wg.Add(1)
+		go func(t store.Task, r dispatchRequest) {
+			defer s.wg.Done()
+			reqID := validation.GenerateID("retry")
+			s.processTask(&t, r, reqID)
+		}(task, req)
+	}
+}
+
 // persistTask writes a task state transition before the pipeline continues.
 func (s *Server) persistTask(task *store.Task, transition string) error {
 	if err := s.tasks.Update(task); err != nil {
@@ -337,16 +404,26 @@ func (s *Server) Dispatch(c *gin.Context) {
 	now := time.Now()
 
 	payloadJSON, _ := json.Marshal(req.Payload)
+	status := "pending"
+	stage := "queued"
+	var startedAt *time.Time
+	if s.cfg.PGDSN == "" {
+		status = "running"
+		stage = "ingest"
+		startedAt = &now
+	}
+
 	task := &store.Task{
 		ID:           taskID,
 		APICode:      normAPICode,
 		DatasourceID: normID,
-		Status:       "pending",
-		Stage:        "queued",
+		Status:       status,
+		Stage:        stage,
 		Source:       normID,
 		Operation:    req.Operation,
 		Priority:     req.Priority,
 		CreatedAt:    now,
+		StartedAt:    startedAt,
 		PayloadJSON:  string(payloadJSON),
 	}
 
@@ -355,12 +432,19 @@ func (s *Server) Dispatch(c *gin.Context) {
 		return
 	}
 
-	// 加入 WaitGroup 跟踪并拉起异步协程
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.processTask(task, req)
-	}()
+	requestID := c.GetString("RequestID")
+	if requestID == "" {
+		requestID = validation.GenerateID("req")
+	}
+
+	// PostgreSQL 模式由共享租约 worker 消费，避免不同入口绕过任务所有权。
+	if s.cfg.PGDSN == "" {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.processTask(task, req, requestID)
+		}()
+	}
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"task_id":       taskID,
@@ -378,11 +462,17 @@ func (s *Server) Dispatch(c *gin.Context) {
 // ① 请求接入 (ingest)：更新状态为 running，初始化任务元数据；
 // ② 申请原数 (fetch)：若 Payload 为空，自动向 datasource-mgr 发起远程抽样获取数据；
 // ③ 分类+脱敏 (classify)：一次调用 engine /v1/medical/process 医疗流水线，
-//    同时完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + ICD-10 脱敏 + 诊断残留清除；
+//
+//	同时完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + ICD-10 脱敏 + 诊断残留清除；
+//
 // ④ 脱敏治理 (desensitize)：已由 ③ 合并完成，快速通过（保留阶段状态追踪）；
 // ⑤ 结果返回 (return)：组装脱敏后的数据对象；
 // ⑥ 审计存证 (audit/done)：记录执行耗时与完成状态并落盘存证。
-func (s *Server) processTask(task *store.Task, req dispatchRequest) {
+func (s *Server) processTask(task *store.Task, req dispatchRequest, requestID string) {
+	if requestID == "" {
+		requestID = validation.GenerateID("task")
+	}
+
 	// 并发信号量限流控制（最多 10 个并发任务）
 	s.taskSem <- struct{}{}
 	defer func() { <-s.taskSem }()
@@ -397,6 +487,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 			now := time.Now()
 			task.CompletedAt = &now
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+			s.recordDatasourceRequest(task.DatasourceID, "error")
 			_ = s.persistTask(task, "panic recovery")
 		}
 	}()
@@ -421,6 +512,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 			now := time.Now()
 			task.CompletedAt = &now
 			task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+			s.recordDatasourceRequest(task.DatasourceID, "error")
 			_ = s.persistTask(task, "shutdown failure")
 			return
 		}
@@ -429,6 +521,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 		if stage == "fetch" && s.datasource != nil {
 			if req.Payload == nil || isEmptyPayload(req.Payload) {
 				ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+				ctx = agent.ContextWithRequestID(ctx, requestID)
 				if res, err := s.datasource.FetchData(ctx, req.DatasourceID, 10, 0); err == nil && len(res.Records) > 0 {
 					req.Payload = res.Records
 					payloadBytes, _ := json.Marshal(req.Payload)
@@ -445,7 +538,10 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 		// 阶段 ③：分类+脱敏一体化 (classify) ── 一次调用 engine 医疗流水线
 		// 替代原先 classify + desensitize 两步分离调用，减少一次网络往返。
 		if stage == "classify" && isPrivacyOperation(req.Operation) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
+			ctx = agent.ContextWithRequestID(ctx, requestID)
+			idempotencyKey := fmt.Sprintf("hub-%s-%s-%d", task.ID, stage, task.RetryCount)
+			ctx = agent.ContextWithIdempotencyKey(ctx, idempotencyKey)
 			records := agent.ToRecords(req.Payload)
 			if len(records) > 0 {
 				_, err := s.agent.ProcessMedical(ctx, records)
@@ -456,6 +552,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 					now := time.Now()
 					task.CompletedAt = &now
 					task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+					s.recordDatasourceRequest(task.DatasourceID, "error")
 					_ = s.persistTask(task, "medical pipeline failure")
 					return
 				}
@@ -473,6 +570,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 	now := time.Now()
 	task.CompletedAt = &now
 	task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
+	s.recordDatasourceRequest(task.DatasourceID, "success")
 	_ = s.persistTask(task, "task completed")
 }
 
@@ -523,6 +621,27 @@ func isPrivacyOperation(op string) bool {
 		return true
 	}
 	return false
+}
+
+// unknownDatasourceLabel is the bounded metric label value used when a task
+// carries a datasource_id that is not in the canonical registry.
+// unknownDatasourceLabel 用于未登记 datasource_id 的固定指标标签值。
+const unknownDatasourceLabel = "unknown"
+
+// recordDatasourceRequest reports a terminal pipeline outcome per canonical
+// datasource (api_rename_design.md §7.2 privshield_datasource_requests_total).
+//
+// recordDatasourceRequest 上报一个数据源任务的终态流水结果。
+// status: "success" | "error"；未登记的 datasource_id 归一到 "unknown" 标签值，
+// 避免任意脏值产生无界时间序列。
+func (s *Server) recordDatasourceRequest(datasourceID, status string) {
+	if s.mc == nil {
+		return
+	}
+	if _, ok := naming.EntryByDataSourceID(datasourceID); !ok {
+		datasourceID = unknownDatasourceLabel
+	}
+	s.mc.RecordDatasourceRequest(datasourceID, naming.APICodeForDataSource(datasourceID), status)
 }
 
 // isEmptyPayload checks whether a generic payload is nil or empty.

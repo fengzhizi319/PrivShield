@@ -81,7 +81,8 @@ def permission_for_rest_path(path: str) -> str:
             "/v1/dynclassification/generate_profile",
         ):
             return "dynclassification:write"
-        return "dynclassification:read"
+    if path.startswith("/v1/agent"):
+        return "agent:process"
     if path.startswith("/v1/medical"):
         return "medical:process"
     if path.startswith("/v1/pipeline"):

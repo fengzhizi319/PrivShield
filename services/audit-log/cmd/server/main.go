@@ -25,6 +25,7 @@ import (
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
 	"github.com/fengzhizi319/PrivShield/pkg/store/sqlite"
@@ -65,6 +66,8 @@ func main() {
 
 	// ── Prometheus metrics / Prometheus 指标 ───────────────────
 	mc := metrics.NewCollector("audit-log")
+	// 注册命名观测器：pkg/naming 归一化时自动上报别名使用 / 脏 ID 指标（§7.2）。
+	naming.SetObserver(mc)
 
 	// ── Agent client / Agent 客户端 ────────────────────────────
 	agentClient := agent.New(cfg)

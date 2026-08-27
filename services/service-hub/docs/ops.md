@@ -106,12 +106,14 @@ curl -s http://127.0.0.1:8082/api/health | jq .
 - 上游 Agent 连通性与命名空间 (`agent: {"status": "ok"}`)
 - 下游模拟数据源连通性 (`datasource: "ok"`)
 
-### 3.2 触发数据源脱敏调度流水线
+### 3.2 提交调度任务并按需取数
 ```bash
-curl -s -X POST http://127.0.0.1:8082/api/hub/pipeline/trigger-datasource \
+curl -s -X POST http://127.0.0.1:8082/api/hub/dispatch \
   -H "Content-Type: application/json" \
-  -d '{"datasource_id": "ds_yibao", "limit": 5, "operation": "mask"}' | jq .
+  -d '{"datasource_id": "ds_yibao", "operation": "mask"}' | jq .
 ```
+
+未提供 `payload` 时，任务在 `fetch` 状态追踪标签调用 datasource-mgr 获取记录；随后在 `classify` 标签通过一次 Agent 一体化调用完成分类与脱敏。
 
 ### 3.3 查看 Prometheus 监控指标
 ```bash

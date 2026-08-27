@@ -5,7 +5,7 @@
 //   - SetupRouter: 注册所有 API 路由 + SPA 静态文件回退
 //
 // API 路由分组（/api/lz/*）：
-//  1. 拓扑探测：GET /topology, POST /probe/all
+//  1. 拓扑探测与流水线状态：GET /topology, POST /probe/all, GET /pipeline
 //  2. 任务管理：GET /tasks, GET /tasks/:id, GET /tasks/leases, POST /tasks/dispatch
 //  3. 测试套件：GET /suites, POST /suites/run
 //  4. 审计验证：GET /audit/logs, POST /audit/verify
@@ -13,11 +13,14 @@
 //  6. 预设数据 API：GET /data-api/definitions, POST /data-api/invoke
 //
 // 关键流程：
-//   - InvokeDataApi: 编排完整的 4 阶段会话（fetch → classify+desensitize → audit → return）
+//   - InvokeDataApi: 编排完整的 5 阶段会话（ingest → fetch → classify_desensitize → return → audit）
 //   - applyMasking: 本地降级掩码（当 engine 不可达时使用）
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -33,23 +36,26 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/models"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/runner"
-	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 )
 
 // Handler 持有所有 HTTP 处理器的依赖。
-// 所有 handler 方法共享同一个 Handler 实例，通过它访问配置、客户端池和测试执行器。
+// 所有 handler 方法共享同一个 Handler 实例，通过它访问配置、客户端池、测试执行器与监控指标。
 type Handler struct {
 	cfg    *config.Config      // 运行时配置
 	pool   *clients.ClientPool // 上游微服务 HTTP 客户端池
 	runner *runner.TestRunner  // E2E 测试套件执行器
+	mc     *metrics.Collector  // 本 BFF 自身的 Prometheus 指标（可为 nil）
 }
 
-// NewHandler 创建一个新的 Handler 实例。
-func NewHandler(cfg *config.Config, pool *clients.ClientPool, testRunner *runner.TestRunner) *Handler {
+// NewHandler 创建一个新的 Handler 实例；mc 可为 nil（不暴露 /metrics）。
+func NewHandler(cfg *config.Config, pool *clients.ClientPool, runner *runner.TestRunner, mc *metrics.Collector) *Handler {
 	return &Handler{
 		cfg:    cfg,
 		pool:   pool,
-		runner: testRunner,
+		runner: runner,
+		mc:     mc,
 	}
 }
 
@@ -59,6 +65,7 @@ func NewHandler(cfg *config.Config, pool *clients.ClientPool, testRunner *runner
 //
 //	/api/health          — BFF 自身健康检查
 //	/api/lz/topology     — 服务拓扑探测
+//	/api/lz/pipeline     — 6 阶段流水线状态
 //	/api/lz/tasks/*      — 任务管理（列表/详情/租约/派发）
 //	/api/lz/suites/*     — E2E 测试套件
 //	/api/lz/audit/*      — 审计日志与 Merkle 验真
@@ -75,12 +82,21 @@ func SetupRouter(h *Handler) *gin.Engine {
 	r.GET("/api/health", h.HealthCheck)
 	r.GET("/health", h.HealthCheck)
 
+	// ── 本 BFF 自身的 Prometheus 端点（§7.2）──
+	// 区别于 /api/lz/metrics（代理 service-hub 指标）。
+	if h.mc != nil {
+		r.GET("/metrics", h.mc.Handler())
+	}
+
 	// ── App-LZ API 分组 ──
 	api := r.Group("/api/lz")
 	{
 		// 1. 拓扑探测（GET 和 POST 均支持，POST 用于强制刷新）
 		api.GET("/topology", h.GetTopology)
 		api.POST("/probe/all", h.GetTopology)
+
+		// 1.5 6 阶段流水线状态
+		api.GET("/pipeline", h.GetPipelineStatus)
 
 		// 2. 任务管理（列表/详情/租约/派发）
 		api.GET("/tasks", h.ListTasks)
@@ -190,6 +206,16 @@ func (h *Handler) GetTopology(c *gin.Context) {
 	c.JSON(http.StatusOK, topo)
 }
 
+// GetPipelineStatus 获取 Service Hub 6 阶段流水线拓扑及统计数据（P1-7）。
+func (h *Handler) GetPipelineStatus(c *gin.Context) {
+	resp, err := h.pool.GetPipelineStatus(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 // DispatchTask 处理手动任务派发请求。
 // 将前端提交的任务转发到 Service Hub，失败时返回 503。
 func (h *Handler) DispatchTask(c *gin.Context) {
@@ -215,41 +241,32 @@ func (h *Handler) ListTasks(c *gin.Context) {
 
 	tasksResp, err := h.pool.ListTasks(c.Request.Context(), status, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"total": 0, "tasks": []models.Task{}, "via": "app-lz"})
+		c.JSON(http.StatusOK, gin.H{"tasks": []models.Task{}, "total": 0, "via": "app-lz-bff"})
 		return
 	}
 	c.JSON(http.StatusOK, tasksResp)
 }
 
 // GetTask 返回单个任务的完整详情。
-// 通过 URL 路径参数 :id 指定任务 ID。
 func (h *Handler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	task, err := h.pool.GetTask(c.Request.Context(), id)
-	if err != nil || task == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("task %s not found: %v", id, err), "via": "app-lz-bff"})
 		return
 	}
-	c.JSON(http.StatusOK, task)
+	c.JSON(http.StatusOK, gin.H{"task": task, "via": "app-lz-bff"})
 }
 
-// GetLeases 返回 Phase B PostgreSQL 租约状态。
-// 从 Service Hub 查询 running 状态的任务并推导租约信息。
-// 当 Hub 不可达或无租约任务时，返回空结构（含元数据）。
+// GetLeases 返回 Phase B PostgreSQL 任务租约检查结果。
 func (h *Handler) GetLeases(c *gin.Context) {
 	leaseResp, err := h.pool.GetLeasesFromHub(c.Request.Context())
 	if err != nil || leaseResp.TotalLeasedTasks == 0 {
-		// Fallback: return empty structure with metadata when hub is unreachable
 		c.JSON(http.StatusOK, models.LeasedTasksResponse{
 			StoreBackend:     "sqlite",
 			TotalLeasedTasks: 0,
 			Workers:          []models.WorkerLeaseInfo{},
-			OrphanRecovery: map[string]any{
-				"enabled":               true,
-				"scan_interval_seconds": 5,
-				"recovered_total":       0,
-				"atomic_lock_mechanism": "FOR UPDATE SKIP LOCKED",
-			},
+			OrphanRecovery:   map[string]any{},
 		})
 		return
 	}
@@ -276,7 +293,7 @@ func (h *Handler) RunSuites(c *gin.Context) {
 }
 
 // GetAuditLogs 返回审计日志条目列表。
-// 支持查询参数：limit（默认 50）、offset（默认 0）、datasource_id / datasource。
+// 支持查询参数：limit（默认 50）、offset（默认 0）、datasource_id / datasource、task_id、api_code。
 func (h *Handler) GetAuditLogs(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
@@ -284,8 +301,10 @@ func (h *Handler) GetAuditLogs(c *gin.Context) {
 	if rawDatasource == "" {
 		rawDatasource = c.Query("datasource")
 	}
+	taskID := c.Query("task_id")
+	apiCode := c.Query("api_code")
 
-	resp, err := h.pool.GetAuditLogs(c.Request.Context(), limit, offset, rawDatasource)
+	resp, err := h.pool.GetAuditLogsFiltered(c.Request.Context(), limit, offset, rawDatasource, taskID, apiCode)
 	if err != nil {
 		if ue, ok := err.(*clients.UpstreamError); ok {
 			c.JSON(ue.StatusCode(), ue.Body("app-lz-bff"))
@@ -348,13 +367,12 @@ func (h *Handler) GetDataApiDefinitions(c *gin.Context) {
 
 // InvokeDataApi 编排完整的预设数据 API 会话。
 //
-// 执行流程（6 阶段）：
+// 执行流程（5 阶段）：
 //  1. Ingest — 请求校验与会话初始化
 //  2. Fetch — 从 datasource-mgr 拉取原始数据
-//  3. Classify — 敏感数据三层漏斗分级
-//  4. Desensitize — 自适应隐私脱敏治理
-//  5. Return — 结果装配
-//  6. Audit — 向 audit-log 写入审计存证
+//  3. Classify & Desensitize — 敏感数据三层漏斗分级与自适应隐私脱敏治理 (合并一体化执行)
+//  4. Return — 结果装配
+//  5. Audit — 向 audit-log 写入审计存证
 func (h *Handler) InvokeDataApi(c *gin.Context) {
 	var req models.DataApiInvokeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -387,7 +405,7 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 	}
 
 	sessionID := fmt.Sprintf("session-%s-%d", apiDef.APICode, time.Now().UnixNano())
-	stages := make([]models.DataApiSessionStage, 0, 6)
+	stages := make([]models.DataApiSessionStage, 0, 5)
 	var rawRecords []map[string]any
 	var sanitizedData []map[string]any
 	overallStatus := "completed"
@@ -421,7 +439,7 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 		})
 	}
 
-	// ── 阶段 3 & 4：分类分级 + 脱敏治理 (classify & desensitize) ───
+	// ── 阶段 3：三层漏斗评级与隐私脱敏治理 (classify_desensitize) ───
 	desensitizeStart := time.Now()
 	if len(rawRecords) > 0 {
 		medResult, medErr := h.pool.ProcessMedicalRecords(c.Request.Context(), rawRecords)
@@ -429,17 +447,13 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 			sanitizedData = medResult.SanitizedData
 			desensitizeDuration := time.Since(desensitizeStart).Milliseconds()
 			stages = append(stages, models.DataApiSessionStage{
-				Name: "classify", Title: "三层分类漏斗评级", Status: "success",
-				Source: "engine", DurationMs: desensitizeDuration / 2,
-				Detail: fmt.Sprintf("医疗流水线识别 %d 条记录共 %d 个字段并完成分级", len(rawRecords), len(apiDef.Fields)),
-			})
-			stages = append(stages, models.DataApiSessionStage{
-				Name: "desensitize", Title: "自适应隐私脱敏治理", Status: "success",
-				Source: "engine", DurationMs: desensitizeDuration / 2,
-				Detail: fmt.Sprintf("对 %d 条记录执行医疗流水线脱敏 (via engine, L4/L5 高敏剥离)", len(sanitizedData)),
+				Name: "classify_desensitize", Title: "三层漏斗评级与隐私脱敏治理", Status: "success",
+				Source: "engine", DurationMs: desensitizeDuration,
+				Detail: fmt.Sprintf("医疗流水线识别 %d 条记录共 %d 个敏感字段，完成三层漏斗评级并执行自适应隐私脱敏 (via engine, L4/L5 高敏剥离)", len(rawRecords), len(apiDef.Fields)),
 			})
 		} else {
 			// 降级兜底：engine 不可达 → 本地字段级掩码
+			overallStatus = "degraded"
 			sanitizedData = make([]map[string]any, 0, len(rawRecords))
 			for _, rec := range rawRecords {
 				sanitized := make(map[string]any)
@@ -450,29 +464,20 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 			}
 			desensitizeDuration := time.Since(desensitizeStart).Milliseconds()
 			stages = append(stages, models.DataApiSessionStage{
-				Name: "classify", Title: "三层分类漏斗评级", Status: "success",
-				Source: "local-fallback", DurationMs: desensitizeDuration / 2,
-				Detail: fmt.Sprintf("识别 %d 个敏感字段并完成分级 (降级模式)", len(apiDef.Fields)),
-			})
-			stages = append(stages, models.DataApiSessionStage{
-				Name: "desensitize", Title: "自适应隐私脱敏治理", Status: "success",
-				Source: "local-fallback", DurationMs: desensitizeDuration / 2,
-				Detail: fmt.Sprintf("对 %d 条记录执行本地降级掩码 (via local-fallback)", len(sanitizedData)),
+				Name: "classify_desensitize", Title: "三层漏斗评级与隐私脱敏治理", Status: "degraded",
+				Source: "local-fallback", DurationMs: desensitizeDuration,
+				Detail: fmt.Sprintf("识别 %d 个敏感字段并完成分级，对 %d 条记录执行本地降级掩码 (via local-fallback)", len(apiDef.Fields), len(sanitizedData)),
 			})
 		}
 	} else {
 		desensitizeDuration := time.Since(desensitizeStart).Milliseconds()
 		stages = append(stages, models.DataApiSessionStage{
-			Name: "classify", Title: "三层分类漏斗评级", Status: "skipped",
-			DurationMs: desensitizeDuration / 2, Detail: "无原始数据可分类",
-		})
-		stages = append(stages, models.DataApiSessionStage{
-			Name: "desensitize", Title: "自适应隐私脱敏治理", Status: "skipped",
-			DurationMs: desensitizeDuration / 2, Detail: "无原始数据可脱敏",
+			Name: "classify_desensitize", Title: "三层漏斗评级与隐私脱敏治理", Status: "skipped",
+			DurationMs: desensitizeDuration, Detail: "无原始数据可评级与脱敏",
 		})
 	}
 
-	// ── 阶段 5：结果装配 (return) ─────────────────────────────────
+	// ── 阶段 4：结果装配 (return) ─────────────────────────────────
 	stages = append(stages, models.DataApiSessionStage{
 		Name:       "return",
 		Title:      "脱敏结果装配与交付",
@@ -482,13 +487,24 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 		Detail:     fmt.Sprintf("装配 %d 条脱敏记录准备返回", len(sanitizedData)),
 	})
 
-	// ── 阶段 6：审计存证 (audit) ───────────────────────────────────
+	// ── 阶段 5：审计存证 (audit) ───────────────────────────────────
+	rawBytes, _ := json.Marshal(rawRecords)
+	inputHashBytes := sha256.Sum256(rawBytes)
+	inputHash := hex.EncodeToString(inputHashBytes[:])
+
+	sanitizedBytes, _ := json.Marshal(sanitizedData)
+	outputHashBytes := sha256.Sum256(sanitizedBytes)
+	outputHash := hex.EncodeToString(outputHashBytes[:])
+
 	auditStart := time.Now()
 	auditEntryID := ""
 	entryID, auditErr := h.pool.RecordAudit(c.Request.Context(), models.AuditRecordRequest{
 		Datasource:    apiDef.DatasourceID,
 		APICode:       apiDef.APICode,
+		TaskID:        sessionID,
 		SessionID:     sessionID,
+		InputHash:     inputHash,
+		OutputHash:    outputHash,
 		Operation:     "mask",
 		Algorithm:     "three_layer_funnel",
 		User:          "app-lz-bff",

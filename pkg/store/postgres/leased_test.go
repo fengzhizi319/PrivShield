@@ -2,8 +2,9 @@
 // Phase B：PostgreSQL LeasedTaskStore 集成测试。
 //
 // 运行方式：
-//   PRIVSHIELD_PG_TEST_DSN="postgres://user:pass@localhost:5432/privshield_hub_test" \
-//   go test -tags=integration -v ./pkg/store/postgres/...
+//
+//	PRIVSHIELD_PG_TEST_DSN="postgres://user:pass@localhost:5432/privshield_hub_test" \
+//	go test -tags=integration -v ./pkg/store/postgres/...
 //
 // 若未设置 PRIVSHIELD_PG_TEST_DSN，测试将自动跳过。
 package postgres_test

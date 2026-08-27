@@ -57,6 +57,9 @@ help:
 lint:
 	ruff check engine/ tests/
 
+lint-naming:
+	bash scripts/dev/lint-source-naming.sh
+
 format:
 	ruff format engine/ tests/
 	ruff check --fix engine/ tests/
@@ -64,7 +67,7 @@ format:
 typecheck:
 	mypy
 
-check: lint typecheck
+check: lint lint-naming typecheck
 
 # ── Testing ──────────────────────────────────────────────────
 

@@ -30,9 +30,9 @@ type Task struct {
 	CompletedAt  *time.Time `json:"completed_at"`
 	DurationMs   int64      `json:"duration_ms"`
 	Error        string     `json:"error,omitempty"`
-	PayloadJSON  string     `json:"-"`                       // Raw payload (not exposed in JSON)
-	RetryCount   int        `json:"retry_count"`             // Number of retry attempts (replaces fragile string matching)
-	RetryAfter   *time.Time `json:"retry_after,omitempty"`   // Earliest time for next retry (backoff delay)
+	PayloadJSON  string     `json:"-"`                     // Raw payload (not exposed in JSON)
+	RetryCount   int        `json:"retry_count"`           // Number of retry attempts (replaces fragile string matching)
+	RetryAfter   *time.Time `json:"retry_after,omitempty"` // Earliest time for next retry (backoff delay)
 
 	// ── Phase B: Lease fields for multi-replica Hub / 多副本 Hub 租约字段 ──
 	LeaseOwner     string     `json:"lease_owner,omitempty"`      // Hub instance that owns the current lease
@@ -95,9 +95,9 @@ type TaskResult struct {
 // TaskFailure encapsulates the reason a task failed.
 // TaskFailure 封装任务失败的原因与分类。
 type TaskFailure struct {
-	Error       string // Human-readable error description
-	Retryable   bool   // Whether the failure is transient and worth retrying
-	ErrorClass  string // Error classification (e.g. "timeout", "downstream", "internal")
+	Error      string // Human-readable error description
+	Retryable  bool   // Whether the failure is transient and worth retrying
+	ErrorClass string // Error classification (e.g. "timeout", "downstream", "internal")
 }
 
 // LeasedTaskStore extends TaskStore with atomic lease operations for multi-replica Hub.
@@ -138,16 +138,16 @@ type LeasedTaskStore interface {
 type DataSource struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
-	Type          string     `json:"type"`            // "database" | "api" | "file"
+	Type          string     `json:"type"` // "database" | "api" | "file"
 	Host          string     `json:"host"`
 	Port          int        `json:"port"`
 	Database      string     `json:"database"`
-	SecurityLevel string     `json:"security_level"`  // "high" | "medium" | "low"
-	Status        string     `json:"status"`          // "connected" | "disconnected" | "error"
+	SecurityLevel string     `json:"security_level"` // "high" | "medium" | "low"
+	Status        string     `json:"status"`         // "connected" | "disconnected" | "error"
 	CreatedAt     time.Time  `json:"created_at"`
 	LastCheckAt   *time.Time `json:"last_check_at"`
-	TagsJSON      string     `json:"-"`               // JSON-encoded tags
-	Tags          []string   `json:"tags"`            // Business tags
+	TagsJSON      string     `json:"-"`    // JSON-encoded tags
+	Tags          []string   `json:"tags"` // Business tags
 }
 
 // AccessAuditRecord represents an access audit log entry.
@@ -224,43 +224,44 @@ type AuditFilter struct {
 
 // SnapshotRecord represents a desensitization snapshot for evidence.
 type SnapshotRecord struct {
-	ID            string    `json:"id"`
-	AuditLogID    string    `json:"audit_log_id"`
-	Timestamp     time.Time `json:"timestamp"`
-	InputSample   string    `json:"input_sample"`
-	OutputSample  string    `json:"output_sample"`
-	Algorithm     string    `json:"algorithm"`
-	ParametersJSON string   `json:"-"`
-	Parameters    any       `json:"parameters"`
-	IntegrityHash string    `json:"integrity_hash"`
+	ID             string    `json:"id"`
+	AuditLogID     string    `json:"audit_log_id"`
+	Timestamp      time.Time `json:"timestamp"`
+	InputSample    string    `json:"input_sample"`
+	OutputSample   string    `json:"output_sample"`
+	Algorithm      string    `json:"algorithm"`
+	ParametersJSON string    `json:"-"`
+	Parameters     any       `json:"parameters"`
+	IntegrityHash  string    `json:"integrity_hash"`
 }
 
 // AuditStats holds aggregated audit statistics.
 // P31 fix: SQL-level aggregation instead of loading 10k records into memory.
 type AuditStats struct {
-	TotalOperations  int            `json:"total_operations"`
-	ByOperation      map[string]int `json:"by_operation"`
-	ByStatus         map[string]int `json:"by_status"`
-	BySecurityLevel  map[string]int `json:"by_security_level"`
-	AvgDurationMs    float64        `json:"avg_duration_ms"`
+	TotalOperations int            `json:"total_operations"`
+	ByOperation     map[string]int `json:"by_operation"`
+	ByStatus        map[string]int `json:"by_status"`
+	BySecurityLevel map[string]int `json:"by_security_level"`
+	AvgDurationMs   float64        `json:"avg_duration_ms"`
 }
 
 // AuditReport holds compliance audit report data.
 // P33 fix: SQL-level filtering and aggregation instead of loading 10k records.
 type AuditReport struct {
-	TotalOperations   int            `json:"total_operations"`
-	SuccessRate       float64        `json:"success_rate"`
-	BySecurityLevel   map[string]int `json:"by_security_level"`
-	TopOperations     []string       `json:"top_operations"`
-	Recommendations   []string       `json:"recommendations"`
+	TotalOperations int            `json:"total_operations"`
+	SuccessRate     float64        `json:"success_rate"`
+	BySecurityLevel map[string]int `json:"by_security_level"`
+	TopOperations   []string       `json:"top_operations"`
+	Recommendations []string       `json:"recommendations"`
 }
 
 // AuditStore defines the persistence interface for audit logs and snapshots.
 type AuditStore interface {
 	SaveLog(log *AuditLog) error
+	SaveLogWithSnapshot(log *AuditLog, snapshot *SnapshotRecord) error
 	GetLog(id string) (*AuditLog, error)
 	ListLogs(filter AuditFilter) ([]AuditLog, int, error)
-	GetStats() (*AuditStats, error) // P31: SQL-level aggregation
+	GetStats() (*AuditStats, error)                     // P31: SQL-level aggregation
 	GenerateReport(period string) (*AuditReport, error) // P33: SQL-level filtering + aggregation
 
 	SaveSnapshot(snap *SnapshotRecord) error

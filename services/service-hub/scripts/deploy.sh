@@ -32,6 +32,25 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "环境变量 / Env vars:"
+            echo "  SERVICE_HUB_IMAGE      镜像名称与标签 (默认: privshield-service-hub:1.8.0)"
+            echo "  SERVICE_HUB_CONTAINER  容器名称 (默认: privshield-service-hub)"
+            echo "  SERVICE_HUB_PORT       REST 端口 (默认: 8082)"
+            echo "  SERVICE_HUB_GRPC_PORT  gRPC 端口 (默认: 50052)"
+            echo "  -h, --help             显示帮助信息并退出"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 # ── 2. 读取部署环境变量与默认值 ──────────────────────────────────────────────
 IMAGE_NAME="${SERVICE_HUB_IMAGE:-privshield-service-hub:1.8.0}"
 CONTAINER_NAME="${SERVICE_HUB_CONTAINER:-privshield-service-hub}"

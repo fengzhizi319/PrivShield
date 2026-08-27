@@ -33,6 +33,33 @@ func (s *AuditStore) SaveLog(log *store.AuditLog) error {
 	return err
 }
 
+// SaveLogWithSnapshot persists an audit log and its snapshot as one transaction.
+func (s *AuditStore) SaveLogWithSnapshot(log *store.AuditLog, snapshot *store.SnapshotRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		INSERT INTO audit_logs (id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash,
+			algorithm, parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, log.ID, log.TaskID, log.APICode, log.DatasourceID, log.Timestamp.Format(time.RFC3339Nano), log.Operation, log.DataSource,
+		log.InputHash, log.OutputHash, log.Algorithm, log.ParametersJSON,
+		log.InputRows, log.OutputRows, log.DurationMs, log.User, log.Status, log.ErrorMessage, log.SecurityLevel); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO snapshots (id, audit_log_id, timestamp, input_sample, output_sample, algorithm, parameters_json, integrity_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, snapshot.ID, snapshot.AuditLogID, snapshot.Timestamp.Format(time.RFC3339Nano),
+		snapshot.InputSample, snapshot.OutputSample, snapshot.Algorithm, snapshot.ParametersJSON, snapshot.IntegrityHash); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *AuditStore) GetLog(id string) (*store.AuditLog, error) {
 	row := s.db.QueryRow(`
 		SELECT id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash, algorithm,

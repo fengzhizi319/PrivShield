@@ -5,6 +5,21 @@
 # ==============================================================================
 set -e
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/deploy/docker-compose/docker-compose.prod.yml"
 

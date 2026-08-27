@@ -77,3 +77,35 @@ export const CATALOG: CatalogEntry[] = [
     status: 'reserved',
   },
 ];
+
+export const ALIAS_TO_CANONICAL: Record<string, string> = {
+  'yibao': DS_YIBAO,
+  'ds_yibao': DS_YIBAO,
+  'api1_yibao': DS_YIBAO,
+  '医保': DS_YIBAO,
+  '医保结算': DS_YIBAO,
+  'kangyang': DS_KANGYANG,
+  'ds_kangyang': DS_KANGYANG,
+  'api2_kangyang': DS_KANGYANG,
+  '康养': DS_KANGYANG,
+  '康养健康': DS_KANGYANG,
+  'mock3': DS_MOCK3,
+  'ds_mock3': DS_MOCK3,
+  'mock4': DS_MOCK4,
+  'ds_mock4': DS_MOCK4,
+};
+
+export function normalizeDataSourceID(input: string): string {
+  const trimmed = (input || '').trim().toLowerCase();
+  return ALIAS_TO_CANONICAL[trimmed] || trimmed;
+}
+
+export function getCatalogEntry(idOrAlias: string): CatalogEntry | undefined {
+  const canonical = normalizeDataSourceID(idOrAlias);
+  return CATALOG.find(c => c.datasource_id === canonical || c.api_code === canonical);
+}
+
+export function isWritableDataSource(idOrAlias: string): boolean {
+  const canonical = normalizeDataSourceID(idOrAlias);
+  return canonical === DS_YIBAO || canonical === DS_KANGYANG;
+}

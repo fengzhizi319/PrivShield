@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from engine.dynclassification.base import SmallNerEngine
 from engine.dynclassification.ner_adapter import NerAdapter
 from engine.dynclassification.ner_engines import (
     ModelScopeSmallNerEngine,
@@ -408,3 +410,63 @@ class TestCudaNerEngine:
             print(f"  🚀 PyTorch CUDA vs CPU 加速比: {speedup:.2f}x")
             assert ms_cuda_lat > 0
             assert cpu_lat > 0
+
+
+class TestNvidiaLibPreload:
+    """回归：_preload_nvidia_libs 必须幂等，不得让 LD_LIBRARY_PATH 无界增长。
+
+    历史缺陷：每次引擎初始化都把整批 nvidia/triton 目录前插到 LD_LIBRARY_PATH，
+    进程内累计超过 ARG_MAX 后任何子进程 exec 都会抛
+    ``OSError: [Errno 7] Argument list too long``（曾表现为全量 pytest 下真实 LLM
+    用例在 NER 用例之后必然失败）。
+    """
+
+    @staticmethod
+    def _fake_site_packages(tmp_path):
+        """构造一个仅含 nvidia/cuda/lib 的假 site-packages 目录。"""
+        lib_dir = tmp_path / "nvidia" / "cuda" / "lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "libcupti.so.12").write_text("")
+        return lib_dir
+
+    def test_repeated_calls_do_not_grow_ld_library_path(self, tmp_path, monkeypatch):
+        """多次预加载后 LD_LIBRARY_PATH 中同一目录只应出现一次，且保留原有条目。"""
+        from engine.dynclassification import base as base_mod
+
+        lib_dir = self._fake_site_packages(tmp_path)
+        monkeypatch.setattr(sys, "path", [str(tmp_path)], raising=False)
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/pre/existing/lib")
+        monkeypatch.setattr(base_mod, "_CUDA_PRELOAD_DONE", False)
+
+        for _ in range(5):
+            SmallNerEngine._preload_nvidia_libs()
+
+        parts = os.environ["LD_LIBRARY_PATH"].split(":")
+        assert parts.count(str(lib_dir)) == 1
+        assert "/pre/existing/lib" in parts
+
+    def test_second_call_is_noop_after_guard_set(self, tmp_path, monkeypatch):
+        """进程内守卫生效后，新出现的目录不应被再次追加。"""
+        from engine.dynclassification import base as base_mod
+
+        self._fake_site_packages(tmp_path / "first")
+        monkeypatch.setattr(sys, "path", [str(tmp_path / "first")], raising=False)
+        monkeypatch.setenv("LD_LIBRARY_PATH", "")
+        monkeypatch.setattr(base_mod, "_CUDA_PRELOAD_DONE", False)
+
+        SmallNerEngine._preload_nvidia_libs()
+        after_first = os.environ["LD_LIBRARY_PATH"]
+        assert after_first
+
+        second_dir = self._fake_site_packages(tmp_path / "second")
+        monkeypatch.setattr(sys, "path", [str(tmp_path / "second")], raising=False)
+        SmallNerEngine._preload_nvidia_libs()
+
+        assert os.environ["LD_LIBRARY_PATH"] == after_first
+        assert str(second_dir) not in os.environ["LD_LIBRARY_PATH"]
+
+    def test_no_duplicate_override_in_ner_engines(self):
+        """NER 引擎子类不得再复制一份 _preload_nvidia_libs（SSOT：基类唯一实现）。"""
+        assert "_preload_nvidia_libs" not in ModelScopeSmallNerEngine.__dict__
+        assert "_preload_nvidia_libs" not in TensorRTSmallNerEngine.__dict__
+        assert "_preload_nvidia_libs" not in ONNXSmallNerEngine.__dict__

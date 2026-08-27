@@ -81,3 +81,15 @@ go test -v ./services/datasource-mgr/...
 # 运行整个 Go 工作区测试
 make test-go
 ```
+
+---
+
+## 容器化与独立 Kubernetes 部署
+
+```bash
+# 1. 独立构建 Docker 镜像（构建上下文需在仓库根目录以包含共享 pkg/）
+docker build -f services/datasource-mgr/Dockerfile -t datasource-mgr:latest .
+
+# 2. 独立部署到 Kubernetes（使用单服务自包含清单）
+kubectl apply -k services/datasource-mgr/deploy/k8s/
+```

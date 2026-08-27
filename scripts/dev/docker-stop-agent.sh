@@ -12,6 +12,21 @@
 
 set -euo pipefail
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 echo "============================================================================"
 echo "🛑 [Docker Mode] 正在停止 PrivShield 容器..."
 echo "============================================================================"

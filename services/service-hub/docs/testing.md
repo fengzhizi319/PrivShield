@@ -13,8 +13,7 @@
 | **模拟数据源客户端** | `internal/datasource/client_test.go` | 医保数据（API 1）、康养数据（API 2）、mock3/4 及通用取数、探活与连通性测试 | **100.0%** |
 | **共享领域模型** | `internal/models/models_test.go` | 敏感度等级到脱敏操作映射 (`LevelToOperation`)、所有核心模型 JSON 序列化与反序列化 | **100.0%** |
 | **配置加载器** | `internal/config/config_test.go` | 默认配置、多节点 `AgentBaseURLs` 轮询解析、Datasource 地址方法、mTLS 与公钥固定环境变量、生产加固参数 | **100.0%** |
-| **HTTP REST 处理器** | `internal/handlers/handlers_test.go` | Health、HubStatus、PipelineStatus、GetTask、ListTasks 分页与状态过滤、Dispatch 边界拦截、Classify 自动编排、TriggerDataSourcePipeline、ListDataSources 代理、API Key 认证、优雅停机 | **88%+** |
-| **数据源流水线联动** | `internal/handlers/datasource_pipeline_test.go` | 医保与康养数据源端到端自动取数、动态探查与脱敏流水线执行 | **90%+** |
+| **HTTP REST 处理器** | `internal/handlers/handlers_test.go` | Health、HubStatus、Pipeline、GetTask、ListTasks 分页与状态过滤、Dispatch 边界拦截、API Key 认证、优雅停机及状态写入失败中止 | **88%+** |
 | **HTTP TLS / mTLS 双向认证** | `internal/handlers/httptls_test.go` | HTTP 协议下的 TLS 1.3、mTLS 客户端证书校验与公钥固定 (SPKI Pinning) 拦截 | **92%+** |
 | **gRPC 服务端与 mTLS** | `internal/grpcserver/server_test.go` | Health、HubStatus、Dispatch、ClassifyAndDispatch、GetTask、ListTasks、PipelineStatus、mTLS 证书链生成与校验、公钥比对、流水线异常恢复与停机中断 | **80%+** |
 | **真实跨服务 E2E 流水线** | `internal/handlers/real_e2e_test.go` | 真实 Agent + Service Hub + Datasource Mgr + Audit Log 跨服务 6 阶段完整流水线调度验证 | 条件触发 (`PRIVSHIELD_E2E=1`) |
@@ -55,8 +54,6 @@ PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/han
 | `TestDispatchInvalidBody` | `POST /api/hub/dispatch` | 缺失必需字段（`source` 或 `operation`）时返回 400 Bad Request |
 | `TestDispatch_OversizedSource` | `POST /api/hub/dispatch` | `source` 字段超出 1024 字符防超大字符串攻击，返回 400 Bad Request |
 | `TestDispatchAccepted` | `POST /api/hub/dispatch` | 合法请求立即返回 202 Accepted + 任务 ID，后台异步调度流水线 |
-| `TestClassifyAndDispatch_Validations` | `POST /api/hub/classify` | 校验非法 JSON、空 `source` 与超长 `source` 参数防护 |
-| `TestTriggerDataSourcePipeline` | `POST /api/hub/pipeline/trigger-datasource` | 联动 `datasource-mgr` 获取模拟数据并自动分发脱敏流水线 |
-| `TestListDataSourcesProxy` | `GET /api/hub/datasources` | 代理列出 `datasource-mgr` 模拟数据源清单 |
+| `TestProcessTask_StopsWhenStatePersistenceFails` | `processTask` | 首次 `running/ingest` 状态更新失败时立即停止，不推进后续阶段 |
 | `TestAuthMiddleware_Protection` | `pkg/middleware.Auth` | 验证未携带 Token 返回 401 Unauthorized、合法 Bearer 放行及 `/health` 免认证 |
 | `TestServer_ShutdownGraceful` | `Server.Shutdown` | 验证停机信号触发 Context 取消并安全等待在途任务 Goroutine 完成 |

@@ -288,8 +288,9 @@ class BudgetAccountant:
     def _init_db(self) -> None:
         """初始化共享数据库，如果设置了 PRIVACY_BUDGET_DB 持久化路径。
 
-        启动时执行 PRAGMA integrity_check 校验数据库完整性（#8），
-        若检测到损坏则记录错误日志并回退到内存模式，防止带病运行。
+        启动时执行 PRAGMA integrity_check 校验数据库完整性（#8）。配置的
+        预算库损坏时必须拒绝初始化，不能回退到内存状态，否则重启后可能绕过
+        已持久化的预算消耗。
         """
         db_path = os.environ.get("PRIVACY_BUDGET_DB")
         if db_path:
@@ -304,6 +305,9 @@ class BudgetAccountant:
                                 "budget_db_integrity_check_failed",
                                 extra={"db_path": db_path, "result": result[0]},
                             )
+                            raise RuntimeError(
+                                f"privacy budget database integrity check failed: {result[0]}"
+                            )
                     finally:
                         check_conn.close()
                 except Exception as e:
@@ -311,6 +315,9 @@ class BudgetAccountant:
                         "budget_db_integrity_check_error",
                         extra={"db_path": db_path, "error": str(e)},
                     )
+                    raise RuntimeError(
+                        f"privacy budget database integrity check failed: {e}"
+                    ) from e
 
             parent_dir = os.path.dirname(db_path)
             if parent_dir:
@@ -711,9 +718,7 @@ class BudgetAccountant:
     def reset(self) -> None:
         """重置已消耗隐私预算为 0。"""
         with self._mu:
-            self.epsilon_spent = 0.0
-            self.delta_spent = 0.0
-            self._window_start = self._now()
+            reset_time = self._now()
             if self._redis_client:
                 try:
                     redis_key = f"privshield:budget:{self.namespace}"
@@ -722,22 +727,25 @@ class BudgetAccountant:
                         mapping={
                             "eps_spent": 0.0,
                             "del_spent": 0.0,
-                            "win_start": self._window_start,
+                            "win_start": reset_time,
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    raise RuntimeError("failed to persist privacy budget reset to Redis") from e
             db_path = os.environ.get("PRIVACY_BUDGET_DB")
             if db_path:
                 try:
                     with self._db_conn(db_path) as conn:
                         conn.execute(
                             "UPDATE privacy_budgets SET epsilon_spent = 0.0, delta_spent = 0.0, window_start = ? WHERE namespace = ?",
-                            (self._window_start, self.namespace),
+                            (reset_time, self.namespace),
                         )
                         conn.commit()
-                except Exception:
-                    pass
+                except Exception as e:
+                    raise RuntimeError("failed to persist privacy budget reset to SQLite") from e
+            self.epsilon_spent = 0.0
+            self.delta_spent = 0.0
+            self._window_start = reset_time
             self._update_metrics(self.epsilon_total, self.delta_total, 0.0, 0.0)
 
     def __repr__(self) -> str:

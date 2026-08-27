@@ -43,13 +43,25 @@ def download_via_huggingface(model_id: str, local_dir: str) -> bool:
         return False
 
 
+import argparse
+
+
 def main():
-    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    parser = argparse.ArgumentParser(description="本地大语言模型下载工具 / LLM Downloader")
+    parser.add_argument("--model-id", default="Qwen/Qwen2.5-0.5B-Instruct", help="模型 ID (默认: Qwen/Qwen2.5-0.5B-Instruct)")
+    parser.add_argument("--output-dir", "-o", help="本地保存路径 (默认: .models/<model_name>)")
+    args = parser.parse_args()
+
+    model_id = args.model_id
     
-    # 默认将模型存放在项目根目录下的 .models 目录中
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    local_dir = os.path.join(project_root, ".models", "Qwen2.5-0.5B-Instruct")
+    
+    if args.output_dir:
+        local_dir = args.output_dir
+    else:
+        model_name = model_id.split("/")[-1]
+        local_dir = os.path.join(project_root, ".models", model_name)
     
     print(f"[*] 目标保存路径: {local_dir}")
     os.makedirs(local_dir, exist_ok=True)

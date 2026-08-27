@@ -24,6 +24,15 @@ stop_postgres() {
     echo "[INFO] PostgreSQL container stopped."
 }
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "用法 / Usage: $0 [选项]"
+    echo ""
+    echo "选项 / Options:"
+    echo "  --stop      停止并移除 PostgreSQL 容器"
+    echo "  -h, --help  显示帮助信息并退出"
+    exit 0
+fi
+
 if [[ "${1:-}" == "--stop" ]]; then
     stop_postgres
     exit 0

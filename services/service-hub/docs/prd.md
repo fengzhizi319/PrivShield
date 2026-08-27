@@ -21,20 +21,20 @@
 
 ### 2.1 六阶段安全调度流水线
 
-每个进入调度中枢的数据处理任务必须按严格顺序经过 6 个阶段：
+每个进入调度中枢的数据处理任务按严格顺序经过 6 个状态追踪标签；其中仅 `classify` 执行一次分类与脱敏一体化处理，`desensitize` 保留为兼容的状态追踪标签。
 
 ```text
-① ingest (接入) ──▶ ② fetch (取数) ──▶ ③ classify (分类) ──▶ ④ desensitize (脱敏) ──▶ ⑤ return (返回) ──▶ ⑥ audit (存证) ──▶ done
+① ingest (接入) ──▶ ② fetch (取数) ──▶ ③ classify（分类与脱敏处理） ──▶ ④ desensitize（状态追踪） ──▶ ⑤ return (返回) ──▶ ⑥ audit（状态追踪） ──▶ done
 ```
 
 | 阶段 | 标识 | 说明 | 协同模块与动作 |
 |---|---|---|---|
 | ① | `ingest` | 接收请求，参数校验，生成唯一 `task_id`，落库 `pending` 状态 | 快速校验与入队，立即响应 `202 Accepted` |
 | ② | `fetch` | 申请并抽取原始数据 | 若请求未显式携带 Payload，自动调用 `datasource-mgr` 采样 |
-| ③ | `classify` | 敏感度动态探查与分级 | 调用 Agent `/v1/dynclassification/classify` 评估（L1~L5） |
-| ④ | `desensitize` | 隐私原语执行 | 根据等级或显式指令调用 Agent 执行 mask/k_anon/dp/qol |
-| ⑤ | `return` | 结果封装与格式校验 | 组装脱敏输出与耗时元数据 |
-| ⑥ | `audit` | 存证审计写盘 | 触发异步审计日志记录与 SHA-256 存证 |
+| ③ | `classify` | 分类与脱敏一体化处理 | 一次调用 Agent `POST /v1/agent/process`（404 时兼容 `POST /v1/medical/process`） |
+| ④ | `desensitize` | 状态追踪 | 不执行独立脱敏调用，快速流转 |
+| ⑤ | `return` | 状态追踪 | 当前不组装或持久化额外结果对象 |
+| ⑥ | `audit` | 状态追踪 | 任务随后写为 `completed/done`；当前不直接调用 audit-log |
 
 ### 2.2 敏感度等级到脱敏策略自动映射
 
@@ -51,7 +51,7 @@
 ### 2.3 任务生命周期与状态机
 
 - **状态集合**：`pending`（等待调度）➔ `running`（流水线执行中）➔ `completed`（处理成功）/ `failed`（处理失败）。
-- **异步处理**：任务提交（`POST /api/hub/dispatch` 或 `POST /api/hub/classify`）后立即返回 `202 Accepted` + `task_id`。
+- **异步处理**：HTTP 任务通过 `POST /api/hub/dispatch` 提交后立即返回 `202 Accepted` + `task_id`；gRPC 还提供 `ClassifyAndDispatch` 进行预先敏感度评估与自动操作选择。
 - **并发控制**：内部通过容量为 10 的 Goroutine 信号量（`taskSem`）限制同时并发执行的流水线任务数，最大排队深度由 `SERVICE_HUB_MAX_QUEUE` 控制。
 - **状态查询与过滤**：支持按 `task_id` 单查详情，或在列表接口按 `status`（`pending`/`running`/`completed`/`failed`）分页过滤。
 
@@ -65,15 +65,12 @@
 |---|---|---|---|
 | GET | `/health` | 免密 | 存活探针（Liveness Probe，进程存活即返回 200） |
 | GET | `/readyz` | 免密 | 就绪探针（Readiness Probe，检查 Agent+Datasource 依赖，失败返回 503） |
-| GET | `/api/health` | 免密 | 综合健康检查（兼容别名，返回自身及上下游依赖延迟） |
+| GET | `/api/health` | 免密 | 存活探针兼容别名，返回自身状态与模块标识 |
 | GET | `/api/hub/status` | 可选 API Key | 调度中枢运行状态（Uptime、排队数、活跃任务数、成功/失败总量） |
 | GET | `/api/hub/tasks` | 可选 API Key | 分页查询任务列表（支持 `?status=` 过滤与 `limit`/`offset` 参数） |
 | GET | `/api/hub/tasks/:id` | 可选 API Key | 查询单个任务详情（包含流水线阶段、耗时与错误信息） |
 | POST | `/api/hub/dispatch` | 可选 API Key | 手动提交指定算子的隐私调度任务（返回 202 Accepted） |
 | GET | `/api/hub/pipeline` | 可选 API Key | 获取 6 阶段流水线活跃状态与 Agent 连通性 |
-| POST | `/api/hub/classify` | 可选 API Key | 智能分类分级并根据等级自动策略下发脱敏流水线 |
-| POST | `/api/hub/pipeline/trigger-datasource` | 可选 API Key | 联动 `datasource-mgr` 采样并全自动触发脱敏流水线 |
-| GET | `/api/hub/datasources` | 可选 API Key | 代理列出 `datasource-mgr` 当前已注册的数据源清单 |
 | GET | `/metrics` | 免密 | Prometheus 格式指标导出端点 |
 
 ### 3.2 gRPC 服务接口清单 (`servicehub.ServiceHubService`)

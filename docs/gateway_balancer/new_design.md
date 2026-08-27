@@ -85,7 +85,7 @@ Kubernetes Service 仍然有实际价值：调用方只持有稳定 DNS；Pod IP
 
 **部署要求**：
 
-- 使用 [service-hub Kustomize 模板](../../deploy/k8s/service-hub/kustomization.yaml)；
+- 使用 [service-hub Kustomize 模板](../../services/service-hub/deploy/k8s/kustomization.yaml)；
 - 任务数据库路径为 `/app/data/service-hub.db`，挂载独占 `ReadWriteOnce` PVC；
 - `Deployment.spec.replicas` 必须保持 `1`；
 - 更新策略必须保持 `Recreate`，先停止旧 Pod 再挂载卷启动新 Pod；
@@ -319,7 +319,7 @@ Service DNS 不是认证机制。mTLS 的客户端身份与服务端 SAN 校验�
 
 ### 阶段 A：固定入口与单副本持久化
 
-1. 构建 `service-hub:latest` 镜像并部署 `deploy/k8s/service-hub/`。
+1. 构建 `service-hub:latest` 镜像并部署 `services/service-hub/deploy/k8s/`。
 2. 将调用方（如 BFF、控制台或其他微服务）的上游地址从 Pod IP 改为 `service-hub` Service DNS。
 3. 验证 HTTP、gRPC、`/health`、`/readyz`、PVC 重启恢复与 Service Endpoints。
 4. 对任务处理期间执行 Pod 删除，确认重启后的孤立任务恢复与幂等边界符合预期。
@@ -385,7 +385,7 @@ Service DNS 不是认证机制。mTLS 的客户端身份与服务端 SAN 校验�
 
 ## 12. 实施状态
 
-已提供阶段 A 的 Kubernetes 资源：[Service](../../deploy/k8s/service-hub/service.yaml)、[Deployment](../../deploy/k8s/service-hub/deployment.yaml)、[PVC](../../deploy/k8s/service-hub/persistentvolumeclaim.yaml) 与 [Kustomization](../../deploy/k8s/service-hub/kustomization.yaml)。
+已提供阶段 A 的 Kubernetes 资源：[Service](../../services/service-hub/deploy/k8s/service.yaml)、[Deployment](../../services/service-hub/deploy/k8s/deployment.yaml)、[PVC](../../services/service-hub/deploy/k8s/persistentvolumeclaim.yaml) 与 [Kustomization](../../services/service-hub/deploy/k8s/kustomization.yaml)。
 
 阶段 B 核心代码已实现：
 
@@ -395,9 +395,8 @@ Service DNS 不是认证机制。mTLS 的客户端身份与服务端 SAN 校验�
 - **Task 模型扩展**：新增 `LeaseOwner`、`LeaseToken`、`LeaseExpiresAt`、`Version`、`MaxRetries` 字段。
 - **Prometheus 租约指标**：`task_lease_conflicts_total`、`task_lease_expired_total`、`task_claim_latency_seconds`、`task_transitions_total`、`service_hub_ready`。
 - **Service-Hub 集成**：`initLeasedTaskStore()` 根据 `SERVICE_HUB_PG_DSN` 自动选择 PostgreSQL 或回退 SQLite。
-- **K8s PostgreSQL 资源**：`deploy/k8s/service-hub/postgres/` 提供可选的 PostgreSQL Deployment/Service/PVC/Secret。
-
-阶段 B 的下游幂等键集成、多副本压测验证与生产故障演练仍是后续工作。
+- **K8s PostgreSQL 资源**：`services/service-hub/deploy/k8s/postgres/` 提供可选的 PostgreSQL Deployment/Service/PVC/Secret。
+- **下游 Agent 幂等凭据集成**：已完整支持 `X-Idempotency-Key` 自动透传。
 
 ## 13. 相关文档
 
@@ -405,4 +404,4 @@ Service DNS 不是认证机制。mTLS 的客户端身份与服务端 SAN 校验�
 - [网关与负载均衡器设计](./design.md)
 - [网关可靠性能力说明](./reliability.md)
 - [网关 PRD](./prd.md)
-- [service-hub K8s 资源](../../deploy/k8s/service-hub/)
+- [service-hub K8s 资源](../../services/service-hub/deploy/k8s/)

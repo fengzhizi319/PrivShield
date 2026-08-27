@@ -23,13 +23,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 	"github.com/fengzhizi319/PrivShield/pkg/validation"
-	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
@@ -79,6 +80,86 @@ func New(ag *agent.Client, ds *datasource.Client, cfg *config.Config, tasks stor
 func (s *GRPCServer) Shutdown() {
 	s.cancel()
 	s.wg.Wait()
+}
+
+// StartLeaseWorker starts the PostgreSQL-backed task consumer used by all
+// service-hub ingress protocols. It must only be enabled for a backend that
+// provides real lease semantics.
+func (s *GRPCServer) StartLeaseWorker(owner string, leaseTTL time.Duration) error {
+	leasedStore, ok := s.tasks.(store.LeasedTaskStore)
+	if !ok {
+		return fmt.Errorf("task store does not support leases")
+	}
+	if leaseTTL <= 0 {
+		return fmt.Errorf("lease TTL must be positive")
+	}
+
+	s.wg.Add(1)
+	go s.leaseWorkerLoop(leasedStore, owner, leaseTTL)
+	s.logger.Info("postgresql lease worker started", "owner", owner, "lease_ttl", leaseTTL.String())
+	return nil
+}
+
+// StartLocalWorker starts a local worker loop for consuming pending/recovered tasks in SQLite/memory mode.
+func (s *GRPCServer) StartLocalWorker() error {
+	s.wg.Add(1)
+	go s.localWorkerLoop()
+	s.logger.Info("gRPC local pending task worker started (SQLite/memory mode)")
+	return nil
+}
+
+func (s *GRPCServer) localWorkerLoop() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.processPendingTasks()
+		}
+	}
+}
+
+func (s *GRPCServer) processPendingTasks() {
+	pendingTasks, _, err := s.tasks.List(store.TaskFilter{Status: "pending", Limit: 10})
+	if err != nil || len(pendingTasks) == 0 {
+		return
+	}
+
+	for i := range pendingTasks {
+		task := pendingTasks[i]
+		if task.RetryAfter != nil && time.Now().Before(*task.RetryAfter) {
+			continue
+		}
+
+		now := time.Now()
+		task.Status = "running"
+		task.Stage = "ingest"
+		task.StartedAt = &now
+		if err := s.persistTask(&task, "local worker claim"); err != nil {
+			continue
+		}
+
+		s.wg.Add(1)
+		go func(t store.Task) {
+			defer s.wg.Done()
+			reqID := validation.GenerateID("retry")
+			s.processTask(&t, t.Operation, t.PayloadJSON, reqID)
+		}(task)
+	}
+}
+
+// extractRequestID extracts x-request-id from gRPC metadata or generates a new one.
+func extractRequestID(ctx context.Context) string {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("x-request-id"); len(vals) > 0 && vals[0] != "" {
+			return vals[0]
+		}
+	}
+	return validation.GenerateID("grpc-req")
 }
 
 // persistTask writes a task state transition before the pipeline continues.
@@ -169,14 +250,24 @@ func (s *GRPCServer) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb
 	taskID := validation.GenerateID("task")
 	now := time.Now()
 
+	initialStatus := "pending"
+	stage := "queued"
+	var startedAt *time.Time
+	if !s.usesLeaseWorker() {
+		initialStatus = "running"
+		stage = "ingest"
+		startedAt = &now
+	}
+
 	task := &store.Task{
 		ID:          taskID,
-		Status:      "pending",
-		Stage:       "queued",
+		Status:      initialStatus,
+		Stage:       stage,
 		Source:      req.Source,
 		Operation:   req.Operation,
 		Priority:    int(req.Priority),
 		CreatedAt:   now,
+		StartedAt:   startedAt,
 		PayloadJSON: req.PayloadJson,
 	}
 
@@ -184,11 +275,15 @@ func (s *GRPCServer) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb
 		return nil, status.Errorf(codes.Internal, "save task: %v", err)
 	}
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.processTask(task, req.Operation, req.PayloadJson)
-	}()
+	requestID := extractRequestID(ctx)
+
+	if !s.usesLeaseWorker() {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.processTask(task, req.Operation, req.PayloadJson, requestID)
+		}()
+	}
 
 	return &pb.DispatchResponse{
 		TaskId: taskID,
@@ -219,9 +314,12 @@ func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAn
 	}
 	normAPICode := naming.APICodeForDataSource(normID)
 
+	requestID := extractRequestID(ctx)
+
 	payloadJSON := req.PayloadJson
 	if (payloadJSON == "" || payloadJSON == "{}" || payloadJSON == "null") && s.datasource != nil {
 		dsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		dsCtx = agent.ContextWithRequestID(dsCtx, requestID)
 		if res, err := s.datasource.FetchData(dsCtx, normID, 5, 0); err == nil && len(res.Records) > 0 {
 			b, _ := json.Marshal(res.Records[0])
 			payloadJSON = string(b)
@@ -230,6 +328,8 @@ func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAn
 	}
 
 	classifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	classifyCtx = agent.ContextWithRequestID(classifyCtx, requestID)
+	classifyCtx = agent.ContextWithIdempotencyKey(classifyCtx, fmt.Sprintf("hub-classify-%s", normID))
 	defer cancel()
 
 	classifyResult, err := s.agent.Classify(classifyCtx, payloadJSON)
@@ -267,11 +367,13 @@ func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAn
 
 	classifyResultJSON, _ := json.Marshal(classifyResult)
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.processTask(task, operation, payloadJSON)
-	}()
+	if !s.usesLeaseWorker() {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.processTask(task, operation, payloadJSON, requestID)
+		}()
+	}
 
 	return &pb.ClassifyAndDispatchResponse{
 		TaskId:             taskID,
@@ -373,7 +475,11 @@ func (s *GRPCServer) PipelineStatus(ctx context.Context, req *pb.PipelineStatusR
 // processTask simulates the scheduling pipeline stages.
 // processTask 内部异步流水线执行器：
 // 顺序流转 ingest ➔ fetch ➔ classify ➔ desensitize ➔ return ➔ audit 6 个阶段。
-func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string) {
+func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string, requestID string) {
+	if requestID == "" {
+		requestID = validation.GenerateID("grpc-task")
+	}
+
 	s.taskSem <- struct{}{}
 	defer func() { <-s.taskSem }()
 
@@ -417,6 +523,7 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 		if stage == "fetch" && s.datasource != nil {
 			if payloadJSON == "" || payloadJSON == "{}" || payloadJSON == "null" {
 				ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+				ctx = agent.ContextWithRequestID(ctx, requestID)
 				if res, err := s.datasource.FetchDataBySource(ctx, task.Source, 10, 0); err == nil && len(res.Records) > 0 {
 					b, _ := json.Marshal(res.Records)
 					payloadJSON = string(b)
@@ -433,7 +540,10 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 		// Stage 3: classify → 分类+脱敏一体化，一次调用 engine 医疗流水线
 		// 替代原先 classify + desensitize 两步分离调用，减少一次网络往返。
 		if stage == "classify" && isPrivacyOp(operation) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
+			ctx = agent.ContextWithRequestID(ctx, requestID)
+			idempotencyKey := fmt.Sprintf("hub-%s-%s-%d", task.ID, stage, task.RetryCount)
+			ctx = agent.ContextWithIdempotencyKey(ctx, idempotencyKey)
 			records := agent.ToRecords(payloadJSON)
 			if len(records) > 0 {
 				_, err := s.agent.ProcessMedical(ctx, records)
@@ -461,6 +571,132 @@ func (s *GRPCServer) processTask(task *store.Task, operation, payloadJSON string
 	task.CompletedAt = &now
 	task.DurationMs = now.Sub(task.CreatedAt).Milliseconds()
 	_ = s.persistTask(task, "task completed")
+}
+
+func (s *GRPCServer) usesLeaseWorker() bool {
+	return s.cfg.PGDSN != ""
+}
+
+func (s *GRPCServer) leaseWorkerLoop(tasks store.LeasedTaskStore, owner string, leaseTTL time.Duration) {
+	defer s.wg.Done()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if reclaimed, err := tasks.RequeueExpiredLeases(100); err != nil {
+			s.logger.Error("failed to requeue expired leases", "error", err.Error())
+		} else if reclaimed > 0 {
+			s.logger.Warn("requeued expired task leases", "count", reclaimed)
+		}
+
+		lease, err := tasks.ClaimNext(owner, leaseTTL)
+		if err != nil {
+			s.logger.Error("failed to claim pending task", "error", err.Error())
+		} else if lease != nil {
+			s.runLeasedTask(tasks, lease, leaseTTL)
+		}
+
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *GRPCServer) runLeasedTask(tasks store.LeasedTaskStore, lease *store.TaskLease, leaseTTL time.Duration) {
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+
+	renewalDone := make(chan struct{})
+	go func() {
+		defer close(renewalDone)
+		interval := leaseTTL / 2
+		if interval < time.Second {
+			interval = time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				valid, err := tasks.RenewLease(lease.Task.ID, lease.Owner, lease.Token, leaseTTL)
+				if err != nil || !valid {
+					s.logger.Warn("task lease lost while executing",
+						"task_id", lease.Task.ID, "error", err)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	failure := s.executeLeasedTask(ctx, lease.Task)
+	cancel()
+	<-renewalDone
+
+	if failure == nil {
+		completed, err := tasks.CompleteLease(lease.Task.ID, lease.Owner, lease.Token, store.TaskResult{Stage: "done"})
+		if err != nil || !completed {
+			s.logger.Warn("could not complete leased task", "task_id", lease.Task.ID, "error", err)
+		}
+		return
+	}
+
+	failed, err := tasks.FailLease(lease.Task.ID, lease.Owner, lease.Token, *failure)
+	if err != nil || !failed {
+		s.logger.Warn("could not fail leased task", "task_id", lease.Task.ID, "error", err)
+	}
+}
+
+func (s *GRPCServer) executeLeasedTask(ctx context.Context, task *store.Task) (failure *store.TaskFailure) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			failure = &store.TaskFailure{Error: fmt.Sprintf("internal panic: %v", recovered)}
+		}
+	}()
+
+	payloadJSON := task.PayloadJSON
+	for _, stage := range []string{"ingest", "fetch", "classify", "desensitize", "return", "audit"} {
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+			return &store.TaskFailure{Error: "lease worker shutting down", Retryable: true, ErrorClass: "shutdown"}
+		}
+
+		if stage == "fetch" && s.datasource != nil && (payloadJSON == "" || payloadJSON == "{}" || payloadJSON == "null") {
+			fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			fetchCtx = agent.ContextWithRequestID(fetchCtx, task.ID)
+			result, err := s.datasource.FetchDataBySource(fetchCtx, task.Source, 10, 0)
+			cancel()
+			if err != nil {
+				return &store.TaskFailure{Error: fmt.Sprintf("fetch data: %v", err), Retryable: true, ErrorClass: "downstream"}
+			}
+			if len(result.Records) > 0 {
+				payload, _ := json.Marshal(result.Records)
+				payloadJSON = string(payload)
+			}
+		}
+
+		if stage == "classify" && isPrivacyOp(task.Operation) {
+			records := agent.ToRecords(payloadJSON)
+			if len(records) == 0 {
+				continue
+			}
+			processCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			processCtx = agent.ContextWithRequestID(processCtx, task.ID)
+			idempotencyKey := fmt.Sprintf("hub-%s-%s-%d", task.ID, stage, task.RetryCount)
+			processCtx = agent.ContextWithIdempotencyKey(processCtx, idempotencyKey)
+			_, err := s.agent.ProcessMedical(processCtx, records)
+			cancel()
+			if err != nil {
+				return &store.TaskFailure{Error: fmt.Sprintf("medical pipeline failed: %v", err), Retryable: true, ErrorClass: "downstream"}
+			}
+		}
+	}
+	return nil
 }
 
 // taskToProto converts a store.Task domain model to its Protobuf representation.

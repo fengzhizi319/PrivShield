@@ -302,14 +302,14 @@ func TestDataSourceStore_Audit(t *testing.T) {
 	ds := setupDSStore(t)
 	now := time.Now()
 	rec := &store.AccessAuditRecord{
-		ID:           "audit-1",
-		DataSourceID: "ds-1",
+		ID:             "audit-1",
+		DataSourceID:   "ds-1",
 		DataSourceName: "卫健",
-		Operation:    "query",
-		User:         "admin",
-		Timestamp:    now,
-		RecordsCount: 100,
-		Status:       "success",
+		Operation:      "query",
+		User:           "admin",
+		Timestamp:      now,
+		RecordsCount:   100,
+		Status:         "success",
 	}
 	if err := ds.SaveAudit(rec); err != nil {
 		t.Fatalf("save audit: %v", err)
@@ -630,4 +630,189 @@ func TestLeasedTaskStore_InterfaceCompliance(t *testing.T) {
 	ts := setupTaskStore(t)
 	// This will fail at compile time if sqlite.TaskStore doesn't implement LeasedTaskStore.
 	var _ store.LeasedTaskStore = ts
+}
+
+// ─────────────────────────────────────────────────────────────
+// Legacy Schema Migration Regression Tests (P0-1 & P0-3)
+// ─────────────────────────────────────────────────────────────
+
+func TestInitAuditTables_LegacyMigration(t *testing.T) {
+	dbPath := openTestDB(t)
+	db, err := sqlite.Open(dbPath, testLogger())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	// 1. Manually create the 15-column legacy audit_logs schema (without task_id, api_code, datasource_id)
+	_, err = db.Exec(`
+		CREATE TABLE audit_logs (
+			id TEXT PRIMARY KEY,
+			timestamp DATETIME NOT NULL,
+			operation TEXT,
+			datasource TEXT,
+			input_hash TEXT,
+			output_hash TEXT,
+			algorithm TEXT,
+			parameters_json TEXT,
+			input_rows INTEGER DEFAULT 0,
+			output_rows INTEGER DEFAULT 0,
+			duration_ms INTEGER DEFAULT 0,
+			user_name TEXT,
+			status TEXT,
+			error_message TEXT,
+			security_level TEXT
+		);
+		CREATE TABLE snapshots (
+			id TEXT PRIMARY KEY,
+			audit_log_id TEXT,
+			timestamp DATETIME NOT NULL,
+			input_sample TEXT,
+			output_sample TEXT,
+			algorithm TEXT,
+			parameters_json TEXT,
+			integrity_hash TEXT,
+			FOREIGN KEY(audit_log_id) REFERENCES audit_logs(id)
+		);
+	`)
+	if err != nil {
+		t.Fatalf("create legacy audit tables: %v", err)
+	}
+
+	// Insert a legacy row
+	_, err = db.Exec(`
+		INSERT INTO audit_logs (id, timestamp, operation, datasource, user_name, status)
+		VALUES ('legacy-1', '2026-08-20T10:00:00Z', 'mask', 'ds_yibao', 'tester', 'success')
+	`)
+	if err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	// 2. Call production InitAuditTables — must migrate cleanly without crash or SQL error
+	if err := sqlite.InitAuditTables(db); err != nil {
+		t.Fatalf("InitAuditTables failed on legacy db: %v", err)
+	}
+
+	// 3. Verify new columns exist and can be queried
+	as, err := sqlite.NewAuditStore(db)
+	if err != nil {
+		t.Fatalf("new audit store: %v", err)
+	}
+
+	// Save a new log with canonical fields
+	now := time.Now()
+	newLog := &store.AuditLog{
+		ID:           "migrated-2",
+		TaskID:       "task-123",
+		APICode:      "api1_yibao",
+		DatasourceID: "ds_yibao",
+		Timestamp:    now,
+		Operation:    "mask",
+		DataSource:   "ds_yibao",
+		Status:       "success",
+	}
+	if err := as.SaveLog(newLog); err != nil {
+		t.Fatalf("save new log on migrated db: %v", err)
+	}
+
+	got, err := as.GetLog("migrated-2")
+	if err != nil {
+		t.Fatalf("get migrated log: %v", err)
+	}
+	if got.TaskID != "task-123" || got.APICode != "api1_yibao" || got.DatasourceID != "ds_yibao" {
+		t.Fatalf("canonical fields not stored: %+v", got)
+	}
+
+	// Filter by task_id and datasource_id
+	filtered, total, err := as.ListLogs(store.AuditFilter{TaskID: "task-123", DatasourceID: "ds_yibao"})
+	if err != nil {
+		t.Fatalf("filter logs: %v", err)
+	}
+	if total != 1 || len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered log, got %d (total=%d)", len(filtered), total)
+	}
+}
+
+func TestInitTaskTables_LegacyMigration(t *testing.T) {
+	dbPath := openTestDB(t)
+	db, err := sqlite.Open(dbPath, testLogger())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	// 1. Manually create legacy tasks schema (without api_code, datasource_id)
+	_, err = db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			status TEXT NOT NULL DEFAULT 'pending',
+			stage TEXT NOT NULL DEFAULT 'queued',
+			source TEXT,
+			operation TEXT,
+			priority INTEGER DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			started_at DATETIME,
+			completed_at DATETIME,
+			duration_ms INTEGER DEFAULT 0,
+			error TEXT,
+			payload_json TEXT
+		);
+	`)
+	if err != nil {
+		t.Fatalf("create legacy tasks table: %v", err)
+	}
+
+	// Insert legacy row with source = ds_yibao
+	_, err = db.Exec(`
+		INSERT INTO tasks (id, status, stage, source, operation, created_at)
+		VALUES ('legacy-task-1', 'pending', 'queued', 'ds_yibao', 'mask', '2026-08-20T10:00:00Z')
+	`)
+	if err != nil {
+		t.Fatalf("insert legacy task: %v", err)
+	}
+
+	// 2. Call production InitTaskTables — must migrate and backfill
+	if err := sqlite.InitTaskTables(db); err != nil {
+		t.Fatalf("InitTaskTables failed on legacy db: %v", err)
+	}
+
+	ts, err := sqlite.NewTaskStore(db)
+	if err != nil {
+		t.Fatalf("new task store: %v", err)
+	}
+
+	// Verify backfill: legacy-task-1 should now have datasource_id="ds_yibao" and api_code="api1_yibao"
+	task, err := ts.Get("legacy-task-1")
+	if err != nil {
+		t.Fatalf("get legacy task: %v", err)
+	}
+	if task.DatasourceID != "ds_yibao" {
+		t.Fatalf("expected backfilled DatasourceID 'ds_yibao', got %q", task.DatasourceID)
+	}
+	if task.APICode != "api1_yibao" {
+		t.Fatalf("expected backfilled APICode 'api1_yibao', got %q", task.APICode)
+	}
+
+	// Save new task with canonical fields and get it
+	now := time.Now()
+	newTask := &store.Task{
+		ID:           "new-task-2",
+		Status:       "running",
+		Stage:        "processing",
+		Source:       "ds_kangyang",
+		APICode:      "api2_kangyang",
+		DatasourceID: "ds_kangyang",
+		Operation:    "k_anon",
+		CreatedAt:    now,
+	}
+	if err := ts.Save(newTask); err != nil {
+		t.Fatalf("save new task: %v", err)
+	}
+	gotNew, err := ts.Get("new-task-2")
+	if err != nil {
+		t.Fatalf("get new task: %v", err)
+	}
+	if gotNew.DatasourceID != "ds_kangyang" || gotNew.APICode != "api2_kangyang" {
+		t.Fatalf("canonical fields not preserved on get: %+v", gotNew)
+	}
 }

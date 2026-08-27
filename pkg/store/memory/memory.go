@@ -325,6 +325,24 @@ func (s *AuditStore) SaveLog(log *store.AuditLog) error {
 	return nil
 }
 
+// SaveLogWithSnapshot stores an audit log and its snapshot while holding one lock.
+func (s *AuditStore) SaveLogWithSnapshot(log *store.AuditLog, snapshot *store.SnapshotRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	logCopy := *log
+	snapshotCopy := *snapshot
+	s.logs = append(s.logs, logCopy)
+	s.snapshots = append(s.snapshots, snapshotCopy)
+	if len(s.logs) > maxAuditLogs {
+		s.logs = s.logs[len(s.logs)-maxAuditLogs:]
+	}
+	if len(s.snapshots) > maxSnapshots {
+		s.snapshots = s.snapshots[len(s.snapshots)-maxSnapshots:]
+	}
+	return nil
+}
+
 func (s *AuditStore) GetLog(id string) (*store.AuditLog, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -18,6 +18,25 @@
 
 set -euo pipefail
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            echo ""
+            echo "环境变量 / Env vars:"
+            echo "  SERVICE_HUB_HOST   主机地址 (默认: 127.0.0.1)"
+            echo "  SERVICE_HUB_PORT   端口 (默认: 8082)"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 HOST="${SERVICE_HUB_HOST:-127.0.0.1}"
 PORT="${SERVICE_HUB_PORT:-8082}"
 BASE_URL="http://${HOST}:${PORT}"

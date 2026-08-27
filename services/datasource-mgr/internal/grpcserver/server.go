@@ -178,6 +178,18 @@ func (s *GRPCServer) GetMockData4(ctx context.Context, req *pb.DataQueryRequest)
 // Generic Datasource Query & Management / 通用数据源动态查询与元数据管理
 // ─────────────────────────────────────────────────────────────────────────────
 
+// GetData implements canonical RPC for fetching dataset slice.
+// GetData 实现规范 RPC：查询指定数据源的数据切片。
+func (s *GRPCServer) GetData(ctx context.Context, req *pb.SourceDataQueryRequest) (*pb.DataQueryResponse, error) {
+	return s.GetDataBySource(ctx, req)
+}
+
+// ListDataSources implements canonical RPC for listing registered data sources.
+// ListDataSources 实现规范 RPC：列出所有已注册的数据源资产目录。
+func (s *GRPCServer) ListDataSources(ctx context.Context, req *pb.ListMockSourcesRequest) (*pb.ListMockSourcesResponse, error) {
+	return s.ListMockSources(ctx, req)
+}
+
 // GetDataBySource dynamically routes query requests by source_id.
 // GetDataBySource 根据入参的 source_id 动态分发并路由查询对应的数据集。
 func (s *GRPCServer) GetDataBySource(ctx context.Context, req *pb.SourceDataQueryRequest) (*pb.DataQueryResponse, error) {

@@ -73,18 +73,20 @@
 - **说明**：获取任务列表，支持按状态过滤与分页。
 - **查询参数**：
   - `status` (可选)：按状态过滤，支持 `pending` \| `running` \| `completed` \| `failed`
-  - `limit` (可选，默认 50，最大 200)：单页数量
+  - `limit` (可选，默认 100，最大 1000)：单页数量
   - `offset` (可选，默认 0)：分页偏移量
 - **响应状态码**：`200 OK`
 - **响应示例**：
 ```json
 {
   "total": 2,
+  "limit": 100,
+  "offset": 0,
   "tasks": [
     {
       "id": "task-1787554500-eabf3934",
       "status": "completed",
-      "stage": "audit",
+      "stage": "done",
       "source": "ds_yibao",
       "operation": "mask",
       "priority": 50,
@@ -106,19 +108,20 @@
 - **响应示例**：
 ```json
 {
-  "id": "task-1787554500-eabf3934",
-  "status": "completed",
-  "stage": "audit",
-  "source": "ds_yibao",
-  "operation": "mask",
-  "priority": 50,
-  "created_at": "2026-08-25T16:00:00Z",
-  "started_at": "2026-08-25T16:00:00.050Z",
-  "completed_at": "2026-08-25T16:00:00.320Z",
-  "duration_ms": 270,
-  "error": "",
-  "payload_json": "{\"name\":\"张三\",\"id_card\":\"510101199001011234\"}",
-  "retry_count": 0,
+  "task": {
+    "id": "task-1787554500-eabf3934",
+    "status": "completed",
+    "stage": "done",
+    "source": "ds_yibao",
+    "operation": "mask",
+    "priority": 50,
+    "created_at": "2026-08-25T16:00:00Z",
+    "started_at": "2026-08-25T16:00:00.050Z",
+    "completed_at": "2026-08-25T16:00:00.320Z",
+    "duration_ms": 270,
+    "error": "",
+    "retry_count": 0
+  },
   "via": "service-hub"
 }
 ```
@@ -147,65 +150,15 @@
 ```json
 {
   "task_id": "task-1787554500-eabf3934",
-  "status": "accepted",
-  "via": "service-hub"
-}
-```
-
-#### `POST /api/hub/classify`
-- **说明**：自适应调度端点。先调用 Agent 三层分类漏斗自动探查数据的敏感度等级（L1~L5），再根据等级自动映射最佳脱敏原语（`none` / `mask` / `k_anon` / `dp` / `qol`）并执行流水线。
-- **请求体**：
-```json
-{
-  "source": "ds_yibao",
-  "payload": {
-    "name": "李四",
-    "diagnosis": "高血压",
-    "claim_amount": 1280.50
-  }
-}
-```
-- **响应状态码**：`202 Accepted`
-- **响应示例**：
-```json
-{
-  "task_id": "task-1787554600-fa3b9182",
-  "level": "L2",
-  "auto_operation": "mask",
-  "classify_result": {
-    "final_level": "L2",
-    "confidence": 0.95,
-    "funnel_layer": "rule"
-  },
-  "via": "service-hub"
-}
-```
-
-#### `POST /api/hub/pipeline/trigger-datasource`
-- **说明**：一键联动 `datasource-mgr` 从指定模拟数据源（医保/康养）抓取原始数据切片，并自动触发脱敏调度流水线。
-- **请求体**：
-```json
-{
+  "api_code": "API1",
   "datasource_id": "ds_yibao",
-  "limit": 10,
-  "operation": "mask"
-}
-```
-- **响应状态码**：`202 Accepted`
-- **响应示例**：
-```json
-{
-  "task_id": "task-1787554700-0193bb22",
-  "datasource_id": "ds_yibao",
-  "records_count": 10,
-  "operation": "mask",
   "status": "accepted",
   "via": "service-hub"
 }
 ```
 
 #### `GET /api/hub/pipeline`
-- **说明**：返回 6 大流水线阶段（`ingest` ➔ `fetch` ➔ `classify` ➔ `desensitize` ➔ `return` ➔ `audit`）的实时活跃任务统计与 Agent 运行状态。其中阶段 ③ `classify` 调用 engine `/v1/agent/process`（兼容 `/v1/medical/process`）通用合规流水线一体化完成分类与脱敏，阶段 ④ `desensitize` 快速通过。
+- **说明**：返回 6 个状态追踪标签（`ingest` ➔ `fetch` ➔ `classify` ➔ `desensitize` ➔ `return` ➔ `audit`）的实时活跃任务统计与 Agent 运行状态。业务处理在 `classify` 标签执行一次 engine `POST /v1/agent/process` 调用（404 时兼容回退 `POST /v1/medical/process`），一体化完成分类与脱敏；`desensitize` 仅保留为状态追踪标签并快速流转，不会发起第二次处理调用。
 - **响应状态码**：`200 OK`
 - **响应示例**：
 ```json
@@ -214,35 +167,11 @@
     {"name": "ingest", "status": "idle", "active_count": 0},
     {"name": "fetch", "status": "idle", "active_count": 0},
     {"name": "classify", "status": "processing", "active_count": 1},
-    {"name": "desensitize", "status": "processing", "active_count": 1},
+    {"name": "desensitize", "status": "idle", "active_count": 0},
     {"name": "return", "status": "idle", "active_count": 0},
     {"name": "audit", "status": "idle", "active_count": 0}
   ],
   "agent_ok": true
-}
-```
-
-#### `GET /api/hub/datasources`
-- **说明**：代理查询 `datasource-mgr` 当前已注册的数据源列表及元数据。
-- **响应状态码**：`200 OK`
-- **响应示例**：
-```json
-{
-  "datasources": [
-    {
-      "id": "ds_yibao",
-      "name": "城镇职工基本医疗保险结算数据源",
-      "category": "medical",
-      "records_count": 1000
-    },
-    {
-      "id": "ds_kangyang",
-      "name": "智慧养老健康监护数据源",
-      "category": "healthcare",
-      "records_count": 800
-    }
-  ],
-  "via": "service-hub"
 }
 ```
 
@@ -278,10 +207,10 @@ service ServiceHubService {
   // HubStatus 调度中枢状态概览
   rpc HubStatus(HubStatusRequest) returns (HubStatusResponse);
 
-  // Dispatch 分发脱敏/分类任务到流水线
+  // Dispatch 分发指定操作任务到流水线
   rpc Dispatch(DispatchRequest) returns (DispatchResponse);
 
-  // ClassifyAndDispatch 先分类分级，再根据敏感度自动分发脱敏策略
+  // ClassifyAndDispatch 先评估敏感度，再按等级自动选择操作并分发任务
   rpc ClassifyAndDispatch(ClassifyAndDispatchRequest) returns (ClassifyAndDispatchResponse);
 
   // GetTask 查询单个任务状态

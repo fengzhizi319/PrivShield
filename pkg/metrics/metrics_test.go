@@ -105,3 +105,34 @@ func TestHandler_ContentType(t *testing.T) {
 		t.Errorf("content-type = %q, want prometheus format", ct)
 	}
 }
+
+func TestNamingMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := NewCollector("naming-metrics-test")
+
+	c.RecordAPIAlias("yibao", "ds_yibao", "datasource_id")
+	c.RecordNormalizeError("reserved")
+	c.RecordDatasourceRequest("ds_yibao", "api1_yibao", "success")
+
+	r := gin.New()
+	r.GET("/metrics", c.Handler())
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/metrics", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "privshield_api_alias_requests_total") {
+		t.Error("missing privshield_api_alias_requests_total")
+	}
+	if !strings.Contains(body, "privshield_datasource_normalize_errors_total") {
+		t.Error("missing privshield_datasource_normalize_errors_total")
+	}
+	if !strings.Contains(body, "privshield_datasource_requests_total") {
+		t.Error("missing privshield_datasource_requests_total")
+	}
+}

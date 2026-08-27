@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
+
 	_ "modernc.org/sqlite" // SQLite driver / SQLite 驱动
 )
 
@@ -109,6 +111,8 @@ func InitTaskTables(db *sql.DB) error {
 			status TEXT NOT NULL DEFAULT 'pending',
 			stage TEXT NOT NULL DEFAULT 'queued',
 			source TEXT,
+			api_code TEXT DEFAULT '',
+			datasource_id TEXT DEFAULT '',
 			operation TEXT,
 			priority INTEGER DEFAULT 0,
 			created_at DATETIME NOT NULL,
@@ -194,6 +198,23 @@ func InitTaskTables(db *sql.DB) error {
 		}
 	}
 
+	// ── Canonical identifiers (api_rename_design.md §4.4 阶段 2) / canonical 标识列 ──
+	// 早期实现只在 Go struct / JSON 上双写 api_code、datasource_id，未落库，
+	// 导致重启或多副本接管后 canonical 标识丢失。
+	if !columns["api_code"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN api_code TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["datasource_id"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN datasource_id TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if err := backfillTaskCanonicalIDs(db); err != nil {
+		return err
+	}
+
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_retry_after ON tasks(retry_after)"); err != nil {
 		return err
 	}
@@ -203,7 +224,35 @@ func InitTaskTables(db *sql.DB) error {
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(status, priority DESC, created_at) WHERE status='pending'"); err != nil {
 		return err
 	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_datasource_id ON tasks(datasource_id)"); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+// backfillTaskCanonicalIDs 把历史任务行回填为 canonical 标识：
+//  1. datasource_id 从已规范化的 source（ds_* 形式）复制；
+//  2. api_code 由 pkg/naming 注册表按 datasource_id 反查（唯一事实源，不硬编码映射）。
+//
+// 幂等：仅填充空值，重复执行不改变已有数据。
+func backfillTaskCanonicalIDs(db *sql.DB) error {
+	if _, err := db.Exec(
+		`UPDATE tasks SET datasource_id = source
+		 WHERE (datasource_id IS NULL OR datasource_id = '') AND substr(source, 1, 3) = 'ds_'`); err != nil {
+		return err
+	}
+	for _, entry := range naming.Registry {
+		if entry.APICode == "" || entry.DataSourceID == "" {
+			continue
+		}
+		if _, err := db.Exec(
+			`UPDATE tasks SET api_code = ?
+			 WHERE datasource_id = ? AND (api_code IS NULL OR api_code = '')`,
+			entry.APICode, entry.DataSourceID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -276,8 +325,6 @@ func InitAuditTables(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_ts ON audit_logs(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_op ON audit_logs(operation);
-		CREATE INDEX IF NOT EXISTS idx_audit_logs_ds ON audit_logs(datasource_id);
-		CREATE INDEX IF NOT EXISTS idx_audit_logs_task ON audit_logs(task_id);
 		CREATE INDEX IF NOT EXISTS idx_snapshots_audit ON snapshots(audit_log_id);
 	`)
 	if err != nil {
@@ -321,6 +368,15 @@ func InitAuditTables(db *sql.DB) error {
 		if _, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN datasource_id TEXT DEFAULT ''"); err != nil {
 			return err
 		}
+	}
+
+	// 索引必须在上面的列迁移之后创建：旧库（无 datasource_id/task_id 列）若在
+	// 同一批次里先建索引，会直接 `no such column` 使 audit-log 服务启动失败。
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_ds ON audit_logs(datasource_id)"); err != nil {
+		return err
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_task ON audit_logs(task_id)"); err != nil {
+		return err
 	}
 
 	return nil

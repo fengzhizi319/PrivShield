@@ -443,7 +443,7 @@ export interface DataApiDef {
 
 /**
  * 数据 API 会话中单个阶段的执行结果。
- * 4 个阶段：fetch（拉取）→ classify（分类）→ desensitize（脱敏）→ audit（审计）
+ * 5 个阶段：ingest（接入校验）→ fetch（数据抽取）→ classify_desensitize（评级与脱敏）→ return（装配返回）→ audit（不可篡改存证）
  */
 export interface DataApiSessionStage {
   /** 阶段标识符 */

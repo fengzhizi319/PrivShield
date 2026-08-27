@@ -29,11 +29,17 @@ and sensitivity level enumerations for ner_engines.py / llm_engines.py to implem
 from __future__ import annotations
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# CUDA/Triton 共享库预加载只需在进程内执行一次（见 SmallNerEngine._preload_nvidia_libs）。
+# Process-wide guard so the site-packages scan and the LD_LIBRARY_PATH merge run at most once.
+_CUDA_PRELOAD_LOCK = threading.Lock()
+_CUDA_PRELOAD_DONE = False
 
 
 class SensitivityLevel(str, Enum):
@@ -89,50 +95,66 @@ class SmallNerEngine(ABC):
 
     @staticmethod
     def _preload_nvidia_libs() -> None:
-        """动态寻找并预加载 CUDA/Triton C++ 共享库，更新 LD_LIBRARY_PATH。"""
-        try:
-            import ctypes
-            import os
-            import sys
+        """动态寻找并预加载 CUDA/Triton C++ 共享库，更新 LD_LIBRARY_PATH。
 
-            lib_dirs = []
-            candidate_files = []
+        幂等性 / Idempotency：
+        - 进程内只扫描并预加载一次（重复的 os.walk 与 ctypes.CDLL 代价很高）；
+        - LD_LIBRARY_PATH 只追加当前尚未包含的目录，避免每次调用无界增长
+          （增长到超过 ARG_MAX 后，任何子进程 exec 都会抛
+          ``OSError: [Errno 7] Argument list too long``）。
+        """
+        global _CUDA_PRELOAD_DONE
+        with _CUDA_PRELOAD_LOCK:
+            if _CUDA_PRELOAD_DONE:
+                return
+            try:
+                import ctypes
+                import os
+                import sys
 
-            for s_dir in sys.path:
-                if not s_dir or not os.path.exists(s_dir):
-                    continue
-                for base in ("nvidia", "triton"):
-                    p = os.path.join(s_dir, base)
-                    if os.path.exists(p):
-                        for root, _, files in os.walk(p):
-                            if "lib" in root or "cupti" in root:
-                                if root not in lib_dirs:
-                                    lib_dirs.append(root)
-                            for f in files:
-                                if ".so" in f and any(k in f for k in ("cupti", "cufft", "nvshmem", "cublas", "cudnn", "cuda_runtime")):
-                                    candidate_files.append(os.path.join(root, f))
+                lib_dirs = []
+                candidate_files = []
 
-            if lib_dirs:
-                existing = os.environ.get("LD_LIBRARY_PATH", "")
-                os.environ["LD_LIBRARY_PATH"] = ":".join(lib_dirs) + (":" + existing if existing else "")
+                for s_dir in sys.path:
+                    if not s_dir or not os.path.exists(s_dir):
+                        continue
+                    for base in ("nvidia", "triton"):
+                        p = os.path.join(s_dir, base)
+                        if os.path.exists(p):
+                            for root, _, files in os.walk(p):
+                                if "lib" in root or "cupti" in root:
+                                    if root not in lib_dirs:
+                                        lib_dirs.append(root)
+                                for f in files:
+                                    if ".so" in f and any(k in f for k in ("cupti", "cufft", "nvshmem", "cublas", "cudnn", "cuda_runtime")):
+                                        candidate_files.append(os.path.join(root, f))
 
-            def sort_key(path: str) -> int:
-                if "nvshmem" in path:
-                    return 0
-                if "cufft" in path:
-                    return 1
-                if "cupti" in path:
-                    return 2
-                return 3
+                if lib_dirs:
+                    existing = [p for p in os.environ.get("LD_LIBRARY_PATH", "").split(":") if p]
+                    known = set(existing)
+                    new_dirs = [d for d in lib_dirs if d not in known]
+                    if new_dirs:
+                        os.environ["LD_LIBRARY_PATH"] = ":".join(new_dirs + existing)
 
-            candidate_files.sort(key=sort_key)
-            for lib_path in candidate_files:
-                try:
-                    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                def sort_key(path: str) -> int:
+                    if "nvshmem" in path:
+                        return 0
+                    if "cufft" in path:
+                        return 1
+                    if "cupti" in path:
+                        return 2
+                    return 3
+
+                candidate_files.sort(key=sort_key)
+                for lib_path in candidate_files:
+                    try:
+                        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # best-effort：无论成败都只执行一次，避免重复扫描 site-packages
+            _CUDA_PRELOAD_DONE = True
 
     @abstractmethod
     def extract(self, text: str) -> list[dict[str, Any]]:

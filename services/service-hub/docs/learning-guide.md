@@ -17,7 +17,7 @@
   - [5.4 上游 Agent 客户端与熔断机制 (internal/agent/client.go)](#54-上游-agent-客户端与熔断机制-internalagentclientgo)
   - [5.5 数据源客户端 (internal/datasource/client.go)](#55-数据源客户端-internaldatasourceclientgo)
   - [5.6 gRPC 服务与零信任 mTLS / 公钥固定 (internal/grpcserver/server.go)](#56-grpc-服务与零信任-mtls--公钥固定-internalgrpcserverservergo)
-  - [5.7 gRPC 桩代码与服务端实现的核心关联 (service_hub_grpc.pb.go vs server.go)](#57-grpc-桩代码-service_hub_grpcpbgo-与服务端实现-servergo-的核心关联)
+    - [5.7 gRPC 桩代码与服务端实现的核心关联 (servicehub_grpc.pb.go vs server.go)](#57-grpc-桩代码-servicehub_grpcpbgo-与服务端实现-servergo-的核心关联)
 - [6. 任务存储引擎与状态机流转](#6-任务存储引擎与状态机流转)
 - [7. 零信任安全防护体系](#7-零信任安全防护体系)
 - [8. 本地开发、实操与自动化测试](#8-本地开发实操与自动化测试)
@@ -110,24 +110,24 @@ flowchart TB
 
 ## 3. 六阶段数据流通调度流水线
 
-调度中枢将每一个完整的数据治理流抽象为 6 个明确的执行阶段：
+调度中枢将每一个完整的数据治理流抽象为 6 个有序状态追踪标签；其中 `classify` 是唯一执行分类与脱敏业务处理的标签，`desensitize` 只用于兼容的状态追踪。
 
 ```
-① ingest (接入) ──▶ ② fetch (取数) ──▶ ③ classify (分类) ──▶ ④ desensitize (脱敏) ──▶ ⑤ return (组装) ──▶ ⑥ audit (存证)
+① ingest (接入) ──▶ ② fetch (取数) ──▶ ③ classify（分类与脱敏处理） ──▶ ④ desensitize（状态追踪） ──▶ ⑤ return（状态追踪） ──▶ ⑥ audit（状态追踪） ──▶ done
 ```
 
 | 序号 | 阶段标识 (`stage`) | 具体动作 | 协同模块与关键实现 |
 |---|---|---|---|
-| **1** | `ingest` | 验证请求合法性、解析参数、生成唯一 `task_id`、写入 `pending` 状态 | `handlers.go`: `CreateTask` / `runPipeline` |
-| **2** | `fetch` | 若请求未显式携带 Payload，自动调用数据源服务抽取目标表记录（如医保/康养数据） | `internal/datasource/client.go`: `FetchSourceData` |
-| **3** | `classify` | 调用 Agent `/v1/dynclassification/classify` 进行 3 层分类漏斗评估（规则 → NER → LLM） | `internal/agent/client.go`: `ClassifyData` |
-| **4** | `desensitize` | 根据数据敏感等级或任务指定算子，下发脱敏原语（明文/掩码/K-匿名/差分隐私） | `internal/agent/client.go`: `MaskData` |
-| **5** | `return` | 校验脱敏结果、组装结构体、统计阶段耗时并流转状态至 `completed` | `handlers.go`: 组装 `PipelineResponse` |
-| **6** | `audit` | 异步/同步调用 `audit-log` 存证服务，记录操作人、原数哈希与结果哈希 | `audit-log` 接口联动 |
+| **1** | `ingest` | 任务已由 HTTP 或 gRPC `Dispatch` 创建为 `pending/queued`；流水线随后写入 `running/ingest` | `internal/handlers/handlers.go`: `Dispatch` / `processTask` |
+| **2** | `fetch` | 若请求未显式携带 Payload，自动调用数据源服务抽取记录 | `internal/datasource/client.go`: `FetchData` / `FetchDataBySource` |
+| **3** | `classify` | 调用 Agent `POST /v1/agent/process`，404 时回退 `POST /v1/medical/process`；一次完成分类与脱敏 | `internal/agent/client.go`: `ProcessAgent` |
+| **4** | `desensitize` | 不执行独立脱敏调用；处理已在 `classify` 一体化完成 | `processTask` 状态机快速流转 |
+| **5** | `return` | 当前为状态追踪标签，不组装或持久化额外结果对象 | `processTask` 状态机快速流转 |
+| **6** | `audit` | 当前为状态追踪标签；随后写入 `completed/done`，不直接调用 audit-log | `processTask` 状态机快速流转 |
 
 ### 敏感度等级与隐私原语自动映射策略
 
-当任务指定为自动脱敏模式 (`operation="auto_desensitize"`) 时，中枢将分类分级引擎评估出的敏感度等级与治理原语绑定：
+gRPC `ClassifyAndDispatch` 会先调用 Agent `Classify` 评估敏感度，再将等级映射为任务 `operation`；创建后的异步任务仍在 `classify` 标签通过一体化处理接口完成分类与脱敏：
 
 ```mermaid
 graph LR
@@ -338,13 +338,8 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
     r.GET("/api/hub/tasks/:id", s.GetTask)
     r.POST("/api/hub/dispatch", s.Dispatch)
 
-    // 流水线与自适应分类调度
+    // 流水线状态
     r.GET("/api/hub/pipeline", s.Pipeline)
-    r.POST("/api/hub/classify", s.ClassifyAndDispatch)
-
-    // 模拟数据源联动与代理端点
-    r.POST("/api/hub/pipeline/trigger-datasource", s.TriggerDataSourcePipeline)
-    r.GET("/api/hub/datasources", s.ListDataSources)
 
     // Prometheus 监控指标导出
     r.GET("/metrics", s.mc.Handler())
@@ -353,11 +348,11 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 
 ### 5.4 上游 Agent 客户端与熔断机制 (`internal/agent/client.go`)
 
-`agent.Client` 封装了对 `PrivShield` Python 引擎的 HTTP 通信：
-1. **自动超时控制**：所有请求携带 `context.WithTimeout`（默认 10~30s）。
-2. **安全凭证传递**：自动在 Header 中追加 `X-API-Key`（若配置）。
-3. **敏感分类调用**：`ClassifyData(ctx, data, taxonomy)` 发送至 `/v1/dynclassification/classify`。
-4. **脱敏算子调用**：`MaskData(ctx, req)` 发送至 `/v1/privacy/mask`。
+`agent.Client` 封装对 `PrivShield` Python 引擎的 HTTP 通信：
+1. **自动超时控制**：调用方以 `context.WithTimeout` 约束请求。
+2. **安全凭证传递**：底层共享客户端在配置后自动追加 API Key。
+3. **预评估调用**：gRPC `ClassifyAndDispatch` 使用 `Classify(ctx, payload)` 请求 `POST /v1/dynclassification/eval_record`。
+4. **一体化处理调用**：异步流水线使用 `ProcessAgent(ctx, records)` 请求 `POST /v1/agent/process`，404 时回退至 `POST /v1/medical/process`；该单次调用同时完成分类与脱敏。
 
 ### 5.5 数据源客户端 (`internal/datasource/client.go`)
 
@@ -394,16 +389,16 @@ config.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.
 }
 ```
 
-### 5.7 gRPC 桩代码 (`service_hub_grpc.pb.go`) 与服务端实现 (`server.go`) 的核心关联
+### 5.7 gRPC 桩代码 (`servicehub_grpc.pb.go`) 与服务端实现 (`server.go`) 的核心关联
 
-在 `service-hub` 模块中，Protobuf 生成文件 `proto/service_hub_grpc.pb.go` 与服务端具体业务实现 `internal/grpcserver/server.go` 同样构成了清晰的**契约与落地**协作分工：
+在 `service-hub` 模块中，Protobuf 生成文件 `proto/servicehub_grpc.pb.go` 与服务端具体业务实现 `internal/grpcserver/server.go` 构成契约与实现的对应关系：
 
 1. **接口契约 (Server Interface)**：
-   `service_hub_grpc.pb.go` 中的 `ServiceHubServiceServer` 接口定义了调度中枢的 RPC 规范（如 `SubmitTask`、`GetTaskStatus`、`CancelTask`、`ExecutePipeline`）；
+    `servicehub_grpc.pb.go` 中的 `ServiceHubServiceServer` 接口定义 `Health`、`HubStatus`、`Dispatch`、`ClassifyAndDispatch`、`GetTask`、`ListTasks` 与 `PipelineStatus`；
 2. **方法分发器 (Dispatcher)**：
-   `_ServiceHubService_SubmitTask_Handler` 等内部函数负责反序列化 HTTP/2 网络帧，并动态转发给注册的服务端实例；
+    `_ServiceHubService_Dispatch_Handler` 等内部函数负责反序列化 HTTP/2 网络帧，并转发给注册的服务端实例；
 3. **业务落地实现 (Server Implementation)**：
-   `internal/grpcserver/server.go` 中的 `(*GRPCServer).SubmitTask` 等方法实现了真实的调度业务逻辑（任务持久化、联动 Agent 分类分级与脱敏、存证调度）；
+    `internal/grpcserver/server.go` 中同名的 `(*GRPCServer)` 方法实现任务持久化、预分类自动分发、状态查询和流水线监控；异步流水线通过一次 `ProcessAgent` 调用完成分类与脱敏；
 4. **生命周期绑定**：
    在 `cmd/server/main.go` 中通过 `pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)` 完成路由绑定与方法暴露。
 
@@ -474,24 +469,21 @@ bash scripts/dev/dev-start-new-modules.sh
 curl -s http://127.0.0.1:8082/api/health | jq .
 ```
 
-#### 2. 发起数据流通流水线任务 (`/api/hub/pipeline`)
+#### 2. 发起数据流通流水线任务 (`/api/hub/dispatch`)
 ```bash
-curl -s -X POST http://127.0.0.1:8082/api/hub/pipeline \
+curl -s -X POST http://127.0.0.1:8082/api/hub/dispatch \
   -H "Content-Type: application/json" \
   -d '{
-    "source_id": "ds_yibao",
-    "dataset_name": "医保结算模拟数据集",
-    "operation": "auto_desensitize",
-    "records": [
-      {
-        "patient_id": "P1001",
-        "name": "张伟",
-        "id_card": "110101199003072345",
-        "phone": "13800138000",
-        "diagnosis": "高血压二级",
-        "fee": 1280.50
-      }
-    ]
+        "source": "ds_yibao",
+        "operation": "mask",
+        "payload": {
+            "patient_id": "P1001",
+            "name": "张伟",
+            "id_card": "110101199003072345",
+            "phone": "13800138000",
+            "diagnosis": "高血压二级",
+            "fee": 1280.50
+        }
   }' | jq .
 ```
 
@@ -564,7 +556,7 @@ docker run -d \
 ```mermaid
 flowchart TD
     subgraph gRPC_Flow [1. gRPC 协议开发]
-        G1[1.1 在 proto/service_hub</br>.proto 声明 RPC 契约] --> G2[1.2 执行 protoc 编译</br>生成 Go 桩代码]
+        G1[1.1 在 proto/servicehub.proto 声明 RPC 契约] --> G2[1.2 执行 protoc 编译</br>生成 Go 桩代码]
         G2 --> G3[1.3 在 internal/grpcserver</br>/server.go 实现业务编排]
         G3 --> G4[1.4 在 internal/grpcserver</br>/server_test.go 编写单测]
     end
@@ -580,7 +572,7 @@ flowchart TD
 
 ### 11.1 gRPC 接口开发步骤
 
-1. **编辑契约 (`proto/service_hub.proto`)**：
+1. **编辑契约 (`proto/servicehub.proto`)**：
    ```protobuf
    // 在 service ServiceHubService 中追加
    rpc RetryPipelineTask (RetryTaskRequest) returns (RetryTaskResponse);
@@ -600,7 +592,7 @@ flowchart TD
    ```bash
    protoc -I proto --go_out=proto --go_opt=paths=source_relative \
        --go-grpc_out=proto --go-grpc_opt=paths=source_relative \
-       proto/service_hub.proto
+    proto/servicehub.proto
    ```
 3. **实现服务端逻辑 (`internal/grpcserver/server.go`)**：
    ```go

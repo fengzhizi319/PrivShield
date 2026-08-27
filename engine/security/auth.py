@@ -224,6 +224,21 @@ def require_permission(permission: str) -> Any:
     return Depends(_checker)
 
 
+def require_any_permission(*permissions: str) -> Any:
+    """Return a FastAPI dependency that enforces any one of the specified permissions."""
+
+    async def _checker(identity: Identity = Depends(get_current_identity)) -> None:
+        if not any(identity.has_permission(p) for p in permissions):
+            record_auth_denial("forbidden")
+            logger.warning(
+                "Authorization failed: insufficient scope",
+                extra={"required_permissions": permissions, "identity_name": identity.name},
+            )
+            raise HTTPException(status_code=403, detail="Forbidden: insufficient scope")
+
+    return Depends(_checker)
+
+
 def require_rest_path_permission(path: str) -> Any:
     """Convenience wrapper that enforces the permission for a REST path.
 

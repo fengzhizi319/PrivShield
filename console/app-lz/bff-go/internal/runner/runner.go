@@ -171,24 +171,34 @@ func (r *TestRunner) runTS01(ctx context.Context) models.TestSuiteCase {
 	start := time.Now()
 	logs := []string{"[TS-01] 开始执行全链路审计存证与 Merkle 验真测试..."}
 
-	logs = append(logs, "[TS-01] 调用 audit-log 校验 Merkle Tree 完整性...")
+	logs = append(logs, "[TS-01] 查询 audit-log 审计记录并校验 Merkle Tree 完整性...")
+	auditResp, _ := r.pool.GetAuditLogs(ctx, 5, 0, "")
 	verifyResp, _ := r.pool.VerifyAudit(ctx)
 
-	logs = append(logs, fmt.Sprintf("[TS-01] ✅ Merkle 树校验结果: merkle_valid=%v, root_hash=%s", verifyResp.MerkleValid, verifyResp.RootHash))
+	hasLogs := len(auditResp.Logs) > 0 && auditResp.Source != "fallback"
+	integrityPassed := verifyResp.MerkleValid && verifyResp.Source == "audit-log"
+
+	logs = append(logs, fmt.Sprintf("[TS-01] ✅ Merkle 树校验结果: merkle_valid=%v, root_hash=%s, source=%s", verifyResp.MerkleValid, verifyResp.RootHash, verifyResp.Source))
 
 	assertions := []models.TestSuiteAssertion{
 		{
 			Name:     "SHA-256 Audit Log Integrity",
-			Expected: "Audit trail contains valid HMAC signature",
-			Actual:   "Signature verified (HMAC-SHA256)",
-			Passed:   true,
+			Expected: "Audit trail contains valid records from live audit-log",
+			Actual:   fmt.Sprintf("Logs count: %d, source: %s", len(auditResp.Logs), auditResp.Source),
+			Passed:   hasLogs,
 		},
 		{
 			Name:     "Merkle Tree Consistency",
-			Expected: "merkle_valid=true",
-			Actual:   fmt.Sprintf("merkle_valid=%v", verifyResp.MerkleValid),
-			Passed:   verifyResp.MerkleValid,
+			Expected: "merkle_valid=true from live audit-log",
+			Actual:   fmt.Sprintf("merkle_valid=%v (source=%s)", verifyResp.MerkleValid, verifyResp.Source),
+			Passed:   integrityPassed,
 		},
+	}
+
+	allPassed := hasLogs && integrityPassed
+	status := "passed"
+	if !allPassed {
+		status = "failed"
 	}
 
 	duration := float64(time.Since(start).Microseconds()) / 1000.0
@@ -197,7 +207,7 @@ func (r *TestRunner) runTS01(ctx context.Context) models.TestSuiteCase {
 		Title:       "全链路审计存证与 Merkle 验真 (Audit Log & Merkle Verification)",
 		Description: "验证脱敏任务完成后自动生成不可篡改 SHA-256 存证，并执行 Merkle Tree 链式防篡改验真",
 		Category:    "Audit & Integrity",
-		Status:      "passed",
+		Status:      status,
 		DurationMs:  duration,
 		Assertions:  assertions,
 		Logs:        logs,
@@ -334,78 +344,81 @@ func (r *TestRunner) runTS02(ctx context.Context, req models.RunTestSuiteRequest
 //   - 孤儿租约自动过期回收
 func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 	start := time.Now()
-	logs := []string{"[TS-03] 开始执行 Phase B 原子租约并发争抢测试..."}
+	concurrency := 5
+	totalTasks := 20
+	logs := []string{fmt.Sprintf("[TS-03] 开始执行 Phase B 原子租约并发争抢测试 (并发数=%d, 任务数=%d)...", concurrency, totalTasks)}
 
-	// 启动 5 个并发 Worker，每个分发 4 个任务
-	workersCount := 5
-	tasksPerWorker := 4
-	totalTasks := workersCount * tasksPerWorker
-	logs = append(logs, fmt.Sprintf("[TS-03] 启动 %d 个并发 Worker，每个分发 %d 个任务 (总计 %d)", workersCount, tasksPerWorker, totalTasks))
-
-	taskIDs := make([]string, 0, totalTasks)
-	duplicateCount := 0
-	deadlockCount := 0
+	results := make([]string, totalTasks)
 	realDispatchCount := 0
 	var mu sync.Mutex
+
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
-	for i := 1; i <= workersCount; i++ {
+	for i := 0; i < totalTasks; i++ {
 		wg.Add(1)
-		go func(workerID int) {
+		go func(idx int) {
 			defer wg.Done()
-			for j := 0; j < tasksPerWorker; j++ {
-				t0 := time.Now()
-				resp, err := r.pool.DispatchTask(ctx, models.DispatchRequest{
-					Source:    "ds_yibao",
-					Operation: "mask",
-					Payload: map[string]any{
-						"patient_name": fmt.Sprintf("并发测试-Worker%d-%d", workerID, j),
-						"id_card":      fmt.Sprintf("510101199001%04d", workerID*100+j),
-					},
-					Priority: 50 + j,
-				})
-				latency := time.Since(t0).Milliseconds()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-				mu.Lock()
-				// 派发失败时生成 synthetic ID（降级兆底，仍验证并发模型）
-				var taskID string
-				if err != nil {
-					logs = append(logs, fmt.Sprintf("[TS-03] Worker%d task%d dispatch failed (%dms): %v → fallback synthetic ID", workerID, j, latency, err))
-					// 派发失败 → 生成 synthetic ID
-					taskID = fmt.Sprintf("synthetic-w%d-t%d-%s", workerID, j, shortRandomID())
-				} else if resp.TaskID != "" {
-					taskID = resp.TaskID
+			op := "mask"
+			if idx%3 == 1 {
+				op = "k_anon"
+			} else if idx%3 == 2 {
+				op = "dp"
+			}
+
+			dispResp, err := r.pool.DispatchTask(ctx, models.DispatchRequest{
+				APICode:      naming.API1Yibao,
+				DatasourceID: naming.DSYibao,
+				Operation:    op,
+				Priority:     (idx % 100) + 1,
+				Payload: map[string]any{
+					"insurance_settlement_id": fmt.Sprintf("TS03-YB-%06d", idx),
+					"person_id":               fmt.Sprintf("TS03-PID-%06d", idx),
+					"idx":                     idx,
+				},
+			})
+
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil && dispResp.TaskID != "" {
+				results[idx] = dispResp.TaskID
+				if dispResp.Via == "service-hub" {
 					realDispatchCount++
-					logs = append(logs, fmt.Sprintf("[TS-03] Worker%d task%d dispatched (%dms): task_id=%s", workerID, j, latency, taskID))
-				} else {
-					taskID = fmt.Sprintf("synthetic-w%d-t%d-%s", workerID, j, shortRandomID())
-					logs = append(logs, fmt.Sprintf("[TS-03] Worker%d task%d empty task_id (%dms) → fallback synthetic ID", workerID, j, latency))
 				}
-
-				// 检查任务 ID 零重复（验证原子租约的零重复保证）
-				for _, existing := range taskIDs {
-					if existing == taskID {
-						duplicateCount++
-						break
-					}
-				}
-				taskIDs = append(taskIDs, taskID)
-				mu.Unlock()
+			} else {
+				results[idx] = fmt.Sprintf("fallback-task-%d", idx)
 			}
 		}(i)
 	}
+
 	wg.Wait()
 
-	// 判定执行模式：live（至少有一个真实 dispatch）或 fallback（全部 synthetic）
-	mode := "live"
-	if realDispatchCount == 0 {
-		mode = "fallback"
+	taskIDs := make(map[string]bool)
+	duplicateCount := 0
+	deadlockCount := 0
+	for _, id := range results {
+		if id == "" {
+			deadlockCount++
+		} else if taskIDs[id] {
+			duplicateCount++
+		} else {
+			taskIDs[id] = true
+		}
 	}
 
-	logs = append(logs, fmt.Sprintf("[TS-03] ✅ 并发分发完成 [%s 模式]: 收集 %d/%d 任务 ID (真实 dispatch=%d), 重复认领=%d, 死锁=%d",
-		mode, len(taskIDs), totalTasks, realDispatchCount, duplicateCount, deadlockCount))
+	mode := "live (service-hub)"
+	if realDispatchCount == 0 {
+		mode = "fallback (local simulation)"
+	}
+	logs = append(logs, fmt.Sprintf("[TS-03] 并发派发完成: 总任务=%d, 成功收集=%d, 重复领取=%d, 死锁/丢失=%d (运行模式: %s)",
+		totalTasks, len(taskIDs), duplicateCount, deadlockCount, mode))
 
-	// 构造断言结果
+	leaseResp, _ := r.pool.GetLeasesFromHub(ctx)
+	leaseStoreWorking := leaseResp.StoreBackend != ""
+
 	assertions := []models.TestSuiteAssertion{
 		{
 			Name:     "Zero Duplicate Execution Guarantee",
@@ -427,13 +440,12 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 		},
 		{
 			Name:     "Orphan Lease Auto-Expiry",
-			Expected: "Timeout leases safely reclaimed after 30s TTL",
-			Actual:   fmt.Sprintf("Lease TTL bounded (mode=%s, real_dispatch=%d)", mode, realDispatchCount),
-			Passed:   true,
+			Expected: "Lease store initialized and auto-expiry mechanism active",
+			Actual:   fmt.Sprintf("Backend=%s, total_leased=%d", leaseResp.StoreBackend, leaseResp.TotalLeasedTasks),
+			Passed:   leaseStoreWorking,
 		},
 	}
 
-	// 根据所有断言是否通过判定整体状态
 	duration := float64(time.Since(start).Microseconds()) / 1000.0
 	allPassed := true
 	for _, a := range assertions {
@@ -446,11 +458,12 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 	if !allPassed {
 		status = "failed"
 	}
+
 	return models.TestSuiteCase{
 		ID:          "TS-03",
-		Title:       "Phase B 租约多副本并发争抢 (Atomic Lease Contention)",
-		Description: "模拟多副本 Worker 争抢待处理任务，验证 FOR UPDATE SKIP LOCKED 保证零重复与零死锁",
-		Category:    "Phase B High Availability",
+		Title:       "高并发多副本抢占与租约防重放 (Atomic Lease & Concurrency Benchmark)",
+		Description: "并发派发批量任务，验证 FOR UPDATE SKIP LOCKED 原子争抢、零重复执行与租约过期保护",
+		Category:    "Concurrency & Lease",
 		Status:      status,
 		DurationMs:  duration,
 		Assertions:  assertions,
@@ -458,36 +471,36 @@ func (r *TestRunner) runTS03(ctx context.Context) models.TestSuiteCase {
 	}
 }
 
-// runTS04 执行 TS-04：API1/API2 命名一致性与全链路可追踪。
-//
-// 测试步骤：
-//  1. 验证三种入站标识（api_code=api1_yibao / datasource_id=ds_yibao / source=yibao）
-//     均被精确归一化为 canonical datasource_id = ds_yibao
-//  2. 验证未知数据源与预留数据源在写侧被正确拦截（fail-closed）
-//  3. 验证审计日志记录中的 datasource 均属于 canonical 注册表
-//  4. 验证 Merkle 树验真接口调用
+// runTS04 执行 TS-04：API1/API2 命名一致性与全链路可追踪测试。
+// 验证 api_rename_design.md 规范：
+//  1. 验证三种入站派发标识（api_code / datasource_id / source 及汉字别名）
+//     均被精确归一化为 canonical 标识
+//  2. 验证派发任务并通过 GetTask 完整解包 canonical 字段
+//  3. 验证审计日志记录包含真实且非空的 input_hash 和 output_hash
+//  4. 验证 Merkle 树存证链校验通过
+//  5. 验证未知数据源与预留数据源在写侧被正确拦截（fail-closed）
+//  6. 验证跨语言注册表规范与可用性
 func (r *TestRunner) runTS04(ctx context.Context) models.TestSuiteCase {
 	start := time.Now()
 	logs := []string{"[TS-04] 开始执行 API1/API2 命名一致性与全链路可追踪测试..."}
 
 	// 1. 验证三种入站派发标识均归一化为 canonical 数据源
-	logs = append(logs, "[TS-04] 验证入站标识归一化: api_code=api1_yibao, datasource_id=ds_yibao, source=yibao...")
+	logs = append(logs, "[TS-04] 1. 验证入站多别名标识归一化...")
 	r1, _ := naming.NormalizeDataSourceID("api1_yibao")
 	r2, _ := naming.NormalizeDataSourceID("ds_yibao")
 	r3, _ := naming.NormalizeDataSourceID("yibao")
-	aliasMatch := (r1 == naming.DSYibao && r2 == naming.DSYibao && r3 == naming.DSYibao)
-	logs = append(logs, fmt.Sprintf("[TS-04] 归一化结果: api1_yibao→%s, ds_yibao→%s, yibao→%s (全等=%v)", r1, r2, r3, aliasMatch))
+	r4, _ := naming.NormalizeDataSourceID("医保")
+	r5, _ := naming.NormalizeDataSourceID("api2_kangyang")
+	r6, _ := naming.NormalizeDataSourceID("ds_kangyang")
+	r7, _ := naming.NormalizeDataSourceID("kangyang")
+	r8, _ := naming.NormalizeDataSourceID("康养")
+	aliasMatch := (r1 == naming.DSYibao && r2 == naming.DSYibao && r3 == naming.DSYibao && r4 == naming.DSYibao &&
+		r5 == naming.DSKangyang && r6 == naming.DSKangyang && r7 == naming.DSKangyang && r8 == naming.DSKangyang)
+	logs = append(logs, fmt.Sprintf("[TS-04] 归一化结果: 医保组(4)→%s, 康养组(4)→%s (全等=%v)", r1, r5, aliasMatch))
 
-	// 2. 验证未知标识在写侧被拒绝 (Fail-Closed)
-	logs = append(logs, "[TS-04] 验证未知/预留标识在写侧拒绝 (Fail-Closed)...")
-	_, errUnknown := naming.ResolveInbound("shebao")
-	_, errReserved := naming.ResolveInbound("mock3")
-	failClosed := (errUnknown != nil && errReserved != nil)
-	logs = append(logs, fmt.Sprintf("[TS-04] Fail-closed 拦截结果: shebao→%v, mock3→%v (通过=%v)", errUnknown != nil, errReserved != nil, failClosed))
-
-	// 3. 验证派发任务并检查返回的 canonical 标识
-	logs = append(logs, "[TS-04] 向 service-hub 派发 canonical 任务...")
-	resp1, errDisp1 := r.pool.DispatchTask(ctx, models.DispatchRequest{
+	// 2. 验证派发任务并从 Service Hub 获取真实详情 (GetTask envelope unpack)
+	logs = append(logs, "[TS-04] 2. 派发 canonical 任务并检验 GetTask 详情解包...")
+	dispResp, errDisp := r.pool.DispatchTask(ctx, models.DispatchRequest{
 		APICode:      naming.API1Yibao,
 		DatasourceID: naming.DSYibao,
 		Operation:    "mask",
@@ -497,53 +510,92 @@ func (r *TestRunner) runTS04(ctx context.Context) models.TestSuiteCase {
 		},
 		Priority: 50,
 	})
-	taskDispatched := (errDisp1 == nil && resp1.TaskID != "")
-	if taskDispatched {
-		logs = append(logs, fmt.Sprintf("[TS-04] 任务派发成功: task_id=%s, datasource_id=%s", resp1.TaskID, resp1.DatasourceID))
-	} else {
-		logs = append(logs, fmt.Sprintf("[TS-04] 任务派发完成 (降级/模拟): task_id=%s", resp1.TaskID))
-	}
-
-	// 4. 验证审计日志中的 datasource 均来自 canonical 注册表
-	logs = append(logs, "[TS-04] 查询审计存证并校验 datasource 规范性...")
-	auditResp, _ := r.pool.GetAuditLogs(ctx, 10, 0, "")
-	auditValid := true
-	for _, l := range auditResp.Logs {
-		if l.Datasource != "" && !naming.ValidDataSourceIDFormat(l.Datasource) {
-			auditValid = false
-			break
+	taskGetPassed := false
+	actualGetTaskDetail := "dispatch failed"
+	if errDisp == nil && dispResp.TaskID != "" {
+		fetchedTask, errGet := r.pool.GetTask(ctx, dispResp.TaskID)
+		if errGet == nil && fetchedTask != nil {
+			taskGetPassed = (fetchedTask.ID == dispResp.TaskID && fetchedTask.DatasourceID == naming.DSYibao && fetchedTask.APICode == naming.API1Yibao)
+			actualGetTaskDetail = fmt.Sprintf("task_id=%s, datasource_id=%s, api_code=%s", fetchedTask.ID, fetchedTask.DatasourceID, fetchedTask.APICode)
+		} else {
+			actualGetTaskDetail = fmt.Sprintf("GetTask error: %v", errGet)
 		}
 	}
-	logs = append(logs, fmt.Sprintf("[TS-04] 审计日志记录校验: 条数=%d, 数据源格式合法=%v", len(auditResp.Logs), auditValid))
 
-	// 5. 校验 Merkle 树验真
-	verifyResp, _ := r.pool.VerifyAudit(ctx)
-	logs = append(logs, fmt.Sprintf("[TS-04] Merkle 树验真调用: merkle_valid=%v, root_hash=%s", verifyResp.MerkleValid, verifyResp.RootHash))
+	// 3. 验证审计日志及哈希完整性 (非空且真实)
+	logs = append(logs, "[TS-04] 3. 查询审计存证并校验真实 SHA-256 哈希...")
+	auditResp, errAudit := r.pool.GetAuditLogsFiltered(ctx, 10, 0, naming.DSYibao, "", "")
+	auditHashPassed := false
+	actualAuditDetail := "no logs"
+	if errAudit == nil && len(auditResp.Logs) > 0 {
+		validCount := 0
+		for _, l := range auditResp.Logs {
+			if l.InputHash != "" && l.OutputHash != "" && l.DatasourceID == naming.DSYibao {
+				validCount++
+			}
+		}
+		auditHashPassed = (validCount > 0 && auditResp.Source != "fallback")
+		actualAuditDetail = fmt.Sprintf("total=%d, valid_hashes=%d, source=%s", len(auditResp.Logs), validCount, auditResp.Source)
+	}
+
+	// 4. 校验 Merkle 树验真 (真实上游校验通过)
+	logs = append(logs, "[TS-04] 4. 校验 Merkle 树存证链真伪...")
+	verifyResp, errVerify := r.pool.VerifyAudit(ctx)
+	merklePassed := (errVerify == nil && verifyResp.MerkleValid && verifyResp.Source == "audit-log")
+	logs = append(logs, fmt.Sprintf("[TS-04] Merkle 树校验: valid=%v, source=%s", verifyResp.MerkleValid, verifyResp.Source))
+
+	// 5. 验证未知标识与预留位在各层被拒绝 (Fail-Closed)
+	logs = append(logs, "[TS-04] 5. 验证未知/预留标识在写侧严格拦截 (Fail-Closed)...")
+	_, errUnknown := naming.ResolveInbound("shebao")
+	_, errReserved := naming.ResolveInbound("mock3")
+	_, errSliceUnknown := r.pool.GetDatasourceSlice(ctx, "shebao", 5, 0)
+	_, errSliceReserved := r.pool.GetDatasourceSlice(ctx, "mock3", 5, 0)
+	failClosedPassed := (errUnknown != nil && errReserved != nil && errSliceUnknown != nil && errSliceReserved != nil)
+	logs = append(logs, fmt.Sprintf("[TS-04] Fail-closed 拦截: unknown_inbound=%v, reserved_inbound=%v, slice_unknown=%v, slice_reserved=%v",
+		errUnknown != nil, errReserved != nil, errSliceUnknown != nil, errSliceReserved != nil))
+
+	// 6. 跨语言注册表规范与可用性校验
+	logs = append(logs, "[TS-04] 6. 校验跨服务 canonical 注册表元数据一致性...")
+	activeDS := naming.ActiveDataSourceIDs()
+	parityPassed := (len(activeDS) >= 2 && naming.ValidDataSourceIDFormat(naming.DSYibao) && naming.ValidAPICodeFormat(naming.API1Yibao))
+	logs = append(logs, fmt.Sprintf("[TS-04] 注册表校验: active_count=%d, format_valid=%v", len(activeDS), parityPassed))
 
 	assertions := []models.TestSuiteAssertion{
 		{
 			Name:     "Canonical Inbound Identifier Normalization",
-			Expected: "api1_yibao == ds_yibao == yibao -> ds_yibao",
-			Actual:   fmt.Sprintf("r1=%s, r2=%s, r3=%s", r1, r2, r3),
+			Expected: "All aliases map to canonical ds_yibao & ds_kangyang",
+			Actual:   fmt.Sprintf("yibao_group=%s, kangyang_group=%s", r1, r5),
 			Passed:   aliasMatch,
 		},
 		{
+			Name:     "Task Dispatch & Detail Envelope Unpack",
+			Expected: "Dispatched task retrieved with non-empty ID & canonical IDs",
+			Actual:   actualGetTaskDetail,
+			Passed:   taskGetPassed,
+		},
+		{
+			Name:     "Audit Log Real SHA-256 Hashes",
+			Expected: "Audit logs contain non-empty input_hash & output_hash from live service",
+			Actual:   actualAuditDetail,
+			Passed:   auditHashPassed,
+		},
+		{
+			Name:     "Merkle Integrity Chain Verification",
+			Expected: "merkle_valid=true from audit-log service",
+			Actual:   fmt.Sprintf("merkle_valid=%v, root_hash=%s, source=%s", verifyResp.MerkleValid, verifyResp.RootHash, verifyResp.Source),
+			Passed:   merklePassed,
+		},
+		{
 			Name:     "Write-Side Fail-Closed on Unknown / Reserved",
-			Expected: "unknown & reserved data sources rejected on write",
-			Actual:   fmt.Sprintf("unknown_err=%v, reserved_err=%v", errUnknown != nil, errReserved != nil),
-			Passed:   failClosed,
+			Expected: "Unknown & reserved sources fail-closed across inbound & slice APIs",
+			Actual:   fmt.Sprintf("all 4 checks rejected: %v", failClosedPassed),
+			Passed:   failClosedPassed,
 		},
 		{
-			Name:     "Audit Log Datasource Canonical Conformity",
-			Expected: "all audit logs use valid canonical datasource_id",
-			Actual:   fmt.Sprintf("checked %d logs, valid=%v", len(auditResp.Logs), auditValid),
-			Passed:   auditValid,
-		},
-		{
-			Name:     "Merkle Integrity Verification Available",
-			Expected: "verify response received with valid structure",
-			Actual:   fmt.Sprintf("merkle_valid=%v", verifyResp.MerkleValid),
-			Passed:   true,
+			Name:     "Cross-Layer Canonical Registry Parity",
+			Expected: "Active datasources >= 2 with compliant regex formats",
+			Actual:   fmt.Sprintf("active=%d, ds_yibao=%t, api1_yibao=%t", len(activeDS), naming.ValidDataSourceIDFormat(naming.DSYibao), naming.ValidAPICodeFormat(naming.API1Yibao)),
+			Passed:   parityPassed,
 		},
 	}
 

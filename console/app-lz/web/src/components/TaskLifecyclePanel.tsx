@@ -123,9 +123,11 @@ export const TaskLifecyclePanel: React.FC<TaskLifecyclePanelProps> = ({
         priority: newPriority,
       });
       setCreateResult(`✅ 任务分发成功 — Task ID: ${res.task_id || '(accepted)'}，Status: ${res.status}`);
-      onRefresh();
+      await onRefresh();
+      setTimeout(onRefresh, 1200);
     } catch (err: any) {
       setCreateResult(`⚠️ 任务已接收 (降级模式): ${err.message}`);
+      await onRefresh();
     } finally {
       setCreating(false);
     }

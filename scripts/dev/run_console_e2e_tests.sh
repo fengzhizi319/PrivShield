@@ -20,6 +20,21 @@
 
 set -euo pipefail
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

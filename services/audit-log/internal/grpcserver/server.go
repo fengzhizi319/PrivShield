@@ -115,17 +115,21 @@ func (s *GRPCServer) RecordAudit(ctx context.Context, req *pb.RecordAuditRequest
 		rawDS = req.Datasource
 	}
 
-	normID := ""
+	if strings.TrimSpace(rawDS) == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "datasource or api_code is required")
+	}
+
+	entry, err := naming.Normalize(rawDS)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid datasource %q: %v", rawDS, err)
+	}
+	if err := naming.CheckWritable(entry.DataSourceID); err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
+	}
+	normID := entry.DataSourceID
 	normAPICode := req.ApiCode
-	if rawDS != "" {
-		entry, err := naming.Normalize(rawDS)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid datasource %q: %v", rawDS, err)
-		}
-		normID = entry.DataSourceID
-		if normAPICode == "" {
-			normAPICode = entry.APICode
-		}
+	if normAPICode == "" {
+		normAPICode = entry.APICode
 	}
 
 	now := time.Now()
@@ -149,6 +153,17 @@ func (s *GRPCServer) RecordAudit(ctx context.Context, req *pb.RecordAuditRequest
 		_ = json.Unmarshal([]byte(req.ParametersJson), &params)
 	}
 
+	inputHash := req.InputHash
+	outputHash := req.OutputHash
+	if inputHash == "" {
+		h := sha256.Sum256([]byte(fmt.Sprintf("input|%s|%d|%s|%s", normID, req.InputRows, user, req.ParametersJson)))
+		inputHash = hex.EncodeToString(h[:])
+	}
+	if outputHash == "" {
+		h := sha256.Sum256([]byte(fmt.Sprintf("output|%s|%d|%s|%s|%s", normID, req.OutputRows, opStatus, secLevel, req.ParametersJson)))
+		outputHash = hex.EncodeToString(h[:])
+	}
+
 	logEntry := &store.AuditLog{
 		ID:            id,
 		TaskID:        req.TaskId,
@@ -157,8 +172,8 @@ func (s *GRPCServer) RecordAudit(ctx context.Context, req *pb.RecordAuditRequest
 		Timestamp:     now,
 		Operation:     req.Operation,
 		DataSource:    normID,
-		InputHash:     req.InputHash,
-		OutputHash:    req.OutputHash,
+		InputHash:     inputHash,
+		OutputHash:    outputHash,
 		Algorithm:     req.Algorithm,
 		Parameters:    params,
 		InputRows:     int(req.InputRows),

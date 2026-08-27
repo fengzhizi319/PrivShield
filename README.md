@@ -526,8 +526,8 @@ docker build -f services/service-hub/Dockerfile -t service-hub:latest .
 ```
 
 ```bash
-# 部署 service-hub 的 Service、Deployment 和 SQLite PVC
-kubectl apply -k deploy/k8s/service-hub/
+# 部署 service-hub 的 Service、Deployment 和 SQLite PVC（单服务自包含清单）
+kubectl apply -k services/service-hub/deploy/k8s/
 ```
 
 详细的连接、任务租约、多副本迁移和网关启用边界见

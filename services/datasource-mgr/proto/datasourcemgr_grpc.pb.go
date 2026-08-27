@@ -20,6 +20,8 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	DataSourceManagerService_Health_FullMethodName          = "/datasourcemgr.DataSourceManagerService/Health"
+	DataSourceManagerService_GetData_FullMethodName         = "/datasourcemgr.DataSourceManagerService/GetData"
+	DataSourceManagerService_ListDataSources_FullMethodName = "/datasourcemgr.DataSourceManagerService/ListDataSources"
 	DataSourceManagerService_GetYibaoData_FullMethodName    = "/datasourcemgr.DataSourceManagerService/GetYibaoData"
 	DataSourceManagerService_GetKangyangData_FullMethodName = "/datasourcemgr.DataSourceManagerService/GetKangyangData"
 	DataSourceManagerService_GetMockData3_FullMethodName    = "/datasourcemgr.DataSourceManagerService/GetMockData3"
@@ -39,17 +41,21 @@ const (
 type DataSourceManagerServiceClient interface {
 	// Health 健康检查
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
-	// API 1: 获取医保就医与结算模拟数据 (yibao.csv)
+	// Canonical: 获取数据源切片数据
+	GetData(ctx context.Context, in *SourceDataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
+	// Canonical: 列出所有已注册数据源
+	ListDataSources(ctx context.Context, in *ListMockSourcesRequest, opts ...grpc.CallOption) (*ListMockSourcesResponse, error)
+	// API 1: 获取医保就医与结算模拟数据 (yibao.csv) - DEPRECATED
 	GetYibaoData(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
-	// API 2: 获取康养体检与慢病模拟数据 (kangyang.csv)
+	// API 2: 获取康养体检与慢病模拟数据 (kangyang.csv) - DEPRECATED
 	GetKangyangData(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
-	// API 3: 预留模拟数据源扩展接口 3
+	// API 3: 预留模拟数据源扩展接口 3 - DEPRECATED
 	GetMockData3(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
-	// API 4: 预留模拟数据源扩展接口 4
+	// API 4: 预留模拟数据源扩展接口 4 - DEPRECATED
 	GetMockData4(ctx context.Context, in *DataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
 	// 通用按数据源 ID 获取模拟数据
 	GetDataBySource(ctx context.Context, in *SourceDataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error)
-	// 列出所有内置模拟数据源
+	// 列出所有内置模拟数据源 - DEPRECATED
 	ListMockSources(ctx context.Context, in *ListMockSourcesRequest, opts ...grpc.CallOption) (*ListMockSourcesResponse, error)
 	// 获取单个模拟数据源基本信息
 	GetDataSource(ctx context.Context, in *GetDataSourceRequest, opts ...grpc.CallOption) (*DataSourceProto, error)
@@ -69,6 +75,26 @@ func (c *dataSourceManagerServiceClient) Health(ctx context.Context, in *HealthR
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HealthResponse)
 	err := c.cc.Invoke(ctx, DataSourceManagerService_Health_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataSourceManagerServiceClient) GetData(ctx context.Context, in *SourceDataQueryRequest, opts ...grpc.CallOption) (*DataQueryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DataQueryResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_GetData_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataSourceManagerServiceClient) ListDataSources(ctx context.Context, in *ListMockSourcesRequest, opts ...grpc.CallOption) (*ListMockSourcesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMockSourcesResponse)
+	err := c.cc.Invoke(ctx, DataSourceManagerService_ListDataSources_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -164,17 +190,21 @@ func (c *dataSourceManagerServiceClient) TestConnection(ctx context.Context, in 
 type DataSourceManagerServiceServer interface {
 	// Health 健康检查
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
-	// API 1: 获取医保就医与结算模拟数据 (yibao.csv)
+	// Canonical: 获取数据源切片数据
+	GetData(context.Context, *SourceDataQueryRequest) (*DataQueryResponse, error)
+	// Canonical: 列出所有已注册数据源
+	ListDataSources(context.Context, *ListMockSourcesRequest) (*ListMockSourcesResponse, error)
+	// API 1: 获取医保就医与结算模拟数据 (yibao.csv) - DEPRECATED
 	GetYibaoData(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
-	// API 2: 获取康养体检与慢病模拟数据 (kangyang.csv)
+	// API 2: 获取康养体检与慢病模拟数据 (kangyang.csv) - DEPRECATED
 	GetKangyangData(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
-	// API 3: 预留模拟数据源扩展接口 3
+	// API 3: 预留模拟数据源扩展接口 3 - DEPRECATED
 	GetMockData3(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
-	// API 4: 预留模拟数据源扩展接口 4
+	// API 4: 预留模拟数据源扩展接口 4 - DEPRECATED
 	GetMockData4(context.Context, *DataQueryRequest) (*DataQueryResponse, error)
 	// 通用按数据源 ID 获取模拟数据
 	GetDataBySource(context.Context, *SourceDataQueryRequest) (*DataQueryResponse, error)
-	// 列出所有内置模拟数据源
+	// 列出所有内置模拟数据源 - DEPRECATED
 	ListMockSources(context.Context, *ListMockSourcesRequest) (*ListMockSourcesResponse, error)
 	// 获取单个模拟数据源基本信息
 	GetDataSource(context.Context, *GetDataSourceRequest) (*DataSourceProto, error)
@@ -192,6 +222,12 @@ type UnimplementedDataSourceManagerServiceServer struct{}
 
 func (UnimplementedDataSourceManagerServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedDataSourceManagerServiceServer) GetData(context.Context, *SourceDataQueryRequest) (*DataQueryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetData not implemented")
+}
+func (UnimplementedDataSourceManagerServiceServer) ListDataSources(context.Context, *ListMockSourcesRequest) (*ListMockSourcesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListDataSources not implemented")
 }
 func (UnimplementedDataSourceManagerServiceServer) GetYibaoData(context.Context, *DataQueryRequest) (*DataQueryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetYibaoData not implemented")
@@ -237,6 +273,42 @@ func RegisterDataSourceManagerServiceServer(s grpc.ServiceRegistrar, srv DataSou
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&DataSourceManagerService_ServiceDesc, srv)
+}
+
+func _DataSourceManagerService_GetData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SourceDataQueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataSourceManagerServiceServer).GetData(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataSourceManagerService_GetData_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataSourceManagerServiceServer).GetData(ctx, req.(*SourceDataQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataSourceManagerService_ListDataSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMockSourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataSourceManagerServiceServer).ListDataSources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataSourceManagerService_ListDataSources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataSourceManagerServiceServer).ListDataSources(ctx, req.(*ListMockSourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _DataSourceManagerService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -411,6 +483,14 @@ var DataSourceManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _DataSourceManagerService_Health_Handler,
+		},
+		{
+			MethodName: "GetData",
+			Handler:    _DataSourceManagerService_GetData_Handler,
+		},
+		{
+			MethodName: "ListDataSources",
+			Handler:    _DataSourceManagerService_ListDataSources_Handler,
 		},
 		{
 			MethodName: "GetYibaoData",

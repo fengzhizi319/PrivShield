@@ -55,7 +55,7 @@ func (s *Store) ClaimNext(owner string, leaseTTL time.Duration) (*store.TaskLeas
 		    lease_expires_at = NOW() + ($3::TEXT || ' seconds')::INTERVAL,
 		    version = version + 1
 		WHERE id IN (SELECT id FROM candidate)
-		RETURNING id, status, stage, source, operation, priority, created_at, started_at,
+		RETURNING id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at,
 			completed_at, duration_ms, error, retry_count, retry_after,
 			lease_owner, lease_token, lease_expires_at, version, max_retries
 	`, owner, token, fmt.Sprintf("%.0f", leaseTTL.Seconds()))
@@ -152,6 +152,31 @@ func (s *Store) FailLease(id, owner, token string, failure store.TaskFailure) (b
 		`, id, owner, token, failure.Error)
 		if err != nil {
 			return false, fmt.Errorf("postgres: fail lease (retryable): %w", err)
+		}
+		if tag.RowsAffected() > 0 {
+			return true, nil
+		}
+
+		// A valid lease at its retry limit must become terminal. Leaving it
+		// running would let lease recovery requeue a task that ClaimNext can no
+		// longer claim because retry_count has reached max_retries.
+		tag, err = s.pool.Exec(ctx, `
+			UPDATE tasks
+			SET status = 'failed',
+			    error = $4,
+			    completed_at = NOW(),
+			    duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
+			    lease_expires_at = NULL,
+			    version = version + 1
+			WHERE id = $1
+			  AND status = 'running'
+			  AND lease_owner = $2
+			  AND lease_token = $3
+			  AND lease_expires_at > NOW()
+			  AND retry_count >= max_retries
+		`, id, owner, token, failure.Error)
+		if err != nil {
+			return false, fmt.Errorf("postgres: fail lease after retry exhaustion: %w", err)
 		}
 		return tag.RowsAffected() > 0, nil
 	}

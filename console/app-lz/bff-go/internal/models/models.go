@@ -385,10 +385,10 @@ type DataApiInvokeRequest struct {
 }
 
 // DataApiSessionStage 记录完整会话生命周期中的一个步骤。
-// 阶段名与 service-hub 的 store.Task.Stage 对齐（6 阶段，D-12）：
-// ingest → fetch → classify → desensitize → return → audit。
+// 阶段名（5 阶段，classify 与 desensitize 已合并为 classify_desensitize）：
+// ingest → fetch → classify_desensitize → return → audit。
 type DataApiSessionStage struct {
-	Name       string `json:"name"` // 阶段名（上述 6 项之一）
+	Name       string `json:"name"` // 阶段名（上述 5 项之一）
 	Title      string `json:"title"`
 	Status     string `json:"status"`           // "success" | "error" | "skipped"
 	Source     string `json:"source,omitempty"` // "engine" | "local-fallback" | "audit-log" ...

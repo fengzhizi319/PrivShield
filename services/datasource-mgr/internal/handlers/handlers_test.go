@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/models"
 )
@@ -35,7 +36,7 @@ func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	cfg := config.Load()
 	logger := pkgconfig.SetupLogger("text", "debug")
-	server := New(cfg, logger)
+	server := New(cfg, logger, metrics.NewCollector("datasource-mgr"))
 
 	r := gin.New()
 	server.RegisterRoutes(r)

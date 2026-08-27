@@ -64,7 +64,7 @@ if command -v kubectl >/dev/null 2>&1; then
 
     # 可选：删除 Phase B PostgreSQL 资源
     if [[ "$WITH_POSTGRES" == "true" ]]; then
-        PG_DIR="$K8S_DIR/service-hub/postgres"
+        PG_DIR="$PROJECT_ROOT/services/service-hub/deploy/k8s/postgres"
         echo "🐘 删除 Phase B PostgreSQL 资源..."
         kubectl delete -k "$PG_DIR" -n "$NAMESPACE" --ignore-not-found=true
     fi

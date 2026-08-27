@@ -259,9 +259,10 @@ func TestListSnapshots(t *testing.T) {
 
 	// Create a log (which auto-generates a snapshot)
 	body := map[string]any{
-		"operation": "mask",
-		"algorithm": "field_mask",
-		"status":    "success",
+		"datasource": "ds_yibao",
+		"operation":  "mask",
+		"algorithm":  "field_mask",
+		"status":     "success",
 	}
 	b, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
@@ -291,9 +292,10 @@ func TestVerifyIntegrity(t *testing.T) {
 
 	// Create a log (auto-generates snapshot)
 	body := map[string]any{
-		"operation": "mask",
-		"algorithm": "field_mask",
-		"status":    "success",
+		"datasource": "ds_yibao",
+		"operation":  "mask",
+		"algorithm":  "field_mask",
+		"status":     "success",
 	}
 	b, _ := json.Marshal(body)
 	w := httptest.NewRecorder()

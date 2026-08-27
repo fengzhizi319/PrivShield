@@ -58,6 +58,7 @@ import (
 
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
 	"github.com/fengzhizi319/PrivShield/pkg/store/postgres"
@@ -95,19 +96,18 @@ func main() {
 	// =========================================================================
 	// 3. Task Store Initialization / 任务持久化存储初始化
 	// =========================================================================
-	// 若配置了 DBPath（如 "/app/data/service-hub.db"），则初始化 SQLite 持久化任务库；
-	// 若 DBPath 为空，则回退为进程内内存任务存储（memory.NewTaskStore），确保轻量与无外部依赖。
+	// 优先使用 PostgreSQL 租约存储；未配置时使用 SQLite 或进程内内存存储。
 	//
 	// 3.1 SQLite Integrity Check / SQLite 完整性校验
 	// 启动时先校验数据库完整性，检测损坏并阻止服务启动，防止带病运行。
-	if cfg.DBPath != "" {
+	if cfg.PGDSN == "" && cfg.DBPath != "" {
 		if err := sqlite.ValidateIntegrity(cfg.DBPath); err != nil {
 			log.Fatalf("sqlite integrity check failed: %v", err)
 		}
 		logger.Info("database integrity check passed", "path", cfg.DBPath)
 	}
 
-	taskStore, err := initTaskStore(cfg.DBPath, logger)
+	taskStore, err := initLeasedTaskStore(cfg, logger)
 	if err != nil {
 		log.Fatalf("failed to initialize task store: %v", err)
 	}
@@ -118,6 +118,8 @@ func main() {
 	// 注册 service-hub 命名空间的 Prometheus 监控指标（QPS、延迟、流水线各阶段状态等）。
 	// 注意：mc 必须在崩溃恢复/重试之前初始化，以便记录恢复/重试指标。
 	mc := metrics.NewCollector("service-hub")
+	// 注册命名观测器：pkg/naming 归一化时自动上报别名使用 / 脏 ID 指标（§7.2）。
+	naming.SetObserver(mc)
 
 	// =========================================================================
 	// 3.5 Crash Recovery / 崩溃恢复机制
@@ -125,7 +127,9 @@ func main() {
 	// 启动时自动扫描并恢复孤立任务：
 	// - pending 任务：直接保留在队列中（尚未执行，无需标记失败）；
 	// - running 任务：标记为 failed（可能已部分执行，需重新提交）。
-	recoverOrphanedTasks(taskStore, mc, logger)
+	if err := recoverOrphanedTasks(taskStore, mc, logger); err != nil {
+		log.Fatalf("failed to recover orphaned tasks: %v", err)
+	}
 
 	// =========================================================================
 	// 3.6 Automatic Task Retry / 失败任务自动重试
@@ -258,6 +262,21 @@ func main() {
 		serviceImpl = grpcserver.New(agentClient, dsClient, cfg, taskStore, logger)
 		pb.RegisterServiceHubServiceServer(grpcServer, serviceImpl)
 		logger.Info("gRPC server started (insecure)", "addr", cfg.GRPCAddress())
+	}
+
+	if cfg.PGDSN != "" {
+		hostname, hostErr := os.Hostname()
+		if hostErr != nil {
+			log.Fatalf("resolve lease worker hostname: %v", hostErr)
+		}
+		owner := fmt.Sprintf("%s-%d", hostname, os.Getpid())
+		if err := serviceImpl.StartLeaseWorker(owner, time.Duration(cfg.LeaseTTL)*time.Second); err != nil {
+			log.Fatalf("start PostgreSQL lease worker: %v", err)
+		}
+	} else {
+		if err := server.StartLocalWorker(); err != nil {
+			log.Fatalf("start local pending task worker: %v", err)
+		}
 	}
 
 	// =========================================================================
@@ -491,12 +510,11 @@ func redactDSN(dsn string) string {
 //
 // 改进点（#1）：pending 任务直接保留在队列中（它们尚未执行，无需标记失败）；
 // running 任务标记为 failed（可能已部分执行，需要重新提交）。
-func recoverOrphanedTasks(taskStore store.TaskStore, mc *metrics.Collector, logger *slog.Logger) {
+func recoverOrphanedTasks(taskStore store.TaskStore, mc *metrics.Collector, logger *slog.Logger) error {
 	// 1. 扫描所有 "running" 状态的任务 → 标记为 failed（可能已部分执行）
 	runningTasks, _, err := taskStore.List(store.TaskFilter{Status: "running", Limit: 10000})
 	if err != nil {
-		logger.Error("failed to list running tasks for recovery", "error", err.Error())
-		return
+		return fmt.Errorf("list running tasks: %w", err)
 	}
 
 	for i := range runningTasks {
@@ -505,7 +523,9 @@ func recoverOrphanedTasks(taskStore store.TaskStore, mc *metrics.Collector, logg
 		now := time.Now()
 		runningTasks[i].CompletedAt = &now
 		runningTasks[i].DurationMs = now.Sub(runningTasks[i].CreatedAt).Milliseconds()
-		_ = taskStore.Update(&runningTasks[i])
+		if err := taskStore.Update(&runningTasks[i]); err != nil {
+			return fmt.Errorf("mark running task %s as failed: %w", runningTasks[i].ID, err)
+		}
 		if mc != nil {
 			mc.RecordOrphanedRecovery("running")
 		}
@@ -514,8 +534,7 @@ func recoverOrphanedTasks(taskStore store.TaskStore, mc *metrics.Collector, logg
 	// 2. 扫描所有 "pending" 状态的任务 → 直接保留在队列中（尚未执行，无需标记失败）
 	pendingTasks, _, err := taskStore.List(store.TaskFilter{Status: "pending", Limit: 10000})
 	if err != nil {
-		logger.Error("failed to list pending tasks for recovery", "error", err.Error())
-		return
+		return fmt.Errorf("list pending tasks: %w", err)
 	}
 
 	// pending 任务无需修改状态，仅记录指标
@@ -534,6 +553,7 @@ func recoverOrphanedTasks(taskStore store.TaskStore, mc *metrics.Collector, logg
 	} else {
 		logger.Info("no orphaned tasks found, all tasks are in terminal state")
 	}
+	return nil
 }
 
 // maxRetryCount is the maximum number of retry attempts for a failed task.

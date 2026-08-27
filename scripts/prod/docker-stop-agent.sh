@@ -13,8 +13,23 @@
 
 set -euo pipefail
 
-# ── 步骤 1：指定容器名称 ──────────────────────────────────────────────────
+# ── 步骤 1：指定容器名称与参数解析 ──────────────────────────────────────────
 CONTAINER_NAME="PrivShield-prod-agent"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
 
 echo "============================================================================"
 echo "🛑 【生产模式】正在安全停止 PrivShield 生产级 Agent 容器 ($CONTAINER_NAME)..."

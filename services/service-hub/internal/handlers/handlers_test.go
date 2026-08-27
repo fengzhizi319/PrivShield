@@ -406,7 +406,7 @@ func TestProcessTask_StopsWhenStatePersistenceFails(t *testing.T) {
 		t.Fatalf("save task: %v", err)
 	}
 
-	s.processTask(task, dispatchRequest{DatasourceID: task.Source, Source: task.Source, Operation: task.Operation})
+	s.processTask(task, dispatchRequest{DatasourceID: task.Source, Source: task.Source, Operation: task.Operation}, "test-req")
 
 	if failingStore.updateCalls != 1 {
 		t.Fatalf("expected one failed stage-state write before stopping, got %d", failingStore.updateCalls)
@@ -445,6 +445,7 @@ func TestListTasksWithFilter(t *testing.T) {
 	body := map[string]any{
 		"source":    "ds_yibao",
 		"operation": "none",
+		"payload":   []map[string]any{{"data": "sample"}},
 	}
 	b, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
@@ -881,6 +882,46 @@ func TestAuthMiddleware_Protection(t *testing.T) {
 func TestServer_ShutdownGraceful(t *testing.T) {
 	s := newSimpleTestServer()
 	s.Shutdown()
+}
+
+// TestServer_LocalPendingWorker tests that StartLocalWorker picks up and processes pending tasks in SQLite/memory mode.
+func TestServer_LocalPendingWorker(t *testing.T) {
+	s := newSimpleTestServer()
+	defer s.Shutdown()
+
+	task := &store.Task{
+		ID:          "recovered-pending-task",
+		Status:      "pending",
+		Stage:       "queued",
+		Source:      "ds_yibao",
+		Operation:   "none",
+		PayloadJSON: `[{"name":"test"}]`,
+		CreatedAt:   time.Now(),
+	}
+	if err := s.tasks.Save(task); err != nil {
+		t.Fatalf("save pending task: %v", err)
+	}
+
+	if err := s.StartLocalWorker(); err != nil {
+		t.Fatalf("start local worker: %v", err)
+	}
+
+	// Wait for worker loop to pick up and complete the task (500ms poll + 6*100ms pipeline)
+	deadline := time.Now().Add(3 * time.Second)
+	completed := false
+	for time.Now().Before(deadline) {
+		tCheck, err := s.tasks.Get("recovered-pending-task")
+		if err == nil && tCheck.Status == "completed" {
+			completed = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !completed {
+		tCheck, _ := s.tasks.Get("recovered-pending-task")
+		t.Fatalf("expected task to be completed by local worker, got state: %+v", tCheck)
+	}
 }
 
 

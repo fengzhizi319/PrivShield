@@ -104,7 +104,14 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            head -n 45 "$0" | tail -n +3
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  --full              全量备份（默认）"
+            echo "  --incremental       增量备份（仅备份变化的文件）"
+            echo "  --verify            验证模式：解压最新备份并执行 SQLite 完整性校验"
+            echo "  --install-cron      安装定时任务（每天凌晨 2 点执行）"
+            echo "  -h, --help          显示帮助信息并退出"
             exit 0
             ;;
         *)

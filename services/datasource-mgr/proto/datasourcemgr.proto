@@ -10,29 +10,27 @@ service DataSourceManagerService {
   // Health 健康检查
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // API 1: 获取医保就医与结算模拟数据 (yibao.csv)
-  rpc GetYibaoData(DataQueryRequest) returns (DataQueryResponse);
+  // Canonical RPC: 通用获取数据源切片数据
+  rpc GetData(SourceDataQueryRequest) returns (DataQueryResponse);
 
-  // API 2: 获取康养体检与慢病模拟数据 (kangyang.csv)
-  rpc GetKangyangData(DataQueryRequest) returns (DataQueryResponse);
+  // Canonical RPC: 列出已注册数据源目录
+  rpc ListDataSources(ListMockSourcesRequest) returns (ListMockSourcesResponse);
 
-  // API 3: 预留模拟数据源扩展接口 3
-  rpc GetMockData3(DataQueryRequest) returns (DataQueryResponse);
-
-  // API 4: 预留模拟数据源扩展接口 4
-  rpc GetMockData4(DataQueryRequest) returns (DataQueryResponse);
-
-  // 通用按数据源 ID 获取模拟数据
+  // 通用按数据源 ID 获取模拟数据 (alias of GetData)
   rpc GetDataBySource(SourceDataQueryRequest) returns (DataQueryResponse);
-
-  // 列出所有内置模拟数据源
-  rpc ListMockSources(ListMockSourcesRequest) returns (ListMockSourcesResponse);
 
   // 获取单个模拟数据源基本信息
   rpc GetDataSource(GetDataSourceRequest) returns (DataSourceProto);
 
   // 模拟数据源连通性测试
   rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
+
+  // DEPRECATED RPCs (Sunset: 2027-02-01)
+  rpc GetYibaoData(DataQueryRequest) returns (DataQueryResponse) { option deprecated = true; }
+  rpc GetKangyangData(DataQueryRequest) returns (DataQueryResponse) { option deprecated = true; }
+  rpc GetMockData3(DataQueryRequest) returns (DataQueryResponse) { option deprecated = true; }
+  rpc GetMockData4(DataQueryRequest) returns (DataQueryResponse) { option deprecated = true; }
+  rpc ListMockSources(ListMockSourcesRequest) returns (ListMockSourcesResponse) { option deprecated = true; }
 }
 
 // ─────────────────────────────────────────────────────────────

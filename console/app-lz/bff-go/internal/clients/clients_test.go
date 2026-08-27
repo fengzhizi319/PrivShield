@@ -285,3 +285,46 @@ func TestD03_RecordAuditRealAndNoForging(t *testing.T) {
 		t.Errorf("outbound datasource should be normalized to %s, got %s", naming.DSYibao, receivedDatasource)
 	}
 }
+
+// TestP02_GetTaskEnvelopeUnpack 验证 P0-2 修复：
+// 验证 BFF GetTask 能正确解包 service-hub 返回的 {"task": {...}, "via": "service-hub"} 外壳
+func TestP02_GetTaskEnvelopeUnpack(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/hub/tasks/task-12345") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"task": map[string]any{
+					"id":            "task-12345",
+					"status":        "completed",
+					"stage":         "audit",
+					"source":        "ds_yibao",
+					"api_code":      "api1_yibao",
+					"datasource_id": "ds_yibao",
+					"operation":     "mask",
+				},
+				"via": "service-hub",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{HubURL: server.URL}
+	pool := NewClientPool(cfg)
+
+	task, err := pool.GetTask(context.Background(), "task-12345")
+	if err != nil {
+		t.Fatalf("unexpected GetTask error: %v", err)
+	}
+	if task.ID != "task-12345" {
+		t.Errorf("P0-2 violation: expected task.ID=task-12345, got %q (unpacked zero value)", task.ID)
+	}
+	if task.DatasourceID != "ds_yibao" || task.APICode != "api1_yibao" {
+		t.Errorf("expected canonical IDs in task, got datasource_id=%s api_code=%s", task.DatasourceID, task.APICode)
+	}
+	if task.Status != "completed" || task.Stage != "audit" {
+		t.Errorf("expected status=completed stage=audit, got status=%s stage=%s", task.Status, task.Stage)
+	}
+}
+

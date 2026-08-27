@@ -9,8 +9,21 @@
 
 set -euo pipefail
 
-# ── 解析脚本目录，定位项目根目录和 PID 文件目录 ────────────────────────
-# 支持两个 PID 目录：新版 .pids/ 和旧版 console/.pids/（向后兼容）
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PIDS_DIR="${PROJECT_ROOT}/.pids"

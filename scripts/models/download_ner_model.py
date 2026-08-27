@@ -59,12 +59,20 @@ def download_file(url: str, target_path: str) -> bool:
         return False
 
 
+import argparse
+
+
 def main():
-    model_id = "iic/nlp_raner_named-entity-recognition_chinese-base-cmeee"
+    parser = argparse.ArgumentParser(description="下载 Small-NER ONNX 模型与词表文件 / Small-NER Downloader")
+    parser.add_argument("--model-id", default="iic/nlp_raner_named-entity-recognition_chinese-base-cmeee", help="ModelScope 模型 ID")
+    parser.add_argument("--output-dir", "-o", help="本地保存路径 (默认: .models)")
+    args = parser.parse_args()
+
+    model_id = args.model_id
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    models_dir = os.path.join(project_root, ".models")
+    models_dir = args.output_dir if args.output_dir else os.path.join(project_root, ".models")
     os.makedirs(models_dir, exist_ok=True)
 
     # 优先尝试从 ModelScope 进行下载

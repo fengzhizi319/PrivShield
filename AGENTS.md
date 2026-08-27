@@ -82,13 +82,19 @@ PrivShield/
 │       ├── balancer.py
 │       ├── http_proxy.py
 │       └── grpc_proxy.py
-├── services/                      # 企业级数据流通与安全治理中台微服务群 (Go)
+├── services/                      # 企业级数据流通与安全治理中台微服务群 (Go，各子服务含 Dockerfile 与 deploy/k8s/)
 │   ├── service-hub/               # 数联数据服务调度中枢 (流水线调度: :8082)
 │   ├── datasource-mgr/            # 数据源资产管理与敏感特征自动探查 (:8083)
 │   └── audit-log/                 # 脱敏审计日志与不可篡改 SHA-256 存证 (:8084)
-├── console/                       # 统一运维与测试控制台 (Web UI + BFF)
+├── console/                       # 统一运维与测试控制台 (Web UI + BFF，含 deploy/k8s/)
 │   ├── bff-go/                    # Go gRPC/HTTPS 代理网关 / BFF (:8081)
 │   └── web/                       # React + TypeScript + Vite 前端控制台 (:5173)
+├── deploy/                        # 全栈集中部署与编排资产 (Compose / Helm / K8s 集成 / 监控大屏)
+│   ├── docker-compose/            # Docker Compose 全栈编排
+│   ├── helm/PrivShield/           # 全栈统一 Helm Chart
+│   ├── k8s/                       # 原生 K8s 全栈集成清单 (Kustomize 聚合入口)
+│   ├── prometheus/                # Prometheus 采集与告警规则
+│   └── grafana/                   # Grafana 预置仪表盘
 ├── pkg/                           # Go 共享基础库 (Agent客户端, 中间件, 存储, 指标, 校验)
 ├── proto/privacy.proto            # gRPC service definition
 ├── tests/                         # pytest suite

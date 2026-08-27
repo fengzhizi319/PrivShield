@@ -30,6 +30,8 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/handlers"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/runner"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 )
 
 func main() {
@@ -45,12 +47,16 @@ func main() {
 	}
 
 	// ── 第 3 步：初始化核心组件 ────────────────────────────────────────
+	// Collector: Prometheus 指标收集器；注册为 naming 的观测器后，
+	// 别名流量 / 归一化失败会在解析收口处自动上报（api_rename_design.md §7.2）。
+	mc := metrics.NewCollector("app-lz-bff")
+	naming.SetObserver(mc)
 	// ClientPool: 封装对 4 个上游微服务的所有 HTTP 调用，含降级兜底逻辑
 	pool := clients.NewClientPool(cfg)
 	// TestRunner: E2E 测试套件执行器（TS-01 审计验真 / TS-02 压测 / TS-03 租约争抢）
 	testRunner := runner.NewTestRunner(pool)
 	// Handler: 所有 HTTP 请求的处理层，编排 ClientPool 和 TestRunner
-	h := handlers.NewHandler(cfg, pool, testRunner)
+	h := handlers.NewHandler(cfg, pool, testRunner, mc)
 	// SetupRouter: 注册所有 API 路由 + SPA 静态文件回退
 	router := handlers.SetupRouter(h)
 

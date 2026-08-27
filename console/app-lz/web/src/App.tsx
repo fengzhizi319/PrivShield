@@ -99,12 +99,12 @@ export const App: React.FC = () => {
       setTasks(tRes.tasks || []);
       setLeases(lRes);
     } catch {
-      // BFF 不可达时，前端构造 2 条示例任务（演示模式）
+      // BFF 不可达时，前端构造 2 条示例任务（演示模式，已全部处于终态）
       setTasks([
         {
           id: 'task-1787554500-eabf3934',
           status: 'completed',
-          stage: 'audit',
+          stage: 'done',
           source: 'ds_yibao',
           operation: 'mask',
           priority: 50,
@@ -116,12 +116,12 @@ export const App: React.FC = () => {
         },
         {
           id: 'task-1787554501-89bcdef1',
-          status: 'running',
-          stage: 'desensitize',
+          status: 'completed',
+          stage: 'done',
           source: 'ds_kangyang',
-          operation: 'classify_and_mask',
+          operation: 'mask',
           priority: 80,
-          created_at: new Date().toISOString(),
+          created_at: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
           duration_ms: 120,
           error: '',
           retry_count: 0,
@@ -229,6 +229,19 @@ export const App: React.FC = () => {
     }, 15000);
     return () => clearInterval(timer);  // 组件卸载时清理定时器
   }, [fetchTopology, fetchTasksAndLeases, fetchSuites, fetchAuditLogs, fetchMetrics, fetchDataApiDefs]);
+
+  // ── 任务与租约自动轮询：处于任务标签页或存在 running/pending 任务时动态刷新 ──
+  const hasActiveTasks = tasks.some(t => t.status === 'running' || t.status === 'pending');
+  useEffect(() => {
+    if (currentTab === 'tasks' || hasActiveTasks) {
+      // 存在正在执行的任务时 1.5s 轮询，否则 4s 轮询
+      const intervalMs = hasActiveTasks ? 1500 : 4000;
+      const timer = setInterval(() => {
+        fetchTasksAndLeases();
+      }, intervalMs);
+      return () => clearInterval(timer);
+    }
+  }, [currentTab, hasActiveTasks, fetchTasksAndLeases]);
 
   // ── 渲染：左侧导航 + 右侧面板 ──────────────────────────────────
   return (

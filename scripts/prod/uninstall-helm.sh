@@ -74,7 +74,7 @@ fi
 if [[ "$WITH_POSTGRES" == "true" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-    PG_DIR="$PROJECT_ROOT/deploy/k8s/service-hub/postgres"
+    PG_DIR="$PROJECT_ROOT/services/service-hub/deploy/k8s/postgres"
     echo "🐘 删除 Phase B PostgreSQL 资源..."
     if command -v kubectl >/dev/null 2>&1; then
         kubectl delete -k "$PG_DIR" -n "$NAMESPACE" --ignore-not-found=true

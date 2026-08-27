@@ -27,6 +27,17 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "用法 / Usage: $0 [输出目录 / output_dir]"
+    echo ""
+    echo "选项 / Options:"
+    echo "  -h, --help    显示帮助信息并退出"
+    echo ""
+    echo "环境变量 / Env vars:"
+    echo "  CERT_DAYS     证书有效天数 (默认: 365)"
+    exit 0
+fi
+
 OUT_DIR="${1:-$(dirname "$0")/../certs}"
 DAYS="${CERT_DAYS:-365}"
 

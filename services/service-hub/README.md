@@ -107,3 +107,18 @@ PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/han
 # 编译 Linux 静态二进制
 CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/server ./cmd/server
 ```
+
+---
+
+## 容器化与独立 Kubernetes 部署
+
+```bash
+# 1. 独立构建 Docker 镜像（构建上下文需在仓库根目录以包含共享 pkg/）
+docker build -f services/service-hub/Dockerfile -t service-hub:latest .
+
+# 2. 独立部署到 Kubernetes（使用单服务自包含清单）
+kubectl apply -k services/service-hub/deploy/k8s/
+
+# 3. 部署 Phase B PostgreSQL 多副本后端（可选）
+kubectl apply -k services/service-hub/deploy/k8s/postgres/
+```

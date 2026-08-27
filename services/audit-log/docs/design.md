@@ -164,7 +164,7 @@ flowchart TB
     Auditor -->|3. 在线完整性核验 / 调取合规报告| BusinessEngine
     WebConsole -->|3. 存证列表查询| BusinessEngine
 
-    BusinessEngine -.->|运行时记录 (RequestID/耗时/握手)| SlogLogger
+    BusinessEngine -.->|"运行时记录 (RequestID/耗时/握手)"| SlogLogger
     SlogLogger -->|单行 JSON 日志流| StdOut
     StdOut -->|容器日志抓取| Promtail
     Promtail -->|按标签流式推送| Loki

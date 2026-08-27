@@ -231,25 +231,33 @@ func NormalizeDataSourceID(raw string) (string, error) {
 
 // Normalize is the Entry-returning form of NormalizeDataSourceID.
 // Normalize 返回条目本体，便于调用方同时取到 api_code / 展示名。
+//
+// 同时向已注册的 Observer 上报别名使用与归一化失败（§7.2）；未注册时为空操作。
+// 预留位命中由 ResolveInbound/checkWritableEntry 上报，本函数不重复计数。
 func Normalize(raw string) (*Entry, error) {
 	v := strings.TrimSpace(raw)
 	if v == "" {
+		recordNormalizeError(ReasonEmpty)
 		return nil, unknownError(raw)
 	}
 	if e, ok := byDataSourceID[v]; ok {
 		return e, nil
 	}
 	if e, ok := byAPICode[v]; ok {
+		recordAlias(v, e.DataSourceID, TargetAPICode)
 		return e, nil
 	}
 	// ASCII aliases are case-insensitive; non-ASCII aliases match exactly.
 	lowered := strings.ToLower(v)
 	if e, ok := aliasIndex[lowered]; ok {
+		recordAlias(v, e.DataSourceID, TargetDataSourceID)
 		return e, nil
 	}
 	if e, ok := aliasIndex[v]; ok {
+		recordAlias(v, e.DataSourceID, TargetDataSourceID)
 		return e, nil
 	}
+	recordNormalizeError(ReasonUnknown)
 	return nil, unknownError(raw)
 }
 
@@ -277,13 +285,30 @@ func IsReserved(err error) bool {
 // it must be registered and must not be reserved.
 //
 // CheckWritable 校验写侧使用的 canonical datasource_id：必须已登记且非预留位。
+// 失败原因同步上报 Observer（它是唯一收口，无需调用方各自埋点）；
+// 与 ResolveInbound 的分工是：后者先调 Normalize（上报 empty/unknown/alias），
+// 再调 checkWritableEntry（仅上报 reserved），因此同一次调用不会重复计数。
 func CheckWritable(datasourceID string) error {
-	e, ok := EntryByDataSourceID(datasourceID)
+	e, ok := byDataSourceID[datasourceID]
 	if !ok {
+		// 进入「只接受 canonical 字面量」的校验器却不是合法格式，
+		// 说明调用方漏了边界归一化，与「格式合法但未登记」是两类修复动作。
+		if !ValidDataSourceIDFormat(datasourceID) {
+			recordNormalizeError(ReasonFormatInvalid)
+		} else {
+			recordNormalizeError(ReasonUnknown)
+		}
 		return unknownError(datasourceID)
 	}
+	return checkWritableEntry(e)
+}
+
+// checkWritableEntry enforces the write-side status rule on a looked-up entry.
+// checkWritableEntry 对已查到的条目施加写侧状态校验。
+func checkWritableEntry(e *Entry) error {
 	if e.Status != StatusActive {
-		return fmt.Errorf("%w: %s", ErrReservedDataSource, datasourceID)
+		recordNormalizeError(ReasonReserved)
+		return fmt.Errorf("%w: %s", ErrReservedDataSource, e.DataSourceID)
 	}
 	return nil
 }
@@ -298,8 +323,8 @@ func ResolveInbound(raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if e.Status != StatusActive {
-		return "", fmt.Errorf("%w: %s", ErrReservedDataSource, e.DataSourceID)
+	if err := checkWritableEntry(e); err != nil {
+		return "", err
 	}
 	return e.DataSourceID, nil
 }

@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +52,98 @@ func (s *failingUpdateTaskStore) Update(task *store.Task) error {
 	s.updateCalls++
 	return errors.New("simulated task state persistence failure")
 }
+
+type leaseWorkerTestStore struct {
+	mu        sync.Mutex
+	tasks     map[string]*store.Task
+	completed chan string
+}
+
+func newLeaseWorkerTestStore(task *store.Task) *leaseWorkerTestStore {
+	return &leaseWorkerTestStore{
+		tasks:     map[string]*store.Task{task.ID: task},
+		completed: make(chan string, 1),
+	}
+}
+
+func (s *leaseWorkerTestStore) Save(task *store.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copy := *task
+	s.tasks[task.ID] = &copy
+	return nil
+}
+
+func (s *leaseWorkerTestStore) Get(id string) (*store.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task, ok := s.tasks[id]
+	if !ok {
+		return nil, errors.New("task not found")
+	}
+	copy := *task
+	return &copy, nil
+}
+
+func (s *leaseWorkerTestStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var tasks []store.Task
+	for _, task := range s.tasks {
+		if filter.Status == "" || filter.Status == task.Status {
+			tasks = append(tasks, *task)
+		}
+	}
+	return tasks, len(tasks), nil
+}
+
+func (s *leaseWorkerTestStore) Update(task *store.Task) error { return s.Save(task) }
+
+func (s *leaseWorkerTestStore) Counts() (store.TaskCounts, error) {
+	return store.TaskCounts{}, nil
+}
+
+func (s *leaseWorkerTestStore) CleanupOld(time.Time) (int64, error) { return 0, nil }
+
+func (s *leaseWorkerTestStore) ClaimNext(owner string, leaseTTL time.Duration) (*store.TaskLease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, task := range s.tasks {
+		if task.Status != "pending" {
+			continue
+		}
+		expiresAt := time.Now().Add(leaseTTL)
+		task.Status = "running"
+		task.LeaseOwner = owner
+		task.LeaseToken = "test-token"
+		task.LeaseExpiresAt = &expiresAt
+		copy := *task
+		return &store.TaskLease{Task: &copy, Owner: owner, Token: "test-token", ExpiresAt: expiresAt}, nil
+	}
+	return nil, nil
+}
+
+func (s *leaseWorkerTestStore) RenewLease(_, _, _ string, _ time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (s *leaseWorkerTestStore) CompleteLease(id, _, _ string, _ store.TaskResult) (bool, error) {
+	s.mu.Lock()
+	task := s.tasks[id]
+	task.Status = "completed"
+	s.mu.Unlock()
+	s.completed <- id
+	return true, nil
+}
+
+func (s *leaseWorkerTestStore) FailLease(id, _, _ string, _ store.TaskFailure) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tasks[id].Status = "failed"
+	return true, nil
+}
+
+func (s *leaseWorkerTestStore) RequeueExpiredLeases(int) (int, error) { return 0, nil }
 
 // genTestCerts generates a complete test certificate chain in a temp directory.
 // genTestCerts 在临时目录中动态生成完整的测试证书链（CA 根证书 ➔ 服务端证书 ➔ 客户端证书 ➔ 客户端公钥）。
@@ -630,10 +723,36 @@ func TestGRPCServer_ProcessTask_StopsWhenStatePersistenceFails(t *testing.T) {
 		t.Fatalf("save task: %v", err)
 	}
 
-	srv.processTask(task, task.Operation, "{}")
+	srv.processTask(task, task.Operation, "{}", "test-req")
 
 	if failingStore.updateCalls != 1 {
 		t.Fatalf("expected one failed stage-state write before stopping, got %d", failingStore.updateCalls)
+	}
+}
+
+func TestGRPCServer_LeaseWorkerClaimsAndCompletesPendingTask(t *testing.T) {
+	taskStore := newLeaseWorkerTestStore(&store.Task{
+		ID:        "leased-task",
+		Status:    "pending",
+		Stage:     "queued",
+		Source:    "test-source",
+		Operation: "none",
+		CreatedAt: time.Now(),
+	})
+	server := New(nil, nil, &config.Config{PGDSN: "postgres://test", LeaseTTL: 1}, taskStore, slog.Default())
+	defer server.Shutdown()
+
+	if err := server.StartLeaseWorker("hub-test", time.Second); err != nil {
+		t.Fatalf("start lease worker: %v", err)
+	}
+
+	select {
+	case taskID := <-taskStore.completed:
+		if taskID != "leased-task" {
+			t.Fatalf("expected leased-task completion, got %q", taskID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("lease worker did not complete the pending task")
 	}
 }
 
@@ -668,7 +787,7 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		_ = taskStore.Save(task)
 
 		// 同步调用 processTask 验证失败状态更新
-		srv.processTask(task, "classify", `{"record":"test"}`)
+		srv.processTask(task, "classify", `{"record":"test"}`, "test-req")
 
 		updated, err := taskStore.Get("task-fail-1")
 		if err != nil {
@@ -706,7 +825,7 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		}
 		_ = taskStore.Save(task)
 
-		srv.processTask(task, "mask", `{"name":"test"}`)
+		srv.processTask(task, "mask", `{"name":"test"}`, "test-req")
 
 		updated, err := taskStore.Get("task-fail-2")
 		if err != nil {
@@ -733,7 +852,7 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 		srv.wg.Add(1)
 		go func() {
 			defer srv.wg.Done()
-			srv.processTask(task, "mask", `{}`)
+			srv.processTask(task, "mask", `{}`, "test-req")
 		}()
 
 		time.Sleep(20 * time.Millisecond)
@@ -747,4 +866,43 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 			t.Errorf("expected failed status with shutting down error, got: %+v", updated)
 		}
 	})
+}
+
+func TestGRPCServer_LocalPendingWorker(t *testing.T) {
+	taskStore := memory.NewTaskStore()
+	server := New(nil, nil, &config.Config{}, taskStore, slog.Default())
+	defer server.Shutdown()
+
+	task := &store.Task{
+		ID:          "grpc-recovered-task",
+		Status:      "pending",
+		Stage:       "queued",
+		Source:      "test-source",
+		Operation:   "none",
+		PayloadJSON: `{}`,
+		CreatedAt:   time.Now(),
+	}
+	if err := taskStore.Save(task); err != nil {
+		t.Fatalf("save task: %v", err)
+	}
+
+	if err := server.StartLocalWorker(); err != nil {
+		t.Fatalf("start local worker: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	completed := false
+	for time.Now().Before(deadline) {
+		tCheck, err := taskStore.Get("grpc-recovered-task")
+		if err == nil && tCheck.Status == "completed" {
+			completed = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !completed {
+		tCheck, _ := taskStore.Get("grpc-recovered-task")
+		t.Fatalf("expected task to be completed by grpc local worker, got state: %+v", tCheck)
+	}
 }

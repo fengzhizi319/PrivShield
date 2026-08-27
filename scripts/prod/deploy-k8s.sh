@@ -105,7 +105,7 @@ kubectl apply -k "$K8S_DIR" -n "$NAMESPACE"
 # 当指定 --with-postgres 时，额外应用 service-hub/postgres/ 下的 K8s 资源
 # 包括 PostgreSQL Deployment、Service、PVC、Secret
 if [[ "$WITH_POSTGRES" == "true" ]]; then
-    PG_DIR="$K8S_DIR/service-hub/postgres"
+    PG_DIR="$PROJECT_ROOT/services/service-hub/deploy/k8s/postgres"
     echo ""
     echo "🐘 应用 Phase B PostgreSQL 资源 ($PG_DIR)..."
     kubectl apply -k "$PG_DIR" -n "$NAMESPACE"

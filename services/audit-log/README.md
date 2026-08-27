@@ -63,6 +63,18 @@ make test-go
 
 ---
 
+## 容器化与独立 Kubernetes 部署
+
+```bash
+# 1. 独立构建 Docker 镜像（构建上下文需在仓库根目录以包含共享 pkg/）
+docker build -f services/audit-log/Dockerfile -t audit-log:latest .
+
+# 2. 独立部署到 Kubernetes（使用单服务自包含清单）
+kubectl apply -k services/audit-log/deploy/k8s/
+```
+
+---
+
 ## 详细文档目录
 
 - 📘 [详细设计文档 (docs/design.md)](docs/design.md)

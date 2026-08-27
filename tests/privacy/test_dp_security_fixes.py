@@ -38,6 +38,16 @@ def _make_api(ns: str, epsilon_total: float = 100.0, delta_total: float = 10.0) 
     return DPApi(namespace=ns)
 
 
+def test_corrupt_budget_database_fails_closed(tmp_path, monkeypatch):
+    db_path = tmp_path / "corrupt-budget.db"
+    db_path.write_bytes(b"not a sqlite database")
+    monkeypatch.setenv("PRIVACY_BUDGET_DB", str(db_path))
+
+    registry = BudgetRegistry()
+    with pytest.raises(RuntimeError, match="integrity check failed"):
+        registry.get_or_create("corrupt-budget-db")
+
+
 class TestVectorMeanSqrtD:
     """#1 vector_mean 高维 Laplace 必须按 sqrt(d) * max_norm 的 L1 敏感度校准。"""
 

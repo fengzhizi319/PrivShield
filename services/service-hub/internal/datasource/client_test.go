@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -341,5 +343,65 @@ func TestDatasourceClient(t *testing.T) {
 	connGRPC, err := client.TestConnectionGRPC(ctx, "ds_yibao")
 	if err != nil || !connGRPC.Success {
 		t.Fatalf("TestConnectionGRPC failed: %v", err)
+	}
+
+	if st := client.CircuitStateString(); st != "closed" {
+		t.Fatalf("expected circuit breaker to be closed, got: %s", st)
+	}
+}
+
+func TestDatasourceClient_CircuitBreaker(t *testing.T) {
+	// Server returns 500
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer failSrv.Close()
+
+	u, _ := url.Parse(failSrv.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	cfg := &config.Config{
+		DatasourceRESTHost: u.Hostname(),
+		DatasourceRESTPort: port,
+	}
+
+	client := New(cfg)
+	client.cbThreshold = 2
+	client.maxRetries = 0
+	client.cbCooldown = 100 * time.Millisecond
+
+	ctx := context.Background()
+
+	// 1. Fail request 1
+	_, err := client.Health(ctx)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	// 2. Fail request 2 -> trips circuit breaker
+	_, err = client.Health(ctx)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if client.CircuitStateString() != "open" {
+		t.Fatalf("expected circuit breaker to be open, got: %s", client.CircuitStateString())
+	}
+
+	// 3. Fast fail while circuit is open
+	_, err = client.Health(ctx)
+	if err == nil || !strings.Contains(err.Error(), "circuit breaker open") {
+		t.Fatalf("expected circuit breaker open error, got: %v", err)
+	}
+
+	// 4. Wait for cooldown
+	time.Sleep(150 * time.Millisecond)
+
+	// Half-open transition
+	if err := client.checkCircuit(); err != nil {
+		t.Fatalf("expected half-open allow probe, got: %v", err)
+	}
+	if client.CircuitStateString() != "half-open" {
+		t.Fatalf("expected half-open state, got: %s", client.CircuitStateString())
 	}
 }

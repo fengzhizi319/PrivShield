@@ -686,13 +686,94 @@ def test_k8s_manifests_are_valid_yaml() -> None:
     """验证 deploy/k8s/ 下所有 YAML 文件可被正确解析。
 
     包括 deployment.yaml, service.yaml, configmap.yaml,
-    namespace.yaml, kustomization.yaml, secret.example.yaml。
+    namespace.yaml, kustomization.yaml, secret.example.yaml,
+    llm-deployment.yaml, llm-service.yaml。
     """
     for path in K8S_DIR.glob("*.yaml"):
         with path.open("r", encoding="utf-8") as f:
             content = f.read()
         docs = list(yaml.safe_load_all(content))
         assert any(d is not None for d in docs), f"{path} contains no documents"
+
+
+def test_subservices_k8s_manifests_are_valid_yaml() -> None:
+    """验证各子服务 (service-hub, datasource-mgr, audit-log, console) 的独立 K8s 清单均为合法 YAML。
+
+    涵盖目录：
+    - services/service-hub/deploy/k8s/ 及 postgres/ 子目录
+    - services/datasource-mgr/deploy/k8s/
+    - services/audit-log/deploy/k8s/
+    - console/deploy/k8s/
+    """
+    manifest_dirs = [
+        PROJECT_ROOT / "services" / "service-hub" / "deploy" / "k8s",
+        PROJECT_ROOT / "services" / "service-hub" / "deploy" / "k8s" / "postgres",
+        PROJECT_ROOT / "services" / "datasource-mgr" / "deploy" / "k8s",
+        PROJECT_ROOT / "services" / "audit-log" / "deploy" / "k8s",
+        PROJECT_ROOT / "console" / "deploy" / "k8s",
+    ]
+    total_manifest_files = 0
+    for mdir in manifest_dirs:
+        assert mdir.is_dir(), f"Manifest directory does not exist: {mdir}"
+        yaml_files = list(mdir.glob("*.yaml")) + list(mdir.glob("*.yml"))
+        assert len(yaml_files) > 0, f"No YAML manifest files found in {mdir}"
+        for path in yaml_files:
+            with path.open("r", encoding="utf-8") as f:
+                content = f.read()
+            docs = list(yaml.safe_load_all(content))
+            assert any(d is not None for d in docs), f"{path} contains no valid documents"
+            total_manifest_files += 1
+
+    assert total_manifest_files >= 15, f"Expected at least 15 subservice K8s manifests, found {total_manifest_files}"
+
+
+def test_k8s_kustomize_resource_cross_references() -> None:
+    """验证根目录与各子服务的 kustomization.yaml 资源引用均真实有效且可解析。"""
+    root_kust_file = K8S_DIR / "kustomization.yaml"
+    assert root_kust_file.is_file(), f"Missing root kustomization.yaml: {root_kust_file}"
+
+    with root_kust_file.open("r", encoding="utf-8") as f:
+        root_kust = yaml.safe_load(f)
+
+    assert "resources" in root_kust, "Root kustomization.yaml missing 'resources'"
+    resources = root_kust["resources"]
+
+    # 验证相对路径资源均存在
+    for res_rel in resources:
+        resolved_path = (K8S_DIR / res_rel).resolve()
+        assert resolved_path.exists(), f"Resource referenced in root kustomization does not exist: {res_rel} -> {resolved_path}"
+        if resolved_path.is_dir():
+            sub_kust = resolved_path / "kustomization.yaml"
+            assert sub_kust.is_file(), f"Sub-directory missing kustomization.yaml: {sub_kust}"
+
+
+def test_k8s_service_ports_and_protocols_consistency() -> None:
+    """验证所有核心微服务的 Kubernetes Service 端口映射规范。
+
+    端口约定：
+    - Core Agent    : HTTP 8079, gRPC 50051
+    - service-hub   : HTTP 8082, gRPC 50052
+    - datasource-mgr: HTTP 8083, gRPC 50053
+    - audit-log     : HTTP 8084, gRPC 50054
+    - console-bff   : HTTP 8081, gRPC 50055
+    """
+    service_checks = [
+        (K8S_DIR / "service.yaml", {"http": 8079, "grpc": 50051}),
+        (PROJECT_ROOT / "services" / "service-hub" / "deploy" / "k8s" / "service.yaml", {"http": 8082, "grpc": 50052}),
+        (PROJECT_ROOT / "services" / "datasource-mgr" / "deploy" / "k8s" / "service.yaml", {"http": 8083, "grpc": 50053}),
+        (PROJECT_ROOT / "services" / "audit-log" / "deploy" / "k8s" / "service.yaml", {"http": 8084, "grpc": 50054}),
+        (PROJECT_ROOT / "console" / "deploy" / "k8s" / "bff-go-service.yaml", {"http": 8081}),
+        (PROJECT_ROOT / "console" / "deploy" / "k8s" / "web-service.yaml", {"http": 5173}),
+    ]
+
+    for svc_file, expected_ports in service_checks:
+        assert svc_file.is_file(), f"Missing service file: {svc_file}"
+        with svc_file.open("r", encoding="utf-8") as f:
+            svc_doc = yaml.safe_load(f)
+        assert svc_doc.get("kind") == "Service"
+        ports = {p["name"]: p["port"] for p in svc_doc["spec"]["ports"]}
+        for port_name, expected_val in expected_ports.items():
+            assert ports.get(port_name) == expected_val, f"{svc_file.name} port '{port_name}' expected {expected_val}, got {ports.get(port_name)}"
 
 
 def test_docker_compose_files_are_valid_yaml() -> None:
@@ -703,12 +784,16 @@ def test_docker_compose_files_are_valid_yaml() -> None:
     - docker-compose.prod.yml (生产环境安全加固编排)
     - docker-compose.dev.yml (开发联调源码热挂载编排)
     - docker-compose.test.yml (CI/自动化集成测试编排)
+    - docker-compose.mtls.yml (mTLS 双向认证编排)
+    - docker-compose.app-lz.yml (调度之眼专用控制台编排)
     """
     compose_files = [
         "docker-compose.yml",
         "docker-compose.prod.yml",
         "docker-compose.dev.yml",
         "docker-compose.test.yml",
+        "docker-compose.mtls.yml",
+        "docker-compose.app-lz.yml",
     ]
     for filename in compose_files:
         file_path = COMPOSE_DIR / filename
@@ -717,7 +802,6 @@ def test_docker_compose_files_are_valid_yaml() -> None:
             data = yaml.safe_load(f)
         assert isinstance(data, dict), f"{filename} is not a valid YAML dictionary"
         assert "services" in data, f"{filename} missing top-level 'services' section"
-        assert "PrivShield" in data["services"], f"{filename} missing 'PrivShield' service"
 
 
 def test_docker_compose_production_configuration() -> None:
@@ -725,6 +809,7 @@ def test_docker_compose_production_configuration() -> None:
 
     检查项：
     - Core Agent 启用 TLS、API Key Auth、限速与 JSON 日志
+    - 包含 3 大中台微服务 (service-hub, datasource-mgr, audit-log)
     - 包含独立的 Redis 缓存/限流后端服务
     - 包含 Go 代理与 Nginx Web 前端
     - 包含独立 vLLM (Profile: llm) 与监控栈 (Profile: monitoring)
@@ -736,6 +821,9 @@ def test_docker_compose_production_configuration() -> None:
 
     services = data["services"]
     assert "PrivShield" in services
+    assert "service-hub" in services
+    assert "datasource-mgr" in services
+    assert "audit-log" in services
     assert "redis" in services
     assert "console-backend-go" in services
     assert "console-web" in services
@@ -795,4 +883,72 @@ def test_docker_compose_test_runner_configuration() -> None:
     deps = runner.get("depends_on", {})
     assert "PrivShield" in deps
     assert deps["PrivShield"].get("condition") == "service_healthy"
+
+
+def test_docker_compose_app_lz_configuration() -> None:
+    """验证专用控制台 docker-compose.app-lz.yml 的服务定义。"""
+    app_lz_file = COMPOSE_DIR / "docker-compose.app-lz.yml"
+    with app_lz_file.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    services = data["services"]
+    assert "app-lz-web" in services
+    assert "app-lz-bff" in services
+
+
+def test_prometheus_scrape_configs_and_alerts_validity() -> None:
+    """验证 deploy/prometheus/ 下监控采集配置与告警规则的合法性。
+
+    检查项：
+    - prometheus.yml 包含 privshield-agent, console-bff-go, service-hub, datasource-mgr 四大采集 Job
+    - alerts.yml 定义了 PrivShieldCoreAlerts 与 ServiceHubAlerts 告警规则组
+    """
+    prom_dir = PROJECT_ROOT / "deploy" / "prometheus"
+    prom_file = prom_dir / "prometheus.yml"
+    alerts_file = prom_dir / "alerts.yml"
+
+    assert prom_file.is_file(), f"Missing prometheus.yml: {prom_file}"
+    assert alerts_file.is_file(), f"Missing alerts.yml: {alerts_file}"
+
+    # 1. 验证 prometheus.yml
+    with prom_file.open("r", encoding="utf-8") as f:
+        prom_cfg = yaml.safe_load(f)
+    assert isinstance(prom_cfg, dict)
+    assert "scrape_configs" in prom_cfg
+    job_names = [sc.get("job_name") for sc in prom_cfg["scrape_configs"]]
+    assert "privshield-agent" in job_names
+    assert "console-bff-go" in job_names
+    assert "service-hub" in job_names
+    assert "datasource-mgr" in job_names
+
+    # 2. 验证 alerts.yml
+    with alerts_file.open("r", encoding="utf-8") as f:
+        alerts_cfg = yaml.safe_load(f)
+    assert isinstance(alerts_cfg, dict)
+    assert "groups" in alerts_cfg
+    group_names = [g.get("name") for g in alerts_cfg["groups"]]
+    assert "PrivShield.availability" in group_names
+    assert "PrivShield.latency" in group_names
+    assert "PrivShield.errors" in group_names
+    assert "PrivShield.privacy" in group_names
+    assert "PrivShield.classification" in group_names
+    assert "PrivShield.services" in group_names
+
+
+def test_grafana_dashboards_validity() -> None:
+    """验证 deploy/grafana/ 预置大屏 JSON 文件的完整性与有效性。"""
+    import json
+
+    grafana_dir = PROJECT_ROOT / "deploy" / "grafana"
+    dashboards = ["dashboard.json", "service-hub-dashboard.json"]
+
+    for dname in dashboards:
+        dpath = grafana_dir / dname
+        assert dpath.is_file(), f"Missing Grafana dashboard: {dpath}"
+        with dpath.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert isinstance(data, dict), f"{dname} is not a valid JSON object"
+        assert "panels" in data or "rows" in data, f"{dname} missing panels/rows"
+        assert data.get("title"), f"{dname} missing title"
+
 

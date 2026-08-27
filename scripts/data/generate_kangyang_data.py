@@ -413,34 +413,45 @@ for i in range(11, 21):
     ROWS.append(row)
 
 
-# 延伸扩展至 100 条记录，确保满足 100 条测试数据集规范
-EXTENDED_ROWS = []
-base_rows_len = len(ROWS)
-for idx in range(100):
-    src_row = list(ROWS[idx % base_rows_len])
-    # 替换其中的姓名和身份证号，保持唯一性与有效性
-    seq = idx + 1
-    src_row[0] = "男" if seq % 2 == 1 else "女"
-    src_row[22] = f"{src_row[22]}_{seq}"
-    id_base = f"11010519{85 - (seq % 40):02d}0{(seq % 9) + 1:01d}15{seq * 7 % 900 + 100:03d}"
-    src_row[23] = calculate_id_check(id_base)
-    EXTENDED_ROWS.append(src_row)
+import argparse
 
 
 def main():
+    parser = argparse.ArgumentParser(description="生成康养健康档案数据 kangyang.csv")
+    parser.add_argument("--output", "-o", help="输出 CSV 文件路径 (若未指定则写到默认路径)")
+    parser.add_argument("--count", "-c", type=int, default=100, help="生成的记录条数 (默认 100)")
+    parser.add_argument("--seed", type=int, default=42, help="随机种子")
+    args = parser.parse_args()
+
     project_root = Path(__file__).resolve().parents[2]
-    target_paths = [
-        project_root / "data/kangyang.csv",
-        project_root / "console/bff-go/internal/samples/kangyang.csv",
-    ]
+    
+    # 动态根据 count 生成行数据
+    extended_rows = []
+    base_rows_len = len(ROWS)
+    for idx in range(args.count):
+        src_row = list(ROWS[idx % base_rows_len])
+        seq = idx + 1
+        src_row[0] = "男" if seq % 2 == 1 else "女"
+        src_row[22] = f"{src_row[22]}_{seq}"
+        id_base = f"11010519{85 - (seq % 40):02d}0{(seq % 9) + 1:01d}15{seq * 7 % 900 + 100:03d}"
+        src_row[23] = calculate_id_check(id_base)
+        extended_rows.append(src_row)
+
+    if args.output:
+        target_paths = [Path(args.output)]
+    else:
+        target_paths = [
+            project_root / "data/kangyang.csv",
+            project_root / "console/bff-go/internal/samples/kangyang.csv",
+        ]
 
     for p in target_paths:
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(HEADER)
-            writer.writerows(EXTENDED_ROWS)
-        print(f"[+] 成功写出 {len(EXTENDED_ROWS)} 条测试样本数据到 {p}")
+            writer.writerows(extended_rows)
+        print(f"[+] 成功写出 {len(extended_rows)} 条测试样本数据到 {p}")
 
 
 if __name__ == "__main__":

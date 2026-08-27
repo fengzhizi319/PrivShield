@@ -317,11 +317,24 @@ func (c *ClientPool) GetTask(ctx context.Context, taskID string) (*models.Task, 
 		return nil, fmt.Errorf("task not found")
 	}
 
-	var task models.Task
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return nil, err
 	}
-	return &task, nil
+
+	var envelope struct {
+		Task models.Task `json:"task"`
+		Via  string      `json:"via"`
+	}
+	if err := json.Unmarshal(bodyBytes, &envelope); err == nil && envelope.Task.ID != "" {
+		return &envelope.Task, nil
+	}
+
+	var direct models.Task
+	if err := json.Unmarshal(bodyBytes, &direct); err != nil {
+		return nil, err
+	}
+	return &direct, nil
 }
 
 // GetDatasources 从 datasource-mgr 查询已注册的数据源目录。
@@ -597,12 +610,17 @@ func sampleKangyangRecord(i int) map[string]any {
 
 // GetAuditLogs 从 audit-log 服务获取审计日志条目。
 //
-// canonical 调用路径：GET {AuditURL}/api/audit/logs?limit=&offset=&datasource=
+// canonical 调用路径：GET {AuditURL}/api/audit/logs?limit=&offset=&datasource=&task_id=&api_code=
 // （旧实现误用 /api/v1/audit/logs，上游不存在该路径 → 恒 404 静默降级，即 D-02）
 //
 // rawDatasourceID 为空表示不过滤；非空时先归一化，未知值直接 400（不静默回落）。
 // 降级时返回 Source="fallback"，不再伪装为真实存证。
 func (c *ClientPool) GetAuditLogs(ctx context.Context, limit, offset int, rawDatasourceID string) (models.AuditLogsResponse, error) {
+	return c.GetAuditLogsFiltered(ctx, limit, offset, rawDatasourceID, "", "")
+}
+
+// GetAuditLogsFiltered 支持按 datasource、task_id、api_code 复合过滤查询审计日志。
+func (c *ClientPool) GetAuditLogsFiltered(ctx context.Context, limit, offset int, rawDatasourceID, taskID, apiCode string) (models.AuditLogsResponse, error) {
 	datasourceID := ""
 	if strings.TrimSpace(rawDatasourceID) != "" {
 		resolved, err := ResolveDatasourceID(rawDatasourceID)
@@ -615,6 +633,12 @@ func (c *ClientPool) GetAuditLogs(ctx context.Context, limit, offset int, rawDat
 	path := fmt.Sprintf("/api/audit/logs?limit=%d&offset=%d", limit, offset)
 	if datasourceID != "" {
 		path += "&datasource=" + datasourceID
+	}
+	if strings.TrimSpace(taskID) != "" {
+		path += "&task_id=" + strings.TrimSpace(taskID)
+	}
+	if strings.TrimSpace(apiCode) != "" {
+		path += "&api_code=" + strings.TrimSpace(apiCode)
 	}
 	url := strings.TrimRight(c.cfg.AuditURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -679,8 +703,8 @@ func degradedAuditLogs(detail, datasourceID string) models.AuditLogsResponse {
 }
 
 // defaultAuditLogs 返回本地兜底审计示例（仅用于不可演示时的占位，Source 会标为 fallback）。
-// operation 取 canonical 操作名（validation.AuditOperations：mask/classify/k_anon/dp/qol），
-// datasource 取 naming 注册表常量，避免 D-07 类脉脉漂移。
+// operation 取 canonical 操作名（validation.AuditOperations：mask/k_anon/dp/qol），
+// status 标为 synthetic，哈希置空，禁止伪装为真实存证（P1-5 修复）。
 func defaultAuditLogs() []models.AuditLogItem {
 	now := time.Now().UTC().Format(time.RFC3339)
 	items := []models.AuditLogItem{
@@ -690,11 +714,11 @@ func defaultAuditLogs() []models.AuditLogItem {
 			Datasource:    naming.DSYibao,
 			APICode:       naming.API1Yibao,
 			Operation:     "mask",
-			InputHash:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-			OutputHash:    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			InputHash:     "",
+			OutputHash:    "",
 			Algorithm:     "field_mask",
 			User:          "app-lz-bff",
-			Status:        "success",
+			Status:        "synthetic",
 			SecurityLevel: "L3",
 		},
 		{
@@ -702,12 +726,12 @@ func defaultAuditLogs() []models.AuditLogItem {
 			Timestamp:     now,
 			Datasource:    naming.DSKangyang,
 			APICode:       naming.API2Kangyang,
-			Operation:     "classify",
-			InputHash:     "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
-			OutputHash:    "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
-			Algorithm:     "three_layer_funnel",
+			Operation:     "k_anon",
+			InputHash:     "",
+			OutputHash:    "",
+			Algorithm:     "mondrian",
 			User:          "app-lz-bff",
-			Status:        "success",
+			Status:        "synthetic",
 			SecurityLevel: "L4",
 		},
 	}
@@ -1139,6 +1163,48 @@ func max(a, b float64) float64 {
 	return b
 }
 
+// GetPipelineStatus queries the 6-stage pipeline telemetry from service-hub (/api/hub/pipeline).
+func (c *ClientPool) GetPipelineStatus(ctx context.Context) (map[string]any, error) {
+	url := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/pipeline"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return defaultPipelineStatus(), err
+	}
+	if c.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return defaultPipelineStatus(), err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return defaultPipelineStatus(), fmt.Errorf("service-hub pipeline returned status %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return defaultPipelineStatus(), err
+	}
+	return result, nil
+}
+
+func defaultPipelineStatus() map[string]any {
+	return map[string]any{
+		"mode": "pipeline_telemetry",
+		"stages": []map[string]any{
+			{"name": "ingest", "status": "idle"},
+			{"name": "fetch", "status": "idle"},
+			{"name": "classify", "status": "idle"},
+			{"name": "desensitize", "status": "idle"},
+			{"name": "return", "status": "idle"},
+			{"name": "audit", "status": "idle"},
+		},
+		"via": "app-lz-bff",
+	}
+}
+
 // MedicalProcessResult 保存 engine 医疗流水线 /v1/medical/process 的返回结果。
 // 包含三部分：分类分级报告 + 脱敏清洗后合规数据 + 汇总统计。
 type MedicalProcessResult struct {
@@ -1147,13 +1213,18 @@ type MedicalProcessResult struct {
 	Summary              map[string]any   `json:"summary"`
 }
 
-// ProcessMedicalRecords 将一批记录发送到 engine 的医疗数据处理流水线。
-//
-// 调用路径：POST {AgentURL}/v1/medical/process
-// 执行能力：3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 +
-// ICD-10 编码脱敏 + 诊断残留清除等专业医疗数据治理。
+// ProcessMedicalRecords 将一批记录发送到 engine 的数据处理流水线（别名兼容方法）。
 func (c *ClientPool) ProcessMedicalRecords(ctx context.Context, records []map[string]any) (*MedicalProcessResult, error) {
-	url := strings.TrimRight(c.cfg.AgentURL, "/") + "/v1/medical/process"
+	return c.ProcessAgentRecords(ctx, records)
+}
+
+// ProcessAgentRecords 将一批记录发送到 engine 的通用数据处理流水线。
+//
+// canonical 调用路径：POST {AgentURL}/v1/agent/process
+// （当返回 404 时自动回退至兼容别名 /v1/medical/process）
+// 执行能力：3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + 结构化合规治理。
+func (c *ClientPool) ProcessAgentRecords(ctx context.Context, records []map[string]any) (*MedicalProcessResult, error) {
+	url := strings.TrimRight(c.cfg.AgentURL, "/") + "/v1/agent/process"
 	data, _ := json.Marshal(map[string]any{
 		"records": records,
 	})
@@ -1170,8 +1241,31 @@ func (c *ClientPool) ProcessMedicalRecords(ctx context.Context, records []map[st
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		// Fallback to legacy /v1/medical/process
+		fallbackURL := strings.TrimRight(c.cfg.AgentURL, "/") + "/v1/medical/process"
+		fReq, fErr := http.NewRequestWithContext(ctx, http.MethodPost, fallbackURL, bytes.NewReader(data))
+		if fErr != nil {
+			return nil, fErr
+		}
+		fReq.Header.Set("Content-Type", "application/json")
+		fResp, fErr := c.httpClient.Do(fReq)
+		if fErr != nil {
+			return nil, fErr
+		}
+		defer fResp.Body.Close()
+		if fResp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("engine agent/medical pipeline returned status %d", fResp.StatusCode)
+		}
+		var fResult MedicalProcessResult
+		if err := json.NewDecoder(fResp.Body).Decode(&fResult); err != nil {
+			return nil, err
+		}
+		return &fResult, nil
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("engine medical pipeline returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("engine agent pipeline returned status %d", resp.StatusCode)
 	}
 
 	var result MedicalProcessResult

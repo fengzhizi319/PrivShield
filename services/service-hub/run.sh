@@ -19,6 +19,25 @@
 
 set -euo pipefail
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            echo ""
+            echo "环境变量 / Env vars:"
+            echo "  SERVICE_HUB_HOST   HTTP 监听地址 (默认: 127.0.0.1)"
+            echo "  SERVICE_HUB_PORT   HTTP 监听端口 (默认: 8082)"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 # 1. 切换到脚本所在目录（即 services/service-hub）
 cd "$(dirname "$0")"
 

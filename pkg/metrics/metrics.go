@@ -11,10 +11,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// Collector satisfies naming.Observer, so services can register it with
+// naming.SetObserver(mc) and get alias / error counters for free (§7.2).
+// Collector 实现 naming.Observer，服务只需 naming.SetObserver(mc) 即可自动上报指标。
+var _ naming.Observer = (*Collector)(nil)
 
 // Collector holds module-scoped Prometheus metrics.
 // Collector 持有模块级别的 Prometheus 指标。
@@ -71,6 +77,17 @@ type Collector struct {
 	// ServiceHubReady indicates whether the service-hub is ready to serve traffic.
 	// ServiceHubReady 指示 service-hub 是否就绪可服务流量（1=ready, 0=not ready）。
 	ServiceHubReady prometheus.Gauge
+
+	// ── Canonical Naming & Routing metrics / 命名规范与路由指标 ──
+
+	// APIAliasRequestsTotal counts requests using alias identifiers vs canonical.
+	APIAliasRequestsTotal *prometheus.CounterVec
+
+	// DatasourceNormalizeErrorsTotal counts normalization failures by reason.
+	DatasourceNormalizeErrorsTotal *prometheus.CounterVec
+
+	// DatasourceRequestsTotal counts datasource processing requests by datasource_id/api_code/status.
+	DatasourceRequestsTotal *prometheus.CounterVec
 }
 
 // NewCollector creates and registers a new metrics collector for the given module.
@@ -177,6 +194,34 @@ func NewCollector(module string) *Collector {
 		ConstLabels: prometheus.Labels{"module": module},
 	})
 
+	// ── Canonical Naming & Routing metrics ──
+	c.APIAliasRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name:        "privshield_api_alias_requests_total",
+			Help:        "Total requests processed via legacy/alias identifier mapping.",
+			ConstLabels: prometheus.Labels{"module": module},
+		},
+		[]string{"alias", "canonical", "target"},
+	)
+	c.DatasourceNormalizeErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name:        "privshield_datasource_normalize_errors_total",
+			Help:        "Total identifier normalization errors and fail-closed rejections.",
+			ConstLabels: prometheus.Labels{"module": module},
+		},
+		// 标签必须低卡：原始入站值是调用方可控的无界集合，只能进日志（raw_source 字段），
+		// 不能进标签，否则任一脏 ID 都会永久新增一条时间序列。
+		[]string{"reason"},
+	)
+	c.DatasourceRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name:        "privshield_datasource_requests_total",
+			Help:        "Total requests processed per canonical datasource.",
+			ConstLabels: prometheus.Labels{"module": module},
+		},
+		[]string{"datasource_id", "api_code", "status"},
+	)
+
 	reg.MustRegister(
 		c.HTTPRequestsTotal,
 		c.HTTPRequestDuration,
@@ -190,6 +235,9 @@ func NewCollector(module string) *Collector {
 		c.TaskClaimLatency,
 		c.TaskTransitions,
 		c.ServiceHubReady,
+		c.APIAliasRequestsTotal,
+		c.DatasourceNormalizeErrorsTotal,
+		c.DatasourceRequestsTotal,
 	)
 
 	return c
@@ -294,6 +342,27 @@ func (c *Collector) SetReady(ready bool) {
 	} else {
 		c.ServiceHubReady.Set(0)
 	}
+}
+
+// ── Canonical Naming metric helpers / 命名规范指标辅助方法 ──
+
+// RecordAPIAlias records an alias mapping usage event.
+// target: "api_code" | "datasource_id"
+func (c *Collector) RecordAPIAlias(alias, canonical, target string) {
+	c.APIAliasRequestsTotal.WithLabelValues(alias, canonical, target).Inc()
+}
+
+// RecordNormalizeError records an identifier normalization failure.
+// reason: "unknown" | "reserved" | "empty" | "format_invalid"
+// 原始入站值不进入标签（无界基数），由调用方以 raw_source 日志字段输出。
+func (c *Collector) RecordNormalizeError(reason string) {
+	c.DatasourceNormalizeErrorsTotal.WithLabelValues(reason).Inc()
+}
+
+// RecordDatasourceRequest records a request by canonical datasource ID and status.
+// status: "success" | "error" | "fallback"
+func (c *Collector) RecordDatasourceRequest(datasourceID, apiCode, status string) {
+	c.DatasourceRequestsTotal.WithLabelValues(datasourceID, apiCode, status).Inc()
 }
 
 // Handler returns a Gin handler that serves Prometheus /metrics endpoint

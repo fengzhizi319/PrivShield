@@ -34,7 +34,7 @@ func setupTestRouter() *Handler {
 	}
 	pool := clients.NewClientPool(cfg)
 	testRunner := runner.NewTestRunner(pool)
-	return NewHandler(cfg, pool, testRunner)
+	return NewHandler(cfg, pool, testRunner, nil)
 }
 
 // TestHealthCheck 验证健康检查端点。
@@ -232,10 +232,10 @@ func TestInvokeDataApiContractAndFailClosed(t *testing.T) {
 	if resp.APICode != "api1_yibao" || resp.DatasourceID != "ds_yibao" {
 		t.Errorf("expected api1_yibao / ds_yibao, got %s / %s", resp.APICode, resp.DatasourceID)
 	}
-	if len(resp.Stages) != 6 {
-		t.Errorf("expected 6 pipeline stages (ingest->fetch->classify->desensitize->return->audit), got %d", len(resp.Stages))
+	if len(resp.Stages) != 5 {
+		t.Errorf("expected 5 pipeline stages (ingest->fetch->classify_desensitize->return->audit), got %d", len(resp.Stages))
 	}
-	expectedStages := []string{"ingest", "fetch", "classify", "desensitize", "return", "audit"}
+	expectedStages := []string{"ingest", "fetch", "classify_desensitize", "return", "audit"}
 	for i, exp := range expectedStages {
 		if i < len(resp.Stages) && resp.Stages[i].Name != exp {
 			t.Errorf("stage[%d] = %s, want %s", i, resp.Stages[i].Name, exp)

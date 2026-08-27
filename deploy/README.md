@@ -11,7 +11,7 @@
 ```text
 deploy/
 ├── README.md                    # ← 本文件：部署全景导航
-├── docker-compose/              # Docker Compose 编排（单机/演示/开发/生产）
+├── docker-compose/              # Docker Compose 全栈编排（单机/演示/开发/生产）
 │   ├── README.md                #   Compose 使用详解（文件矩阵、生产准备、CI 测试）
 │   ├── docker-compose.yml       #   通用全栈编排（本地构建，支持 --profile llm / monitoring）
 │   ├── docker-compose.prod.yml  #   生产编排（纯镜像、TLS、Redis 限流、安全加固）
@@ -19,16 +19,15 @@ deploy/
 │   ├── docker-compose.test.yml  #   CI 集成测试编排（test-runner 自动冒烟）
 │   ├── .env.prod.example        #   生产环境变量模板（cp 为 .env 后填写）
 │   └── privacy-profile.yaml     #   隐私原语参数 profile（挂载至容器）
-├── helm/PrivShield/             # 生产级 Helm Chart（HPA / PDB / NetworkPolicy / Ingress）
+├── helm/PrivShield/             # 生产级全栈 Helm Chart（HPA / PDB / NetworkPolicy / Ingress）
 │   ├── Chart.yaml
 │   ├── values.yaml              #   默认值（开发模式）
 │   ├── values-production.yaml   #   生产覆盖值（2 副本 + TLS + Auth + 限流 + HPA）
 │   ├── values-ml.yaml           #   ML 镜像覆盖值（torch/transformers/onnxruntime）
 │   └── templates/               #   K8s 资源模板
-├── k8s/                         # 原生 K8s 最小清单（Kustomize，适合学习/最小化部署）
-│   ├── kustomization.yaml
+├── k8s/                         # 原生 K8s 全栈集成清单（Kustomize 入口，通过相对路径引用各子服务 deploy/k8s）
+│   ├── kustomization.yaml       #   聚合 Agent + services/* + console/* 的全栈主入口
 │   ├── namespace.yaml / configmap.yaml / deployment.yaml / service.yaml
-│   ├── service-hub/postgres/    #   Phase B: PostgreSQL 多副本 Hub 资源
 │   └── secret.example.yaml      #   TLS + API Key 示例（需自行填值）
 ├── prometheus/                  # Prometheus 采集配置与告警规则
 │   ├── prometheus.yml
@@ -37,6 +36,10 @@ deploy/
     ├── dashboard.json           #   PrivShield 全景总览大屏
     └── service-hub-dashboard.json  #   调度中枢专属大屏
 ```
+
+> 💡 **架构分层说明**：
+> - **单服务原子部署**：各独立子项目（`services/service-hub`、`services/datasource-mgr`、`services/audit-log`、`console`）在各自的 `deploy/k8s/` 目录下自包含原子 Deployment/Service/PVC 清单与 `Dockerfile`，支持单服务独立构建与独立发布；
+> - **全栈集成编排**：`deploy/` 根目录统一管理多服务全栈拓扑、统一 Compose 联调、统一 Helm 伞图（Umbrella Chart）与全栈 Kustomize 集成入口。
 
 ---
 

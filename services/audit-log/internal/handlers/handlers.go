@@ -4,10 +4,12 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -54,9 +56,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
-	r.GET("/health", s.Health)       // Liveness probe / 存活探针
-	r.GET("/readyz", s.Readyz)       // Readiness probe / 就绪探针
-	r.GET("/api/health", s.Health)   // Alias for backward compat / 向后兼容别名
+	r.GET("/health", s.Health)     // Liveness probe / 存活探针
+	r.GET("/readyz", s.Readyz)     // Readiness probe / 就绪探针
+	r.GET("/api/health", s.Health) // Alias for backward compat / 向后兼容别名
 	r.GET("/api/audit/logs", s.ListLogs)
 	r.POST("/api/audit/logs", s.CreateLog)
 	r.GET("/api/audit/logs/:id", s.GetLog)
@@ -204,18 +206,24 @@ func (s *Server) CreateLog(c *gin.Context) {
 		rawDS = req.DataSource
 	}
 
-	normID := ""
+	if strings.TrimSpace(rawDS) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "datasource is required"})
+		return
+	}
+
+	entry, err := naming.Normalize(rawDS)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid datasource %q: %v", rawDS, err)})
+		return
+	}
+	if err := naming.CheckWritable(entry.DataSourceID); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"detail": err.Error(), "code": "RESERVED_DATASOURCE"})
+		return
+	}
+	normID := entry.DataSourceID
 	normAPICode := req.APICode
-	if rawDS != "" {
-		entry, err := naming.Normalize(rawDS)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid datasource %q: %v", rawDS, err)})
-			return
-		}
-		normID = entry.DataSourceID
-		if normAPICode == "" {
-			normAPICode = entry.APICode
-		}
+	if normAPICode == "" {
+		normAPICode = entry.APICode
 	}
 
 	// Input validation / 输入校验
@@ -249,6 +257,17 @@ func (s *Server) CreateLog(c *gin.Context) {
 		return
 	}
 
+	inputHash := req.InputHash
+	outputHash := req.OutputHash
+	if inputHash == "" {
+		h := sha256.Sum256([]byte(fmt.Sprintf("input|%s|%d|%s|%s", normID, req.InputRows, req.User, string(paramsJSON))))
+		inputHash = hex.EncodeToString(h[:])
+	}
+	if outputHash == "" {
+		h := sha256.Sum256([]byte(fmt.Sprintf("output|%s|%d|%s|%s|%s", normID, req.OutputRows, req.Status, req.SecurityLevel, string(paramsJSON))))
+		outputHash = hex.EncodeToString(h[:])
+	}
+
 	log := &store.AuditLog{
 		ID:             logID,
 		TaskID:         req.TaskID,
@@ -257,8 +276,8 @@ func (s *Server) CreateLog(c *gin.Context) {
 		Timestamp:      now,
 		Operation:      req.Operation,
 		DataSource:     normID,
-		InputHash:      req.InputHash,
-		OutputHash:     req.OutputHash,
+		InputHash:      inputHash,
+		OutputHash:     outputHash,
 		Algorithm:      req.Algorithm,
 		Parameters:     req.Parameters,
 		ParametersJSON: string(paramsJSON),
@@ -269,11 +288,6 @@ func (s *Server) CreateLog(c *gin.Context) {
 		Status:         req.Status,
 		ErrorMessage:   req.ErrorMessage,
 		SecurityLevel:  req.SecurityLevel,
-	}
-
-	if err := s.audit.SaveLog(log); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
-		return
 	}
 
 	// Auto-generate snapshot with ENHANCED integrity hash
@@ -287,11 +301,13 @@ func (s *Server) CreateLog(c *gin.Context) {
 		Algorithm:      req.Algorithm,
 		Parameters:     req.Parameters,
 		ParametersJSON: string(paramsJSON),
-		IntegrityHash:  computeIntegrityHash(logID, now, req.Algorithm, req.InputHash, req.OutputHash, req.User, req.SecurityLevel, string(paramsJSON)),
+		IntegrityHash:  computeIntegrityHash(logID, now, req.Algorithm, inputHash, outputHash, req.User, req.SecurityLevel, string(paramsJSON)),
 	}
 
-	if err := s.audit.SaveSnapshot(snapshot); err != nil {
-		s.logger.Error("failed to save snapshot", "error", err.Error())
+	if err := s.audit.SaveLogWithSnapshot(log, snapshot); err != nil {
+		s.logger.Error("failed to persist audit log and snapshot", "error", err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to persist audit log and snapshot"})
+		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{

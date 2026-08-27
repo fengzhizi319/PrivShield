@@ -175,7 +175,7 @@ export const api = {
 
   /**
    * 触发 Merkle 树完整性验证。
-   * BFF 内部转发到 Audit Log 服务的 POST /api/v1/audit/verify。
+   * BFF 内部转发到 Audit Log 服务的 POST /api/audit/snapshots/verify。
    * 返回 merkle_valid=true 表示所有日志条目的哈希链未被篡改。
    */
   async verifyAudit(): Promise<AuditVerifyResponse> {

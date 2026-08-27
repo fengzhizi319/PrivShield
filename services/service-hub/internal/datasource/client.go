@@ -1,20 +1,27 @@
 // Package datasource provides a client for communicating with the datasource-mgr module.
 // Package datasource 提供与模拟数据源服务 (datasource-mgr) 通信的客户端，支持 HTTP REST 与 gRPC (mTLS) 双协议。
 //
-// 架构设计：
+// 架构设计与高可用特性：
 // 1. 双协议支持：提供基于 net/http 的 HTTPS REST 客户端与基于 grpc-go 的高性能 gRPC 客户端；
 // 2. 线程安全与延迟连接：gRPC 连接采用 sync.RWMutex 读写锁进行并发安全保护与按需懒加载初始化；
 // 3. 生产级 mTLS 支持：当启用 TLS 时，自动加载客户端证书/私钥与受信任 CA，建立端到端 TLS 1.3 加密通道；
-// 4. 数据协议适配转换：提供 protoToQueryResult 辅助函数，无缝将 gRPC Protobuf 结构转换为通用的 DataQueryResult 实体。
+// 4. 弹性容灾与自愈：
+//    - 三态熔断器（Circuit Breaker: Closed → Open → HalfOpen），连续 5 次失败自动熔断，30s 冷却后半开探测；
+//    - 指数退避重试（Exponential Backoff with Jitter），最多 3 次重试，防范瞬时网络抖动与 5xx 故障；
+//    - 内存防溢出保护，限制单响应体最大 64 MiB；
+//    - 分布式链路追踪透传，自动提取并注入 X-Request-ID。
 package datasource
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,14 +31,40 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
-	dspb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
+	dspb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
 )
+
+// CircuitState represents the circuit breaker state.
+type CircuitState int
+
+const (
+	CircuitClosed   CircuitState = iota // Normal operation / 正常运行
+	CircuitOpen                         // Tripped, rejecting calls / 熔断中，拒绝调用
+	CircuitHalfOpen                     // Testing recovery / 探测恢复中
+)
+
+func (s CircuitState) String() string {
+	switch s {
+	case CircuitClosed:
+		return "closed"
+	case CircuitOpen:
+		return "open"
+	case CircuitHalfOpen:
+		return "half-open"
+	default:
+		return "unknown"
+	}
+}
 
 // Client handles HTTP/REST and gRPC communication with datasource-mgr.
 // Client 结构体负责与 datasource-mgr 微服务进行双协议通信，管理 HTTP 传输层与 gRPC 连接生命周期。
@@ -40,18 +73,25 @@ type Client struct {
 	baseURL    string         // datasource-mgr HTTP REST 基础 URL（如 "http://127.0.0.1:8083"）
 	grpcAddr   string         // datasource-mgr gRPC 监听网络地址（如 "127.0.0.1:50053"）
 	httpClient *http.Client   // 配置了超时与可选 mTLS 的 HTTP 客户端
+	logger     *slog.Logger
 
-	mu         sync.RWMutex                         // 保护 gRPC 连接与客户端实例的读写互斥锁
-	grpcConn   *grpc.ClientConn                     // gRPC 底层长连接实例
-	grpcClient dspb.DataSourceManagerServiceClient  // gRPC 生成桩客户端
+	// Retry & Circuit Breaker / 重试与熔断配置
+	maxRetries     int
+	retryBaseDelay time.Duration
+	cbMu           sync.Mutex
+	cbState        CircuitState
+	cbFailures     int
+	cbOpenedAt     time.Time
+	cbThreshold    int           // 连续失败熔断阈值（默认 5）
+	cbCooldown     time.Duration // 熔断冷却时间（默认 30s）
+
+	mu         sync.RWMutex                        // 保护 gRPC 连接与客户端实例的读写互斥锁
+	grpcConn   *grpc.ClientConn                    // gRPC 底层长连接实例
+	grpcClient dspb.DataSourceManagerServiceClient // gRPC 生成桩客户端
 }
 
-// New creates a new Client instance with optional HTTPS mTLS support.
+// New creates a new Client instance with optional HTTPS mTLS support and circuit breaker.
 // New 构造函数根据传入的配置初始化数据源客户端。
-// 执行步骤：
-// 1. 构建默认超时为 10 秒的标准 http.Client；
-// 2. 若配置了 TLSEnabled 并提供了证书和私钥，则构造 TLS 1.3 配置与 RootCAs 证书池，注入 http.Transport；
-// 3. 解析并格式化 HTTP 基地址与 gRPC 目标地址，返回 Client 实例。
 func New(cfg *config.Config) *Client {
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
@@ -74,15 +114,24 @@ func New(cfg *config.Config) *Client {
 			}
 		}
 		httpClient.Transport = &http.Transport{
-			TLSClientConfig: tlsConfig,
+			TLSClientConfig:     tlsConfig,
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 20,
+			IdleConnTimeout:     90 * time.Second,
 		}
 	}
 
 	return &Client{
-		cfg:        cfg,
-		baseURL:    strings.TrimRight(cfg.DatasourceBaseURL(), "/"),
-		grpcAddr:   cfg.DatasourceGRPCAddress(),
-		httpClient: httpClient,
+		cfg:            cfg,
+		baseURL:        strings.TrimRight(cfg.DatasourceBaseURL(), "/"),
+		grpcAddr:       cfg.DatasourceGRPCAddress(),
+		httpClient:     httpClient,
+		logger:         slog.Default(),
+		maxRetries:     3,
+		retryBaseDelay: 500 * time.Millisecond,
+		cbThreshold:    5,
+		cbCooldown:     30 * time.Second,
+		cbState:        CircuitClosed,
 	}
 }
 
@@ -100,6 +149,138 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// CircuitStateString returns the current circuit breaker status as a string.
+func (c *Client) CircuitStateString() string {
+	c.cbMu.Lock()
+	defer c.cbMu.Unlock()
+	return c.cbState.String()
+}
+
+func (c *Client) checkCircuit() error {
+	c.cbMu.Lock()
+	defer c.cbMu.Unlock()
+
+	switch c.cbState {
+	case CircuitClosed:
+		return nil
+	case CircuitOpen:
+		if time.Since(c.cbOpenedAt) >= c.cbCooldown {
+			c.cbState = CircuitHalfOpen
+			c.logger.Info("datasource client circuit breaker half-open, probing recovery")
+			return nil
+		}
+		return fmt.Errorf("datasource circuit breaker open (cooling down)")
+	case CircuitHalfOpen:
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (c *Client) recordSuccess() {
+	c.cbMu.Lock()
+	defer c.cbMu.Unlock()
+
+	c.cbFailures = 0
+	if c.cbState == CircuitHalfOpen {
+		c.cbState = CircuitClosed
+		c.logger.Info("datasource client circuit breaker closed (recovered)")
+	}
+}
+
+func (c *Client) recordFailure() {
+	c.cbMu.Lock()
+	defer c.cbMu.Unlock()
+
+	c.cbFailures++
+	switch c.cbState {
+	case CircuitClosed:
+		if c.cbFailures >= c.cbThreshold {
+			c.cbState = CircuitOpen
+			c.cbOpenedAt = time.Now()
+			c.logger.Warn("datasource client circuit breaker opened", "consecutive_failures", c.cbFailures)
+		}
+	case CircuitHalfOpen:
+		c.cbState = CircuitOpen
+		c.cbOpenedAt = time.Now()
+		c.logger.Warn("datasource client circuit breaker re-opened (probe failed)")
+	}
+}
+
+// doHTTP executes an HTTP request with circuit breaker, retries, and body limit.
+func (c *Client) doHTTP(req *http.Request) ([]byte, error) {
+	if err := c.checkCircuit(); err != nil {
+		return nil, err
+	}
+
+	if rid := pkgagent.RequestIDFromContext(req.Context()); rid != "" && req.Header.Get("X-Request-ID") == "" {
+		req.Header.Set("X-Request-ID", rid)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := c.retryBaseDelay * time.Duration(1<<(attempt-1))
+			jitter := time.Duration(rand.Int64N(int64(delay / 2)))
+			sleepDur := delay + jitter
+
+			c.logger.Info("retrying datasource HTTP request",
+				"path", req.URL.Path,
+				"attempt", attempt+1,
+				"backoff", sleepDur.String(),
+			)
+
+			select {
+			case <-req.Context().Done():
+				return nil, fmt.Errorf("datasource request cancelled: %w", req.Context().Err())
+			case <-time.After(sleepDur):
+			}
+
+			if req.GetBody != nil {
+				newBody, err := req.GetBody()
+				if err != nil {
+					return nil, fmt.Errorf("recreate request body: %w", err)
+				}
+				req.Body = newBody
+			}
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			c.recordFailure()
+			lastErr = fmt.Errorf("datasource HTTP do: %w", err)
+			continue
+		}
+
+		const maxBodySize = 64 << 20 // 64 MiB
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize+1))
+		resp.Body.Close()
+		if err != nil {
+			c.recordFailure()
+			lastErr = fmt.Errorf("read datasource response: %w", err)
+			continue
+		}
+		if int64(len(body)) > maxBodySize {
+			c.recordFailure()
+			return nil, fmt.Errorf("datasource response too large: exceeds %d bytes", maxBodySize)
+		}
+
+		if resp.StatusCode >= 500 {
+			c.recordFailure()
+			lastErr = fmt.Errorf("datasource server error %d: %s", resp.StatusCode, string(body))
+			continue
+		} else if resp.StatusCode >= 400 {
+			// 4xx client errors don't trigger breaker
+			return nil, fmt.Errorf("datasource request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+
+		c.recordSuccess()
+		return body, nil
+	}
+
+	return nil, fmt.Errorf("datasource request failed after %d attempts: %w", c.maxRetries+1, lastErr)
+}
+
 // ─────────────────────────────────────────────────────────────
 // HTTP REST Methods / HTTP REST 方法
 // ─────────────────────────────────────────────────────────────
@@ -112,18 +293,13 @@ func (c *Client) Health(ctx context.Context) (map[string]any, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	body, err := c.doHTTP(req)
 	if err != nil {
-		return nil, fmt.Errorf("do health request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, err
 	}
 
 	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return result, nil
@@ -163,25 +339,21 @@ func (c *Client) FetchData(ctx context.Context, datasourceID string, limit, offs
 }
 
 // FetchYibaoData requests mock yibao data (API 1) via HTTP REST.
-// FetchYibaoData 发送 GET /api/v1/yibao 请求，获取医保就医结算模拟高敏数据。
 func (c *Client) FetchYibaoData(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
 	return c.fetchEndpoint(ctx, "/api/v1/yibao", limit, offset)
 }
 
 // FetchKangyangData requests mock kangyang data (API 2) via HTTP REST.
-// FetchKangyangData 发送 GET /api/v1/kangyang 请求，获取康养体检与慢病档案模拟数据。
 func (c *Client) FetchKangyangData(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
 	return c.fetchEndpoint(ctx, "/api/v1/kangyang", limit, offset)
 }
 
 // FetchMockData3 requests mock data 3 (API 3) via HTTP REST.
-// FetchMockData3 发送 GET /api/v1/mock3 请求，获取预留政务数据源 3 模拟数据。
 func (c *Client) FetchMockData3(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
 	return c.fetchEndpoint(ctx, "/api/v1/mock3", limit, offset)
 }
 
 // FetchMockData4 requests mock data 4 (API 4) via HTTP REST.
-// FetchMockData4 发送 GET /api/v1/mock4 请求，获取预留企业/金融数据源 4 模拟数据。
 func (c *Client) FetchMockData4(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
 	return c.fetchEndpoint(ctx, "/api/v1/mock4", limit, offset)
 }
@@ -192,82 +364,63 @@ func (c *Client) FetchDataBySource(ctx context.Context, sourceID string, limit, 
 }
 
 // ListDataSources fetches the list of mock datasources via HTTP REST.
-// ListDataSources 发起 GET /api/datasources 请求，获取全部已注册数据源的元数据列表。
 func (c *Client) ListDataSources(ctx context.Context) (map[string]any, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/datasources", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	body, err := c.doHTTP(req)
 	if err != nil {
-		return nil, fmt.Errorf("do list datasources request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, err
 	}
 
 	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return result, nil
 }
 
 // GetDataSource fetches a single datasource by ID via HTTP REST.
-// GetDataSource 发起 GET /api/datasources/:id 请求，获取指定数据源的详细属性。
 func (c *Client) GetDataSource(ctx context.Context, id string) (map[string]any, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/datasources/"+url.PathEscape(id), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	body, err := c.doHTTP(req)
 	if err != nil {
-		return nil, fmt.Errorf("do get datasource request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, err
 	}
 
 	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return result, nil
 }
 
 // TestConnection tests datasource connectivity via HTTP REST.
-// TestConnection 发起 POST /api/datasources/:id/test 请求，测试与指定数据源的物理连通性。
 func (c *Client) TestConnection(ctx context.Context, id string) (map[string]any, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/datasources/"+url.PathEscape(id)+"/test", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/datasources/"+url.PathEscape(id)+"/test", bytes.NewReader(nil))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	body, err := c.doHTTP(req)
 	if err != nil {
-		return nil, fmt.Errorf("do test connection request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, err
 	}
 
 	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return result, nil
 }
 
 // fetchEndpoint executes an HTTP GET request with limit and offset query parameters.
-// fetchEndpoint 内部通用辅助方法：负责解析 URL、附加分页 Query 参数、执行请求并反序列化为 DataQueryResult。
 func (c *Client) fetchEndpoint(ctx context.Context, path string, limit, offset int) (*DataQueryResult, error) {
 	u, err := url.Parse(c.baseURL + path)
 	if err != nil {
@@ -287,19 +440,13 @@ func (c *Client) fetchEndpoint(ctx context.Context, path string, limit, offset i
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	bodyBytes, err := c.doHTTP(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request %s: %w", path, err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("request %s returned status %d: %s", path, resp.StatusCode, string(bodyBytes))
-	}
 
 	var result DataQueryResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return nil, fmt.Errorf("decode response from %s: %w", path, err)
 	}
 	return &result, nil
@@ -309,12 +456,6 @@ func (c *Client) fetchEndpoint(ctx context.Context, path string, limit, offset i
 // gRPC Methods / gRPC 通信方法
 // ─────────────────────────────────────────────────────────────
 
-// getGRPCClient initializes (if necessary) and returns the cached gRPC service client in a thread-safe manner.
-// getGRPCClient 方法以双重检查锁（DCL）线程安全地获取或初始化 gRPC 客户端连接：
-// 1. 先加读锁检查 grpcClient 是否已建立，若存在直接复用；
-// 2. 加写锁二次检查；
-// 3. 根据配置构造 TLS 1.3 凭证（加载 CA 证书与客户端证书）或明文凭证；
-// 4. 发起 grpc.DialContext 建立长连接并实例化 DataSourceManagerServiceClient。
 func (c *Client) getGRPCClient(ctx context.Context) (dspb.DataSourceManagerServiceClient, error) {
 	c.mu.RLock()
 	if c.grpcClient != nil {
@@ -356,16 +497,11 @@ func (c *Client) getGRPCClient(ctx context.Context) (dspb.DataSourceManagerServi
 		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
 	}
 
-	// Use a bounded timeout for the dial operation to prevent indefinite blocking
-	// when the upstream gRPC service is unreachable.
-	// 为连接操作设置有限超时，防止上游 gRPC 服务不可达时无限阻塞。
 	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dialCancel()
 
 	conn, err := grpc.DialContext(dialCtx, c.grpcAddr, dialOpt,
 		grpc.WithBlock(),
-		// Client-side keepalive: detect dead connections and maintain liveness.
-		// 客户端 keepalive：检测死连接并维持链路活跃。
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                10 * time.Second,
 			Timeout:             5 * time.Second,
@@ -381,134 +517,246 @@ func (c *Client) getGRPCClient(ctx context.Context) (dspb.DataSourceManagerServi
 	return c.grpcClient, nil
 }
 
+// wrapGRPCContext injects X-Request-ID to outgoing gRPC metadata if present.
+func (c *Client) wrapGRPCContext(ctx context.Context) context.Context {
+	if rid := pkgagent.RequestIDFromContext(ctx); rid != "" {
+		return metadata.AppendToOutgoingContext(ctx, "x-request-id", rid)
+	}
+	return ctx
+}
+
+// isRetryableGRPCCode checks whether a gRPC error is transient and retryable.
+func isRetryableGRPCCode(err error) bool {
+	if err == nil {
+		return false
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		return true // network/connection error
+	}
+	switch st.Code() {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		return true
+	default:
+		return false
+	}
+}
+
 // HealthGRPC checks datasource-mgr connectivity via gRPC.
-// HealthGRPC 通过 gRPC 调用 Health RPC 方法检测服务健康状态。
 func (c *Client) HealthGRPC(ctx context.Context) (*dspb.HealthResponse, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	return client.Health(ctx, &dspb.HealthRequest{})
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.Health(outCtx, &dspb.HealthRequest{})
+	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
+		return nil, err
+	}
+	c.recordSuccess()
+	return resp, nil
 }
 
 // FetchYibaoDataGRPC requests mock yibao data (API 1) via gRPC.
-// FetchYibaoDataGRPC 通过 gRPC 调用 GetYibaoData 获取医保结算数据。
 func (c *Client) FetchYibaoDataGRPC(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	resp, err := client.GetYibaoData(ctx, &dspb.DataQueryRequest{
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.GetYibaoData(outCtx, &dspb.DataQueryRequest{
 		Limit:  int32(limit),
 		Offset: int32(offset),
 	})
 	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
 		return nil, fmt.Errorf("grpc GetYibaoData: %w", err)
 	}
+	c.recordSuccess()
 	return protoToQueryResult(resp), nil
 }
 
 // FetchKangyangDataGRPC requests mock kangyang data (API 2) via gRPC.
-// FetchKangyangDataGRPC 通过 gRPC 调用 GetKangyangData 获取康养慢病数据。
 func (c *Client) FetchKangyangDataGRPC(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	resp, err := client.GetKangyangData(ctx, &dspb.DataQueryRequest{
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.GetKangyangData(outCtx, &dspb.DataQueryRequest{
 		Limit:  int32(limit),
 		Offset: int32(offset),
 	})
 	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
 		return nil, fmt.Errorf("grpc GetKangyangData: %w", err)
 	}
+	c.recordSuccess()
 	return protoToQueryResult(resp), nil
 }
 
 // FetchMockData3GRPC requests mock data 3 (API 3) via gRPC.
-// FetchMockData3GRPC 通过 gRPC 调用 GetMockData3 获取预留政务数据。
 func (c *Client) FetchMockData3GRPC(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	resp, err := client.GetMockData3(ctx, &dspb.DataQueryRequest{
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.GetMockData3(outCtx, &dspb.DataQueryRequest{
 		Limit:  int32(limit),
 		Offset: int32(offset),
 	})
 	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
 		return nil, fmt.Errorf("grpc GetMockData3: %w", err)
 	}
+	c.recordSuccess()
 	return protoToQueryResult(resp), nil
 }
 
 // FetchMockData4GRPC requests mock data 4 (API 4) via gRPC.
-// FetchMockData4GRPC 通过 gRPC 调用 GetMockData4 获取预留金融数据。
 func (c *Client) FetchMockData4GRPC(ctx context.Context, limit, offset int) (*DataQueryResult, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	resp, err := client.GetMockData4(ctx, &dspb.DataQueryRequest{
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.GetMockData4(outCtx, &dspb.DataQueryRequest{
 		Limit:  int32(limit),
 		Offset: int32(offset),
 	})
 	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
 		return nil, fmt.Errorf("grpc GetMockData4: %w", err)
 	}
+	c.recordSuccess()
 	return protoToQueryResult(resp), nil
 }
 
 // FetchDataBySourceGRPC requests mock data by source ID via gRPC.
-// FetchDataBySourceGRPC 通过 gRPC 调用 GetDataBySource 根据源标识动态查询抽样数据。
 func (c *Client) FetchDataBySourceGRPC(ctx context.Context, sourceID string, limit, offset int) (*DataQueryResult, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	resp, err := client.GetDataBySource(ctx, &dspb.SourceDataQueryRequest{
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.GetDataBySource(outCtx, &dspb.SourceDataQueryRequest{
 		SourceId: sourceID,
 		Limit:    int32(limit),
 		Offset:   int32(offset),
 	})
 	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
 		return nil, fmt.Errorf("grpc GetDataBySource: %w", err)
 	}
+	c.recordSuccess()
 	return protoToQueryResult(resp), nil
 }
 
 // ListMockSourcesGRPC lists mock sources via gRPC.
-// ListMockSourcesGRPC 通过 gRPC 调用 ListMockSources 获取所有模拟数据源列表。
 func (c *Client) ListMockSourcesGRPC(ctx context.Context) (*dspb.ListMockSourcesResponse, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	return client.ListMockSources(ctx, &dspb.ListMockSourcesRequest{})
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.ListMockSources(outCtx, &dspb.ListMockSourcesRequest{})
+	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
+		return nil, err
+	}
+	c.recordSuccess()
+	return resp, nil
 }
 
 // GetDataSourceGRPC gets datasource details via gRPC.
-// GetDataSourceGRPC 通过 gRPC 调用 GetDataSource 获取单数据源详情。
 func (c *Client) GetDataSourceGRPC(ctx context.Context, id string) (*dspb.DataSourceProto, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	return client.GetDataSource(ctx, &dspb.GetDataSourceRequest{Id: id})
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.GetDataSource(outCtx, &dspb.GetDataSourceRequest{Id: id})
+	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
+		return nil, err
+	}
+	c.recordSuccess()
+	return resp, nil
 }
 
 // TestConnectionGRPC tests connection via gRPC.
-// TestConnectionGRPC 通过 gRPC 调用 TestConnection 触发连通性探针。
 func (c *Client) TestConnectionGRPC(ctx context.Context, id string) (*dspb.TestConnectionResponse, error) {
-	client, err := c.getGRPCClient(ctx)
-	if err != nil {
+	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
-	return client.TestConnection(ctx, &dspb.TestConnectionRequest{Id: id})
+	client, err := c.getGRPCClient(ctx)
+	if err != nil {
+		c.recordFailure()
+		return nil, err
+	}
+	outCtx := c.wrapGRPCContext(ctx)
+	resp, err := client.TestConnection(outCtx, &dspb.TestConnectionRequest{Id: id})
+	if err != nil {
+		if isRetryableGRPCCode(err) {
+			c.recordFailure()
+		}
+		return nil, err
+	}
+	c.recordSuccess()
+	return resp, nil
 }
 
 // protoToQueryResult converts a Protobuf DataQueryResponse to a standard DataQueryResult domain model.
-// protoToQueryResult 将 gRPC Protobuf DataQueryResponse 对象转换为 Go 业务层标准实体 DataQueryResult。
 func protoToQueryResult(resp *dspb.DataQueryResponse) *DataQueryResult {
 	if resp == nil {
 		return nil

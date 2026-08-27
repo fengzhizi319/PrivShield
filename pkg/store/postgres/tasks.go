@@ -14,14 +14,15 @@ import (
 func (s *Store) Save(task *store.Task) error {
 	ctx := context.Background()
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO tasks (id, status, stage, source, operation, priority, created_at, payload_json, retry_count, retry_after, max_retries)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO tasks (id, status, stage, source, api_code, datasource_id, operation, priority, created_at, payload_json, retry_count, retry_after, max_retries)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (id) DO UPDATE SET
 			status=EXCLUDED.status, stage=EXCLUDED.stage, source=EXCLUDED.source,
+			api_code=EXCLUDED.api_code, datasource_id=EXCLUDED.datasource_id,
 			operation=EXCLUDED.operation, priority=EXCLUDED.priority,
 			payload_json=EXCLUDED.payload_json, retry_count=EXCLUDED.retry_count,
 			retry_after=EXCLUDED.retry_after, max_retries=EXCLUDED.max_retries
-	`, task.ID, task.Status, task.Stage, task.Source, task.Operation, task.Priority,
+	`, task.ID, task.Status, task.Stage, task.Source, task.APICode, task.DatasourceID, task.Operation, task.Priority,
 		task.CreatedAt, task.PayloadJSON, task.RetryCount, task.RetryAfter, task.MaxRetries)
 	return err
 }
@@ -30,7 +31,7 @@ func (s *Store) Save(task *store.Task) error {
 func (s *Store) Get(id string) (*store.Task, error) {
 	ctx := context.Background()
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, status, stage, source, operation, priority, created_at, started_at,
+		SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at,
 			completed_at, duration_ms, error, retry_count, retry_after,
 			lease_owner, lease_token, lease_expires_at, version, max_retries
 		FROM tasks WHERE id = $1
@@ -55,7 +56,7 @@ func (s *Store) List(filter store.TaskFilter) ([]store.Task, int, error) {
 	}
 
 	// Fetch rows / 查询行
-	query := `SELECT id, status, stage, source, operation, priority, created_at, started_at,
+	query := `SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at,
 		completed_at, duration_ms, error, retry_count, retry_after,
 		lease_owner, lease_token, lease_expires_at, version, max_retries
 		FROM tasks`
@@ -99,11 +100,11 @@ func (s *Store) Update(task *store.Task) error {
 	ctx := context.Background()
 	_, err := s.pool.Exec(ctx, `
 		UPDATE tasks SET
-			status=$1, stage=$2, started_at=$3, completed_at=$4,
-			duration_ms=$5, error=$6, retry_count=$7, retry_after=$8,
-			lease_owner=$9, lease_token=$10, lease_expires_at=$11, version=$12
-		WHERE id=$13
-	`, task.Status, task.Stage, task.StartedAt, task.CompletedAt,
+			status=$1, stage=$2, api_code=$3, datasource_id=$4, started_at=$5, completed_at=$6,
+			duration_ms=$7, error=$8, retry_count=$9, retry_after=$10,
+			lease_owner=$11, lease_token=$12, lease_expires_at=$13, version=$14
+		WHERE id=$15
+	`, task.Status, task.Stage, task.APICode, task.DatasourceID, task.StartedAt, task.CompletedAt,
 		task.DurationMs, task.Error, task.RetryCount, task.RetryAfter,
 		task.LeaseOwner, task.LeaseToken, task.LeaseExpiresAt, task.Version,
 		task.ID)
@@ -160,7 +161,7 @@ type rowScanner interface {
 func scanTask(row rowScanner) (*store.Task, error) {
 	var t store.Task
 	if err := row.Scan(
-		&t.ID, &t.Status, &t.Stage, &t.Source, &t.Operation, &t.Priority,
+		&t.ID, &t.Status, &t.Stage, &t.Source, &t.APICode, &t.DatasourceID, &t.Operation, &t.Priority,
 		&t.CreatedAt, &t.StartedAt, &t.CompletedAt, &t.DurationMs, &t.Error,
 		&t.RetryCount, &t.RetryAfter,
 		&t.LeaseOwner, &t.LeaseToken, &t.LeaseExpiresAt, &t.Version, &t.MaxRetries,

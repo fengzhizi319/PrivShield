@@ -24,6 +24,41 @@ MODEL_PATH="${PRIVACY_LLM_MODEL_PATH:-.models/Qwen3.5-0.8B-Privacy-Classifier-Sm
 SERVED_NAME="${PRIVACY_LLM_MODEL_NAME:-Qwen3.5-0.8B-Privacy-Classifier-Smoother}"
 GPU_UTIL="${PRIVACY_VLLM_GPU_MEMORY_UTILIZATION:-0.90}"
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  --host HOST         监听地址 (默认: 127.0.0.1 或 PRIVACY_LLM_API_HOST)"
+            echo "  --port PORT         监听端口 (默认: 8000 或 PRIVACY_LLM_API_PORT)"
+            echo "  --model PATH        模型权重路径或 HuggingFace ID"
+            echo "  --gpu-util UTIL     GPU 显存占用比例 (默认: 0.90)"
+            echo "  -h, --help          显示帮助信息并退出"
+            exit 0
+            ;;
+        --host)
+            HOST="$2"
+            shift 2
+            ;;
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        --model)
+            MODEL_PATH="$2"
+            shift 2
+            ;;
+        --gpu-util)
+            GPU_UTIL="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 # 若模型目录不存在，退而使用备选模型名
 if [ ! -d "$MODEL_PATH" ]; then
     echo "⚠️  未在 $MODEL_PATH 找到本地权重文件"

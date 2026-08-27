@@ -201,7 +201,7 @@ helm upgrade --install "$RELEASE_NAME" "$CHART_DIR" \
 
 # ── 步骤 8b：可选 — 部署 Phase B PostgreSQL 资源 ─────────────────────
 if [[ "$WITH_POSTGRES" == "true" ]]; then
-    PG_DIR="$PROJECT_ROOT/deploy/k8s/service-hub/postgres"
+    PG_DIR="$PROJECT_ROOT/services/service-hub/deploy/k8s/postgres"
     echo ""
     echo "🐘 部署 Phase B PostgreSQL 资源..."
     kubectl apply -k "$PG_DIR" -n "$NAMESPACE"

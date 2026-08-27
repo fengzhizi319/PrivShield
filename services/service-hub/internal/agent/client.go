@@ -13,6 +13,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
@@ -36,6 +37,16 @@ func New(cfg *config.Config) *Client {
 		APIKey:   cfg.AgentAPIKey,
 	})
 	return &Client{Client: shared}
+}
+
+// ContextWithRequestID wraps pkgagent.ContextWithRequestID.
+func ContextWithRequestID(ctx context.Context, requestID string) context.Context {
+	return pkgagent.ContextWithRequestID(ctx, requestID)
+}
+
+// ContextWithIdempotencyKey wraps pkgagent.ContextWithIdempotencyKey.
+func ContextWithIdempotencyKey(ctx context.Context, key string) context.Context {
+	return pkgagent.ContextWithIdempotencyKey(ctx, key)
 }
 
 // Classify sends data to the dynamic classification endpoint.
@@ -91,22 +102,28 @@ type MedicalProcessResult struct {
 	Summary              map[string]any   `json:"summary"`
 }
 
-// ProcessMedical sends records to the engine's medical pipeline endpoint.
-// ProcessMedical 将批量记录发送至 engine /v1/medical/process 专业医疗流水线，
-// 一次 HTTP 调用同时完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 +
-// ICD-10 编码脱敏 + 诊断残留清除，替代原先 classify + desensitize 两步分离调用。
-//
-// Agent 端点规范：
-// - URL: POST /v1/medical/process
-// - 请求结构: {"records": [{...}, {...}, ...]}
-// - 响应结构: {"classification_report": [...], "sanitized_data": [...], "summary": {...}}
+// ProcessMedical 将批量记录发送至 engine 处理流水线（兼容别名）。
 func (c *Client) ProcessMedical(ctx context.Context, records []map[string]any) (*MedicalProcessResult, error) {
+	return c.ProcessAgent(ctx, records)
+}
+
+// ProcessAgent 将批量记录发送至 engine /v1/agent/process 通用处理流水线，
+// 一次 HTTP 调用同时完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 +
+// 诊断残留清除，替代原先 classify + desensitize 两步分离调用。
+// 当上游返回 404 时自动回退至兼容别名 /v1/medical/process。
+func (c *Client) ProcessAgent(ctx context.Context, records []map[string]any) (*MedicalProcessResult, error) {
 	payload := map[string]any{
 		"records": records,
 	}
-	result, err := c.Post(ctx, "/v1/medical/process", payload)
+	result, err := c.Post(ctx, "/v1/agent/process", payload)
 	if err != nil {
-		return nil, err
+		// If 404, fallback to legacy /v1/medical/process
+		if strings.Contains(err.Error(), "404") {
+			result, err = c.Post(ctx, "/v1/medical/process", payload)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 将通用 map 解析为结构化结果

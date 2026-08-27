@@ -3,7 +3,7 @@
  *
  * 功能概述：
  *  1. 展示 4 个预设数据 API 卡片（医保/康养/预留×2），支持点击“申请”触发全链路会话
- *  2. 6 阶段流水线可视化：Ingest → Fetch → Classify → Desensitize → Return → Audit
+ *  2. 5 阶段流水线可视化：Ingest → Fetch → Classify & Desensitize → Return → Audit
  *  3. 会话结果展示：状态指示 + 各阶段耗时 + 原始数据 vs 脱敏数据对比
  *  4. 手风琴式数据对比视图（DataAccordionView）：支持逐行展开查看字段级脱敏详情
  *
@@ -112,21 +112,23 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
         </div>
       </div>
 
-      {/* Session Flow Diagram — 6-Stage Pipeline */}
+      {/* Session Flow Diagram — 5-Stage Pipeline */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
         <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
-          {t('dataApi.flowTitle')} — 6 阶段流水线
+          {t('dataApi.flowTitle')} — 5 阶段流水线
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           {[
             { key: 'ingest', label: '1. Ingest\n任务接收校验', icon: '📥', color: 'indigo' },
             { key: 'fetch', label: '2. Fetch\n数据源切片抽取', icon: '📊', color: 'amber' },
-            { key: 'classify', label: '3. Classify\n三层漏斗评级', icon: '🔍', color: 'rose' },
-            { key: 'desensitize', label: '4. Desensitize\n隐私脱敏治理', icon: '🔒', color: 'emerald' },
-            { key: 'return', label: '5. Return\n合规结果装配', icon: '📦', color: 'cyan' },
-            { key: 'audit', label: '6. Audit\n不可篡改存证', icon: '📝', color: 'purple' },
+            { key: 'classify_desensitize', label: '3. Classify & Desensitize\n漏斗评级与脱敏治理', icon: '🔒', color: 'emerald' },
+            { key: 'return', label: '4. Return\n合规结果装配', icon: '📦', color: 'cyan' },
+            { key: 'audit', label: '5. Audit\n不可篡改存证', icon: '📝', color: 'purple' },
           ].map((step, idx) => {
-            const stageData = session?.stages.find(s => s.name === step.key);
+            const stageData = session?.stages.find(s =>
+              s.name === step.key ||
+              (step.key === 'classify_desensitize' && (s.name === 'classify_desensitize' || s.name === 'classify' || s.name === 'desensitize' || s.name === 'process'))
+            );
             const isActive = stageData?.status === 'success';
             const isError = stageData?.status === 'error';
             return (
@@ -150,7 +152,7 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
                     </div>
                   )}
                 </div>
-                {idx < 5 && (
+                {idx < 4 && (
                   <span className="text-slate-600 text-xs font-bold shrink-0">›</span>
                 )}
               </div>
@@ -296,7 +298,7 @@ export const DataApiPanel: React.FC<DataApiPanelProps> = ({
             </div>
 
             {/* Stage Timeline */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2">
               {session.stages.map((stage) => (
                 <div key={stage.name} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
                   <div className="flex items-center gap-2 mb-1.5">

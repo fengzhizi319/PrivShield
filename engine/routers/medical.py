@@ -52,4 +52,22 @@ def process_medical(req: MedicalProcessRequest, response: Response) -> dict[str,
     response.headers["Sunset"] = "Thu, 31 Dec 2026 23:59:59 GMT"
     response.headers["Link"] = '</v1/agent/process>; rel="successor-version"'
     response.headers["X-PrivShield-Canonical-Path"] = "/v1/agent/process"
-    return service.process_medical_data(req.records)
+
+    result = service.process_medical_data(req.records)
+
+    import hashlib
+    import json
+
+    raw_bytes = json.dumps(req.records, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    input_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+    sanitized = result.get("sanitized_data", [])
+    sanitized_bytes = json.dumps(sanitized, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    output_hash = hashlib.sha256(sanitized_bytes).hexdigest()
+
+    summary = dict(result.get("summary", {}))
+    summary["input_hash"] = input_hash
+    summary["output_hash"] = output_hash
+    result["summary"] = summary
+
+    return result

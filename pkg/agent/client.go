@@ -58,6 +58,33 @@ func ContextWithRequestID(ctx context.Context, requestID string) context.Context
 	return context.WithValue(ctx, requestIDKey, requestID)
 }
 
+// RequestIDFromContext extracts request ID from context if present.
+func RequestIDFromContext(ctx context.Context) string {
+	if rid, ok := ctx.Value(requestIDKey).(string); ok {
+		return rid
+	}
+	return ""
+}
+
+// idempotencyKeyType is the context key for propagating X-Idempotency-Key.
+type idempotencyKeyType struct{}
+
+var idempotencyKey idempotencyKeyType
+
+// ContextWithIdempotencyKey returns a copy of ctx carrying the given idempotency key.
+// Downstream calls automatically inject this value as X-Idempotency-Key header.
+func ContextWithIdempotencyKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, idempotencyKey, key)
+}
+
+// IdempotencyKeyFromContext extracts idempotency key from context if present.
+func IdempotencyKeyFromContext(ctx context.Context) string {
+	if ik, ok := ctx.Value(idempotencyKey).(string); ok {
+		return ik
+	}
+	return ""
+}
+
 const (
 	CircuitClosed   CircuitState = iota // Normal operation / 正常运行
 	CircuitOpen                         // Tripped, rejecting calls / 熔断中，拒绝调用
@@ -244,6 +271,16 @@ func (c *Client) PostWithRequestID(ctx context.Context, path string, payload any
 func (c *Client) setHeaders(req *http.Request) {
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	if req.Header.Get("X-Request-ID") == "" {
+		if rid := RequestIDFromContext(req.Context()); rid != "" {
+			req.Header.Set("X-Request-ID", rid)
+		}
+	}
+	if req.Header.Get("X-Idempotency-Key") == "" {
+		if ik := IdempotencyKeyFromContext(req.Context()); ik != "" {
+			req.Header.Set("X-Idempotency-Key", ik)
+		}
 	}
 }
 

@@ -1492,7 +1492,7 @@ func (s *Server) MedicalPipeline(c *gin.Context) {
 	start := time.Now()
 	proxyReq := models.ProxyRequest{
 		Method: "POST",
-		Path:   "/v1/medical/process",
+		Path:   "/v1/agent/process",
 	}
 	reqBytes, _ := json.Marshal(map[string]any{"records": records})
 	proxyReq.Body = reqBytes
@@ -1522,7 +1522,7 @@ func (s *Server) YibaoPipeline(c *gin.Context) {
 	start := time.Now()
 	proxyReq := models.ProxyRequest{
 		Method: "POST",
-		Path:   "/v1/medical/process",
+		Path:   "/v1/agent/process",
 	}
 	reqBytes, _ := json.Marshal(map[string]any{"records": records})
 	proxyReq.Body = reqBytes

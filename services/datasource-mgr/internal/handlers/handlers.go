@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
@@ -25,29 +26,41 @@ import (
 // moduleVia 是响应体中的服务标识常量，用于全链路追踪定位请求处理节点。
 const moduleVia = "datasource-mgr"
 
-// setDeprecationHeaders 注入专用端点的弃用响应头（api_rename_design.md §7.1）。
-func setDeprecationHeaders(c *gin.Context, canonicalID string) {
+// setDeprecationHeaders 注入专用端点的弃用响应头（api_rename_design.md §7.1），
+// 并上报一次别名流量（§7.2 privshield_api_alias_requests_total，下线门槛 §7.3 的依据）。
+// 标签只取路由模板 c.FullPath()（有界），绝不取原始 URL（无界基数）。
+func (s *Server) setDeprecationHeaders(c *gin.Context, canonicalID string) {
 	c.Header("Deprecation", "true")
 	c.Header("Sunset", "Mon, 01 Feb 2027 00:00:00 GMT")
 	canonicalPath := fmt.Sprintf("/api/datasources/%s/records", canonicalID)
 	c.Header("Link", fmt.Sprintf("<%s>; rel=\"successor-version\"", canonicalPath))
 	c.Header("X-PrivShield-Canonical-Path", canonicalPath)
 	c.Header("X-PrivShield-Canonical-Source", canonicalID)
+
+	if s.mc != nil {
+		alias := c.FullPath()
+		if alias == "" {
+			alias = "legacy-endpoint"
+		}
+		s.mc.RecordAPIAlias(alias, canonicalID, naming.TargetPath)
+	}
 }
 
 // Server aggregates HTTP handler dependencies.
-// Server 结构体聚合了 HTTP 处理器层所需的运行配置和结构化日志组件。
+// Server 结构体聚合了 HTTP 处理器层所需的运行配置、结构化日志与监控指标组件。
 type Server struct {
-	cfg    *config.Config // 全局运行配置
-	logger *slog.Logger   // 结构化日志记录器
+	cfg    *config.Config      // 全局运行配置
+	logger *slog.Logger        // 结构化日志记录器
+	mc     *metrics.Collector  // Prometheus 指标收集器（可为 nil，测试场景）
 }
 
 // New creates a new Server instance.
-// New 创建并返回一个新的 Server 实例。
-func New(cfg *config.Config, logger *slog.Logger) *Server {
+// New 创建并返回一个新的 Server 实例；mc 可为 nil（不上报指标）。
+func New(cfg *config.Config, logger *slog.Logger, mc *metrics.Collector) *Server {
 	return &Server{
 		cfg:    cfg,
 		logger: logger,
+		mc:     mc,
 	}
 }
 
@@ -78,6 +91,11 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/health", s.Health)       // Liveness probe / 存活探针
 	r.GET("/readyz", s.Readyz)       // Readiness probe / 就绪探针
 	r.GET("/api/health", s.Health)   // Alias for backward compat / 向后兼容别名
+
+	// Prometheus 指标端点（§7.2）：mc 为 nil（单测）时不注册。
+	if s.mc != nil {
+		r.GET("/metrics", s.mc.Handler())
+	}
 
 	// API 1, 2, 3, 4: 专用模拟数据源访问端点
 	r.GET("/api/v1/yibao", s.GetYibaoData)         // API 1: 医保就医与结算
@@ -147,7 +165,7 @@ func (s *Server) Readyz(c *gin.Context) {
 // GetYibaoData implements API 1: queries mock healthcare and settlement records.
 // GetYibaoData 处理 API 1 请求：分页读取并返回医保就医与结算模拟数据（yibao.csv）。
 func (s *Server) GetYibaoData(c *gin.Context) {
-	setDeprecationHeaders(c, naming.DSYibao)
+	s.setDeprecationHeaders(c, naming.DSYibao)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetYibaoRecords(limit, offset)
 	if err != nil {
@@ -169,7 +187,7 @@ func (s *Server) GetYibaoData(c *gin.Context) {
 // GetKangyangData implements API 2: queries mock elderly care and chronic disease records.
 // GetKangyangData 处理 API 2 请求：分页读取并返回康养体检与慢病管理模拟数据（kangyang.csv）。
 func (s *Server) GetKangyangData(c *gin.Context) {
-	setDeprecationHeaders(c, naming.DSKangyang)
+	s.setDeprecationHeaders(c, naming.DSKangyang)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetKangyangRecords(limit, offset)
 	if err != nil {
@@ -191,7 +209,7 @@ func (s *Server) GetKangyangData(c *gin.Context) {
 // GetMock3Data implements API 3: queries reserved municipal dataset 3.
 // GetMock3Data 处理 API 3 请求：分页读取并返回预留政务模拟数据源 3 的记录。
 func (s *Server) GetMock3Data(c *gin.Context) {
-	setDeprecationHeaders(c, naming.DSMock3)
+	s.setDeprecationHeaders(c, naming.DSMock3)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock3Records(limit, offset)
 	if err != nil {
@@ -213,7 +231,7 @@ func (s *Server) GetMock3Data(c *gin.Context) {
 // GetMock4Data implements API 4: queries reserved municipal dataset 4.
 // GetMock4Data 处理 API 4 请求：分页读取并返回预留政务模拟数据源 4 的记录。
 func (s *Server) GetMock4Data(c *gin.Context) {
-	setDeprecationHeaders(c, naming.DSMock4)
+	s.setDeprecationHeaders(c, naming.DSMock4)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock4Records(limit, offset)
 	if err != nil {
@@ -255,22 +273,39 @@ func (s *Server) GetDataSource(c *gin.Context) {
 	c.JSON(http.StatusOK, ds)
 }
 
+// unknownDatasourceLabel 用于无法归一化的入站 ID，避免把调用方可控的原始值写入指标标签。
+const unknownDatasourceLabel = "unknown"
+
+// recordDatasourceRequest 上报单数据源请求分布（§7.2）；mc 为 nil 时空操作。
+// 标签仅取 canonical 值，未知入站值一律归入 "unknown"（低基数）。
+func (s *Server) recordDatasourceRequest(datasourceID, status string) {
+	if s.mc == nil {
+		return
+	}
+	if _, ok := naming.EntryByDataSourceID(datasourceID); !ok {
+		datasourceID = unknownDatasourceLabel
+	}
+	s.mc.RecordDatasourceRequest(datasourceID, naming.APICodeForDataSource(datasourceID), status)
+}
+
 // GetDataSourceRecords returns records for a given datasource ID with pagination.
 // GetDataSourceRecords 根据 URL 路径参数 :id 动态路由并分页查询对应数据源的数据记录。
 func (s *Server) GetDataSourceRecords(c *gin.Context) {
 	id := c.Param("id")
 	limit, offset := parsePagination(c, 20, 500)
 
-	records, total, sourceName, err := GetDataBySource(id, limit, offset)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
-		return
-	}
-
 	canonID, _ := naming.NormalizeDataSourceID(id)
 	if canonID == "" {
 		canonID = id
 	}
+
+	records, total, sourceName, err := GetDataBySource(id, limit, offset)
+	if err != nil {
+		s.recordDatasourceRequest(canonID, "error")
+		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		return
+	}
+	s.recordDatasourceRequest(canonID, "success")
 
 	c.JSON(http.StatusOK, gin.H{
 		"datasource_id": canonID,
