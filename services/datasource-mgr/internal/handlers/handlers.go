@@ -83,7 +83,8 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.StructuredLogger(s.logger, "datasource-mgr"))
 	r.Use(middleware.Recovery(s.logger, "datasource-mgr"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB max payload protection
+	r.Use(middleware.MaxBodySize(32 << 20))   // 32 MiB max payload protection
+	r.Use(middleware.MaxConcurrent(1000))      // 并发在途请求上限，超限返回 503
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 

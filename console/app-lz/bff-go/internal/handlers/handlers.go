@@ -76,9 +76,12 @@ func NewHandler(cfg *config.Config, pool *clients.ClientPool, runner *runner.Tes
 func SetupRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode) // 生产模式，关闭 Gin 调试日志
 	r := gin.New()
-	r.Use(gin.Recovery())              // 全局 panic 恢复中间件
-	r.Use(middleware.TraceMiddleware()) // 分布式追踪 ID 自动注入与双头下发
-	r.Use(corsMiddleware())            // 全局 CORS 中间件
+	r.Use(gin.Recovery())                        // 全局 panic 恢复中间件
+	r.Use(middleware.TraceMiddleware())           // 分布式追踪 ID 自动注入与双头下发
+	r.Use(middleware.SecurityHeaders())           // 安全响应头 (CSP/HSTS/X-Frame-Options)
+	r.Use(middleware.MaxBodySize(32 << 20))       // 32 MiB 请求体最大保护
+	r.Use(middleware.MaxConcurrent(1000))         // 并发在途请求上限，超限返回 503
+	r.Use(corsMiddleware())                       // 全局 CORS 中间件
 
 	// ── 健康检查（两个路径均支持，兼容不同探测配置）──
 	r.GET("/api/health", h.HealthCheck)

@@ -189,14 +189,16 @@ func (s *Server) persistTask(task *store.Task, transition string) error {
 // 3. Recovery: 拦截 Handler Panic 并返回 500 JSON
 // 4. SecurityHeaders: 注入 CSP、HSTS、X-Content-Type-Options 等安全防护头
 // 5. MaxBodySize: 限制请求体最大 32 MiB，防御超大 Body 内存溢出
-// 6. CORS: 跨域来源校验与预检放行
-// 7. Auth: 基于 Authorization Bearer 的 API Key 鉴权校验
+// 6. MaxConcurrent: 限制在途请求并发上限（1000），超限返回 503
+// 7. CORS: 跨域来源校验与预检放行
+// 8. Auth: 基于 Authorization Bearer 的 API Key 鉴权校验
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
 	r.Use(middleware.Recovery(s.logger, "service-hub"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB 请求体最大保护
+	r.Use(middleware.MaxBodySize(32 << 20))   // 32 MiB 请求体最大保护
+	r.Use(middleware.MaxConcurrent(1000))      // 并发在途请求上限，超限返回 503
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
