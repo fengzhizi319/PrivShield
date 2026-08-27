@@ -700,9 +700,7 @@ func (s *Server) Batch(c *gin.Context) {
 	// P41 fix: 限制批量请求数量上限为 100，防止单次提交数千请求导致长时间占用连接（DoS 防护）
 	const maxBatchSize = 100
 	if len(req.Requests) > maxBatchSize {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("batch too large: %d requests (max %d)", len(req.Requests), maxBatchSize),
-		})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("batch too large: %d requests (max %d)", len(req.Requests), maxBatchSize), nil)
 		return
 	}
 
@@ -815,10 +813,7 @@ func (s *Server) Upload(c *gin.Context) {
 
 	// 上传大小限制：超限返回 413，避免大文件耗尽内存（DoS 防护）。
 	if s.cfg.MaxUploadBytes > 0 && header.Size > s.cfg.MaxUploadBytes {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-			"detail": fmt.Sprintf("文件过大（%d 字节），上限 %d 字节", header.Size, s.cfg.MaxUploadBytes),
-			"status": http.StatusRequestEntityTooLarge,
-		})
+		middleware.AbortWithError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", fmt.Sprintf("文件过大（%d 字节），上限 %d 字节", header.Size, s.cfg.MaxUploadBytes), nil)
 		return
 	}
 
@@ -845,10 +840,7 @@ func (s *Server) Upload(c *gin.Context) {
 	}
 	if int64(len(content)) > maxReadSize {
 		// 文件实际大小超过限制
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-			"detail": fmt.Sprintf("文件实际大小超过上限 %d 字节", maxReadSize),
-			"status": http.StatusRequestEntityTooLarge,
-		})
+		middleware.AbortWithError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", fmt.Sprintf("文件实际大小超过上限 %d 字节", maxReadSize), nil)
 		return
 	}
 

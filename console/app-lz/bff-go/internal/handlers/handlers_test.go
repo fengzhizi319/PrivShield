@@ -275,3 +275,43 @@ func TestInvokeDataApiContractAndFailClosed(t *testing.T) {
 		t.Errorf("expected 400 for mismatched api/datasource, got %d", w4.Code)
 	}
 }
+
+// TestTraceMiddlewareRegistered 验证 TraceMiddleware 已注册到路由中。
+// 期望：响应头包含 X-Request-ID 和 X-Trace-ID。
+func TestTraceMiddlewareRegistered(t *testing.T) {
+	h := setupTestRouter()
+	router := SetupRouter(h)
+
+	// 1. 无请求头时自动生成 trace ID
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/health", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	reqID := w.Header().Get("X-Request-ID")
+	traceID := w.Header().Get("X-Trace-ID")
+	if reqID == "" {
+		t.Error("expected X-Request-ID header to be set by TraceMiddleware")
+	}
+	if traceID == "" {
+		t.Error("expected X-Trace-ID header to be set by TraceMiddleware")
+	}
+	if reqID != traceID {
+		t.Errorf("expected X-Request-ID == X-Trace-ID, got %q != %q", reqID, traceID)
+	}
+
+	// 2. 上游传入 X-Request-ID 时应透传
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodGet, "/api/health", nil)
+	req2.Header.Set("X-Request-ID", "req-test-upstream-123")
+	router.ServeHTTP(w2, req2)
+
+	if got := w2.Header().Get("X-Request-ID"); got != "req-test-upstream-123" {
+		t.Errorf("expected X-Request-ID passthrough, got %q", got)
+	}
+	if got := w2.Header().Get("X-Trace-ID"); got != "req-test-upstream-123" {
+		t.Errorf("expected X-Trace-ID passthrough, got %q", got)
+	}
+}
