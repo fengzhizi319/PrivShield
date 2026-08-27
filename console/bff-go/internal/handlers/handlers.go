@@ -221,7 +221,7 @@ func (s *Server) registerStatic(r *gin.Engine) {
 		// 判断请求路径是否以 /api/ 开头
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			// API 路由未匹配，返回标准 404 JSON 响应
-			c.JSON(http.StatusNotFound, gin.H{"detail": "Not Found", "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", "Not Found", nil)
 			return
 		}
 		// 非 API 路由：设置 no-cache 响应头，防止浏览器缓存 index.html。
@@ -352,7 +352,7 @@ func (s *Server) Samples(c *gin.Context) {
 func (s *Server) Proxy(c *gin.Context) {
 	var req models.ProxyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 
@@ -378,7 +378,7 @@ func (s *Server) Proxy(c *gin.Context) {
 		if isUnavailable(err) {
 			status = http.StatusBadGateway
 		}
-		c.JSON(status, gin.H{"detail": err.Error(), "status": status})
+		middleware.AbortWithError(c, status, middleware.ErrorCodeFromStatus(status), err.Error(), nil)
 		return
 	}
 
@@ -656,7 +656,7 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
-		c.JSON(statusCode, gin.H{"detail": err.Error(), "status": statusCode})
+		middleware.AbortWithError(c, statusCode, middleware.ErrorCodeFromStatus(statusCode), err.Error(), nil)
 		return
 	}
 
@@ -693,7 +693,7 @@ func (s *Server) Batch(c *gin.Context) {
 	var req models.BatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 请求体格式不合法时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 
@@ -807,7 +807,7 @@ func (s *Server) Upload(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		// 缺少文件或读取失败时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("缺少文件: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("缺少文件: %v", err), nil)
 		return
 	}
 	// 注册 defer：函数退出时自动关闭文件句柄，释放资源
@@ -840,7 +840,7 @@ func (s *Server) Upload(c *gin.Context) {
 	content, err := io.ReadAll(io.LimitReader(file, maxReadSize+1))
 	if err != nil {
 		// 文件读取失败时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("读取文件失败: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("读取文件失败: %v", err), nil)
 		return
 	}
 	if int64(len(content)) > maxReadSize {
@@ -865,12 +865,12 @@ func (s *Server) Upload(c *gin.Context) {
 		records, _, err = fileparse.ParseJSON(content)
 	default:
 		// 不支持的文件格式时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "仅支持 .csv 与 .json 文件", "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "仅支持 .csv 与 .json 文件", nil)
 		return
 	}
 	if err != nil {
 		// 文件解析失败（如格式不合法）时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error(), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 
@@ -878,7 +878,7 @@ func (s *Server) Upload(c *gin.Context) {
 	var options map[string]any
 	if err := json.Unmarshal([]byte(params), &options); err != nil {
 		// params 不是合法 JSON 时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("params 需为合法 JSON: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("params 需为合法 JSON: %v", err), nil)
 		return
 	}
 
@@ -921,7 +921,7 @@ func (s *Server) Upload(c *gin.Context) {
 		qiCols := stringSlice(options, "qi_cols")
 		if len(qiCols) == 0 {
 			// 缺少 qi_cols 参数时返回 400 错误
-			c.JSON(http.StatusBadRequest, gin.H{"detail": "k_anonymize 操作需提供 qi_cols 参数", "status": http.StatusBadRequest})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "k_anonymize 操作需提供 qi_cols 参数", nil)
 			return
 		}
 		// 调用 KAnonymizeDataFrame gRPC 方法
@@ -942,10 +942,7 @@ func (s *Server) Upload(c *gin.Context) {
 
 	default:
 		// 不支持的操作类型时返回 400 错误，并列出可选操作
-		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("不支持的操作 '%s'，可选: k_anonymize, mask_dataframe", operation),
-			"status": http.StatusBadRequest,
-		})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("不支持的操作 '%s'，可选: k_anonymize, mask_dataframe", operation), nil)
 		return
 	}
 
@@ -980,19 +977,19 @@ func (s *Server) LbTest(c *gin.Context) {
 	var req models.LbTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 请求体格式不合法时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 	// SSRF 防护：逐个校验探测目标 URL 的 scheme / host 白名单。
 	if err := lbtest.ValidateBackends(req.Backends, splitHosts(s.cfg.LBAllowedHosts)); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error(), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 	// 调用 lbtest 模块执行负载均衡测试，第三个参数为可选的自定义 HTTP 客户端（nil 使用默认）
 	resp, err := lbtest.Run(c.Request.Context(), req, nil)
 	if err != nil {
 		// 测试执行失败时返回 400 错误，包含具体错误信息
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error(), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 	// 返回测试结果 JSON
@@ -1028,7 +1025,7 @@ func (s *Server) writeUpstreamError(c *gin.Context, err error) {
 		status = http.StatusBadGateway
 	}
 	// 返回 JSON 格式的错误响应，包含错误详情与状态码
-	c.JSON(status, gin.H{"detail": err.Error(), "status": status})
+	middleware.AbortWithError(c, status, middleware.ErrorCodeFromStatus(status), err.Error(), nil)
 }
 
 // toRecordEntries 将 Go map 数组转换为 gRPC RecordEntry 列表。
@@ -1239,7 +1236,7 @@ func securityMiddleware(apiKey string, rateLimit int) (gin.HandlerFunc, func()) 
 		if apiKey != "" {
 			token := extractBearer(c.GetHeader("Authorization"))
 			if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"detail": "Unauthorized: invalid console api key"})
+				middleware.AbortWithError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Unauthorized: invalid console api key", nil)
 				return
 			}
 		}
@@ -1260,7 +1257,7 @@ func securityMiddleware(apiKey string, rateLimit int) (gin.HandlerFunc, func()) 
 			if len(kept) >= rateLimit {
 				hits[ip] = kept
 				mu.Unlock()
-				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"detail": "Too many requests"})
+				middleware.AbortWithError(c, http.StatusTooManyRequests, "RATE_LIMITED", "Too many requests", nil)
 				return
 			}
 			hits[ip] = append(kept, now)
@@ -1284,7 +1281,7 @@ func extractBearer(header string) string {
 func (s *Server) ConcurrencyTest(c *gin.Context) {
 	var req models.ConcurrencyTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 	if req.Path == "" {
@@ -1293,10 +1290,7 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 	// P37 fix: validate path against allowlist to prevent SSRF via pressure test endpoint
 	// 校验压测路径白名单，防止通过压测端点访问敏感内部接口
 	if !isAllowedConcurrencyPath(req.Path) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("path %q not allowed for concurrency test; allowed prefixes: /v1/privacy/, /v1/dynclassification/, /v1/medical/, /v1/pipeline/, /health", req.Path),
-			"status": http.StatusBadRequest,
-		})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("path %q not allowed for concurrency test; allowed prefixes: /v1/privacy/, /v1/dynclassification/, /v1/medical/, /v1/pipeline/, /health", req.Path), nil)
 		return
 	}
 	if req.Method == "" {
@@ -1483,7 +1477,7 @@ func (s *Server) MedicalPipeline(c *gin.Context) {
 		loaded, err := s.loadSampleRecords("kangyang.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
-			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
 		}
 		records = loaded
@@ -1513,7 +1507,7 @@ func (s *Server) YibaoPipeline(c *gin.Context) {
 		loaded, err := s.loadSampleRecords("yibao.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
-			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
 		}
 		records = loaded
@@ -1545,7 +1539,7 @@ func (s *Server) PipelineProcess(c *gin.Context) {
 		loaded, err := s.loadSampleRecords("kangyang.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
-			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
 		}
 		records = loaded

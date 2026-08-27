@@ -169,7 +169,7 @@ func (s *Server) GetYibaoData(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetYibaoRecords(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -191,7 +191,7 @@ func (s *Server) GetKangyangData(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetKangyangRecords(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -213,7 +213,7 @@ func (s *Server) GetMock3Data(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock3Records(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -235,7 +235,7 @@ func (s *Server) GetMock4Data(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock4Records(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -267,7 +267,7 @@ func (s *Server) GetDataSource(c *gin.Context) {
 	id := c.Param("id")
 	ds, err := GetMockDataSource(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, ds)
@@ -302,7 +302,7 @@ func (s *Server) GetDataSourceRecords(c *gin.Context) {
 	records, total, sourceName, err := GetDataBySource(id, limit, offset)
 	if err != nil {
 		s.recordDatasourceRequest(canonID, "error")
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	s.recordDatasourceRequest(canonID, "success")
@@ -325,7 +325,7 @@ func (s *Server) TestConnection(c *gin.Context) {
 	id := c.Param("id")
 	_, err := GetMockDataSource(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.ConnectionTestResult{
@@ -342,7 +342,7 @@ func (s *Server) GetMetadata(c *gin.Context) {
 	id := c.Param("id")
 	meta, err := GetMetadata(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, meta)

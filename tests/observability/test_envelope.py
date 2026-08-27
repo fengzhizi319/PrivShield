@@ -247,3 +247,39 @@ class TestObservabilityMiddlewareEnvelope:
         # Headers should be set
         assert resp.headers.get("x-request-id", "") != ""
         assert resp.headers.get("x-trace-id", "") != ""
+
+
+class TestGrpcTraceMetadataExtraction:
+    """Verify gRPC metadata extraction supports both x-request-id and x-trace-id."""
+
+    def test_extracts_x_request_id(self):
+        from engine.observability.middleware import _get_request_id_from_metadata
+
+        ctx = MagicMock()
+        ctx.invocation_metadata.return_value = [("x-request-id", "test-rid-123")]
+        assert _get_request_id_from_metadata(ctx) == "test-rid-123"
+
+    def test_falls_back_to_x_trace_id(self):
+        from engine.observability.middleware import _get_request_id_from_metadata
+
+        ctx = MagicMock()
+        ctx.invocation_metadata.return_value = [("x-trace-id", "test-tid-456")]
+        assert _get_request_id_from_metadata(ctx) == "test-tid-456"
+
+    def test_prefers_x_request_id_over_x_trace_id(self):
+        from engine.observability.middleware import _get_request_id_from_metadata
+
+        ctx = MagicMock()
+        ctx.invocation_metadata.return_value = [
+            ("x-request-id", "primary"),
+            ("x-trace-id", "secondary"),
+        ]
+        assert _get_request_id_from_metadata(ctx) == "primary"
+
+    def test_generates_id_when_missing(self):
+        from engine.observability.middleware import _get_request_id_from_metadata
+
+        ctx = MagicMock()
+        ctx.invocation_metadata.return_value = []
+        result = _get_request_id_from_metadata(ctx)
+        assert result != "", "should generate a fallback ID when metadata is empty"

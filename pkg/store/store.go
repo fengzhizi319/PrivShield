@@ -33,6 +33,7 @@ type Task struct {
 	PayloadJSON  string     `json:"-"`                     // Raw payload (not exposed in JSON)
 	RetryCount   int        `json:"retry_count"`           // Number of retry attempts (replaces fragile string matching)
 	RetryAfter   *time.Time `json:"retry_after,omitempty"` // Earliest time for next retry (backoff delay)
+	TraceID      string     `json:"trace_id,omitempty"`    // Distributed trace ID for end-to-end correlation
 
 	// ── Phase B: Lease fields for multi-replica Hub / 多副本 Hub 租约字段 ──
 	LeaseOwner     string     `json:"lease_owner,omitempty"`      // Hub instance that owns the current lease

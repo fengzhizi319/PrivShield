@@ -14,16 +14,17 @@ import (
 func (s *Store) Save(task *store.Task) error {
 	ctx := context.Background()
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO tasks (id, status, stage, source, api_code, datasource_id, operation, priority, created_at, payload_json, retry_count, retry_after, max_retries)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		INSERT INTO tasks (id, status, stage, source, api_code, datasource_id, operation, priority, created_at, payload_json, retry_count, retry_after, max_retries, trace_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (id) DO UPDATE SET
 			status=EXCLUDED.status, stage=EXCLUDED.stage, source=EXCLUDED.source,
 			api_code=EXCLUDED.api_code, datasource_id=EXCLUDED.datasource_id,
 			operation=EXCLUDED.operation, priority=EXCLUDED.priority,
 			payload_json=EXCLUDED.payload_json, retry_count=EXCLUDED.retry_count,
-			retry_after=EXCLUDED.retry_after, max_retries=EXCLUDED.max_retries
+			retry_after=EXCLUDED.retry_after, max_retries=EXCLUDED.max_retries,
+			trace_id=EXCLUDED.trace_id
 	`, task.ID, task.Status, task.Stage, task.Source, task.APICode, task.DatasourceID, task.Operation, task.Priority,
-		task.CreatedAt, task.PayloadJSON, task.RetryCount, task.RetryAfter, task.MaxRetries)
+		task.CreatedAt, task.PayloadJSON, task.RetryCount, task.RetryAfter, task.MaxRetries, task.TraceID)
 	return err
 }
 
@@ -32,7 +33,7 @@ func (s *Store) Get(id string) (*store.Task, error) {
 	ctx := context.Background()
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at,
-			completed_at, duration_ms, error, retry_count, retry_after,
+			completed_at, duration_ms, error, retry_count, retry_after, trace_id,
 			lease_owner, lease_token, lease_expires_at, version, max_retries
 		FROM tasks WHERE id = $1
 	`, id)
@@ -57,7 +58,7 @@ func (s *Store) List(filter store.TaskFilter) ([]store.Task, int, error) {
 
 	// Fetch rows / 查询行
 	query := `SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at,
-		completed_at, duration_ms, error, retry_count, retry_after,
+		completed_at, duration_ms, error, retry_count, retry_after, trace_id,
 		lease_owner, lease_token, lease_expires_at, version, max_retries
 		FROM tasks`
 	var listArgs []any
@@ -102,10 +103,12 @@ func (s *Store) Update(task *store.Task) error {
 		UPDATE tasks SET
 			status=$1, stage=$2, api_code=$3, datasource_id=$4, started_at=$5, completed_at=$6,
 			duration_ms=$7, error=$8, retry_count=$9, retry_after=$10,
-			lease_owner=$11, lease_token=$12, lease_expires_at=$13, version=$14
-		WHERE id=$15
+			trace_id=$11,
+			lease_owner=$12, lease_token=$13, lease_expires_at=$14, version=$15
+		WHERE id=$16
 	`, task.Status, task.Stage, task.APICode, task.DatasourceID, task.StartedAt, task.CompletedAt,
 		task.DurationMs, task.Error, task.RetryCount, task.RetryAfter,
+		task.TraceID,
 		task.LeaseOwner, task.LeaseToken, task.LeaseExpiresAt, task.Version,
 		task.ID)
 	return err
@@ -163,7 +166,7 @@ func scanTask(row rowScanner) (*store.Task, error) {
 	if err := row.Scan(
 		&t.ID, &t.Status, &t.Stage, &t.Source, &t.APICode, &t.DatasourceID, &t.Operation, &t.Priority,
 		&t.CreatedAt, &t.StartedAt, &t.CompletedAt, &t.DurationMs, &t.Error,
-		&t.RetryCount, &t.RetryAfter,
+		&t.RetryCount, &t.RetryAfter, &t.TraceID,
 		&t.LeaseOwner, &t.LeaseToken, &t.LeaseExpiresAt, &t.Version, &t.MaxRetries,
 	); err != nil {
 		return nil, fmt.Errorf("postgres: scan task: %w", err)

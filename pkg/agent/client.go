@@ -277,6 +277,13 @@ func (c *Client) setHeaders(req *http.Request) {
 			req.Header.Set("X-Request-ID", rid)
 		}
 	}
+	// Inject X-Trace-ID for dual-header trace propagation (aligned with Go TraceMiddleware).
+	// 注入 X-Trace-ID 实现双头追踪传播（与 Go TraceMiddleware 对齐）。
+	if req.Header.Get("X-Trace-ID") == "" {
+		if rid := RequestIDFromContext(req.Context()); rid != "" {
+			req.Header.Set("X-Trace-ID", rid)
+		}
+	}
 	if req.Header.Get("X-Idempotency-Key") == "" {
 		if ik := IdempotencyKeyFromContext(req.Context()); ik != "" {
 			req.Header.Set("X-Idempotency-Key", ik)

@@ -143,7 +143,7 @@ func (s *Server) ListLogs(c *gin.Context) {
 
 	logs, total, err := s.audit.ListLogs(filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 
@@ -180,7 +180,7 @@ func (s *Server) CreateLog(c *gin.Context) {
 		PrevHash      string `json:"prev_hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request: %v", err), nil)
 		return
 	}
 
@@ -193,17 +193,17 @@ func (s *Server) CreateLog(c *gin.Context) {
 	}
 
 	if strings.TrimSpace(rawDS) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "datasource is required"})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "datasource is required", nil)
 		return
 	}
 
 	entry, err := naming.Normalize(rawDS)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid datasource %q: %v", rawDS, err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", fmt.Sprintf("invalid datasource %q: %v", rawDS, err), nil)
 		return
 	}
 	if err := naming.CheckWritable(entry.DataSourceID); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"detail": err.Error(), "code": "RESERVED_DATASOURCE"})
+		middleware.AbortWithError(c, http.StatusConflict, "RESERVED_DATASOURCE", err.Error(), nil)
 		return
 	}
 	normID := entry.DataSourceID
@@ -214,16 +214,16 @@ func (s *Server) CreateLog(c *gin.Context) {
 
 	// Input validation
 	if err := validation.AllowedValues("operation", req.Operation, validation.AuditOperations); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 	if err := validation.AllowedValues("status", req.Status, validation.AuditStatuses); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 	if req.SecurityLevel != "" {
 		if err := validation.AllowedValues("security_level", req.SecurityLevel, validation.SensitivityLevels); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 			return
 		}
 	}
@@ -234,9 +234,7 @@ func (s *Server) CreateLog(c *gin.Context) {
 	paramsJSON, _ := json.Marshal(req.Parameters)
 	const maxParamsSize = 1 << 20 // 1 MB
 	if len(paramsJSON) > maxParamsSize {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("parameters too large: %d bytes (max %d bytes)", len(paramsJSON), maxParamsSize),
-		})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("parameters too large: %d bytes (max %d bytes)", len(paramsJSON), maxParamsSize), nil)
 		return
 	}
 
@@ -312,7 +310,7 @@ func (s *Server) CreateLog(c *gin.Context) {
 
 	if err := s.audit.SaveLogWithSnapshot(log, snapshot); err != nil {
 		s.logger.Error("failed to persist audit log and snapshot", "error", err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to persist audit log and snapshot"})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to persist audit log and snapshot", nil)
 		return
 	}
 
@@ -330,7 +328,7 @@ func (s *Server) GetLog(c *gin.Context) {
 	id := c.Param("id")
 	log, err := s.audit.GetLog(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "audit log not found"})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", "audit log not found", nil)
 		return
 	}
 
@@ -341,7 +339,7 @@ func (s *Server) GetLog(c *gin.Context) {
 func (s *Server) GetStats(c *gin.Context) {
 	stats, err := s.audit.GetStats()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 
@@ -361,7 +359,7 @@ func (s *Server) ListSnapshots(c *gin.Context) {
 
 	snaps, total, err := s.audit.ListSnapshots(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 
@@ -396,19 +394,19 @@ func (s *Server) VerifyIntegrity(c *gin.Context) {
 		SnapshotID string `json:"snapshot_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request: %v", err), nil)
 		return
 	}
 
 	snap, err := s.audit.GetSnapshot(req.SnapshotID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "snapshot not found"})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", "snapshot not found", nil)
 		return
 	}
 
 	log, err := s.audit.GetLog(snap.AuditLogID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "associated audit log not found"})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "associated audit log not found", nil)
 		return
 	}
 
@@ -445,7 +443,7 @@ func (s *Server) VerifyChain(c *gin.Context) {
 
 	res, err := s.audit.VerifyChain(req.Limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 
@@ -471,7 +469,7 @@ func (s *Server) GenerateReport(c *gin.Context) {
 
 	report, err := s.audit.GenerateReport(req.Period)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 

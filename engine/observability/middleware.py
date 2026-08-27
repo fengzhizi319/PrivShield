@@ -49,9 +49,9 @@ def _metrics_path(request: Request) -> str:
 
 
 def _get_request_id_from_metadata(context: grpc.ServicerContext) -> str:
-    """Extract x-request-id from gRPC invocation metadata."""
+    """Extract x-request-id (or x-trace-id fallback) from gRPC invocation metadata."""
     metadata = dict(context.invocation_metadata() or [])
-    value = metadata.get(_REQUEST_ID_HEADER, "")
+    value = metadata.get(_REQUEST_ID_HEADER, "") or metadata.get(_TRACE_ID_HEADER, "")
     return value or _generate_request_id()
 
 
@@ -206,15 +206,17 @@ def _wrap_unary_unary(
         set_request_context(
             RequestContext(request_id=request_id, method="gRPC", path=method)
         )
+        # Inject dual trace headers as initial metadata for end-to-end correlation.
+        context.send_initial_metadata([
+            (_REQUEST_ID_HEADER, request_id),
+            (_TRACE_ID_HEADER, request_id),
+        ])
         start = time.perf_counter()
         request_size = _message_size(request)
-        response = None
-        try:
-            response = handler(request, context)
-            return response
-        finally:
-            response_size = _message_size(response)
-            _observe_grpc(context, method, start, request_size, response_size)
+        response = handler(request, context)
+        response_size = _message_size(response)
+        _observe_grpc(context, method, start, request_size, response_size)
+        return response
 
     return grpc.unary_unary_rpc_method_handler(
         _wrapper,

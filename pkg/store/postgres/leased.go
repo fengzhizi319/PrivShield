@@ -56,7 +56,7 @@ func (s *Store) ClaimNext(owner string, leaseTTL time.Duration) (*store.TaskLeas
 		    version = version + 1
 		WHERE id IN (SELECT id FROM candidate)
 		RETURNING id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at,
-			completed_at, duration_ms, error, retry_count, retry_after,
+			completed_at, duration_ms, error, retry_count, retry_after, trace_id,
 			lease_owner, lease_token, lease_expires_at, version, max_retries
 	`, owner, token, fmt.Sprintf("%.0f", leaseTTL.Seconds()))
 

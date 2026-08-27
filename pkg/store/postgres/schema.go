@@ -23,6 +23,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 			payload_json    TEXT,
 			retry_count     INTEGER DEFAULT 0,
 			retry_after     TIMESTAMPTZ,
+			trace_id        TEXT DEFAULT '',
 			lease_owner     TEXT DEFAULT '',
 			lease_token     TEXT DEFAULT '',
 			lease_expires_at TIMESTAMPTZ,
@@ -33,6 +34,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 		-- Migration for existing databases
 		ALTER TABLE tasks ADD COLUMN IF NOT EXISTS api_code TEXT DEFAULT '';
 		ALTER TABLE tasks ADD COLUMN IF NOT EXISTS datasource_id TEXT DEFAULT '';
+		ALTER TABLE tasks ADD COLUMN IF NOT EXISTS trace_id TEXT DEFAULT '';
 
 		-- Backfill canonical identifiers
 		UPDATE tasks SET datasource_id = source

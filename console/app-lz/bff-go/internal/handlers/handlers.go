@@ -37,6 +37,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/models"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/runner"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
 )
 
@@ -168,7 +169,7 @@ func setupStaticServing(r *gin.Engine, staticDir string) {
 		path := c.Request.URL.Path
 		// /api/* 路径不应回退到 SPA，直接返回 404
 		if strings.HasPrefix(path, "/api") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "api route not found"})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", "api route not found", nil)
 			return
 		}
 		// 尝试返回静态文件
@@ -221,12 +222,12 @@ func (h *Handler) GetPipelineStatus(c *gin.Context) {
 func (h *Handler) DispatchTask(c *gin.Context) {
 	var req models.DispatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 	resp, err := h.pool.DispatchTask(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		middleware.AbortWithError(c, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -252,7 +253,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	task, err := h.pool.GetTask(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("task %s not found: %v", id, err), "via": "app-lz-bff"})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("task %s not found: %v", id, err), nil)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"task": task, "via": "app-lz-bff"})
@@ -284,7 +285,7 @@ func (h *Handler) GetSuites(c *gin.Context) {
 func (h *Handler) RunSuites(c *gin.Context) {
 	var req models.RunTestSuiteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 
@@ -376,7 +377,7 @@ func (h *Handler) GetDataApiDefinitions(c *gin.Context) {
 func (h *Handler) InvokeDataApi(c *gin.Context) {
 	var req models.DataApiInvokeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "via": "app-lz-bff"})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 
