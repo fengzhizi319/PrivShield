@@ -261,6 +261,26 @@ func (c *Client) Raw() pb.PrivacyServiceClient {
 	return c.client
 }
 
+// WithTrace returns a context with distributed trace ID metadata attached.
+// WithTrace 返回附带分布式追踪 ID 元数据的 context。
+//
+// Appends both "x-request-id" and "x-trace-id" to gRPC outgoing metadata,
+// ensuring the upstream Python engine receives the trace context for
+// end-to-end distributed tracing across the HTTP → gRPC boundary.
+// 将 "x-request-id" 与 "x-trace-id" 双头追加到 gRPC outgoing metadata，
+// 确保上游 Python 引擎收到追踪上下文，实现 HTTP → gRPC 跨协议全链路追踪。
+//
+// Usage / 用法：
+//   ctx := client.WithTrace(ctx, traceID)
+//   ctx = client.WithAuth(ctx)
+//   resp, err := client.Raw().SomeRPC(ctx, req)
+func (c *Client) WithTrace(ctx context.Context, traceID string) context.Context {
+	if traceID == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, "x-request-id", traceID, "x-trace-id", traceID)
+}
+
 // WithAuth returns a context with authentication metadata attached.
 // WithAuth 返回附带认证元数据的 context。
 //

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/metadata"
 
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/config"
 )
@@ -201,5 +204,71 @@ func TestBuildTransportCredentialsBadKeyPair(t *testing.T) {
 	}
 	if _, err := buildTransportCredentials(cfg); err == nil {
 		t.Fatal("expected error when key pair invalid")
+	}
+}
+
+// TestWithTraceAttachesMetadata verifies WithTrace attaches x-request-id and x-trace-id
+// to gRPC outgoing metadata when a non-empty trace ID is provided.
+func TestWithTraceAttachesMetadata(t *testing.T) {
+	c := &Client{cfg: &config.Config{}}
+	ctx := context.Background()
+	traceID := "req-1234567890-abcdef"
+
+	result := c.WithTrace(ctx, traceID)
+
+	md, ok := metadata.FromOutgoingContext(result)
+	if !ok {
+		t.Fatal("expected outgoing metadata to be present")
+	}
+	// 校验 x-request-id 双头下发
+	reqIDs := md.Get("x-request-id")
+	if len(reqIDs) != 1 || reqIDs[0] != traceID {
+		t.Errorf("x-request-id = %v, want [%s]", reqIDs, traceID)
+	}
+	// 校验 x-trace-id 双头下发
+	traceIDs := md.Get("x-trace-id")
+	if len(traceIDs) != 1 || traceIDs[0] != traceID {
+		t.Errorf("x-trace-id = %v, want [%s]", traceIDs, traceID)
+	}
+}
+
+// TestWithTraceEmptyIDNoOp verifies WithTrace returns the original context unchanged
+// when the trace ID is empty, avoiding unnecessary metadata allocation.
+func TestWithTraceEmptyIDNoOp(t *testing.T) {
+	c := &Client{cfg: &config.Config{}}
+	ctx := context.Background()
+
+	result := c.WithTrace(ctx, "")
+
+	// 空 trace ID 时不应附加任何 metadata
+	_, ok := metadata.FromOutgoingContext(result)
+	if ok {
+		t.Error("expected no outgoing metadata when trace ID is empty")
+	}
+}
+
+// TestWithTraceAndAuthCombined verifies WithTrace and WithAuth can be chained
+// to attach both trace and auth metadata to the same context.
+func TestWithTraceAndAuthCombined(t *testing.T) {
+	c := &Client{cfg: &config.Config{AgentAPIKey: "test-key-123"}}
+	ctx := context.Background()
+	traceID := "req-combined-test"
+
+	// 模拟 handler 中的链式调用：WithTrace(WithAuth(ctx), traceID)
+	result := c.WithTrace(c.WithAuth(ctx), traceID)
+
+	md, ok := metadata.FromOutgoingContext(result)
+	if !ok {
+		t.Fatal("expected outgoing metadata to be present")
+	}
+	// 校验追踪元数据
+	reqIDs := md.Get("x-request-id")
+	if len(reqIDs) != 1 || reqIDs[0] != traceID {
+		t.Errorf("x-request-id = %v, want [%s]", reqIDs, traceID)
+	}
+	// 校验认证元数据
+	authIDs := md.Get("authorization")
+	if len(authIDs) != 1 || authIDs[0] != "Bearer test-key-123" {
+		t.Errorf("authorization = %v, want [Bearer test-key-123]", authIDs)
 	}
 }

@@ -308,13 +308,15 @@ func (s *Server) Health(c *gin.Context) {
 	}
 
 	// 默认使用 gRPC 协议检查
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// 将追踪 ID 注入 context，确保 gRPC 健康检查也携带分布式追踪上下文
+	healthCtx := s.client.WithTrace(context.Background(), middleware.GetTraceID(c))
+	ctx, cancel := context.WithTimeout(healthCtx, 3*time.Second)
 	defer cancel()
 
 	resp, err := s.client.Health(ctx)
 	if err != nil {
 		// 瞬态重试一次（处理连接握手与初始化期间的抖动）
-		retryCtx, retryCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		retryCtx, retryCancel := context.WithTimeout(s.client.WithTrace(context.Background(), middleware.GetTraceID(c)), 2*time.Second)
 		resp, err = s.client.Health(retryCtx)
 		retryCancel()
 	}
@@ -364,9 +366,10 @@ func (s *Server) Proxy(c *gin.Context) {
 	}
 
 	// 核心调用：通过 gRPC mapper 转发
+	// 将追踪 ID 注入 gRPC outgoing metadata，实现 HTTP → gRPC 跨协议全链路追踪
 	ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
 	defer cancel()
-	data, err := s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), req.Path, req.Body)
+	data, err := s.mapper.Dispatch(s.client.WithTrace(s.client.WithAuth(ctx), middleware.GetTraceID(c)), s.client.Raw(), req.Path, req.Body)
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -732,8 +735,9 @@ func (s *Server) Batch(c *gin.Context) {
 		} else {
 			// 通过 mapper 转发到上游 agent 的对应 gRPC 方法。
 			// 使用 grpcCallTimeout 超时包裹：agent 重启期间请求等待连接恢复而非立即失败。
+			// 将追踪 ID 注入 gRPC outgoing metadata，保持全链路追踪连续性
 			ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
-			data, callErr = s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), item.Path, item.Body)
+			data, callErr = s.mapper.Dispatch(s.client.WithTrace(s.client.WithAuth(ctx), middleware.GetTraceID(c)), s.client.Raw(), item.Path, item.Body)
 			cancel()
 
 			if callErr != nil && strings.Contains(callErr.Error(), "unsupported gRPC path") {
@@ -881,7 +885,8 @@ func (s *Server) Upload(c *gin.Context) {
 	// 获取底层 gRPC 客户端，用于直接调用 RPC 方法
 	client := s.client.Raw()
 	// 使用请求的 context，支持客户端取消操作
-	ctx := s.client.WithAuth(c.Request.Context())
+	// 将追踪 ID 注入 gRPC outgoing metadata，保持全链路追踪连续性
+	ctx := s.client.WithTrace(s.client.WithAuth(c.Request.Context()), middleware.GetTraceID(c))
 
 	// 记录操作开始时间，用于计算总耗时
 	start := time.Now()
@@ -1334,7 +1339,8 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 				if useREST {
 					err = s.callRestOnce(req.Method, req.Path, req.Body)
 				} else {
-					ctx, cancel := context.WithTimeout(s.client.WithAuth(context.Background()), 30*time.Second)
+					// 将追踪 ID 注入 gRPC metadata，确保压测请求也参与全链路追踪
+					ctx, cancel := context.WithTimeout(s.client.WithTrace(s.client.WithAuth(context.Background()), middleware.GetTraceID(c)), 30*time.Second)
 					_, err = s.mapper.Dispatch(ctx, s.client.Raw(), req.Path, req.Body)
 					cancel()
 					// gRPC 不支持该路径时回退 REST（与 Proxy 的错误回退策略一致）
