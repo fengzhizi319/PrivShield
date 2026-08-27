@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v6.0.0  
+> **版本**：v7.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 新增 API 端点速查表、扩展环境变量参考、修正风险预案
+> **最后更新**：2026-08-28 — 服务拓扑补齐 gRPC 端口、mTLS 配置精简、验收测试统计摘要
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -113,6 +113,7 @@ flowchart TD
 | console/bff-go → audit-log | HTTP | :8084 | API Key | X-Request-ID + X-Trace-ID |
 | console/bff-go → engine (REST) | HTTP | :8079 | API Key | X-Request-ID |
 | console/bff-go → engine (gRPC) | gRPC | :50051 | mTLS (可选) | x-request-id metadata |
+| console/bff-go (gRPC server) | gRPC | :50055 | mTLS (可选) | — (可选组件，`PRIVACY_CONSOLE_GRPC_ENABLED`) |
 | app-lz/bff-go → service-hub | HTTP | :8082 | API Key | X-Request-ID + X-Trace-ID |
 | app-lz/bff-go → datasource-mgr | HTTP | :8083 | API Key | X-Request-ID + X-Trace-ID |
 | app-lz/bff-go → audit-log | HTTP | :8084 | API Key | X-Request-ID + X-Trace-ID |
@@ -332,40 +333,22 @@ flowchart TD
 将静态编译在代码或单机环境变量中的证书 CN 列表，迁移为基于动态配置文件的 **微服务访问控制白名单 (`mtls-whitelist.yaml`)**，支持在不停机的情况下通过文件监听（`fsnotify`）实现毫秒级授权热生效。
 
 #### 2. 白名单配置文件标准结构 (`config/mtls-whitelist.yaml`)
+
 ```yaml
-# PrivShield 微服务内部 mTLS 访问控制白名单
-version: "1.0"
-updated_at: "2026-08-27T09:00:00Z"
-
+# 每个客户端条目包含: cn (证书 CommonName), role, description, allowed_scopes
+# allowed_scopes 支持通配符 "*" 和精确 gRPC 方法匹配 (如 "/ServiceHub/*")
 clients:
-  - cn: "bff-go.privshield.internal"
-    role: "gateway"
-    description: "主控制台 BFF 代理网关"
-    allowed_scopes:
-      - "*"
-
-  - cn: "app-lz-bff.privshield.internal"
-    role: "lz_gateway"
-    description: "调度之眼控制台 BFF"
-    allowed_scopes:
-      - "/ServiceHub/*"
-      - "/AuditLog/*"
-      - "/DatasourceMgr/*"
-
-  - cn: "service-hub.privshield.internal"
-    role: "orchestrator"
-    description: "数据调度中枢"
-    allowed_scopes:
-      - "/PrivacyService/Process"
-      - "/AuditLog/RecordAudit"
-      - "/DatasourceMgr/FetchSlice"
-
-  - cn: "external-hospital-client"
-    role: "data_consumer"
-    description: "外部医院端调用方（仅限脱敏接口）"
-    allowed_scopes:
-      - "/ServiceHub/DispatchTask"
+  - cn: "bff-go.privshield.internal"        # 主控制台 BFF → 全 Scope 访问
+    allowed_scopes: ["*"]
+  - cn: "app-lz-bff.privshield.internal"    # 调度之眼 BFF → 限定 3 个服务
+    allowed_scopes: ["/ServiceHub/*", "/AuditLog/*", "/DatasourceMgr/*"]
+  - cn: "service-hub.privshield.internal"   # 调度中枢 → 限定 3 个方法
+    allowed_scopes: ["/PrivacyService/Process", "/AuditLog/RecordAudit", "/DatasourceMgr/FetchSlice"]
+  - cn: "external-hospital-client"          # 外部调用方 → 仅脱敏接口
+    allowed_scopes: ["/ServiceHub/DispatchTask"]
 ```
+
+> 完整配置参见 [`config/mtls-whitelist.yaml`](../../config/mtls-whitelist.yaml)（83 行，含注释与版本信息）。
 
 #### 3. 实现要点
 - **白名单配置** (`config/mtls-whitelist.yaml`)：YAML 格式定义 CN → role → allowed_scopes 映射，支持通配符 `"*"` 和精确 gRPC 方法匹配；
@@ -463,6 +446,16 @@ cd ../../web && pnpm build
 - [x] **优雅停机**：所有 Go 服务使用 `signal.NotifyContext`，Python 使用 `timeout_graceful_shutdown`，在途请求排空完成后再退出；
 - [x] **熔断器保护**：Agent 客户端与 Gateway 负载均衡器均具备三态熔断器（Closed/Open/Half-Open）；
 - [x] **数据保留策略**：审计日志超期自动清理（`AUDIT_LOG_RETENTION_DAYS`，默认 90 天）。
+
+### 5.3 测试覆盖统计摘要
+
+| 测试域 | 命令 | 覆盖范围 |
+|---|---|---|
+| Go 共享库 | `go test ./pkg/...` | 中间件 / 指标 / 命名 / 存储 / TLS / 校验 |
+| Go 微服务群 | `go test ./services/...` | service-hub / datasource-mgr / audit-log |
+| Go 控制台 | `go test ./console/...` | bff-go / app-lz/bff-go（含 E2E runner） |
+| Python 引擎 | `pytest tests/ -q` | REST API / 隐私原语 / 分类漏斗 / 网关 / 安全 / 可观测性 |
+| 前端 | `pnpm build` + vitest | console/web + console/app-lz/web 类型检查与单元测试 |
 
 ---
 
