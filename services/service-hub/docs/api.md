@@ -205,7 +205,7 @@
 ```
 
 #### `GET /api/hub/pipeline`
-- **说明**：返回 6 大流水线阶段（`ingest` ➔ `fetch` ➔ `classify` ➔ `desensitize` ➔ `return` ➔ `audit`）的实时活跃任务统计与 Agent 运行状态。其中阶段 ③ `classify` 调用 engine `/v1/medical/process` 医疗流水线一体化完成分类与脱敏，阶段 ④ `desensitize` 快速通过。
+- **说明**：返回 6 大流水线阶段（`ingest` ➔ `fetch` ➔ `classify` ➔ `desensitize` ➔ `return` ➔ `audit`）的实时活跃任务统计与 Agent 运行状态。其中阶段 ③ `classify` 调用 engine `/v1/agent/process`（兼容 `/v1/medical/process`）通用合规流水线一体化完成分类与脱敏，阶段 ④ `desensitize` 快速通过。
 - **响应状态码**：`200 OK`
 - **响应示例**：
 ```json

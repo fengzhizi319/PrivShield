@@ -29,6 +29,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 	"github.com/fengzhizi319/PrivShield/pkg/validation"
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
@@ -209,10 +210,19 @@ func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAn
 		return nil, status.Error(codes.InvalidArgument, "source exceeds maximum length of 1024 characters")
 	}
 
+	normID, normErr := naming.ResolveInbound(req.Source)
+	if normErr != nil {
+		if naming.IsReserved(normErr) {
+			return nil, status.Errorf(codes.FailedPrecondition, "reserved source: %v", normErr)
+		}
+		return nil, status.Errorf(codes.InvalidArgument, "invalid source: %v", normErr)
+	}
+	normAPICode := naming.APICodeForDataSource(normID)
+
 	payloadJSON := req.PayloadJson
 	if (payloadJSON == "" || payloadJSON == "{}" || payloadJSON == "null") && s.datasource != nil {
 		dsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		if res, err := s.datasource.FetchDataBySource(dsCtx, req.Source, 5, 0); err == nil && len(res.Records) > 0 {
+		if res, err := s.datasource.FetchData(dsCtx, normID, 5, 0); err == nil && len(res.Records) > 0 {
 			b, _ := json.Marshal(res.Records[0])
 			payloadJSON = string(b)
 		}
@@ -239,14 +249,16 @@ func (s *GRPCServer) ClassifyAndDispatch(ctx context.Context, req *pb.ClassifyAn
 	now := time.Now()
 
 	task := &store.Task{
-		ID:          taskID,
-		Status:      "pending",
-		Stage:       "queued",
-		Source:      req.Source,
-		Operation:   operation,
-		Priority:    priority,
-		CreatedAt:   now,
-		PayloadJSON: payloadJSON,
+		ID:           taskID,
+		APICode:      normAPICode,
+		DatasourceID: normID,
+		Status:       "pending",
+		Stage:        "queued",
+		Source:       normID,
+		Operation:    operation,
+		Priority:     priority,
+		CreatedAt:    now,
+		PayloadJSON:  payloadJSON,
 	}
 
 	if err := s.tasks.Save(task); err != nil {

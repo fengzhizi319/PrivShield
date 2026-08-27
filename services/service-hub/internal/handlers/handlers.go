@@ -37,6 +37,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/validation"
 
@@ -50,10 +51,12 @@ const moduleVia = "service-hub"
 // dispatchRequest is the common request shape used across Dispatch / ClassifyAndDispatch / processTask.
 // dispatchRequest 结构体表示任务提交与内部异步流转的标准入参载荷。
 type dispatchRequest struct {
-	Source    string `json:"source"`    // 数据源标识
-	Operation string `json:"operation"` // 脱敏算子（mask/k_anon/dp/none）
-	Payload   any    `json:"payload"`   // 原始记录数据
-	Priority  int    `json:"priority"`  // 执行优先级
+	APICode      string `json:"api_code"`
+	DatasourceID string `json:"datasource_id"`
+	Source       string `json:"source"`    // 兼容历史字段
+	Operation    string `json:"operation"` // 脱敏算子（mask/k_anon/dp/none）
+	Payload      any    `json:"payload"`   // 原始记录数据
+	Priority     int    `json:"priority"`  // 执行优先级
 }
 
 // Server aggregates HTTP handler dependencies.
@@ -286,7 +289,7 @@ func (s *Server) ListTasks(c *gin.Context) {
 
 // Dispatch creates a new task and simulates pipeline processing.
 // Dispatch 接收用户显式提交的数据处理任务：
-// 1. 绑定并校验 JSON 请求体（source 非空且限长、operation 在合法操作集合内）；
+// 1. 绑定并校验 JSON 请求体（source/datasource_id/api_code 归一化校验、operation 在合法操作集合内）；
 // 2. 生成全局唯一 TaskID，初始化为 pending/queued 状态并写入 TaskStore；
 // 3. 异步拉起后台协程执行 6 阶段流水线调度（processTask）；
 // 4. 立即返回 202 Accepted 包含 TaskID。
@@ -297,16 +300,35 @@ func (s *Server) Dispatch(c *gin.Context) {
 		return
 	}
 
-	// 字段合法性安全校验
-	if err := validation.NonEmpty("source", req.Source); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+	rawSource := req.DatasourceID
+	if rawSource == "" {
+		rawSource = req.APICode
+	}
+	if rawSource == "" {
+		rawSource = req.Source
+	}
+
+	if rawSource == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "source / datasource_id / api_code is required"})
 		return
 	}
+
+	normID, err := naming.ResolveInbound(rawSource)
+	if err != nil {
+		if naming.IsReserved(err) {
+			c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("data source %q is reserved: %v", rawSource, err)})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid data source or api_code %q: %v", rawSource, err)})
+		return
+	}
+	normAPICode := naming.APICodeForDataSource(normID)
+
+	req.DatasourceID = normID
+	req.APICode = normAPICode
+	req.Source = normID
+
 	if err := validation.AllowedValues("operation", req.Operation, validation.HubOperations); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
-		return
-	}
-	if err := validation.MaxLength("source", req.Source, 1024); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
@@ -316,14 +338,16 @@ func (s *Server) Dispatch(c *gin.Context) {
 
 	payloadJSON, _ := json.Marshal(req.Payload)
 	task := &store.Task{
-		ID:          taskID,
-		Status:      "pending",
-		Stage:       "queued",
-		Source:      req.Source,
-		Operation:   req.Operation,
-		Priority:    req.Priority,
-		CreatedAt:   now,
-		PayloadJSON: string(payloadJSON),
+		ID:           taskID,
+		APICode:      normAPICode,
+		DatasourceID: normID,
+		Status:       "pending",
+		Stage:        "queued",
+		Source:       normID,
+		Operation:    req.Operation,
+		Priority:     req.Priority,
+		CreatedAt:    now,
+		PayloadJSON:  string(payloadJSON),
 	}
 
 	if err := s.tasks.Save(task); err != nil {
@@ -339,9 +363,11 @@ func (s *Server) Dispatch(c *gin.Context) {
 	}()
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"task_id": taskID,
-		"status":  "accepted",
-		"via":     moduleVia,
+		"task_id":       taskID,
+		"api_code":      normAPICode,
+		"datasource_id": normID,
+		"status":        "accepted",
+		"via":           moduleVia,
 	})
 }
 
@@ -403,7 +429,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest) {
 		if stage == "fetch" && s.datasource != nil {
 			if req.Payload == nil || isEmptyPayload(req.Payload) {
 				ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
-				if res, err := s.datasource.FetchDataBySource(ctx, req.Source, 10, 0); err == nil && len(res.Records) > 0 {
+				if res, err := s.datasource.FetchData(ctx, req.DatasourceID, 10, 0); err == nil && len(res.Records) > 0 {
 					req.Payload = res.Records
 					payloadBytes, _ := json.Marshal(req.Payload)
 					task.PayloadJSON = string(payloadBytes)

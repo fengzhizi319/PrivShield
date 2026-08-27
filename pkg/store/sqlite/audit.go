@@ -24,10 +24,10 @@ func NewAuditStore(db *sql.DB) (*AuditStore, error) {
 
 func (s *AuditStore) SaveLog(log *store.AuditLog) error {
 	_, err := s.db.Exec(`
-		INSERT INTO audit_logs (id, timestamp, operation, datasource, input_hash, output_hash,
+		INSERT INTO audit_logs (id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash,
 			algorithm, parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, log.ID, log.Timestamp.Format(time.RFC3339Nano), log.Operation, log.DataSource,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, log.ID, log.TaskID, log.APICode, log.DatasourceID, log.Timestamp.Format(time.RFC3339Nano), log.Operation, log.DataSource,
 		log.InputHash, log.OutputHash, log.Algorithm, log.ParametersJSON,
 		log.InputRows, log.OutputRows, log.DurationMs, log.User, log.Status, log.ErrorMessage, log.SecurityLevel)
 	return err
@@ -35,7 +35,7 @@ func (s *AuditStore) SaveLog(log *store.AuditLog) error {
 
 func (s *AuditStore) GetLog(id string) (*store.AuditLog, error) {
 	row := s.db.QueryRow(`
-		SELECT id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
+		SELECT id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
 			parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level
 		FROM audit_logs WHERE id = ?
 	`, id)
@@ -53,7 +53,7 @@ func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, 
 	}
 
 	// Fetch rows
-	query := `SELECT id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
+	query := `SELECT id, task_id, api_code, datasource_id, timestamp, operation, datasource, input_hash, output_hash, algorithm,
 		parameters_json, input_rows, output_rows, duration_ms, user_name, status, error_message, security_level
 		FROM audit_logs` + where + " ORDER BY timestamp DESC"
 	if filter.Limit > 0 {
@@ -324,13 +324,24 @@ func buildAuditWhere(filter store.AuditFilter) (string, []any) {
 	conditions := make([]string, 0)
 	args := make([]any, 0)
 
+	if filter.TaskID != "" {
+		conditions = append(conditions, "task_id = ?")
+		args = append(args, filter.TaskID)
+	}
+	if filter.APICode != "" {
+		conditions = append(conditions, "api_code = ?")
+		args = append(args, filter.APICode)
+	}
+	if filter.DatasourceID != "" {
+		conditions = append(conditions, "(datasource_id = ? OR datasource = ?)")
+		args = append(args, filter.DatasourceID, filter.DatasourceID)
+	} else if filter.DataSource != "" {
+		conditions = append(conditions, "(datasource = ? OR datasource_id = ?)")
+		args = append(args, filter.DataSource, filter.DataSource)
+	}
 	if filter.Operation != "" {
 		conditions = append(conditions, "operation = ?")
 		args = append(args, filter.Operation)
-	}
-	if filter.DataSource != "" {
-		conditions = append(conditions, "datasource = ?")
-		args = append(args, filter.DataSource)
 	}
 	if filter.User != "" {
 		conditions = append(conditions, "user_name = ?")
@@ -379,12 +390,23 @@ func scanAuditFields(scan func(dest ...any) error) (*store.AuditLog, error) {
 	var l store.AuditLog
 	var ts string
 	var paramsJSON sql.NullString
+	var taskID, apiCode, datasourceID sql.NullString
 
-	err := scan(&l.ID, &ts, &l.Operation, &l.DataSource, &l.InputHash, &l.OutputHash,
+	err := scan(&l.ID, &taskID, &apiCode, &datasourceID, &ts, &l.Operation, &l.DataSource, &l.InputHash, &l.OutputHash,
 		&l.Algorithm, &paramsJSON, &l.InputRows, &l.OutputRows, &l.DurationMs,
 		&l.User, &l.Status, &l.ErrorMessage, &l.SecurityLevel)
 	if err != nil {
 		return nil, err
+	}
+
+	l.TaskID = taskID.String
+	l.APICode = apiCode.String
+	l.DatasourceID = datasourceID.String
+	if l.DatasourceID == "" && l.DataSource != "" {
+		l.DatasourceID = l.DataSource
+	}
+	if l.DataSource == "" && l.DatasourceID != "" {
+		l.DataSource = l.DatasourceID
 	}
 
 	l.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)

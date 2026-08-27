@@ -245,6 +245,9 @@ func InitAuditTables(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_logs (
 			id TEXT PRIMARY KEY,
+			task_id TEXT DEFAULT '',
+			api_code TEXT DEFAULT '',
+			datasource_id TEXT DEFAULT '',
 			timestamp DATETIME NOT NULL,
 			operation TEXT,
 			datasource TEXT,
@@ -273,7 +276,52 @@ func InitAuditTables(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_ts ON audit_logs(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_op ON audit_logs(operation);
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_ds ON audit_logs(datasource_id);
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_task ON audit_logs(task_id);
 		CREATE INDEX IF NOT EXISTS idx_snapshots_audit ON snapshots(audit_log_id);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Schema migration for existing audit_logs tables
+	cursor, err := db.Query("PRAGMA table_info(audit_logs)")
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+
+	columns := make(map[string]bool)
+	for cursor.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := cursor.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			continue
+		}
+		columns[name] = true
+	}
+
+	if !columns["task_id"] {
+		if _, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN task_id TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["api_code"] {
+		if _, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN api_code TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !columns["datasource_id"] {
+		if _, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN datasource_id TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

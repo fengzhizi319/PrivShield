@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v7.35.0
-// source: auditlog.proto
+// source: services/audit-log/proto/auditlog.proto
 
 package proto
 
@@ -405,5 +405,5 @@ var AuditLogService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "auditlog.proto",
+	Metadata: "services/audit-log/proto/auditlog.proto",
 }

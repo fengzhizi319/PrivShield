@@ -28,18 +28,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/catalog"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/clients"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/models"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/runner"
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 )
 
 // Handler 持有所有 HTTP 处理器的依赖。
 // 所有 handler 方法共享同一个 Handler 实例，通过它访问配置、客户端池和测试执行器。
 type Handler struct {
-	cfg    *config.Config       // 运行时配置
-	pool   *clients.ClientPool  // 上游微服务 HTTP 客户端池
-	runner *runner.TestRunner   // E2E 测试套件执行器
+	cfg    *config.Config      // 运行时配置
+	pool   *clients.ClientPool // 上游微服务 HTTP 客户端池
+	runner *runner.TestRunner  // E2E 测试套件执行器
 }
 
 // NewHandler 创建一个新的 Handler 实例。
@@ -54,19 +56,20 @@ func NewHandler(cfg *config.Config, pool *clients.ClientPool, testRunner *runner
 // SetupRouter 初始化 Gin 引擎并注册所有 API 路由和静态文件服务。
 //
 // 路由结构：
-//   /api/health          — BFF 自身健康检查
-//   /api/lz/topology     — 服务拓扑探测
-//   /api/lz/tasks/*      — 任务管理（列表/详情/租约/派发）
-//   /api/lz/suites/*     — E2E 测试套件
-//   /api/lz/audit/*      — 审计日志与 Merkle 验真
-//   /api/lz/metrics*     — Prometheus 指标
-//   /api/lz/data-api/*   — 预设数据 API
-//   /*                   — SPA 静态文件回退（NoRoute handler）
+//
+//	/api/health          — BFF 自身健康检查
+//	/api/lz/topology     — 服务拓扑探测
+//	/api/lz/tasks/*      — 任务管理（列表/详情/租约/派发）
+//	/api/lz/suites/*     — E2E 测试套件
+//	/api/lz/audit/*      — 审计日志与 Merkle 验真
+//	/api/lz/metrics*     — Prometheus 指标
+//	/api/lz/data-api/*   — 预设数据 API
+//	/*                   — SPA 静态文件回退（NoRoute handler）
 func SetupRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode) // 生产模式，关闭 Gin 调试日志
 	r := gin.New()
-	r.Use(gin.Recovery())      // 全局 panic 恢复中间件
-	r.Use(corsMiddleware())    // 全局 CORS 中间件
+	r.Use(gin.Recovery())   // 全局 panic 恢复中间件
+	r.Use(corsMiddleware()) // 全局 CORS 中间件
 
 	// ── 健康检查（两个路径均支持，兼容不同探测配置）──
 	r.GET("/api/health", h.HealthCheck)
@@ -273,17 +276,25 @@ func (h *Handler) RunSuites(c *gin.Context) {
 }
 
 // GetAuditLogs 返回审计日志条目列表。
-// 支持查询参数：limit（默认 50）、offset（默认 0）。
+// 支持查询参数：limit（默认 50）、offset（默认 0）、datasource_id / datasource。
 func (h *Handler) GetAuditLogs(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	rawDatasource := c.Query("datasource_id")
+	if rawDatasource == "" {
+		rawDatasource = c.Query("datasource")
+	}
 
-	logs, err := h.pool.GetAuditLogs(c.Request.Context(), limit, offset)
+	resp, err := h.pool.GetAuditLogs(c.Request.Context(), limit, offset, rawDatasource)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"logs": []models.AuditLogItem{}})
+		if ue, ok := err.(*clients.UpstreamError); ok {
+			c.JSON(ue.StatusCode(), ue.Body("app-lz-bff"))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"logs": []models.AuditLogItem{}, "total": 0, "via": "app-lz-bff"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"logs": logs})
+	c.JSON(http.StatusOK, resp)
 }
 
 // VerifyAudit 触发 Merkle 树完整性验证。
@@ -307,23 +318,16 @@ func (h *Handler) GetMetrics(c *gin.Context) {
 	c.String(http.StatusOK, metrics)
 }
 
-// GetParsedMetrics 返回解析后的 Prometheus 指标（各阶段耗时、QPS、百分位数）。
-// 当上游不可达时返回硬编码的默认值，source 标记为 "fallback"。
+// GetParsedMetrics 返回已解析的 Service Hub 性能指标（各阶段耗时、QPS、延迟百分位数）。
 func (h *Handler) GetParsedMetrics(c *gin.Context) {
 	parsed, err := h.pool.GetParsedMetrics(c.Request.Context())
 	if err != nil {
-		// Return defaults when upstream unreachable
 		c.JSON(http.StatusOK, gin.H{
-			"stage_durations": map[string]float64{
-				"ingest": 1.2, "fetch": 4.8, "classify": 12.5,
-				"desensitize": 6.2, "return": 0.9, "audit": 3.1,
-			},
-			"qps": 0.0,
-			"percentiles": map[string]float64{
-				"p50": 8.4, "p90": 14.2, "p95": 18.8, "p99": 28.5,
-			},
-			"total_requests": 0.0,
-			"source":         "fallback",
+			"stage_durations": map[string]float64{"ingest": 1.0, "fetch": 5.0, "classify": 12.0, "desensitize": 6.0, "return": 1.0, "audit": 3.0},
+			"qps":             0.0,
+			"percentiles":     map[string]float64{"p50": 8.0, "p90": 15.0, "p95": 20.0, "p99": 30.0},
+			"total_requests":  0.0,
+			"source":          "fallback",
 		})
 		return
 	}
@@ -338,105 +342,104 @@ func (h *Handler) GetParsedMetrics(c *gin.Context) {
 
 // GetDataApiDefinitions 返回 4 个预设数据 API 的定义。
 func (h *Handler) GetDataApiDefinitions(c *gin.Context) {
-	defs := presetDataApiDefinitions()
-	c.JSON(http.StatusOK, gin.H{"apis": defs, "via": "app-lz-bff"})
+	defs := catalog.Definitions()
+	c.JSON(http.StatusOK, gin.H{"apis": defs, "definitions": defs, "via": "app-lz-bff"})
 }
 
 // InvokeDataApi 编排完整的预设数据 API 会话。
 //
-// 执行流程（4 阶段）：
-//  1. Fetch — 从 datasource-mgr 拉取原始数据
-//  2. Classify + Desensitize — 调用 engine 医疗流水线进行分类分级 + 脱敏
-//     （降级：engine 不可达时走本地字段级掩码 applyMasking）
-//  3. Audit — 向 audit-log 写入审计存证
-//  4. Return — 返回完整会话结果（原始数据 + 脱敏数据 + 各阶段状态）
+// 执行流程（6 阶段）：
+//  1. Ingest — 请求校验与会话初始化
+//  2. Fetch — 从 datasource-mgr 拉取原始数据
+//  3. Classify — 敏感数据三层漏斗分级
+//  4. Desensitize — 自适应隐私脱敏治理
+//  5. Return — 结果装配
+//  6. Audit — 向 audit-log 写入审计存证
 func (h *Handler) InvokeDataApi(c *gin.Context) {
 	var req models.DataApiInvokeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "via": "app-lz-bff"})
 		return
 	}
-	// 参数校验：api_id 必须在 1~4 范围内
-	if req.ApiID < 1 || req.ApiID > 4 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "api_id must be 1-4"})
+
+	apiDef, err := catalog.Resolve(req.APICode, req.ApiID, req.DatasourceID)
+	if err != nil {
+		ue := clients.ValidationErrorFor(err)
+		c.JSON(ue.StatusCode(), ue.Body("app-lz-bff"))
 		return
 	}
-	// 默认返回 5 条记录
+
+	if apiDef.Status != naming.StatusActive {
+		ue := &clients.UpstreamError{
+			Code:     clients.CodeReservedDatasource,
+			Message:  "This API is reserved and not yet active.",
+			Field:    "datasource_id",
+			Received: apiDef.DatasourceID,
+			Allowed:  naming.ActiveDataSourceIDs(),
+			Status:   http.StatusConflict,
+		}
+		c.JSON(ue.StatusCode(), ue.Body("app-lz-bff"))
+		return
+	}
+
 	if req.Limit <= 0 {
 		req.Limit = 5
 	}
 
-	// 查找目标 API 定义
-	defs := presetDataApiDefinitions()
-	var apiDef *models.DataApiDef
-	for i := range defs {
-		if defs[i].ID == req.ApiID {
-			apiDef = &defs[i]
-			break
-		}
-	}
-	// 预留 API（status != "active"）直接返回 skipped
-	if apiDef == nil || apiDef.Status != "active" {
-		c.JSON(http.StatusOK, models.DataApiSessionResponse{
-			SessionID: fmt.Sprintf("session-%d-%d", req.ApiID, time.Now().UnixNano()),
-			ApiID:     req.ApiID,
-			ApiName:   apiDef.Name,
-			Status:    "skipped",
-			Stages:    []models.DataApiSessionStage{},
-			Error:     "This API is reserved and not yet active.",
-		})
-		return
-	}
-
-	sessionID := fmt.Sprintf("session-%d-%d", req.ApiID, time.Now().UnixNano())
-	stages := make([]models.DataApiSessionStage, 0, 4)
+	sessionID := fmt.Sprintf("session-%s-%d", apiDef.APICode, time.Now().UnixNano())
+	stages := make([]models.DataApiSessionStage, 0, 6)
 	var rawRecords []map[string]any
 	var sanitizedData []map[string]any
 	overallStatus := "completed"
 
-	// ── 阶段 1：从 datasource-mgr 拉取原始数据 ────────────────────────
+	// ── 阶段 1：ingest ───────────────────────────────────────────
+	stages = append(stages, models.DataApiSessionStage{
+		Name:       "ingest",
+		Title:      "会话请求接入与校验",
+		Status:     "success",
+		Source:     "app-lz-bff",
+		DurationMs: 1,
+		Detail:     fmt.Sprintf("API 标识 %s (%s) 校验通过", apiDef.APICode, apiDef.DatasourceID),
+	})
+
+	// ── 阶段 2：从 datasource-mgr 拉取原始数据 (fetch) ─────────────
 	fetchStart := time.Now()
-	sliceResp, fetchErr := h.pool.GetDatasourceSlice(c.Request.Context(), apiDef.DatasourceID, req.Limit)
+	sliceResp, fetchErr := h.pool.GetDatasourceSlice(c.Request.Context(), apiDef.DatasourceID, req.Limit, 0)
 	fetchDuration := time.Since(fetchStart).Milliseconds()
 	if fetchErr != nil {
 		stages = append(stages, models.DataApiSessionStage{
 			Name: "fetch", Title: "数据源原始数据拉取", Status: "error",
-			DurationMs: fetchDuration, Detail: fetchErr.Error(),
+			Source: "datasource-mgr", DurationMs: fetchDuration, Detail: fetchErr.Error(),
 		})
 		overallStatus = "partial"
 	} else {
 		rawRecords = sliceResp.Records
 		stages = append(stages, models.DataApiSessionStage{
 			Name: "fetch", Title: "数据源原始数据拉取", Status: "success",
-			DurationMs: fetchDuration,
-			Detail:     fmt.Sprintf("从 %s 拉取 %d 条原始记录", apiDef.DatasourceID, len(rawRecords)),
+			Source: sliceResp.Source, DurationMs: fetchDuration,
+			Detail: fmt.Sprintf("从 %s 拉取 %d 条原始记录", apiDef.DatasourceID, len(rawRecords)),
 		})
 	}
 
-	// ── 阶段 2：分类分级 + 脱敏治理 ─────────────────────────────────
-	// 优先调用 engine 医疗流水线（/v1/medical/process），
-	// 包含 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + ICD-10 脱敏。
-	// 若 engine 不可达，降级到本地字段级掩码（applyMasking）。
+	// ── 阶段 3 & 4：分类分级 + 脱敏治理 (classify & desensitize) ───
 	desensitizeStart := time.Now()
 	if len(rawRecords) > 0 {
-		engineUsed := false
 		medResult, medErr := h.pool.ProcessMedicalRecords(c.Request.Context(), rawRecords)
 		if medErr == nil && medResult != nil && len(medResult.SanitizedData) > 0 {
 			sanitizedData = medResult.SanitizedData
-			engineUsed = true
 			desensitizeDuration := time.Since(desensitizeStart).Milliseconds()
 			stages = append(stages, models.DataApiSessionStage{
 				Name: "classify", Title: "三层分类漏斗评级", Status: "success",
-				DurationMs: desensitizeDuration / 2,
-				Detail:     fmt.Sprintf("医疗流水线识别 %d 条记录共 %d 个字段并完成分级", len(rawRecords), len(apiDef.Fields)),
+				Source: "engine", DurationMs: desensitizeDuration / 2,
+				Detail: fmt.Sprintf("医疗流水线识别 %d 条记录共 %d 个字段并完成分级", len(rawRecords), len(apiDef.Fields)),
 			})
 			stages = append(stages, models.DataApiSessionStage{
 				Name: "desensitize", Title: "自适应隐私脱敏治理", Status: "success",
-				DurationMs: desensitizeDuration / 2,
-				Detail:     fmt.Sprintf("对 %d 条记录执行医疗流水线脱敏 (via engine-agent, L4/L5 高敏剥离)", len(sanitizedData)),
+				Source: "engine", DurationMs: desensitizeDuration / 2,
+				Detail: fmt.Sprintf("对 %d 条记录执行医疗流水线脱敏 (via engine, L4/L5 高敏剥离)", len(sanitizedData)),
 			})
 		} else {
-			// 降级兆底：engine 不可达 → 本地字段级掩码
+			// 降级兜底：engine 不可达 → 本地字段级掩码
 			sanitizedData = make([]map[string]any, 0, len(rawRecords))
 			for _, rec := range rawRecords {
 				sanitized := make(map[string]any)
@@ -448,16 +451,15 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 			desensitizeDuration := time.Since(desensitizeStart).Milliseconds()
 			stages = append(stages, models.DataApiSessionStage{
 				Name: "classify", Title: "三层分类漏斗评级", Status: "success",
-				DurationMs: desensitizeDuration / 2,
-				Detail:     fmt.Sprintf("识别 %d 个敏感字段并完成分级 (降级模式)", len(apiDef.Fields)),
+				Source: "local-fallback", DurationMs: desensitizeDuration / 2,
+				Detail: fmt.Sprintf("识别 %d 个敏感字段并完成分级 (降级模式)", len(apiDef.Fields)),
 			})
 			stages = append(stages, models.DataApiSessionStage{
 				Name: "desensitize", Title: "自适应隐私脱敏治理", Status: "success",
-				DurationMs: desensitizeDuration / 2,
-				Detail:     fmt.Sprintf("对 %d 条记录执行本地降级掩码 (via local-fallback)", len(sanitizedData)),
+				Source: "local-fallback", DurationMs: desensitizeDuration / 2,
+				Detail: fmt.Sprintf("对 %d 条记录执行本地降级掩码 (via local-fallback)", len(sanitizedData)),
 			})
 		}
-		_ = engineUsed
 	} else {
 		desensitizeDuration := time.Since(desensitizeStart).Milliseconds()
 		stages = append(stages, models.DataApiSessionStage{
@@ -470,21 +472,40 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 		})
 	}
 
-	// ── 阶段 3：审计存证 ───────────────────────────────────────────
+	// ── 阶段 5：结果装配 (return) ─────────────────────────────────
+	stages = append(stages, models.DataApiSessionStage{
+		Name:       "return",
+		Title:      "脱敏结果装配与交付",
+		Status:     "success",
+		Source:     "app-lz-bff",
+		DurationMs: 1,
+		Detail:     fmt.Sprintf("装配 %d 条脱敏记录准备返回", len(sanitizedData)),
+	})
+
+	// ── 阶段 6：审计存证 (audit) ───────────────────────────────────
 	auditStart := time.Now()
 	auditEntryID := ""
-	_, auditErr := h.pool.GetAuditLogs(c.Request.Context(), 1, 0)
+	entryID, auditErr := h.pool.RecordAudit(c.Request.Context(), models.AuditRecordRequest{
+		Datasource:    apiDef.DatasourceID,
+		APICode:       apiDef.APICode,
+		SessionID:     sessionID,
+		Operation:     "mask",
+		Algorithm:     "three_layer_funnel",
+		User:          "app-lz-bff",
+		Status:        "success",
+		SecurityLevel: "L3",
+		InputRows:     len(rawRecords),
+		OutputRows:    len(sanitizedData),
+	})
 	auditDuration := time.Since(auditStart).Milliseconds()
 	if auditErr != nil {
 		stages = append(stages, models.DataApiSessionStage{
-			Name: "audit", Title: "不可篡改审计存证", Status: "error",
-			DurationMs: auditDuration, Detail: auditErr.Error(),
+			Name: "audit", Title: "不可篡改审计存证", Status: "skipped",
+			Source: "audit-log", DurationMs: auditDuration,
+			Detail: fmt.Sprintf("审计存证跳过 (上游不可达: %v)", auditErr),
 		})
-		if overallStatus == "completed" {
-			overallStatus = "partial"
-		}
 	} else {
-		auditEntryID = fmt.Sprintf("audit-%s", sessionID)
+		auditEntryID = entryID
 		stages = append(stages, models.DataApiSessionStage{
 			Name: "audit", Title: "不可篡改审计存证", Status: "success",
 			DurationMs: auditDuration,
@@ -500,7 +521,9 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 
 	resp := models.DataApiSessionResponse{
 		SessionID:     sessionID,
-		ApiID:         req.ApiID,
+		APICode:       apiDef.APICode,
+		DatasourceID:  apiDef.DatasourceID,
+		ApiID:         apiDef.Seq,
 		ApiName:       apiDef.Name,
 		Status:        overallStatus,
 		RawRecords:    rawRecords,
@@ -513,60 +536,9 @@ func (h *Handler) InvokeDataApi(c *gin.Context) {
 }
 
 // presetDataApiDefinitions 返回 4 个预设数据 API 的定义。
-// 字段定义与 engine/medical_pipeline/samples 及 scripts/data/ 生成脚本保持严格一致。
-// API 1/2 为 active 状态，API 3/4 为 reserved 预留状态。
+// 委托给 internal/catalog（单一事实源来自 pkg/naming）。
 func presetDataApiDefinitions() []models.DataApiDef {
-	return []models.DataApiDef{
-		{
-			ID: 1, Name: "医保结算数据 API",
-			DatasourceID: "ds_yibao",
-			Category:     "medical",
-			Description:  "城镇职工基本医疗保险结算数据 (yibao.csv 18 字段)，包含结算流水号、人员标识、性别、出生日期、入院/出院日期、住院天数、科室、医院编码、医疗类别、离院方式、ICD-10 诊断编码、诊断名称、入院病情等敏感字段。",
-			Fields: []string{
-				"insurance_settlement_id", "person_id", "gender", "birth_date",
-				"admission_date", "discharge_date", "length_of_stay",
-				"admission_dept", "discharge_dept", "hospital_code",
-				"medical_category", "discharge_mode", "settlement_seq_no",
-				"diagnosis_seq", "diagnosis_type", "icd10_code",
-				"diagnosis_name", "admission_condition",
-			},
-			Status: "active",
-		},
-		{
-			ID: 2, Name: "康养体征数据 API",
-			DatasourceID: "ds_kangyang",
-			Category:     "healthcare",
-			Description:  "智慧养老健康监护与慢病随访数据 (kangyang.csv 27 字段)，包含姓名、身份证号、主诉、现病史、既往史、个人史、吸烟史、家族史、过敏史、残疾评估、体征指标、病程记录等敏感字段。",
-			Fields: []string{
-				"gender", "age", "diagnosis_name", "chief_complaint",
-				"present_illness", "past_history", "personal_history",
-				"is_smoking", "smoking_duration", "family_history",
-				"allergic_history", "department", "height", "weight",
-				"disability_category", "disability_level",
-				"assess_type_name", "assess_result_name", "assess_score",
-				"assess_time", "progress_note", "progress_note_time",
-				"name", "id_card_no", "registered_address",
-				"disability_cert_no", "medical_insurance_no",
-			},
-			Status: "active",
-		},
-		{
-			ID: 3, Name: "预留数据 API #3",
-			DatasourceID: "",
-			Category:     "reserved",
-			Description:  "预留接口，待后续业务接入新的数据源。",
-			Fields:       []string{},
-			Status:       "reserved",
-		},
-		{
-			ID: 4, Name: "预留数据 API #4",
-			DatasourceID: "",
-			Category:     "reserved",
-			Description:  "预留接口，待后续业务接入新的数据源。",
-			Fields:       []string{},
-			Status:       "reserved",
-		},
-	}
+	return catalog.Definitions()
 }
 
 // applyMasking 对单个字段值应用基于字段名的本地掩码。

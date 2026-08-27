@@ -368,7 +368,11 @@ export interface AuditLogItem {
   /** 日志时间戳（ISO 8601） */
   timestamp: string;
   /** 关联的任务 ID */
-  task_id: string;
+  task_id?: string;
+  /** 规范 API 编码，如 'api1_yibao' */
+  api_code?: string;
+  /** 规范数据源 ID，如 'ds_yibao' */
+  datasource_id?: string;
   /** 数据来源 */
   source: string;
   /** 执行的操作 */
@@ -415,10 +419,18 @@ export interface AuditVerifyResponse {
 export interface DataApiDef {
   /** API 唯一 ID（1-4） */
   id: number;
+  /** 规范 API 编码，如 'api1_yibao' */
+  api_code?: string;
+  /** 序号（1-4） */
+  seq?: number;
   /** API 显示名称 */
   name: string;
   /** 关联的数据源 ID，如 'ds_yibao' */
   datasource_id: string;
+  /** 数据文件名，如 'yibao.csv' */
+  file_name?: string;
+  /** 字段数 */
+  field_count?: number;
   /** API 分类，如 'medical' / 'healthcare' / 'reserved' */
   category: string;
   /** API 描述 */

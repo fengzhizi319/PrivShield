@@ -8,25 +8,28 @@ package models
 // MockDataSource represents a registered mock data source for dev/testing.
 // MockDataSource 结构体描述了一个注册在系统中的模拟数据源实体元数据。
 type MockDataSource struct {
-	ID          string   `json:"id"`          // 数据源唯一标识符（如 "ds_yibao", "ds_kangyang", "ds_mock3", "ds_mock4"）
-	Name        string   `json:"name"`        // 数据源中文展示名称（如 "医保就医与结算模拟数据库 (yibao.csv)"）
-	Type        string   `json:"type"`        // 数据源底层存储类型（"file" 表示本地 CSV 文件，"mock" 表示内存硬编码数据）
-	Description string   `json:"description"` // 数据源详细业务描述与用途说明
-	Status      string   `json:"status"`      // 数据源当前连接状态（如 "connected"）
-	RowCount    int      `json:"row_count"`   // 数据源包含的模拟数据总行数
-	Tags        []string `json:"tags"`        // 业务与敏感分类标签列表（如 ["医保", "结算流水", "敏感数据"]）
+	ID           string   `json:"id"`            // 数据源唯一标识符（如 "ds_yibao", "ds_kangyang", "ds_mock3", "ds_mock4"）
+	DatasourceID string   `json:"datasource_id"` // canonical 数据源 ID（与 id 同值双写）
+	APICode      string   `json:"api_code,omitempty"`
+	Name         string   `json:"name"`        // 数据源中文展示名称（如 "医保就医与结算模拟数据库 (yibao.csv)"）
+	Type         string   `json:"type"`        // 数据源底层存储类型（"file" 表示本地 CSV 文件，"mock" 表示内存硬编码数据）
+	Description  string   `json:"description"` // 数据源详细业务描述与用途说明
+	Status       string   `json:"status"`      // 数据源当前连接状态（如 "connected"）
+	RowCount     int      `json:"row_count"`   // 数据源包含的模拟数据总行数
+	Tags         []string `json:"tags"`        // 业务与敏感分类标签列表（如 ["医保", "结算流水", "敏感数据"]）
 }
 
 // DataQueryResponse represents the query result of mock data records.
 // DataQueryResponse 结构体封装了数据源记录分页查询的标准响应载荷。
 type DataQueryResponse struct {
-	SourceID   string           `json:"source_id"`   // 查询的目标数据源唯一标识符
-	SourceName string           `json:"source_name"` // 查询的目标数据源名称
-	Total      int              `json:"total"`       // 符合查询条件的总记录数（用于前端分页计算）
-	Limit      int              `json:"limit"`       // 本次查询请求返回的最大条数限制
-	Offset     int              `json:"offset"`      // 本次查询的记录起始偏移量
-	Records    []map[string]any `json:"records"`     // 实际查询得到的数据行列表（动态键值映射，每行为一组字段名到属性值的对应）
-	Via        string           `json:"via"`         // 响应生成服务节点标识（固定为 "datasource-mgr"，用于全链路追踪）
+	DatasourceID string           `json:"datasource_id"`          // canonical 数据源唯一标识符
+	SourceID     string           `json:"source_id"`              // DEPRECATED: 历史字段名，兼容双写
+	SourceName   string           `json:"source_name"`            // 查询的目标数据源名称
+	Total        int              `json:"total"`                  // 符合查询条件的总记录数（用于前端分页计算）
+	Limit        int              `json:"limit"`                  // 本次查询请求返回的最大条数限制
+	Offset       int              `json:"offset"`                 // 本次查询的记录起始偏移量
+	Records      []map[string]any `json:"records"`                // 实际查询得到的数据行列表（动态键值映射，每行为一组字段名到属性值的对应）
+	Via          string           `json:"via"`                    // 响应生成服务节点标识（固定为 "datasource-mgr"，用于全链路追踪）
 }
 
 // DataSourceListResponse is the response for listing mock datasources.

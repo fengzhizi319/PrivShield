@@ -343,10 +343,19 @@ func (s *AuditStore) ListLogs(filter store.AuditFilter) ([]store.AuditLog, int, 
 
 	filtered := make([]store.AuditLog, 0)
 	for _, l := range s.logs {
-		if filter.Operation != "" && l.Operation != filter.Operation {
+		if filter.TaskID != "" && l.TaskID != filter.TaskID {
 			continue
 		}
-		if filter.DataSource != "" && l.DataSource != filter.DataSource {
+		if filter.APICode != "" && l.APICode != filter.APICode {
+			continue
+		}
+		if filter.DatasourceID != "" && l.DatasourceID != filter.DatasourceID && l.DataSource != filter.DatasourceID {
+			continue
+		}
+		if filter.DataSource != "" && l.DataSource != filter.DataSource && l.DatasourceID != filter.DataSource {
+			continue
+		}
+		if filter.Operation != "" && l.Operation != filter.Operation {
 			continue
 		}
 		if filter.User != "" && l.User != filter.User {

@@ -142,9 +142,9 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| 数据源元数据列表 | **L1 实时** | BFF `GetDatasources()` → `datasource-mgr /api/v1/datasources` | `clients.go` L379~L415 |
+| 数据源元数据列表 | **L1 实时** | BFF `GetDatasources()` → `datasource-mgr /api/datasources` | `clients.go` L379~L415 |
 | 数据源元数据兜底 | **L2 BFF** | `defaultDatasources()` 硬编码 `ds_yibao` + `ds_kangyang` 的 ID/名称/字段列表 | `clients.go` L417~L434 |
-| 切片采样数据 | **L1 实时** | BFF `GetDatasourceSlice()` → `datasource-mgr /api/v1/{yibao\|kangyang}/slice?limit=N` | `clients.go` L437~L474 |
+| 切片采样数据 | **L1 实时** | BFF `GetDatasourceSlice()` → `datasource-mgr /api/datasources/{id}/records?limit=N` | `clients.go` L437~L474 |
 | 切片采样兜底 | **L2 BFF** | `generateSampleSlice()` 按行数循环生成合成记录（医保: YB-2026-XXXXX; 康养: KY-XXXX） | `clients.go` L476~L511 |
 
 **兜底数据详细结构**：
@@ -165,9 +165,9 @@ graph TD
 
 | 数据项 | 来源层级 | 具体来源 | 代码位置 |
 |---|---|---|---|
-| 审计日志流水 | **L1 实时** | BFF `GetAuditLogs()` → `audit-log /api/v1/audit/logs?limit=&offset=` | `clients.go` L514~L537 |
+| 审计日志流水 | **L1 实时** | BFF `GetAuditLogs()` → `audit-log /api/audit/logs?limit=&offset=` | `clients.go` L514~L537 |
 | 审计日志兜底 | **L2 BFF** | `defaultAuditLogs()` 硬编码 2 条存证记录 | `clients.go` L539~L565 |
-| Merkle 验真结果 | **L1 实时** | BFF `VerifyAudit()` → `audit-log /api/v1/audit/verify` | `clients.go` L568~L597 |
+| Merkle 验真结果 | **L1 实时** | BFF `VerifyAudit()` → `audit-log /api/audit/snapshots/verify` | `clients.go` L568~L597 |
 | Merkle 验真兜底 | **L2 BFF** | 硬编码 `merkle_valid: true` + 固定 root_hash + `total_entries: 128` | `clients.go` L577~L595 |
 
 **兜底审计记录详情**：

@@ -67,6 +67,9 @@ message AuditLogProto {
   string status = 13;         // "success" | "failed"
   string error_message = 14;  // 错误信息（失败时）
   string security_level = 15; // 敏感等级 "L1" - "L5"
+  string task_id = 16;        // 关联调度任务 ID
+  string api_code = 17;       // 规范 API 编码（如 "api1_yibao"）
+  string datasource_id = 18;  // 规范数据源 ID（如 "ds_yibao"）
 }
 
 message VerifyIntegrityRequest {
@@ -92,8 +95,10 @@ message VerifyIntegrityResponse {
 
 #### `GET /api/audit/logs`
 - **参数**：
+  - `task_id`：任务 ID 过滤
+  - `api_code`：API 编码过滤（如 `api1_yibao`）
+  - `datasource_id` / `datasource`：数据源名称或 ID（如 `ds_yibao`）
   - `operation`：操作类型 (`mask` / `classify` / `k_anon` / `dp` / `qol`)
-  - `datasource`：数据源名称
   - `user`：操作人员/系统
   - `status`：状态 (`success` / `failed`)
   - `security_level`：敏感等级 (`L1`~`L5`)

@@ -350,7 +350,7 @@ func TestDispatchAccepted(t *testing.T) {
 	router := newTestRouter(s)
 
 	body := map[string]any{
-		"source":    "test-source",
+		"source":    "ds_yibao",
 		"operation": "mask",
 		"payload":   map[string]any{"field_name": "name", "value": "test"},
 	}
@@ -398,7 +398,7 @@ func TestProcessTask_StopsWhenStatePersistenceFails(t *testing.T) {
 		ID:        "task-persist-failure",
 		Status:    "pending",
 		Stage:     "queued",
-		Source:    "test-source",
+		Source:    "ds_yibao",
 		Operation: "none",
 		CreatedAt: time.Now(),
 	}
@@ -406,7 +406,7 @@ func TestProcessTask_StopsWhenStatePersistenceFails(t *testing.T) {
 		t.Fatalf("save task: %v", err)
 	}
 
-	s.processTask(task, dispatchRequest{Source: task.Source, Operation: task.Operation})
+	s.processTask(task, dispatchRequest{DatasourceID: task.Source, Source: task.Source, Operation: task.Operation})
 
 	if failingStore.updateCalls != 1 {
 		t.Fatalf("expected one failed stage-state write before stopping, got %d", failingStore.updateCalls)
@@ -443,7 +443,7 @@ func TestListTasksWithFilter(t *testing.T) {
 
 	// 分发一个 operation=none 任务（无需上游 agent，可快速跑通全流水线）
 	body := map[string]any{
-		"source":    "test-source",
+		"source":    "ds_yibao",
 		"operation": "none",
 	}
 	b, _ := json.Marshal(body)
@@ -501,7 +501,7 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 
 	// Step 1: 申请数据 — 提交包含医疗 PII 的脱敏请求
 	dispatchBody := map[string]any{
-		"source":    "卫健数据库",
+		"source":    "ds_yibao",
 		"operation": "mask",
 		"payload": map[string]any{
 			"patient_name": "张三",
@@ -555,8 +555,8 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	if task["stage"] != "done" {
 		t.Errorf("expected stage=done, got %v", task["stage"])
 	}
-	if task["source"] != "卫健数据库" {
-		t.Errorf("expected source=卫健数据库, got %v", task["source"])
+	if task["source"] != "ds_yibao" {
+		t.Errorf("expected source=ds_yibao, got %v", task["source"])
 	}
 	if task["operation"] != "mask" {
 		t.Errorf("expected operation=mask, got %v", task["operation"])
@@ -606,10 +606,10 @@ func TestE2E_FullPipeline_MultiLevelDesensitize(t *testing.T) {
 		operation string
 		source    string
 	}{
-		{"L1-公开数据-无脱敏", "none", "公开数据集"},
-		{"L2-内部数据-字段脱敏", "mask", "员工信息库"},
-		{"L3-敏感数据-K匿名", "k_anon", "卫健病历库"},
-		{"L4-机密数据-差分隐私", "dp", "医保结算库"},
+		{"L1-公开数据-无脱敏", "none", "ds_yibao"},
+		{"L2-内部数据-字段脱敏", "mask", "ds_yibao"},
+		{"L3-敏感数据-K匿名", "k_anon", "ds_kangyang"},
+		{"L4-机密数据-差分隐私", "dp", "ds_yibao"},
 	}
 
 	for _, tc := range testCases {
@@ -711,7 +711,7 @@ func TestE2E_FullPipeline_PipelineStagesWithAgent(t *testing.T) {
 
 	// 提交一个会调用 mock agent 的任务
 	body := map[string]any{
-		"source":    "测试数据源",
+		"source":    "ds_yibao",
 		"operation": "mask",
 		"payload":   map[string]any{"name": "测试"},
 	}

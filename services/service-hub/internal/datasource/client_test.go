@@ -97,11 +97,23 @@ func setupMockDatasourceServer(t *testing.T) (*httptest.Server, *grpc.Server, ne
 	mux.HandleFunc("/api/v1/yibao", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(DataQueryResult{
-			SourceID:   "ds_yibao",
-			SourceName: "医保就医结算",
-			Total:      50,
-			Records:    []map[string]any{{"person_id": "110101", "name": "张三"}},
-			Via:        "datasource-mgr",
+			DatasourceID: "ds_yibao",
+			SourceID:     "ds_yibao",
+			SourceName:   "医保就医结算",
+			Total:        50,
+			Records:      []map[string]any{{"person_id": "110101", "name": "张三"}},
+			Via:          "datasource-mgr",
+		})
+	})
+	mux.HandleFunc("/api/datasources/ds_yibao/records", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(DataQueryResult{
+			DatasourceID: "ds_yibao",
+			SourceID:     "ds_yibao",
+			SourceName:   "医保就医结算",
+			Total:        50,
+			Records:      []map[string]any{{"person_id": "110101", "name": "张三"}},
+			Via:          "datasource-mgr",
 		})
 	})
 
@@ -109,11 +121,23 @@ func setupMockDatasourceServer(t *testing.T) (*httptest.Server, *grpc.Server, ne
 	mux.HandleFunc("/api/v1/kangyang", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(DataQueryResult{
-			SourceID:   "ds_kangyang",
-			SourceName: "康养健康档案",
-			Total:      50,
-			Records:    []map[string]any{{"elder_id": "KY001", "name": "李四"}},
-			Via:        "datasource-mgr",
+			DatasourceID: "ds_kangyang",
+			SourceID:     "ds_kangyang",
+			SourceName:   "康养健康档案",
+			Total:        50,
+			Records:      []map[string]any{{"elder_id": "KY001", "name": "李四"}},
+			Via:          "datasource-mgr",
+		})
+	})
+	mux.HandleFunc("/api/datasources/ds_kangyang/records", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(DataQueryResult{
+			DatasourceID: "ds_kangyang",
+			SourceID:     "ds_kangyang",
+			SourceName:   "康养健康档案",
+			Total:        50,
+			Records:      []map[string]any{{"elder_id": "KY001", "name": "李四"}},
+			Via:          "datasource-mgr",
 		})
 	})
 
@@ -121,9 +145,19 @@ func setupMockDatasourceServer(t *testing.T) (*httptest.Server, *grpc.Server, ne
 	mux.HandleFunc("/api/v1/mock3", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(DataQueryResult{
-			SourceID: "ds_mock3",
-			Total:    10,
-			Records:  []map[string]any{{"service_code": "GOV_01"}},
+			DatasourceID: "ds_mock3",
+			SourceID:     "ds_mock3",
+			Total:        10,
+			Records:      []map[string]any{{"service_code": "GOV_01"}},
+		})
+	})
+	mux.HandleFunc("/api/datasources/ds_mock3/records", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(DataQueryResult{
+			DatasourceID: "ds_mock3",
+			SourceID:     "ds_mock3",
+			Total:        10,
+			Records:      []map[string]any{{"service_code": "GOV_01"}},
 		})
 	})
 
@@ -131,9 +165,19 @@ func setupMockDatasourceServer(t *testing.T) (*httptest.Server, *grpc.Server, ne
 	mux.HandleFunc("/api/v1/mock4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(DataQueryResult{
-			SourceID: "ds_mock4",
-			Total:    10,
-			Records:  []map[string]any{{"dept_code": "FIN_01"}},
+			DatasourceID: "ds_mock4",
+			SourceID:     "ds_mock4",
+			Total:        10,
+			Records:      []map[string]any{{"dept_code": "FIN_01"}},
+		})
+	})
+	mux.HandleFunc("/api/datasources/ds_mock4/records", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(DataQueryResult{
+			DatasourceID: "ds_mock4",
+			SourceID:     "ds_mock4",
+			Total:        10,
+			Records:      []map[string]any{{"dept_code": "FIN_01"}},
 		})
 	})
 

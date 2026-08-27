@@ -245,12 +245,13 @@ func setupFullIntegrationEnvironment(t *testing.T) (*hubdatasource.Client, *huba
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "backend": "ok"})
 	})
-	mux.HandleFunc("/api/v1/yibao", func(w http.ResponseWriter, r *http.Request) {
+	yibaoHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(hubdatasource.DataQueryResult{
-			SourceID:   "ds_yibao",
-			SourceName: "医保就医与结算模拟数据",
-			Total:      50,
+			DatasourceID: "ds_yibao",
+			SourceID:     "ds_yibao",
+			SourceName:   "医保就医与结算模拟数据",
+			Total:        50,
 			Records: []map[string]any{
 				{
 					"patient_name":  "张三",
@@ -271,13 +272,17 @@ func setupFullIntegrationEnvironment(t *testing.T) (*hubdatasource.Client, *huba
 			},
 			Via: "datasource-mgr",
 		})
-	})
-	mux.HandleFunc("/api/v1/kangyang", func(w http.ResponseWriter, r *http.Request) {
+	}
+	mux.HandleFunc("/api/v1/yibao", yibaoHandler)
+	mux.HandleFunc("/api/datasources/ds_yibao/records", yibaoHandler)
+
+	kangyangHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(hubdatasource.DataQueryResult{
-			SourceID:   "ds_kangyang",
-			SourceName: "康养健康与慢病档案模拟数据",
-			Total:      50,
+			DatasourceID: "ds_kangyang",
+			SourceID:     "ds_kangyang",
+			SourceName:   "康养健康与慢病档案模拟数据",
+			Total:        50,
 			Records: []map[string]any{
 				{
 					"name":            "王五",
@@ -290,7 +295,9 @@ func setupFullIntegrationEnvironment(t *testing.T) (*hubdatasource.Client, *huba
 			},
 			Via: "datasource-mgr",
 		})
-	})
+	}
+	mux.HandleFunc("/api/v1/kangyang", kangyangHandler)
+	mux.HandleFunc("/api/datasources/ds_kangyang/records", kangyangHandler)
 	mux.HandleFunc("/api/datasources", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{

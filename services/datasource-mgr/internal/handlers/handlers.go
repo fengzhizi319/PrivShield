@@ -8,6 +8,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,12 +17,23 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/models"
 )
 
 // moduleVia 是响应体中的服务标识常量，用于全链路追踪定位请求处理节点。
 const moduleVia = "datasource-mgr"
+
+// setDeprecationHeaders 注入专用端点的弃用响应头（api_rename_design.md §7.1）。
+func setDeprecationHeaders(c *gin.Context, canonicalID string) {
+	c.Header("Deprecation", "true")
+	c.Header("Sunset", "Mon, 01 Feb 2027 00:00:00 GMT")
+	canonicalPath := fmt.Sprintf("/api/datasources/%s/records", canonicalID)
+	c.Header("Link", fmt.Sprintf("<%s>; rel=\"successor-version\"", canonicalPath))
+	c.Header("X-PrivShield-Canonical-Path", canonicalPath)
+	c.Header("X-PrivShield-Canonical-Source", canonicalID)
+}
 
 // Server aggregates HTTP handler dependencies.
 // Server 结构体聚合了 HTTP 处理器层所需的运行配置和结构化日志组件。
@@ -135,6 +147,7 @@ func (s *Server) Readyz(c *gin.Context) {
 // GetYibaoData implements API 1: queries mock healthcare and settlement records.
 // GetYibaoData 处理 API 1 请求：分页读取并返回医保就医与结算模拟数据（yibao.csv）。
 func (s *Server) GetYibaoData(c *gin.Context) {
+	setDeprecationHeaders(c, naming.DSYibao)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetYibaoRecords(limit, offset)
 	if err != nil {
@@ -142,19 +155,21 @@ func (s *Server) GetYibaoData(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
-		SourceID:   "ds_yibao",
-		SourceName: "医保就医与结算模拟数据库 (yibao.csv)",
-		Total:      total,
-		Limit:      limit,
-		Offset:     offset,
-		Records:    records,
-		Via:        moduleVia,
+		DatasourceID: naming.DSYibao,
+		SourceID:     naming.DSYibao,
+		SourceName:   "医保就医与结算模拟数据库 (yibao.csv)",
+		Total:        total,
+		Limit:        limit,
+		Offset:       offset,
+		Records:      records,
+		Via:          moduleVia,
 	})
 }
 
 // GetKangyangData implements API 2: queries mock elderly care and chronic disease records.
 // GetKangyangData 处理 API 2 请求：分页读取并返回康养体检与慢病管理模拟数据（kangyang.csv）。
 func (s *Server) GetKangyangData(c *gin.Context) {
+	setDeprecationHeaders(c, naming.DSKangyang)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetKangyangRecords(limit, offset)
 	if err != nil {
@@ -162,19 +177,21 @@ func (s *Server) GetKangyangData(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
-		SourceID:   "ds_kangyang",
-		SourceName: "康养体检与慢病模拟数据库 (kangyang.csv)",
-		Total:      total,
-		Limit:      limit,
-		Offset:     offset,
-		Records:    records,
-		Via:        moduleVia,
+		DatasourceID: naming.DSKangyang,
+		SourceID:     naming.DSKangyang,
+		SourceName:   "康养体检与慢病模拟数据库 (kangyang.csv)",
+		Total:        total,
+		Limit:        limit,
+		Offset:       offset,
+		Records:      records,
+		Via:          moduleVia,
 	})
 }
 
 // GetMock3Data implements API 3: queries reserved municipal dataset 3.
 // GetMock3Data 处理 API 3 请求：分页读取并返回预留政务模拟数据源 3 的记录。
 func (s *Server) GetMock3Data(c *gin.Context) {
+	setDeprecationHeaders(c, naming.DSMock3)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock3Records(limit, offset)
 	if err != nil {
@@ -182,19 +199,21 @@ func (s *Server) GetMock3Data(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
-		SourceID:   "ds_mock3",
-		SourceName: "预留政务数据源 3",
-		Total:      total,
-		Limit:      limit,
-		Offset:     offset,
-		Records:    records,
-		Via:        moduleVia,
+		DatasourceID: naming.DSMock3,
+		SourceID:     naming.DSMock3,
+		SourceName:   "预留政务数据源 3",
+		Total:        total,
+		Limit:        limit,
+		Offset:       offset,
+		Records:      records,
+		Via:          moduleVia,
 	})
 }
 
 // GetMock4Data implements API 4: queries reserved municipal dataset 4.
 // GetMock4Data 处理 API 4 请求：分页读取并返回预留政务模拟数据源 4 的记录。
 func (s *Server) GetMock4Data(c *gin.Context) {
+	setDeprecationHeaders(c, naming.DSMock4)
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock4Records(limit, offset)
 	if err != nil {
@@ -202,13 +221,14 @@ func (s *Server) GetMock4Data(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
-		SourceID:   "ds_mock4",
-		SourceName: "预留政务数据源 4",
-		Total:      total,
-		Limit:      limit,
-		Offset:     offset,
-		Records:    records,
-		Via:        moduleVia,
+		DatasourceID: naming.DSMock4,
+		SourceID:     naming.DSMock4,
+		SourceName:   "预留政务数据源 4",
+		Total:        total,
+		Limit:        limit,
+		Offset:       offset,
+		Records:      records,
+		Via:          moduleVia,
 	})
 }
 
@@ -247,8 +267,14 @@ func (s *Server) GetDataSourceRecords(c *gin.Context) {
 		return
 	}
 
+	canonID, _ := naming.NormalizeDataSourceID(id)
+	if canonID == "" {
+		canonID = id
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"datasource_id": id,
+		"datasource_id": canonID,
+		"source_id":     canonID,
 		"name":          sourceName,
 		"total":         total,
 		"limit":         limit,

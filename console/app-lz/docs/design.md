@@ -78,7 +78,7 @@ flowchart TB
     subgraph UpstreamServices ["PrivShield 核心服务集群"]
         subgraph ServiceHub ["1. 调度中枢 (service-hub :8082 / :50052)"]
             SH_API["REST / gRPC 调度接口"]
-            SH_Pipe["6-Stage Pipeline 调度引擎\n(Ingest➔Fetch➔Classify➔Desensitize➔Return➔Audit)"]
+            SH_Pipe["Pipeline 调度引擎\n(Ingest➔Fetch➔Agent:Classify+Desensitize➔Return➔Audit)"]
             SH_Store["TaskStore 存储引擎\n(PostgreSQL Leased / SQLite / Memory)"]
         end
 
@@ -168,6 +168,45 @@ python -m grpc_tools.protoc \
 
 > **注意**：proto stub 应在上游 proto 文件变更后重新生成，并在 Makefile 中提供 `make proto-gen` 目标一键更新。
 
+### 2.4 API1/API2 数据流与全生命周期接口契约
+
+API1（医保，`ds_yibao`）与 API2（康养，`ds_kangyang`）采用同一条生命周期编排链路：**接入/校验 → 数据源读取 → 调度建任务 → Agent 分类分级并自适应脱敏 → 结果查询/返回 → 审计存证与验真**。两类数据只在数据源读取接口和 `source` 标识处不同，分类分级与脱敏始终由同一个 `engine` Agent 服务完成，不拆分为两个微服务。
+
+#### 2.4.1 API1 医保数据流（`ds_yibao`）
+
+| 生命周期 | REST 接口（具体路径） | gRPC 接口（完整方法名） | 服务与说明 |
+|---|---|---|---|
+| 1. 数据源目录/元数据 | `GET /api/datasources`；`GET /api/datasources/ds_yibao`；`GET /api/datasources/ds_yibao/metadata` | `/datasourcemgr.DataSourceManagerService/ListMockSources`；`/datasourcemgr.DataSourceManagerService/GetDataSource` | `datasource-mgr`，发现数据源、字段和 schema |
+| 2. 医保数据读取 | `GET /api/datasources/ds_yibao/records?limit={n}&offset={m}`（兼容 `GET /api/v1/yibao`） | `/datasourcemgr.DataSourceManagerService/GetYibaoData`；通用方式为 `/datasourcemgr.DataSourceManagerService/GetDataBySource`（`source_id=ds_yibao`） | `datasource-mgr`，返回原始医保记录 |
+| 3. 创建调度任务 | `POST /api/hub/dispatch`，请求中的 `source=ds_yibao` | `/servicehub.ServiceHubService/Dispatch`；需要分类入口时使用 `/servicehub.ServiceHubService/ClassifyAndDispatch` | `service-hub`，返回 `202 Accepted` 和 `task_id` |
+| 4. Agent 分类分级 + 自适应脱敏 | `POST /v1/agent/process`（兼容 `POST /v1/medical/process`） | Agent 当前没有对应的“一体化医疗处理” RPC；可分别使用 `/privacy.local.PrivacyService/DynClassify` 与 `/privacy.local.PrivacyService/Mask`、`/MaskRecord`、`/KAnonymizeRecord`、`/DP*` | `engine`，同一服务内完成分类、策略选择和脱敏；service-hub 当前实际调用 REST |
+| 5. 任务状态与结果查询 | `GET /api/hub/tasks/{task_id}`；列表为 `GET /api/hub/tasks?status=...`；流水线为 `GET /api/hub/pipeline` | `/servicehub.ServiceHubService/GetTask`；`/servicehub.ServiceHubService/ListTasks`；`/servicehub.ServiceHubService/PipelineStatus` | `service-hub`，查询生命周期状态、阶段和租约信息 |
+| 6. 审计写入 | `POST /api/audit/logs` | `/auditlog.AuditLogService/RecordAudit` | `audit-log`，写入任务元数据、数据指纹和操作结果 |
+| 7. 审计查询/验真 | `GET /api/audit/logs`；`GET /api/audit/logs/{id}`；`POST /api/audit/snapshots/verify` | `/auditlog.AuditLogService/GetAuditLog`；`/auditlog.AuditLogService/ListAuditLogs`；`/auditlog.AuditLogService/VerifyIntegrity` | `audit-log`，查询存证并验证 SHA-256/Merkle 完整性 |
+
+#### 2.4.2 API2 康养数据流（`ds_kangyang`）
+
+API2 与 API1 共用第 3～7 步的调度、Agent、任务和审计接口；差异仅在数据源读取阶段：
+
+| 生命周期 | REST 接口（具体路径） | gRPC 接口（完整方法名） | 服务与说明 |
+|---|---|---|---|
+| 1. 数据源目录/元数据 | `GET /api/datasources`；`GET /api/datasources/ds_kangyang`；`GET /api/datasources/ds_kangyang/metadata` | `/datasourcemgr.DataSourceManagerService/ListMockSources`；`/datasourcemgr.DataSourceManagerService/GetDataSource` | `datasource-mgr`，发现数据源、字段和 schema |
+| 2. 康养数据读取 | `GET /api/datasources/ds_kangyang/records?limit={n}&offset={m}`（兼容 `GET /api/v1/kangyang`） | `/datasourcemgr.DataSourceManagerService/GetKangyangData`；通用方式为 `/datasourcemgr.DataSourceManagerService/GetDataBySource`（`source_id=ds_kangyang`） | `datasource-mgr`，返回原始康养记录 |
+| 3.～7. 调度、Agent、任务、审计 | 与 API1 相同：`POST /api/hub/dispatch`（`source=ds_kangyang`）→ `POST /v1/agent/process` → `GET /api/hub/tasks/{task_id}` → `POST /api/audit/logs` → `POST /api/audit/snapshots/verify` | 与 API1 相同：`/servicehub.ServiceHubService/Dispatch` 或 `/ClassifyAndDispatch` → Agent 分类/脱敏 RPC（如需要）→ `/GetTask`/`/PipelineStatus` → `/RecordAudit` → `/VerifyIntegrity` | 各步骤仍分别由 `service-hub`、`engine`、`audit-log` 负责；API1/API2 不建立两套服务接口 |
+
+#### 2.4.3 App-LZ BFF 对外聚合入口与映射
+
+前端不直接依赖上述内部服务地址，统一经 App-LZ BFF（`:8085`/`:50055`）访问。推荐的 API1/API2 入口如下：
+
+| 前端业务动作 | BFF REST | BFF 内部调用链 |
+|---|---|---|
+| 读取医保/康养数据 | `GET /api/lz/data-api/definitions`；`POST /api/lz/data-api/invoke` | `datasource-mgr` 的 `GET /api/datasources/{id}/records`（或对应 gRPC） |
+| 派发医保/康养任务 | `POST /api/lz/tasks/dispatch` | 转发 `service-hub` `POST /api/hub/dispatch`，透传 `source=ds_yibao\|ds_kangyang` |
+| 追踪完整生命周期 | `GET /api/lz/tasks/{id}`；`GET /api/lz/tasks`；`GET /api/lz/tasks/leases` | `service-hub` `GetTask`/`ListTasks`/`HubStatus` |
+| 查看审计与验真 | `GET /api/lz/audit/logs`；`POST /api/lz/audit/verify` | 转发 `audit-log` `GET /api/audit/logs` 与 `POST /api/audit/snapshots/verify` |
+
+> **实现说明**：`audit-log` 支持通过 REST `POST /api/audit/logs` 或 gRPC `RecordAudit` 写入真实存证。engine 通用合规流水线以 `POST /v1/agent/process`（兼容 `POST /v1/medical/process`）REST 为准。
+
 ---
 
 ## 3. 核心功能模块设计
@@ -203,17 +242,17 @@ App-LZ 共划分为 **7 大核心功能工作台**，全方位覆盖 `service-hu
 ---
 
 ### 3.2 模块二：6 阶段流水线动态调度大屏 (6-Stage Pipeline Visualizer)
-- **业务目标**：可视化展示 `service-hub` 核心 6 阶段流水线在处理数据时的流转全貌。
-- **6 大阶段全流程**：
+- **业务目标**：可视化展示 `service-hub` 核心 6 个逻辑处理阶段在处理数据时的流转全貌。
+- **6 个逻辑阶段**（第 3、4 阶段均由同一个 `engine` Agent 服务承载，是服务内的连续子阶段，不是两个微服务）：
   1. **`Ingest` (任务接收与校验)**：校验请求体格式、分配全局唯一 `task_id`、写入存储并置为 `pending`。
   2. **`Fetch` (数据源拉取)**：联动 `datasource-mgr` 根据 `datasource_id` 提取原始数据切片。
-  3. **`Classify` (动态分类分级)**：调用 `engine` 规则引擎/NER/LLM，评估字段与记录的敏感等级 (L1~L5)。
-  4. **`Desensitize` (自适应隐私脱敏)**：根据分类结果自动匹配并执行脱敏原语（掩码/差分隐私/K-匿名/混淆）。
-  5. **`Return` (结果装配与返回)**：装配安全治理后的合规数据包。
-  6. **`Audit` (不可篡改存证)**：向 `audit-log` 异步提交 SHA-256 存证记录与任务元数据。
+  3. **`Classify` (动态分类分级)**：调用同一个 `engine` Agent 服务中的规则引擎/NER/LLM，评估字段与记录的敏感等级 (L1~L5)。REST 主链路为 `POST /v1/medical/process`；原子 gRPC 入口为 `/privacy.local.PrivacyService/DynClassify`。
+  4. **`Desensitize` (自适应隐私脱敏)**：仍在同一个 `engine` Agent 服务内，根据第 3 阶段分类结果匹配掩码、差分隐私、K-匿名或查询混淆等策略；可使用 `/v1/medical/process` 的组合处理，或使用该服务的 `/Mask`、`/KAnonymizeRecord`、`/DP*` 等原语 RPC。此阶段不是独立的脱敏微服务。
+  5. **`Return` (结果装配与返回)**：装配安全治理后的合规数据包，通过 `GET /api/hub/tasks/{task_id}` 查询异步结果或由 BFF 聚合返回。
+  6. **`Audit` (不可篡改存证)**：目标是调用 `audit-log` 的 `POST /api/audit/logs` 或 `/auditlog.AuditLogService/RecordAudit` 写入 SHA-256 存证记录与任务元数据，再通过 `POST /api/audit/snapshots/verify` 或 `/auditlog.AuditLogService/VerifyIntegrity` 验真；当前 service-hub 代码仍主要完成状态持久化。
 - **交互特性**：
   - 各阶段状态灯（空闲 `idle` / 处理中 `processing` / 失败 `error`）与活跃任务计数卡片。
-  - **数据穿透比对面板（Payload Inspector）**：左侧展示原始输入数据（如明文身份证、病历），右侧展示脱敏后数据，中间高亮展示分类标签（如 `[L3-PERSONAL_BASIC] ➔ 掩码脱敏`）。
+  - **数据穿透比对面板（Payload Inspector）**：左侧展示原始输入数据（如明文身份证、病历），右侧展示同一 Agent 服务返回的脱敏数据，中间高亮展示分类标签（如 `[L3-PERSONAL_BASIC] ➔ 掩码脱敏`）。
 - **上游映射**：流水线状态数据来源于 `service-hub` 的 `GET /api/hub/pipeline` 接口，BFF 额外聚合 `service-hub` 的 `GET /api/hub/status` 获取全局队列深度。
 
 ---
@@ -281,7 +320,7 @@ App-LZ 共划分为 **7 大核心功能工作台**，全方位覆盖 `service-hu
 - **业务目标**：直观展示调度中枢的 Prometheus 指标与流水线各阶段性能瓶颈。
 - **功能特性**：
   1. **QPS 与吞吐量实时仪表盘**：按秒级/分钟级统计任务接收速率与处理速率。
-  2. **6 阶段耗时占比瀑布图**：精准量化 `Ingest`、`Fetch`、`Classify`、`Desensitize`、`Return`、`Audit` 的平均耗时分布（例如识别出瓶颈是在 Agent 分类还是在数据源提取）。
+  2. **6 阶段耗时占比瀑布图**：精准量化 `Ingest`、`Fetch`、`Classify`、`Desensitize`、`Return`、`Audit` 的平均耗时分布；其中 `Classify` 与 `Desensitize` 的指标归属于同一个 Agent 服务，可同时观察服务内两个子阶段的瓶颈。
   3. **系统资源与重试率监控**：监控失败重试计数、孤立任务回收次数、错误率趋势。
 - **数据来源**：BFF 通过 HTTP 调用各上游服务的 `GET /metrics` 端点获取 Prometheus 原始指标，聚合后以 JSON 格式返回前端。前端使用 ECharts 渲染图表。
 
@@ -594,7 +633,7 @@ App-LZ 的脚本与现有脚本体系**并行共存、互不干扰**：
 | 组件文件 | 核心技术点 | 业务职责 |
 |---|---|---|
 | [`TopologyPanel.tsx`](../web/src/components/TopologyPanel.tsx) | `FIXED_ORDER` 排序锁、REST/gRPC 工具栏、实时 RTT 徽标 | 展示四微服务固定网格拓扑、通信协议切换与探针明细 |
-| [`PipelineVisualizer.tsx`](../web/src/components/PipelineVisualizer.tsx) | 6 阶段状态机动效、医保/康养预设、双栏 JSON Diff | 实时渲染 Ingest➔Fetch➔Classify➔Desensitize➔Return➔Audit 流转 |
+| [`PipelineVisualizer.tsx`](../web/src/components/PipelineVisualizer.tsx) | 6 阶段状态机动效、医保/康养预设、双栏 JSON Diff | 实时渲染 Ingest➔Fetch➔Agent(Classify➔Desensitize)➔Return➔Audit 流转；Classify 与 Desensitize 共用同一 Agent 节点 |
 | [`TaskLifecyclePanel.tsx`](../web/src/components/TaskLifecyclePanel.tsx) | 任务多维过滤、Phase B 租约表、TTL 倒计时 | 观测任务执行阶段、Worker 分布与 `FOR UPDATE SKIP LOCKED` |
 | [`TestRunnerPanel.tsx`](../web/src/components/TestRunnerPanel.tsx) | 多用例勾选、并发压测滑块、暗黑终端流、MD 导出 | TS-01~TS-03 一键执行、实时断言判定与测试报告生成 |
 | [`DataApiPanel.tsx`](../web/src/components/DataApiPanel.tsx) | 4 阶段全链路会话、原始/脱敏数据逐行对比、字段高亮 | 预设数据 API 调用与脱敏效果可视化 |

@@ -101,7 +101,7 @@ func TestCreateLog(t *testing.T) {
 
 	body := map[string]any{
 		"operation":      "mask",
-		"datasource":     "卫健数据库",
+		"datasource":     "ds_yibao",
 		"algorithm":      "field_mask",
 		"parameters":     map[string]any{"fields": []string{"name", "id_card"}},
 		"input_rows":     1000,
@@ -175,7 +175,7 @@ func TestGetLog(t *testing.T) {
 	// Create a log
 	body := map[string]any{
 		"operation":      "k_anon",
-		"datasource":     "医保数据库",
+		"datasource":     "ds_yibao",
 		"algorithm":      "k_anonymity",
 		"input_rows":     5000,
 		"output_rows":    5000,
@@ -221,7 +221,7 @@ func TestGetStats(t *testing.T) {
 	for _, op := range []string{"mask", "mask", "k_anon", "dp"} {
 		body := map[string]any{
 			"operation":      op,
-			"datasource":     "test",
+			"datasource":     "ds_yibao",
 			"status":         "success",
 			"security_level": "L3",
 			"duration_ms":    50,
@@ -361,7 +361,7 @@ func TestGenerateReport(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		body := map[string]any{
 			"operation":      "mask",
-			"datasource":     "test",
+			"datasource":     "ds_yibao",
 			"status":         "success",
 			"security_level": "L3",
 			"duration_ms":    50,
@@ -407,7 +407,7 @@ func TestListLogsWithFilter(t *testing.T) {
 	for _, op := range []string{"mask", "k_anon", "dp"} {
 		body := map[string]any{
 			"operation":      op,
-			"datasource":     "test",
+			"datasource":     "ds_yibao",
 			"status":         "success",
 			"security_level": "L3",
 		}

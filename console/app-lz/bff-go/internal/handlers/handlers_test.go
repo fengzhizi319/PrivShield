@@ -121,9 +121,9 @@ func TestGetSuitesAndRun(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", w.Code)
 	}
 
-	// 步骤 2：执行 TS-01/02/03 三个套件
+	// 步骤 2：执行 TS-01/02/03/04 四个套件
 	runPayload := models.RunTestSuiteRequest{
-		SuiteIDs:          []string{"TS-01", "TS-02", "TS-03"},
+		SuiteIDs:          []string{"TS-01", "TS-02", "TS-03", "TS-04"},
 		Concurrency:       5,
 		BenchmarkRequests: 10,
 	}
@@ -142,8 +142,8 @@ func TestGetSuitesAndRun(t *testing.T) {
 	if err := json.Unmarshal(w2.Body.Bytes(), &runResp); err != nil {
 		t.Fatalf("failed to parse run response: %v", err)
 	}
-	if runResp.TotalCases != 3 {
-		t.Errorf("expected 3 total suite items, got %d", runResp.TotalCases)
+	if runResp.TotalCases != 4 {
+		t.Errorf("expected 4 total suite items, got %d", runResp.TotalCases)
 	}
 }
 
@@ -167,5 +167,111 @@ func TestGetLeases(t *testing.T) {
 	}
 	if leases.StoreBackend != "sqlite" {
 		t.Errorf("expected sqlite store, got %s", leases.StoreBackend)
+	}
+}
+
+// TestGetDataApiDefinitions 验证预设数据 API 目录接口返回 canonical 字段（api_code / datasource_id）。
+func TestGetDataApiDefinitions(t *testing.T) {
+	h := setupTestRouter()
+	router := SetupRouter(h)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/lz/data-api/definitions", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var body struct {
+		APIs []models.DataApiDef `json:"apis"`
+		Via  string              `json:"via"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse definitions response: %v", err)
+	}
+	if len(body.APIs) != 4 {
+		t.Fatalf("expected 4 api definitions, got %d", len(body.APIs))
+	}
+	if body.APIs[0].APICode != "api1_yibao" || body.APIs[0].DatasourceID != "ds_yibao" {
+		t.Errorf("unexpected API1 definition: %+v", body.APIs[0])
+	}
+	if body.APIs[1].APICode != "api2_kangyang" || body.APIs[1].DatasourceID != "ds_kangyang" {
+		t.Errorf("unexpected API2 definition: %+v", body.APIs[1])
+	}
+}
+
+// TestInvokeDataApiContractAndFailClosed 验证 InvokeDataApi 会话调用契约与 fail-closed：
+// 1. api_code=api1_yibao 正常产生 6 阶段流水线响应
+// 2. 未知 api_code 返回 400 INVALID_API_CODE
+// 3. 预留 API 返回 409 RESERVED_DATASOURCE
+// 4. api_code 与 datasource_id 冲突返回 400 API_DATASOURCE_MISMATCH
+func TestInvokeDataApiContractAndFailClosed(t *testing.T) {
+	h := setupTestRouter()
+	router := SetupRouter(h)
+
+	// 1. 正常调用 API1
+	invokePayload := models.DataApiInvokeRequest{
+		APICode: "api1_yibao",
+		Limit:   3,
+	}
+	data, _ := json.Marshal(invokePayload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/lz/data-api/invoke", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for api1_yibao, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp models.DataApiSessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal session response: %v", err)
+	}
+	if resp.APICode != "api1_yibao" || resp.DatasourceID != "ds_yibao" {
+		t.Errorf("expected api1_yibao / ds_yibao, got %s / %s", resp.APICode, resp.DatasourceID)
+	}
+	if len(resp.Stages) != 6 {
+		t.Errorf("expected 6 pipeline stages (ingest->fetch->classify->desensitize->return->audit), got %d", len(resp.Stages))
+	}
+	expectedStages := []string{"ingest", "fetch", "classify", "desensitize", "return", "audit"}
+	for i, exp := range expectedStages {
+		if i < len(resp.Stages) && resp.Stages[i].Name != exp {
+			t.Errorf("stage[%d] = %s, want %s", i, resp.Stages[i].Name, exp)
+		}
+	}
+
+	// 2. 未知 api_code (shebao)
+	invUnknown, _ := json.Marshal(models.DataApiInvokeRequest{APICode: "api3_shebao"})
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodPost, "/api/lz/data-api/invoke", bytes.NewReader(invUnknown))
+	req2.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unknown api_code, got %d", w2.Code)
+	}
+
+	// 3. 预留数据源 (api_id=3)
+	invReserved, _ := json.Marshal(models.DataApiInvokeRequest{ApiID: 3})
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest(http.MethodPost, "/api/lz/data-api/invoke", bytes.NewReader(invReserved))
+	req3.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusConflict {
+		t.Errorf("expected 409 for reserved api_id=3, got %d", w3.Code)
+	}
+
+	// 4. 冲突不自洽 (api1_yibao + ds_kangyang)
+	invMismatch, _ := json.Marshal(models.DataApiInvokeRequest{
+		APICode:      "api1_yibao",
+		DatasourceID: "ds_kangyang",
+	})
+	w4 := httptest.NewRecorder()
+	req4, _ := http.NewRequest(http.MethodPost, "/api/lz/data-api/invoke", bytes.NewReader(invMismatch))
+	req4.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w4, req4)
+	if w4.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for mismatched api/datasource, got %d", w4.Code)
 	}
 }

@@ -16,12 +16,12 @@
 
 ## 2. 模拟数据接口规划 (API 1 ~ 4)
 
-| 接口编号 | 对应数据源 | REST 路径 | gRPC 方法 | 说明 |
-|---|---|---|---|---|
-| **API 1** | 医保数据源 | `GET /api/v1/yibao` | `GetYibaoData` | 模拟医保就医、诊断与结算流水 (`yibao.csv`) |
-| **API 2** | 康养数据源 | `GET /api/v1/kangyang` | `GetKangyangData` | 模拟康养中心体检、慢病随访与健康档案 (`kangyang.csv`) |
-| **API 3** | 预留接口 3 | `GET /api/v1/mock3` | `GetMockData3` | 预留政务数据源 3 模拟数据 |
-| **API 4** | 预留接口 4 | `GET /api/v1/mock4` | `GetMockData4` | 预留政务数据源 4 模拟数据 |
+| 接口编号 | 对应数据源 | 规范 REST 路径 (Canonical) | 兼容别名 (Deprecated) | gRPC 方法 | 说明 |
+|---|---|---|---|---|---|
+| **API 1** | 医保数据源 (`ds_yibao`) | `GET /api/datasources/ds_yibao/records` | `GET /api/v1/yibao` | `GetYibaoData` | 模拟医保就医、诊断与结算流水 (`yibao.csv`) |
+| **API 2** | 康养数据源 (`ds_kangyang`) | `GET /api/datasources/ds_kangyang/records` | `GET /api/v1/kangyang` | `GetKangyangData` | 模拟康养中心体检、慢病随访与健康档案 (`kangyang.csv`) |
+| **API 3** | 预留接口 3 (`ds_mock3`) | `GET /api/datasources/ds_mock3/records` | `GET /api/v1/mock3` | `GetMockData3` | 预留政务数据源 3 模拟数据 |
+| **API 4** | 预留接口 4 (`ds_mock4`) | `GET /api/datasources/ds_mock4/records` | `GET /api/v1/mock4` | `GetMockData4` | 预留企业/金融数据源 4 模拟数据 |
 
 ---
 

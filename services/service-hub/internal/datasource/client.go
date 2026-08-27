@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	dspb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
 )
 
@@ -131,13 +132,34 @@ func (c *Client) Health(ctx context.Context) (map[string]any, error) {
 // DataQueryResult represents the query result from datasource-mgr.
 // DataQueryResult 结构体表示从 datasource-mgr 查询抽样获取的标准数据集对象。
 type DataQueryResult struct {
-	SourceID   string           `json:"source_id"`   // 数据源标识（如 "ds_yibao"）
-	SourceName string           `json:"source_name"` // 数据源名称（如 "医保结算高敏数据"）
-	Total      int              `json:"total"`       // 数据集总记录条数
-	Limit      int              `json:"limit"`       // 分页限制每页大小
-	Offset     int              `json:"offset"`      // 分页偏移游标
-	Records    []map[string]any `json:"records"`     // 结构化样本数据行切片
-	Via        string           `json:"via"`         // 模块来源标识
+	DatasourceID string           `json:"datasource_id"` // canonical 数据源标识（如 "ds_yibao"）
+	SourceID     string           `json:"source_id"`     // DEPRECATED 历史字段，兼容双写
+	SourceName   string           `json:"source_name"`   // 数据源名称（如 "医保结算高敏数据"）
+	Total        int              `json:"total"`         // 数据集总记录条数
+	Limit        int              `json:"limit"`         // 分页限制每页大小
+	Offset       int              `json:"offset"`        // 分页偏移游标
+	Records      []map[string]any `json:"records"`       // 结构化样本数据行切片
+	Via          string           `json:"via"`           // 模块来源标识
+}
+
+// FetchData requests records from datasource-mgr using the canonical path:
+// GET /api/datasources/{id}/records?limit=&offset=
+func (c *Client) FetchData(ctx context.Context, datasourceID string, limit, offset int) (*DataQueryResult, error) {
+	normID, err := naming.NormalizeDataSourceID(datasourceID)
+	if err != nil {
+		normID = datasourceID
+	}
+	res, err := c.fetchEndpoint(ctx, fmt.Sprintf("/api/datasources/%s/records", url.PathEscape(normID)), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	if res.DatasourceID == "" {
+		res.DatasourceID = normID
+	}
+	if res.SourceID == "" {
+		res.SourceID = normID
+	}
+	return res, nil
 }
 
 // FetchYibaoData requests mock yibao data (API 1) via HTTP REST.
@@ -164,22 +186,9 @@ func (c *Client) FetchMockData4(ctx context.Context, limit, offset int) (*DataQu
 	return c.fetchEndpoint(ctx, "/api/v1/mock4", limit, offset)
 }
 
-// FetchDataBySource dispatches to the appropriate endpoint based on source ID or path via HTTP REST.
-// FetchDataBySource 根据传入的数据源标识（ID 或中英文关键字）自动路由并请求对应的专用端点或通用查询端点。
+// FetchDataBySource dispatches to FetchData via canonical /api/datasources/{id}/records.
 func (c *Client) FetchDataBySource(ctx context.Context, sourceID string, limit, offset int) (*DataQueryResult, error) {
-	normalized := strings.ToLower(strings.TrimSpace(sourceID))
-	switch {
-	case strings.Contains(normalized, "yibao") || strings.Contains(normalized, "医保"):
-		return c.FetchYibaoData(ctx, limit, offset)
-	case strings.Contains(normalized, "kangyang") || strings.Contains(normalized, "康养"):
-		return c.FetchKangyangData(ctx, limit, offset)
-	case strings.Contains(normalized, "mock3") || strings.Contains(normalized, "政务"):
-		return c.FetchMockData3(ctx, limit, offset)
-	case strings.Contains(normalized, "mock4") || strings.Contains(normalized, "企业") || strings.Contains(normalized, "金融"):
-		return c.FetchMockData4(ctx, limit, offset)
-	default:
-		return c.fetchEndpoint(ctx, "/api/datasources/"+url.PathEscape(sourceID)+"/query", limit, offset)
-	}
+	return c.FetchData(ctx, sourceID, limit, offset)
 }
 
 // ListDataSources fetches the list of mock datasources via HTTP REST.
@@ -512,13 +521,18 @@ func protoToQueryResult(resp *dspb.DataQueryResponse) *DataQueryResult {
 		}
 		records[i] = m
 	}
+	canonID, _ := naming.NormalizeDataSourceID(resp.SourceId)
+	if canonID == "" {
+		canonID = resp.SourceId
+	}
 	return &DataQueryResult{
-		SourceID:   resp.SourceId,
-		SourceName: resp.SourceName,
-		Total:      int(resp.Total),
-		Limit:      int(resp.Limit),
-		Offset:     int(resp.Offset),
-		Records:    records,
-		Via:        resp.Via,
+		DatasourceID: canonID,
+		SourceID:     canonID,
+		SourceName:   resp.SourceName,
+		Total:        int(resp.Total),
+		Limit:        int(resp.Limit),
+		Offset:       int(resp.Offset),
+		Records:      records,
+		Via:          resp.Via,
 	}
 }

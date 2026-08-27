@@ -418,9 +418,9 @@ SSE 端点通过 URL 查询参数认证：`GET /api/lz/suites/stream/:run_id?tok
 ```
 
 **会话链路**：
-1. **Fetch** — 从 `datasource-mgr` 拉取原始数据切片
-2. **Classify + Desensitize** — 调用 `engine /v1/medical/process` 执行三层分类分级 + 隐私脱敏；降级时 BFF 本地 `applyMasking()` 字段级掩码
-3. **Audit** — 验证 `audit-log` 服务可达
-4. **Return** — 组装完整会话结果（原始数据 + 脱敏数据 + 各阶段耗时）
+1. **Fetch** — 从 `datasource-mgr` `GET /api/datasources/{id}/records` 拉取原始数据切片
+2. **Classify + Desensitize** — 调用 `engine /v1/agent/process`（兼容 `/v1/medical/process`）执行三层分类分级 + 隐私脱敏；降级时 BFF 本地 `applyMasking()` 字段级掩码
+3. **Audit** — 调用 `audit-log` gRPC / REST 写入不可篡改 SHA-256 审计存证并获取真实存证条目 ID
+4. **Return** — 组装完整会话结果（原始数据 + 脱敏数据 + 各阶段耗时 + 审计条目 ID）
 
 > 详细响应结构参见 [frontend_backend_mapping.md](frontend_backend_mapping.md) §8.2。

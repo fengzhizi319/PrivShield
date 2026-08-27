@@ -153,7 +153,7 @@ export const AuditVerifierPanel: React.FC<AuditVerifierPanelProps> = ({
                 <tr key={item.id} className="hover:bg-slate-800/40 transition">
                   <td className="py-3 px-3 text-slate-400 truncate max-w-[140px]">{item.timestamp}</td>
                   <td className="py-3 px-3 font-bold text-slate-200">{item.task_id}</td>
-                  <td className="py-3 px-3 text-slate-300">{item.source}</td>
+                  <td className="py-3 px-3 text-slate-300">{item.datasource_id || item.source}</td>
                   <td className="py-3 px-3">
                     <span className="px-2 py-0.5 rounded bg-slate-800 text-indigo-300 border border-slate-700">
                       {item.operation}

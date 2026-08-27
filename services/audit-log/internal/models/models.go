@@ -5,21 +5,24 @@ import "time"
 
 // AuditLog represents a single audit log entry.
 type AuditLog struct {
-	ID            string    `json:"id"`              // Unique log ID
-	Timestamp     time.Time `json:"timestamp"`       // When the operation occurred
-	Operation     string    `json:"operation"`       // "mask" | "classify" | "k_anon" | "dp" | "qol"
-	DataSource    string    `json:"datasource"`      // Source data identifier
-	InputHash     string    `json:"input_hash"`      // SHA256 hash of input data
-	OutputHash    string    `json:"output_hash"`     // SHA256 hash of output data
-	Algorithm     string    `json:"algorithm"`       // Algorithm used (e.g., "field_mask", "k_anonymity")
-	Parameters    any       `json:"parameters"`      // Algorithm parameters
-	InputRows     int       `json:"input_rows"`      // Number of input rows
-	OutputRows    int       `json:"output_rows"`     // Number of output rows
-	DurationMs    int64     `json:"duration_ms"`     // Processing duration
-	User          string    `json:"user"`            // Who performed the operation
-	Status        string    `json:"status"`          // "success" | "failed"
-	ErrorMessage  string    `json:"error,omitempty"` // Error message if failed
-	SecurityLevel string    `json:"security_level"`  // L1-L5 classification level
+	ID            string    `json:"id"`                        // Unique log ID
+	TaskID        string    `json:"task_id,omitempty"`         // Associated pipeline task ID
+	APICode       string    `json:"api_code,omitempty"`        // Canonical API code (e.g. "api1_yibao")
+	DatasourceID  string    `json:"datasource_id,omitempty"`   // Canonical datasource ID (e.g. "ds_yibao")
+	Timestamp     time.Time `json:"timestamp"`                 // When the operation occurred
+	Operation     string    `json:"operation"`                 // "mask" | "classify" | "k_anon" | "dp" | "qol"
+	DataSource    string    `json:"datasource"`                // Source data identifier
+	InputHash     string    `json:"input_hash"`                // SHA256 hash of input data
+	OutputHash    string    `json:"output_hash"`               // SHA256 hash of output data
+	Algorithm     string    `json:"algorithm"`                 // Algorithm used (e.g., "field_mask", "k_anonymity")
+	Parameters    any       `json:"parameters"`                // Algorithm parameters
+	InputRows     int       `json:"input_rows"`                // Number of input rows
+	OutputRows    int       `json:"output_rows"`               // Number of output rows
+	DurationMs    int64     `json:"duration_ms"`               // Processing duration
+	User          string    `json:"user"`                      // Who performed the operation
+	Status        string    `json:"status"`                    // "success" | "failed"
+	ErrorMessage  string    `json:"error,omitempty"`           // Error message if failed
+	SecurityLevel string    `json:"security_level"`            // L1-L5 classification level
 }
 
 // AuditLogListResponse is the response for listing audit logs.
@@ -31,6 +34,9 @@ type AuditLogListResponse struct {
 
 // AuditLogQueryRequest is the request for querying audit logs.
 type AuditLogQueryRequest struct {
+	TaskID        string     `json:"task_id"`
+	APICode       string     `json:"api_code"`
+	DatasourceID  string     `json:"datasource_id"`
 	StartTime     *time.Time `json:"start_time"`
 	EndTime       *time.Time `json:"end_time"`
 	Operation     string     `json:"operation"`

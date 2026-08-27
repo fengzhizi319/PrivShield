@@ -249,12 +249,12 @@ BFF 从 Prometheus 文本格式中提取：
   │
   ├─ Stage 1: 数据源原始数据拉取
   │   BFF → datasource-mgr
-  │   GET :8083/api/v1/yibao?limit=5     (API1 医保)
-  │   GET :8083/api/v1/kangyang?limit=5  (API2 康养)
+  │   GET :8083/api/datasources/ds_yibao/records?limit=5     (API1 医保)
+  │   GET :8083/api/datasources/ds_kangyang/records?limit=5  (API2 康养)
   │
   ├─ Stage 2: 分类分级 + 脱敏治理 ⭐ 核心
-  │   BFF → engine 医疗流水线
-  │   POST :8079/v1/medical/process
+  │   BFF → engine 通用合规流水线
+  │   POST :8079/v1/agent/process (兼容 /v1/medical/process)
   │   { records: [...原始记录...] }
   │
   │   Engine 内部执行：
@@ -269,7 +269,7 @@ BFF 从 Prometheus 文本格式中提取：
   │
   └─ Stage 3: 审计存证
       BFF → audit-log
-      GET :8084/api/v1/audit/logs (验证审计服务可达)
+      POST :8084/api/audit/logs (或 gRPC RecordAudit 写入不可篡改 SHA-256 存证)
 ```
 
 #### Engine `/v1/medical/process` 响应结构
@@ -324,13 +324,13 @@ BFF 从 Prometheus 文本格式中提取：
 | `ListTasks()` | service-hub | `GET /api/hub/tasks` |
 | `GetTask()` | service-hub | `GET /api/hub/tasks/:id` |
 | `GetLeasesFromHub()` | service-hub | `GET /api/hub/tasks?status=running&limit=100` |
-| `GetDatasources()` | datasource-mgr | `GET /api/v1/datasources` (回退 hub) |
-| `GetDatasourceSlice()` | datasource-mgr | `GET /api/v1/{yibao\|kangyang}?limit=N` |
-| `GetAuditLogs()` | audit-log | `GET /api/v1/audit/logs` |
-| `VerifyAudit()` | audit-log | `POST /api/v1/audit/verify` |
+| `GetDatasources()` | datasource-mgr | `GET /api/datasources` |
+| `GetDatasourceSlice()` | datasource-mgr | `GET /api/datasources/{id}/records?limit=N` |
+| `GetAuditLogs()` | audit-log | `GET /api/audit/logs` |
+| `VerifyAudit()` | audit-log | `POST /api/audit/snapshots/verify` |
 | `GetHubMetrics()` | service-hub | `GET /metrics` |
 | `GetParsedMetrics()` | service-hub | `GET /metrics` → BFF 本地解析 |
-| `ProcessMedicalRecords()` | **engine** | `POST /v1/medical/process` |
+| `ProcessAgentRecords()` | **engine** | `POST /v1/agent/process`（兼容 `/v1/medical/process`） |
 | `MaskRecordViaEngine()` | **engine** | `POST /v1/privacy/mask_record` |
 
 ## 附录 B：前端 API Client → BFF 路由速查表

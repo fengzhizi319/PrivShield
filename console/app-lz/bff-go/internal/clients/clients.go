@@ -10,8 +10,9 @@
 //   - Audit Log      (:8084) — 审计日志、Merkle 验真
 //
 // 降级策略：
-//   当上游服务不可达时，多个方法会返回硬编码的 fallback 数据（如 defaultDatasources、
-//   generateSampleSlice、defaultAuditLogs），确保前端大屏在开发/演示模式下仍有数据展示。
+//
+//	当上游服务不可达时，多个方法会返回硬编码的 fallback 数据（如 defaultDatasources、
+//	generateSampleSlice、defaultAuditLogs），确保前端大屏在开发/演示模式下仍有数据展示。
 package clients
 
 import (
@@ -26,8 +27,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/catalog"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/models"
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
+)
+
+// 数据来源标记（api_rename_design.md §9.3 不变式 4）：降级/兜底数据必须携带显式来源。
+const (
+	sourceFallback = "fallback"
+	viaBFF         = "app-lz-bff"
 )
 
 // ClientPool 管理与 4 个上游微服务的 HTTP 通信。
@@ -45,9 +54,9 @@ func NewClientPool(cfg *config.Config) *ClientPool {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        100,               // 全局最大空闲连接数
-				MaxIdleConnsPerHost: 25,                // 每个上游服务最大空闲连接数
-				IdleConnTimeout:     90 * time.Second,  // 空闲连接回收时间
+				MaxIdleConns:        100,              // 全局最大空闲连接数
+				MaxIdleConnsPerHost: 25,               // 每个上游服务最大空闲连接数
+				IdleConnTimeout:     90 * time.Second, // 空闲连接回收时间
 			},
 		},
 	}
@@ -315,75 +324,135 @@ func (c *ClientPool) GetTask(ctx context.Context, taskID string) (*models.Task, 
 	return &task, nil
 }
 
-// GetDatasources 从 datasource-mgr 查询已注册的数据源列表。
+// GetDatasources 从 datasource-mgr 查询已注册的数据源目录。
 //
-// 调用路径：GET {DatasourceURL}/api/v1/datasources
-// 降级策略：当服务不可达、响应解析失败或返回空列表时，
-// 返回 defaultDatasources() 硬编码的 2 个默认数据源（医保 + 康养）。
-func (c *ClientPool) GetDatasources(ctx context.Context) ([]models.Datasource, error) {
-	url := strings.TrimRight(c.cfg.DatasourceURL, "/") + "/api/v1/datasources"
+// canonical 调用路径：GET {DatasourceURL}/api/datasources
+// （旧实现误用 /api/v1/datasources，该路径在上游不存在 → 恒 404 静默降级，即 D-01）
+//
+// 降级策略：服务不可达 / 非 2xx / 解析失败 / 空列表时，返回由 pkg/naming 注册表
+// 派生的兜底目录，并把 Source 标为 "fallback" + Detail 写明原因（9.3 不变式 4）。
+func (c *ClientPool) GetDatasources(ctx context.Context) (models.DatasourcesResponse, error) {
+	path := "/api/datasources"
+	url := strings.TrimRight(c.cfg.DatasourceURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return models.DatasourcesResponse{Datasources: fallbackDatasources(), Total: len(fallbackDatasources()), Source: sourceFallback, Detail: err.Error(), Via: viaBFF}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// 服务不可达 → 返回硬编码的默认数据源元数据
-		return defaultDatasources(), nil
+		return degradedDatasources(fmt.Sprintf("datasource-mgr unreachable: %v", err)), nil
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return degradedDatasources(fmt.Sprintf("datasource-mgr returned HTTP %d for %s", resp.StatusCode, path)), nil
+	}
+
 	var result struct {
+		Total       int                 `json:"total"`
 		Datasources []models.Datasource `json:"datasources"`
+		Via         string              `json:"via"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		// 解析失败 → 返回默认数据源
-		return defaultDatasources(), nil
+		return degradedDatasources(fmt.Sprintf("failed to decode datasource catalog: %v", err)), nil
 	}
 	if len(result.Datasources) == 0 {
-		// 空列表 → 返回默认数据源
-		return defaultDatasources(), nil
+		return degradedDatasources("datasource-mgr returned an empty catalog"), nil
 	}
-	return result.Datasources, nil
+
+	for i := range result.Datasources {
+		normalizeDatasource(&result.Datasources[i])
+	}
+	total := result.Total
+	if total == 0 {
+		total = len(result.Datasources)
+	}
+	return models.DatasourcesResponse{
+		Datasources: result.Datasources,
+		Total:       total,
+		Source:      "datasource-mgr",
+		Via:         viaBFF,
+	}, nil
 }
 
-// defaultDatasources 返回硬编码的默认数据源列表（降级兆底）。
-// 包含 2 个模拟数据源：医保结算（ds_yibao, 1000 条）和康养体征（ds_kangyang, 800 条）。
-func defaultDatasources() []models.Datasource {
-	return []models.Datasource{
-		{
-			ID:           "ds_yibao",
-			Name:         "城镇职工基本医疗保险结算数据源",
-			Category:     "medical",
-			RecordsCount: 1000,
-			Fields:       []string{"record_id", "patient_name", "id_card", "phone", "diagnosis", "hospital_name", "total_fee", "yibao_pay", "settle_date"},
-		},
-		{
-			ID:           "ds_kangyang",
-			Name:         "智慧养老健康监护与体征数据源",
-			Category:     "healthcare",
-			RecordsCount: 800,
-			Fields:       []string{"elder_id", "name", "age", "gender", "heart_rate", "blood_pressure", "blood_glucose", "room_no", "emergency_contact"},
-		},
+// degradedDatasources 返回带显式降级标记的兜底目录（绝不伪装成上游真实数据）。
+func degradedDatasources(detail string) models.DatasourcesResponse {
+	items := fallbackDatasources()
+	return models.DatasourcesResponse{
+		Datasources: items,
+		Total:       len(items),
+		Source:      sourceFallback,
+		Detail:      detail,
+		Via:         viaBFF,
 	}
+}
+
+// normalizeDatasource 把上游目录条目补齐为 canonical 形态：
+// datasource_id 与历史 id 双写，并用注册表补充 api_code / status。
+func normalizeDatasource(ds *models.Datasource) {
+	if ds.DatasourceID == "" {
+		ds.DatasourceID = ds.ID
+	}
+	if ds.ID == "" {
+		ds.ID = ds.DatasourceID
+	}
+	if entry, ok := naming.EntryByDataSourceID(ds.DatasourceID); ok {
+		ds.DatasourceID = entry.DataSourceID
+		ds.ID = entry.DataSourceID
+		ds.APICode = entry.APICode
+		ds.Status = entry.Status
+		if ds.Category == "" {
+			ds.Category = entry.Category
+		}
+	}
+}
+
+// fallbackDatasources 返回由 pkg/naming 注册表派生的兜底数据源目录。
+// 旧版本在这里手写硬编码字段清单（与真实 schema 不一致，D-14），现统一改为查注册表 + catalog。
+func fallbackDatasources() []models.Datasource {
+	defs := catalog.Definitions()
+	out := make([]models.Datasource, 0, len(defs))
+	for _, def := range defs {
+		if def.Status != naming.StatusActive {
+			continue
+		}
+		out = append(out, models.Datasource{
+			ID:           def.DatasourceID,
+			DatasourceID: def.DatasourceID,
+			Name:         def.Name,
+			APICode:      def.APICode,
+			Category:     def.Category,
+			Status:       def.Status,
+			RecordsCount: len(def.Fields),
+			Fields:       def.Fields,
+		})
+	}
+	return out
 }
 
 // GetDatasourceSlice 从 datasource-mgr 获取数据源的采样行数据。
 //
-// 调用路径：GET {DatasourceURL}/api/v1/yibao?limit=N 或 /api/v1/kangyang?limit=N
-// 根据 dsID 判断目标数据源："ds_kangyang" / "kangyang" → kangyang 端点，其余 → yibao 端点。
-// 降级策略：服务不可达或解析失败时，返回 generateSampleSlice() 的硬编码样本数据。
-func (c *ClientPool) GetDatasourceSlice(ctx context.Context, dsID string, limit int) (models.DatasourceSliceResponse, error) {
+// canonical 调用路径：GET {DatasourceURL}/api/datasources/{id}/records?limit=&offset=
+//
+// 入站 rawID 允许任意注册表表现（canonical / slug / 文件名 / 中文名 / api_code），
+// 在服务边界归一化一次；未知 ID 返回 INVALID_DATASOURCE_ID(400)、预留位返回
+// RESERVED_DATASOURCE(409)，不再静默落到医保（修复 D-11）。
+// 上游不可用时返回 Source="fallback" 的本地样本，供大屏演示但不谎报为真实数据。
+func (c *ClientPool) GetDatasourceSlice(ctx context.Context, rawID string, limit, offset int) (models.DatasourceSliceResponse, error) {
+	datasourceID, err := ResolveDatasourceID(rawID)
+	if err != nil {
+		return models.DatasourceSliceResponse{}, err
+	}
 	if limit <= 0 {
 		limit = 10
 	}
-	// 根据数据源 ID 选择对应的 API 端点
-	endpoint := "yibao"
-	if dsID == "ds_kangyang" || dsID == "kangyang" {
-		endpoint = "kangyang"
+	if offset < 0 {
+		offset = 0
 	}
-	url := fmt.Sprintf("%s/api/v1/%s?limit=%d", strings.TrimRight(c.cfg.DatasourceURL, "/"), endpoint, limit)
+
+	url := fmt.Sprintf("%s/api/datasources/%s/records?limit=%d&offset=%d",
+		strings.TrimRight(c.cfg.DatasourceURL, "/"), datasourceID, limit, offset)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return models.DatasourceSliceResponse{}, err
@@ -391,196 +460,434 @@ func (c *ClientPool) GetDatasourceSlice(ctx context.Context, dsID string, limit 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// 服务不可达 → 返回硬编码样本数据
-		return generateSampleSlice(dsID, limit), nil
+		return fallbackSlice(datasourceID, limit, fmt.Sprintf("datasource-mgr unreachable: %v", err)), nil
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return fallbackSlice(datasourceID, limit, fmt.Sprintf("datasource-mgr returned HTTP %d", resp.StatusCode)), nil
+	}
+
 	var result struct {
-		SourceID string           `json:"source_id"`
-		Total    int              `json:"total"`
-		Records  []map[string]any `json:"records"`
+		DatasourceID string           `json:"datasource_id"`
+		SourceID     string           `json:"source_id"` // DEPRECATED 出站字段
+		Total        int              `json:"total"`
+		Records      []map[string]any `json:"records"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		// 解析失败 → 返回硬编码样本数据
-		return generateSampleSlice(dsID, limit), nil
+		return fallbackSlice(datasourceID, limit, fmt.Sprintf("failed to decode records: %v", err)), nil
+	}
+
+	returnedID := result.DatasourceID
+	if returnedID == "" {
+		returnedID = result.SourceID
+	}
+	if returnedID == "" {
+		returnedID = datasourceID
+	}
+	if returnedID != datasourceID {
+		// 上游返回了与请求不同的数据源：立即报错而不是静默接受（D-11 同类风险）
+		return models.DatasourceSliceResponse{}, &UpstreamError{
+			Code:    CodeAmbiguousSource,
+			Message: fmt.Sprintf("datasource-mgr answered for %q while %q was requested", returnedID, datasourceID),
+			Field:   "datasource_id",
+			Status:  http.StatusBadGateway,
+		}
 	}
 
 	return models.DatasourceSliceResponse{
-		DatasourceID: dsID,
+		DatasourceID: datasourceID,
 		Count:        len(result.Records),
 		Total:        result.Total,
 		Records:      result.Records,
+		Source:       "datasource-mgr",
 	}, nil
 }
 
+// fallbackSlice 构造带降级标记的本地样本切片。
+func fallbackSlice(datasourceID string, limit int, detail string) models.DatasourceSliceResponse {
+	slice := generateSampleSlice(datasourceID, limit)
+	slice.Source = sourceFallback
+	slice.Detail = detail
+	return slice
+}
+
 // generateSampleSlice returns fallback sample data when datasource-mgr is unreachable.
-// 字段定义与 engine/medical_pipeline/samples 及 scripts/data/ 生成脚本保持严格一致：
-// yibao.csv 18 字段，kangyang.csv 27 字段。
-func generateSampleSlice(dsID string, limit int) models.DatasourceSliceResponse {
+// 字段定义与 catalog（由 scripts/data/ 生成脚本与 engine/medical_pipeline/samples 对齐）
+// 的 schema 严格一致：yibao.csv 18 字段，kangyang.csv 27 字段。
+//
+// 入参 datasourceID 必须是已经归一化的 canonical 值（调用方负责）。
+func generateSampleSlice(datasourceID string, limit int) models.DatasourceSliceResponse {
 	records := make([]map[string]any, 0, limit)
 	for i := 1; i <= limit; i++ {
-		if dsID == "ds_kangyang" {
+		switch datasourceID {
+		case naming.DSKangyang:
 			// kangyang.csv 27 字段
-			records = append(records, map[string]any{
-				"gender":             "男",
-				"age":                70 + (i % 20),
-				"diagnosis_name":     "2型糖尿病",
-				"chief_complaint":    "口渴多饮多尿半年",
-				"present_illness":    "患者半年前无明显诱因出现口渴",
-				"past_history":       "高血压病史5年",
-				"personal_history":   "无特殊",
-				"is_smoking":         "否",
-				"smoking_duration":   "",
-				"family_history":     "父亲有糖尿病史",
-				"allergic_history":   "无",
-				"department":         "内分泌科",
-				"height":             170,
-				"weight":             72,
-				"disability_category": "无",
-				"disability_level":   "",
-				"assess_type_name":   "老年人能力评估",
-				"assess_result_name": "能力完好",
-				"assess_score":       5,
-				"assess_time":        "2026-01-15 09:30:00",
-				"progress_note":      "血糖控制可，继续当前治疗方案",
-				"progress_note_time": "2026-01-15 10:00:00",
-				"name":               fmt.Sprintf("张老%d", i),
-				"id_card_no":         fmt.Sprintf("510101195%02d0101123%d", i%50, i%10),
-				"registered_address": fmt.Sprintf("四川省成都市武侯区%d号", i),
-				"disability_cert_no": "",
-				"medical_insurance_no": fmt.Sprintf("YB%d%06d", 51, i),
-			})
-		} else {
+			records = append(records, sampleKangyangRecord(i))
+		default:
 			// yibao.csv 18 字段
-			records = append(records, map[string]any{
-				"insurance_settlement_id": fmt.Sprintf("YB202601%04d", i),
-				"person_id":              fmt.Sprintf("PID%08d", 10000000+i),
-				"gender":                 "男",
-				"birth_date":             fmt.Sprintf("19%02d-06-15", 50+i%40),
-				"admission_date":         "2026-01-10",
-				"discharge_date":         "2026-01-18",
-				"length_of_stay":         8,
-				"admission_dept":         "内分泌科",
-				"discharge_dept":         "内分泌科",
-				"hospital_code":          fmt.Sprintf("H%d010%d001", 5+i%3, i%5),
-				"medical_category":       "住院",
-				"discharge_mode":         "医嘱离院",
-				"settlement_seq_no":      fmt.Sprintf("MX202601%04d", i),
-				"diagnosis_seq":          1,
-				"diagnosis_type":         "主要诊断",
-				"icd10_code":             "E11.900",
-				"diagnosis_name":         "2型糖尿病",
-				"admission_condition":    "一般",
-			})
+			records = append(records, sampleYibaoRecord(i))
 		}
 	}
 	return models.DatasourceSliceResponse{
-		DatasourceID: dsID,
+		DatasourceID: datasourceID,
 		Count:        limit,
-		Total:        50,
+		Total:        limit,
 		Records:      records,
+		Source:       sourceFallback,
+	}
+}
+
+// sampleYibaoRecord 构造一条医保结算样本记录（18 字段，与 catalog.Fields(naming.DSYibao) 同序）。
+func sampleYibaoRecord(i int) map[string]any {
+	return map[string]any{
+		"insurance_settlement_id": fmt.Sprintf("YB202601%04d", i),
+		"person_id":               fmt.Sprintf("PID%08d", 10000000+i),
+		"gender":                  "男",
+		"birth_date":              fmt.Sprintf("19%02d-06-15", 50+i%40),
+		"admission_date":          "2026-01-10",
+		"discharge_date":          "2026-01-18",
+		"length_of_stay":          8,
+		"admission_dept":          "内分泌科",
+		"discharge_dept":          "内分泌科",
+		"hospital_code":           fmt.Sprintf("H%d010%d001", 5+i%3, i%5),
+		"medical_category":        "住院",
+		"discharge_mode":          "医囑离院",
+		"settlement_seq_no":       fmt.Sprintf("MX202601%04d", i),
+		"diagnosis_seq":           1,
+		"diagnosis_type":          "主要诊断",
+		"icd10_code":              "E11.900",
+		"diagnosis_name":          "2型糖尿病",
+		"admission_condition":     "一般",
+	}
+}
+
+// sampleKangyangRecord 构造一条康养体征样本记录（27 字段，与 catalog.Fields(naming.DSKangyang) 同序）。
+func sampleKangyangRecord(i int) map[string]any {
+	return map[string]any{
+		"gender":               "男",
+		"age":                  70 + (i % 20),
+		"diagnosis_name":       "2型糖尿病",
+		"chief_complaint":      "口渴多饮多尿半年",
+		"present_illness":      "患者半年前无明显诱因出现口渴",
+		"past_history":         "高血压病史5年",
+		"personal_history":     "无特殊",
+		"is_smoking":           "否",
+		"smoking_duration":     "",
+		"family_history":       "父亲有糖尿病史",
+		"allergic_history":     "无",
+		"department":           "内分泌科",
+		"height":               170,
+		"weight":               72,
+		"disability_category":  "无",
+		"disability_level":     "",
+		"assess_type_name":     "老年人能力评估",
+		"assess_result_name":   "能力完好",
+		"assess_score":         5,
+		"assess_time":          "2026-01-15 09:30:00",
+		"progress_note":        "血糖控制可，继续当前治疗方案",
+		"progress_note_time":   "2026-01-15 10:00:00",
+		"name":                 fmt.Sprintf("张老%d", i),
+		"id_card_no":           fmt.Sprintf("510101195%02d0101123%d", i%50, i%10),
+		"registered_address":   fmt.Sprintf("四川省成都市武侯区%d号", i),
+		"disability_cert_no":   "",
+		"medical_insurance_no": fmt.Sprintf("YB%d%06d", 51, i),
 	}
 }
 
 // GetAuditLogs 从 audit-log 服务获取审计日志条目。
 //
-// 调用路径：GET {AuditURL}/api/v1/audit/logs?limit=N&offset=N
-// 降级策略：服务不可达、解析失败或返回空列表时，返回 defaultAuditLogs() 硬编码的 2 条示例审计记录。
-func (c *ClientPool) GetAuditLogs(ctx context.Context, limit, offset int) ([]models.AuditLogItem, error) {
-	url := fmt.Sprintf("%s/api/v1/audit/logs?limit=%d&offset=%d", strings.TrimRight(c.cfg.AuditURL, "/"), limit, offset)
+// canonical 调用路径：GET {AuditURL}/api/audit/logs?limit=&offset=&datasource=
+// （旧实现误用 /api/v1/audit/logs，上游不存在该路径 → 恒 404 静默降级，即 D-02）
+//
+// rawDatasourceID 为空表示不过滤；非空时先归一化，未知值直接 400（不静默回落）。
+// 降级时返回 Source="fallback"，不再伪装为真实存证。
+func (c *ClientPool) GetAuditLogs(ctx context.Context, limit, offset int, rawDatasourceID string) (models.AuditLogsResponse, error) {
+	datasourceID := ""
+	if strings.TrimSpace(rawDatasourceID) != "" {
+		resolved, err := ResolveDatasourceID(rawDatasourceID)
+		if err != nil {
+			return models.AuditLogsResponse{}, err
+		}
+		datasourceID = resolved
+	}
+
+	path := fmt.Sprintf("/api/audit/logs?limit=%d&offset=%d", limit, offset)
+	if datasourceID != "" {
+		path += "&datasource=" + datasourceID
+	}
+	url := strings.TrimRight(c.cfg.AuditURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return models.AuditLogsResponse{}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// 服务不可达 → 返回默认审计日志
-		return defaultAuditLogs(), nil
+		return degradedAuditLogs(fmt.Sprintf("audit-log unreachable: %v", err), datasourceID), nil
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return degradedAuditLogs(fmt.Sprintf("audit-log returned HTTP %d for %s", resp.StatusCode, path), datasourceID), nil
+	}
+
 	var result struct {
-		Logs []models.AuditLogItem `json:"logs"`
+		Total int                   `json:"total"`
+		Logs  []models.AuditLogItem `json:"logs"`
+		Via   string                `json:"via"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		// 解析失败 → 返回默认审计日志
-		return defaultAuditLogs(), nil
+		return degradedAuditLogs(fmt.Sprintf("failed to decode audit logs: %v", err), datasourceID), nil
 	}
-	if len(result.Logs) == 0 {
-		// 空列表 → 返回默认审计日志
-		return defaultAuditLogs(), nil
+
+	for i := range result.Logs {
+		result.Logs[i].NormalizeAliases()
 	}
-	return result.Logs, nil
+	total := result.Total
+	if total == 0 {
+		total = len(result.Logs)
+	}
+	return models.AuditLogsResponse{
+		Logs:   result.Logs,
+		Total:  total,
+		Source: "audit-log",
+		Via:    viaBFF,
+	}, nil
 }
 
-// defaultAuditLogs 返回硬编码的默认审计日志（降级兆底）。
-// 包含 2 条示例记录：医保脱敏审计 + 康养分类脱敏审计。
+// degradedAuditLogs 返回带显式降级标记的兜底审计示例。
+// 兜底条目的 operation / datasource 均取 canonical 值，避免被回写时遭 400（D-06/D-07）。
+func degradedAuditLogs(detail, datasourceID string) models.AuditLogsResponse {
+	items := defaultAuditLogs()
+	if datasourceID != "" {
+		filtered := make([]models.AuditLogItem, 0, len(items))
+		for _, it := range items {
+			if it.Datasource == datasourceID {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
+	}
+	return models.AuditLogsResponse{
+		Logs:   items,
+		Total:  len(items),
+		Source: sourceFallback,
+		Detail: detail,
+		Via:    viaBFF,
+	}
+}
+
+// defaultAuditLogs 返回本地兜底审计示例（仅用于不可演示时的占位，Source 会标为 fallback）。
+// operation 取 canonical 操作名（validation.AuditOperations：mask/classify/k_anon/dp/qol），
+// datasource 取 naming 注册表常量，避免 D-07 类脉脉漂移。
 func defaultAuditLogs() []models.AuditLogItem {
 	now := time.Now().UTC().Format(time.RFC3339)
-	return []models.AuditLogItem{
+	items := []models.AuditLogItem{
 		{
-			ID:         "audit-log-001",
-			Timestamp:  now,
-			TaskID:     "task-1787554500-eabf3934",
-			Source:     "ds_yibao",
-			Operation:  "mask",
-			DataHash:   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-			Operator:   "service-hub-pipeline",
-			Encryption: "SHA-256 + HMAC",
-			Result:     "success",
+			ID:            "fallback-audit-001",
+			Timestamp:     now,
+			Datasource:    naming.DSYibao,
+			APICode:       naming.API1Yibao,
+			Operation:     "mask",
+			InputHash:     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			OutputHash:    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			Algorithm:     "field_mask",
+			User:          "app-lz-bff",
+			Status:        "success",
+			SecurityLevel: "L3",
 		},
 		{
-			ID:         "audit-log-002",
-			Timestamp:  now,
-			TaskID:     "task-1787554501-89bcdef1",
-			Source:     "ds_kangyang",
-			Operation:  "classify_and_mask",
-			DataHash:   "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
-			Operator:   "service-hub-pipeline",
-			Encryption: "SHA-256 + HMAC",
-			Result:     "success",
+			ID:            "fallback-audit-002",
+			Timestamp:     now,
+			Datasource:    naming.DSKangyang,
+			APICode:       naming.API2Kangyang,
+			Operation:     "classify",
+			InputHash:     "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+			OutputHash:    "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+			Algorithm:     "three_layer_funnel",
+			User:          "app-lz-bff",
+			Status:        "success",
+			SecurityLevel: "L4",
 		},
+	}
+	for i := range items {
+		items[i].NormalizeAliases()
+	}
+	return items
+}
+
+// RecordAudit 向 audit-log 写入一条真实存证（POST /api/audit/logs）。
+//
+// 返回上游生成的记录 ID；上游不可达时返回 *UpstreamError（UPSTREAM_UNAVAILABLE/503），
+// 调用方必须将该阶段标为 skipped/error，不得伪造 audit_entry_id（修复 D-03）。
+func (c *ClientPool) RecordAudit(ctx context.Context, req models.AuditRecordRequest) (string, error) {
+	path := "/api/audit/logs"
+	if strings.TrimSpace(req.Datasource) == "" && strings.TrimSpace(req.APICode) != "" {
+		if dsID, ok := naming.DataSourceForAPICode(req.APICode); ok {
+			req.Datasource = dsID
+		}
+	}
+	datasourceID, err := ResolveDatasourceID(req.Datasource)
+	if err != nil {
+		return "", err
+	}
+	req.Datasource = datasourceID
+	if req.User == "" {
+		req.User = viaBFF
+	}
+	if req.Status == "" {
+		req.Status = "success"
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.cfg.AuditURL, "/")+path, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", &UpstreamError{
+			Code:    CodeUpstreamUnavailable,
+			Message: fmt.Sprintf("audit-log unreachable: %v", err),
+			Status:  http.StatusServiceUnavailable,
+			Err:     err,
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", &UpstreamError{
+			Code:    CodeUpstreamUnavailable,
+			Message: fmt.Sprintf("audit-log returned HTTP %d for %s: %s", resp.StatusCode, path, strings.TrimSpace(string(detail))),
+			Status:  http.StatusBadGateway,
+		}
+	}
+
+	var result struct {
+		ID      string `json:"id"`
+		AuditID string `json:"audit_id"`
+		LogID   string `json:"log_id"`
+		TaskID  string `json:"task_id"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	switch {
+	case result.ID != "":
+		return result.ID, nil
+	case result.AuditID != "":
+		return result.AuditID, nil
+	case result.LogID != "":
+		return result.LogID, nil
+	default:
+		return "", &UpstreamError{
+			Code:    CodeUpstreamUnavailable,
+			Message: "audit-log accepted the record but returned no entry id",
+			Status:  http.StatusBadGateway,
+		}
 	}
 }
 
-// VerifyAudit 触发 audit-log 服务的 Merkle 树完整性验证。
+// VerifyAudit 对最近一条审计快照执行真实完整性验真。
 //
-// 调用路径：POST {AuditURL}/api/v1/audit/verify
-// 返回 Merkle 根哈希、总条目数、签名等信息。
-// 降级策略：服务不可达时返回合成的“验证通过”结果（确保前端大屏可演示）。
+// canonical 调用链路：
+//  1. GET  {AuditURL}/api/audit/snapshots?limit=1        → 取最近快照 ID 与存证总数
+//  2. POST {AuditURL}/api/audit/snapshots/verify        → 上游重算 SHA-256 完整性哈希
+//
+// （旧实现调用不存在的 /api/v1/audit/verify，失败时还会合成 MerkleValid:true，即 D-02）
+// 上游不可达时返回 MerkleValid=false + Source="fallback"，绝不合成“验真通过”。
 func (c *ClientPool) VerifyAudit(ctx context.Context) (models.AuditVerifyResponse, error) {
-	url := strings.TrimRight(c.cfg.AuditURL, "/") + "/api/v1/audit/verify"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	snapshotsPath := "/api/audit/snapshots?limit=1"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(c.cfg.AuditURL, "/")+snapshotsPath, nil)
 	if err != nil {
 		return models.AuditVerifyResponse{}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// 服务不可达 → 返回合成的验证通过结果
-		return models.AuditVerifyResponse{
-			MerkleValid:  true,
-			RootHash:     "3a8b417c8d9e01f23456789abcdef0123456789abcdef0123456789abcdef012",
-			TotalEntries: 128,
-			Timestamp:    time.Now().UTC().Format(time.RFC3339),
-			Signature:    "ed25519-valid",
-		}, nil
+		return degradedVerify(fmt.Sprintf("audit-log unreachable: %v", err)), nil
 	}
 	defer resp.Body.Close()
 
-	var result models.AuditVerifyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		// 解析失败 → 返回合成的验证通过结果
+	if resp.StatusCode != http.StatusOK {
+		return degradedVerify(fmt.Sprintf("audit-log returned HTTP %d for %s", resp.StatusCode, snapshotsPath)), nil
+	}
+
+	var snapResult struct {
+		Total     int `json:"total"`
+		Snapshots []struct {
+			ID            string    `json:"id"`
+			AuditLogID    string    `json:"audit_log_id"`
+			Timestamp     time.Time `json:"timestamp"`
+			IntegrityHash string    `json:"integrity_hash"`
+		} `json:"snapshots"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&snapResult); err != nil {
+		return degradedVerify(fmt.Sprintf("failed to decode snapshots: %v", err)), nil
+	}
+	if len(snapResult.Snapshots) == 0 {
 		return models.AuditVerifyResponse{
-			MerkleValid:  true,
-			RootHash:     "3a8b417c8d9e01f23456789abcdef0123456789abcdef0123456789abcdef012",
-			TotalEntries: 128,
+			MerkleValid:  false,
+			TotalEntries: snapResult.Total,
+			Source:       "audit-log",
 			Timestamp:    time.Now().UTC().Format(time.RFC3339),
+			Error:        "no snapshot stored yet; nothing to verify",
 		}, nil
 	}
-	return result, nil
+
+	snapshotID := snapResult.Snapshots[0].ID
+	payload, _ := json.Marshal(map[string]string{"snapshot_id": snapshotID})
+	verifyPath := "/api/audit/snapshots/verify"
+	verifyReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(c.cfg.AuditURL, "/")+verifyPath, bytes.NewReader(payload))
+	if err != nil {
+		return models.AuditVerifyResponse{}, err
+	}
+	verifyReq.Header.Set("Content-Type", "application/json")
+
+	verifyResp, err := c.httpClient.Do(verifyReq)
+	if err != nil {
+		return degradedVerify(fmt.Sprintf("audit-log unreachable during verify: %v", err)), nil
+	}
+	defer verifyResp.Body.Close()
+
+	if verifyResp.StatusCode != http.StatusOK {
+		return degradedVerify(fmt.Sprintf("audit-log returned HTTP %d for %s", verifyResp.StatusCode, verifyPath)), nil
+	}
+
+	var verifyResult struct {
+		SnapshotID string `json:"snapshot_id"`
+		Valid      bool   `json:"valid"`
+		Expected   string `json:"expected"`
+		Actual     string `json:"actual"`
+		Via        string `json:"via"`
+	}
+	if err := json.NewDecoder(verifyResp.Body).Decode(&verifyResult); err != nil {
+		return degradedVerify(fmt.Sprintf("failed to decode verify response: %v", err)), nil
+	}
+
+	return models.AuditVerifyResponse{
+		MerkleValid:  verifyResult.Valid,
+		RootHash:     verifyResult.Actual,
+		ExpectedHash: verifyResult.Expected,
+		SnapshotID:   verifyResult.SnapshotID,
+		TotalEntries: snapResult.Total,
+		Source:       "audit-log",
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+// degradedVerify 返回“未验真”的降级结果（merkle_valid 必须为 false）。
+func degradedVerify(detail string) models.AuditVerifyResponse {
+	return models.AuditVerifyResponse{
+		MerkleValid: false,
+		Source:      sourceFallback,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Error:       detail,
+	}
 }
 
 // GetHubMetrics 从 Service Hub 获取原始 Prometheus 指标文本。
@@ -654,8 +961,8 @@ func parsePrometheusMetrics(raw string) ParsedMetrics {
 
 	// 逐行解析 Prometheus 文本格式
 	lines := strings.Split(raw, "\n")
-	var totalSum float64     // http_request_duration_seconds 的总和
-	var totalCount float64   // http_request_duration_seconds 的总计数
+	var totalSum float64   // http_request_duration_seconds 的总和
+	var totalCount float64 // http_request_duration_seconds 的总计数
 	var bucketValues []struct {
 		le    float64 // histogram bucket 上界
 		count float64 // 累积计数

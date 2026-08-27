@@ -14,6 +14,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/validation"
 
@@ -118,9 +119,25 @@ func (s *Server) ListLogs(c *gin.Context) {
 	// P61 fix: use shared ParsePagination helper instead of duplicated parsing logic.
 	limit, offset := validation.ParsePagination(c, 100, 1000)
 
+	rawDS := c.Query("datasource_id")
+	if rawDS == "" {
+		rawDS = c.Query("datasource")
+	}
+	normDS := ""
+	if rawDS != "" {
+		if id, err := naming.NormalizeDataSourceID(rawDS); err == nil {
+			normDS = id
+		} else {
+			normDS = rawDS
+		}
+	}
+
 	filter := store.AuditFilter{
+		TaskID:        c.Query("task_id"),
+		APICode:       c.Query("api_code"),
+		DatasourceID:  normDS,
 		Operation:     c.Query("operation"),
-		DataSource:    c.Query("datasource"),
+		DataSource:    normDS,
 		User:          c.Query("user"),
 		Status:        c.Query("status"),
 		SecurityLevel: c.Query("security_level"),
@@ -155,6 +172,9 @@ func (s *Server) ListLogs(c *gin.Context) {
 //   - 防止攻击者篡改输入/输出数据而不被检测
 func (s *Server) CreateLog(c *gin.Context) {
 	var req struct {
+		TaskID        string `json:"task_id"`
+		APICode       string `json:"api_code"`
+		DatasourceID  string `json:"datasource_id"`
 		Operation     string `json:"operation" binding:"required"`
 		DataSource    string `json:"datasource"`
 		InputHash     string `json:"input_hash"`
@@ -174,6 +194,28 @@ func (s *Server) CreateLog(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
 		return
+	}
+
+	rawDS := req.DatasourceID
+	if rawDS == "" {
+		rawDS = req.APICode
+	}
+	if rawDS == "" {
+		rawDS = req.DataSource
+	}
+
+	normID := ""
+	normAPICode := req.APICode
+	if rawDS != "" {
+		entry, err := naming.Normalize(rawDS)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid datasource %q: %v", rawDS, err)})
+			return
+		}
+		normID = entry.DataSourceID
+		if normAPICode == "" {
+			normAPICode = entry.APICode
+		}
 	}
 
 	// Input validation / 输入校验
@@ -209,9 +251,12 @@ func (s *Server) CreateLog(c *gin.Context) {
 
 	log := &store.AuditLog{
 		ID:             logID,
+		TaskID:         req.TaskID,
+		APICode:        normAPICode,
+		DatasourceID:   normID,
 		Timestamp:      now,
 		Operation:      req.Operation,
-		DataSource:     req.DataSource,
+		DataSource:     normID,
 		InputHash:      req.InputHash,
 		OutputHash:     req.OutputHash,
 		Algorithm:      req.Algorithm,

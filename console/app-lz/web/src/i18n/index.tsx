@@ -133,6 +133,15 @@ const translations: Record<Language, Record<string, string>> = {
     'dataApi.rawRecords': '原始明文记录',
     'dataApi.sanitizedRecords': '脱敏合规记录',
     'dataApi.auditWritten': '审计存证 ID',
+
+    // Pipeline
+    'pipe.title': '6 阶段流水线动态流转大屏',
+    'pipe.desc': '全景透视数据调度处理 6 阶段（接收校验 → 数据拉取 → 分类评级 → 隐私脱敏 → 结果装配 → 审计存证）运行时状态与执行流水。',
+
+    // Datasource
+    'ds.title': '多源异构数据切片浏览器',
+    'ds.desc': '在线探查与切片采样数据源，并支持联动调度中枢触发数据合规治理。',
+    'ds.sampleSlice': '采样切片',
   },
   'en-US': {
     // App Header & Nav
@@ -225,9 +234,18 @@ const translations: Record<Language, Record<string, string>> = {
     'dataApi.dataDiff': 'Raw Data vs Sanitized Data',
     'dataApi.showRaw': 'Show Raw JSON',
     'dataApi.hideRaw': 'Hide Raw JSON',
-    'dataApi.rawRecords': 'Raw Plaint Records',
+    'dataApi.rawRecords': 'Raw Plaintext Records',
     'dataApi.sanitizedRecords': 'Sanitized Compliant Records',
     'dataApi.auditWritten': 'Audit Entry ID',
+
+    // Pipeline
+    'pipe.title': '6-Stage Pipeline Dynamic Flow Stream',
+    'pipe.desc': 'Full visualization of 6 runtime stages in data governance pipeline.',
+
+    // Datasource
+    'ds.title': 'Heterogeneous Datasource Slice Explorer',
+    'ds.desc': 'Inspect and sample heterogeneous datasets.',
+    'ds.sampleSlice': 'Sample Slice',
   },
 };
 

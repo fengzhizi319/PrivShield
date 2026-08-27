@@ -10,7 +10,7 @@
 
 1. **统一接入与协商**：统一接收来自各调用方的数据申请请求与协商凭证；
 2. **模拟数据源跨服务联动**：对接 `services/datasource-mgr`，按需调取医保（`yibao.csv`）、康养（`kangyang.csv`）及预留数据源进行高保真仿真调度；
-3. **流水线编排调度**：自动化调度「请求接入 → 申请原数 (fetch) → 分类+脱敏 (classify) → 脱敏治理 (desensitize) → 返回结果 (return) → 存证写日志 (audit)」6 大阶段，其中阶段 ③ 调用 engine `/v1/medical/process` 医疗流水线一体化完成分类分级与脱敏治理，阶段 ④ 快速通过；
+3. **流水线编排调度**：自动化调度「请求接入 → 申请原数 (fetch) → 分类+脱敏 (classify) → 脱敏治理 (desensitize) → 返回结果 (return) → 存证写日志 (audit)」6 大阶段，其中阶段 ③ 调用 engine `/v1/agent/process`（兼容 `/v1/medical/process`）通用合规流水线一体化完成分类分级与脱敏治理，阶段 ④ 快速通过；
 4. **分类分级智能联动**：接入 Layer-1~3 分类分级漏斗，根据动态评估得出的数据敏感度（L1~L5）自动决策并下发最适隐私原语（明文/字段脱敏/K-匿名/差分隐私/查询混淆）；
 5. **双协议服务暴露**：同时提供面向 Web 前端与管控端的 HTTP REST API，以及面向高性能微服务互通的双向 mTLS / 公钥固定 gRPC 服务；
 6. **生产级任务持久化**：支持 SQLite 任务生命周期持久化与状态机流转，支持服务优雅关停与高并发协程控制；
@@ -90,7 +90,7 @@ graph TD
 |---|---|---|---|
 | **1. 接入** | `ingest` | 验证请求合法性、解析参数、生成唯一 `task_id`、写入 `pending` 状态 | 参数不合法立即返回 400 |
 | **2. 取数** | `fetch` | 若请求未显式携带 Payload，自动调用 `datasource-mgr` 根据数据源标识（如 `ds_yibao`）抓取模拟样本 | `internal/datasource/client.go` |
-| **3. 分类+脱敏** | `classify` | 一次调用 engine `/v1/medical/process` 医疗流水线，一体化完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + ICD-10 编码脱敏 + 诊断残留清除 | engine 医疗流水线（替代原先 classify + desensitize 两步分离调用，减少一次网络往返） |
+| **3. 分类+脱敏** | `classify` | 一次调用 engine `/v1/agent/process`（兼容 `/v1/medical/process`）通用合规流水线，一体化完成 3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + ICD-10 编码脱敏 + 诊断残留清除 | engine 合规流水线（替代原先 classify + desensitize 两步分离调用，减少一次网络往返） |
 | **4. 脱敏治理** | `desensitize` | 已由阶段 ③ 医疗流水线合并完成，快速通过（保留阶段状态追踪） | 状态机快速流转 |
 | **5. 返回** | `return` | 组装处理结果，记录最终处理耗时与状态 | 格式校验 |
 | **6. 存证** | `audit` | 触发审计存证记录写盘，完成流水线流转 | `services/audit-log` |

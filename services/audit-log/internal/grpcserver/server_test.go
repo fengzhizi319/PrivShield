@@ -118,7 +118,7 @@ func TestGRPCAuditLogOperations(t *testing.T) {
 	// 1. RecordAudit
 	recResp, err := client.RecordAudit(ctx, &pb.RecordAuditRequest{
 		Operation:      "mask",
-		Datasource:     "hospital_ehr",
+		Datasource:     "ds_yibao",
 		InputHash:      "hash_in_123",
 		OutputHash:     "hash_out_456",
 		Algorithm:      "field_mask",

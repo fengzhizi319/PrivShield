@@ -92,9 +92,10 @@ from .pipeline import router as pipeline_router
 #   profile     — /v1/privacy/profile         隐私参数 profile
 #   file        — /v1/privacy/file/*          文件上传与处理
 #   ops         — /v1/ops/diagnostics         运维诊断
-#   medical     — /v1/medical/*               医疗数据流水线
+#   medical     — /v1/medical/*               医疗数据流水线（deprecated）
+#   agent_process — /v1/agent/*               通用数据评估与脱敏流水线（canonical）
 #   dynclassification — /v1/classify/*        三层漏斗动态分类
-from .routers import budget, dp, dynclassification, file, health, kano, ldp, mask, medical, ops, profile, qol
+from .routers import agent_process, budget, dp, dynclassification, file, health, kano, ldp, mask, medical, ops, profile, qol
 
 # ASGI-level API Key middleware for mounted sub-apps (e.g. /metrics)
 # ASGI 层 API Key 中间件，用于挂载的子应用（如 /metrics）
@@ -467,6 +468,7 @@ app.include_router(budget.router)
 app.include_router(profile.router)
 app.include_router(file.router)
 app.include_router(ops.router)
+app.include_router(agent_process.router)
 app.include_router(medical.router)
 app.include_router(pipeline_router)
 

@@ -17,20 +17,22 @@ import (
 
 // Task represents a scheduling task in the pipeline.
 type Task struct {
-	ID          string     `json:"id"`
-	Status      string     `json:"status"`       // "pending" | "running" | "completed" | "failed"
-	Stage       string     `json:"stage"`         // Current pipeline stage
-	Source      string     `json:"source"`        // Data source name
-	Operation   string     `json:"operation"`     // "mask" | "k_anon" | "dp" | "classify" | "none"
-	Priority    int        `json:"priority"`      // Higher = sooner
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at"`
-	CompletedAt *time.Time `json:"completed_at"`
-	DurationMs  int64      `json:"duration_ms"`
-	Error       string     `json:"error,omitempty"`
-	PayloadJSON string     `json:"-"`             // Raw payload (not exposed in JSON)
-	RetryCount  int        `json:"retry_count"`   // Number of retry attempts (replaces fragile string matching)
-	RetryAfter  *time.Time `json:"retry_after,omitempty"` // Earliest time for next retry (backoff delay)
+	ID           string     `json:"id"`
+	APICode      string     `json:"api_code,omitempty"`      // canonical 业务 API（如 "api1_yibao"）
+	DatasourceID string     `json:"datasource_id,omitempty"` // canonical 数据源（如 "ds_yibao"）
+	Status       string     `json:"status"`                  // "pending" | "running" | "completed" | "failed"
+	Stage        string     `json:"stage"`                   // Current pipeline stage
+	Source       string     `json:"source"`                  // Data source name
+	Operation    string     `json:"operation"`               // "mask" | "k_anon" | "dp" | "classify" | "none"
+	Priority     int        `json:"priority"`                // Higher = sooner
+	CreatedAt    time.Time  `json:"created_at"`
+	StartedAt    *time.Time `json:"started_at"`
+	CompletedAt  *time.Time `json:"completed_at"`
+	DurationMs   int64      `json:"duration_ms"`
+	Error        string     `json:"error,omitempty"`
+	PayloadJSON  string     `json:"-"`                       // Raw payload (not exposed in JSON)
+	RetryCount   int        `json:"retry_count"`             // Number of retry attempts (replaces fragile string matching)
+	RetryAfter   *time.Time `json:"retry_after,omitempty"`   // Earliest time for next retry (backoff delay)
 
 	// ── Phase B: Lease fields for multi-replica Hub / 多副本 Hub 租约字段 ──
 	LeaseOwner     string     `json:"lease_owner,omitempty"`      // Hub instance that owns the current lease
@@ -185,26 +187,32 @@ type DataSourceStore interface {
 
 // AuditLog represents a single audit log entry.
 type AuditLog struct {
-	ID            string    `json:"id"`
-	Timestamp     time.Time `json:"timestamp"`
-	Operation     string    `json:"operation"`
-	DataSource    string    `json:"datasource"`
-	InputHash     string    `json:"input_hash"`
-	OutputHash    string    `json:"output_hash"`
-	Algorithm     string    `json:"algorithm"`
-	ParametersJSON string   `json:"-"`
-	Parameters    any       `json:"parameters"`
-	InputRows     int       `json:"input_rows"`
-	OutputRows    int       `json:"output_rows"`
-	DurationMs    int64     `json:"duration_ms"`
-	User          string    `json:"user"`
-	Status        string    `json:"status"`
-	ErrorMessage  string    `json:"error,omitempty"`
-	SecurityLevel string    `json:"security_level"`
+	ID             string    `json:"id"`
+	TaskID         string    `json:"task_id,omitempty"`       // 所属调度流水线任务 ID
+	APICode        string    `json:"api_code,omitempty"`      // canonical 业务 API（如 "api1_yibao"）
+	DatasourceID   string    `json:"datasource_id,omitempty"` // canonical 数据源 ID（如 "ds_yibao"）
+	Timestamp      time.Time `json:"timestamp"`
+	Operation      string    `json:"operation"`
+	DataSource     string    `json:"datasource"` // 兼容历史字段，与 DatasourceID 保持一致
+	InputHash      string    `json:"input_hash"`
+	OutputHash     string    `json:"output_hash"`
+	Algorithm      string    `json:"algorithm"`
+	ParametersJSON string    `json:"-"`
+	Parameters     any       `json:"parameters"`
+	InputRows      int       `json:"input_rows"`
+	OutputRows     int       `json:"output_rows"`
+	DurationMs     int64     `json:"duration_ms"`
+	User           string    `json:"user"`
+	Status         string    `json:"status"`
+	ErrorMessage   string    `json:"error,omitempty"`
+	SecurityLevel  string    `json:"security_level"`
 }
 
 // AuditFilter specifies filtering criteria for listing audit logs.
 type AuditFilter struct {
+	TaskID        string
+	APICode       string
+	DatasourceID  string
 	Operation     string
 	DataSource    string
 	User          string

@@ -67,6 +67,9 @@ message AuditLogProto {
   string status = 13;         // "success" | "failed"
   string error_message = 14;  // 错误信息（失败时）
   string security_level = 15; // 敏感等级 "L1" - "L5"
+  string task_id = 16;        // 关联任务 ID
+  string api_code = 17;       // API 编码
+  string datasource_id = 18;  // canonical 数据源 ID
 }
 
 message RecordAuditRequest {
@@ -83,6 +86,9 @@ message RecordAuditRequest {
   string status = 11;
   string error_message = 12;
   string security_level = 13;
+  string task_id = 14;
+  string api_code = 15;
+  string datasource_id = 16;
 }
 
 message RecordAuditResponse {
@@ -103,6 +109,9 @@ message ListAuditLogsRequest {
   string security_level = 5;
   int32  limit = 6;
   int32  offset = 7;
+  string datasource_id = 8;
+  string api_code = 9;
+  string task_id = 10;
 }
 
 message ListAuditLogsResponse {

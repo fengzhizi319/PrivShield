@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/models"
 )
 
@@ -25,40 +26,46 @@ import (
 // MockDataSources 定义了系统内置注册的模拟数据源清单，用于开发测试与演示环境。
 var MockDataSources = []models.MockDataSource{
 	{
-		ID:          "ds_yibao",
-		Name:        "医保就医与结算模拟数据库 (yibao.csv)",
-		Type:        "file",
-		Description: "模拟医保局患者就医、诊断与费用结算明细数据",
-		Status:      "connected",
-		RowCount:    50,
-		Tags:        []string{"医保", "门诊住院", "结算流水", "敏感数据"},
+		ID:           naming.DSYibao,
+		DatasourceID: naming.DSYibao,
+		APICode:      naming.API1Yibao,
+		Name:         "医保就医与结算模拟数据库 (yibao.csv)",
+		Type:         "file",
+		Description:  "模拟医保局患者就医、诊断与费用结算明细数据",
+		Status:       "connected",
+		RowCount:     50,
+		Tags:         []string{"医保", "门诊住院", "结算流水", "敏感数据"},
 	},
 	{
-		ID:          "ds_kangyang",
-		Name:        "康养体检与慢病模拟数据库 (kangyang.csv)",
-		Type:        "file",
-		Description: "模拟民政/卫健康养中心体检、慢病随访与残疾评估数据",
-		Status:      "connected",
-		RowCount:    50,
-		Tags:        []string{"康养", "慢病随访", "体检报告", "健康档案"},
+		ID:           naming.DSKangyang,
+		DatasourceID: naming.DSKangyang,
+		APICode:      naming.API2Kangyang,
+		Name:         "康养体检与慢病模拟数据库 (kangyang.csv)",
+		Type:         "file",
+		Description:  "模拟民政/卫健康养中心体检、慢病随访与残疾评估数据",
+		Status:       "connected",
+		RowCount:     50,
+		Tags:         []string{"康养", "慢病随访", "体检报告", "健康档案"},
 	},
 	{
-		ID:          "ds_mock3",
-		Name:        "预留政务数据源 3 (Reserved Mock Source 3)",
-		Type:        "mock",
-		Description: "预留扩展模拟数据源 3，用于后续政务跨部门联合调试",
-		Status:      "connected",
-		RowCount:    10,
-		Tags:        []string{"预留", "政务流通", "扩展接口"},
+		ID:           naming.DSMock3,
+		DatasourceID: naming.DSMock3,
+		Name:         "预留政务数据源 3 (Reserved Mock Source 3)",
+		Type:         "mock",
+		Description:  "预留扩展模拟数据源 3，用于后续政务跨部门联合调试",
+		Status:       "connected",
+		RowCount:     10,
+		Tags:         []string{"预留", "政务流通", "扩展接口"},
 	},
 	{
-		ID:          "ds_mock4",
-		Name:        "预留政务数据源 4 (Reserved Mock Source 4)",
-		Type:        "mock",
-		Description: "预留扩展模拟数据源 4，用于后续企业端数据合规流转调试",
-		Status:      "connected",
-		RowCount:    10,
-		Tags:        []string{"预留", "金融统计", "扩展接口"},
+		ID:           naming.DSMock4,
+		DatasourceID: naming.DSMock4,
+		Name:         "预留政务数据源 4 (Reserved Mock Source 4)",
+		Type:         "mock",
+		Description:  "预留扩展模拟数据源 4，用于后续企业端数据合规流转调试",
+		Status:       "connected",
+		RowCount:     10,
+		Tags:         []string{"预留", "金融统计", "扩展接口"},
 	},
 }
 
@@ -70,13 +77,18 @@ func ListMockDataSources() []models.MockDataSource {
 
 // GetMockDataSource returns a mock datasource by ID.
 // GetMockDataSource 根据数据源 ID（或常用别名如 "yibao", "kangyang"）查找对应的数据源元数据。
-// 执行逻辑：
-// 1. 遍历 MockDataSources 列表；
-// 2. 匹配精确 ID 或别名映射；
-// 3. 匹配成功返回元数据指针，未找到则返回格式化错误信息。
 func GetMockDataSource(id string) (*models.MockDataSource, error) {
+	normID, err := naming.NormalizeDataSourceID(id)
+	if err != nil {
+		for _, ds := range MockDataSources {
+			if ds.ID == id || ds.DatasourceID == id {
+				return &ds, nil
+			}
+		}
+		return nil, fmt.Errorf("mock datasource not found: %s", id)
+	}
 	for _, ds := range MockDataSources {
-		if ds.ID == id || (id == "yibao" && ds.ID == "ds_yibao") || (id == "kangyang" && ds.ID == "ds_kangyang") {
+		if ds.DatasourceID == normID || ds.ID == normID {
 			return &ds, nil
 		}
 	}
@@ -274,22 +286,23 @@ func GetMock4Records(limit, offset int) ([]map[string]any, int, error) {
 }
 
 // GetDataBySource retrieves records by source ID with unified name and error handling.
-// GetDataBySource 根据传入的数据源唯一标识符动态路由并调用对应的数据提取函数，执行逻辑如下：
-// 1. 将 sourceID 转为小写以增强兼容性；
-// 2. 根据分支调用对应的数据加载函数（如 "ds_yibao" 调用 GetYibaoRecords）；
-// 3. 返回数据行列表、总记录数、数据源中文显示名称以及可能发生的错误。
+// GetDataBySource 根据传入的数据源唯一标识符（或别名）查注册表动态路由并调用对应的数据提取函数。
 func GetDataBySource(sourceID string, limit, offset int) ([]map[string]any, int, string, error) {
-	switch strings.ToLower(sourceID) {
-	case "ds_yibao", "yibao", "yibao.csv":
+	normID, err := naming.NormalizeDataSourceID(sourceID)
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("unknown mock source: %s", sourceID)
+	}
+	switch normID {
+	case naming.DSYibao:
 		rows, total, err := GetYibaoRecords(limit, offset)
 		return rows, total, "医保就医与结算模拟数据库 (yibao.csv)", err
-	case "ds_kangyang", "kangyang", "kangyang.csv":
+	case naming.DSKangyang:
 		rows, total, err := GetKangyangRecords(limit, offset)
 		return rows, total, "康养体检与慢病模拟数据库 (kangyang.csv)", err
-	case "ds_mock3", "mock3":
+	case naming.DSMock3:
 		rows, total, err := GetMock3Records(limit, offset)
 		return rows, total, "预留政务数据源 3", err
-	case "ds_mock4", "mock4":
+	case naming.DSMock4:
 		rows, total, err := GetMock4Records(limit, offset)
 		return rows, total, "预留政务数据源 4", err
 	default:

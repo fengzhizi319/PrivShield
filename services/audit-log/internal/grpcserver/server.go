@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/agent"
 	"github.com/fengzhizi319/PrivShield/services/audit-log/internal/config"
@@ -106,6 +107,27 @@ func (s *GRPCServer) RecordAudit(ctx context.Context, req *pb.RecordAuditRequest
 		return nil, status.Error(codes.InvalidArgument, "operation is required")
 	}
 
+	rawDS := req.DatasourceId
+	if rawDS == "" {
+		rawDS = req.ApiCode
+	}
+	if rawDS == "" {
+		rawDS = req.Datasource
+	}
+
+	normID := ""
+	normAPICode := req.ApiCode
+	if rawDS != "" {
+		entry, err := naming.Normalize(rawDS)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid datasource %q: %v", rawDS, err)
+		}
+		normID = entry.DataSourceID
+		if normAPICode == "" {
+			normAPICode = entry.APICode
+		}
+	}
+
 	now := time.Now()
 	id := fmt.Sprintf("audit_%d", now.UnixNano())
 
@@ -129,9 +151,12 @@ func (s *GRPCServer) RecordAudit(ctx context.Context, req *pb.RecordAuditRequest
 
 	logEntry := &store.AuditLog{
 		ID:            id,
+		TaskID:        req.TaskId,
+		APICode:       normAPICode,
+		DatasourceID:  normID,
 		Timestamp:     now,
 		Operation:     req.Operation,
-		DataSource:    req.Datasource,
+		DataSource:    normID,
 		InputHash:     req.InputHash,
 		OutputHash:    req.OutputHash,
 		Algorithm:     req.Algorithm,
@@ -186,9 +211,25 @@ func (s *GRPCServer) ListAuditLogs(ctx context.Context, req *pb.ListAuditLogsReq
 		offset = 0
 	}
 
+	rawDS := req.DatasourceId
+	if rawDS == "" {
+		rawDS = req.Datasource
+	}
+	normDS := ""
+	if rawDS != "" {
+		if id, err := naming.NormalizeDataSourceID(rawDS); err == nil {
+			normDS = id
+		} else {
+			normDS = rawDS
+		}
+	}
+
 	filter := store.AuditFilter{
+		TaskID:        req.TaskId,
+		APICode:       req.ApiCode,
+		DatasourceID:  normDS,
 		Operation:     req.Operation,
-		DataSource:    req.Datasource,
+		DataSource:    normDS,
 		User:          req.User,
 		Status:        req.Status,
 		SecurityLevel: req.SecurityLevel,
@@ -411,6 +452,9 @@ func recordToProto(rec *store.AuditLog) *pb.AuditLogProto {
 		Status:         rec.Status,
 		ErrorMessage:   rec.ErrorMessage,
 		SecurityLevel:  rec.SecurityLevel,
+		TaskId:         rec.TaskID,
+		ApiCode:        rec.APICode,
+		DatasourceId:   rec.DatasourceID,
 	}
 }
 
