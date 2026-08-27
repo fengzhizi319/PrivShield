@@ -79,7 +79,7 @@ func New(cfg *config.Config, logger *slog.Logger, mc *metrics.Collector) *Server
 //    - 数据源管理与元数据探测端点。
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// 装配中间件栈
-	r.Use(middleware.RequestID())
+	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "datasource-mgr"))
 	r.Use(middleware.Recovery(s.logger, "datasource-mgr"))
 	r.Use(middleware.SecurityHeaders())

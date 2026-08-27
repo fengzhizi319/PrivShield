@@ -34,9 +34,6 @@ from contextlib import asynccontextmanager
 # FastAPI core framework for building REST API endpoints
 # FastAPI 核心框架，用于构建 REST API 端点
 from fastapi import FastAPI
-# RequestValidationError handler for sanitizing 422 responses
-# 请求校验异常，用于自定义 422 响应以防止泄露内部模型结构
-from fastapi.exceptions import RequestValidationError
 # GZip middleware for compressing large HTTP responses to reduce bandwidth
 # GZip 中间件，压缩大型 HTTP 响应以减少网络带宽消耗
 from fastapi.middleware.gzip import GZipMiddleware
@@ -75,6 +72,9 @@ from .deps import service  # noqa: F401
 # Import exception mapper for global exception handler registration
 # 导入异常映射函数，用于注册全局异常处理器
 from .deps import handle_request_exception
+# Unified error envelope: cross-language consistent error response format
+# 统一错误信封：跨语言一致的错误响应格式
+from .observability.envelope import register_envelope_exception_handlers
 
 # Medical pipeline router (multi-step classification + privacy processing)
 # 医疗流水线路由（多步分类 + 隐私处理组合端点）
@@ -291,23 +291,13 @@ app.add_exception_handler(Exception, handle_request_exception)
 
 
 # ---------------------------------------------------------------------------
-# 422 Validation error handler — sanitize response for production security
+# 422 Validation error handler — unified error envelope format
 # ---------------------------------------------------------------------------
-# FastAPI 默认的 422 响应包含完整的字段名、类型路径和校验器信息，
-# 会泄露内部 Pydantic 模型结构，帮助攻击者探测 API 参数格式。
-# 生产环境返回精简错误信息，仅在 debug 模式下返回详细校验错误。
-@app.exception_handler(RequestValidationError)
-async def _validation_error_handler(request: Request, exc: RequestValidationError):
-    _debug = os.environ.get("PRIVACY_DEBUG_VALIDATION", "false").lower() == "true"
-    if _debug:
-        return JSONResponse(
-            status_code=422,
-            content={"detail": exc.errors()},
-        )
-    return JSONResponse(
-        status_code=422,
-        content={"detail": "Invalid request: one or more fields failed validation"},
-    )
+# FastAPI 默认 422 响应包含完整字段名与校验器信息，会泄露内部 Pydantic 模型结构。
+# 使用统一错误信封格式返回，仅在 PRIVACY_DEBUG_VALIDATION=true 时返回详细校验错误。
+# Aligned with Go middleware.ErrorEnvelope (pkg/middleware/envelope.go).
+_debug_validation = os.environ.get("PRIVACY_DEBUG_VALIDATION", "false").lower() == "true"
+register_envelope_exception_handlers(app, debug_validation=_debug_validation)
 
 
 # ---------------------------------------------------------------------------

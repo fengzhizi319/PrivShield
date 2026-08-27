@@ -192,7 +192,7 @@ func (s *Server) persistTask(task *store.Task, transition string) error {
 // 6. CORS: 跨域来源校验与预检放行
 // 7. Auth: 基于 Authorization Bearer 的 API Key 鉴权校验
 func (s *Server) RegisterRoutes(r *gin.Engine) {
-	r.Use(middleware.RequestID())
+	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
 	r.Use(middleware.Recovery(s.logger, "service-hub"))
 	r.Use(middleware.SecurityHeaders())

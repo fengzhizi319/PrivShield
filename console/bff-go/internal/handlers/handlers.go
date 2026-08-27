@@ -145,7 +145,7 @@ func (s *Server) Shutdown() {
 
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// Shared middleware chain / 共享中间件链
-	r.Use(middleware.RequestID())
+	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "backend-go"))
 	r.Use(middleware.Recovery(s.logger, "backend-go"))
 	r.Use(middleware.SecurityHeaders())

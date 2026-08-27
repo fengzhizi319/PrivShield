@@ -49,7 +49,7 @@ func New(ag *agent.Client, cfg *config.Config, audit store.AuditStore, logger *s
 
 // RegisterRoutes registers all HTTP routes on the Gin engine.
 func (s *Server) RegisterRoutes(r *gin.Engine) {
-	r.Use(middleware.RequestID())
+	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "audit-log"))
 	r.Use(middleware.Recovery(s.logger, "audit-log"))
 	r.Use(middleware.SecurityHeaders())
