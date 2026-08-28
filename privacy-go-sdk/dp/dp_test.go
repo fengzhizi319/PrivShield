@@ -116,13 +116,19 @@ func TestNoisySum(t *testing.T) {
 	values := []float64{1.0, 2.0, 3.0, 4.0, 5.0}
 	epsilon := 1.0
 	sensitivity := 5.0
-
-	result := NoisySum(values, epsilon, sensitivity)
 	expectedSum := 15.0
 
-	// 验证结果接近真实总和
-	if math.Abs(result-expectedSum) > 10.0 {
-		t.Errorf("NoisySum = %f, want ~%f", result, expectedSum)
+	// 多次采样取均值，验证无偏性
+	const runs = 500
+	var sum float64
+	for i := 0; i < runs; i++ {
+		sum += NoisySum(values, epsilon, sensitivity)
+	}
+	avg := sum / float64(runs)
+
+	// Laplace(scale=5.0) 的 std dev ≈ 7.07, SE ≈ 7.07/sqrt(500) ≈ 0.316
+	if math.Abs(avg-expectedSum) > 2.0 {
+		t.Errorf("NoisySum avg = %f, want ~%f", avg, expectedSum)
 	}
 }
 

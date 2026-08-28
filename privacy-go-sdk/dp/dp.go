@@ -150,3 +150,57 @@ func NoisyMean(values []float64, epsilon, delta, clipBound float64) float64 {
 	sensitivity := clipBound / float64(len(values))
 	return AddGaussianNoise(mean, epsilon, delta, sensitivity)
 }
+
+// ──────────────────────────────────────────────
+// 直方图与向量均值（对齐 Python DPApi）
+// ──────────────────────────────────────────────
+
+// NoisyHistogram 计算带噪声的分类直方图。
+// trueCounts 为各分类的真实计数（map[分类]计数），
+// epsilon 为隐私预算。返回各分类的带噪声计数。
+// 每个分类独立添加 Laplace 噪声（敏感度 = 1）。
+func NoisyHistogram(trueCounts map[string]int, epsilon float64) map[string]float64 {
+	result := make(map[string]float64, len(trueCounts))
+	for k, v := range trueCounts {
+		result[k] = NoisyCount(v, epsilon)
+	}
+	return result
+}
+
+// VectorMean 计算向量均值并添加 Laplace 向量噪声。
+// 先对每个向量截断 L2 范数至 maxNorm，再计算均值，
+// 最后为均值向量每个分量添加 Laplace 噪声。
+// 返回带噪声的均值向量。
+func VectorMean(vectors [][]float64, maxNorm float64, epsilon float64) []float64 {
+	if len(vectors) == 0 {
+		return nil
+	}
+	dim := len(vectors[0])
+	if dim == 0 {
+		return nil
+	}
+
+	// 1. 截断每个向量的 L2 范数
+	clipped := make([][]float64, len(vectors))
+	for i, v := range vectors {
+		clipped[i] = ClipL2Norm(v, maxNorm)
+	}
+
+	// 2. 计算截断后的均值
+	sum := make([]float64, dim)
+	for _, v := range clipped {
+		for j := 0; j < dim && j < len(v); j++ {
+			sum[j] += v[j]
+		}
+	}
+	n := float64(len(vectors))
+	mean := make([]float64, dim)
+	for j := 0; j < dim; j++ {
+		mean[j] = sum[j] / n
+	}
+
+	// 3. 为均值向量添加 Laplace 噪声
+	// 敏感度 = maxNorm / n（每个分量的敏感度）
+	sensitivity := maxNorm / n
+	return AddLaplaceVector(mean, epsilon, sensitivity)
+}

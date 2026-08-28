@@ -4,6 +4,7 @@
 package dynclassification
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -95,6 +96,73 @@ func (o *FieldMatchOperator) Match(field, value string) bool {
 	return matchRegex(o.pattern, field)
 }
 
+// AcAutomatonOperator AC 自动机多模式匹配算子。
+// 基于 Aho-Corasick 算法实现 O(N+M+Z) 多模式匹配，
+// 适用于高敏医学词库等大规模关键词扫描场景。
+type AcAutomatonOperator struct {
+	ac        *AhoCorasick
+	termLevel map[string]string // 模式串(小写) → 等级
+}
+
+// NewAcAutomatonOperator 创建 AC 自动机算子。
+// termsMap 的 key 为模式串，value 为对应等级（如 "L5"）。
+func NewAcAutomatonOperator(termsMap map[string]string) *AcAutomatonOperator {
+	ac := NewAhoCorasick()
+	lowerMap := make(map[string]string, len(termsMap))
+	for term, level := range termsMap {
+		lw := strings.ToLower(term)
+		ac.AddPattern(lw)
+		lowerMap[lw] = level
+	}
+	ac.Build()
+	return &AcAutomatonOperator{ac: ac, termLevel: lowerMap}
+}
+
+func (o *AcAutomatonOperator) Type() OperatorType { return OpACAutomaton }
+
+// Match 对 value 执行 AC 多模式匹配。
+// 返回 (是否匹配, 最高等级, 匹配到的原始词条列表)。
+func (o *AcAutomatonOperator) Match(field, value string) bool {
+	return o.ac.Contains(strings.ToLower(value))
+}
+
+// MatchDetail 返回详细匹配结果（是否匹配, 最高等级, 匹配词条列表）。
+func (o *AcAutomatonOperator) MatchDetail(value string) (bool, string, []string) {
+	lower := strings.ToLower(value)
+	matches := o.ac.MatchString(lower)
+	if len(matches) == 0 {
+		return false, "L1", nil
+	}
+	maxLevel := "L1"
+	var matchedTerms []string
+	for _, m := range matches {
+		lvl := o.termLevel[m.Pattern]
+		matchedTerms = append(matchedTerms, m.Pattern)
+		if lRank(lvl) > lRank(maxLevel) {
+			maxLevel = lvl
+		}
+	}
+	return true, maxLevel, matchedTerms
+}
+
+// lRank 将 "L1"-"L5" 等级字符串映射为数值（越高越敏感）。
+func lRank(level string) int {
+	switch level {
+	case "L5":
+		return 5
+	case "L4":
+		return 4
+	case "L3":
+		return 3
+	case "L2":
+		return 2
+	case "L1":
+		return 1
+	default:
+		return 0
+	}
+}
+
 // ──────────────────────────────────────────────
 // 算子注册表
 // ──────────────────────────────────────────────
@@ -183,36 +251,18 @@ func (r *OperatorRegistry) ListOperators() []OperatorType {
 // 辅助函数
 // ──────────────────────────────────────────────
 
-// matchRegex 使用缓存的正则匹配
+// matchRegex 使用缓存的正则匹配（线程安全）
 func matchRegex(pattern, text string) bool {
 	re, ok := regexCache.Load(pattern)
 	if !ok {
-		compiled, err := compileRegex(pattern)
+		compiled, err := regexp.Compile(pattern)
 		if err != nil {
 			return false
 		}
 		regexCache.Store(pattern, compiled)
 		return compiled.MatchString(text)
 	}
-	return re.(*cachedRegex).MatchString(text)
+	return re.(*regexp.Regexp).MatchString(text)
 }
 
 var regexCache sync.Map
-
-func compileRegex(pattern string) (*cachedRegex, error) {
-	// 使用标准库 regexp
-	return &cachedRegex{pattern: pattern}, nil
-}
-
-type cachedRegex struct {
-	pattern string
-}
-
-func (r *cachedRegex) MatchString(s string) bool {
-	// 简化实现：对于简单模式使用 strings.Contains
-	// 生产环境应使用 regexp.Compile 缓存
-	if strings.HasPrefix(r.pattern, "(?i)") {
-		return strings.Contains(strings.ToLower(s), strings.ToLower(r.pattern[4:]))
-	}
-	return strings.Contains(s, r.pattern)
-}
