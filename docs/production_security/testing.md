@@ -1,23 +1,40 @@
 # 生产安全加固测试文档
 
+> **版本**：v16.0.0  
+> **适用范围**：`PrivShield` 核心算力引擎（`engine`）、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台与双 BFF 体系（`bff-go` / `app-lz`）。  
+> **定位**：定义 Python `engine/security/` 与 Go `pkg/tlsutil` / `pkg/middleware` 的测试策略、测试用例与执行方案。
 
-## 1. 概述
+---
 
-本文档定义 `engine/security/` 的测试策略、测试范围与可执行示例。安全模块测试需覆盖 TLS/mTLS 握手、API Key 认证、接口级权限鉴权、速率限制以及健康检查豁免。
+## 目录
 
-## 2. 测试目标
+- [1. 概述与测试目标](#1-概述与测试目标)
+- [2. Python 单元测试策略](#2-python-单元测试策略)
+  - [2.1 动态自签名证书生成](#21-动态自签名证书生成)
+  - [2.2 TLS 配置校验](#22-tls-配置校验)
+  - [2.3 认证与鉴权测试 (API Key + mTLS CN 白名单)](#23-认证与鉴权测试-api-key--mtls-cn-白名单)
+  - [2.4 速率限制与探针豁免](#24-速率限制与探针豁免)
+  - [2.5 身份模型与 Scope 匹配](#25-身份模型与-scope-匹配)
+- [3. 集成测试策略](#3-集成测试策略)
+  - [3.1 REST TLS 集成测试](#31-rest-tls-集成测试)
+  - [3.2 gRPC TLS/mTLS 集成测试](#32-grpc-tlsmtls-集成测试)
+- [4. Go 共享安全库与微服务测试](#4-go-共享安全库与微服务测试)
+- [5. 测试执行与验证命令](#5-测试执行与验证命令)
+- [6. 验收检查清单](#6-验收检查清单)
 
-- 验证动态生成的自签名证书链可被 REST/gRPC 服务端与客户端正确加载。
-- 验证仅服务端 TLS 与 mTLS 模式下的握手行为（信任 CA / 不信任 CA / 缺失客户端证书）。
-- 验证内部 API Key 通配权限、外部 API Key 最小权限、缺失/无效凭证、越权场景。
-- 验证按身份 + 接口的滑动窗口限速生效，超速返回 429 / `RESOURCE_EXHAUSTED`。
-- 验证 `/health` 与 `Health` RPC 默认免认证、不限速。
+---
 
-## 3. 单元测试策略
+## 1. 概述与测试目标
 
-### 3.1 证书生成
+本文档定义 `engine/security/` 与 Go 共享安全栈的测试策略、测试范围与可执行示例。安全模块测试需覆盖 TLS/mTLS 握手、API Key 认证、接口级权限鉴权、速率限制、Slowloris/Payload DDoS 防护以及健康检查豁免。
 
-复用 `tests/security_certs.py` 中的 `generate_test_certs`，避免在仓库中提交真实证书。
+---
+
+## 2. Python 单元测试策略
+
+### 2.1 动态自签名证书生成
+
+复用 `tests/security_certs.py` 中的 `generate_test_certs`，避免在仓库中提交真实证书：
 
 ```python
 from pathlib import Path
@@ -29,7 +46,7 @@ def test_generate_certs(tmp_path: Path):
         assert certs[name].exists()
 ```
 
-### 3.2 TLS 配置校验
+### 2.2 TLS 配置校验
 
 ```python
 import pytest
@@ -51,66 +68,7 @@ def test_mtls_requires_ca():
         )
 ```
 
-### 3.3 认证与鉴权
-
-#### API Key 认证测试
-
-```python
-import pytest
-from fastapi.testclient import TestClient
-
-from engine.main import app
-from engine.security.config import get_security_settings
-from engine.security.identity import Identity
-
-client = TestClient(app)
-
-
-@pytest.fixture
-def auth_enabled(monkeypatch):
-    monkeypatch.setenv("PRIVACY_AUTH_ENABLED", "true")
-    monkeypatch.setenv(
-        "PRIVACY_AUTH_INTERNAL_KEYS_JSON",
-        '{"sk-internal":{"name":"secretpad","scopes":["*"]}}',
-    )
-    monkeypatch.setenv(
-        "PRIVACY_AUTH_EXTERNAL_KEYS_JSON",
-        '{"sk-external":{"name":"portal","scopes":["privacy:mask"]}}',
-    )
-    yield
-
-
-def test_internal_token_full_access(auth_enabled):
-    headers = {"Authorization": "Bearer sk-internal"}
-    resp = client.post(
-        "/v1/privacy/dp/count",
-        headers=headers,
-        json={"values": [1, 0, 1], "params": {"epsilon": 1.0}},
-    )
-    assert resp.status_code == 200
-
-
-def test_external_token_forbidden(auth_enabled):
-    headers = {"Authorization": "Bearer sk-external"}
-    resp = client.post(
-        "/v1/privacy/dp/count",
-        headers=headers,
-        json={"values": [1, 0, 1], "params": {"epsilon": 1.0}},
-    )
-    assert resp.status_code == 403
-
-
-def test_missing_token_returns_401(auth_enabled):
-    resp = client.post("/v1/privacy/mask", json={"field_name": "mobile", "value": "13812345678"})
-    assert resp.status_code == 401
-
-
-def test_health_exempt_by_default(auth_enabled):
-    resp = client.get("/health")
-    assert resp.status_code == 200
-```
-
-#### mTLS CN 白名单认证测试
+### 2.3 认证与鉴权测试 (API Key + mTLS CN 白名单)
 
 ```python
 import pytest
@@ -147,25 +105,16 @@ def test_mtls_cn_not_in_whitelist_rejected():
     )
     ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"rogue-svc"]}
     assert _authenticate_mtls(settings, ctx) is None
-
-
-def test_mtls_enabled_but_empty_whitelist_rejects_all():
-    """启用 mTLS 但未配置 CN 白名单时拒绝所有证书（fail-closed）。"""
-    settings = SecuritySettings(auth_internal_mtls_enabled=True)
-    ctx = {"transport_security_type": [b"ssl"], "x509_common_name": [b"any-cn"]}
-    assert _authenticate_mtls(settings, ctx) is None
 ```
 
-### 3.4 速率限制
+### 2.4 速率限制与探针豁免
 
 ```python
 import pytest
 from fastapi.testclient import TestClient
-
 from engine.main import app
 
 client = TestClient(app)
-
 
 @pytest.fixture
 def tight_rate_limit(monkeypatch):
@@ -192,17 +141,15 @@ def test_rate_limit_health_exempt(tight_rate_limit):
         assert client.get("/health").status_code == 200
 ```
 
-### 3.5 身份模型
+### 2.5 身份模型与 Scope 匹配
 
 ```python
 from engine.security.identity import Identity
 
-
 def test_identity_wildcard():
-    identity = Identity("internal", "secretpad", ["*"])
+    identity = Identity("internal", "service-hub", ["*"])
     assert identity.has_permission("privacy:dp")
     assert identity.has_permission("classification:read")
-
 
 def test_identity_exact_scope():
     identity = Identity("external", "portal", ["privacy:mask"])
@@ -210,11 +157,13 @@ def test_identity_exact_scope():
     assert not identity.has_permission("privacy:dp")
 ```
 
-## 4. 集成测试策略
+---
 
-### 4.1 REST TLS
+## 3. 集成测试策略
 
-使用 `uvicorn.Server` 在后台线程启动应用，使用 `httpx` 访问 HTTPS。
+### 3.1 REST TLS 集成测试
+
+使用 `uvicorn.Server` 在后台线程启动应用，使用 `httpx` 访问 HTTPS：
 
 ```python
 import contextlib
@@ -257,85 +206,18 @@ class RestServer:
     def stop(self):
         self._server.should_exit = True
         self._thread.join(timeout=5)
-
-
-@contextlib.contextmanager
-def rest_tls_server(certs: dict[str, Path]):
-    os.environ["PRIVACY_TLS_ENABLED"] = "true"
-    os.environ["PRIVACY_TLS_CERT_FILE"] = str(certs["server_cert"])
-    os.environ["PRIVACY_TLS_KEY_FILE"] = str(certs["server_key"])
-    port = 18079
-    server = RestServer(port, uvicorn_ssl_kwargs(get_security_settings()), certs["ca_cert"])
-    try:
-        server.start()
-        yield port
-    finally:
-        server.stop()
-        os.environ.pop("PRIVACY_TLS_ENABLED", None)
-        os.environ.pop("PRIVACY_TLS_CERT_FILE", None)
-        os.environ.pop("PRIVACY_TLS_KEY_FILE", None)
-
-
-def test_rest_tls_trusted_ca(tmp_path: Path):
-    certs = generate_test_certs(tmp_path)
-    with rest_tls_server(certs) as port:
-        with httpx.Client(verify=str(certs["ca_cert"])) as client:
-            resp = client.get(f"https://127.0.0.1:{port}/health")
-            assert resp.status_code == 200
 ```
 
-### 4.2 gRPC TLS/mTLS
+### 3.2 gRPC TLS/mTLS 集成测试
 
-使用 `grpc.server` + `grpc_server_credentials` 启动 gRPCs 服务端，客户端使用 `grpc.ssl_channel_credentials`。
+使用 `grpc.server` + `grpc_server_credentials` 启动 gRPCs 服务端，客户端使用 `grpc.ssl_channel_credentials`：
 
 ```python
-import contextlib
-import os
-from concurrent import futures
-from pathlib import Path
-
-import grpc
-import pytest
-
-from engine import privacy_pb2, privacy_pb2_grpc
-from engine.grpc_server import PrivacyServicer
-from engine.security.config import get_security_settings
-from engine.security.tls import grpc_server_credentials
-from tests.security_certs import generate_test_certs
-
-
-def _start_grpc_server(port: int, certs: dict[str, Path], client_auth: str = "none"):
-    os.environ["PRIVACY_TLS_ENABLED"] = "true"
-    os.environ["PRIVACY_TLS_CERT_FILE"] = str(certs["server_cert"])
-    os.environ["PRIVACY_TLS_KEY_FILE"] = str(certs["server_key"])
-    os.environ["PRIVACY_TLS_CLIENT_AUTH"] = client_auth
-    if client_auth in ("optional", "require"):
-        os.environ["PRIVACY_TLS_CA_FILE"] = str(certs["ca_cert"])
-
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
-    privacy_pb2_grpc.add_PrivacyServiceServicer_to_server(PrivacyServicer(), server)
-    creds = grpc_server_credentials(get_security_settings())
-    server.add_secure_port(f"127.0.0.1:{port}", creds)
-    server.start()
-    return server
-
-
-@contextlib.contextmanager
-def grpc_tls_server(certs: dict[str, Path], port: int, client_auth: str = "none"):
-    server = _start_grpc_server(port, certs, client_auth)
-    try:
-        yield
-    finally:
-        server.stop(0)
-        for key in ("PRIVACY_TLS_ENABLED", "PRIVACY_TLS_CERT_FILE", "PRIVACY_TLS_KEY_FILE", "PRIVACY_TLS_CLIENT_AUTH", "PRIVACY_TLS_CA_FILE"):
-            os.environ.pop(key, None)
-
-
 def test_grpc_mtls_require_client_cert(tmp_path: Path):
     certs = generate_test_certs(tmp_path)
     port = 50052
     with grpc_tls_server(certs, port, client_auth="require"):
-        # 无客户端证书，连接失败
+        # 无客户端证书，连接超时/失败
         ca = certs["ca_cert"].read_bytes()
         creds = grpc.ssl_channel_credentials(root_certificates=ca)
         with pytest.raises(grpc.FutureTimeoutError):
@@ -354,38 +236,48 @@ def test_grpc_mtls_require_client_cert(tmp_path: Path):
             assert resp.status == "ok"
 ```
 
-## 5. 测试执行命令
+---
+
+## 4. Go 共享安全库与微服务测试
+
+Go 安全模块覆盖测试：
+1. `pkg/tlsutil/whitelist_test.go`：测试 CN 白名单加载、Scope 校验与文件 5 秒轮询热重载；
+2. `pkg/middleware/middleware_test.go`：测试 `RateLimit` IP 令牌桶、`MaxBodySize` 413 切断、`MaxConcurrent` 503 熔断与 `Recovery` 异常脱敏；
+3. `pkg/crypto/envelope_test.go`：测试 SM4-GCM 动态 Nonce 加解密与格式校验；
+4. `services/audit-log` 9 要素连续哈希链与验真接口单测。
+
+---
+
+## 5. 测试执行与验证命令
 
 ```bash
-# 运行全部安全相关测试
-PYTHONPATH=. pytest tests/test_security_*.py -v
+# 1. 运行 Python 全部安全测试
+PYTHONPATH=. pytest tests/security/ -v
 
-# 单独运行认证测试
-PYTHONPATH=. pytest tests/test_security_auth.py -v
+# 2. 单独运行特定子模块安全测试
+PYTHONPATH=. pytest tests/security/test_security_auth.py -v
+PYTHONPATH=. pytest tests/security/test_security_tls.py -v
+PYTHONPATH=. pytest tests/security/test_security_rate_limit.py -v
+PYTHONPATH=. pytest tests/security/test_security_whitelist.py -v
 
-# 单独运行 TLS 测试
-PYTHONPATH=. pytest tests/test_security_tls.py -v
+# 3. 运行 Go 基础安全库与微服务中间件测试（带竞争检测）
+go test -race -count=1 ./pkg/tlsutil/... ./pkg/middleware/... ./pkg/crypto/... ./services/audit-log/...
 
-# 单独运行限速测试
-PYTHONPATH=. pytest tests/test_security_rate_limit.py -v
+# 4. 执行端到端安全与 DDoS 综合集成测试
+bash ./scripts/dev/integration-test-new-modules.sh
 ```
 
-## 6. 持续集成建议
+---
 
-- 每次提交前执行 `pytest tests/test_security_*.py`。
-- CI 中安装 `cryptography`（已通过项目依赖引入）。
-- TLS 集成测试使用动态临时端口，避免与本地服务冲突。
-- 限速测试使用远高于默认值的 `burst`，减少测试运行时间抖动。
+## 6. 验收检查清单
 
-## 7. 验收检查清单
-
-- [ ] 动态生成 CA/服务器/客户端证书并在测试中使用。
-- [ ] 仅服务端 TLS 下，受信 CA 可连接，不受信 CA 失败。
-- [ ] mTLS `require` 模式下，缺失客户端证书连接失败。
-- [ ] mTLS CN 白名单：命中白名单的 CN 获得内部身份，未命中的被拒绝。
-- [ ] mTLS 默认关闭（fail-closed）：未显式启用时即使证书合法也不授予身份。
-- [ ] 内部 API Key 可访问全部接口，外部 API Key 越权返回 403 / `PERMISSION_DENIED`。
-- [ ] 缺失/无效凭证返回 401 / `UNAUTHENTICATED`。
-- [ ] 超速调用返回 429 / `RESOURCE_EXHAUSTED`。
-- [ ] `/health` 与 `Health` 默认免认证、不限速。
-- [ ] 关闭安全开关后既有测试集无需修改即可通过。
+- [x] 动态生成 CA/服务器/客户端证书并在测试中使用。
+- [x] 仅服务端 TLS 下，受信 CA 可连接，不受信 CA 失败。
+- [x] mTLS `require` 模式下，缺失客户端证书连接失败。
+- [x] mTLS CN 白名单：命中白名单的 CN 获得内部身份，未命中的被拒绝。
+- [x] mTLS 默认关闭（fail-closed）：未显式启用时即使证书合法也不授予身份。
+- [x] 内部 API Key 可访问全部接口，外部 API Key 越权返回 403 / `PERMISSION_DENIED`。
+- [x] 缺失/无效凭证返回 401 / `UNAUTHENTICATED`。
+- [x] 超速调用返回 429 / `RESOURCE_EXHAUSTED`。
+- [x] `/health` 与 `Health` 默认免认证、不限速。
+- [x] 关闭安全开关后既有测试集无需修改即可通过。

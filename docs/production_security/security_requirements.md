@@ -1,6 +1,27 @@
 # 生产安全加固——技术栈常见漏洞与编码安全规范
 
-> 本文档系统总结了 `PrivShield` 项目所使用技术栈的常见安全漏洞类型、原理、编码安全规范以及针对本项目的安全扫描与修复结果。
+> **版本**：v16.0.0  
+> **适用范围**：`PrivShield` 全栈开发人员、安全合规审计组与 SRE 运维团队。  
+> **定位**：系统总结项目所使用技术栈的常见安全漏洞类型、原理、编码安全规范以及针对本项目的安全扫描与修复结果。
+
+---
+
+## 目录
+
+- [1. 项目技术栈概览](#1-项目技术栈概览)
+- [2. 技术栈常用漏洞与安全防范要求](#2-技术栈常用漏洞与安全防范要求)
+  - [2.1 不安全的反序列化 (Insecure Deserialization)](#21-不安全的反序列化-insecure-deserialization)
+  - [2.2 身份鉴权与时序攻击 (Authentication & Timing Attacks)](#22-身份鉴权与时序攻击-authentication--timing-attacks)
+  - [2.3 路径遍历与任意文件访问 (Path Traversal / Arbitrary File Access)](#23-路径遍历与任意文件访问-path-traversal--arbitrary-file-access)
+  - [2.4 命令注入与代码注入 (Command & Code Injection)](#24-命令注入与代码注入-command--code-injection)
+  - [2.5 SQL 注入 (SQL Injection)](#25-sql-注入-sql-injection)
+  - [2.6 网关与 Web 安全：SSRF、CORS 与安全响应头](#26-网关与-web-安全ssrfcors-与安全响应头)
+  - [2.7 敏感信息泄露与全局异常处理 (Information Leakage)](#27-敏感信息泄露与全局异常处理-information-leakage)
+  - [2.8 隐私计算特定漏洞：隐私预算逃逸 (Privacy Budget Escape / Race Condition)](#28-隐私计算特定漏洞隐私预算逃逸-privacy-budget-escape--race-condition)
+  - [2.9 拒绝服务与洪峰攻击防护 (DDoS & Overload Protection)](#29-拒绝服务与洪峰攻击防护-ddos--overload-protection)
+- [3. 本项目安全扫描与修复记录](#3-本项目安全扫描与修复记录)
+  - [3.1 发现的漏洞与安全隐患矩阵](#31-发现的漏洞与安全隐患矩阵)
+- [4. 自动化安全测试与持续集成](#4-自动化安全测试与持续集成)
 
 ---
 
@@ -8,13 +29,13 @@
 
 `PrivShield` 是一个本地/Sidecar 部署的隐私计算与数据分类分级代理服务。主要技术栈组成如下：
 
-- **核心语言与运行时**：Python 3.13+、Go (控制台 BFF `console/bff-go`)
+- **核心语言与运行时**：Python 3.13+、Go 1.25（控制台 BFF 与中台微服务群）
 - **Web / RPC 框架**：FastAPI (ASGI REST)、Uvicorn、gRPC (`grpcio`)、Gin (Go 后端)
 - **数据模型与序列化**：Pydantic v2、PyYAML、Protocol Buffers
-- **持久化与嵌入式数据库**：SQLite3 (隐私预算与审查记录)
+- **持久化与嵌入式数据库**：PostgreSQL / SQLite3 (隐私预算与审查记录)
 - **HTTP 代理客户端**：`httpx` (Gateway / HTTP 代理)
 - **机器学习 / 大模型 / NER**：PyTorch, Transformers, ONNX Runtime, ModelScope
-- **前端与控制台**：React + Vite (Web Console)
+- **前端与控制台**：React 18 + TypeScript + Vite (Web Console)
 - **部署与容器化**：Docker, Docker Compose, Kubernetes, Helm
 
 ---
@@ -56,9 +77,9 @@
 
 ### 2.5 SQL 注入 (SQL Injection)
 - **常见漏洞场景**：
-  - 使用 SQL 语句拼接（如 `f"SELECT * FROM users WHERE name = '{name}'"`）查询 SQLite。
+  - 使用 SQL 语句拼接（如 `f"SELECT * FROM users WHERE name = '{name}'"`）查询 SQLite 或 PostgreSQL。
 - **安全编码要求**：
-  1. 任何 SQLite 数据库查询与写入，必须使用占位符参数化查询（如 `cursor.execute("SELECT ... WHERE key = ?", (key,))`）。
+  1. 任何 SQLite / PostgreSQL 数据库查询与写入，必须使用占位符参数化查询（如 `cursor.execute("SELECT ... WHERE key = ?", (key,))` 或 `$1, $2`）。
   2. 严禁使用字符串拼接构造 SQL 条件。
 
 ### 2.6 网关与 Web 安全：SSRF、CORS 与安全响应头
@@ -85,7 +106,7 @@
 - **安全编码要求**：
   1. 内存隐私预算更新必须通过 `threading.Lock` 加锁。
   2. SQLite 持久化预算更新必须使用事务排他锁（`BEGIN IMMEDIATE`）与 WAL 模式，确保并发原子扣减。
-  3. Redis 分布式预算必须使用 Lua 脚本保证原子扣减与原子滑动窗口重置。
+  3. PostgreSQL / Redis 分布式预算必须使用强一致事务或 Lua 脚本保证原子扣减与原子滑动窗口重置。
 
 ### 2.9 拒绝服务与洪峰攻击防护 (DDoS & Overload Protection)
 - **常见漏洞场景**：
@@ -103,7 +124,7 @@
 
 基于上述安全要求，对 `PrivShield` 全库代码（含 Python 算力层、Go 微服务群、共享库与控制台）进行了静态扫描与深度安全审计，审计结果与修复清单如下：
 
-### 3.1 发现的漏洞与安全隐患
+### 3.1 发现的漏洞与安全隐患矩阵
 
 | 编号 | 漏洞/隐患描述 | 严重级别 | 受影响文件 | 修复方案与效果 |
 |---|---|---|---|---|

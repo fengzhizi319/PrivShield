@@ -1,44 +1,43 @@
-# 生产安全加固与防御体系文档索引
+# PrivShield 生产安全模块索引
 
-本目录包含 `PrivShield` 全平台（Python 核心隐私算力引擎、Go 中台微服务群与控制台 BFF）生产安全模块的全套 SDLC 文档，覆盖 REST/gRPC 的 TLS/mTLS 传输加密、认证鉴权、速率限制、全栈纵深防 DDoS（Slowloris/Payload/Flood/Concurrency）、路径穿越沙箱防御、错误脱敏与存储安全。
+> **版本**：v16.0.0  
+> **适用范围**：`PrivShield` 核心算力引擎（`engine`）、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台与双 BFF 体系（`bff-go` / `app-lz`）。  
+> **定位**：系统索引全平台生产安全模块的 SDLC 文档，涵盖 TLS 1.3/mTLS 传输安全、CN 白名单动态热重载、API Key 恒定时间认证、全栈 9 层中间件纵深防 DDoS、SM4-GCM 快照信封加密与 9 要素密码学哈希链防篡改存证。
 
-## 文档清单
+---
 
-| 文档 | 说明 | 目标读者 |
+## 目录
+
+- [1. 文档导航](#1-文档导航)
+- [2. 全栈安全能力速查表](#2-全栈安全能力速查表)
+- [3. 快速运行示例](#3-快速运行示例)
+
+---
+
+## 1. 文档导航
+
+| 文档 | 描述 | 核心章节 |
 |---|---|---|
-| [security_requirements.md](./security_requirements.md) | 技术栈常见漏洞总结、安全编码规范与全平台审计修复清单 | 全体开发人员、安全审计员 |
-| [prd.md](./prd.md) | 生产安全与纵深防 DDoS 产品需求文档与验收标准 | 产品经理、项目经理 |
-| [design.md](./design.md) | 技术架构、威胁模型、mTLS 白名单认证、全栈防 DDoS 与实现细节 | 安全架构师、后端开发 |
-| [api_reference.md](./api_reference.md) | 环境变量、配置项与 TLS/Auth/RateLimit/DDoS 接口参考 | 接入开发者、SRE |
-| [examples.md](./examples.md) | TLS、API Key、速率限制与安全中间件的配置示例 | 接入开发者 |
-| [examples/security_usage.py](./examples/security_usage.py) | 可运行的完整示例脚本 | 接入开发者 |
-| [testing.md](./testing.md) | 安全测试策略、DDoS 压测与测试代码示例 | QA、测试开发 |
-| [ops.md](./ops.md) | 运维手册、生产安全加固参数建议与故障排查 | SRE、运维 |
+| [prd.md](./prd.md) | 生产安全产品需求文档 (PRD) | 业务背景、功能与非功能需求、验收标准 |
+| [design.md](./design.md) | 生产安全架构设计文档 (Design) | 架构概览、TLS/mTLS 设计、CN 白名单 5 秒热重载、9 层中间件与防 DDoS、认证鉴权、速率限制 |
+| [security_requirements.md](./security_requirements.md) | 安全与编码规范 | 威胁建模、安全编码要求、CVE 防御、漏洞修复矩阵 |
+| [api_reference.md](./api_reference.md) | 安全配置与 API 参考 | 环境变量矩阵、Python SDK、Go 安全库接口 |
+| [ops.md](./ops.md) | 生产安全运维手册 (Ops) | 环境变量参考、证书生成、启动示例、排错指南 |
+| [examples.md](./examples.md) | 生产安全加固使用示例 | 典型场景配置、REST/gRPC 客户端调用代码 |
+| [testing.md](./testing.md) | 生产安全加固测试文档 | 测试策略、单测/集成测试用例、验收检查清单 |
 
-## 快速开始
+---
 
-1. 阅读 [prd.md](./prd.md) 了解全栈安全能力范围与验收标准。
-2. 阅读 [design.md](./design.md) 掌握 TLS/mTLS、认证鉴权、防 DDoS 架构与 Go 共享安全栈。
-3. 查看 [examples.md](./examples.md) 或运行 [examples/security_usage.py](./examples/security_usage.py) 快速上手。
-4. 开发/部署时参考 [api_reference.md](./api_reference.md) 与 [ops.md](./ops.md)。
-5. 编写安全测试参考 [testing.md](./testing.md)。
-
-## 运行示例
-
-```bash
-cd /path/to/PrivShield
-source .venv/bin/activate
-PYTHONPATH=. python docs/production_security/examples/security_usage.py
-```
-
-## 安全能力与开关速查
+## 2. 全栈安全能力速查表
 
 | 能力分层 | 核心机制 / 开关 | 默认值 | 安全防护说明 |
 |---|---|---|---|
 | **传输安全 (TLS)** | `PRIVACY_TLS_ENABLED=true` | `false` | REST/gRPC 强制启用 TLS 1.3 加密传输 |
 | **客户端证书 (mTLS)** | `PRIVACY_TLS_CLIENT_AUTH=require` | `none` | 强制双向 TLS 校验客户端身份证书 |
-| **mTLS CN 白名单** | `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` | `false` | gRPC 客户端证书 CN 白名单认证与 per-CN Scope 授权 |
+| **mTLS CN 白名单** | `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` | `false` | gRPC 客户端证书 CN 白名单认证与 per-CN Scope 授权（支持 5 秒热重载） |
 | **API Key 认证** | `PRIVACY_AUTH_ENABLED=true` / `API_KEY` | `false` / `""` | 静态 Bearer Token 恒定时间防时序攻击鉴权 |
+| **静态快照加密** | `AUDIT_LOG_ENCRYPTION_KEY` | `""` (明文) | SM4-GCM 信封加密脱敏快照落盘（`enc:v1:` 前缀） |
+| **不可篡改存证** | 9 要素哈希链 | 内建生效 | 基于连续 SHA-256 区块链式哈希链，支持秒级在线核验 |
 | **租户/身份限流** | `PRIVACY_RATE_LIMIT_ENABLED=true` | `false` | Python 核心引擎基于调用者身份 + 接口的滑动窗口限流 |
 | **IP 令牌桶防刷** | `pkg/middleware.RateLimit(200, 400)` | 自动注入 | Go 微服务基于客户端 IP 令牌桶限流，超限返回 429 与 Retry-After |
 | **慢速连接防护** | `ReadHeaderTimeout: 5s` / `ReadTimeout: 30s` | 已配置 | 协议级防御 Slowloris 与慢速 POST 挂起连接攻击 |
@@ -48,4 +47,12 @@ PYTHONPATH=. python docs/production_security/examples/security_usage.py
 | **异常信息脱敏** | `pkg/middleware.Recovery` | 自动注入 | Panic 堆栈收敛至服务端内部日志，对外统一响应脱敏 JSON |
 | **SQL 边界加固** | `pkg/store/sqlite` 分页夹紧 | 强制启用 | `Limit` 限制 1~10000，`Offset >= 0`，杜绝异常查询 |
 
-> 核心开关默认保持平滑兼容（可通过环境变量按需开启）；关键输入沙箱与防护中间件均已默认内建生效。
+---
+
+## 3. 快速运行示例
+
+```bash
+cd /path/to/PrivShield
+source .venv/bin/activate
+PYTHONPATH=. python docs/production_security/examples/security_usage.py
+```

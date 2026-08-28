@@ -1,11 +1,33 @@
 # 生产安全加固产品设计 PRD
 
-> Scope: P0 — REST/gRPC TLS（含 mTLS 可选）、认证鉴权、速率限制。
+> **版本**：v16.0.0  
+> **适用范围**：`PrivShield` 核心算力引擎（`engine`）、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台与双 BFF 体系（`bff-go` / `app-lz`）。  
+> **核心目标**：定义 REST/gRPC TLS 1.3、双向 mTLS CN 白名单认证鉴权、速率限制、全栈 9 层中间件纵深防 DDoS、SM4-GCM 快照信封加密与 9 要素哈希链存证的产品需求与验收标准。
 
+---
+
+## 目录
+
+- [1. 概述](#1-概述)
+- [2. 设计目标](#2-设计目标)
+- [3. 用户故事](#3-用户故事)
+- [4. 功能需求](#4-功能需求)
+  - [4.1 TLS / mTLS 传输安全](#41-tls--mtls-传输安全)
+  - [4.2 认证与鉴权](#42-认证与鉴权)
+  - [4.3 速率限制](#43-速率限制)
+  - [4.4 健康检查豁免](#44-健康检查豁免)
+  - [4.5 全栈防 DDoS 与系统容量保护](#45-全栈防-ddos-与系统容量保护)
+  - [4.6 数据源与存储沙箱安全](#46-数据源与存储沙箱安全)
+- [5. 非功能需求](#5-非功能需求)
+- [6. 验收标准与测试矩阵](#6-验收标准与测试矩阵)
+
+---
 
 ## 1. 概述
 
 本文档定义 `PrivShield` 生产安全模块的产品需求与验收标准。该模块为 REST 与 gRPC 双协议提供可选的传输安全、身份认证、权限鉴权与速率限制能力，使其能够部署于多租户、跨域或半开放的生产环境。
+
+---
 
 ## 2. 设计目标
 
@@ -14,19 +36,23 @@
 - 基于调用者身份与接口路径/方法进行速率限制，防止预算爆破、模型推理资源耗尽与 DDoS。
 - 所有安全能力默认关闭，通过环境变量显式开启，保证向后兼容。
 
+---
+
 ## 3. 用户故事
 
 | 角色 | 故事 |
 |---|---|
 | 平台运维 | 通过 TLS 加密 REST/gRPC 流量，避免隐私原语请求在链路上被窃听或篡改。 |
-| SecretPad 后端（内部服务） | 使用内部 API Key 或 mTLS 调用 agent，并拥有全部隐私原语权限。 |
+| Service Hub（内部服务） | 使用内部 API Key 或 mTLS 调用 agent，并拥有全部隐私原语权限。 |
 | 数据门户（外部服务） | 仅获得脱敏、分类等只读/低敏能力，不能调用差分隐私消耗预算或 K-匿名。 |
 | SRE | `/health` 保持匿名可访问，便于 Kubernetes 探针和负载均衡健康检查。 |
 | 安全团队 | 对缺失/无效凭证返回 401/`UNAUTHENTICATED`，对越权返回 403/`PERMISSION_DENIED`，对超速返回 429/`RESOURCE_EXHAUSTED`。 |
 
+---
+
 ## 4. 功能需求
 
-### 4.1 TLS
+### 4.1 TLS / mTLS 传输安全
 
 | ID | 需求 |
 |---|---|
@@ -57,14 +83,14 @@
 | FR-RL-4 | 健康检查接口默认不受限速影响。 |
 | FR-RL-5 | 可选 Redis 后端，用于多副本共享限流计数器；未配置时使用进程内存。 |
 
-### 4.4 健康检查
+### 4.4 健康检查豁免
 
 | ID | 需求 |
 |---|---|
 | FR-HEALTH-1 | `/health` 与 `Health` RPC 默认不认证、不限速。 |
 | FR-HEALTH-2 | 可通过 `PRIVACY_HEALTH_NO_AUTH=false` 与 `PRIVACY_HEALTH_NO_RATE_LIMIT=false` 关闭豁免。 |
 
-### 4.5 全栈防 DDoS 与系统容量保护 (DDoS & Capacity Protection)
+### 4.5 全栈防 DDoS 与系统容量保护
 
 | ID | 需求 |
 |---|---|
@@ -74,13 +100,15 @@
 | FR-DDOS-4 | **并发容量硬顶**：提供 `MaxConcurrent(limit)` 信号量中间件，突发过载快速返回 `503 Service Unavailable` 保护协程池。 |
 | FR-DDOS-5 | **云原生 Ingress 防护**：Helm 与生产模板预置 Nginx Ingress 连接限制（50 连接/IP）与速率限制（100 RPS/IP）。 |
 
-### 4.6 数据源与存储沙箱安全 (Data Source & Storage Security)
+### 4.6 数据源与存储沙箱安全
 
 | ID | 需求 |
 |---|---|
 | FR-DATA-1 | **路径遍历 (LFI) 沙箱防护**：`datasource-mgr` CSV 加载强制 `.csv` 白名单，提取纯文件名并在目录沙箱内加载，且限制最大读取 50,000 行。 |
 | FR-DATA-2 | **异常信息脱敏**：`pkg/middleware.Recovery` 捕获 Panic 并向客户端返回安全脱敏响应，堆栈仅留存于内部结构化日志。 |
 | FR-DATA-3 | **SQL 分页边界安全**：SQLite 存储层使用 `ParsePagination` 强制约束 `Limit` 在 1~10000 且 `Offset ≥ 0`。 |
+
+---
 
 ## 5. 非功能需求
 
@@ -92,7 +120,9 @@
 | 可配置 | 全部行为通过环境变量配置，无需改动代码即可适配不同环境。 |
 | 可测试 | 提供自签名证书生成工具/测试夹具，单元测试覆盖 TLS/mTLS/Auth/RateLimit/DDoS/LFI。 |
 
-## 6. 验收标准
+---
+
+## 6. 验收标准与测试矩阵
 
 - [x] 编写 `docs/production_security/prd.md`、`design.md`、`ops.md`、`security_requirements.md`。
 - [x] 新增 `engine/security/` 模块，包含 config/tls/identity/auth/ratelimit。
@@ -107,8 +137,3 @@
 - [x] 引入 `MaxBodySize` 大包防御（413）与 `MaxConcurrent` 并发熔断（503）。
 - [x] 实施 CSV Loader 路径穿越沙箱与 SQLite 分页上下限夹紧。
 - [x] 所有现有测试在默认配置下通过；新增安全与 DDoS 测试 100% 通过。
-
-## 7. 非目标与演进规划
-
-- 本次不实现复杂 OAuth/OIDC 认证服务，采用静态 API Key + mTLS 客户端证书 + 静态 Scope 映射；
-- 硬件安全模块 (HSM) 与 KMS 信封加密密钥自动轮换作为后续演进目标。

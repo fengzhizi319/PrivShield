@@ -1,20 +1,48 @@
 # 生产安全加固 API 参考
 
+> **版本**：v16.0.0  
+> **适用范围**：`PrivShield` 核心算力引擎（`engine`）、企业级中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台与双 BFF 体系（`bff-go` / `app-lz`）。  
+> **定位**：系统参考手册，提供环境变量、Python `engine/security` 模块、Go `pkg/tlsutil` / `pkg/middleware` / `pkg/crypto` 共享库与 REST/gRPC 安全接口定义。
 
-## 1. 环境变量
+---
 
-### 1.1 TLS
+## 目录
+
+- [1. 全局环境变量矩阵](#1-全局环境变量矩阵)
+  - [1.1 TLS / mTLS 传输加密](#11-tls--mtls-传输加密)
+  - [1.2 认证鉴权与 mTLS 白名单](#12-认证鉴权与-mtls-白名单)
+  - [1.3 速率限制与分布式后端](#13-速率限制与分布式后端)
+  - [1.4 全栈防 DDoS 与快照加密](#14-全栈防-ddos-与快照加密)
+  - [1.5 健康检查豁免](#15-健康检查豁免)
+- [2. Python 安全 SDK (engine/security)](#2-python-安全-sdk-enginesecurity)
+  - [2.1 SecuritySettings](#21-securitysettings)
+  - [2.2 TLS 构造器 (security/tls.py)](#22-tls-构造器-securitytlspy)
+  - [2.3 身份模型与 Scope 权限映射 (security/identity.py)](#23-身份模型与-scope-权限映射-securityidentitypy)
+  - [2.4 认证与鉴权依赖 (security/auth.py)](#24-认证与鉴权依赖-securityauthpy)
+  - [2.5 速率限制引擎 (security/ratelimit.py)](#25-速率限制引擎-securityratelimitpy)
+  - [2.6 白名单管理器 (security/whitelist.py)](#26-白名单管理器-securitywhitelistpy)
+- [3. Go 共享安全库 (pkg/)](#3-go-共享安全库-pkg)
+  - [3.1 TLS 与 CN 白名单 (pkg/tlsutil)](#31-tls-与-cn-白名单-pkgtlsutil)
+  - [3.2 9 层统一中间件栈 (pkg/middleware)](#32-9-层统一中间件栈-pkgmiddleware)
+  - [3.3 SM4-GCM 快照信封加密 (pkg/crypto)](#33-sm4-gcm-快照信封加密-pkgcrypto)
+- [4. REST 与 gRPC 协议行为及错误码汇总](#4-rest-与-grpc-协议行为及错误码汇总)
+
+---
+
+## 1. 全局环境变量矩阵
+
+### 1.1 TLS / mTLS 传输加密
 
 | 变量 | 默认值 | 必填 | 说明 |
 |---|---|---|---|
 | `PRIVACY_TLS_ENABLED` | `false` | 否 | 是否启用 REST/gRPC TLS。 |
-| `PRIVACY_TLS_CERT_FILE` | — | TLS 开启时必填 | 服务器证书 PEM 路径。 |
-| `PRIVACY_TLS_KEY_FILE` | — | TLS 开启时必填 | 服务器私钥 PEM 路径。 |
-| `PRIVACY_TLS_CA_FILE` | — | `optional`/`require` 时必填 | CA 证书 PEM 路径，用于校验客户端证书。 |
+| `PRIVACY_TLS_CERT_FILE` / `PRIVACY_TLS_CERT_PATH` | — | TLS 开启时必填 | 服务器证书 PEM 路径。 |
+| `PRIVACY_TLS_KEY_FILE` / `PRIVACY_TLS_KEY_PATH` | — | TLS 开启时必填 | 服务器私钥 PEM 路径。 |
+| `PRIVACY_TLS_CA_FILE` / `PRIVACY_TLS_CA_PATH` | — | `optional`/`require` 时必填 | CA 证书 PEM 路径，用于校验客户端证书。 |
 | `PRIVACY_TLS_CLIENT_AUTH` | `none` | 否 | 客户端认证模式：`none` / `optional` / `require`。 |
 | `PRIVACY_TLS_KEY_PASSWORD` | — | 否 | 加密私钥的口令。 |
 
-### 1.2 认证鉴权
+### 1.2 认证鉴权与 mTLS 白名单
 
 | 变量 | 默认值 | 必填 | 说明 |
 |---|---|---|---|
@@ -25,20 +53,21 @@
 | `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | — | 否 | mTLS CN 白名单 YAML 配置文件路径。设置后启用 per-CN scope 控制与热重载。 |
 | `PRIVACY_AUTH_MTLS_ALLOWED_CNS` | `[]` | 否 | mTLS 客户端证书 CN 静态白名单（JSON 数组或逗号分隔）。当 WHITELIST_FILE 未设置时使用，所有 CN 获得 `["*"]` 全权限。 |
 
-JSON 格式：
-
+JSON 格式示例：
 ```json
 {
-  "<token>": {
-    "name": "<服务名>",
-    "scopes": ["<scope1>", "<scope2>"]
+  "sk-internal-1": {
+    "name": "service-hub",
+    "scopes": ["*"]
+  },
+  "sk-external-1": {
+    "name": "portal",
+    "scopes": ["privacy:mask", "classification:read"]
   }
 }
 ```
 
-`scopes` 为 `["*"]` 时表示拥有全部权限。
-
-### 1.3 速率限制
+### 1.3 速率限制与分布式后端
 
 | 变量 | 默认值 | 必填 | 说明 |
 |---|---|---|---|
@@ -48,7 +77,15 @@ JSON 格式：
 | `PRIVACY_RATE_LIMIT_PER_ENDPOINT_JSON` | `{}` | 否 | 按接口覆盖限速规则。 |
 | `PRIVACY_RATE_LIMIT_REDIS_URL` | — | 否 | 多副本时共享计数器，例 `redis://redis:6379/0`。 |
 
-### 1.4 健康检查
+### 1.4 全栈防 DDoS 与快照加密
+
+| 变量 | 默认值 | 必填 | 说明 |
+|---|---|---|---|
+| `AUDIT_LOG_ENCRYPTION_KEY` | — | 生产必填 | SM4-GCM 快照落盘信封加密密钥。 |
+| `MAX_CONCURRENT_REQUESTS` | `1000` | 否 | Go 微服务在途并发信号量拦截上限。 |
+| `MAX_BODY_SIZE_MB` | `32` / `64` | 否 | 请求体硬顶限制（微服务 32MB / BFF 64MB）。 |
+
+### 1.5 健康检查豁免
 
 | 变量 | 默认值 | 必填 | 说明 |
 |---|---|---|---|
@@ -57,13 +94,11 @@ JSON 格式：
 
 ---
 
-## 2. Python SDK
+## 2. Python 安全 SDK (`engine/security`)
 
 ### 2.1 `SecuritySettings`
 
-位置：`engine.security.config.SecuritySettings`
-
-Pydantic v2 模型，集中承载所有安全相关配置。
+位置：`engine.security.config.SecuritySettings`，Pydantic v2 集中配置模型。
 
 ```python
 class SecuritySettings(BaseModel):
@@ -77,7 +112,7 @@ class SecuritySettings(BaseModel):
     auth_enabled: bool = False
     auth_internal_mtls_enabled: bool = False
     auth_mtls_allowed_cns: list[str] = Field(default_factory=list)
-    auth_mtls_whitelist_file: Path | None = None  # YAML 配置文件路径
+    auth_mtls_whitelist_file: Path | None = None
     internal_keys: dict[str, KeyConfig] = Field(default_factory=dict)
     external_keys: dict[str, KeyConfig] = Field(default_factory=dict)
 
@@ -91,136 +126,12 @@ class SecuritySettings(BaseModel):
     health_no_rate_limit: bool = True
 ```
 
-#### `KeyConfig`
+### 2.2 TLS 构造器 (`security/tls.py`)
 
-```python
-class KeyConfig(BaseModel):
-    name: str
-    scopes: list[str] = Field(default_factory=list)
-```
+- **`uvicorn_ssl_kwargs(settings: SecuritySettings) -> dict[str, Any]`**：为 `uvicorn.run()` 生成 SSL 参数；
+- **`grpc_server_credentials(settings: SecuritySettings) -> grpc.ServerCredentials`**：生成 gRPC 服务端 SSL 凭证。
 
-#### `RateLimitConfig`
-
-```python
-class RateLimitConfig(BaseModel):
-    rps: float
-    burst: float
-```
-
-### 2.2 `get_security_settings`
-
-位置：`engine.security.config.get_security_settings`
-
-```python
-def get_security_settings() -> SecuritySettings
-```
-
-从当前环境变量解析并返回 `SecuritySettings`。每次调用都会重新读取 `os.environ`，便于测试与运行时重载。
-
-### 2.3 TLS 构造器
-
-位置：`engine.security.tls`
-
-#### `uvicorn_ssl_kwargs`
-
-```python
-def uvicorn_ssl_kwargs(settings: SecuritySettings) -> dict[str, Any]
-```
-
-为 `uvicorn.run(..., **ssl_kwargs)` 生成 SSL 关键字参数。TLS 未启用时返回空字典。
-
-#### `grpc_server_credentials`
-
-```python
-def grpc_server_credentials(settings: SecuritySettings) -> grpc.ServerCredentials
-```
-
-根据 `tls_client_auth` 返回 gRPC 服务端凭证：
-
-- `none`：仅服务端 TLS。
-- `optional`：服务端 TLS + 请求但不强制客户端证书。
-- `require`：mTLS，强制客户端证书。
-
-### 2.4 认证依赖
-
-位置：`engine.security.auth`
-
-#### `get_current_identity`
-
-```python
-async def get_current_identity(request: Request) -> Identity
-```
-
-FastAPI dependency，解析请求中的 `Authorization: Bearer <token>` 并返回 `Identity`。认证未启用时返回匿名管理员身份。
-
-#### `require_permission`
-
-```python
-def require_permission(permission: str) -> Depends
-```
-
-返回 FastAPI dependency，要求调用者拥有指定 scope。
-
-```python
-from fastapi import Depends
-from engine.security.auth import require_permission
-
-@app.post("/v1/privacy/mask", dependencies=[require_permission("privacy:mask")])
-```
-
-#### `require_rest_path_permission`
-
-```python
-def require_rest_path_permission(path: str) -> Depends
-```
-
-根据 REST 路径自动推导所需权限。
-
-#### `AuthInterceptor`
-
-```python
-class AuthInterceptor(grpc.ServerInterceptor):
-    def __init__(self, settings: SecuritySettings | None = None): ...
-```
-
-gRPC server interceptor，校验 metadata / mTLS auth_context 中的身份与 scope。
-
-### 2.5 速率限制
-
-位置：`engine.security.ratelimit`
-
-#### `Limiter`
-
-```python
-class Limiter:
-    def __init__(self, settings: SecuritySettings): ...
-    def is_allowed(self, identity: Identity, endpoint: str) -> bool: ...
-```
-
-基于 `limits` 库的滑动窗口限速器。支持内存与 Redis 两种后端。
-
-#### `rate_limit_dependency`
-
-```python
-async def rate_limit_dependency(request: Request) -> None
-```
-
-FastAPI dependency，依赖 `request.state.identity`（由 `get_current_identity` 设置），超限时抛出 `HTTPException(429)`。
-
-#### `RateLimitInterceptor`
-
-```python
-class RateLimitInterceptor(grpc.ServerInterceptor):
-    def __init__(self, settings: SecuritySettings | None = None): ...
-```
-
-gRPC server interceptor，超限时返回 `grpc.StatusCode.RESOURCE_EXHAUSTED`。
-
-### 2.6 身份与权限
-
-位置：`engine.security.identity`
-
-#### `Identity`
+### 2.3 身份模型与 Scope 权限映射 (`security/identity.py`)
 
 ```python
 @dataclass(frozen=True)
@@ -232,147 +143,73 @@ class Identity:
     def has_permission(self, permission: str) -> bool: ...
 ```
 
-#### 权限映射
-
-| REST 路径 | 权限 |
+| REST 路径 / gRPC 方法 | 对应权限 Scope |
 |---|---|
-| `/health`, `/livez`, `/readyz` | `health:read` |
-| `/v1/privacy/mask`, `/v1/privacy/mask_record` | `privacy:mask` |
-| `/v1/privacy/hash` | `privacy:hash` |
-| `/v1/privacy/dp/*` | `privacy:dp` |
-| `/v1/privacy/k_anonymize/record` | `privacy:kano` |
-| `/v1/privacy/qol/obfuscate` | `privacy:qol` |
+| `/health`, `/livez`, `/readyz` / `Health` | `health:read` |
+| `/v1/privacy/mask`, `/v1/privacy/mask_record` / `Mask`, `MaskRecord` | `privacy:mask` |
+| `/v1/privacy/hash` / `Hash` | `privacy:hash` |
+| `/v1/privacy/dp/*` / `DPCount`, `DPSum`, `DPMean` | `privacy:dp` |
+| `/v1/privacy/k_anonymize/record` / `KAnonymizeRecord` | `privacy:kano` |
+| `/v1/privacy/qol/obfuscate` / `ObfuscateQuery` | `privacy:qol` |
 | `/v1/privacy/budget` | `privacy:budget` |
-| `/v1/privacy/classify/*` | `classification:read` |
+| `/v1/dynclassification/*` / `ClassifyField`, `ClassifyTable` | `classification:read` |
 
-| gRPC 方法 | 权限 |
-|---|---|
-| `Health` | `health:read` |
-| `Mask`, `MaskRecord` | `privacy:mask` |
-| `Hash` | `privacy:hash` |
-| `DPCount`, `DPSum`, `DPMean` | `privacy:dp` |
-| `KAnonymizeRecord` | `privacy:kano` |
-| `ObfuscateQuery` | `privacy:qol` |
-| `ClassifyField`, `ClassifyRecord`, `ClassifyTable` | `classification:read` |
-| `RecommendParams` | `privacy:profile` |
+### 2.4 认证与鉴权依赖 (`security/auth.py`)
 
-### 2.7 白名单管理器
+- `get_current_identity(request: Request) -> Identity`：FastAPI 依赖；
+- `require_permission(permission: str) -> Depends`：接口级 Scope 校验依赖；
+- `AuthInterceptor`：gRPC 拦截器，校验 metadata 与 mTLS auth_context。
 
-位置：`engine.security.whitelist`
+### 2.5 速率限制引擎 (`security/ratelimit.py`)
 
-#### `WhitelistManager`
+- `Limiter`：基于滑动窗口的限流器；
+- `rate_limit_dependency`：FastAPI 限流依赖；
+- `RateLimitInterceptor`：gRPC 限流拦截器。
 
-```python
-class WhitelistManager:
-    def __init__(self, config_path: Path | None, static_cns: list[str] | None): ...
-    def get_entry(self, cn: str) -> CNEntry | None: ...
-    def get_scopes(self, cn: str) -> list[str] | None: ...
-    def is_allowed(self, cn: str) -> bool: ...
-    def reload(self) -> None: ...
-    @property
-    def all_entries(self) -> list[CNEntry]: ...
-    @property
-    def default_scopes(self) -> list[str]: ...
-    @property
-    def last_error(self) -> str | None: ...
-```
+### 2.6 白名单管理器 (`security/whitelist.py`)
 
-线程安全的 mTLS CN 白名单管理器，支持基于文件 mtime 的热重载。
-
-#### `CNEntry`
-
-```python
-class CNEntry(BaseModel):
-    cn: str
-    scopes: list[str] = Field(default_factory=lambda: ["*"])
-    description: str = ""
-    enabled: bool = True
-```
-
-单个 CN 白名单条目。
-
-#### `get_whitelist_manager`
-
-```python
-def get_whitelist_manager() -> WhitelistManager
-```
-
-返回模块级单例 `WhitelistManager`。首次调用时从环境变量初始化：
-- `PRIVACY_AUTH_MTLS_WHITELIST_FILE` → YAML 配置文件
-- `PRIVACY_AUTH_MTLS_ALLOWED_CNS` → 静态 CN 列表（回退）
+- `WhitelistManager`：支持热重载的线程安全 CN 白名单管理器；
+- `get_whitelist_manager() -> WhitelistManager`：单例工厂方法。
 
 ---
 
-## 3. REST 接口行为
+## 3. Go 共享安全库 (`pkg/`)
 
-### 3.1 认证
+### 3.1 TLS 与 CN 白名单 (`pkg/tlsutil`)
 
-请求头：
+- `NewServerTLSConfig(certFile, keyFile, caFile, requireClientCert string) (*tls.Config, error)`：构造 TLS 1.3 服务端配置；
+- `NewClientTLSConfig(certFile, keyFile, caFile, serverName string) (*tls.Config, error)`：构造客户端双向证书配置；
+- `NewWhitelist(configFile string, allowedCNs []string) (*Whitelist, error)`：初始化 CN 白名单（支持 5 秒轮询热重载）；
+- `UnaryServerInterceptor(wl *Whitelist)` / `StreamServerInterceptor(wl *Whitelist)`：gRPC 服务端白名单拦截器。
 
-```http
-Authorization: Bearer <token>
-```
+### 3.2 9 层统一中间件栈 (`pkg/middleware`)
 
-| 场景 | HTTP 状态码 | 响应体 |
-|---|---|---|
-| 认证关闭 | — | 正常处理，使用匿名身份 |
-| 未携带凭证 | 401 | `{"detail": "Unauthorized: missing credentials"}` |
-| 无效凭证 | 401 | `{"detail": "Unauthorized: invalid credentials"}` |
-| 越权 | 403 | `{"detail": "Forbidden: insufficient scope"}` |
+1. `TraceMiddleware`：提取并透传 `X-Request-ID` 与 `X-Trace-ID`；
+2. `StructuredLogger`：统一结构化 JSON 日志；
+3. `Recovery`：Panic 拦截脱敏；
+4. `SecurityHeaders`：CSP、HSTS、X-Frame-Options 等安全响应头；
+5. `MaxBodySize`：32MB / 64MB 硬顶拦截（413）；
+6. `MaxConcurrent`：在途并发容量硬顶（503）；
+7. `RateLimit`：IP 令牌桶限流（429 + Retry-After）；
+8. `CORS`：跨域白名单；
+9. `Auth`：恒定时间 Bearer Token 鉴权（401 / 403）。
 
-### 3.2 速率限制
+### 3.3 SM4-GCM 快照信封加密 (`pkg/crypto`)
 
-| 场景 | HTTP 状态码 | 响应体 |
-|---|---|---|
-| 未超速 | — | 正常处理 |
-| 超速 | 429 | `{"detail": "Rate limit exceeded"}` |
-
----
-
-## 4. gRPC 接口行为
-
-### 4.1 认证
-
-metadata：
-
-```python
-metadata=(("authorization", "Bearer <token>"),)
-```
-
-| 场景 | gRPC 状态码 |
-|---|---|
-| 未携带凭证 | `UNAUTHENTICATED` |
-| 无效凭证 | `UNAUTHENTICATED` |
-| 越权 | `PERMISSION_DENIED` |
-
-### 4.2 mTLS 身份
-
-当 `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true` 且连接使用 TLS 并携带客户端证书时，gRPC 服务端从 `auth_context["x509_common_name"]` 提取 CN。通过 `WhitelistManager` 查找 CN 白名单：
-
-- **YAML 配置文件**（`PRIVACY_AUTH_MTLS_WHITELIST_FILE`）：使用条目定义的 scopes，支持 per-CN 权限控制与热重载
-- **静态列表**（`PRIVACY_AUTH_MTLS_ALLOWED_CNS`）：所有 CN 获得 `["*"]` 全权限
-
-构造 `Identity("internal", cn, entry.scopes)`，授予对应权限。
-
-**凭证优先级**：mTLS 认证优先于 API Key。mTLS 白名单匹配成功后不再检查 API Key；mTLS 未匹配时回退到 API Key 认证。
-
-> 详细原理与步骤见 `design.md` §6.3。白名单管理器详见 §6.8。
-
-### 4.3 速率限制
-
-| 场景 | gRPC 状态码 |
-|---|---|
-| 未超速 | — |
-| 超速 | `RESOURCE_EXHAUSTED` |
+- `Encrypt(plaintext []byte, key []byte) (string, error)`：输出 `enc:v1:<Base64(12B Nonce + Ciphertext + 16B Tag)>`；
+- `Decrypt(encoded string, key []byte) ([]byte, error)`：透明还原快照密文；
+- `IsEncrypted(data string) bool`：判断是否已包含加密前缀。
 
 ---
 
-## 5. 错误码汇总
+## 4. REST 与 gRPC 协议行为及错误码汇总
 
-| 场景 | REST | gRPC |
-|---|---|---|
-| 未认证 | 401 Unauthorized | `UNAUTHENTICATED` |
-| 越权 | 403 Forbidden | `PERMISSION_DENIED` |
-| 超速 | 429 Too Many Requests | `RESOURCE_EXHAUSTED` |
-| TLS 握手失败 | SSL/TLS 连接断开 | `UNAVAILABLE` |
-| 配置错误（TLS 开启但缺少证书） | 启动失败 | 启动失败 |
+| 场景 | REST 响应状态 | gRPC 状态码 | 响应内容示例 |
+|---|---|---|---|
+| 未携带凭证 / 凭证无效 | `401 Unauthorized` | `UNAUTHENTICATED` | `{"code":"UNAUTHORIZED","message":"missing or invalid credentials"}` |
+| 权限不足 / Scope 越权 | `403 Forbidden` | `PERMISSION_DENIED` | `{"code":"FORBIDDEN","message":"insufficient scope"}` |
+| 请求速率超限 | `429 Too Many Requests`| `RESOURCE_EXHAUSTED` | `{"code":"RATE_LIMIT_EXCEEDED","message":"too many requests"}` |
+| 并发容量超载 | `503 Service Unavailable`| `UNAVAILABLE` | `{"code":"SERVICE_UNAVAILABLE","message":"concurrency limit reached"}` |
+| 请求体超限 | `413 Payload Too Large`| `INVALID_ARGUMENT` | `{"code":"PAYLOAD_TOO_LARGE","message":"request body exceeds limit"}` |
+| 非法数据源标识 | `400 Bad Request` | `INVALID_ARGUMENT` | `{"code":"INVALID_DATASOURCE_ID","message":"unregistered datasource"}` |
+| TLS 握手失败 | TCP 连接切断 | `UNAVAILABLE` | — |
