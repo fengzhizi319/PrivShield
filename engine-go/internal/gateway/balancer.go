@@ -16,13 +16,14 @@ import (
 
 // BackendNode 后端节点
 type BackendNode struct {
-	Address  string
-	Weight   int
-	InFlight int64         // 当前在途请求数
-	EWMA     float64       // 指数移动加权平均延迟
-	LastUsed time.Time     // 最后使用时间
-	CB       CircuitBreaker // 熔断器
-	mu       sync.Mutex
+	Address        string
+	Weight         int
+	currentWeight  int  // Nginx SWRR 当前权重（动态调整）
+	InFlight       int64         // 当前在途请求数
+	EWMA           float64       // 指数移动加权平均延迟
+	LastUsed       time.Time     // 最后使用时间
+	CB             CircuitBreaker // 熔断器
+	mu             sync.Mutex
 }
 
 // ──────────────────────────────────────────────
@@ -131,7 +132,7 @@ func (cb *CircuitBreaker) State() CBState {
 // LoadBalancer 自适应负载均衡器
 type LoadBalancer struct {
 	nodes    []*BackendNode
-	strategy string // "p2c" | "round_robin" | "least_conn"
+	strategy string // "p2c" | "round_robin" | "least_conn" | "weighted_rr" | "weighted_random"
 	rrIndex  int    // round-robin 计数器
 	mu       sync.Mutex
 }
@@ -143,6 +144,27 @@ func NewLoadBalancer(addresses []string, strategy string) *LoadBalancer {
 		nodes[i] = &BackendNode{
 			Address: addr,
 			Weight:  1,
+			CB:      NewCircuitBreaker(5, 30*time.Second),
+		}
+	}
+	return &LoadBalancer{
+		nodes:    nodes,
+		strategy: strategy,
+	}
+}
+
+// NewWeightedLoadBalancer 创建支持权重的负载均衡器。
+// weights 与 addresses 一一对应，值越大分配流量越多。
+func NewWeightedLoadBalancer(addresses []string, weights []int, strategy string) *LoadBalancer {
+	nodes := make([]*BackendNode, len(addresses))
+	for i, addr := range addresses {
+		w := 1
+		if i < len(weights) && weights[i] > 0 {
+			w = weights[i]
+		}
+		nodes[i] = &BackendNode{
+			Address: addr,
+			Weight:  w,
 			CB:      NewCircuitBreaker(5, 30*time.Second),
 		}
 	}
@@ -164,6 +186,10 @@ func (lb *LoadBalancer) SelectNode() *BackendNode {
 		return lb.selectRoundRobin()
 	case "least_conn":
 		return lb.selectLeastConn()
+	case "weighted_rr":
+		return lb.selectWeightedRoundRobin()
+	case "weighted_random":
+		return lb.selectWeightedRandom()
 	default:
 		return lb.selectP2C()
 	}
@@ -238,6 +264,68 @@ func (lb *LoadBalancer) selectLeastConn() *BackendNode {
 		return lb.nodes[0]
 	}
 	return best
+}
+
+// selectWeightedRoundRobin Nginx 平滑加权轮询 (SWRR)。
+//
+// 算法：每轮所有节点 currentWeight += weight；
+// 选取 currentWeight 最大的节点；
+// 被选中节点 currentWeight -= totalWeight。
+// 保证分配比例精确且分布均匀（不会出现连续集中分配到同一节点）。
+func (lb *LoadBalancer) selectWeightedRoundRobin() *BackendNode {
+	available := make([]*BackendNode, 0, len(lb.nodes))
+	for _, n := range lb.nodes {
+		if n.CB.Allow() {
+			available = append(available, n)
+		}
+	}
+	if len(available) == 0 {
+		return lb.nodes[0]
+	}
+
+	totalWeight := 0
+	var best *BackendNode
+	for _, n := range available {
+		n.currentWeight += n.Weight
+		totalWeight += n.Weight
+		if best == nil || n.currentWeight > best.currentWeight {
+			best = n
+		}
+	}
+	best.currentWeight -= totalWeight
+	return best
+}
+
+// selectWeightedRandom 加权随机选择。
+//
+// 每个节点的选中概率与其 Weight 成正比。
+func (lb *LoadBalancer) selectWeightedRandom() *BackendNode {
+	available := make([]*BackendNode, 0, len(lb.nodes))
+	for _, n := range lb.nodes {
+		if n.CB.Allow() {
+			available = append(available, n)
+		}
+	}
+	if len(available) == 0 {
+		return lb.nodes[0]
+	}
+	if len(available) == 1 {
+		return available[0]
+	}
+
+	totalWeight := 0
+	for _, n := range available {
+		totalWeight += n.Weight
+	}
+	r := rand.IntN(totalWeight)
+	cumulative := 0
+	for _, n := range available {
+		cumulative += n.Weight
+		if r < cumulative {
+			return n
+		}
+	}
+	return available[len(available)-1]
 }
 
 // UpdateEWMA 更新节点 EWMA 延迟
