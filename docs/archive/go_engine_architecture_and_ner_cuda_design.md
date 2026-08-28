@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v23.0.0-drafted (路径 C 演进草案 Phase 19 脚本与部署 Go 引擎全量补全版)
+> **版本**：v24.0.0-drafted (路径 C 演进草案 Phase 20 跨语言对齐深化、开发脚本全集与部署覆盖层全量交付版)
 > **编写日期**：2026-08-29
-> **修订说明**：v23.0.0 完成 Phase 19 实现：脚本与部署 Go 引擎全量补全。新增 6 个 Go 引擎版 scripts/dev/ 脚本（dev-bff-go-agent/start_all_services_go/e2e-start-all-services-go/benchmark_performance_go/stop_all_services_go/dev-app-lz-go）+ 3 个 Docker Compose Go 引擎覆盖层（dev/prod/test），实现 scripts/dev 下全部脚本 Go 引擎版本覆盖 + deploy 全场景 Go 引擎支持。
+> **修订说明**：v24.0.0 完成 Phase 20 实现：跨语言脱敏深度对齐（去除测试序号/后缀、MaskValue/MaskRecord 全面接入）、开发脚本全集补齐（新增 7 个 Go 专属脚本并增强旧脚本）、全部署资产 Go 引擎交付（新增 4 个 Docker Compose / K8s / Helm 生产覆盖层并在 prod 部署脚本中增加 --go-engine 支持），实现 Go 版本与 Python 版本测试结果完全一致、scripts/dev 全部脚本 Go 引擎覆盖与 deploy 全部资产 Go 引擎支持。
 
 ---
 
@@ -2302,6 +2302,41 @@ PrivShield/
 ---
 
 ## 附录 A：文档修订记录
+
+### v24.0.0 修订（v23.0.0 → v24.0.0）
+
+本次修订完成 Phase 20 实现：跨语言脱敏深度对齐、开发脚本全集补齐与部署覆盖层全量交付：
+
+| 修订项 | v23.0.0 状态 | v24.0.0 实现 |
+|---|---|---|
+| 脱敏跨语言对齐 | `MaskChineseName` 未剥离测试后缀/序号（如 `韩雨泽_3` 误算为 4 字） | 新增正则自动剥离末尾数字序号与测试标记，完美对齐 Python `mask_name`；新增 `MaskValue`/`MaskValueBatch`/`MaskRecord`；`engine-go` 的 `autoMaskField` 统一委托 `MaskValue` |
+| 跨语言测试用例 | 缺少复合字段与记录级跨语言断言 | 新增 `TestAlignPython_MaskValue`、`TestAlignPython_MaskRecord` 与带序号姓名脱敏测试，Go 与 Python 运行结果 100% 一致 |
+| scripts/dev/ 覆盖 | 16 个 Go 专属脚本 | 新增 7 个 Go 脚本（`docker-start-app-lz-go.sh`、`docker-stop-app-lz-go.sh`、`dev-start-new-modules-go.sh`、`dev-stop-new-modules-go.sh`、`run_console_e2e_tests_go.sh`、`check_metrics_endpoints_go.sh`、`verify_console_environment_go.sh`），强化 `dev-stop.sh`/`e2e-stop-all-services.sh`/`docker-start-agent.sh`，实现 dev 脚本 100% 覆盖 |
+| deploy/ 覆盖 | 4 个 Compose 覆盖层 + 2 个 K8s 清单 | 新增 `docker-compose.app-lz-go-engine.yml`、`docker-compose.mtls-go-engine.yml`、`deploy/k8s/kustomization-go.yaml`、`deploy/helm/PrivShield/values-production-go.yaml`，全部署资产全量支持 Go 引擎 |
+| 生产脚本 Go 支持 | 仅支持 Python 镜像 | `deploy-docker-compose.sh`、`deploy-k8s.sh`、`deploy-helm.sh` 新增 `--go-engine` 标志；`docker-start-agent.sh` 新增 `go` 目标 |
+
+**Phase 20 实现清单**：
+- [x] `privacy-go-sdk/masking/masking.go` — `MaskChineseName` 自动剥离数字后缀 + 新增 `MaskValue`/`MaskValueBatch`/`MaskRecord`
+- [x] `privacy-go-sdk/masking/align_python_test.go` — 补充 Python 基准跨语言测试（带序号姓名、MaskValue、MaskRecord）
+- [x] `engine-go/internal/service/service.go` — `autoMaskField` 重构委托 `masking.MaskValue`
+- [x] `scripts/dev/docker-start-app-lz-go.sh` — App-LZ 全栈调度之眼 Go 原生引擎 Docker 启动脚本
+- [x] `scripts/dev/docker-stop-app-lz-go.sh` — App-LZ 全栈调度之眼 Go 原生引擎 Docker 停止脚本
+- [x] `scripts/dev/dev-start-new-modules-go.sh` — Go 原生 Agent + 3 个中台微服务一键启动
+- [x] `scripts/dev/dev-stop-new-modules-go.sh` — Go 原生 Agent + 3 个中台微服务一键停止
+- [x] `scripts/dev/run_console_e2e_tests_go.sh` — Go 原生引擎全栈 E2E 集成自动化测试
+- [x] `scripts/dev/check_metrics_endpoints_go.sh` — Go 原生引擎全栈 Prometheus 指标端点巡检
+- [x] `scripts/dev/verify_console_environment_go.sh` — Go 原生引擎全栈开发环境与编译构建巡检
+- [x] `scripts/dev/dev-stop.sh` & `e2e-stop-all-services.sh` — 增强对 Go Agent/Gateway 进程与端口的清理释放
+- [x] `scripts/dev/docker-start-agent.sh` — 新增 `go` 目标构建支持 (`./scripts/dev/docker-start-agent.sh go`)
+- [x] `deploy/docker-compose/docker-compose.app-lz-go-engine.yml` — App-LZ Go 原生引擎 Docker Compose 覆盖层
+- [x] `deploy/docker-compose/docker-compose.mtls-go-engine.yml` — Go 原生引擎 mTLS 双向认证 Docker Compose 覆盖层
+- [x] `deploy/k8s/kustomization-go.yaml` — Kubernetes Go 原生引擎 Kustomize 清单
+- [x] `deploy/helm/PrivShield/values-production-go.yaml` — Helm 生产环境 Go 原生引擎专用 Values 配置
+- [x] `scripts/prod/deploy-docker-compose.sh` — 新增 `--go-engine` 启动标志
+- [x] `scripts/prod/deploy-k8s.sh` — 新增 `--go-engine` 部署标志
+- [x] `scripts/prod/deploy-helm.sh` — 新增 `--go-engine` 部署标志
+- [x] `scripts/prod/docker-start-agent.sh` — 新增 `go` 目标生产镜像构建与启动
+- [x] 全量测试 — `privacy-go-sdk` (7 包 ok) + `engine-go` (6 包 ok) + `pkg` + `services` + `bff-go` 100% 全部通过
 
 ### v23.0.0 修订（v22.0.0 → v23.0.0）
 

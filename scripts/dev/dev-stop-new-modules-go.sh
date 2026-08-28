@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Stop All Real Services (E2E Integration Testing Cleanup)
-# 停止全部真实服务
+# Development Stop Script for Go Engine + Three Microservice Modules
+# Go 原生引擎 + 三个中台微服务模块的停止脚本
+#
+# 停止模块：
+#   1. privshield-agent (Go 原生隐私计算引擎)
+#   2. service-hub      (数据服务调度中枢)
+#   3. datasource-mgr   (数据源管理)
+#   4. audit-log        (脱敏审计日志)
 #
 # Usage:
-#   bash scripts/dev/e2e-stop-all-services.sh
+#   bash scripts/dev/dev-stop-new-modules-go.sh
 # ============================================================================
 
 set -euo pipefail
@@ -31,16 +37,13 @@ LEGACY_PIDS_DIR="${PROJECT_ROOT}/console/.pids"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
-# ── stop_module: 通过 PID 文件停止单个模块 ────────────────────────────
-# 1. 在 .pids/ 和 console/.pids/ 中查找 PID 文件（优先新版目录）
-# 2. 发送 SIGTERM 优雅退出，每 0.5s 检查一次，最多等待 10s
-# 3. 超时后发送 SIGKILL 强杀
-# 4. 删除 PID 文件
 stop_module() {
     local name="$1"
     local pid_file=""
@@ -52,7 +55,9 @@ stop_module() {
     fi
 
     if [ -z "$pid_file" ] || [ ! -f "$pid_file" ]; then
-        log_warn "${name}: no PID file"
+        # 尝试按进程名停止
+        pkill -f "bin/${name}" 2>/dev/null || true
+        log_warn "${name}: no PID file found"
         return
     fi
 
@@ -67,23 +72,27 @@ stop_module() {
             sleep 0.5
             count=$((count + 1))
         done
+
         if kill -0 "$pid" 2>/dev/null; then
+            log_warn "${name} (PID ${pid}) did not exit, sending SIGKILL..."
             kill -9 "$pid" 2>/dev/null || true
         fi
         log_info "${name} stopped"
     else
-        log_warn "${name} (PID ${pid}) not running"
+        log_warn "${name} (PID ${pid}) is not running"
     fi
+
     rm -f "$pid_file"
 }
 
-# ── 停止顺序：先停 Go 微服务群，再停 Agent（避免服务依赖导致僵尸进程） ──
+# ── 按依赖反序停止各服务与 Go Agent ─────────────────────────────────
 stop_module "service-hub"
 stop_module "datasource-mgr"
 stop_module "audit-log"
-stop_module "privshield-gateway"
 stop_module "privshield-agent"
-stop_module "agent"
+stop_module "privshield-gateway"
 
 echo ""
-log_info "All E2E services stopped."
+log_info "=========================================="
+log_info "  Go Engine & All Microservices stopped."
+log_info "=========================================="

@@ -1,0 +1,43 @@
+# =============================================================================
+# PrivShield - App-LZ Docker Compose Go Engine Override
+# PrivShield - 调度之眼全景测试集群 Go 原生引擎覆盖层
+#
+# 使用方式 / Usage:
+#   docker compose -f docker-compose.app-lz.yml -f docker-compose.app-lz-go-engine.yml up -d
+#
+# 或通过脚本启动：
+#   bash scripts/dev/docker-start-app-lz-go.sh
+# =============================================================================
+
+services:
+
+  # 覆盖 App-LZ 编排中的 PrivShield 服务为 Go 原生引擎
+  PrivShield:
+    image: ${PRIVSHIELD_GO_IMAGE:-privshield-go:1.0.0}
+    build: null
+    pull_policy: if_not_present
+    container_name: PrivShield-Go
+    environment:
+      PRIVACY_REST_HOST: "0.0.0.0"
+      PRIVACY_REST_PORT: "8079"
+      PRIVACY_GRPC_HOST: "0.0.0.0"
+      PRIVACY_GRPC_PORT: "50051"
+      PRIVACY_LOG_LEVEL: "${PRIVACY_LOG_LEVEL:-INFO}"
+      PRIVACY_LOG_FORMAT: "json"
+    volumes:
+      - budget-db:/data/budget
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8079/readyz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    stop_grace_period: 15s

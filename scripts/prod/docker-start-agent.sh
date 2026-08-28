@@ -43,7 +43,7 @@ NO_BUILD=false
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        core|ml)
+        core|ml|go)
             TARGET="$1"
             shift 1
             ;;
@@ -64,11 +64,12 @@ while [[ $# -gt 0 ]]; do
             shift 1
             ;;
         -h|--help)
-            echo "用法 / Usage: $0 [core|ml] [选项]"
+            echo "用法 / Usage: $0 [core|ml|go] [选项]"
             echo ""
             echo "构建目标 / Targets:"
             echo "  core   (默认) 轻量 Core 镜像（仅含 FastAPI/gRPC 基础依赖）"
             echo "  ml     完整 ML 镜像（包含 PyTorch/Transformers/ONNX 等重量级依赖）"
+            echo "  go     Go 原生高性能引擎镜像（极轻量 ~15MB，无 Python 运行时）"
             echo ""
             echo "选项 / Options:"
             echo "  -p, --rest-port PORT   REST API 宿主机监听端口 (默认: 8079)"
@@ -111,7 +112,14 @@ mkdir -p "$PROJECT_ROOT/.data/budget" "$PROJECT_ROOT/.logs"
 chmod 755 "$PROJECT_ROOT/.data/budget" "$PROJECT_ROOT/.logs"
 
 # ── 4. 镜像构建（若未指定 --no-build）──
-if [[ "$TARGET" == "ml" ]]; then
+if [[ "$TARGET" == "go" ]]; then
+    IMAGE_NAME="privshield-go:1.0.0"
+    RESOURCE_LIMITS=(--cpus="1.0" --memory="512m")
+    if [[ "$NO_BUILD" != "true" ]]; then
+        echo "📦 正在构建生产级 Go 原生引擎镜像 ($IMAGE_NAME)..."
+        docker build -f engine-go/Dockerfile -t "$IMAGE_NAME" .
+    fi
+elif [[ "$TARGET" == "ml" ]]; then
     IMAGE_NAME="privshield:1.8.0-ml"
     RESOURCE_LIMITS=(--cpus="4.0" --memory="8g")
     if [[ "$NO_BUILD" != "true" ]]; then

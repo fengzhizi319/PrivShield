@@ -108,6 +108,8 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
         kill_by_pid_file "$dir/service-hub.pid" "service-hub 调度中枢"
         kill_by_pid_file "$dir/datasource-mgr.pid" "datasource-mgr 数据源"
         kill_by_pid_file "$dir/audit-log.pid" "audit-log 审计日志"
+        kill_by_pid_file "$dir/privshield-gateway.pid" "PrivShield Gateway (Go)"
+        kill_by_pid_file "$dir/privshield-agent.pid" "PrivShield Agent (Go)"
         kill_by_pid_file "$dir/agent-go-mtls.pid" "PrivShield (mTLS)"
         kill_by_pid_file "$dir/agent-all.pid" "PrivShield (all)"
         kill_by_pid_file "$dir/agent-go.pid" "PrivShield (gRPC)"
@@ -118,10 +120,13 @@ done
 # ── 第二步：端口级安全网清理 ────────────────────────────────────────
 # 即使 PID 文件缺失或过期，也确保所有开发端口完全释放
 kill_by_port 5173 "Vite 前端开发服务器"
+kill_by_port 8085 "App-LZ Go BFF"
 kill_by_port 8084 "audit-log 审计日志"
 kill_by_port 8083 "datasource-mgr 数据源管理"
 kill_by_port 8082 "service-hub 调度中枢"
 kill_by_port 8081 "Go BFF 代理后端"
+kill_by_port 50000 "PrivShield Gateway gRPC"
+kill_by_port 8000 "PrivShield Gateway REST"
 kill_by_port 50051 "PrivShield gRPC"
 kill_by_port 8079 "PrivShield REST"
 

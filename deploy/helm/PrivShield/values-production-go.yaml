@@ -1,0 +1,67 @@
+# =============================================================================
+# 生产环境配置 — Go 原生引擎版（values-production-go.yaml）
+# =============================================================================
+# 本文件作为生产环境 Go 原生引擎的标准 values 配置文件。
+#
+# 🚀 生产部署示例 (Usage):
+#   helm install privshield ./deploy/helm/PrivShield \
+#     -f ./deploy/helm/PrivShield/values-production-go.yaml \
+#     --set security.tls.existingSecret=your-tls-secret \
+#     --set security.auth.apiKeysSecret=your-apikeys-secret
+# =============================================================================
+
+# 指定引擎类型为 Go 原生引擎
+engineType: go
+
+# Go 引擎高可用多副本
+replicaCount: 2
+
+# Go 引擎镜像与资源参数
+goEngine:
+  image:
+    repository: privshield-go
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 1000m       # 1 核 CPU 上限 (Go 原生协程高并发)
+      memory: 512Mi     # 512 MiB 内存上限 (相比 Python 降低 75%)
+    requests:
+      cpu: 100m        # 0.1 核保障预留
+      memory: 128Mi     # 128 MiB 保障预留
+  terminationGracePeriodSeconds: 15
+
+agent:
+  logLevel: info
+  logFormat: json
+
+security:
+  tls:
+    enabled: true
+    existingSecret: ""  # 必填：部署时通过 --set security.tls.existingSecret=... 指定
+  auth:
+    enabled: true
+    apiKeysSecret: ""   # 必填：部署时通过 --set security.auth.apiKeysSecret=... 指定
+  rateLimit:
+    enabled: true
+
+# 弹性扩缩容
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# 零信任网络隔离
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/part-of: PrivShield
+
+# 监控指标
+serviceMonitor:
+  enabled: true

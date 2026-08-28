@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: PrivShield
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment-go.yaml
+  - service-go.yaml
+  # ── Go 微服务群（下沉各服务自包含部署清单）──
+  - ../../services/service-hub/deploy/k8s
+  - ../../services/datasource-mgr/deploy/k8s
+  - ../../services/audit-log/deploy/k8s
+  # ── 统一控制台（Go BFF + Web 前端自包含部署清单）──
+  - ../../console/deploy/k8s

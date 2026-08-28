@@ -40,6 +40,7 @@ COMPOSE_DIR="$PROJECT_ROOT/deploy/docker-compose"      # Docker Compose 编排�
 # ── 步骤 1：设置参数默认值 ────────────────────────────────────────────────
 # 默认使用生产 compose 文件；LLM/监控默认关闭；构建/拉取标志默认空
 COMPOSE_FILE="docker-compose.prod.yml"
+GO_ENGINE=false                                        # 是否使用 Go 原生引擎覆盖层
 WITH_LLM=false                                         # 是否启用 vLLM GPU 推理容器
 WITH_MONITORING=false                                  # 是否启用 Prometheus + Grafana 监控
 WITH_POSTGRES=false                                    # 是否启用 Phase B PostgreSQL
@@ -55,6 +56,11 @@ while [[ $# -gt 0 ]]; do
             # 指定自定义 compose 文件（如 docker-compose.dev.yml / docker-compose.test.yml）
             COMPOSE_FILE="$2"
             shift 2
+            ;;
+        --go-engine)
+            # 启用 Go 原生引擎覆盖层
+            GO_ENGINE=true
+            shift 1
             ;;
         --agent-only)
             # 仅启动核心 Agent (PrivShield 与 redis)，不启动前端 Web 与后端代理
@@ -91,6 +97,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "选项 / Options:"
             echo "  -f, --file FILE      指定 Compose 配置文件 (默认: docker-compose.prod.yml)"
+            echo "  --go-engine          使用 Go 原生引擎替代 Python 引擎 (极速轻量)"
             echo "  --agent-only         仅启动核心 Agent 服务 (不拉起 Web 前端与后端代理)"
             echo "  --with-llm           启用 vLLM 大模型 GPU 推理容器"
             echo "  --with-monitoring    启用 Prometheus + Grafana 生产监控套件"
@@ -175,29 +182,28 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
     COMPOSE_FILE="docker-compose.yml"
 fi
 
-echo "   • 编排配置文件: $COMPOSE_FILE"
+COMPOSE_ARGS=("-f" "$COMPOSE_FILE")
+if [[ "$GO_ENGINE" == "true" ]]; then
+    if [[ -f "docker-compose.prod-go-engine.yml" ]]; then
+        COMPOSE_ARGS+=("-f" "docker-compose.prod-go-engine.yml")
+    elif [[ -f "docker-compose.go-engine.yml" ]]; then
+        COMPOSE_ARGS+=("-f" "docker-compose.go-engine.yml")
+    fi
+    echo "   • 引擎类型    : Go 原生高性能引擎 (privshield-go:1.0.0)"
+else
+    echo "   • 引擎类型    : Python 核心引擎"
+fi
+
+echo "   • 编排配置文件: ${COMPOSE_ARGS[*]}"
 
 # ── 步骤 8：执行 docker compose up -d 启动服务 ─────────────────────────
-# docker compose up -d 的完整动作：
-#   1. 解析 compose 文件 + profile 过滤，确定要启动的服务列表
-#   2. 创建自定义网络（服务间通过 DNS 服务名互访）
-#   3. 创建命名卷（持久化数据）
-#   4. 按依赖拓扑启动容器（如 console-* 依赖 agent 健康检查通过后才启动）
-#   5. -d (detached): 容器后台运行，命令立即返回
-#
-# 参数说明：
-#   -f "$COMPOSE_FILE"   指定编排文件
-#   "${PROFILES[@]}"     展开为 --profile llm 和/或 --profile monitoring
-#   $BUILD_FLAG          非空时为 --build（up 前重新构建镜像）
-#   $PULL_FLAG           非空时为 --pull always（强制拉取最新基础镜像）
-# shellcheck disable=SC2086
 echo ""
 if [[ "$AGENT_ONLY" == "true" ]]; then
     echo "🚀 正在启动生产级核心 Agent 服务 (Agent-Only)..."
-    docker compose -f "$COMPOSE_FILE" "${PROFILES[@]}" up -d $BUILD_FLAG $PULL_FLAG PrivShield redis
+    docker compose "${COMPOSE_ARGS[@]}" "${PROFILES[@]}" up -d $BUILD_FLAG $PULL_FLAG PrivShield redis
 else
     echo "🚀 正在启动生产服务容器群..."
-    docker compose -f "$COMPOSE_FILE" "${PROFILES[@]}" up -d $BUILD_FLAG $PULL_FLAG
+    docker compose "${COMPOSE_ARGS[@]}" "${PROFILES[@]}" up -d $BUILD_FLAG $PULL_FLAG
 fi
 
 # ── 步骤 9：轮询等待核心 Agent 就绪探针 ────────────────────────────────

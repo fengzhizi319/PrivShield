@@ -39,7 +39,8 @@ CHART_DIR="$PROJECT_ROOT/deploy/helm/PrivShield"       # Helm Chart 模板目录
 # 未通过命令行指定时使用以下默认值；生产 values 覆盖 values.yaml 中的开发默认
 NAMESPACE="privshield"                                 # K8s 命名空间（资源隔离边界）
 RELEASE_NAME="privshield"                              # Helm Release 名称（标识一次部署实例）
-VALUES_FILE="$CHART_DIR/values-production.yaml"         # 生产环境 values 覆盖文件
+VALUES_FILE=""                                         # 生产环境 values 覆盖文件
+GO_ENGINE=false                                        # 是否使用 Go 原生引擎
 TLS_SECRET=""                                          # 外部 TLS Secret 名称（部署时 --set 注入）
 AUTH_SECRET=""                                         # 外部 API Key Secret 名称（部署时 --set 注入）
 DRY_RUN=""                                             # 非空时 helm 仅演练不实际变更
@@ -60,6 +61,10 @@ while [[ $# -gt 0 ]]; do
         -f|--values)
             VALUES_FILE="$2"
             shift 2
+            ;;
+        --go-engine)
+            GO_ENGINE=true
+            shift 1
             ;;
         --tls-secret)
             TLS_SECRET="$2"
@@ -84,6 +89,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -n, --namespace NS       Kubernetes 命名空间 (默认: privshield)"
             echo "  -r, --release RELEASE    Helm Release 实例名称 (默认: privshield)"
             echo "  -f, --values VALUES      生产 values 配置文件路径"
+            echo "  --go-engine              部署 Go 原生引擎 (启用 values-production-go.yaml / engineType=go)"
             echo "  --tls-secret SECRET      Kubernetes TLS Secret 资源名称"
             echo "  --auth-secret SECRET     Kubernetes API Key Auth Secret 资源名称"
             echo "  --dry-run                执行 dry-run 演练测试"
@@ -97,6 +103,14 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ -z "$VALUES_FILE" ]]; then
+    if [[ "$GO_ENGINE" == "true" && -f "$CHART_DIR/values-production-go.yaml" ]]; then
+        VALUES_FILE="$CHART_DIR/values-production-go.yaml"
+    else
+        VALUES_FILE="$CHART_DIR/values-production.yaml"
+    fi
+fi
 
 # ── 步骤 3：打印部署摘要 ──────────────────────────────────────────────────
 # 在执行任何操作前展示本次部署的关键参数，便于运维确认和审计追溯

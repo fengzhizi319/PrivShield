@@ -658,8 +658,8 @@ def _coerce_to_dict(data: Any) -> dict[str, Any]:
                 raise ValueError("PyArrow table is empty, cannot extract record")
             # 字典推导：遍历列名，取每列第 0 行元素转为 Python 原生值
             return {col: data.column(col)[0].as_py() for col in data.column_names}
-    except ImportError:
-        pass  # PyArrow 未安装，跳过此分支
+    except (ImportError, Exception):
+        pass  # PyArrow 未安装或不可用，跳过此分支
 
     # numpy ndarray: 按维度构建字典
     if isinstance(data, np.ndarray):
@@ -676,8 +676,8 @@ def _coerce_to_dict(data: Any) -> dict[str, Any]:
         import pandas as pd  # 延迟导入
         if isinstance(data, pd.Series):
             return cast("dict[str, Any]", data.to_dict())  # Series 的 index 为 key，values 为 value
-    except ImportError:
-        pass  # pandas 未安装，跳过
+    except (ImportError, Exception):
+        pass  # pandas 未安装或不可用，跳过
 
     # polars Series：鸭子类型检测（有 to_dict 但无 columns 属性 → 不是 DataFrame）
     if hasattr(data, "to_dict") and not hasattr(data, "columns"):

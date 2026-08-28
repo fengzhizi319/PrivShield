@@ -121,11 +121,18 @@ func MaskOfficerId(id string) string {
 	return strings.Repeat("*", len(id))
 }
 
+var nameSuffixRegex = regexp.MustCompile(`[_\-\s#(\[]*\d+[)\]]*$|\d+$`)
+
 // MaskChineseName 对中文姓名脱敏：保留姓（首字）与末字，中间用 * 掩盖。
+// 自动剥离末尾数字序号、测试后缀与括号（如 "韩雨泽_3" -> "韩**泽"，"李四-12" -> "李*"，"王五 (3)" -> "王*"）：
 // 与 Python mask_name 对齐：2字→首+*；3字→首+**+尾；4字及以上→首+*(n-2)+尾。
 func MaskChineseName(name string) string {
 	name = strings.TrimSpace(name)
-	runes := []rune(name)
+	cleanName := strings.TrimSpace(nameSuffixRegex.ReplaceAllString(name, ""))
+	if cleanName == "" {
+		cleanName = name
+	}
+	runes := []rune(cleanName)
 	switch len(runes) {
 	case 0:
 		return ""
@@ -133,11 +140,12 @@ func MaskChineseName(name string) string {
 		return "*"
 	case 2:
 		return string(runes[0]) + "*"
+	case 3:
+		return string(runes[0]) + "**" + string(runes[2])
 	default:
 		sb := acquireBuilder()
 		defer releaseBuilder(sb)
 		sb.WriteRune(runes[0])
-		// 与 Python mask_name 对齐：3字→固定 **；4字及以上→*(n-2)
 		starCount := len(runes) - 2
 		if starCount < 2 {
 			starCount = 2
@@ -397,6 +405,60 @@ func boundedContains(s, keyword string) bool {
 	return true
 }
 
+// MaskValue 根据字段名自动推断类型并执行对应脱敏。
+// 与 Python mask_value 对齐：
+// - mobile: MaskPhone
+// - id_card: MaskIdCard
+// - name: MaskChineseName
+// - bank_card: MaskBankCard
+// - email: MaskEmail
+// - address: MaskAddress
+// - medical: MaskDefault(value, 3, 3)
+// - default: MaskDefault(value, 3, 3)
+func MaskValue(fieldName, value string) string {
+	if value == "" {
+		return ""
+	}
+	ftype := GuessFieldType(fieldName)
+	switch ftype {
+	case FieldTypeMobile:
+		return MaskPhone(value)
+	case FieldTypeIDCard:
+		return MaskIdCard(value)
+	case FieldName:
+		return MaskChineseName(value)
+	case FieldTypeBankCard:
+		return MaskBankCard(value)
+	case FieldTypeEmail:
+		return MaskEmail(value)
+	case FieldTypeAddress:
+		return MaskAddress(value)
+	case FieldTypeMedical:
+		return MaskDefault(value, 3, 3)
+	default:
+		return MaskDefault(value, 3, 3)
+	}
+}
+
+// MaskValueBatch 批量单字段脱敏。
+func MaskValueBatch(fieldName string, values []string) []string {
+	results := make([]string, len(values))
+	for i, val := range values {
+		results[i] = MaskValue(fieldName, val)
+	}
+	return results
+}
+
+// MaskRecord 对整条记录按字段名推断脱敏。
+// 与 Python mask_record 对齐。
+func MaskRecord(record map[string]string) map[string]string {
+	result := make(map[string]string, len(record))
+	for k, v := range record {
+		result[k] = MaskValue(k, v)
+	}
+	return result
+}
+
 // ──────────────────────────────────────────────
 // 随机工具
 // ──────────────────────────────────────────────
@@ -404,3 +466,4 @@ func boundedContains(s, keyword string) bool {
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
+

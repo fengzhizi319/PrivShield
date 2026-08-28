@@ -308,46 +308,7 @@ func (s *PrivacyService) HashHMAC(value, salt string) string {
 // ──────────────────────────────────────────────
 
 func (s *PrivacyService) autoMaskField(fieldName, value string) string {
-	if value == "" {
-		return ""
-	}
-	// 基于字段名推断脱敏策略
-	lower := fieldName
-	for _, r := range lower {
-		if r >= 'A' && r <= 'Z' {
-			lower = string(r+32) + lower[1:]
-			break
-		}
-	}
-	switch {
-	case containsAny(lower, "id_card", "idcard", "cert_no", "identity"):
-		return masking.MaskIdCard(value)
-	case containsAny(lower, "phone", "mobile", "tel"):
-		return masking.MaskPhone(value)
-	case containsAny(lower, "bank", "credit_card"):
-		return masking.MaskBankCard(value)
-	case containsAny(lower, "name", "patient_name", "user_name"):
-		return masking.MaskChineseName(value)
-	case containsAny(lower, "email", "mail"):
-		return masking.MaskEmail(value)
-	case containsAny(lower, "address", "addr"):
-		return masking.MaskAddress(value)
-	default:
-		return value
-	}
-}
-
-func containsAny(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if len(s) >= len(sub) {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return masking.MaskValue(fieldName, value)
 }
 
 // defaultRules 默认分类规则

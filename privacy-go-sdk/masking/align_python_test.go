@@ -50,8 +50,13 @@ func TestAlignPython_MaskChineseName(t *testing.T) {
 	}{
 		// Python: mask_name("张三丰") == "张**丰"
 		{"张三丰", "张**丰", "3字→首+**+尾"},
+		// Python: mask_name("韩雨泽_3") == "韩**泽"
+		{"韩雨泽_3", "韩**泽", "带_3序号3字姓名"},
+		{"韩雨泽3", "韩**泽", "带3数字3字姓名"},
 		// Python: mask_name("李四") == "李*"
 		{"李四", "李*", "2字→首+*"},
+		{"李四-12", "李*", "带-12序号2字姓名"},
+		{"王五 (3)", "王*", "带括号序号2字姓名"},
 		// Python: mask_name("欧阳六六") == "欧**六"
 		{"欧阳六六", "欧**六", "4字→首+*(n-2)+尾"},
 	}
@@ -168,8 +173,56 @@ func TestAlignPython_MaskRecordIntegration(t *testing.T) {
 func TestAlignPython_TruncateConsistency(t *testing.T) {
 	// Python: truncate("abcdef", 3) == "abc***"
 	// Python: truncate("ab", 3) == "ab"
-	// Go 没有独立 Truncate 函数，但 MaskDefault 的短字符串行为一致
 	if got := masking.MaskDefault("ab", 3, 3); got != "ab" {
 		t.Errorf("MaskDefault(ab, 3, 3) = %q, want %q (short passthrough)", got, "ab")
 	}
 }
+
+func TestAlignPython_MaskValue(t *testing.T) {
+	tests := []struct {
+		fieldName string
+		value     string
+		expected  string
+	}{
+		{"mobile", "13812345678", "138****5678"},
+		{"id_card", "110101199001011234", "110101********1234"},
+		{"name", "张三丰", "张**丰"},
+		{"email", "test@example.com", "t***t@example.com"},
+		{"address", "北京市朝阳区某某街道", "北京市朝阳区****"},
+		{"unknown", "abcdefgh", "abc**fgh"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.fieldName, func(t *testing.T) {
+			if got := masking.MaskValue(tt.fieldName, tt.value); got != tt.expected {
+				t.Errorf("MaskValue(%q, %q) = %q, want %q", tt.fieldName, tt.value, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAlignPython_MaskRecord(t *testing.T) {
+	record := map[string]string{
+		"mobile":  "13812345678",
+		"id_card": "110101199001011234",
+		"name":    "韩雨泽_3",
+		"email":   "user@domain.com",
+		"address": "上海市浦东新区张江高科",
+	}
+	masked := masking.MaskRecord(record)
+	if masked["mobile"] != "138****5678" {
+		t.Errorf("mobile = %q, want %q", masked["mobile"], "138****5678")
+	}
+	if masked["id_card"] != "110101********1234" {
+		t.Errorf("id_card = %q, want %q", masked["id_card"], "110101********1234")
+	}
+	if masked["name"] != "韩**泽" {
+		t.Errorf("name = %q, want %q", masked["name"], "韩**泽")
+	}
+	if masked["email"] != "u***r@domain.com" {
+		t.Errorf("email = %q, want %q", masked["email"], "u***r@domain.com")
+	}
+	if masked["address"] != "上海市浦东新****" {
+		t.Errorf("address = %q, want %q", masked["address"], "上海市浦东新****")
+	}
+}
+

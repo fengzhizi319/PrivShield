@@ -22,11 +22,12 @@ TARGET="${1:-core}"
 
 # ── 步骤 1：帮助信息与参数合法性白名单校验 ────────────────────────────────
 if [[ "$TARGET" == "-h" || "$TARGET" == "--help" ]]; then
-    echo "用法 / Usage: $0 [core|ml]"
+    echo "用法 / Usage: $0 [core|ml|go]"
     echo ""
     echo "构建目标 / Targets:"
     echo "  core   (默认) 构建并启动轻量 Core 镜像（仅含 FastAPI/gRPC 基础依赖）"
     echo "  ml     构建并启动完整 ML 镜像（包含 PyTorch/Transformers/ONNX 等重量级依赖）"
+    echo "  go     构建并启动 Go 原生高性能引擎镜像（极轻量 ~15MB）"
     echo ""
     echo "跨平台支持 / Cross-Platform:"
     echo "  - Linux: x86_64 / aarch64 原生 Docker Engine"
@@ -35,9 +36,9 @@ if [[ "$TARGET" == "-h" || "$TARGET" == "--help" ]]; then
     exit 0
 fi
 
-if [[ "$TARGET" != "core" && "$TARGET" != "ml" ]]; then
+if [[ "$TARGET" != "core" && "$TARGET" != "ml" && "$TARGET" != "go" ]]; then
     echo "❌ [错误] 无效的构建目标: '$TARGET'" >&2
-    echo "   用法: $0 [core|ml]" >&2
+    echo "   用法: $0 [core|ml|go]" >&2
     exit 1
 fi
 
@@ -83,7 +84,11 @@ echo "==========================================================================
 cd "$PROJECT_ROOT"
 
 # ── 步骤 4：镜像构建 ──────────────────────────────────────────────────────
-if [[ "$TARGET" == "ml" ]]; then
+if [[ "$TARGET" == "go" ]]; then
+    echo "📦 构建 Go 原生高性能引擎镜像..."
+    docker build -f engine-go/Dockerfile -t privshield-go:1.0.0 .
+    IMAGE_NAME="privshield-go:1.0.0"
+elif [[ "$TARGET" == "ml" ]]; then
     echo "📦 构建含有 PyTorch / Transformers / ONNX 的 ML 镜像..."
     docker build --target ml -t privshield:1.8.0-ml .
     IMAGE_NAME="privshield:1.8.0-ml"
