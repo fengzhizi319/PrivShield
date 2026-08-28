@@ -183,13 +183,13 @@
 - **说明**：导出 Prometheus 格式的实时性能监控指标。
 - **响应状态码**：`200 OK`
 - **关键指标包含**：
-  - `service_hub_http_requests_total{method, path, status}`：HTTP 请求计数器
-  - `service_hub_http_request_duration_seconds{method, path}`：请求耗时直方图
-  - `service_hub_tasks_dispatched_total{operation, status}`：任务分发计数
-  - `service_hub_pipeline_stage_duration_seconds{stage}`：各流水线阶段耗时
-  - `service_hub_orphaned_tasks_recovered_total{type}`：崩溃孤立任务回收计数
-  - `service_hub_tasks_retried_total{result}`：失败任务重试计数
-  - `service_hub_circuit_breaker_state`：Agent 客户端熔断器状态
+  - `http_requests_total{method, path, status}`：HTTP 请求计数器（所有 Go 服务共享，通过 `module` 标签区分服务）
+  - `http_request_duration_seconds{method, path}`：请求耗时直方图
+  - `task_transitions_total{from_status, to_status, result}`：任务状态转换计数
+  - `task_claim_latency_seconds`：任务认领延迟
+  - `orphaned_tasks_recovered_total`：崩溃孤立任务回收计数
+  - `tasks_retried_total{result}`：失败任务重试计数
+  - `circuit_breaker_state`：Agent 客户端熔断器状态
 
 ---
 
