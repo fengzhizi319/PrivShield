@@ -3,7 +3,7 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构全面演进至 **Go 原生高性能微服务架构 (路径 C)** 的系统级深度架构设计、核心源码实现与生产迁移落地规约（Production Blueprint）。
 > **顶层设计对齐**：全面严格对齐 [`docs/archive/unified_design.md`](unified_design.md) (v15.1.0) 统一规范（包含统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。
 > **参考实现与存量资产**：深度借鉴并复用 `~/code/sfwork/PrivShield-go` (含 `privacy-go-sdk`、`internal/gateway`、`internal/dynclassification`、`internal/service`、`internal/grpcserver`、`internal/rest`) 与当前主仓库 `pkg/` 共享基础库。
-> **版本**：v3.3.0 (存量 Go 代码资产复用与工程落地指南版)
+> **版本**：v3.4.0 (全栈纯 Go 技术均质化与 Python 引擎退役规划版)
 > **编写日期**：2026-08-28
 
 ---
@@ -14,6 +14,7 @@
    * 1.1 [为什么必须实施路径 C (全栈 Go 化)？](#11-为什么必须实施路径-c-全栈-go-化)
    * 1.2 [路径 C 的四大核心目标](#12-路径-c-四大核心目标)
    * 1.3 [仓库组织形态技术决策 (Monorepo 目录共存 vs 独立新仓库)](#13-仓库组织形态技术决策-monorepo-目录共存-vs-独立新仓库)
+   * 1.4 [终态全栈技术均质化评估与 Python 引擎全面退役总纲](#14-终态全栈技术均质化评估与-python-引擎全面退役总纲)
 2. [全栈统一架构蓝图与服务拓扑 (System Topology)](#2-全栈统一架构蓝图与服务拓扑-system-topology)
 3. [统一中间件与上下文透传体系 (Unified Middleware & Context)](#3-统一中间件与上下文透传体系-unified-middleware--context)
 4. [零分配与高并发内存架构设计 (Zero-Allocation Architecture)](#4-零分配与高并发内存架构设计-zero-allocation-architecture)
@@ -50,7 +51,9 @@
     * 13.4 [跨工程资产同步与自动化合并迁移指令](#134-跨工程资产同步与自动化合并迁移指令)
 14. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#14-性能基准量化评估与容量规划-benchmark--sizing)
 15. [构建、依赖管理与生产部署清单 (Build & K8s Packaging)](#15-构建依赖管理与生产部署清单-build--k8s-packaging)
-16. [双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)](#16-双轨影子流量验证与平滑迁移演进路线-migration-playbook)
+16. [双轨影子流量验证与 Python 引擎彻底退役路线 (Migration & Deprecation Playbook)](#16-双轨影子流量验证与-python-引擎彻底退役路线-migration--deprecation-playbook)
+    * 16.1 [三阶段无缝平滑切流演进路线](#161-三阶段无缝平滑切流演进路线)
+    * 16.2 [Python 引擎全生命周期彻底下线与清理清单](#162-python-引擎全生命周期彻底下线与清理清单)
 
 ---
 
@@ -98,6 +101,36 @@
    - 第二阶段：在同一 Docker Compose 环境中同时运行 Python 引擎 (`:8079`) 与 Go 引擎 (`:8080`)，网关开启影子流量双发比对；
    - 第三阶段：验证 100% 稳定后，将调度中枢与 BFF 的调用地址平滑切换至 Go 引擎；
    - 第四阶段：将旧有的 `engine/` 目录归档为 `engine-legacy-python/`，`engine-go/` 成为主力核心引擎。
+
+### 1.4 终态全栈技术均质化评估与 Python 引擎全面退役总纲
+
+当 Go 版本在性能、稳定性和功能等价性上达到生产就绪标准后，系统将**彻底退役并永久移除 Python 引擎**，实现 **100% 纯 Go 后端技术栈均质化 (Pure-Go Homogeneous Architecture)**。
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                             Python 引擎彻底退役后的全栈均质化收益评估                              │
+├───────────────────┬───────────────────────────────────┬──────────────────────────────────────────┤
+│ 维度              │ 现状 (Python 引擎 + 4 个 Go 服务)  │ 终态 (100% 纯 Go 企业级统一技术栈)       │
+├───────────────────┼───────────────────────────────────┼──────────────────────────────────────────┤
+│ **技术栈纯洁度**  │ 🔴 异构：Python (FastAPI) + Go   │ 🟢 **全栈单一语言：100% Go 1.22+**       │
+│ **运行时环境**    │ 🔴 需管理 Python venv/pip/Conda   │ 🟢 **仅需单一静态 Go Toolchain**         │
+│ **单机调用模式**  │ 🔴 强制跨进程 gRPC/IPC (耗时 >1ms)│ 🟢 **支持进程内直接函数调用 (耗时 <100ns)**│
+│ **大模型 LLM 解耦**│ 🔴 Python 进程内加载 PyTorch(易OOM)│ 🟢 **标准云原生 vLLM 独立容器解耦**      │
+│ **全局镜像体积**  │ 🔴 3.5 GB (包含 PyTorch 全家桶)   │ 🟢 **< 180 MB (极简 CUDA 运行时)**       │
+│ **可观测性栈**    │ 🔴 双套 Prometheus Client (格式差异)│ 🟢 **统一 client_golang 与 slog 结构化**  │
+│ **运维与排障成本**│ 🔴 跨语言追踪与两套日志分析       │ 🟢 **统一构建、统一拦截器、维护成本减半** │
+└───────────────────┴───────────────────────────────────┴──────────────────────────────────────────┘
+```
+
+#### 终态核心演进要点：
+1. **微服务内嵌调用模式 (In-Process Direct Invocation)**：
+   - 在资源受限的边缘节点或轻量部署场景下，`service-hub` 可以直接作为 Package 引用 `privacy-go-sdk`，将脱敏与规则判定变为**进程内纳秒级直接函数调用 (< 100ns)**，彻底消除网络协议栈开销；
+2. **大模型推理的云原生标准化解耦**：
+   - 彻底告别在计算 Sidecar 内部直接 import PyTorch 加载大模型的沉重做法；
+   - Layer 3 LLM 推理全量标准化交由外部独立的 **vLLM / Ollama** 高性能推理容器负责，Go Engine 仅作为高并发 HTTP/2 客户端负责调度与仲裁，彻底消除 Sidecar 内存泄漏与显存争用隐患；
+3. **极简运维与快速冷启动**：
+   - 消除 Python 启动阶段模块扫描与 Torch JIT 初始化的 3~8 秒等待，Go 引擎冷启动就绪时间 **< 80ms**，完美适配 Kubernetes HPA 极速扩缩容。
+
 
 ---
 
@@ -2033,7 +2066,9 @@ ENTRYPOINT ["/app/privshield-agent"]
 
 ---
 
-## 16. 双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)
+## 16. 双轨影子流量验证与 Python 引擎彻底退役路线 (Migration & Deprecation Playbook)
+
+### 16.1 三阶段无缝平滑切流演进路线
 
 为确保从 Python 引擎向 Go 引擎的无故障平滑过渡，制定三阶段迁移演进路线：
 
@@ -2047,8 +2082,79 @@ ENTRYPOINT ["/app/privshield-agent"]
 │ • PrivShield Gateway 将真实流量异步复制一份给 Go 引擎与 Python 引擎       │
 │ • 校验两者双结构输出的字段级差异，持续 7 天零差异后推进 Phase 3          │
 ├──────────────────────────────────────────────────────────────────────────┤
-│ Phase 3: 金丝雀分流与全面上线 (Canary Release)                           │
+│ Phase 3: 全量切流与 Python 引擎退役 (Canary Cutover & Full Deprecation) │
 │ • 网关按 10% ➔ 50% ➔ 100% 阶梯将生产流量切入 Go 引擎节点                │
-│ • Python 引擎降级为第二级灾备实例，全面提升系统可靠性与吞吐容量           │
+│ • 业务稳定运行 14 天后，触发 Python 引擎生命周期彻底退役与代码清理       │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+### 16.2 Python 引擎全生命周期彻底下线与清理清单
+
+当 Go 原生引擎（`engine-go/`）全面接管所有生产流量后，为了彻底净化代码库、消除双重维护负担与技术债务，执行以下**不可逆清理清单 (Clean-up Checklist)**：
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                             Python 引擎彻底退役与代码资产清理清单                                │
+├───────────────────────────────┬──────────────────────────────────┬───────────────────────────────┤
+│ 清理对象 / 资产类别           │ 具体路径 / 文件                  │ 清理动作与替代方案            │
+├───────────────────────────────┼──────────────────────────────────┼───────────────────────────────┤
+│ **Python 源码目录**           │ `engine/`                        │ 归档或直接 `git rm -rf engine`│
+│ **Python 依赖与包管理**       │ `pyproject.toml`                 │ 直接删除                      │
+│                               │ `requirements.txt`               │ 直接删除                      │
+│                               │ `requirements-core.txt`          │ 直接删除                      │
+│                               │ `requirements-ml.txt`            │ 直接删除                      │
+│ **Python 单元测试**           │ `tests/` (Python pytest 测试集)  │ 迁移为 `go test` 单元测试     │
+│ **编译与自动化脚本**          │ `Makefile`                       │ 移除 pytest/pip/uvicorn 目标  │
+│                               │ `scripts/dev/docker-start-agent` │ 替换为 Go 极简容器拉起脚本    │
+│ **部署编排资产**              │ `Dockerfile`                     │ 替换为 15.1 节 Multi-Stage Go │
+│                               │ `deploy/docker-compose/`         │ Agent 镜像指向 `privshield-go`│
+│                               │ `deploy/helm/PrivShield/`        │ 移除 Python 相关环境变量与配置│
+│                               │ `deploy/k8s/`                    │ 更新 Pod 资源 Limits (内存降90%)│
+│ **文档与使用指南**            │ `AGENTS.md`                      │ 更新构建与测试命令为 `go test`│
+│                               │ `README.md`                      │ 更新架构图与快速启动指南      │
+└───────────────────────────────┴──────────────────────────────────┴───────────────────────────────┘
+```
+
+#### 彻底下线后的纯 Go 仓库根目录形态：
+```text
+PrivShield/
+├── cmd/
+│   ├── privshield-agent/           # 核心引擎主入口 (:8079 / :50051)
+│   └── privshield-gateway/         # L7 负载均衡网关 (:8000 / :50000)
+├── services/                       # Go 微服务群 (service-hub, datasource-mgr, audit-log)
+├── console/                        # Web 控制台与 Go BFF (bff-go)
+├── privacy-go-sdk/                 # 纯 Go 隐私原语与医疗流水线
+├── internal/                       # 核心分级漏斗与 ONNX 推理引擎
+├── pkg/                            # 全栈统一基础库 (naming, middleware, tlsutil, crypto, store)
+├── rules/                          # 统一 YAML 分类分级与领域规则
+├── proto/privacy.proto             # 统一 gRPC 协议
+├── deploy/                         # 统一 Helm / K8s / Compose 编排
+├── go.work                         # Go 根目录工作区
+├── go.mod
+├── Makefile                        # 纯 Go 构建与测试脚本
+└── Dockerfile                      # 180MB 极简生产容器
+```
+
+---
+
+### 16.3 纯 Go 时代自动化构建与精简部署体系 (Pure-Go Build & Deployment)
+
+彻底移除 Python 运行时后，全系统的开发与运维效率将获得质的飞跃：
+
+1. **一键构建与全量测试**：
+   ```bash
+   # 运行全栈所有 Go 模块单元测试与竞态检测
+   go test -v -race ./...
+
+   # 一键静态编译全栈二进制
+   make build-all
+   ```
+
+2. **单机极速冷启动**：
+   - 不再需要激活虚拟环境 `source .venv/bin/activate` 或下载数十个 Python 依赖包；
+   - 本地开发仅需安装 Go 1.22+，执行 `./bin/privshield-agent` 即可在 **80ms 内启动完毕**。
+
+3. **云原生资源成本极大节约**：
+   - 生产 Kubernetes 集群中，每个 Agent Pod 的内存 Request/Limit 可从原本的 `2Gi / 4Gi` 调整为 **`64Mi / 256Mi`**，整机 Pod 密度提升 **8~16 倍**，为企业节省 **80%+ 的云资源算力成本**！
