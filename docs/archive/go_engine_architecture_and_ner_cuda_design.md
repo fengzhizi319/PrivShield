@@ -1,10 +1,11 @@
-# 数盾 PrivShield-go (路径 C) 深度架构重构与 Go+CUDA 异构推理完整实施方案
+# 数盾 PrivShield-go (路径 C) 架构演进规划与 Go+CUDA 异构推理设计草案
 
-> **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构全面演进至 **Go 原生高性能微服务架构 (路径 C)** 的系统级深度架构设计、核心源码实现与生产迁移落地规约（Production Blueprint）。
-> **顶层设计对齐**：全面严格对齐 [`docs/archive/unified_design.md`](unified_design.md) (v15.1.0) 统一规范（包含统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。
-> **参考实现与存量资产**：深度借鉴并复用 `~/code/sfwork/PrivShield-go` (含 `privacy-go-sdk`、`internal/gateway`、`internal/dynclassification`、`internal/service`、`internal/grpcserver`、`internal/rest`) 与当前主仓库 `pkg/` 共享基础库。
-> **版本**：v3.4.0 (全栈纯 Go 技术均质化与 Python 引擎退役规划版)
+> **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
+> **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。当前 `pkg/` 共享库已提供部分能力，`engine-go/` / `privacy-go-sdk/` / CUDA NER 等模块尚未实现。
+> **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
+> **版本**：v3.4.1-drafted (路径 C 演进草案修订版)
 > **编写日期**：2026-08-28
+> **修订说明**：v3.4.1 明确区分"已落地"与"规划态"，删除对不存在仓库的虚假引用，修正工程示例中的明显缺陷，并将性能数字从"已实现实测"改为"目标/测算值"。
 
 ---
 
@@ -45,8 +46,8 @@
     * 12.8 [Step 7: L7 自适应负载均衡网关实现 (`internal/gateway`)](#128-step-7-l7-自适应负载均衡网关实现-internalgateway)
     * 12.9 [Step 8: 自动化测试、性能压测与影子流量验证](#129-step-8-自动化测试性能压测与影子流量验证)
 13. [存量 Go 代码资产复用与工程借鉴实战指南 (Reusing Existing Go Assets)](#13-存量-go-代码资产复用与工程借鉴实战指南-reusing-existing-go-assets)
-    * 13.1 [现有 Go 资产盘点与复用度评估矩阵](#131-现有-go-资产盘点与复用度评估矩阵)
-    * 13.2 [网关子系统复用实战 (`sfwork/PrivShield-go/internal/gateway`)](#132-网关子系统复用实战-sfworkprivshield-gointernalgateway)
+    * 13.1 [当前仓库 Go 资产盘点与复用度评估矩阵](#131-当前仓库-go-资产盘点与复用度评估矩阵)
+    * 13.2 [网关子系统复用实战（当前 Python 实现 vs 目标 Go 实现）](#132-网关子系统复用实战当前-python-实现-vs-目标-go-实现)
     * 13.3 [主工程 `pkg/` 共享基础设施库无缝接入](#133-主工程-pkg-共享基础设施库无缝接入)
     * 13.4 [跨工程资产同步与自动化合并迁移指令](#134-跨工程资产同步与自动化合并迁移指令)
 14. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#14-性能基准量化评估与容量规划-benchmark--sizing)
@@ -57,17 +58,45 @@
 
 ---
 
+## 文档状态与真实性声明（必读）
+
+本文档是 **路径 C（Go 原生引擎 + CUDA NER）的架构演进草案**，用于统一终态技术愿景并指导后续工程落地。**它不等同于当前已实现系统**，阅读时请注意以下状态划分：
+
+| 类别 | 当前状态 | 说明 |
+|---|---|---|
+| `pkg/middleware/`（统一错误信封、Trace、限流） | ✅ 已落地 | 主仓库已存在 `pkg/middleware/envelope.go`、`trace.go`、`ratelimit.go`，Go 微服务已接入。 |
+| `pkg/naming/`（SSOT 数据源命名） | ✅ 已落地 | `DSYibao` / `DSKangyang` / `ResolveInbound` 已实现并接入服务。 |
+| `pkg/tlsutil/`（mTLS CN 白名单热重载） | ✅ 已落地 | 支持 `config/mtls-whitelist.yaml` 5 秒轮询热重载。 |
+| `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
+| `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
+| `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ❌ 尚未创建 | 文档第 12 章描述的目录结构为**目标结构**，当前仓库不存在。 |
+| Go + CUDA Small-NER 引擎 | ❌ 尚未实现 | ONNX Runtime CGO 绑定、动态合批、Tokenizer 等为设计草案。 |
+| Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
+
+**工程数字说明**：
+- 第 1.2、14 章中的吞吐/延迟/内存/镜像体积等数字为**目标值或理论测算值**，不是当前仓库实测结果；
+- 第 5~13 章的 Go 代码示例为**设计参考实现/教学片段**，部分函数（如 `MaskChineseName`、`MaskAddress`）和类型（如 `FrameData`）未定义，不能直接编译；
+- 第 13 章引用的 `~/code/sfwork/PrivShield-go` 仓库在当前工作区不存在，复用策略需以实际可获取的代码资产为准。
+
+**使用建议**：
+1. 若需在当前仓库继续推进路径 C，请先按第 12 章创建 `engine-go/`、`privacy-go-sdk/`、`cmd/privshield-*` 目录并逐步填充实现；
+2. 在每一阶段完成后，回到本文档更新对应章节的"状态"列，避免设计与实现长期脱节；
+3. 性能数字必须在真实环境压测后替换为实测值，并附 `go test -bench` / `wrk` 等原始数据。
+
+---
+
 ## 1. 方案演进背景与顶层技术决策
 
-### 1.1 为什么必须实施路径 C (全栈 Go 化)？
-现有的 Python 核心引擎 (`engine/`) 虽然通过预编译正则、批次去重、`str.translate` 等优化将 100 条记录处理耗时压至 52.4ms，但在企业级高密流通场景下，仍存在无法突破的语言级瓶颈：
+### 1.1 为什么评估路径 C (全栈 Go 化)？
+现有的 Python 核心引擎 (`engine/`) 通过预编译正则、批次去重、`str.translate` 等优化已能在多数场景下满足业务需求（100 条记录处理耗时约 52.4ms）。但在**超高并发、超低延迟、边缘节点**等场景下，Python 运行时存在以下潜在瓶颈，值得评估 Go 原生实现：
 * **CPython GIL 锁死多核横向扩展**：单个 Python 进程只能利用单核 CPU 进行规则计算，多核必须依靠 Uvicorn 多进程。而在 64 核服务器上拉起 32 个 Worker 进程，每个 Worker 占用 300MB~1.5GB 内存，整机内存消耗高达 **20GB~40GB**。
 * **高频 GC 暂停与延迟抖动**：每秒数十万次字符串切片与对象分配引发频繁的 Python 分代垃圾回收，导致服务 P99 延迟偶发突破 500ms，无法满足金融级与医保实时结算 SLA（< 50ms）。
 * **跨语言微服务割裂**：外围中台服务（`service-hub`、`datasource-mgr`、`audit-log`、`bff-go`）均为 Go 语言实现，Python 引擎的异构存在增加了跨语言错误解析、追踪断链、监控埋点与运维打包的复杂度。
 
-### 1.2 路径 C 的四大核心目标
-1. **极致吞吐 (Ultra Throughput)**：纯 CPU 规则与隐私原语吞吐达到 **40,000 ~ 60,000+ QPS**，16 逻辑核下满载吞吐突破 **500,000 记录/秒**；
-2. **极轻资源 (Ultra Low Footprint)**：单进程常驻内存仅 **18MB ~ 40MB**，比 Python 降低 95%；Docker 运行时镜像由 3.5GB 压缩至 **< 200MB**；
+### 1.2 路径 C 的四大核心目标（设计目标 / 待验证）
+1. **极致吞吐 (Ultra Throughput)**：纯 CPU 规则与隐私原语目标吞吐达到 **40,000 ~ 60,000+ QPS**，16 逻辑核下满载目标吞吐突破 **500,000 记录/秒**；
+2. **极轻资源 (Ultra Low Footprint)**：单进程目标常驻内存仅 **18MB ~ 40MB**，比 Python 降低 95%；Docker 运行时镜像目标由 3.5GB 压缩至 **< 200MB**；
 3. **异构计算深度融合 (Heterogeneous Acceleration)**：通过 CGO + ONNX Runtime C API 直接驱动 CUDA GPU，利用**动态合批 (Dynamic Batching)** 与 **Pinning OS Thread**，将 GPU Tensor Core 算力发挥至极致；
 4. **全栈统一标准合流**：全面接入 `pkg/` 共享库，统一错误信封、全链路 Trace 上下文、SSOT 命名、mTLS CN 白名单与 Prometheus 指标。
 
@@ -90,21 +119,21 @@
 └───────────────────┴──────────────────────────┴──────────────────────────┴────────────────────────┘
 ```
 
-#### 决策结论：
-👉 **绝对不新建独立 Git 仓库，采用【当前 Git 仓库 Monorepo 目录共存 (`engine-go/`)】进行渐进式演进**。
+#### 决策结论（建议）：
+👉 **推荐在当前 Git 仓库内以 Monorepo 目录共存 (`engine-go/`) 方式渐进式演进，而非新建独立仓库**。该决策需结合团队维护成本与发布节奏最终确认。
 
 **核心理由**：
-1. **防止基础底座语义漂移**：`PrivShield` 拥有 4 个成熟的 Go 微服务（Hub/Datasource/Audit/BFF）与全套 `pkg/` 共享库（SSOT 命名、mTLS 白名单、错误信封、SM4 加密）。在当前仓库内演进，Go 引擎可直接 `import "github.com/fengzhizi319/PrivShield/pkg/..."`，保证全栈单一事实源；
+1. **防止基础底座语义漂移**：`PrivShield` 已有 4 个 Go 微服务（Hub/Datasource/Audit/BFF）与 `pkg/` 共享库（SSOT 命名、mTLS 白名单、错误信封、SM4 加密）。在当前仓库内演进，Go 引擎可直接 `import "github.com/fengzhizi319/PrivShield/pkg/..."`，保持全栈单一事实源；
 2. **共用一套规则与模型资产**：`rules/domains/*.yaml` 与 `rules/taxonomies/*.yaml` 无需在多个仓库间手动同步；
-3. **零停机平滑割接路线**：
+3. **渐进式割接路线（规划）**：
    - 第一阶段：在当前仓库创建 `engine-go/` 目录，通过 `go.work` 将其纳入工作区；
    - 第二阶段：在同一 Docker Compose 环境中同时运行 Python 引擎 (`:8079`) 与 Go 引擎 (`:8080`)，网关开启影子流量双发比对；
-   - 第三阶段：验证 100% 稳定后，将调度中枢与 BFF 的调用地址平滑切换至 Go 引擎；
-   - 第四阶段：将旧有的 `engine/` 目录归档为 `engine-legacy-python/`，`engine-go/` 成为主力核心引擎。
+   - 第三阶段：验证结果一致且性能达标后，将调度中枢与 BFF 的调用地址平滑切换至 Go 引擎；
+   - 第四阶段（远期）：在 Go 引擎稳定运行并完全承接生产流量后，再评估是否将 `engine/` 归档或移除，**不是当前阶段目标**。
 
 ### 1.4 终态全栈技术均质化评估与 Python 引擎全面退役总纲
 
-当 Go 版本在性能、稳定性和功能等价性上达到生产就绪标准后，系统将**彻底退役并永久移除 Python 引擎**，实现 **100% 纯 Go 后端技术栈均质化 (Pure-Go Homogeneous Architecture)**。
+当 Go 版本在性能、稳定性和功能等价性上达到生产就绪标准后，**可评估**彻底退役 Python 引擎，实现 **100% 纯 Go 后端技术栈均质化 (Pure-Go Homogeneous Architecture)**。这是**远期目标**，当前生产主力仍为 `engine/` Python 引擎。
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -134,9 +163,15 @@
 
 ---
 
-## 2. 全栈统一架构蓝图与服务拓扑 (System Topology)
+## 2. 全栈统一架构蓝图与服务拓扑 (System Topology) — 目标态
 
-遵循 [`docs/archive/unified_design.md`](unified_design.md) §2 顶层拓扑规约，Go 原生引擎 (`PrivShield-go`) 与全栈微服务协同拓扑如下：
+> **状态说明**：本章描述的是路径 C 终态目标拓扑。当前生产中：
+> - `console/bff-go`、`services/service-hub`、`services/datasource-mgr`、`services/audit-log` 已按此拓扑运行；
+> - `pkg/middleware/`、`pkg/naming/`、`pkg/tlsutil/`、`pkg/store/`、`pkg/crypto/` 已作为共享库落地；
+> - `PrivShield Gateway` 当前为 `engine/gateway/` Python 实现（监听 `:8000` / `:50000`），Go 原生网关尚未实现；
+> - `PrivShield-go Agent` 当前为 `engine/` Python 实现（监听 `:8079` / `:50051`），Go 原生引擎尚未实现。
+
+目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 顶层拓扑规约，Go 原生引擎 (`PrivShield-go`) 与全栈微服务协同拓扑如下：
 
 ```mermaid
 flowchart TD
@@ -193,10 +228,10 @@ flowchart TD
 
 | 服务 / 模块 | 协议 | 内部端口 | 认证与鉴权方式 | 追踪与元数据透传 | 职责与定位 |
 |---|---|---|---|---|---|
-| **PrivShield Gateway (REST)** | HTTP/1.1 & HTTP/2 | `:8000` | API Key / 令牌桶限流 | `X-Request-ID` + `X-Trace-ID` | 南北向对外统一 REST 反向代理 |
-| **PrivShield Gateway (gRPC)** | gRPC (HTTP/2) | `:50000` | mTLS (CN 白名单) / API Key | `x-request-id` + `x-trace-id` | 南北向对外统一 gRPC 反向代理 |
-| **PrivShield-go Agent (REST)** | HTTP/1.1 & HTTP/2 | `:8079` | API Key / 内部回源鉴权 | `X-Request-ID` + `X-Trace-ID` | 核心隐私计算与脱敏 REST 端点 |
-| **PrivShield-go Agent (gRPC)** | gRPC (HTTP/2) | `:50051` | 东西向 mTLS 双向认证 | `x-request-id` metadata | 核心隐私计算与分类 gRPC 端点 |
+| **PrivShield Gateway (REST)** | HTTP/1.1 & HTTP/2 | `:8000` | API Key / 令牌桶限流 | `X-Request-ID` + `X-Trace-ID` | 南北向对外统一 REST 反向代理；**当前为 Python 实现，目标 Go 化** |
+| **PrivShield Gateway (gRPC)** | gRPC (HTTP/2) | `:50000` | mTLS (CN 白名单) / API Key | `x-request-id` + `x-trace-id` | 南北向对外统一 gRPC 反向代理；**当前为 Python 实现，目标 Go 化** |
+| **PrivShield-go Agent (REST)** | HTTP/1.1 & HTTP/2 | `:8079` | API Key / 内部回源鉴权 | `X-Request-ID` + `X-Trace-ID` | 核心隐私计算与脱敏 REST 端点；**当前由 Python `engine/main.py` 提供，Go 版本为目标态** |
+| **PrivShield-go Agent (gRPC)** | gRPC (HTTP/2) | `:50051` | 东西向 mTLS 双向认证 | `x-request-id` metadata | 核心隐私计算与分类 gRPC 端点；**当前由 Python `engine/grpc_server.py` 提供，Go 版本为目标态** |
 | **console/bff-go** | HTTPS / gRPC | `:8081` / `:50055` | API Key / mTLS | `X-Request-ID` + `X-Trace-ID` | Web 控制台聚合代理网关 |
 | **services/service-hub** | HTTP / gRPC | `:8082` / `:50052` | API Key / mTLS | `X-Request-ID` + `X-Trace-ID` | 6 阶段流通流水线与租约调度中枢 |
 | **services/datasource-mgr** | HTTP / gRPC | `:8083` / `:50053` | API Key / mTLS | `X-Request-ID` + `X-Trace-ID` | 多源数据接入与敏感特征探查 |
@@ -207,7 +242,9 @@ flowchart TD
 
 ## 3. 统一中间件与上下文透传体系 (Unified Middleware & Context)
 
-全面接入 `pkg/middleware/`，杜绝接口行为与格式的不一致：
+`pkg/middleware/` 与 `pkg/tlsutil/` 已在当前仓库落地，Go 微服务（`services/*`、`console/bff-go`、`console/app-lz/*`）已接入；未来 Go 原生引擎与网关应遵循同一规约。当前 Python `engine/` 通过 `engine/observability/envelope.py` 对齐统一错误信封格式，实现跨语言一致。
+
+> **实现状态**：统一错误信封、Trace 透传、mTLS 白名单热重载为**已落地**能力；Go 原生引擎与网关接入为**规划**任务。
 
 ### 3.1 统一 JSON 错误与响应信封 (`pkg/middleware/envelope.go`)
 所有 REST 接口（Agent 与 Gateway）在发生错误或异常拦截时，统一返回严格遵循 [`unified_design.md`](unified_design.md) 专项方案 1 的信封格式：
@@ -241,9 +278,11 @@ middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_PARAM_LEVEL", "请�
 
 ---
 
-## 4. 零分配与高并发内存架构设计 (Zero-Allocation Architecture)
+## 4. 零分配与高并发内存架构设计 (Zero-Allocation Architecture) — 设计草案
 
-为了在高并发（50,000+ QPS）下实现近乎零 GC 暂停，`PrivShield-go` 采用以下核心内存技术：
+> **状态说明**：本章为 Go 原生引擎的目标内存架构设计，需在 `privacy-go-sdk/` 与 `internal/dynclassification/` 实现后通过 `go test -bench` 与压测验证。
+
+为了在高并发（目标 50,000+ QPS）下实现近乎零 GC 暂停，`PrivShield-go` 计划采用以下核心内存技术：
 
 ```text
                                   ┌──────────────────────────┐
@@ -268,11 +307,13 @@ middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_PARAM_LEVEL", "请�
 
 ---
 
-## 5. 纯 Go 隐私原语与 AC 自动机规则引擎 (privacy-go-sdk)
+## 5. 纯 Go 隐私原语与 AC 自动机规则引擎 (privacy-go-sdk) — 设计草案
 
-### 5.1 算法实现与性能矩阵
+> **状态说明**：`privacy-go-sdk/` 目录与以下 Go 隐私原语均未在当前仓库实现，属于路径 C 第二阶段重点落地内容。
 
-| 模块目录 | 核心算法与数据结构 | 性能指标 | 核心实现细节 |
+### 5.1 算法实现与目标性能矩阵
+
+| 模块目录 | 核心算法与数据结构 | 目标性能指标 | 核心实现细节 |
 |---|---|---|---|
 | `internal/masking` | 预编译正则表 + HMAC-SHA256 加盐哈希 | **< 120 ns / 字段** | 零内存分配遮蔽算法，支持中国身份证/手机/银行卡/军官证校验与脱敏 |
 | `internal/dp` | 逆变换采样 Laplace、Box-Muller Gaussian、自适应梯度截断 | **< 45 ns / 运算** | 纯标量浮点计算，提供 Count/Sum/Mean/GroupBy 与高维稀疏向量加噪 |
@@ -281,9 +322,11 @@ middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_PARAM_LEVEL", "请�
 | `internal/qol` | 语义诱饵生成、Fisher-Yates 随机置乱注入 | **< 1.5 μs / 次** | 内置医疗与通用语料库，防外部搜索引擎/大模型语义侧信道探测 |
 | `internal/budget` | 无锁内存原子扣减 (`atomic.Uint64` 浮点位操作)、滑动窗口重置 | **< 15 ns / 次** | 支持内存模式与 Redis 分布式租约模式 |
 
-### 5.2 Aho-Corasick 多模式匹配规则引擎 (取代回溯正则)
+### 5.2 Aho-Corasick 多模式匹配规则引擎 (取代回溯正则) — 参考实现
 
-针对高敏医学词库（包含 284 个高危病种与传染病词条），放弃 Python CPython 的回溯式正则，改用 **Aho-Corasick (AC) 自动机**：
+> **状态说明**：以下 Go 代码为 Layer 1 规则引擎的**参考实现片段**，演示如何用 AC 自动机替代 Python 正则进行多模式匹配。完整生产实现需接入 `rules/domains/*.yaml` 词库、处理大小写混合文本的字节对齐、支持泛化标签与降级规则。
+
+针对高敏医学词库（包含 284 个高危病种与传染病词条），目标放弃 Python 回溯式正则，改用 **Aho-Corasick (AC) 自动机**。
 ```go
 package rules
 
@@ -377,9 +420,11 @@ func (m *AcRuleMatcher) ScanAndRedact(text string) (sanitized string, maxLevel s
 
 ---
 
-## 6. Go + CUDA Small-NER 深度学习推理核心实现
+## 6. Go + CUDA Small-NER 深度学习推理核心实现 — 设计草案与关键约束
 
-在 Go 中调用 CUDA 执行深度学习推理，必须解决 **CGO 调度屏障**、**显存安全管理**、**中文分词对齐** 与 **动态合批** 四大工程难题。
+> **状态说明**：Go + CUDA Small-NER 引擎属于路径 C 的高复杂度模块，**尚未实现**。本章描述的是设计思路、关键约束与参考实现片段；实际落地前需完成 ONNX Runtime 动态库适配、词表与模型资产准备、GPU 环境可用性验证。
+
+在 Go 中调用 CUDA 执行深度学习推理，必须解决 **CGO 调度屏障**、**显存安全管理**、**中文分词对齐** 与 **动态合批** 四大工程难题。以下各小节代码为**教学/参考片段**，不能直接用于生产。
 
 ### 6.1 ONNX Runtime CGO 双轨生命周期管理
 
@@ -401,9 +446,15 @@ sequenceDiagram
     Worker->>Main: BIO 实体解码并回传 ResultChan
 ```
 
-### 6.2 生产级 WordPiece Tokenizer 与精准 Offset Mapping
+### 6.2 WordPiece Tokenizer 与精准 Offset Mapping — 简化教学示例
 
-中文临床文本可能混杂英文缩写（如 `HIV-1`、`CD4`、`HAART`）与特殊符号。分词器不仅要准确生成 Token，还必须维护**字符到原始字节的 Offset Mapping**，确保实体抽取结果能够精准对齐并替换：
+> **状态说明**：以下 `BertTokenizer` 是按 rune 逐字查表的**极度简化示例**，仅用于说明 Token-Offset 映射思路。生产级实现必须：
+> 1. 完整实现 WordPiece / BPE / Unigram 子词切分；
+> 2. 处理 `##` 前缀、未知字符回退、字节级编码；
+> 3. 支持 `HIV-1`、`CD4` 等混合英文缩写的子词拆分；
+> 4. 使用经过验证的 ONNX / HuggingFace Tokenizer 资产或 `github.com/yalue/onnxruntime_go` 配套工具。
+
+中文临床文本可能混杂英文缩写（如 `HIV-1`、`CD4`、`HAART`）与特殊符号。分词器不仅要准确生成 Token，还必须维护**字符到原始字节的 Offset Mapping**，确保实体抽取结果能够精准对齐并替换。
 
 ```go
 package dynclassification
@@ -532,10 +583,16 @@ func (t *BertTokenizer) EncodeWithOffsets(text string) (inputIDs, attnMask, type
 
 ---
 
-### 6.3 OS 线程绑定、专用 Worker Pool 与动态合批 (Dynamic Batching)
+### 6.3 OS 线程绑定、专用 Worker Pool 与动态合批 (Dynamic Batching) — 关键实现约束
 
-在 Go 中，Go 协程的 M:N 调度机制会导致协程在不同 OS 线程间跳转。如果在普通的业务 Goroutine 中调用 CGO 执行 CUDA，将频繁触发 CUDA Context 切换甚至导致锁死。
-**解决方案**：采用专职的 GPU Worker Pool，并在 Worker 协程入口处执行 `runtime.LockOSThread()`，通过 Go Channel 实现 Dynamic Batching：
+> **状态说明**：以下代码为概念演示，存在多处**必须在生产实现中修复**的缺陷（见代码注释）。
+>
+> 在 Go 中，Go 协程的 M:N 调度机制会导致协程在不同 OS 线程间跳转。如果在普通业务 Goroutine 中调用 CGO 执行 CUDA，可能触发 CUDA Context 切换甚至运行时错误。
+> **目标方案**：采用专职的 GPU Worker Pool，并在 Worker 协程入口处执行 `runtime.LockOSThread()`，通过 Go Channel 实现 Dynamic Batching。注意：
+> - ONNX Runtime 的 CUDA Provider 通常自己管理 CUDA Context，`LockOSThread` 主要避免 Go Scheduler 在 CGO 调用期间迁移线程导致不可预期行为；
+> - 多个 Worker 共享同一 GPU 时，应通过单一 `taskQueue` + 单一推理 Session 或显式 Session 隔离来避免 CUDA Context 冲突；
+> - 所有 `ort.NewTensor` / `session.Run` 返回值必须检查；
+> - `sync.Pool` 回收的切片长度必须与新请求兼容，否则会造成内存污染或越界。
 
 ```go
 package dynclassification
@@ -722,7 +779,9 @@ func (e *CudaOnnxNerEngine) runBatchInference(tasks []*NerTask) {
 
 ---
 
-### 6.4 BIO/BIOES 实体解码与 Span 对齐还原
+### 6.4 BIO/BIOES 实体解码与 Span 对齐还原 — 参考实现
+
+> **状态说明**：以下 `decodeBIOEntities` 为 BIO 解码的简化示例。生产实现需同时支持 BIOES、处理低置信度过滤、合并 WordPiece 子词跨度、对齐原始文本偏移，并与 6.2 节的 Tokenizer 协同验证。
 
 ```go
 func (e *CudaOnnxNerEngine) decodeBIOEntities(
@@ -793,9 +852,9 @@ func (e *CudaOnnxNerEngine) decodeBIOEntities(
 
 ---
 
-## 7. 医疗数据全流程流水线 (Medical Pipeline) Go 原生实现
+## 7. 医疗数据全流程流水线 (Medical Pipeline) Go 原生实现 — 设计草案
 
-在 Go 中实现与 Python `MedicalPrivacyPipeline` 100% 对齐的流式/批次处理引擎：
+> **状态说明**：本章 `MedicalPrivacyPipeline` 为 Go 实现的概念骨架，依赖尚未创建的 `privacy-go-sdk/` 与 `internal/dynclassification/` 包（如 `rules.AcRuleMatcher`、`dynclassification.CudaOnnxNerEngine`）。与 Python `engine/medical_pipeline/` 的 100% 输出对齐需在实现阶段通过影子流量和 Fuzz 测试验证，不是自动成立的。
 
 ```go
 package medical_pipeline
@@ -943,9 +1002,11 @@ func (p *MedicalPrivacyPipeline) ProcessRecords(
 
 ---
 
-## 8. 三层漏斗与多级容灾降级机制 (Safety Floor & Fault Tolerance)
+## 8. 三层漏斗与多级容灾降级机制 (Safety Floor & Fault Tolerance) — 设计草案
 
-为了保证医疗/金融级系统的高可用与零泄露，设计四级熔断降级阶梯：
+> **状态说明**：当前 Python `engine/dynclassification/funnel.py` 已实现 Rule → NER → LLM 三层漏斗与 Safety Floor 降级。本章描述的是 Go 原生引擎应遵循的等效降级策略，需在 `internal/dynclassification/` 中重新实现。
+
+为了保证医疗/金融级系统的高可用与零泄露，Go 原生引擎目标设计四级熔断降级阶梯：
 
 ```text
 ┌────────────────────────────────────────────────────────┐
@@ -965,9 +1026,11 @@ func (p *MedicalPrivacyPipeline) ProcessRecords(
 
 ---
 
-## 9. Engine 自带高性能负载均衡与网关子系统重构 (Gateway & Balancer)
+## 9. Engine 自带高性能负载均衡与网关子系统重构 (Gateway & Balancer) — 设计草案
 
-在路径 C 中，网关与负载均衡子系统（`internal/gateway`）不仅承载着南北向流量分发，更是屏蔽后端 Agent 计算集群物理异构性、实现**L7 per-RPC 精准调度**、**零拷贝流式转发**与**东西向安全回源**的核心枢纽。
+> **状态说明**：当前 `engine/gateway/` 为 Python 实现，已提供 HTTP/gRPC 反向代理、Round-Robin 负载均衡与健康检查（监听 `:8000` / `:50000`）。本章描述的是路径 C 中将其重构为 **Go 原生 `internal/gateway`** 的目标设计，包含 L7 per-RPC 调度、P2C-EWMA、三态熔断等增强能力。
+
+在路径 C 中，目标网关与负载均衡子系统（`internal/gateway`）不仅承载南北向流量分发，更是屏蔽后端 Agent 计算集群物理异构性、实现**L7 per-RPC 精准调度**、**零拷贝流式转发**与**东西向安全回源**的核心枢纽。
 
 ```mermaid
 flowchart TD
@@ -1002,10 +1065,10 @@ flowchart TD
 * **L4 负载均衡的致命缺陷**：K8s Service (ClusterIP) 仅在 TCP 三次握手瞬间做一次分配。由于 gRPC 长连接多路复用，客户端建连后发送的所有 RPC 都会**钉死在同一个后端 Pod 上**，造成严重负载倾斜；
 * **L7 per-RPC 代理的优势**：网关理解 HTTP/2 帧结构，每一个进来的独立 RPC 调用（如 `Mask()` 或 `ProcessRecords()`），都会在应用层**动态挑选最空闲的后端 Agent 节点**并发起转发，实现 100% 均匀的 RPC 级负载均衡。
 
-#### 2. 网关性能核心重构指标
-* **并发吞吐能力**：网关转发开销 **< 0.15ms**，单节点吞吐突破 **80,000+ RPS**；
-* **内存占用**：常驻内存 **< 25MB**；
-* **高可用自愈**：后端节点故障 **< 50ms 自动摘除**，单节点故障请求 **0 丢包（快速重试）**。
+#### 2. 网关性能核心重构目标指标（待验证）
+* **并发吞吐能力**：网关转发开销目标 **< 0.15ms**，单节点吞吐目标 **80,000+ RPS**；
+* **内存占用**：目标常驻内存 **< 25MB**；
+* **高可用自愈**：后端节点故障目标 **< 50ms 自动摘除**，单节点故障请求 **0 丢包（快速重试）**。
 
 ---
 
@@ -1201,9 +1264,14 @@ func (cb *CircuitBreaker) RecordFailure() {
 
 ---
 
-### 9.4 透明零编解码 gRPC 反向代理核心实现 (Transparent Stream Proxy)
+### 9.4 透明零编解码 gRPC 反向代理核心实现 (Transparent Stream Proxy) — 概念示例
 
-为了追求极致性能，网关抛弃了“先根据 Protobuf 反序列化再序列化”的传统低效模式，采用基于 `grpc.UnknownServiceHandler` 的 **透明零编解码字节流代理模式 (Zero-Marshaling Stream Director)**：
+> **状态说明**：以下代码为**概念示意片段**，不能直接编译或运行。gRPC 透明代理存在两个必须解决的工程问题：
+> 1. `grpc.UnknownServiceHandler` 接收到的 `ServerStream` 使用服务端已注册 codec 解析消息；要实现真正的字节透传，通常需要自定义 codec（`encoding.Codec`）或复用 `mwitkow/grpc-proxy` / `improbable-eng/grpc-web` 等成熟方案；
+> 2. 代码中 `FrameData` 类型未定义，示例中把它当作二进制容器使用，但标准 gRPC-Go 没有这种通用帧类型。
+> 生产实现应在基准测试后，在"自定义 codec 透传"与"使用 grpc-proxy 库"之间做选型，而不是直接复制本示例。
+
+为了追求极致性能，目标网关拟采用基于 `grpc.UnknownServiceHandler` 的 **透明零编解码字节流代理模式 (Zero-Marshaling Stream Director)**。其设计思想是避免"先反序列化再序列化"的双重开销：
 
 ```go
 package gateway
@@ -1332,29 +1400,29 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      caCertPool,
-		MinVersion:   tls.VersionTLS13, // 强制 TLS 1.3
+		MinVersion:   tls.VersionTLS13, // 建议默认 TLS 1.3；若内部 CA 尚未升级，可降级至 TLS 1.2
 	}, nil
 }
 ```
 
 ---
 
-## 10. 统一存储、审计存证与密码学基座 (Storage, Crypto & Audit)
+## 10. 统一存储、审计存证与密码学基座 (Storage, Crypto & Audit) — 已落地能力
 
-全面对齐 [`unified_design.md`](unified_design.md) §3.4 与 §5 规范：
+> **状态说明**：本章列出的能力在当前仓库**已实现**，Go 原生引擎可直接复用，无需重新开发。
 
 1. **Phase B 存储底座 (PostgreSQL LeasedTaskStore)**：
-   - 调度中枢与多副本任务分发基于 `pkg/store/postgres`，使用 `FOR UPDATE SKIP LOCKED` 实现无锁分布式任务认领；
+   - 调度中枢与多副本任务分发基于 `pkg/store/postgres`，使用 `FOR UPDATE SKIP LOCKED` 实现无锁分布式任务认领；SQLite / Memory 回退用于开发与测试；
 2. **不可篡改 9 要素哈希链存证 (`services/audit-log`)**：
-   - 每次脱敏/分级调用均向 `:8084` 异步投递审计事件，生成不可逆 SHA-256 前后相连哈希链；
+   - 每次脱敏/分级调用向 `:8084` 异步投递审计事件，生成不可逆 SHA-256 前后相连哈希链；
 3. **国密 SM4-GCM 快照信封加密 (`pkg/crypto`)**：
-   - 原始数据敏感快照使用 SM4-GCM 算法加密为 `enc:v1:<salt>:<nonce>:<ciphertext>` 标准信封密文，密钥支持 KMS 动态注入与轮转。
+   - 原始数据敏感快照使用 SM4-GCM 算法加密为 `enc:v1:<salt>:<nonce>:<ciphertext>` 标准信封密文，密钥支持环境变量注入；KMS 动态注入与自动轮转为后续增强项。
 
 ---
 
-## 11. 全栈可观测性与监控指标规约 (Observability Spec)
+## 11. 全栈可观测性与监控指标规约 (Observability Spec) — 目标指标集
 
-遵循 [`unified_design.md`](unified_design.md) §6 规范，统一指标命名空间与格式：
+> **状态说明**：本章为路径 C 全栈可观测性的**目标指标规约**。当前 Python `engine/` 与 Go 服务已按 [`unified_design.md`](unified_design.md) 输出结构化日志与 Prometheus 指标；下表中的 `privacy_ner_gpu_*`、`privacy_gateway_*` 等 GPU/Go 网关专属指标需在 Go 原生引擎与网关实现后补埋。
 
 ### 11.1 Prometheus 核心指标定义
 
@@ -1371,9 +1439,11 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ---
 
-## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook)
+## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-本节为研发团队提供覆盖 8 个工程里程碑的超细化落地实施清单，包含具体文件路径、CGO 编译指令、核心代码实现与验收基准。
+> **状态说明**：本节为路径 C 的**建议落地路线图**，所列目录与文件（`engine-go/`、`privacy-go-sdk/`、`cmd/privshield-*`）当前尚未创建。研发团队可按此清单分阶段实施，每完成一阶段需更新本文档对应章节的状态说明并补充实测数据。
+
+本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
 ```mermaid
 flowchart TD
@@ -1388,7 +1458,9 @@ flowchart TD
 
 ---
 
-### 12.1 工程目录结构规划与包依赖划分
+### 12.1 工程目录结构规划与包依赖划分（目标结构，尚未创建）
+
+> **状态说明**：以下目录结构为路径 C 的目标布局，当前仓库不存在 `engine-go/` 或 `PrivShield-go/` 目录。建议作为后续代码组织的参考蓝图。
 
 ```text
 PrivShield-go/
@@ -1434,7 +1506,9 @@ PrivShield-go/
 
 ---
 
-### 12.2 Step 1: 环境准备与 CGO/ONNX 动态库绑定
+### 12.2 Step 1: 环境准备与 CGO/ONNX 动态库绑定（待实施）
+
+> **状态说明**：本节为实施步骤草案，执行前需确认目标环境已安装 NVIDIA 驱动、CUDA Toolkit 与 ONNX Runtime GPU 动态库。
 
 #### 1. 前置条件与目录创建
 ```bash
@@ -1684,7 +1758,7 @@ func (e *CudaOnnxNerEngine) cpuFallback(text string) []NerEntity {
 
 ### 12.6 Step 5: 医疗流水线与三层分级漏斗串联 (`medical_pipeline`)
 
-在 `privacy-go-sdk/medical/pipeline.go` 中集成 18/27 字段特化处理规则：
+在 `privacy-go-sdk/medical/pipeline.go` 中集成 18/27 字段特化处理规则。以下示例引用了 `masking.MaskChineseName`、`masking.MaskAddress` 等尚未实现的辅助函数，完整实现需补齐：
 
 ```go
 package medical
@@ -1842,9 +1916,11 @@ func main() {
 	})
 
 	// 1. REST 反向代理
+	// 注意：Gin 的 r.Any("/*proxyPath") 只能匹配固定前缀路径，无法作为全量 catch-all。
+	// 若要将所有未匹配路径转发给后端，应使用 r.NoRoute(...) 或显式注册需要代理的 API 前缀。
 	r := gin.New()
 	r.Use(middleware.TraceMiddleware())
-	r.Any("/*proxyPath", gateway.NewHttpProxyHandler(balancer))
+	r.NoRoute(gateway.NewHttpProxyHandler(balancer))
 
 	go func() {
 		slog.Info("Gateway REST Proxy listening on :8000")
@@ -1852,14 +1928,22 @@ func main() {
 	}()
 
 	// 2. gRPC 透明流代理
+	// 注意：UnknownServiceHandler 配合未注册消息类型的透明字节转发需要自定义 codec，
+	// 本章 9.4 节已说明。以下仅为启动框架示意。
 	grpcProxy := gateway.NewGrpcProxyServer(balancer)
 	grpcServer := grpc.NewServer(
 		grpc.UnknownServiceHandler(grpcProxy.TransparentStreamDirector),
 	)
 
-	lis, _ := net.Listen("tcp", ":50000")
+	lis, err := net.Listen("tcp", ":50000")
+	if err != nil {
+		slog.Error("gRPC listen failed", "err", err)
+		os.Exit(1)
+	}
 	slog.Info("Gateway gRPC Proxy listening on :50000")
-	_ = grpcServer.Serve(lis)
+	if err := grpcServer.Serve(lis); err != nil {
+		slog.Error("gRPC server failed", "err", err)
+	}
 }
 ```
 
@@ -1902,47 +1986,61 @@ func main() {
 
 ---
 
-## 13. 存量 Go 代码资产复用与工程借鉴实战指南 (Reusing Existing Go Assets)
+## 13. 存量 Go 代码资产复用与工程借鉴实战指南 (Reusing Existing Go Assets) — 基于当前仓库
 
-为了最大化复用已有开发成果，避免“重复造轮子”，本节详细梳理当前项目群中已就绪的成熟 Go 代码资产，并给出具体的接入和移植方法。
+> **状态说明**：v3.4.1 修订删除了对 `~/code/sfwork/PrivShield-go` 外部仓库的引用（该仓库在当前工作区不存在）。本节仅梳理**当前主仓库 `PrivShield/` 内已就绪的 Go 资产**，并指出路径 C 仍需新建的模块。
 
-### 13.1 现有 Go 资产盘点与复用度评估矩阵
+为了最大化复用已有开发成果，避免“重复造轮子”，本节梳理当前主仓库内已就绪的成熟 Go 代码资产，并给出接入和移植建议。
+
+### 13.1 当前仓库 Go 资产盘点与复用度评估矩阵
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                               存量 Go 代码资产与复用度评估全景表                                  │
+│                          当前仓库 PrivShield/ 已就绪 Go 资产复用度评估                            │
 ├───────────────────────────────┬────────────────────────────────────┬──────────┬──────────────────┤
 │ 模块资产来源                  │ 对应功能与实现内容                 │ 可复用度 │ 复用与改造策略   │
 ├───────────────────────────────┼────────────────────────────────────┼──────────┼──────────────────┤
-│ `sfwork/PrivShield-go/`       │                                    │          │                  │
-│  ├─ `internal/gateway/`       │ 813 行完整负载均衡器/熔断/双轨探活 │ **95%**  │ 直接移植，升级P2C│
-│  ├─ `privacy-go-sdk/`         │ 50 个原语/算子/分词器/ONNX实现     │ **90%**  │ 导入作为核心算法 │
-│  ├─ `internal/grpcserver/`    │ gRPC Protocol Server 骨架          │ **85%**  │ 接入 pkg/ 拦截器 │
-│  └─ `internal/rest/`          │ Gin REST 接口与路由映射            │ **85%**  │ 挂载统一错误信封 │
 │ `PrivShield/pkg/` (主工程)    │                                    │          │                  │
 │  ├─ `pkg/middleware/`         │ 统一错误信封 / TraceID / 限流中间件│ **100%** │ 全量直接接入     │
 │  ├─ `pkg/tlsutil/`            │ mTLS CN 白名单热重载拦截器         │ **100%** │ 全量直接接入     │
 │  ├─ `pkg/naming/`             │ SSOT 命名事实源 (DSYibao/Kangyang) │ **100%** │ 替换所有硬编码   │
-│  └─ `pkg/store/postgres/`     │ Phase B PostgreSQL 租约存储与哈希链│ **100%** │ 状态与任务复用   │
+│  ├─ `pkg/store/`              │ Memory / SQLite / PostgreSQL 租约  │ **100%** │ 状态与任务复用   │
+│  └─ `pkg/crypto/`             │ SM4-GCM 信封加密                   │ **100%** │ 直接复用         │
+│ `PrivShield/services/`        │                                    │          │                  │
+│  ├─ `service-hub/`            │ gRPC/HTTP 服务端、调度中枢模式     │ **80%**  │ 参考服务框架     │
+│  ├─ `datasource-mgr/`         │ 数据源纳管与 mTLS 服务端           │ **80%**  │ 参考服务框架     │
+│  └─ `audit-log/`              │ 审计存证与哈希链                   │ **90%**  │ 复用审计客户端   │
 │ `PrivShield/console/bff-go/`  │                                    │          │                  │
 │  └─ `internal/agent/`         │ gRPC 连接池、重试与自愈探针        │ **90%**  │ 提取为通用客户端 │
+│ `PrivShield/engine/gateway/`  │ Python 版网关实现                  │ **30%**  │ 仅复用配置与协议 │
 └───────────────────────────────┴────────────────────────────────────┴──────────┴──────────────────┘
 ```
 
+### 13.2 路径 C 需新建模块清单（当前仓库不存在）
+
+| 目标模块 | 当前状态 | 说明 |
+|---|---|---|
+| `privacy-go-sdk/` | ❌ 不存在 | 需从零实现纯 Go 隐私原语；可参考 Python `engine/privacy/` 的算法语义与测试用例。 |
+| `internal/dynclassification/` | ❌ 不存在 | 需实现 AC 规则引擎、ONNX NER、LLM 客户端、Safety Floor。 |
+| `internal/gateway/` | ❌ 不存在 | 当前网关为 Python `engine/gateway/`；Go 版本需重新实现或参考成熟开源库。 |
+| `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ❌ 不存在 | 需基于 `pkg/` 与 `proto/privacy.proto` 新建。 |
+| `cmd/privshield-agent/`、`cmd/privshield-gateway/` | ❌ 不存在 | 需新建主入口。 |
+
 ---
 
-### 13.2 网关子系统复用实战 (`sfwork/PrivShield-go/internal/gateway`)
+### 13.2 网关子系统复用实战（当前 Python 实现 vs 目标 Go 实现）
 
-在 `/home/charles/code/sfwork/PrivShield-go/internal/gateway/` 中已包含成熟的负载均衡与代理实现，可直接复用并升级：
+当前 `/home/charles/code/PrivShield/engine/gateway/` 为 Python 实现，提供负载均衡、反向代理与健康检查，可作为 Go 原生网关的**协议与配置参考**，但不能直接复用代码。目标 Go 原生网关 (`internal/gateway`) 需重新实现以下能力：
 
-1. **复用 `balancer.go` 的调度核心与三态状态机**：
-   - **调度策略**：直接复用 `StrategyRoundRobin`、`StrategyWeightedRoundRobin` (Nginx SWRR 平滑加权轮询)、`StrategyLeastConnections`、`StrategyWeightedRandom`；
-   - **三态熔断器**：直接复用 `CircuitBreaker` 状态机（`Closed` ➔ `Open` ➔ `Half-Open`），其包含连续失败计数与冷却恢复时间窗口；
-   - **主动双轨探活**：直接复用 `CheckBackendHealth()` 函数，其已实现并发 HTTP `/health` JSON 状态解析与 gRPC `Health/Check` 探测。
-2. **复用 `grpc_proxy.go` 的透明流式转发**：
-   - 借鉴其基于 `grpc.UnknownServiceHandler` 的透明转发机制，免去网关编译业务 `.pb.go` 的依赖。
-3. **升级与改造点**：
-   - 在 `balancer.go` 中新增 `SelectNodeP2C()` 幂律双选自适应调度算法（见本文档 §9.2）；
+1. **重新实现 `balancer.go` 的调度核心与三态状态机**：
+   - 当前 Python `engine/gateway/balancer.py` 已实现 Round-Robin、Weighted Round-Robin、LeastConnections 调度与熔断/健康检查，可作为算法语义参考；
+   - Go 版本需实现：`StrategyRoundRobin`、`StrategyWeightedRoundRobin` (Nginx SWRR)、`StrategyLeastConnections`、`StrategyWeightedRandom`；
+   - 新增 `SelectNodeP2C()` 幂律双选自适应调度算法（见本文档 §9.2）；
+   - 实现 `CircuitBreaker` 三态状态机（`Closed` ➔ `Open` ➔ `Half-Open`）与并发 HTTP `/health` + gRPC `Health/Check` 双轨探活。
+2. **重新实现 `grpc_proxy.go` 的透明流式转发**：
+   - 当前 Python `engine/gateway/grpc_proxy.py` 已实现基于 gRPC 帧的透明转发，可作为协议参考；
+   - Go 版本需解决自定义 codec / `UnknownServiceHandler` 字节透传问题（见 9.4 节约束），可选用成熟开源库或自研。
+3. **接入点**：
    - 在 `http_proxy.go` 中接入 `pkg/middleware/envelope.go`，确保网关自身拦截错误与后端错误均输出统一 5 字段 JSON 格式。
 
 ---
@@ -1954,52 +2052,49 @@ func main() {
 1. **统一错误信封接入 (`pkg/middleware/envelope.go`)**：
    - 彻底废除 Go 引擎中原有的旧版错误响应，统一使用 `middleware.AbortWithError(c, status, code, msg, detail)`；
 2. **SSOT 数据源别名收敛 (`pkg/naming/`)**：
-   - 将所有涉及医保与康养的路由和参数判断，统一收敛至 `naming.DSYibao` 与 `naming.DSKangyang`，未知数据源调用 `naming.ValidateDatasourceID()` 并在不合规时阻断；
+   - 将所有涉及医保与康养的路由和参数判断，统一收敛至 `naming.DSYibao` 与 `naming.DSKangyang`；入站值使用 `naming.ResolveInbound(raw)` 一次性完成归一化与写侧校验，未知或预留数据源 fail-closed；
 3. **mTLS CN 动态白名单接入 (`pkg/tlsutil/`)**：
    - gRPC Server 显式注册 `tlsutil.NewWhitelistUnaryInterceptor(whitelistPath)` 与 `tlsutil.NewWhitelistStreamInterceptor(whitelistPath)`，自动实现基于 `config/mtls-whitelist.yaml` 的 5 秒文件 mtime 轮询热重载。
 
 ---
 
-### 13.4 跨工程资产同步与自动化合并迁移指令
+### 13.4 跨工程资产同步说明（重要勘误）
 
-研发人员可通过以下脚本快速完成代码资产的同步、合并与编译验证：
+> **状态说明**：v3.4.1 修订确认 `~/code/sfwork/PrivShield-go` 仓库**在当前工作区不存在**，因此原 v3.3.0 中基于 `cp -r ${SOURCE_DIR}/...` 的自动同步脚本已失效并移除。
 
+如果后续引入外部 Go 参考实现，必须遵循以下原则：
+1. **先审计再合入**：外部代码的依赖、许可证、端口、环境变量命名必须与当前仓库 `pkg/` 和 `unified_design.md` 对齐，禁止直接覆盖；
+2. **分模块评审**：`privacy-go-sdk/`、`internal/gateway/`、`internal/dynclassification/` 等核心模块应单独 PR，禁止一次性大补丁；
+3. **先跑测试再合并**：合并前必须执行 `go test -v -race ./...`、`go vet ./...`、`make lint-naming` 与 `PYTHONPATH=. pytest tests/ -q`；
+4. **Python 引擎保护**：在 Go 引擎尚未通过影子流量验证前，不得删除或破坏 `engine/`、`pyproject.toml`、`tests/` 等现有资产。
+
+**推荐启动脚本（当前仓库现状）**：
 ```bash
 #!/bin/bash
 set -e
+cd /home/charles/code/PrivShield
 
-SOURCE_DIR="/home/charles/code/sfwork/PrivShield-go"
-TARGET_DIR="/home/charles/code/PrivShield"
+# 1. 验证当前 Go 共享库编译通过
+go test -v -race ./pkg/...
 
-echo "=== [1/4] 同步 privacy-go-sdk 隐私原语与分类引擎 ==="
-mkdir -p ${TARGET_DIR}/privacy-go-sdk
-cp -r ${SOURCE_DIR}/privacy-go-sdk/* ${TARGET_DIR}/privacy-go-sdk/
+# 2. 验证 Python 引擎测试集仍通过
+PYTHONPATH=. pytest tests/ -q
 
-echo "=== [2/4] 同步 internal/gateway 负载均衡与网关代码 ==="
-mkdir -p ${TARGET_DIR}/internal/gateway
-cp -r ${SOURCE_DIR}/internal/gateway/* ${TARGET_DIR}/internal/gateway/
-
-echo "=== [3/4] 同步 cmd 入口文件 ==="
-mkdir -p ${TARGET_DIR}/cmd/privshield-agent ${TARGET_DIR}/cmd/privshield-gateway
-cp -r ${SOURCE_DIR}/cmd/privshield-agent/* ${TARGET_DIR}/cmd/privshield-agent/
-cp -r ${SOURCE_DIR}/cmd/privshield-gateway/* ${TARGET_DIR}/cmd/privshield-gateway/
-
-echo "=== [4/4] 编译与单元测试验证 ==="
-cd ${TARGET_DIR}
-go mod tidy
-go test -v -race ./privacy-go-sdk/... ./internal/gateway/...
-echo "=== 资产同步与验证全部成功 ==="
+# 3. 命名规范检查（若已配置）
+make lint-naming
 ```
 
 ---
 
-## 14. 性能基准量化评估与容量规划 (Benchmark & Sizing)
+## 14. 性能基准量化评估与容量规划 (Benchmark & Sizing) — 目标/测算值
 
-在 16 逻辑核 / 32GB 内存 / NVIDIA RTX 4090 (24GB) 环境实测与理论测算：
+> **状态说明**：本章所有数字为**目标值、理论测算值或对标值**，不是当前仓库实测结果。Go 原生引擎实现后，必须用 `go test -bench`、`wrk`/`k6`、GPU 压测工具在真实环境复测并替换为实测数据。
 
-### 14.1 性能与资源全面对比
+在 16 逻辑核 / 32GB 内存 / NVIDIA RTX 4090 (24GB) 环境**目标测算**：
 
-| 核心指标 | Python 引擎 (当前) | Go 原生引擎 (路径 C) | 提升幅度 |
+### 14.1 性能与资源目标对比
+
+| 核心指标 | Python 引擎 (当前参考) | Go 原生引擎 (路径 C 目标) | 预期提升幅度 |
 |---|---|---|---|
 | **单核纯规则脱敏吞吐** | ~33 批/秒 (~890 记录/秒) | **~2,100 批/秒 (~56,000 记录/秒)** | 🚀 **63x** |
 | **16 核满载并发吞吐** | ~54 批/秒 (受 GIL 限制) | **~32,000 批/秒 (~860,000 记录/秒)** | 🚀 **590x** |
@@ -2014,9 +2109,11 @@ echo "=== 资产同步与验证全部成功 ==="
 
 ---
 
-## 15. 构建、依赖管理与生产部署清单 (Build & K8s Packaging)
+## 15. 构建、依赖管理与生产部署清单 (Build & K8s Packaging) — 目标清单
 
-### 15.1 Multi-Stage 生产级 Dockerfile
+> **状态说明**：本章 Dockerfile 与部署清单为路径 C 的**目标构建方案**，当前仓库尚未生成对应镜像或 K8s 清单。实施前需与 `deploy/helm/PrivShield/`、`deploy/docker-compose/`、`deploy/k8s/` 现有资产对齐，并保留 Python 引擎双轨运行能力。
+
+### 15.1 Multi-Stage 目标 Dockerfile（参考）
 
 ```dockerfile
 # ── Stage 1: Go 编译环境 ──
@@ -2066,15 +2163,17 @@ ENTRYPOINT ["/app/privshield-agent"]
 
 ---
 
-## 16. 双轨影子流量验证与 Python 引擎彻底退役路线 (Migration & Deprecation Playbook)
+## 16. 双轨影子流量验证与 Python 引擎退役路线 (Migration & Deprecation Playbook) — 远期规划
 
-### 16.1 三阶段无缝平滑切流演进路线
+> **状态说明**：本章为**远期退役规划**，不是当前阶段任务。在 Go 原生引擎尚未实现、未通过影子流量验证、未稳定运行前，**不得执行** Python 引擎清理动作。
 
-为确保从 Python 引擎向 Go 引擎的无故障平滑过渡，制定三阶段迁移演进路线：
+### 16.1 三阶段无缝平滑切流演进路线（远期）
+
+为确保从 Python 引擎向 Go 引擎的无故障平滑过渡，目标制定三阶段迁移演进路线：
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Phase 1: 算法等价与 Fuzz 模糊测试 (当前 sfwork/PrivShield-go 阶段)        │
+│ Phase 1: 算法等价与 Fuzz 模糊测试 (Go 引擎开发阶段)                       │
 │ • 对 100,000+ 条医保/康养历史数据进行比对，验证脱敏与分级结果 100% 一致   │
 │ • 完成单元测试、覆盖率测试 (> 90%) 与边界 Fuzz 测试                      │
 ├──────────────────────────────────────────────────────────────────────────┤
@@ -2090,9 +2189,11 @@ ENTRYPOINT ["/app/privshield-agent"]
 
 ---
 
-### 16.2 Python 引擎全生命周期彻底下线与清理清单
+### 16.2 Python 引擎全生命周期彻底下线与清理清单（远期，当前禁止执行）
 
-当 Go 原生引擎（`engine-go/`）全面接管所有生产流量后，为了彻底净化代码库、消除双重维护负担与技术债务，执行以下**不可逆清理清单 (Clean-up Checklist)**：
+> **状态说明**：本节为 Go 引擎全面接管流量后的**远期清理清单**。在 Go 引擎未通过影子流量验证、未稳定运行前，**禁止**删除 `engine/`、`pyproject.toml`、`tests/`、`Makefile` 等现有资产，否则将破坏当前生产与 CI。
+
+当 Go 原生引擎（`engine-go/`）全面接管所有生产流量后，为了彻底净化代码库、消除双重维护负担与技术债务，**可评估**执行以下不可逆清理清单 (Clean-up Checklist)：
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -2139,9 +2240,11 @@ PrivShield/
 
 ---
 
-### 16.3 纯 Go 时代自动化构建与精简部署体系 (Pure-Go Build & Deployment)
+### 16.3 纯 Go 时代自动化构建与精简部署体系 (Pure-Go Build & Deployment) — 远期愿景
 
-彻底移除 Python 运行时后，全系统的开发与运维效率将获得质的飞跃：
+> **状态说明**：本节描述的是 Python 引擎彻底退役后的目标构建体系。当前构建、测试、部署仍以 `pyproject.toml`、`Makefile`、`pytest` 与 Python 引擎为主。
+
+彻底移除 Python 运行时后，全系统的开发与运维效率目标获得质的飞跃：
 
 1. **一键构建与全量测试**：
    ```bash
@@ -2158,3 +2261,26 @@ PrivShield/
 
 3. **云原生资源成本极大节约**：
    - 生产 Kubernetes 集群中，每个 Agent Pod 的内存 Request/Limit 可从原本的 `2Gi / 4Gi` 调整为 **`64Mi / 256Mi`**，整机 Pod 密度提升 **8~16 倍**，为企业节省 **80%+ 的云资源算力成本**！
+
+---
+
+## 附录 A：v3.4.1 文档修订记录
+
+本次修订（v3.4.0 → v3.4.1）基于对当前仓库实际代码资产的核对，核心目标是**让设计文档向代码对齐**，避免把规划态能力描述为已实现状态：
+
+| 修订项 | v3.4.0 原描述 | v3.4.1 修正 |
+|---|---|---|
+| 文档定位 | "完整实施方案 / Production Blueprint" | "架构演进规划与可行性研究草案" |
+| 外部仓库引用 | 声称复用 `~/code/sfwork/PrivShield-go` | 明确该仓库在当前工作区不存在，删除同步脚本 |
+| `engine-go/` 等目录 | 当作已存在描述 | 标注为"目标结构，尚未创建" |
+| 性能数字 | 当作已实测数据呈现 | 全部改为"目标值 / 测算值"，要求后续实测替换 |
+| Python 引擎退役 | "彻底退役并永久移除" | 改为"远期目标，当前禁止执行" |
+| 代码示例 | 部分可直接编译的错觉 | 在 5.2、6.2、6.3、6.4、7、9.4、12.6 等节明确标注为教学/参考片段 |
+| 拓扑端口 | Go 原生引擎/Gateway 作为当前态 | 标注 Python 引擎/Gateway 仍为主力 |
+| 工程错误示例 | `r.Any("/*proxyPath")`、`FrameData`、忽略 `session.Run` 错误等 | 增加说明或修正为 `NoRoute`、错误检查 |
+
+**待办（建议后续更新本附录时同步完成）**：
+- [ ] 创建 `engine-go/`、`privacy-go-sdk/`、`cmd/privshield-*` 目录并实现隐私原语；
+- [ ] 补充 `go test -bench`、网关压测、GPU NER 压测的实测数据，替换第 14 章目标值；
+- [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
+- [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。
