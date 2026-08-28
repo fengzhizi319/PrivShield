@@ -73,8 +73,8 @@ func main() {
 	// Prometheus /metrics 端点（设计文档 §11.1）
 	r.GET("/metrics", gwMetrics.Handler())
 
-	// 反向代理：所有未匹配路由转发给后端
-	r.NoRoute(gateway.NewHTTPProxyHandler(lb))
+	// 反向代理：所有未匹配路由转发给后端（传入 metrics 实时上报 Prometheus 指标）
+	r.NoRoute(gateway.NewHTTPProxyHandler(lb, gwMetrics))
 
 	// 启动 HTTP 服务器
 	httpAddr := fmt.Sprintf("%s:%s", getEnv("GATEWAY_HOST", "0.0.0.0"), getEnv("GATEWAY_PORT", "8000"))
@@ -98,7 +98,7 @@ func main() {
 	grpcPort := getEnv("GATEWAY_GRPC_PORT", "50000")
 	grpcAddr := fmt.Sprintf("0.0.0.0:%s", grpcPort)
 
-	grpcProxyServer, grpcLis, err := gateway.NewGrpcProxyListener(lb, grpcAddr)
+	grpcProxyServer, grpcLis, err := gateway.NewGrpcProxyListener(lb, grpcAddr, gwMetrics)
 	if err != nil {
 		slog.Error("gRPC proxy listener failed", "err", err)
 		os.Exit(1)

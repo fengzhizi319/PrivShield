@@ -55,7 +55,7 @@ func TestRawCodecUnmarshalTypeError(t *testing.T) {
 
 func TestNewGrpcProxyServer(t *testing.T) {
 	lb := NewLoadBalancer([]string{"127.0.0.1:50051"}, "p2c")
-	proxy := NewGrpcProxyServer(lb)
+	proxy := NewGrpcProxyServer(lb, nil)
 	if proxy == nil {
 		t.Fatal("NewGrpcProxyServer returned nil")
 	}
@@ -65,11 +65,14 @@ func TestNewGrpcProxyServer(t *testing.T) {
 	if proxy.dialTimeout != 5*time.Second {
 		t.Errorf("dialTimeout = %v, want 5s", proxy.dialTimeout)
 	}
+	if proxy.metrics != nil {
+		t.Error("metrics should be nil")
+	}
 }
 
 func TestGrpcProxyGetOrCreateConn(t *testing.T) {
 	lb := NewLoadBalancer([]string{"127.0.0.1:50051"}, "p2c")
-	proxy := NewGrpcProxyServer(lb)
+	proxy := NewGrpcProxyServer(lb, nil)
 	defer proxy.Close()
 
 	// 第一次创建
@@ -93,7 +96,7 @@ func TestGrpcProxyGetOrCreateConn(t *testing.T) {
 
 func TestGrpcProxyClose(t *testing.T) {
 	lb := NewLoadBalancer([]string{"127.0.0.1:50051"}, "p2c")
-	proxy := NewGrpcProxyServer(lb)
+	proxy := NewGrpcProxyServer(lb, nil)
 
 	// 创建连接
 	_, _ = proxy.getOrCreateConn("127.0.0.1:50051")
@@ -116,7 +119,7 @@ func TestNewGrpcProxyListener(t *testing.T) {
 	lb := NewLoadBalancer([]string{"127.0.0.1:50051"}, "p2c")
 
 	// 使用 :0 让系统分配端口
-	grpcServer, lis, err := NewGrpcProxyListener(lb, "127.0.0.1:0")
+	grpcServer, lis, err := NewGrpcProxyListener(lb, "127.0.0.1:0", nil)
 	if err != nil {
 		t.Fatalf("NewGrpcProxyListener: %v", err)
 	}

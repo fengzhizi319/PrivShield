@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -61,15 +62,17 @@ type GrpcProxyServer struct {
 	connPoolMu  sync.RWMutex
 	ewmaAlpha   float64
 	dialTimeout time.Duration
+	metrics     *observability.GatewayMetrics // 可为 nil
 }
 
 // NewGrpcProxyServer 创建 gRPC 透明流代理
-func NewGrpcProxyServer(lb *LoadBalancer) *GrpcProxyServer {
+func NewGrpcProxyServer(lb *LoadBalancer, metrics *observability.GatewayMetrics) *GrpcProxyServer {
 	return &GrpcProxyServer{
 		lb:          lb,
 		connPool:    make(map[string]*grpc.ClientConn),
 		ewmaAlpha:   0.2,
 		dialTimeout: 5 * time.Second,
+		metrics:     metrics,
 	}
 }
 
@@ -142,7 +145,13 @@ func (g *GrpcProxyServer) TransparentStreamDirector(srv interface{}, serverStrea
 	start := time.Now()
 	defer func() {
 		node.DecrementInFlight()
-		node.UpdateEWMA(time.Since(start), g.ewmaAlpha)
+		latency := time.Since(start)
+		node.UpdateEWMA(latency, g.ewmaAlpha)
+		// 上报 Prometheus 指标
+		if g.metrics != nil {
+			g.metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight))
+			g.metrics.SetBackendEWMALatency(node.Address, latency.Seconds())
+		}
 	}()
 
 	// 4. 建立到后端的客户端流
@@ -214,6 +223,17 @@ func (g *GrpcProxyServer) TransparentStreamDirector(srv interface{}, serverStrea
 		)
 		node.CB.RecordFailure()
 	}
+
+	// 上报熔断器状态 + 转发计数
+	if g.metrics != nil {
+		g.metrics.SetCircuitBreakerState(node.Address, cbStateString(node.CB.State()))
+		if err == nil {
+			g.metrics.RecordForwarded(node.Address, 200)
+		} else {
+			g.metrics.RecordForwarded(node.Address, 502)
+		}
+	}
+
 	return err
 }
 
@@ -233,13 +253,14 @@ func (g *GrpcProxyServer) Close() error {
 
 // NewGrpcProxyListener 创建并启动 gRPC 透明流代理服务器
 // 返回 grpc.Server 实例用于优雅停机。
-func NewGrpcProxyListener(lb *LoadBalancer, listenAddr string) (*grpc.Server, net.Listener, error) {
+// metrics 可为 nil，为 nil 时不上报 Prometheus 指标。
+func NewGrpcProxyListener(lb *LoadBalancer, listenAddr string, metrics *observability.GatewayMetrics) (*grpc.Server, net.Listener, error) {
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listen %s: %w", listenAddr, err)
 	}
 
-	proxy := NewGrpcProxyServer(lb)
+	proxy := NewGrpcProxyServer(lb, metrics)
 
 	grpcServer := grpc.NewServer(
 		grpc.UnknownServiceHandler(proxy.TransparentStreamDirector),

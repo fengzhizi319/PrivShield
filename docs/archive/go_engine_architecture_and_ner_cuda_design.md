@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v11.0.0-drafted (路径 C 演进草案 Phase 7 Prometheus 指标实际注册 + 网关指标补埋版)
+> **版本**：v12.0.0-drafted (路径 C 演进草案 Phase 8 网关 Prometheus 指标联动 + 统一错误信封 + 集成测试版)
 > **编写日期**：2026-08-28
-> **修订说明**：v11.0.0 完成 Phase 7 实现：engine-go Prometheus 指标实际注册（替代 TODO 桩），新增 `observability/metrics.go`（5 个 engine 指标：`privshield_requests_total`/`privshield_request_duration_seconds`/`privshield_classification_total`/`privshield_budget_consumed_total`/`privshield_ner_inference_seconds`）+ `observability/gateway_metrics.go`（4 个 gateway 指标：`privshield_gateway_backend_in_flight`/`privshield_gateway_backend_ewma_latency_seconds`/`privshield_gateway_circuit_breaker_state`/`privshield_gateway_requests_total`）。Agent + Gateway 均接入 `/metrics` 端点。新增 13 个指标测试。清理多处过期状态标注。
+> **修订说明**：v12.0.0 完成 Phase 8 实现：GatewayMetrics 实际接入 HTTP/gRPC 代理层（`http_proxy.go` + `grpc_proxy.go` 每次转发实时上报 InFlight/EWMA/熔断器状态/转发计数到 Prometheus）。`http_proxy.go` 全部错误响应迁移至 `middleware.AbortWithError` 统一信封。新增 `cbStateString` 辅助函数。新增 11 个 gateway 集成测试（代理+指标联动+信封格式校验+熔断器状态机）。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 7 已实现 | Phase 1-6 骨架 + Phase 7 Prometheus 指标实际注册（9 个指标 + `/metrics` 端点 + 13 个测试）。详见附录 A v11.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 8 已实现 | Phase 1-7 骨架 + Phase 8 网关 Prometheus 指标联动（代理层实时上报 InFlight/EWMA/熔断器状态）+ 统一错误信封 + 11 个 gateway 集成测试。详见附录 A v12.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -1442,7 +1442,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-7 已实现（详见附录 A v5.0.0–v11.0.0 修订记录）。Phase 7 Prometheus 指标实际注册已完成（替代 TODO 桩，9 个指标 + `/metrics` 端点 + 13 个测试）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
+> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-8 已实现（详见附录 A v5.0.0–v12.0.0 修订记录）。Phase 8 网关 Prometheus 指标联动已完成（代理层实时上报 + 统一错误信封 + 11 个集成测试）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2028,11 +2028,11 @@ func main() {
 |---|---|---|
 | `privacy-go-sdk/` | ✅ Phase 2 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试与基准测试。 |
 | `internal/dynclassification/` | ✅ Phase 5 已实现 | 规则引擎 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + 动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链 + **CUDA ONNX NER 引擎（LockOSThread Worker Pool + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级）**。完整 CUDA CGO 绑定待引入 onnxruntime_go。 |
-| `internal/gateway/` | ✅ Phase 3 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）**。 |
+| `internal/gateway/` | ✅ Phase 8 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）** + **Prometheus 指标联动（每次转发实时上报 InFlight/EWMA/CB 状态）** + **统一错误信封（`middleware.AbortWithError`）** + 11 个集成测试。 |
 | `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 6 已实现 | Service 编排层、REST 路由（**17 个端点统一错误信封 `middleware.AbortWithError`** + 28 个集成测试）、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer**）。 |
 | `internal/observability/` | ✅ Phase 7 已实现 | 结构化日志（slog JSON）+ **Prometheus 指标实际注册**（`metrics.go`：5 个 engine 指标 + `gateway_metrics.go`：4 个 gateway 指标 + `/metrics` 端点 + 13 个测试）。替代旧 TODO 桩。 |
 | `cmd/privshield-agent/` | ✅ Phase 7 已集成 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer`，**接入 TraceMiddleware + RateLimit 限流 + mTLS CN 白名单拦截器 + Prometheus `/metrics` 端点**。 |
-| `cmd/privshield-gateway/` | ✅ Phase 7 已重构 | L7 网关入口，补齐 gRPC 透明流代理集成（`grpcProxy.NewGrpcProxyListener`），HTTP+gRPC 双协议代理 + **Prometheus `/metrics` 端点（4 个 gateway 专属指标）**。 |
+| `cmd/privshield-gateway/` | ✅ Phase 8 已重构 | L7 网关入口，补齐 gRPC 透明流代理集成（`grpcProxy.NewGrpcProxyListener`），HTTP+gRPC 双协议代理 + **Prometheus `/metrics` 端点（4 个 gateway 专属指标）** + **代理层指标联动**。 |
 | `internal/gateway/backend_tls.go` | ✅ Phase 4 已实现 | 东西向 mTLS 回源 TLS 配置（BuildBackendTLSConfig + CA 验证 + TLS 1.3 + Insecure 降级）。 |
 | `scripts/dev/shadow_verifier.go` | ✅ Phase 4 已实现 | 影子流量比对验证工具，6 条比对用例（MaskRecord/NoisyCount/Classify/HashHMAC/MaskBatch/ClassifyBatch），精确+近似双模式比对。 |
 | `scripts/dev/go-engine-bench.sh` | ✅ Phase 4 已实现 | 全栈压测脚本，覆盖 privacy-go-sdk 6 包 + engine-go dynclassification，支持 `--bench-time` 和 `--output` 参数。 |
@@ -2298,6 +2298,27 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v12.0.0 修订（v11.0.0 → v12.0.0）
+
+本次修订完成 Phase 8 实现：网关 Prometheus 指标联动 + 统一错误信封 + 集成测试：
+
+| 修订项 | v11.0.0 状态 | v12.0.0 实现 |
+|---|---|---|
+| HTTP 代理指标联动 | `GatewayMetrics` 已定义但未接入 `http_proxy.go` | `NewHTTPProxyHandler(lb, metrics)` 每次转发实时上报 `SetBackendInFlight`/`SetBackendEWMALatency`/`SetCircuitBreakerState`/`RecordForwarded` |
+| gRPC 代理指标联动 | `GatewayMetrics` 未接入 `grpc_proxy.go` | `NewGrpcProxyServer(lb, metrics)` 在 defer 中上报 InFlight/EWMA，流结束后上报 CB 状态 + 转发计数 |
+| HTTP 代理错误信封 | `c.JSON(statusCode, gin.H{...})` 旧版格式 | 全部 3 个错误路径迁移至 `middleware.AbortWithError`，输出统一信封（code/message/detail/trace_id/timestamp） |
+| `cbStateString` 辅助函数 | 内联 switch 分散在多处 | 提取为统一函数，`http_proxy.go` + `grpc_proxy.go` 共享 |
+| Gateway 集成测试 | 仅 gRPC 代理测试 | 新增 `http_proxy_test.go`（11 个测试）：`cbStateString`/熔断器信封/指标联动/nil metrics 安全/健康检查/信封格式校验/middleware 一致性 |
+| Gateway main.go | 未传递 metrics 到代理层 | `NewHTTPProxyHandler(lb, gwMetrics)` + `NewGrpcProxyListener(lb, grpcAddr, gwMetrics)` |
+
+**Phase 8 实现清单**：
+- [x] `engine-go/internal/gateway/http_proxy.go` — GatewayMetrics 接入 + 统一错误信封 + `cbStateString` 辅助函数
+- [x] `engine-go/internal/gateway/grpc_proxy.go` — GatewayMetrics 接入（defer InFlight/EWMA + 流结束 CB/转发计数）
+- [x] `engine-go/internal/gateway/http_proxy_test.go` — 11 个集成测试（代理+指标联动+信封格式+熔断器状态机）
+- [x] `engine-go/internal/gateway/grpc_proxy_test.go` — 更新签名适配 `metrics` 参数
+- [x] `engine-go/cmd/privshield-gateway/main.go` — 传递 `gwMetrics` 到 HTTP/gRPC 代理层
+- [x] 全量测试 — engine-go (5 包 ok) + privacy-go-sdk (7 包 ok)，`-race` 全部通过
+
 ### v11.0.0 修订（v10.0.0 → v11.0.0）
 
 本次修订完成 Phase 7 实现：Prometheus 指标实际注册 + 网关指标补埋 + `/metrics` 端点：
@@ -2514,6 +2535,8 @@ PrivShield/
 - [x] REST 集成测试（`routes_test.go`，28 个测试覆盖全部端点 + 错误信封格式校验）；
 - [x] Prometheus 指标实际注册：`observability/metrics.go`（5 个 engine 指标）+ `observability/gateway_metrics.go`（4 个 gateway 指标），替代旧 TODO 桩；
 - [x] Agent + Gateway 均接入 `/metrics` 端点 + 13 个指标测试；
+- [x] 网关 Prometheus 指标联动：`http_proxy.go` + `grpc_proxy.go` 每次转发实时上报 InFlight/EWMA/CB 状态到 Prometheus；
+- [x] HTTP 代理统一错误信封迁移 + 11 个 gateway 集成测试；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。
