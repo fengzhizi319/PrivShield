@@ -43,35 +43,9 @@ func InitLogger(level string) {
 }
 
 // ──────────────────────────────────────────────
-// Prometheus 指标中间件
+// Prometheus 指标中间件已迁移至 metrics.go
+// 使用 EngineMetrics.PrometheusMiddleware() 替代
 // ──────────────────────────────────────────────
-
-// PrometheusMiddleware 记录 HTTP 请求指标
-func PrometheusMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		start := time.Now()
-
-		// 处理请求
-		c.Next()
-
-		// 记录指标（简化版，生产环境应使用 prometheus 客户端库）
-		duration := time.Since(start).Seconds()
-		status := c.Writer.Status()
-		method := c.Request.Method
-		path := c.FullPath()
-
-		// TODO: 集成 prometheus 客户端库
-		// httpRequestsTotal.WithLabelValues(method, path, status).Inc()
-		// httpRequestDuration.WithLabelValues(method, path).Observe(duration)
-
-		slog.Debug("Request metrics",
-			"method", method,
-			"path", path,
-			"status", status,
-			"duration", duration,
-		)
-	}
-}
 
 // ──────────────────────────────────────────────
 // 请求日志中间件

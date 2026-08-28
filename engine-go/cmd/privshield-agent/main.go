@@ -91,6 +91,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 初始化 Prometheus 指标收集器（设计文档 §11.1）
+	engineMetrics := observability.NewEngineMetrics()
+
 	// ── REST API (Gin) ──
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -104,10 +107,13 @@ func main() {
 	}
 
 	router.Use(observability.RequestLogger())
-	router.Use(observability.PrometheusMiddleware())
+	router.Use(engineMetrics.PrometheusMiddleware()) // Prometheus 实际指标注册（替代旧 TODO 桩）
 
 	// 注册全部 REST API 路由（17 个端点）
 	rest.RegisterRoutes(router, svc)
+
+	// Prometheus /metrics 端点（设计文档 §11.1）
+	router.GET("/metrics", engineMetrics.Handler())
 
 	restAddr := fmt.Sprintf("%s:%d", cfg.RESTHost, cfg.RESTPort)
 	restServer := &http.Server{

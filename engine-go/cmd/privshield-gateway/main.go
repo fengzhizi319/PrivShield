@@ -52,11 +52,15 @@ func main() {
 	// 创建负载均衡器
 	lb := gateway.NewLoadBalancer(addresses, strategy)
 
+	// 初始化网关 Prometheus 指标（设计文档 §11.1）
+	gwMetrics := observability.NewGatewayMetrics()
+
 	// ── HTTP 反向代理 ──
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(observability.RequestLogger())
+	r.Use(gwMetrics.PrometheusMiddleware()) // 网关转发指标
 
 	// 网关自身健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -65,6 +69,9 @@ func main() {
 
 	// 后端状态查询
 	r.GET("/gateway/backends", gateway.NewHealthCheckHandler(lb))
+
+	// Prometheus /metrics 端点（设计文档 §11.1）
+	r.GET("/metrics", gwMetrics.Handler())
 
 	// 反向代理：所有未匹配路由转发给后端
 	r.NoRoute(gateway.NewHTTPProxyHandler(lb))
