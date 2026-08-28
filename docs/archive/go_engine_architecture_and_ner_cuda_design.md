@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v8.0.0-drafted (路径 C 演进草案 Phase 4 集成验证版)
+> **版本**：v9.0.0-drafted (路径 C 演进草案 Phase 5 CUDA ONNX NER + 统一中间件集成版)
 > **编写日期**：2026-08-28
-> **修订说明**：v8.0.0 完成 Phase 4 集成验证：Agent main.go 重构（使用 rest.RegisterRoutes + TypedServer 替代内联路由）、Gateway main.go 补齐 gRPC 透明流代理集成、mTLS 后端 TLS 配置（BuildBackendTLSConfig + CA 验证 + TLS 1.3 默认）、影子流量比对验证工具（shadow_verifier.go，6 条比对用例 + 精确/近似双模式）、全栈压测脚本（go-engine-bench.sh，覆盖 privacy-go-sdk 6 包 + engine-go dynclassification）。
+> **修订说明**：v9.0.0 完成 Phase 5 核心实现：CUDA ONNX NER 引擎完整架构（LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象 + Stub/CGO 双轨模式 + 四级降级链）、Agent 接入 pkg/middleware 全链路分布式追踪中间件（TraceMiddleware）、Agent gRPC 接入 pkg/tlsutil mTLS CN 白名单拦截器（NewWhitelistInterceptor）。新增 14 个 CUDA ONNX NER 测试（BIO 解码/argmax/softmax/Worker Pool/超时降级/推理错误降级）。
 
 ---
 
@@ -72,7 +72,7 @@
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
 | `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 2 已实现 | Phase 1 骨架 + Phase 2 补齐：gRPC 服务端、Service 编排层、REST 路由、L7 网关、dynclassification 扩展、medical 包、配置文件。详见附录 A v6.0.0 修订记录。 |
-| Go + CUDA Small-NER 引擎 | ❌ 尚未实现 | ONNX Runtime CGO 绑定、动态合批、Tokenizer 等为设计草案。WordPiece Tokenizer 与安全底线仲裁器已提供 Go 纯实现版（Phase 2）。 |
+| Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
 **工程数字说明**：
@@ -423,9 +423,9 @@ func (m *AcRuleMatcher) ScanAndRedact(text string) (sanitized string, maxLevel s
 
 ## 6. Go + CUDA Small-NER 深度学习推理核心实现 — 设计草案与关键约束
 
-> **状态说明**：Go + CUDA Small-NER 引擎属于路径 C 的高复杂度模块，**尚未实现**。本章描述的是设计思路、关键约束与参考实现片段；实际落地前需完成 ONNX Runtime 动态库适配、词表与模型资产准备、GPU 环境可用性验证。
+> **状态说明**：Go + CUDA Small-NER 引擎 **Phase 5 架构已实现**（`cuda_onnx_ner.go`，666 行）。LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象 + Stub/CGO 双轨模式 + 四级降级链均已实现并通过 14 个单元测试（`-race` 全通过）。完整 CUDA CGO 绑定待引入 `onnxruntime_go` 替换 Stub 实现；当前在无 GPU 环境下自动降级到规则引擎。GPU 基准数据待 NVIDIA 环境复测后补充。
 
-在 Go 中调用 CUDA 执行深度学习推理，必须解决 **CGO 调度屏障**、**显存安全管理**、**中文分词对齐** 与 **动态合批** 四大工程难题。以下各小节代码为**教学/参考片段**，不能直接用于生产。
+在 Go 中调用 CUDA 执行深度学习推理，必须解决 **CGO 调度屏障**、**显存安全管理**、**中文分词对齐** 与 **动态合批** 四大工程难题。以下各小节代码为**教学/参考片段**，不能直接用于生产。Phase 5 实际实现的完整架构代码见 `engine-go/internal/dynclassification/cuda_onnx_ner.go`。
 
 ### 6.1 ONNX Runtime CGO 双轨生命周期管理
 
@@ -2027,10 +2027,10 @@ func main() {
 | 目标模块 | 当前状态 | 说明 |
 |---|---|---|
 | `privacy-go-sdk/` | ✅ Phase 2 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试与基准测试。 |
-| `internal/dynclassification/` | ✅ Phase 3 已实现 | 规则引擎 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + **动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链**。完整 CUDA ONNX 绑定待实施。 |
+| `internal/dynclassification/` | ✅ Phase 5 已实现 | 规则引擎 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + 动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链 + **CUDA ONNX NER 引擎（LockOSThread Worker Pool + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级）**。完整 CUDA CGO 绑定待引入 onnxruntime_go。 |
 | `internal/gateway/` | ✅ Phase 3 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）**。 |
 | `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 3 已实现 | Service 编排层、REST 路由、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer（protoc-gen-go 生成桩代码）**）。 |
-| `cmd/privshield-agent/` | ✅ Phase 4 已重构 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer` 替代内联路由，REST+gRPC 统一启动。 |
+| `cmd/privshield-agent/` | ✅ Phase 5 已集成 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer`，**接入 pkg/middleware TraceMiddleware + pkg/tlsutil mTLS CN 白名单拦截器**。 |
 | `cmd/privshield-gateway/` | ✅ Phase 4 已重构 | L7 网关入口，补齐 gRPC 透明流代理集成（`grpcProxy.NewGrpcProxyListener`），HTTP+gRPC 双协议代理。 |
 | `internal/gateway/backend_tls.go` | ✅ Phase 4 已实现 | 东西向 mTLS 回源 TLS 配置（BuildBackendTLSConfig + CA 验证 + TLS 1.3 + Insecure 降级）。 |
 | `scripts/dev/shadow_verifier.go` | ✅ Phase 4 已实现 | 影子流量比对验证工具，6 条比对用例（MaskRecord/NoisyCount/Classify/HashHMAC/MaskBatch/ClassifyBatch），精确+近似双模式比对。 |
@@ -2059,12 +2059,15 @@ func main() {
 
 `PrivShield-go` 作为主工程的核心组件，必须全面导入并挂载 `pkg/`：
 
+> **Phase 5 实现状态**：以下 1/3 项已在 `engine-go/cmd/privshield-agent/main.go` 中完成集成。
+
 1. **统一错误信封接入 (`pkg/middleware/envelope.go`)**：
    - 彻底废除 Go 引擎中原有的旧版错误响应，统一使用 `middleware.AbortWithError(c, status, code, msg, detail)`；
 2. **SSOT 数据源别名收敛 (`pkg/naming/`)**：
    - 将所有涉及医保与康养的路由和参数判断，统一收敛至 `naming.DSYibao` 与 `naming.DSKangyang`；入站值使用 `naming.ResolveInbound(raw)` 一次性完成归一化与写侧校验，未知或预留数据源 fail-closed；
 3. **mTLS CN 动态白名单接入 (`pkg/tlsutil/`)**：
    - gRPC Server 通过 `tlsutil.NewWhitelistInterceptor(whitelistPath)` 一次性获取 `UnaryServerInterceptor` + `StreamServerInterceptor` + `DynamicWhitelist`，自动实现基于 `config/mtls-whitelist.yaml` 的 5 秒文件 mtime 轮询热重载。
+   - ✅ **Phase 5 已集成**：`cmd/privshield-agent/main.go` 通过 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 环境变量启用，拦截器以 `grpc.ServerOption` 传入 `grpcserver.NewServer(svc, grpcOpts...)`。
 
 ---
 
@@ -2294,6 +2297,26 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v9.0.0 修订（v8.0.0 → v9.0.0）
+
+本次修订完成 Phase 5 核心实现：CUDA ONNX NER 引擎完整架构 + Agent 统一中间件集成：
+
+| 修订项 | v8.0.0 状态 | v9.0.0 实现 |
+|---|---|---|
+| CUDA ONNX NER 引擎 | ❌ 设计草案 | 实现 `cuda_onnx_ner.go`（666 行）：OnnxRuntime 接口抽象 + LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + Stub/CGO 双轨模式 + 四级降级链（GPU CUDA → CPU ONNX → Rule-based → 安全底线） |
+| Agent 分布式追踪 | 未接入 pkg/middleware | `cmd/privshield-agent/main.go` 集成 `middleware.TraceMiddleware()`，注入 X-Request-ID + X-Trace-ID 响应头 |
+| Agent mTLS CN 白名单 | 未接入 pkg/tlsutil | `cmd/privshield-agent/main.go` 集成 `tlsutil.NewWhitelistInterceptor()`，gRPC Server 接受 `...grpc.ServerOption` 可变参数传递拦截器 |
+| gRPC Server 扩展性 | 固定内置选项 | `grpcserver.NewServer` 改为接受 `...grpc.ServerOption`，Serve() 合并内置选项（rawCodec + UnknownServiceHandler）与外部选项（mTLS 拦截器） |
+| 测试覆盖 | Phase 4 测试 | 新增 `cuda_onnx_ner_test.go`（552 行，14 个测试）：BIO 解码/argmax/softmax/padOrTrim/Stub 降级/Worker Pool 并发/超时降级/推理错误降级，全量通过 `-race` 检测 |
+
+**Phase 5 实现清单**：
+- [x] `engine-go/internal/dynclassification/cuda_onnx_ner.go` — CUDA ONNX NER 引擎完整架构（666 行）
+- [x] `engine-go/internal/dynclassification/cuda_onnx_ner_test.go` — 14 个单元测试（552 行）
+- [x] `engine-go/cmd/privshield-agent/main.go` — Agent 集成 TraceMiddleware + mTLS CN 白名单拦截器
+- [x] `engine-go/internal/grpcserver/server.go` — NewServer 支持 `...grpc.ServerOption` 可变参数
+- [x] `engine-go/go.mod` — 添加 `pkg` 依赖 + replace 指令
+- [x] 全量测试 — engine-go (3 包 ok) + privacy-go-sdk (7 包 ok)，`-race` 全部通过
+
 ### v8.0.0 修订（v7.0.0 → v8.0.0）
 
 本次修订完成 Phase 4 集成验证，补齐入口重构、mTLS 回源、影子流量工具与压测脚本：
@@ -2438,7 +2461,8 @@ PrivShield/
 - [x] 实现全栈压测脚本（`scripts/dev/go-engine-bench.sh`，覆盖 privacy-go-sdk 6 包 + engine-go dynclassification）；
 - [x] Agent/Gateway 入口重构（rest.RegisterRoutes + TypedServer + gRPC 透明流代理集成）；
 - [x] 实现 mTLS 后端 TLS 配置（`internal/gateway/backend_tls.go`，CA 验证 + TLS 1.3）；
-- [ ] 实现完整 Go+CUDA ONNX NER CGO 绑定（引入 `onnxruntime_go`，LockOSThread Worker + 动态合批 GPU 推理）；
+- [x] 实现完整 Go+CUDA ONNX NER 架构（`cuda_onnx_ner.go`，LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级链，14 个测试通过 `-race`）；完整 CUDA CGO 绑定待引入 `onnxruntime_go` 替换 Stub；
+- [x] Agent 集成 `pkg/middleware` TraceMiddleware + `pkg/tlsutil` mTLS CN 白名单拦截器；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。

@@ -56,21 +56,27 @@ func (rawCodec) Name() string { return "proto" }
 
 // Server gRPC 隐私服务服务端
 type Server struct {
-	svc     *service.PrivacyService
-	grpcSrv *grpc.Server
+	svc      *service.PrivacyService
+	grpcSrv  *grpc.Server
+	grpcOpts []grpc.ServerOption // 额外 gRPC 选项（如 mTLS 拦截器）
 }
 
 // NewServer 创建 gRPC 服务端实例
-func NewServer(svc *service.PrivacyService) *Server {
-	return &Server{svc: svc}
+// 可选传入 grpc.ServerOption（如 mTLS CN 白名单拦截器）
+func NewServer(svc *service.PrivacyService, opts ...grpc.ServerOption) *Server {
+	return &Server{svc: svc, grpcOpts: opts}
 }
 
 // Serve 启动 gRPC 服务（阻塞）
 func (s *Server) Serve(lis net.Listener) error {
-	s.grpcSrv = grpc.NewServer(
+	// 内置选项：rawCodec + UnknownServiceHandler
+	builtinOpts := []grpc.ServerOption{
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(s.handleStream),
-	)
+	}
+	// 合并外部传入的选项（如 mTLS 拦截器）
+	allOpts := append(builtinOpts, s.grpcOpts...)
+	s.grpcSrv = grpc.NewServer(allOpts...)
 	slog.Info("gRPC server starting", "addr", lis.Addr())
 	return s.grpcSrv.Serve(lis)
 }

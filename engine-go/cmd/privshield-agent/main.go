@@ -23,10 +23,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
+
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/rest"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
+	"github.com/fengzhizi319/PrivShield/pkg/middleware"
+	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 )
 
 // ──────────────────────────────────────────────
@@ -87,6 +91,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(middleware.TraceMiddleware()) // 全链路分布式追踪 (X-Request-ID + X-Trace-ID)
 	router.Use(observability.RequestLogger())
 	router.Use(observability.PrometheusMiddleware())
 
@@ -118,7 +123,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	grpcSrv := grpcserver.NewServer(svc)
+	// mTLS CN 白名单拦截器（设计文档 §13.4）
+	var grpcOpts []grpc.ServerOption
+	whitelistPath := getEnv("PRIVACY_AUTH_MTLS_WHITELIST_FILE", "")
+	if whitelistPath != "" {
+		unaryInter, streamInter, _, err := tlsutil.NewWhitelistInterceptor(whitelistPath)
+		if err != nil {
+			slog.Error("Failed to init mTLS whitelist interceptor", "err", err)
+			os.Exit(1)
+		}
+		if unaryInter != nil {
+			grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(unaryInter))
+		}
+		if streamInter != nil {
+			grpcOpts = append(grpcOpts, grpc.StreamInterceptor(streamInter))
+		}
+		slog.Info("mTLS CN whitelist interceptor enabled", "path", whitelistPath)
+	}
+
+	grpcSrv := grpcserver.NewServer(svc, grpcOpts...)
 	go func() {
 		slog.Info("gRPC server starting", "addr", grpcAddr)
 		if err := grpcSrv.Serve(grpcLis); err != nil {
