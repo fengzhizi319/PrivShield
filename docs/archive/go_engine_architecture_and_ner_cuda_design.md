@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v16.0.0-drafted (路径 C 演进草案 Phase 12 AC 自动机 + DP 扩展 + 跨语言对齐补全版)
-> **编写日期**：2026-08-28
-> **修订说明**：v16.0.0 完成 Phase 12 实现：纯 Go AC 自动机算子 + 正则修复 + DP 扩展 + 跨语言对齐测试补全。实现纯 Go Aho-Corasick 多模式匹配自动机（trie + BFS failure link + O(N+M+Z) 复杂度），集成到算子注册表。修复 `cachedRegex` 使用 `regexp.Compile` 替代简化 `strings.Contains`。DP 模块新增 `NoisyHistogram` + `VectorMean`。新增跨语言对齐测试：DP 9 个（ClipValue/ClipL2Norm 精确匹配 + 统计无偏性验证）+ Budget 5 个（扣减/拒绝/重置/边界条件）。
+> **版本**：v17.0.0-drafted (路径 C 演进草案 Phase 13 缺失算子补齐 + KAno 层次函数 + Masking 工具函数 + 跨语言对齐补全版)
+> **编写日期**：2026-08-29
+> **修订说明**：v17.0.0 完成 Phase 13 实现：Go 引擎缺失算子补齐（9 个：身份证/医保卡/ICD-10/Luhn/IP/MAC/中文姓名/邮箱/长度范围）+ KAno 层次泛化函数（Age/Zipcode/Gender/Salary/Education + ChooseLevel + AnonymizeRecord）+ Masking 工具函数（Truncate/FpeEncryptNumeric/RandomDateOffset/GuessFieldType）+ 跨语言对齐测试补全。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 12 已实现 | Phase 1-11 骨架 + **Phase 12 AC 自动机算子 + DP 扩展 + 跨语言对齐补全**（纯 Go AC 自动机 + 正则修复 + DP NoisyHistogram/VectorMean + 14 个对齐测试）。详见附录 A v16.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 13 已实现 | Phase 1-12 骨架 + **Phase 13 缺失算子补齐 + KAno 层次函数 + Masking 工具函数**（9 个新算子 + 5 个层次泛化函数 + 4 个工具函数 + 跨语言对齐测试）。详见附录 A v17.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -1444,7 +1444,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-12 已实现（详见附录 A v5.0.0–v16.0.0 修订记录）。Phase 12 纯 Go AC 自动机 + DP 扩展 + 跨语言对齐补全已完成。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
+> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-13 已实现（详见 附录 A v5.0.0–v17.0.0 修订记录）。Phase 13 缺失算子补齐 + KAno 层次函数 + Masking 工具函数已完成。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2028,8 +2028,8 @@ func main() {
 
 | 目标模块 | 当前状态 | 说明 |
 |---|---|---|
-| `privacy-go-sdk/` | ✅ Phase 12 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试、基准测试与 **Python 跨语言对齐测试**（masking 13 + QOL 4 + DP 9 + Budget 5 = 31 个对齐测试）。DP 模块新增 `NoisyHistogram` + `VectorMean`。 |
-| `internal/dynclassification/` | ✅ Phase 12 已实现 | 规则引擎 + **纯 Go AC 自动机（trie + BFS failure link + O(N+M+Z) 多模式匹配）** + `AcAutomatonOperator` 算子 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + 动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链 + **CUDA ONNX NER 引擎（LockOSThread Worker Pool + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级）** + **正则修复（`regexp.Compile` 替代简化 `strings.Contains`）**。完整 CUDA CGO 绑定待引入 onnxruntime_go。 |
+| `privacy-go-sdk/` | ✅ Phase 13 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试、基准测试与 **Python 跨语言对齐测试**（masking 13 + QOL 4 + DP 9 + Budget 5 + KAno 6 = 37 个对齐测试）。Masking 模块新增 `Truncate`/`FpeEncryptNumeric`/`RandomDateOffset`/`GuessFieldType`。KAno 模块新增层次泛化函数（Age/Zipcode/Gender/Salary/Education + ChooseLevel + AnonymizeRecord）。 |
+| `internal/dynclassification/` | ✅ Phase 13 已实现 | 规则引擎 + **纯 Go AC 自动机（trie + BFS failure link + O(N+M+Z) 多模式匹配）** + `AcAutomatonOperator` 算子 + **9 个新增校验算子（身份证/医保卡/ICD-10/Luhn/IP/MAC/中文姓名/邮箱/长度范围）** + 算子注册表（15 个算子） + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + 动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链 + **CUDA ONNX NER 引擎（LockOSThread Worker Pool + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级）** + **正则修复（`regexp.Compile` 替代简化 `strings.Contains`）**。完整 CUDA CGO 绑定待引入 onnxruntime_go。 |
 | `internal/gateway/` | ✅ Phase 11 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）** + **Prometheus 指标联动（每次转发实时上报 InFlight/EWMA/CB 状态）** + **统一错误信封（`middleware.AbortWithError`）** + **5 种调度策略（P2C / RoundRobin / LeastConn / WeightedRoundRobin / WeightedRandom）** + **20 个负载均衡器测试**。 |
 | `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 9 已实现 | Service 编排层（**SSOT 数据源归一化 `pkg/naming` + Fail-Closed**）、REST 路由（**17 个端点统一错误信封** + **SSOT 别名解析** + 33 个集成测试）、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer**）。 |
 | `internal/observability/` | ✅ Phase 7 已实现 | 结构化日志（slog JSON）+ **Prometheus 指标实际注册**（`metrics.go`：5 个 engine 指标 + `gateway_metrics.go`：4 个 gateway 指标 + `/metrics` 端点 + 13 个测试）。替代旧 TODO 桩。 |
@@ -2302,6 +2302,26 @@ PrivShield/
 ---
 
 ## 附录 A：文档修订记录
+
+### v17.0.0 修订（v16.0.0 → v17.0.0）
+
+本次修订完成 Phase 13 实现：缺失算子补齐 + KAno 层次函数 + Masking 工具函数 + 跨语言对齐测试补全：
+
+| 修订项 | v16.0.0 状态 | v17.0.0 实现 |
+|---|---|---|
+| Go 引擎算子 | 6 个基础算子（regex/contains/equals/starts_with/ends_with/field_match） + AC 自动机 | 新增 9 个校验算子：身份证/医保卡/ICD-10/Luhn/IP/MAC/中文姓名/邮箱/长度范围，算子注册表从 7 个扩展到 15 个 |
+| KAno 层次泛化 | 仅有 Mondrian 数据集级算法 | 新增 5 个层次泛化函数（Age/Zipcode/Gender/Salary/Education）+ ChooseLevel + AnonymizeRecord/AnonymizeRecordBatch |
+| Masking 工具函数 | 仅有基础脱敏函数 | 新增 Truncate/FpeEncryptNumeric/RandomDateOffset/GuessFieldType |
+| 跨语言对齐测试 | 31 个对齐测试（masking 13 + QOL 4 + DP 9 + Budget 5） | 新增 37 个对齐测试（+算子 11 + KAno 6 + Masking 4 = 21 个新增） |
+
+**Phase 13 实现清单**：
+- [x] `engine-go/internal/dynclassification/operators.go` — 新增 9 个校验算子（IdCard/MedicalCard/Icd10Range/Luhn/LengthRange/IpAddress/MacAddress/ChineseName/Email）+ 校验辅助函数 + 算子注册表扩展
+- [x] `engine-go/internal/dynclassification/operators_align_test.go` — 算子测试 + Python 跨语言对齐测试（11 个对齐测试）
+- [x] `privacy-go-sdk/kano/hierarchy.go` — KAno 层次泛化函数（AgeHierarchy/ZipcodeHierarchy/GenderHierarchy/SalaryHierarchy/EducationHierarchy + ChooseLevel + AnonymizeRecord/AnonymizeRecordBatch）
+- [x] `privacy-go-sdk/kano/hierarchy_test.go` — KAno 层次函数测试 + Python 跨语言对齐测试（6 个对齐测试）
+- [x] `privacy-go-sdk/masking/masking.go` — 新增 Truncate/FpeEncryptNumeric/RandomDateOffset/GuessFieldType + FieldType 枚举 + boundedContains
+- [x] `privacy-go-sdk/masking/utils_test.go` — Masking 工具函数测试 + Python 跨语言对齐测试（4 个对齐测试）
+- [x] 全量测试 — privacy-go-sdk (7 包 ok) + engine-go (6 包 ok)，`-race` 全部通过
 
 ### v16.0.0 修订（v15.0.0 → v16.0.0）
 
@@ -2634,6 +2654,9 @@ PrivShield/
 - [x] AC 自动机算子：纯 Go Aho-Corasick 多模式匹配 + `AcAutomatonOperator` 集成 + 14 个测试；
 - [x] 正则修复：`regexp.Compile` 替代简化 `strings.Contains`；
 - [x] DP 扩展：`NoisyHistogram` + `VectorMean` + 9 个 DP 对齐测试 + 5 个 Budget 对齐测试；
+- [x] 缺失算子补齐：9 个校验算子（身份证/医保卡/ICD-10/Luhn/IP/MAC/中文姓名/邮箱/长度范围）+ 算子注册表扩展到 15 个；
+- [x] KAno 层次泛化函数：Age/Zipcode/Gender/Salary/Education + ChooseLevel + AnonymizeRecord + 6 个对齐测试；
+- [x] Masking 工具函数：Truncate/FpeEncryptNumeric/RandomDateOffset/GuessFieldType + 4 个对齐测试；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。
