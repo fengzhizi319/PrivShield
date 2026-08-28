@@ -1,66 +1,111 @@
-# 统一控制台与 BFF 代理网关 (Console & BFF Gateway)
+# 统一控制台与 BFF 代理网关群 (Console & BFF Gateways)
 
-数盾统一运维与测试控制台，提供现代化的 Web UI 交互界面与高性能的 API 代理网关（BFF），用于直观呈现隐私计算、动态分类分级、数据流通调度及合规审计全链路功能。
+> **版本**：v16.0.0  
+> **适用范围**：`console/bff-go`、`console/app-lz/bff-go`、`console/web` 与 `console/app-lz/web`。  
+> **定位**：本文档系统阐述数联天下 · 数盾（`PrivShield`）双控制台体系与 Go BFF 代理网关群的架构实现、端点路由与运行指南。
 
 ---
 
-## 1. 统一 BFF 架构设计
+## 目录
 
-数盾采用单一 Go BFF（Backend For Frontend）架构：
+- [1. 双控制台与 Dual-BFF 架构设计](#1-双控制台与-dual-bff-架构设计)
+- [2. 核心组件职责与特性](#2-核心组件职责与特性)
+  - [2.1 主控制台 BFF 网关 (console/bff-go:8081 / :50055)](#21-主控制台-bff-网关-consolebff-go8081--50055)
+  - [2.2 业务调度之眼 BFF (console/app-lz/bff-go:8085)](#22-业务调度之眼-bff-consoleapp-lzbff-go8085)
+  - [2.3 前端控制台群 (console/web & console/app-lz/web)](#23-前端控制台群-consoleweb--consoleapp-lzweb)
+- [3. 路由与微服务聚合架构](#3-路由与微服务聚合架构)
+- [4. 运行指南](#4-运行指南)
+
+---
+
+## 1. 双控制台与 Dual-BFF 架构设计
+
+为了同时满足**数据安全合规工程师（全量原语与分类调优）**与**业务流通运营人员（业务流水线与实战调度）**的不同诉求，PrivShield 采用分工明确的双控制台与 Dual-BFF 架构：
 
 ```mermaid
 graph TD
-    Browser[React + TS 前端控制台<br/>:5173 / :80]
-
-    subgraph BFF [BFF 网关层]
-        GoBFF[Go gRPC BFF<br/>:8081<br/>Gin + gRPC-Go<br/>单连接多路复用 / 生产主力]
+    subgraph Presentation [前端控制台群]
+        WebFull[console/web :5173<br/>全量隐私原语与分类漏斗调优]
+        WebAppLZ[console/app-lz/web :5173<br/>数联调度之眼 / 业务流水线与测试大屏]
     end
 
-    subgraph CoreEngine [PrivShield 核心算力引擎]
-        AgentREST[Agent REST :8079]
-        AgentGRPC[Agent gRPC :50051]
+    subgraph BFFGateways [Go BFF 网关层]
+        GoBFF["console/bff-go (:8081 / :50055)<br/>Gin + gRPC-Go 聚合代理网关<br/>文件脱敏 / 批量代理 / 安全限流"]
+        GoLZBFF["console/app-lz/bff-go (:8085)<br/>流水线调度会话编排 / 动态数据 API / E2E Runner"]
     end
 
-    Browser -->|/api/*| GoBFF
+    subgraph UpstreamServices [后端微服务与核心引擎]
+        Agent["PrivShield Agent (:8079 / :50051)<br/>Python 核心算力"]
+        Hub["Service Hub (:8082 / :50052)<br/>调度中枢"]
+        DSMgr["Datasource Mgr (:8083 / :50053)<br/>数据源管理"]
+        Audit["Audit Log (:8084 / :50054)<br/>存证审计"]
+    end
 
-    GoBFF -->|gRPC / HTTP/2| AgentGRPC
-    GoBFF -->|HTTP/REST fallback| AgentREST
+    WebFull -->|HTTP / REST| GoBFF
+    WebAppLZ -->|HTTP / REST| GoLZBFF
+
+    GoBFF -->|gRPC / HTTP/2| Agent
+    GoBFF -.->|HTTP fallback| Agent
+
+    GoLZBFF -->|HTTP| Hub
+    GoLZBFF -->|HTTP| DSMgr
+    GoLZBFF -->|HTTP| Audit
+    GoLZBFF -->|HTTP| Agent
 ```
 
-* **Go BFF (`bff-go:8081`)**：
-  * 基于 Gin + gRPC-Go 构建；
-  * 对外暴露 REST/JSON 接口，内部通过 gRPC 与 Agent 通信，部分场景通过 REST 回退；
-  * 使用 Protobuf 结构体进行严格类型约束，通过 HTTP/2 多路复用大幅削减通信握手延迟；
-  * 生产环境主力推荐，内置 mTLS 双向认证支持与前端静态文件独立托管；
-  * **gRPC 自动重试**：内置可配置重试策略（默认最多 6 次，指数退避 1s→8s），`waitForReady=true` 连接等待就绪；
-  * 📖 [可靠性能力详解](../../console/bff-go/docs/reliability.md)
+---
 
-> **历史说明**：早期版本曾存在 Python REST BFF（`console/bff-py`，端口 `:8080`）作为并行实现，用于开发调试。该实现已在后续重构中移除，当前统一由 `console/bff-go` 承载全部 BFF 职责。
+## 2. 核心组件职责与特性
+
+### 2.1 主控制台 BFF 网关 (`console/bff-go:8081` / `:50055`)
+- **高性能 REST ➔ gRPC 转换**：对外暴露统一 REST/JSON 接口，内部通过 gRPC 与 Agent 通信，利用 Protobuf 强契约与 HTTP/2 多路复用大幅削减通信握手延迟；
+- **文件级隐私处理 (`POST /api/upload`)**：支持 CSV/JSON 文件上传，流式解析并调用底层脱敏/K-匿名能力；
+- **复合安全中间件**：将 API Key 鉴权与滑动窗口限流（`CONSOLE_RATE_LIMIT`，默认 600 req/min）整合，内置后台协程定期清理过期 IP 防止内存泄漏；当 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 指向 `config/mtls-whitelist.yaml` 时，可选的入站 gRPC 服务（`:50055`）会注册 `NewWhitelistInterceptor()` unary/stream 拦截器，按客户端 CN 进行 method-scope 鉴权并支持 5 秒 mtime 热重载。
+- **负载均衡策略测试器 (`POST /api/lb_test`)**：用于对多后端 Agent 进行负载分发与熔断切换演练；
+- **静态 SPA 托管**：可独立挂载并托管 `console/web/dist` 前端构建产物，实现单二进制交付；
+- 📖 [可靠性能力详解](../../console/bff-go/docs/reliability.md)
+
+### 2.2 业务调度之眼 BFF (`console/app-lz/bff-go:8085`)
+- **5 阶段流通会话编排 (`InvokeDataApi`)**：编排 `ingest` → `fetch` → `classify_desensitize` → `return` → `audit` 业务闭环；
+- **动态数据 API 目录 (`GET /api/lz/data-api/definitions`)**：彻底废除前端写死 API 列表的逻辑，统一动态拉取数据源卡片；
+- **内置 E2E 自动化测试套件 (`TestRunner`)**：支持在界面一键触发 TS-01 ~ TS-04 自动化测试用例并实时可视化输出；
+- **9 层统一中间件栈**：全量装配 `pkg/middleware`（含 TraceMiddleware、MaxBodySize、MaxConcurrent、RateLimit 与统一错误信封）。
+
+### 2.3 前端控制台群 (`console/web` & `console/app-lz/web`)
+- **统一技术栈**：React 18 + TypeScript + Vite + TailwindCSS + Lucide Icons；
+- **统一错误信封解析**：统一解析 `{code, message, detail, trace_id}`，自动向后兼容历史旧字段；
+- **标准化状态色彩规范**：`completed`（翡翠绿）、`running`（靛蓝呼吸光晕）、`failed`（玫瑰红）、`pending`（蓝灰）。
 
 ---
 
-## 2. 前端控制台 (Web UI)
+## 3. 路由与微服务聚合架构
 
-* **技术栈**：React 18 + TypeScript + Vite + TailwindCSS + Lucide Icons；
-* **极速热更新**：支持 Vite HMR（<50ms 本地热更新）；
-* **功能工作台**：
-  * 隐私原语交互面板（脱敏、DP 噪声注入、K-匿名分布、查询混淆对比）；
-  * 动态分类分级评估面板（三层漏斗命中轨迹可视化、规则/NER/LLM 决策链呈现）；
-  * 数据流通调度流水线大屏；
-  * 模拟数据源资产目录与样本探查；
-  * 不可篡改审计日志流水与哈希完整性核验工具。
+BFF 网关层提供了面向不同业务场景的聚合路由定义：
+
+| 路由前缀 / 端点 | 处理组件 | 上游微服务 | 功能说明 |
+|---|---|---|---|
+| `/api/privacy/*` | `console/bff-go` | `engine:50051` | 隐私计算原语（脱敏、DP、K-匿名、查询混淆）gRPC 代理 |
+| `/api/upload` | `console/bff-go` | `engine:50051` | 文件隐私处理（CSV/JSON 解析与脱敏） |
+| `/api/lb_test` | `console/bff-go` | 可配置 Agent REST 后端 | 负载均衡策略测试（round-robin / random / least-connections） |
+| `/api/lz/data-api/*` | `app-lz/bff-go` | `catalog` / `pkg/naming`（本地 SSOT） | 动态业务数据接口目录与元数据拉取 |
+| `/api/lz/tasks/dispatch` | `app-lz/bff-go` | `service-hub:8082` | 5 阶段流通会话触发与流水线任务派发 |
+| `/api/lz/audit/*` | `app-lz/bff-go` | `audit-log:8084` | 9 要素哈希链存证查询与在线验真 |
+| `/api/lz/suites` / `/api/lz/suites/run` | `app-lz/bff-go` | 内置 TestRunner | 获取 / 执行 TS-01~TS-04 自动化 E2E 测试套件 |
 
 ---
 
-## 3. 运行指南
+## 4. 运行指南
 
 ```bash
-# 启动 Agent + Go BFF + Web 前端（Vite 热更新）
+# 1. 启动全功能控制台（Python Agent + Go BFF + Vite HMR 前端）
 bash ./scripts/dev/dev-bff-agent.sh
 
-# 启用 mTLS 双向认证模式启动
+# 2. 启用 mTLS 双向认证模式启动
 bash ./scripts/dev/dev-bff-agent.sh --mtls
 
-# 停止控制台服务
+# 3. 启动业务调度控制台（App-LZ Dev）
+bash ./scripts/dev/dev-app-lz.sh
+
+# 4. 停止所有控制台服务
 bash ./scripts/dev/dev-stop.sh
 ```

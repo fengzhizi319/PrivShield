@@ -1,7 +1,25 @@
 # 新增数据接口（Data API）全链路扩展与命名规范设计
 
-> **本文档为 PrivShield 体系下新增业务数据接口（如 `ds_xx1` / `api3_xx1`）的标准架构设计与扩展实施指南（SOP）。**  
-> 旨在确保跨服务（Go 微服务群、Python 隐私计算引擎、TypeScript 前端控制台）实现**统一命名规范**、**单一事实源（Single Source of Truth, SSOT）**、**零语义漂移**与**快速敏捷接入**。
+> **版本**：v16.0.0  
+> **适用范围**：PrivShield 体系下新增业务数据接口（如 `ds_xx1` / `api3_xx1`）的标准架构设计与扩展实施指南（SOP）。  
+> **定位**：旨在确保跨服务（Go 微服务群、Python 隐私计算引擎、TypeScript 前端控制台）实现**统一命名规范**、**单一事实源（Single Source of Truth, SSOT）**、**零语义漂移**与**快速敏捷接入**。
+
+---
+
+## 目录
+
+- [1. 概述与设计哲学](#1-概述与设计哲学)
+  - [1.1 核心设计原则](#11-核心设计原则)
+- [2. 全局命名规范与四位一体标准矩阵](#2-全局命名规范与四位一体标准矩阵)
+  - [2.1 规范详情说明](#21-规范详情说明)
+- [3. 全链路架构拓扑与数据流转](#3-全链路架构拓扑与数据流转)
+- [4. 新增数据接口标准实施路径 (5 步 SOP)](#4-新增数据接口标准实施路径-5-步-sop)
+  - [第 1 步：在 pkg/naming 中注册核心事实源](#第-1-步在-pkgnaming-中注册核心事实源)
+  - [第 2 步：在 services/datasource-mgr 中接入数据资产](#第-2-步在-servicesdatasource-mgr-中接入数据资产)
+  - [第 3 步：在 engine 中配置动态分类分级与脱敏规则](#第-3-步在-engine-中配置动态分类分级与脱敏规则)
+  - [第 4 步：service-hub 与 audit-log 自动适配验证](#第-4-步service-hub-与-audit-log-自动适配验证)
+  - [第 5 步：在 app-lz/bff-go 中注册前端展示元数据](#第-5-步在-app-lzbff-go-中注册前端展示元数据)
+- [5. 质量保证与 CI 门禁验证 (Verification DoD)](#5-质量保证与-ci-门禁验证-verification-dod)
 
 ---
 
@@ -70,14 +88,18 @@ sequenceDiagram
     BFF->>BFF: 2. naming.NormalizeDataSourceID() 归一化为 ds_xx1
     BFF->>Hub: 3. DispatchTask (Source: "ds_xx1", Op: "mask")
     Hub->>DSMgr: 4. FetchSlice (DatasourceID: "ds_xx1", Limit: 5)
-    DSMgr-->>Hub: 5. 返回 data/xx1.csv 原始记录 (Raw Payload)
+    DSMgr-->>Hub: 5. 返回 data/xx1.csv 原始记录（JSON Payload）
     Hub->>Engine: 6. POST /v1/agent/process (加载 rules/domains/xx1.yaml)
     Engine-->>Hub: 7. 返回分类分级评级结果 + 脱敏后记录 (Masked Payload)
-    Hub->>Audit: 8. RecordAudit (计算 9要素哈希链 + AES-256-GCM 快照信封加密)
-    Audit-->>Hub: 9. 存证成功 (LogID, IntegrityHash)
-    Hub-->>BFF: 10. 返回任务终态结果 (TaskCompleted)
-    BFF-->>UI: 11. 动态呈现 5 阶段会话结果与字段手风琴对比
+    Note over Hub,Audit: audit-log 服务已就绪（:8084/:50054，SM4-GCM 信封加密）。<br/>service-hub 6 阶段流水线当前仅在本地标记 audit 阶段，<br/>自动 RecordAudit 集成属于 Phase 2 待完成项。
+    Hub-->>BFF: 8. 返回任务终态结果 (TaskCompleted)
+    BFF-->>UI: 9. 动态呈现 5 阶段会话结果与字段手风琴对比
 ```
+
+> **默认端口、环境变量与 mTLS 说明**：
+> - Python Agent REST `:8079` / gRPC `:50051`；service-hub `:8082`/`:50052`；datasource-mgr `:8083`/`:50053`；audit-log `:8084`/`:50054`；bff-go `:8081`/`:50055`（可选）。
+> - 环境变量按服务隔离：`SERVICE_HUB_*`、`DATASOURCE_MGR_*`、`AUDIT_LOG_*`、`PRIVACY_CONSOLE_*`、`PRIVACY_AGENT_*` 等，并共享 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 等配置。
+> - Go gRPC 服务器统一使用 `pkg/tlsutil` 的 `NewWhitelistInterceptor()` CN 白名单拦截器；配置 `PRIVACY_AUTH_MTLS_WHITELIST_FILE=config/mtls-whitelist.yaml` 后，通过 5 秒 mtime 轮询热重载。
 
 ---
 
@@ -119,7 +141,7 @@ var Registry = []Entry{
         },
         Category:     "business_flow",
         FileName:     "xx1.csv",
-        FieldCount:   15,
+        FieldCount:   7,
         Aliases: []string{
             "xx1", "xx1.csv", "XX业务", "XX数据", "business_flow",
         },
@@ -145,9 +167,9 @@ var Registry = []Entry{
    TX-2026-002,李淑珍,510101199008085678,13811112222,880.50,2026-08-25 11:15:20,192.168.1.101
    ```
 2. **验证数据源切片提取**：  
-   `datasource-mgr` 会根据注册表中的 `FileName: "xx1.csv"` 自动定位文件，支持通过 REST 接口拉取数据切片：
+   `datasource-mgr` 会根据注册表中的 `FileName: "xx1.csv"` 自动定位文件，支持通过 REST 接口拉取 JSON 格式的原始记录切片：
    ```bash
-   curl -s http://127.0.0.1:8083/api/datasources/ds_xx1/slice?limit=2 | jq .
+   curl -s http://127.0.0.1:8083/api/datasources/ds_xx1/sample?limit=2 | jq .
    ```
 
 ---
@@ -189,58 +211,39 @@ var Registry = []Entry{
          - operator: regex
            pattern: "^1[3-9]\\d{9}$"
        action: mask_phone
-
-     - id: rule-xx1-ip
-       field: terminal_ip
-       level: L1
-       category: network
-       matchers:
-         - operator: regex
-           pattern: "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
-       action: mask_ip
    ```
-2. **验证引擎规则评估**：  
-   调用 `engine` 的脱敏治理接口进行验证：
+
+2. **热重载分类规则引擎**：  
+   无需重启 Python Agent，通过热重载接口立即生效：
    ```bash
-   curl -X POST http://127.0.0.1:8079/v1/agent/process \
-     -H "Content-Type: application/json" \
-     -d '{
-       "source": "ds_xx1",
-       "data": {
-         "user_name": "王建国",
-         "id_card": "510101198505051234",
-         "phone_number": "13900001111"
-       }
-     }' | jq .
+   curl -s -X POST http://127.0.0.1:8079/v1/dynclassification/profiles/reload | jq .
    ```
 
 ---
 
-### 第 4 步：调度中枢 (`service-hub`) 与存证中心 (`audit-log`) 自动适配
+### 第 4 步：`service-hub` 与 `audit-log` 自动适配验证
 
-- **`services/service-hub` 零代码修改**：
-  - 任务分发接口 `POST /api/hub/dispatch` 接收到 `source: "ds_xx1"` 时，底层通过 `naming.NormalizeDataSourceID` 验证通过；
-  - 自动创建调度任务，Worker 节点基于 Phase B PostgreSQL 租约（`FOR UPDATE SKIP LOCKED`）自动争抢任务并串联 6 阶段流水线。
-- **`services/audit-log` 零代码修改**：
-  - 存证接口 `POST /api/audit/logs` 自动提取 `datasource: "ds_xx1"`；
-  - 自动为 `ds_xx1` 计算 9 要素区块链式哈希链（`prev_hash` + `integrity_hash`）；
-  - 自动使用 AES-256-GCM 对原始与脱敏数据样本执行信封加密。
+得益于调度中枢与审计存证的**泛型负载（`map[string]any`）**设计，**新增数据源无需修改 `service-hub` 与 `audit-log` 的现有 Go 源代码**即可被识别：
+
+1. **调度中枢自动转发**：  
+   `service-hub` 从 `datasource-mgr` 获取任意字段的 JSON 记录，透明转发给 `engine` 的 `POST /v1/agent/process`，`engine` 根据 `rules/domains/xx1.yaml` 自动完成分类分级与脱敏。
+2. **审计存证当前状态**：  
+   `audit-log` 服务已就绪（`:8084` REST / `:50054` gRPC），支持显式调用 `RecordAudit` 并将样本以 SM4-GCM 信封加密后持久化；但 `service-hub` 6 阶段流水线当前仅在本地标记 `audit` 阶段，自动调用 `audit-log` 的端到端集成属于 Phase 2 待完成项。
 
 ---
 
-### 第 5 步：控制台与 BFF 展示层适配 (`console/app-lz`)
+### 第 5 步：在 `app-lz/bff-go` 中注册前端展示元数据
 
-#### 1. 注册展示目录元数据（BFF 端）
-打开 [`console/app-lz/bff-go/internal/catalog/catalog.go`](../../console/app-lz/bff-go/internal/catalog/catalog.go)，在 `schemas` map 中注册展示信息：
+打开 [`console/app-lz/bff-go/internal/catalog/catalog.go`](../../console/app-lz/bff-go/internal/catalog/catalog.go)，在 `schemas` 映射表中追加该数据源的字段清单与展示描述：
 
 ```go
 var schemas = map[string]schema{
-    // ... 原有 DSYibao, DSKangyang ...
+    // ... 原有 naming.DSYibao, naming.DSKangyang 条目 ...
     naming.DSXX1: {
         NameZh: "XX业务流转数据 API",
         NameEn: "XX Business Workflow API",
         Description: fmt.Sprintf(
-            "企业核心业务交易与流转数据 (%s 15 字段)，包含交易流水号、用户姓名、身份证号、联系电话、交易金额、终端 IP 等敏感字段。",
+            "XX业务真实流转记录 (%s 7 字段)，包含交易流水号、用户姓名、身份证号、手机号、交易金额、交易时间、终端IP等字段。",
             fileNameOf(naming.DSXX1)),
         Fields: []string{
             "trade_no", "user_name", "id_card", "phone_number",
@@ -250,74 +253,25 @@ var schemas = map[string]schema{
 }
 ```
 
-#### 2. 前端页面联动（Web 端）
-- **预设数据 API 会话面板 ([`DataApiPanel.tsx`](../../console/app-lz/web/src/components/DataApiPanel.tsx))**：  
-  **全动态驱动**。前端直接请求 `/api/lz/data-api/definitions`，页面会自动渲染出第 3 个 API 卡片，并支持一键发起全链路会话与手风琴逐字段比对，**无需修改前端代码**！
-- **任务生命周期面板 ([`TaskLifecyclePanel.tsx`](../../console/app-lz/web/src/components/TaskLifecyclePanel.tsx))**：  
-  若需在新建任务表单中支持 `ds_xx1`，在下拉框和负载模板中追加选项：
-  ```tsx
-  // 在 Source 下拉列表中追加
-  <option value="ds_xx1">ds_xx1 (XX业务流转数据 API)</option>
-
-  // 补充默认表单 JSON 模板
-  const xx1PayloadTemplate = {
-    trade_no: 'TX-2026-99001',
-    user_name: '王建国',
-    id_card: '510101198505051234',
-    phone_number: '13900001111',
-    trade_amount: '2500.00',
-  };
-  ```
+> **底层生效机制**：
+> `catalog.Definitions()` 会自动遍历 `pkg/naming.Registry`，与 `schemas` 映射表动态合并生成 `models.DataApiDef` 列表供前端接口 `/api/lz/data-api/definitions` 拉取，前端卡片与字段手风琴对比组件自动渲染展示。
 
 ---
 
-## 5. 一致性保障机制与质量护栏
+## 5. 质量保证与 CI 门禁验证 (Verification DoD)
 
-为防止代码迭代过程中发生接口名称漂移，PrivShield 建立了三重质量保障护栏：
-
-### 5.1 编译期静态检查 (Go Type System)
-所有微服务内部禁止使用裸字符串，必须引用 `naming` 常量。任何拼写错误将在 `go build` 或 `go test` 时直接引发编译失败：
-```go
-// ❌ 错误示范：硬编码裸字符串
-req := models.DispatchRequest{ Source: "ds_xx_1" }
-
-// ✅ 正确示范：引用统一命名常量
-req := models.DispatchRequest{ Source: naming.DSXX1 }
-```
-
-### 5.2 边界归一化与 Fail-Closed 防护 (Runtime Normalization)
-```go
-// 在任何入站处理层
-canonicalDS, err := naming.NormalizeDataSourceID(inboundSource)
-if err != nil {
-    // 未知或非法数据源直接拒绝，杜绝静默回退默认源的安全漏洞
-    middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", err.Error(), nil)
-    return
-}
-```
-
-### 5.3 自动化一致性测试套件 (CI Guardrails)
-在 CI 流水线中自动执行以下测试命令，确保注册表、目录元数据与各微服务对齐：
+完成上述 5 步后，依次执行以下命令确保全链路接入无误：
 
 ```bash
-# 1. 运行 naming 事实源测试
-go test -v ./pkg/naming/...
+# 1. 静态代码合规扫描（检测是否有硬编码字面量）
+make lint-naming
 
-# 2. 运行 App-LZ BFF 目录一致性与端点测试
-go test -v ./console/app-lz/bff-go/internal/catalog/... ./console/app-lz/bff-go/internal/handlers/...
+# 2. 运行 Go 基础库与微服务测试
+go test -race -count=1 ./pkg/naming/... ./services/datasource-mgr/... ./console/app-lz/bff-go/...
 
-# 3. 运行全栈集成测试
-bash ./scripts/dev/integration-test-new-modules.sh
+# 3. 运行 Python 规则引擎单测
+PYTHONPATH=. pytest tests/dynclassification/ -k "xx1 or funnel"
+
+# 4. 执行 App-LZ 自动化 E2E 调度流水线测试
+go test -v -run TestRunSuites ./console/app-lz/bff-go/internal/runner/
 ```
-
----
-
-## 6. 变更检查清单 (Developer Checklist)
-
-在提交新增接口的代码前，请对照以下清单逐项自检：
-
-- [ ] **`pkg/naming/naming.go`**：已定义 `API<N><Domain>` 与 `DS<Domain>` 常量，并在 `Registry` 中注册完整元数据；
-- [ ] **`data/<domain>.csv`**：已放置标准 CSV 样本数据，表头与字段名拼写一致；
-- [ ] **`rules/domains/<domain>.yaml`**：已编写字段级动态分类分级与脱敏规则；
-- [ ] **`console/app-lz/bff-go/internal/catalog/catalog.go`**：已在 `schemas` 中注册中文名与 `Fields` 字段清单；
-- [ ] **单元测试与全栈测试**：`go test ./...` 100% 全部通过，无新增告警。
