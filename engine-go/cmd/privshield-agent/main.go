@@ -23,13 +23,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/fengzhizi319/PrivShield/engine-go/internal/dynclassification"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/rest"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
-	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/budget"
-	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
-	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/masking"
 )
 
 // ──────────────────────────────────────────────
@@ -78,51 +75,24 @@ func main() {
 		"git_commit", GitCommit,
 	)
 
-	// 初始化隐私预算会计
-	budgetAcct := budget.NewBudgetAccountant(10.0, 1e-5, 3600)
-
-	// 初始化规则引擎（示例规则）
-	rules := []dynclassification.RuleDef{
-		{
-			ID:            "id_card",
-			Level:         dynclassification.LevelSecret,
-			Category:      "pii.identity",
-			FieldPatterns: []string{`(?i)(id_?card|身份证|identity)`},
-			Description:   "中国居民身份证",
-		},
-		{
-			ID:            "phone",
-			Level:         dynclassification.LevelConfidential,
-			Category:      "pii.contact",
-			FieldPatterns: []string{`(?i)(phone|mobile|手机|电话)`},
-			Description:   "手机号码",
-		},
-		{
-			ID:            "email",
-			Level:         dynclassification.LevelConfidential,
-			Category:      "pii.contact",
-			FieldPatterns: []string{`(?i)(email|邮箱|邮件)`},
-			Description:   "电子邮箱",
-		},
-		{
-			ID:            "bank_card",
-			Level:         dynclassification.LevelSecret,
-			Category:      "pii.financial",
-			FieldPatterns: []string{`(?i)(bank_?card|银行卡|信用卡)`},
-			Description:   "银行卡号",
-		},
-	}
-
-	ruleEngine, err := dynclassification.NewRuleEngine(rules)
+	// 初始化 PrivacyService 统一编排层
+	svcCfg := service.DefaultConfig()
+	svc, err := service.NewPrivacyService(svcCfg)
 	if err != nil {
-		slog.Error("Failed to init rule engine", "err", err)
+		slog.Error("Failed to init PrivacyService", "err", err)
 		os.Exit(1)
 	}
 
-	// 初始化 REST 服务器
-	router := setupRESTRouter(ruleEngine, budgetAcct)
+	// ── REST API (Gin) ──
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(observability.RequestLogger())
+	router.Use(observability.PrometheusMiddleware())
 
-	// 启动 REST 服务器
+	// 注册全部 REST API 路由（17 个端点）
+	rest.RegisterRoutes(router, svc)
+
 	restAddr := fmt.Sprintf("%s:%d", cfg.RESTHost, cfg.RESTPort)
 	restServer := &http.Server{
 		Addr:         restAddr,
@@ -140,19 +110,11 @@ func main() {
 		}
 	}()
 
-	// 启动 gRPC 服务器
+	// ── gRPC Server ──
 	grpcAddr := fmt.Sprintf("0.0.0.0:%d", cfg.GRPCPort)
 	grpcLis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		slog.Error("gRPC listen failed", "err", err)
-		os.Exit(1)
-	}
-
-	// 创建 PrivacyService 编排层
-	svcCfg := service.DefaultConfig()
-	svc, err := service.NewPrivacyService(svcCfg)
-	if err != nil {
-		slog.Error("Failed to init PrivacyService", "err", err)
 		os.Exit(1)
 	}
 
@@ -164,11 +126,14 @@ func main() {
 		}
 	}()
 
+	// ── 启动配置摘要 ──
+	budgetStatus := svc.BudgetStatus()
 	slog.Info("Configuration summary",
 		"rest_addr", restAddr,
-		"grpc_port", cfg.GRPCPort,
+		"grpc_addr", grpcAddr,
 		"log_level", cfg.LogLevel,
-		"budget_total_epsilon", budgetAcct.TotalEpsilon(),
+		"budget_total_epsilon", budgetStatus["total_epsilon"],
+		"budget_remaining_epsilon", budgetStatus["remaining_epsilon"],
 	)
 
 	// 等待退出信号
@@ -187,141 +152,6 @@ func main() {
 	grpcSrv.GracefulStop()
 
 	slog.Info("Server stopped gracefully")
-}
-
-// ──────────────────────────────────────────────
-// REST 路由
-// ──────────────────────────────────────────────
-
-func setupRESTRouter(engine *dynclassification.RuleEngine, budgetAcct *budget.BudgetAccountant) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-
-	// 中间件
-	router.Use(gin.Recovery())
-	router.Use(observability.RequestLogger())
-	router.Use(observability.PrometheusMiddleware())
-
-	// 健康检查
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	// 隐私原语 API
-	api := router.Group("/api/v1")
-
-	// 掩码
-	api.POST("/mask", func(c *gin.Context) {
-		var req struct {
-			Field string `json:"field" binding:"required"`
-			Value string `json:"value" binding:"required"`
-			Type  string `json:"type" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		var masked string
-		switch req.Type {
-		case "id_card":
-			masked = masking.MaskIdCard(req.Value)
-		case "phone":
-			masked = masking.MaskPhone(req.Value)
-		case "bank_card":
-			masked = masking.MaskBankCard(req.Value)
-		case "name":
-			masked = masking.MaskChineseName(req.Value)
-		case "email":
-			masked = masking.MaskEmail(req.Value)
-		case "address":
-			masked = masking.MaskAddress(req.Value)
-		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown mask type"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"field":  req.Field,
-			"masked": masked,
-		})
-	})
-
-	// 差分隐私
-	api.POST("/dp/noisy_count", func(c *gin.Context) {
-		var req struct {
-			Count   int     `json:"count" binding:"required"`
-			Epsilon float64 `json:"epsilon" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if !budgetAcct.Consume(req.Epsilon, 0) {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "budget exhausted"})
-			return
-		}
-
-		noisy := dp.NoisyCount(req.Count, req.Epsilon)
-		c.JSON(http.StatusOK, gin.H{
-			"noisy_count": noisy,
-			"epsilon":     req.Epsilon,
-		})
-	})
-
-	api.POST("/dp/noisy_sum", func(c *gin.Context) {
-		var req struct {
-			Values    []float64 `json:"values" binding:"required"`
-			Epsilon   float64   `json:"epsilon" binding:"required"`
-			Sensitivity float64 `json:"sensitivity" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if !budgetAcct.Consume(req.Epsilon, 0) {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "budget exhausted"})
-			return
-		}
-
-		noisy := dp.NoisySum(req.Values, req.Epsilon, req.Sensitivity)
-		c.JSON(http.StatusOK, gin.H{
-			"noisy_sum": noisy,
-			"epsilon":   req.Epsilon,
-		})
-	})
-
-	// 动态分类
-	api.POST("/classify", func(c *gin.Context) {
-		var req struct {
-			Records []map[string]string `json:"records" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		results := engine.ClassifyBatch(req.Records)
-		c.JSON(http.StatusOK, gin.H{
-			"classifications": results,
-		})
-	})
-
-	// 预算查询
-	api.GET("/budget", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"total_epsilon":     budgetAcct.TotalEpsilon(),
-			"used_epsilon":      budgetAcct.UsedEpsilon(),
-			"remaining_epsilon": budgetAcct.RemainingEpsilon(),
-			"total_delta":       budgetAcct.TotalDelta(),
-			"used_delta":        budgetAcct.UsedDelta(),
-			"remaining_delta":   budgetAcct.RemainingDelta(),
-		})
-	})
-
-	return router
 }
 
 // ──────────────────────────────────────────────

@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v7.0.0-drafted (路径 C 演进草案 Phase 3 实现版)
+> **版本**：v8.0.0-drafted (路径 C 演进草案 Phase 4 集成验证版)
 > **编写日期**：2026-08-28
-> **修订说明**：v7.0.0 完成 Phase 3 核心实现：gRPC 透明流式代理（rawCodec + UnknownServiceHandler + 连接池 + 双向零拷贝转发）、类型安全 gRPC 服务端（protoc-gen-go 生成桩代码）、动态合批队列（Channel 缓冲 + Ticker 超时 + 可配置批大小）、ONNX NER 引擎骨架 + RuleBasedNerEngine CPU 降级（9 种正则模式 + FallbackChain 降级链管理器）、引入 protoc-gen-go 生成 proto stubs。实测基准数据：MaskRecord 10 字段 755 ns/op（单核 ~1.3M 记录/秒），DP Laplace 17 ns/op 零分配，规则分类 22 ns/op。
+> **修订说明**：v8.0.0 完成 Phase 4 集成验证：Agent main.go 重构（使用 rest.RegisterRoutes + TypedServer 替代内联路由）、Gateway main.go 补齐 gRPC 透明流代理集成、mTLS 后端 TLS 配置（BuildBackendTLSConfig + CA 验证 + TLS 1.3 默认）、影子流量比对验证工具（shadow_verifier.go，6 条比对用例 + 精确/近似双模式）、全栈压测脚本（go-engine-bench.sh，覆盖 privacy-go-sdk 6 包 + engine-go dynclassification）。
 
 ---
 
@@ -1442,7 +1442,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本节为路径 C 的**建议落地路线图**。Phase 1（Step 1-3）、Phase 2（Step 6-7）与 Phase 3（Step 4 骨架 + Step 5 串联）已实现，详见附录 A v5.0.0/v6.0.0/v7.0.0 修订记录。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 Step 8（全栈压测）待后续 Phase 4 实施。
+> **状态说明**：本节为路径 C 的**建议落地路线图**。Phase 1-3 已实现（详见附录 A v5.0.0/v6.0.0/v7.0.0 修订记录）。Phase 4 集成验证已完成：Agent/Gateway 入口重构集成、mTLS 后端 TLS、影子流量比对工具、全栈压测脚本。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2030,7 +2030,11 @@ func main() {
 | `internal/dynclassification/` | ✅ Phase 3 已实现 | 规则引擎 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + **动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链**。完整 CUDA ONNX 绑定待实施。 |
 | `internal/gateway/` | ✅ Phase 3 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）**。 |
 | `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 3 已实现 | Service 编排层、REST 路由、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer（protoc-gen-go 生成桩代码）**）。 |
-| `cmd/privshield-agent/`、`cmd/privshield-gateway/` | ✅ Phase 2 已实现 | 双协议服务入口 + L7 网关入口，Dockerfile、开发脚本均已创建。 |
+| `cmd/privshield-agent/` | ✅ Phase 4 已重构 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer` 替代内联路由，REST+gRPC 统一启动。 |
+| `cmd/privshield-gateway/` | ✅ Phase 4 已重构 | L7 网关入口，补齐 gRPC 透明流代理集成（`grpcProxy.NewGrpcProxyListener`），HTTP+gRPC 双协议代理。 |
+| `internal/gateway/backend_tls.go` | ✅ Phase 4 已实现 | 东西向 mTLS 回源 TLS 配置（BuildBackendTLSConfig + CA 验证 + TLS 1.3 + Insecure 降级）。 |
+| `scripts/dev/shadow_verifier.go` | ✅ Phase 4 已实现 | 影子流量比对验证工具，6 条比对用例（MaskRecord/NoisyCount/Classify/HashHMAC/MaskBatch/ClassifyBatch），精确+近似双模式比对。 |
+| `scripts/dev/go-engine-bench.sh` | ✅ Phase 4 已实现 | 全栈压测脚本，覆盖 privacy-go-sdk 6 包 + engine-go dynclassification，支持 `--bench-time` 和 `--output` 参数。 |
 
 ---
 
@@ -2290,6 +2294,28 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v8.0.0 修订（v7.0.0 → v8.0.0）
+
+本次修订完成 Phase 4 集成验证，补齐入口重构、mTLS 回源、影子流量工具与压测脚本：
+
+| 修订项 | v7.0.0 状态 | v8.0.0 实现 |
+|---|---|---|
+| Agent 入口 | 内联路由 + 独立 gRPC | 重构 `cmd/privshield-agent/main.go`：使用 `rest.RegisterRoutes` 统一路由注册 + `grpcserver.TypedServer` 类型安全 gRPC 服务端，REST+gRPC 统一进程 |
+| Gateway 入口 | 仅 HTTP 反向代理 | 重构 `cmd/privshield-gateway/main.go`：补齐 gRPC 透明流代理集成（`grpcProxy.NewGrpcProxyListener`），HTTP+gRPC 双协议代理 + 优雅停机 |
+| mTLS 后端 TLS | 不存在 | 实现 `internal/gateway/backend_tls.go`：BuildBackendTLSConfig（CA 验证 + 客户端证书 + TLS 1.3）、BuildBackendTLSConfigWithMinVersion（自定义最低版本）、BuildInsecureBackendTLSConfig（开发降级） |
+| 影子流量比对 | 设计文档中的伪代码 | 实现 `scripts/dev/shadow_verifier.go`：6 条比对用例（MaskRecord/NoisyCount/Classify/HashHMAC/MaskBatch/ClassifyBatch），精确字段比对 + DP 浮点近似比对（±30% 容差），双引擎并行发送 + 自动比对报告 |
+| 全栈压测脚本 | 不存在 | 实现 `scripts/dev/go-engine-bench.sh`：覆盖 privacy-go-sdk 6 包（masking/dp/ldp/kano/qol/budget）+ engine-go dynclassification，支持 `--bench-time` 和 `--output` 参数，自动汇总关键 Benchmark 行 |
+| 测试覆盖 | Phase 3 测试 | 新增 backend_tls_test.go (3 测试)，全量通过 `-race` 检测 |
+
+**Phase 4 实现清单**：
+- [x] `engine-go/cmd/privshield-agent/main.go` — Agent 入口重构（rest.RegisterRoutes + TypedServer 统一进程）
+- [x] `engine-go/cmd/privshield-gateway/main.go` — Gateway 入口重构（HTTP + gRPC 双协议代理）
+- [x] `engine-go/internal/gateway/backend_tls.go` — mTLS 后端 TLS 配置（CA + 客户端证书 + TLS 1.3）
+- [x] `engine-go/internal/gateway/backend_tls_test.go` — mTLS TLS 配置测试（3 个测试）
+- [x] `scripts/dev/shadow_verifier.go` — 影子流量比对验证工具（6 条用例 + 精确/近似双模式）
+- [x] `scripts/dev/go-engine-bench.sh` — 全栈压测脚本（7 个包 + 自动汇总）
+- [x] 全量测试 — engine-go (3 包 ok) + privacy-go-sdk (7 包 ok)，`-race` 全部通过
+
 ### v7.0.0 修订（v6.0.0 → v7.0.0）
 
 本次修订完成 Phase 3 核心实现，补齐 gRPC 透明流代理、类型安全 gRPC 服务端、动态合批、ONNX NER 骨架与基准实测：
@@ -2408,8 +2434,11 @@ PrivShield/
 - [x] 引入 protoc-gen-go 生成类型安全桩代码，实现 TypedServer（`typed_server.go`，覆盖 15 个核心 RPC）；
 - [x] 实现动态合批队列（`dynamic_batching.go`，Channel + Ticker + 可配置批大小）；
 - [x] 实现 ONNX NER 引擎骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链（`onnx_ner.go`）；
+- [x] 实现影子流量比对验证工具（`scripts/dev/shadow_verifier.go`，6 条用例 + 精确/近似双模式）；
+- [x] 实现全栈压测脚本（`scripts/dev/go-engine-bench.sh`，覆盖 privacy-go-sdk 6 包 + engine-go dynclassification）；
+- [x] Agent/Gateway 入口重构（rest.RegisterRoutes + TypedServer + gRPC 透明流代理集成）；
+- [x] 实现 mTLS 后端 TLS 配置（`internal/gateway/backend_tls.go`，CA 验证 + TLS 1.3）；
 - [ ] 实现完整 Go+CUDA ONNX NER CGO 绑定（引入 `onnxruntime_go`，LockOSThread Worker + 动态合批 GPU 推理）；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
-- [ ] 实现全栈压测（`wrk`/`k6` HTTP + gRPC 并发压测），替换 §14.2 目标值；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。

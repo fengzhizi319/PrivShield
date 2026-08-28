@@ -1,4 +1,15 @@
 // Package main 提供 L7 自适应负载均衡网关入口。
+//
+// 双协议代理：
+//   - HTTP 反向代理：REST API 流量 → :8000
+//   - gRPC 透明流代理：gRPC 流量 → :50000
+//
+// 环境变量：
+//   - GATEWAY_BACKENDS：后端 Agent 地址（逗号分隔）
+//   - GATEWAY_STRATEGY：调度策略（p2c/round_robin/least_conn）
+//   - GATEWAY_HOST / GATEWAY_PORT：HTTP 监听地址
+//   - GATEWAY_GRPC_PORT：gRPC 监听端口
+//   - PRIVACY_LOG_LEVEL：日志级别
 package main
 
 import (
@@ -13,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/gateway"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
 )
@@ -40,7 +52,7 @@ func main() {
 	// 创建负载均衡器
 	lb := gateway.NewLoadBalancer(addresses, strategy)
 
-	// 创建 Gin 路由
+	// ── HTTP 反向代理 ──
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -58,9 +70,9 @@ func main() {
 	r.NoRoute(gateway.NewHTTPProxyHandler(lb))
 
 	// 启动 HTTP 服务器
-	addr := fmt.Sprintf("%s:%s", getEnv("GATEWAY_HOST", "0.0.0.0"), getEnv("GATEWAY_PORT", "8000"))
+	httpAddr := fmt.Sprintf("%s:%s", getEnv("GATEWAY_HOST", "0.0.0.0"), getEnv("GATEWAY_PORT", "8000"))
 	httpServer := &http.Server{
-		Addr:         addr,
+		Addr:         httpAddr,
 		Handler:      r,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -68,15 +80,34 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("Gateway HTTP Proxy listening", "addr", addr)
+		slog.Info("Gateway HTTP Proxy listening", "addr", httpAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("Gateway server error", "err", err)
+			slog.Error("Gateway HTTP server error", "err", err)
 			os.Exit(1)
 		}
 	}()
 
+	// ── gRPC 透明流代理 ──
+	grpcPort := getEnv("GATEWAY_GRPC_PORT", "50000")
+	grpcAddr := fmt.Sprintf("0.0.0.0:%s", grpcPort)
+
+	grpcProxyServer, grpcLis, err := gateway.NewGrpcProxyListener(lb, grpcAddr)
+	if err != nil {
+		slog.Error("gRPC proxy listener failed", "err", err)
+		os.Exit(1)
+	}
+
+	go func() {
+		slog.Info("Gateway gRPC Transparent Proxy listening", "addr", grpcAddr)
+		if err := grpcProxyServer.Serve(grpcLis); err != nil {
+			slog.Error("Gateway gRPC server error", "err", err)
+		}
+	}()
+
+	// ── 启动配置摘要 ──
 	slog.Info("Configuration summary",
-		"listen_addr", addr,
+		"http_addr", httpAddr,
+		"grpc_addr", grpcAddr,
 		"strategy", strategy,
 		"backends", addresses,
 	)
@@ -91,8 +122,10 @@ func main() {
 	defer cancel()
 
 	if err := httpServer.Shutdown(ctx); err != nil {
-		slog.Error("Gateway shutdown error", "err", err)
+		slog.Error("Gateway HTTP shutdown error", "err", err)
 	}
+	grpcProxyServer.GracefulStop()
+
 	slog.Info("Gateway stopped gracefully")
 }
 
