@@ -1,9 +1,9 @@
 # 数盾 PrivShield-go (路径 C) 深度架构重构与 Go+CUDA 异构推理完整实施方案
 
-> **文档定位**：本方案为 `PrivShield` 核心引擎从 Python 架构全面演进至 **Go 原生高性能微服务架构 (路径 C)** 的系统级深度架构设计、核心源码实现与落地实施指南（Production Blueprint）。
-> **参考实现**：`~/code/sfwork/PrivShield-go` (包含 `privacy-go-sdk`、`internal/dynclassification`、`internal/service`、`internal/grpcserver`、`internal/rest`、`internal/gateway`)
-> **版本**：v2.1.0 (深度重构与负载均衡增强版)
-> **状态**：🎯 生产就绪型技术蓝图 (Production-Grade Architecture & Implementation Blueprint)
+> **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构全面演进至 **Go 原生高性能微服务架构 (路径 C)** 的系统级深度架构设计、核心源码实现与生产迁移落地规约（Production Blueprint）。
+> **顶层设计对齐**：全面严格对齐 [`docs/archive/unified_design.md`](unified_design.md) (v15.1.0) 统一规范（包含统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。
+> **参考实现**：`~/code/sfwork/PrivShield-go` (包含 `privacy-go-sdk`、`internal/dynclassification`、`internal/service`、`internal/grpcserver`、`internal/rest`、`internal/gateway`) 与 `pkg/` 共享基础库。
+> **版本**：v3.0.0 (全栈统一对齐与生产就绪版)
 > **编写日期**：2026-08-28
 
 ---
@@ -11,98 +11,157 @@
 ## 目录 (Table of Contents)
 
 1. [方案演进背景与顶层技术决策](#1-方案演进背景与顶层技术决策)
-2. [全栈架构拓扑与数据流拓扑](#2-全栈架构拓扑与数据流拓扑)
-3. [零分配与高并发内存架构设计 (Zero-Allocation Architecture)](#3-零分配与高并发内存架构设计-zero-allocation-architecture)
-4. [纯 Go 隐私原语与 AC 自动机规则引擎](#4-纯-go-隐私原语与-ac-自动机规则引擎)
-5. [Go + CUDA Small-NER 深度学习推理核心实现](#5-go--cuda-small-ner-深度学习推理核心实现)
-   * 5.1 [ONNX Runtime CGO 双轨生命周期管理](#51-onnx-runtime-cgo-双轨生命周期管理)
-   * 5.2 [生产级 WordPiece Tokenizer 与精准 Offset Mapping](#52-生产级-wordpiece-tokenizer-与精准-offset-mapping)
-   * 5.3 [OS 线程绑定、专用 Worker Pool 与动态合批 (Dynamic Batching)](#53-os-线程绑定专用-worker-pool-与动态合批-dynamic-batching)
-   * 5.4 [BIO/BIOES 实体解码与 Span 对齐还原](#54-biobioes-实体解码与-span-对齐还原)
-6. [医疗数据全流程流水线 (Medical Pipeline) Go 原生实现](#6-医疗数据全流程流水线-medical-pipeline-go-原生实现)
-7. [三层漏斗与多级容灾降级机制 (Safety Floor & Fault Tolerance)](#7-三层漏斗与多级容灾降级机制-safety-floor--fault-tolerance)
-8. [Engine 自带高性能负载均衡与网关子系统重构设计 (Gateway & Balancer Redesign)](#8-engine-自带高性能负载均衡与网关子系统重构设计-gateway--balancer-redesign)
-   * 8.1 [网关架构重构目标与 L7 per-RPC 调度优势](#81-网关架构重构目标与-l7-per-rpc-调度优势)
-   * 8.2 [自适应负载均衡调度算法体系 (P2C-EWMA / SWRR / LeastConn)](#82-自适应负载均衡调度算法体系-p2c-ewma--swrr--leastconn)
-   * 8.3 [节点独立三态熔断器与双轨自愈健康探针](#83-节点独立三态熔断器与双轨自愈健康探针)
-   * 8.4 [透明零编解码 gRPC 反向代理核心实现 (Transparent Stream Proxy)](#84-透明零编解码-grpc-反向代理核心实现-transparent-stream-proxy)
-   * 8.5 [东西向零信任 mTLS 回源与南北向 TLS 终结](#85-东西向零信任-mtls-回源与南北向-tls-终结)
-9. [性能基准量化评估与容量规划](#9-性能基准量化评估与容量规划)
-10. [构建、依赖管理与生产部署清单](#10-构建依赖管理与生产部署清单)
-11. [双轨影子流量验证与平滑迁移演进路线](#11-双轨影子流量验证与平滑迁移演进路线)
+2. [全栈统一架构蓝图与服务拓扑 (System Topology)](#2-全栈统一架构蓝图与服务拓扑-system-topology)
+3. [统一中间件与上下文透传体系 (Unified Middleware & Context)](#3-统一中间件与上下文透传体系-unified-middleware--context)
+4. [零分配与高并发内存架构设计 (Zero-Allocation Architecture)](#4-零分配与高并发内存架构设计-zero-allocation-architecture)
+5. [纯 Go 隐私原语与 AC 自动机规则引擎 (privacy-go-sdk)](#5-纯-go-隐私原语与-ac-自动机规则引擎-privacy-go-sdk)
+6. [Go + CUDA Small-NER 深度学习推理核心实现](#6-go--cuda-small-ner-深度学习推理核心实现)
+   * 6.1 [ONNX Runtime CGO 双轨生命周期管理](#61-onnx-runtime-cgo-双轨生命周期管理)
+   * 6.2 [生产级 WordPiece Tokenizer 与精准 Offset Mapping](#62-生产级-wordpiece-tokenizer-与精准-offset-mapping)
+   * 6.3 [OS 线程绑定、专用 Worker Pool 与动态合批 (Dynamic Batching)](#63-os-线程绑定专用-worker-pool-与动态合批-dynamic-batching)
+   * 6.4 [BIO/BIOES 实体解码与 Span 对齐还原](#64-biobioes-实体解码与-span-对齐还原)
+7. [医疗数据全流程流水线 (Medical Pipeline) Go 原生实现](#7-医疗数据全流程流水线-medical-pipeline-go-原生实现)
+8. [三层漏斗与多级容灾降级机制 (Safety Floor & Fault Tolerance)](#8-三层漏斗与多级容灾降级机制-safety-floor--fault-tolerance)
+9. [Engine 自带高性能负载均衡与网关子系统重构 (Gateway & Balancer)](#9-engine-自带高性能负载均衡与网关子系统重构-gateway--balancer)
+   * 9.1 [网关架构定位与 L7 per-RPC 调度优势](#91-网关架构定位与-l7-per-rpc-调度优势)
+   * 9.2 [自适应负载均衡调度算法体系 (P2C-EWMA / SWRR / LeastConn)](#92-自适应负载均衡调度算法体系-p2c-ewma--swrr--leastconn)
+   * 9.3 [节点独立三态熔断器与双轨自愈健康探针](#93-节点独立三态熔断器与双轨自愈健康探针)
+   * 9.4 [透明零编解码 gRPC 反向代理核心实现 (Transparent Stream Proxy)](#94-透明零编解码-grpc-反向代理核心实现-transparent-stream-proxy)
+   * 9.5 [东西向零信任 mTLS 回源与南北向 TLS 终结](#95-东西向零信任-mtls-回源与南北向-tls-终结)
+10. [统一存储、审计存证与密码学基座 (Storage, Crypto & Audit)](#10-统一存储审计存证与密码学基座-storage-crypto--audit)
+11. [全栈可观测性与监控指标规约 (Observability Spec)](#11-全栈可观测性与监控指标规约-observability-spec)
+12. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#12-性能基准量化评估与容量规划-benchmark--sizing)
+13. [构建、依赖管理与生产部署清单 (Build & K8s Packaging)](#13-构建依赖管理与生产部署清单-build--k8s-packaging)
+14. [双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)](#14-双轨影子流量验证与平滑迁移演进路线-migration-playbook)
 
 ---
 
 ## 1. 方案演进背景与顶层技术决策
 
 ### 1.1 为什么必须实施路径 C (全栈 Go 化)？
-现有的 Python 引擎 (`engine/`) 虽然通过预编译正则、批次去重、`str.translate` 等优化将 100 条记录处理耗时压至 52.4ms，但在企业级高密流通场景下，仍存在无法突破的语言级瓶颈：
+现有的 Python 核心引擎 (`engine/`) 虽然通过预编译正则、批次去重、`str.translate` 等优化将 100 条记录处理耗时压至 52.4ms，但在企业级高密流通场景下，仍存在无法突破的语言级瓶颈：
 * **CPython GIL 锁死多核横向扩展**：单个 Python 进程只能利用单核 CPU 进行规则计算，多核必须依靠 Uvicorn 多进程。而在 64 核服务器上拉起 32 个 Worker 进程，每个 Worker 占用 300MB~1.5GB 内存，整机内存消耗高达 **20GB~40GB**。
 * **高频 GC 暂停与延迟抖动**：每秒数十万次字符串切片与对象分配引发频繁的 Python 分代垃圾回收，导致服务 P99 延迟偶发突破 500ms，无法满足金融级与医保实时结算 SLA（< 50ms）。
-* **跨语言微服务割裂**：外围中台服务（`service-hub`、`datasource-mgr`、`audit-log`、`bff-go`）均为 Go 语言实现，Python 引擎的异构存在增加了运维监控（Prometheus/gRPC 追踪）与镜像打包复杂度。
+* **跨语言微服务割裂**：外围中台服务（`service-hub`、`datasource-mgr`、`audit-log`、`bff-go`）均为 Go 语言实现，Python 引擎的异构存在增加了跨语言错误解析、追踪断链、监控埋点与运维打包的复杂度。
 
 ### 1.2 路径 C 的四大核心目标
 1. **极致吞吐 (Ultra Throughput)**：纯 CPU 规则与隐私原语吞吐达到 **40,000 ~ 60,000+ QPS**，16 逻辑核下满载吞吐突破 **500,000 记录/秒**；
 2. **极轻资源 (Ultra Low Footprint)**：单进程常驻内存仅 **18MB ~ 40MB**，比 Python 降低 95%；Docker 运行时镜像由 3.5GB 压缩至 **< 200MB**；
 3. **异构计算深度融合 (Heterogeneous Acceleration)**：通过 CGO + ONNX Runtime C API 直接驱动 CUDA GPU，利用**动态合批 (Dynamic Batching)** 与 **Pinning OS Thread**，将 GPU Tensor Core 算力发挥至极致；
-4. **统一高可靠网关与负载均衡 (L7 Gateway)**：将自带的 Gateway 升级为 Go 原生流式零拷贝反向代理，支持 **P2C-EWMA 自适应调度**、**三态独立熔断器** 与 **gRPC 透明帧流转**。
+4. **全栈统一标准合流**：全面接入 `pkg/` 共享库，统一错误信封、全链路 Trace 上下文、SSOT 命名、mTLS CN 白名单与 Prometheus 指标。
 
 ---
 
-## 2. 全栈架构拓扑与数据流拓扑
+## 2. 全栈统一架构蓝图与服务拓扑 (System Topology)
 
-```text
-                                  ┌─────────────────────────────────────────┐
-                                  │   客户端应用 / Service Hub / BFF-Go       │
-                                  └────────────────────┬────────────────────┘
-                                                       │
-                               ┌───────────────────────┴───────────────────────┐
-                               │ REST (HTTP/1.1)                 gRPC (HTTP/2) │
-                               ▼                                               ▼
-                  ┌─────────────────────────┐                     ┌─────────────────────────┐
-                  │ PrivShield Gateway REST │                     │ PrivShield Gateway gRPC │
-                  │ (Port: 8000, Go Proxy)  │                     │ (Port: 50000, L7 Proxy) │
-                  └────────────┬────────────┘                     └────────────┬────────────┘
-                               │                                               │
-                               └───────────────────────┬───────────────────────┘
-                                                       │ 智能调度 (P2C-EWMA / SWRR / LeastConn)
-                                                       │ 双轨健康探活 (HTTP /health + gRPC Health)
-                                                       ▼
-                               ┌───────────────────────────────────────────────┐
-                               │       PrivShield Agent 高性能计算节点集群       │
-                               │          (REST: 8079   |   gRPC: 50051)       │
-                               └───────────────────────┬───────────────────────┘
-                                                       │
-                               ┌───────────────────────▼───────────────────────┐
-                               │       Security & Interceptor 中间件层          │
-                               │   (TLS 1.3 / mTLS CN 白名单 / API Key / 限流)   │
-                               └───────────────────────┬───────────────────────┘
-                                                       │
-                               ┌───────────────────────▼───────────────────────┐
-                               │   PrivacyService 统一业务编排与对象池调度器    │
-                               │   (internal/service - sync.Pool 零拷贝内存复用)│
-                               └───────────────────────┬───────────────────────┘
-                                                       │
-               ┌───────────────────────────────────────┼───────────────────────────────────────┐
-               ▼                                       ▼                                       ▼
- ┌───────────────────────────┐           ┌───────────────────────────┐           ┌───────────────────────────┐
- │   三层动态分类分级引擎     │           │    底层隐私原语核心库     │           │     全栈可观测性组件      │
- │ (internal/dynclassification)│          │     (privacy-go-sdk)      │           │ (internal/observability)  │
- ├───────────────────────────┤           ├───────────────────────────┤           ├───────────────────────────┤
- │ • Layer 1: AC 自动机规则   │           │ • Masking (正则+HMAC-SHA) │           │ • slog 结构化日志 (JSON)  │
- │   引擎 (亚微秒级 < 0.5μs) │           │ • DP (Laplace/Gaussian)   │           │ • OpenTelemetry 链路追踪  │
- │ • Layer 2: Go+CUDA ONNX   │           │ • LDP (Randomized Response│           │ • Prometheus /metrics     │
- │   Small-NER (合批毫秒级)  │           │ • Kano (Mondrian/泛化)    │           │ • /v1/ops/diagnostics     │
- │ • Layer 3: Local LLM/vLLM │           │ • QOL (语义混淆注入)      │           └───────────────────────────┘
- │   (HTTP 连接池异步仲裁)   │           │ • Budget (滑动窗口/原子扣减)│
- └───────────────────────────┘           └───────────────────────────┘
+遵循 [`docs/archive/unified_design.md`](unified_design.md) §2 顶层拓扑规约，Go 原生引擎 (`PrivShield-go`) 与全栈微服务协同拓扑如下：
+
+```mermaid
+flowchart TD
+    subgraph LayerPresentation ["1. 统一表现与接入层 (Presentation & Gateway)"]
+        WebFull["console/web<br/>(4大隐私原语 + 分类漏斗)"]
+        WebAppLZ["console/app-lz/web<br/>(医保/康养流水线大屏)"]
+        BFFGo["console/bff-go (:8081)<br/>REST/gRPC 聚合网关"]
+        BFFLZ["app-lz/bff-go (:8085)<br/>流水线调度测试器"]
+        GoGW["PrivShield Gateway (:8000 / :50000)<br/>Go 原生 L7 自适应负载均衡网关"]
+    end
+
+    subgraph LayerMiddleware ["2. 统一中间件与上下文透传层 (Cross-Cutting Middleware)"]
+        TraceMW["pkg/middleware/trace.go<br/>(X-Request-ID / X-Trace-ID 自动注入与传播)"]
+        AuthMW["pkg/middleware/auth.go<br/>(API Key 鉴权 & 令牌桶限流)"]
+        EnvelopeMW["pkg/middleware/envelope.go<br/>(统一 JSON 错误与响应信封)"]
+        mTLSAuth["pkg/tlsutil/whitelist.go<br/>(mTLS CN 白名单动态热重载)"]
+    end
+
+    subgraph LayerGovernance ["3. 企业级数据流通调度与存证层 (Services Cluster)"]
+        Hub["services/service-hub (:8082)<br/>流水线调度 / Phase B 租约 Worker"]
+        DSMgr["services/datasource-mgr (:8083)<br/>多源数据纳管 / 样本切片提取"]
+        Audit["services/audit-log (:8084)<br/>9要素防篡改哈希链 / 快照信封加密"]
+    end
+
+    subgraph LayerCoreCompute ["4. Go 原生核心引擎集群 (PrivShield-go Engine)"]
+        AgentPool["PrivShield-go Agent 计算节点集群 (:8079 / :50051)"]
+        subgraph EngineInternals ["Agent 内部组件"]
+            Funnel["3-Layer 分类漏斗<br/>(AC-Rule → ONNX-CUDA → vLLM)"]
+            Primitives["privacy-go-sdk<br/>(Masking / DP / LDP / Kano / QoL)"]
+            Budget["原子隐私预算会计<br/>(Epsilon/Delta + 滑动窗口)"]
+        end
+    end
+
+    subgraph LayerStorageSecurity ["5. 统一存储与密码学基座 (Storage & Crypto)"]
+        SSOT["pkg/naming<br/>(全局唯一事实源 SSOT)"]
+        StoreFacade["pkg/store<br/>(Memory / PostgreSQL Phase B)"]
+        EnvelopeCrypto["pkg/crypto<br/>(SM4-GCM enc:v1:...)"]
+    end
+
+    WebFull --> BFFGo
+    WebAppLZ --> BFFLZ
+    BFFGo & BFFLZ --> LayerMiddleware
+    LayerMiddleware --> GoGW
+    GoGW -->|L7 per-RPC / mTLS 回源| AgentPool
+    AgentPool --> EngineInternals
+    Hub -->|gRPC| GoGW
+    Hub -->|HTTP| DSMgr
+    Hub & AgentPool --> Audit
+    LayerGovernance --> LayerStorageSecurity
+    EngineInternals --> LayerStorageSecurity
 ```
 
+### 2.1 全栈统一服务端口与协议矩阵 (对齐 unified_design.md §2.1)
+
+| 服务 / 模块 | 协议 | 内部端口 | 认证与鉴权方式 | 追踪与元数据透传 | 职责与定位 |
+|---|---|---|---|---|---|
+| **PrivShield Gateway (REST)** | HTTP/1.1 & HTTP/2 | `:8000` | API Key / 令牌桶限流 | `X-Request-ID` + `X-Trace-ID` | 南北向对外统一 REST 反向代理 |
+| **PrivShield Gateway (gRPC)** | gRPC (HTTP/2) | `:50000` | mTLS (CN 白名单) / API Key | `x-request-id` + `x-trace-id` | 南北向对外统一 gRPC 反向代理 |
+| **PrivShield-go Agent (REST)** | HTTP/1.1 & HTTP/2 | `:8079` | API Key / 内部回源鉴权 | `X-Request-ID` + `X-Trace-ID` | 核心隐私计算与脱敏 REST 端点 |
+| **PrivShield-go Agent (gRPC)** | gRPC (HTTP/2) | `:50051` | 东西向 mTLS 双向认证 | `x-request-id` metadata | 核心隐私计算与分类 gRPC 端点 |
+| **console/bff-go** | HTTPS / gRPC | `:8081` / `:50055` | API Key / mTLS | `X-Request-ID` + `X-Trace-ID` | Web 控制台聚合代理网关 |
+| **services/service-hub** | HTTP / gRPC | `:8082` / `:50052` | API Key / mTLS | `X-Request-ID` + `X-Trace-ID` | 6 阶段流通流水线与租约调度中枢 |
+| **services/datasource-mgr** | HTTP / gRPC | `:8083` / `:50053` | API Key / mTLS | `X-Request-ID` + `X-Trace-ID` | 多源数据接入与敏感特征探查 |
+| **services/audit-log** | HTTP / gRPC | `:8084` / `:50054` | API Key / mTLS | `X-Request-ID` + `X-Trace-ID` | 9 要素哈希链存证与 SM4 快照加密 |
+| **console/app-lz/bff-go** | HTTP | `:8085` | API Key | `X-Request-ID` + `X-Trace-ID` | 医保/康养流水线会话执行器 |
+
 ---
 
-## 3. 零分配与高并发内存架构设计 (Zero-Allocation Architecture)
+## 3. 统一中间件与上下文透传体系 (Unified Middleware & Context)
 
-为了在高并发下实现近乎零 GC 暂停，`PrivShield-go` 采用以下核心内存技术：
+全面接入 `pkg/middleware/`，杜绝接口行为与格式的不一致：
+
+### 3.1 统一 JSON 错误与响应信封 (`pkg/middleware/envelope.go`)
+所有 REST 接口（Agent 与 Gateway）在发生错误或异常拦截时，统一返回严格遵循 [`unified_design.md`](unified_design.md) 专项方案 1 的信封格式：
+
+```json
+{
+  "code": "INVALID_PARAM_LEVEL",
+  "message": "请求参数校验未通过",
+  "detail": "level must be one of [L1, L2, L3, L4, L5]",
+  "trace_id": "req-1787554500-abc12345",
+  "timestamp": "2026-08-28T18:30:00.123Z"
+}
+```
+
+在 Go 中统一调用封装：
+```go
+// 统一中止并输出规范错误信封
+middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_PARAM_LEVEL", "请求参数校验未通过", "level must be one of [L1, L2, L3, L4, L5]")
+```
+
+### 3.2 全链路分布式追踪 (`pkg/middleware/trace.go`)
+* **HTTP 入口**：提取请求头中的 `X-Request-ID` 与 `X-Trace-ID`；若缺失则自动生成标准前缀格式 `req-<timestamp>-<uuid8>`；
+* **gRPC 跨机调用**：客户端拦截器自动向 `metadata.OutgoingContext` 注入 `x-request-id` 与 `x-trace-id`；服务端拦截器自动从 `metadata.IncomingContext` 提取并绑定到 Go `context.Context` 中；
+* **日志绑定**：所有 `slog` 结构化日志自动提取 Context 中的 TraceID 进行关联输出。
+
+### 3.3 SSOT 统一命名与别名归一化 (`pkg/naming/`)
+所有接口涉及的数据源与数据类别严格通过 `pkg/naming` 解析：
+* `naming.DSYibao` ➔ `"ds_yibao"`（对应 `api1_yibao` 医保结算 18 字段）；
+* `naming.DSKangyang` ➔ `"ds_kangyang"`（对应 `api2_kangyang` 康养慢病 27 字段）；
+* 未知标识触发 **Fail-Closed** 拦截，直接返回 `400 INVALID_DATASOURCE_ID`。
+
+---
+
+## 4. 零分配与高并发内存架构设计 (Zero-Allocation Architecture)
+
+为了在高并发（50,000+ QPS）下实现近乎零 GC 暂停，`PrivShield-go` 采用以下核心内存技术：
 
 ```text
                                   ┌──────────────────────────┐
@@ -127,9 +186,9 @@
 
 ---
 
-## 4. 纯 Go 隐私原语与 AC 自动机规则引擎
+## 5. 纯 Go 隐私原语与 AC 自动机规则引擎 (privacy-go-sdk)
 
-### 4.1 算法实现与性能矩阵
+### 5.1 算法实现与性能矩阵
 
 | 模块目录 | 核心算法与数据结构 | 性能指标 | 核心实现细节 |
 |---|---|---|---|
@@ -140,7 +199,7 @@
 | `internal/qol` | 语义诱饵生成、Fisher-Yates 随机置乱注入 | **< 1.5 μs / 次** | 内置医疗与通用语料库，防外部搜索引擎/大模型语义侧信道探测 |
 | `internal/budget` | 无锁内存原子扣减 (`atomic.Uint64` 浮点位操作)、滑动窗口重置 | **< 15 ns / 次** | 支持内存模式与 Redis 分布式租约模式 |
 
-### 4.2 Aho-Corasick 多模式匹配规则引擎 (取代回溯正则)
+### 5.2 Aho-Corasick 多模式匹配规则引擎 (取代回溯正则)
 
 针对高敏医学词库（包含 284 个高危病种与传染病词条），放弃 Python CPython 的回溯式正则，改用 **Aho-Corasick (AC) 自动机**：
 ```go
@@ -236,11 +295,11 @@ func (m *AcRuleMatcher) ScanAndRedact(text string) (sanitized string, maxLevel s
 
 ---
 
-## 5. Go + CUDA Small-NER 深度学习推理核心实现
+## 6. Go + CUDA Small-NER 深度学习推理核心实现
 
 在 Go 中调用 CUDA 执行深度学习推理，必须解决 **CGO 调度屏障**、**显存安全管理**、**中文分词对齐** 与 **动态合批** 四大工程难题。
 
-### 5.1 ONNX Runtime CGO 双轨生命周期管理
+### 6.1 ONNX Runtime CGO 双轨生命周期管理
 
 ```mermaid
 sequenceDiagram
@@ -260,7 +319,7 @@ sequenceDiagram
     Worker->>Main: BIO 实体解码并回传 ResultChan
 ```
 
-### 5.2 生产级 WordPiece Tokenizer 与精准 Offset Mapping
+### 6.2 生产级 WordPiece Tokenizer 与精准 Offset Mapping
 
 中文临床文本可能混杂英文缩写（如 `HIV-1`、`CD4`、`HAART`）与特殊符号。分词器不仅要准确生成 Token，还必须维护**字符到原始字节的 Offset Mapping**，确保实体抽取结果能够精准对齐并替换：
 
@@ -391,7 +450,7 @@ func (t *BertTokenizer) EncodeWithOffsets(text string) (inputIDs, attnMask, type
 
 ---
 
-### 5.3 OS 线程绑定、专用 Worker Pool 与动态合批 (Dynamic Batching)
+### 6.3 OS 线程绑定、专用 Worker Pool 与动态合批 (Dynamic Batching)
 
 在 Go 中，Go 协程的 M:N 调度机制会导致协程在不同 OS 线程间跳转。如果在普通的业务 Goroutine 中调用 CGO 执行 CUDA，将频繁触发 CUDA Context 切换甚至导致锁死。
 **解决方案**：采用专职的 GPU Worker Pool，并在 Worker 协程入口处执行 `runtime.LockOSThread()`，通过 Go Channel 实现 Dynamic Batching：
@@ -581,7 +640,7 @@ func (e *CudaOnnxNerEngine) runBatchInference(tasks []*NerTask) {
 
 ---
 
-### 5.4 BIO/BIOES 实体解码与 Span 对齐还原
+### 6.4 BIO/BIOES 实体解码与 Span 对齐还原
 
 ```go
 func (e *CudaOnnxNerEngine) decodeBIOEntities(
@@ -652,7 +711,7 @@ func (e *CudaOnnxNerEngine) decodeBIOEntities(
 
 ---
 
-## 6. 医疗数据全流程流水线 (Medical Pipeline) Go 原生实现
+## 7. 医疗数据全流程流水线 (Medical Pipeline) Go 原生实现
 
 在 Go 中实现与 Python `MedicalPrivacyPipeline` 100% 对齐的流式/批次处理引擎：
 
@@ -802,7 +861,7 @@ func (p *MedicalPrivacyPipeline) ProcessRecords(
 
 ---
 
-## 7. 三层漏斗与多级容灾降级机制 (Safety Floor & Fault Tolerance)
+## 8. 三层漏斗与多级容灾降级机制 (Safety Floor & Fault Tolerance)
 
 为了保证医疗/金融级系统的高可用与零泄露，设计四级熔断降级阶梯：
 
@@ -824,7 +883,7 @@ func (p *MedicalPrivacyPipeline) ProcessRecords(
 
 ---
 
-## 8. Engine 自带高性能负载均衡与网关子系统重构设计 (Gateway & Balancer Redesign)
+## 9. Engine 自带高性能负载均衡与网关子系统重构 (Gateway & Balancer)
 
 在路径 C 中，网关与负载均衡子系统（`internal/gateway`）不仅承载着南北向流量分发，更是屏蔽后端 Agent 计算集群物理异构性、实现**L7 per-RPC 精准调度**、**零拷贝流式转发**与**东西向安全回源**的核心枢纽。
 
@@ -836,29 +895,29 @@ flowchart TD
         Router[动态协议路由器]
         Auth[安全鉴权 & 令牌桶限流]
         Balancer{自适应负载均衡器\n(P2C-EWMA / SWRR / LeastConn)}
-        CB[节点三态熔断器\nClosed/Open/HalfOpen]
+        CB[节点三态熔断器\nClosed / Open / Half-Open]
     end
     
     Gateway --> Router --> Auth --> Balancer
     Balancer <--> CB
     
     subgraph BackendPool ["后端 Agent 计算节点集群 (East-West TLS)"]
-        Agent1["Agent Node 1 (CPU Node)\nWeight: 1, InFlight: 2"]
-        Agent2["Agent Node 2 (GPU Node)\nWeight: 5, InFlight: 10"]
-        Agent3["Agent Node 3 (GPU Node)\nWeight: 5, InFlight: 3"]
+        Agent1["Agent Node 1 (2核 CPU 节点)\nWeight: 1, InFlight: 2"]
+        Agent2["Agent Node 2 (8核 GPU 节点)\nWeight: 5, InFlight: 10"]
+        Agent3["Agent Node 3 (8核 GPU 节点)\nWeight: 5, InFlight: 3"]
     end
     
-    Balancer -->|动态选择最佳节点| Agent3
+    Balancer -->|动态选择最优节点| Agent3
     
-    HealthProbe[双轨主动探活引擎\n(HTTP /health + gRPC Health/Check)] -.->|毫秒级健康状态更新| Balancer
+    HealthProbe[双轨主动探活引擎\n(HTTP /health + gRPC Health/Check)] -.->|毫秒级状态同步| Balancer
 ```
 
 ---
 
-### 8.1 网关架构重构目标与 L7 per-RPC 调度优势
+### 9.1 网关架构定位与 L7 per-RPC 调度优势
 
 #### 1. 破解 gRPC HTTP/2 多路复用导致的“单 Pod 钉住”顽疾
-* **L4 负载均衡的致命缺陷**：K8s Service (ClusterIP) 仅在 TCP 三次握手瞬间做一次分配。由于 gRPC 长连接多路复用，客户端建连后发送的所有 RPC 全部钉死在同一 Pod 上，造成严重负载倾斜。
+* **L4 负载均衡的致命缺陷**：K8s Service (ClusterIP) 仅在 TCP 三次握手瞬间做一次分配。由于 gRPC 长连接多路复用，客户端建连后发送的所有 RPC 都会**钉死在同一个后端 Pod 上**，造成严重负载倾斜；
 * **L7 per-RPC 代理的优势**：网关理解 HTTP/2 帧结构，每一个进来的独立 RPC 调用（如 `Mask()` 或 `ProcessRecords()`），都会在应用层**动态挑选最空闲的后端 Agent 节点**并发起转发，实现 100% 均匀的 RPC 级负载均衡。
 
 #### 2. 网关性能核心重构指标
@@ -868,7 +927,7 @@ flowchart TD
 
 ---
 
-### 8.2 自适应负载均衡调度算法体系 (P2C-EWMA / SWRR / LeastConn)
+### 9.2 自适应负载均衡调度算法体系 (P2C-EWMA / SWRR / LeastConn)
 
 网关内置五大调度算法，其中 **P2C-EWMA** 是专门为**GPU/CPU 异构计算与深度学习推理**设计的核心自适应算法：
 
@@ -964,7 +1023,7 @@ func (b *LoadBalancer) SelectNodeP2C() *BackendNode {
 
 ---
 
-### 8.3 节点独立三态熔断器与双轨自愈健康探针
+### 9.3 节点独立三态熔断器与双轨自愈健康探针
 
 网关为每个后端节点配备独立的**三态熔断器 (Circuit Breaker)** 与 **主动/被动双轨健康检查**：
 
@@ -1060,7 +1119,7 @@ func (cb *CircuitBreaker) RecordFailure() {
 
 ---
 
-### 8.4 透明零编解码 gRPC 反向代理核心实现 (Transparent Stream Proxy)
+### 9.4 透明零编解码 gRPC 反向代理核心实现 (Transparent Stream Proxy)
 
 为了追求极致性能，网关抛弃了“先根据 Protobuf 反序列化再序列化”的传统低效模式，采用基于 `grpc.UnknownServiceHandler` 的 **透明零编解码字节流代理模式 (Zero-Marshaling Stream Director)**：
 
@@ -1069,6 +1128,7 @@ package gateway
 
 import (
 	"io"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -1167,10 +1227,10 @@ func (g *GrpcProxyServer) TransparentStreamDirector(srv interface{}, ss grpc.Ser
 
 ---
 
-### 8.5 东西向零信任 mTLS 回源与南北向 TLS 终结
+### 9.5 东西向零信任 mTLS 回源与南北向 TLS 终结 (对齐 unified_design.md §3.5)
 
 网关同时支持**双层证书体系**：
-1. **南北向公网/客户端接入**：网关终结外部 TLS 握手，验证 API Key 或 mTLS CN 白名单；
+1. **南北向公网/客户端接入**：网关终结外部 TLS 握手，验证 API Key 或 mTLS CN 白名单（读取 `config/mtls-whitelist.yaml`）；
 2. **东西向内部安全回源**：网关作为 mTLS Client，使用内部私有 CA 证书与后端 Agent 建立双向加密通道，防止内网流量被嗅探或篡改。
 
 ```go
@@ -1197,11 +1257,43 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ---
 
-## 9. 性能基准量化评估与容量规划
+## 10. 统一存储、审计存证与密码学基座 (Storage, Crypto & Audit)
+
+全面对齐 [`unified_design.md`](unified_design.md) §3.4 与 §5 规范：
+
+1. **Phase B 存储底座 (PostgreSQL LeasedTaskStore)**：
+   - 调度中枢与多副本任务分发基于 `pkg/store/postgres`，使用 `FOR UPDATE SKIP LOCKED` 实现无锁分布式任务认领；
+2. **不可篡改 9 要素哈希链存证 (`services/audit-log`)**：
+   - 每次脱敏/分级调用均向 `:8084` 异步投递审计事件，生成不可逆 SHA-256 前后相连哈希链；
+3. **国密 SM4-GCM 快照信封加密 (`pkg/crypto`)**：
+   - 原始数据敏感快照使用 SM4-GCM 算法加密为 `enc:v1:<salt>:<nonce>:<ciphertext>` 标准信封密文，密钥支持 KMS 动态注入与轮转。
+
+---
+
+## 11. 全栈可观测性与监控指标规约 (Observability Spec)
+
+遵循 [`unified_design.md`](unified_design.md) §6 规范，统一指标命名空间与格式：
+
+### 11.1 Prometheus 核心指标定义
+
+| 指标名称 | 类型 | 标签 (Labels) | 说明 |
+|---|---|---|---|
+| `privacy_requests_total` | Counter | `protocol`, `endpoint`, `status` | 引擎与网关收到的总请求数 |
+| `privacy_request_duration_seconds` | Histogram | `protocol`, `endpoint` | 核心接口与原语耗时分布 (P50/P90/P99) |
+| `privacy_classification_total` | Counter | `engine`, `level`, `domain` | 三层分类漏斗命中计数 |
+| `privacy_ner_gpu_inference_seconds` | Histogram | `device_id`, `batch_size` | GPU Small-NER 前向推理耗时 |
+| `privacy_gateway_backend_in_flight` | Gauge | `node_id`, `backend_addr` | 网关各后端节点实时在途并发数 |
+| `privacy_gateway_backend_ewma_latency_seconds`| Gauge | `node_id` | 节点指数移动加权平均延迟 (EWMA) |
+| `privacy_gateway_circuit_breaker_state` | Gauge | `node_id`, `state` | 节点熔断器状态 (0=Closed, 1=HalfOpen, 2=Open) |
+| `privacy_budget_consumed_total` | Counter | `namespace`, `mechanism` | 累计消耗差分隐私预算 $\epsilon / \delta$ |
+
+---
+
+## 12. 性能基准量化评估与容量规划 (Benchmark & Sizing)
 
 在 16 逻辑核 / 32GB 内存 / NVIDIA RTX 4090 (24GB) 环境实测与理论测算：
 
-### 9.1 性能与资源全面对比
+### 12.1 性能与资源全面对比
 
 | 核心指标 | Python 引擎 (当前) | Go 原生引擎 (路径 C) | 提升幅度 |
 |---|---|---|---|
@@ -1218,9 +1310,9 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ---
 
-## 10. 构建、依赖管理与生产部署清单
+## 13. 构建、依赖管理与生产部署清单 (Build & K8s Packaging)
 
-### 10.1 Multi-Stage 生产级 Dockerfile
+### 13.1 Multi-Stage 生产级 Dockerfile
 
 ```dockerfile
 # ── Stage 1: Go 编译环境 ──
@@ -1235,7 +1327,7 @@ RUN go mod download
 
 COPY . .
 # 同时编译 Agent 与 Gateway 二进制
-RUN go build -ldflags="-s -w -X 'main.Version=2.1.0' -X 'main.BuildTime=$(date)'" \
+RUN go build -ldflags="-s -w -X 'main.Version=3.0.0' -X 'main.BuildTime=$(date)'" \
     -o /build/bin/privshield-agent ./cmd/privshield-agent && \
     go build -ldflags="-s -w" -o /build/bin/privshield-gateway ./cmd/privshield-gateway
 
@@ -1244,7 +1336,7 @@ FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04
 
 WORKDIR /app
 
-# 安装 ONNX Runtime GPU 动态库
+# 安装 ONNX Runtime GPU 动态库与运行时依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget ca-certificates libgomp1 \
     && wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-linux-x64-gpu-1.17.1.tgz \
@@ -1270,7 +1362,7 @@ ENTRYPOINT ["/app/privshield-agent"]
 
 ---
 
-## 11. 双轨影子流量验证与平滑迁移演进路线
+## 14. 双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)
 
 为确保从 Python 引擎向 Go 引擎的无故障平滑过渡，制定三阶段迁移演进路线：
 
