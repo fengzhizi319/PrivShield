@@ -157,6 +157,10 @@ type Config struct {
 	// 对应环境变量 PRIVACY_CONSOLE_TLS_PINNED_PUBKEY_FILE。
 	ConsoleTLSPinnedPubKeyFile string
 
+	// ConsoleMTLSWhitelistFile：BFF 入站 gRPC 服务端 mTLS CN 白名单文件路径（YAML）。
+	// 对应环境变量 PRIVACY_AUTH_MTLS_WHITELIST_FILE，为空则关闭 gRPC 层 method-scope 鉴权。
+	ConsoleMTLSWhitelistFile string
+
 	// ── BFF 入站 gRPC 服务端配置 ─────────────────────────────────────────
 
 	// ConsoleGRPCEnabled：是否同时启动 BFF 自身对外暴露的 gRPC 代理网关服务。
@@ -231,6 +235,7 @@ func Load() *Config {
 		ConsoleTLSCAFile:           getEnv("PRIVACY_CONSOLE_TLS_CA_FILE", ""),
 		ConsoleTLSClientAuth:       getEnv("PRIVACY_CONSOLE_TLS_CLIENT_AUTH", ""),
 		ConsoleTLSPinnedPubKeyFile: getEnv("PRIVACY_CONSOLE_TLS_PINNED_PUBKEY_FILE", ""),
+		ConsoleMTLSWhitelistFile:   getEnv("PRIVACY_AUTH_MTLS_WHITELIST_FILE", ""),
 		// BFF 入站 gRPC 服务端配置
 		ConsoleGRPCEnabled: getEnvBool("PRIVACY_CONSOLE_GRPC_ENABLED", false),
 		ConsoleGRPCHost:    getEnv("PRIVACY_CONSOLE_GRPC_HOST", "127.0.0.1"),

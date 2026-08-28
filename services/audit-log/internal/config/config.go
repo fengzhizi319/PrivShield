@@ -30,6 +30,9 @@ type Config struct {
 	TLSCAFile     string // CA cert for client verification / 用于校验客户端证书的 CA 证书路径
 	TLSClientAuth string // Client auth mode: "require" | "verify" | "" / 客户端认证模式
 
+	// mTLS CN whitelist configuration / mTLS CN 白名单配置（gRPC 服务端 method-scope 鉴权）
+	MTLSWhitelistFile string // Path to client certificate CN whitelist YAML / 客户端证书 CN 白名单 YAML 文件路径
+
 	// Public key pinning / 公钥固定
 	TLSPinnedPubKeyFile string // Pinned client public key PEM / 固定的客户端公钥文件路径
 
@@ -84,6 +87,9 @@ func Load() *Config {
 		TLSKeyFile:    pkgconfig.EnvString("AUDIT_LOG_TLS_KEY_FILE", ""),
 		TLSCAFile:     pkgconfig.EnvString("AUDIT_LOG_TLS_CA_FILE", ""),
 		TLSClientAuth: pkgconfig.EnvString("AUDIT_LOG_TLS_CLIENT_AUTH", ""),
+
+		// mTLS CN whitelist / 全局白名单文件
+		MTLSWhitelistFile: pkgconfig.EnvString("PRIVACY_AUTH_MTLS_WHITELIST_FILE", ""),
 
 		// Public key pinning / 公钥固定
 		TLSPinnedPubKeyFile: pkgconfig.EnvString("AUDIT_LOG_TLS_PINNED_PUBKEY_FILE", ""),

@@ -32,6 +32,9 @@ type Config struct {
 	TLSClientAuth       string // 客户端认证模式："require"（强制双向认证）| "verify"（可选验证）| ""（单向 TLS）
 	TLSPinnedPubKeyFile string // 固定客户端公钥 PEM 文件路径，用于应用层公钥指纹比对（防 CA 劫持与伪造）
 
+	// mTLS CN 白名单配置（gRPC 服务端 method-scope 鉴权）
+	MTLSWhitelistFile string // 客户端证书 CN 白名单 YAML 文件路径（为空则关闭 gRPC 层鉴权）
+
 	// 安全鉴权与跨域配置
 	APIKey      string   // 入站 HTTP/gRPC 请求 API Key 鉴权密钥（为空则不校验）
 	CORSOrigins []string // 允许的跨域来源列表（CORS 白名单）
@@ -70,6 +73,9 @@ func Load() *Config {
 		TLSCAFile:           pkgconfig.EnvString("DATASOURCE_MGR_TLS_CA_FILE", ""),
 		TLSClientAuth:       pkgconfig.EnvString("DATASOURCE_MGR_TLS_CLIENT_AUTH", ""),
 		TLSPinnedPubKeyFile: pkgconfig.EnvString("DATASOURCE_MGR_TLS_PINNED_PUBKEY_FILE", ""),
+
+		// mTLS CN 白名单配置（全局白名单文件，所有 Go gRPC 服务端共享）
+		MTLSWhitelistFile: pkgconfig.EnvString("PRIVACY_AUTH_MTLS_WHITELIST_FILE", ""),
 
 		// API 鉴权与跨域策略解析
 		APIKey:      pkgconfig.EnvString("DATASOURCE_MGR_API_KEY", ""),

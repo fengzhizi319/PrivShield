@@ -51,10 +51,34 @@ default_scopes: []
 #   - "health:read"            健康检查
 
 entries:
-  # 内部服务：全权限
+  # Go BFF / 统一控制台后端：全权限
   - cn: "privacy-console-go-client"
     scopes: ["*"]
     description: "Go console backend - full access for admin operations"
+    enabled: true
+
+  # Go BFF gRPC 服务端自身标识（与 privacy-console-go-client 等价，用于服务网格/证书自识别）
+  - cn: "bff-go.privshield.internal"
+    scopes: ["*"]
+    description: "BFF-Go gRPC server identity"
+    enabled: true
+
+  # 数据服务调度中枢 service-hub：作为上游调度者，需要调用 datasource-mgr / audit-log
+  - cn: "service-hub.privshield.internal"
+    scopes: ["*"]
+    description: "service-hub data dispatch center - full access for internal orchestration"
+    enabled: true
+
+  # 模拟数据源服务 datasource-mgr：接受 service-hub 等内部服务调用
+  - cn: "datasource-mgr.privshield.internal"
+    scopes: ["*"]
+    description: "datasource-mgr mock data service identity"
+    enabled: true
+
+  # 审计存证服务 audit-log：接受 service-hub 等内部服务调用
+  - cn: "audit-log.privshield.internal"
+    scopes: ["*"]
+    description: "audit-log tamper-proof logging service identity"
     enabled: true
 
   # 网关服务：全权限

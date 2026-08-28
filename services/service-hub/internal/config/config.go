@@ -45,6 +45,9 @@ type Config struct {
 	TLSCAFile     string // 验证调用方客户端身份的受信任根 CA 证书路径
 	TLSClientAuth string // 客户端认证模式："require"（强制双向校验）| "verify" | "request" | ""
 
+	// mTLS CN 白名单配置（gRPC 服务端 method-scope 鉴权）
+	MTLSWhitelistFile string // 客户端证书 CN 白名单 YAML 文件路径（为空则关闭 gRPC 层鉴权）
+
 	// 应用层公钥指纹固定（SPKI Pinning，防御 CA 劫持与伪造）
 	TLSPinnedPubKeyFile string // 固定的客户端 RSA 公钥 PEM 文件路径
 
@@ -103,6 +106,9 @@ func Load() *Config {
 		TLSKeyFile:    pkgconfig.EnvString("SERVICE_HUB_TLS_KEY_FILE", ""),
 		TLSCAFile:     pkgconfig.EnvString("SERVICE_HUB_TLS_CA_FILE", ""),
 		TLSClientAuth: pkgconfig.EnvString("SERVICE_HUB_TLS_CLIENT_AUTH", ""),
+
+		// mTLS CN 白名单配置（全局白名单文件，所有 Go gRPC 服务端共享）
+		MTLSWhitelistFile: pkgconfig.EnvString("PRIVACY_AUTH_MTLS_WHITELIST_FILE", ""),
 
 		// 客户端 RSA 公钥固定
 		TLSPinnedPubKeyFile: pkgconfig.EnvString("SERVICE_HUB_TLS_PINNED_PUBKEY_FILE", ""),

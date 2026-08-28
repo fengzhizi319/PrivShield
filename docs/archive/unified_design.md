@@ -15,8 +15,8 @@
 | 统一错误信封 | ✅ Phase 1 完成 | Python `engine/observability/envelope.py` + Go `pkg/middleware/envelope.go`；FastAPI/Starlette 全局捕获；MaxBodySize 走信封 | 无 |
 | 全链路分布式追踪 | 🟡 Phase 1 主体完成，部分 outbound 待补齐 | HTTP/gRPC 入口注入 `X-Request-ID`/`X-Trace-ID`；engine gRPC 提取 metadata；service-hub task 持久化 TraceID；BFF-Go REST 已向上游透传双头；service-hub→datasource-mgr gRPC 已透传双头 | app-lz/bff-go outbound 双头透传；统一 outbound API Key 注入 |
 | SSOT 数据源命名 | ✅ Phase 1 完成 | `pkg/naming/` SSOT；Go/Python/TS 常量对齐；`make lint-naming` | 无 |
-| SQLite → PostgreSQL 迁移 | 🟡 Phase 1 工具可用，验真待增强 | `pkg/store/cmd/migrate/main.go` + `scripts/prod/migrate_sqlite_to_postgres.sh`；哈希链迁移后校验 | 增加 snapshot 密文 AES-GCM 验真；只读锁定/幂等重跑优化 |
-| mTLS CN 白名单 | 🟡 库完成，服务端注册待完成 | `pkg/tlsutil/whitelist.go` + `grpc_interceptor.go`；热重载（mtime 轮询）；Python 端消费 | Go service-hub/datasource-mgr/audit-log/bff-go gRPC server 注册拦截器；统一 `config/mtls-whitelist.yaml` scope 语义 |
+| SQLite → PostgreSQL 迁移 | 🟡 Phase 1 工具可用，验真待增强 | `pkg/store/cmd/migrate/main.go` + `scripts/prod/migrate_sqlite_to_postgres.sh`；哈希链迁移后校验 | 增加 snapshot 密文 SM4-GCM 验真；只读锁定/幂等重跑优化 |
+| mTLS CN 白名单 | ✅ Phase 1 完成 | `pkg/tlsutil/whitelist.go` + `grpc_interceptor.go` + `NewWhitelistInterceptor` 辅助函数；热重载（mtime 轮询）；Python 端消费；Go service-hub/datasource-mgr/audit-log/bff-go gRPC server 已注册拦截器；统一读取 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | 无 |
 | 前端双控制台 | ✅ Phase 1 完成 | `console/web` 与 `console/app-lz/web` 统一错误解析、状态指示器、动态 API 渲染 | 无 |
 | 可观测性指标 | 🟡 定义完成，部分未埋点 | Python/Go metric 定义；中间件计数；部分 primitive 埋点 | 补齐 `privacy_classification_*`、`privacy_*_duration_seconds` 埋点；Go `service_hub_ready` / `circuit_breaker_state` 更新 |
 | BFF 微服务直连 | 📋 Phase 2 | 当前 `console/bff-go` 只代理到 Python Agent | `console/bff-go` 增加直连 service-hub/datasource-mgr/audit-log 的客户端、路由与错误映射 |
@@ -52,7 +52,7 @@
 1. **错误响应信封格式差异** ✅ — Python/Go 双端已统一，`MaxBodySize` 也已接入信封；
 2. **追踪上下文断链风险** 🟡 — HTTP/gRPC 入口已贯通；Task `TraceID` 已持久化；剩余 outbound 补齐见 [§10](#10-第二阶段改造计划phase-2)；
 3. **数据源命名硬编码** ✅ — SSOT + `make lint-naming` 已落地；
-4. **SQLite → PostgreSQL 割接** 🟡 — 迁移工具已可用，支持 `dry-run`/`verify`；snapshot 密文原样迁移，AES-GCM 验真待 Phase 2。
+4. **SQLite → PostgreSQL 割接** 🟡 — 迁移工具已可用，支持 `dry-run`/`verify`；snapshot 密文原样迁移，SM4-GCM 验真待 Phase 2。
 
 ---
 
@@ -92,7 +92,7 @@ flowchart TD
     subgraph LayerStorageSecurity ["5. 统一存储与密码学基座 (Storage & Crypto Foundations)"]
         SSOT["pkg/naming<br/>(全局唯一事实源)"]
         StoreFacade["pkg/store<br/>(Memory / SQLite / PostgreSQL)"]
-        EnvelopeCrypto["pkg/crypto<br/>(AES-256-GCM enc:v1:...)"]
+        EnvelopeCrypto["pkg/crypto<br/>(SM4-GCM enc:v1:...)"]
         mTLSAuth["pkg/tlsutil<br/>(TLS 1.3 mTLS + CN 白名单)"]
     end
 
@@ -400,7 +400,7 @@ flowchart TD
 
 #### 1. 迁移目标与挑战
 在单机环境下，PrivShield 使用 SQLite WAL 模式（`service-hub.db` 与 `audit-log.db`）。当升级到多节点企业级高并发集群时，需切换至 PostgreSQL Phase B 存储底座。  
-**核心挑战**：必须保证存量审计日志在割接过程中 **9 要素连续哈希链不断链**，且 **snapshot 密文原样迁移、哈希链完整性可校验**（AES-GCM 解密验真作为 Phase 2 增强目标）。
+**核心挑战**：必须保证存量审计日志在割接过程中 **9 要素连续哈希链不断链**，且 **snapshot 密文原样迁移、哈希链完整性可校验**（SM4-GCM 解密验真作为 Phase 2 增强目标）。
 
 ```text
 ┌───────────────────────┐                               ┌──────────────────────────┐
@@ -426,10 +426,10 @@ flowchart TD
 ##### Step 4.3：生产环境变量切换
 设置 `*_PG_DSN` 环境变量后重启服务，自动激活 Phase B 存储后端（`AUDIT_LOG_PG_DSN`、`SERVICE_HUB_PG_DSN`）。
 
-**实现状态**：迁移工具已可用，支持 `--dry-run` 预检与迁移后哈希链校验；snapshot 密文当前为原样迁移，完整 AES-GCM 解密验真待增强。
+**实现状态**：迁移工具已可用，支持 `--dry-run` 预检与迁移后哈希链校验；snapshot 密文当前为原样迁移，完整 SM4-GCM 解密验真待增强。
 
 **Phase 2 待办**：
-- 增加 snapshot 密文 AES-GCM 验真（见 [§10.2](#102-改造任务清单)）；
+- 增加 snapshot 密文 SM4-GCM 验真（见 [§10.2](#102-改造任务清单)）；
 - 增加源库只读锁定与幂等重跑优化（见 [§10.2](#102-改造任务清单)）。
 
 ---
@@ -462,12 +462,16 @@ entries:
 - **gRPC 拦截器** (`pkg/tlsutil/grpc_interceptor.go`)：从 TLS peer 证书提取 CN，与白名单比对并校验 Scope，未授权 CN 返回 `PermissionDenied`；
 - **Fail-Closed 策略**：无证书、未验证证书或 CN 不在白名单中的请求一律拒绝。
 
-> **注意**：当前 `config/mtls-whitelist.yaml` 主要由 Python Agent 消费；Go 服务端 gRPC 拦截器已提供，尚未在 service-hub/datasource-mgr/audit-log/bff-go 中显式注册，生产使用需结合 TLS client auth 与静态 CN 列表做兜底。
+> **注意**：`config/mtls-whitelist.yaml` 由 Python Agent 与 Go gRPC 服务端共同消费；Go 服务端已在 gRPC server option 中显式注册一元/流式拦截器，未授权 CN 返回 `PermissionDenied`。
+>
+> 生效条件：
+> - gRPC 服务端启用 mTLS（`SERVICE_HUB_TLS_CLIENT_AUTH=require` 等服务级变量，或 BFF 的 `PRIVACY_CONSOLE_TLS_CLIENT_AUTH=require`）；
+> - 设置 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 指向 `config/mtls-whitelist.yaml`；
+> - 客户端证书 CN 必须存在于白名单条目中（`entries[].cn`）。
 
-**实现状态**：CN 白名单配置、动态热重载库与 gRPC 拦截器已实现；Python 端已消费；Go 服务端注册尚待补齐。
+**实现状态**：CN 白名单配置、动态热重载库与 gRPC 拦截器已实现；Python 端已消费；Go service-hub/datasource-mgr/audit-log/bff-go gRPC Server 已注册拦截器。
 
 **Phase 2 待办**：
-- 在 service-hub/datasource-mgr/audit-log/bff-go gRPC Server 注册拦截器（见 [§10.2](#102-改造任务清单)）；
 - 统一 Python/Go 对 `config/mtls-whitelist.yaml` 的 scope 语义（见 [§10.2](#102-改造任务清单)）。
 
 ---
@@ -834,7 +838,7 @@ SIGTERM/SIGINT 到达
 | 审计日志 (`audit_logs`) | `AUDIT_LOG_RETENTION_DAYS`（默认 90 天） | 超期自动清理，保留哈希链完整性 |
 | 任务记录 (`tasks`) | 按服务配置 | 已完成任务定期归档 |
 | 隐私预算日志 | 永久保留 | 仅追加，不删除 |
-| 快照加密数据 | 跟随审计日志 | AES-256-GCM 密文随日志一同清理 |
+| 快照加密数据 | 跟随审计日志 | SM4-GCM 密文随日志一同清理 |
 
 ---
 
@@ -961,10 +965,10 @@ bash ./scripts/prod/prod_health_check.sh
 
 | 优先级 | 任务 | 涉及文件 | 改造内容 | 验收标准 |
 |:---|:---|:---|:---|:---|
-| P0 | Go gRPC 服务端注册 mTLS 白名单拦截器 | `services/service-hub/cmd/server/main.go`, `services/datasource-mgr/cmd/server/main.go`, `services/audit-log/cmd/server/main.go`, `console/bff-go/cmd/server/main.go`, `pkg/tlsutil/grpc_interceptor.go` | 在 gRPC server option 中注册 `UnaryServerInterceptor`/`StreamServerInterceptor`；读取 `PRIVACY_AUTH_MTLS_WHITELIST_FILE`；未授权 CN 返回 `PermissionDenied` | 拦截器单元测试通过；真实 mTLS 证书场景下白名单生效 |
+| ✅ | P0 | Go gRPC 服务端注册 mTLS 白名单拦截器 | `services/service-hub/cmd/server/main.go`, `services/datasource-mgr/cmd/server/main.go`, `services/audit-log/cmd/server/main.go`, `console/bff-go/internal/grpcserver/server.go`, `pkg/tlsutil/grpc_interceptor.go` | 在 gRPC server option 中注册 `UnaryServerInterceptor`/`StreamServerInterceptor`；统一读取 `PRIVACY_AUTH_MTLS_WHITELIST_FILE`；未授权 CN 返回 `PermissionDenied` | 拦截器单元测试通过；`go test ./pkg/tlsutil/... ./services/... ./console/...` 全绿 |
 | P0 | console/bff-go 直连 Go 微服务 | `console/bff-go/internal/clients/*.go` (new), `console/bff-go/internal/handlers/handlers.go`, `console/bff-go/internal/config/config.go` | 新增 service-hub/datasource-mgr/audit-log HTTP 客户端；新增 `/api/hub/*`、`/api/datasource/*`、`/api/audit/*` 路由；复用 `pkg/agent` trace/auth | 现有单测通过；新增集成测试覆盖端到端代理 |
 | P1 | service-hub / app-lz outbound 统一认证与追踪 | `services/service-hub/internal/datasource/client.go`, `console/app-lz/bff-go/internal/clients/clients.go` | HTTP outbound 注入 API Key、`X-Request-ID`、`X-Trace-ID` | 单元测试验证请求头 |
-| P1 | 迁移工具 AES-GCM snapshot 密文验真 | `pkg/store/cmd/migrate/main.go` | 迁移后读取 snapshots 密文，使用 `AUDIT_LOG_ENCRYPTION_KEY`/`PRIVACY_AUDIT_KEY` 解密并校验 tag；支持跳过/仅校验模式 | 迁移测试包含密文验真用例 |
+| P1 | 迁移工具 SM4-GCM snapshot 密文验真 | `pkg/store/cmd/migrate/main.go` | 迁移后读取 snapshots 密文，使用 `AUDIT_LOG_ENCRYPTION_KEY`/`PRIVACY_AUDIT_KEY` 解密并校验 tag；支持跳过/仅校验模式 | 迁移测试包含密文验真用例 |
 | P1 | Prometheus 指标全埋点 | `engine/dynclassification/service.py`, `engine/gateway/balancer.py`, `engine/privacy/*.py`, `pkg/metrics/metrics.go`, `services/service-hub/cmd/server/main.go` | Python 补齐 `privacy_classification_*` 与 duration 埋点；Go 在就绪探针更新 `service_hub_ready`，在熔断器状态变更更新 `circuit_breaker_state` | 指标在 `/metrics` 中可见；对应单元测试通过 |
 | P2 | 文件处理补全 Excel | `engine/routers/file.py`, `engine/privacy/file_processor.py` | 增加 `pandas.read_excel` 分支与字段识别 | 新增 Excel 处理测试 |
 

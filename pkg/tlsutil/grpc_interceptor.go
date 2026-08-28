@@ -102,3 +102,17 @@ func (dw *DynamicWhitelist) StreamServerInterceptor() grpc.StreamServerIntercept
 		return handler(srv, ss)
 	}
 }
+
+// NewWhitelistInterceptor loads a DynamicWhitelist from path and returns both
+// unary and stream server interceptors. If path is empty, it returns nil
+// interceptors and a nil DynamicWhitelist with no error.
+func NewWhitelistInterceptor(path string) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor, *DynamicWhitelist, error) {
+	if path == "" {
+		return nil, nil, nil, nil
+	}
+	dw, err := NewDynamicWhitelist(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return dw.UnaryServerInterceptor(), dw.StreamServerInterceptor(), dw, nil
+}

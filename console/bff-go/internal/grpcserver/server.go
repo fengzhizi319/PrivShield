@@ -24,10 +24,11 @@ import (
 // Server implements pb.PrivacyServiceServer as a high-performance gRPC gateway proxy.
 type Server struct {
 	pb.UnimplementedPrivacyServiceServer
-	client *agent.Client
-	cfg    *config.Config
-	logger *slog.Logger
-	grpcS  *grpc.Server
+	client    *agent.Client
+	cfg       *config.Config
+	logger    *slog.Logger
+	grpcS     *grpc.Server
+	whitelist *tlsutil.DynamicWhitelist
 }
 
 // New creates a new gRPC Server instance for the BFF gateway.
@@ -51,6 +52,22 @@ func (s *Server) Start(addr string) error {
 		grpc.MaxRecvMsgSize(64<<20),
 		grpc.MaxSendMsgSize(64<<20),
 	)
+
+	// mTLS CN whitelist authorization for inbound gRPC connections.
+	if s.cfg.ConsoleMTLSWhitelistFile != "" {
+		unaryInterceptor, streamInterceptor, dw, err := tlsutil.NewWhitelistInterceptor(s.cfg.ConsoleMTLSWhitelistFile)
+		if err != nil {
+			return fmt.Errorf("failed to load mTLS whitelist: %w", err)
+		}
+		s.whitelist = dw
+		opts = append(opts,
+			grpc.UnaryInterceptor(unaryInterceptor),
+			grpc.StreamInterceptor(streamInterceptor),
+		)
+		s.logger.Info("bff grpc server configured with mTLS CN whitelist",
+			"path", s.cfg.ConsoleMTLSWhitelistFile,
+		)
+	}
 
 	// TLS / mTLS support
 	if s.cfg.ConsoleTLSEnabled {
@@ -87,6 +104,9 @@ func (s *Server) Start(addr string) error {
 func (s *Server) Stop() {
 	if s.grpcS != nil {
 		s.grpcS.GracefulStop()
+	}
+	if s.whitelist != nil {
+		s.whitelist.Close()
 	}
 }
 

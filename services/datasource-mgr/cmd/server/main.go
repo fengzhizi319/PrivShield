@@ -49,6 +49,7 @@ import (
 	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
+	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/handlers"
@@ -149,6 +150,22 @@ func main() {
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
+	}
+
+	// mTLS CN whitelist authorization for inbound gRPC connections.
+	if cfg.MTLSWhitelistFile != "" {
+		unaryInterceptor, streamInterceptor, dw, err := tlsutil.NewWhitelistInterceptor(cfg.MTLSWhitelistFile)
+		if err != nil {
+			log.Fatalf("failed to load mTLS whitelist: %v", err)
+		}
+		defer dw.Close()
+		grpcServerOpts = append(grpcServerOpts,
+			grpc.UnaryInterceptor(unaryInterceptor),
+			grpc.StreamInterceptor(streamInterceptor),
+		)
+		logger.Info("gRPC server configured with mTLS CN whitelist",
+			"path", cfg.MTLSWhitelistFile,
+		)
 	}
 
 	if cfg.TLSEnabled {

@@ -243,3 +243,50 @@ func createTempWhitelistForInterceptor(t *testing.T) string {
 	t.Helper()
 	return createTempWhitelist(t, testWhitelistYAML)
 }
+
+// TestNewWhitelistInterceptor_EmptyPath verifies that an empty path returns nil interceptors.
+func TestNewWhitelistInterceptor_EmptyPath(t *testing.T) {
+	unary, stream, dw, err := NewWhitelistInterceptor("")
+	if err != nil {
+		t.Fatalf("unexpected error for empty path: %v", err)
+	}
+	if unary != nil {
+		t.Error("expected nil unary interceptor for empty path")
+	}
+	if stream != nil {
+		t.Error("expected nil stream interceptor for empty path")
+	}
+	if dw != nil {
+		t.Error("expected nil DynamicWhitelist for empty path")
+	}
+}
+
+// TestNewWhitelistInterceptor_LoadAndAuthorize verifies the helper loads the whitelist
+// and the returned unary interceptor blocks unauthorized CNs.
+func TestNewWhitelistInterceptor_LoadAndAuthorize(t *testing.T) {
+	path := createTempWhitelistForInterceptor(t)
+	unary, stream, dw, err := NewWhitelistInterceptor(path)
+	if err != nil {
+		t.Fatalf("NewWhitelistInterceptor failed: %v", err)
+	}
+	defer dw.Close()
+	if unary == nil {
+		t.Fatal("expected non-nil unary interceptor")
+	}
+	if stream == nil {
+		t.Fatal("expected non-nil stream interceptor")
+	}
+
+	ctx := tlsPeerContext("unknown-client")
+	_, err = unary(ctx, "test-request", &grpc.UnaryServerInfo{FullMethod: "/TestService/TestMethod"}, func(ctx context.Context, req any) (any, error) {
+		t.Error("handler should NOT be called for unauthorized CN")
+		return nil, nil
+	})
+	if err == nil {
+		t.Fatal("expected error for unauthorized CN")
+	}
+	st, _ := status.FromError(err)
+	if st.Code() != codes.PermissionDenied {
+		t.Errorf("expected PermissionDenied, got %v", st.Code())
+	}
+}

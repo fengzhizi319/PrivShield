@@ -244,6 +244,23 @@ func main() {
 		}),
 	}
 
+	// mTLS CN whitelist authorization for inbound gRPC connections.
+	// 为入站 gRPC 连接配置 mTLS CN 白名单 method-scope 鉴权拦截器。
+	if cfg.MTLSWhitelistFile != "" {
+		unaryInterceptor, streamInterceptor, dw, err := tlsutil.NewWhitelistInterceptor(cfg.MTLSWhitelistFile)
+		if err != nil {
+			log.Fatalf("failed to load mTLS whitelist: %v", err)
+		}
+		defer dw.Close()
+		grpcServerOpts = append(grpcServerOpts,
+			grpc.UnaryInterceptor(unaryInterceptor),
+			grpc.StreamInterceptor(streamInterceptor),
+		)
+		logger.Info("gRPC server configured with mTLS CN whitelist",
+			"path", cfg.MTLSWhitelistFile,
+		)
+	}
+
 	if cfg.TLSEnabled {
 		creds, credErr := grpcserver.BuildServerCredentials(cfg)
 		if credErr != nil {
