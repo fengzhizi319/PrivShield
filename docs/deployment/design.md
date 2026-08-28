@@ -956,7 +956,7 @@ flowchart LR
 
     subgraph NodeB ["服务器 B：审计存证与合规账本节点 (Audit & Evidence Node)"]
         direction TB
-        AuditLog["services/audit-log<br/>(9要素区块链式哈希链 / AES-256-GCM 信封加密 / 快照验真 :8084/:50054)"]
+        AuditLog["services/audit-log<br/>(9要素区块链式哈希链 / SM4-GCM 信封加密 / 快照验真 :8084/:50054)"]
         AuditDB[(不可篡改存储底座<br/>SQLite WAL / PostgreSQL Phase B)]
         
         AuditLog --> AuditDB
@@ -986,7 +986,7 @@ flowchart LR
 |---|---|---|---|---|
 | **接入与调度 (`service-hub`)** | 请求参数解析、鉴权、生成 TaskID、任务持久化 | $0.2 \sim 0.5 \text{ ms}$ | $\approx 4 \text{ KB}$ | 内存/SQLite 1 次写入（$\approx 1 \text{ KB}$） |
 | **规则与脱敏 (`engine`)** | Layer-1 正则/字典匹配 + Layer-2 Small-NER + PII 掩码 + ICD-10 敏感诊断脱敏 | $2.5 \sim 6.0 \text{ ms}$（CPU 纯规则）<br/>$15 \sim 35 \text{ ms}$（启用 Small-NER ONNX） | $\approx 32 \text{ KB}$ (临时缓存) | 零磁盘 I/O（全内存流式处理） |
-| **审计存证 (`audit-log`)** | 追溯前序哈希 + 计算 9 要素 SHA-256 + AES-256-GCM 样本信封加密 + 批量落盘 | $0.8 \sim 1.5 \text{ ms}$ (硬件加速 AES-NI/SHA-NI) | $\approx 8 \text{ KB}$ | 磁盘写入 $\approx 1.2 \text{ KB}$ (含快照与哈希链索引) |
+| **审计存证 (`audit-log`)** | 追溯前序哈希 + 计算 9 要素 SHA-256 + SM4-GCM 样本信封加密 + 批量落盘 | $0.8 \sim 1.5 \text{ ms}$ (硬件加速 国密/SHA-NI) | $\approx 8 \text{ KB}$ | 磁盘写入 $\approx 1.2 \text{ KB}$ (含快照与哈希链索引) |
 
 #### 容量测算关键公式：
 1. **内网带宽开销**：
@@ -1026,7 +1026,7 @@ flowchart LR
 | 节点 | 推荐规格 | CPU / 内存 | 存储选型与配置 | 网络需求 | 软件参数调优 |
 |---|---|---|---|---|---|
 | **服务器 A**<br/>(engine + service-hub) | 物理机 / 企业级云主机 | **8 ~ 16 核 vCPU / 16 ~ 32 GB 内存** | 200 GB NVMe SSD | 1 Gbps (千兆网) | • Uvicorn workers: 4~8<br/>• gRPC MaxWorkers: 64<br/>• Hub 并发信号量: 30<br/>• 开启规则引擎 LRU 缓存 (4096) |
-| **服务器 B**<br/>(audit-log) | 物理机 / 企业级云主机 | **4 ~ 8 核 vCPU / 8 ~ 16 GB 内存** | 1 TB ~ 2 TB NVMe SSD<br/>(写入吞吐 $\ge 20 \text{MB/s}$, IOPS $\ge 3,000$) | 1 Gbps | • 存储引擎: SQLite WAL 或 PostgreSQL Phase B<br/>• 开启 AES-256-GCM 硬件指令集加速<br/>• 本地保留: 60 天 + 定期归档 |
+| **服务器 B**<br/>(audit-log) | 物理机 / 企业级云主机 | **4 ~ 8 核 vCPU / 8 ~ 16 GB 内存** | 1 TB ~ 2 TB NVMe SSD<br/>(写入吞吐 $\ge 20 \text{MB/s}$, IOPS $\ge 3,000$) | 1 Gbps | • 存储引擎: SQLite WAL 或 PostgreSQL Phase B<br/>• 开启 SM4-GCM 硬件指令集加速<br/>• 本地保留: 60 天 + 定期归档 |
 
 #### 梯度 3：高并发场景 (1,000 ~ 3,000 QPS，日请求量 5,000万 ~ 1.5亿次)
 
@@ -1048,7 +1048,7 @@ flowchart LR
 
 1. **CPU 算力瓶颈与优化**：
    - **动态脱敏规则匹配**：`engine` 内部正则编译已通过 `ConfigurableRuleEngine` 实现全局 LRU 预编译缓存（`PRIVACY_ENGINE_CACHE_MAX_SIZE=4096`），避免单次请求重复编译正则；
-   - **密码学哈希与加密**：SHA-256 哈希链与 AES-256-GCM 运算尽量确保宿主机 CPU 支持并启用了 `Intel SHA-NI` 与 `AES-NI` 扩展指令集，可降低 70% 的 CPU 存证开销。
+   - **密码学哈希与加密**：SHA-256 哈希链与 SM4-GCM 运算尽量确保宿主机 CPU 支持并启用了 `Intel SHA-NI` 与国密 SM4 硬件扩展指令集，可降低 70% 的 CPU 存证开销。
 2. **内存消耗与 OOM 防御**：
    - `services/service-hub` 与 `services/audit-log` 配置了 HTTP `MaxBodySize(32MB)` 保护，杜绝超大 Payload 请求撑爆内存；
    - 在高并发数据导入时，优先采用批次分片（Batch Chunking，单批 100~500 行），避免一次加载上万条完整记录到单请求上下文中。

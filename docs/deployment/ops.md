@@ -2753,7 +2753,7 @@ AUDIT_LOG_GRPC_HOST=0.0.0.0
 AUDIT_LOG_GRPC_PORT=50054
 AUDIT_LOG_DB_PATH=/var/lib/privshield/audit-log.db
 AUDIT_LOG_RETENTION_DAYS=30
-AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-aes-key-here
+AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-sm4-key-here
 ```
 
 ---
@@ -2794,7 +2794,7 @@ AUDIT_LOG_GRPC_PORT=50054
 AUDIT_LOG_DB_PATH=/var/lib/privshield/audit-log.db
 # 或启用轻量 PostgreSQL: AUDIT_LOG_PG_DSN=postgres://audit:pwd@127.0.0.1:5432/privshield_audit?sslmode=disable
 AUDIT_LOG_RETENTION_DAYS=60
-AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-aes-key-here
+AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-sm4-key-here
 ```
 
 ---
@@ -2838,7 +2838,7 @@ AUDIT_LOG_GRPC_HOST=0.0.0.0
 AUDIT_LOG_GRPC_PORT=50054
 # 强制启用 PostgreSQL Phase B 多副本高效批量存证存储
 AUDIT_LOG_PG_DSN=postgres://audit:auditpwd@127.0.0.1:5432/privshield_audit?sslmode=disable&pool_max_conns=50&pool_min_conns=10
-AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-aes-key-here
+AUDIT_LOG_ENCRYPTION_KEY=your-32-byte-base64-sm4-key-here
 AUDIT_LOG_RETENTION_DAYS=90
 AUDIT_LOG_ARCHIVE_DIR=/data/audit_archive
 ```
