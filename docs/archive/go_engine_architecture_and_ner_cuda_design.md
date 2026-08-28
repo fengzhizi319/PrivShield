@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。当前 `pkg/` 共享库已提供部分能力，`engine-go/` / `privacy-go-sdk/` / CUDA NER 等模块尚未实现。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v3.4.1-drafted (路径 C 演进草案修订版)
+> **版本**：v4.0.0-drafted (路径 C 演进草案修订版)
 > **编写日期**：2026-08-28
-> **修订说明**：v3.4.1 明确区分"已落地"与"规划态"，删除对不存在仓库的虚假引用，修正工程示例中的明显缺陷，并将性能数字从"已实现实测"改为"目标/测算值"。
+> **修订说明**：v4.0.0 修复 7 类代码一致性问题：tlsutil 函数签名对齐、§13 重复编号修正、硬编码路径清理、Mermaid 拓扑虚假链路移除、Go 版本与 Dockerfile 版本号更新。
 
 ---
 
@@ -47,9 +47,10 @@
     * 12.9 [Step 8: 自动化测试、性能压测与影子流量验证](#129-step-8-自动化测试性能压测与影子流量验证)
 13. [存量 Go 代码资产复用与工程借鉴实战指南 (Reusing Existing Go Assets)](#13-存量-go-代码资产复用与工程借鉴实战指南-reusing-existing-go-assets)
     * 13.1 [当前仓库 Go 资产盘点与复用度评估矩阵](#131-当前仓库-go-资产盘点与复用度评估矩阵)
-    * 13.2 [网关子系统复用实战（当前 Python 实现 vs 目标 Go 实现）](#132-网关子系统复用实战当前-python-实现-vs-目标-go-实现)
-    * 13.3 [主工程 `pkg/` 共享基础设施库无缝接入](#133-主工程-pkg-共享基础设施库无缝接入)
-    * 13.4 [跨工程资产同步与自动化合并迁移指令](#134-跨工程资产同步与自动化合并迁移指令)
+    * 13.2 [路径 C 需新建模块清单（当前仓库不存在）](#132-路径-c-需新建模块清单当前仓库不存在)
+    * 13.3 [网关子系统复用实战（当前 Python 实现 vs 目标 Go 实现）](#133-网关子系统复用实战当前-python-实现-vs-目标-go-实现)
+    * 13.4 [主工程 `pkg/` 共享基础设施库无缝接入](#134-主工程-pkg-共享基础设施库无缝接入)
+    * 13.5 [跨工程资产同步说明（重要勘误）](#135-跨工程资产同步说明重要勘误)
 14. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#14-性能基准量化评估与容量规划-benchmark--sizing)
 15. [构建、依赖管理与生产部署清单 (Build & K8s Packaging)](#15-构建依赖管理与生产部署清单-build--k8s-packaging)
 16. [双轨影子流量验证与 Python 引擎彻底退役路线 (Migration & Deprecation Playbook)](#16-双轨影子流量验证与-python-引擎彻底退役路线-migration--deprecation-playbook)
@@ -219,7 +220,7 @@ flowchart TD
     AgentPool --> EngineInternals
     Hub -->|gRPC| GoGW
     Hub -->|HTTP| DSMgr
-    Hub & AgentPool --> Audit
+    AgentPool -->|异步审计事件| Audit
     LayerGovernance --> LayerStorageSecurity
     EngineInternals --> LayerStorageSecurity
 ```
@@ -1512,7 +1513,7 @@ PrivShield-go/
 
 #### 1. 前置条件与目录创建
 ```bash
-cd /home/charles/code/PrivShield
+cd /path/to/PrivShield
 mkdir -p cmd/privshield-agent cmd/privshield-gateway
 mkdir -p privacy-go-sdk/{masking,dp,ldp,kano,qol,budget,medical}
 mkdir -p internal/{dynclassification,service,rest,grpcserver,gateway,observability}
@@ -1531,7 +1532,7 @@ sudo ldconfig
 ```go
 module github.com/fengzhizi319/PrivShield
 
-go 1.22
+go 1.25
 
 require (
 	github.com/BobuSumisu/aho-corasick v1.0.3
@@ -1847,11 +1848,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 加载 mTLS CN 白名单拦截器
+	// 加载 mTLS CN 白名单拦截器（单一构造函数返回四元组）
 	whitelistPath := os.Getenv("PRIVACY_AUTH_MTLS_WHITELIST_FILE")
+	unaryInterceptor, streamInterceptor, _, err := tlsutil.NewWhitelistInterceptor(whitelistPath)
+	if err != nil {
+		slog.Error("Failed to init mTLS whitelist", "err", err)
+		os.Exit(1)
+	}
 	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(tlsutil.NewWhitelistUnaryInterceptor(whitelistPath)),
-		grpc.StreamInterceptor(tlsutil.NewWhitelistStreamInterceptor(whitelistPath)),
+		grpc.UnaryInterceptor(unaryInterceptor),
+		grpc.StreamInterceptor(streamInterceptor),
 	)
 	pb.RegisterPrivacyServiceServer(grpcServer, grpcserver.NewPrivacyServer())
 
@@ -2028,9 +2034,9 @@ func main() {
 
 ---
 
-### 13.2 网关子系统复用实战（当前 Python 实现 vs 目标 Go 实现）
+### 13.3 网关子系统复用实战（当前 Python 实现 vs 目标 Go 实现）
 
-当前 `/home/charles/code/PrivShield/engine/gateway/` 为 Python 实现，提供负载均衡、反向代理与健康检查，可作为 Go 原生网关的**协议与配置参考**，但不能直接复用代码。目标 Go 原生网关 (`internal/gateway`) 需重新实现以下能力：
+当前 `engine/gateway/` 为 Python 实现，提供负载均衡、反向代理与健康检查，可作为 Go 原生网关的**协议与配置参考**，但不能直接复用代码。目标 Go 原生网关 (`internal/gateway`) 需重新实现以下能力：
 
 1. **重新实现 `balancer.go` 的调度核心与三态状态机**：
    - 当前 Python `engine/gateway/balancer.py` 已实现 Round-Robin、Weighted Round-Robin、LeastConnections 调度与熔断/健康检查，可作为算法语义参考；
@@ -2045,7 +2051,7 @@ func main() {
 
 ---
 
-### 13.3 主工程 `pkg/` 共享基础设施库无缝接入
+### 13.4 主工程 `pkg/` 共享基础设施库无缝接入
 
 `PrivShield-go` 作为主工程的核心组件，必须全面导入并挂载 `pkg/`：
 
@@ -2054,11 +2060,11 @@ func main() {
 2. **SSOT 数据源别名收敛 (`pkg/naming/`)**：
    - 将所有涉及医保与康养的路由和参数判断，统一收敛至 `naming.DSYibao` 与 `naming.DSKangyang`；入站值使用 `naming.ResolveInbound(raw)` 一次性完成归一化与写侧校验，未知或预留数据源 fail-closed；
 3. **mTLS CN 动态白名单接入 (`pkg/tlsutil/`)**：
-   - gRPC Server 显式注册 `tlsutil.NewWhitelistUnaryInterceptor(whitelistPath)` 与 `tlsutil.NewWhitelistStreamInterceptor(whitelistPath)`，自动实现基于 `config/mtls-whitelist.yaml` 的 5 秒文件 mtime 轮询热重载。
+   - gRPC Server 通过 `tlsutil.NewWhitelistInterceptor(whitelistPath)` 一次性获取 `UnaryServerInterceptor` + `StreamServerInterceptor` + `DynamicWhitelist`，自动实现基于 `config/mtls-whitelist.yaml` 的 5 秒文件 mtime 轮询热重载。
 
 ---
 
-### 13.4 跨工程资产同步说明（重要勘误）
+### 13.5 跨工程资产同步说明（重要勘误）
 
 > **状态说明**：v3.4.1 修订确认 `~/code/sfwork/PrivShield-go` 仓库**在当前工作区不存在**，因此原 v3.3.0 中基于 `cp -r ${SOURCE_DIR}/...` 的自动同步脚本已失效并移除。
 
@@ -2072,7 +2078,7 @@ func main() {
 ```bash
 #!/bin/bash
 set -e
-cd /home/charles/code/PrivShield
+cd /path/to/PrivShield
 
 # 1. 验证当前 Go 共享库编译通过
 go test -v -race ./pkg/...
@@ -2128,7 +2134,7 @@ RUN go mod download
 
 COPY . .
 # 同时编译 Agent 与 Gateway 二进制
-RUN go build -ldflags="-s -w -X 'main.Version=3.3.0' -X 'main.BuildTime=$(date)'" \
+RUN go build -ldflags="-s -w -X 'main.Version=3.4.1' -X 'main.BuildTime=$(date)'" \
     -o /build/bin/privshield-agent ./cmd/privshield-agent && \
     go build -ldflags="-s -w" -o /build/bin/privshield-gateway ./cmd/privshield-gateway
 
@@ -2264,9 +2270,23 @@ PrivShield/
 
 ---
 
-## 附录 A：v3.4.1 文档修订记录
+## 附录 A：文档修订记录
 
-本次修订（v3.4.0 → v3.4.1）基于对当前仓库实际代码资产的核对，核心目标是**让设计文档向代码对齐**，避免把规划态能力描述为已实现状态：
+### v4.0.0 修订（v3.4.1 → v4.0.0）
+
+本次修订基于对当前仓库代码的再次审计，修复 7 类设计与代码不一致问题：
+
+| 修订项 | v3.4.1 原描述 | v4.0.0 修正 |
+|---|---|---|
+| tlsutil 函数签名 | `NewWhitelistUnaryInterceptor` / `NewWhitelistStreamInterceptor`（不存在） | 修正为 `NewWhitelistInterceptor(path)` 返回四元组 `(Unary, Stream, *DynamicWhitelist, error)` |
+| §13 章节编号 | §13.2 重复出现两次，§13.3/§13.4 顺延错位 | 补齐缺失的 §13.2（需新建模块清单），重新编号 §13.2→§13.5 |
+| 硬编码路径 | `/home/charles/code/PrivShield`（3 处） | 统一替换为 `/path/to/PrivShield` |
+| Mermaid 服务拓扑 | `Hub & AgentPool --> Audit`（service-hub 不直接调用 audit-log） | 修正为 `AgentPool --> Audit`（仅 Go 引擎异步审计） |
+| go.mod Go 版本 | `go 1.22`（过时） | 修正为 `go 1.25`（对齐实际 `pkg/go.mod`） |
+| Dockerfile 版本号 | `main.Version=3.3.0`（过时） | 修正为 `main.Version=3.4.1` |
+| TOC 缺失条目 | §13.2 需新建模块清单未在 TOC 中列出 | 补齐 TOC 条目并对齐编号 |
+
+### v3.4.1 修订（初始版本 → v3.4.1）
 
 | 修订项 | v3.4.0 原描述 | v3.4.1 修正 |
 |---|---|---|
