@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v12.0.0  
+> **版本**：v13.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 修复测试构建失败 + Go workspace 测试命令修正
+> **最后更新**：2026-08-28 — 修正分类引擎指标文件路径 + 5 处标签对齐代码
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -521,7 +521,7 @@ cd ../../web && pnpm build
 
 ### 6.1 Prometheus 指标体系
 
-#### Python 引擎端 (`engine/observability/metrics.py` + `engine/dynclassification/metrics.py`)
+#### Python 引擎端 (`engine/observability/metrics.py`)
 
 <details>
 <summary>点击展开完整 Python 指标参考表（40 个指标）</summary>
@@ -568,16 +568,16 @@ cd ../../web && pnpm build
 | `privacy_classification_llm_tokens_total` | Counter | `direction` | LLM Token 消耗量 |
 | `privacy_classification_duration_seconds` | Histogram | `source` | 分类端到端延迟 |
 
-##### 分类引擎内部（`dynclassification/metrics.py`）
+##### 分类引擎内部（同 `engine/observability/metrics.py`）
 
 | 指标名称 | 类型 | 标签 | 用途 |
 |---|---|---|---|
-| `classification_rule_hits_total` | Counter | `rule_id`, `level` | 规则命中计数（含级别） |
-| `classification_operator_calls_total` | Counter | `operator` | 算子调用计数 |
-| `classification_operator_errors_total` | Counter | `operator` | 算子错误计数 |
-| `classification_engine_load_duration_seconds` | Histogram | — | 规则引擎加载延迟 |
+| `classification_rule_hits_total` | Counter | `rule_id`, `domain`, `standard` | 规则命中计数（含领域/体系） |
+| `classification_operator_calls_total` | Counter | `operator`, `result` | 算子调用计数（含结果） |
+| `classification_operator_errors_total` | Counter | `operator`, `rule_id` | 算子错误计数 |
+| `classification_engine_load_duration_seconds` | Histogram | `domain`, `standard` | 规则引擎加载延迟 |
 | `classification_profile_cache_size` | Gauge | — | 配置 Profile 缓存大小 |
-| `classification_override_suppressed_total` | Counter | `rule_id` | 安全覆盖抑制计数 |
+| `classification_override_suppressed_total` | Counter | `domain`, `suppressed_rule_id` | 安全覆盖抑制计数 |
 
 ##### 网关
 
@@ -898,4 +898,5 @@ bash ./scripts/prod/prod_health_check.sh
 | v9.0 | 2026-08-28 | 移除拓扑矩阵虚假链路、§1.2/§8.3 细节修正 |
 | v10.0 | 2026-08-28 | datasource-mgr 升级至 Level 5、新增 Python 引擎 50+ API 端点速查 |
 | v11.0 | 2026-08-28 | 架构图补齐服务间链路、新增 §9 快速参考卡 + 附录 A 修订历史 |
-| **v12.0** | **2026-08-28** | **修复测试构建失败 + Go workspace 测试命令修正** |
+| v12.0 | 2026-08-28 | 修复测试构建失败 + Go workspace 测试命令修正 |
+| **v13.0** | **2026-08-28** | **修正分类引擎指标文件路径（不存在 dynclassification/metrics.py）+ 5 处标签对齐代码** |
