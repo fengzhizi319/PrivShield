@@ -1,11 +1,16 @@
 // Package rest 提供 REST API 路由注册。
+//
+// 所有错误响应统一使用 middleware.AbortWithError 输出标准信封格式，
+// 与 Python 引擎及其他 Go 微服务保持跨语言一致。
 package rest
 
 import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
+	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/kano"
 )
 
@@ -73,12 +78,12 @@ func maskHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Type  string `json:"type" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result, err := svc.MaskField(req.Type, req.Value)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "MASK_FAILED", "脱敏处理失败", err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"field": req.Field, "masked": result})
@@ -91,7 +96,7 @@ func maskRecordHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Record map[string]string `json:"record" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result := svc.MaskRecord(req.Record)
@@ -105,7 +110,7 @@ func maskBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Records []map[string]string `json:"records" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		results := svc.MaskBatch(req.Records)
@@ -124,12 +129,12 @@ func noisyCountHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Epsilon float64 `json:"epsilon" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result, err := svc.NoisyCount(c.Request.Context(), req.Count, req.Epsilon)
 		if err != nil {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"noisy_count": result, "epsilon": req.Epsilon})
@@ -144,12 +149,12 @@ func noisySumHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Sensitivity float64   `json:"sensitivity" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result, err := svc.NoisySum(c.Request.Context(), req.Values, req.Epsilon, req.Sensitivity)
 		if err != nil {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"noisy_sum": result, "epsilon": req.Epsilon})
@@ -165,12 +170,12 @@ func noisyMeanHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			ClipBound float64   `json:"clip_bound" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result, err := svc.NoisyMean(c.Request.Context(), req.Values, req.Epsilon, req.Delta, req.ClipBound)
 		if err != nil {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"noisy_mean": result, "epsilon": req.Epsilon})
@@ -188,7 +193,7 @@ func randomizedResponseHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Epsilon float64 `json:"epsilon" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result := svc.RandomizedResponse(req.Value, req.Epsilon)
@@ -204,7 +209,7 @@ func orrHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			DomainSize int     `json:"domain_size" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result := svc.ORRResponse(req.Value, req.Epsilon, req.DomainSize)
@@ -224,7 +229,7 @@ func kAnonymizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			K        int                 `json:"k" binding:"required,min=1"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		// 转换类型
@@ -234,7 +239,7 @@ func kAnonymizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
 		}
 		result, err := svc.KAnonymize(kanoRecords, req.QIFields, req.K)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusInternalServerError, "KANONYMIZE_FAILED", "K-匿名处理失败", err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -257,7 +262,7 @@ func obfuscateHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Domain    string `json:"domain" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		queries, realIdx := svc.ObfuscateQuery(req.Query, req.NumDecoys, req.Domain)
@@ -279,7 +284,7 @@ func classifyHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Value string `json:"value" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result := svc.Classify(req.Field, req.Value)
@@ -293,7 +298,7 @@ func classifyBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Records []map[string]string `json:"records" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		results := svc.ClassifyBatch(req.Records)
@@ -312,7 +317,7 @@ func medicalSanitizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Domain string            `json:"domain" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result := svc.SanitizeMedicalRecord(req.Record, req.Domain)
@@ -327,7 +332,7 @@ func medicalBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Domain  string              `json:"domain" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		results := svc.SanitizeMedicalBatch(req.Records, req.Domain)
@@ -346,7 +351,7 @@ func hashHMACHanlder(svc *service.PrivacyService) gin.HandlerFunc {
 			Salt  string `json:"salt" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
 		result := svc.HashHMAC(req.Value, req.Salt)

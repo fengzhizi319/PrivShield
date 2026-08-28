@@ -18,9 +18,9 @@ COPY engine-go/ ./engine-go/
 
 # 编译 Agent 与 Gateway
 RUN cd engine-go && \
-    go build -ldflags="-s -w -X 'main.Version=6.0.0' -X 'main.BuildTime=$(date -u)'" \
+    go build -ldflags="-s -w -X 'main.Version=10.0.0' -X 'main.BuildTime=$(date -u)'" \
     -o /build/bin/privshield-agent ./cmd/privshield-agent && \
-    go build -ldflags="-s -w -X 'main.Version=6.0.0' -X 'main.BuildTime=$(date -u)'" \
+    go build -ldflags="-s -w -X 'main.Version=10.0.0' -X 'main.BuildTime=$(date -u)'" \
     -o /build/bin/privshield-gateway ./cmd/privshield-gateway
 
 # ── Stage 2: 极简运行时镜像 ──

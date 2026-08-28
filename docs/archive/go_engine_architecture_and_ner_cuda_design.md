@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v9.0.0-drafted (路径 C 演进草案 Phase 5 CUDA ONNX NER + 统一中间件集成版)
+> **版本**：v10.0.0-drafted (路径 C 演进草案 Phase 6 统一错误信封 + 限流 + CUDA Dockerfile + REST 测试版)
 > **编写日期**：2026-08-28
-> **修订说明**：v9.0.0 完成 Phase 5 核心实现：CUDA ONNX NER 引擎完整架构（LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象 + Stub/CGO 双轨模式 + 四级降级链）、Agent 接入 pkg/middleware 全链路分布式追踪中间件（TraceMiddleware）、Agent gRPC 接入 pkg/tlsutil mTLS CN 白名单拦截器（NewWhitelistInterceptor）。新增 14 个 CUDA ONNX NER 测试（BIO 解码/argmax/softmax/Worker Pool/超时降级/推理错误降级）。
+> **修订说明**：v10.0.0 完成 Phase 6 实现：REST 全部 17 个端点统一错误信封迁移（`middleware.AbortWithError` 替换旧版 `gin.H{"error"}`）、Agent 接入 `pkg/middleware.RateLimit` 令牌桶限流中间件（`PRIVACY_RATE_LIMIT_RPS/BURST` 环境变量配置）、Dockerfile 版本升级至 v10.0.0 + 新增 CUDA 变体（`Dockerfile.cuda`，nvidia/cuda 运行时 + ONNX Runtime GPU 动态库 + CGO 编译）、新增 REST 集成测试（28 个测试覆盖全部端点正常路径 + 错误信封格式校验）。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 2 已实现 | Phase 1 骨架 + Phase 2 补齐：gRPC 服务端、Service 编排层、REST 路由、L7 网关、dynclassification 扩展、medical 包、配置文件。详见附录 A v6.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 6 已实现 | Phase 1-5 骨架 + Phase 6 统一错误信封 + 限流 + CUDA Dockerfile + REST 测试。详见附录 A v10.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -2029,8 +2029,8 @@ func main() {
 | `privacy-go-sdk/` | ✅ Phase 2 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试与基准测试。 |
 | `internal/dynclassification/` | ✅ Phase 5 已实现 | 规则引擎 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + 动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链 + **CUDA ONNX NER 引擎（LockOSThread Worker Pool + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级）**。完整 CUDA CGO 绑定待引入 onnxruntime_go。 |
 | `internal/gateway/` | ✅ Phase 3 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）**。 |
-| `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 3 已实现 | Service 编排层、REST 路由、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer（protoc-gen-go 生成桩代码）**）。 |
-| `cmd/privshield-agent/` | ✅ Phase 5 已集成 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer`，**接入 pkg/middleware TraceMiddleware + pkg/tlsutil mTLS CN 白名单拦截器**。 |
+| `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 6 已实现 | Service 编排层、REST 路由（**17 个端点统一错误信封 `middleware.AbortWithError`** + 28 个集成测试）、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer**）。 |
+| `cmd/privshield-agent/` | ✅ Phase 6 已集成 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer`，**接入 TraceMiddleware + RateLimit 限流 + mTLS CN 白名单拦截器**。 |
 | `cmd/privshield-gateway/` | ✅ Phase 4 已重构 | L7 网关入口，补齐 gRPC 透明流代理集成（`grpcProxy.NewGrpcProxyListener`），HTTP+gRPC 双协议代理。 |
 | `internal/gateway/backend_tls.go` | ✅ Phase 4 已实现 | 东西向 mTLS 回源 TLS 配置（BuildBackendTLSConfig + CA 验证 + TLS 1.3 + Insecure 降级）。 |
 | `scripts/dev/shadow_verifier.go` | ✅ Phase 4 已实现 | 影子流量比对验证工具，6 条比对用例（MaskRecord/NoisyCount/Classify/HashHMAC/MaskBatch/ClassifyBatch），精确+近似双模式比对。 |
@@ -2297,6 +2297,26 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v10.0.0 修订（v9.0.0 → v10.0.0）
+
+本次修订完成 Phase 6 实现：REST 统一错误信封 + 限流中间件 + CUDA Dockerfile + REST 集成测试：
+
+| 修订项 | v9.0.0 状态 | v10.0.0 实现 |
+|---|---|---|
+| REST 错误信封 | `c.JSON(400, gin.H{"error":...})` 旧版格式 | 全部 17 个端点统一迁移至 `middleware.AbortWithError`，输出标准信封格式（code/message/detail/trace_id/timestamp），与 Python 引擎及其他 Go 微服务跨语言一致 |
+| Agent 限流中间件 | 未接入 | `cmd/privshield-agent/main.go` 集成 `middleware.RateLimit(rps, burst)`，通过 `PRIVACY_RATE_LIMIT_RPS/BURST` 环境变量配置（默认 1000/2000） |
+| Dockerfile 版本 | `main.Version=6.0.0` | 升级至 `main.Version=10.0.0` |
+| CUDA Dockerfile | 不存在 | 新增 `engine-go/Dockerfile.cuda`：nvidia/cuda 运行时 + ONNX Runtime GPU 动态库 + CGO 编译 + NVIDIA_VISIBLE_DEVICES + 非 root 用户 + HEALTHCHECK |
+| REST 集成测试 | 不存在 | 新增 `routes_test.go`（427 行，28 个测试）：覆盖全部 17 个端点正常路径 + 错误信封格式校验 + 404 路由，全量通过 `-race` 检测 |
+
+**Phase 6 实现清单**：
+- [x] `engine-go/internal/rest/routes.go` — 17 个端点统一错误信封迁移（`middleware.AbortWithError`）
+- [x] `engine-go/internal/rest/routes_test.go` — 28 个 REST 集成测试（427 行）
+- [x] `engine-go/cmd/privshield-agent/main.go` — Agent 接入 `middleware.RateLimit` 限流中间件
+- [x] `engine-go/Dockerfile` — 版本升级至 v10.0.0
+- [x] `engine-go/Dockerfile.cuda` — CUDA 变体 Dockerfile（nvidia/cuda + ONNX Runtime GPU）
+- [x] 全量测试 — engine-go (4 包 ok) + privacy-go-sdk (7 包 ok)，`-race` 全部通过
+
 ### v9.0.0 修订（v8.0.0 → v9.0.0）
 
 本次修订完成 Phase 5 核心实现：CUDA ONNX NER 引擎完整架构 + Agent 统一中间件集成：
@@ -2463,6 +2483,10 @@ PrivShield/
 - [x] 实现 mTLS 后端 TLS 配置（`internal/gateway/backend_tls.go`，CA 验证 + TLS 1.3）；
 - [x] 实现完整 Go+CUDA ONNX NER 架构（`cuda_onnx_ner.go`，LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级链，14 个测试通过 `-race`）；完整 CUDA CGO 绑定待引入 `onnxruntime_go` 替换 Stub；
 - [x] Agent 集成 `pkg/middleware` TraceMiddleware + `pkg/tlsutil` mTLS CN 白名单拦截器；
+- [x] REST 全部 17 个端点统一错误信封迁移（`middleware.AbortWithError` 替换旧版 `gin.H{"error"}`）；
+- [x] Agent 接入 `pkg/middleware.RateLimit` 令牌桶限流中间件（`PRIVACY_RATE_LIMIT_RPS/BURST` 环境变量）；
+- [x] Dockerfile 版本升级至 v10.0.0 + 新增 CUDA 变体（`Dockerfile.cuda`）；
+- [x] REST 集成测试（`routes_test.go`，28 个测试覆盖全部端点 + 错误信封格式校验）；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。

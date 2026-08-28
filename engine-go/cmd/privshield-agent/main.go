@@ -48,18 +48,22 @@ var (
 // ──────────────────────────────────────────────
 
 type Config struct {
-	RESTHost string
-	RESTPort int
-	GRPCPort int
-	LogLevel string
+	RESTHost    string
+	RESTPort    int
+	GRPCPort    int
+	LogLevel    string
+	RateLimitRPS int
+	RateLimitBurst int
 }
 
 func loadConfig() Config {
 	return Config{
-		RESTHost: getEnv("PRIVACY_REST_HOST", "0.0.0.0"),
-		RESTPort: getEnvInt("PRIVACY_REST_PORT", 8079),
-		GRPCPort: getEnvInt("PRIVACY_GRPC_PORT", 50051),
-		LogLevel: getEnv("PRIVACY_LOG_LEVEL", "INFO"),
+		RESTHost:    getEnv("PRIVACY_REST_HOST", "0.0.0.0"),
+		RESTPort:    getEnvInt("PRIVACY_REST_PORT", 8079),
+		GRPCPort:    getEnvInt("PRIVACY_GRPC_PORT", 50051),
+		LogLevel:    getEnv("PRIVACY_LOG_LEVEL", "INFO"),
+		RateLimitRPS:   getEnvInt("PRIVACY_RATE_LIMIT_RPS", 1000),
+		RateLimitBurst: getEnvInt("PRIVACY_RATE_LIMIT_BURST", 2000),
 	}
 }
 
@@ -92,6 +96,13 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.TraceMiddleware()) // 全链路分布式追踪 (X-Request-ID + X-Trace-ID)
+
+	// 可选限流中间件（设计文档 §12.7 / §13.4）
+	if cfg.RateLimitRPS > 0 {
+		router.Use(middleware.RateLimit(cfg.RateLimitRPS, cfg.RateLimitBurst))
+		slog.Info("Rate limiting enabled", "rps", cfg.RateLimitRPS, "burst", cfg.RateLimitBurst)
+	}
+
 	router.Use(observability.RequestLogger())
 	router.Use(observability.PrometheusMiddleware())
 
