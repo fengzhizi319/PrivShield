@@ -99,13 +99,19 @@ BFF 网关层提供了面向不同业务场景的聚合路由定义：
 ```bash
 # 1. 启动全功能控制台（Python Agent + Go BFF + Vite HMR 前端）
 bash ./scripts/dev/dev-bff-agent.sh
+```
 
+```bash
 # 2. 启用 mTLS 双向认证模式启动
 bash ./scripts/dev/dev-bff-agent.sh --mtls
+```
 
+```bash
 # 3. 启动业务调度控制台（App-LZ Dev）
-bash ./scripts/dev/dev-app-lz.sh
+bash ./scripts/dev/dev-app-lz.sh  --force
+```
 
+```bash
 # 4. 停止所有控制台服务
 bash ./scripts/dev/dev-stop.sh
 ```
