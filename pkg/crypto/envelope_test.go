@@ -1,8 +1,38 @@
 package crypto
 
 import (
+	"bytes"
+	"encoding/hex"
 	"testing"
 )
+
+// TestSM4StandardVector tests the standard GB/T 32907-2016 single block encryption/decryption.
+func TestSM4StandardVector(t *testing.T) {
+	keyHex := "0123456789abcdeffedcba9876543210"
+	plainHex := "0123456789abcdeffedcba9876543210"
+	cipherHex := "a39c462feee46b964d80175d3294b6bd"
+
+	key, _ := hex.DecodeString(keyHex)
+	plain, _ := hex.DecodeString(plainHex)
+	expectedCipher, _ := hex.DecodeString(cipherHex)
+
+	block, err := NewCipher(key)
+	if err != nil {
+		t.Fatalf("NewCipher failed: %v", err)
+	}
+
+	dst := make([]byte, BlockSize)
+	block.Encrypt(dst, plain)
+	if !bytes.Equal(dst, expectedCipher) {
+		t.Fatalf("SM4 encryption mismatch: got %x, want %x", dst, expectedCipher)
+	}
+
+	dec := make([]byte, BlockSize)
+	block.Decrypt(dec, dst)
+	if !bytes.Equal(dec, plain) {
+		t.Fatalf("SM4 decryption mismatch: got %x, want %x", dec, plain)
+	}
+}
 
 func TestEnvelopeEncryption(t *testing.T) {
 	secret := "privshield-master-key-2026"
