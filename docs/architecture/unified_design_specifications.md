@@ -128,7 +128,8 @@ flowchart TD
    - 入站请求若包含 `X-Request-ID`，写入上下文并透传；
    - 入站请求若缺失，中间件自动生成并回写到 HTTP 响应头 `X-Request-ID`；
 2. **gRPC 双向元数据转换**：
-   - Go 客户端（`pkg/agent`）发起 gRPC 调用时，自动将上下文中的 `X-Request-ID` 写入 gRPC `metadata.Pairs("x-request-id", traceID)`；
+   - Go gRPC 客户端（`console/bff-go/internal/agent/client.go`）发起 gRPC 调用时，自动将上下文中的 trace ID 写入 gRPC `metadata.AppendToOutgoingContext(ctx, "x-request-id", traceID, "x-trace-id", traceID)`；
+   - Go HTTP 客户端（`pkg/agent/client.go`）发起 HTTP 调用时，自动注入 `X-Request-ID` + `X-Trace-ID` 双头；
    - Python gRPC Servicer（`engine/grpc_server.py`）自动从 `context.invocation_metadata()` 中提取并在日志中绑定；
 3. **结构化日志标准输出字段**：
    ```json
