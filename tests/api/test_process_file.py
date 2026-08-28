@@ -87,3 +87,73 @@ def test_process_file_unsupported_format():
         data={"operation": "mask_dataframe"},
     )
     assert resp.status_code == 400
+
+
+def _make_xlsx_bytes(rows: list[list[str]], sheet_title: str = "Sheet1") -> bytes:
+    """使用 openpyxl 在内存中构造 .xlsx 文件字节。"""
+    from io import BytesIO
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    if ws is None:
+        ws = wb.create_sheet(sheet_title)
+    ws.title = sheet_title
+    for row in rows:
+        ws.append(row)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_process_file_mask_xlsx():
+    """上传 Excel 执行 DataFrame 脱敏，应返回与输入等量的脱敏记录。"""
+    xlsx = _make_xlsx_bytes(
+        [
+            ["email", "phone", "name"],
+            ["alice@example.com", "13800138000", "Alice"],
+            ["bob@example.com", "13900139000", "Bob"],
+        ]
+    )
+    resp = client.post(
+        "/v1/privacy/process_file",
+        files={"file": ("data.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={
+            "operation": "mask_dataframe",
+            "params": json.dumps({"columns": ["email", "phone"]}),
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["operation"] == "mask_dataframe"
+    assert body["rows_in"] == 2
+    assert body["rows_out"] == 2
+    assert body["result"][0]["email"] != "alice@example.com"
+
+
+def test_process_file_k_anonymize_xlsx():
+    """上传 Excel 执行 K-匿名，敏感列应保持不变。"""
+    xlsx = _make_xlsx_bytes(
+        [
+            ["age", "zip", "gender", "disease"],
+            ["30", "100000", "F", "A"],
+            ["31", "100001", "F", "B"],
+            ["32", "100002", "M", "C"],
+            ["33", "100003", "M", "D"],
+        ]
+    )
+    resp = client.post(
+        "/v1/privacy/process_file",
+        files={"file": ("data.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={
+            "operation": "k_anonymize",
+            "params": json.dumps({"qi_cols": ["age", "zip", "gender"], "k": 2}),
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["operation"] == "k_anonymize"
+    assert body["rows_in"] == 4
+    assert body["rows_out"] == 4
+    assert {r["disease"] for r in body["result"]} == {"A", "B", "C", "D"}

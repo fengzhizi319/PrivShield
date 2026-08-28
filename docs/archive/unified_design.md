@@ -970,7 +970,7 @@ bash ./scripts/prod/prod_health_check.sh
 | ✅ | P1 | service-hub / app-lz outbound 统一认证与追踪 | `services/service-hub/internal/datasource/client.go`, `console/app-lz/bff-go/internal/clients/clients.go` | HTTP outbound 注入 API Key、`X-Request-ID`、`X-Trace-ID` | 单元测试验证请求头 |
 | ✅ | P1 | 迁移工具 SM4-GCM snapshot 密文验真 | `pkg/store/cmd/migrate/main.go`, `pkg/store/cmd/migrate/main_test.go` | 迁移后读取 snapshots 密文，使用 `AUDIT_LOG_ENCRYPTION_KEY`/`PRIVACY_AUDIT_KEY` 解密并校验 tag；支持 skip/after-migrate/only 模式 | 迁移测试包含密文验真用例 |
 | ✅ | P1 | Prometheus 指标全埋点 | `engine/observability/metrics.py`, `engine/dynclassification/{service,funnel,engine}.py`, `engine/privacy/*.py`, `pkg/agent/client.go`, `pkg/metrics/metrics.go`, `services/service-hub/cmd/server/main.go`, `services/service-hub/internal/handlers/handlers.go` | Python 补齐 `privacy_classification_*`/`privacy_*_duration_seconds` 埋点；Go 在就绪探针更新 `service_hub_ready`，熔断器状态变更更新 `circuit_breaker_state` | 指标在 `/metrics` 中可见；Go/Python 单元测试通过 |
-| P2 | 文件处理补全 Excel | `engine/routers/file.py`, `engine/privacy/file_processor.py` | 增加 `pandas.read_excel` 分支与字段识别 | 新增 Excel 处理测试 |
+| ✅ | P2 | 文件处理补全 Excel | `engine/routers/file.py`, `tests/api/test_process_file.py`, `pyproject.toml`, `requirements-core.txt` | 增加 `pandas.read_excel` 分支（支持 `.xlsx/.xls`）与字段识别；新增 `openpyxl` 运行时依赖 | 新增 Excel 处理测试 |
 
 ### 10.3 推荐迭代顺序
 
@@ -1008,3 +1008,4 @@ bash ./scripts/prod/prod_health_check.sh
 | **v15.1.0** | **2026-08-28** | **console/bff-go 直连 Go 微服务落地：`/api/hub/*`、`/api/datasource/*`、`/api/audit/*` 透明代理；统一注入 trace/auth 头；§0 状态表与 §10 任务清单标记为 ✅；§2.1 拓扑矩阵注释更新。** |
 | **v15.2.0** | **2026-08-28** | **Phase 2 P1 完成：service-hub→datasource-mgr HTTP/gRPC 出站统一注入 API Key + `X-Request-ID`/`X-Trace-ID`；app-lz/bff-go `ClientPool` 全出站请求统一注入 per-service API Key + 双 trace 头；§0 状态表与 §10 任务清单更新；新增 `clients_test.go` 出站头注入单元测试。** |
 | **v15.3.0** | **2026-08-28** | **Phase 2 P1 完成：迁移工具新增 `-snapshot-verify-mode` 与 SM4-GCM snapshot 密文验真；Python 补齐 `privacy_classification_*`/`privacy_*_duration_seconds` 埋点；Go `service_hub_ready` / `circuit_breaker_state` 已更新；§0 状态表与 §10 任务清单更新。** |
+| **v15.4.0** | **2026-08-28** | **Phase 2 P2 完成：`/v1/privacy/process_file` 支持 `.xlsx/.xls` Excel 文件解析；新增 `openpyxl` 运行时依赖与 `tests/api/test_process_file.py` Excel 用例；§10 任务清单标记为 ✅。** |

@@ -41,8 +41,16 @@ def _parse_upload_to_records(content: bytes, filename: str) -> list[dict[str, An
             if not isinstance(data, list):
                 raise ValueError("JSON 文件需为记录数组（list of objects）")
             df = pd.DataFrame(data)
+        elif name.endswith(".xlsx") or name.endswith(".xls"):
+            # Excel 文件使用 pandas.read_excel 解析，默认读取第一个工作表
+            df = pd.read_excel(io.BytesIO(content), dtype=str, engine="openpyxl")
         else:
-            raise HTTPException(status_code=400, detail="仅支持 .csv 与 .json 文件")
+            raise HTTPException(status_code=400, detail="仅支持 .csv、.json 与 .xlsx/.xls 文件")
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Excel 解析依赖未安装：{exc}",
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
