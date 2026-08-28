@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v14.0.0-drafted (路径 C 演进草案 Phase 10 网关负载均衡策略补齐版)
+> **版本**：v15.0.0-drafted (路径 C 演进草案 Phase 11 Go/Python 跨语言测试对齐版)
 > **编写日期**：2026-08-28
-> **修订说明**：v14.0.0 完成 Phase 10 实现：网关负载均衡策略补齐。新增 `selectWeightedRoundRobin`（Nginx SWRR 平滑加权轮询，保证精确分配比例且分布均匀）+ `selectWeightedRandom`（加权随机，概率与权重成正比）。新增 `NewWeightedLoadBalancer` 构造函数支持自定义权重。新增 20 个负载均衡器测试（熔断器状态机 4 个 + 5 种策略 11 个 + 熔断器集成 3 个 + InFlight 计数 1 个 + 构造函数 2 个）。
+> **修订说明**：v15.0.0 完成 Phase 11 实现：Go/Python 跨语言测试对齐。修复 Go masking 5 个函数与 Python 输出不一致问题（MaskChineseName 3 字姓名 `**` 固定双星 / MaskEmail 首尾保留+`***` / MaskAddress 固定 `****` / MaskDefault 新增 / HashHMAC base64 编码截取 16 字符）。对齐 Go QOL 诱饵词库与 Python MEDICAL_DUMMY/GENERIC_DUMMY 完全一致（20+20 条）。新增跨语言对齐测试 26 个（masking 13 个 + QOL 4 个 + 词库排序一致性 1 个）。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 10 已实现 | Phase 1-9 骨架 + **Phase 10 网关负载均衡策略补齐**（WeightedRoundRobin + WeightedRandom + 20 个负载均衡器测试）。详见附录 A v14.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 11 已实现 | Phase 1-10 骨架 + **Phase 11 Go/Python 跨语言测试对齐**（5 个 masking 函数修复 + QOL 词库对齐 + 26 个对齐测试）。详见附录 A v15.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -1444,7 +1444,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-10 已实现（详见附录 A v5.0.0–v14.0.0 修订记录）。Phase 10 网关负载均衡策略补齐已完成（5 种策略全部实现 + 20 个测试）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
+> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-11 已实现（详见附录 A v5.0.0–v15.0.0 修订记录）。Phase 11 Go/Python 跨语言测试对齐已完成（5 个 masking 函数修复 + QOL 词库对齐 + 26 个对齐测试）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2028,9 +2028,9 @@ func main() {
 
 | 目标模块 | 当前状态 | 说明 |
 |---|---|---|
-| `privacy-go-sdk/` | ✅ Phase 2 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试与基准测试。 |
+| `privacy-go-sdk/` | ✅ Phase 11 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试、基准测试与 **Python 跨语言对齐测试**。 |
 | `internal/dynclassification/` | ✅ Phase 5 已实现 | 规则引擎 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + 动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链 + **CUDA ONNX NER 引擎（LockOSThread Worker Pool + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级）**。完整 CUDA CGO 绑定待引入 onnxruntime_go。 |
-| `internal/gateway/` | ✅ Phase 10 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）** + **Prometheus 指标联动（每次转发实时上报 InFlight/EWMA/CB 状态）** + **统一错误信封（`middleware.AbortWithError`）** + **5 种调度策略（P2C / RoundRobin / LeastConn / WeightedRoundRobin / WeightedRandom）** + **20 个负载均衡器测试**。 |
+| `internal/gateway/` | ✅ Phase 11 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）** + **Prometheus 指标联动（每次转发实时上报 InFlight/EWMA/CB 状态）** + **统一错误信封（`middleware.AbortWithError`）** + **5 种调度策略（P2C / RoundRobin / LeastConn / WeightedRoundRobin / WeightedRandom）** + **20 个负载均衡器测试**。 |
 | `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 9 已实现 | Service 编排层（**SSOT 数据源归一化 `pkg/naming` + Fail-Closed**）、REST 路由（**17 个端点统一错误信封** + **SSOT 别名解析** + 33 个集成测试）、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer**）。 |
 | `internal/observability/` | ✅ Phase 7 已实现 | 结构化日志（slog JSON）+ **Prometheus 指标实际注册**（`metrics.go`：5 个 engine 指标 + `gateway_metrics.go`：4 个 gateway 指标 + `/metrics` 端点 + 13 个测试）。替代旧 TODO 桩。 |
 | `cmd/privshield-agent/` | ✅ Phase 7 已集成 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer`，**接入 TraceMiddleware + RateLimit 限流 + mTLS CN 白名单拦截器 + Prometheus `/metrics` 端点**。 |
@@ -2302,6 +2302,29 @@ PrivShield/
 ---
 
 ## 附录 A：文档修订记录
+
+### v15.0.0 修订（v14.0.0 → v15.0.0）
+
+本次修订完成 Phase 11 实现：Go/Python 跨语言测试对齐：
+
+| 修订项 | v14.0.0 状态 | v15.0.0 实现 |
+|---|---|---|
+| `MaskChineseName` | 3 字姓名输出 `张*丰`（1 星） | 与 Python `mask_name` 对齐：3 字→ `张**丰`（2 星），4 字及以上→ `*(n-2)` |
+| `MaskEmail` | 保留首 2 字符 + 中间星号 + @域名 | 与 Python `mask_email` 对齐：长用户名→首+`***`+尾+@域名；短用户名(≤2)→首+`***`+@域名；无@回退 `MaskDefault` |
+| `MaskAddress` | 保留前 6 字符 + 变长星号；短地址全星化 | 与 Python `mask_address` 对齐：保留前 6 字符 + 固定 `****`；短地址(≤6)原样返回 |
+| `HashHMAC` | hex 编码，输出 64 字符 | 与 Python `hash_value` 对齐：base64 编码截取前 16 字符 |
+| `MaskDefault` | 不存在 | 新增默认脱敏策略函数，保留前 prefix 后 suffix，中间 `*` 填充 |
+| QOL 诱饵词库 | Go 医疗 20 条/通用 15 条（与 Python 不一致） | 与 Python `MEDICAL_DUMMY`/`GENERIC_DUMMY` 完全一致（20+20 条） |
+| 跨语言对齐测试 | 不存在 | 新增 `align_python_test.go`（masking 13 个 + QOL 4 个 + 词库排序一致性 1 个） |
+
+**Phase 11 实现清单**：
+- [x] `privacy-go-sdk/masking/masking.go` — 修复 `MaskChineseName`/`MaskEmail`/`MaskAddress`/`HashHMAC` + 新增 `MaskDefault`，全面与 Python 对齐
+- [x] `privacy-go-sdk/masking/masking_test.go` — 更新现有测试期望值与 Python 对齐
+- [x] `privacy-go-sdk/masking/align_python_test.go` — 13 个跨语言对齐测试（MaskPhone/MaskIdCard/MaskChineseName/MaskEmail/MaskAddress/MaskDefault/HashHMAC/记录集成/截断一致性）
+- [x] `privacy-go-sdk/qol/qol.go` — 诱饵词库与 Python `MEDICAL_DUMMY`/`GENERIC_DUMMY` 完全对齐（20+20 条）+ 新增 `MedicalDecoyPool()`/`GeneralDecoyPool()` 访问器
+- [x] `privacy-go-sdk/qol/align_python_test.go` — 4 个跨语言对齐测试（词库大小/关键条目/注入结构/排序一致性）
+- [x] `privacy-go-sdk/medical/pipeline_test.go` — 更新 `TestSanitizeName` 期望值与 Python 对齐
+- [x] 全量测试 — privacy-go-sdk (7 包 ok) + engine-go (6 包 ok)，`-race` 全部通过
 
 ### v14.0.0 修订（v13.0.0 → v14.0.0）
 
@@ -2583,6 +2606,7 @@ PrivShield/
 - [x] SSOT 数据源命名接入：Service 层 + REST 路由层全面接入 `pkg/naming`，未知/预留数据源 Fail-Closed；
 - [x] Service 层 SSOT 测试（10 个）+ REST 层 SSOT 测试（5 个）；
 - [x] 网关负载均衡策略补齐：WeightedRoundRobin (Nginx SWRR) + WeightedRandom + 20 个负载均衡器测试；
+- [x] Go/Python 跨语言测试对齐：修复 masking 5 个函数 + QOL 词库对齐 + 26 个对齐测试；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。

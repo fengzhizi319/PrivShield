@@ -39,7 +39,7 @@ func TestSanitizePhone(t *testing.T) {
 func TestSanitizeName(t *testing.T) {
 	p := NewYibaoPipeline()
 	result := p.SanitizeField("name", "张三丰")
-	expected := "张*丰"
+	expected := "张**丰" // 与 Python mask_name 对齐：3字→首+**+尾
 	if result != expected {
 		t.Errorf("SanitizeField(name) = %q, want %q", result, expected)
 	}

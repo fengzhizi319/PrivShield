@@ -8,7 +8,7 @@ package masking
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"regexp"
 	"strings"
 	"sync"
@@ -116,8 +116,8 @@ func MaskOfficerId(id string) string {
 	return strings.Repeat("*", len(id))
 }
 
-// MaskChineseName 对中文姓名脱敏：保留姓（首字），名用 * 掩盖。
-// 适用于 2~4 字中文姓名；超长姓名保留首字 + 末字，中间掩码。
+// MaskChineseName 对中文姓名脱敏：保留姓（首字）与末字，中间用 * 掩盖。
+// 与 Python mask_name 对齐：2字→首+*；3字→首+**+尾；4字及以上→首+*(n-2)+尾。
 func MaskChineseName(name string) string {
 	name = strings.TrimSpace(name)
 	runes := []rune(name)
@@ -132,7 +132,12 @@ func MaskChineseName(name string) string {
 		sb := acquireBuilder()
 		defer releaseBuilder(sb)
 		sb.WriteRune(runes[0])
-		for i := 1; i < len(runes)-1; i++ {
+		// 与 Python mask_name 对齐：3字→固定 **；4字及以上→*(n-2)
+		starCount := len(runes) - 2
+		if starCount < 2 {
+			starCount = 2
+		}
+		for i := 0; i < starCount; i++ {
 			sb.WriteByte('*')
 		}
 		sb.WriteRune(runes[len(runes)-1])
@@ -140,45 +145,59 @@ func MaskChineseName(name string) string {
 	}
 }
 
-// MaskAddress 对地址脱敏：保留前 6 个字符（省/市级），后续掩码。
+// MaskAddress 对地址脱敏：保留前 6 个字符（省/市级），后续替换为固定 ****。
+// 与 Python mask_address 对齐：长度 <= 6 原样返回，> 6 则 前6字符 + ****。
 func MaskAddress(addr string) string {
 	addr = strings.TrimSpace(addr)
 	runes := []rune(addr)
 	if len(runes) <= 6 {
-		return strings.Repeat("*", len(runes))
+		return addr // 短地址原样返回
 	}
-	sb := acquireBuilder()
-	defer releaseBuilder(sb)
-	for i := 0; i < 6; i++ {
-		sb.WriteRune(runes[i])
-	}
-	for i := 6; i < len(runes); i++ {
-		sb.WriteByte('*')
-	}
-	return sb.String()
+	return string(runes[:6]) + "****"
 }
 
-// MaskEmail 对邮箱脱敏：保留首 2 字符 + @ 域名。
+// MaskEmail 对邮箱脱敏：用户名保留首尾字符、中间替换为 ***，域名完整保留。
+// 与 Python mask_email 对齐：长用户名(>2)→首+***+尾+@域名；短用户名(≤2)→首+***+@域名。
 func MaskEmail(email string) string {
 	email = strings.TrimSpace(email)
-	m := emailRegex.FindStringSubmatch(email)
-	if len(m) == 4 {
-		return m[1] + strings.Repeat("*", len(m[2])) + m[3]
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return MaskDefault(email, 3, 3) // 无 @ 回退到默认策略
 	}
-	at := strings.Index(email, "@")
-	if at <= 2 {
-		return email
+	local := email[:at]
+	domain := email[at+1:]
+	var maskedLocal string
+	if len(local) <= 2 {
+		if len(local) > 0 {
+			maskedLocal = string([]rune(local)[0]) + "***"
+		} else {
+			maskedLocal = "***"
+		}
+	} else {
+		runes := []rune(local)
+		maskedLocal = string(runes[0]) + "***" + string(runes[len(runes)-1])
 	}
-	return email[:2] + strings.Repeat("*", at-2) + email[at:]
+	return maskedLocal + "@" + domain
+}
+
+// MaskDefault 默认脱敏策略：保留前 prefix 位与后 suffix 位，中间用 * 填充。
+// 与 Python mask_default 对齐。
+func MaskDefault(value string, prefix, suffix int) string {
+	if len(value) <= prefix+suffix {
+		return value
+	}
+	stars := strings.Repeat("*", len(value)-prefix-suffix)
+	return value[:prefix] + stars + value[len(value)-suffix:]
 }
 
 // ──────────────────────────────────────────────
 // HMAC 加盐不可逆散列
 // ──────────────────────────────────────────────
 
-// HashHMAC 生成 HMAC-SHA256 不可逆加盐散列，用于需要保留统计关联但不可还原的场景。
+// HashHMAC 生成 HMAC-SHA256 不可逆加盐散列，base64 编码后截取前 16 字符。
+// 与 Python hash_value 对齐：HMAC-SHA256(salt, value) → base64 → 前16字符。
 func HashHMAC(value, salt string) string {
 	h := hmac.New(sha256.New, []byte(salt))
 	h.Write([]byte(value))
-	return hex.EncodeToString(h.Sum(nil))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))[:16]
 }

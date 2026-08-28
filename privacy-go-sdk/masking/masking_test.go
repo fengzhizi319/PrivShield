@@ -117,12 +117,12 @@ func TestMaskChineseName(t *testing.T) {
 		{
 			name:     "three-character name",
 			input:    "张三丰",
-			expected: "张*丰",
+			expected: "张**丰", // 与 Python mask_name 对齐：3字→首+**+尾
 		},
 		{
 			name:     "four-character name",
 			input:    "欧阳三丰",
-			expected: "欧**丰",
+			expected: "欧**丰", // 与 Python mask_name 对齐：4字→首+*(n-2)+尾
 		},
 		{
 			name:     "single character",
@@ -153,14 +153,24 @@ func TestMaskEmail(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "standard email",
-			input:    "test@example.com",
-			expected: "te**@example.com",
+			name:     "standard email long local",
+			input:    "zhangsan@example.com",
+			expected: "z***n@example.com", // 与 Python mask_email 对齐：首+***+尾+@域名
 		},
 		{
-			name:     "short local part",
-			input:    "ab@example.com",
-			expected: "ab@example.com",
+			name:     "test email",
+			input:    "test@example.com",
+			expected: "t***t@example.com", // 与 Python mask_email 对齐
+		},
+		{
+			name:     "short local part 2 chars",
+			input:    "ab@test.com",
+			expected: "a***@test.com", // 短用户名(<=2)→首+***+@域名
+		},
+		{
+			name:     "no at sign fallback",
+			input:    "noemail",
+			expected: "noe*ail", // 无 @ 回退到 MaskDefault
 		},
 	}
 
@@ -182,13 +192,18 @@ func TestMaskAddress(t *testing.T) {
 	}{
 		{
 			name:     "long address",
-			input:    "北京市朝阳区建国路88号",
-			expected: "北京市朝阳区******",
+			input:    "北京市朝阳区某某街道123号",
+			expected: "北京市朝阳区****", // 与 Python mask_address 对齐：前6字符+固定****
 		},
 		{
-			name:     "short address",
-			input:    "北京市",
-			expected: "***",
+			name:     "short address unchanged",
+			input:    "短地址",
+			expected: "短地址", // 长度<=6原样返回
+		},
+		{
+			name:     "exactly 6 chars unchanged",
+			input:    "北京市朝阳区",
+			expected: "北京市朝阳区", // 恰好6字符原样返回
 		},
 	}
 
@@ -203,14 +218,22 @@ func TestMaskAddress(t *testing.T) {
 }
 
 func TestHashHMAC(t *testing.T) {
-	result1 := HashHMAC("test", "salt")
-	result2 := HashHMAC("test", "salt")
-	if result1 != result2 {
+	// 与 Python hash_value 对齐：HMAC-SHA256(salt, value) → base64 → 前16字符
+	result := HashHMAC("hello", "salt")
+	if len(result) != 16 {
+		t.Errorf("HashHMAC should return 16 chars, got %d: %q", len(result), result)
+	}
+	// 确定性：相同输入产生相同输出
+	if HashHMAC("hello", "salt") != result {
 		t.Errorf("HashHMAC should be deterministic")
 	}
-
-	result3 := HashHMAC("test", "different_salt")
-	if result1 == result3 {
+	// 盐值敏感性：不同盐值产生不同输出
+	if HashHMAC("hello", "other") == result {
 		t.Errorf("HashHMAC with different salt should produce different result")
+	}
+	// 精确值与 Python hash_value("hello", "salt") 对齐
+	expected := "hqgcMCMTbl75WlVF"
+	if result != expected {
+		t.Errorf("HashHMAC(hello, salt) = %q, want %q (Python baseline)", result, expected)
 	}
 }
