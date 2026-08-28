@@ -33,6 +33,7 @@ type Config struct {
 	DatasourceRESTPort int    // 数据源服务 HTTP REST 端口（默认 8083）
 	DatasourceGRPCHost string // 数据源服务 gRPC 主机地址（默认 127.0.0.1）
 	DatasourceGRPCPort int    // 数据源服务 gRPC 端口（默认 50053）
+	DatasourceAPIKey   string // 访问 datasource-mgr 所需的出站 API Key（可选）
 
 	// gRPC 远程过程调用服务网络监听参数
 	GRPCHost string // gRPC 监听主机地址（默认 127.0.0.1）
@@ -95,6 +96,7 @@ func Load() *Config {
 		DatasourceRESTPort: pkgconfig.EnvInt("DATASOURCE_MGR_PORT", 8083),
 		DatasourceGRPCHost: pkgconfig.EnvString("DATASOURCE_MGR_GRPC_HOST", "127.0.0.1"),
 		DatasourceGRPCPort: pkgconfig.EnvInt("DATASOURCE_MGR_GRPC_PORT", 50053),
+		DatasourceAPIKey:   pkgconfig.EnvString("SERVICE_HUB_DATASOURCE_API_KEY", ""),
 
 		// gRPC 服务监听参数（默认 127.0.0.1:50052）
 		GRPCHost: pkgconfig.EnvString("SERVICE_HUB_GRPC_HOST", "127.0.0.1"),

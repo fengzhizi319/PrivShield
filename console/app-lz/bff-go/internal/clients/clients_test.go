@@ -10,6 +10,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/models"
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 )
 
@@ -325,6 +326,93 @@ func TestP02_GetTaskEnvelopeUnpack(t *testing.T) {
 	}
 	if task.Status != "completed" || task.Stage != "audit" {
 		t.Errorf("expected status=completed stage=audit, got status=%s stage=%s", task.Status, task.Stage)
+	}
+}
+
+// TestP1_OutboundHeadersInjected verifies that every outbound HTTP call from ClientPool
+// carries the propagated X-Request-ID / X-Trace-ID headers and the per-service
+// Authorization: Bearer <APIKey> header.
+func TestP1_OutboundHeadersInjected(t *testing.T) {
+	captured := make(map[string]http.Header)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured[r.URL.Path] = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/api/hub/tasks":
+			_ = json.NewEncoder(w).Encode(models.TasksResponse{Total: 0, Tasks: []models.Task{}})
+		case "/api/datasources":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"total":       1,
+				"datasources": []map[string]any{{"id": naming.DSYibao, "datasource_id": naming.DSYibao, "name": "医保", "category": "medical"}},
+				"via":         "datasource-mgr",
+			})
+		case "/api/audit/logs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"total": 0, "logs": []models.AuditLogItem{}, "via": "audit-log"})
+		case "/api/hub/pipeline":
+			_ = json.NewEncoder(w).Encode(map[string]any{"mode": "pipeline_telemetry", "stages": []map[string]any{}})
+		case "/v1/privacy/mask_record":
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"masked": true}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		HubURL:           server.URL,
+		DatasourceURL:    server.URL,
+		AuditURL:         server.URL,
+		AgentURL:         server.URL,
+		HubAPIKey:        "hub-key-123",
+		DatasourceAPIKey: "datasource-key-456",
+		AuditAPIKey:      "audit-key-789",
+		AgentAPIKey:      "agent-key-abc",
+	}
+	pool := NewClientPool(cfg)
+	ctx := pkgagent.ContextWithRequestID(context.Background(), "test-trace-123")
+
+	if _, err := pool.ListTasks(ctx, "pending", 10, 0); err != nil {
+		t.Fatalf("ListTasks failed: %v", err)
+	}
+	if _, err := pool.GetDatasources(ctx); err != nil {
+		t.Fatalf("GetDatasources failed: %v", err)
+	}
+	if _, err := pool.GetAuditLogs(ctx, 10, 0, ""); err != nil {
+		t.Fatalf("GetAuditLogs failed: %v", err)
+	}
+	if _, err := pool.GetPipelineStatus(ctx); err != nil {
+		t.Fatalf("GetPipelineStatus failed: %v", err)
+	}
+	if _, err := pool.MaskRecordViaEngine(ctx, map[string]any{"name": "张老"}); err != nil {
+		t.Fatalf("MaskRecordViaEngine failed: %v", err)
+	}
+
+	expectations := map[string]string{
+		"/api/hub/tasks":          cfg.HubAPIKey,
+		"/api/datasources":        cfg.DatasourceAPIKey,
+		"/api/audit/logs":         cfg.AuditAPIKey,
+		"/api/hub/pipeline":       cfg.HubAPIKey,
+		"/v1/privacy/mask_record": cfg.AgentAPIKey,
+	}
+
+	for path, expectedKey := range expectations {
+		hdrs, ok := captured[path]
+		if !ok {
+			t.Errorf("expected request to %s to be captured", path)
+			continue
+		}
+		if got := hdrs.Get("X-Request-ID"); got != "test-trace-123" {
+			t.Errorf("%s: X-Request-ID = %q, want %q", path, got, "test-trace-123")
+		}
+		if got := hdrs.Get("X-Trace-ID"); got != "test-trace-123" {
+			t.Errorf("%s: X-Trace-ID = %q, want %q", path, got, "test-trace-123")
+		}
+		wantAuth := "Bearer " + expectedKey
+		if got := hdrs.Get("Authorization"); got != wantAuth {
+			t.Errorf("%s: Authorization = %q, want %q", path, got, wantAuth)
+		}
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/catalog"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/app-lz/bff-go/internal/models"
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 )
 
@@ -59,6 +60,42 @@ func NewClientPool(cfg *config.Config) *ClientPool {
 				IdleConnTimeout:     90 * time.Second, // 空闲连接回收时间
 			},
 		},
+	}
+}
+
+// setHeaders injects X-Request-ID, X-Trace-ID and per-service Authorization: Bearer <APIKey>
+// into an outbound request. The requestID argument is optional; when empty it is read from ctx.
+func (c *ClientPool) setHeaders(req *http.Request, serviceID string, requestID string) {
+	if req == nil {
+		return
+	}
+	if requestID == "" {
+		requestID = pkgagent.RequestIDFromContext(req.Context())
+	}
+	if requestID != "" {
+		if req.Header.Get("X-Request-ID") == "" {
+			req.Header.Set("X-Request-ID", requestID)
+		}
+		if req.Header.Get("X-Trace-ID") == "" {
+			req.Header.Set("X-Trace-ID", requestID)
+		}
+	}
+	if req.Header.Get("Authorization") != "" {
+		return
+	}
+	var apiKey string
+	switch serviceID {
+	case "service-hub", "hub":
+		apiKey = c.cfg.HubAPIKey
+	case "engine", "agent":
+		apiKey = c.cfg.AgentAPIKey
+	case "datasource-mgr", "datasource":
+		apiKey = c.cfg.DatasourceAPIKey
+	case "audit-log", "audit":
+		apiKey = c.cfg.AuditAPIKey
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 }
 
@@ -96,6 +133,7 @@ func (c *ClientPool) ProbeNode(ctx context.Context, id, name, httpURL, grpcAddr,
 	startREST := time.Now()
 	healthURL := strings.TrimRight(httpURL, "/") + "/api/health"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	c.setHeaders(req, id, "")
 	if err == nil {
 		resp, errREST := c.httpClient.Do(req)
 		if errREST != nil || (resp != nil && resp.StatusCode >= 400) {
@@ -105,6 +143,7 @@ func (c *ClientPool) ProbeNode(ctx context.Context, id, name, httpURL, grpcAddr,
 			// 回退到 /health（无 /api 前缀）
 			healthURL2 := strings.TrimRight(httpURL, "/") + "/health"
 			req2, err2 := http.NewRequestWithContext(ctx, http.MethodGet, healthURL2, nil)
+			c.setHeaders(req2, id, "")
 			if err2 == nil {
 				resp2, err2Resp := c.httpClient.Do(req2)
 				if err2Resp == nil && resp2.StatusCode < 400 {
@@ -245,6 +284,7 @@ func (c *ClientPool) DispatchTask(ctx context.Context, req models.DispatchReques
 	data, _ := json.Marshal(req)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	c.setHeaders(httpReq, "hub", "")
 	if err != nil {
 		return models.DispatchResponse{}, err
 	}
@@ -279,6 +319,7 @@ func (c *ClientPool) ListTasks(ctx context.Context, status string, limit, offset
 		strings.TrimRight(c.cfg.HubURL, "/"), status, limit, offset)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "hub", "")
 	if err != nil {
 		return models.TasksResponse{}, err
 	}
@@ -303,6 +344,7 @@ func (c *ClientPool) ListTasks(ctx context.Context, status string, limit, offset
 func (c *ClientPool) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
 	url := fmt.Sprintf("%s/api/hub/tasks/%s", strings.TrimRight(c.cfg.HubURL, "/"), taskID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "hub", "")
 	if err != nil {
 		return nil, err
 	}
@@ -348,6 +390,7 @@ func (c *ClientPool) GetDatasources(ctx context.Context) (models.DatasourcesResp
 	path := "/api/datasources"
 	url := strings.TrimRight(c.cfg.DatasourceURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "datasource", "")
 	if err != nil {
 		return models.DatasourcesResponse{Datasources: fallbackDatasources(), Total: len(fallbackDatasources()), Source: sourceFallback, Detail: err.Error(), Via: viaBFF}, err
 	}
@@ -467,6 +510,7 @@ func (c *ClientPool) GetDatasourceSlice(ctx context.Context, rawID string, limit
 	url := fmt.Sprintf("%s/api/datasources/%s/records?limit=%d&offset=%d",
 		strings.TrimRight(c.cfg.DatasourceURL, "/"), datasourceID, limit, offset)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "datasource", "")
 	if err != nil {
 		return models.DatasourceSliceResponse{}, err
 	}
@@ -642,6 +686,7 @@ func (c *ClientPool) GetAuditLogsFiltered(ctx context.Context, limit, offset int
 	}
 	url := strings.TrimRight(c.cfg.AuditURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "audit", "")
 	if err != nil {
 		return models.AuditLogsResponse{}, err
 	}
@@ -766,6 +811,7 @@ func (c *ClientPool) RecordAudit(ctx context.Context, req models.AuditRecordRequ
 
 	body, _ := json.Marshal(req)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.cfg.AuditURL, "/")+path, bytes.NewReader(body))
+	c.setHeaders(httpReq, "audit", "")
 	if err != nil {
 		return "", err
 	}
@@ -826,6 +872,7 @@ func (c *ClientPool) VerifyAudit(ctx context.Context) (models.AuditVerifyRespons
 	snapshotsPath := "/api/audit/snapshots?limit=1"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(c.cfg.AuditURL, "/")+snapshotsPath, nil)
+	c.setHeaders(req, "audit", "")
 	if err != nil {
 		return models.AuditVerifyResponse{}, err
 	}
@@ -867,6 +914,7 @@ func (c *ClientPool) VerifyAudit(ctx context.Context) (models.AuditVerifyRespons
 	verifyPath := "/api/audit/snapshots/verify"
 	verifyReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(c.cfg.AuditURL, "/")+verifyPath, bytes.NewReader(payload))
+	c.setHeaders(verifyReq, "audit", "")
 	if err != nil {
 		return models.AuditVerifyResponse{}, err
 	}
@@ -921,6 +969,7 @@ func degradedVerify(detail string) models.AuditVerifyResponse {
 func (c *ClientPool) GetHubMetrics(ctx context.Context) (string, error) {
 	url := strings.TrimRight(c.cfg.HubURL, "/") + "/metrics"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "hub", "")
 	if err != nil {
 		return "", err
 	}
@@ -1167,11 +1216,9 @@ func max(a, b float64) float64 {
 func (c *ClientPool) GetPipelineStatus(ctx context.Context) (map[string]any, error) {
 	url := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/pipeline"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "hub", "")
 	if err != nil {
 		return defaultPipelineStatus(), err
-	}
-	if c.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -1230,6 +1277,7 @@ func (c *ClientPool) ProcessAgentRecords(ctx context.Context, records []map[stri
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	c.setHeaders(req, "agent", "")
 	if err != nil {
 		return nil, err
 	}
@@ -1245,6 +1293,7 @@ func (c *ClientPool) ProcessAgentRecords(ctx context.Context, records []map[stri
 		// Fallback to legacy /v1/medical/process
 		fallbackURL := strings.TrimRight(c.cfg.AgentURL, "/") + "/v1/medical/process"
 		fReq, fErr := http.NewRequestWithContext(ctx, http.MethodPost, fallbackURL, bytes.NewReader(data))
+		c.setHeaders(fReq, "agent", "")
 		if fErr != nil {
 			return nil, fErr
 		}
@@ -1287,6 +1336,7 @@ func (c *ClientPool) MaskRecordViaEngine(ctx context.Context, record map[string]
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	c.setHeaders(req, "agent", "")
 	if err != nil {
 		return nil, err
 	}
@@ -1321,6 +1371,7 @@ func (c *ClientPool) MaskRecordViaEngine(ctx context.Context, record map[string]
 func (c *ClientPool) GetLeasesFromHub(ctx context.Context) (models.LeasedTasksResponse, error) {
 	url := strings.TrimRight(c.cfg.HubURL, "/") + "/api/hub/tasks?status=running&limit=100"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	c.setHeaders(req, "hub", "")
 	if err != nil {
 		return models.LeasedTasksResponse{}, err
 	}

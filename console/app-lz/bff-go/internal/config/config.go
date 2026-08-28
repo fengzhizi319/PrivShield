@@ -28,6 +28,12 @@ type Config struct {
 	AuditURL      string // 审计存证服务 REST 地址（默认 http://127.0.0.1:8084）
 	AgentURL      string // 隐私脱敏引擎 REST 地址（默认 http://127.0.0.1:8079）
 
+	// ── 上游微服务 API Key（出站零信任认证）──
+	HubAPIKey        string // Service Hub 出站 API Key（可选）
+	DatasourceAPIKey string // 数据源管理器出站 API Key（可选）
+	AuditAPIKey      string // 审计存证服务出站 API Key（可选）
+	AgentAPIKey      string // 隐私脱敏引擎出站 API Key（可选）
+
 	// ── 上游微服务 gRPC 地址（用于拓扑探测）──
 	HubGRPC        string // Service Hub gRPC 地址（默认 127.0.0.1:50052）
 	DatasourceGRPC string // 数据源管理器 gRPC 地址（默认 127.0.0.1:50053）
@@ -74,6 +80,12 @@ func Load() *Config {
 	agentURL := getEnv("APP_LZ_AGENT_URL", getEnv("AGENT_URL", "http://127.0.0.1:8079"))
 	agentGRPC := getEnv("APP_LZ_AGENT_GRPC", getEnv("AGENT_GRPC", "127.0.0.1:50051"))
 
+	// ── 上游微服务出站 API Key（可选，用于服务间认证）──
+	hubAPIKey := getEnv("APP_LZ_HUB_API_KEY", getEnv("HUB_API_KEY", ""))
+	datasourceAPIKey := getEnv("APP_LZ_DATASOURCE_API_KEY", getEnv("DATASOURCE_API_KEY", ""))
+	auditAPIKey := getEnv("APP_LZ_AUDIT_API_KEY", getEnv("AUDIT_API_KEY", ""))
+	agentAPIKey := getEnv("APP_LZ_AGENT_API_KEY", getEnv("AGENT_API_KEY", ""))
+
 	// ── 静态文件 & 日志 ──
 	staticDir := getEnv("APP_LZ_STATIC_DIR", "./web/dist")
 	logFormat := getEnv("APP_LZ_LOG_FORMAT", "json")
@@ -100,6 +112,10 @@ func Load() *Config {
 		AuditGRPC:      auditGRPC,
 		AgentURL:       agentURL,
 		AgentGRPC:      agentGRPC,
+		HubAPIKey:      hubAPIKey,
+		DatasourceAPIKey: datasourceAPIKey,
+		AuditAPIKey:      auditAPIKey,
+		AgentAPIKey:      agentAPIKey,
 		StaticDir:      staticDir,
 		LogFormat:      logFormat,
 		LogLevel:       logLevel,

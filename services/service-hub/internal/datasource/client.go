@@ -208,13 +208,25 @@ func (c *Client) recordFailure() {
 }
 
 // doHTTP executes an HTTP request with circuit breaker, retries, and body limit.
+// Injects trace headers (X-Request-ID / X-Trace-ID) and outbound API Key for
+// zero-trust service-to-service authentication.
 func (c *Client) doHTTP(req *http.Request) ([]byte, error) {
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
 
-	if rid := pkgagent.RequestIDFromContext(req.Context()); rid != "" && req.Header.Get("X-Request-ID") == "" {
-		req.Header.Set("X-Request-ID", rid)
+	if rid := pkgagent.RequestIDFromContext(req.Context()); rid != "" {
+		if req.Header.Get("X-Request-ID") == "" {
+			req.Header.Set("X-Request-ID", rid)
+		}
+		if req.Header.Get("X-Trace-ID") == "" {
+			req.Header.Set("X-Trace-ID", rid)
+		}
+	}
+
+	// Inject outbound API Key when calling datasource-mgr in production.
+	if c.cfg.DatasourceAPIKey != "" && req.Header.Get("Authorization") == "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.DatasourceAPIKey)
 	}
 
 	var lastErr error
