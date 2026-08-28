@@ -63,6 +63,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/fileparse"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/lbtest"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/mapper"
+	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/microservices"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/models"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/samples"
 	pb "github.com/fengzhizi319/PrivShield/console/bff-go/proto"
@@ -86,8 +87,9 @@ type Server struct {
 	cfg        *config.Config
 	logger     *slog.Logger
 	mc         *metrics.Collector
-	httpClient *http.Client // Shared HTTP client for REST calls / 共享 HTTP 客户端
-	secCleanup func()       // P57 fix: cleanup function for securityMiddleware ticker goroutine
+	httpClient *http.Client               // Shared HTTP client for REST calls / 共享 HTTP 客户端
+	msClient   *microservices.ClientPool  // Direct Go microservice proxy clients / 直连 Go 微服务代理客户端
+	secCleanup func()                    // P57 fix: cleanup function for securityMiddleware ticker goroutine
 }
 
 func New(client *agent.Client, cfg *config.Config, logger *slog.Logger, mc *metrics.Collector) *Server {
@@ -133,6 +135,7 @@ func New(client *agent.Client, cfg *config.Config, logger *slog.Logger, mc *metr
 			Timeout:   60 * time.Second,
 			Transport: transport,
 		},
+		msClient: microservices.NewClientPool(cfg),
 	}
 }
 
@@ -169,6 +172,13 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.POST("/api/medical_pipeline", s.MedicalPipeline)
 	r.POST("/api/yibao_pipeline", s.YibaoPipeline)
 	r.POST("/api/pipeline/process", s.PipelineProcess)
+
+	// Direct Go microservice proxy routes (Phase 2)
+	// 主控制台 BFF 直连 service-hub / datasource-mgr / audit-log 的透明代理入口
+	r.Any("/api/hub/*path", s.ProxyHub)
+	r.Any("/api/datasource/*path", s.ProxyDatasource)
+	r.Any("/api/audit/*path", s.ProxyAudit)
+
 	r.GET("/metrics", s.mc.Handler())
 	s.registerStatic(r)
 }
@@ -1595,4 +1605,78 @@ func splitHosts(s string) []string {
 		}
 	}
 	return out
+}
+
+// ProxyHub transparently forwards requests to service-hub.
+// The /api/hub prefix is stripped so the upstream sees its own route (e.g. /api/hub/tasks → /tasks).
+func (s *Server) ProxyHub(c *gin.Context) {
+	s.proxyMicroservice(c, "hub")
+}
+
+// ProxyDatasource transparently forwards requests to datasource-mgr.
+func (s *Server) ProxyDatasource(c *gin.Context) {
+	s.proxyMicroservice(c, "datasource")
+}
+
+// ProxyAudit transparently forwards requests to audit-log.
+func (s *Server) ProxyAudit(c *gin.Context) {
+	s.proxyMicroservice(c, "audit")
+}
+
+// proxyMicroservice performs a transparent HTTP proxy to a named Go microservice.
+// It strips the BFF route prefix, forwards method/query/body, and injects trace
+// and API Key headers using the shared microservices client.
+func (s *Server) proxyMicroservice(c *gin.Context, service string) {
+	// Strip the leading /api/{service} prefix to reconstruct the upstream path.
+	prefix := "/api/" + service
+	path := strings.TrimPrefix(c.Request.URL.Path, prefix)
+	if path == "" {
+		path = "/"
+	}
+
+	var body []byte
+	if c.Request.Body != nil {
+		var err error
+		body, err = io.ReadAll(io.LimitReader(c.Request.Body, 64<<20+1))
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "failed to read request body", err.Error())
+			return
+		}
+		if int64(len(body)) > 64<<20 {
+			middleware.AbortWithError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds 64 MiB", nil)
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	resp, respBody, err := s.msClient.Proxy(
+		ctx,
+		service,
+		c.Request.Method,
+		path,
+		c.Request.URL.Query(),
+		body,
+		c.Request.Header.Get("Content-Type"),
+		middleware.GetTraceID(c),
+	)
+	if err != nil {
+		s.logger.Warn("microservice proxy failed",
+			"service", service,
+			"path", path,
+			"error", err.Error(),
+		)
+		middleware.AbortWithError(c, http.StatusBadGateway, "UPSTREAM_ERROR", fmt.Sprintf("%s unreachable", service), err.Error())
+		return
+	}
+
+	// Preserve upstream content type if present.
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		c.Header("Content-Type", ct)
+	}
+	c.Status(resp.StatusCode)
+	if len(respBody) > 0 {
+		_, _ = c.Writer.Write(respBody)
+	}
 }

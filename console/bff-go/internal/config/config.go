@@ -174,6 +174,32 @@ type Config struct {
 	// ConsoleGRPCPort：BFF gRPC 服务的监听端口。
 	// 对应环境变量 PRIVACY_CONSOLE_GRPC_PORT，默认 50055。
 	ConsoleGRPCPort int
+
+	// ── 直连 Go 微服务配置（Phase 2：console/bff-go 不再只代理 Python Agent）
+	//
+	// HubURL：service-hub HTTP REST 基础地址。
+	// 对应环境变量 BFF_HUB_URL，默认 "http://127.0.0.1:8082"。
+	HubURL string
+
+	// DatasourceURL：datasource-mgr HTTP REST 基础地址。
+	// 对应环境变量 BFF_DATASOURCE_URL，默认 "http://127.0.0.1:8083"。
+	DatasourceURL string
+
+	// AuditURL：audit-log HTTP REST 基础地址。
+	// 对应环境变量 BFF_AUDIT_URL，默认 "http://127.0.0.1:8084"。
+	AuditURL string
+
+	// HubAPIKey：访问 service-hub 的 API Key（可选）。
+	// 对应环境变量 BFF_HUB_API_KEY。
+	HubAPIKey string
+
+	// DatasourceAPIKey：访问 datasource-mgr 的 API Key（可选）。
+	// 对应环境变量 BFF_DATASOURCE_API_KEY。
+	DatasourceAPIKey string
+
+	// AuditAPIKey：访问 audit-log 的 API Key（可选）。
+	// 对应环境变量 BFF_AUDIT_API_KEY。
+	AuditAPIKey string
 }
 
 // Load reads all configuration from environment variables and returns a populated Config.
@@ -240,6 +266,14 @@ func Load() *Config {
 		ConsoleGRPCEnabled: getEnvBool("PRIVACY_CONSOLE_GRPC_ENABLED", false),
 		ConsoleGRPCHost:    getEnv("PRIVACY_CONSOLE_GRPC_HOST", "127.0.0.1"),
 		ConsoleGRPCPort:    getEnvInt("PRIVACY_CONSOLE_GRPC_PORT", 50055),
+
+		// 直连 Go 微服务配置
+		HubURL:            getEnv("BFF_HUB_URL", "http://127.0.0.1:8082"),
+		DatasourceURL:     getEnv("BFF_DATASOURCE_URL", "http://127.0.0.1:8083"),
+		AuditURL:          getEnv("BFF_AUDIT_URL", "http://127.0.0.1:8084"),
+		HubAPIKey:         getEnv("BFF_HUB_API_KEY", ""),
+		DatasourceAPIKey:  getEnv("BFF_DATASOURCE_API_KEY", ""),
+		AuditAPIKey:       getEnv("BFF_AUDIT_API_KEY", ""),
 	}
 }
 
