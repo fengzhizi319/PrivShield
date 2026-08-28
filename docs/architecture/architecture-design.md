@@ -61,7 +61,7 @@ PrivShield 实现了**「三层四柱五御六类」数据安全与隐私治理�
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#1e293b', 'primaryTextColor': '#f8fafc', 'primaryBorderColor': '#38bdf8', 'lineColor': '#38bdf8' }}}%%
 flowchart TD
-    subgraph Presentation [1. 表现与接入层 (Presentation & Gateway)]
+    subgraph Presentation ["1. 表现与接入层 (Presentation & Gateway)"]
         WebFull[console/web<br/>通用隐私与分类控制台 :5173]
         WebAppLZ[console/app-lz/web<br/>数联调度之眼大屏 :5174]
         GoBFF[Go gRPC API Gateway / BFF :8081<br/>REST 入口 + gRPC 上游]
@@ -69,18 +69,18 @@ flowchart TD
         PyGateway[engine/gateway<br/>Python L7 负载均衡网关 :8000 / :50000]
     end
 
-    subgraph CrossCutting [2. 跨切面中间件与零信任安全层 (Middleware & Security)]
+    subgraph CrossCutting ["2. 跨切面中间件与零信任安全层 (Middleware & Security)"]
         MWStack["9层中间件栈 (TraceID 注入 / StructuredLogger / Recovery / SecurityHeaders / MaxBodySize / MaxConcurrent / RateLimit / CORS / Auth)"]
         mTLSAuth["TLS 1.3 双向 mTLS + CN 白名单动态热重载 (config/mtls-whitelist.yaml)"]
     end
 
-    subgraph ServiceCluster [3. 企业级数据流通调度与存证层 (Governance Services)]
+    subgraph ServiceCluster ["3. 企业级数据流通调度与存证层 (Governance Services)"]
         ServiceHub[数据服务调度中枢 :8082 / :50052<br/>6 阶段流水线编排 / PG 原子租约 Worker]
         DatasourceMgr[数据源与资产管理 :8083 / :50053<br/>多源连接池 / 样本切片 / 敏感特征探查]
         AuditLog[合规存证与审计日志 :8084 / :50054<br/>9 要素防篡改哈希链 / SM4-GCM 快照加密]
     end
 
-    subgraph CoreEngine [4. 核心隐私算力与动态分类引擎 (Core Engine :8079 / :50051)]
+    subgraph CoreEngine ["4. 核心隐私算力与动态分类引擎 (Core Engine :8079 / :50051)"]
         REST[FastAPI REST API :8079]
         GRPC[gRPC Servicer :50051]
         Funnel[3 层动态分类漏斗<br/>Rule → Small-NER → Local LLM 仲裁]
@@ -88,14 +88,14 @@ flowchart TD
         Budget[分布式隐私预算会计模型<br/>Epsilon / Delta + 时间窗口重置]
     end
 
-    subgraph StorageSecurity [5. 统一存储与密码学基座 (Storage & Crypto)]
+    subgraph StorageSecurity ["5. 统一存储与密码学基座 (Storage & Crypto)"]
         SSOT[pkg/naming 单一事实源]
         StoreSQLite[SQLite WAL 单机存储]
         StorePostgres[PostgreSQL FOR UPDATE SKIP LOCKED 原子租约高可用存储]
         CryptoBase[SM4-GCM 快照信封加密 enc:v1:...]
     end
 
-    subgraph Infrastructure [6. 云原生与全栈可观测基础设施 (Observability & K8s)]
+    subgraph Infrastructure ["6. 云原生与全栈可观测基础设施 (Observability & K8s)"]
         Prometheus[Prometheus 指标采集 :9090<br/>Python 40+ 指标 / Go 15+ 指标]
         Grafana[Grafana 联合监控看板 :3000]
         Tracing[OpenTelemetry 分布式链路追踪]
@@ -323,7 +323,7 @@ graph TB
 
 1. **9 要素区块链式连续哈希链数学模型**：
    每一笔数据流通操作均提取 9 个关键特征字段，并与前序区块的哈希值进行链式计算：
-   $$\text{BlockData}_n = \text{prev\_hash}_{n-1} \parallel \text{id}_n \parallel \text{task\_id}_n \parallel \text{api\_code}_n \parallel \text{datasource\_id}_n \parallel \text{timestamp}_n \parallel \text{input\_hash}_n \parallel \text{output\_hash}_n \parallel \text{algorithm}_n$$
+   $$\text{BlockData}_n = \text{prev_hash}_{n-1} \parallel \text{id}_n \parallel \text{task_id}_n \parallel \text{api_code}_n \parallel \text{datasource_id}_n \parallel \text{timestamp}_n \parallel \text{input_hash}_n \parallel \text{output_hash}_n \parallel \text{algorithm}_n$$
    $$\text{IntegrityHash}_n = \text{SHA256}(\text{BlockData}_n)$$
 2. **快照 SM4-GCM 信封加密落盘**：
    出域脱敏样本快照在入库前经国密 SM4-GCM 动态信封加密落盘，存储格式为：
