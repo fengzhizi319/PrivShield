@@ -381,7 +381,7 @@ export interface AuditLogItem {
   data_hash: string;
   /** 操作者标识 */
   operator: string;
-  /** 加密方式，如 'AES-256-GCM' */
+  /** 加密方式，如 'SM4-GCM' */
   encryption: string;
   /** 操作结果，如 'success' / 'failed' */
   result: string;
