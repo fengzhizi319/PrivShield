@@ -1166,3 +1166,64 @@ def test_default_generalization_allowed_is_precomputed() -> None:
     assert "GENETIC_DEFECT" in _DEFAULT_GENERALIZATION_ALLOWED
     assert "SEVERE_ORGAN_DAMAGE" in _DEFAULT_GENERALIZATION_ALLOWED
 
+
+
+# ── 双引擎规则快照：批次去重与可选开关（性能优化回归） ────────────────────
+
+
+def _kangyang_records(n: int = 5) -> list[dict[str, str]]:
+    """读取康养样例数据前 n 条，作为贴近真实字段分布的测试输入。"""
+    csv_path = Path(__file__).resolve().parent.parent / "data" / "kangyang.csv"
+    with csv_path.open(encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    return [{k: (v or "") for k, v in row.items()} for row in rows[:n]]
+
+
+def test_rule_snapshot_matches_independent_redaction() -> None:
+    """批次去重后，规则快照必须与逐字段独立调用 redact_medical_text 的结果完全一致。"""
+    from engine.medical_pipeline.rules import PII_FIELD_RULES, canonicalize_pii_field
+
+    records = _kangyang_records()
+    pipeline = MedicalPrivacyPipeline()
+    result = pipeline.process_records(records)
+
+    checked = 0
+    for rep in result.classification_report:
+        for fd in rep["field_details"]:
+            if canonicalize_pii_field(fd["field_name"]) in PII_FIELD_RULES:
+                continue  # PII 字段走强掩码分支，不经过文本抹平
+            expected = redact_medical_text(fd["raw_value"], strategy=pipeline.redaction_strategy)
+            assert fd["sanitized_value_rule"] == expected, fd["field_name"]
+            if pipeline.redact_engine == "rule":
+                assert fd["sanitized_value_ner"] == expected, fd["field_name"]
+            checked += 1
+    assert checked > 0
+
+
+def test_batch_dedups_rule_redaction_calls(monkeypatch) -> None:
+    """同一批次内每个唯一文本只应触发一次底层规则抹平（交付与快照共享结果）。"""
+    import engine.medical_pipeline.pipeline as pipeline_module
+    import engine.medical_pipeline.rules as rules_module
+
+    real = rules_module.redact_medical_text
+    calls: list[str] = []
+
+    def counting(text, strategy=None):
+        calls.append(text)
+        return real(text, strategy=strategy)
+
+    monkeypatch.setattr(rules_module, "redact_medical_text", counting)
+    monkeypatch.setattr(pipeline_module, "redact_medical_text", counting)
+
+    row = _kangyang_records(1)[0]
+    pipeline = MedicalPrivacyPipeline()
+    pipeline.process_records([row])
+    assert calls, "样例数据未触发任何规则抹平，测试前提失效"
+    assert len(calls) == len(set(calls)), "同一文本在同一批次内被重复抹平"
+
+    calls.clear()
+    pipeline.clear_cache()
+    pipeline.process_records([dict(row) for _ in range(5)])
+    assert len(calls) == len(set(calls)), "5 条重复记录触发了重复抹平"
+
+

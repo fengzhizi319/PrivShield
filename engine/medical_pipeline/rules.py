@@ -438,6 +438,11 @@ _TERMS_FIRST_CHARS_PATTERN = re.compile(
 _MASKED_LABEL_PATTERN = r"\[(?:L4|L5)-[A-Z_]+-SENSITIVE-MASKED\]"
 _MASKED_LABEL_RE = re.compile(_MASKED_LABEL_PATTERN)
 
+# 字符间插值噪声剥离正则（预编译）
+_STRIPPED_NOISE_RE = re.compile(
+    r"(?<=[a-zA-Z0-9一-龥])[\s.\-_·•\u200b\u200c\ufeff]+(?=[a-zA-Z0-9一-龥])"
+)
+
 
 def contains_high_risk_text(
     text: str,
@@ -454,6 +459,8 @@ def contains_high_risk_text(
             Pipeline 实例应传入 ``self._l5_patterns + self._l4_patterns``
             以检测自定义替换标签。
     """
+    if not text:
+        return False
     # 替换标签（如 [L5-IMMUNODEFICIENCY-SENSITIVE-MASKED]）以 '[' 开头，
     # 不在词库首字符集中——必须先于 _TERMS_FIRST_CHARS_PATTERN 预筛检查，
     # 否则仅含替换标签的文本会被预筛误判为安全而提前返回 False。
@@ -461,17 +468,26 @@ def contains_high_risk_text(
         return True
     if not _TERMS_FIRST_CHARS_PATTERN.search(text):
         return False
-    effective_patterns = patterns if patterns is not None else L4_PATTERNS + L5_PATTERNS
+
+    if patterns is None:
+        # 极速单正则路径：单次 DFA 扫描匹配所有词库
+        if _TERMS_ONLY_PATTERN.search(text):
+            return True
+        norm = normalize_fullwidth_alphanumeric(text)
+        if norm != text and _TERMS_ONLY_PATTERN.search(norm):
+            return True
+        stripped = _STRIPPED_NOISE_RE.sub("", norm)
+        if stripped != norm and _TERMS_ONLY_PATTERN.search(stripped):
+            return True
+        return False
+
+    effective_patterns = patterns
     if any(pattern.search(text) for pattern, _replacement in effective_patterns):
         return True
     norm = normalize_fullwidth_alphanumeric(text)
     if norm != text and any(pattern.search(norm) for pattern, _replacement in effective_patterns):
         return True
-    stripped = re.sub(
-        r"(?<=[a-zA-Z0-9一-龥])[\s.\-_·•\u200b\u200c\ufeff]+(?=[a-zA-Z0-9一-龥])",
-        "",
-        norm,
-    )
+    stripped = _STRIPPED_NOISE_RE.sub("", norm)
     if stripped != norm and any(pattern.search(stripped) for pattern, _replacement in effective_patterns):
         return True
     return False
@@ -601,6 +617,44 @@ _CLEANUP_EMPTY_CLAUSE_PATTERN = re.compile(r"([，,、])\s*([。;；])")
 _CLEANUP_LEADING_PUNCT_PATTERN = re.compile(r"^[，,；;。]\s*")
 _CLEANUP_EMPTY_PAREN_PATTERN = re.compile(r"[\(（]\s*[\)）]")
 
+# 语法自愈常用正则预编译池
+_CLEANUP_EMPTY_OP_PAREN_RE = re.compile(r"[\(（][\s\+\-\*\/]*[\)）]")
+_CLEANUP_HAART_LONG_RE = re.compile(r"开展\s*(?:HAART\s*)?抗病毒治疗")
+_CLEANUP_HAART_SHORT_RE = re.compile(r"(?:HAART\s*)?抗病毒治疗")
+_CLEANUP_HAART_WORD_RE = re.compile(r"\bHAART\b", re.IGNORECASE)
+_CLEANUP_HIV_PAREN_RE = re.compile(r"[\(（]\s*(?:HIV\s*)?(?:[\u4e00-\u9fa5]{0,6}(?:期|型|阶段|试验)|期|型)?\s*[\)）]")
+_CLEANUP_NAME_LABEL_RE = re.compile(r"(?<=姓名[：:])\s*([\u4e00-\u9fa5])[\u4e00-\u9fa5]{1,2}")
+_CLEANUP_PATIENT_LABEL_RE = re.compile(r"(?<=患者[：:])\s*([\u4e00-\u9fa5])[\u4e00-\u9fa5]{1,2}")
+_CLEANUP_COLON_COMMA_RE = re.compile(r"([：:])\s*[，,、]")
+_CLEANUP_COLON_PERIOD_RE = re.compile(r"([：:])\s*[。；;]")
+_CLEANUP_COMMA_PERIOD_RE = re.compile(r"([，,])\s*([。；;])")
+_CLEANUP_APPEAR_PUNCT_RE = re.compile(r"(?:出现|发展为|表现为)\s*([。；;，,])")
+_CLEANUP_REPEAT_QUOTES_RE = re.compile(r"(['\"“‘'”’])\1+")
+_CLEANUP_REPEAT_PUNCT_RE = re.compile(r"([。；;,，])\1+")
+_CLEANUP_TIME_PREFIX_PUNCT_RE = re.compile(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)\s*([。；;，,])")
+_CLEANUP_TIME_PREFIX_RE = re.compile(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)")
+_CLEANUP_HISTORY_START_PUNCT_RE = re.compile(r"(?:追问病史|诊断为|确诊为|建议尽早启动|尽早启动|启动|开展|进一步检查|进一步|发现)\s*([。；;，,])")
+_CLEANUP_HISTORY_START_RE = re.compile(r"(?:追问病史|诊断为|确诊为|建议尽早启动|尽早启动|启动|开展|进一步检查|进一步)")
+_CLEANUP_SEEK_CARE_PUNCT_RE = re.compile(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)\s*([。；;，,])")
+_CLEANUP_SEEK_CARE_RE = re.compile(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)")
+_CLEANUP_SYMPTOM_ITCH_RE = re.compile(r"(?:伴|与|和)?\s*(?:局部)?(?:轻度)?(?:瘙痒|异物感|接触性出血)\s*([。；;，,])?")
+_CLEANUP_DOCTOR_ORDER_RE = re.compile(r"(?:医嘱[：:])\s*(?:立即|及时|定期)?\s*([。；;])")
+_CLEANUP_DIE_PAREN_RE = re.compile(r"(死于|殁于)\s*[\(（]([^）\)]+)[\)）]")
+_CLEANUP_ILL_PUNCT_RE = re.compile(r"(?<=[\u4e00-\u9fa5])患\s*([\(（。；;,，])")
+_CLEANUP_BECAUSE_DIE_RE = re.compile(r"(?:因|死于|因于)\s*(去世|死于|离世|逝世)")
+_CLEANUP_FAMILY_DIE_RE = re.compile(rf"({_FAMILY_MEMBERS})\s*(?:殁于|死于|身亡于|病逝于|离世于|由)\s*([。；;，,]|(?={_FAMILY_MEMBERS}))")
+_CLEANUP_DIAG_PREFIX_COMMA_RE = re.compile(r"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?))\s*[、,，]\s*")
+_CLEANUP_AGE_ANON_RE = re.compile(r"((?:死于|确诊|患病|发病|年龄|生于|现年|年满|[\(（])?\s*)(\d{1,3})\s*岁([^\)\n，,。；;]*)")
+_CLEANUP_IMAGE_EXT_RE = re.compile(
+    r"(\b[\w/\\.-]*?)(?:syphilis|hiv|aids|cancer|tumor|hepatitis)([\w/\\.-]*\.(?:png|jpg|jpeg|dcm|webp|gif)\b)",
+    re.IGNORECASE,
+)
+_CLEANUP_LEADING_CONJ_RE = re.compile(r"^[与和及且并]+\s*")
+_CLEANUP_LEADING_PATIENT_PUNCT_RE = re.compile(r"^患者[。；;，,]\s*")
+_CLEANUP_LEADING_PATIENT_CHEST_RE = re.compile(r"^患者(?=[^，,。；;]{0,10}详见)")
+_CLEANUP_HORIZ_SPACES_RE = re.compile(r"[ \t]{2,}")
+
+
 # 10. 性传播疾病与极高敏特征综合句法擦除正则（涵盖血清学检查示TPPA/RPR滴度、不洁接触史、无痛性溃疡/硬下疳自愈等完整词句）
 # ReDoS 防护说明：临床中文短语的组成字词之间天然无空白，因此各分支的可选修饰组之间
 # 一律不使用 \s*（仅保留至多一处有界 \s{0,2}）。若可选组之间串联多个无界 \s*，
@@ -712,7 +766,7 @@ def _clean_orphan_syntax(s: str) -> str:
 
     # ReDoS 全局防护（与 redact_medical_text 一致）：折叠连续水平空白串，
     # 防止下方清理正则在长空白 run 上的组合回溯（幂等操作，正常文本不受影响）
-    s = re.sub(r"[ \t]{2,}", " ", s)
+    s = _CLEANUP_HORIZ_SPACES_RE.sub(" ", s)
 
     # 0. 优先清理擦除产生的空括号，避免阻碍后续孤立动词与标点匹配；并自动擦除就诊医院/机构句法与肝炎体征载量短语
     s = _CLEANUP_EMPTY_PAREN_PATTERN.sub("", s)
@@ -720,26 +774,22 @@ def _clean_orphan_syntax(s: str) -> str:
     s = _REDACT_HEPATITIS_FEATURE_CLAUSE_PATTERN.sub("", s)
 
     # 0.1 语法自愈：清理多药联合处方擦除后残留的空运算符、空括号及残缺治疗短语（如 "（ +  + ）" -> ""；"开展 HAART 抗病毒治疗" -> "开展常规对症治疗"）
-    s = re.sub(r"[\(（][\s\+\-\*\/]*[\)）]", "", s)
-    s = re.sub(r"开展\s*(?:HAART\s*)?抗病毒治疗", "开展常规对症治疗", s)
-    s = re.sub(r"(?:HAART\s*)?抗病毒治疗", "常规对症治疗", s)
-    s = re.sub(r"\bHAART\b", "", s, flags=re.IGNORECASE)
+    s = _CLEANUP_EMPTY_OP_PAREN_RE.sub("", s)
+    s = _CLEANUP_HAART_LONG_RE.sub("开展常规对症治疗", s)
+    s = _CLEANUP_HAART_SHORT_RE.sub("常规对症治疗", s)
+    s = _CLEANUP_HAART_WORD_RE.sub("", s)
 
     # 0.2 语法自愈：清理擦除主诊断后残存的孤立病期/分型修饰括号（如 "（感染期）"、"（期）"、"（确证试验）"）
-    s = re.sub(
-        r"[\(（]\s*(?:HIV\s*)?(?:[\u4e00-\u9fa5]{0,6}(?:期|型|阶段|试验)|期|型)?\s*[\)）]",
-        "",
-        s,
-    )
+    s = _CLEANUP_HIV_PAREN_RE.sub("", s)
 
     # 0.3 语法自愈：中文姓名自动掩码遮蔽（如 "姓名：张三" -> "姓名：张*"；"患者：张三" -> "患者：张*"）
-    s = re.sub(r"(?<=姓名[：:])\s*([\u4e00-\u9fa5])[\u4e00-\u9fa5]{1,2}", r"\1*", s)
-    s = re.sub(r"(?<=患者[：:])\s*([\u4e00-\u9fa5])[\u4e00-\u9fa5]{1,2}", r"\1*", s)
+    s = _CLEANUP_NAME_LABEL_RE.sub(r"\1*", s)
+    s = _CLEANUP_PATIENT_LABEL_RE.sub(r"\1*", s)
 
     # 0.4 语法自愈：消除冒号后紧跟逗号/句号等非法中文标点碰撞（如 "初步诊断：，伴..." -> "初步诊断：伴..."）
-    s = re.sub(r"([：:])\s*[，,、]", r"\1", s)
-    s = re.sub(r"([：:])\s*[。；;]", r"。", s)
-    s = re.sub(r"([，,])\s*([。；;])", r"\2", s)
+    s = _CLEANUP_COLON_COMMA_RE.sub(r"\1", s)
+    s = _CLEANUP_COLON_PERIOD_RE.sub("。", s)
+    s = _CLEANUP_COMMA_PERIOD_RE.sub(r"\2", s)
 
     # 1. 清理孤立无宾语动词：如“示。”、“提示。”、“急诊行提示”、“予行”、“予行及”、“予。”
     s = _CLEANUP_NO_OBJ_VERB_PATTERN.sub(r"\1", s)
@@ -747,34 +797,34 @@ def _clean_orphan_syntax(s: str) -> str:
 
     # 2. 清理孤立连词与介词碎片：如“伴及。”、“及。”、“与。”、“伴。”、“长期。”、“发展为。”
     s = _CLEANUP_ORPHAN_PREP_PATTERN.sub(r"\1", s)
-    s = re.sub(r"(?:出现|发展为|表现为)\s*([。；;，,])", r"\1", s)
+    s = _CLEANUP_APPEAR_PUNCT_RE.sub(r"\1", s)
     s = _CLEANUP_DEVELOP_AND_PATTERN.sub("发展为", s)
 
     # 3. 标点与空括号自愈
-    s = re.sub(r"(['\"“‘'”’])\1+", "", s)
+    s = _CLEANUP_REPEAT_QUOTES_RE.sub("", s)
     s = _CLEANUP_PUNCTUATION_PATTERN.sub(r"\1", s)
     s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
     s = _CLEANUP_LEADING_PUNCT_PATTERN.sub("", s)
     s = _CLEANUP_EMPTY_PAREN_PATTERN.sub("", s)
-    s = re.sub(r"([。；;,，])\1+", r"\1", s)
+    s = _CLEANUP_REPEAT_PUNCT_RE.sub(r"\1", s)
 
     # 5. 清理擦除敏感病史/症状后遗留的孤立前缀、后缀与时间短语
-    s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:1年前有|半年前|1年前|既往有|曾有|自述有|外阴|曾出现|出现|自愈)", "", s)
-    s = re.sub(r"(?:追问病史|诊断为|确诊为|建议尽早启动|尽早启动|启动|开展|进一步检查|进一步|发现)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:追问病史|诊断为|确诊为|建议尽早启动|尽早启动|启动|开展|进一步检查|进一步)", "", s)
-    s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)\s*([。；;，,])", r"\1", s)
-    s = re.sub(r"(?:曾?就诊于|就诊于|收治于|转诊至|住院于)", "", s)
-    s = re.sub(r"(?:伴|与|和)?\s*(?:局部)?(?:轻度)?(?:瘙痒|异物感|接触性出血)\s*([。；;，,])?", r"\1", s)
+    s = _CLEANUP_TIME_PREFIX_PUNCT_RE.sub(r"\1", s)
+    s = _CLEANUP_TIME_PREFIX_RE.sub("", s)
+    s = _CLEANUP_HISTORY_START_PUNCT_RE.sub(r"\1", s)
+    s = _CLEANUP_HISTORY_START_RE.sub("", s)
+    s = _CLEANUP_SEEK_CARE_PUNCT_RE.sub(r"\1", s)
+    s = _CLEANUP_SEEK_CARE_RE.sub("", s)
+    s = _CLEANUP_SYMPTOM_ITCH_RE.sub(r"\1", s)
     # 5.05 医嘱残余自愈：如果医嘱内容被高敏专科医院与特种用药整体擦除，自愈润色为常规健康管理描述
-    s = re.sub(r"(?:医嘱[：:])\s*(?:立即|及时|定期)?\s*([。；;])", r"医嘱：遵医嘱常规治疗与健康管理。", s)
+    s = _CLEANUP_DOCTOR_ORDER_RE.sub("医嘱：遵医嘱常规治疗与健康管理。", s)
 
     # 5.1 死因孤立介词自愈重构 ("因去世" -> "因病去世")、括号年龄清理 ("死于(62岁)" -> "死于62岁") 与孤立"患"补全 ("母亲患(55岁确诊)" -> "母亲患病(55岁确诊)")
-    s = re.sub(r"(死于|殁于)\s*[\(（]([^）\)]+)[\)）]", r"\1\2", s)
-    s = re.sub(r"(?<=[\u4e00-\u9fa5])患\s*([\(（。；;,，])", r"患病\1", s)
-    s = re.sub(r"(?:因|死于|因于)\s*(去世|死于|离世|逝世)", r"因病\1", s)
-    s = re.sub(rf"({_FAMILY_MEMBERS})\s*(?:殁于|死于|身亡于|病逝于|离世于|由)\s*([。；;，,]|(?={_FAMILY_MEMBERS}))", r"\1因病去世\2", s)
-    s = re.sub(r"((?:因|患有?|确诊(?:为)?|诊断(?:为)?|患|有|合并|伴有?))\s*[、,，]\s*", r"\1", s)
+    s = _CLEANUP_DIE_PAREN_RE.sub(r"\1\2", s)
+    s = _CLEANUP_ILL_PUNCT_RE.sub(r"患病\1", s)
+    s = _CLEANUP_BECAUSE_DIE_RE.sub(r"因病\1", s)
+    s = _CLEANUP_FAMILY_DIE_RE.sub(r"\1因病去世\2", s)
+    s = _CLEANUP_DIAG_PREFIX_COMMA_RE.sub(r"\1", s)
 
     # 5.2 单条记录准标识符自适应年龄 K-匿名泛化 (<60岁按3岁区间/age-(age%3)，>=60岁按2岁精细康养区间/age-(age%2))
     def _age_anon_repl(match: re.Match) -> str:
@@ -785,24 +835,19 @@ def _clean_orphan_syntax(s: str) -> str:
         anon_age = adaptive_age_hierarchy(age_num, under_60_interval=3, senior_interval=2, output_format="floor")
         return f"{prefix}{anon_age}岁{suffix}"
 
-    s = re.sub(r"((?:死于|确诊|患病|发病|年龄|生于|现年|年满|[\(（])?\s*)(\d{1,3})\s*岁([^\)\n，,。；;]*)", _age_anon_repl, s)
+    s = _CLEANUP_AGE_ANON_RE.sub(_age_anon_repl, s)
 
     s = _CLEANUP_EMPTY_CLAUSE_PATTERN.sub(r"\2", s)
     s = _CLEANUP_LEADING_PUNCT_PATTERN.sub("", s)
-    s = re.sub(r"([。；;,，])\1+", r"\1", s)
+    s = _CLEANUP_REPEAT_PUNCT_RE.sub(r"\1", s)
 
     # 6. 去标识化擦除文本或图片引用路径中包含的高敏感英文词汇（如 syphilis, hiv, cancer 等）
-    s = re.sub(
-        r"(\b[\w/\\.-]*?)(?:syphilis|hiv|aids|cancer|tumor|hepatitis)([\w/\\.-]*\.(?:png|jpg|jpeg|dcm|webp|gif)\b)",
-        r"\1sanitized_case_image\2",
-        s,
-        flags=re.IGNORECASE,
-    )
+    s = _CLEANUP_IMAGE_EXT_RE.sub(r"\1sanitized_case_image\2", s)
 
     # 7. 清理开头孤立的连词与无谓主语（含敏感句被整体擦除后残留的 "患者胸片详见..." 中的悬空主语）
-    s = re.sub(r"^[与和及且并]+\s*", "", s)
-    s = re.sub(r"^患者[。；;，,]\s*", "", s)
-    s = re.sub(r"^患者(?=[^，,。；;]{0,10}详见)", "", s)
+    s = _CLEANUP_LEADING_CONJ_RE.sub("", s)
+    s = _CLEANUP_LEADING_PATIENT_PUNCT_RE.sub("", s)
+    s = _CLEANUP_LEADING_PATIENT_CHEST_RE.sub("", s)
 
     # 8. 最终判断：若全句抹平后仅剩无主语/无主病因孤立频次、动词或时间状语从句，直接抹平清空。
     # 该正则含多个无界 \s* 槽位与 $ 锚定，对长输入存在组合回溯风险——仅对短残渣（<=30 字符）执行，
@@ -893,14 +938,17 @@ def truncate_date_to_month(date_str: str) -> str:
     return _DATE_PREFIX_PATTERN.sub(r"\1-\2", date_str, count=1)
 
 
+_FULLWIDTH_TO_HALFWIDTH = str.maketrans({
+    i: i - 0xFEE0
+    for i in list(range(0xFF10, 0xFF1A)) + list(range(0xFF21, 0xFF3B)) + list(range(0xFF41, 0xFF5B))
+})
+
+
 def normalize_fullwidth_alphanumeric(text: str) -> str:
     """仅将全角英文字母与数字（如 ＨＩＶ、１２３）转换为半角（HIV、123），保留中文标点（，。；“”）。"""
-    def _repl(match: re.Match) -> str:
-        code = ord(match.group(0))
-        if 0xFF10 <= code <= 0xFF19 or 0xFF21 <= code <= 0xFF3A or 0xFF41 <= code <= 0xFF5A:
-            return chr(code - 0xfee0)
-        return match.group(0)
-    return re.sub(r"[\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]", _repl, text)
+    if not text:
+        return text
+    return text.translate(_FULLWIDTH_TO_HALFWIDTH)
 
 
 def redact_medical_text(
@@ -921,11 +969,11 @@ def redact_medical_text(
     if not _TERMS_FIRST_CHARS_PATTERN.search(text) and not _MASKED_LABEL_RE.search(text):
         return text
 
-    # 三级检测：原文 → 全角归一化 → 剔除字符间噪声；三级文本去重，避免对同一内容重复全量扫描
-    stripped_norm = re.sub(r"(?<=[a-zA-Z0-9\u4e00-\u9fa5])[\s\.\-_]+(?=[a-zA-Z0-9\u4e00-\u9fa5])", "", norm_text)
-    scan_variants = {text, norm_text, stripped_norm}
-    if not any(_TERMS_ONLY_PATTERN.search(v) for v in scan_variants) and not _MASKED_LABEL_RE.search(text):
-        return text
+    # 三级检测：单次 DFA 扫描匹配
+    if not (_TERMS_ONLY_PATTERN.search(norm_text) or _MASKED_LABEL_RE.search(text)):
+        stripped_norm = _STRIPPED_NOISE_RE.sub("", norm_text)
+        if stripped_norm == norm_text or not _TERMS_ONLY_PATTERN.search(stripped_norm):
+            return text
 
     s = norm_text
     # 注：词库正则已通过 _flex_escape 实现字符间分隔符容忍（"H I V"/"H.I.V"/"艾-滋-病" 等变体

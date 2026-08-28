@@ -53,6 +53,7 @@ from .rules import (
     L4_PATTERNS,
     L5_PATTERNS,
     RedactionStrategyConfig,
+    _TERMS_FIRST_CHARS_PATTERN,
     classify_icd10_code,
     compile_l4_l5_patterns,
     contains_high_risk_text,
@@ -86,6 +87,14 @@ _CATEGORICAL_FIELDS = frozenset({
     "department", "dept", "dept_name", "admission_dept", "discharge_dept",
 })
 
+# 临床自由文本字段集合（静态常量，避免每次请求重复分配 set）
+_CLINICAL_KEYS = frozenset({
+    "diagnosis_name", "chief_complaint", "present_illness",
+    "past_history", "personal_history", "family_history",
+    "allergic_history", "progress_note", "icd10_code", "admission_condition",
+    "treatment_plan", "diagnosis",
+})
+
 
 def _mask_string(field_name: str, value: str) -> str:
     """调用 masking 并稳定返回字符串，屏蔽其可选详情返回类型。
@@ -93,7 +102,7 @@ def _mask_string(field_name: str, value: str) -> str:
     内部工具函数：mask_value 在 return_details=False 时可能返回纯字符串，
     也可能返回带 .value 属性的对象（取决于 masking 版本），此处统一收敛为 str。
     """
-    result = mask_value(field_name, value, return_details=False)
+    result = mask_value(field_name=field_name, value=value, return_details=False)
     # 双形态兼容：str 直接返回；对象则取其 .value 字段
     if isinstance(result, str):
         return result
@@ -121,10 +130,24 @@ class FieldClassification:
     sanitized_value_rule: str = ""  # 纯规则引擎（正则）抹平结果，供对比分析
     sanitized_value_ner: str = ""  # Small-NER 引擎抹平结果，供对比分析（无推理时等于规则结果）
 
+    def to_dict(self) -> dict[str, Any]:
+        """高性能字典序列化（避免 dataclasses.asdict 深拷贝开销）。"""
+        return {
+            "field_name": self.field_name,
+            "level": self.level,
+            "security_tag": self.security_tag,
+            "description": self.description,
+            "rule_matched": self.rule_matched,
+            "raw_value": self.raw_value,
+            "sanitized_value": self.sanitized_value,
+            "sanitized_value_rule": self.sanitized_value_rule,
+            "sanitized_value_ner": self.sanitized_value_ner,
+        }
+
 
 @dataclass
 class RecordClassificationReport:
-    """单条记录的分级报告模型（asdict 后进入 classification_report 列表）。"""
+    """单条记录的分级报告模型（to_dict 后进入 classification_report 列表）。"""
 
     record_index: int  # 记录序号（从 1 开始，对应 enumerate(start=1)）
     max_level: str  # 该记录所有字段中的最高等级（记录级风险取 max）
@@ -132,6 +155,20 @@ class RecordClassificationReport:
     high_sensitivity_detected: list[str]  # 检测到的高敏字段及其等级（L4/L5 级风险）
     field_details: list[FieldClassification]  # 字段级明细（完整分级/脱敏过程记录）
     raw_record: Optional[dict[str, str]] = field(default=None)  # 原始记录快照（可关闭以省内存）
+
+    def to_dict(self) -> dict[str, Any]:
+        """高性能字典序列化。"""
+        return {
+            "record_index": self.record_index,
+            "max_level": self.max_level,
+            "pii_fields_detected": self.pii_fields_detected,
+            "high_sensitivity_detected": self.high_sensitivity_detected,
+            "field_details": [
+                fd.to_dict() if hasattr(fd, "to_dict") else asdict(fd)
+                for fd in self.field_details
+            ],
+            "raw_record": self.raw_record,
+        }
 
 
 @dataclass
@@ -235,6 +272,8 @@ class MedicalPrivacyPipeline:
         self._field_class_cache: dict[tuple[str, str], FieldClassification] = {}
         # NER 抹平结果缓存（受 _NER_CACHE_MAX_SIZE 上限约束，防止无界内存增长）
         self._ner_cache: dict[str, str] = {}
+        # 单批次规则抹平去重表宿主（线程局部，见 _redact_rule_text）：各 worker 线程互不影响
+        self._redact_tls = threading.local()
 
     def clear_cache(self) -> None:
         """清空实例内所有缓存池（支持策略热重载、运行时重置与测试隔离）。"""
@@ -260,6 +299,23 @@ class MedicalPrivacyPipeline:
             except (StopIteration, KeyError):
                 pass
         self._sanitized_cache[cache_key] = sanitized
+
+    def _redact_rule_text(self, text: str) -> str:
+        """规则引擎无痕抹平入口，按当前批次自动去重。
+
+        ``redact_medical_text`` 是 ``(text, strategy)`` 的纯函数，而同一批记录里存在大量
+        重复字段值，交付脱敏、双引擎快照与 dyn 漏斗回调还会对同一文本各算一次。去重表由
+        :meth:`process_records` 存入线程局部状态并在批次结束时释放——不进实例共享状态，
+        因此无需持锁，也不引入跨请求内存增长。无批次上下文时退化为直接调用。
+        """
+        memo = getattr(self._redact_tls, "memo", None)
+        if memo is None:
+            return redact_medical_text(text, strategy=self.redaction_strategy)
+        cached = memo.get(text)
+        if cached is None:
+            cached = redact_medical_text(text, strategy=self.redaction_strategy)
+            memo[text] = cached
+        return cached
 
     def _medical_text_sanitizer(self, field_name: str, text: str, final_level: str, mode: str = "redact") -> str:
         """医疗领域文本脱敏回调（注入到 DynClassificationService）。
@@ -319,10 +375,10 @@ class MedicalPrivacyPipeline:
                             self._cache_ner_result(text, sanitized_text)
                 else:
                     # 不满足深度推理条件 → 降级为纯规则引擎（正则）抹平
-                    sanitized_text = redact_medical_text(text, strategy=self.redaction_strategy)
+                    sanitized_text = self._redact_rule_text(text)
             else:
                 # "rule" 引擎：始终使用纯正则快速路径
-                sanitized_text = redact_medical_text(text, strategy=self.redaction_strategy)
+                sanitized_text = self._redact_rule_text(text)
 
             # 语义清洗：诊断字段若被抹平成残缺的修饰词（如"慢性"），
             # 说明其主体（病名）已被抹除，保留修饰词无意义且易泄露上下文 → 整体置空
@@ -342,11 +398,26 @@ class MedicalPrivacyPipeline:
         val_str = "" if val is None else str(val)
         cache_key = (key, val_str)
 
+        # 批次级线程局部缓存（无需持锁）
+        fc_memo = getattr(self._redact_tls, "fc_memo", None)
+        if fc_memo is not None:
+            cached_fc = fc_memo.get(cache_key)
+            if cached_fc is not None:
+                return FieldClassification(
+                    field_name=cached_fc.field_name,
+                    level=cached_fc.level,
+                    security_tag=cached_fc.security_tag,
+                    description=cached_fc.description,
+                    rule_matched=cached_fc.rule_matched,
+                )
+
         with self._lock:
             cached_fc = self._field_class_cache.get(cache_key)
             if cached_fc is not None:
                 # 刷新访问热度（LRU 语义：命中时移至最新插入位置）
                 self._field_class_cache[cache_key] = self._field_class_cache.pop(cache_key)
+                if fc_memo is not None:
+                    fc_memo[cache_key] = cached_fc
                 return FieldClassification(
                     field_name=cached_fc.field_name,
                     level=cached_fc.level,
@@ -386,7 +457,11 @@ class MedicalPrivacyPipeline:
         # ── 步骤 2: 病史文本 L5/L4 术语扫描（正则词库匹配，最高等级优先）──
         if fc is None:
             detected_level: str | None = None
-            if key.strip().lower() not in _CATEGORICAL_FIELDS and c_key not in _CATEGORICAL_FIELDS:
+            if (
+                key.strip().lower() not in _CATEGORICAL_FIELDS
+                and c_key not in _CATEGORICAL_FIELDS
+                and bool(_TERMS_FIRST_CHARS_PATTERN.search(val_str))
+            ):
                 for pat, _replacement in self._l5_patterns:
                     if pat.search(val_str):
                         detected_level = "L5"
@@ -566,8 +641,27 @@ class MedicalPrivacyPipeline:
         2. 作为最终门禁——process_records 中脱敏后仍命中则整值删除（见最终门禁逻辑）。
 
         使用实例级 L4/L5 模式（含自定义替换标签），委托模块级函数执行三级检测。
-        前置词库首字符预筛：不含任何词库首字符的文本直接判否（毫秒级短路）。
+        前置词库首字符预筛：不含任何词库首字符且不含脱敏标签的文本直接判否（毫秒级短路）。
         """
+        if not text:
+            return False
+        hr_memo = getattr(self._redact_tls, "hr_memo", None)
+        if hr_memo is not None:
+            res = hr_memo.get(text)
+            if res is not None:
+                return res
+            if not _TERMS_FIRST_CHARS_PATTERN.search(text) and not text.startswith("["):
+                hr_memo[text] = False
+                return False
+            res = contains_high_risk_text(
+                text,
+                patterns=self._l5_patterns + self._l4_patterns,
+            )
+            hr_memo[text] = res
+            return res
+
+        if not _TERMS_FIRST_CHARS_PATTERN.search(text) and not text.startswith("["):
+            return False
         return contains_high_risk_text(
             text,
             patterns=self._l5_patterns + self._l4_patterns,
@@ -672,20 +766,14 @@ class MedicalPrivacyPipeline:
             return val_str
 
         # 5. 临床自由文本与高风险病史抹平
-        clinical_keys = {
-            "diagnosis_name", "chief_complaint", "present_illness",
-            "past_history", "personal_history", "family_history",
-            "allergic_history", "progress_note", "icd10_code", "admission_condition",
-            "treatment_plan",
-        }
         if (
-            key in clinical_keys
-            or c_key in clinical_keys
-            or canonical_key in clinical_keys
+            key in _CLINICAL_KEYS
+            or c_key in _CLINICAL_KEYS
+            or canonical_key in _CLINICAL_KEYS
             or self._contains_high_risk_text(val_str)
             or (level_hint if level_hint is not None else self._classify_field(key, val_str).level) in ["L4", "L5"]
         ):
-            return self._purge_diagnosis_residual(key, val_str, redact_medical_text(val_str, strategy=self.redaction_strategy))
+            return self._purge_diagnosis_residual(key, val_str, self._redact_rule_text(val_str))
 
         # 6. 低敏/普通字段：原样返回
         return val_str
@@ -694,11 +782,30 @@ class MedicalPrivacyPipeline:
         self, records: list[dict[str, str]], sanitize: bool = True
     ) -> MedicalPipelineResult:
         """处理医疗数据集记录并生成双输出。
-        
+
         Args:
             records: 输入医疗记录列表。
             sanitize: 是否进行高敏与 PII 脱敏（默认 True）。若为 True，在单次推断/循环中同时完成分级与脱敏。
         """
+        # 在本线程启用批次级抹平去重表，交由 _redact_rule_text 消费；线程局部因此无需
+        # 持锁，也不会跨请求堆积。外层值在此保存并在结束时恢复，以支持嵌套调用。
+        outer_memo = getattr(self._redact_tls, "memo", None)
+        outer_hr_memo = getattr(self._redact_tls, "hr_memo", None)
+        outer_fc_memo = getattr(self._redact_tls, "fc_memo", None)
+        self._redact_tls.memo = {}
+        self._redact_tls.hr_memo = {}
+        self._redact_tls.fc_memo = {}
+        try:
+            return self._process_records_impl(records, sanitize=sanitize)
+        finally:
+            self._redact_tls.memo = outer_memo
+            self._redact_tls.hr_memo = outer_hr_memo
+            self._redact_tls.fc_memo = outer_fc_memo
+
+    def _process_records_impl(
+        self, records: list[dict[str, str]], sanitize: bool = True
+    ) -> MedicalPipelineResult:
+        """process_records 主实现（当前线程已挂载批次抹平去重表）。"""
         start_time = time.perf_counter()  # 高精度计时起点（统计整体耗时）
         
         # 输出容器：报告列表（每条记录一份）与脱敏记录列表（与输入一一对应）
@@ -772,6 +879,8 @@ class MedicalPrivacyPipeline:
                 fc.sanitized_value = sanitized_rec[key]
 
                 # ③ 生成双引擎对比快照（供审计/调优分析，不影响对外脱敏值）：
+                # 规则快照经批次去重表复用 ② 中已算出的同一抹平结果，
+                # 避免对相同文本重复执行全量句法正则。
                 if canonicalize_pii_field(key) in PII_FIELD_RULES:
                     # PII 字段：rule 引擎与 ner 引擎均记录强掩码结果（PII 不走文本抹平）
                     fc.sanitized_value_rule = self._mask_pii_value(key, val_str)
@@ -780,18 +889,13 @@ class MedicalPrivacyPipeline:
                     # 非 PII 字段：
                     # 性能超级优化：仅对临床长文本字段/高危敏感字段触发深度 Small-NER 前向推理，
                     # 结构化/短文本字段直接复用超快规则管道，结合 LRU 缓存秒级响应
-                    fc.sanitized_value_rule = redact_medical_text(val_str, strategy=self.redaction_strategy)
-                    clinical_keys = {
-                        "chief_complaint", "present_illness", "past_history",
-                        "personal_history", "family_history", "allergic_history",
-                        "progress_note", "diagnosis_name",
-                    }
+                    fc.sanitized_value_rule = self._redact_rule_text(val_str)
                     # 触发条件：仅当显式配置为 ner 引擎且已挂载 ner 适配器时，才对高敏/临床文本执行深度推理；
                     # 规则模式或未启用 NER 时直接复用规则抹平结果（避免无谓的推理耗时与 CPU 阻塞）
                     if (
                         self.redact_engine == "ner"
                         and self.ner_adapter is not None
-                        and (key in clinical_keys or self._contains_high_risk_text(val_str))
+                        and (key in _CLINICAL_KEYS or self._contains_high_risk_text(val_str))
                         and self._could_benefit_from_ner(val_str)
                     ):
                         # 带内存缓存的 NER 抹平（相同文本 0ms 闪电响应）；
@@ -829,7 +933,7 @@ class MedicalPrivacyPipeline:
                 field_details=field_classifications,
                 raw_record=rec,
             )
-            reports.append(asdict(rep))
+            reports.append(rep.to_dict())
             sanitized_records.append(sanitized_rec)
 
         # ── 汇总统计：耗时 + 各等级计数 + 合规保证标记 ──

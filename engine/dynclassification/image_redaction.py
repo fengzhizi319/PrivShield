@@ -106,15 +106,19 @@ def _is_path_allowed(path: Path) -> bool:
     return any(resolved.is_relative_to(root) for root in _allowed_image_dirs())
 
 
+_IMAGE_EXTENSIONS_TUPLE = tuple(ext.lower() for ext in IMAGE_FILE_EXTENSIONS)
+
+
 def is_image_input(val_str: str) -> bool:
     """判断输入是否为图像（文件路径或 Base64 Data URI）。"""
     if not val_str:
         return False
     stripped = val_str.strip()
+    low = stripped.lower()
     return (
         len(stripped) < _MAX_PATH_LEN
-        and any(stripped.lower().endswith(ext) for ext in IMAGE_FILE_EXTENSIONS)
-    ) or stripped.lower().startswith(("data:image/", "image:"))
+        and low.endswith(_IMAGE_EXTENSIONS_TUPLE)
+    ) or low.startswith(("data:image/", "image:"))
 
 
 def _cleanup_old_sanitized_images(output_dir: Path, max_files: int = 200) -> None:
