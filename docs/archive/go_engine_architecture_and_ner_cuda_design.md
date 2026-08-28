@@ -3,7 +3,7 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构全面演进至 **Go 原生高性能微服务架构 (路径 C)** 的系统级深度架构设计、核心源码实现与生产迁移落地规约（Production Blueprint）。
 > **顶层设计对齐**：全面严格对齐 [`docs/archive/unified_design.md`](unified_design.md) (v15.1.0) 统一规范（包含统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。
 > **参考实现**：`~/code/sfwork/PrivShield-go` (包含 `privacy-go-sdk`、`internal/dynclassification`、`internal/service`、`internal/grpcserver`、`internal/rest`、`internal/gateway`) 与 `pkg/` 共享基础库。
-> **版本**：v3.0.0 (全栈统一对齐与生产就绪版)
+> **版本**：v3.1.0 (代码实施步骤与工程落地强化版)
 > **编写日期**：2026-08-28
 
 ---
@@ -30,9 +30,19 @@
    * 9.5 [东西向零信任 mTLS 回源与南北向 TLS 终结](#95-东西向零信任-mtls-回源与南北向-tls-终结)
 10. [统一存储、审计存证与密码学基座 (Storage, Crypto & Audit)](#10-统一存储审计存证与密码学基座-storage-crypto--audit)
 11. [全栈可观测性与监控指标规约 (Observability Spec)](#11-全栈可观测性与监控指标规约-observability-spec)
-12. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#12-性能基准量化评估与容量规划-benchmark--sizing)
-13. [构建、依赖管理与生产部署清单 (Build & K8s Packaging)](#13-构建依赖管理与生产部署清单-build--k8s-packaging)
-14. [双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)](#14-双轨影子流量验证与平滑迁移演进路线-migration-playbook)
+12. [全流程代码工程实施指南与落地步骤 (Step-by-Step Code Implementation Playbook)](#12-全流程代码工程实施指南与落地步骤-step-by-step-code-implementation-playbook)
+    * 12.1 [工程目录结构规划与包依赖划分](#121-工程目录结构规划与包依赖划分)
+    * 12.2 [Step 1: 环境准备与 CGO/ONNX 动态库绑定](#122-step-1-环境准备与-cgoonnx-动态库绑定)
+    * 12.3 [Step 2: 纯 Go 隐私原语库与单元测试实现](#123-step-2-纯-go-隐私原语库与单元测试实现)
+    * 12.4 [Step 3: AC 自动机规则引擎与 Tokenizer 分词器构建](#124-step-3-ac-自动机规则引擎与-tokenizer-分词器构建)
+    * 12.5 [Step 4: Go + CUDA ONNX 推理引擎与动态合批 Worker 实现](#125-step-4-go--cuda-onnx-推理引擎与动态合批-worker-实现)
+    * 12.6 [Step 5: 医疗流水线与三层分级漏斗串联](#126-step-5-医疗流水线与三层分级漏斗串联)
+    * 12.7 [Step 6: 双协议服务端实现与统一中间件挂载](#127-step-6-双协议服务端实现与统一中间件挂载)
+    * 12.8 [Step 7: L7 自适应负载均衡网关实现](#128-step-7-l7-自适应负载均衡网关实现)
+    * 12.9 [Step 8: 自动化测试、性能压测与影子流量验证](#129-step-8-自动化测试性能压测与影子流量验证)
+13. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#13-性能基准量化评估与容量规划-benchmark--sizing)
+14. [构建、依赖管理与生产部署清单 (Build & K8s Packaging)](#14-构建依赖管理与生产部署清单-build--k8s-packaging)
+15. [双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)](#15-双轨影子流量验证与平滑迁移演进路线-migration-playbook)
 
 ---
 
@@ -1289,11 +1299,179 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ---
 
-## 12. 性能基准量化评估与容量规划 (Benchmark & Sizing)
+## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Code Implementation Playbook)
+
+本节为开发团队提供完整、可直接执行的分步工程实施清单。
+
+### 12.1 工程目录结构规划与包依赖划分
+
+```text
+PrivShield-go/
+├── cmd/
+│   ├── privshield-agent/           # Engine Agent 主入口 (REST :8079 + gRPC :50051)
+│   │   └── main.go
+│   └── privshield-gateway/         # L7 负载均衡网关入口 (REST :8000 + gRPC :50000)
+│       └── main.go
+├── privacy-go-sdk/                 # 纯 Go 隐私原语与算子 SDK (零重依赖)
+│   ├── masking/                    # 字段掩码 (支持国标身份证/手机/银行卡/HMAC)
+│   ├── dp/                         # 差分隐私 (Laplace/Gaussian/Adaptive Clip/Vector)
+│   ├── ldp/                        # 本地差分隐私 (Randomized Response/O-RR)
+│   ├── kano/                       # K-匿名 (Mondrian 切分与泛化树)
+│   ├── qol/                        # 语义混淆查询注入
+│   ├── budget/                     # 隐私预算会计 (无锁内存原子扣减/Redis 租约)
+│   └── medical/                    # 医保 18 字段 / 康养 27 字段特化流水线
+├── internal/
+│   ├── dynclassification/          # 三层动态分类分级漏斗
+│   │   ├── engine.go               # Layer 1 规则引擎
+│   │   ├── operators.go            # AC 自动机与算子注册表
+│   │   ├── tokenizer.go            # 中文 BERT WordPiece Tokenizer + Offset Mapping
+│   │   ├── onnx_ner.go             # Layer 2 Go+CUDA ONNX 推理引擎 (CGO + 线程绑定)
+│   │   ├── dynamic_batching.go     # 动态合批队列 (Channel 缓冲 + Ticker 超时)
+│   │   ├── llm_client.go           # Layer 3 Local LLM / vLLM HTTP 连接池客户端
+│   │   └── safety_floor.go         # 安全底线门禁仲裁器
+│   ├── service/                    # PrivacyService 统一编排与 sync.Pool 对象池
+│   ├── rest/                       # Gin REST 控制器与路由定义
+│   ├── grpcserver/                 # gRPC Protocol 服务端 (绑定 proto/privacy.proto)
+│   ├── gateway/                    # L7 自适应负载均衡网关 (P2C-EWMA / SWRR / 熔断 / 透明代理)
+│   └── observability/              # slog 结构化日志、Prometheus 指标注册与 OTel 追踪
+├── pkg/                            # 共享基础库 (直接导入根目录 pkg/)
+│   ├── naming/                     # SSOT 命名事实源 (DSYibao, DSKangyang)
+│   ├── middleware/                 # 统一错误信封、Trace 上下文、限流中间件
+│   ├── tlsutil/                    # mTLS 证书与 CN 白名单热重载
+│   └── store/                      # PostgreSQL Phase B 存储适配器
+├── config/                         # 配置文件 (mtls-whitelist.yaml, privacy.yaml)
+├── rules/                          # YAML 领域规则与体系定义 (taxonomies/ & domains/)
+├── .models/                        # ONNX NER 模型权重 (model.onnx, vocab.txt)
+├── go.mod
+├── go.sum
+└── Dockerfile                      # Multi-Stage 极简生产镜像
+```
+
+---
+
+### 12.2 Step 1: 环境准备与 CGO/ONNX 动态库绑定
+
+1. **配置 Go 工作区与核心依赖声明 (`go.mod`)**：
+   ```bash
+   cd /home/charles/code/PrivShield
+   # 确保 go.mod 引入核心依赖
+   go get -u github.com/gin-gonic/gin
+   go get -u google.golang.org/grpc
+   go get -u github.com/yalue/onnxruntime_go
+   go get -u github.com/BobuSumisu/aho-corasick
+   go get -u github.com/bytedance/sonic
+   go get -u github.com/prometheus/client_golang/prometheus
+   ```
+2. **安装 ONNX Runtime GPU 动态链接库 (`/usr/local/lib`)**：
+   ```bash
+   # 下载 ONNX Runtime 1.17.1 GPU Linux x64 包
+   wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-linux-x64-gpu-1.17.1.tgz
+   tar -zxvf onnxruntime-linux-x64-gpu-1.17.1.tgz
+   sudo cp onnxruntime-linux-x64-gpu-1.17.1/lib/libonnxruntime* /usr/local/lib/
+   sudo ldconfig
+   ```
+
+---
+
+### 12.3 Step 2: 纯 Go 隐私原语库与单元测试实现
+
+1. **实现 `privacy-go-sdk` 各算法模块**：
+   - `masking/masking.go`：预编译正则与 `strings.Builder` 零拷贝掩码；
+   - `dp/dp.go`：Laplace 与 Gaussian 噪声生成及自适应截断；
+   - `ldp/ldp.go`：基于 `math/rand/v2` 的 Randomized Response；
+   - `kano/kano.go`：Mondrian 切分算法与年龄层级泛化；
+   - `budget/budget.go`：`atomic.Uint64` 无锁原子预算扣减。
+2. **编写比对单元测试**：
+   ```bash
+   go test -v -race ./privacy-go-sdk/...
+   ```
+   验证每个原语的输出与 Python 对应算法在给定随机种子下保持 100% 比特级或统计级一致。
+
+---
+
+### 12.4 Step 3: AC 自动机规则引擎与 Tokenizer 分词器构建
+
+1. **在 `internal/dynclassification/operators.go` 中集成 AC 自动机**：
+   - 启动时加载 `rules/domains/*.yaml` 提取所有高危病种词条；
+   - 构建 `ahocorasick.Trie` 树，提供时间复杂度 $O(N)$ 的 `ScanAndRedact` 接口。
+2. **在 `internal/dynclassification/tokenizer.go` 中实现 BERT 分词器**：
+   - 读取 `.models/vocab.txt`；
+   - 实现包含 `TokenOffset { StartByte, EndByte }` 映射的 `EncodeWithOffsets` 方法；
+   - 运行基准性能压测：
+     ```bash
+     go test -bench=BenchmarkTokenizer -benchmem ./internal/dynclassification/...
+     ```
+     确保单次分词耗时 **< 2μs** 且零堆内存分配。
+
+---
+
+### 12.5 Step 4: Go + CUDA ONNX 推理引擎与动态合批 Worker 实现
+
+1. **在 `internal/dynclassification/onnx_ner.go` 中绑定 ONNX Runtime CGO**：
+   - 初始化 `ort.AdvancedSession` 并加载 `.models/model.onnx`；
+   - 配置 `CUDAProviderOptions`，设定 2GB 显存上限；
+2. **实现专职 GPU Worker Pool**：
+   - 在 Worker 协程入口显式调用 `runtime.LockOSThread()`；
+   - 建立合批队列 `taskQueue chan *NerTask`，配置 `BatchSize=32` 与 `MaxWait=3ms`；
+3. **实现 BIO 实体解码与优雅降级**：
+   - 实现 `decodeBIOEntities` 将 Logits 映射为包含精确 `StartByte` 与 `EndByte` 的实体切片；
+   - 当 CUDA 驱动异常或显存告警时，自动捕获错误并平滑回退至 CPU 推理或 AC 规则抹平。
+
+---
+
+### 12.6 Step 5: 医疗流水线与三层分级漏斗串联
+
+1. **在 `privacy-go-sdk/medical/pipeline.go` 中实现 `MedicalPrivacyPipeline`**：
+   - 引入批次局部去重表（`memo`、`fcMemo`）；
+   - 串联 Layer 1 (AC 规则) ➔ Layer 2 (Go+CUDA NER) ➔ Layer 3 (vLLM 异步仲裁)；
+   - 挂载 **Safety Floor 安全底线** 仲裁器与出口 **Fail-Safe Guardrail** 最终门禁；
+2. **对接 `pkg/naming` SSOT 规范**：
+   - 严格处理 `naming.DSYibao` (18 字段) 与 `naming.DSKangyang` (27 字段)。
+
+---
+
+### 12.7 Step 6: 双协议服务端实现与统一中间件挂载
+
+1. **REST 服务端 (`internal/rest/server.go`)**：
+   - 使用 Gin 引擎注册路由：`/v1/privacy/mask`、`/v1/privacy/dp`、`/v1/pipeline/process_records`、`/health`、`/metrics` 等；
+   - 挂载统一中间件：`pkg/middleware/envelope.go`（错误信封）、`pkg/middleware/trace.go`（Trace 传播）、`pkg/middleware/auth.go`（限流与鉴权）。
+2. **gRPC 服务端 (`internal/grpcserver/server.go`)**：
+   - 实现 `proto/privacy.proto` 定义的全部 gRPC 方法；
+   - 挂载 `pkg/tlsutil/whitelist.go` 的 mTLS CN 白名单拦截器。
+
+---
+
+### 12.8 Step 7: L7 自适应负载均衡网关实现
+
+1. **在 `internal/gateway/` 中实现高可用网关**：
+   - `balancer.go`：实现 **P2C-EWMA 自适应调度算法** 与 Nginx SWRR 平滑加权轮询；
+   - `circuit_breaker.go`：实现每个后端的 **三态独立熔断器 (Closed/Open/Half-Open)**；
+   - `grpc_proxy.go`：基于 `grpc.UnknownServiceHandler` 实现 **透明零编解码流式代理 (`TransparentStreamDirector`)**；
+   - `http_proxy.go`：基于 `httputil.ReverseProxy` 实现 REST 流式反向代理；
+   - `health.go`：启动后台 Goroutine 执行 HTTP `/health` 与 gRPC `Health/Check` 主动探活。
+
+---
+
+### 12.9 Step 8: 自动化测试、性能压测与影子流量验证
+
+1. **全量并发单元测试与竞态检测**：
+   ```bash
+   go test -v -race ./...
+   ```
+2. **微服务全链路联调**：
+   - 启动 Go Agent (`:8079`, `:50051`) 与 Gateway (`:8000`, `:50000`)；
+   - 启动 `service-hub` (:8082)、`datasource-mgr` (:8083)、`audit-log` (:8084)；
+   - 运行 E2E 测试验证流水线流通。
+3. **压测验收**：
+   - 打开 `console/app-lz` 前端，使用 `BenchmarkPanel.tsx` 触发 100/200 RPS 持续压测，验证 100 条记录延迟在 **< 5ms**，P99 波动 **< 8ms**。
+
+---
+
+## 13. 性能基准量化评估与容量规划 (Benchmark & Sizing)
 
 在 16 逻辑核 / 32GB 内存 / NVIDIA RTX 4090 (24GB) 环境实测与理论测算：
 
-### 12.1 性能与资源全面对比
+### 13.1 性能与资源全面对比
 
 | 核心指标 | Python 引擎 (当前) | Go 原生引擎 (路径 C) | 提升幅度 |
 |---|---|---|---|
@@ -1310,9 +1488,9 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ---
 
-## 13. 构建、依赖管理与生产部署清单 (Build & K8s Packaging)
+## 14. 构建、依赖管理与生产部署清单 (Build & K8s Packaging)
 
-### 13.1 Multi-Stage 生产级 Dockerfile
+### 14.1 Multi-Stage 生产级 Dockerfile
 
 ```dockerfile
 # ── Stage 1: Go 编译环境 ──
@@ -1327,7 +1505,7 @@ RUN go mod download
 
 COPY . .
 # 同时编译 Agent 与 Gateway 二进制
-RUN go build -ldflags="-s -w -X 'main.Version=3.0.0' -X 'main.BuildTime=$(date)'" \
+RUN go build -ldflags="-s -w -X 'main.Version=3.1.0' -X 'main.BuildTime=$(date)'" \
     -o /build/bin/privshield-agent ./cmd/privshield-agent && \
     go build -ldflags="-s -w" -o /build/bin/privshield-gateway ./cmd/privshield-gateway
 
@@ -1362,7 +1540,7 @@ ENTRYPOINT ["/app/privshield-agent"]
 
 ---
 
-## 14. 双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)
+## 15. 双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)
 
 为确保从 Python 引擎向 Go 引擎的无故障平滑过渡，制定三阶段迁移演进路线：
 
