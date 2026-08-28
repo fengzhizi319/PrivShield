@@ -185,7 +185,6 @@ func (r *OperatorRegistry) ListOperators() []OperatorType {
 
 // matchRegex 使用缓存的正则匹配
 func matchRegex(pattern, text string) bool {
-	// 使用全局缓存
 	re, ok := regexCache.Load(pattern)
 	if !ok {
 		compiled, err := compileRegex(pattern)
@@ -193,9 +192,9 @@ func matchRegex(pattern, text string) bool {
 			return false
 		}
 		regexCache.Store(pattern, compiled)
-		re = compiled
+		return compiled.MatchString(text)
 	}
-	return re.MatchString(text)
+	return re.(*cachedRegex).MatchString(text)
 }
 
 var regexCache sync.Map

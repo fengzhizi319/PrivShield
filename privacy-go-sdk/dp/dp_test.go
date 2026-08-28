@@ -130,13 +130,21 @@ func TestNoisyMean(t *testing.T) {
 	values := []float64{1.0, 2.0, 3.0, 4.0, 5.0}
 	epsilon := 1.0
 	delta := 1e-5
-	clipBound := 10.0
+	// clipBound 设为数据上界，使 sensitivity = clipBound/n = 1.0
+	// 避免过大 sensitivity 导致噪声方差过高、测试不稳定
+	clipBound := 5.0
 
-	result := NoisyMean(values, epsilon, delta, clipBound)
+	// 多次运行取平均，验证噪声均值无偏
+	var sum float64
+	runs := 500
+	for i := 0; i < runs; i++ {
+		sum += NoisyMean(values, epsilon, delta, clipBound)
+	}
+	avgResult := sum / float64(runs)
 	expectedMean := 3.0
 
-	// 验证结果接近真实均值
-	if math.Abs(result-expectedMean) > 2.0 {
-		t.Errorf("NoisyMean = %f, want ~%f", result, expectedMean)
+	// sensitivity=1.0 时 sigma≈2.74, SE≈0.12; 容差 1.5 ≈ 12σ 极安全
+	if math.Abs(avgResult-expectedMean) > 1.5 {
+		t.Errorf("NoisyMean avg = %f, want ~%f", avgResult, expectedMean)
 	}
 }

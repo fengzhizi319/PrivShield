@@ -183,7 +183,7 @@ func TestMaskAddress(t *testing.T) {
 		{
 			name:     "long address",
 			input:    "北京市朝阳区建国路88号",
-			expected: "北京市朝阳区*******",
+			expected: "北京市朝阳区******",
 		},
 		{
 			name:     "short address",

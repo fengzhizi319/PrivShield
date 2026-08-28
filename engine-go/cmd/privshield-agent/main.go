@@ -26,7 +26,6 @@ import (
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/dynclassification"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
-	"github.com/fengzhizi319/PrivShield/engine-go/internal/server"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/budget"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"

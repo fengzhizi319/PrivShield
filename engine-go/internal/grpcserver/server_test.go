@@ -202,7 +202,7 @@ func TestHandleDynClassify(t *testing.T) {
 		{"id_card_no", "110101199003072345", "secret"},
 		{"phone", "13812345678", "confidential"},
 		{"email", "test@example.com", "confidential"},
-		{"random_field", "hello", "public"},
+		{"random_field", "hello", "internal"}, // safety floor upgrades public → internal
 	}
 
 	for _, tt := range tests {

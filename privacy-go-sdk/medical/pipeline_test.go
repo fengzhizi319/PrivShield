@@ -51,9 +51,10 @@ func TestSanitizeAddress(t *testing.T) {
 	if len(result) == 0 {
 		t.Error("SanitizeField(address) should not be empty")
 	}
-	// 前 6 字符应保留
-	if result[:6] != "北京市朝阳区" {
-		t.Errorf("SanitizeField(address) prefix = %q, want '北京市朝阳区'", result[:6])
+	// 前 6 个 rune 应保留（MaskAddress 保留前 6 个字符）
+	runes := []rune(result)
+	if string(runes[:6]) != "北京市朝阳区" {
+		t.Errorf("SanitizeField(address) prefix = %q, want '北京市朝阳区'", string(runes[:6]))
 	}
 }
 

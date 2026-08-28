@@ -220,11 +220,11 @@ func commonPrefix(a, b string) string {
 
 func compareValues(a, b string) int {
 	if isNumeric([]string{a, b}) {
-		na, nb := parseNumeric([]string{a, b})
-		if na[0] < nb[0] {
+		nums := parseNumeric([]string{a, b})
+		if nums[0] < nums[1] {
 			return -1
 		}
-		if na[0] > nb[0] {
+		if nums[0] > nums[1] {
 			return 1
 		}
 		return 0
