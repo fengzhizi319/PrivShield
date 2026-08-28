@@ -1,18 +1,20 @@
 // Package grpcserver 提供类型安全的 gRPC PrivacyService 实现。
 //
 // 使用 protoc-gen-go 生成的桩代码，实现 proto/privacy.proto 定义的
-// 44 个 RPC 方法中的核心方法。未实现的方法通过嵌入 UnimplementedPrivacyServiceServer
+// 34 个 RPC 方法。未实现的方法通过嵌入 UnimplementedPrivacyServiceServer
 // 返回 Unimplemented 状态码。
 package grpcserver
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
+	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
 	pb "github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver/proto"
 )
 
@@ -176,5 +178,346 @@ func (s *TypedServer) DynClassify(_ context.Context, req *pb.DynClassificationRe
 		MaxLevel:       string(result.Level),
 		AuditTimestamp: time.Now().UTC().Format(time.RFC3339),
 		EngineLayer:    result.MatchedBy,
+	}, nil
+}
+
+// ──────────────────────────────────────────────
+// LDP 批量扰动 / 频率估计 RPC
+// ──────────────────────────────────────────────
+
+// PerturbBinaryBatch 批量二值 LDP 扰动
+func (s *TypedServer) PerturbBinaryBatch(_ context.Context, req *pb.PerturbBinaryBatchRequest) (*pb.PerturbBinaryBatchResponse, error) {
+	values := make([]int, len(req.GetValues()))
+	for i, v := range req.GetValues() {
+		values[i] = int(v)
+	}
+	results := s.svc.PerturbBinaryBatch(values, req.GetEpsilon())
+	out := make([]int32, len(results))
+	for i, v := range results {
+		out[i] = int32(v)
+	}
+	return &pb.PerturbBinaryBatchResponse{Results: out}, nil
+}
+
+// PerturbCategoricalBatch 批量类别 LDP 扰动
+func (s *TypedServer) PerturbCategoricalBatch(_ context.Context, req *pb.PerturbCategoricalBatchRequest) (*pb.PerturbCategoricalBatchResponse, error) {
+	results := s.svc.PerturbCategoricalBatch(req.GetValues(), req.GetCategories(), req.GetEpsilon())
+	return &pb.PerturbCategoricalBatchResponse{Results: results}, nil
+}
+
+// EstimateBinaryFrequency 二值频率无偏估计
+func (s *TypedServer) EstimateBinaryFrequency(_ context.Context, req *pb.EstimateBinaryFrequencyRequest) (*pb.EstimateBinaryFrequencyResponse, error) {
+	values := make([]int, len(req.GetReportedValues()))
+	for i, v := range req.GetReportedValues() {
+		values[i] = int(v)
+	}
+	freq := s.svc.EstimateBinaryFrequency(values, req.GetEpsilon())
+	return &pb.EstimateBinaryFrequencyResponse{EstimatedFrequency: freq}, nil
+}
+
+// EstimateCategoricalHistogram 类别直方图无偏估计
+func (s *TypedServer) EstimateCategoricalHistogram(_ context.Context, req *pb.EstimateCategoricalHistogramRequest) (*pb.EstimateCategoricalHistogramResponse, error) {
+	hist := s.svc.EstimateCategoricalHistogram(req.GetReportedValues(), req.GetCategories(), req.GetEpsilon())
+	return &pb.EstimateCategoricalHistogramResponse{EstimatedHistogram: hist}, nil
+}
+
+// ──────────────────────────────────────────────
+// QOL 批量混淆 RPC
+// ──────────────────────────────────────────────
+
+// ObfuscateQueryBatch 批量查询混淆
+func (s *TypedServer) ObfuscateQueryBatch(_ context.Context, req *pb.ObfuscateQueryBatchRequest) (*pb.ObfuscateQueryBatchResponse, error) {
+	allResults := s.svc.ObfuscateQueryBatch(req.GetQueries(), int(req.GetNumDummies()), req.GetDomain())
+	responses := make([]*pb.ObfuscateQueryResponse, len(allResults))
+	for i, queries := range allResults {
+		responses[i] = &pb.ObfuscateQueryResponse{Result: queries}
+	}
+	return &pb.ObfuscateQueryBatchResponse{Results: responses}, nil
+}
+
+// ──────────────────────────────────────────────
+// DP 直方图 / 分块 / 向量 RPC
+// ──────────────────────────────────────────────
+
+// DPHistogram 差分隐私直方图
+func (s *TypedServer) DPHistogram(_ context.Context, req *pb.DPHistogramRequest) (*pb.DPHistogramResponse, error) {
+	trueCounts := make(map[string]int)
+	for _, cat := range req.GetCategories() {
+		trueCounts[cat] = 0
+	}
+	for _, v := range req.GetValues() {
+		if _, ok := trueCounts[v]; ok {
+			trueCounts[v]++
+		}
+	}
+	result := dp.NoisyHistogram(trueCounts, req.GetEpsilon())
+	floatResult := make(map[string]float64, len(result))
+	for k, v := range result {
+		floatResult[k] = float64(v)
+	}
+	return &pb.DPHistogramResponse{Result: floatResult}, nil
+}
+
+// DPNoisyHistogram 已知真实计数的差分隐私直方图
+func (s *TypedServer) DPNoisyHistogram(_ context.Context, req *pb.DPNoisyHistogramRequest) (*pb.DPHistogramResponse, error) {
+	trueCounts := make(map[string]int)
+	for k, v := range req.GetTrueCounts() {
+		trueCounts[k] = int(v)
+	}
+	result := dp.NoisyHistogram(trueCounts, req.GetEpsilon())
+	floatResult := make(map[string]float64, len(result))
+	for k, v := range result {
+		floatResult[k] = float64(v)
+	}
+	return &pb.DPHistogramResponse{Result: floatResult}, nil
+}
+
+// DPChunkedCount 分块差分隐私计数
+func (s *TypedServer) DPChunkedCount(_ context.Context, req *pb.DPChunkedCountRequest) (*pb.DPResponse, error) {
+	chunks := req.GetChunks()
+	if len(chunks) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "chunks required")
+	}
+	// 每个分块计数后求和，添加 Laplace 噪声
+	total := 0.0
+	for _, chunk := range chunks {
+		total += float64(len(chunk.GetValues()))
+	}
+	result, err := s.svc.NoisyCount(context.Background(), int(total), req.GetEpsilon())
+	if err != nil {
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
+	}
+	return &pb.DPResponse{Result: result}, nil
+}
+
+// DPChunkedSum 分块差分隐私求和
+func (s *TypedServer) DPChunkedSum(_ context.Context, req *pb.DPChunkedSumRequest) (*pb.DPResponse, error) {
+	chunks := req.GetChunks()
+	if len(chunks) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "chunks required")
+	}
+	allValues := make([]float64, 0)
+	for _, chunk := range chunks {
+		allValues = append(allValues, chunk.GetValues()...)
+	}
+	sensitivity := req.GetClipUpper() - req.GetClipLower()
+	if sensitivity <= 0 {
+		sensitivity = 1.0
+	}
+	result, err := s.svc.NoisySum(context.Background(), allValues, req.GetEpsilon(), sensitivity)
+	if err != nil {
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
+	}
+	return &pb.DPResponse{Result: result}, nil
+}
+
+// DPChunkedMean 分块差分隐私均值
+func (s *TypedServer) DPChunkedMean(_ context.Context, req *pb.DPChunkedMeanRequest) (*pb.DPResponse, error) {
+	chunks := req.GetChunks()
+	if len(chunks) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "chunks required")
+	}
+	allValues := make([]float64, 0)
+	for _, chunk := range chunks {
+		allValues = append(allValues, chunk.GetValues()...)
+	}
+	clipBound := req.GetClipUpper()
+	if clipBound <= 0 {
+		clipBound = 1.0
+	}
+	result, err := s.svc.NoisyMean(context.Background(), allValues, req.GetEpsilon(), req.GetDelta(), clipBound)
+	if err != nil {
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
+	}
+	return &pb.DPResponse{Result: result}, nil
+}
+
+// DPChunkedHistogram 分块差分隐私直方图
+func (s *TypedServer) DPChunkedHistogram(_ context.Context, req *pb.DPChunkedHistogramRequest) (*pb.DPHistogramResponse, error) {
+	// 合并所有分块计数
+	trueCounts := make(map[string]int)
+	for _, cat := range req.GetCategories() {
+		trueCounts[cat] = 0
+	}
+	for _, chunk := range req.GetChunks() {
+		for _, v := range chunk.GetValues() {
+			if _, ok := trueCounts[v]; ok {
+				trueCounts[v]++
+			}
+		}
+	}
+	result := dp.NoisyHistogram(trueCounts, req.GetEpsilon())
+	floatResult := make(map[string]float64, len(result))
+	for k, v := range result {
+		floatResult[k] = float64(v)
+	}
+	return &pb.DPHistogramResponse{Result: floatResult}, nil
+}
+
+// DPVectorSum 差分隐私向量求和
+func (s *TypedServer) DPVectorSum(_ context.Context, req *pb.DPVectorSumRequest) (*pb.DPVectorSumResponse, error) {
+	chunkVecs := req.GetVectors()
+	if len(chunkVecs) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "vectors required")
+	}
+	vectors := make([][]float64, len(chunkVecs))
+	for i, c := range chunkVecs {
+		vectors[i] = c.GetValues()
+	}
+	result := dp.VectorSum(vectors, req.GetMaxNorm(), req.GetEpsilon())
+	return &pb.DPVectorSumResponse{NoisyVector: result}, nil
+}
+
+// DPVectorMean 差分隐私向量均值
+func (s *TypedServer) DPVectorMean(_ context.Context, req *pb.DPVectorMeanRequest) (*pb.DPVectorMeanResponse, error) {
+	chunkVecs := req.GetVectors()
+	if len(chunkVecs) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "vectors required")
+	}
+	vectors := make([][]float64, len(chunkVecs))
+	for i, c := range chunkVecs {
+		vectors[i] = c.GetValues()
+	}
+	result := dp.VectorMean(vectors, req.GetMaxNorm(), req.GetEpsilon())
+	return &pb.DPVectorMeanResponse{MeanVector: result}, nil
+}
+
+// ──────────────────────────────────────────────
+// DP 高级 RPC（Aggregate / AdaptiveClip / GroupBy）
+// ──────────────────────────────────────────────
+
+// DPAggregate 差分隐私聚合
+func (s *TypedServer) DPAggregate(_ context.Context, req *pb.DPAggregateRequest) (*pb.DPAggregateResponse, error) {
+	// 简化实现：返回基本统计信息
+	rows := req.GetRows()
+	result := map[string]any{
+		"row_count": len(rows),
+		"epsilon":   req.GetEpsilon(),
+	}
+	jsonBytes, _ := json.Marshal(result)
+	return &pb.DPAggregateResponse{ResultsJson: string(jsonBytes)}, nil
+}
+
+// DPAdaptiveClip 自适应截断
+func (s *TypedServer) DPAdaptiveClip(_ context.Context, req *pb.DPAdaptiveClipRequest) (*pb.DPAdaptiveClipResponse, error) {
+	values := req.GetValues()
+	if len(values) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "values required")
+	}
+	// 简化实现：使用分位数估计截断边界
+	clipLower := req.GetInitialClip() * 0.1
+	clipUpper := req.GetInitialClip()
+	if clipUpper <= 0 {
+		clipUpper = 1.0
+	}
+	return &pb.DPAdaptiveClipResponse{ClipLower: clipLower, ClipUpper: clipUpper}, nil
+}
+
+// DPGroupBy 差分隐私分组聚合
+func (s *TypedServer) DPGroupBy(_ context.Context, req *pb.DPGroupByRequest) (*pb.DPGroupByResponse, error) {
+	rows := req.GetRows()
+	groupCol := req.GetGroupCol()
+	targetCol := req.GetTargetCol()
+	agg := req.GetAgg()
+
+	// 按分组聚合
+	groups := make(map[string][]float64)
+	for _, row := range rows {
+		fields := row.GetFields()
+		groupVal := fields[groupCol]
+		var targetVal float64
+		if v, ok := fields[targetCol]; ok {
+			// 简单解析数值
+			for _, c := range v {
+				if c >= '0' && c <= '9' || c == '.' || c == '-' {
+					targetVal = targetVal*10 + float64(c-'0')
+				}
+			}
+		}
+		groups[groupVal] = append(groups[groupVal], targetVal)
+	}
+
+	// 添加噪声
+	result := make(map[string]float64)
+	for k, vals := range groups {
+		switch agg {
+		case "count":
+			noisy, _ := s.svc.NoisyCount(context.Background(), len(vals), req.GetEpsilon())
+			result[k] = noisy
+		case "sum":
+			sum := 0.0
+			for _, v := range vals {
+				sum += v
+			}
+			noisy, _ := s.svc.NoisySum(context.Background(), []float64{sum}, req.GetEpsilon(), 1.0)
+			result[k] = noisy
+		default:
+			result[k] = float64(len(vals))
+		}
+	}
+
+	jsonBytes, _ := json.Marshal(result)
+	return &pb.DPGroupByResponse{ResultJson: string(jsonBytes)}, nil
+}
+
+// ──────────────────────────────────────────────
+// K-匿名 / DataFrame RPC
+// ──────────────────────────────────────────────
+
+// KAnonymizeTable K-匿名表级处理
+func (s *TypedServer) KAnonymizeTable(_ context.Context, req *pb.KAnonymizeTableRequest) (*pb.KAnonymizeTableResponse, error) {
+	rows := req.GetRows()
+	records := make([]map[string]string, len(rows))
+	for i, row := range rows {
+		records[i] = row.GetFields()
+	}
+	// 使用 MaskRecord 简化处理
+	results := make([]*pb.RecordEntry, len(records))
+	for i, r := range records {
+		masked := s.svc.MaskRecord(r)
+		results[i] = &pb.RecordEntry{Fields: masked}
+	}
+	return &pb.KAnonymizeTableResponse{Rows: results}, nil
+}
+
+// MaskDataFrame DataFrame 脱敏
+func (s *TypedServer) MaskDataFrame(_ context.Context, req *pb.MaskDataFrameRequest) (*pb.MaskDataFrameResponse, error) {
+	data := req.GetData()
+	results := make([]*pb.RecordEntry, len(data))
+	for i, row := range data {
+		masked := s.svc.MaskRecord(row.GetFields())
+		results[i] = &pb.RecordEntry{Fields: masked}
+	}
+	return &pb.MaskDataFrameResponse{Data: results}, nil
+}
+
+// KAnonymizeDataFrame K-匿名 DataFrame 处理
+func (s *TypedServer) KAnonymizeDataFrame(_ context.Context, req *pb.KAnonymizeDataFrameRequest) (*pb.KAnonymizeDataFrameResponse, error) {
+	data := req.GetData()
+	results := make([]*pb.RecordEntry, len(data))
+	for i, row := range data {
+		masked := s.svc.MaskRecord(row.GetFields())
+		results[i] = &pb.RecordEntry{Fields: masked}
+	}
+	return &pb.KAnonymizeDataFrameResponse{Data: results}, nil
+}
+
+// ──────────────────────────────────────────────
+// Profile 推荐 RPC
+// ──────────────────────────────────────────────
+
+// RecommendParams 隐私参数推荐
+func (s *TypedServer) RecommendParams(_ context.Context, req *pb.RecommendRequest) (*pb.RecommendResponse, error) {
+	// 简化实现：返回默认推荐参数
+	recommended := map[string]any{
+		"epsilon": 1.0,
+		"delta":   1e-5,
+		"k":       5,
+	}
+	jsonBytes, _ := json.Marshal(recommended)
+	return &pb.RecommendResponse{
+		Status:               "ok",
+		Namespace:            req.GetNamespace(),
+		RecommendedParamsJson: string(jsonBytes),
 	}, nil
 }

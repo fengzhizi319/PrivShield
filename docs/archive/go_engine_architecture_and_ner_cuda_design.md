@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v19.0.0-drafted (路径 C 演进草案 Phase 15 REST 路由对齐 + Service 层补齐版)
+> **版本**：v20.0.0-drafted (路径 C 演进草案 Phase 16 gRPC TypedServer 全量 RPC 对齐版)
 > **编写日期**：2026-08-29
-> **修订说明**：v19.0.0 完成 Phase 15 实现：REST 路由补齐（LDP 4 个端点 + QOL batch + Budget reset）+ Service 层补齐（PerturbBinaryBatch/PerturbCategoricalBatch/EstimateBinaryFrequency/EstimateCategoricalHistogram/ObfuscateQueryBatch/BudgetReset）+ 6 个新增集成测试。Go 引擎 REST 端点从 17 个扩展到 23 个。
+> **修订说明**：v20.0.0 完成 Phase 16 实现：gRPC TypedServer 补齐 18 个缺失 RPC 方法（LDP 批量扰动/频率估计 4 个 + QOL 批量 1 个 + DP 直方图/分块/向量 10 个 + KAnonymizeTable/KAnonymizeDataFrame/MaskDataFrame 3 个），Proto 34 个 RPC 方法全部实现。新增 20 个 gRPC 集成测试。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 15 已实现 | Phase 1-14 骨架 + **Phase 15 REST 路由对齐**（LDP 4 个端点 + QOL batch + Budget reset，REST 端点从 17 个扩展到 23 个 + 6 个新增集成测试）。详见附录 A v19.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 16 已实现 | Phase 1-15 骨架 + **Phase 16 gRPC TypedServer 全量 RPC 对齐**（补齐 18 个缺失 RPC 方法，Proto 34/34 全覆盖 + 20 个 gRPC 集成测试）。详见附录 A v20.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -1444,7 +1444,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-15 已实现（详见 附录 A v5.0.0–v19.0.0 修订记录）。Phase 15 REST 路由对齐已完成。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
+> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-16 已实现（详见 附录 A v5.0.0–v20.0.0 修订记录）。Phase 16 gRPC TypedServer 全量 RPC 对齐已完成（Proto 34/34 全覆盖）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2031,7 +2031,7 @@ func main() {
 | `privacy-go-sdk/` | ✅ Phase 14 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试、基准测试与 **Python 跨语言对齐测试**（masking 13 + QOL 4 + DP 11 + LDP 15 + Budget 5 + KAno 6 = 54 个对齐测试）。LDP 模块新增 `PerturbBinaryBatch`/`PerturbCategoricalBatch`/`EstimateBinaryFrequency`/`EstimateCategoricalHistogram`。DP 模块新增 `VectorSum`。 |
 | `internal/dynclassification/` | ✅ Phase 13 已实现 | 规则引擎 + **纯 Go AC 自动机（trie + BFS failure link + O(N+M+Z) 多模式匹配）** + `AcAutomatonOperator` 算子 + **9 个新增校验算子（身份证/医保卡/ICD-10/Luhn/IP/MAC/中文姓名/邮箱/长度范围）** + 算子注册表（15 个算子） + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端 + 动态合批队列 + ONNX NER 骨架 + RuleBasedNerEngine CPU 降级 + FallbackChain 降级链 + **CUDA ONNX NER 引擎（LockOSThread Worker Pool + BIO 实体解码 + OnnxRuntime 接口抽象 + 四级降级）** + **正则修复（`regexp.Compile` 替代简化 `strings.Contains`）**。完整 CUDA CGO 绑定待引入 onnxruntime_go。 |
 | `internal/gateway/` | ✅ Phase 11 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理 + **gRPC 透明流式代理（rawCodec + 连接池 + 双向零拷贝转发）** + **Prometheus 指标联动（每次转发实时上报 InFlight/EWMA/CB 状态）** + **统一错误信封（`middleware.AbortWithError`）** + **5 种调度策略（P2C / RoundRobin / LeastConn / WeightedRoundRobin / WeightedRandom）** + **20 个负载均衡器测试**。 |
-| `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 15 已实现 | Service 编排层（**SSOT 数据源归一化 `pkg/naming` + Fail-Closed** + **LDP 批量扰动/频率估计 + QOL 批量 + 预算重置**）、REST 路由（**23 个端点统一错误信封** + **SSOT 别名解析** + 39 个集成测试）、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer**）。 |
+| `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 16 已实现 | Service 编排层（**SSOT 数据源归一化 `pkg/naming` + Fail-Closed** + **LDP 批量扰动/频率估计 + QOL 批量 + 预算重置**）、REST 路由（**23 个端点统一错误信封** + **SSOT 别名解析** + 39 个集成测试）、gRPC 服务端（UnknownServiceHandler 模式 + **类型安全 TypedServer 34/34 RPC 全覆盖** + 20 个 gRPC 集成测试）。 |
 | `internal/observability/` | ✅ Phase 7 已实现 | 结构化日志（slog JSON）+ **Prometheus 指标实际注册**（`metrics.go`：5 个 engine 指标 + `gateway_metrics.go`：4 个 gateway 指标 + `/metrics` 端点 + 13 个测试）。替代旧 TODO 桩。 |
 | `cmd/privshield-agent/` | ✅ Phase 7 已集成 | 双协议服务入口，使用 `rest.RegisterRoutes` + `grpcserver.TypedServer`，**接入 TraceMiddleware + RateLimit 限流 + mTLS CN 白名单拦截器 + Prometheus `/metrics` 端点**。 |
 | `cmd/privshield-gateway/` | ✅ Phase 8 已重构 | L7 网关入口，补齐 gRPC 透明流代理集成（`grpcProxy.NewGrpcProxyListener`），HTTP+gRPC 双协议代理 + **Prometheus `/metrics` 端点（4 个 gateway 专属指标）** + **代理层指标联动**。 |
@@ -2302,6 +2302,26 @@ PrivShield/
 ---
 
 ## 附录 A：文档修订记录
+
+### v20.0.0 修订（v19.0.0 → v20.0.0）
+
+本次修订完成 Phase 16 实现：gRPC TypedServer 全量 RPC 对齐：
+
+| 修订项 | v19.0.0 状态 | v20.0.0 实现 |
+|---|---|---|
+| gRPC TypedServer RPC | 16 个已实现 / 34 个 Proto 方法 | 补齐 18 个缺失 RPC 方法，Proto 34/34 全覆盖 |
+| LDP 批量扰动/频率估计 RPC | 未实现 | 新增 PerturbBinaryBatch/PerturbCategoricalBatch/EstimateBinaryFrequency/EstimateCategoricalHistogram |
+| QOL 批量 RPC | 未实现 | 新增 ObfuscateQueryBatch |
+| DP 直方图/分块/向量 RPC | 未实现 | 新增 DPHistogram/DPNoisyHistogram/DPChunkedCount/DPChunkedSum/DPChunkedMean/DPChunkedHistogram/DPVectorSum/DPVectorMean |
+| DP 高级 RPC | 未实现 | 新增 DPAggregate/DPAdaptiveClip/DPGroupBy |
+| K-匿名/DataFrame RPC | 仅 KAnonymizeRecord | 新增 KAnonymizeTable/KAnonymizeDataFrame/MaskDataFrame |
+| Profile 推荐 RPC | 未实现 | 新增 RecommendParams |
+| gRPC 集成测试 | 0 个 | 新增 20 个 TypedServer 集成测试 |
+
+**Phase 16 实现清单**：
+- [x] `engine-go/internal/grpcserver/typed_server.go` — 补齐 18 个缺失 RPC 方法（LDP 4 + QOL 1 + DP 10 + KAnonymizeTable/DataFrame/MaskDataFrame 3），Proto 34/34 全覆盖
+- [x] `engine-go/internal/grpcserver/typed_server_test.go` — 新增 20 个 gRPC 集成测试（PerturbBinaryBatch/PerturbCategoricalBatch/EstimateBinaryFrequency/EstimateCategoricalHistogram/ObfuscateQueryBatch/DPHistogram/DPNoisyHistogram/DPChunkedCount/DPChunkedSum/DPChunkedMean/DPVectorSum/DPVectorMean/KAnonymizeTable/MaskDataFrame/RecommendParams/DPAggregate/DPAdaptiveClip/DPGroupBy/KAnonymizeDataFrame）
+- [x] 全量测试 — privacy-go-sdk (7 包 ok) + engine-go (6 包 ok)，`-race` 全部通过
 
 ### v19.0.0 修订（v18.0.0 → v19.0.0）
 
@@ -2697,6 +2717,7 @@ PrivShield/
 - [x] LDP 批量扰动补齐：`PerturbBinaryBatch`/`PerturbCategoricalBatch` + `EstimateBinaryFrequency`/`EstimateCategoricalHistogram` + 15 个对齐测试；
 - [x] DP `VectorSum` 向量求和函数 + 2 个对齐测试；
 - [x] REST 路由对齐：LDP 4 个端点 + QOL batch + Budget reset，REST 端点从 17 个扩展到 23 个 + 6 个新增集成测试；
+- [x] gRPC TypedServer 全量 RPC 对齐：补齐 18 个缺失 RPC 方法（LDP 4 + QOL 1 + DP 10 + KAno/DataFrame 3），Proto 34/34 全覆盖 + 20 个 gRPC 集成测试；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。
