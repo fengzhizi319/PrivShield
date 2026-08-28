@@ -979,17 +979,17 @@ func TestProxyRestErrorPassthrough(t *testing.T) {
 
 	var body struct {
 		Detail string `json:"detail"`
-		Status int    `json:"status"`
+		Code   string `json:"code"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode error response failed: %v", err)
 	}
-	// detail 应保留上游错误体，status 字段回显透传状态码。
+	// detail 应保留上游错误体，code 字段回显统一错误码。
 	if !strings.Contains(body.Detail, "invalid standard") {
 		t.Fatalf("expected detail to preserve upstream error body, got %q", body.Detail)
 	}
-	if body.Status != http.StatusBadRequest {
-		t.Fatalf("expected status field 400, got %d", body.Status)
+	if body.Code != "INVALID_ARGUMENT" {
+		t.Fatalf("expected code field INVALID_ARGUMENT, got %q", body.Code)
 	}
 }
 

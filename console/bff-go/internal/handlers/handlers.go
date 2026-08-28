@@ -660,7 +660,9 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
-		middleware.AbortWithError(c, statusCode, middleware.ErrorCodeFromStatus(statusCode), err.Error(), nil)
+		// 将上游错误体作为 detail 字段保留在统一错误信封中，
+		// 前端依赖 {detail} 展示上游原始错误信息。
+		middleware.AbortWithError(c, statusCode, middleware.ErrorCodeFromStatus(statusCode), "upstream error", err.Error())
 		return
 	}
 

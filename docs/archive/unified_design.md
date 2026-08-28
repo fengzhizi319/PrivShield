@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v11.0.0  
+> **版本**：v12.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 架构图补齐服务间链路、新增快速参考卡与修订历史
+> **最后更新**：2026-08-28 — 修复测试构建失败 + Go workspace 测试命令修正
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -508,8 +508,8 @@ cd ../../web && pnpm build
 | 测试域 | 命令 | 覆盖范围 |
 |---|---|---|
 | Go 共享库 | `go test ./pkg/...` | 中间件 / 指标 / 命名 / 存储 / TLS / 校验 |
-| Go 微服务群 | `go test ./services/...` | service-hub / datasource-mgr / audit-log |
-| Go 控制台 | `go test ./console/...` | bff-go / app-lz/bff-go（含 E2E runner） |
+| Go 微服务群 | `go test ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...` | service-hub / datasource-mgr / audit-log |
+| Go 控制台 | `go test ./console/bff-go/... ./console/app-lz/bff-go/...` | bff-go / app-lz/bff-go（含 E2E runner） |
 | Python 引擎 | `pytest tests/ -q` | REST API / 隐私原语 / 分类漏斗 / 网关 / 安全 / 可观测性 |
 | 前端 | `pnpm build` + vitest | console/web + console/app-lz/web 类型检查与单元测试 |
 
@@ -837,7 +837,7 @@ bash ./scripts/dev/dev-app-lz.sh           # :8085
 
 ```bash
 # Go 全量测试（禁用缓存）
-go test -count=1 ./pkg/... ./services/... ./console/...
+go test -count=1 ./pkg/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/... ./console/app-lz/bff-go/...
 
 # Python 全量测试
 PYTHONPATH=. pytest tests/ -q
@@ -897,4 +897,5 @@ bash ./scripts/prod/prod_health_check.sh
 | v8.0 | 2026-08-28 | Python 指标 18→40 精确对齐、Go 指标 7 处修正、Helm 文件名修正 |
 | v9.0 | 2026-08-28 | 移除拓扑矩阵虚假链路、§1.2/§8.3 细节修正 |
 | v10.0 | 2026-08-28 | datasource-mgr 升级至 Level 5、新增 Python 引擎 50+ API 端点速查 |
-| **v11.0** | **2026-08-28** | **架构图补齐服务间链路、新增 §9 快速参考卡 + 附录 A 修订历史** |
+| v11.0 | 2026-08-28 | 架构图补齐服务间链路、新增 §9 快速参考卡 + 附录 A 修订历史 |
+| **v12.0** | **2026-08-28** | **修复测试构建失败 + Go workspace 测试命令修正** |

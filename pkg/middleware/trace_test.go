@@ -63,7 +63,9 @@ func TestTraceMiddleware_BackwardCompatWithRequestID(t *testing.T) {
 
 	var capturedTraceID, capturedRequestID string
 	router.GET("/test", func(c *gin.Context) {
-		capturedRequestID, _ = c.Get("request_id")
+		if v, ok := c.Get("request_id"); ok {
+			capturedRequestID, _ = v.(string)
+		}
 		capturedTraceID = GetTraceID(c)
 		c.String(http.StatusOK, "ok")
 	})
