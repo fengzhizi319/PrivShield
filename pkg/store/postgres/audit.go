@@ -130,6 +130,15 @@ func (s *AuditStore) initAuditSchema(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_datasource_id ON audit_logs (datasource_id);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_task_id ON audit_logs (task_id);
 		CREATE INDEX IF NOT EXISTS idx_snapshots_audit_log_id ON snapshots (audit_log_id);
+
+		ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS task_id TEXT DEFAULT '';
+		ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS api_code TEXT DEFAULT '';
+		ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS datasource_id TEXT DEFAULT '';
+		ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS prev_hash TEXT DEFAULT '';
+		ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS integrity_hash TEXT DEFAULT '';
+
+		ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS prev_hash TEXT DEFAULT '';
+		ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS integrity_hash TEXT DEFAULT '';
 	`)
 	return err
 }

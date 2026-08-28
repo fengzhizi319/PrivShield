@@ -398,5 +398,39 @@ func InitAuditTables(db *sql.DB) error {
 		return err
 	}
 
+	// Schema migration for existing snapshots tables
+	snapCursor, err := db.Query("PRAGMA table_info(snapshots)")
+	if err != nil {
+		return err
+	}
+	defer snapCursor.Close()
+
+	snapColumns := make(map[string]bool)
+	for snapCursor.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := snapCursor.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			continue
+		}
+		snapColumns[name] = true
+	}
+
+	if !snapColumns["prev_hash"] {
+		if _, err := db.Exec("ALTER TABLE snapshots ADD COLUMN prev_hash TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !snapColumns["integrity_hash"] {
+		if _, err := db.Exec("ALTER TABLE snapshots ADD COLUMN integrity_hash TEXT DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

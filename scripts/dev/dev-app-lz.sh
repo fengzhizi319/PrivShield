@@ -104,20 +104,22 @@ _wait_for_http() {
 
 _start_upstream_if_needed() {
     local name="$1" port="$2" health_url="$3"
-    # 已可达则跳过
+    # --force 模式下强制清理端口并重新启动最新版本
+    if [[ "$FORCE" == "true" ]]; then
+        if _is_port_in_use "$port"; then
+            echo "⚠️  端口 $port ($name) 被占用，--force 模式下自动重启..."
+            _kill_port "$port"
+        fi
+        return
+    fi
+    # 非 force 模式下：若已健康可达则跳过
     if curl -sf -o /dev/null "$health_url" 2>/dev/null; then
         echo "✅ $name 已在运行 (port $port)"
         return
     fi
-    # --force 模式下清理端口
     if _is_port_in_use "$port"; then
-        if [[ "$FORCE" == "true" ]]; then
-            echo "⚠️  端口 $port ($name) 被占用，--force 模式下自动清理..."
-            _kill_port "$port"
-        else
-            echo "❌ 端口 $port ($name) 被占用，使用 --force 自动清理"
-            return
-        fi
+        echo "❌ 端口 $port ($name) 被占用，使用 --force 自动清理并重启"
+        return
     fi
 }
 

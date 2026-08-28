@@ -228,20 +228,28 @@ func TestGRPCServer_TLS_mTLS(t *testing.T) {
 		ServerName:   "localhost",
 	})
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
-	if err != nil {
-		t.Fatalf("client dial failed: %v", err)
+	var conn *grpc.ClientConn
+	var hResp *pb.HealthResponse
+	for i := 0; i < 30; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err = grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+		if err != nil {
+			continue
+		}
+		client := pb.NewPrivacyServiceClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		hResp, err = client.Health(ctx, &pb.HealthRequest{})
+		cancel()
+		if err == nil {
+			break
+		}
+		_ = conn.Close()
 	}
-	defer conn.Close()
-
-	client := pb.NewPrivacyServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	hResp, err := client.Health(ctx, &pb.HealthRequest{})
 	if err != nil {
 		t.Fatalf("mTLS gRPC Health call failed: %v", err)
 	}
+	defer conn.Close()
+
 	if hResp.Status != "degraded" && hResp.Status != "ok" {
 		t.Errorf("unexpected status: %s", hResp.Status)
 	}
