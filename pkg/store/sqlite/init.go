@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
@@ -28,7 +29,12 @@ func Open(path string, logger *slog.Logger) (*sql.DB, error) {
 		logger = slog.Default()
 	}
 
-	db, err := sql.Open("sqlite", path)
+	dsn := path
+	if !strings.Contains(path, "?") {
+		dsn = path + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	}
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}

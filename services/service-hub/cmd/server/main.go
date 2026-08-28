@@ -162,8 +162,10 @@ func main() {
 	// =========================================================================
 	// 1) AgentClient: 负责与 PrivShield Python Core Sidecar（:8079）通信，调用分类分级与脱敏算子；
 	// 2) DatasourceClient: 负责与 datasource-mgr 模拟数据源服务（:8083/:50053）交互，采样抽取数据。
-	agentClient := agent.New(cfg)
+	agentClient := agent.New(cfg, mc)
 	dsClient := datasource.New(cfg)
+	// Start in a non-ready state until both HTTP and gRPC listeners are confirmed launched.
+	mc.SetReady(false)
 
 	// =========================================================================
 	// 6. HTTP REST Server Setup / HTTP REST 路由与服务器构建
@@ -386,6 +388,9 @@ func main() {
 			}
 		}
 	}()
+
+	// Both REST and gRPC listeners have been launched successfully; mark service-hub ready.
+	mc.SetReady(true)
 
 	// =========================================================================
 	// 10. Graceful Shutdown Workflow / 优雅停机收敛流程

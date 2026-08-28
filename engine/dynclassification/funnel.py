@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 from typing import Any, Tuple
 
 from ..observability.logging_config import get_logger
+from ..observability.metrics import CLASSIFICATION_TOTAL
 from .engine import ConfigurableRuleEngine
 from .llm_adapter import LlmAdapter
 from .models import (
@@ -585,6 +586,11 @@ class ClassificationFunnel:
             has_conflict=has_conflict,
             sanitized_value=sanitized_value,
         )
+        if funnel_result.final_level:
+            CLASSIFICATION_TOTAL.labels(
+                final_level=funnel_result.final_level,
+                layer=funnel_result.engine_layer or "unknown",
+            ).inc()
         return funnel_result, suppressed_tags
 
     def _is_image_field_or_value(self, field_name: str, value: Any) -> bool:

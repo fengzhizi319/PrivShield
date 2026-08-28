@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/store"
 	"github.com/fengzhizi319/PrivShield/pkg/store/memory"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/agent"
@@ -452,7 +453,8 @@ func setupTestGRPCServer(t *testing.T, agentHandler http.HandlerFunc) (*GRPCServ
 
 	t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
 	cfg := config.Load()
-	ag := agent.New(cfg)
+	mc := metrics.NewCollector("service-hub-grpc-test")
+	ag := agent.New(cfg, mc)
 	ds := datasource.New(cfg)
 	taskStore := memory.NewTaskStore()
 	logger := slog.Default()
@@ -771,7 +773,7 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 
 		t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
 		cfg := config.Load()
-		ag := agent.New(cfg)
+		ag := agent.New(cfg, metrics.NewCollector("service-hub-grpc-test"))
 		ds := datasource.New(cfg)
 		taskStore := memory.NewTaskStore()
 		srv := New(ag, ds, cfg, taskStore, slog.Default())
@@ -810,7 +812,7 @@ func TestGRPCServer_ProcessTask_FailureBranches(t *testing.T) {
 
 		t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
 		cfg := config.Load()
-		ag := agent.New(cfg)
+		ag := agent.New(cfg, metrics.NewCollector("service-hub-grpc-test"))
 		ds := datasource.New(cfg)
 		taskStore := memory.NewTaskStore()
 		srv := New(ag, ds, cfg, taskStore, slog.Default())

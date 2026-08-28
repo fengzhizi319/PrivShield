@@ -36,6 +36,7 @@ logger = get_logger(__name__)
 
 # Prometheus metrics for monitoring engine behavior in production:
 from ..observability.metrics import (
+    CLASSIFICATION_RULE_HITS_TOTAL,
     DYNCLASSIFICATION_OPERATOR_CALLS_TOTAL,
     DYNCLASSIFICATION_OPERATOR_ERRORS_TOTAL,
     DYNCLASSIFICATION_OVERRIDE_SUPPRESSED_TOTAL,
@@ -342,6 +343,7 @@ class ConfigurableRuleEngine:
             domain=self.domain or "default",
             standard=self.standard_id or "default",
         ).inc()
+        CLASSIFICATION_RULE_HITS_TOTAL.labels(rule_id=rule.id).inc()
 
         level = dynamic_level if dynamic_level is not None else rule.level
         category = dynamic_category if dynamic_category is not None else rule.category

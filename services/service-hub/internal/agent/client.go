@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/services/service-hub/internal/config"
 )
 
@@ -25,17 +26,24 @@ type Client struct {
 	*pkgagent.Client
 }
 
-// New creates a new agent client from the given config.
+// New creates a new agent client from the given config and metrics collector.
 // New 函数根据 service-hub 的运行配置构造并初始化 Agent 客户端实例。
 // 执行步骤：
 // 1. 从 Config 提取所有 Agent URL 列表（支持单节点与多节点配置）及 APIKey；
 // 2. 初始化底层 pkgagent.Client 实例并绑定熔断重试机制；
-// 3. 返回封装后的 *Client 实例。
-func New(cfg *config.Config) *Client {
-	shared := pkgagent.New(pkgagent.Config{
+// 3. 可选注册熔断器状态观测器，将节点熔断状态上报到 Prometheus；
+// 4. 返回封装后的 *Client 实例。
+func New(cfg *config.Config, mc *metrics.Collector) *Client {
+	pkgCfg := pkgagent.Config{
 		BaseURLs: cfg.AgentBaseURLs(),
 		APIKey:   cfg.AgentAPIKey,
-	})
+	}
+	if mc != nil {
+		pkgCfg.StateObserver = func(node, state string) {
+			mc.SetCircuitBreakerState(node, state)
+		}
+	}
+	shared := pkgagent.New(pkgCfg)
 	return &Client{Client: shared}
 }
 

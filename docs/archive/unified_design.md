@@ -15,12 +15,12 @@
 | 统一错误信封 | ✅ Phase 1 完成 | Python `engine/observability/envelope.py` + Go `pkg/middleware/envelope.go`；FastAPI/Starlette 全局捕获；MaxBodySize 走信封 | 无 |
 | 全链路分布式追踪 | ✅ Phase 1+2 完成 | HTTP/gRPC 入口注入 `X-Request-ID`/`X-Trace-ID`；engine gRPC 提取 metadata；service-hub task 持久化 TraceID；BFF-Go/app-lz/bff-go REST 已向上游透传双头并注入 API Key；service-hub→datasource-mgr HTTP/gRPC 已透传双头并注入 API Key | 统一引入 OpenTelemetry SDK，实现跨服务 Span 聚合（长期演进） |
 | SSOT 数据源命名 | ✅ Phase 1 完成 | `pkg/naming/` SSOT；Go/Python/TS 常量对齐；`make lint-naming` | 无 |
-| SQLite → PostgreSQL 迁移 | 🟡 Phase 1 工具可用，验真待增强 | `pkg/store/cmd/migrate/main.go` + `scripts/prod/migrate_sqlite_to_postgres.sh`；哈希链迁移后校验 | 增加 snapshot 密文 SM4-GCM 验真；只读锁定/幂等重跑优化 |
+| SQLite → PostgreSQL 迁移 | 🟡 Phase 1+2 部分完成 | `pkg/store/cmd/migrate/main.go` + `scripts/prod/migrate_sqlite_to_postgres.sh`；哈希链迁移后校验；snapshot 密文 SM4-GCM 验真已支持 skip/after-migrate/only 模式 | 只读锁定/幂等重跑优化 |
 | mTLS CN 白名单 | ✅ Phase 1 完成 | `pkg/tlsutil/whitelist.go` + `grpc_interceptor.go` + `NewWhitelistInterceptor` 辅助函数；热重载（mtime 轮询）；Python 端消费；Go service-hub/datasource-mgr/audit-log/bff-go gRPC server 已注册拦截器；统一读取 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | 无 |
 | 前端双控制台 | ✅ Phase 1 完成 | `console/web` 与 `console/app-lz/web` 统一错误解析、状态指示器、动态 API 渲染 | 无 |
-| 可观测性指标 | 🟡 定义完成，部分未埋点 | Python/Go metric 定义；中间件计数；部分 primitive 埋点 | 补齐 `privacy_classification_*`、`privacy_*_duration_seconds` 埋点；Go `service_hub_ready` / `circuit_breaker_state` 更新 |
+| 可观测性指标 | ✅ Phase 1+2 完成 | Python `privacy_*_duration_seconds` 已覆盖 classification/masking/kano/dp/qol；`privacy_classification_total/rule_hits/composite_hits/jobs_*` 已补齐；Go `service_hub_ready` / `circuit_breaker_state` 已更新 | 无 |
 | BFF 微服务直连 | ✅ Phase 1 完成 | `console/bff-go/internal/microservices` 透明 HTTP 代理；新增 `/api/hub/*`、`/api/datasource/*`、`/api/audit/*` 路由；统一注入 `X-Request-ID` / `X-Trace-ID` / `Authorization`；默认地址分别为 `http://127.0.0.1:8082/8083/8084`，可通过 `BFF_HUB_URL` / `BFF_DATASOURCE_URL` / `BFF_AUDIT_URL` 覆盖 | 无 |
-| 零信任 outbound 认证 | 📋 Phase 2 | service-hub→datasource-mgr HTTP 未发 API Key；app-lz outbound 未透传 trace/auth | 统一 outbound API Key + trace header 注入 |
+| 零信任 outbound 认证 | ✅ Phase 2 完成 | service-hub→datasource-mgr HTTP/gRPC outbound 已注入 API Key + `X-Request-ID`/`X-Trace-ID`；app-lz/bff-go `ClientPool` 全出站请求已注入 per-service API Key + 双 trace 头 | 无 |
 
 ## 1. 统一设计顶层再评估与技术代差审计
 
@@ -968,8 +968,8 @@ bash ./scripts/prod/prod_health_check.sh
 | ✅ | P0 | Go gRPC 服务端注册 mTLS 白名单拦截器 | `services/service-hub/cmd/server/main.go`, `services/datasource-mgr/cmd/server/main.go`, `services/audit-log/cmd/server/main.go`, `console/bff-go/internal/grpcserver/server.go`, `pkg/tlsutil/grpc_interceptor.go` | 在 gRPC server option 中注册 `UnaryServerInterceptor`/`StreamServerInterceptor`；统一读取 `PRIVACY_AUTH_MTLS_WHITELIST_FILE`；未授权 CN 返回 `PermissionDenied` | 拦截器单元测试通过；`go test ./pkg/tlsutil/... ./services/... ./console/...` 全绿 |
 | ✅ | P0 | console/bff-go 直连 Go 微服务 | `console/bff-go/internal/microservices/client.go` (new), `console/bff-go/internal/handlers/handlers.go`, `console/bff-go/internal/handlers/microservice_proxy_test.go`, `console/bff-go/internal/config/config.go` | 新增 service-hub/datasource-mgr/audit-log HTTP 透明代理；新增 `/api/hub/*`、`/api/datasource/*`、`/api/audit/*` 路由；统一注入 `X-Request-ID` / `X-Trace-ID` / `Authorization`；默认地址 `127.0.0.1:8082/8083/8084`，环境变量 `BFF_HUB_URL` / `BFF_DATASOURCE_URL` / `BFF_AUDIT_URL` | `go test ./console/bff-go/...` 全绿；集成测试验证路由/请求体/query/请求头透传 |
 | ✅ | P1 | service-hub / app-lz outbound 统一认证与追踪 | `services/service-hub/internal/datasource/client.go`, `console/app-lz/bff-go/internal/clients/clients.go` | HTTP outbound 注入 API Key、`X-Request-ID`、`X-Trace-ID` | 单元测试验证请求头 |
-| P1 | 迁移工具 SM4-GCM snapshot 密文验真 | `pkg/store/cmd/migrate/main.go` | 迁移后读取 snapshots 密文，使用 `AUDIT_LOG_ENCRYPTION_KEY`/`PRIVACY_AUDIT_KEY` 解密并校验 tag；支持跳过/仅校验模式 | 迁移测试包含密文验真用例 |
-| P1 | Prometheus 指标全埋点 | `engine/dynclassification/service.py`, `engine/gateway/balancer.py`, `engine/privacy/*.py`, `pkg/metrics/metrics.go`, `services/service-hub/cmd/server/main.go` | Python 补齐 `privacy_classification_*` 与 duration 埋点；Go 在就绪探针更新 `service_hub_ready`，在熔断器状态变更更新 `circuit_breaker_state` | 指标在 `/metrics` 中可见；对应单元测试通过 |
+| ✅ | P1 | 迁移工具 SM4-GCM snapshot 密文验真 | `pkg/store/cmd/migrate/main.go`, `pkg/store/cmd/migrate/main_test.go` | 迁移后读取 snapshots 密文，使用 `AUDIT_LOG_ENCRYPTION_KEY`/`PRIVACY_AUDIT_KEY` 解密并校验 tag；支持 skip/after-migrate/only 模式 | 迁移测试包含密文验真用例 |
+| ✅ | P1 | Prometheus 指标全埋点 | `engine/observability/metrics.py`, `engine/dynclassification/{service,funnel,engine}.py`, `engine/privacy/*.py`, `pkg/agent/client.go`, `pkg/metrics/metrics.go`, `services/service-hub/cmd/server/main.go`, `services/service-hub/internal/handlers/handlers.go` | Python 补齐 `privacy_classification_*`/`privacy_*_duration_seconds` 埋点；Go 在就绪探针更新 `service_hub_ready`，熔断器状态变更更新 `circuit_breaker_state` | 指标在 `/metrics` 中可见；Go/Python 单元测试通过 |
 | P2 | 文件处理补全 Excel | `engine/routers/file.py`, `engine/privacy/file_processor.py` | 增加 `pandas.read_excel` 分支与字段识别 | 新增 Excel 处理测试 |
 
 ### 10.3 推荐迭代顺序
@@ -1007,3 +1007,4 @@ bash ./scripts/prod/prod_health_check.sh
 | **v15.0.0** | **2026-08-28** | **升级为 Target Blueprint + Phase 1 Implemented + Phase 2 Plan；新增 §0 设计落地状态总览；重写 §1.2 短板评估；§3 各专项补充实现状态与 Phase 2 待办；新增 §10 Phase 2 改造任务清单。** |
 | **v15.1.0** | **2026-08-28** | **console/bff-go 直连 Go 微服务落地：`/api/hub/*`、`/api/datasource/*`、`/api/audit/*` 透明代理；统一注入 trace/auth 头；§0 状态表与 §10 任务清单标记为 ✅；§2.1 拓扑矩阵注释更新。** |
 | **v15.2.0** | **2026-08-28** | **Phase 2 P1 完成：service-hub→datasource-mgr HTTP/gRPC 出站统一注入 API Key + `X-Request-ID`/`X-Trace-ID`；app-lz/bff-go `ClientPool` 全出站请求统一注入 per-service API Key + 双 trace 头；§0 状态表与 §10 任务清单更新；新增 `clients_test.go` 出站头注入单元测试。** |
+| **v15.3.0** | **2026-08-28** | **Phase 2 P1 完成：迁移工具新增 `-snapshot-verify-mode` 与 SM4-GCM snapshot 密文验真；Python 补齐 `privacy_classification_*`/`privacy_*_duration_seconds` 埋点；Go `service_hub_ready` / `circuit_breaker_state` 已更新；§0 状态表与 §10 任务清单更新。** |

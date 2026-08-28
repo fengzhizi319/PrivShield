@@ -18,6 +18,7 @@ package clients
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,9 +56,10 @@ func NewClientPool(cfg *config.Config) *ClientPool {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        100,              // 全局最大空闲连接数
-				MaxIdleConnsPerHost: 25,               // 每个上游服务最大空闲连接数
-				IdleConnTimeout:     90 * time.Second, // 空闲连接回收时间
+				MaxIdleConns:        100,                                   // 全局最大空闲连接数
+				MaxIdleConnsPerHost: 25,                                    // 每个上游服务最大空闲连接数
+				IdleConnTimeout:     90 * time.Second,                      // 空闲连接回收时间
+				TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, // 兼容 HTTPS/mTLS 自签名证书
 			},
 		},
 	}
@@ -1265,13 +1267,12 @@ func (c *ClientPool) ProcessMedicalRecords(ctx context.Context, records []map[st
 	return c.ProcessAgentRecords(ctx, records)
 }
 
-// ProcessAgentRecords 将一批记录发送到 engine 的通用数据处理流水线。
+// ProcessAgentRecords 将一批记录发送到 engine 的数据处理流水线。
 //
-// canonical 调用路径：POST {AgentURL}/v1/agent/process
-// （当返回 404 时自动回退至兼容别名 /v1/medical/process）
+// 调用路径：POST {AgentURL}/v1/medical/process
 // 执行能力：3-Layer 分类分级 + L4/L5 高敏文本剥离 + PII 强掩码 + 结构化合规治理。
 func (c *ClientPool) ProcessAgentRecords(ctx context.Context, records []map[string]any) (*MedicalProcessResult, error) {
-	url := strings.TrimRight(c.cfg.AgentURL, "/") + "/v1/agent/process"
+	url := strings.TrimRight(c.cfg.AgentURL, "/") + "/v1/medical/process"
 	data, _ := json.Marshal(map[string]any{
 		"records": records,
 	})
@@ -1289,32 +1290,8 @@ func (c *ClientPool) ProcessAgentRecords(ctx context.Context, records []map[stri
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		// Fallback to legacy /v1/medical/process
-		fallbackURL := strings.TrimRight(c.cfg.AgentURL, "/") + "/v1/medical/process"
-		fReq, fErr := http.NewRequestWithContext(ctx, http.MethodPost, fallbackURL, bytes.NewReader(data))
-		c.setHeaders(fReq, "agent", "")
-		if fErr != nil {
-			return nil, fErr
-		}
-		fReq.Header.Set("Content-Type", "application/json")
-		fResp, fErr := c.httpClient.Do(fReq)
-		if fErr != nil {
-			return nil, fErr
-		}
-		defer fResp.Body.Close()
-		if fResp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("engine agent/medical pipeline returned status %d", fResp.StatusCode)
-		}
-		var fResult MedicalProcessResult
-		if err := json.NewDecoder(fResp.Body).Decode(&fResult); err != nil {
-			return nil, err
-		}
-		return &fResult, nil
-	}
-
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("engine agent pipeline returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("engine medical pipeline returned status %d", resp.StatusCode)
 	}
 
 	var result MedicalProcessResult

@@ -43,7 +43,7 @@ import numpy as np  # NumPy 数组支持，用于 ndarray 格式输入的适配�
 
 # 从可观测性子包导入结构化日志工厂和 Prometheus Counter 指标实例
 from ..observability.logging_config import get_logger
-from ..observability.metrics import MASKING_OPERATIONS_TOTAL
+from ..observability.metrics import MASKING_DURATION, MASKING_OPERATIONS_TOTAL, observe_duration
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -506,42 +506,43 @@ def mask_value(
     # Step 2: Prometheus 指标累加（Counter +1，标签为 operation="mask_value"）
     MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.MASK_VALUE.value).inc()
 
-    # Step 3: 推断字段敏感类型（返回 FieldType 枚举值字符串）
-    ft = guess_field_type(field_name)
+    with observe_duration(MASKING_DURATION, operation=MaskingOperation.MASK_VALUE.value):
+        # Step 3: 推断字段敏感类型（返回 FieldType 枚举值字符串）
+        ft = guess_field_type(field_name)
 
-    # Step 4: 根据字段类型路由到对应的脱敏函数（策略模式）
-    if ft == FieldType.MOBILE:          # 手机号 → 前3后4
-        masked_val = mask_mobile(value)
-    elif ft == FieldType.ID_CARD:       # 身份证 → 前6后4
-        masked_val = mask_id_card(value)
-    elif ft == FieldType.NAME:          # 姓名 → 首尾保留
-        masked_val = mask_name(value)
-    elif ft == FieldType.BANK_CARD:     # 银行卡 → 前4后4
-        masked_val = mask_bank_card(value)
-    elif ft == FieldType.EMAIL:         # 邮箱 → 用户名首尾+域名保留
-        masked_val = mask_email(value)
-    elif ft == FieldType.ADDRESS:       # 地址 → 前6字符保留
-        masked_val = mask_address(value)
-    elif ft == FieldType.MEDICAL:       # 医疗诊断 → 首字保留+其余全星化
-        masked_val = mask_medical(value)
-    else:                               # 默认 → 前3后3通用策略
-        masked_val = mask_default(value)
+        # Step 4: 根据字段类型路由到对应的脱敏函数（策略模式）
+        if ft == FieldType.MOBILE:          # 手机号 → 前3后4
+            masked_val = mask_mobile(value)
+        elif ft == FieldType.ID_CARD:       # 身份证 → 前6后4
+            masked_val = mask_id_card(value)
+        elif ft == FieldType.NAME:          # 姓名 → 首尾保留
+            masked_val = mask_name(value)
+        elif ft == FieldType.BANK_CARD:     # 银行卡 → 前4后4
+            masked_val = mask_bank_card(value)
+        elif ft == FieldType.EMAIL:         # 邮箱 → 用户名首尾+域名保留
+            masked_val = mask_email(value)
+        elif ft == FieldType.ADDRESS:       # 地址 → 前6字符保留
+            masked_val = mask_address(value)
+        elif ft == FieldType.MEDICAL:       # 医疗诊断 → 首字保留+其余全星化
+            masked_val = mask_medical(value)
+        else:                               # 默认 → 前3后3通用策略
+            masked_val = mask_default(value)
 
-    # Step 5: 结构化日志（debug 级别，生产环境默认不输出，避免日志风暴）
-    logger.debug(
-        "mask_value_completed",
-        extra={"field_name": field_name, "field_type": ft, "context": context},
-    )
-
-    # Step 6: 根据 return_details 决定返回纯字符串还是结构化包装
-    if return_details:
-        return MaskingResult(
-            value=masked_val,  # 脱敏后的实际值
-            operation=f"{MaskingOperation.MASK_VALUE.value}:{ft}",  # 操作标识含字段类型（如 "mask_value:mobile"）
-            masked_fields=[field_name],  # 被脱敏的字段名列表
-            total_masked=1,              # 单值脱敏计数为 1
+        # Step 5: 结构化日志（debug 级别，生产环境默认不输出，避免日志风暴）
+        logger.debug(
+            "mask_value_completed",
+            extra={"field_name": field_name, "field_type": ft, "context": context},
         )
-    return masked_val  # 默认返回纯字符串，保持最简调用体验
+
+        # Step 6: 根据 return_details 决定返回纯字符串还是结构化包装
+        if return_details:
+            return MaskingResult(
+                value=masked_val,  # 脱敏后的实际值
+                operation=f"{MaskingOperation.MASK_VALUE.value}:{ft}",  # 操作标识含字段类型（如 "mask_value:mobile"）
+                masked_fields=[field_name],  # 被脱敏的字段名列表
+                total_masked=1,              # 单值脱敏计数为 1
+            )
+        return masked_val  # 默认返回纯字符串，保持最简调用体验
 
 
 def mask_value_batch(
@@ -587,28 +588,29 @@ def mask_value_batch(
     # Prometheus 指标累加（整批只计 1 次，而非每个元素计 1 次）
     MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.MASK_VALUE_BATCH.value).inc()
 
-    # 列表推导式 + zip 配对：逐元素调用 mask_value 完成脱敏
-    # zip(field_names, values) 将两个列表按位置配对为 (field_name, value) 元组
-    masked_list = cast(
-        "list[str]",
-        [mask_value(fn, val, context, return_details=False) for fn, val in zip(field_names, values)],
-    )
-
-    # 结构化日志（info 级别，记录批量操作的字段数和上下文）
-    logger.info(
-        "mask_value_batch_completed",
-        extra={"num_fields": len(field_names), "context": context},
-    )
-
-    # 根据 return_details 决定返回纯列表还是结构化包装
-    if return_details:
-        return MaskingResult(
-            value=masked_list,  # 脱敏后的字符串列表
-            operation=MaskingOperation.MASK_VALUE_BATCH.value,  # 操作标识
-            masked_fields=list(set(field_names)),  # 去重后的字段名集合（set 去重 → list 序列化）
-            total_masked=len(masked_list),  # 脱敏总数 = 列表长度
+    with observe_duration(MASKING_DURATION, operation=MaskingOperation.MASK_VALUE_BATCH.value):
+        # 列表推导式 + zip 配对：逐元素调用 mask_value 完成脱敏
+        # zip(field_names, values) 将两个列表按位置配对为 (field_name, value) 元组
+        masked_list = cast(
+            "list[str]",
+            [mask_value(fn, val, context, return_details=False) for fn, val in zip(field_names, values)],
         )
-    return masked_list  # 默认返回纯字符串列表
+
+        # 结构化日志（info 级别，记录批量操作的字段数和上下文）
+        logger.info(
+            "mask_value_batch_completed",
+            extra={"num_fields": len(field_names), "context": context},
+        )
+
+        # 根据 return_details 决定返回纯列表还是结构化包装
+        if return_details:
+            return MaskingResult(
+                value=masked_list,  # 脱敏后的字符串列表
+                operation=MaskingOperation.MASK_VALUE_BATCH.value,  # 操作标识
+                masked_fields=list(set(field_names)),  # 去重后的字段名集合（set 去重 → list 序列化）
+                total_masked=len(masked_list),  # 脱敏总数 = 列表长度
+            )
+        return masked_list  # 默认返回纯字符串列表
 
 
 # === 内部格式适配器区 / Internal Format Adapters ===
@@ -945,6 +947,19 @@ def mask_dataframe(
     context: str = "",
     return_details: bool = False,
 ) -> Any | MaskingResult:
+    """对 DataFrame 中的指定列进行脱敏 / Mask Specified Columns in DataFrame."""
+    # Prometheus 指标埋点：每次调用 mask_dataframe 时累加计数器（按操作类型分标签）
+    MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.MASK_DATAFRAME.value).inc()
+    with observe_duration(MASKING_DURATION, operation=MaskingOperation.MASK_DATAFRAME.value):
+        return _mask_dataframe_core(df, columns, context, return_details)
+
+
+def _mask_dataframe_core(
+    df: Any,
+    columns: list[str] | None = None,
+    context: str = "",
+    return_details: bool = False,
+) -> Any | MaskingResult:
     """对 DataFrame 中的指定列进行脱敏 / Mask Specified Columns in DataFrame.
 
     支持多种输入数据格式（参考 DP 模块 `extract_values` 设计）：
@@ -985,8 +1000,6 @@ def mask_dataframe(
     Returns:
         脱敏后的 DataFrame 或 MaskingResult / Masked DataFrame or MaskingResult.
     """
-    # Prometheus 指标埋点：每次调用 mask_dataframe 时累加计数器（按操作类型分标签）
-    MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.MASK_DATAFRAME.value).inc()
     target_cols = columns or []  # 初始化目标列列表（未指定时为空，后续根据数据类型自动推断）
 
     # Step 1: pandas DataFrame 快速路径 — 列级向量化 apply 脱敏
@@ -1160,21 +1173,22 @@ def hash_value(value: str, salt: str, return_details: bool = False) -> str | Mas
     _validate_salt(salt)  # 校验盐值参数：必须为非空字符串，否则抛出 ValueError
     # Prometheus 指标埋点：累加 hash_value 操作计数器
     MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.HASH_VALUE.value).inc()
-    # 构建 HMAC-SHA256：salt 为密钥，value 为消息，计算消息认证码摘要
-    mac = hmac.new(salt.encode(), value.encode(), hashlib.sha256).digest()
-    # base64 编码摘要并截取前 16 字符（平衡可读性与碰撞概率）
-    hashed = base64.b64encode(mac).decode()[:16]
-    # 结构化调试日志：记录原始值长度（不记录原始值本身，避免敏感信息泄漏）
-    logger.debug("hash_value_completed", extra={"value_length": len(value)})
-    if return_details:
-        # 返回包装结果：包含哈希值 + 操作元数据
-        return MaskingResult(
-            value=hashed,
-            operation=MaskingOperation.HASH_VALUE.value,
-            masked_fields=[],
-            total_masked=1,
-        )
-    return hashed  # 直接返回 16 位 base64 哈希字符串
+    with observe_duration(MASKING_DURATION, operation=MaskingOperation.HASH_VALUE.value):
+        # 构建 HMAC-SHA256：salt 为密钥，value 为消息，计算消息认证码摘要
+        mac = hmac.new(salt.encode(), value.encode(), hashlib.sha256).digest()
+        # base64 编码摘要并截取前 16 字符（平衡可读性与碰撞概率）
+        hashed = base64.b64encode(mac).decode()[:16]
+        # 结构化调试日志：记录原始值长度（不记录原始值本身，避免敏感信息泄漏）
+        logger.debug("hash_value_completed", extra={"value_length": len(value)})
+        if return_details:
+            # 返回包装结果：包含哈希值 + 操作元数据
+            return MaskingResult(
+                value=hashed,
+                operation=MaskingOperation.HASH_VALUE.value,
+                masked_fields=[],
+                total_masked=1,
+            )
+        return hashed  # 直接返回 16 位 base64 哈希字符串
 
 
 def truncate(value: str, keep_prefix: int, return_details: bool = False) -> str | MaskingResult:
@@ -1204,11 +1218,12 @@ def truncate(value: str, keep_prefix: int, return_details: bool = False) -> str 
         raise ValueError(f"keep_prefix must be non-negative, got {keep_prefix}")
     # Prometheus 指标埋点：累加 truncate 操作计数器
     MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.TRUNCATE.value).inc()
-    res = value if len(value) <= keep_prefix else value[:keep_prefix] + "***"
-    if return_details:
-        # 返回包装结果：包含截断后字符串 + 操作元数据
-        return MaskingResult(value=res, operation=MaskingOperation.TRUNCATE.value, masked_fields=[], total_masked=1)
-    return res  # 直接返回截断后的字符串
+    with observe_duration(MASKING_DURATION, operation=MaskingOperation.TRUNCATE.value):
+        res = value if len(value) <= keep_prefix else value[:keep_prefix] + "***"
+        if return_details:
+            # 返回包装结果：包含截断后字符串 + 操作元数据
+            return MaskingResult(value=res, operation=MaskingOperation.TRUNCATE.value, masked_fields=[], total_masked=1)
+        return res  # 直接返回截断后的字符串
 
 
 def mask_record(
@@ -1264,27 +1279,28 @@ def mask_record(
         raise ValueError("record must not be empty")
     # Prometheus 指标埋点：累加 mask_record 操作计数器
     MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.MASK_RECORD.value).inc()
-    # 字典推导式：对每个字符串值调用 mask_value 脱敏，非字符串值保留原样
-    masked_rec = {
-        k: mask_value(k, v, context) if isinstance(v, str) else v
-        for k, v in record.items()
-    }
-    # 收集被脱敏的字段名列表（仅字符串类型的字段）
-    masked_fields = [k for k, v in record.items() if isinstance(v, str)]
-    # 结构化日志：记录脱敏字段数和上下文信息
-    logger.info(
-        "mask_record_completed",
-        extra={"num_fields": len(masked_fields), "context": context},
-    )
-    if return_details:
-        # 返回包装结果：包含脱敏后记录 + 元数据
-        return MaskingResult(
-            value=masked_rec,                                  # 脱敏后的记录字典
-            operation=MaskingOperation.MASK_RECORD.value,      # 操作标识
-            masked_fields=masked_fields,                       # 被脱敏的字段名列表
-            total_masked=len(masked_fields),                   # 脱敏字段总数
+    with observe_duration(MASKING_DURATION, operation=MaskingOperation.MASK_RECORD.value):
+        # 字典推导式：对每个字符串值调用 mask_value 脱敏，非字符串值保留原样
+        masked_rec = {
+            k: mask_value(k, v, context) if isinstance(v, str) else v
+            for k, v in record.items()
+        }
+        # 收集被脱敏的字段名列表（仅字符串类型的字段）
+        masked_fields = [k for k, v in record.items() if isinstance(v, str)]
+        # 结构化日志：记录脱敏字段数和上下文信息
+        logger.info(
+            "mask_record_completed",
+            extra={"num_fields": len(masked_fields), "context": context},
         )
-    return masked_rec  # 直接返回脱敏后的记录字典
+        if return_details:
+            # 返回包装结果：包含脱敏后记录 + 元数据
+            return MaskingResult(
+                value=masked_rec,                                  # 脱敏后的记录字典
+                operation=MaskingOperation.MASK_RECORD.value,      # 操作标识
+                masked_fields=masked_fields,                       # 被脱敏的字段名列表
+                total_masked=len(masked_fields),                   # 脱敏字段总数
+            )
+        return masked_rec  # 直接返回脱敏后的记录字典
 
 
 def chunked_mask_records(
@@ -1340,39 +1356,40 @@ def chunked_mask_records(
     for chunk_idx, chunk in enumerate(chunks):  # 惰性迭代每个 chunk（生成器模式，不一次性加载全部数据）
         # Prometheus 指标埋点：每个 chunk 累加一次计数器
         MASKING_OPERATIONS_TOTAL.labels(operation=MaskingOperation.CHUNKED_MASK_RECORDS.value).inc()
-        # 通过扩展格式适配器将 chunk 转换为记录列表（支持多种数据格式）
-        records = _convert_to_records(chunk)
-        masked_chunk: list[dict[str, Any]] = []  # 当前 chunk 脱敏后的记录列表
-        all_masked_fields: list[str] = []  # 累计所有被脱敏的字段名
-        total_masked = 0  # 累计脱敏字段总次数（字段数 × 记录数）
-        for record in records:  # 遍历当前 chunk 中的每条记录
-            # 确定目标列：指定了 columns 则用之，否则自动选择所有字符串字段
-            target_cols = columns or [k for k, v in record.items() if isinstance(v, str)]
-            masked_rec = dict(record)  # 浅拷贝记录（避免修改原始数据）
-            chunk_fields: list[str] = []  # 当前记录被脱敏的字段名
-            for col in target_cols:  # 遍历每个目标字段
-                val = masked_rec.get(col)  # 获取字段值
-                if isinstance(val, str):  # 仅对字符串值执行脱敏
-                    masked_rec[col] = mask_value(col, val, context)  # 根据字段名推断类型并脱敏
-                    chunk_fields.append(col)  # 记录被脱敏的字段名
-            masked_chunk.append(masked_rec)  # 收集脱敏后的记录
-            all_masked_fields.extend(chunk_fields)  # 累计字段名
-            total_masked += len(chunk_fields)  # 累计脱敏字段次数
-        # 结构化调试日志：记录当前 chunk 处理完成的统计信息
-        logger.debug(
-            "chunked_mask_records_chunk_completed",
-            extra={"chunk_idx": chunk_idx, "num_records": len(masked_chunk), "total_masked": total_masked},
-        )
-        if return_details:
-            # yield 包装结果：包含脱敏后记录列表 + 元数据（set 去重字段名）
-            yield MaskingResult(
-                value=masked_chunk,                                        # 当前 chunk 脱敏后的记录列表
-                operation=MaskingOperation.CHUNKED_MASK_RECORDS.value,     # 操作标识
-                masked_fields=list(set(all_masked_fields)),                # 去重后的被脱敏字段名
-                total_masked=total_masked,                                 # 脱敏字段总次数
+        with observe_duration(MASKING_DURATION, operation=MaskingOperation.CHUNKED_MASK_RECORDS.value):
+            # 通过扩展格式适配器将 chunk 转换为记录列表（支持多种数据格式）
+            records = _convert_to_records(chunk)
+            masked_chunk: list[dict[str, Any]] = []  # 当前 chunk 脱敏后的记录列表
+            all_masked_fields: list[str] = []  # 累计所有被脱敏的字段名
+            total_masked = 0  # 累计脱敏字段总次数（字段数 × 记录数）
+            for record in records:  # 遍历当前 chunk 中的每条记录
+                # 确定目标列：指定了 columns 则用之，否则自动选择所有字符串字段
+                target_cols = columns or [k for k, v in record.items() if isinstance(v, str)]
+                masked_rec = dict(record)  # 浅拷贝记录（避免修改原始数据）
+                chunk_fields: list[str] = []  # 当前记录被脱敏的字段名
+                for col in target_cols:  # 遍历每个目标字段
+                    val = masked_rec.get(col)  # 获取字段值
+                    if isinstance(val, str):  # 仅对字符串值执行脱敏
+                        masked_rec[col] = mask_value(col, val, context)  # 根据字段名推断类型并脱敏
+                        chunk_fields.append(col)  # 记录被脱敏的字段名
+                masked_chunk.append(masked_rec)  # 收集脱敏后的记录
+                all_masked_fields.extend(chunk_fields)  # 累计字段名
+                total_masked += len(chunk_fields)  # 累计脱敏字段次数
+            # 结构化调试日志：记录当前 chunk 处理完成的统计信息
+            logger.debug(
+                "chunked_mask_records_chunk_completed",
+                extra={"chunk_idx": chunk_idx, "num_records": len(masked_chunk), "total_masked": total_masked},
             )
-        else:
-            yield masked_chunk  # 直接 yield 当前 chunk 的脱敏后记录列表
+            if return_details:
+                # yield 包装结果：包含脱敏后记录列表 + 元数据（set 去重字段名）
+                yield MaskingResult(
+                    value=masked_chunk,                                        # 当前 chunk 脱敏后的记录列表
+                    operation=MaskingOperation.CHUNKED_MASK_RECORDS.value,     # 操作标识
+                    masked_fields=list(set(all_masked_fields)),                # 去重后的被脱敏字段名
+                    total_masked=total_masked,                                 # 脱敏字段总次数
+                )
+            else:
+                yield masked_chunk  # 直接 yield 当前 chunk 的脱敏后记录列表
 
 
 # === 高级加密与科研治理算子 / Advanced FPE, Date Offset & Shuffle Operators ===

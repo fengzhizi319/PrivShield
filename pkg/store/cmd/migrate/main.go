@@ -20,22 +20,31 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "modernc.org/sqlite"
 
+	pkcrypto "github.com/fengzhizi319/PrivShield/pkg/crypto"
 	"github.com/fengzhizi319/PrivShield/pkg/store/postgres"
 )
 
 var (
-	hubDBPath   = flag.String("hub-db", "./data/service-hub.db", "Path to service-hub SQLite database")
-	auditDBPath = flag.String("audit-db", "./data/audit-log.db", "Path to audit-log SQLite database")
-	pgDSN       = flag.String("pg-dsn", os.Getenv("PRIVSHIELD_MIGRATE_PG_DSN"), "Target PostgreSQL DSN (also env PRIVSHIELD_MIGRATE_PG_DSN)")
-	batchSize   = flag.Int("batch", 500, "Batch insert size")
-	dryRun      = flag.Bool("dry-run", false, "Print counts without writing to PostgreSQL")
-	verify      = flag.Bool("verify", false, "Run hash-chain verification after migration")
+	hubDBPath          = flag.String("hub-db", "./data/service-hub.db", "Path to service-hub SQLite database")
+	auditDBPath        = flag.String("audit-db", "./data/audit-log.db", "Path to audit-log SQLite database")
+	pgDSN              = flag.String("pg-dsn", os.Getenv("PRIVSHIELD_MIGRATE_PG_DSN"), "Target PostgreSQL DSN (also env PRIVSHIELD_MIGRATE_PG_DSN)")
+	batchSize          = flag.Int("batch", 500, "Batch insert size")
+	dryRun             = flag.Bool("dry-run", false, "Print counts without writing to PostgreSQL")
+	verify             = flag.Bool("verify", false, "Run hash-chain verification after migration")
+	snapshotVerifyMode = flag.String("snapshot-verify-mode", func() string {
+		if v := os.Getenv("PRIVSHIELD_MIGRATE_SNAPSHOT_VERIFY"); v != "" {
+			return v
+		}
+		return "skip"
+	}(), "Snapshot ciphertext verification mode: skip, after-migrate, only (also env PRIVSHIELD_MIGRATE_SNAPSHOT_VERIFY)")
+	auditEncryptionKey = flag.String("audit-encryption-key", os.Getenv("AUDIT_LOG_ENCRYPTION_KEY"), "Audit log snapshot encryption key (fallback env PRIVACY_AUDIT_KEY)")
 )
 
 func main() {
@@ -48,13 +57,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	auditKey := *auditEncryptionKey
+	if auditKey == "" {
+		auditKey = os.Getenv("PRIVACY_AUDIT_KEY")
+	}
+
 	if err := run(context.Background(), logger, runConfig{
-		hubDBPath:   *hubDBPath,
-		auditDBPath: *auditDBPath,
-		pgDSN:       *pgDSN,
-		batchSize:   *batchSize,
-		dryRun:      *dryRun,
-		verify:      *verify,
+		hubDBPath:          *hubDBPath,
+		auditDBPath:        *auditDBPath,
+		pgDSN:              *pgDSN,
+		batchSize:          *batchSize,
+		dryRun:             *dryRun,
+		verify:             *verify,
+		snapshotVerifyMode: *snapshotVerifyMode,
+		auditEncryptionKey: auditKey,
 	}); err != nil {
 		logger.Error("migration failed", "error", err)
 		os.Exit(1)
@@ -62,12 +78,14 @@ func main() {
 }
 
 type runConfig struct {
-	hubDBPath   string
-	auditDBPath string
-	pgDSN       string
-	batchSize   int
-	dryRun      bool
-	verify      bool
+	hubDBPath          string
+	auditDBPath        string
+	pgDSN              string
+	batchSize          int
+	dryRun             bool
+	verify             bool
+	snapshotVerifyMode string
+	auditEncryptionKey string
 }
 
 func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
@@ -83,6 +101,23 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		logger.Info("dry-run mode: no writes will be performed")
 	}
 
+	switch cfg.snapshotVerifyMode {
+	case "only":
+		if cfg.dryRun {
+			logger.Info("snapshot-verify-only mode with dry-run: nothing to do")
+			return nil
+		}
+		if err := verifySnapshots(ctx, logger, pgPool, cfg.auditEncryptionKey); err != nil {
+			return fmt.Errorf("verify snapshots: %w", err)
+		}
+		logger.Info("snapshot verification completed")
+		return nil
+	case "skip", "after-migrate":
+		// proceed with migration
+	default:
+		return fmt.Errorf("invalid snapshot-verify-mode %q (expected skip, after-migrate, or only)", cfg.snapshotVerifyMode)
+	}
+
 	if err := migrateTasks(ctx, logger, cfg.hubDBPath, pgPool, cfg.batchSize, cfg.dryRun); err != nil {
 		return fmt.Errorf("migrate tasks: %w", err)
 	}
@@ -94,6 +129,12 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 	if cfg.verify && !cfg.dryRun {
 		if err := verifyChain(ctx, logger, cfg.pgDSN); err != nil {
 			return fmt.Errorf("verify chain: %w", err)
+		}
+	}
+
+	if cfg.snapshotVerifyMode == "after-migrate" && !cfg.dryRun {
+		if err := verifySnapshots(ctx, logger, pgPool, cfg.auditEncryptionKey); err != nil {
+			return fmt.Errorf("verify snapshots: %w", err)
 		}
 	}
 
@@ -339,6 +380,68 @@ func verifyChain(ctx context.Context, logger *slog.Logger, pgDSN string) error {
 		return fmt.Errorf("hash chain invalid: %s (broken_at_id=%s)", res.Message, res.BrokenAtID)
 	}
 	logger.Info("hash chain verified", "total_verified", res.TotalVerified, "message", res.Message)
+	return nil
+}
+
+func verifySnapshots(ctx context.Context, logger *slog.Logger, pgPool *pgxpool.Pool, key string) error {
+	if key == "" {
+		return fmt.Errorf("audit encryption key is required for snapshot verification (set AUDIT_LOG_ENCRYPTION_KEY or PRIVACY_AUDIT_KEY)")
+	}
+
+	rows, err := pgPool.Query(ctx, `SELECT id, input_sample, output_sample FROM snapshots ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("query snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var total, encrypted, plaintext, failed int
+	var failedIDs []string
+	var firstErr error
+
+	for rows.Next() {
+		var id, inputSample, outputSample string
+		if err := rows.Scan(&id, &inputSample, &outputSample); err != nil {
+			return fmt.Errorf("scan snapshot: %w", err)
+		}
+		total++
+
+		check := func(value string) {
+			if value == "" {
+				return
+			}
+			if strings.HasPrefix(value, pkcrypto.EncryptedPrefix) {
+				encrypted++
+				if _, err := pkcrypto.DecryptString(value, key); err != nil {
+					failed++
+					if len(failedIDs) < 5 {
+						failedIDs = append(failedIDs, id)
+					}
+					if firstErr == nil {
+						firstErr = err
+					}
+				}
+			} else {
+				plaintext++
+			}
+		}
+
+		check(inputSample)
+		check(outputSample)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate snapshots: %w", err)
+	}
+
+	logger.Info("snapshot verification",
+		"total_snapshots", total,
+		"encrypted_samples", encrypted,
+		"plaintext_samples", plaintext,
+		"failed_samples", failed,
+	)
+
+	if failed > 0 {
+		return fmt.Errorf("snapshot ciphertext verification failed for %d encrypted sample(s) (first ids: %v): %w", failed, failedIDs, firstErr)
+	}
 	return nil
 }
 

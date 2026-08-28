@@ -93,7 +93,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 		ScheduleTimeout: 5,
 	}
 	d := newTestDeps()
-	ag := agent.New(cfg)
+	ag := agent.New(cfg, d.mc)
 	ds := datasource.New(cfg)
 	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 	return srv, mockAgent
@@ -111,7 +111,7 @@ func newSimpleTestServer() *Server {
 		ScheduleTimeout: 5,
 	}
 	d := newTestDeps()
-	ag := agent.New(cfg)
+	ag := agent.New(cfg, d.mc)
 	ds := datasource.New(cfg)
 	return New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 }
@@ -215,7 +215,7 @@ func newMockE2EServer(t *testing.T) (*Server, *httptest.Server) {
 		ScheduleTimeout: 10,
 	}
 	d := newTestDeps()
-	ag := agent.New(cfg)
+	ag := agent.New(cfg, d.mc)
 	ds := datasource.New(cfg)
 	srv := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 	return srv, mockAgent
@@ -838,7 +838,7 @@ func TestAuthMiddleware_Protection(t *testing.T) {
 		APIKey:        "secret-token-123",
 	}
 	d := newTestDeps()
-	ag := agent.New(cfg)
+	ag := agent.New(cfg, d.mc)
 	ds := datasource.New(cfg)
 	s := New(ag, ds, cfg, d.tasks, d.logger, d.mc)
 

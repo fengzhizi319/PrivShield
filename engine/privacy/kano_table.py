@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from ..observability.logging_config import get_logger
-from ..observability.metrics import KANO_OPERATIONS_TOTAL
+from ..observability.metrics import KANO_DURATION, KANO_OPERATIONS_TOTAL, observe_duration
 
 # Module-level structured logger for dataset-level K-anonymity operations
 logger = get_logger(__name__)
@@ -195,7 +195,6 @@ def k_anonymize_table(
     Raises:
         ValueError: 当行数 < k 或 qi_cols 无效时 / When rows < k or qi_cols invalid.
     """
-    KANO_OPERATIONS_TOTAL.labels(operation="table").inc()
     if not rows:
         return []
     if k < 2:
@@ -210,163 +209,13 @@ def k_anonymize_table(
     if missing_cols:
         raise ValueError(f"qi_cols not found in rows: {missing_cols}")
 
-    try:
-        import pandas as pd
+    KANO_OPERATIONS_TOTAL.labels(operation="table").inc()
+    with observe_duration(KANO_DURATION, operation="table"):
+        try:
+            import pandas as pd
 
-        # 使用 Pandas 向量化优化版 Mondrian 算法，避免递归的 Python list sorting 开销
-        df = pd.DataFrame(rows)
-
-        def _mondrian_pd(sub_df: pd.DataFrame, depth: int) -> pd.DataFrame:
-            if len(sub_df) < 2 * k or depth <= 0:
-                # 泛化当前等价组
-                gen_df = sub_df.copy()
-                for col in qi_cols:
-                    col_vals = gen_df[col]
-                    # 判断是否全为数值类型
-                    is_num = pd.api.types.is_numeric_dtype(col_vals) and not pd.api.types.is_bool_dtype(col_vals)
-                    if is_num:
-                        low = col_vals.min()
-                        high = col_vals.max()
-                        if pd.isna(low):
-                            pass
-                        elif low == high:
-                            gen_df[col] = low
-                        else:
-                            gen_df[col] = f"[{low}-{high}]"
-                    else:
-                        unique_vals = sorted(set(col_vals.dropna().astype(str)))
-                        if len(unique_vals) == 1:
-                            gen_df[col] = unique_vals[0]
-                        elif len(unique_vals) > 1:
-                            gen_df[col] = "{" + ",".join(unique_vals) + "}"
-                return gen_df
-
-            # 选择跨度最大的分割列
-            max_span = -1.0
-            best_dim = None
-            for col in qi_cols:
-                col_vals = sub_df[col].dropna()
-                if not col_vals.empty:
-                    is_num = pd.api.types.is_numeric_dtype(col_vals) and not pd.api.types.is_bool_dtype(col_vals)
-                    span = float(col_vals.max() - col_vals.min()) if is_num else float(col_vals.nunique() - 1)
-                    if span > max_span:
-                        max_span = span
-                        best_dim = col
-
-            if best_dim is None:
-                return sub_df
-
-            # 按选定维度进行中位数划分，并满足左右两部分均不少于 k 条记录
-            sorted_sub = sub_df.sort_values(by=best_dim)
-            mid = len(sorted_sub) // 2
-            split_idx = max(k, min(mid, len(sorted_sub) - k))
-            if split_idx < k or len(sorted_sub) - split_idx < k:
-                # 无法满足边界要求，直接泛化
-                return _mondrian_pd(sub_df, 0)
-
-            left = _mondrian_pd(sorted_sub.iloc[:split_idx], depth - 1)
-            right = _mondrian_pd(sorted_sub.iloc[split_idx:], depth - 1)
-            return pd.concat([left, right])
-
-        result_df = _mondrian_pd(df, max_depth)
-        res_list = cast("list[dict[str, Any]]", result_df.to_dict(orient="records"))
-        # 真实等价类计数：按泛化后的准标识符组合分组统计，
-        # 而非 len(rows)//k 的估算（单叶子或尾组合并时估算值会虚高）。
-        eq_count = len({tuple(str(r.get(c)) for c in qi_cols) for r in res_list}) if res_list else 0
-        logger.info(
-            "kano_table_completed",
-            extra={
-                "k": k,
-                "qi_cols": qi_cols,
-                "num_rows": len(rows),
-                "equivalence_classes": eq_count,
-                "max_depth": max_depth,
-            },
-        )
-        if return_details:
-            return KAnonymityResult(value=res_list, k=k, qi_cols=qi_cols, equivalence_classes_count=eq_count)
-        return res_list
-    except ImportError:
-        pass
-
-    def _mondrian(
-        records: list[dict[str, Any]], depth: int
-    ) -> list[dict[str, Any]]:
-        if len(records) < 2 * k or depth <= 0:
-            return _generalize(records, qi_cols)
-
-        dim = _choose_dimension(records, qi_cols)
-        split_idx = _median_split(records, dim, k)
-        if split_idx is None:
-            return _generalize(records, qi_cols)
-
-        def _sort_key(record: dict[str, Any]) -> Any:
-            value = record.get(dim)
-            if _is_numeric(value):
-                return value
-            return str(value)
-
-        sorted_records = sorted(records, key=_sort_key)
-        left = _mondrian(sorted_records[:split_idx], depth - 1)
-        right = _mondrian(sorted_records[split_idx:], depth - 1)
-        return left + right
-
-    final_res = _mondrian(rows, max_depth)
-    # 真实等价类计数：按泛化后的准标识符组合分组统计（与 pandas 路径口径一致）
-    eq_count = len({tuple(str(r.get(c)) for c in qi_cols) for r in final_res}) if final_res else 0
-    logger.info(
-        "kano_table_completed",
-        extra={
-            "k": k,
-            "qi_cols": qi_cols,
-            "num_rows": len(rows),
-            "equivalence_classes": eq_count,
-            "max_depth": max_depth,
-        },
-    )
-    if return_details:
-        return KAnonymityResult(value=final_res, k=k, qi_cols=qi_cols, equivalence_classes_count=eq_count)
-    return final_res
-
-
-def k_anonymize_dataframe(
-    df: Any,
-    qi_cols: list[str],
-    k: int = 5,
-    max_depth: int = 10,
-    return_details: bool = False,
-) -> Any:
-    """对 DataFrame 执行 Mondrian K-匿名泛化。
-
-    支持 pandas DataFrame 与 SecretFlow DataFrame（H/V）。
-    内部转换为 records 后调用 k_anonymize_table，再按原类型返回。
-
-    Args:
-        df: 输入 DataFrame。
-        qi_cols: 准标识符列名列表。
-        k: K-匿名阈值。
-        max_depth: 最大递归深度。
-        return_details: 是否返回 KAnonymityResult 结构体。
-
-    Returns:
-        泛化后的 DataFrame（pandas DataFrame），或当 return_details=True 时返回 KAnonymityResult。
-    """
-    from .data_adapters import from_records, to_records
-
-    KANO_OPERATIONS_TOTAL.labels(operation="dataframe").inc()
-
-    try:
-        import pandas as pd
-        if isinstance(df, pd.DataFrame):
-            if len(df) < k:
-                raise ValueError(
-                    f"Input table has {len(df)} rows, but k-anonymity requires at least {k}"
-                )
-            if not qi_cols:
-                raise ValueError("qi_cols must not be empty")
-            missing_cols = [col for col in qi_cols if col not in df.columns]
-            if missing_cols:
-                raise ValueError(f"qi_cols not found in rows: {missing_cols}")
+            # 使用 Pandas 向量化优化版 Mondrian 算法，避免递归的 Python list sorting 开销
+            df = pd.DataFrame(rows)
 
             def _mondrian_pd(sub_df: pd.DataFrame, depth: int) -> pd.DataFrame:
                 if len(sub_df) < 2 * k or depth <= 0:
@@ -374,6 +223,7 @@ def k_anonymize_dataframe(
                     gen_df = sub_df.copy()
                     for col in qi_cols:
                         col_vals = gen_df[col]
+                        # 判断是否全为数值类型
                         is_num = pd.api.types.is_numeric_dtype(col_vals) and not pd.api.types.is_bool_dtype(col_vals)
                         if is_num:
                             low = col_vals.min()
@@ -412,6 +262,7 @@ def k_anonymize_dataframe(
                 mid = len(sorted_sub) // 2
                 split_idx = max(k, min(mid, len(sorted_sub) - k))
                 if split_idx < k or len(sorted_sub) - split_idx < k:
+                    # 无法满足边界要求，直接泛化
                     return _mondrian_pd(sub_df, 0)
 
                 left = _mondrian_pd(sorted_sub.iloc[:split_idx], depth - 1)
@@ -419,23 +270,173 @@ def k_anonymize_dataframe(
                 return pd.concat([left, right])
 
             result_df = _mondrian_pd(df, max_depth)
+            res_list = cast("list[dict[str, Any]]", result_df.to_dict(orient="records"))
+            # 真实等价类计数：按泛化后的准标识符组合分组统计，
+            # 而非 len(rows)//k 的估算（单叶子或尾组合并时估算值会虚高）。
+            eq_count = len({tuple(str(r.get(c)) for c in qi_cols) for r in res_list}) if res_list else 0
+            logger.info(
+                "kano_table_completed",
+                extra={
+                    "k": k,
+                    "qi_cols": qi_cols,
+                    "num_rows": len(rows),
+                    "equivalence_classes": eq_count,
+                    "max_depth": max_depth,
+                },
+            )
             if return_details:
-                res_list = result_df.to_dict(orient="records")
-                return KAnonymityResult(
-                    value=res_list,
-                    k=k,
-                    qi_cols=qi_cols,
-                    equivalence_classes_count=len(res_list) // max(1, k),
-                )
-            return result_df
-    except ImportError:
-        pass
+                return KAnonymityResult(value=res_list, k=k, qi_cols=qi_cols, equivalence_classes_count=eq_count)
+            return res_list
+        except ImportError:
+            pass
 
-    records = to_records(df)
-    anonymized = k_anonymize_table(
-        records, qi_cols, k=k, max_depth=max_depth, return_details=return_details
-    )
-    if return_details:
-        return anonymized
-    assert isinstance(anonymized, list)
-    return from_records(anonymized, df)
+        def _mondrian(
+            records: list[dict[str, Any]], depth: int
+        ) -> list[dict[str, Any]]:
+            if len(records) < 2 * k or depth <= 0:
+                return _generalize(records, qi_cols)
+
+            dim = _choose_dimension(records, qi_cols)
+            split_idx = _median_split(records, dim, k)
+            if split_idx is None:
+                return _generalize(records, qi_cols)
+
+            def _sort_key(record: dict[str, Any]) -> Any:
+                value = record.get(dim)
+                if _is_numeric(value):
+                    return value
+                return str(value)
+
+            sorted_records = sorted(records, key=_sort_key)
+            left = _mondrian(sorted_records[:split_idx], depth - 1)
+            right = _mondrian(sorted_records[split_idx:], depth - 1)
+            return left + right
+
+        final_res = _mondrian(rows, max_depth)
+        # 真实等价类计数：按泛化后的准标识符组合分组统计（与 pandas 路径口径一致）
+        eq_count = len({tuple(str(r.get(c)) for c in qi_cols) for r in final_res}) if final_res else 0
+        logger.info(
+            "kano_table_completed",
+            extra={
+                "k": k,
+                "qi_cols": qi_cols,
+                "num_rows": len(rows),
+                "equivalence_classes": eq_count,
+                "max_depth": max_depth,
+            },
+        )
+        if return_details:
+            return KAnonymityResult(value=final_res, k=k, qi_cols=qi_cols, equivalence_classes_count=eq_count)
+        return final_res
+
+
+def k_anonymize_dataframe(
+    df: Any,
+    qi_cols: list[str],
+    k: int = 5,
+    max_depth: int = 10,
+    return_details: bool = False,
+) -> Any:
+    """对 DataFrame 执行 Mondrian K-匿名泛化。
+
+    支持 pandas DataFrame 与 SecretFlow DataFrame（H/V）。
+    内部转换为 records 后调用 k_anonymize_table，再按原类型返回。
+
+    Args:
+        df: 输入 DataFrame。
+        qi_cols: 准标识符列名列表。
+        k: K-匿名阈值。
+        max_depth: 最大递归深度。
+        return_details: 是否返回 KAnonymityResult 结构体。
+
+    Returns:
+        泛化后的 DataFrame（pandas DataFrame），或当 return_details=True 时返回 KAnonymityResult。
+    """
+    from .data_adapters import from_records, to_records
+
+    KANO_OPERATIONS_TOTAL.labels(operation="dataframe").inc()
+    with observe_duration(KANO_DURATION, operation="dataframe"):
+        try:
+            import pandas as pd
+            if isinstance(df, pd.DataFrame):
+                if len(df) < k:
+                    raise ValueError(
+                        f"Input table has {len(df)} rows, but k-anonymity requires at least {k}"
+                    )
+                if not qi_cols:
+                    raise ValueError("qi_cols must not be empty")
+                missing_cols = [col for col in qi_cols if col not in df.columns]
+                if missing_cols:
+                    raise ValueError(f"qi_cols not found in rows: {missing_cols}")
+
+                def _mondrian_pd(sub_df: pd.DataFrame, depth: int) -> pd.DataFrame:
+                    if len(sub_df) < 2 * k or depth <= 0:
+                        # 泛化当前等价组
+                        gen_df = sub_df.copy()
+                        for col in qi_cols:
+                            col_vals = gen_df[col]
+                            is_num = pd.api.types.is_numeric_dtype(col_vals) and not pd.api.types.is_bool_dtype(col_vals)
+                            if is_num:
+                                low = col_vals.min()
+                                high = col_vals.max()
+                                if pd.isna(low):
+                                    pass
+                                elif low == high:
+                                    gen_df[col] = low
+                                else:
+                                    gen_df[col] = f"[{low}-{high}]"
+                            else:
+                                unique_vals = sorted(set(col_vals.dropna().astype(str)))
+                                if len(unique_vals) == 1:
+                                    gen_df[col] = unique_vals[0]
+                                elif len(unique_vals) > 1:
+                                    gen_df[col] = "{" + ",".join(unique_vals) + "}"
+                        return gen_df
+
+                    # 选择跨度最大的分割列
+                    max_span = -1.0
+                    best_dim = None
+                    for col in qi_cols:
+                        col_vals = sub_df[col].dropna()
+                        if not col_vals.empty:
+                            is_num = pd.api.types.is_numeric_dtype(col_vals) and not pd.api.types.is_bool_dtype(col_vals)
+                            span = float(col_vals.max() - col_vals.min()) if is_num else float(col_vals.nunique() - 1)
+                            if span > max_span:
+                                max_span = span
+                                best_dim = col
+
+                    if best_dim is None:
+                        return sub_df
+
+                    # 按选定维度进行中位数划分，并满足左右两部分均不少于 k 条记录
+                    sorted_sub = sub_df.sort_values(by=best_dim)
+                    mid = len(sorted_sub) // 2
+                    split_idx = max(k, min(mid, len(sorted_sub) - k))
+                    if split_idx < k or len(sorted_sub) - split_idx < k:
+                        return _mondrian_pd(sub_df, 0)
+
+                    left = _mondrian_pd(sorted_sub.iloc[:split_idx], depth - 1)
+                    right = _mondrian_pd(sorted_sub.iloc[split_idx:], depth - 1)
+                    return pd.concat([left, right])
+
+                result_df = _mondrian_pd(df, max_depth)
+                if return_details:
+                    res_list = result_df.to_dict(orient="records")
+                    return KAnonymityResult(
+                        value=res_list,
+                        k=k,
+                        qi_cols=qi_cols,
+                        equivalence_classes_count=len(res_list) // max(1, k),
+                    )
+                return result_df
+        except ImportError:
+            pass
+
+        records = to_records(df)
+        anonymized = k_anonymize_table(
+            records, qi_cols, k=k, max_depth=max_depth, return_details=return_details
+        )
+        if return_details:
+            return anonymized
+        assert isinstance(anonymized, list)
+        return from_records(anonymized, df)

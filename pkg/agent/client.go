@@ -32,12 +32,13 @@ type Client struct {
 	retryBaseDelay time.Duration
 
 	// Circuit breaker state / 熔断器状态
-	cbMu        sync.Mutex
-	cbState     CircuitState
-	cbFailures  int
-	cbOpenedAt  time.Time
-	cbThreshold int           // Consecutive failures before opening / 连续失败熔断阈值
-	cbCooldown  time.Duration // Cooldown before half-open / 熔断冷却时间
+	cbMu          sync.Mutex
+	cbState       CircuitState
+	cbFailures    int
+	cbOpenedAt    time.Time
+	cbThreshold   int           // Consecutive failures before opening / 连续失败熔断阈值
+	cbCooldown    time.Duration // Cooldown before half-open / 熔断冷却时间
+	stateObserver func(node, state string)
 }
 
 // CircuitState represents the circuit breaker state.
@@ -115,6 +116,7 @@ type Config struct {
 	MaxRetries         int           // Max retry attempts for retryable errors (0=no retry) / 可重试错误的最大重试次数（0=不重试）
 	RetryBaseDelay     time.Duration // Base delay for exponential backoff / 指数退避基础延迟
 	Logger             *slog.Logger  // Structured logger / 结构化日志
+	StateObserver      func(node, state string) // Optional callback for circuit breaker state changes / 熔断器状态变化回调（node, state）
 }
 
 // New creates a new agent client from the given config.
@@ -167,6 +169,7 @@ func New(cfg Config) *Client {
 		cbFailures:     0,
 		cbThreshold:    cfg.CBThreshold,
 		cbCooldown:     cfg.CBCooldown,
+		stateObserver:  cfg.StateObserver,
 	}
 }
 
@@ -426,6 +429,31 @@ func (c *Client) cooldownDuration() time.Duration {
 	return c.cbCooldown
 }
 
+// reportCircuitState reports the current circuit breaker state to the optional
+// StateObserver. The node label falls back to "agent" when no base URL is configured.
+// State strings are normalized to closed/open/half_open.
+func (c *Client) reportCircuitState(state CircuitState) {
+	if c.stateObserver == nil {
+		return
+	}
+	node := c.BaseURL()
+	if node == "" {
+		node = "agent"
+	}
+	var stateStr string
+	switch state {
+	case CircuitClosed:
+		stateStr = "closed"
+	case CircuitOpen:
+		stateStr = "open"
+	case CircuitHalfOpen:
+		stateStr = "half_open"
+	default:
+		stateStr = "unknown"
+	}
+	c.stateObserver(node, stateStr)
+}
+
 // recordSuccess records a successful call, resetting consecutive failure counter
 // and closing the circuit if half-open.
 func (c *Client) recordSuccess() {
@@ -437,6 +465,7 @@ func (c *Client) recordSuccess() {
 		c.cbState = CircuitClosed
 		c.logger.Info("circuit breaker closed (recovery successful)")
 	}
+	c.reportCircuitState(c.cbState)
 }
 
 // recordFailure records a failed call, potentially opening the circuit.
@@ -460,4 +489,5 @@ func (c *Client) recordFailure() {
 		c.cbOpenedAt = time.Now()
 		c.logger.Warn("circuit breaker re-opened (probe failed)")
 	}
+	c.reportCircuitState(c.cbState)
 }

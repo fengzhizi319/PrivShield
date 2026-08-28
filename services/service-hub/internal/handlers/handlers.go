@@ -259,6 +259,9 @@ func (s *Server) Readyz(c *gin.Context) {
 	// Agent is the critical dependency — if unreachable, report not ready.
 	// Agent 是关键依赖 — 不可用时报告未就绪。
 	if agentErr != nil {
+		if s.mc != nil {
+			s.mc.SetReady(false)
+		}
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status":         "not_ready",
 			"backend":        "ok",
@@ -273,6 +276,9 @@ func (s *Server) Readyz(c *gin.Context) {
 		return
 	}
 
+	if s.mc != nil {
+		s.mc.SetReady(true)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":         "ready",
 		"backend":        "ok",

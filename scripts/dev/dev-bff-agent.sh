@@ -337,6 +337,7 @@ echo "启动 Go gRPC 代理后端 (API: $CONSOLE_URL)..."
         # 避免 BFF 继承全局 PRIVACY_TLS_ENABLED=true 后错误地按 TLS 连接 Agent。
         export PRIVACY_AGENT_TLS_ENABLED=false
     fi
+    export CONSOLE_RATE_LIMIT="${CONSOLE_RATE_LIMIT:-0}"
     exec ./bin/backend-go
 ) > "$LOGS_DIR/backend-go-all.log" 2>&1 &
 GO_CONSOLE_PID=$!

@@ -722,7 +722,7 @@ func scanPGSnapshotRow(row pgRowScanner) (*store.SnapshotRecord, error) {
 
 func computePGAuditIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm, inputHash, outputHash, user, securityLevel, paramsJSON string) string {
 	data := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%v",
-		prevHash, logID, timestamp.Format(time.RFC3339Nano), algorithm,
+		prevHash, logID, timestamp.UTC().Format(time.RFC3339Nano), algorithm,
 		inputHash, outputHash, user, securityLevel, paramsJSON)
 	hash := sha256.Sum256([]byte(data))
 	return fmt.Sprintf("%x", hash)

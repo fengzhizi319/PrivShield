@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from contextlib import contextmanager
+import time
+
 from prometheus_client import (
     Counter,
     Gauge,
@@ -15,6 +18,15 @@ from prometheus_client import (
 from prometheus_client import (
     make_asgi_app as _make_asgi_app,
 )
+
+
+@contextmanager
+def observe_duration(histogram, **labels):
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        histogram.labels(**labels).observe(time.perf_counter() - start)
 
 # REST/gRPC request counter.
 REQUESTS_TOTAL = Counter(

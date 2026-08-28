@@ -10,6 +10,7 @@
 |---|---|---|
 | [prd.md](./prd.md) | 医疗敏感数据治理流水线产品需求文档 (PRD) | 产品经理、数据合规人员、架构师 |
 | [design.md](./design.md) | 3-Layer 分类分级、L4/L5 脱敏剥离与双输出架构设计方案 | 算法工程师、Agent 开发者 |
+| [performance_optimization_guide.md](./performance_optimization_guide.md) | 规则评级与自适应脱敏性能瓶颈深度剖析与优化指南 | 性能测试工程师、后端架构师 |
 | [api_reference.md](./api_reference.md) | Agent REST / Python SDK / Dual-Backend API 接口参考 | 接入开发者、前端开发 |
 | [ops.md](./ops.md) | 数据生成、脚本使用、运维配置与排障指南 | SRE、运维工程师、测试人员 |
 | [testing.md](./testing.md) | 校验码测试、L4/L5 零泄露测试与测试用例指南 | QA、测试工程师 |

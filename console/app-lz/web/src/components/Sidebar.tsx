@@ -20,10 +20,11 @@ import {
   IconLayers,
   IconSparkles,
   IconGlobe,
+  IconGauge,
 } from './icons';
 
-/** 6 个标签页类型，对应 6 个面板组件 */
-export type TabType = 'topology' | 'tasks' | 'runner' | 'audit' | 'metrics' | 'dataApi';
+/** 7 个标签页类型，对应 7 个面板组件 */
+export type TabType = 'topology' | 'benchmark' | 'dataApi' | 'tasks' | 'runner' | 'audit' | 'metrics';
 
 /** Sidebar 组件的 Props */
 interface SidebarProps {
@@ -42,9 +43,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { lang, setLang, t } = useI18n();
 
-  /** 导航菜单项定义（6 个标签页，每个包含 ID、翻译 key、图标） */
+  /** 导航菜单项定义（7 个标签页，每个包含 ID、翻译 key、图标） */
   const navItems: { id: TabType; labelKey: string; icon: React.ReactNode }[] = [
     { id: 'topology', labelKey: 'nav.topology', icon: <IconServer className="w-5 h-5" /> },
+    { id: 'benchmark', labelKey: 'nav.benchmark', icon: <IconGauge className="w-5 h-5" /> },
     { id: 'dataApi', labelKey: 'nav.dataApi', icon: <IconGlobe className="w-5 h-5" /> },
     { id: 'tasks', labelKey: 'nav.tasks', icon: <IconLayers className="w-5 h-5" /> },
     { id: 'runner', labelKey: 'nav.runner', icon: <IconPlay className="w-5 h-5" /> },

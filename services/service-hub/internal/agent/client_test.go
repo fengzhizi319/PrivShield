@@ -73,9 +73,9 @@ func TestAgentClient(t *testing.T) {
 	t.Setenv("PRIVACY_AGENT_URLS", mockServer.URL)
 	cfg := config.Load()
 
-	client := New(cfg)
+	client := New(cfg, nil)
 	if client == nil {
-		t.Fatal("New(cfg) returned nil")
+		t.Fatal("New(cfg, nil) returned nil")
 	}
 
 	ctx := context.Background()

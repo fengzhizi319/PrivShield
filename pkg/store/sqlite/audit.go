@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/fengzhizi319/PrivShield/pkg/store"
@@ -13,6 +14,7 @@ import (
 // AuditStore implements store.AuditStore backed by SQLite.
 type AuditStore struct {
 	db *sql.DB
+	mu sync.Mutex
 }
 
 // NewAuditStore creates a new SQLite-backed audit store.
@@ -24,6 +26,9 @@ func NewAuditStore(db *sql.DB) (*AuditStore, error) {
 }
 
 func (s *AuditStore) SaveLog(log *store.AuditLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if log.IntegrityHash == "" {
 		log.IntegrityHash = ComputeAuditIntegrityHash(log.ID, log.PrevHash, log.Timestamp, log.Algorithm, log.InputHash, log.OutputHash, log.User, log.SecurityLevel, log.ParametersJSON)
 	}
@@ -40,6 +45,9 @@ func (s *AuditStore) SaveLog(log *store.AuditLog) error {
 
 // SaveLogWithSnapshot persists an audit log and its snapshot as one transaction.
 func (s *AuditStore) SaveLogWithSnapshot(log *store.AuditLog, snapshot *store.SnapshotRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if log.IntegrityHash == "" {
 		log.IntegrityHash = ComputeAuditIntegrityHash(log.ID, log.PrevHash, log.Timestamp, log.Algorithm, log.InputHash, log.OutputHash, log.User, log.SecurityLevel, log.ParametersJSON)
 	}
@@ -81,6 +89,9 @@ func (s *AuditStore) SaveLogsBatch(logs []store.AuditLog, snapshots []store.Snap
 	if len(logs) == 0 && len(snapshots) == 0 {
 		return nil
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {

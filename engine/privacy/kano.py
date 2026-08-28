@@ -27,7 +27,7 @@ from enum import Enum
 from typing import Any
 
 from ..observability.logging_config import get_logger
-from ..observability.metrics import KANO_DURATION, KANO_OPERATIONS_TOTAL
+from ..observability.metrics import KANO_DURATION, KANO_OPERATIONS_TOTAL, observe_duration
 
 # Module-level structured logger for K-anonymity operations
 logger = get_logger(__name__)
@@ -418,46 +418,47 @@ def anonymize_record(
         raise ValueError(f"record must be a dict, got {type(record).__name__}")
 
     KANO_OPERATIONS_TOTAL.labels(operation="record").inc()
-    result = dict(record)
-    effective_hierarchies = {**BUILTIN_HIERARCHIES, **(hierarchies or {})}
-    applied_levels: dict[str, int] = {}
-    hierarchies_used: dict[str, str] = {}
-    for col in qi_cols:
-        h = effective_hierarchies.get(col)
-        val = result.get(col)
-        if h is not None and isinstance(val, str):
-            max_level = 4 if col not in (QIType.GENDER.value, QIType.EDUCATION.value) else (
-                1 if col == QIType.GENDER.value else 2
+    with observe_duration(KANO_DURATION, operation="record"):
+        result = dict(record)
+        effective_hierarchies = {**BUILTIN_HIERARCHIES, **(hierarchies or {})}
+        applied_levels: dict[str, int] = {}
+        hierarchies_used: dict[str, str] = {}
+        for col in qi_cols:
+            h = effective_hierarchies.get(col)
+            val = result.get(col)
+            if h is not None and isinstance(val, str):
+                max_level = 4 if col not in (QIType.GENDER.value, QIType.EDUCATION.value) else (
+                    1 if col == QIType.GENDER.value else 2
+                )
+                level = choose_level(k, max_level)
+                result[col] = h(val, level)
+                applied_levels[col] = level
+                hierarchies_used[col] = h.__name__
+
+        logger.info(
+            "kano_anonymize_record_completed",
+            extra={
+                "k": k,
+                "qi_cols": qi_cols,
+                "applied_levels": applied_levels,
+                "num_qi_processed": len(applied_levels),
+            },
+        )
+
+        if return_details:
+            avg_level = (
+                sum(applied_levels.values()) // len(applied_levels)
+                if applied_levels
+                else 1
             )
-            level = choose_level(k, max_level)
-            result[col] = h(val, level)
-            applied_levels[col] = level
-            hierarchies_used[col] = h.__name__
-
-    logger.info(
-        "kano_anonymize_record_completed",
-        extra={
-            "k": k,
-            "qi_cols": qi_cols,
-            "applied_levels": applied_levels,
-            "num_qi_processed": len(applied_levels),
-        },
-    )
-
-    if return_details:
-        avg_level = (
-            sum(applied_levels.values()) // len(applied_levels)
-            if applied_levels
-            else 1
-        )
-        return KAnonymityRecordResult(
-            value=result,
-            k=k,
-            qi_cols=qi_cols,
-            applied_level=avg_level,
-            hierarchies_used=hierarchies_used,
-        )
-    return result
+            return KAnonymityRecordResult(
+                value=result,
+                k=k,
+                qi_cols=qi_cols,
+                applied_level=avg_level,
+                hierarchies_used=hierarchies_used,
+            )
+        return result
 
 
 def anonymize_records_batch(
@@ -512,61 +513,61 @@ def anonymize_records_batch(
 
     start_time = time.perf_counter()
     KANO_OPERATIONS_TOTAL.labels(operation="record_batch").inc()
-    effective_hierarchies = hierarchies or {}
-    generalized: list[dict[str, Any]] = []
-    total_levels: list[int] = []
-    all_hierarchies_used: dict[str, str] = {}
+    with observe_duration(KANO_DURATION, operation="record_batch"):
+        effective_hierarchies = hierarchies or {}
+        generalized: list[dict[str, Any]] = []
+        total_levels: list[int] = []
+        all_hierarchies_used: dict[str, str] = {}
 
-    for i, record in enumerate(records):
-        # 超时检查 / Timeout check
-        elapsed = time.perf_counter() - start_time
-        if elapsed > effective_timeout:
-            KANO_DURATION.labels(operation="record_batch_timeout").observe(elapsed)
-            logger.error(
-                "Batch anonymization timeout",
-                extra={
-                    "processed_records": i,
-                    "total_records": len(records),
-                    "elapsed_seconds": elapsed,
-                    "timeout_seconds": effective_timeout,
-                },
+        for i, record in enumerate(records):
+            # 超时检查 / Timeout check
+            elapsed = time.perf_counter() - start_time
+            if elapsed > effective_timeout:
+                KANO_DURATION.labels(operation="record_batch_timeout").observe(elapsed)
+                logger.error(
+                    "Batch anonymization timeout",
+                    extra={
+                        "processed_records": i,
+                        "total_records": len(records),
+                        "elapsed_seconds": elapsed,
+                        "timeout_seconds": effective_timeout,
+                    },
+                )
+                raise TimeoutError(
+                    f"Batch anonymization timed out after {elapsed:.2f}s "
+                    f"(processed {i}/{len(records)} records, timeout={effective_timeout}s)"
+                )
+
+            result = anonymize_record(
+                record, qi_cols, effective_hierarchies, k, return_details=True
             )
-            raise TimeoutError(
-                f"Batch anonymization timed out after {elapsed:.2f}s "
-                f"(processed {i}/{len(records)} records, timeout={effective_timeout}s)"
+            if isinstance(result, KAnonymityRecordResult):
+                generalized.append(result.value)
+                total_levels.append(result.applied_level)
+                all_hierarchies_used.update(result.hierarchies_used)
+            else:
+                generalized.append(result)
+
+        duration = time.perf_counter() - start_time
+
+        logger.info(
+            "kano_anonymize_records_batch_completed",
+            extra={
+                "k": k,
+                "qi_cols": qi_cols,
+                "num_records": len(records),
+                "avg_level": sum(total_levels) // max(1, len(total_levels)),
+                "duration_seconds": round(duration, 4),
+            },
+        )
+
+        if return_details:
+            avg_level = sum(total_levels) // max(1, len(total_levels)) if total_levels else 1
+            return KAnonymityRecordResult(
+                value={"records": generalized, "count": len(generalized)},
+                k=k,
+                qi_cols=qi_cols,
+                applied_level=avg_level,
+                hierarchies_used=all_hierarchies_used,
             )
-
-        result = anonymize_record(
-            record, qi_cols, effective_hierarchies, k, return_details=True
-        )
-        if isinstance(result, KAnonymityRecordResult):
-            generalized.append(result.value)
-            total_levels.append(result.applied_level)
-            all_hierarchies_used.update(result.hierarchies_used)
-        else:
-            generalized.append(result)
-
-    duration = time.perf_counter() - start_time
-    KANO_DURATION.labels(operation="record_batch").observe(duration)
-
-    logger.info(
-        "kano_anonymize_records_batch_completed",
-        extra={
-            "k": k,
-            "qi_cols": qi_cols,
-            "num_records": len(records),
-            "avg_level": sum(total_levels) // max(1, len(total_levels)),
-            "duration_seconds": round(duration, 4),
-        },
-    )
-
-    if return_details:
-        avg_level = sum(total_levels) // max(1, len(total_levels)) if total_levels else 1
-        return KAnonymityRecordResult(
-            value={"records": generalized, "count": len(generalized)},
-            k=k,
-            qi_cols=qi_cols,
-            applied_level=avg_level,
-            hierarchies_used=all_hierarchies_used,
-        )
-    return generalized
+        return generalized

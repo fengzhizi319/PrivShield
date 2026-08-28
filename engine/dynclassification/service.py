@@ -75,6 +75,13 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from ..observability.metrics import (
+    CLASSIFICATION_DURATION,
+    CLASSIFICATION_JOBS_DURATION,
+    CLASSIFICATION_JOBS_TOTAL,
+    CLASSIFICATION_TOTAL,
+    observe_duration,
+)
 from .engine import ConfigurableRuleEngine
 from .funnel import ClassificationFunnel
 from .llm_adapter import LlmAdapter
@@ -298,102 +305,95 @@ class DynClassificationService:
         standard: Optional[str] = None,
         sanitize: bool = False,
     ) -> ClassificationResponse:
-        """对单个字段进行分类与智能抹平脱敏。
+        """对单个字段进行分类与智能抹平脱敏。"""
+        start = time.perf_counter()
+        status = "success"
+        response: ClassificationResponse | None = None
+        try:
+            with observe_duration(CLASSIFICATION_DURATION, operation="field"):
+                # Step 0: 高并发 LRU 缓存查找（防超长 Base64 内存暴涨）
+                val_str_raw = str(value) if value is not None else ""
+                val_key = val_str_raw if len(val_str_raw) <= 200 else (len(val_str_raw), val_str_raw[:100], hash(val_str_raw))
+                cache_key = (domain or "", standard or "", field_name, val_key, sanitize)
+                cached_resp = self._classification_cache.get(cache_key)
+                if cached_resp is not None:
+                    field_result = cached_resp.field_result.model_copy(deep=True)
+                    if sanitize and field_result.sanitized_value is None:
+                        val_str = str(value) if value is not None else ""
+                        field_result = self._compute_sanitized_value(field_name, val_str, field_result)
 
-        Execution flow:
-        1. Check high-concurrency LRU cache for identical (domain, standard, field_name, value).
-        2. Obtain (or build from cache) the rule engine for the given domain/standard.
-        3. Evaluate the field against all rules/NER/LLM funnel to produce security tags.
-        4. Resolve final level and package results with audit info.
-        5. If sanitize=True, compute smart sanitized_value via masking/LLM.
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    audit = AuditInfo(
+                        domain=cached_resp.audit_info.domain,
+                        standard_id=cached_resp.audit_info.standard_id,
+                        rule_set_version=cached_resp.audit_info.rule_set_version,
+                        rules_evaluated=cached_resp.audit_info.rules_evaluated,
+                        rules_hit=cached_resp.audit_info.rules_hit,
+                        duration_ms=round(duration_ms, 3),
+                    )
+                    response = ClassificationResponse(field_result=field_result, audit_info=audit)
+                    if field_result.final_level:
+                        CLASSIFICATION_TOTAL.labels(
+                            final_level=field_result.final_level,
+                            layer=field_result.engine_layer or "unknown",
+                        ).inc()
+                else:
+                    # Step 1: Get or construct the rule engine (cached by domain:standard key).
+                    engine = self.loader.get_engine(domain=domain, standard=standard)
 
-        Args:
-            field_name: 字段名。
-            value: 字段值。
-            domain: 领域标识（可选）。
-            standard: 标准标识（可选，优先于 domain）。
-            sanitize: 是否计算并生成智能抹平/脱敏后的字段值（默认 False）。
+                    # Step 2: Build and execute the 3-layer funnel.
+                    funnel = self._build_funnel(engine)
+                    funnel_result, suppressed_tags = funnel.classify_field(field_name, value, sanitize=sanitize)
+                    tags = funnel_result.tags
 
-        Returns:
-            ClassificationResponse 包含字段分类结果和审计信息。
-        """
-        # Start high-resolution timer for duration measurement.
-        start = time.monotonic()
+                    # Step 3: Use funnel result directly (level, confidence, layer already resolved).
+                    final_level = funnel_result.final_level
 
-        # Step 0: 高并发 LRU 缓存查找（防超长 Base64 内存暴涨）
-        val_str_raw = str(value) if value is not None else ""
-        val_key = val_str_raw if len(val_str_raw) <= 200 else (len(val_str_raw), val_str_raw[:100], hash(val_str_raw))
-        cache_key = (domain or "", standard or "", field_name, val_key, sanitize)
-        cached_resp = self._classification_cache.get(cache_key)
-        if cached_resp is not None:
-            # 线程安全：深拷贝缓存中的共享可变对象，避免调用方/后续分支
-            # 修改污染缓存（其他并发请求可能正持有同一对象）
-            field_result = cached_resp.field_result.model_copy(deep=True)
-            if sanitize and field_result.sanitized_value is None:
-                val_str = str(value) if value is not None else ""
-                field_result = self._compute_sanitized_value(field_name, val_str, field_result)
+                    # Compute smart sanitized_value if requested
+                    sanitized_val: str | None = None
+                    if sanitize:
+                        val_str = str(value) if value is not None else ""
+                        sanitized_val = self._get_sanitized_value_from_funnel(field_name, val_str, funnel_result, final_level)
 
-            duration_ms = (time.monotonic() - start) * 1000
-            # 构造新的 response 保持独立的执行耗时审计
-            audit = AuditInfo(
-                domain=cached_resp.audit_info.domain,
-                standard_id=cached_resp.audit_info.standard_id,
-                rule_set_version=cached_resp.audit_info.rule_set_version,
-                rules_evaluated=cached_resp.audit_info.rules_evaluated,
-                rules_hit=cached_resp.audit_info.rules_hit,
-                duration_ms=round(duration_ms, 3),
-            )
-            return ClassificationResponse(field_result=field_result, audit_info=audit)
+                    duration_ms = (time.perf_counter() - start) * 1000
 
-        # Step 1: Get or construct the rule engine (cached by domain:standard key).
-        engine = self.loader.get_engine(domain=domain, standard=standard)
+                    # Step 5: Build the field-level classification result.
+                    field_result = FieldClassificationResult(
+                        field_name=field_name,
+                        field_value=str(value) if value is not None else None,
+                        tags=tags,
+                        final_level=final_level,
+                        confidence=funnel_result.confidence,
+                        needs_human_review=funnel_result.needs_human_review,
+                        engine_layer=funnel_result.engine_layer,
+                        reasoning=funnel_result.reasoning,
+                        sanitized_value=sanitized_val,
+                        suppressed_tags=suppressed_tags,
+                    )
 
-        # Step 2: Build and execute the 3-layer funnel.
-        # The funnel orchestrates: Layer-1 Rule → Layer-2 NER → Layer-3 LLM
-        # with confidence policy (conflict detection + decay + LLM arbitration).
-        funnel = self._build_funnel(engine)
-        funnel_result, suppressed_tags = funnel.classify_field(field_name, value, sanitize=sanitize)
-        tags = funnel_result.tags
+                    audit = AuditInfo(
+                        domain=engine.domain,
+                        standard_id=engine.standard_id,
+                        rule_set_version=engine.taxonomy.version,
+                        rules_evaluated=engine.rule_count,
+                        rules_hit=len(tags),
+                        duration_ms=round(duration_ms, 3),
+                    )
 
-        # Step 3: Use funnel result directly (level, confidence, layer already resolved).
-        final_level = funnel_result.final_level
-
-        # Compute smart sanitized_value if requested
-        sanitized_val: str | None = None
-        if sanitize:
-            val_str = str(value) if value is not None else ""
-            sanitized_val = self._get_sanitized_value_from_funnel(field_name, val_str, funnel_result, final_level)
-
-        # Calculate execution duration in milliseconds.
-        duration_ms = (time.monotonic() - start) * 1000
-
-        # Step 5: Build the field-level classification result.
-        field_result = FieldClassificationResult(
-            field_name=field_name,
-            field_value=str(value) if value is not None else None,
-            tags=tags,
-            final_level=final_level,
-            confidence=funnel_result.confidence,
-            needs_human_review=funnel_result.needs_human_review,
-            engine_layer=funnel_result.engine_layer,
-            reasoning=funnel_result.reasoning,
-            sanitized_value=sanitized_val,
-            suppressed_tags=suppressed_tags,
-        )
-
-        # Build audit metadata for traceability.
-        audit = AuditInfo(
-            domain=engine.domain,
-            standard_id=engine.standard_id,
-            rule_set_version=engine.taxonomy.version,
-            rules_evaluated=engine.rule_count,
-            rules_hit=len(tags),
-            duration_ms=round(duration_ms, 3),
-        )
-
-        response = ClassificationResponse(field_result=field_result, audit_info=audit)
-        # 写入高并发 LRU 缓存
-        self._classification_cache.put(cache_key, response)
+                    response = ClassificationResponse(field_result=field_result, audit_info=audit)
+                    self._classification_cache.put(cache_key, response)
+                    if field_result.final_level:
+                        CLASSIFICATION_TOTAL.labels(
+                            final_level=field_result.final_level,
+                            layer=field_result.engine_layer or "unknown",
+                        ).inc()
+        except Exception:
+            status = "error"
+            CLASSIFICATION_JOBS_TOTAL.labels(status="error").inc()
+            raise
+        finally:
+            CLASSIFICATION_JOBS_DURATION.labels(status=status).observe(time.perf_counter() - start)
+        CLASSIFICATION_JOBS_TOTAL.labels(status="success").inc()
         return response
 
 
@@ -409,72 +409,72 @@ class DynClassificationService:
         standard: Optional[str] = None,
         sanitize: bool = False,
     ) -> ClassificationResponse:
-        """对单条记录（多字段）进行分类与智能抹平脱敏。
+        """对单条记录（多字段）进行分类与智能抹平脱敏。"""
+        start = time.perf_counter()
+        status = "success"
+        response: ClassificationResponse | None = None
+        try:
+            with observe_duration(CLASSIFICATION_DURATION, operation="record"):
+                field_results: dict[str, FieldClassificationResult] = {}
+                all_tags: list[SecurityTag] = []
+                for field_name, value in record.items():
+                    resp = self.classify_field(field_name, value, domain=domain, standard=standard, sanitize=sanitize)
+                    if resp.field_result:
+                        field_results[field_name] = resp.field_result
+                        all_tags.extend(resp.field_result.tags)
 
-        Execution flow:
-        1. Classify each field individually using the full 3-layer funnel (with sanitize parameter).
-        2. Run composite rule engine for multi-field combination detection.
-        3. Resolve record-level final level (max of all fields + composite upgrades).
+                engine = self.loader.get_engine(domain=domain, standard=standard)
+                composite_engine = self.loader.get_composite_engine(domain=domain, standard=standard)
 
-        Args:
-            record: 记录字典（字段名 → 字段值）。
-            record_index: 记录索引。
-            domain: 领域标识。
-            standard: 标准标识。
-            sanitize: 是否进行高敏与 PII 脱敏抹平（默认 False）。
+                composite_tags = composite_engine.evaluate(record, field_results)
+                all_tags.extend(composite_tags)
 
-        Returns:
-            ClassificationResponse 包含记录分类结果和审计信息。
-        """
-        start = time.monotonic()
+                # 基准记录等级：从字段裁定等级集合中解析最高等级（保持字段级降级/仲裁裁定有效性）
+                field_levels = [fr.final_level for fr in field_results.values() if fr.final_level]
+                base_record_level = (
+                    engine.taxonomy.max_level(*field_levels)
+                    if field_levels
+                    else engine.taxonomy.default_level
+                )
+                record_level = composite_engine.apply_to_record_level(
+                    base_record_level, composite_tags, engine.taxonomy
+                )
 
-        field_results: dict[str, FieldClassificationResult] = {}
-        all_tags: list[SecurityTag] = []
-        
-        for field_name, value in record.items():
-            resp = self.classify_field(field_name, value, domain=domain, standard=standard, sanitize=sanitize)
-            if resp.field_result:
-                field_results[field_name] = resp.field_result
-                all_tags.extend(resp.field_result.tags)
+                duration_ms = (time.perf_counter() - start) * 1000
 
-        engine = self.loader.get_engine(domain=domain, standard=standard)
-        composite_engine = self.loader.get_composite_engine(domain=domain, standard=standard)
-        
-        composite_tags = composite_engine.evaluate(record, field_results)
-        all_tags.extend(composite_tags)
+                record_result = RecordClassificationResult(
+                    record_index=record_index,
+                    field_results=field_results,
+                    aggregated_tags=all_tags,
+                    final_level=record_level,
+                    confidence=max((fr.confidence for fr in field_results.values()), default=0.0),
+                    needs_human_review=any(fr.needs_human_review for fr in field_results.values()),
+                )
 
-        # 基准记录等级：从字段裁定等级集合中解析最高等级（保持字段级降级/仲裁裁定有效性）
-        field_levels = [fr.final_level for fr in field_results.values() if fr.final_level]
-        base_record_level = (
-            engine.taxonomy.max_level(*field_levels)
-            if field_levels
-            else engine.taxonomy.default_level
-        )
-        record_level = composite_engine.apply_to_record_level(
-            base_record_level, composite_tags, engine.taxonomy
-        )
+                audit = AuditInfo(
+                    domain=engine.domain,
+                    standard_id=engine.standard_id,
+                    rule_set_version=engine.taxonomy.version,
+                    rules_evaluated=engine.rule_count * len(record),
+                    rules_hit=len(all_tags),
+                    duration_ms=round(duration_ms, 3),
+                )
 
-        duration_ms = (time.monotonic() - start) * 1000
-
-        record_result = RecordClassificationResult(
-            record_index=record_index,
-            field_results=field_results,
-            aggregated_tags=all_tags,
-            final_level=record_level,
-            confidence=max((fr.confidence for fr in field_results.values()), default=0.0),
-            needs_human_review=any(fr.needs_human_review for fr in field_results.values()),
-        )
-
-        audit = AuditInfo(
-            domain=engine.domain,
-            standard_id=engine.standard_id,
-            rule_set_version=engine.taxonomy.version,
-            rules_evaluated=engine.rule_count * len(record),
-            rules_hit=len(all_tags),
-            duration_ms=round(duration_ms, 3),
-        )
-
-        return ClassificationResponse(record_result=record_result, audit_info=audit)
+                response = ClassificationResponse(record_result=record_result, audit_info=audit)
+                for fr in field_results.values():
+                    if fr.final_level:
+                        CLASSIFICATION_TOTAL.labels(
+                            final_level=fr.final_level,
+                            layer=fr.engine_layer or "unknown",
+                        ).inc()
+        except Exception:
+            status = "error"
+            CLASSIFICATION_JOBS_TOTAL.labels(status="error").inc()
+            raise
+        finally:
+            CLASSIFICATION_JOBS_DURATION.labels(status=status).observe(time.perf_counter() - start)
+        CLASSIFICATION_JOBS_TOTAL.labels(status="success").inc()
+        return response
 
     # ------------------------------------------------------------------
     # 表级分类 / Table-level Classification
@@ -487,69 +487,65 @@ class DynClassificationService:
         domain: Optional[str] = None,
         standard: Optional[str] = None,
     ) -> ClassificationResponse:
-        """对整张表进行分类。
+        """对整张表进行分类。"""
+        start = time.perf_counter()
+        status = "success"
+        response: ClassificationResponse | None = None
+        try:
+            with observe_duration(CLASSIFICATION_DURATION, operation="table"):
+                record_results: list[RecordClassificationResult] = []
+                all_tags: list[SecurityTag] = []
 
-        Iterates all rows, classifies each as a record, then aggregates
-        to determine the table-level sensitivity (max across all records).
+                for idx, row in enumerate(rows):
+                    resp = self.classify_record(row, record_index=idx, domain=domain, standard=standard)
+                    if resp.record_result:
+                        record_results.append(resp.record_result)
+                        all_tags.extend(resp.record_result.aggregated_tags)
 
-        Args:
-            schema: 列名列表。
-            rows: 记录列表。
-            domain: 领域标识。
-            standard: 标准标识。
+                # Determine table-level final level (highest across all records).
+                engine = self.loader.get_engine(domain=domain, standard=standard)
+                rec_levels = [r.final_level for r in record_results if r.final_level]
+                table_level = (
+                    engine.taxonomy.max_level(*rec_levels)
+                    if rec_levels
+                    else engine.taxonomy.default_level
+                )
 
-        Returns:
-            ClassificationResponse 包含表分类结果和审计信息。
-        """
-        start = time.monotonic()
+                duration_ms = (time.perf_counter() - start) * 1000
 
-        record_results: list[RecordClassificationResult] = []
-        all_tags: list[SecurityTag] = []
+                table_result = TableClassificationResult(
+                    schema_=schema,
+                    record_results=record_results,
+                    aggregated_tags=all_tags,
+                    final_level=table_level,
+                    confidence=1.0 if all_tags else 0.0,
+                )
 
-        # Classify rows sequentially to avoid shared-state races on the service-wide
-        # caches, lazy-loaded adapters, and ProfileLoader caches when multiple
-        # worker threads from ThreadPoolExecutor concurrently touch the same
-        # mutable service state. The per-row work is CPU-bound under the GIL, so
-        # the marginal speedup from threading is small while the correctness risk
-        # (non-atomic adapter init, cache mutation, and connection leakage) is
-        # real. If high throughput is needed, prefer batching smaller requests or
-        # running table classification in a dedicated process pool.
-        for idx, row in enumerate(rows):
-            resp = self.classify_record(row, record_index=idx, domain=domain, standard=standard)
-            if resp.record_result:
-                record_results.append(resp.record_result)
-                all_tags.extend(resp.record_result.aggregated_tags)
+                audit = AuditInfo(
+                    domain=engine.domain,
+                    standard_id=engine.standard_id,
+                    rule_set_version=engine.taxonomy.version,
+                    rules_evaluated=engine.rule_count * len(rows) * max(len(schema), 1),
+                    rules_hit=len(all_tags),
+                    duration_ms=round(duration_ms, 3),
+                )
 
-        # Determine table-level final level (highest across all records).
-        engine = self.loader.get_engine(domain=domain, standard=standard)
-        rec_levels = [r.final_level for r in record_results if r.final_level]
-        table_level = (
-            engine.taxonomy.max_level(*rec_levels)
-            if rec_levels
-            else engine.taxonomy.default_level
-        )
-
-        duration_ms = (time.monotonic() - start) * 1000
-
-        table_result = TableClassificationResult(
-            schema_=schema,
-            record_results=record_results,
-            aggregated_tags=all_tags,
-            final_level=table_level,
-            confidence=1.0 if all_tags else 0.0,
-        )
-
-        # Audit: total evaluations = rules * rows * columns.
-        audit = AuditInfo(
-            domain=engine.domain,
-            standard_id=engine.standard_id,
-            rule_set_version=engine.taxonomy.version,
-            rules_evaluated=engine.rule_count * len(rows) * max(len(schema), 1),
-            rules_hit=len(all_tags),
-            duration_ms=round(duration_ms, 3),
-        )
-
-        return ClassificationResponse(table_result=table_result, audit_info=audit)
+                response = ClassificationResponse(table_result=table_result, audit_info=audit)
+                for rec in record_results:
+                    for fr in rec.field_results.values():
+                        if fr.final_level:
+                            CLASSIFICATION_TOTAL.labels(
+                                final_level=fr.final_level,
+                                layer=fr.engine_layer or "unknown",
+                            ).inc()
+        except Exception:
+            status = "error"
+            CLASSIFICATION_JOBS_TOTAL.labels(status="error").inc()
+            raise
+        finally:
+            CLASSIFICATION_JOBS_DURATION.labels(status=status).observe(time.perf_counter() - start)
+        CLASSIFICATION_JOBS_TOTAL.labels(status="success").inc()
+        return response
 
     # ------------------------------------------------------------------
     # Dry-Run 预演 / Dry-Run Preview

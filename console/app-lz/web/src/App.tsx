@@ -40,6 +40,7 @@ import { TestRunnerPanel } from './components/TestRunnerPanel';
 import { AuditVerifierPanel } from './components/AuditVerifierPanel';
 import { MetricsPanel } from './components/MetricsPanel';
 import { DataApiPanel } from './components/DataApiPanel';
+import { BenchmarkPanel } from './components/BenchmarkPanel';
 
 export const App: React.FC = () => {
   // ── 导航状态 ──
@@ -263,6 +264,13 @@ export const App: React.FC = () => {
             onProtocolChange={setActiveProtocol}
             onRefresh={fetchTopology}
             loading={loadingTopo}
+          />
+        )}
+
+        {/* 性能与吞吐量压测大屏 */}
+        {currentTab === 'benchmark' && (
+          <BenchmarkPanel
+            apis={dataApiDefs}
           />
         )}
 
