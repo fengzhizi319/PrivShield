@@ -1,0 +1,65 @@
+# =============================================================================
+# PrivShield - Go Engine Override for docker-compose.dev.yml
+# PrivShield - Go 原生引擎替代覆盖层（开发模式）
+#
+# 使用方式 / Usage:
+#   docker compose -f docker-compose.dev.yml -f docker-compose.dev-go-engine.yml up -d
+#
+# 或通过脚本启动：
+#   bash scripts/dev/docker-start-bff-go-agent.sh
+#
+# 说明：
+#   本文件覆盖 docker-compose.dev.yml 中的 PrivShield 服务定义，
+#   将 Python 引擎替换为 Go 原生引擎（engine-go/Dockerfile 构建）。
+#   Go 引擎镜像极小（~15MB），启动速度快（<1s），无 Python/ML 依赖。
+#   开发模式下：纯文本日志、关闭 TLS、挂载 budget-db 卷。
+#
+# 环境变量：
+#   PRIVSHIELD_GO_IMAGE: Go 引擎镜像名（默认 privshield-go:1.0.0）
+# =============================================================================
+
+services:
+
+  # 覆盖 docker-compose.dev.yml 中的 PrivShield 服务定义
+  PrivShield:
+    # 使用 Go 引擎镜像
+    image: ${PRIVSHIELD_GO_IMAGE:-privshield-go:1.0.0}
+    # Go 引擎不需要本地构建（由启动脚本预先构建）
+    build: null
+    pull_policy: if_not_present
+    container_name: PrivShield-Go-dev
+    environment:
+      # Go 引擎基础配置
+      PRIVACY_REST_HOST: "0.0.0.0"
+      PRIVACY_REST_PORT: "8079"
+      PRIVACY_GRPC_HOST: "0.0.0.0"
+      PRIVACY_GRPC_PORT: "50051"
+      PRIVACY_LOG_LEVEL: "${PRIVACY_LOG_LEVEL:-DEBUG}"
+      PRIVACY_LOG_FORMAT: "text"
+      PRIVACY_SERVICE_NAME: "PrivShield-Go-Dev"
+      # 开发模式：关闭 TLS 与鉴权
+      PRIVACY_TLS_ENABLED: "false"
+      PRIVACY_AUTH_ENABLED: "false"
+      PRIVACY_RATE_LIMIT_ENABLED: "false"
+    # Go 引擎不需要 Python 源码挂载，仅保留数据卷
+    volumes:
+      - budget-db-dev:/data/budget
+    # Go 引擎启动极快，healthcheck 间隔缩短
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8079/readyz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    # Go 引擎资源消耗远低于 Python 引擎（开发模式轻量配额）
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+    # Go 引擎 gRPC GracefulStop 更快
+    stop_grace_period: 15s
+    restart: "no"

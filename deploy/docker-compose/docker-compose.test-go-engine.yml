@@ -1,0 +1,54 @@
+# =============================================================================
+# PrivShield - Go Engine Override for docker-compose.test.yml
+# PrivShield - Go 原生引擎替代覆盖层（测试模式）
+#
+# 使用方式 / Usage:
+#   docker compose -f docker-compose.test.yml -f docker-compose.test-go-engine.yml \
+#     up --abort-on-container-exit --exit-code-from test-runner
+#
+# 说明：
+#   本文件覆盖 docker-compose.test.yml 中的 PrivShield 服务定义，
+#   将 Python 引擎替换为 Go 原生引擎，用于 CI 集成测试。
+#   Go 引擎启动极快（<1s），可显著缩短 CI 流水线耗时。
+#
+# 环境变量：
+#   PRIVSHIELD_GO_IMAGE: Go 引擎镜像名（默认 privshield-go:1.0.0）
+# =============================================================================
+
+services:
+
+  # 覆盖 docker-compose.test.yml 中的 PrivShield 服务定义
+  PrivShield:
+    # 使用 Go 引擎镜像
+    image: ${PRIVSHIELD_GO_IMAGE:-privshield-go:1.0.0}
+    # Go 引擎不需要本地构建
+    build: null
+    pull_policy: if_not_present
+    container_name: PrivShield-Go-test
+    environment:
+      PRIVACY_REST_HOST: "0.0.0.0"
+      PRIVACY_REST_PORT: "8079"
+      PRIVACY_GRPC_HOST: "0.0.0.0"
+      PRIVACY_GRPC_PORT: "50051"
+      PRIVACY_SERVICE_NAME: "PrivShield-Go-test"
+      PRIVACY_LOG_LEVEL: "INFO"
+      PRIVACY_LOG_FORMAT: "text"
+      PRIVACY_TLS_ENABLED: "false"
+      PRIVACY_AUTH_ENABLED: "false"
+      PRIVACY_RATE_LIMIT_ENABLED: "false"
+    # Go 引擎不需要 Python 配置挂载
+    volumes:
+      - test-budget-db:/data/budget
+    # Go 引擎 healthcheck（启动极快，缩短等待）
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8079/readyz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
+      start_period: 3s
+    # Go 引擎测试资源配额（极轻量）
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M

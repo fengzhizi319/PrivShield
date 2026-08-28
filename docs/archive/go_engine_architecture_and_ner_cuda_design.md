@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v22.0.0-drafted (路径 C 演进草案 Phase 18 脚本与部署 Go 引擎全量接入版)
+> **版本**：v23.0.0-drafted (路径 C 演进草案 Phase 19 脚本与部署 Go 引擎全量补全版)
 > **编写日期**：2026-08-29
-> **修订说明**：v22.0.0 完成 Phase 18 实现：脚本与部署 Go 引擎全量接入。新增 6 个 Go 引擎版 scripts/dev/ 脚本（docker-start-go-agent/stop/bff-go-agent/go-all/health_check_go/integration-test-go）+ 2 个 K8s 部署清单（deployment-go.yaml/service-go.yaml）+ 1 个 Docker Compose 覆盖层（docker-compose.go-engine.yml）+ Helm chart Go 引擎切换支持（engineType: go）。
+> **修订说明**：v23.0.0 完成 Phase 19 实现：脚本与部署 Go 引擎全量补全。新增 6 个 Go 引擎版 scripts/dev/ 脚本（dev-bff-go-agent/start_all_services_go/e2e-start-all-services-go/benchmark_performance_go/stop_all_services_go/dev-app-lz-go）+ 3 个 Docker Compose Go 引擎覆盖层（dev/prod/test），实现 scripts/dev 下全部脚本 Go 引擎版本覆盖 + deploy 全场景 Go 引擎支持。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 18 已实现 | Phase 1-17 骨架 + **Phase 18 脚本与部署 Go 引擎全量接入**（6 个 Go 引擎版 dev 脚本 + 2 个 K8s 清单 + 1 个 Docker Compose 覆盖层 + Helm engineType 切换）。详见附录 A v22.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 19 已实现 | Phase 1-19 骨架 + **Phase 19 脚本与部署 Go 引擎全量补全**（6 个新增 dev 脚本 + 3 个 Docker Compose 覆盖层，总计 16 个 Go 引擎版 dev 脚本 + 4 个 Docker Compose 覆盖层 + K8s/Helm 全链路）。详见附录 A v23.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -1444,7 +1444,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-18 已实现（详见 附录 A v5.0.0–v22.0.0 修订记录）。Phase 18 脚本与部署 Go 引擎全量接入已完成（6 个 dev 脚本 + Docker Compose/K8s/Helm 全链路）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
+> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-19 已实现（详见 附录 A v5.0.0–v23.0.0 修订记录）。Phase 19 脚本与部署 Go 引擎全量补全已完成（6 个新增 dev 脚本 + 3 个 Docker Compose 覆盖层，实现 scripts/dev 全量 Go 引擎版本覆盖 + deploy 全场景 Go 引擎支持）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2303,6 +2303,29 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v23.0.0 修订（v22.0.0 → v23.0.0）
+
+本次修订完成 Phase 19 实现：脚本与部署 Go 引擎全量补全：
+
+| 修订项 | v22.0.0 状态 | v23.0.0 实现 |
+|---|---|---|
+| scripts/dev/ Go 引擎脚本 | 10 个（Phase 18） | 新增 6 个：dev-bff-go-agent/start_all_services_go/e2e-start-all-services-go/benchmark_performance_go/stop_all_services_go/dev-app-lz-go，总计 16 个 |
+| deploy/docker-compose Go 覆盖层 | 1 个（docker-compose.go-engine.yml） | 新增 3 个：docker-compose.dev-go-engine.yml/prod-go-engine.yml/test-go-engine.yml，总计 4 个 |
+| scripts/dev 全量覆盖 | 部分脚本有 Go 版本 | scripts/dev 下全部主要脚本均有 Go 引擎版本 |
+| deploy 全场景支持 | 仅主 compose + K8s + Helm | dev/prod/test 三种场景均有 Go 引擎覆盖层 |
+
+**Phase 19 实现清单**：
+- [x] `scripts/dev/dev-bff-go-agent.sh` — Go 引擎本地开发控制台（Go Engine + BFF + Vite HMR）
+- [x] `scripts/dev/start_all_services_go.sh` — Go 引擎后台启动全栈（Agent + BFF + 可选微服务群）
+- [x] `scripts/dev/e2e-start-all-services-go.sh` — Go 引擎 E2E 全流程服务启动
+- [x] `scripts/dev/benchmark_performance_go.sh` — Go 引擎性能基准测试工具
+- [x] `scripts/dev/stop_all_services_go.sh` — Go 引擎优雅停止全栈服务
+- [x] `scripts/dev/dev-app-lz-go.sh` — Go 引擎调度之眼控制台（Go Engine + 4 微服务 + BFF + Vite）
+- [x] `deploy/docker-compose/docker-compose.dev-go-engine.yml` — 开发模式 Go 引擎覆盖层
+- [x] `deploy/docker-compose/docker-compose.prod-go-engine.yml` — 生产模式 Go 引擎覆盖层
+- [x] `deploy/docker-compose/docker-compose.test-go-engine.yml` — 测试模式 Go 引擎覆盖层
+- [x] 全量测试 — privacy-go-sdk (7 包 ok) + engine-go (6 包 ok)，全部通过
+
 ### v22.0.0 修订（v21.0.0 → v22.0.0）
 
 本次修订完成 Phase 18 实现：脚本与部署 Go 引擎全量接入：
@@ -2764,6 +2787,7 @@ PrivShield/
 - [x] gRPC TypedServer 全量 RPC 对齐：补齐 18 个缺失 RPC 方法（LDP 4 + QOL 1 + DP 10 + KAno/DataFrame 3），Proto 34/34 全覆盖 + 20 个 gRPC 集成测试；
 - [x] REST 路由全量对齐：新增 18 个端点（14 DP + 1 mask/dataframe + 3 health），REST 端点从 23 个扩展到 41 个 + 18 个集成测试；
 - [x] 脚本与部署 Go 引擎全量接入：6 个 dev 脚本 + Docker Compose 覆盖层 + K8s 清单 + Helm engineType 切换；
+- [x] 脚本与部署 Go 引擎全量补全：6 个新增 dev 脚本（dev-bff-go-agent/start_all_services_go/e2e-start-all-services-go/benchmark_performance_go/stop_all_services_go/dev-app-lz-go）+ 3 个 Docker Compose 覆盖层（dev/prod/test），总计 16 个 Go 引擎版 dev 脚本 + 4 个 Docker Compose 覆盖层；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。
