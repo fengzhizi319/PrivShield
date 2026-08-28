@@ -15,7 +15,7 @@
 | 统一错误信封 | ✅ Phase 1 完成 | Python `engine/observability/envelope.py` + Go `pkg/middleware/envelope.go`；FastAPI/Starlette 全局捕获；MaxBodySize 走信封 | 无 |
 | 全链路分布式追踪 | 🟡 Phase 1 主体完成，部分 outbound 待补齐 | HTTP/gRPC 入口注入 `X-Request-ID`/`X-Trace-ID`；engine gRPC 提取 metadata；service-hub task 持久化 TraceID | BFF-Go REST 向上游透传（已做需文档确认）；service-hub→datasource-mgr gRPC 双头（已做需文档确认）；app-lz/bff-go outbound 透传 |
 | SSOT 数据源命名 | ✅ Phase 1 完成 | `pkg/naming/` SSOT；Go/Python/TS 常量对齐；`make lint-naming` | 无 |
-| SQLite → PostgreSQL 迁移 | 🟡 Phase 1 工具可用，验真待增强 | `pkg/store/cmd/migrate/main.go` + `scripts/prod/migrate_sqlite_to_postgres.sh`；哈希链迁移后校验 | 增加 snapshot 密文 AES-GCM 验真；只读锁定/幂等重跑优化 |
+| SQLite → PostgreSQL 迁移 | 🟡 Phase 1 工具可用，验真待增强 | `pkg/store/cmd/migrate/main.go` + `scripts/prod/migrate_sqlite_to_postgres.sh`；哈希链迁移后校验 | 增加 snapshot 密文 SM4-GCM 验真；只读锁定/幂等重跑优化 |
 | mTLS CN 白名单 | 🟡 库完成，服务端注册待完成 | `pkg/tlsutil/whitelist.go` + `grpc_interceptor.go`；热重载（mtime 轮询）；Python 端消费 | Go service-hub/datasource-mgr/audit-log/bff-go gRPC server 注册拦截器；统一 `config/mtls-whitelist.yaml` scope 语义 |
 | 前端双控制台 | ✅ Phase 1 完成 | `console/web` 与 `console/app-lz/web` 统一错误解析、状态指示器、动态 API 渲染 | 无 |
 | 可观测性指标 | 🟡 定义完成，部分未埋点 | Python/Go metric 定义；中间件计数；部分 primitive 埋点 | 补齐 `privacy_classification_*`、`privacy_*_duration_seconds` 埋点；Go `service_hub_ready` / `circuit_breaker_state` 更新 |
@@ -47,7 +47,7 @@
 1. **错误响应信封格式差异** ✅ — Python/Go 双端已统一，`MaxBodySize` 也已接入信封；
 2. **追踪上下文断链风险** 🟡 — HTTP/gRPC 入口已贯通；Task `TraceID` 已持久化；剩余 outbound 补齐见 [§10](#10-第二阶段改造计划phase-2)；
 3. **数据源命名硬编码** ✅ — SSOT + `make lint-naming` 已落地；
-4. **SQLite → PostgreSQL 割接** 🟡 — 迁移工具已可用，支持 `dry-run`/`verify`；snapshot 密文原样迁移，AES-GCM 验真待 Phase 2。
+4. **SQLite → PostgreSQL 割接** 🟡 — 迁移工具已可用，支持 `dry-run`/`verify`；snapshot 密文原样迁移，SM4-GCM 验真待 Phase 2。
 
 ---
 
@@ -87,7 +87,7 @@ flowchart TD
     subgraph LayerStorageSecurity ["5. 统一存储与密码学基座 (Storage & Crypto Foundations)"]
         SSOT["pkg/naming<br/>(全局唯一事实源)"]
         StoreFacade["pkg/store<br/>(Memory / SQLite / PostgreSQL)"]
-        EnvelopeCrypto["pkg/crypto<br/>(AES-256-GCM enc:v1:...)"]
+        EnvelopeCrypto["pkg/crypto<br/>(SM4-GCM enc:v1:...)"]
         mTLSAuth["pkg/tlsutil<br/>(TLS 1.3 mTLS + CN 白名单)"]
     end
 
@@ -777,7 +777,7 @@ SIGTERM/SIGINT 到达
 | 审计日志 (`audit_logs`) | `AUDIT_LOG_RETENTION_DAYS`（默认 90 天） | 超期自动清理，保留哈希链完整性 |
 | 任务记录 (`tasks`) | 按服务配置 | 已完成任务定期归档 |
 | 隐私预算日志 | 永久保留 | 仅追加，不删除 |
-| 快照加密数据 | 跟随审计日志 | AES-256-GCM 密文随日志一同清理 |
+| 快照加密数据 | 跟随审计日志 | SM4-GCM 密文随日志一同清理 |
 
 ---
 
@@ -949,8 +949,8 @@ bash ./scripts/prod/prod_health_check.sh
 | **Privacy Budget Accountant**    | —                                                            | **隐私预算会计**。追踪并管理各命名空间（namespace）下 ε/δ 的消耗与剩余，防止超支，支持时间窗口自动重置与跨实例同步。 |
 | **Hash Chain**                   | —                                                            | **哈希链**。将审计日志条目按时间顺序串联，每条记录包含前一条记录的哈希值，形成区块链式防篡改结构。PrivShield 的 9 要素哈希链确保审计日志的完整性与可追溯性。 |
 | **HMAC**                         | Hash-based Message Authentication Code                       | **基于哈希的消息认证码**。使用密钥与哈希函数生成的认证标签，用于验证数据完整性与真实性。PrivShield 用于敏感字段的确定性哈希。 |
-| **AES-256-GCM**                  | Advanced Encryption Standard - 256 bit - Galois/Counter Mode | **高级加密标准-256位-GCM模式**。对称加密算法，提供机密性（AES-256）与认证加密（GCM），防止密文篡改。PrivShield 用于快照信封加密，密文前缀标记为 `enc:v1:`。 |
-| **Snapshot Envelope Encryption** | —                                                            | **快照信封加密**。对审计快照数据先进行 AES-256-GCM 加密，再将密文存入数据库，读取时透明解密。即使数据库被拖库，敏感内容仍为密文。 |
+| **SM4-GCM**                      | Commercial Cryptography SM4 - Galois/Counter Mode            | **国密SM4-GCM模式**。国家商用密码标准分组对称加密算法（GB/T 32907-2016），提供机密性与认证加密（GCM），防止密文篡改。PrivShield 用于快照信封加密，密文前缀标记为 `enc:v1:`。 |
+| **Snapshot Envelope Encryption** | —                                                            | **快照信封加密**。对审计快照数据先进行 SM4-GCM 加密，再将密文存入数据库，读取时透明解密。即使数据库被拖库，敏感内容仍为密文。 |
 | **Conservative Fallback**        | —                                                            | **保守回退**。当高级隐私机制（如 LLM 仲裁）不可用时，系统不降格安全等级，而是采用更保守的处理策略（如提升分类敏感度、增强脱敏强度），确保安全底线不被突破。 |
 
 ---
@@ -1074,7 +1074,7 @@ bash ./scripts/prod/prod_health_check.sh
 | CN          | Common Name                                          | 通用名称（证书）       | §3.5         |
 | DDoS        | Distributed Denial of Service                        | 分布式拒绝服务         | §2, §7.2     |
 | HMAC        | Hash-based Message Authentication Code               | 基于哈希的消息认证码   | §2.3         |
-| AES-256-GCM | Advanced Encryption Standard 256 Galois/Counter Mode | 高级加密标准-256-GCM   | §3.4         |
+| SM4-GCM     | Commercial Cryptography SM4 Galois/Counter Mode      | 国密SM4-GCM            | §3.4         |
 | WAL         | Write-Ahead Logging                                  | 预写式日志             | §3.4         |
 | DSN         | Data Source Name                                     | 数据源名称             | §2.2         |
 | HPA         | Horizontal Pod Autoscaler                            | 水平 Pod 自动扩缩      | §8.1         |
