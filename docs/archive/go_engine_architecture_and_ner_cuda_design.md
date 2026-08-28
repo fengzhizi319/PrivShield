@@ -1,11 +1,11 @@
 # 数盾 PrivShield-go (路径 C) 架构演进规划与 Go+CUDA 异构推理设计草案
 
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
-> **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。当前 `pkg/` 共享库已提供部分能力，`engine-go/` / `privacy-go-sdk/` / CUDA NER 等模块尚未实现。
+> **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v4.0.0-drafted (路径 C 演进草案修订版)
+> **版本**：v5.0.0-drafted (路径 C 演进草案实现版)
 > **编写日期**：2026-08-28
-> **修订说明**：v4.0.0 修复 7 类代码一致性问题：tlsutil 函数签名对齐、§13 重复编号修正、硬编码路径清理、Mermaid 拓扑虚假链路移除、Go 版本与 Dockerfile 版本号更新。
+> **修订说明**：v5.0.0 完成 Phase 1 代码实现：创建 `privacy-go-sdk` 隐私原语库（masking/dp/ldp/kano/qol/budget 6 个包）与 `engine-go` 引擎骨架（AC 自动机规则引擎 + REST 服务器 + 可观测性基础设施），编写单元测试，验证代码可编译。
 
 ---
 
@@ -2272,6 +2272,29 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v5.0.0 修订（v4.0.0 → v5.0.0）
+
+本次修订完成 Phase 1 代码实现，将设计文档转化为可运行的 Go 原生引擎骨架：
+
+| 修订项 | v4.0.0 状态 | v5.0.0 实现 |
+|---|---|---|
+| `privacy-go-sdk` 模块 | 目标结构，尚未创建 | 创建 6 个包：`masking/`（字段掩码）、`dp/`（差分隐私）、`ldp/`（本地差分隐私）、`kano/`（K-匿名）、`qol/`（查询混淆）、`budget/`（隐私预算会计） |
+| `engine-go` 模块 | 目标结构，尚未创建 | 创建引擎骨架：`cmd/privshield-agent/main.go`（双协议服务入口）、`internal/dynclassification/engine.go`（AC 自动机规则引擎）、`internal/observability/logger.go`（可观测性） |
+| 单元测试 | 待补充 | 为 `masking`、`dp`、`budget`、`dynclassification` 编写单元测试，覆盖核心 API |
+| 文档状态 | "尚未实现" | 更新为 "Phase 1 已实现"，标注后续 Phase 2-4 计划 |
+
+**实现清单**：
+- [x] `privacy-go-sdk/masking` — 字段级 PII 脱敏（身份证、手机、银行卡、姓名、地址、邮箱）+ HMAC 加盐散列
+- [x] `privacy-go-sdk/dp` — Laplace/Gaussian 机制、自适应梯度截断、向量加噪、NoisyCount/Sum/Mean
+- [x] `privacy-go-sdk/ldp` — 二值 Randomized Response、多类别 O-RR、无偏频数估计、数值型 LDP
+- [x] `privacy-go-sdk/kano` — Mondrian 算法 K-匿名、准标识符泛化、L-多样性（基础版）
+- [x] `privacy-go-sdk/qol` — 医疗/通用诱饵词库、Fisher-Yates 随机置乱注入
+- [x] `privacy-go-sdk/budget` — 无锁原子 (ε,δ) 预算会计、滑动窗口自动重置
+- [x] `engine-go/internal/dynclassification` — AC 自动机 + 字段名正则 Layer 1 规则引擎、LRU 缓存
+- [x] `engine-go/cmd/privshield-agent` — Gin REST 服务器、优雅停机、环境变量配置
+- [x] `engine-go/internal/observability` — 结构化日志（slog JSON）、Prometheus 中间件、请求日志
+- [x] 单元测试 — masking/dp/budget/dynclassification 共 4 个测试文件
+
 ### v4.0.0 修订（v3.4.1 → v4.0.0）
 
 本次修订基于对当前仓库代码的再次审计，修复 7 类设计与代码不一致问题：
@@ -2300,7 +2323,11 @@ PrivShield/
 | 工程错误示例 | `r.Any("/*proxyPath")`、`FrameData`、忽略 `session.Run` 错误等 | 增加说明或修正为 `NoRoute`、错误检查 |
 
 **待办（建议后续更新本附录时同步完成）**：
-- [ ] 创建 `engine-go/`、`privacy-go-sdk/`、`cmd/privshield-*` 目录并实现隐私原语；
+- [x] 创建 `privacy-go-sdk/` 目录并实现 6 个隐私原语包（masking/dp/ldp/kano/qol/budget）；
+- [x] 创建 `engine-go/` 目录并实现引擎骨架（AC 自动机 + REST 服务器 + 可观测性）；
+- [x] 编写 `masking`/`dp`/`budget`/`dynclassification` 单元测试；
 - [ ] 补充 `go test -bench`、网关压测、GPU NER 压测的实测数据，替换第 14 章目标值；
+- [ ] 实现 gRPC 服务器（Phase 2）；
+- [ ] 实现 Layer 2 Small-NER（ONNX Runtime）与 Layer 3 LLM/VLM 仲裁（Phase 3）；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。

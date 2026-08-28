@@ -7,4 +7,6 @@ use (
 	./services/audit-log
 	./console/bff-go
 	./console/app-lz/bff-go
+	./privacy-go-sdk
+	./engine-go
 )
