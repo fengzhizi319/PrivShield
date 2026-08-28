@@ -2,8 +2,8 @@
 
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构全面演进至 **Go 原生高性能微服务架构 (路径 C)** 的系统级深度架构设计、核心源码实现与生产迁移落地规约（Production Blueprint）。
 > **顶层设计对齐**：全面严格对齐 [`docs/archive/unified_design.md`](unified_design.md) (v15.1.0) 统一规范（包含统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。
-> **参考实现**：`~/code/sfwork/PrivShield-go` (包含 `privacy-go-sdk`、`internal/dynclassification`、`internal/service`、`internal/grpcserver`、`internal/rest`、`internal/gateway`) 与 `pkg/` 共享基础库。
-> **版本**：v3.2.0 (代码实施步骤超细化生产指南版)
+> **参考实现与存量资产**：深度借鉴并复用 `~/code/sfwork/PrivShield-go` (含 `privacy-go-sdk`、`internal/gateway`、`internal/dynclassification`、`internal/service`、`internal/grpcserver`、`internal/rest`) 与当前主仓库 `pkg/` 共享基础库。
+> **版本**：v3.3.0 (存量 Go 代码资产复用与工程落地指南版)
 > **编写日期**：2026-08-28
 
 ---
@@ -30,7 +30,7 @@
    * 9.5 [东西向零信任 mTLS 回源与南北向 TLS 终结](#95-东西向零信任-mtls-回源与南北向-tls-终结)
 10. [统一存储、审计存证与密码学基座 (Storage, Crypto & Audit)](#10-统一存储审计存证与密码学基座-storage-crypto--audit)
 11. [全栈可观测性与监控指标规约 (Observability Spec)](#11-全栈可观测性与监控指标规约-observability-spec)
-12. [全流程代码工程实施指南与超细化落地步骤 (Step-by-Step Implementation Playbook)](#12-全流程代码工程实施指南与超细化落地步骤-step-by-step-implementation-playbook)
+12. [全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook)](#12-全流程代码工程实施指南与落地步骤-step-by-step-implementation-playbook)
     * 12.1 [工程目录结构规划与包依赖划分](#121-工程目录结构规划与包依赖划分)
     * 12.2 [Step 1: 环境准备与 CGO/ONNX 动态库绑定](#122-step-1-环境准备与-cgoonnx-动态库绑定)
     * 12.3 [Step 2: 纯 Go 隐私原语库与单元测试实现 (`privacy-go-sdk`)](#123-step-2-纯-go-隐私原语库与单元测试实现-privacy-go-sdk)
@@ -40,9 +40,14 @@
     * 12.7 [Step 6: 双协议服务端实现与统一中间件挂载](#127-step-6-双协议服务端实现与统一中间件挂载)
     * 12.8 [Step 7: L7 自适应负载均衡网关实现 (`internal/gateway`)](#128-step-7-l7-自适应负载均衡网关实现-internalgateway)
     * 12.9 [Step 8: 自动化测试、性能压测与影子流量验证](#129-step-8-自动化测试性能压测与影子流量验证)
-13. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#13-性能基准量化评估与容量规划-benchmark--sizing)
-14. [构建、依赖管理与生产部署清单 (Build & K8s Packaging)](#14-构建依赖管理与生产部署清单-build--k8s-packaging)
-15. [双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)](#15-双轨影子流量验证与平滑迁移演进路线-migration-playbook)
+13. [存量 Go 代码资产复用与工程借鉴实战指南 (Reusing Existing Go Assets)](#13-存量-go-代码资产复用与工程借鉴实战指南-reusing-existing-go-assets)
+    * 13.1 [现有 Go 资产盘点与复用度评估矩阵](#131-现有-go-资产盘点与复用度评估矩阵)
+    * 13.2 [网关子系统复用实战 (`sfwork/PrivShield-go/internal/gateway`)](#132-网关子系统复用实战-sfworkprivshield-gointernalgateway)
+    * 13.3 [主工程 `pkg/` 共享基础设施库无缝接入](#133-主工程-pkg-共享基础设施库无缝接入)
+    * 13.4 [跨工程资产同步与自动化合并迁移指令](#134-跨工程资产同步与自动化合并迁移指令)
+14. [性能基准量化评估与容量规划 (Benchmark & Sizing)](#14-性能基准量化评估与容量规划-benchmark--sizing)
+15. [构建、依赖管理与生产部署清单 (Build & K8s Packaging)](#15-构建依赖管理与生产部署清单-build--k8s-packaging)
+16. [双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)](#16-双轨影子流量验证与平滑迁移演进路线-migration-playbook)
 
 ---
 
@@ -1299,7 +1304,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ---
 
-## 12. 全流程代码工程实施指南与超细化落地步骤 (Step-by-Step Implementation Playbook)
+## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook)
 
 本节为研发团队提供覆盖 8 个工程里程碑的超细化落地实施清单，包含具体文件路径、CGO 编译指令、核心代码实现与验收基准。
 
@@ -1830,11 +1835,102 @@ func main() {
 
 ---
 
-## 13. 性能基准量化评估与容量规划 (Benchmark & Sizing)
+## 13. 存量 Go 代码资产复用与工程借鉴实战指南 (Reusing Existing Go Assets)
+
+为了最大化复用已有开发成果，避免“重复造轮子”，本节详细梳理当前项目群中已就绪的成熟 Go 代码资产，并给出具体的接入和移植方法。
+
+### 13.1 现有 Go 资产盘点与复用度评估矩阵
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                               存量 Go 代码资产与复用度评估全景表                                  │
+├───────────────────────────────┬────────────────────────────────────┬──────────┬──────────────────┤
+│ 模块资产来源                  │ 对应功能与实现内容                 │ 可复用度 │ 复用与改造策略   │
+├───────────────────────────────┼────────────────────────────────────┼──────────┼──────────────────┤
+│ `sfwork/PrivShield-go/`       │                                    │          │                  │
+│  ├─ `internal/gateway/`       │ 813 行完整负载均衡器/熔断/双轨探活 │ **95%**  │ 直接移植，升级P2C│
+│  ├─ `privacy-go-sdk/`         │ 50 个原语/算子/分词器/ONNX实现     │ **90%**  │ 导入作为核心算法 │
+│  ├─ `internal/grpcserver/`    │ gRPC Protocol Server 骨架          │ **85%**  │ 接入 pkg/ 拦截器 │
+│  └─ `internal/rest/`          │ Gin REST 接口与路由映射            │ **85%**  │ 挂载统一错误信封 │
+│ `PrivShield/pkg/` (主工程)    │                                    │          │                  │
+│  ├─ `pkg/middleware/`         │ 统一错误信封 / TraceID / 限流中间件│ **100%** │ 全量直接接入     │
+│  ├─ `pkg/tlsutil/`            │ mTLS CN 白名单热重载拦截器         │ **100%** │ 全量直接接入     │
+│  ├─ `pkg/naming/`             │ SSOT 命名事实源 (DSYibao/Kangyang) │ **100%** │ 替换所有硬编码   │
+│  └─ `pkg/store/postgres/`     │ Phase B PostgreSQL 租约存储与哈希链│ **100%** │ 状态与任务复用   │
+│ `PrivShield/console/bff-go/`  │                                    │          │                  │
+│  └─ `internal/agent/`         │ gRPC 连接池、重试与自愈探针        │ **90%**  │ 提取为通用客户端 │
+└───────────────────────────────┴────────────────────────────────────┴──────────┴──────────────────┘
+```
+
+---
+
+### 13.2 网关子系统复用实战 (`sfwork/PrivShield-go/internal/gateway`)
+
+在 `/home/charles/code/sfwork/PrivShield-go/internal/gateway/` 中已包含成熟的负载均衡与代理实现，可直接复用并升级：
+
+1. **复用 `balancer.go` 的调度核心与三态状态机**：
+   - **调度策略**：直接复用 `StrategyRoundRobin`、`StrategyWeightedRoundRobin` (Nginx SWRR 平滑加权轮询)、`StrategyLeastConnections`、`StrategyWeightedRandom`；
+   - **三态熔断器**：直接复用 `CircuitBreaker` 状态机（`Closed` ➔ `Open` ➔ `Half-Open`），其包含连续失败计数与冷却恢复时间窗口；
+   - **主动双轨探活**：直接复用 `CheckBackendHealth()` 函数，其已实现并发 HTTP `/health` JSON 状态解析与 gRPC `Health/Check` 探测。
+2. **复用 `grpc_proxy.go` 的透明流式转发**：
+   - 借鉴其基于 `grpc.UnknownServiceHandler` 的透明转发机制，免去网关编译业务 `.pb.go` 的依赖。
+3. **升级与改造点**：
+   - 在 `balancer.go` 中新增 `SelectNodeP2C()` 幂律双选自适应调度算法（见本文档 §9.2）；
+   - 在 `http_proxy.go` 中接入 `pkg/middleware/envelope.go`，确保网关自身拦截错误与后端错误均输出统一 5 字段 JSON 格式。
+
+---
+
+### 13.3 主工程 `pkg/` 共享基础设施库无缝接入
+
+`PrivShield-go` 作为主工程的核心组件，必须全面导入并挂载 `pkg/`：
+
+1. **统一错误信封接入 (`pkg/middleware/envelope.go`)**：
+   - 彻底废除 Go 引擎中原有的旧版错误响应，统一使用 `middleware.AbortWithError(c, status, code, msg, detail)`；
+2. **SSOT 数据源别名收敛 (`pkg/naming/`)**：
+   - 将所有涉及医保与康养的路由和参数判断，统一收敛至 `naming.DSYibao` 与 `naming.DSKangyang`，未知数据源调用 `naming.ValidateDatasourceID()` 并在不合规时阻断；
+3. **mTLS CN 动态白名单接入 (`pkg/tlsutil/`)**：
+   - gRPC Server 显式注册 `tlsutil.NewWhitelistUnaryInterceptor(whitelistPath)` 与 `tlsutil.NewWhitelistStreamInterceptor(whitelistPath)`，自动实现基于 `config/mtls-whitelist.yaml` 的 5 秒文件 mtime 轮询热重载。
+
+---
+
+### 13.4 跨工程资产同步与自动化合并迁移指令
+
+研发人员可通过以下脚本快速完成代码资产的同步、合并与编译验证：
+
+```bash
+#!/bin/bash
+set -e
+
+SOURCE_DIR="/home/charles/code/sfwork/PrivShield-go"
+TARGET_DIR="/home/charles/code/PrivShield"
+
+echo "=== [1/4] 同步 privacy-go-sdk 隐私原语与分类引擎 ==="
+mkdir -p ${TARGET_DIR}/privacy-go-sdk
+cp -r ${SOURCE_DIR}/privacy-go-sdk/* ${TARGET_DIR}/privacy-go-sdk/
+
+echo "=== [2/4] 同步 internal/gateway 负载均衡与网关代码 ==="
+mkdir -p ${TARGET_DIR}/internal/gateway
+cp -r ${SOURCE_DIR}/internal/gateway/* ${TARGET_DIR}/internal/gateway/
+
+echo "=== [3/4] 同步 cmd 入口文件 ==="
+mkdir -p ${TARGET_DIR}/cmd/privshield-agent ${TARGET_DIR}/cmd/privshield-gateway
+cp -r ${SOURCE_DIR}/cmd/privshield-agent/* ${TARGET_DIR}/cmd/privshield-agent/
+cp -r ${SOURCE_DIR}/cmd/privshield-gateway/* ${TARGET_DIR}/cmd/privshield-gateway/
+
+echo "=== [4/4] 编译与单元测试验证 ==="
+cd ${TARGET_DIR}
+go mod tidy
+go test -v -race ./privacy-go-sdk/... ./internal/gateway/...
+echo "=== 资产同步与验证全部成功 ==="
+```
+
+---
+
+## 14. 性能基准量化评估与容量规划 (Benchmark & Sizing)
 
 在 16 逻辑核 / 32GB 内存 / NVIDIA RTX 4090 (24GB) 环境实测与理论测算：
 
-### 13.1 性能与资源全面对比
+### 14.1 性能与资源全面对比
 
 | 核心指标 | Python 引擎 (当前) | Go 原生引擎 (路径 C) | 提升幅度 |
 |---|---|---|---|
@@ -1851,9 +1947,9 @@ func main() {
 
 ---
 
-## 14. 构建、依赖管理与生产部署清单 (Build & K8s Packaging)
+## 15. 构建、依赖管理与生产部署清单 (Build & K8s Packaging)
 
-### 14.1 Multi-Stage 生产级 Dockerfile
+### 15.1 Multi-Stage 生产级 Dockerfile
 
 ```dockerfile
 # ── Stage 1: Go 编译环境 ──
@@ -1868,7 +1964,7 @@ RUN go mod download
 
 COPY . .
 # 同时编译 Agent 与 Gateway 二进制
-RUN go build -ldflags="-s -w -X 'main.Version=3.2.0' -X 'main.BuildTime=$(date)'" \
+RUN go build -ldflags="-s -w -X 'main.Version=3.3.0' -X 'main.BuildTime=$(date)'" \
     -o /build/bin/privshield-agent ./cmd/privshield-agent && \
     go build -ldflags="-s -w" -o /build/bin/privshield-gateway ./cmd/privshield-gateway
 
@@ -1903,7 +1999,7 @@ ENTRYPOINT ["/app/privshield-agent"]
 
 ---
 
-## 15. 双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)
+## 16. 双轨影子流量验证与平滑迁移演进路线 (Migration Playbook)
 
 为确保从 Python 引擎向 Go 引擎的无故障平滑过渡，制定三阶段迁移演进路线：
 
