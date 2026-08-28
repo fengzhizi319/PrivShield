@@ -11,11 +11,11 @@
 | 测试包 | 测试文件 | 覆盖内容与核心断言 |
 |---|---|---|
 | `internal/grpcserver` | `server_test.go` | **全部 9 个 gRPC 方法**（Health/RecordAudit/GetAuditLog/ListAuditLogs/GetAuditStats/ListSnapshots/VerifyIntegrity/VerifyChain/GenerateReport）、原子快照创建与样本信封解密、mTLS 凭证构造、CA 链校验与公钥固定 (Public Key Pinning) |
-| `internal/handlers` | `handlers_test.go` | **HTTP REST Handler 层**（Health、创建审计日志、日志检索过滤、统计概览、快照列表、快照样本 AES-256-GCM 信封加密/解密、SHA-256 9 要素完整性校验、全链路连续哈希链验真 `/api/audit/chain/verify`、合规报告生成、参数超大拦截防 DoS） |
+| `internal/handlers` | `handlers_test.go` | **HTTP REST Handler 层**（Health、创建审计日志、日志检索过滤、统计概览、快照列表、快照样本 SM4-GCM 信封加密/解密、SHA-256 9 要素完整性校验、全链路连续哈希链验真 `/api/audit/chain/verify`、合规报告生成、参数超大拦截防 DoS） |
 | `internal/config` | `config_test.go` | 默认配置、自定义环境变量加载（`PGDSN`、`EncryptionKey`、`ArchiveDir`）、`Address()`、`GRPCAddress()`、`AgentBaseURLs()` 多节点轮询与 mTLS 配置解析 |
 | `internal/models` | `models_test.go` | 审计日志、快照存证、合规报告等核心数据结构的 JSON 序列化与反序列化双向无损性验证 |
 | `internal/agent` | `client_test.go` | 上游 Agent HTTP 客户端（Health 探活） |
-| `pkg/crypto` | `envelope_test.go` | AES-256-GCM 信封加密、解密、防篡改、空密钥降级与明文向后兼容性验证 |
+| `pkg/crypto` | `envelope_test.go` | SM4-GCM 信封加密、解密、防篡改、空密钥降级与明文向后兼容性验证 |
 | `pkg/store/postgres` | `postgres_test.go` (Phase B) | PostgreSQL 多副本连接池初始化、批量高效入库 `SaveLogsBatch`、前序哈希追溯 `GetLatestLog`、全链验真 `VerifyChain` |
 
 ---
@@ -50,6 +50,6 @@ go test ./pkg/... ./services/... ./console/bff-go/... ./console/app-lz/bff-go/..
 - `TestCreateLog` / `TestGetLog` / `TestListLogsWithFilter`；
 - `TestVerifyIntegrity`：验证 9 要素 SHA-256 存证完整性；
 - `TestVerifyChainEndpoint`：验证 POST `/api/audit/chain/verify` 对历史区块链式哈希链的连续性对账；
-- `TestEnvelopeEncryptionOfSnapshots`：验证快照落盘时的 `enc:v1:` AES-256-GCM 加密以及读取时的透明解密；
+- `TestEnvelopeEncryptionOfSnapshots`：验证快照落盘时的 `enc:v1:` SM4-GCM 加密以及读取时的透明解密；
 - `TestCreateLogParametersTooLarge`：超大参数攻击拦截（防内存耗尽 DoS）；
 - `TestComputeIntegrityHash`：验证哈希确定性、哈希链连续性与雪崩效应。

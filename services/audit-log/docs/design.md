@@ -121,9 +121,9 @@ func computeIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm
 
 ## 5. 快照样本应用层信封加密 (Envelope Encryption)
 
-快照表（`snapshots`）存储了脱敏前后的数据样本（`input_sample` 与 `output_sample`）。为了彻底避免审计数据库本身成为敏感 PII 泄露源，系统引入了应用层 AES-256-GCM 信封加密：
+快照表（`snapshots`）存储了脱敏前后的数据样本（`input_sample` 与 `output_sample`）。为了彻底避免审计数据库本身成为敏感 PII 泄露源，系统引入了应用层 SM4-GCM 信封加密：
 
-1. **落盘加密**：配置 `AUDIT_LOG_ENCRYPTION_KEY`（或 `PRIVACY_AUDIT_KEY`）后，样本在入库前自动以随机 12-byte Nonce 进行 AES-256-GCM 加密，存储格式为 `enc:v1:<base64>`；
+1. **落盘加密**：配置 `AUDIT_LOG_ENCRYPTION_KEY`（或 `PRIVACY_AUDIT_KEY`）后，样本在入库前自动以随机 12-byte Nonce 进行 SM4-GCM 加密，存储格式为 `enc:v1:<base64>`；
 2. **透明解密**：仅在经过认证与鉴权的 API 调用方查询快照时，在内存中动态解密呈现；
 3. **向后兼容**：未加密的历史遗留样本与未配置密钥环境平滑兼容。
 
@@ -152,7 +152,7 @@ func computeIntegrityHash(logID, prevHash string, timestamp time.Time, algorithm
 | 维度 | `services/audit-log` (业务存证中台) | Grafana Loki / ELK (运维日志平台) |
 |---|---|---|
 | **核心定位** | **业务合规与法律证据**（解决“谁在何时对什么数据执行了何种脱敏”的法定合规溯源） | **系统运维与故障排查**（解决“服务是否健康、报错堆栈为何、请求延迟与网络抖动”的 SRE 观测） |
-| **存储内容** | 9 要素哈希链、原始数据 SHA-256 哈希、脱敏结果哈希、AES 密文快照 | 容器与进程标准输出 stdout / stderr 的非结构化/半结构化文本或 JSON |
+| **存储内容** | 9 要素哈希链、原始数据 SHA-256 哈希、脱敏结果哈希、SM4 密文快照 | 容器与进程标准输出 stdout / stderr 的非结构化/半结构化文本或 JSON |
 | **密码学防篡改** | **链式防篡改**（SHA-256 连续哈希链 + 动态核验对账接口，杜绝任何删改） | **不具备**（日志以分块 Chunk 或倒排索引存储，依赖存储介质本身的写保护） |
 | **法律合规效力** | 满足《数据安全法》第二十七条、《个人信息保护法》第六十九条与 GDPR 第三十条之规定 | 面向运维与内部分析，通常不具备直接的抗抵赖与司法存证签名能力 |
 | **存储底座** | 独立 SQLite WAL 读写分离引擎 / 专用关系型 PostgreSQL 存证库（Append-Only） | 分布式对象存储（S3/MinIO）+ 索引存储（BoltDB/Cassandra/DynamoDB） |

@@ -120,7 +120,7 @@ python -m engine.privacy.verify_audit --log-file /path/to/audit.log
    - 每条审计记录在落盘时包含 `prev_hash`，指向上一条记录的综合密码学哈希；
    - 提供 `VerifyChain` 端点支持全量/区间连续性核验，杜绝物理删行或记录插入攻击。
 3. **敏感样本应用层信封加密 (Envelope Encryption)**：
-   - 快照表中的 `input_sample` 和 `output_sample` 由 `pkg/crypto` 采用 AES-256-GCM 密文落盘，防止数据库文件被拖库导致隐私外泄。
+   - 快照表中的 `input_sample` 和 `output_sample` 由 `pkg/crypto` 采用 SM4-GCM 密文落盘，防止数据库文件被拖库导致隐私外泄。
 4. **PostgreSQL Phase B 高并发与多副本扩容**：
    - 在高吞吐集群环境下，通过配置 PostgreSQL DSN 消除 SQLite 单写锁瓶颈，支持多副本并发存证与 `SaveLogsBatch` 批量管道刷盘。
 

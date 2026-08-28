@@ -260,7 +260,7 @@ func main() {
 | `AUDIT_LOG_GRPC_PORT` | `50054` | gRPC 服务监听端口 |
 | `AUDIT_LOG_DB_PATH` | `""` (内存) | 审计日志 SQLite 存储路径 (配置时开启 WAL 持久化) |
 | `AUDIT_LOG_PG_DSN` / `PG_DSN` | `""` | Phase B PostgreSQL 存证库 DSN 连接串（启用多副本高可用存储） |
-| `AUDIT_LOG_ENCRYPTION_KEY` | `""` | 快照敏感样本 AES-256-GCM 信封加密主密钥 |
+| `AUDIT_LOG_ENCRYPTION_KEY` | `""` | 快照敏感样本 SM4-GCM 信封加密主密钥 |
 | `AUDIT_LOG_ARCHIVE_DIR` | `""` | 审计归档导出目录 |
 | `AUDIT_LOG_RETENTION_DAYS` | `90` | 审计日志本地保留天数（0 表示禁用自动清理） |
 | `PRIVACY_AGENT_REST_HOST` | `127.0.0.1` | PrivShield Agent 连通性探针地址 |
@@ -273,7 +273,7 @@ func main() {
 
 `handlers.go` 提供了完备的存证生命周期 API：
 
-1. `CreateLog`：接收存证请求，自动进行哈希链关联（`prev_hash`）、计算 9 要素完整性哈希，并对快照样本自动实施 AES-256-GCM 信封加密落盘。
+1. `CreateLog`：接收存证请求，自动进行哈希链关联（`prev_hash`）、计算 9 要素完整性哈希，并对快照样本自动实施 SM4-GCM 信封加密落盘。
 2. `ListLogs`：支持基于 `task_id`、`api_code`、`datasource_id`、`operation`、`user`、`status`、`security_level` 的高效复合过滤与分页。
 3. `ListSnapshots`：查询脱敏前后快照，向鉴权调用方动态解密样本明文。
 4. `VerifyIntegrity`：快照完整性单点校验。

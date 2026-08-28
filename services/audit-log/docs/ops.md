@@ -87,7 +87,7 @@ docker run -d \
 | `AUDIT_LOG_CORS_ORIGINS` | (空) | 允许的 CORS 跨域源（逗号分隔） |
 | `AUDIT_LOG_DB_PATH` | (空) | SQLite 数据库路径（空表示纯内存模式） |
 | `AUDIT_LOG_PG_DSN` / `PG_DSN` | (空) | PostgreSQL 存证库 DSN（Phase B 架构，启用多副本水平扩展） |
-| `AUDIT_LOG_ENCRYPTION_KEY` | (空) | 快照敏感样本 AES-256-GCM 信封加密主密钥 |
+| `AUDIT_LOG_ENCRYPTION_KEY` | (空) | 快照敏感样本 SM4-GCM 信封加密主密钥 |
 | `AUDIT_LOG_ARCHIVE_DIR` | (空) | 审计归档导出目录 |
 | `AUDIT_LOG_RETENTION_DAYS` | `90` | 审计日志本地保留天数（0 表示禁用自动清理） |
 | `AUDIT_LOG_LOG_FORMAT` | `json` | 日志格式: `json` \| `text` |
