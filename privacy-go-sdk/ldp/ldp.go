@@ -140,3 +140,156 @@ func AddLaplaceSimple(value, epsilon float64) float64 {
 	noise := -scale * sgn * math.Log(1.0-2.0*math.Abs(u))
 	return value + noise
 }
+
+// ──────────────────────────────────────────────
+// Python LocalDPApi 对齐函数
+// ──────────────────────────────────────────────
+
+// PerturbBinaryBatch 批量对二值数据进行本地 DP 扰动（Warner 模型）。
+// 与 Python perturb_binary_batch 对齐。
+func PerturbBinaryBatch(values []int, epsilon float64) []int {
+	result := make([]int, len(values))
+	for i, v := range values {
+		if v == 0 || v == 1 {
+			result[i] = perturbBinary(v, epsilon)
+		} else {
+			result[i] = v
+		}
+	}
+	return result
+}
+
+// perturbBinary 对单个二值数据进行 ε-本地差分隐私扰动。
+func perturbBinary(value int, epsilon float64) int {
+	if epsilon <= 0 {
+		return value
+	}
+	// p = e^ε / (1 + e^ε) = 1 / (1 + e^(-ε))
+	p := 1.0 / (1.0 + math.Exp(-epsilon))
+	if rand.Float64() < p {
+		return value
+	}
+	return 1 - value
+}
+
+// PerturbCategoricalBatch 批量对类别型数据进行 k-ary Randomized Response 扰动。
+// 与 Python perturb_categorical_batch 对齐。
+func PerturbCategoricalBatch(values []string, categories []string, epsilon float64) []string {
+	result := make([]string, len(values))
+	for i, v := range values {
+		result[i] = perturbCategorical(v, categories, epsilon)
+	}
+	return result
+}
+
+// perturbCategorical 对单个类别型数据进行 k-ary Randomized Response 扰动。
+func perturbCategorical(value string, categories []string, epsilon float64) string {
+	k := len(categories)
+	if k < 2 || epsilon <= 0 {
+		return value
+	}
+	// p = e^ε / (k-1 + e^ε) = 1 / (1 + (k-1)*e^(-ε))
+	p := 1.0 / (1.0 + float64(k-1)*math.Exp(-epsilon))
+	if rand.Float64() < p {
+		return value
+	}
+	// 均匀选择其他 k-1 个类别之一
+	others := make([]string, 0, k-1)
+	for _, c := range categories {
+		if c != value {
+			others = append(others, c)
+		}
+	}
+	if len(others) == 0 {
+		return value
+	}
+	return others[rand.IntN(len(others))]
+}
+
+// EstimateBinaryFrequency 根据扰动后的二值样本估计真实比例为 1 的频率。
+// 与 Python estimate_binary_frequency 对齐。
+// 公式：hat_f = (f_reported - (1-p)) / (2p-1)，截断到 [0, 1]。
+func EstimateBinaryFrequency(reportedValues []int, epsilon float64) float64 {
+	n := len(reportedValues)
+	if n == 0 || epsilon <= 0 {
+		return 0.0
+	}
+	// p = 1 / (1 + e^(-ε))
+	p := 1.0 / (1.0 + math.Exp(-epsilon))
+	// 统计上报样本中 1 的比例
+	count := 0
+	for _, v := range reportedValues {
+		if v == 1 {
+			count++
+		}
+	}
+	fReported := float64(count) / float64(n)
+	// 无偏纠偏公式
+	est := (fReported - (1.0 - p)) / (2.0*p - 1.0)
+	// 截断到 [0, 1]
+	if est < 0.0 {
+		return 0.0
+	}
+	if est > 1.0 {
+		return 1.0
+	}
+	return est
+}
+
+// EstimateCategoricalHistogram 根据扰动后的类别样本估计各类别的真实频率分布。
+// 与 Python estimate_categorical_histogram 对齐。
+// 返回 map[类别]估计频率，所有频率之和为 1.0。
+func EstimateCategoricalHistogram(reportedValues []string, categories []string, epsilon float64) map[string]float64 {
+	n := len(reportedValues)
+	k := len(categories)
+	if k < 2 || n == 0 || epsilon <= 0 {
+		// 回退为均匀分布
+		result := make(map[string]float64, k)
+		for _, c := range categories {
+			result[c] = 1.0 / float64(k)
+		}
+		return result
+	}
+	// p = 报出真实类别的概率
+	p := 1.0 / (1.0 + float64(k-1)*math.Exp(-epsilon))
+	// q = 报出任一指定错误类别的概率
+	q := (1.0 - p) / float64(k-1)
+	denominator := p - q
+
+	// 统计各类别出现次数
+	counts := make(map[string]int, k)
+	for _, c := range categories {
+		counts[c] = 0
+	}
+	for _, v := range reportedValues {
+		if _, ok := counts[v]; ok {
+			counts[v]++
+		}
+	}
+
+	// 无偏估计 + 非负截断
+	estimates := make(map[string]float64, k)
+	total := 0.0
+	for _, c := range categories {
+		fReported := float64(counts[c]) / float64(n)
+		est := (fReported - q) / denominator
+		if est < 0.0 {
+			est = 0.0
+		}
+		estimates[c] = est
+		total += est
+	}
+
+	// 归一化使总和为 1.0
+	if total > 0 {
+		for c, v := range estimates {
+			estimates[c] = v / total
+		}
+	} else {
+		// 截断后总和为 0，回退为均匀分布
+		for _, c := range categories {
+			estimates[c] = 1.0 / float64(k)
+		}
+	}
+	return estimates
+}

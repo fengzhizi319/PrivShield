@@ -204,3 +204,34 @@ func VectorMean(vectors [][]float64, maxNorm float64, epsilon float64) []float64
 	sensitivity := maxNorm / n
 	return AddLaplaceVector(mean, epsilon, sensitivity)
 }
+
+// VectorSum 对向量集合执行差分隐私求和。
+// 先对每个向量做 L2 截断（敏感度 = maxNorm），再求和后添加 Laplace 噪声。
+// 与 Python dp_vector_sum 对齐。
+func VectorSum(vectors [][]float64, maxNorm float64, epsilon float64) []float64 {
+	if len(vectors) == 0 {
+		return nil
+	}
+	dim := len(vectors[0])
+	if dim == 0 {
+		return nil
+	}
+
+	// 1. 截断每个向量的 L2 范数
+	clipped := make([][]float64, len(vectors))
+	for i, v := range vectors {
+		clipped[i] = ClipL2Norm(v, maxNorm)
+	}
+
+	// 2. 计算截断后的总和
+	sum := make([]float64, dim)
+	for _, v := range clipped {
+		for j := 0; j < dim && j < len(v); j++ {
+			sum[j] += v[j]
+		}
+	}
+
+	// 3. 为总和向量添加 Laplace 噪声
+	// 敏感度 = maxNorm（每个分量的敏感度）
+	return AddLaplaceVector(sum, epsilon, maxNorm)
+}

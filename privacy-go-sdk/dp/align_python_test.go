@@ -208,3 +208,49 @@ func TestAlignPython_NoisyHistogramEmpty(t *testing.T) {
 		t.Errorf("NoisyHistogram({}) should return empty map, got %v", result)
 	}
 }
+
+// TestAlignPython_VectorSum 验证 VectorSum 基本行为。
+// 先 L2 截断 → 计算总和 → 添加 Laplace 向量噪声。
+// Python: dp_vector_sum(vectors, max_norm=10.0, epsilon=1.0)
+func TestAlignPython_VectorSum(t *testing.T) {
+	vectors := [][]float64{
+		{1.0, 2.0},
+		{3.0, 4.0},
+		{5.0, 6.0},
+	}
+	maxNorm := 10.0 // 所有向量 L2 范数 < 10，不截断
+	epsilon := 1.0
+	runs := 1000
+
+	// 累计各分量的带噪声总和
+	dim := len(vectors[0])
+	accum := make([]float64, dim)
+	for i := 0; i < runs; i++ {
+		result := VectorSum(vectors, maxNorm, epsilon)
+		for j := 0; j < dim; j++ {
+			accum[j] += result[j]
+		}
+	}
+
+	// 真实总和 = 1+3+5=9, 2+4+6=12
+	trueSum := []float64{9.0, 12.0}
+	for j := 0; j < dim; j++ {
+		mean := accum[j] / float64(runs)
+		if math.Abs(mean-trueSum[j]) > 1.0 {
+			t.Errorf("VectorSum[%d] mean=%g, want ~%g", j, mean, trueSum[j])
+		}
+	}
+}
+
+// TestAlignPython_VectorSumEmpty 验证空输入行为。
+func TestAlignPython_VectorSumEmpty(t *testing.T) {
+	result := VectorSum(nil, 1.0, 1.0)
+	if result != nil {
+		t.Errorf("VectorSum(nil) should return nil, got %v", result)
+	}
+
+	result = VectorSum([][]float64{{}}, 1.0, 1.0)
+	if result != nil {
+		t.Errorf("VectorSum([[]]) should return nil, got %v", result)
+	}
+}
