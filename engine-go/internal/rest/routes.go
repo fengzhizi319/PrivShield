@@ -35,12 +35,17 @@ func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
 		// 本地差分隐私
 		v1.POST("/ldp/randomized_response", randomizedResponseHandler(svc))
 		v1.POST("/ldp/orr", orrHandler(svc))
+		v1.POST("/ldp/perturb/binary", perturbBinaryBatchHandler(svc))
+		v1.POST("/ldp/perturb/categorical", perturbCategoricalBatchHandler(svc))
+		v1.POST("/ldp/estimate/binary", estimateBinaryFrequencyHandler(svc))
+		v1.POST("/ldp/estimate/categorical", estimateCategoricalHistogramHandler(svc))
 
 		// K-匿名
 		v1.POST("/kano/anonymize", kAnonymizeHandler(svc))
 
 		// 查询混淆
 		v1.POST("/qol/obfuscate", obfuscateHandler(svc))
+		v1.POST("/qol/obfuscate/batch", obfuscateBatchHandler(svc))
 
 		// 动态分类
 		v1.POST("/classify", classifyHandler(svc))
@@ -53,8 +58,9 @@ func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
 		// HMAC 散列
 		v1.POST("/hash/hmac", hashHMACHanlder(svc))
 
-		// 预算查询
+		// 预算查询与重置
 		v1.GET("/budget", budgetHandler(svc))
+		v1.POST("/budget/reset", budgetResetHandler(svc))
 	}
 }
 
@@ -217,6 +223,68 @@ func orrHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	}
 }
 
+func perturbBinaryBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Values  []int   `json:"values" binding:"required"`
+			Epsilon float64 `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.PerturbBinaryBatch(req.Values, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func perturbCategoricalBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Values     []string  `json:"values" binding:"required"`
+			Categories []string  `json:"categories" binding:"required"`
+			Epsilon    float64   `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.PerturbCategoricalBatch(req.Values, req.Categories, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func estimateBinaryFrequencyHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			ReportedValues []int   `json:"reported_values" binding:"required"`
+			Epsilon        float64 `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.EstimateBinaryFrequency(req.ReportedValues, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"frequency": result})
+	}
+}
+
+func estimateCategoricalHistogramHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			ReportedValues []string  `json:"reported_values" binding:"required"`
+			Categories     []string  `json:"categories" binding:"required"`
+			Epsilon        float64   `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.EstimateCategoricalHistogram(req.ReportedValues, req.Categories, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"histogram": result})
+	}
+}
+
 // ──────────────────────────────────────────────
 // K-匿名处理器
 // ──────────────────────────────────────────────
@@ -270,6 +338,22 @@ func obfuscateHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			"queries":    queries,
 			"real_index": realIdx,
 		})
+	}
+}
+
+func obfuscateBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Queries   []string `json:"queries" binding:"required"`
+			NumDecoys int      `json:"num_decoys" binding:"required,min=1"`
+			Domain    string   `json:"domain" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		results := svc.ObfuscateQueryBatch(req.Queries, req.NumDecoys, req.Domain)
+		c.JSON(http.StatusOK, gin.H{"results": results})
 	}
 }
 
@@ -374,6 +458,13 @@ func hashHMACHanlder(svc *service.PrivacyService) gin.HandlerFunc {
 func budgetHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		status := svc.BudgetStatus()
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func budgetResetHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		status := svc.BudgetReset()
 		c.JSON(http.StatusOK, status)
 	}
 }

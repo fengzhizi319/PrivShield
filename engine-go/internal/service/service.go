@@ -154,6 +154,26 @@ func (s *PrivacyService) ORRResponse(value int, epsilon float64, domainSize int)
 	return ldp.ORRResponse(value, epsilon, domainSize)
 }
 
+// PerturbBinaryBatch 批量二值扰动（与 Python perturb_binary_batch 对齐）
+func (s *PrivacyService) PerturbBinaryBatch(values []int, epsilon float64) []int {
+	return ldp.PerturbBinaryBatch(values, epsilon)
+}
+
+// PerturbCategoricalBatch 批量类别扰动（与 Python perturb_categorical_batch 对齐）
+func (s *PrivacyService) PerturbCategoricalBatch(values []string, categories []string, epsilon float64) []string {
+	return ldp.PerturbCategoricalBatch(values, categories, epsilon)
+}
+
+// EstimateBinaryFrequency 二值频率无偏估计（与 Python estimate_binary_frequency 对齐）
+func (s *PrivacyService) EstimateBinaryFrequency(reportedValues []int, epsilon float64) float64 {
+	return ldp.EstimateBinaryFrequency(reportedValues, epsilon)
+}
+
+// EstimateCategoricalHistogram 类别直方图无偏估计（与 Python estimate_categorical_histogram 对齐）
+func (s *PrivacyService) EstimateCategoricalHistogram(reportedValues []string, categories []string, epsilon float64) map[string]float64 {
+	return ldp.EstimateCategoricalHistogram(reportedValues, categories, epsilon)
+}
+
 // ──────────────────────────────────────────────
 // K-匿名 API
 // ──────────────────────────────────────────────
@@ -170,6 +190,16 @@ func (s *PrivacyService) KAnonymize(records []kano.Record, qiFields []string, k 
 // ObfuscateQuery 查询混淆
 func (s *PrivacyService) ObfuscateQuery(query string, numDecoys int, domain string) ([]string, int) {
 	return qol.InjectDecoys(query, numDecoys, domain)
+}
+
+// ObfuscateQueryBatch 批量查询混淆（与 Python obfuscate_query_batch 对齐）
+func (s *PrivacyService) ObfuscateQueryBatch(queries []string, numDecoys int, domain string) [][]string {
+	results := make([][]string, len(queries))
+	for i, q := range queries {
+		injected, _ := qol.InjectDecoys(q, numDecoys, domain)
+		results[i] = injected
+	}
+	return results
 }
 
 // ──────────────────────────────────────────────
@@ -241,6 +271,12 @@ func (s *PrivacyService) BudgetStatus() map[string]float64 {
 		"used_delta":        s.budget.UsedDelta(),
 		"remaining_delta":   s.budget.RemainingDelta(),
 	}
+}
+
+// BudgetReset 重置预算
+func (s *PrivacyService) BudgetReset() map[string]float64 {
+	s.budget.Reset()
+	return s.BudgetStatus()
 }
 
 // ──────────────────────────────────────────────

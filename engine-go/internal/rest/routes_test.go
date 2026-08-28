@@ -433,6 +433,122 @@ func TestBudget_Success(t *testing.T) {
 	}
 }
 
+func TestBudgetReset_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/budget/reset", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]float64
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := body["remaining_epsilon"]; !ok {
+		t.Error("missing 'remaining_epsilon' in reset response")
+	}
+}
+
+// ──────────────────────────────────────────────
+// LDP 新增端点
+// ──────────────────────────────────────────────
+
+func TestPerturbBinaryBatch_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/ldp/perturb/binary", map[string]any{
+		"values": []int{0, 1, 1, 0, 1}, "epsilon": 1.0,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	result, ok := body["result"].([]any)
+	if !ok || len(result) != 5 {
+		t.Errorf("result should have 5 elements, got %v", body["result"])
+	}
+}
+
+func TestPerturbCategoricalBatch_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/ldp/perturb/categorical", map[string]any{
+		"values": []string{"A", "B", "C"}, "categories": []string{"A", "B", "C"}, "epsilon": 1.0,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	result, ok := body["result"].([]any)
+	if !ok || len(result) != 3 {
+		t.Errorf("result should have 3 elements, got %v", body["result"])
+	}
+}
+
+func TestEstimateBinaryFrequency_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/ldp/estimate/binary", map[string]any{
+		"reported_values": []int{1, 1, 0, 1, 0}, "epsilon": 5.0,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	freq, ok := body["frequency"].(float64)
+	if !ok || freq < 0.0 || freq > 1.0 {
+		t.Errorf("frequency should be in [0,1], got %v", body["frequency"])
+	}
+}
+
+func TestEstimateCategoricalHistogram_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/ldp/estimate/categorical", map[string]any{
+		"reported_values": []string{"A", "B", "A", "C"},
+		"categories":      []string{"A", "B", "C"},
+		"epsilon":         5.0,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	hist, ok := body["histogram"].(map[string]any)
+	if !ok || len(hist) != 3 {
+		t.Errorf("histogram should have 3 categories, got %v", body["histogram"])
+	}
+}
+
+// ──────────────────────────────────────────────
+// QOL 批量端点
+// ──────────────────────────────────────────────
+
+func TestObfuscateBatch_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/qol/obfuscate/batch", map[string]any{
+		"queries": []string{"SELECT * FROM patients", "SELECT name FROM users"},
+		"num_decoys": 3, "domain": "medical",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	results, ok := body["results"].([]any)
+	if !ok || len(results) != 2 {
+		t.Errorf("results should have 2 elements, got %v", body["results"])
+	}
+}
+
 // ──────────────────────────────────────────────
 // 404 路由
 // ──────────────────────────────────────────────
@@ -465,8 +581,13 @@ func TestAllEndpoints_ReturnEnvelopeOnError(t *testing.T) {
 		{"POST", "/api/v1/dp/noisy_mean"},
 		{"POST", "/api/v1/ldp/randomized_response"},
 		{"POST", "/api/v1/ldp/orr"},
+		{"POST", "/api/v1/ldp/perturb/binary"},
+		{"POST", "/api/v1/ldp/perturb/categorical"},
+		{"POST", "/api/v1/ldp/estimate/binary"},
+		{"POST", "/api/v1/ldp/estimate/categorical"},
 		{"POST", "/api/v1/kano/anonymize"},
 		{"POST", "/api/v1/qol/obfuscate"},
+		{"POST", "/api/v1/qol/obfuscate/batch"},
 		{"POST", "/api/v1/classify"},
 		{"POST", "/api/v1/classify/batch"},
 		{"POST", "/api/v1/medical/sanitize"},
