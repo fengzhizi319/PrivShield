@@ -86,7 +86,10 @@ def _extract_trace_id(context: grpc.ServicerContext) -> str:
     Returns:
         Trace ID string / 追踪 ID 字符串
     """
-    for key, val in context.invocation_metadata():
+    metadata = []
+    if context is not None:
+        metadata = context.invocation_metadata() or []
+    for key, val in metadata:
         if key in ("x-request-id", "x-trace-id"):
             return val
     return f"req-{int(_time_mod.time())}"
