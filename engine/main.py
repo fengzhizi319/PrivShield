@@ -74,7 +74,10 @@ from .deps import service  # noqa: F401
 from .deps import handle_request_exception
 # Unified error envelope: cross-language consistent error response format
 # 统一错误信封：跨语言一致的错误响应格式
-from .observability.envelope import register_envelope_exception_handlers
+from .observability.envelope import (
+    register_envelope_exception_handlers,
+    _build_error_envelope,
+)
 
 # Medical pipeline router (multi-step classification + privacy processing)
 # 医疗流水线路由（多步分类 + 隐私处理组合端点）
@@ -182,10 +185,12 @@ class MaxBodySizeMiddleware(BaseHTTPMiddleware):
         if content_length is not None:
             try:
                 if int(content_length) > _MAX_BODY_SIZE:
-                    from starlette.responses import JSONResponse
-                    return JSONResponse(
+                    return _build_error_envelope(
+                        code="PAYLOAD_TOO_LARGE",
+                        message=f"Request body exceeds {_MAX_BODY_SIZE} bytes limit",
+                        detail=f"Content-Length {content_length} exceeds {_MAX_BODY_SIZE}",
+                        request=request,
                         status_code=413,
-                        content={"detail": f"Request body exceeds {_MAX_BODY_SIZE} bytes limit"},
                     )
             except ValueError:
                 pass  # Non-integer Content-Length; let downstream handle

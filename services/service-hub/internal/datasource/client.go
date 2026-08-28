@@ -517,10 +517,10 @@ func (c *Client) getGRPCClient(ctx context.Context) (dspb.DataSourceManagerServi
 	return c.grpcClient, nil
 }
 
-// wrapGRPCContext injects X-Request-ID to outgoing gRPC metadata if present.
+// wrapGRPCContext injects X-Request-ID and X-Trace-ID to outgoing gRPC metadata if present.
 func (c *Client) wrapGRPCContext(ctx context.Context) context.Context {
 	if rid := pkgagent.RequestIDFromContext(ctx); rid != "" {
-		return metadata.AppendToOutgoingContext(ctx, "x-request-id", rid)
+		return metadata.AppendToOutgoingContext(ctx, "x-request-id", rid, "x-trace-id", rid)
 	}
 	return ctx
 }

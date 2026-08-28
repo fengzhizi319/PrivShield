@@ -75,6 +75,7 @@ for hid in "${HARDCODED_IDS[@]}"; do
         | grep -v '// ' \
         | grep -v 'runner/runner.go' \
         | grep -v 'console/.*/web/src/' \
+        | grep -v '/dist/' \
         || true)
     if [ -n "${MATCHES}" ]; then
         echo "❌ ERROR: Found hardcoded datasource ID '${hid}' — use naming constants instead:"

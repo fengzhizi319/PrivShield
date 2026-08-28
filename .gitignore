@@ -69,11 +69,13 @@ site/
 # Legacy package directory (renamed to engine/)
 /PrivShield/
 
-# Compiled Go binaries in console/ and services/
+# Compiled Go binaries in console/, services/ and pkg/
 console/*/server
 console/*/bin/
 services/*/bin/
 /kubectl
+/pkg/migrate
+/pkg/store/cmd/migrate/migrate
 
 
 # Node modules & build artifacts (console/web & console/app-lz)

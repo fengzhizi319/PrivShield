@@ -55,6 +55,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/agent"
@@ -624,6 +625,11 @@ func (s *Server) callRest(ctx context.Context, method, path string, body json.Ra
 	}
 	if s.cfg.AgentAPIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
+	}
+	// Propagate distributed trace headers to the upstream Python engine.
+	if rid := pkgagent.RequestIDFromContext(ctx); rid != "" {
+		httpReq.Header.Set("X-Request-ID", rid)
+		httpReq.Header.Set("X-Trace-ID", rid)
 	}
 
 	client := s.httpClient
