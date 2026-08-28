@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v21.0.0-drafted (路径 C 演进草案 Phase 17 REST 路由全量对齐版)
+> **版本**：v22.0.0-drafted (路径 C 演进草案 Phase 18 脚本与部署 Go 引擎全量接入版)
 > **编写日期**：2026-08-29
-> **修订说明**：v21.0.0 完成 Phase 17 实现：REST 路由全量对齐。新增 18 个 REST 端点（14 个 DP + 1 个 mask/dataframe + 3 个 health），Go REST 端点从 23 个扩展到 41 个。新增 18 个集成测试 + 信封测试扩展 15 个新端点。
+> **修订说明**：v22.0.0 完成 Phase 18 实现：脚本与部署 Go 引擎全量接入。新增 6 个 Go 引擎版 scripts/dev/ 脚本（docker-start-go-agent/stop/bff-go-agent/go-all/health_check_go/integration-test-go）+ 2 个 K8s 部署清单（deployment-go.yaml/service-go.yaml）+ 1 个 Docker Compose 覆盖层（docker-compose.go-engine.yml）+ Helm chart Go 引擎切换支持（engineType: go）。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 17 已实现 | Phase 1-16 骨架 + **Phase 17 REST 路由全量对齐**（新增 18 个端点：14 DP + 1 mask/dataframe + 3 health，REST 端点从 23 个扩展到 41 个 + 18 个集成测试）。详见附录 A v21.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 18 已实现 | Phase 1-17 骨架 + **Phase 18 脚本与部署 Go 引擎全量接入**（6 个 Go 引擎版 dev 脚本 + 2 个 K8s 清单 + 1 个 Docker Compose 覆盖层 + Helm engineType 切换）。详见附录 A v22.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -1444,7 +1444,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-17 已实现（详见 附录 A v5.0.0–v21.0.0 修订记录）。Phase 17 REST 路由全量对齐已完成（41 个端点）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
+> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-18 已实现（详见 附录 A v5.0.0–v22.0.0 修订记录）。Phase 18 脚本与部署 Go 引擎全量接入已完成（6 个 dev 脚本 + Docker Compose/K8s/Helm 全链路）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2303,6 +2303,31 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v22.0.0 修订（v21.0.0 → v22.0.0）
+
+本次修订完成 Phase 18 实现：脚本与部署 Go 引擎全量接入：
+
+| 修订项 | v21.0.0 状态 | v22.0.0 实现 |
+|---|---|---|
+| scripts/dev/ Go 引擎脚本 | 4 个（go-engine-start/test/bench/gateway-start） | 新增 6 个：docker-start-go-agent/stop/bff-go-agent/go-all/health_check_go/integration-test-go，总计 10 个 |
+| deploy/docker-compose | 仅 Python 引擎服务定义 | 新增 docker-compose.go-engine.yml 覆盖层，支持 Go 引擎镜像替换 |
+| deploy/k8s | 仅 Python 引擎 deployment.yaml | 新增 deployment-go.yaml + service-go.yaml（Go 引擎 K8s 清单） |
+| deploy/helm | 仅 flavor: core/ml 切换 | 新增 engineType: python/go 切换 + goEngine 配置段 |
+
+**Phase 18 实现清单**：
+- [x] `scripts/dev/docker-start-go-agent.sh` — Go 引擎 Docker 单容器启动
+- [x] `scripts/dev/docker-stop-go-agent.sh` — Go 引擎 Docker 容器停止
+- [x] `scripts/dev/docker-start-bff-go-agent.sh` — BFF + Go Engine 控制台三件套
+- [x] `scripts/dev/docker-start-go-all.sh` — 全栈 Go 引擎启动（含可选 vLLM/PG/监控）
+- [x] `scripts/dev/health_check_go.sh` — Go 引擎健康诊断工具
+- [x] `scripts/dev/integration-test-go.sh` — Go 引擎集成测试脚本（10 类 API 测试）
+- [x] `deploy/docker-compose/docker-compose.go-engine.yml` — Go 引擎 Docker Compose 覆盖层
+- [x] `deploy/k8s/deployment-go.yaml` — Go 引擎 K8s Deployment 清单
+- [x] `deploy/k8s/service-go.yaml` — Go 引擎 K8s Service 清单
+- [x] `deploy/helm/PrivShield/values.yaml` — 新增 engineType + goEngine 配置段
+- [x] `deploy/helm/PrivShield/templates/deployment.yaml` — Go 引擎镜像/资源/终止宽限期条件切换
+- [x] 全量测试 — privacy-go-sdk (7 包 ok) + engine-go (6 包 ok)，全部通过
+
 ### v21.0.0 修订（v20.0.0 → v21.0.0）
 
 本次修订完成 Phase 17 实现：REST 路由全量对齐：
@@ -2738,6 +2763,7 @@ PrivShield/
 - [x] REST 路由对齐：LDP 4 个端点 + QOL batch + Budget reset，REST 端点从 17 个扩展到 23 个 + 6 个新增集成测试；
 - [x] gRPC TypedServer 全量 RPC 对齐：补齐 18 个缺失 RPC 方法（LDP 4 + QOL 1 + DP 10 + KAno/DataFrame 3），Proto 34/34 全覆盖 + 20 个 gRPC 集成测试；
 - [x] REST 路由全量对齐：新增 18 个端点（14 DP + 1 mask/dataframe + 3 health），REST 端点从 23 个扩展到 41 个 + 18 个集成测试；
+- [x] 脚本与部署 Go 引擎全量接入：6 个 dev 脚本 + Docker Compose 覆盖层 + K8s 清单 + Helm engineType 切换；
 - [ ] NVIDIA GPU 环境复测，补充 CUDA 基准数据；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。

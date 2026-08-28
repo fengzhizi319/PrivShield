@@ -1,0 +1,100 @@
+# =============================================================================
+# PrivShield Go Engine Deployment (K8s)
+# PrivShield Go 原生引擎 K8s 部署清单
+#
+# 与 deployment.yaml 的区别：
+#   - deployment.yaml: Python 引擎（privshield:1.8.0，含 PyTorch/ML 依赖）
+#   - 本文件: Go 原生引擎（privshield-go:1.0.0，极小镜像，无 ML 依赖）
+#
+# Go 引擎优势：
+#   - 镜像大小 ~15MB（Python 引擎 ~1.5GB core / ~5GB ml）
+#   - 启动时间 <1s（Python 引擎 5-30s）
+#   - 内存占用 <100MB（Python 引擎 256MB-2GB）
+#   - 无 Python/PyTorch/ONNX 运行时依赖
+#
+# 使用方式：
+#   替换 deployment.yaml 使用：
+#     kubectl apply -f deploy/k8s/deployment-go.yaml
+#   或通过 kustomization 选择：
+#     在 deploy/k8s/kustomization.yaml 中注释 deployment.yaml，启用 deployment-go.yaml
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: PrivShield-Go
+  namespace: PrivShield
+  labels:
+    app: PrivShield-Go
+    engine-type: go
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: PrivShield-Go
+  template:
+    metadata:
+      labels:
+        app: PrivShield-Go
+        engine-type: go
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      # Go 引擎优雅关闭更快，15s 足够
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: agent
+          image: privshield-go:1.0.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8079
+            - name: grpc
+              containerPort: 50051
+          env:
+            - name: PRIVACY_REST_HOST
+              value: "0.0.0.0"
+            - name: PRIVACY_REST_PORT
+              value: "8079"
+            - name: PRIVACY_GRPC_HOST
+              value: "0.0.0.0"
+            - name: PRIVACY_GRPC_PORT
+              value: "50051"
+            - name: PRIVACY_LOG_LEVEL
+              value: "INFO"
+            - name: PRIVACY_LOG_FORMAT
+              value: "json"
+          # Go 引擎启动极快，探针配置更紧凑
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 10
+          # Go 引擎资源消耗远低于 Python
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

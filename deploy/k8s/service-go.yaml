@@ -1,0 +1,29 @@
+# =============================================================================
+# PrivShield Go Engine Service (K8s)
+# PrivShield Go 原生引擎 K8s Service 清单
+#
+# 与 service.yaml 的区别：
+#   - service.yaml: 匹配 app: PrivShield (Python 引擎)
+#   - 本文件: 匹配 app: PrivShield-Go (Go 原生引擎)
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: PrivShield-Go
+  namespace: PrivShield
+  labels:
+    app: PrivShield-Go
+    engine-type: go
+spec:
+  type: ClusterIP
+  selector:
+    app: PrivShield-Go
+  ports:
+    - name: http
+      port: 8079
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+      protocol: TCP

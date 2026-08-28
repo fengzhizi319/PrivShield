@@ -42,7 +42,7 @@ namespace:
   create: false
 
 # ── 镜像风味 / Image flavor ─────────────────────────────────────────────────
-# 镜像选择：
+# 镜像选择（仅 engineType=python 时生效）：
 #   core → 轻量运行时镜像（无 torch/transformers，纯 REST/gRPC 核心能力）
 #   ml   → 完整 ML 镜像（含 PyTorch、Transformers、ONNX Runtime，Layer-2/3 进程内推理）
 flavor: core
@@ -50,6 +50,7 @@ flavor: core
 # ── 容器镜像配置 / Container image ─────────────────────────────────────────
 image:
   # repository: 镜像仓库地址（不含 tag）
+  #   engineType=python 时默认 privshield；engineType=go 时默认 privshield-go
   repository: privshield
   # pullPolicy: 镜像拉取策略
   #   Always        → 每次启动 Pod 都拉取最新镜像（开发环境）
@@ -59,6 +60,24 @@ image:
   # tag: 镜像标签。留空时自动使用 Chart.yaml 中的 appVersion
   #   flavor=ml 时自动附加 -ml 后缀（由 _helpers.tpl 的 imageTag 模板处理）
   tag: ""
+
+# ── Go 引擎镜像配置 / Go engine image ─────────────────────────────────────
+# 仅 engineType=go 时生效
+goEngine:
+  image:
+    repository: privshield-go
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  # Go 引擎资源消耗远低于 Python 引擎
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  # Go 引擎优雅终止更快
+  terminationGracePeriodSeconds: 15
 
 # imagePullSecrets: 私有镜像仓库的认证 Secret 列表
 #   格式: [{ name: my-registry-secret }]

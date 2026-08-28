@@ -55,16 +55,25 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       # 优雅终止宽限期（SIGTERM 后等待容器自行退出）
+      {{- if eq .Values.engineType "go" }}
+      terminationGracePeriodSeconds: {{ .Values.goEngine.terminationGracePeriodSeconds | default 15 }}
+      {{- else }}
       {{- with .Values.terminationGracePeriodSeconds }}
       terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           # 容器级安全上下文（最小权限原则）
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if eq .Values.engineType "go" }}
+          image: "{{ .Values.goEngine.image.repository }}:{{ .Values.goEngine.image.tag }}"
+          imagePullPolicy: {{ .Values.goEngine.image.pullPolicy }}
+          {{- else }}
           image: "{{ .Values.image.repository }}:{{ include "PrivShield.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.restPort }}
@@ -269,8 +278,13 @@ spec:
             failureThreshold: {{ .Values.probes.startup.failureThreshold }}
           {{- end }}
           # 资源限制（CPU/内存）
+          {{- if eq .Values.engineType "go" }}
+          resources:
+            {{- toYaml .Values.goEngine.resources | nindent 12 }}
+          {{- else }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- end }}
       # ── 卷定义 ──
       volumes:
         # 配置文件卷（从 ConfigMap 挂载 privacy-profile.yaml）
