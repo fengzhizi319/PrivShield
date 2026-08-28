@@ -24,8 +24,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/dynclassification"
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/server"
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/budget"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/masking"
@@ -139,9 +141,29 @@ func main() {
 		}
 	}()
 
-	// TODO: 启动 gRPC 服务器（Phase 2）
-	// grpcAddr := fmt.Sprintf("%s:%d", cfg.GRPCPort)
-	// grpcServer := setupGRPCServer(ruleEngine, budgetAcct)
+	// 启动 gRPC 服务器
+	grpcAddr := fmt.Sprintf("0.0.0.0:%d", cfg.GRPCPort)
+	grpcLis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		slog.Error("gRPC listen failed", "err", err)
+		os.Exit(1)
+	}
+
+	// 创建 PrivacyService 编排层
+	svcCfg := service.DefaultConfig()
+	svc, err := service.NewPrivacyService(svcCfg)
+	if err != nil {
+		slog.Error("Failed to init PrivacyService", "err", err)
+		os.Exit(1)
+	}
+
+	grpcSrv := grpcserver.NewServer(svc)
+	go func() {
+		slog.Info("gRPC server starting", "addr", grpcAddr)
+		if err := grpcSrv.Serve(grpcLis); err != nil {
+			slog.Error("gRPC server error", "err", err)
+		}
+	}()
 
 	slog.Info("Configuration summary",
 		"rest_addr", restAddr,
@@ -163,6 +185,7 @@ func main() {
 	if err := restServer.Shutdown(ctx); err != nil {
 		slog.Error("REST server shutdown error", "err", err)
 	}
+	grpcSrv.GracefulStop()
 
 	slog.Info("Server stopped gracefully")
 }
@@ -320,14 +343,4 @@ func getEnvInt(key string, defaultVal int) int {
 		return n
 	}
 	return defaultVal
-}
-
-// ──────────────────────────────────────────────
-// gRPC 服务器（Phase 2 占位）
-// ──────────────────────────────────────────────
-
-func setupGRPCServer() {
-	// TODO: 实现 gRPC 服务器
-	// 参考 design doc §12.6
-	slog.Info("gRPC server not yet implemented")
 }

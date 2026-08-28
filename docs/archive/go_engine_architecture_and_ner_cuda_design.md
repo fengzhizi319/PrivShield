@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v5.0.0-drafted (路径 C 演进草案实现版)
+> **版本**：v6.0.0-drafted (路径 C 演进草案 Phase 2 实现版)
 > **编写日期**：2026-08-28
-> **修订说明**：v5.0.0 完成 Phase 1 代码实现：创建 `privacy-go-sdk` 隐私原语库（masking/dp/ldp/kano/qol/budget 6 个包）与 `engine-go` 引擎骨架（AC 自动机规则引擎 + REST 服务器 + 可观测性基础设施），编写单元测试，验证代码可编译。
+> **修订说明**：v6.0.0 完成 Phase 2 代码实现：补齐 gRPC 服务端（UnknownServiceHandler + 原始编解码器模式，覆盖 44 个 RPC 方法路由）、Service 编排层、REST 路由重构、L7 网关（P2C-EWMA + 三态熔断器 + HTTP 反向代理）、dynclassification 补齐（算子注册表/WordPiece Tokenizer/安全底线仲裁器/LLM HTTP 客户端）、medical 包、配置文件（privacy.yaml + gateway.yaml）、Benchmark 基准测试、开发脚本。
 
 ---
 
@@ -71,8 +71,8 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ❌ 尚未创建 | 文档第 12 章描述的目录结构为**目标结构**，当前仓库不存在。 |
-| Go + CUDA Small-NER 引擎 | ❌ 尚未实现 | ONNX Runtime CGO 绑定、动态合批、Tokenizer 等为设计草案。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 2 已实现 | Phase 1 骨架 + Phase 2 补齐：gRPC 服务端、Service 编排层、REST 路由、L7 网关、dynclassification 扩展、medical 包、配置文件。详见附录 A v6.0.0 修订记录。 |
+| Go + CUDA Small-NER 引擎 | ❌ 尚未实现 | ONNX Runtime CGO 绑定、动态合批、Tokenizer 等为设计草案。WordPiece Tokenizer 与安全底线仲裁器已提供 Go 纯实现版（Phase 2）。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
 **工程数字说明**：
@@ -1442,7 +1442,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本节为路径 C 的**建议落地路线图**，所列目录与文件（`engine-go/`、`privacy-go-sdk/`、`cmd/privshield-*`）当前尚未创建。研发团队可按此清单分阶段实施，每完成一阶段需更新本文档对应章节的状态说明并补充实测数据。
+> **状态说明**：本节为路径 C 的**建议落地路线图**。Phase 1（Step 1-3）与 Phase 2（Step 6-7）已实现，详见附录 A v5.0.0/v6.0.0 修订记录。剩余 Step 4-5（Go+CUDA NER）与 Step 8（全栈压测）待后续 Phase 3 实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -1461,7 +1461,7 @@ flowchart TD
 
 ### 12.1 工程目录结构规划与包依赖划分（目标结构，尚未创建）
 
-> **状态说明**：以下目录结构为路径 C 的目标布局，当前仓库不存在 `engine-go/` 或 `PrivShield-go/` 目录。建议作为后续代码组织的参考蓝图。
+> **状态说明**：以下目录结构为路径 C 的目标布局。Phase 1 + Phase 2 已创建 `engine-go/` 与 `privacy-go-sdk/`（详见附录 A），但目录组织与目标结构略有差异（当前 `engine-go/` 包含 `internal/` 子目录，而非直接放在根目录）。后续可逐步对齐。
 
 ```text
 PrivShield-go/
@@ -2026,11 +2026,11 @@ func main() {
 
 | 目标模块 | 当前状态 | 说明 |
 |---|---|---|
-| `privacy-go-sdk/` | ❌ 不存在 | 需从零实现纯 Go 隐私原语；可参考 Python `engine/privacy/` 的算法语义与测试用例。 |
-| `internal/dynclassification/` | ❌ 不存在 | 需实现 AC 规则引擎、ONNX NER、LLM 客户端、Safety Floor。 |
-| `internal/gateway/` | ❌ 不存在 | 当前网关为 Python `engine/gateway/`；Go 版本需重新实现或参考成熟开源库。 |
-| `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ❌ 不存在 | 需基于 `pkg/` 与 `proto/privacy.proto` 新建。 |
-| `cmd/privshield-agent/`、`cmd/privshield-gateway/` | ❌ 不存在 | 需新建主入口。 |
+| `privacy-go-sdk/` | ✅ Phase 2 已实现 | 7 个包：`masking/`、`dp/`、`ldp/`、`kano/`、`qol/`、`budget/`、`medical/`，含单元测试与基准测试。 |
+| `internal/dynclassification/` | ✅ Phase 2 已实现 | 规则引擎 + 算子注册表 + WordPiece Tokenizer + 安全底线仲裁器 + LLM HTTP 客户端。ONNX NER 待实现。 |
+| `internal/gateway/` | ✅ Phase 2 已实现 | P2C-EWMA 负载均衡 + 三态熔断器 + HTTP 反向代理。gRPC 透明流代理待实现。 |
+| `internal/service/`、`internal/rest/`、`internal/grpcserver/` | ✅ Phase 2 已实现 | Service 编排层、REST 路由、gRPC 服务端（UnknownServiceHandler 模式）。 |
+| `cmd/privshield-agent/`、`cmd/privshield-gateway/` | ✅ Phase 2 已实现 | 双协议服务入口 + L7 网关入口，Dockerfile、开发脚本均已创建。 |
 
 ---
 
@@ -2272,6 +2272,39 @@ PrivShield/
 
 ## 附录 A：文档修订记录
 
+### v6.0.0 修订（v5.0.0 → v6.0.0）
+
+本次修订完成 Phase 2 代码实现，将 Go 引擎从骨架扩展为功能基本完整的双协议服务：
+
+| 修订项 | v5.0.0 状态 | v6.0.0 实现 |
+|---|---|---|
+| gRPC 服务端 | Phase 2 待实现 | 实现 `internal/grpcserver/server.go`，采用 `grpc.UnknownServiceHandler` + 原始编解码器模式，覆盖 44 个 RPC 方法路由（Health/Mask/DP/Classify 等核心方法已实现，其余返回 unimplemented 占位） |
+| Service 编排层 | 不存在 | 实现 `internal/service/service.go`，统一封装掩码/DP/LDP/K-匿名/查询混淆/分类/医疗流水线/预算/HMAC 为单一服务接口 |
+| REST 路由 | 内联在 main.go | 重构为 `internal/rest/routes.go`，覆盖 mask/dp/ldp/kano/qol/classify/medical/hash/budget 全部端点 |
+| L7 网关 | 不存在 | 实现 `internal/gateway/balancer.go`（P2C-EWMA + RoundRobin + LeastConn + 三态熔断器）+ `http_proxy.go`（HTTP 反向代理 + EWMA 延迟追踪） |
+| dynclassification 扩展 | 仅规则引擎 | 补齐 `operators.go`（算子注册表，6 种算子）、`tokenizer.go`（WordPiece Tokenizer + Offset Mapping）、`safety_floor.go`（安全底线仲裁器）、`llm_client.go`（LLM HTTP 连接池客户端） |
+| medical 包 | 不存在 | 实现 `privacy-go-sdk/medical/pipeline.go`，医保 18 字段 / 康养 27 字段特化脱敏流水线 |
+| 单元测试 | Phase 1 4 个测试文件 | 补齐 ldp/kano/qol/medical/grpcserver 测试，共 10+ 个测试文件 |
+| 基准测试 | 不存在 | 创建 masking/dp/dynclassification 基准测试（`*_bench_test.go`） |
+| 配置文件 | 不存在 | 创建 `config/privacy.yaml`（隐私服务配置）+ `config/gateway.yaml`（网关负载均衡配置） |
+| Dockerfile | 不存在 | 创建 `engine-go/Dockerfile`，多阶段构建（golang:1.25-alpine3.21 → alpine:3.21），编译 agent + gateway 双二进制 |
+| 开发脚本 | 不存在 | 创建 `go-engine-start.sh`、`go-gateway-start.sh`、`go-engine-test.sh`、`proto_generate.sh` |
+| 文档状态 | “尚未创建” | 更新为“Phase 2 已实现”，§13.2 模块清单状态全部更新为 ✅ |
+
+**Phase 2 实现清单**：
+- [x] `engine-go/internal/grpcserver` — gRPC 服务端（UnknownServiceHandler + rawCodec，覆盖 Health/Mask/DP/Classify/Hash/Obfuscate/KAnonymize 等核心 RPC）
+- [x] `engine-go/internal/service` — PrivacyService 统一编排层（8 类 API，自动字段推断脱敏）
+- [x] `engine-go/internal/rest` — REST 路由重构（17 个端点，从 main.go 内联分离）
+- [x] `engine-go/internal/gateway` — L7 网关（P2C-EWMA 调度 + 三态熔断器 + HTTP 反向代理 + EWMA 延迟追踪）
+- [x] `engine-go/internal/dynclassification` — 算子注册表（6 种算子）、WordPiece Tokenizer、安全底线仲裁器、LLM HTTP 客户端
+- [x] `privacy-go-sdk/medical` — 医保 18 字段 / 康养 27 字段特化脱敏流水线
+- [x] `engine-go/cmd/privshield-gateway` — L7 网关入口（环境变量配置 + 优雅停机）
+- [x] `engine-go/Dockerfile` — 多阶段构建（agent + gateway 双二进制）
+- [x] `config/privacy.yaml` + `config/gateway.yaml` — 服务配置与网关配置
+- [x] 单元测试 — ldp/kano/qol/medical/grpcserver 共 6 个新测试文件
+- [x] 基准测试 — masking/dp/dynclassification 共 3 个 bench 文件
+- [x] 开发脚本 — go-engine-start.sh / go-gateway-start.sh / go-engine-test.sh / proto_generate.sh
+
 ### v5.0.0 修订（v4.0.0 → v5.0.0）
 
 本次修订完成 Phase 1 代码实现，将设计文档转化为可运行的 Go 原生引擎骨架：
@@ -2326,8 +2359,12 @@ PrivShield/
 - [x] 创建 `privacy-go-sdk/` 目录并实现 6 个隐私原语包（masking/dp/ldp/kano/qol/budget）；
 - [x] 创建 `engine-go/` 目录并实现引擎骨架（AC 自动机 + REST 服务器 + 可观测性）；
 - [x] 编写 `masking`/`dp`/`budget`/`dynclassification` 单元测试；
+- [x] 实现 gRPC 服务端（Phase 2，UnknownServiceHandler 模式）；
+- [x] 实现 Service 编排层、REST 路由重构、L7 网关、dynclassification 扩展、medical 包（Phase 2）；
+- [x] 创建配置文件、基准测试、开发脚本、Dockerfile（Phase 2）；
 - [ ] 补充 `go test -bench`、网关压测、GPU NER 压测的实测数据，替换第 14 章目标值；
-- [ ] 实现 gRPC 服务器（Phase 2）；
-- [ ] 实现 Layer 2 Small-NER（ONNX Runtime）与 Layer 3 LLM/VLM 仲裁（Phase 3）；
+- [ ] 实现 Layer 2 Small-NER（ONNX Runtime CGO）与 Layer 3 LLM/VLM 仲裁（Phase 3）；
+- [ ] 实现 gRPC 透明流式代理（§9.4，需自定义 codec 或接入 grpc-proxy 库）；
+- [ ] 引入 protoc-gen-go 生成类型安全桩代码，替换 UnknownServiceHandler 模式（Phase 3）；
 - [ ] 当 Go 引擎通过影子流量验证后，更新第 16 章状态并制定切流计划；
 - [ ] 若未来引入外部参考实现，重新评估并更新第 13 章。
