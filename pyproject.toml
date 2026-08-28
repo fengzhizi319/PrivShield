@@ -38,6 +38,7 @@ Documentation = "https://github.com/fengzhizi319/PrivShield#readme"
 dev = [
     "grpcio-tools>=1.62.0,<2.0.0",
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
     "pytest-cov>=5.0.0",
     "pytest-benchmark>=4.0.0",
     "hypothesis>=6.0.0",
@@ -192,6 +193,7 @@ ignore_errors = true
 # ── pytest + coverage ────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "slow: marks tests as slow-running",

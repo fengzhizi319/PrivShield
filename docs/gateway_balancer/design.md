@@ -379,7 +379,7 @@ graph TD
 | **隐私原语算力群** | [`engine/privacy/dp.py`](engine/privacy/dp.py)<br>[`engine/privacy/kano.py`](engine/privacy/kano.py)<br>[`engine/privacy/masking.py`](engine/privacy/masking.py) | 包含 `DPApi`（Laplace/Gaussian 机制与数值裁剪）、`LDPApi`（随机响应）、`KAnonymityApi`（自适应分段年龄泛化与 Mondrian 多维划分）、`MaskingApi`（通用脱敏）。 |
 | **分布式预算记账器**<br>`BudgetAccountant` | [`engine/privacy/budget.py`](engine/privacy/budget.py) | 管理 Epsilon/Delta 隐私预算。在多 Worker 场景下通过 SQLite `BEGIN IMMEDIATE` 排他锁保证跨容器/跨进程扣减的 ACID 原子一致性，支持时间窗口自动清零与 HMAC-SHA256 审计存证。 |
 | **AI/ML 适配器** | [`engine/dynclassification/ner_adapter.py`](engine/dynclassification/ner_adapter.py)<br>[`llm_adapter.py`](engine/dynclassification/llm_adapter.py) | StructBERT ONNX Runtime 实体识别与 Qwen-3.5 本地 LLM 推理，受进程级信号量（`PRIVACY_LLM_MAX_CONCURRENCY`）与物理可用内存熔断保护（`PRIVACY_LLM_MIN_FREE_MEM_MB`）。 |
-| **安全与白名单** | [`engine/security/auth.py`](engine/security/auth.py)<br>[`whitelist.py`](engine/security/whitelist.py) | 校验网关回源请求的 API Key，或验证 mTLS 客户端证书 Common Name（CN），支持 YAML 白名单热加载。 |
+| **安全与白名单** | [`engine/security/auth.py`](engine/security/auth.py)<br>[`whitelist.py`](engine/security/whitelist.py)<br>[`pkg/tlsutil/whitelist.go`](pkg/tlsutil/whitelist.go) | 校验网关回源请求的 API Key，或验证 mTLS 客户端证书 Common Name（CN）；Python 端支持 YAML 白名单请求驱动热加载，Go 端支持 YAML 白名单 mtime 轮询热重载 + per-CN scope 授权。 |
 | **可观测性组件** | [`engine/observability/metrics.py`](engine/observability/metrics.py)<br>[`tracing.py`](engine/observability/tracing.py) | 收集 Worker 内部的 Prometheus 细粒度指标，记录结构化 JSON 日志并透传 OpenTelemetry W3C TraceContext 链路追踪。 |
 
 ---

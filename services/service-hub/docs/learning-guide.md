@@ -319,7 +319,7 @@ type Server struct {
 
 func (s *Server) RegisterRoutes(r *gin.Engine) {
     // 挂载通用中间件链
-    r.Use(middleware.RequestID())
+    r.Use(middleware.TraceMiddleware())  // 全链路追踪（X-Request-ID + X-Trace-ID）
     r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
     r.Use(middleware.Recovery(s.logger, "service-hub"))
     r.Use(middleware.SecurityHeaders())
@@ -525,11 +525,13 @@ docker run -d \
 
 ### Prometheus 监控指标
 
-访问 `http://127.0.0.1:8082/metrics` 即可采集标准 Prometheus 指标：
-- `service_hub_http_requests_total`：HTTP 请求总数（按 path/code 统计）
-- `service_hub_http_request_duration_seconds`：HTTP 请求延迟直方图
-- `service_hub_tasks_active`：当前活跃执行中的流水线任务数
-- `service_hub_tasks_completed_total`：累计完成任务数
+访问 `http://127.0.0.1:8082/metrics` 即可采集标准 Prometheus 指标（所有 Go 服务共享 `pkg/metrics` 指标库，通过 `module` 标签区分服务）：
+- `http_requests_total`：HTTP 请求总数（按 method/path/status 统计）
+- `http_request_duration_seconds`：HTTP 请求延迟直方图
+- `task_transitions_total`：任务状态转换计数（按 from/to/result 统计）
+- `orphaned_tasks_recovered_total`：崩溃孤立任务回收计数
+- `tasks_retried_total`：失败任务重试计数
+- `circuit_breaker_state`：Agent 客户端熔断器状态
 
 ---
 

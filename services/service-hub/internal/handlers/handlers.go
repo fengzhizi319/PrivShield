@@ -189,14 +189,19 @@ func (s *Server) persistTask(task *store.Task, transition string) error {
 // 3. Recovery: 拦截 Handler Panic 并返回 500 JSON
 // 4. SecurityHeaders: 注入 CSP、HSTS、X-Content-Type-Options 等安全防护头
 // 5. MaxBodySize: 限制请求体最大 32 MiB，防御超大 Body 内存溢出
-// 6. CORS: 跨域来源校验与预检放行
-// 7. Auth: 基于 Authorization Bearer 的 API Key 鉴权校验
+// 6. MaxConcurrent: 限制在途请求并发上限（1000），超限返回 503
+// 7. CORS: 跨域来源校验与预检放行
+// 8. Auth: 基于 Authorization Bearer 的 API Key 鉴权校验
 func (s *Server) RegisterRoutes(r *gin.Engine) {
-	r.Use(middleware.RequestID())
+	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
 	r.Use(middleware.Recovery(s.logger, "service-hub"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB 请求体最大保护
+	r.Use(middleware.MaxBodySize(32 << 20))   // 32 MiB 请求体最大保护
+	r.Use(middleware.MaxConcurrent(1000))      // 并发在途请求上限，超限返回 503
+	if s.cfg.RateLimitRPS > 0 {
+		r.Use(middleware.RateLimit(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst)) // 每客户端 IP 令牌桶限流
+	}
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
@@ -285,7 +290,7 @@ func (s *Server) Readyz(c *gin.Context) {
 func (s *Server) HubStatus(c *gin.Context) {
 	counts, err := s.tasks.Counts()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 
@@ -307,10 +312,7 @@ func (s *Server) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	task, err := s.tasks.Get(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"detail": fmt.Sprintf("task %s not found", id),
-			"via":    moduleVia,
-		})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("task %s not found", id), nil)
 		return
 	}
 
@@ -331,7 +333,7 @@ func (s *Server) ListTasks(c *gin.Context) {
 	// 状态枚举白名单校验
 	if statusFilter != "" {
 		if err := validation.AllowedValues("status", statusFilter, validation.TaskStatuses); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 			return
 		}
 	}
@@ -341,7 +343,7 @@ func (s *Server) ListTasks(c *gin.Context) {
 
 	tasks, total, err := s.tasks.List(store.TaskFilter{Status: statusFilter, Limit: limit, Offset: offset})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 
@@ -363,7 +365,7 @@ func (s *Server) ListTasks(c *gin.Context) {
 func (s *Server) Dispatch(c *gin.Context) {
 	var req dispatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request: %v", err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request: %v", err), nil)
 		return
 	}
 
@@ -376,17 +378,17 @@ func (s *Server) Dispatch(c *gin.Context) {
 	}
 
 	if rawSource == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "source / datasource_id / api_code is required"})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "source / datasource_id / api_code is required", nil)
 		return
 	}
 
 	normID, err := naming.ResolveInbound(rawSource)
 	if err != nil {
 		if naming.IsReserved(err) {
-			c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("data source %q is reserved: %v", rawSource, err)})
+			middleware.AbortWithError(c, http.StatusConflict, "RESERVED_DATASOURCE", fmt.Sprintf("data source %q is reserved: %v", rawSource, err), nil)
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid data source or api_code %q: %v", rawSource, err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", fmt.Sprintf("invalid data source or api_code %q: %v", rawSource, err), nil)
 		return
 	}
 	normAPICode := naming.APICodeForDataSource(normID)
@@ -396,12 +398,17 @@ func (s *Server) Dispatch(c *gin.Context) {
 	req.Source = normID
 
 	if err := validation.AllowedValues("operation", req.Operation, validation.HubOperations); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 
 	taskID := validation.GenerateID("task")
 	now := time.Now()
+
+	requestID := middleware.GetTraceID(c)
+	if requestID == "" {
+		requestID = validation.GenerateID("req")
+	}
 
 	payloadJSON, _ := json.Marshal(req.Payload)
 	status := "pending"
@@ -425,16 +432,12 @@ func (s *Server) Dispatch(c *gin.Context) {
 		CreatedAt:    now,
 		StartedAt:    startedAt,
 		PayloadJSON:  string(payloadJSON),
+		TraceID:      requestID,
 	}
 
 	if err := s.tasks.Save(task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
-	}
-
-	requestID := c.GetString("RequestID")
-	if requestID == "" {
-		requestID = validation.GenerateID("req")
 	}
 
 	// PostgreSQL 模式由共享租约 worker 消费，避免不同入口绕过任务所有权。
@@ -579,7 +582,7 @@ func (s *Server) processTask(task *store.Task, req dispatchRequest, requestID st
 func (s *Server) Pipeline(c *gin.Context) {
 	runningTasks, _, err := s.tasks.List(store.TaskFilter{Status: "running", Limit: 1000})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 

@@ -55,6 +55,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
 	"github.com/fengzhizi319/PrivShield/pkg/metrics"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/agent"
@@ -145,12 +146,13 @@ func (s *Server) Shutdown() {
 
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// Shared middleware chain / 共享中间件链
-	r.Use(middleware.RequestID())
+	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "backend-go"))
 	r.Use(middleware.Recovery(s.logger, "backend-go"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(64 << 20)) // 64 MiB max payload protection (supports larger CSV uploads)
-	r.Use(middleware.CORS(nil))            // backend-go 默认允许所有来源（开发模式）
+	r.Use(middleware.MaxBodySize(64 << 20))  // 64 MiB max payload protection (supports larger CSV uploads)
+	r.Use(middleware.MaxConcurrent(1000))    // 并发在途请求上限，超限返回 503
+	r.Use(middleware.CORS(nil))              // backend-go 默认允许所有来源（开发模式）
 	// P57 fix: capture cleanup function from securityMiddleware to stop ticker goroutine on shutdown.
 	secHandler, secCleanup := securityMiddleware(s.cfg.ConsoleAPIKey, s.cfg.ConsoleRateLimit)
 	s.secCleanup = secCleanup
@@ -221,7 +223,7 @@ func (s *Server) registerStatic(r *gin.Engine) {
 		// 判断请求路径是否以 /api/ 开头
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			// API 路由未匹配，返回标准 404 JSON 响应
-			c.JSON(http.StatusNotFound, gin.H{"detail": "Not Found", "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", "Not Found", nil)
 			return
 		}
 		// 非 API 路由：设置 no-cache 响应头，防止浏览器缓存 index.html。
@@ -308,13 +310,15 @@ func (s *Server) Health(c *gin.Context) {
 	}
 
 	// 默认使用 gRPC 协议检查
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// 将追踪 ID 注入 context，确保 gRPC 健康检查也携带分布式追踪上下文
+	healthCtx := s.client.WithTrace(context.Background(), middleware.GetTraceID(c))
+	ctx, cancel := context.WithTimeout(healthCtx, 3*time.Second)
 	defer cancel()
 
 	resp, err := s.client.Health(ctx)
 	if err != nil {
 		// 瞬态重试一次（处理连接握手与初始化期间的抖动）
-		retryCtx, retryCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		retryCtx, retryCancel := context.WithTimeout(s.client.WithTrace(context.Background(), middleware.GetTraceID(c)), 2*time.Second)
 		resp, err = s.client.Health(retryCtx)
 		retryCancel()
 	}
@@ -352,7 +356,7 @@ func (s *Server) Samples(c *gin.Context) {
 func (s *Server) Proxy(c *gin.Context) {
 	var req models.ProxyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 
@@ -364,9 +368,10 @@ func (s *Server) Proxy(c *gin.Context) {
 	}
 
 	// 核心调用：通过 gRPC mapper 转发
+	// 将追踪 ID 注入 gRPC outgoing metadata，实现 HTTP → gRPC 跨协议全链路追踪
 	ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
 	defer cancel()
-	data, err := s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), req.Path, req.Body)
+	data, err := s.mapper.Dispatch(s.client.WithTrace(s.client.WithAuth(ctx), middleware.GetTraceID(c)), s.client.Raw(), req.Path, req.Body)
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -378,7 +383,7 @@ func (s *Server) Proxy(c *gin.Context) {
 		if isUnavailable(err) {
 			status = http.StatusBadGateway
 		}
-		c.JSON(status, gin.H{"detail": err.Error(), "status": status})
+		middleware.AbortWithError(c, status, middleware.ErrorCodeFromStatus(status), err.Error(), nil)
 		return
 	}
 
@@ -621,6 +626,11 @@ func (s *Server) callRest(ctx context.Context, method, path string, body json.Ra
 	if s.cfg.AgentAPIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.AgentAPIKey)
 	}
+	// Propagate distributed trace headers to the upstream Python engine.
+	if rid := pkgagent.RequestIDFromContext(ctx); rid != "" {
+		httpReq.Header.Set("X-Request-ID", rid)
+		httpReq.Header.Set("X-Trace-ID", rid)
+	}
 
 	client := s.httpClient
 	resp, err := client.Do(httpReq)
@@ -656,7 +666,9 @@ func (s *Server) proxyRest(c *gin.Context, start time.Time, req models.ProxyRequ
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
-		c.JSON(statusCode, gin.H{"detail": err.Error(), "status": statusCode})
+		// 将上游错误体作为 detail 字段保留在统一错误信封中，
+		// 前端依赖 {detail} 展示上游原始错误信息。
+		middleware.AbortWithError(c, statusCode, middleware.ErrorCodeFromStatus(statusCode), "upstream error", err.Error())
 		return
 	}
 
@@ -693,16 +705,14 @@ func (s *Server) Batch(c *gin.Context) {
 	var req models.BatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 请求体格式不合法时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err)})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 
 	// P41 fix: 限制批量请求数量上限为 100，防止单次提交数千请求导致长时间占用连接（DoS 防护）
 	const maxBatchSize = 100
 	if len(req.Requests) > maxBatchSize {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("batch too large: %d requests (max %d)", len(req.Requests), maxBatchSize),
-		})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("batch too large: %d requests (max %d)", len(req.Requests), maxBatchSize), nil)
 		return
 	}
 
@@ -734,8 +744,9 @@ func (s *Server) Batch(c *gin.Context) {
 		} else {
 			// 通过 mapper 转发到上游 agent 的对应 gRPC 方法。
 			// 使用 grpcCallTimeout 超时包裹：agent 重启期间请求等待连接恢复而非立即失败。
+			// 将追踪 ID 注入 gRPC outgoing metadata，保持全链路追踪连续性
 			ctx, cancel := context.WithTimeout(c.Request.Context(), s.grpcCallTimeout())
-			data, callErr = s.mapper.Dispatch(s.client.WithAuth(ctx), s.client.Raw(), item.Path, item.Body)
+			data, callErr = s.mapper.Dispatch(s.client.WithTrace(s.client.WithAuth(ctx), middleware.GetTraceID(c)), s.client.Raw(), item.Path, item.Body)
 			cancel()
 
 			if callErr != nil && strings.Contains(callErr.Error(), "unsupported gRPC path") {
@@ -807,7 +818,7 @@ func (s *Server) Upload(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		// 缺少文件或读取失败时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("缺少文件: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("缺少文件: %v", err), nil)
 		return
 	}
 	// 注册 defer：函数退出时自动关闭文件句柄，释放资源
@@ -815,10 +826,7 @@ func (s *Server) Upload(c *gin.Context) {
 
 	// 上传大小限制：超限返回 413，避免大文件耗尽内存（DoS 防护）。
 	if s.cfg.MaxUploadBytes > 0 && header.Size > s.cfg.MaxUploadBytes {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-			"detail": fmt.Sprintf("文件过大（%d 字节），上限 %d 字节", header.Size, s.cfg.MaxUploadBytes),
-			"status": http.StatusRequestEntityTooLarge,
-		})
+		middleware.AbortWithError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", fmt.Sprintf("文件过大（%d 字节），上限 %d 字节", header.Size, s.cfg.MaxUploadBytes), nil)
 		return
 	}
 
@@ -840,15 +848,12 @@ func (s *Server) Upload(c *gin.Context) {
 	content, err := io.ReadAll(io.LimitReader(file, maxReadSize+1))
 	if err != nil {
 		// 文件读取失败时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("读取文件失败: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("读取文件失败: %v", err), nil)
 		return
 	}
 	if int64(len(content)) > maxReadSize {
 		// 文件实际大小超过限制
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-			"detail": fmt.Sprintf("文件实际大小超过上限 %d 字节", maxReadSize),
-			"status": http.StatusRequestEntityTooLarge,
-		})
+		middleware.AbortWithError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", fmt.Sprintf("文件实际大小超过上限 %d 字节", maxReadSize), nil)
 		return
 	}
 
@@ -865,12 +870,12 @@ func (s *Server) Upload(c *gin.Context) {
 		records, _, err = fileparse.ParseJSON(content)
 	default:
 		// 不支持的文件格式时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "仅支持 .csv 与 .json 文件", "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "仅支持 .csv 与 .json 文件", nil)
 		return
 	}
 	if err != nil {
 		// 文件解析失败（如格式不合法）时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error(), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 
@@ -878,7 +883,7 @@ func (s *Server) Upload(c *gin.Context) {
 	var options map[string]any
 	if err := json.Unmarshal([]byte(params), &options); err != nil {
 		// params 不是合法 JSON 时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("params 需为合法 JSON: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("params 需为合法 JSON: %v", err), nil)
 		return
 	}
 
@@ -889,7 +894,8 @@ func (s *Server) Upload(c *gin.Context) {
 	// 获取底层 gRPC 客户端，用于直接调用 RPC 方法
 	client := s.client.Raw()
 	// 使用请求的 context，支持客户端取消操作
-	ctx := s.client.WithAuth(c.Request.Context())
+	// 将追踪 ID 注入 gRPC outgoing metadata，保持全链路追踪连续性
+	ctx := s.client.WithTrace(s.client.WithAuth(c.Request.Context()), middleware.GetTraceID(c))
 
 	// 记录操作开始时间，用于计算总耗时
 	start := time.Now()
@@ -921,7 +927,7 @@ func (s *Server) Upload(c *gin.Context) {
 		qiCols := stringSlice(options, "qi_cols")
 		if len(qiCols) == 0 {
 			// 缺少 qi_cols 参数时返回 400 错误
-			c.JSON(http.StatusBadRequest, gin.H{"detail": "k_anonymize 操作需提供 qi_cols 参数", "status": http.StatusBadRequest})
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "k_anonymize 操作需提供 qi_cols 参数", nil)
 			return
 		}
 		// 调用 KAnonymizeDataFrame gRPC 方法
@@ -942,10 +948,7 @@ func (s *Server) Upload(c *gin.Context) {
 
 	default:
 		// 不支持的操作类型时返回 400 错误，并列出可选操作
-		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("不支持的操作 '%s'，可选: k_anonymize, mask_dataframe", operation),
-			"status": http.StatusBadRequest,
-		})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("不支持的操作 '%s'，可选: k_anonymize, mask_dataframe", operation), nil)
 		return
 	}
 
@@ -980,19 +983,19 @@ func (s *Server) LbTest(c *gin.Context) {
 	var req models.LbTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 请求体格式不合法时返回 400 错误
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 	// SSRF 防护：逐个校验探测目标 URL 的 scheme / host 白名单。
 	if err := lbtest.ValidateBackends(req.Backends, splitHosts(s.cfg.LBAllowedHosts)); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error(), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 	// 调用 lbtest 模块执行负载均衡测试，第三个参数为可选的自定义 HTTP 客户端（nil 使用默认）
 	resp, err := lbtest.Run(c.Request.Context(), req, nil)
 	if err != nil {
 		// 测试执行失败时返回 400 错误，包含具体错误信息
-		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error(), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), nil)
 		return
 	}
 	// 返回测试结果 JSON
@@ -1028,7 +1031,7 @@ func (s *Server) writeUpstreamError(c *gin.Context, err error) {
 		status = http.StatusBadGateway
 	}
 	// 返回 JSON 格式的错误响应，包含错误详情与状态码
-	c.JSON(status, gin.H{"detail": err.Error(), "status": status})
+	middleware.AbortWithError(c, status, middleware.ErrorCodeFromStatus(status), err.Error(), nil)
 }
 
 // toRecordEntries 将 Go map 数组转换为 gRPC RecordEntry 列表。
@@ -1239,7 +1242,7 @@ func securityMiddleware(apiKey string, rateLimit int) (gin.HandlerFunc, func()) 
 		if apiKey != "" {
 			token := extractBearer(c.GetHeader("Authorization"))
 			if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"detail": "Unauthorized: invalid console api key"})
+				middleware.AbortWithError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Unauthorized: invalid console api key", nil)
 				return
 			}
 		}
@@ -1260,7 +1263,7 @@ func securityMiddleware(apiKey string, rateLimit int) (gin.HandlerFunc, func()) 
 			if len(kept) >= rateLimit {
 				hits[ip] = kept
 				mu.Unlock()
-				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"detail": "Too many requests"})
+				middleware.AbortWithError(c, http.StatusTooManyRequests, "RATE_LIMITED", "Too many requests", nil)
 				return
 			}
 			hits[ip] = append(kept, now)
@@ -1284,7 +1287,7 @@ func extractBearer(header string) string {
 func (s *Server) ConcurrencyTest(c *gin.Context) {
 	var req models.ConcurrencyTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid request body: %v", err), "status": http.StatusBadRequest})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("invalid request body: %v", err), nil)
 		return
 	}
 	if req.Path == "" {
@@ -1293,10 +1296,7 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 	// P37 fix: validate path against allowlist to prevent SSRF via pressure test endpoint
 	// 校验压测路径白名单，防止通过压测端点访问敏感内部接口
 	if !isAllowedConcurrencyPath(req.Path) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"detail": fmt.Sprintf("path %q not allowed for concurrency test; allowed prefixes: /v1/privacy/, /v1/dynclassification/, /v1/medical/, /v1/pipeline/, /health", req.Path),
-			"status": http.StatusBadRequest,
-		})
+		middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Sprintf("path %q not allowed for concurrency test; allowed prefixes: /v1/privacy/, /v1/dynclassification/, /v1/medical/, /v1/pipeline/, /health", req.Path), nil)
 		return
 	}
 	if req.Method == "" {
@@ -1348,7 +1348,8 @@ func (s *Server) ConcurrencyTest(c *gin.Context) {
 				if useREST {
 					err = s.callRestOnce(req.Method, req.Path, req.Body)
 				} else {
-					ctx, cancel := context.WithTimeout(s.client.WithAuth(context.Background()), 30*time.Second)
+					// 将追踪 ID 注入 gRPC metadata，确保压测请求也参与全链路追踪
+					ctx, cancel := context.WithTimeout(s.client.WithTrace(s.client.WithAuth(context.Background()), middleware.GetTraceID(c)), 30*time.Second)
 					_, err = s.mapper.Dispatch(ctx, s.client.Raw(), req.Path, req.Body)
 					cancel()
 					// gRPC 不支持该路径时回退 REST（与 Proxy 的错误回退策略一致）
@@ -1483,7 +1484,7 @@ func (s *Server) MedicalPipeline(c *gin.Context) {
 		loaded, err := s.loadSampleRecords("kangyang.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
-			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
 		}
 		records = loaded
@@ -1513,7 +1514,7 @@ func (s *Server) YibaoPipeline(c *gin.Context) {
 		loaded, err := s.loadSampleRecords("yibao.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
-			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
 		}
 		records = loaded
@@ -1545,7 +1546,7 @@ func (s *Server) PipelineProcess(c *gin.Context) {
 		loaded, err := s.loadSampleRecords("kangyang.csv")
 		if err != nil {
 			// 明确报错而非代理空记录集，避免前端把"样本缺失"误显示为"0 条记录"
-			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "status": http.StatusNotFound})
+			middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
 		}
 		records = loaded

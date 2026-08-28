@@ -96,10 +96,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       });
 
       // 非 2xx 响应统一抛出携带 detail 的 Error / Non-2xx responses throw Error with detail
+      // 兼容统一信封格式 {code, message, detail, trace_id, timestamp} 与旧格式 {detail}
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        const error = new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err)) as Error & { status?: number };
+        // 优先使用统一信封的 message 字段，回退到旧 detail 字段
+        const detailText = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+        const errMsg = err.message || detailText || res.statusText;
+        const error = new Error(errMsg) as Error & { status?: number; code?: string; traceId?: string };
         error.status = res.status;
+        if (err.code) error.code = err.code;
+        if (err.trace_id) error.traceId = err.trace_id;
+        if (err.trace_id) {
+          console.error(`[PrivShield API Error] ${err.code || 'UNKNOWN'} (TraceID: ${err.trace_id}): ${errMsg}`);
+        }
+        // Dispatch global error event for unified toast/notification handling
+        // 派发全局错误事件，供统一 Toast/通知组件监听
+        if (err.code) {
+          window.dispatchEvent(new CustomEvent('privshield:api-error', {
+            detail: { code: err.code, message: errMsg, detail: err.detail, trace_id: err.trace_id },
+          }));
+        }
         if (![502, 503, 504].includes(res.status) || attempt >= MAX_IDEMPOTENT_RETRIES) throw error;
         lastError = error;
       } else {

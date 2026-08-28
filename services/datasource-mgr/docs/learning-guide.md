@@ -330,7 +330,7 @@ type Config struct {
 ```go
 func (s *Server) RegisterRoutes(r *gin.Engine) {
     // 注入统一中间件
-    r.Use(middleware.RequestID())
+    r.Use(middleware.TraceMiddleware())  // 全链路追踪（X-Request-ID + X-Trace-ID）
     r.Use(middleware.StructuredLogger(s.logger, "datasource-mgr"))
     r.Use(middleware.Recovery(s.logger, "datasource-mgr"))
     r.Use(middleware.SecurityHeaders())

@@ -278,7 +278,7 @@ func (r *TestRunner) runTS02(ctx context.Context, req models.RunTestSuiteRequest
 			for j := 0; j < reqPerWorker; j++ {
 				t0 := time.Now()
 				_, _ = r.pool.DispatchTask(ctx, models.DispatchRequest{
-					Source:    "ds_yibao",
+					Source:    naming.DSYibao,
 					Operation: "mask",
 					Payload: map[string]any{
 						"name":    "测试用户",

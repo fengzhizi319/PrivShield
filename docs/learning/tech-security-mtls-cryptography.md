@@ -45,7 +45,7 @@
 
 ### 2.1 gRPC mTLS 客户端证书身份提取与白名单热加载 / gRPC mTLS & Whitelist Hot-Reload
 
-文件 / File：[`engine/security/auth.py`](engine/security/auth.py#L80-L130) & [`engine/security/whitelist.py`](engine/security/whitelist.py)
+文件 / File：[`engine/security/auth.py`](engine/security/auth.py#L80-L130) & [`engine/security/whitelist.py`](engine/security/whitelist.py)（Python 端）；[`pkg/tlsutil/whitelist.go`](pkg/tlsutil/whitelist.go)（Go 端，mtime 轮询热重载）
 
 #### (1) Common Name 提取与作用域授权
 

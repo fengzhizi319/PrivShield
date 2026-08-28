@@ -344,7 +344,7 @@ func GetMetadata(sourceID string) (*models.MetadataResponse, error) {
 	}
 
 	// 针对特定数据集定制其业务 Schema，与 CSV 表头严格对齐
-	if ds.ID == "ds_yibao" {
+	if ds.ID == naming.DSYibao {
 		// yibao.csv 18 字段
 		fields = []models.MetadataField{
 			{Name: "insurance_settlement_id", Type: "string"},
@@ -366,7 +366,7 @@ func GetMetadata(sourceID string) (*models.MetadataResponse, error) {
 			{Name: "diagnosis_name", Type: "string"},
 			{Name: "admission_condition", Type: "string"},
 		}
-	} else if ds.ID == "ds_kangyang" {
+	} else if ds.ID == naming.DSKangyang {
 		// kangyang.csv 27 字段
 		fields = []models.MetadataField{
 			{Name: "gender", Type: "string"},

@@ -319,8 +319,10 @@ func main() {
 	// =========================================================================
 	// 8. Operating System Signal Registration / 系统中断信号监听
 	// =========================================================================
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// 使用 signal.NotifyContext（Go 1.16+）替代传统的 signal.Notify + channel 模式，
+	// 信号到达时自动取消 context，与下游协程的 ctx.Done() 无缝衔接。
+	sigCtx, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer sigStop()
 
 	// =========================================================================
 	// 9. Dual-Protocol Concurrent Listeners / 双协议并发监听启动
@@ -372,8 +374,8 @@ func main() {
 	// 10. Graceful Shutdown Workflow / 优雅停机收敛流程
 	// =========================================================================
 	// 1) 阻塞等待退出信号（SIGINT / SIGTERM）
-	sig := <-sigChan
-	logger.Info("shutting down service-hub servers...", "signal", sig.String())
+	<-sigCtx.Done()
+	logger.Info("shutting down service-hub servers...")
 
 	// 2) 停止周期性重试协程与数据保留清理协程
 	retryCancel()

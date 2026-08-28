@@ -134,18 +134,18 @@ func Recovery(logger *slog.Logger, module string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
-				rid, _ := c.Get("request_id")
-				requestID, _ := rid.(string)
+				requestID := GetTraceID(c)
 				logger.Error("panic recovered in handler",
 					"request_id", requestID,
 					"module", module,
 					"panic", fmt.Sprintf("%v", r),
 					"path", c.Request.URL.Path,
 				)
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-					"detail":     "Internal Server Error",
-					"request_id": requestID,
-				})
+				AbortWithError(c, http.StatusInternalServerError,
+					"INTERNAL_ERROR",
+					"Internal Server Error",
+					nil,
+				)
 			}
 		}()
 		c.Next()

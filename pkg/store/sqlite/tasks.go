@@ -24,16 +24,16 @@ func NewTaskStore(db *sql.DB) (*TaskStore, error) {
 
 func (s *TaskStore) Save(task *store.Task) error {
 	_, err := s.db.Exec(`
-		INSERT OR REPLACE INTO tasks (id, status, stage, source, api_code, datasource_id, operation, priority, created_at, payload_json, retry_count, retry_after)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT OR REPLACE INTO tasks (id, status, stage, source, api_code, datasource_id, operation, priority, created_at, payload_json, retry_count, retry_after, trace_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Status, task.Stage, task.Source, task.APICode, task.DatasourceID, task.Operation, task.Priority,
-		task.CreatedAt.Format(time.RFC3339Nano), task.PayloadJSON, task.RetryCount, nullTime(task.RetryAfter))
+		task.CreatedAt.Format(time.RFC3339Nano), task.PayloadJSON, task.RetryCount, nullTime(task.RetryAfter), task.TraceID)
 	return err
 }
 
 func (s *TaskStore) Get(id string) (*store.Task, error) {
 	row := s.db.QueryRow(`
-		SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at, completed_at, duration_ms, error, retry_count, retry_after
+		SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at, completed_at, duration_ms, error, retry_count, retry_after, trace_id
 		FROM tasks WHERE id = ?
 	`, id)
 	return scanTask(row)
@@ -53,7 +53,7 @@ func (s *TaskStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
 	}
 
 	// Fetch rows
-	query := "SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at, completed_at, duration_ms, error, retry_count, retry_after FROM tasks"
+	query := "SELECT id, status, stage, source, api_code, datasource_id, operation, priority, created_at, started_at, completed_at, duration_ms, error, retry_count, retry_after, trace_id FROM tasks"
 	if filter.Status != "" {
 		query += " WHERE status = ?"
 	}
@@ -94,10 +94,10 @@ func (s *TaskStore) List(filter store.TaskFilter) ([]store.Task, int, error) {
 
 func (s *TaskStore) Update(task *store.Task) error {
 	_, err := s.db.Exec(`
-		UPDATE tasks SET status=?, stage=?, api_code=?, datasource_id=?, started_at=?, completed_at=?, duration_ms=?, error=?, retry_count=?, retry_after=?
+		UPDATE tasks SET status=?, stage=?, api_code=?, datasource_id=?, started_at=?, completed_at=?, duration_ms=?, error=?, retry_count=?, retry_after=?, trace_id=?
 		WHERE id=?
 	`, task.Status, task.Stage, task.APICode, task.DatasourceID, nullTime(task.StartedAt), nullTime(task.CompletedAt),
-		task.DurationMs, task.Error, task.RetryCount, nullTime(task.RetryAfter), task.ID)
+		task.DurationMs, task.Error, task.RetryCount, nullTime(task.RetryAfter), task.TraceID, task.ID)
 	return err
 }
 
@@ -138,7 +138,7 @@ func scanTaskFields(scan func(dest ...any) error) (*store.Task, error) {
 
 	err := scan(&t.ID, &t.Status, &t.Stage, &t.Source, &t.APICode, &t.DatasourceID, &t.Operation, &t.Priority,
 		&createdAt, &startedAt, &completedAt, &t.DurationMs, &errMsg,
-		&t.RetryCount, &retryAfter)
+		&t.RetryCount, &retryAfter, &t.TraceID)
 	if err != nil {
 		return nil, err
 	}

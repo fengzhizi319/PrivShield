@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -164,6 +165,15 @@ func TestAuth_InvalidKey(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
 	}
+
+	// Verify unified error envelope format / 校验统一错误信封格式
+	var env ErrorEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if env.Code != "UNAUTHORIZED" {
+		t.Errorf("code = %s, want UNAUTHORIZED", env.Code)
+	}
 }
 
 func TestAuth_MissingToken(t *testing.T) {
@@ -306,10 +316,23 @@ func TestRecovery_CatchesPanic(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/panic", nil)
+	req.Header.Set("X-Request-ID", "req-panic-001")
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", w.Code)
+	}
+
+	// Verify unified error envelope format / 校验统一错误信封格式
+	var env ErrorEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if env.Code != "INTERNAL_ERROR" {
+		t.Errorf("code = %s, want INTERNAL_ERROR", env.Code)
+	}
+	if env.TraceID == "" {
+		t.Error("expected non-empty trace_id in envelope")
 	}
 }
 

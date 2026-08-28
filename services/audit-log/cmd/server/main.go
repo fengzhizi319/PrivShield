@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -183,8 +182,10 @@ func main() {
 	}
 
 	// ── Signal handling / 信号处理 ───────────────────────────────
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// 使用 signal.NotifyContext（Go 1.16+）替代传统的 signal.Notify + channel 模式，
+	// 信号到达时自动取消 context，与下游协程的 ctx.Done() 无缝衔接。
+	sigCtx, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer sigStop()
 
 	// Start gRPC listener / 启动 gRPC 监听
 	grpcLis, err := net.Listen("tcp", cfg.GRPCAddress())
@@ -228,8 +229,8 @@ func main() {
 	}()
 
 	// Wait for shutdown signal / 等待优雅停机信号
-	sig := <-sigChan
-	logger.Info("shutting down audit-log servers...", "signal", sig.String())
+	<-sigCtx.Done()
+	logger.Info("shutting down audit-log servers...")
 
 	// Stop data retention cleanup goroutine / 停止数据保留清理协程
 	retentionCancel()

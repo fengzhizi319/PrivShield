@@ -79,11 +79,15 @@ func New(cfg *config.Config, logger *slog.Logger, mc *metrics.Collector) *Server
 //    - 数据源管理与元数据探测端点。
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// 装配中间件栈
-	r.Use(middleware.RequestID())
+	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "datasource-mgr"))
 	r.Use(middleware.Recovery(s.logger, "datasource-mgr"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB max payload protection
+	r.Use(middleware.MaxBodySize(32 << 20))   // 32 MiB max payload protection
+	r.Use(middleware.MaxConcurrent(1000))      // 并发在途请求上限，超限返回 503
+	if s.cfg.RateLimitRPS > 0 {
+		r.Use(middleware.RateLimit(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst)) // 每客户端 IP 令牌桶限流
+	}
 	r.Use(middleware.CORS(s.cfg.CORSOrigins))
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
@@ -169,7 +173,7 @@ func (s *Server) GetYibaoData(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetYibaoRecords(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -191,7 +195,7 @@ func (s *Server) GetKangyangData(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetKangyangRecords(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -213,7 +217,7 @@ func (s *Server) GetMock3Data(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock3Records(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -235,7 +239,7 @@ func (s *Server) GetMock4Data(c *gin.Context) {
 	limit, offset := parsePagination(c, 20, 500)
 	records, total, err := GetMock4Records(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.DataQueryResponse{
@@ -267,7 +271,7 @@ func (s *Server) GetDataSource(c *gin.Context) {
 	id := c.Param("id")
 	ds, err := GetMockDataSource(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, ds)
@@ -302,7 +306,7 @@ func (s *Server) GetDataSourceRecords(c *gin.Context) {
 	records, total, sourceName, err := GetDataBySource(id, limit, offset)
 	if err != nil {
 		s.recordDatasourceRequest(canonID, "error")
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	s.recordDatasourceRequest(canonID, "success")
@@ -325,7 +329,7 @@ func (s *Server) TestConnection(c *gin.Context) {
 	id := c.Param("id")
 	_, err := GetMockDataSource(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, models.ConnectionTestResult{
@@ -342,7 +346,7 @@ func (s *Server) GetMetadata(c *gin.Context) {
 	id := c.Param("id")
 	meta, err := GetMetadata(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error(), "via": moduleVia})
+		middleware.AbortWithError(c, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
 	}
 	c.JSON(http.StatusOK, meta)

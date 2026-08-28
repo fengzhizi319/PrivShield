@@ -39,6 +39,8 @@ import (
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/config"
 	"github.com/fengzhizi319/PrivShield/services/datasource-mgr/internal/handlers"
 	pb "github.com/fengzhizi319/PrivShield/services/datasource-mgr/proto"
+
+	naming "github.com/fengzhizi319/PrivShield/pkg/naming"
 )
 
 // moduleVia 是在所有 gRPC 响应体中携带的服务节点标识，用于全链路追踪与调试来源识别。
@@ -111,7 +113,7 @@ func (s *GRPCServer) GetYibaoData(ctx context.Context, req *pb.DataQueryRequest)
 		return nil, status.Errorf(codes.Internal, "get yibao records: %v", err)
 	}
 
-	return toDataQueryResponse("ds_yibao", "医保就医与结算模拟数据库 (yibao.csv)", total, limit, offset, rows), nil
+	return toDataQueryResponse(naming.DSYibao, "医保就医与结算模拟数据库 (yibao.csv)", total, limit, offset, rows), nil
 }
 
 // GetKangyangData implements API 2: queries mock elderly care/physical exam records from kangyang.csv.
@@ -131,7 +133,7 @@ func (s *GRPCServer) GetKangyangData(ctx context.Context, req *pb.DataQueryReque
 		return nil, status.Errorf(codes.Internal, "get kangyang records: %v", err)
 	}
 
-	return toDataQueryResponse("ds_kangyang", "康养体检与慢病模拟数据库 (kangyang.csv)", total, limit, offset, rows), nil
+	return toDataQueryResponse(naming.DSKangyang, "康养体检与慢病模拟数据库 (kangyang.csv)", total, limit, offset, rows), nil
 }
 
 // GetMockData3 implements API 3: queries reserved municipal dataset 3.

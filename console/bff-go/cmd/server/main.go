@@ -22,7 +22,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -132,11 +131,12 @@ func main() {
 	}
 
 	// ── 步骤 5：启动优雅关闭协程 ─────────────────────────────────────
-	// 在独立 goroutine 中监听系统信号，主协程继续执行到 ListenAndServe
+	// 在独立 goroutine 中使用 signal.NotifyContext（Go 1.16+）监听系统信号，
+	// 信号到达时自动取消 context，触发优雅停机流程。
 	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
+		sigCtx, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer sigStop()
+		<-sigCtx.Done()
 
 		logger.Info("shutting down bff-go servers...")
 		server.Shutdown()

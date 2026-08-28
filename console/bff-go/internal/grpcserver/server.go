@@ -90,125 +90,130 @@ func (s *Server) Stop() {
 	}
 }
 
+// outgoingCtx attaches trace and auth metadata to the upstream gRPC context.
+func (s *Server) outgoingCtx(ctx context.Context) context.Context {
+	return s.client.WithAuth(s.client.WithTraceFromContext(ctx))
+}
+
 // --- gRPC Method Proxies / Forwarding Implementation ---
 
 func (s *Server) Mask(ctx context.Context, req *pb.MaskRequest) (*pb.MaskResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().Mask(s.client.WithAuth(ctx), req)
+	return s.client.Raw().Mask(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) MaskRecord(ctx context.Context, req *pb.MaskRecordRequest) (*pb.MaskRecordResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().MaskRecord(s.client.WithAuth(ctx), req)
+	return s.client.Raw().MaskRecord(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) MaskBatch(ctx context.Context, req *pb.MaskBatchRequest) (*pb.MaskBatchResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().MaskBatch(s.client.WithAuth(ctx), req)
+	return s.client.Raw().MaskBatch(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) MaskDataFrame(ctx context.Context, req *pb.MaskDataFrameRequest) (*pb.MaskDataFrameResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().MaskDataFrame(s.client.WithAuth(ctx), req)
+	return s.client.Raw().MaskDataFrame(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) Hash(ctx context.Context, req *pb.HashRequest) (*pb.HashResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().Hash(s.client.WithAuth(ctx), req)
+	return s.client.Raw().Hash(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) DPCount(ctx context.Context, req *pb.DPRequest) (*pb.DPResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().DPCount(s.client.WithAuth(ctx), req)
+	return s.client.Raw().DPCount(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) DPSum(ctx context.Context, req *pb.DPRequest) (*pb.DPResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().DPSum(s.client.WithAuth(ctx), req)
+	return s.client.Raw().DPSum(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) DPMean(ctx context.Context, req *pb.DPRequest) (*pb.DPResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().DPMean(s.client.WithAuth(ctx), req)
+	return s.client.Raw().DPMean(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) DPHistogram(ctx context.Context, req *pb.DPHistogramRequest) (*pb.DPHistogramResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().DPHistogram(s.client.WithAuth(ctx), req)
+	return s.client.Raw().DPHistogram(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) KAnonymizeRecord(ctx context.Context, req *pb.KAnonymizeRequest) (*pb.KAnonymizeResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().KAnonymizeRecord(s.client.WithAuth(ctx), req)
+	return s.client.Raw().KAnonymizeRecord(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) KAnonymizeTable(ctx context.Context, req *pb.KAnonymizeTableRequest) (*pb.KAnonymizeTableResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().KAnonymizeTable(s.client.WithAuth(ctx), req)
+	return s.client.Raw().KAnonymizeTable(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) KAnonymizeDataFrame(ctx context.Context, req *pb.KAnonymizeDataFrameRequest) (*pb.KAnonymizeDataFrameResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().KAnonymizeDataFrame(s.client.WithAuth(ctx), req)
+	return s.client.Raw().KAnonymizeDataFrame(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) ObfuscateQuery(ctx context.Context, req *pb.ObfuscateQueryRequest) (*pb.ObfuscateQueryResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().ObfuscateQuery(s.client.WithAuth(ctx), req)
+	return s.client.Raw().ObfuscateQuery(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) ObfuscateQueryBatch(ctx context.Context, req *pb.ObfuscateQueryBatchRequest) (*pb.ObfuscateQueryBatchResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().ObfuscateQueryBatch(s.client.WithAuth(ctx), req)
+	return s.client.Raw().ObfuscateQueryBatch(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) ClassifyField(ctx context.Context, req *pb.ClassifyFieldRequest) (*pb.ClassifyFieldResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().ClassifyField(s.client.WithAuth(ctx), req)
+	return s.client.Raw().ClassifyField(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) ClassifyRecord(ctx context.Context, req *pb.ClassifyRecordRequest) (*pb.ClassifyRecordResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().ClassifyRecord(s.client.WithAuth(ctx), req)
+	return s.client.Raw().ClassifyRecord(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) ClassifyTable(ctx context.Context, req *pb.ClassifyTableRequest) (*pb.ClassifyTableResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().ClassifyTable(s.client.WithAuth(ctx), req)
+	return s.client.Raw().ClassifyTable(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
@@ -225,12 +230,12 @@ func (s *Server) RecommendParams(ctx context.Context, req *pb.RecommendRequest) 
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().RecommendParams(s.client.WithAuth(ctx), req)
+	return s.client.Raw().RecommendParams(s.outgoingCtx(ctx), req)
 }
 
 func (s *Server) DPVectorSum(ctx context.Context, req *pb.DPVectorSumRequest) (*pb.DPVectorSumResponse, error) {
 	if s.client == nil {
 		return nil, status.Error(codes.Unavailable, "agent client not initialized")
 	}
-	return s.client.Raw().DPVectorSum(s.client.WithAuth(ctx), req)
+	return s.client.Raw().DPVectorSum(s.outgoingCtx(ctx), req)
 }

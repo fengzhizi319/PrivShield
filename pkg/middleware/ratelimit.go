@@ -41,10 +41,11 @@ func MaxConcurrent(limit int) gin.HandlerFunc {
 			defer func() { <-sem }()
 			c.Next()
 		default:
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"detail": "Server is overloaded: concurrent request limit reached, please retry later",
-				"status": http.StatusServiceUnavailable,
-			})
+			AbortWithError(c, http.StatusServiceUnavailable,
+				"UPSTREAM_UNAVAILABLE",
+				"Server is overloaded: concurrent request limit reached, please retry later",
+				nil,
+			)
 		}
 	}
 }
@@ -168,10 +169,11 @@ func RateLimit(rps int, burst int) gin.HandlerFunc {
 		if !limiter.Allow(clientIP) {
 			c.Writer.Header().Set("Retry-After", "1")
 			c.Writer.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", rps))
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"detail": "Too Many Requests: rate limit exceeded, please retry later",
-				"status": http.StatusTooManyRequests,
-			})
+			AbortWithError(c, http.StatusTooManyRequests,
+				"RATE_LIMITED",
+				"Too Many Requests: rate limit exceeded, please retry later",
+				nil,
+			)
 			return
 		}
 

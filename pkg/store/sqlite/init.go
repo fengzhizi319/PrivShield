@@ -123,6 +123,7 @@ func InitTaskTables(db *sql.DB) error {
 			payload_json TEXT,
 			retry_count INTEGER DEFAULT 0,
 			retry_after DATETIME,
+			trace_id TEXT DEFAULT '',
 			lease_owner TEXT DEFAULT '',
 			lease_token TEXT DEFAULT '',
 			lease_expires_at DATETIME,
@@ -167,6 +168,11 @@ func InitTaskTables(db *sql.DB) error {
 	}
 	if !columns["retry_after"] {
 		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN retry_after DATETIME"); err != nil {
+			return err
+		}
+	}
+	if !columns["trace_id"] {
+		if _, err := db.Exec("ALTER TABLE tasks ADD COLUMN trace_id TEXT DEFAULT ''"); err != nil {
 			return err
 		}
 	}

@@ -34,7 +34,7 @@ func setupTestRouter() *Handler {
 	}
 	pool := clients.NewClientPool(cfg)
 	testRunner := runner.NewTestRunner(pool)
-	return NewHandler(cfg, pool, testRunner, nil)
+	return NewHandler(cfg, pool, testRunner, nil, nil)
 }
 
 // TestHealthCheck 验证健康检查端点。
@@ -273,5 +273,157 @@ func TestInvokeDataApiContractAndFailClosed(t *testing.T) {
 	router.ServeHTTP(w4, req4)
 	if w4.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for mismatched api/datasource, got %d", w4.Code)
+	}
+}
+
+// TestTraceMiddlewareRegistered 验证 TraceMiddleware 已注册到路由中。
+// 期望：响应头包含 X-Request-ID 和 X-Trace-ID。
+func TestTraceMiddlewareRegistered(t *testing.T) {
+	h := setupTestRouter()
+	router := SetupRouter(h)
+
+	// 1. 无请求头时自动生成 trace ID
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/health", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	reqID := w.Header().Get("X-Request-ID")
+	traceID := w.Header().Get("X-Trace-ID")
+	if reqID == "" {
+		t.Error("expected X-Request-ID header to be set by TraceMiddleware")
+	}
+	if traceID == "" {
+		t.Error("expected X-Trace-ID header to be set by TraceMiddleware")
+	}
+	if reqID != traceID {
+		t.Errorf("expected X-Request-ID == X-Trace-ID, got %q != %q", reqID, traceID)
+	}
+
+	// 2. 上游传入 X-Request-ID 时应透传
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodGet, "/api/health", nil)
+	req2.Header.Set("X-Request-ID", "req-test-upstream-123")
+	router.ServeHTTP(w2, req2)
+
+	if got := w2.Header().Get("X-Request-ID"); got != "req-test-upstream-123" {
+		t.Errorf("expected X-Request-ID passthrough, got %q", got)
+	}
+	if got := w2.Header().Get("X-Trace-ID"); got != "req-test-upstream-123" {
+		t.Errorf("expected X-Trace-ID passthrough, got %q", got)
+	}
+}
+
+// TestRateLimitMiddleware 验证令牌桶限流中间件：
+// 1. RPS > 0 时，超限请求返回 429 Too Many Requests
+// 2. RPS = 0 时，限流中间件不启用，所有请求正常通过
+func TestRateLimitMiddleware(t *testing.T) {
+	// 1. 低 RPS 配置：突发 2，每秒 1 个请求
+	cfg := &config.Config{
+		Host:           "127.0.0.1",
+		Port:           "8085",
+		HubURL:         "http://127.0.0.1:8082",
+		DatasourceURL:  "http://127.0.0.1:8083",
+		AuditURL:       "http://127.0.0.1:8084",
+		AgentURL:       "http://127.0.0.1:8079",
+		RateLimitRPS:   1,
+		RateLimitBurst: 2,
+	}
+	pool := clients.NewClientPool(cfg)
+	h := NewHandler(cfg, pool, runner.NewTestRunner(pool), nil, nil)
+	router := SetupRouter(h)
+
+	// 突发 2 次应成功（桶容量 2）
+	// 注意：/health 和 /api/health 被 RateLimit 中间件豁免，使用 /api/lz/topology 测试
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/lz/topology", nil)
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", i+1, w.Code)
+		}
+	}
+
+	// 第 3 次应被限流（桶已耗尽）
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/lz/topology", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 after burst exhausted, got %d", w.Code)
+	}
+	if retry := w.Header().Get("Retry-After"); retry == "" {
+		t.Error("expected Retry-After header on 429 response")
+	}
+
+	// 2. RPS=0 配置：限流禁用，所有请求应通过
+	cfg2 := &config.Config{
+		Host:         "127.0.0.1",
+		Port:         "8085",
+		HubURL:       "http://127.0.0.1:8082",
+		DatasourceURL: "http://127.0.0.1:8083",
+		AuditURL:     "http://127.0.0.1:8084",
+		AgentURL:     "http://127.0.0.1:8079",
+		RateLimitRPS: 0, // 禁用限流
+	}
+	pool2 := clients.NewClientPool(cfg2)
+	h2 := NewHandler(cfg2, pool2, runner.NewTestRunner(pool2), nil, nil)
+	router2 := SetupRouter(h2)
+
+	for i := 0; i < 10; i++ {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/lz/topology", nil)
+		router2.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("RPS=0: request %d: expected 200, got %d", i+1, w.Code)
+		}
+	}
+}
+
+// TestAuthMiddleware 验证 API Key 鉴权中间件：空密钥跳过、正确密钥通过、错误密钥 401。
+func TestAuthMiddleware(t *testing.T) {
+	// 场景 1：API Key 为空 → 全部通过
+	cfg1 := &config.Config{RateLimitRPS: 0}
+	pool1 := clients.NewClientPool(cfg1)
+	h1 := NewHandler(cfg1, pool1, runner.NewTestRunner(pool1), nil, nil)
+	r1 := SetupRouter(h1)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/lz/topology", nil)
+	r1.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("empty APIKey: expected 200, got %d", w.Code)
+	}
+
+	// 场景 2：API Key 设置 + 正确密钥 → 通过
+	cfg2 := &config.Config{APIKey: "test-secret-key", RateLimitRPS: 0}
+	pool2 := clients.NewClientPool(cfg2)
+	h2 := NewHandler(cfg2, pool2, runner.NewTestRunner(pool2), nil, nil)
+	r2 := SetupRouter(h2)
+
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("GET", "/api/lz/topology", nil)
+	req2.Header.Set("Authorization", "Bearer test-secret-key")
+	r2.ServeHTTP(w2, req2)
+	// 200 或 502（上游不可达）均表示通过了鉴权
+	if w2.Code == http.StatusUnauthorized {
+		t.Errorf("correct APIKey: got 401, should pass auth")
+	}
+
+	// 场景 3：API Key 设置 + 缺失密钥 → 401
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest("GET", "/api/lz/topology", nil)
+	r2.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusUnauthorized {
+		t.Errorf("missing APIKey: expected 401, got %d", w3.Code)
+	}
+
+	// 场景 4：健康检查端点豁免
+	w4 := httptest.NewRecorder()
+	req4, _ := http.NewRequest("GET", "/api/health", nil)
+	r2.ServeHTTP(w4, req4)
+	if w4.Code != http.StatusOK {
+		t.Errorf("health endpoint: expected 200, got %d", w4.Code)
 	}
 }

@@ -59,6 +59,8 @@ from .security.tls import grpc_server_credentials
 # 导入核心业务层 PrivacyService：所有隐私原语的统一入口
 from .service import PrivacyService
 
+import time as _time_mod  # noqa: E401  (用于 _extract_trace_id 回退生成)
+
 # ─── 全局配置常量 / Global configuration constants ───
 # 与 REST 模块共享环境变量配置，确保两种协议使用同一 profile 与命名空间
 # Share env-var config with the REST module so both protocols use the same profile & namespace
@@ -67,6 +69,30 @@ NAMESPACE = os.environ.get("PRIVACY_NAMESPACE", "default")  # 隐私预算命名
 
 # 获取当前模块的 logger 实例，日志名称为 "engine.grpc_server"
 logger = get_logger(__name__)
+
+
+def _extract_trace_id(context: grpc.ServicerContext) -> str:
+    """Extract distributed trace ID from gRPC incoming metadata.
+
+    从 gRPC 入站 metadata 中提取分布式追踪 ID。
+    优先查找 x-request-id，其次 x-trace-id，均不存在时自动生成。
+
+    与 bff-go WithTrace() 及 pkg/middleware/trace.go 的追踪上下文对齐，
+    确保 HTTP → gRPC 跨协议全链路追踪不断链。
+
+    Args:
+        context: gRPC servicer context / gRPC 服务端 context
+
+    Returns:
+        Trace ID string / 追踪 ID 字符串
+    """
+    metadata = []
+    if context is not None:
+        metadata = context.invocation_metadata() or []
+    for key, val in metadata:
+        if key in ("x-request-id", "x-trace-id"):
+            return val
+    return f"req-{int(_time_mod.time())}"
 
 
 def _grpc_error_mapper(fn):
@@ -80,6 +106,9 @@ def _grpc_error_mapper(fn):
         ValueError             → INVALID_ARGUMENT    (参数校验失败)
         其他 Exception         → INTERNAL            (未预期内部错误)
 
+    集成追踪上下文：从 gRPC metadata 提取 trace_id 并注入结构化日志，
+    确保 gRPC 入站请求与 REST 入站请求使用相同的追踪 ID 格式。
+
     Args:
         fn: 被装饰的 gRPC 方法（签名为 (self, request, context)）。
 
@@ -87,21 +116,23 @@ def _grpc_error_mapper(fn):
         包装后的函数，捕获异常并通过 context.set_code / set_details 设置错误信息。
     """
     def wrapper(self, request, context):
+        trace_id = _extract_trace_id(context)
         try:
             # 正常执行被装饰的 RPC 方法并返回 protobuf 响应
             return fn(self, request, context)
         except PrivacyBudgetExhausted as e:
             # 隐私预算耗尽：返回 RESOURCE_EXHAUSTED，客户端可据此触发预算重置或降级
+            logger.warning("Privacy budget exhausted", extra={"trace_id": trace_id})
             context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
             context.set_details("Privacy budget exhausted")  # Fixed message — avoid leaking internal state
         except ValueError as e:
             # 参数校验失败（如 epsilon<=0、空数据等）：返回 INVALID_ARGUMENT
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details("Invalid request parameters")  # Fixed message — avoid leaking internals
-            logger.debug("gRPC ValueError", extra={"error": str(e)})
+            logger.debug("gRPC ValueError", extra={"error": str(e), "trace_id": trace_id})
         except Exception:
             # 未预期异常：记录完整堆栈到日志，向客户端仅暴露通用错误信息，避免泄露内部实现
-            logger.exception("grpc_request_error")  # 输出包含 traceback 的 ERROR 日志
+            logger.exception("grpc_request_error", extra={"trace_id": trace_id})
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details("Internal server error")  # 通用错误描述，不含敏感信息
     return wrapper

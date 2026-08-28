@@ -291,7 +291,7 @@ req := models.DispatchRequest{ Source: naming.DSXX1 }
 canonicalDS, err := naming.NormalizeDataSourceID(inboundSource)
 if err != nil {
     // 未知或非法数据源直接拒绝，杜绝静默回退默认源的安全漏洞
-    c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_DATASOURCE_ID", "detail": err.Error()})
+    middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", err.Error(), nil)
     return
 }
 ```

@@ -25,7 +25,7 @@
 | Per-IP 令牌桶限流 | ✅ | 可配置 RPS/Burst，自动清理 10min 不活动 IP 桶，健康端点豁免 |
 | 安全响应头 | ✅ | X-Content-Type-Options / X-Frame-Options / HSTS / Referrer-Policy / Permissions-Policy |
 | 请求体大小限制 | ✅ | HTTP 中间件 32 MiB + Agent/Datasource 响应体 64 MiB 双重防护 |
-| 全链路分布式追踪 | ✅ | X-Request-ID 中间件注入 → Context 全链路传播（异步协程不丢上下文） → 下游客户端透传 |
+| 全链路分布式追踪 | ✅ | TraceMiddleware 中间件注入 X-Request-ID + X-Trace-ID 双头 → Context 全链路传播（异步协程不丢上下文） → 下游客户端透传 |
 | Prometheus 可观测性 | ✅ | 7 项指标：HTTP/gRPC QPS+延迟、崩溃恢复、重试、熔断器状态、租约指标 |
 | SQLite 完整性校验 | ✅ | `PRAGMA integrity_check` 启动时阻断损坏数据库 |
 | 数据库备份 | ✅ | 支持全量/增量备份、`--verify` 恢复验证模式、自动过期清理 |
@@ -218,7 +218,7 @@ Agent 客户端与 Datasource 客户端均实现了标准的三态熔断器：
 service-hub 支持端到端请求标识传递，保证异步 6 阶段流水线在后台执行时仍能完整保留上下文链路信息：
 
 ```
-[外部请求] ──(X-Request-ID)──> [HTTP / gRPC 入口]
+[外部请求] ──(X-Request-ID / X-Trace-ID)──> [HTTP / gRPC 入口]
                                       │
                                       ▼ 提取或生成 RequestID
                           [异步流水线 processTask(..., reqID)]
@@ -347,6 +347,6 @@ service-hub 的 HTTP REST 和 gRPC 双协议均支持 TLS 1.3 及 mTLS 双向认
 - [x] **下游 Agent 接口幂等键集成**：通过 Context 自动注入 `X-Idempotency-Key`（`hub-<task_id>-<stage>-<retry_count>`）
 - [x] **下游 Datasource 客户端弹性加固**：三态熔断器 + 指数退避重试 + 64 MiB 响应体防护
 - [x] **SQLite 待处理与重试任务消费引擎**：`StartLocalWorker` 500ms 轮询拾取与 `RetryAfter` 退避校验
-- [x] **全链路分布式追踪传播**：异步 6 阶段流水线 goroutine 保持 `X-Request-ID` 上下文
+- [x] **全链路分布式追踪传播**：异步 6 阶段流水线 goroutine 保持 `X-Request-ID` / `X-Trace-ID` 上下文（`TraceMiddleware` 双头注入）
 - [ ] 多副本压测与领取吞吐基准（CI 自动化集成）
 - [ ] PostgreSQL 主从切换故障演练

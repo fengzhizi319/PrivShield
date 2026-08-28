@@ -409,10 +409,11 @@ docker run -d \
 
 ### Prometheus 监控指标
 
-访问 `http://127.0.0.1:8084/metrics`：
-- `audit_log_entries_total`：累计写入存证条数
-- `audit_log_verifications_total`：快照完整性校验次数与结果
-- `audit_log_http_requests_total`：HTTP 接口请求总数与延迟
+访问 `http://127.0.0.1:8084/metrics`（所有 Go 服务共享 `pkg/metrics` 指标库，通过 `module` 标签区分服务）：
+- `http_requests_total`：HTTP 接口请求总数（按 method/path/status 统计）
+- `http_request_duration_seconds`：HTTP 请求延迟直方图
+- `agent_requests_total`：Agent 上游调用计数
+- `circuit_breaker_state`：Agent 客户端熔断器状态
 
 ---
 
