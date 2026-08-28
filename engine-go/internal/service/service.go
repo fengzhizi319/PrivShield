@@ -140,6 +140,21 @@ func (s *PrivacyService) NoisyMean(ctx context.Context, values []float64, epsilo
 	return dp.NoisyMean(values, epsilon, delta, clipBound), nil
 }
 
+// DPHistogram 差分隐私直方图（无预算消耗，纯噪声添加）
+func (s *PrivacyService) DPHistogram(trueCounts map[string]int, epsilon float64) map[string]float64 {
+	return dp.NoisyHistogram(trueCounts, epsilon)
+}
+
+// DPVectorSum 差分隐私向量求和
+func (s *PrivacyService) DPVectorSum(vectors [][]float64, maxNorm, epsilon float64) []float64 {
+	return dp.VectorSum(vectors, maxNorm, epsilon)
+}
+
+// DPVectorMean 差分隐私向量均值
+func (s *PrivacyService) DPVectorMean(vectors [][]float64, maxNorm, epsilon float64) []float64 {
+	return dp.VectorMean(vectors, maxNorm, epsilon)
+}
+
 // ──────────────────────────────────────────────
 // 本地差分隐私 API
 // ──────────────────────────────────────────────

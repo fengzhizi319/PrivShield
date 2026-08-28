@@ -1,6 +1,6 @@
 // Package rest — REST API 路由集成测试。
 //
-// 覆盖全部 17 个端点的正常路径 + 错误信封格式校验。
+// 覆盖全部 41 个端点的正常路径 + 错误信封格式校验。
 // 验证统一错误信封（code/message/detail/trace_id/timestamp）输出。
 package rest
 
@@ -553,6 +553,191 @@ func TestObfuscateBatch_Success(t *testing.T) {
 // 404 路由
 // ──────────────────────────────────────────────
 
+// ──────────────────────────────────────────────
+// Phase 17 新增端点测试
+// ──────────────────────────────────────────────
+
+func TestHealthEndpoints(t *testing.T) {
+	r, _ := setupRouter(t)
+	for _, path := range []string{"/livez", "/readyz", "/readyz/llm"} {
+		w := doJSON(r, "GET", path, nil)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", path, w.Code)
+		}
+	}
+}
+
+func TestDPCount_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/count", map[string]any{"count": 100, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if _, ok := resp["result"]; !ok {
+		t.Error("missing 'result' field")
+	}
+}
+
+func TestDPSum_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/sum", map[string]any{"values": []float64{1, 2, 3}, "epsilon": 1.0, "clip_lower": 0, "clip_upper": 10})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPMean_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/mean", map[string]any{"values": []float64{1, 2, 3}, "epsilon": 1.0, "delta": 1e-5, "clip_bound": 5})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPHistogram_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/histogram", map[string]any{"values": []string{"A", "B", "A"}, "categories": []string{"A", "B", "C"}, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	result, ok := resp["result"].(map[string]any)
+	if !ok || len(result) != 3 {
+		t.Errorf("histogram categories = %d, want 3", len(result))
+	}
+}
+
+func TestDPNoisyHistogram_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/noisy_histogram", map[string]any{"true_counts": map[string]int{"A": 100, "B": 200}, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPChunkedCount_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/chunked_count", map[string]any{"chunks": [][]float64{{1, 2}, {3, 4, 5}}, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPChunkedSum_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/chunked_sum", map[string]any{"chunks": [][]float64{{10, 20}, {30}}, "epsilon": 1.0, "clip_lower": 0, "clip_upper": 100})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPChunkedMean_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/chunked_mean", map[string]any{"chunks": [][]float64{{1, 2}, {3}}, "epsilon": 1.0, "delta": 1e-5, "clip_bound": 5})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPChunkedHistogram_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/chunked_histogram", map[string]any{"chunks": [][]string{{"A", "B"}, {"A"}}, "categories": []string{"A", "B", "C"}, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPVectorSum_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/vector_sum", map[string]any{"vectors": [][]float64{{1, 2}, {3, 4}}, "max_norm": 10, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	vec, ok := resp["noisy_vector"].([]any)
+	if !ok || len(vec) != 2 {
+		t.Errorf("vector dim mismatch")
+	}
+}
+
+func TestDPVectorMean_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/vector_mean", map[string]any{"vectors": [][]float64{{1, 2}, {3, 4}}, "max_norm": 10, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestDPAggregate_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/aggregate", map[string]any{"rows": []map[string]string{{"a": "1"}}, "epsilon": 1.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if _, ok := resp["results_json"]; !ok {
+		t.Error("missing 'results_json' field")
+	}
+}
+
+func TestDPAdaptiveClip_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/adaptive_clip", map[string]any{"values": []float64{1, 2, 3}, "epsilon": 1.0, "initial_clip": 10.0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["clip_upper"].(float64) <= 0 {
+		t.Error("clip_upper should be positive")
+	}
+}
+
+func TestDPGroupBy_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/dp/groupby", map[string]any{
+		"rows":       []map[string]string{{"group": "A", "value": "10"}, {"group": "B", "value": "20"}},
+		"group_col":  "group",
+		"target_col": "value",
+		"agg":        "count",
+		"epsilon":    1.0,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if _, ok := resp["result_json"]; !ok {
+		t.Error("missing 'result_json' field")
+	}
+}
+
+func TestMaskDataFrame_Success(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/mask/dataframe", map[string]any{
+		"data":    []map[string]string{{"phone": "13812345678", "name": "张三"}},
+		"columns": []string{"phone", "name"},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	data, ok := resp["data"].([]any)
+	if !ok || len(data) != 1 {
+		t.Fatalf("data count mismatch")
+	}
+	row := data[0].(map[string]any)
+	if row["phone"] == "13812345678" {
+		t.Error("phone should be masked")
+	}
+}
+
 func TestNotFound(t *testing.T) {
 	r, _ := setupRouter(t)
 	w := doJSON(r, "GET", "/api/v1/nonexistent", nil)
@@ -593,6 +778,22 @@ func TestAllEndpoints_ReturnEnvelopeOnError(t *testing.T) {
 		{"POST", "/api/v1/medical/sanitize"},
 		{"POST", "/api/v1/medical/sanitize/batch"},
 		{"POST", "/api/v1/hash/hmac"},
+		// Phase 17 新增端点
+		{"POST", "/api/v1/dp/count"},
+		{"POST", "/api/v1/dp/sum"},
+		{"POST", "/api/v1/dp/mean"},
+		{"POST", "/api/v1/dp/histogram"},
+		{"POST", "/api/v1/dp/noisy_histogram"},
+		{"POST", "/api/v1/dp/chunked_count"},
+		{"POST", "/api/v1/dp/chunked_sum"},
+		{"POST", "/api/v1/dp/chunked_mean"},
+		{"POST", "/api/v1/dp/chunked_histogram"},
+		{"POST", "/api/v1/dp/vector_sum"},
+		{"POST", "/api/v1/dp/vector_mean"},
+		{"POST", "/api/v1/dp/aggregate"},
+		{"POST", "/api/v1/dp/adaptive_clip"},
+		{"POST", "/api/v1/dp/groupby"},
+		{"POST", "/api/v1/mask/dataframe"},
 	}
 
 	for _, ep := range endpoints {
