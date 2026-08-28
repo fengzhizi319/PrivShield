@@ -1,9 +1,9 @@
 # PrivShield 全栈统一架构设计再评估与全系统平滑迁移实施方案
 
 > **文档定位**：本文档为 `PrivShield` 体系提供全栈统一架构设计的**深度再评估报告**与**系统级细节迁移落地实施方案（Migration Playbook）**。  
-> **版本**：v13.0.0  
+> **版本**：v14.0.0  
 > **状态**：🎯 **Target Blueprint & Execution Guide**  
-> **最后更新**：2026-08-28 — 修正分类引擎指标文件路径 + 5 处标签对齐代码
+> **最后更新**：2026-08-28 — 修正 gRPC 客户端文件路径引用
 > **覆盖范围**：`engine`（Python 核心隐私引擎）、`services/service-hub`（调度中枢）、`services/datasource-mgr`（数据源管理）、`services/audit-log`（审计存证）、`console/bff-go` & `console/app-lz`（BFF网关与测试执行器）、`console/web` & `console/app-lz/web`（前端控制台群）、`pkg/`（共享基础库）及云原生部署基础设施。
 
 ---
@@ -326,7 +326,7 @@ flowchart TD
 
 #### 2. 实现要点
 - **HTTP 层** (`pkg/middleware/trace.go`)：`TraceMiddleware()` 自动注入/传播 `X-Request-ID` + `X-Trace-ID` 双头下发；
-- **gRPC 客户端** (`pkg/agent/grpc_client.go`)：外发拦截器将 trace ID 写入 `metadata.AppendToOutgoingContext`；
+- **gRPC 客户端** (`console/bff-go/internal/agent/client.go`)：外发拦截器将 trace ID 写入 `metadata.AppendToOutgoingContext`；
 - **gRPC 服务端** (`engine/grpc_server.py`)：元数据提取器从 `invocation_metadata()` 读取 `x-request-id` / `x-trace-id`；
 - **异步任务** (`services/service-hub/internal/handlers/handlers.go`)：`Dispatch` 时将 `TraceID` 持久化至 `models.Task.TraceID`，Worker 消费时还原为 `context.Context`。
 
@@ -899,4 +899,5 @@ bash ./scripts/prod/prod_health_check.sh
 | v10.0 | 2026-08-28 | datasource-mgr 升级至 Level 5、新增 Python 引擎 50+ API 端点速查 |
 | v11.0 | 2026-08-28 | 架构图补齐服务间链路、新增 §9 快速参考卡 + 附录 A 修订历史 |
 | v12.0 | 2026-08-28 | 修复测试构建失败 + Go workspace 测试命令修正 |
-| **v13.0** | **2026-08-28** | **修正分类引擎指标文件路径（不存在 dynclassification/metrics.py）+ 5 处标签对齐代码** |
+| v13.0 | 2026-08-28 | 修正分类引擎指标文件路径（不存在 dynclassification/metrics.py）+ 5 处标签对齐代码 |
+| **v14.0** | **2026-08-28** | **修正 gRPC 客户端文件路径引用（pkg/agent/grpc_client.go → console/bff-go/internal/agent/client.go）** |
