@@ -320,7 +320,11 @@ func medicalSanitizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		result := svc.SanitizeMedicalRecord(req.Record, req.Domain)
+		result, err := svc.SanitizeMedicalRecord(req.Record, req.Domain)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", "未知或不支持的数据源标识", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"result": result})
 	}
 }
@@ -335,7 +339,11 @@ func medicalBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		results := svc.SanitizeMedicalBatch(req.Records, req.Domain)
+		results, err := svc.SanitizeMedicalBatch(req.Records, req.Domain)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", "未知或不支持的数据源标识", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"results": results})
 	}
 }

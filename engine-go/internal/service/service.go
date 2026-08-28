@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/dynclassification"
+	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/budget"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/kano"
@@ -191,27 +192,38 @@ func (s *PrivacyService) ClassifyBatch(records []map[string]string) []*dynclassi
 // 医疗流水线 API
 // ──────────────────────────────────────────────
 
-// SanitizeMedicalRecord 医疗记录脱敏
-func (s *PrivacyService) SanitizeMedicalRecord(record map[string]string, domain string) map[string]string {
-	switch domain {
-	case "yibao":
-		return s.medicalYibao.SanitizeRecord(record)
-	case "kangyang":
-		return s.medicalKang.SanitizeRecord(record)
+// SanitizeMedicalRecord 医疗记录脱敏。
+// domain 参数支持任意入站表示（canonical id / api_code / 别名），
+// 通过 naming.NormalizeDataSourceID 归一化后路由到对应流水线。
+// 未知数据源触发 Fail-Closed（设计文档 §3.3）。
+func (s *PrivacyService) SanitizeMedicalRecord(record map[string]string, domain string) (map[string]string, error) {
+	dsID, err := naming.NormalizeDataSourceID(domain)
+	if err != nil {
+		return nil, fmt.Errorf("INVALID_DATASOURCE_ID: %w", err)
+	}
+	switch dsID {
+	case naming.DSYibao:
+		return s.medicalYibao.SanitizeRecord(record), nil
+	case naming.DSKangyang:
+		return s.medicalKang.SanitizeRecord(record), nil
 	default:
-		return s.medicalYibao.SanitizeRecord(record)
+		return nil, fmt.Errorf("unsupported datasource: %s", dsID)
 	}
 }
 
-// SanitizeMedicalBatch 批量医疗脱敏
-func (s *PrivacyService) SanitizeMedicalBatch(records []map[string]string, domain string) []map[string]string {
-	switch domain {
-	case "yibao":
-		return s.medicalYibao.SanitizeBatch(records)
-	case "kangyang":
-		return s.medicalKang.SanitizeBatch(records)
+// SanitizeMedicalBatch 批量医疗脱敏（SSOT 归一化 + Fail-Closed）。
+func (s *PrivacyService) SanitizeMedicalBatch(records []map[string]string, domain string) ([]map[string]string, error) {
+	dsID, err := naming.NormalizeDataSourceID(domain)
+	if err != nil {
+		return nil, fmt.Errorf("INVALID_DATASOURCE_ID: %w", err)
+	}
+	switch dsID {
+	case naming.DSYibao:
+		return s.medicalYibao.SanitizeBatch(records), nil
+	case naming.DSKangyang:
+		return s.medicalKang.SanitizeBatch(records), nil
 	default:
-		return s.medicalYibao.SanitizeBatch(records)
+		return nil, fmt.Errorf("unsupported datasource: %s", dsID)
 	}
 }
 

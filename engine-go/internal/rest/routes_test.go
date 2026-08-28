@@ -334,6 +334,75 @@ func TestMedicalBatch_Success(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────
+// SSOT 数据源命名 — 医疗端点
+// ──────────────────────────────────────────────
+
+func TestMedicalSanitize_SSOTCanonicalDSID(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
+		"record": map[string]string{"name": "张三"},
+		"domain": "ds_yibao", // canonical datasource_id
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMedicalSanitize_SSOTAlias_Chinese(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
+		"record": map[string]string{"name": "李四"},
+		"domain": "康养", // Chinese alias → ds_kangyang
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMedicalSanitize_SSOTUnknownDomain_FailClosed(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
+		"record": map[string]string{"name": "张三"},
+		"domain": "totally_unknown",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", w.Code, w.Body.String())
+	}
+	var env map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	if env["code"] != "INVALID_DATASOURCE_ID" {
+		t.Errorf("code = %v, want INVALID_DATASOURCE_ID", env["code"])
+	}
+}
+
+func TestMedicalBatch_SSOTUnknownDomain_FailClosed(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/medical/sanitize/batch", map[string]any{
+		"records": []map[string]string{{"name": "张三"}},
+		"domain":  "nonexistent_ds",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", w.Code, w.Body.String())
+	}
+	var env map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	if env["code"] != "INVALID_DATASOURCE_ID" {
+		t.Errorf("code = %v, want INVALID_DATASOURCE_ID", env["code"])
+	}
+}
+
+func TestMedicalSanitize_SSOTReservedDomain_FailClosed(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
+		"record": map[string]string{"name": "张三"},
+		"domain": "ds_mock3", // reserved, not active
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", w.Code, w.Body.String())
+	}
+}
+
+// ──────────────────────────────────────────────
 // HMAC 散列端点
 // ──────────────────────────────────────────────
 
