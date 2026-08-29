@@ -235,11 +235,11 @@ Hub 可直接访问 Agent Service。当前 service-hub 已通过 `pkg/agent.Clie
 
 启用时，Hub 只连接网关 Service，网关再将请求转发到多个 Agent Endpoints；不能让 Hub 同时随机直接访问 Agent 和网关，否则熔断、指标和回退语义会分裂。
 
-### 5.3 与 `engine.gateway` 的边界与协同
+### 5.3 与 `privshield-gateway` 的边界与协同
 
-`engine.gateway` 是 PrivShield 自带的 L7 网关与负载均衡器，位于 `engine/gateway/`。它提供双协议反向代理、节点级熔断、按 RPC 负载均衡与动态拓扑管理，适用于**多副本 Agent 计算节点**的流量调度场景。它与 service-hub 的边界如下：
+`privshield-gateway` 是 PrivShield 自带的 L7 网关与负载均衡器，位于 `engine-go/cmd/privshield-gateway` 与 `engine-go/internal/gateway/`。它提供双协议反向代理、节点级熔断、按 RPC 负载均衡（P2C-EWMA）与 BufferPool 零分配缓存，适用于**多副本 Agent 计算节点**的流量调度场景。它与 service-hub 的边界如下：
 
-| 职责 | 是否由 service-hub 负责 | 是否由 engine.gateway 负责 | 说明 |
+| 职责 | 是否由 service-hub 负责 | 是否由 privshield-gateway 负责 | 说明 |
 |---|---|---|---|
 | 任务持久化与状态机 | ✅ | ❌ | service-hub 独占数据库与任务租约语义。 |
 | 调用方到 service-hub 的入口发现 | ✅（K8s Service） | ❌ | 固定业务入口，无需网关。 |
@@ -248,7 +248,7 @@ Hub 可直接访问 Agent Service。当前 service-hub 已通过 `pkg/agent.Clie
 
 **关键原则**：
 
-1. **不要为单副本 service-hub 前面部署 engine.gateway**。网关无法把单副本变成多副本，只会引入额外延迟与故障域。
+1. **不要为单副本 service-hub 前面部署 privshield-gateway**。网关无法把单副本变成多副本，只会引入额外延迟与故障域。
 2. **网关应作为 Agent 池的前置调度层**。当 service-hub 调用多个 Agent Pod 时，网关负责请求级选路、熔断与动态扩缩容感知。
 3. **保持流量路径单一**。同一类流量不能同时走“直接 Service”和“经网关”两条路径，否则熔断、重试、指标会割裂。
 4. **阶段 B 的多副本 service-hub 仍不需要前置网关**。service-hub 副本之间通过 PostgreSQL 租约协调，入口仍使用 K8s Service 做 L4 分发；若出现 RPC 级分布不均，优先在客户端启用连接池，其次再考虑 L7 网关。

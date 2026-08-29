@@ -31,53 +31,21 @@ graph TD
 
 可观测层贯穿 REST 与 gRPC：
 
-- `observability/context.py`：通过 `contextvars` 维护请求上下文（request_id、identity 等）。
-- `observability/logging_config.py`：统一配置 root logger 与 JSON formatter。
-- `observability/middleware.py`：FastAPI middleware + gRPC interceptor，负责生成/读取 `x-request-id`、记录 access log、更新 Prometheus metrics、打印审计日志。
-- `observability/metrics.py`：集中定义所有指标。
-- `observability/tracing.py`：可选 OpenTelemetry 初始化与 span helper。
+- `engine-go/internal/observability/`:
+  - `logging.go`：基于标准库 `log/slog` 统一配置结构化日志（支持 JSON 与文本模式），自动绑定 `trace_id`、`request_id` 与请求上下文。
+  - `metrics.go`：集中定义 Prometheus 指标并在 `/metrics` 端点导出。
+  - `middleware.go`：Gin HTTP 中间件与 gRPC 拦截器，统一记录 access log、更新 Prometheus 耗时直方图与流量计数器。
+  - `tracing.go`：OpenTelemetry 分布式追踪注入与上下文提取。
 
 ## 4. 日志设计
 
-### 4.1 配置
-
-```python
-def configure_logging(
-    log_level: str = "INFO",
-    json_format: bool = False,
-    service_name: str = "PrivShield",
-) -> None
-```
-
-- 调用 `logging.basicConfig` 配置 root handler。
-- `json_format=False`：文本格式。
-- `json_format=True`：使用 `pythonjsonlogger.jsonlogger.JsonFormatter`。
-
-### 4.2 上下文字段
-
-自定义 `ContextFilter` 从 `contextvars` 读取当前 `RequestContext`，注入每条日志：
-
-```python
-class ContextFilter(logging.Filter):
-    def filter(self, record):
-        ctx = request_context.get()
-        record.request_id = ctx.request_id if ctx else ""
-        record.identity_name = ctx.identity_name if ctx else ""
-        record.method = ctx.method if ctx else ""
-        record.path = ctx.path if ctx else ""
-        return True
-```
-
-### 4.3 统一 logger 入口
-
-```python
-from engine.observability import get_logger
-logger = get_logger(__name__)
-```
+- 基于 Go 1.25+ 标准库 `log/slog`；
+- 支持环境变量 `PRIVACY_LOG_LEVEL` (`DEBUG`/`INFO`/`WARN`/`ERROR`) 与 `PRIVACY_LOG_FORMAT` (`json`/`text`)；
+- 所有日志行自动携带 `trace_id`、`component`、`duration_ms` 等核心排错字段。
 
 ## 5. Metrics 设计
 
-使用 `prometheus-client` 的默认 registry。
+使用 `prometheus/client_golang`。
 
 | 指标名 | 类型 | labels | 说明 |
 |---|---|---|---|
@@ -87,9 +55,9 @@ logger = get_logger(__name__)
 | `privacy_budget_remaining` | Gauge | namespace, budget_type | 剩余预算 |
 | `privacy_classification_total` | Counter | final_level, layer | 分类结果数 |
 | `privacy_auth_denials_total` | Counter | reason | 认证/鉴权/限速拒绝数 |
-| `privacy_traffic_bytes_total` | Counter | method, path, direction | REST/gRPC 请求/响应流量字节数（direction=request/response） |
+| `privacy_traffic_bytes_total` | Counter | method, path, direction | REST/gRPC 请求/响应流量字节数 |
 
-REST：`/metrics` 通过 `prometheus_client.make_asgi_app()` 挂载到 FastAPI。gRPC 拦截器内更新 Counter/Histogram，`/metrics` 仍通过 REST 端口暴露。
+REST：`/metrics` 直接挂载到 Gin 引擎路由，gRPC 拦截器同步更新 RED 指标。
 
 ### 5.1 流量监控
 

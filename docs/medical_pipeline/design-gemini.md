@@ -10,16 +10,14 @@
 
 在医疗健康数据开放与合规共享场景中，电子病历 (EMR)、残疾人评估记录及医保结算数据包含高度敏感的个人身份标识信息 (PII，如身份证号、医保证号) 以及极高风险的医疗病史信息（如 L4 级的恶性肿瘤/传染病病史、L5 级的重度精神障碍/遗传缺陷/HIV 感染等）。
 
-本设计方案旨在构建一个完整的**医疗数据合规治理 Pipeline**：
-1. **数据模拟生成 (`scripts/data/generate_medical_data.py`)**：自动生成 20 条包含真实身份证校验码 (GB 11643-1999)、真实文本病历、图片病例引用以及 L4/L5 级敏感病史的高仿真 `kangyang.csv`。
-2. **算法处理核心 (`engine/medical_pipeline/`)**：
-   - 接入 `dynclassification` 规则与 Funnel 引擎，完成 27 个字段及文本内容的 L1~L5 分级标注。
-   - 接入 `privacy/masking` 脱敏原语，对 PII 及 L4/L5 级高敏感诊断与病历执行强脱敏与范畴化替换，强制保障输出数据中**绝对不包含任何 L4/L5 级原始敏感内容**。
+本设计方案构建了一个完整的**医疗数据合规治理 Pipeline**：
+1. **多核并发切片流水线 (`privacy-go-sdk/medical/pipeline.go`)**：
+   - 接入 3-Layer Funnel 规则引擎，完成 27 个字段及文本内容的 L1~L5 分级标注。
+   - 接入 `privacy-go-sdk/masking` 脱敏原语，对 PII 及 L4/L5 级高敏感诊断与病历执行强脱敏与范畴化替换，强制保障输出数据中**绝对不包含任何 L4/L5 级原始敏感内容**。
    - **双重结果输出**：输出 (1) 分级报告数据 (`classification_report`) 和 (2) 脱敏后符合安全合规要求的清洗数据 (`sanitized_data`)。
-3. **代理后端与前端全链路集成**：
-   - 将 `kangyang.csv` 放置于 Go/Python 控制台后端样例目录。
-   - 在 Python 后端与 Go 后端实现对应的测试代理与 gRPC/REST 通信。
-   - 在 Web 前端控制台增加“医疗数据治理 (Medical Pipeline)”独立功能面板，实现 Front-to-End 跑通。
+2. **代理后端与前端全链路集成**：
+   - 在 Go BFF (`console/bff-go`) 实现对应的代理与 gRPC/REST 通信。
+   - 在 Web 前端控制台提供“医疗数据治理 (Medical Pipeline)”功能面板。
 
 ---
 
@@ -27,22 +25,24 @@
 
 ```mermaid
 flowchart TD
-    subgraph DataGen [数据生成脚本]
-        SG[scripts/data/generate_medical_data.py] -->|生成合规高仿真数据| D1[kangyang.csv]
+    subgraph DataGen [数据样本]
+        D1[data/kangyang.csv / data/yibao.csv]
     end
 
-    subgraph AgentPipeline [engine/medical_pipeline]
+    subgraph AgentPipeline [privacy-go-sdk/medical & engine-go]
         D1 --> MP[MedicalPrivacyPipeline]
         MP -->|调用 dynclassification| DC[3-Layer 分类分级引擎]
         DC -->|标注 L1~L5 等级与 Tag| CR[1. 分级结果数据 (Classification Report)]
-        MP -->|调用 privacy/masking| MS[脱敏与 L4/L5 抹平引擎]
+        MP -->|调用 privacy-go-sdk/masking| MS[脱敏与 L4/L5 抹平引擎]
         MS -->|PII 掩码 + L4/L5 泛化/抹平| SD[2. 脱敏清洗数据 (Sanitized Data)]
     end
 
     subgraph Endpoints [通信层与后端通道]
         MP --> Service[PrivacyService / MedicalRoute]
-        Service --> PyBackend[Python Console Backend /api/medical_pipeline]
-        Service --> GoBackend[Go Console Backend /api/medical_pipeline]
+        Service --> GoBackend[Go Console Backend :8081 /api/privacy]
+        GoBackend --> WebUI[Web 控制台 :5173]
+    end
+```
     end
 
     subgraph Frontend [Web 前端控制台]
@@ -101,32 +101,28 @@ flowchart TD
 
 ---
 
-### 3.3 核心算法 Pipeline (`engine/medical_pipeline/`)
+### 3.3 核心算法 Pipeline (`privacy-go-sdk/medical/`)
 
-包结构定义：
+Go 模块结构定义：
 ```text
-engine/medical_pipeline/
-├── __init__.py
-├── pipeline.py          # 医疗数据治理 Pipeline 主逻辑 (MedicalPrivacyPipeline)
-├── rules.py             # 医疗专属分级规则与 L4/L5 关键词字典
-├── samples/
-│   └── kangyang.csv        # 自动生成的仿真医疗数据集
+privacy-go-sdk/medical/
+├── pipeline.go          # 医疗数据治理 Pipeline 主逻辑与多核并发分块
+├── pipeline_test.go     # 单元测试与基准测试
+└── rules.go             # 医疗专属分级规则与 L4/L5 关键词映射
 ```
 
 #### Pipeline 处理逻辑流程：
-```python
-class MedicalPrivacyPipeline:
-    def process_record(self, record: dict) -> Tuple[dict, dict]:
-        """
-        处理单条医疗记录，返回 (classification_report, sanitized_record)
-        """
-        # Step 1: 分类分级 (DynClassificationService)
-        classification = self.classify_record(record)
-        
-        # Step 2: L4/L5 级别扫描与全量掩码/剥离
-        sanitized = self.sanitize_record(record, classification)
-        
-        return classification, sanitized
+```go
+// ProcessRecord 处理单条医疗记录，返回 (classificationReport, sanitizedRecord, error)
+func (p *MedicalPrivacyPipeline) ProcessRecord(record map[string]any) (map[string]any, map[string]any, error) {
+    // Step 1: 分类分级
+    classification := p.ClassifyRecord(record)
+    
+    // Step 2: L4/L5 级别扫描与全量掩码/剥离
+    sanitized := p.SanitizeRecord(record, classification)
+    
+    return classification, sanitized, nil
+}
 ```
 
 ---
@@ -135,22 +131,20 @@ class MedicalPrivacyPipeline:
 
 1. **Agent 接口层**：
    - REST 路由: `POST /v1/medical/process`
-   - gRPC 接口: 在 `proto/privacy.proto` 补充 `MedicalProcessRequest` 与 `MedicalProcessResponse`，更新存根。
-2. **Go & Python 控制台后端**：
-   - Go BFF: 在 `console/bff-go/internal/handlers/handlers.go` 增加 `POST /api/medical_pipeline`。
-   - 将 `kangyang.csv` 部署到 `console/bff-go/internal/samples/kangyang.csv`。
-
-> **历史说明**：早期设计同时要求 Python REST BFF（`console/backend/app/main.py`）实现相同路由，该实现已移除。
+   - gRPC 接口: `ProcessMedical`
+2. **Go 控制台后端**：
+   - Go BFF: 在 `console/bff-go/internal/handlers/handlers.go` 暴露 `POST /api/medical_pipeline`。
+   - 数据源直接加载 `data/kangyang.csv` 与 `data/yibao.csv`。
 3. **Web 控制台 (`console/web`)**：
-   - 新增 `MedicalPipelinePanel.tsx` 视图组件。
-   - 在左侧侧边栏增加“医疗数据治理 (Medical Pipeline)”入口。
-   - 支持一键载入 `kangyang.csv` 20 条数据、一键运行 Pipeline、联动分栏展示“1. 字段与记录级分级报告”和“2. 脱敏清洗数据（已彻底消除 L4/L5 高危病史与 PII）”。
+   - 视图组件: `MedicalPipelinePanel.tsx`。
+   - 在左侧侧边栏提供“医疗数据治理 (Medical Pipeline)”入口。
+   - 支持一键载入 `kangyang.csv` 数据、一键运行 Pipeline、联动分栏展示“1. 字段与记录级分级报告”和“2. 脱敏清洗数据（已彻底消除 L4/L5 高危病史与 PII）”。
 
 ---
 
 ## 4. 单元测试设计 (Testing Plan)
 
-在 `tests/test_medical_pipeline.py` 中编写自动化测试，验证：
+在 `privacy-go-sdk/medical/pipeline_test.go` 中编写自动化测试，验证：
 1. `kangyang.csv` 的字段完整性 (27 列) 与身份证号算法有效性。
 2. 包含 L4/L5 级诊断与病史的数据记录经 Pipeline 处理后，`sanitized_data` 中绝对不包含原始 L4/L5 敏感字符串。
 3. PII 字段（姓名、身份证、医保证、残疾证）脱敏后符合掩码规范。

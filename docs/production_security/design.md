@@ -84,10 +84,10 @@ graph TD
         BFF & Hub & DS & Audit --- PkgSec
     end
 
-    subgraph EngineSecurity [Python 核心算力引擎]
-        REST[FastAPI REST :8079]
+    subgraph EngineSecurity [Go 核心算力引擎 (engine-go)]
+        REST[Gin REST :8079]
         GRPC[gRPC Server :50051]
-        SEC[Security Layer<br/>TLS / mTLS / APIKey / SlidingWindow RL / WhitelistManager]
+        SEC[Security Layer<br/>TLS / mTLS / APIKey / 32-Shard TokenBucket / WhitelistManager]
         REST --> SEC
         GRPC --> SEC
     end
@@ -98,10 +98,10 @@ graph TD
     Hub --> DS & Audit
 ```
 
-安全层对 Python 算力引擎与 Go 中台微服务群提供协同治理：
+安全层对 Go 核心算力引擎与 Go 中台微服务群提供统一协同治理：
 
-- **Python 算力层 (`engine/security/`)**：`SecuritySettings` 配置加载、`tls.py` 证书参数构造、`auth.py` / `ratelimit.py` FastAPI 依赖与 gRPC Interceptor、`whitelist.py` mTLS CN 白名单；
-- **Go 微服务群 (`pkg/middleware/`)**：`ratelimit.go` (IP 令牌桶限流 + MaxBodySize + MaxConcurrent)、`auth.go` (恒定时间 Bearer 鉴权)、`envelope.go` (跨语言统一错误信封)、`trace.go` (全链路追踪 TraceMiddleware)、`middleware.go` (CORS、Request ID、结构化日志、Recovery 异常脱敏与 Security Headers)。所有中间件错误响应统一使用 `AbortWithError()` 输出信封格式。
+- **Go 算力层 (`engine-go/internal/security/`)**：`security.go` 证书参数构造、`auth.go` / `ratelimit.go` Gin 中间件与 gRPC Interceptor、`whitelist.go` mTLS CN 白名单（5s mtime 热重载）；
+- **Go 微服务群 (`pkg/middleware/`)**：`ratelimit.go` (IP 令牌桶限流 + MaxBodySize + MaxConcurrent)、`auth.go` (恒定时间 Bearer 鉴权)、`envelope.go` (统一错误信封)、`trace.go` (全链路追踪 TraceMiddleware)、`middleware.go` (CORS、Request ID、结构化日志、Recovery 异常脱敏与 Security Headers)。所有中间件错误响应统一使用 `AbortWithError()` 输出信封格式。
 
 ---
 

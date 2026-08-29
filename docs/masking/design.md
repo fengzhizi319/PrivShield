@@ -228,13 +228,12 @@ assert MaskingOperation.HASH_VALUE == "hash_value"
 
 ## 9. 模块设计
 
-- `engine/privacy/masking.py`：核心脱敏逻辑。
-  - `_mask_arrow_column`：PyArrow 列级向量化脱敏内核（`pyarrow.compute` UTF-8 算子）。
-  - `_coerce_to_dict`：单行多格式输入转 dict。
-  - `_convert_to_records`：多行多格式输入转记录列表。
-- `engine/privacy/data_adapters.py`：DataFrame 与记录列表互转。
-- `engine/service.py`：`PrivacyService` 封装。
-- `engine/main.py` / `grpc_server.py`：REST / gRPC 接口。
+- `privacy-go-sdk/masking/masking.go`：核心脱敏逻辑。
+  - 支持国密 SM3/SM4、身份证、手机、银行卡、姓名、邮箱、地址、军官证、HMAC-SHA256、Truncate。
+  - 基于 `sync.Pool` 复用 `strings.Builder` 与 HMAC Hasher，达到单核高频 0 堆内存分配。
+- `engine-go/internal/service/service.go`：`PrivacyService` 统一编排。
+  - 提供 `MaskBatchContext` 多核无锁分块并发计算，支持客户端超时中断。
+- `engine-go/internal/rest/routes.go` / `engine-go/internal/grpcserver/server.go`：REST (Gin) / gRPC (RawCodec) 接口。
 
 ## 10. 测试策略
 

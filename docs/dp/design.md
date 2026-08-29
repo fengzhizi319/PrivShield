@@ -1623,30 +1623,24 @@ Tau-Thresholding 保证：即使某个分组只包含一条记录，攻击者也
 
 ## 4. 模块设计
 
-### 4.1 `engine/privacy/dp.py`
+### 4.1 `privacy-go-sdk/dp/` 与 `privacy-go-sdk/ldp/`
 
-- `DPApi.count(...)`：count 查询入口。
-- `DPApi.sum(...)`：sum 查询入口，先 clipping 再计算。
-- `DPApi.mean(...)`：mean 查询入口，组合 count 与 sum，支持 `min_count` 低频保护。
-- `DPApi.histogram(...)`：直方图查询入口，利用互斥划分的联合敏感度为 1，仅消耗一次预算。
-- `DPApi.noisy_count/noisy_sum/noisy_mean/noisy_histogram(...)`：对已由外部引擎聚合好的中间结果加噪。
-- `DPApi.chunked_count/chunked_sum/chunked_mean/chunked_histogram(...)`：分块流式聚合。
-- `DPApi.adaptive_clip(...)`：差分隐私自适应二分搜索估计 clip 上界。
-- `DPApi.dp_aggregate(...)`：表格级 DP 聚合编排，按列自动拆分预算。
-- `DPApi.vector_sum/vector_mean(...)`：高维向量 / 梯度 DP 加噪（DP-SGD 基础）。
-- `DPApi.dp_groupby(...)`：Tau-Thresholding 差分隐私 SQL Group-By 过滤。
-- `DPApi.create_accumulator/finalize_dp(...)`：分布式 Worker 无噪累加与 Master 统一加噪。
-- `DPApi._clip_values(...)`：NumPy 向量化 clip，失败回退纯 Python。
-- `LocalDPApi.perturb_binary/perturb_categorical(...)`：二值/类别型本地 DP 扰动。
-- `LocalDPApi.estimate_binary_frequency/estimate_categorical_histogram(...)`：本地 DP 频率/直方图纠偏估计。
-- `calibrate_analytic_gaussian(...)`：解析高斯机制噪声校准。
-- `_sample_laplace(scale)` / `_sample_gaussian(sigma)`：噪声采样。
-- `mechanism` 校验为 `laplace` 或 `gaussian`。
+- `DPCount(...)`：count 查询入口，单趟融合计算。
+- `DPSum(...)`：sum 查询入口，自适应截断后加噪。
+- `DPMean(...)`：mean 查询入口，组合 count 与 sum。
+- `DPHistogram(...)`：直方图查询入口，利用互斥划分的联合敏感度为 1。
+- `AdaptiveClip(...)`：差分隐私自适应估计 clip 上界。
+- `VectorSum/VectorMean(...)`：高维向量 / 梯度 DP 加噪（单趟向量化加速）。
+- `DPGroupBy(...)`：Tau-Thresholding 差分隐私 SQL Group-By 过滤。
+- `PerturbBinary/PerturbCategorical(...)`：二值/类别型本地 DP 扰动（多核并发分块）。
+- `EstimateBinaryFrequency/EstimateCategoricalHistogram(...)`：本地 DP 频率/直方图纠偏估计。
+- `CalibrateAnalyticGaussian(...)`：解析高斯机制噪声校准。
+- `SampleLaplace(scale)` / `SampleGaussian(sigma)`：密码学安全噪声采样。
 
-### 4.2 `engine/service.py`
+### 4.2 `engine-go/internal/service/service.go`
 
-- `dp_count/dp_sum/dp_mean` 从解析后的参数中传递 `delta`、`clip_lower`、`clip_upper`。
-- 负责参数解析、profile 合并与错误处理。
+- `PrivacyService` 统一封装 DP 与 LDP 计算，集成无锁原子隐私预算会计（`budget.BudgetAccountant`）。
+- 负责参数解析、Profile 合并与错误处理。
 
 ### 4.3 proto / REST / gRPC
 

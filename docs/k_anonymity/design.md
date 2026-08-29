@@ -374,25 +374,17 @@ mondrian(records, qi_cols, k, depth):
 
 ## 5. 模块设计
 
-`engine/privacy/kano_table.py`：
+`privacy-go-sdk/kano/`：
 
 | 函数 / 方法 | 作用 |
 |---|---|
-| `k_anonymize_table(rows, qi_cols, k, max_depth)` | 记录列表入口函数（内含 Pandas 向量化优化加速） |
-| `k_anonymize_dataframe(df, qi_cols, k, max_depth)` | DataFrame 入口函数（免 records 互转 Pandas 直通通道） |
-| `_mondrian_pd(sub_df, depth)` | Pandas 向量化 Mondrian 递归划分核心方法 |
-| `_choose_dimension(records, qi_cols)` | 纯 Python 兜底：选择分割维度 |
-| `_median_split(records, dim, k)` | 纯 Python 兜底：中位数分割 |
-| `_generalize(records, qi_cols)` | 纯 Python 兜底：等价组泛化 |
+| `KAnonymizeTable(rows, qiCols, k, maxDepth)` | Mondrian KD-tree 多维区间递归划分算法，带 `maxDepth = 32` 递归深度守卫 |
+| `CheckDistinctLDiversity(records, qiCols, saCol, l)` | Distinct L-多样性检验，按 QI 等价类统计敏感属性离散基数，杜绝同质性攻击 |
+| `KAnonymizeRecord(record, k)` | 单记录启发式泛化 |
 
-### 5.1 性能与计算优化 (Pandas 向量化 Mondrian)
-- **高性能直通通道**：在 `k_anonymize_dataframe` 中，如果输入为 `pandas.DataFrame`，算法不进行行级 Dict 格式化转换，而是采用 Pandas 原生的 `_mondrian_pd` 算法进行中位数排序拆分与等价区间泛化，避免了繁重的序列化与反序列化边界开销。
-- **Mondrian 向量化**：`k_anonymize_table` 同样在能成功加载 `pandas` 时，自动在内部用 `pd.DataFrame(rows)` 替代纯 Python 排序（即 `sorted(records, key=...)`）进行递归二分。这在大数据规模（例如 10 万行）下提供了数十倍的计算加速。
-- **平滑降级**：若未安装 Pandas 环境，则自动降级为原有基于 Python List 排序的 Mondrian 递归流程，保证核心逻辑在各种环境中的通用性与健壮性。
+`engine-go/internal/service/service.go`：`PrivacyService` 统一编排与文件级 K-匿名。
 
-`engine/privacy/data_adapters.py` 提供 `to_records` / `from_records`，用于在降级场景中将 pandas / SecretFlow DataFrame 与记录列表互转。
-
-`PrivacyService` 新增 `k_anonymize_table` / `k_anonymize_dataframe` 方法；`main.py` / `grpc_server.py` 暴露 `KAnonymizeTable` / `KAnonymizeDataFrame` 接口。
+`engine-go/internal/rest/routes.go` / `engine-go/internal/grpcserver/server.go`：暴露 REST 与 gRPC 接口。
 
 ### 5.2 指标
 
