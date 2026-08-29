@@ -1,0 +1,173 @@
+package medical
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestCanonicalizePIIField(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"身份证号", "id_card_no"},
+		{"居民身份证", "id_card_no"},
+		{"真实姓名", "name"},
+		{"家庭住址", "registered_address"},
+		{"id_card_no (身份证号)", "id_card_no"},
+		{"主诉", "chief_complaint"},
+		{"诊断编码", "icd10_code"},
+		{"other_field", "other_field"},
+	}
+
+	for _, c := range cases {
+		got := CanonicalizePIIField(c.input)
+		if got != c.want {
+			t.Errorf("CanonicalizePIIField(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+func TestClassifyAndRedactICD10Code(t *testing.T) {
+	// L5: HIV (B20-B24)
+	level, cat, ok := ClassifyICD10Code("B20.900")
+	if !ok || level != "L5" || cat != "ICD_HIGH_SENSITIVE" {
+		t.Errorf("B20.900 classify = (%q, %q, %v), want (L5, ICD_HIGH_SENSITIVE, true)", level, cat, ok)
+	}
+	if got := RedactICD10Code("B20.900"); got != "" {
+		t.Errorf("RedactICD10Code(B20.900) = %q, want empty string", got)
+	}
+
+	// L4: Neoplasm (C34.900)
+	level, cat, ok = ClassifyICD10Code("C34.900")
+	if !ok || level != "L4" || cat != "ICD_NEOPLASM" {
+		t.Errorf("C34.900 classify = (%q, %q, %v), want (L4, ICD_NEOPLASM, true)", level, cat, ok)
+	}
+	if got := RedactICD10Code("C34.900"); got != "[L4-ICD_NEOPLASM]" {
+		t.Errorf("RedactICD10Code(C34.900) = %q, want [L4-ICD_NEOPLASM]", got)
+	}
+
+	// L4: STD (A53.900)
+	level, cat, ok = ClassifyICD10Code("A53.900")
+	if !ok || level != "L4" || cat != "ICD_INFECTIOUS" {
+		t.Errorf("A53.900 classify = (%q, %q, %v), want (L4, ICD_INFECTIOUS, true)", level, cat, ok)
+	}
+
+	// Non-sensitive code (I10)
+	level, cat, ok = ClassifyICD10Code("I10.x00")
+	if ok {
+		t.Errorf("I10.x00 should not be high risk, got (%q, %q)", level, cat)
+	}
+	if got := RedactICD10Code("I10.x00"); got != "I10.x00" {
+		t.Errorf("RedactICD10Code(I10.x00) = %q, want I10.x00", got)
+	}
+}
+
+func TestTruncateDateToMonth(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"1990-05-18", "1990-05"},
+		{"2023/12/31", "2023-12"},
+		{"2024.1.15", "2024-01"},
+		{"invalid-date", "invalid-date"},
+		{"", ""},
+	}
+
+	for _, c := range cases {
+		got := TruncateDateToMonth(c.input)
+		if got != c.want {
+			t.Errorf("TruncateDateToMonth(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeFullwidthAlphanumeric(t *testing.T) {
+	input := "患者ＨＩＶ抗体阳性，ＣＤ４细胞计数１２３。"
+	want := "患者HIV抗体阳性，CD4细胞计数123。"
+	got := NormalizeFullwidthAlphanumeric(input)
+	if got != want {
+		t.Errorf("NormalizeFullwidthAlphanumeric(%q) = %q, want %q", input, got, want)
+	}
+}
+
+func TestRedactMedicalText(t *testing.T) {
+	// L5: HIV & Psychiatric
+	text1 := "患者自述既往有艾滋病病史，长期口服奥氮平片治疗精神分裂症。"
+	got1 := RedactMedicalText(text1)
+	if strings.Contains(got1, "艾滋病") || strings.Contains(got1, "奥氮平") || strings.Contains(got1, "精神分裂症") {
+		t.Errorf("RedactMedicalText did not redact L5 terms: %q", got1)
+	}
+	if !strings.Contains(got1, "[L5-IMMUNODEFICIENCY]") || !strings.Contains(got1, "[L5-PSYCHIATRIC_DISORDER]") {
+		t.Errorf("RedactMedicalText missing L5 tags: %q", got1)
+	}
+
+	// L4: Malignant neoplasm & STD
+	text2 := "初步诊断为肺腺癌晚期，合并梅毒感染。"
+	got2 := RedactMedicalText(text2)
+	if strings.Contains(got2, "肺腺癌") || strings.Contains(got2, "梅毒") {
+		t.Errorf("RedactMedicalText did not redact L4 terms: %q", got2)
+	}
+	if !strings.Contains(got2, "[L4-MALIGNANT_NEOPLASM]") || !strings.Contains(got2, "[L4-INFECTIOUS_DISEASE]") {
+		t.Errorf("RedactMedicalText missing L4 tags: %q", got2)
+	}
+}
+
+func TestProcessRecordsFullPipeline(t *testing.T) {
+	p := NewYibaoPipeline()
+	records := []map[string]string{
+		{
+			"name":            "张三",
+			"id_card_no":      "110101199005181234",
+			"phone":           "13812345678",
+			"birth_date":      "1990-05-18",
+			"diagnosis":       "既往有艾滋病，现诊断为肺腺癌",
+			"icd_code":        "B20.900",
+			"admission_date":  "2023-10-01",
+			"total_cost":      "12500.50",
+		},
+		{
+			"name":            "李四",
+			"id_card_no":      "110101198503205678",
+			"phone":           "13987654321",
+			"birth_date":      "1985-03-20",
+			"diagnosis":       "高血压二级",
+			"icd_code":        "I10.x00",
+			"admission_date":  "2023-11-15",
+			"total_cost":      "850.00",
+		},
+	}
+
+	result := p.ProcessRecords(records)
+	if len(result.SanitizedData) != 2 {
+		t.Fatalf("SanitizedData len = %d, want 2", len(result.SanitizedData))
+	}
+	if len(result.ClassificationReport) != 2 {
+		t.Fatalf("ClassificationReport len = %d, want 2", len(result.ClassificationReport))
+	}
+
+	// 记录 1 应为 L5
+	rep1 := result.ClassificationReport[0]
+	if rep1.MaxLevel != "L5" {
+		t.Errorf("Record 1 max_level = %q, want 'L5'", rep1.MaxLevel)
+	}
+
+	// 检查脱敏后的字段
+	san1 := result.SanitizedData[0]
+	if san1["name"] != "张*" {
+		t.Errorf("sanitized name = %q, want '张*'", san1["name"])
+	}
+	if san1["id_card_no"] != "110101********1234" {
+		t.Errorf("sanitized id_card_no = %q, want '110101********1234'", san1["id_card_no"])
+	}
+	if san1["birth_date"] != "1990-05" {
+		t.Errorf("sanitized birth_date = %q, want '1990-05'", san1["birth_date"])
+	}
+	if san1["icd_code"] != "" {
+		t.Errorf("sanitized icd_code for B20.900 = %q, want empty string (purged)", san1["icd_code"])
+	}
+	if strings.Contains(san1["diagnosis"], "艾滋病") || strings.Contains(san1["diagnosis"], "肺腺癌") {
+		t.Errorf("sanitized diagnosis leaked clinical terms: %q", san1["diagnosis"])
+	}
+}

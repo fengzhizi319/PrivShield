@@ -154,3 +154,83 @@ func TestNoisyMean(t *testing.T) {
 		t.Errorf("NoisyMean avg = %f, want ~%f", avgResult, expectedMean)
 	}
 }
+
+func TestAdaptiveClip(t *testing.T) {
+	values := []float64{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}
+	lower, upper := AdaptiveClip(values, 1.0, 0.9, 15, 10.0)
+	if lower != 0.0 {
+		t.Errorf("AdaptiveClip lower = %f, want 0.0", lower)
+	}
+	if upper <= 0.0 {
+		t.Errorf("AdaptiveClip upper = %f, want > 0.0", upper)
+	}
+
+	// 空数据测试
+	lowerEmpty, upperEmpty := AdaptiveClip(nil, 1.0, 0.9, 10, 5.0)
+	if lowerEmpty != 0.0 || upperEmpty != 5.0 {
+		t.Errorf("AdaptiveClip empty data = (%f, %f), want (0.0, 5.0)", lowerEmpty, upperEmpty)
+	}
+}
+
+func TestGroupBy(t *testing.T) {
+	rows := []map[string]string{
+		{"dept": "Cardiology", "cost": "100.0"},
+		{"dept": "Cardiology", "cost": "200.0"},
+		{"dept": "Neurology", "cost": "300.0"},
+		{"dept": "Neurology", "cost": "400.0"},
+	}
+
+	// Count
+	resCount, err := GroupBy(rows, "dept", "cost", "count", 1.0, 0, 0, 500, "laplace")
+	if err != nil {
+		t.Fatalf("GroupBy count failed: %v", err)
+	}
+	if len(resCount) != 2 {
+		t.Errorf("GroupBy count len = %d, want 2", len(resCount))
+	}
+
+	// Sum
+	resSum, err := GroupBy(rows, "dept", "cost", "sum", 1.0, 0, 0, 500, "laplace")
+	if err != nil {
+		t.Fatalf("GroupBy sum failed: %v", err)
+	}
+	if len(resSum) != 2 {
+		t.Errorf("GroupBy sum len = %d, want 2", len(resSum))
+	}
+
+	// Mean
+	resMean, err := GroupBy(rows, "dept", "cost", "mean", 1.0, 1e-5, 0, 500, "gaussian")
+	if err != nil {
+		t.Fatalf("GroupBy mean failed: %v", err)
+	}
+	if len(resMean) != 2 {
+		t.Errorf("GroupBy mean len = %d, want 2", len(resMean))
+	}
+}
+
+func TestAggregate(t *testing.T) {
+	rows := []map[string]string{
+		{"age": "25", "salary": "5000"},
+		{"age": "35", "salary": "8000"},
+		{"age": "45", "salary": "12000"},
+	}
+	specs := map[string]string{
+		"age":    "mean",
+		"salary": "sum",
+	}
+
+	res, err := Aggregate(rows, specs, 1.0, 1e-5, "laplace")
+	if err != nil {
+		t.Fatalf("Aggregate failed: %v", err)
+	}
+	if len(res) != 2 {
+		t.Errorf("Aggregate result len = %d, want 2", len(res))
+	}
+	if _, ok := res["age_mean"]; !ok {
+		t.Errorf("Aggregate missing age_mean")
+	}
+	if _, ok := res["salary_sum"]; !ok {
+		t.Errorf("Aggregate missing salary_sum")
+	}
+}
+

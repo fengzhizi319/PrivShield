@@ -5,8 +5,10 @@
 package dp
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
+	"strings"
 )
 
 // ──────────────────────────────────────────────
@@ -235,3 +237,164 @@ func VectorSum(vectors [][]float64, maxNorm float64, epsilon float64) []float64 
 	// 敏感度 = maxNorm（每个分量的敏感度）
 	return AddLaplaceVector(sum, epsilon, maxNorm)
 }
+
+// ──────────────────────────────────────────────
+// DP 自适应截断、分组聚合与多指标聚合
+// ──────────────────────────────────────────────
+
+// AdaptiveClip 差分隐私自适应二分搜索估计 [0.0, clipUpper] 上下界。
+// 通过 DP 分位数估计自适应确定安全截断范围。
+func AdaptiveClip(values []float64, epsilon float64, targetQuantile float64, numIterations int, initialClip float64) (float64, float64) {
+	if numIterations <= 0 {
+		numIterations = 15
+	}
+	if targetQuantile <= 0 || targetQuantile >= 1 {
+		targetQuantile = 0.95
+	}
+	if initialClip <= 0 {
+		initialClip = 10.0
+	}
+	if len(values) == 0 {
+		return 0.0, initialClip
+	}
+
+	epsPerIter := epsilon / float64(numIterations)
+	curClip := initialClip
+	totalCount := float64(len(values))
+
+	for i := 0; i < numIterations; i++ {
+		belowCount := 0
+		for _, v := range values {
+			if v <= curClip {
+				belowCount++
+			}
+		}
+		noisyBelow := NoisyCount(belowCount, epsPerIter)
+		frac := noisyBelow / totalCount
+		if frac < targetQuantile {
+			curClip *= 1.5
+		} else {
+			curClip *= 0.85
+		}
+	}
+
+	return 0.0, curClip
+}
+
+// GroupBy 对表格记录按 groupCol 分组，并在 targetCol 上执行带差分隐私的分组聚合计算。
+// 支持 count、sum、mean 聚合算子，机制支持 laplace 与 gaussian。
+func GroupBy(rows []map[string]string, groupCol, targetCol, agg string, epsilon, delta, clipLower, clipUpper float64, mechanism string) (map[string]float64, error) {
+	if len(rows) == 0 {
+		return map[string]float64{}, nil
+	}
+	if agg == "" {
+		agg = "count"
+	}
+	if clipUpper <= clipLower {
+		clipUpper = clipLower + 1.0
+	}
+
+	// 1. 按 groupCol 分组
+	groups := make(map[string][]float64)
+	for _, row := range rows {
+		gVal := row[groupCol]
+		if gVal == "" {
+			gVal = "unknown"
+		}
+		var val float64
+		if tStr, ok := row[targetCol]; ok && tStr != "" {
+			for i, r := range tStr {
+				if (r >= '0' && r <= '9') || r == '.' || r == '-' {
+					continue
+				}
+				tStr = tStr[:i]
+				break
+			}
+			var parsed float64
+			n, _ := fmt.Sscanf(tStr, "%f", &parsed)
+			if n > 0 {
+				val = parsed
+			}
+		}
+		groups[gVal] = append(groups[gVal], val)
+	}
+
+	// 2. 对每个分组独立计算并加噪
+	result := make(map[string]float64, len(groups))
+	sensitivity := clipUpper - clipLower
+	if sensitivity <= 0 {
+		sensitivity = 1.0
+	}
+
+	for gVal, vals := range groups {
+		switch strings.ToLower(agg) {
+		case "count":
+			result[gVal] = NoisyCount(len(vals), epsilon)
+		case "sum":
+			var clippedVals []float64
+			for _, v := range vals {
+				clippedVals = append(clippedVals, ClipValue(v, clipUpper))
+			}
+			var sum float64
+			for _, v := range clippedVals {
+				sum += v
+			}
+			if strings.ToLower(mechanism) == "gaussian" && delta > 0 {
+				result[gVal] = AddGaussianNoise(sum, epsilon, delta, sensitivity)
+			} else {
+				result[gVal] = AddLaplaceNoise(sum, epsilon, sensitivity)
+			}
+		case "mean":
+			var clippedVals []float64
+			for _, v := range vals {
+				clippedVals = append(clippedVals, ClipValue(v, clipUpper))
+			}
+			result[gVal] = NoisyMean(clippedVals, epsilon, delta, clipUpper)
+		default:
+			result[gVal] = NoisyCount(len(vals), epsilon)
+		}
+	}
+
+	return result, nil
+}
+
+// Aggregate 对记录集按指定字段和算子列表执行多指标差分隐私聚合计算。
+// specs 为 map[字段名]聚合算子 (count/sum/mean)。
+func Aggregate(rows []map[string]string, specs map[string]string, epsilon, delta float64, mechanism string) (map[string]float64, error) {
+	if len(rows) == 0 || len(specs) == 0 {
+		return map[string]float64{}, nil
+	}
+
+	numSpecs := float64(len(specs))
+	epsPerSpec := epsilon / numSpecs
+	deltaPerSpec := delta / numSpecs
+
+	result := make(map[string]float64, len(specs))
+	for col, agg := range specs {
+		var vals []float64
+		for _, row := range rows {
+			if vStr, ok := row[col]; ok && vStr != "" {
+				var val float64
+				n, _ := fmt.Sscanf(vStr, "%f", &val)
+				if n > 0 {
+					vals = append(vals, val)
+				}
+			}
+		}
+
+		key := col + "_" + strings.ToLower(agg)
+		switch strings.ToLower(agg) {
+		case "count":
+			result[key] = NoisyCount(len(vals), epsPerSpec)
+		case "sum":
+			result[key] = NoisySum(vals, epsPerSpec, 1.0)
+		case "mean":
+			result[key] = NoisyMean(vals, epsPerSpec, deltaPerSpec, 1.0)
+		default:
+			result[key] = NoisyCount(len(vals), epsPerSpec)
+		}
+	}
+
+	return result, nil
+}
+

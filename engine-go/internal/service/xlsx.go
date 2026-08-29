@@ -1,0 +1,175 @@
+package service
+
+import (
+	"archive/zip"
+	"bytes"
+	"encoding/xml"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+)
+
+// ParseXLSXRecords 从 .xlsx 字节数据中解析结构化记录列表（纯 Go 实现，无 CGO 依赖）。
+func ParseXLSXRecords(content []byte) ([]map[string]string, error) {
+	zr, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return nil, fmt.Errorf("open xlsx zip: %w", err)
+	}
+
+	var sharedStrings []string
+	var sheetFile *zip.File
+
+	for _, f := range zr.File {
+		if f.Name == "xl/sharedStrings.xml" {
+			rc, err := f.Open()
+			if err == nil {
+				sharedStrings, _ = parseSharedStrings(rc)
+				rc.Close()
+			}
+		} else if f.Name == "xl/worksheets/sheet1.xml" || (sheetFile == nil && strings.HasPrefix(f.Name, "xl/worksheets/sheet") && strings.HasSuffix(f.Name, ".xml")) {
+			sheetFile = f
+		}
+	}
+
+	if sheetFile == nil {
+		return nil, fmt.Errorf("sheet1.xml not found in xlsx archive")
+	}
+
+	rc, err := sheetFile.Open()
+	if err != nil {
+		return nil, fmt.Errorf("open sheet xml: %w", err)
+	}
+	defer rc.Close()
+
+	rows, err := parseSheetData(rc, sharedStrings)
+	if err != nil {
+		return nil, fmt.Errorf("parse sheet xml: %w", err)
+	}
+
+	if len(rows) < 1 {
+		return nil, fmt.Errorf("xlsx sheet is empty")
+	}
+
+	headers := rows[0]
+	records := make([]map[string]string, 0, len(rows)-1)
+
+	for _, row := range rows[1:] {
+		rec := make(map[string]string, len(headers))
+		hasAny := false
+		for i, h := range headers {
+			if h == "" {
+				continue
+			}
+			if i < len(row) {
+				rec[h] = row[i]
+				if row[i] != "" {
+					hasAny = true
+				}
+			} else {
+				rec[h] = ""
+			}
+		}
+		if hasAny {
+			records = append(records, rec)
+		}
+	}
+
+	return records, nil
+}
+
+func parseSharedStrings(r io.Reader) ([]string, error) {
+	var sst struct {
+		XMLName xml.Name `xml:"sst"`
+		SI      []struct {
+			T string `xml:"t"`
+			R []struct {
+				T string `xml:"t"`
+			} `xml:"r"`
+		} `xml:"si"`
+	}
+
+	if err := xml.NewDecoder(r).Decode(&sst); err != nil {
+		return nil, err
+	}
+
+	result := make([]string, len(sst.SI))
+	for i, si := range sst.SI {
+		if si.T != "" {
+			result[i] = si.T
+		} else if len(si.R) > 0 {
+			var sb strings.Builder
+			for _, r := range si.R {
+				sb.WriteString(r.T)
+			}
+			result[i] = sb.String()
+		}
+	}
+	return result, nil
+}
+
+func parseSheetData(r io.Reader, sharedStrings []string) ([][]string, error) {
+	var ws struct {
+		XMLName   xml.Name `xml:"worksheet"`
+		SheetData struct {
+			Row []struct {
+				R int `xml:"r,attr"`
+				C []struct {
+					R string `xml:"r,attr"`
+					T string `xml:"t,attr"`
+					V string `xml:"v"`
+					IS struct {
+						T string `xml:"t"`
+					} `xml:"is"`
+				} `xml:"c"`
+			} `xml:"row"`
+		} `xml:"sheetData"`
+	}
+
+	if err := xml.NewDecoder(r).Decode(&ws); err != nil {
+		return nil, err
+	}
+
+	var rows [][]string
+
+	for _, row := range ws.SheetData.Row {
+		var rowVals []string
+		for _, c := range row.C {
+			colIdx := colNameToIndex(c.R)
+			for len(rowVals) <= colIdx {
+				rowVals = append(rowVals, "")
+			}
+
+			val := c.V
+			if c.T == "s" {
+				idx, err := strconv.Atoi(c.V)
+				if err == nil && idx >= 0 && idx < len(sharedStrings) {
+					val = sharedStrings[idx]
+				}
+			} else if c.T == "inlineStr" {
+				val = c.IS.T
+			}
+			rowVals[colIdx] = val
+		}
+		rows = append(rows, rowVals)
+	}
+
+	return rows, nil
+}
+
+func colNameToIndex(cellRef string) int {
+	col := 0
+	for _, r := range cellRef {
+		if r >= 'A' && r <= 'Z' {
+			col = col*26 + int(r-'A'+1)
+		} else if r >= 'a' && r <= 'z' {
+			col = col*26 + int(r-'a'+1)
+		} else {
+			break
+		}
+	}
+	if col > 0 {
+		return col - 1
+	}
+	return 0
+}

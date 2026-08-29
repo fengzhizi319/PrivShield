@@ -177,11 +177,21 @@ func SanitizeImage(val string, outputDir string, boxes []Box) (string, error) {
 	var img image.Image
 	var inputExt string
 
-	// 1. 加载图像
+	// 1. 加载图像或处理 DICOM
 	if isFilePath {
 		if !isPathAllowed(stripped) {
 			return FailurePlaceholder, nil
 		}
+
+		// DICOM 医学影像直接处理
+		if IsDICOMFile(stripped) {
+			outPath, err := SanitizeDICOMFile(stripped, outputDir)
+			if err != nil {
+				return FailurePlaceholder, nil
+			}
+			return outPath, nil
+		}
+
 		f, err := os.Open(stripped)
 		if err != nil {
 			return FailurePlaceholder, nil
@@ -202,6 +212,16 @@ func SanitizeImage(val string, outputDir string, boxes []Box) (string, error) {
 		if err != nil {
 			return FailurePlaceholder, nil
 		}
+
+		// 检查 Base64 中是否为 DICOM 数据
+		if IsDICOM(data) {
+			anon, err := AnonymizeDICOM(data)
+			if err != nil {
+				return FailurePlaceholder, nil
+			}
+			return "data:application/dicom;base64," + base64.StdEncoding.EncodeToString(anon), nil
+		}
+
 		img2, errDec := decodeImageReader(data)
 		if errDec != nil {
 			return FailurePlaceholder, nil

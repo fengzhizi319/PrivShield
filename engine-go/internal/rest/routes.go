@@ -1173,8 +1173,12 @@ func processFileHandler(svc *service.PrivacyService) gin.HandlerFunc {
 // 动态分类 Profiles 重载
 // ──────────────────────────────────────────────
 
-func dynProfilesReloadHandler(_ *service.PrivacyService) gin.HandlerFunc {
+func dynProfilesReloadHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if err := svc.ReloadDynamicProfiles(); err != nil {
+			middleware.AbortWithError(c, http.StatusInternalServerError, "RELOAD_FAILED", "重载动态配置失败", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"message": "Dynamic classification profiles reloaded successfully",
@@ -1186,14 +1190,32 @@ func dynProfilesReloadHandler(_ *service.PrivacyService) gin.HandlerFunc {
 // Profile 推荐
 // ──────────────────────────────────────────────
 
-func profileRecommendHandler(_ *service.PrivacyService) gin.HandlerFunc {
+type profileRecommendRequest struct {
+	Namespace string                   `json:"namespace"`
+	Values    []float64                `json:"values"`
+	Rows      []map[string]interface{} `json:"rows"`
+	QICols    []string                 `json:"qi_cols"`
+}
+
+func profileRecommendHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var req profileRecommendRequest
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+				middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_REQUEST", "解析请求体失败", err.Error())
+				return
+			}
+		}
+		if req.Namespace == "" {
+			req.Namespace = "default"
+		}
+
+		params := svc.RecommendParams(req.Namespace, req.Values, req.Rows, req.QICols)
+
 		c.JSON(http.StatusOK, gin.H{
-			"recommended_profile": "standard",
-			"epsilon":             1.0,
-			"delta":               1e-5,
-			"k":                   5,
-			"note":                "Go 引擎参数推荐",
+			"status":             "success",
+			"namespace":          req.Namespace,
+			"recommended_params": params,
 		})
 	}
 }

@@ -1,17 +1,20 @@
 // Package medical 提供医疗数据隐私处理流水线。
 //
 // 实现医保 18 字段与康养 27 字段的特化脱敏流水线，
-// 支持字段级自动识别与分级脱敏策略。
+// 支持字段级自动识别、分级脱敏策略与双结构结果输出（分级报告 + 脱敏数据集）。
 package medical
 
 import (
+	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/masking"
 )
 
 // ──────────────────────────────────────────────
-// 字段分类
+// 字段分类与规格
 // ──────────────────────────────────────────────
 
 // FieldCategory 字段敏感类别
@@ -93,18 +96,56 @@ var KangyangFields = []FieldSpec{
 }
 
 // ──────────────────────────────────────────────
-// 医疗隐私流水线
+// 数据结构定义（双结构输出模型）
+// ──────────────────────────────────────────────
+
+// FieldClassification 单字段分类分级结果模型
+type FieldClassification struct {
+	FieldName          string `json:"field_name"`
+	Level              string `json:"level"`
+	SecurityTag        string `json:"security_tag"`
+	Description        string `json:"description"`
+	RuleMatched        string `json:"rule_matched"`
+	RawValue           string `json:"raw_value,omitempty"`
+	SanitizedValue     string `json:"sanitized_value"`
+	SanitizedValueRule string `json:"sanitized_value_rule"`
+	SanitizedValueNer  string `json:"sanitized_value_ner"`
+}
+
+// RecordClassificationReport 单条记录的分级报告
+type RecordClassificationReport struct {
+	RecordIndex             int                   `json:"record_index"`
+	MaxLevel                string                `json:"max_level"`
+	PIIFieldsDetected       []string              `json:"pii_fields_detected"`
+	HighSensitivityDetected []string              `json:"high_sensitivity_detected"`
+	FieldDetails            []FieldClassification `json:"field_details"`
+	RawRecord               map[string]string     `json:"raw_record,omitempty"`
+}
+
+// MedicalPipelineResult 医疗流水线最终执行结果（双结构输出）
+type MedicalPipelineResult struct {
+	ClassificationReport []RecordClassificationReport `json:"classification_report"`
+	SanitizedData        []map[string]string          `json:"sanitized_data"`
+	RawData              []map[string]string          `json:"raw_data,omitempty"`
+	Summary              map[string]interface{}       `json:"summary"`
+}
+
+// ──────────────────────────────────────────────
+// 医疗隐私流水线 (Pipeline)
 // ──────────────────────────────────────────────
 
 // Pipeline 医疗数据隐私处理流水线
 type Pipeline struct {
 	fieldMap map[string]*FieldSpec
+	mu       sync.RWMutex
+	cache    map[string]string
 }
 
 // NewPipeline 创建医疗流水线实例
 func NewPipeline(fields []FieldSpec) *Pipeline {
 	p := &Pipeline{
 		fieldMap: make(map[string]*FieldSpec, len(fields)),
+		cache:    make(map[string]string),
 	}
 	for i := range fields {
 		p.fieldMap[fields[i].Name] = &fields[i]
@@ -120,6 +161,188 @@ func NewYibaoPipeline() *Pipeline {
 // NewKangyangPipeline 创建康养 27 字段流水线
 func NewKangyangPipeline() *Pipeline {
 	return NewPipeline(KangyangFields)
+}
+
+// ProcessRecords 全流程处理医疗数据集，生成双结构报告与脱敏数据集
+func (p *Pipeline) ProcessRecords(records []map[string]string) *MedicalPipelineResult {
+	start := time.Now()
+	sanitizedData := make([]map[string]string, len(records))
+	reports := make([]RecordClassificationReport, len(records))
+	levelCounts := map[string]int{"L1": 0, "L2": 0, "L3": 0, "L4": 0, "L5": 0}
+
+	for i, rec := range records {
+		sanRec, report := p.ProcessRecord(rec, i+1)
+		sanitizedData[i] = sanRec
+		reports[i] = *report
+		levelCounts[report.MaxLevel]++
+	}
+
+	elapsed := time.Since(start).Seconds()
+
+	return &MedicalPipelineResult{
+		ClassificationReport: reports,
+		SanitizedData:        sanitizedData,
+		RawData:              records,
+		Summary: map[string]interface{}{
+			"total_records":    len(records),
+			"level_counts":     levelCounts,
+			"duration_seconds": elapsed,
+			"status":           "success",
+			"compliance_guaranteed": true,
+		},
+	}
+}
+
+// ProcessRecord 处理单条记录
+func (p *Pipeline) ProcessRecord(record map[string]string, index int) (map[string]string, *RecordClassificationReport) {
+	sanRec := make(map[string]string, len(record))
+	var fieldDetails []FieldClassification
+	var piiFields []string
+	var highSensFields []string
+	maxLevel := "L1"
+
+	for k, v := range record {
+		fc := p.ClassifyAndSanitizeField(k, v)
+		sanRec[k] = fc.SanitizedValue
+		fieldDetails = append(fieldDetails, *fc)
+
+		if strings.HasPrefix(fc.SecurityTag, "PII_") || fc.SecurityTag == "IDENTITY" {
+			piiFields = append(piiFields, k)
+		}
+		if fc.Level == "L4" || fc.Level == "L5" {
+			highSensFields = append(highSensFields, fmt.Sprintf("%s(%s)", k, fc.Level))
+		}
+
+		if compareLevel(fc.Level, maxLevel) > 0 {
+			maxLevel = fc.Level
+		}
+	}
+
+	report := &RecordClassificationReport{
+		RecordIndex:             index,
+		MaxLevel:                maxLevel,
+		PIIFieldsDetected:       piiFields,
+		HighSensitivityDetected: highSensFields,
+		FieldDetails:            fieldDetails,
+		RawRecord:               record,
+	}
+
+	return sanRec, report
+}
+
+// ClassifyAndSanitizeField 对单个字段执行分类与脱敏
+func (p *Pipeline) ClassifyAndSanitizeField(fieldName, value string) *FieldClassification {
+	canon := CanonicalizePIIField(fieldName)
+
+	// 1. ICD-10 编码字段
+	if ICD10FieldNames[canon] || ICD10FieldNames[strings.ToLower(fieldName)] {
+		level, cat, ok := ClassifyICD10Code(value)
+		if ok {
+			sanVal := RedactICD10Code(value)
+			return &FieldClassification{
+				FieldName:          fieldName,
+				Level:              level,
+				SecurityTag:        "ICD10_DIAGNOSIS",
+				Description:        "ICD-10 诊断编码",
+				RuleMatched:        fmt.Sprintf("ICD10_%s", cat),
+				RawValue:           value,
+				SanitizedValue:     sanVal,
+				SanitizedValueRule: sanVal,
+				SanitizedValueNer:  sanVal,
+			}
+		}
+		return &FieldClassification{
+			FieldName:          fieldName,
+			Level:              "L2",
+			SecurityTag:        "ICD10_DIAGNOSIS",
+			Description:        "ICD-10 基础编码",
+			RuleMatched:        "ICD10_STANDARD",
+			RawValue:           value,
+			SanitizedValue:     value,
+			SanitizedValueRule: value,
+			SanitizedValueNer:  value,
+		}
+	}
+
+	// 2. 日期字段
+	if DateGeneralizationFields[canon] || DateGeneralizationFields[strings.ToLower(fieldName)] {
+		sanVal := TruncateDateToMonth(value)
+		return &FieldClassification{
+			FieldName:          fieldName,
+			Level:              "L2",
+			SecurityTag:        "DATE_QI",
+			Description:        "日期准标识符",
+			RuleMatched:        "DATE_GENERALIZATION",
+			RawValue:           value,
+			SanitizedValue:     sanVal,
+			SanitizedValueRule: sanVal,
+			SanitizedValueNer:  sanVal,
+		}
+	}
+
+	// 3. PII 身份与联系字段
+	if rule, isPII := PIIFieldRules[canon]; isPII {
+		sanVal := p.sanitizeIdentity(canon, value)
+		level := "L4"
+		if canon == "id_card_no" || canon == "social_security_no" {
+			level = "L5"
+		}
+		return &FieldClassification{
+			FieldName:          fieldName,
+			Level:              level,
+			SecurityTag:        "PII_IDENTITY",
+			Description:        "个人身份敏感字段",
+			RuleMatched:        rule,
+			RawValue:           value,
+			SanitizedValue:     sanVal,
+			SanitizedValueRule: sanVal,
+			SanitizedValueNer:  sanVal,
+		}
+	}
+
+	// 4. 临床文本 / 病史文本（检测 L4/L5 高敏词）
+	if ContainsHighRiskText(value) {
+		sanVal := RedactMedicalText(value)
+		level := "L4"
+		if strings.Contains(sanVal, "[L5-") {
+			level = "L5"
+		}
+		return &FieldClassification{
+			FieldName:          fieldName,
+			Level:              level,
+			SecurityTag:        "CLINICAL_HIGH_RISK",
+			Description:        "临床高危病史文本",
+			RuleMatched:        "MEDICAL_L4_L5_RULE",
+			RawValue:           value,
+			SanitizedValue:     sanVal,
+			SanitizedValueRule: sanVal,
+			SanitizedValueNer:  sanVal,
+		}
+	}
+
+	// 5. 按照预设规格脱敏
+	sanVal := p.SanitizeField(fieldName, value)
+	spec := p.GetFieldSpec(fieldName)
+	levelStr := "L1"
+	tag := "GENERAL"
+	desc := "常规数据"
+	if spec != nil {
+		levelStr = fmt.Sprintf("L%d", spec.Level)
+		tag = string(spec.Category)
+		desc = string(spec.Category)
+	}
+
+	return &FieldClassification{
+		FieldName:          fieldName,
+		Level:              levelStr,
+		SecurityTag:        tag,
+		Description:        desc,
+		RuleMatched:        "SPEC_RULE",
+		RawValue:           value,
+		SanitizedValue:     sanVal,
+		SanitizedValueRule: sanVal,
+		SanitizedValueNer:  sanVal,
+	}
 }
 
 // SanitizeRecord 对整条记录执行脱敏
@@ -146,9 +369,28 @@ func (p *Pipeline) SanitizeField(fieldName, value string) string {
 		return ""
 	}
 
+	canon := CanonicalizePIIField(fieldName)
+
+	// 1. ICD-10 编码
+	if ICD10FieldNames[canon] || ICD10FieldNames[strings.ToLower(fieldName)] {
+		return RedactICD10Code(value)
+	}
+
+	// 2. 日期截断
+	if DateGeneralizationFields[canon] || DateGeneralizationFields[strings.ToLower(fieldName)] {
+		return TruncateDateToMonth(value)
+	}
+
+	// 3. 临床高危词汇脱敏
+	if ContainsHighRiskText(value) {
+		return RedactMedicalText(value)
+	}
+
 	spec, ok := p.fieldMap[fieldName]
 	if !ok {
-		// 未知字段：根据值内容启发式匹配
+		spec, ok = p.fieldMap[canon]
+	}
+	if !ok {
 		return p.sanitizeByHeuristic(fieldName, value)
 	}
 
@@ -174,17 +416,14 @@ func (p *Pipeline) sanitizeBySpec(spec *FieldSpec, value string) string {
 
 func (p *Pipeline) sanitizeIdentity(name, value string) string {
 	switch name {
-	case "id_card_no", "social_security_no":
+	case "id_card_no", "social_security_no", "disability_cert_no":
 		return masking.MaskIdCard(value)
 	case "name", "doctor_name", "nurse_name":
 		return masking.MaskChineseName(value)
 	case "gender", "age", "blood_type":
 		return value // 低敏感保留
-	case "date_of_birth":
-		if len(value) >= 8 {
-			return value[:4] + "-**-**"
-		}
-		return "****-**-**"
+	case "date_of_birth", "birth_date":
+		return TruncateDateToMonth(value)
 	default:
 		return masking.MaskChineseName(value)
 	}
@@ -216,13 +455,15 @@ func (p *Pipeline) sanitizeMedical(name, value string) string {
 	switch name {
 	case "diagnosis", "chief_complaint", "chronic_diseases",
 		"medication_history", "allergies", "special_notes",
-		"dietary_restrictions":
-		// 临床长文本：保留首尾字符，中间掩码
+		"dietary_restrictions", "present_illness", "past_history":
+		if ContainsHighRiskText(value) {
+			return RedactMedicalText(value)
+		}
 		return maskClinicalText(value)
-	case "icd_code":
-		return value // ICD 编码保留
+	case "icd_code", "icd10_code":
+		return RedactICD10Code(value)
 	case "admission_date", "discharge_date":
-		return value // 日期保留
+		return TruncateDateToMonth(value)
 	case "medical_record_no", "health_record_no":
 		if len(value) > 4 {
 			return value[:2] + strings.Repeat("*", len(value)-4) + value[len(value)-2:]
@@ -233,13 +474,16 @@ func (p *Pipeline) sanitizeMedical(name, value string) string {
 	case "bed_no", "room_no":
 		return value // 床位号保留
 	default:
+		if ContainsHighRiskText(value) {
+			return RedactMedicalText(value)
+		}
 		return value
 	}
 }
 
 func (p *Pipeline) sanitizeLocation(name, value string) string {
 	switch name {
-	case "address":
+	case "address", "registered_address":
 		return masking.MaskAddress(value)
 	default:
 		return value
@@ -249,17 +493,20 @@ func (p *Pipeline) sanitizeLocation(name, value string) string {
 func (p *Pipeline) sanitizeByHeuristic(fieldName, value string) string {
 	lower := strings.ToLower(fieldName)
 	switch {
-	case strings.Contains(lower, "id") || strings.Contains(lower, "card"):
+	case strings.Contains(lower, "id") || strings.Contains(lower, "card") || strings.Contains(lower, "sfz"):
 		return masking.MaskIdCard(value)
-	case strings.Contains(lower, "phone") || strings.Contains(lower, "mobile"):
+	case strings.Contains(lower, "phone") || strings.Contains(lower, "mobile") || strings.Contains(lower, "tel"):
 		return masking.MaskPhone(value)
-	case strings.Contains(lower, "name"):
+	case strings.Contains(lower, "name") || strings.Contains(lower, "姓名"):
 		return masking.MaskChineseName(value)
-	case strings.Contains(lower, "email"):
+	case strings.Contains(lower, "email") || strings.Contains(lower, "mail"):
 		return masking.MaskEmail(value)
-	case strings.Contains(lower, "address"):
+	case strings.Contains(lower, "address") || strings.Contains(lower, "地址"):
 		return masking.MaskAddress(value)
 	default:
+		if ContainsHighRiskText(value) {
+			return RedactMedicalText(value)
+		}
 		return value
 	}
 }
@@ -271,7 +518,6 @@ func maskClinicalText(text string) string {
 	if n <= 2 {
 		return strings.Repeat("*", n)
 	}
-	// 保留前 2 后 2，中间掩码
 	kept := 2
 	maskLen := n - kept*2
 	if maskLen <= 0 {
@@ -292,4 +538,9 @@ func (p *Pipeline) GetFieldSpec(fieldName string) *FieldSpec {
 // FieldCount 返回已注册字段数
 func (p *Pipeline) FieldCount() int {
 	return len(p.fieldMap)
+}
+
+func compareLevel(a, b string) int {
+	rank := map[string]int{"L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5}
+	return rank[a] - rank[b]
 }

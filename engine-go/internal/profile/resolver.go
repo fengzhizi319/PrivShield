@@ -104,6 +104,107 @@ func (r *Resolver) Recommend() map[string]interface{} {
 	}
 }
 
+// RecommendDataParams 根据输入样本数据特征自动计算并推荐 DP 与 K-Anonymity 最佳隐私参数。
+func (r *Resolver) RecommendDataParams(namespace string, values []float64, rows []map[string]interface{}, qiCols []string) map[string]interface{} {
+	recommendations := make(map[string]interface{})
+
+	// 1. 推荐 DP 参数
+	if len(values) > 0 {
+		n := len(values)
+		sorted := make([]float64, n)
+		copy(sorted, values)
+		for i := 0; i < n; i++ {
+			for j := i + 1; j < n; j++ {
+				if sorted[j] < sorted[i] {
+					sorted[i], sorted[j] = sorted[j], sorted[i]
+				}
+			}
+		}
+
+		p5Idx := int(float64(n) * 0.05)
+		p95Idx := int(float64(n) * 0.95)
+		if p95Idx >= n {
+			p95Idx = n - 1
+		}
+		clipLower := sorted[p5Idx]
+		clipUpper := sorted[p95Idx]
+		if clipLower == clipUpper {
+			clipLower -= 1.0
+			clipUpper += 1.0
+		}
+
+		delta := 1e-5
+		if n > 0 {
+			calcDelta := 1.0 / (10.0 * float64(n*n))
+			if calcDelta < delta {
+				delta = calcDelta
+			}
+		}
+
+		dpParams := map[string]interface{}{
+			"epsilon":    1.0,
+			"delta":      delta,
+			"mechanism":  "laplace",
+			"clip_lower": clipLower,
+			"clip_upper": clipUpper,
+		}
+		recommendations["dp"] = dpParams
+		r.SavePersonalizedParams(namespace, "dp", dpParams)
+	}
+
+	// 2. 推荐 K-Anonymity 参数
+	if len(rows) > 0 {
+		n := len(rows)
+		k := n / 10
+		if k < 2 {
+			k = 2
+		}
+		if k > 10 {
+			k = 10
+		}
+		kanoParams := map[string]interface{}{
+			"k":         k,
+			"max_depth": 10,
+		}
+		recommendations["k_anonymity"] = kanoParams
+		r.SavePersonalizedParams(namespace, "k_anonymity", kanoParams)
+	}
+
+	if len(recommendations) == 0 {
+		recommendations["default"] = r.Recommend()
+	}
+
+	return recommendations
+}
+
+// SavePersonalizedParams 保存命名空间级个性化参数
+func (r *Resolver) SavePersonalizedParams(namespace, primitive string, params map[string]interface{}) {
+	if namespace == "" || primitive == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.profile == nil {
+		r.profile = defaultProfile()
+	}
+	if r.profile.Namespaces == nil {
+		r.profile.Namespaces = make(map[string]PrimitiveParams)
+	}
+	if _, ok := r.profile.Namespaces[namespace]; !ok {
+		r.profile.Namespaces[namespace] = make(PrimitiveParams)
+	}
+
+	m, ok := r.profile.Namespaces[namespace][primitive].(map[string]interface{})
+	if !ok {
+		m = make(map[string]interface{})
+	}
+	for k, v := range params {
+		m[k] = v
+	}
+	r.profile.Namespaces[namespace][primitive] = m
+}
+
 func (r *Resolver) profileName() string {
 	if r.profile != nil && r.profile.Name != "" {
 		return r.profile.Name

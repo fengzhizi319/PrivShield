@@ -1,0 +1,493 @@
+// Package medical 提供医疗数据分类分级规则与 L4/L5 级脱敏引擎。
+//
+// 核心架构对齐 Python engine/medical_pipeline/rules.py：
+//  1. 动态字典：PII 别名字典与 L4/L5 重大高敏词库（HIV、精神障碍、遗传缺陷、性病、恶性肿瘤、肝炎、器官损害等）；
+//  2. ICD-10 高危诊断编码分级与脱敏治理；
+//  3. 日期准标识符泛化（截断为年月）；
+//  4. 语法自愈与断句残渣清理。
+package medical
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+	"unicode"
+)
+
+// PII 身份隐私字段及其默认脱敏规则定义
+var PIIFieldRules = map[string]string{
+	"name":                 "CHINESE_NAME",
+	"id_card_no":           "ID_CARD",
+	"registered_address":   "ADDRESS",
+	"disability_cert_no":   "DISABILITY_CERT",
+	"medical_insurance_no": "INSURANCE_NO",
+	"person_id":            "PERSON_ID",
+	"hospital_code":        "HOSPITAL_CODE",
+}
+
+// PII 字段别名映射（中文/英文/缩写 -> 规范字段名）
+var PIIFieldAliases = map[string]string{
+	"姓名":                "name",
+	"真实姓名":              "name",
+	"用户姓名":              "name",
+	"patient_name":     "name",
+	"user_name":        "name",
+	"real_name":        "name",
+	"身份证":               "id_card_no",
+	"身份证号":              "id_card_no",
+	"居民身份证":             "id_card_no",
+	"公民身份号码":            "id_card_no",
+	"id_card":          "id_card_no",
+	"idcard":           "id_card_no",
+	"id_card_num":      "id_card_no",
+	"id_number":        "id_card_no",
+	"id_no":            "id_card_no",
+	"identity_card":    "id_card_no",
+	"identity_no":      "id_card_no",
+	"sfz":              "id_card_no",
+	"sfz_no":           "id_card_no",
+	"地址":                "registered_address",
+	"注册地址":              "registered_address",
+	"登记地址":              "registered_address",
+	"户籍地址":              "registered_address",
+	"居住地址":              "registered_address",
+	"居民住址":              "registered_address",
+	"家庭住址":              "registered_address",
+	"联系地址":              "registered_address",
+	"address":          "registered_address",
+	"home_address":     "registered_address",
+	"contact_address":  "registered_address",
+	"user_address":     "registered_address",
+	"resident_address": "registered_address",
+	"location":         "registered_address",
+	"残疾证号":              "disability_cert_no",
+	"残疾人证号":             "disability_cert_no",
+	"disability_cert":  "disability_cert_no",
+	"disability_card":  "disability_cert_no",
+	"医保卡号":              "medical_insurance_no",
+	"医保号":               "medical_insurance_no",
+	"医疗保险号":             "medical_insurance_no",
+	"insurance_no":     "medical_insurance_no",
+	"med_insurance_no": "medical_insurance_no",
+	"医保结算流水号":           "medical_insurance_no",
+	"人员唯一标识":            "person_id",
+	"person_id":        "person_id",
+	"pid":              "person_id",
+	"定点医疗机构编码":          "hospital_code",
+	"hospital_code":    "hospital_code",
+	// 临床与诊断字段别名映射
+	"主诉":                "chief_complaint",
+	"现病史":               "present_illness",
+	"既往史":               "past_history",
+	"个人史":               "personal_history",
+	"家族史":               "family_history",
+	"过敏史":               "allergic_history",
+	"诊断名称":              "diagnosis_name",
+	"病程记录":              "progress_note",
+	"诊断编码":              "icd10_code",
+	"诊断编码(icd-10)":     "icd10_code",
+	"诊断编码（icd-10）":     "icd10_code",
+	"icd-10":           "icd10_code",
+	"icd10":            "icd10_code",
+	"入院病情":              "admission_condition",
+}
+
+// CanonicalizePIIField 将字段名转换为规范字段名。
+func CanonicalizePIIField(fieldName string) string {
+	if fieldName == "" {
+		return fieldName
+	}
+	cleaned := strings.TrimSpace(fieldName)
+	if canonical, ok := PIIFieldAliases[cleaned]; ok {
+		return canonical
+	}
+	if canonical, ok := PIIFieldAliases[strings.ToLower(cleaned)]; ok {
+		return canonical
+	}
+
+	// 若包含括号（如 "id_card_no (身份证号)"），提取子串匹配
+	if strings.ContainsAny(cleaned, "()（）") {
+		parts := strings.FieldsFunc(cleaned, func(r rune) bool {
+			return r == '(' || r == ')' || r == '（' || r == '）'
+		})
+		for _, part := range parts {
+			p := strings.TrimSpace(part)
+			if p == "" {
+				continue
+			}
+			if canonical, ok := PIIFieldAliases[p]; ok {
+				return canonical
+			}
+			if canonical, ok := PIIFieldAliases[strings.ToLower(p)]; ok {
+				return canonical
+			}
+		}
+	}
+
+	return cleaned
+}
+
+// ──────────────────────────────────────────────
+// ICD-10 高危诊断编码治理
+// ──────────────────────────────────────────────
+
+// ICD10FieldNames 诊断编码字段名集合
+var ICD10FieldNames = map[string]bool{
+	"icd10_code":     true,
+	"icd10":          true,
+	"icd_code":       true,
+	"icd":            true,
+	"diagnosis_code": true,
+	"诊断编码":           true,
+}
+
+var icd10Regex = regexp.MustCompile(`^\s*([A-Za-z])(\d{2})(?:\.[xX\d]\d*)?\s*$`)
+
+// ClassifyICD10Code 判定 ICD-10 诊断编码的风险等级与范畴。
+// 返回 (level, category, isHit)。
+func ClassifyICD10Code(code string) (string, string, bool) {
+	match := icd10Regex.FindStringSubmatch(code)
+	if match == nil {
+		return "", "", false
+	}
+	letter := strings.ToUpper(match[1])
+	var number int
+	fmt.Sscanf(match[2], "%d", &number)
+
+	// L5 极高敏：HIV(B20-B24)、精神分裂症(F20-F29)、亨廷顿舞蹈病(G10)
+	if (letter == "B" && number >= 20 && number <= 24) ||
+		(letter == "F" && number >= 20 && number <= 29) ||
+		(letter == "G" && number == 10) {
+		return "L5", "ICD_HIGH_SENSITIVE", true
+	}
+
+	// L4 高敏：性病(A50-A64)、肿瘤(C00-C97/D00-D48)、肝炎(B15-B19)、心梗(I21-I22)、肾衰/尿毒症(N18-N19)、慢阻肺(J44)
+	if letter == "A" && number >= 50 && number <= 64 {
+		return "L4", "ICD_INFECTIOUS", true
+	}
+	if (letter == "C" && number >= 0 && number <= 97) || (letter == "D" && number >= 0 && number <= 48) {
+		return "L4", "ICD_NEOPLASM", true
+	}
+	if letter == "B" && number >= 15 && number <= 19 {
+		return "L4", "ICD_LIVER", true
+	}
+	if letter == "I" && (number == 21 || number == 22) {
+		return "L4", "ICD_CARDIOVASCULAR", true
+	}
+	if letter == "N" && (number == 18 || number == 19) {
+		return "L4", "ICD_RENAL", true
+	}
+	if letter == "J" && number == 44 {
+		return "L4", "ICD_RESPIRATORY", true
+	}
+
+	return "", "", false
+}
+
+// RedactICD10Code ICD-10 编码脱敏：L5 整值抹平，L4 替换为范畴码，非高危原样返回。
+func RedactICD10Code(code string) string {
+	level, category, ok := ClassifyICD10Code(code)
+	if !ok {
+		return code
+	}
+	if level == "L5" {
+		return ""
+	}
+	return fmt.Sprintf("[L4-%s]", category)
+}
+
+// ──────────────────────────────────────────────
+// 日期准标识符泛化
+// ──────────────────────────────────────────────
+
+// DateGeneralizationFields 需截断至年月的日期字段
+var DateGeneralizationFields = map[string]bool{
+	"birth_date":     true,
+	"date_of_birth":  true,
+	"admission_date": true,
+	"discharge_date": true,
+	"出生日期":           true,
+	"入院日期":           true,
+	"出院日期":           true,
+}
+
+var datePrefixRegex = regexp.MustCompile(`^(\d{4})[-/.](\d{1,2})[-/.]\d{1,2}`)
+
+// TruncateDateToMonth 将 YYYY-MM-DD / YYYY/MM/DD 等完整日期截断为 YYYY-MM。
+func TruncateDateToMonth(dateStr string) string {
+	if dateStr == "" {
+		return dateStr
+	}
+	if match := datePrefixRegex.FindStringSubmatch(dateStr); match != nil {
+		month := match[2]
+		if len(month) == 1 {
+			month = "0" + month
+		}
+		return match[1] + "-" + month
+	}
+	return dateStr
+}
+
+// NormalizeFullwidthAlphanumeric 将全角英文字母和数字转换为半角。
+func NormalizeFullwidthAlphanumeric(text string) string {
+	if text == "" {
+		return text
+	}
+	var sb strings.Builder
+	for _, r := range text {
+		if r >= 0xFF10 && r <= 0xFF19 { // ０-９
+			sb.WriteRune(r - 0xFEE0)
+		} else if r >= 0xFF21 && r <= 0xFF3A { // Ａ-Ｚ
+			sb.WriteRune(r - 0xFEE0)
+		} else if r >= 0xFF41 && r <= 0xFF5A { // ａ-ｚ
+			sb.WriteRune(r - 0xFEE0)
+		} else {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+// ──────────────────────────────────────────────
+// L4 / L5 医疗高危词库与脱敏引擎
+// ──────────────────────────────────────────────
+
+// L5TermsMap 极高风险病史词汇映射组
+var L5TermsMap = map[string][]string{
+	"HIV_AIDS": {
+		"获得性免疫缺陷综合征", "获得性免疫缺陷", "人免疫缺陷病毒", "HIV感染", "HIV抗体阳性", "HIV抗体", "血清HIV-1",
+		"HIV-1", "HIV-2", "HIV", "AIDS", "艾滋病", "艾滋", "CD4+ T淋巴细胞", "CD4+ T细胞", "CD4+T细胞", "CD4细胞",
+		"CD4计数", "CD4/CD8", "替诺福韦+拉米夫定+多替拉韦", "替诺福韦", "拉米夫定", "多替拉韦", "依非韦伦", "阿巴卡韦",
+		"恩曲他滨", "齐多夫定", "HAART抗逆转录治疗", "HAART抗病毒治疗", "HAART方案", "HAART", "抗逆转录治疗", "HIV病毒载量", "病毒载量",
+	},
+	"PSYCHIATRIC_DISORDER": {
+		"重度精神分裂症", "精神分裂症", "精神分裂", "双相情感障碍", "言语关联妄想", "关联妄想", "命令性幻听", "保护性约束倾向",
+		"被害妄想", "幻听", "幻觉", "自伤倾向", "冲动砸物", "保护性约束", "奥氮平片", "奥氮平", "富马酸喹硫平", "喹硫平",
+		"阿立哌唑", "利培酮", "氯氮平", "氨磺必利", "舒必利", "奋乃静", "氟哌啶醇", "丙戊酸钠", "碳酸锂", "精神卫生中心", "schizophrenia",
+	},
+	"GENETIC_DEFECT": {
+		"遗传性亨廷顿舞蹈病", "亨廷顿舞蹈病", "亨廷顿病", "Huntington Disease", "HTT基因CAG重复序列", "HTT基因",
+		"CAG重复序列", "CAG扩增", "四苯嗪", "舞蹈样动作", "舞蹈病", "Huntington",
+	},
+}
+
+// L4TermsMap 高风险病史词汇映射组
+var L4TermsMap = map[string][]string{
+	"STD_VENEREAL": {
+		"早期隐性梅毒", "隐性梅毒", "早期梅毒", "晚期梅毒", "神经梅毒", "心血管梅毒", "先天梅毒", "梅毒", "苍白密螺旋体",
+		"TPPA阳性", "TPPA", "RPR阳性", "RPR 1:16", "RPR", "syphilis", "gonorrhea", "淋病", "淋球菌", "尖锐湿疣",
+		"生殖器疱疹", "软下疳", "性病", "性传播疾病", "不洁性接触史", "硬下疳", "人乳头瘤病毒高危型", "外阴菜花状赘生物",
+		"菜花状赘生物", "鸡冠状赘生物", "醋酸白试验阳性", "HPV 6/11", "HPV 16/18", "HPV高危型", "HPV低危型", "HPV",
+		"CO2激光灼除术", "咪喹莫特乳膏", "苄星青霉素",
+	},
+	"MALIGNANT_NEOPLASM": {
+		"恶性肿瘤", "浸润性腺癌", "肺腺癌", "胃癌", "肝癌", "乳腺癌", "宫颈癌", "癌症", "腺癌", "导管癌", "鳞状细胞癌", "鳞癌",
+		"肉瘤", "消化道恶性肿瘤", "转移性肿瘤", "奥希替尼", "EGFR基因检测", "EGFR突变", "cancer", "tumor", "化疗", "放疗", "靶向治疗", "PD-1抑制剂", "PD-1",
+	},
+	"HEPATITIS_VIRUS": {
+		"慢性乙型病毒性肝炎", "乙型肝炎", "乙肝", "丙型肝炎", "丙肝", "肝硬化失代偿期", "早期肝硬化", "肝硬化", "小肝癌",
+		"蜘蛛痣", "肝掌", "肝硬化腹水", "门静脉高压", "食管胃底静脉曲张破裂出血", "食管胃底静脉曲张", "脾大", "脾功能亢进",
+		"HBV-DNA阳性", "HBV-DNA", "HBV", "HCV-RNA", "HCV", "恩替卡韦", "干扰素", "HBsAg阳性", "HBsAg", "HBeAg阳性",
+		"HBeAg", "HBcAb阳性", "乙肝表面抗原", "乙肝两对半", "hepatitis", "cirrhosis",
+	},
+	"SEVERE_ORGAN_DAMAGE": {
+		"慢性阻塞性肺疾病", "COPD", "急性心肌梗死", "心肌梗死", "心肌梗塞", "冠状动脉重度狭窄", "尿毒症", "肾功能衰竭",
+	},
+}
+
+// 替换标签映射
+var L5ReplacementMap = map[string]string{
+	"HIV_AIDS":             "IMMUNODEFICIENCY",
+	"PSYCHIATRIC_DISORDER": "PSYCHIATRIC_DISORDER",
+	"GENETIC_DEFECT":       "GENETIC_DEFECT",
+}
+
+var L4ReplacementMap = map[string]string{
+	"STD_VENEREAL":        "INFECTIOUS_DISEASE",
+	"MALIGNANT_NEOPLASM":  "MALIGNANT_NEOPLASM",
+	"HEPATITIS_VIRUS":     "HEPATITIS_VIRUS",
+	"SEVERE_ORGAN_DAMAGE": "SEVERE_ORGAN_DAMAGE",
+}
+
+var (
+	compiledOnce    sync.Once
+	l5RegexList     []compiledTermRegex
+	l4RegexList     []compiledTermRegex
+	allTermsPattern *regexp.Regexp
+)
+
+type compiledTermRegex struct {
+	category    string
+	replacement string
+	regex       *regexp.Regexp
+}
+
+func initCompiledPatterns() {
+	// 构建 L5 正则
+	for cat, terms := range L5TermsMap {
+		repl := L5ReplacementMap[cat]
+		if repl == "" {
+			repl = cat
+		}
+		// 按词长倒序排序，避免短词前缀吞掉长词
+		sorted := make([]string, len(terms))
+		copy(sorted, terms)
+		sortStringsByLengthDesc(sorted)
+
+		escaped := make([]string, len(sorted))
+		for i, t := range sorted {
+			escaped[i] = regexp.QuoteMeta(t)
+		}
+		pattern := "(?i)(" + strings.Join(escaped, "|") + ")"
+		re := regexp.MustCompile(pattern)
+		l5RegexList = append(l5RegexList, compiledTermRegex{
+			category:    cat,
+			replacement: fmt.Sprintf("[L5-%s]", repl),
+			regex:       re,
+		})
+	}
+
+	// 构建 L4 正则
+	for cat, terms := range L4TermsMap {
+		repl := L4ReplacementMap[cat]
+		if repl == "" {
+			repl = cat
+		}
+		sorted := make([]string, len(terms))
+		copy(sorted, terms)
+		sortStringsByLengthDesc(sorted)
+
+		escaped := make([]string, len(sorted))
+		for i, t := range sorted {
+			escaped[i] = regexp.QuoteMeta(t)
+		}
+		pattern := "(?i)(" + strings.Join(escaped, "|") + ")"
+		re := regexp.MustCompile(pattern)
+		l4RegexList = append(l4RegexList, compiledTermRegex{
+			category:    cat,
+			replacement: fmt.Sprintf("[L4-%s]", repl),
+			regex:       re,
+		})
+	}
+
+	// 快速探测正则
+	var allTerms []string
+	for _, terms := range L5TermsMap {
+		allTerms = append(allTerms, terms...)
+	}
+	for _, terms := range L4TermsMap {
+		allTerms = append(allTerms, terms...)
+	}
+	sortStringsByLengthDesc(allTerms)
+	escapedAll := make([]string, len(allTerms))
+	for i, t := range allTerms {
+		escapedAll[i] = regexp.QuoteMeta(t)
+	}
+	allTermsPattern = regexp.MustCompile("(?i)(" + strings.Join(escapedAll, "|") + ")")
+}
+
+func sortStringsByLengthDesc(arr []string) {
+	for i := 0; i < len(arr); i++ {
+		for j := i + 1; j < len(arr); j++ {
+			if len(arr[j]) > len(arr[i]) {
+				arr[i], arr[j] = arr[j], arr[i]
+			}
+		}
+	}
+}
+
+// ContainsHighRiskText 快速判断文本是否包含 L4/L5 高风险敏感词。
+func ContainsHighRiskText(text string) bool {
+	if text == "" {
+		return false
+	}
+	compiledOnce.Do(initCompiledPatterns)
+	norm := NormalizeFullwidthAlphanumeric(text)
+	return allTermsPattern.MatchString(norm)
+}
+
+// RedactMedicalText 对医疗临床文本进行高精度 L4/L5 级规则脱敏。
+func RedactMedicalText(text string) string {
+	if text == "" {
+		return text
+	}
+	compiledOnce.Do(initCompiledPatterns)
+
+	s := NormalizeFullwidthAlphanumeric(text)
+	if !allTermsPattern.MatchString(s) {
+		return s // Fast-path 原样放行
+	}
+
+	// 1. 替换 L5 极高敏词汇
+	for _, cr := range l5RegexList {
+		s = cr.regex.ReplaceAllString(s, cr.replacement)
+	}
+
+	// 2. 替换 L4 高敏词汇
+	for _, cr := range l4RegexList {
+		s = cr.regex.ReplaceAllString(s, cr.replacement)
+	}
+
+	// 3. 语法自愈：清理悬挂标点和多余空格
+	s = cleanOrphanSyntax(s)
+	return s
+}
+
+// cleanOrphanSyntax 清理因敏感词抹平留下的断句残渣与悬垂标点。
+func cleanOrphanSyntax(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+
+	// 消除连续重复标点，如 "，，" -> "，", "；；" -> "；"
+	multiPunct := regexp.MustCompile(`([，,、；;。])\s*[，,、；;。]+`)
+	s = multiPunct.ReplaceAllString(s, "$1")
+
+	// 消除句首多余标点
+	leadingPunct := regexp.MustCompile(`^[，,、；;。\s]+`)
+	s = leadingPunct.ReplaceAllString(s, "")
+
+	// 消除句尾悬空逗号/分号
+	trailingComma := regexp.MustCompile(`[，,、；;\s]+$`)
+	s = trailingComma.ReplaceAllString(s, "")
+
+	// 消除连续多个相同占位标签
+	tagRegex := regexp.MustCompile(`\[[A-Z0-9_-]+\]`)
+	for {
+		locs := tagRegex.FindAllStringIndex(s, -1)
+		if len(locs) < 2 {
+			break
+		}
+		replaced := false
+		for i := 0; i < len(locs)-1; i++ {
+			t1 := s[locs[i][0]:locs[i][1]]
+			t2 := s[locs[i+1][0]:locs[i+1][1]]
+			between := strings.TrimSpace(s[locs[i][1]:locs[i+1][0]])
+			if t1 == t2 && between == "" {
+				s = s[:locs[i][1]] + s[locs[i+1][1]:]
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			break
+		}
+	}
+
+	// 若清理后只剩标点或空白，返回空
+	isOnlyPunct := true
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			isOnlyPunct = false
+			break
+		}
+	}
+	if isOnlyPunct {
+		return ""
+	}
+
+	return s
+}
+

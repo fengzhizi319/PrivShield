@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/dynclassification"
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/profile"
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/budget"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
@@ -36,10 +37,13 @@ import (
 // PrivacyService 隐私服务编排器
 type PrivacyService struct {
 	classifier    *dynclassification.RuleEngine
+	funnel        *dynclassification.ClassificationFunnel
 	safetyFloor   *dynclassification.SafetyFloor
 	budget        *budget.BudgetAccountant
 	medicalYibao  *medical.Pipeline
 	medicalKang   *medical.Pipeline
+	resolver      *profile.Resolver
+	namespace     string
 	mu            sync.RWMutex
 }
 
@@ -48,15 +52,31 @@ type Config struct {
 	TotalEpsilon    float64
 	TotalDelta      float64
 	BudgetWindowSec int64
+	Namespace       string
+	ProfilePath     string
+	LLMEndpoint     string
+	EnableLLM       bool
+	EnableNER       bool
 	Rules           []dynclassification.RuleDef
 }
 
 // DefaultConfig 默认配置
 func DefaultConfig() Config {
+	enableLLM := os.Getenv("PRIVACY_LLM_ENABLE") == "true"
+	llmEndpoint := os.Getenv("PRIVACY_LLM_ENDPOINT")
+	if llmEndpoint == "" {
+		llmEndpoint = "http://localhost:8000/v1/chat/completions"
+	}
+
 	return Config{
 		TotalEpsilon:    10.0,
 		TotalDelta:      1e-5,
 		BudgetWindowSec: 3600,
+		Namespace:       "default",
+		ProfilePath:     "",
+		LLMEndpoint:     llmEndpoint,
+		EnableLLM:       enableLLM,
+		EnableNER:       true,
 		Rules:           defaultRules(),
 	}
 }
@@ -68,12 +88,46 @@ func NewPrivacyService(cfg Config) (*PrivacyService, error) {
 		return nil, fmt.Errorf("init rule engine: %w", err)
 	}
 
+	res := profile.NewResolver()
+	if cfg.ProfilePath != "" {
+		_ = res.LoadFromYAML(cfg.ProfilePath)
+	}
+
+	ns := cfg.Namespace
+	if ns == "" {
+		ns = getEnv("PRIVACY_NAMESPACE", "default")
+	}
+
+	var llmClient *dynclassification.LLMClient
+	if cfg.EnableLLM || cfg.LLMEndpoint != "" {
+		llmClient = dynclassification.NewLLMClient(dynclassification.LLMClientConfig{
+			Endpoint:       cfg.LLMEndpoint,
+			ModelName:      getEnv("PRIVACY_LLM_MODEL", "qwen3.5"),
+			MaxConcurrency: getEnvInt("PRIVACY_LLM_MAX_CONCURRENCY", 4),
+			Timeout:        30 * time.Second,
+			MaxRetries:     2,
+			APIKey:         os.Getenv("PRIVACY_LLM_API_KEY"),
+		})
+	}
+
+	funnelCfg := dynclassification.DefaultFunnelConfig()
+	funnelCfg.EnableNER = cfg.EnableNER
+	funnelCfg.EnableLLM = cfg.EnableLLM && llmClient != nil
+
+	funnel, err := dynclassification.NewClassificationFunnel(cfg.Rules, dynclassification.NewRuleBasedNerEngine(), llmClient, funnelCfg)
+	if err != nil {
+		return nil, fmt.Errorf("init classification funnel: %w", err)
+	}
+
 	return &PrivacyService{
 		classifier:    engine,
+		funnel:        funnel,
 		safetyFloor:   dynclassification.NewSafetyFloor(dynclassification.DefaultSafetyFloorConfig()),
 		budget:        budget.NewBudgetAccountant(cfg.TotalEpsilon, cfg.TotalDelta, cfg.BudgetWindowSec),
 		medicalYibao:  medical.NewYibaoPipeline(),
 		medicalKang:   medical.NewKangyangPipeline(),
+		resolver:      res,
+		namespace:     ns,
 	}, nil
 }
 
@@ -230,16 +284,27 @@ func (s *PrivacyService) ObfuscateQueryBatch(queries []string, numDecoys int, do
 // 动态分类 API
 // ──────────────────────────────────────────────
 
-// Classify 动态分类
+// Classify 动态分类（通过 3 层漏斗：Rule → Small-NER → External LLM Arbitration）
 func (s *PrivacyService) Classify(field, value string) *dynclassification.ClassificationResult {
+	if s.funnel != nil {
+		res, err := s.funnel.Classify(context.Background(), field, value)
+		if err == nil && res != nil {
+			return res
+		}
+	}
 	result := s.classifier.Classify(field, value)
 	return s.safetyFloor.Arbitrate(result)
 }
 
 // ClassifyBatch 批量分类
 func (s *PrivacyService) ClassifyBatch(records []map[string]string) []*dynclassification.ClassificationResult {
-	results := s.classifier.ClassifyBatch(records)
-	return s.safetyFloor.ArbitrateBatch(results)
+	var results []*dynclassification.ClassificationResult
+	for _, record := range records {
+		for field, value := range record {
+			results = append(results, s.Classify(field, value))
+		}
+	}
+	return results
 }
 
 // ──────────────────────────────────────────────
@@ -455,8 +520,14 @@ func (s *PrivacyService) ProcessFile(content []byte, filename, operation string,
 			}
 			records = append(records, rec)
 		}
+	case strings.HasSuffix(name, ".xlsx") || strings.HasSuffix(name, ".xls"):
+		xlsxRecords, err := ParseXLSXRecords(content)
+		if err != nil {
+			return nil, fmt.Errorf("Excel parse error: %w", err)
+		}
+		records = xlsxRecords
 	default:
-		return nil, fmt.Errorf("unsupported file type: %s (supported: .csv, .json)", filename)
+		return nil, fmt.Errorf("unsupported file type: %s (supported: .csv, .json, .xlsx, .xls)", filename)
 	}
 
 	rowsIn := len(records)
@@ -734,4 +805,54 @@ func getEnvInt(key string, defaultVal int) int {
 	}
 	return defaultVal
 }
+
+// ──────────────────────────────────────────────
+// 动态 Profile 与推荐 API
+// ──────────────────────────────────────────────
+
+// RecommendParams 根据输入样本数据推荐 DP 和 K-Anonymity 参数并持久化。
+func (s *PrivacyService) RecommendParams(namespace string, values []float64, rows []map[string]interface{}, qiCols []string) map[string]interface{} {
+	if namespace == "" {
+		namespace = s.namespace
+	}
+	if s.resolver != nil {
+		return s.resolver.RecommendDataParams(namespace, values, rows, qiCols)
+	}
+	return map[string]interface{}{
+		"recommended_profile": "standard",
+		"epsilon":             1.0,
+		"delta":               1e-5,
+		"k":                   5,
+	}
+}
+
+// ReloadDynamicProfiles 重新加载动态分类与隐私策略配置。
+func (s *PrivacyService) ReloadDynamicProfiles() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resolver != nil {
+		_ = s.resolver.LoadFromYAML("config/privacy.yaml")
+	}
+	return nil
+}
+
+// ──────────────────────────────────────────────
+// 高级差分隐私 API
+// ──────────────────────────────────────────────
+
+// DPAdaptiveClip 执行自适应分位数截断估计。
+func (s *PrivacyService) DPAdaptiveClip(values []float64, epsilon, targetQuantile float64, numIterations int, initialClip float64) (float64, float64) {
+	return dp.AdaptiveClip(values, epsilon, targetQuantile, numIterations, initialClip)
+}
+
+// DPGroupBy 执行带差分隐私的分组聚合统计。
+func (s *PrivacyService) DPGroupBy(rows []map[string]string, groupCol, targetCol, agg string, epsilon, delta, clipLower, clipUpper float64, mechanism string) (map[string]float64, error) {
+	return dp.GroupBy(rows, groupCol, targetCol, agg, epsilon, delta, clipLower, clipUpper, mechanism)
+}
+
+// DPAggregate 执行多指标差分隐私聚合计算。
+func (s *PrivacyService) DPAggregate(rows []map[string]string, specs map[string]string, epsilon, delta float64, mechanism string) (map[string]float64, error) {
+	return dp.Aggregate(rows, specs, epsilon, delta, mechanism)
+}
+
 

@@ -388,11 +388,20 @@ func (s *TypedServer) DPVectorMean(_ context.Context, req *pb.DPVectorMeanReques
 
 // DPAggregate 差分隐私聚合
 func (s *TypedServer) DPAggregate(_ context.Context, req *pb.DPAggregateRequest) (*pb.DPAggregateResponse, error) {
-	// 简化实现：返回基本统计信息
 	rows := req.GetRows()
-	result := map[string]any{
-		"row_count": len(rows),
-		"epsilon":   req.GetEpsilon(),
+	rowsMap := make([]map[string]string, len(rows))
+	for i, r := range rows {
+		rowsMap[i] = r.GetFields()
+	}
+
+	specs := make(map[string]string)
+	if req.GetSpecsJson() != "" {
+		_ = json.Unmarshal([]byte(req.GetSpecsJson()), &specs)
+	}
+
+	result, err := s.svc.DPAggregate(rowsMap, specs, req.GetEpsilon(), req.GetDelta(), req.GetMechanism())
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	jsonBytes, _ := json.Marshal(result)
 	return &pb.DPAggregateResponse{ResultsJson: string(jsonBytes)}, nil
@@ -404,56 +413,38 @@ func (s *TypedServer) DPAdaptiveClip(_ context.Context, req *pb.DPAdaptiveClipRe
 	if len(values) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "values required")
 	}
-	// 简化实现：使用分位数估计截断边界
-	clipLower := req.GetInitialClip() * 0.1
-	clipUpper := req.GetInitialClip()
-	if clipUpper <= 0 {
-		clipUpper = 1.0
-	}
+
+	clipLower, clipUpper := s.svc.DPAdaptiveClip(
+		values,
+		req.GetEpsilon(),
+		req.GetTargetQuantile(),
+		int(req.GetNumIterations()),
+		req.GetInitialClip(),
+	)
 	return &pb.DPAdaptiveClipResponse{ClipLower: clipLower, ClipUpper: clipUpper}, nil
 }
 
 // DPGroupBy 差分隐私分组聚合
 func (s *TypedServer) DPGroupBy(_ context.Context, req *pb.DPGroupByRequest) (*pb.DPGroupByResponse, error) {
 	rows := req.GetRows()
-	groupCol := req.GetGroupCol()
-	targetCol := req.GetTargetCol()
-	agg := req.GetAgg()
-
-	// 按分组聚合
-	groups := make(map[string][]float64)
-	for _, row := range rows {
-		fields := row.GetFields()
-		groupVal := fields[groupCol]
-		var targetVal float64
-		if v, ok := fields[targetCol]; ok {
-			// 简单解析数值
-			for _, c := range v {
-				if c >= '0' && c <= '9' || c == '.' || c == '-' {
-					targetVal = targetVal*10 + float64(c-'0')
-				}
-			}
-		}
-		groups[groupVal] = append(groups[groupVal], targetVal)
+	rowsMap := make([]map[string]string, len(rows))
+	for i, r := range rows {
+		rowsMap[i] = r.GetFields()
 	}
 
-	// 添加噪声
-	result := make(map[string]float64)
-	for k, vals := range groups {
-		switch agg {
-		case "count":
-			noisy, _ := s.svc.NoisyCount(context.Background(), len(vals), req.GetEpsilon())
-			result[k] = noisy
-		case "sum":
-			sum := 0.0
-			for _, v := range vals {
-				sum += v
-			}
-			noisy, _ := s.svc.NoisySum(context.Background(), []float64{sum}, req.GetEpsilon(), 1.0)
-			result[k] = noisy
-		default:
-			result[k] = float64(len(vals))
-		}
+	result, err := s.svc.DPGroupBy(
+		rowsMap,
+		req.GetGroupCol(),
+		req.GetTargetCol(),
+		req.GetAgg(),
+		req.GetEpsilon(),
+		req.GetDelta(),
+		req.GetClipLower(),
+		req.GetClipUpper(),
+		req.GetMechanism(),
+	)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	jsonBytes, _ := json.Marshal(result)
@@ -468,14 +459,26 @@ func (s *TypedServer) DPGroupBy(_ context.Context, req *pb.DPGroupByRequest) (*p
 func (s *TypedServer) KAnonymizeTable(_ context.Context, req *pb.KAnonymizeTableRequest) (*pb.KAnonymizeTableResponse, error) {
 	rows := req.GetRows()
 	records := make([]map[string]string, len(rows))
-	for i, row := range rows {
-		records[i] = row.GetFields()
+	for i, r := range rows {
+		records[i] = r.GetFields()
 	}
-	// 使用 MaskRecord 简化处理
-	results := make([]*pb.RecordEntry, len(records))
-	for i, r := range records {
-		masked := s.svc.MaskRecord(r)
-		results[i] = &pb.RecordEntry{Fields: masked}
+	res, err := s.svc.ProcessFile(nil, "", "k_anonymize", map[string]interface{}{
+		"qi_cols": req.GetQiCols(),
+		"k":       int(req.GetK()),
+	})
+	if err != nil {
+		// 回退到逐条脱敏
+		results := make([]*pb.RecordEntry, len(records))
+		for i, rec := range records {
+			masked := s.svc.MaskRecord(rec)
+			results[i] = &pb.RecordEntry{Fields: masked}
+		}
+		return &pb.KAnonymizeTableResponse{Rows: results}, nil
+	}
+	outList, _ := res["result"].([]map[string]string)
+	results := make([]*pb.RecordEntry, len(outList))
+	for i, rec := range outList {
+		results[i] = &pb.RecordEntry{Fields: rec}
 	}
 	return &pb.KAnonymizeTableResponse{Rows: results}, nil
 }
@@ -495,8 +498,8 @@ func (s *TypedServer) MaskDataFrame(_ context.Context, req *pb.MaskDataFrameRequ
 func (s *TypedServer) KAnonymizeDataFrame(_ context.Context, req *pb.KAnonymizeDataFrameRequest) (*pb.KAnonymizeDataFrameResponse, error) {
 	data := req.GetData()
 	results := make([]*pb.RecordEntry, len(data))
-	for i, row := range data {
-		masked := s.svc.MaskRecord(row.GetFields())
+	for i, r := range data {
+		masked := s.svc.MaskRecord(r.GetFields())
 		results[i] = &pb.RecordEntry{Fields: masked}
 	}
 	return &pb.KAnonymizeDataFrameResponse{Data: results}, nil
@@ -508,16 +511,20 @@ func (s *TypedServer) KAnonymizeDataFrame(_ context.Context, req *pb.KAnonymizeD
 
 // RecommendParams 隐私参数推荐
 func (s *TypedServer) RecommendParams(_ context.Context, req *pb.RecommendRequest) (*pb.RecommendResponse, error) {
-	// 简化实现：返回默认推荐参数
-	recommended := map[string]any{
-		"epsilon": 1.0,
-		"delta":   1e-5,
-		"k":       5,
+	var rowsMap []map[string]interface{}
+	for _, r := range req.GetRows() {
+		m := make(map[string]interface{}, len(r.GetFields()))
+		for k, v := range r.GetFields() {
+			m[k] = v
+		}
+		rowsMap = append(rowsMap, m)
 	}
+
+	recommended := s.svc.RecommendParams(req.GetNamespace(), req.GetValues(), rowsMap, req.GetQiCols())
 	jsonBytes, _ := json.Marshal(recommended)
 	return &pb.RecommendResponse{
-		Status:               "ok",
-		Namespace:            req.GetNamespace(),
+		Status:                "ok",
+		Namespace:             req.GetNamespace(),
 		RecommendedParamsJson: string(jsonBytes),
 	}, nil
 }
