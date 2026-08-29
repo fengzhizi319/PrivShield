@@ -240,6 +240,10 @@ func isLongVR(vr string) bool {
 
 // SanitizeDICOMFile 对磁盘上的 DICOM 文件执行脱敏并输出到安全沙箱目录。
 func SanitizeDICOMFile(inputPath string, outputDir string) (string, error) {
+	if !isPathAllowed(inputPath) {
+		return "", fmt.Errorf("access denied: path outside allowed directories: %s", inputPath)
+	}
+
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return "", fmt.Errorf("read dicom file: %w", err)

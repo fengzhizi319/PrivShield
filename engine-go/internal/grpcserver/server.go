@@ -259,14 +259,20 @@ func (s *Server) handleMaskBatch(reqBytes []byte) ([]byte, error) {
 
 func (s *Server) handleHash(reqBytes []byte) ([]byte, error) {
 	var req struct {
-		Value string `json:"value"`
-		Salt  string `json:"salt"`
+		Value     string `json:"value"`
+		Salt      string `json:"salt"`
+		Algorithm string `json:"algorithm"`
 	}
 	if err := parseJSON(reqBytes, &req); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "parse: %v", err)
 	}
 
-	result := s.svc.HashHMAC(req.Value, req.Salt)
+	var result string
+	if req.Algorithm == "sm3" || req.Algorithm == "hash_sm3" {
+		result = s.svc.HashSM3(req.Value, req.Salt)
+	} else {
+		result = s.svc.HashHMAC(req.Value, req.Salt)
+	}
 	return toJSON(map[string]string{"result": result})
 }
 

@@ -20,6 +20,7 @@ import (
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/dynclassification"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/profile"
+	"github.com/fengzhizi319/PrivShield/pkg/crypto"
 	"github.com/fengzhizi319/PrivShield/pkg/naming"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/budget"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
@@ -152,6 +153,8 @@ func (s *PrivacyService) MaskField(fieldType, value string) (string, error) {
 		return masking.MaskAddress(value), nil
 	case "officer_id":
 		return masking.MaskOfficerId(value), nil
+	case "sm3", "hash_sm3":
+		return s.HashSM3(value, ""), nil
 	default:
 		return "", fmt.Errorf("unknown mask type: %s", fieldType)
 	}
@@ -437,6 +440,23 @@ func (s *PrivacyService) HashHMAC(value, salt string) string {
 	return masking.HashHMAC(value, salt)
 }
 
+// HashSM3 生成国密 SM3 确定性哈希脱敏散列，十六进制输出（前 16 位）
+func (s *PrivacyService) HashSM3(value, salt string) string {
+	if value == "" {
+		return ""
+	}
+	h := crypto.NewSM3()
+	if salt != "" {
+		h.Write([]byte(salt))
+	}
+	h.Write([]byte(value))
+	digest := hex.EncodeToString(h.Sum(nil))
+	if len(digest) > 16 {
+		return digest[:16]
+	}
+	return digest
+}
+
 // ──────────────────────────────────────────────
 // Agent & Medical 统一处理流水线 API (P0)
 // ──────────────────────────────────────────────
@@ -546,7 +566,8 @@ func (s *PrivacyService) ProcessFile(content []byte, filename, operation string,
 
 	switch {
 	case strings.HasSuffix(name, ".csv"):
-		r := csv.NewReader(bytes.NewReader(content))
+		cleanContent := bytes.TrimPrefix(content, []byte("\xef\xbb\xbf"))
+		r := csv.NewReader(bytes.NewReader(cleanContent))
 		rows, err := r.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("CSV parse error: %w", err)

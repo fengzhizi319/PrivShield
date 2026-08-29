@@ -255,12 +255,21 @@ func maskHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			Field string `json:"field" binding:"required"`
 			Value string `json:"value" binding:"required"`
 			Type  string `json:"type" binding:"required"`
+			Salt  string `json:"salt"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		result, err := svc.MaskField(req.Type, req.Value)
+		var result string
+		var err error
+		if req.Type == "sm3" || req.Type == "hash_sm3" {
+			result = svc.HashSM3(req.Value, req.Salt)
+		} else if req.Type == "hmac" || req.Type == "hash_hmac" {
+			result = svc.HashHMAC(req.Value, req.Salt)
+		} else {
+			result, err = svc.MaskField(req.Type, req.Value)
+		}
 		if err != nil {
 			middleware.AbortWithError(c, http.StatusBadRequest, "MASK_FAILED", "脱敏处理失败", err.Error())
 			return
