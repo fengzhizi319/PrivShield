@@ -100,10 +100,36 @@ func EstimateFrequency(responses []int, epsilon float64, domainSize int) []int {
 
 	// 无偏估计：count_i = (n_i - n*q) / (p - q)
 	estimated := make([]int, domainSize)
+	var estSum int
 	for i := 0; i < domainSize; i++ {
 		est := (float64(counts[i]) - float64(n)*q) / (p - q)
-		estimated[i] = int(math.Round(math.Max(0, est)))
+		val := int(math.Round(math.Max(0, est)))
+		estimated[i] = val
+		estSum += val
 	}
+
+	// 样本总数守恒保形校准
+	if estSum > 0 && estSum != n && n > 10 {
+		scale := float64(n) / float64(estSum)
+		var newSum int
+		for i := 0; i < domainSize; i++ {
+			estimated[i] = int(math.Round(float64(estimated[i]) * scale))
+			newSum += estimated[i]
+		}
+		diff := n - newSum
+		if diff != 0 && domainSize > 0 {
+			maxIdx := 0
+			for i := 1; i < domainSize; i++ {
+				if estimated[i] > estimated[maxIdx] {
+					maxIdx = i
+				}
+			}
+			if estimated[maxIdx]+diff >= 0 {
+				estimated[maxIdx] += diff
+			}
+		}
+	}
+
 	return estimated
 }
 

@@ -6,6 +6,7 @@ package medical
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -163,18 +164,64 @@ func NewKangyangPipeline() *Pipeline {
 	return NewPipeline(KangyangFields)
 }
 
-// ProcessRecords 全流程处理医疗数据集，生成双结构报告与脱敏数据集
+// ProcessRecords 全流程处理医疗数据集，生成双结构报告与脱敏数据集（支持多核并发分块加速）
 func (p *Pipeline) ProcessRecords(records []map[string]string) *MedicalPipelineResult {
 	start := time.Now()
-	sanitizedData := make([]map[string]string, len(records))
-	reports := make([]RecordClassificationReport, len(records))
+	n := len(records)
+	sanitizedData := make([]map[string]string, n)
+	reports := make([]RecordClassificationReport, n)
 	levelCounts := map[string]int{"L1": 0, "L2": 0, "L3": 0, "L4": 0, "L5": 0}
 
-	for i, rec := range records {
-		sanRec, report := p.ProcessRecord(rec, i+1)
-		sanitizedData[i] = sanRec
-		reports[i] = *report
-		levelCounts[report.MaxLevel]++
+	if n <= 64 {
+		// 小批量直接串行处理
+		for i, rec := range records {
+			sanRec, report := p.ProcessRecord(rec, i+1)
+			sanitizedData[i] = sanRec
+			reports[i] = *report
+			levelCounts[report.MaxLevel]++
+		}
+	} else {
+		// 大批量自动根据 CPU 核心数进行分块并发调度
+		numWorkers := runtime.GOMAXPROCS(0)
+		if numWorkers > 16 {
+			numWorkers = 16
+		}
+		if numWorkers > n {
+			numWorkers = n
+		}
+
+		chunkSize := (n + numWorkers - 1) / numWorkers
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for w := 0; w < numWorkers; w++ {
+			startIdx := w * chunkSize
+			endIdx := startIdx + chunkSize
+			if endIdx > n {
+				endIdx = n
+			}
+			if startIdx >= endIdx {
+				break
+			}
+
+			wg.Add(1)
+			go func(s, e int) {
+				defer wg.Done()
+				localCounts := make(map[string]int)
+				for i := s; i < e; i++ {
+					sanRec, report := p.ProcessRecord(records[i], i+1)
+					sanitizedData[i] = sanRec
+					reports[i] = *report
+					localCounts[report.MaxLevel]++
+				}
+				mu.Lock()
+				for k, v := range localCounts {
+					levelCounts[k] += v
+				}
+				mu.Unlock()
+			}(startIdx, endIdx)
+		}
+		wg.Wait()
 	}
 
 	elapsed := time.Since(start).Seconds()
@@ -184,10 +231,10 @@ func (p *Pipeline) ProcessRecords(records []map[string]string) *MedicalPipelineR
 		SanitizedData:        sanitizedData,
 		RawData:              records,
 		Summary: map[string]interface{}{
-			"total_records":    len(records),
-			"level_counts":     levelCounts,
-			"duration_seconds": elapsed,
-			"status":           "success",
+			"total_records":         n,
+			"level_counts":          levelCounts,
+			"duration_seconds":      elapsed,
+			"status":                "success",
 			"compliance_guaranteed": true,
 		},
 	}

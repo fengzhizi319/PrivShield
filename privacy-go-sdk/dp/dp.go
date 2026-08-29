@@ -170,11 +170,10 @@ func NoisyHistogram(trueCounts map[string]int, epsilon float64) map[string]float
 }
 
 // VectorMean 计算向量均值并添加 Laplace 向量噪声。
-// 先对每个向量截断 L2 范数至 maxNorm，再计算均值，
-// 最后为均值向量每个分量添加 Laplace 噪声。
-// 返回带噪声的均值向量。
+// 单趟流式计算：在线截断 L2 范数并融合累加，消除中间切片分配。
 func VectorMean(vectors [][]float64, maxNorm float64, epsilon float64) []float64 {
-	if len(vectors) == 0 {
+	n := len(vectors)
+	if n == 0 {
 		return nil
 	}
 	dim := len(vectors[0])
@@ -182,33 +181,35 @@ func VectorMean(vectors [][]float64, maxNorm float64, epsilon float64) []float64
 		return nil
 	}
 
-	// 1. 截断每个向量的 L2 范数
-	clipped := make([][]float64, len(vectors))
-	for i, v := range vectors {
-		clipped[i] = ClipL2Norm(v, maxNorm)
-	}
-
-	// 2. 计算截断后的均值
 	sum := make([]float64, dim)
-	for _, v := range clipped {
-		for j := 0; j < dim && j < len(v); j++ {
-			sum[j] += v[j]
+	for _, v := range vectors {
+		var normSq float64
+		vLen := len(v)
+		for j := 0; j < dim && j < vLen; j++ {
+			normSq += v[j] * v[j]
+		}
+		norm := math.Sqrt(normSq)
+		scale := 1.0
+		if maxNorm > 0 && norm > maxNorm {
+			scale = maxNorm / norm
+		}
+		for j := 0; j < dim && j < vLen; j++ {
+			sum[j] += v[j] * scale
 		}
 	}
-	n := float64(len(vectors))
+
+	num := float64(n)
 	mean := make([]float64, dim)
 	for j := 0; j < dim; j++ {
-		mean[j] = sum[j] / n
+		mean[j] = sum[j] / num
 	}
 
-	// 3. 为均值向量添加 Laplace 噪声
-	// 敏感度 = maxNorm / n（每个分量的敏感度）
-	sensitivity := maxNorm / n
+	sensitivity := maxNorm / num
 	return AddLaplaceVector(mean, epsilon, sensitivity)
 }
 
 // VectorSum 对向量集合执行差分隐私求和。
-// 先对每个向量做 L2 截断（敏感度 = maxNorm），再求和后添加 Laplace 噪声。
+// 单趟流式计算：在线截断 L2 范数并融合累加，消除中间切片分配。
 // 与 Python dp_vector_sum 对齐。
 func VectorSum(vectors [][]float64, maxNorm float64, epsilon float64) []float64 {
 	if len(vectors) == 0 {
@@ -219,22 +220,23 @@ func VectorSum(vectors [][]float64, maxNorm float64, epsilon float64) []float64 
 		return nil
 	}
 
-	// 1. 截断每个向量的 L2 范数
-	clipped := make([][]float64, len(vectors))
-	for i, v := range vectors {
-		clipped[i] = ClipL2Norm(v, maxNorm)
-	}
-
-	// 2. 计算截断后的总和
 	sum := make([]float64, dim)
-	for _, v := range clipped {
-		for j := 0; j < dim && j < len(v); j++ {
-			sum[j] += v[j]
+	for _, v := range vectors {
+		var normSq float64
+		vLen := len(v)
+		for j := 0; j < dim && j < vLen; j++ {
+			normSq += v[j] * v[j]
+		}
+		norm := math.Sqrt(normSq)
+		scale := 1.0
+		if maxNorm > 0 && norm > maxNorm {
+			scale = maxNorm / norm
+		}
+		for j := 0; j < dim && j < vLen; j++ {
+			sum[j] += v[j] * scale
 		}
 	}
 
-	// 3. 为总和向量添加 Laplace 噪声
-	// 敏感度 = maxNorm（每个分量的敏感度）
 	return AddLaplaceVector(sum, epsilon, maxNorm)
 }
 

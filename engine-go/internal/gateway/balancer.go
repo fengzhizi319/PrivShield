@@ -197,6 +197,10 @@ func (lb *LoadBalancer) SelectNode() *BackendNode {
 
 // selectP2C 幂律双选 (Power of Two Choices) + EWMA 延迟
 func (lb *LoadBalancer) selectP2C() *BackendNode {
+	if len(lb.nodes) == 0 {
+		return nil
+	}
+
 	// 收集可用节点
 	available := make([]*BackendNode, 0, len(lb.nodes))
 	for _, n := range lb.nodes {
@@ -205,7 +209,7 @@ func (lb *LoadBalancer) selectP2C() *BackendNode {
 		}
 	}
 	if len(available) == 0 {
-		// 全部熔断，返回第一个
+		// 全部熔断，返回第一个节点供调用方执行熔断降级与指标上报
 		return lb.nodes[0]
 	}
 	if len(available) == 1 {

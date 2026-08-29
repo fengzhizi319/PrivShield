@@ -50,8 +50,8 @@ func Anonymize(records []Record, qiFields []string, k int) (*AnonymizationResult
 		}
 	}
 
-	// 执行 Mondrian 切分
-	groups := mondrian(data, qiFields, k)
+	// 执行 Mondrian 切分（带最大深度剪枝防护）
+	groups := mondrian(data, qiFields, k, 0)
 
 	// 泛化每个等价类
 	result := &AnonymizationResult{
@@ -67,9 +67,10 @@ func Anonymize(records []Record, qiFields []string, k int) (*AnonymizationResult
 	return result, nil
 }
 
-// mondrian 递归二分数据集，直到每个分区大小 < k 或无法继续切分。
-func mondrian(data []Record, qiFields []string, k int) [][]Record {
-	if len(data) <= k {
+// mondrian 递归二分数据集，直到每个分区大小 < k、达到最大深度或无法继续切分。
+func mondrian(data []Record, qiFields []string, k int, depth int) [][]Record {
+	const maxMondrianDepth = 32
+	if len(data) <= k || depth >= maxMondrianDepth {
 		return [][]Record{data}
 	}
 
@@ -88,8 +89,8 @@ func mondrian(data []Record, qiFields []string, k int) [][]Record {
 
 	// 递归切分
 	groups := make([][]Record, 0, 4)
-	groups = append(groups, mondrian(left, qiFields, k)...)
-	groups = append(groups, mondrian(right, qiFields, k)...)
+	groups = append(groups, mondrian(left, qiFields, k, depth+1)...)
+	groups = append(groups, mondrian(right, qiFields, k, depth+1)...)
 	return groups
 }
 
