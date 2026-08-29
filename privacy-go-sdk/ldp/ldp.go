@@ -148,10 +148,26 @@ func AddLaplaceSimple(value, epsilon float64) float64 {
 // PerturbBinaryBatch 批量对二值数据进行本地 DP 扰动（Warner 模型）。
 // 与 Python perturb_binary_batch 对齐。
 func PerturbBinaryBatch(values []int, epsilon float64) []int {
-	result := make([]int, len(values))
+	n := len(values)
+	result := make([]int, n)
+	if n == 0 {
+		return result
+	}
+	if epsilon <= 0 {
+		copy(result, values)
+		return result
+	}
+
+	// 概率 p 仅在循环外计算一次
+	p := 1.0 / (1.0 + math.Exp(-epsilon))
+
 	for i, v := range values {
 		if v == 0 || v == 1 {
-			result[i] = perturbBinary(v, epsilon)
+			if rand.Float64() < p {
+				result[i] = v
+			} else {
+				result[i] = 1 - v
+			}
 		} else {
 			result[i] = v
 		}
@@ -164,7 +180,6 @@ func perturbBinary(value int, epsilon float64) int {
 	if epsilon <= 0 {
 		return value
 	}
-	// p = e^ε / (1 + e^ε) = 1 / (1 + e^(-ε))
 	p := 1.0 / (1.0 + math.Exp(-epsilon))
 	if rand.Float64() < p {
 		return value
@@ -175,9 +190,43 @@ func perturbBinary(value int, epsilon float64) int {
 // PerturbCategoricalBatch 批量对类别型数据进行 k-ary Randomized Response 扰动。
 // 与 Python perturb_categorical_batch 对齐。
 func PerturbCategoricalBatch(values []string, categories []string, epsilon float64) []string {
-	result := make([]string, len(values))
+	n := len(values)
+	result := make([]string, n)
+	if n == 0 {
+		return result
+	}
+	k := len(categories)
+	if k < 2 || epsilon <= 0 {
+		copy(result, values)
+		return result
+	}
+
+	// 概率 p 仅在循环外计算一次
+	p := 1.0 / (1.0 + float64(k-1)*math.Exp(-epsilon))
+
+	// 预先为每个类别构建"其他类别列表"，消除循环内动态切片分配
+	othersMap := make(map[string][]string, k)
+	for _, cat := range categories {
+		others := make([]string, 0, k-1)
+		for _, other := range categories {
+			if other != cat {
+				others = append(others, other)
+			}
+		}
+		othersMap[cat] = others
+	}
+
 	for i, v := range values {
-		result[i] = perturbCategorical(v, categories, epsilon)
+		if rand.Float64() < p {
+			result[i] = v
+			continue
+		}
+		others, ok := othersMap[v]
+		if !ok || len(others) == 0 {
+			result[i] = categories[rand.IntN(k)]
+		} else {
+			result[i] = others[rand.IntN(len(others))]
+		}
 	}
 	return result
 }

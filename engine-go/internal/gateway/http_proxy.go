@@ -9,12 +9,78 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/gin-gonic/gin"
 )
+
+// byteBufferPool 实现 httputil.BufferPool 接口，复用 32KB 读写缓冲区
+type byteBufferPool struct {
+	pool sync.Pool
+}
+
+func newByteBufferPool() *byteBufferPool {
+	return &byteBufferPool{
+		pool: sync.Pool{
+			New: func() any {
+				b := make([]byte, 32*1024)
+				return &b
+			},
+		},
+	}
+}
+
+func (p *byteBufferPool) Get() []byte {
+	return *p.pool.Get().(*[]byte)
+}
+
+func (p *byteBufferPool) Put(b []byte) {
+	if cap(b) >= 32*1024 {
+		p.pool.Put(&b)
+	}
+}
+
+var (
+	globalBufferPool = newByteBufferPool()
+	sharedTransport  = &http.Transport{
+		MaxIdleConns:        2048,
+		MaxIdleConnsPerHost: 256,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  false,
+	}
+	proxyCache   sync.Map
+)
+
+func getOrCreateReverseProxy(addr string, node *BackendNode, metrics *observability.GatewayMetrics) (*httputil.ReverseProxy, error) {
+	if p, ok := proxyCache.Load(addr); ok {
+		return p.(*httputil.ReverseProxy), nil
+	}
+
+	target, err := url.Parse(fmt.Sprintf("http://%s", addr))
+	if err != nil {
+		return nil, err
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = sharedTransport
+	proxy.BufferPool = globalBufferPool
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		node.CB.RecordFailure()
+		if metrics != nil {
+			metrics.SetCircuitBreakerState(node.Address, cbStateString(node.CB.State()))
+			metrics.RecordForwarded(node.Address, http.StatusBadGateway)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `{"code":"BAD_GATEWAY","message":"后端 %s 不可达","detail":"%s","trace_id":"","timestamp":"%s"}`, node.Address, err.Error(), time.Now().UTC().Format(time.RFC3339Nano))
+	}
+
+	proxyCache.Store(addr, proxy)
+	return proxy, nil
+}
 
 // NewHTTPProxyHandler 创建 HTTP 反向代理处理器。
 // metrics 可为 nil，为 nil 时不上报 Prometheus 指标。
@@ -43,8 +109,8 @@ func NewHTTPProxyHandler(lb *LoadBalancer, metrics *observability.GatewayMetrics
 			metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight))
 		}
 
-		// 创建反向代理
-		target, err := url.Parse(fmt.Sprintf("http://%s", node.Address))
+		// 获取或复用反向代理（内置 BufferPool 与长连接池）
+		proxy, err := getOrCreateReverseProxy(node.Address, node, metrics)
 		if err != nil {
 			node.CB.RecordFailure()
 			if metrics != nil {
@@ -52,18 +118,6 @@ func NewHTTPProxyHandler(lb *LoadBalancer, metrics *observability.GatewayMetrics
 			}
 			middleware.AbortWithError(c, http.StatusInternalServerError, "PROXY_ERROR", "后端代理创建失败", err.Error())
 			return
-		}
-
-		proxy := httputil.NewSingleHostReverseProxy(target)
-		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-			node.CB.RecordFailure()
-			if metrics != nil {
-				metrics.SetCircuitBreakerState(node.Address, cbStateString(node.CB.State()))
-				metrics.RecordForwarded(node.Address, http.StatusBadGateway)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, `{"code":"BAD_GATEWAY","message":"后端 %s 不可达","detail":"%s","trace_id":"","timestamp":"%s"}`, node.Address, err.Error(), time.Now().UTC().Format(time.RFC3339Nano))
 		}
 
 		// 记录延迟

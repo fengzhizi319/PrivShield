@@ -55,6 +55,7 @@ func Anonymize(records []Record, qiFields []string, k int) (*AnonymizationResult
 
 	// 泛化每个等价类
 	result := &AnonymizationResult{
+		Records:    make([]Record, 0, len(records)),
 		K:          k,
 		GroupCount: len(groups),
 	}
@@ -86,7 +87,7 @@ func mondrian(data []Record, qiFields []string, k int) [][]Record {
 	}
 
 	// 递归切分
-	var groups [][]Record
+	groups := make([][]Record, 0, 4)
 	groups = append(groups, mondrian(left, qiFields, k)...)
 	groups = append(groups, mondrian(right, qiFields, k)...)
 	return groups
@@ -137,7 +138,9 @@ func findBestSplit(data []Record, qiFields []string) (string, string) {
 
 // partitionByMedian 按字段中位数将数据分为两半。
 func partitionByMedian(data []Record, field, median string) ([]Record, []Record) {
-	var left, right []Record
+	half := len(data) / 2
+	left := make([]Record, 0, half+1)
+	right := make([]Record, 0, half+1)
 	for _, r := range data {
 		if compareValues(r[field], median) <= 0 {
 			left = append(left, r)

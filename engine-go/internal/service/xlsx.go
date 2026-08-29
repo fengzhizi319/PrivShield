@@ -78,6 +78,28 @@ func ParseXLSXRecords(content []byte) ([]map[string]string, error) {
 	return records, nil
 }
 
+type stringInterner struct {
+	pool map[string]string
+}
+
+func newStringInterner() *stringInterner {
+	return &stringInterner{pool: make(map[string]string, 1024)}
+}
+
+func (si *stringInterner) Intern(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) > 128 {
+		return s
+	}
+	if existing, ok := si.pool[s]; ok {
+		return existing
+	}
+	si.pool[s] = s
+	return s
+}
+
 func parseSharedStrings(r io.Reader) ([]string, error) {
 	var sst struct {
 		XMLName xml.Name `xml:"sst"`
@@ -93,16 +115,17 @@ func parseSharedStrings(r io.Reader) ([]string, error) {
 		return nil, err
 	}
 
+	interner := newStringInterner()
 	result := make([]string, len(sst.SI))
 	for i, si := range sst.SI {
 		if si.T != "" {
-			result[i] = si.T
+			result[i] = interner.Intern(si.T)
 		} else if len(si.R) > 0 {
 			var sb strings.Builder
 			for _, r := range si.R {
 				sb.WriteString(r.T)
 			}
-			result[i] = sb.String()
+			result[i] = interner.Intern(sb.String())
 		}
 	}
 	return result, nil
@@ -130,10 +153,11 @@ func parseSheetData(r io.Reader, sharedStrings []string) ([][]string, error) {
 		return nil, err
 	}
 
-	var rows [][]string
+	interner := newStringInterner()
+	rows := make([][]string, 0, len(ws.SheetData.Row))
 
 	for _, row := range ws.SheetData.Row {
-		var rowVals []string
+		rowVals := make([]string, 0, len(row.C))
 		for _, c := range row.C {
 			colIdx := colNameToIndex(c.R)
 			for len(rowVals) <= colIdx {
@@ -149,7 +173,7 @@ func parseSheetData(r io.Reader, sharedStrings []string) ([][]string, error) {
 			} else if c.T == "inlineStr" {
 				val = c.IS.T
 			}
-			rowVals[colIdx] = val
+			rowVals[colIdx] = interner.Intern(val)
 		}
 		rows = append(rows, rowVals)
 	}

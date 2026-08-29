@@ -81,7 +81,7 @@ func AnonymizeDICOM(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("invalid DICOM: missing DICM magic header")
 	}
 
-	out := new(bytes.Buffer)
+	out := bytes.NewBuffer(make([]byte, 0, len(data)))
 	// 写入 128 字节 preamble + "DICM"
 	out.Write(data[:dicomPreambleLen+4])
 
