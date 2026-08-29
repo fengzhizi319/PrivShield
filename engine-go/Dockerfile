@@ -7,12 +7,15 @@ ENV CGO_ENABLED=0
 ENV GOWORK=off
 
 # 先拷贝 go.mod 利用缓存
+COPY pkg/go.mod ./pkg/go.mod
 COPY privacy-go-sdk/go.mod ./privacy-go-sdk/go.mod
 COPY engine-go/go.mod ./engine-go/go.mod
+RUN cd pkg && go mod download || true
 RUN cd privacy-go-sdk && go mod download || true
 RUN cd engine-go && go mod download || true
 
 # 拷贝源码
+COPY pkg/ ./pkg/
 COPY privacy-go-sdk/ ./privacy-go-sdk/
 COPY engine-go/ ./engine-go/
 

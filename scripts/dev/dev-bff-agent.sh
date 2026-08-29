@@ -263,9 +263,11 @@ launch_agent() {
         else
             # 开发明文模式必须覆盖 shell/.env 可能遗留的 TLS 配置，否则
             # Agent 会监听 HTTPS，而下面的健康探针仍使用 HTTP。
-            export PRIVACY_TLS_ENABLED=false
+        if [[ -f "$PROJECT_ROOT/bin/privshield-agent" ]]; then
+            exec "$PROJECT_ROOT/bin/privshield-agent" >> "$agent_log" 2>&1
+        else
+            exec go run ./engine-go/cmd/privshield-agent >> "$agent_log" 2>&1
         fi
-        exec python -m engine.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"

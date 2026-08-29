@@ -267,8 +267,11 @@ launch_agent() {
             export PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt"
             export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true
             export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["privshield-client"]'
+        if [[ -f "$PROJECT_ROOT/bin/privshield-agent" ]]; then
+            exec "$PROJECT_ROOT/bin/privshield-agent" >> "$agent_log" 2>&1
+        else
+            exec go run ./engine-go/cmd/privshield-agent >> "$agent_log" 2>&1
         fi
-        exec python -m engine.server >> "$agent_log" 2>&1
     ) &
     AGENT_PID=$!
     PIDS[0]="$AGENT_PID"

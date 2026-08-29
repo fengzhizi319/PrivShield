@@ -2,7 +2,7 @@
 
 > AI coding agent guide for the **数联天下 · 数盾 (`PrivShield`)** project. Read this before modifying code.
 
-`PrivShield` is an enterprise privacy-preserving governance sidecar implementing the **「三层四柱五御六类」数据安全与隐私治理架构** (3-Funnel, 4-Pillar, 5-Protection, 6-Category Architecture), exposing privacy primitives (masking, differential privacy, K-anonymity, query obfuscation) and a 3-layer data classification funnel over REST and gRPC.
+`PrivShield` is an enterprise privacy-preserving governance sidecar implementing the **「三层四柱五御六类」数据安全与隐私治理架构** (3-Funnel, 4-Pillar, 5-Protection, 6-Category Architecture), exposing 44 privacy primitives (masking, differential privacy, K-anonymity, query obfuscation) and a 3-layer data classification funnel over REST (Gin) and gRPC in pure **Go 1.25+ Cloud-Native**.
 
 ---
 
@@ -10,106 +10,81 @@
 
 | Capability | Status | Notes |
 |---|---|---|
-| Masking | ✅ Ready | Field-name-aware masking for common PII |
-| Differential Privacy | ✅ Ready | Laplace/Gaussian count/sum/mean with budget accounting |
-| Local Differential Privacy (LDP) | ✅ Ready | Randomized response / histogram / frequency |
-| K-anonymity | ✅ Ready | Per-record heuristic & dataset-level generalization |
-| Query Obfuscation | ✅ Ready | Dummy query injection |
-| File Privacy Processing | ✅ Ready | CSV/Excel/JSON automatic field-level masking |
-| Medical Data Pipeline | ✅ Ready | DICOM/HL7/FHIR parsing and image redaction |
-| Profile Recommendation | ✅ Ready | Data-driven privacy profile recommendation |
-| Ops Diagnostics | ✅ Ready | Runtime health / dependency / configuration snapshot |
-| Classification | ✅ Ready | Rule engine → Small-NER → local LLM |
-| Gateway / Load Balancer | ✅ Ready | REST + gRPC reverse proxy with health checks |
-| TLS / Auth / Rate Limit | ✅ Ready | Opt-in via environment variables |
-| Observability | ✅ Ready | Structured logs + Prometheus `/metrics` + optional tracing |
+| Masking | ✅ Ready | Field-name-aware masking + SM3/SM4 national crypto + ASCII fast-path |
+| Differential Privacy | ✅ Ready | Fused single-pass Laplace/Gaussian count/sum/mean + atomic budget accounting |
+| Local Differential Privacy (LDP) | ✅ Ready | Multi-core chunked randomized response / categorical / projected frequency |
+| K-anonymity & L-Diversity | ✅ Ready | Mondrian KD-tree + Distinct L-Diversity verification + recursion guard |
+| Query Obfuscation | ✅ Ready | Dummy query injection & Fisher-Yates shuffle |
+| File Privacy Processing | ✅ Ready | CSV (UTF-8 BOM strip) / Excel (XLSX string interning + Zip bomb limit) / JSON |
+| Medical Data Pipeline | ✅ Ready | Native DICOM binary parsing, path traversal guard, and multi-core chunked processing |
+| Profile Recommendation | ✅ Ready | Data-driven privacy profile recommendation (YAML dynamic reload) |
+| Ops Diagnostics | ✅ Ready | Runtime health (`/readyz`/`/healthz`/`/ops/diagnostics`), pprof, and metric snapshots |
+| 3-Layer Classification | ✅ Ready | Rule engine (AC automaton + Regex) → Small-NER (ONNX) → External LLM (Circuit Breaker) |
+| Gateway / Load Balancer | ✅ Ready | REST + gRPC reverse proxy + P2C-EWMA + BufferPool zero-allocation proxy cache |
+| TLS / Auth / Rate Limit | ✅ Ready | mTLS CN whitelist 5s hot-reload, constant-time auth, 32-shard token bucket |
+| Observability | ✅ Ready | Standard library `log/slog` + Prometheus `/metrics` + distributed tracing |
 | K8s / Helm Deployment | ✅ Ready | `deploy/helm/` + `deploy/k8s/` + `deploy/docker-compose/` |
-| Dataset-level K-anonymity | ✅ Ready | Implemented via Mondrian algorithm |
-| DP Gaussian / clipping | ✅ Ready | Gaussian mechanism & clipping bounds supported |
-| ML dependency split | ✅ Ready | Single Dockerfile with `--target core|ml` |
-| LeasedTaskStore (Phase B) | ✅ Ready | PostgreSQL atomic task lease via `FOR UPDATE SKIP LOCKED`; SQLite/memory stubs return `ErrLeaseNotSupported` |
 
 ## 2. Technology Stack
 
-- **Python 3.13+**
-- **FastAPI** + **Uvicorn** for REST
-- **gRPC** (`grpcio`) for RPC
-- **Pydantic v2** for models
-- **PyYAML** for profile configuration
-- **ONNX Runtime / ModelScope** for Small-NER (optional, lazy-loaded)
-- **PyTorch + Transformers + Qwen3.5** for LLM layer (optional, lazy-loaded)
-
-Core dependencies are pinned in `pyproject.toml`. Heavy ML dependencies are **not** pinned as runtime deps; they are lazy-loaded and degraded gracefully if absent.
+- **Go 1.25+** (Multi-module workspace `go.work`)
+- **Gin** for High-Performance REST
+- **gRPC** (`google.golang.org/grpc`) for Low-Latency RPC
+- **YAML** (`gopkg.in/yaml.v3`) for Rule & Profile Configuration
+- **ONNX Runtime Go** for Small-NER (optional, lazy-loaded)
+- **External LLM Client** with 3-state Circuit Breaker (`Closed` -> `Open` -> `HalfOpen`)
+- **Alpine Linux / Multi-stage Docker** (~25MB ultra-lightweight image)
 
 ## 3. Repository Layout
 
 ```text
 PrivShield/
-├── engine/                # Python 核心隐私与动态分类分级引擎 (Core Agent / Sidecar)
-│   ├── main.py                    # FastAPI REST entrypoint
-│   ├── grpc_server.py             # gRPC servicer
-│   ├── server.py                  # REST + gRPC combined launcher
-│   ├── launcher.py                # CLI / environment-aware unified launcher
-│   ├── service.py                 # PrivacyService orchestrator
-│   ├── schemas.py                 # REST request models (Pydantic)
-│   ├── routers/                   # REST sub-routers (mask/dp/ldp/kano/qol/file/profile/ops/medical/dynclassification/...)
-│   ├── security/                  # TLS / auth / rate-limit / whitelist
-│   ├── observability/             # Logging / metrics / tracing
-│   ├── privacy/                   # Privacy primitives
-│   │   ├── masking.py
-│   │   ├── dp.py
-│   │   ├── kano.py
-│   │   ├── qol.py
-│   │   ├── budget.py
-│   │   ├── profile.py
-│   │   ├── data_adapters.py       # Sparse/dense array normalization for DP
-│   │   ├── high_concurrency.py    # High-concurrency primitive dispatch helpers
-│   │   ├── download_model.py
-│   │   └── download_ner_model.py
-│   ├── dynclassification/         # Dynamic classification (3-layer funnel: Rule → NER → LLM)
-│   │   ├── funnel.py              # ClassificationFunnel orchestrator + Safety Floor
-│   │   ├── engine.py              # ConfigurableRuleEngine (YAML rules)
-│   │   ├── models.py              # SecurityTag / ConfidencePolicy / DomainTaxonomy
-│   │   ├── rule_schema.py         # RuleDef / RuleProfile schema
-│   │   ├── composite.py           # Composite rules
-│   │   ├── service.py             # DynClassificationService
-│   │   ├── ner_adapter.py / ner_engines.py       # Small-NER (lazy-load)
-│   │   ├── llm_adapter.py / llm_engines.py       # Local LLM/VLM (lazy-load)
-│   │   ├── mlx_ner_engine.py / mlx_llm_engine.py # MLX backends
-│   │   └── image_redaction.py     # Image redaction
-│   └── gateway/                   # Optional gateway/load balancer
-│       ├── server.py
-│       ├── balancer.py
-│       ├── http_proxy.py
-│       └── grpc_proxy.py
-├── services/                      # 企业级数据流通与安全治理中台微服务群 (Go，各子服务含 Dockerfile 与 deploy/k8s/)
+├── engine-go/                     # Go 核心隐私与动态分类分级引擎 (Core Agent / Sidecar)
+│   ├── cmd/
+│   │   ├── privshield-agent/      # Agent 主入口 (REST :8079 + gRPC :50051)
+│   │   └── privshield-gateway/    # 网关与反向代理入口 (:8000 + gRPC :50000)
+│   ├── internal/
+│   │   ├── service/               # PrivacyService 统一编排、文件脱敏、预算集成
+│   │   ├── rest/                  # REST 路由 (Gin)、pprof、K8s readyz/healthz
+│   │   ├── grpcserver/            # gRPC Servicer、RawCodec 统一分发、mTLS 提取
+│   │   ├── dynclassification/     # 3-Layer 漏斗 (AC 规则引擎 + ONNX NER + 熔断器 LLM)
+│   │   ├── gateway/               # P2C-EWMA 负载均衡器、BufferPool 零分配反向代理
+│   │   ├── imageredact/           # DICOM 二进制重构脱敏、路径白名单校验
+│   │   ├── security/              # mTLS CN 白名单 5s 热重载、32分片限流、常量时间认证
+│   │   ├── observability/         # log/slog 结构化日志、Prometheus 指标、分布式追踪
+│   │   └── profile/               # 领域规则与参数 Profile 动态加载器
+│   ├── Dockerfile                 # 极简多阶段构建镜像
+│   └── Dockerfile.cuda            # CUDA / ONNX 专用加速镜像
+├── privacy-go-sdk/                # 纯 Go 零依赖无状态隐私计算数学原语库
+│   ├── masking/                   # 掩码原语 (国密 SM3/SM4, 身份证, 手机, 银行卡, 姓名)
+│   ├── dp/                        # 差分隐私 (单趟融合向量 DP, Laplace/Gaussian, 自适应截断)
+│   ├── ldp/                       # 本地差分隐私 (二值/多分类多核并发扰动, 样本守恒校准)
+│   ├── kano/                      # K-匿名 (Mondrian 算法, 深度剪枝, Distinct L-多样性)
+│   ├── qol/                       # 查询混淆 (Fisher-Yates 语义置乱)
+│   ├── medical/                   # 医疗数据流水线 (多核并发分块, 医保18 / 康养27)
+│   └── budget/                    # 无锁原子隐私预算会计 (无锁 CAS 循环, 原子回滚)
+├── services/                      # 企业级数据流通与安全治理中台微服务群 (Go)
 │   ├── service-hub/               # 数联数据服务调度中枢 (流水线调度: :8082)
 │   ├── datasource-mgr/            # 数据源资产管理与敏感特征自动探查 (:8083)
-│   └── audit-log/                 # 脱敏审计日志与不可篡改 SHA-256 存证 (:8084)
-├── console/                       # 统一运维与测试控制台 (Web UI + BFF，含 deploy/k8s/)
+│   └── audit-log/                 # 脱敏审计日志与不可篡改 SHA-256 / SM3 存证 (:8084)
+├── console/                       # 统一运维与测试控制台 (Web UI + BFF)
 │   ├── bff-go/                    # Go gRPC/HTTPS 代理网关 / BFF (:8081)
 │   └── web/                       # React + TypeScript + Vite 前端控制台 (:5173)
-├── deploy/                        # 全栈集中部署与编排资产 (Compose / Helm / K8s 集成 / 监控大屏)
+├── deploy/                        # 全栈集中部署与编排资产 (Compose / Helm / K8s)
 │   ├── docker-compose/            # Docker Compose 全栈编排
 │   ├── helm/PrivShield/           # 全栈统一 Helm Chart
-│   ├── k8s/                       # 原生 K8s 全栈集成清单 (Kustomize 聚合入口)
+│   ├── k8s/                       # 原生 K8s 全栈集成清单
 │   ├── prometheus/                # Prometheus 采集与告警规则
 │   └── grafana/                   # Grafana 预置仪表盘
-├── pkg/                           # Go 共享基础库 (Agent客户端, 中间件, 存储, 指标, 校验)
-├── proto/privacy.proto            # gRPC service definition
-├── tests/                         # pytest suite
-├── mkdocs.yml                     # MkDocs + Material configuration
-├── go.work                        # 根目录 Go 工作区
-├── config/                        # Profile & runtime configs
-├── rules/                         # Preset classification rules & standards
-├── data/                          # Sample datasets & test data
-├── scripts/                       # 统一自动化运维、启动与测试脚本
-├── Makefile
-├── pyproject.toml
-├── requirements.txt               # Local dev/test deps
-├── requirements-core.txt          # Core image runtime deps
-├── requirements-ml.txt            # ML image extra deps
-└── Dockerfile
+├── pkg/                           # Go 共享基础库 (Agent客户端, 中间件, 存储, 国密, 校验)
+├── proto/privacy.proto            # gRPC 协议定义
+├── go.work                        # 根目录 Go 1.25 工作区
+├── config/                        # Profile & runtime 配置文件
+├── rules/                         # 领域分类分级规则与标准体系 (YAML)
+├── data/                          # 样例数据集与测试数据
+├── scripts/                       # 自动化运维、开发启动与测试脚本
+├── Makefile                       # 统一构建与测试入口
+└── Dockerfile                     # 根目录多阶段构建 Dockerfile
 ```
 
 ## 4. Build & Test Commands
@@ -117,296 +92,60 @@ PrivShield/
 ```bash
 cd /path/to/PrivShield
 
-# Install in editable mode
-pip install -e .
+# 运行全仓库所有模块测试 (100% 通过)
+make test
 
-# Or install dev extras
-pip install -e ".[dev]"
+# 快速编译二进制产物至 bin/
+make build
 
-# Run tests
-PYTHONPATH=. pytest tests -q
+# 静态代码检查与格式化
+make check
 
-# Run a specific test file
-PYTHONPATH=. pytest tests/api/test_rest.py -v
-
-# Benchmark privacy primitives
-PYTHONPATH=. python tests/benchmark_primitives.py
-
-# Download models (optional, required for LLM/NER layers)
-python -m engine.privacy.download_model
-python -m engine.privacy.download_ner_model
+# 构建全套 Docker 镜像
+make docker-all
 ```
 
 ## 5. Running Locally
 
-### REST + gRPC in one process
+### 编译并启动 Go Agent (REST :8079 + gRPC :50051)
 
 ```bash
-python -m engine.server
+go run ./engine-go/cmd/privshield-agent
 ```
 
-Defaults:
-- REST: `http://127.0.0.1:8079`
-- gRPC: `127.0.0.1:50051`
-
-### REST only
+### 启动 Go 网关 (REST :8000 + gRPC :50000)
 
 ```bash
-python -m engine.main
+go run ./engine-go/cmd/privshield-gateway
 ```
 
-### gRPC only
+### 一键启动开发控制台全家桶 (Agent + Go BFF + Vite 前端)
 
 ```bash
-python -m engine.grpc_server
+bash ./scripts/dev/dev-bff-agent.sh
 ```
 
-### Gateway + worker pool
-
-```bash
-python -m engine.gateway.server
-```
-
-## 6. Configuration
-
-Key environment variables:
+## 6. Key Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PRIVACY_ENV_PROFILE` | `vllm` | Active LLM profile (`vllm`/`qwen3`/`mlx`/`openai`, loads `config/env/<profile>.env`) |
-| `PRIVACY_PROFILE` | — | Path to YAML parameter profile |
-| `PRIVACY_NAMESPACE` | `default` | Budget namespace |
-| `PRIVACY_REST_HOST` | `0.0.0.0`（`server.py`/`launcher.py`）；`127.0.0.1`（仅 `main.py` 单独入口） | REST host |
+| `PRIVACY_REST_HOST` | `0.0.0.0` | REST host |
 | `PRIVACY_REST_PORT` | `8079` | REST port |
-| `PRIVACY_GRPC_HOST` | `0.0.0.0`（`server.py`/`grpc_server.py`/`launcher.py`） | gRPC host |
+| `PRIVACY_GRPC_HOST` | `0.0.0.0` | gRPC host |
 | `PRIVACY_GRPC_PORT` | `50051` | gRPC port |
-| `PRIVACY_GRPC_MAX_WORKERS` | `64`（`server.py`/`grpc_server.py`）；`min(64, cpu_count*4)`（`launcher.py`） | gRPC 线程池大小 |
-| `PRIVACY_LIMIT_CONCURRENCY` | `10000` | Uvicorn 最大并发连接数 |
-| `PRIVACY_LIMIT_MAX_REQUESTS` | `100000` | Uvicorn 单个连接最大请求数 |
-| `PRIVACY_TIMEOUT_KEEP_ALIVE` | `30` | Uvicorn keep-alive 超时（秒） |
-| `PRIVACY_BUDGET_DB` | — | SQLite DB path for distributed budget |
-| `PRIVACY_BUDGET_WINDOW_SECONDS` | — | Time window for automatic privacy budget reset |
-| `PRIVACY_LOG_LEVEL` | `INFO` | Logging level |
-| `PRIVACY_LOG_FORMAT` | `text` | `text` or `json` |
-| `PRIVACY_SERVICE_NAME` | `PrivShield` | Service name in logs/traces |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Optional OpenTelemetry OTLP endpoint |
-| `PRIVACY_TLS_ENABLED` | `false` | Enable TLS on REST/gRPC |
-| `PRIVACY_AUTH_ENABLED` | `false` | Enable API key auth |
-| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `false` | Enable mTLS client certificate auth for gRPC (fail-closed) |
-| `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | — | Path to YAML CN whitelist config (enables per-CN scopes + hot-reload) |
-| `PRIVACY_AUTH_MTLS_ALLOWED_CNS` | `[]` | Static CN list (fallback when WHITELIST_FILE not set); all CNs get `["*"]` scope |
-| `PRIVACY_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
-| `PRIVACY_WARMUP_LLM` | `false` | Async warmup local LLM on REST startup |
-| `PRIVACY_LLM_MAX_CONCURRENCY` | `1` | Process-wide LLM inference concurrency cap (semaphore, prevents OOM) |
-| `PRIVACY_LLM_SEMAPHORE_WAIT_SECONDS` | `30` | Max seconds a request waits for the LLM inference slot before degrading |
-| `PRIVACY_LLM_MIN_FREE_MEM_MB` | `512` | Skip LLM layer when available memory falls below this threshold (MB) |
-| `PRIVACY_LLM_CONFIDENCE_THRESHOLD` | `0.75` | Minimum confidence threshold for Layer-3 arbitration |
-| `PRIVACY_LLM_ENABLE_ARBITRATION` | `true` | Enable Layer-3 LLM arbitration on low confidence or uncertainty |
-| `PRIVACY_NER_ENABLE` | `false` | Enable Layer-2 Small-NER entity extraction（dynclassification） |
-| `PRIVACY_LLM_ENABLE` | `false` | Explicitly enable Layer-3 LLM layer regardless of confidence（dynclassification） |
-| `PRIVACY_LLM_AUTO_ON_IMAGE` | `true` | Auto-trigger multimodal LLM layer when image/DICOM input detected |
-| `PRIVACY_ENGINE_CACHE_MAX_SIZE` | `4096` | Layer-1 rule engine field-evaluation LRU cache capacity |
-| `PRIVACY_CLASSIFICATION_CACHE_SIZE` | `10000` | DynClassificationService result LRU cache capacity |
-| `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 图片打码允许读取的目录白名单（os.pathsep 分隔）；路径 resolve 后必须位于白名单内，拒绝目录穿越与 symlink 逃逸 |
+| `PRIVACY_NAMESPACE` | `default` | 隐私预算租户隔离命名空间 |
+| `PRIVACY_TLS_ENABLED` | `false` | 启用 REST/gRPC TLS |
+| `PRIVACY_AUTH_ENABLED` | `false` | 启用 API Key 认证 |
+| `PRIVACY_AUTH_INTERNAL_MTLS_ENABLED` | `false` | 启用 gRPC mTLS 客户端证书认证 |
+| `PRIVACY_AUTH_MTLS_WHITELIST_FILE` | — | CN 白名单配置文件路径 (支持 5s 热重载) |
+| `PRIVACY_RATE_LIMIT_ENABLED` | `false` | 启用 32 分片高并发令牌桶限流 |
+| `PRIVACY_ENGINE_CACHE_MAX_SIZE` | `10000` | 动态分类分级 LRU 缓存容量 |
+| `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 医学影像处理允许读取的文件目录白名单 |
 
-> 注意：三个入口的默认监听地址不同 —— `python -m engine.main` 仅绑定 `127.0.0.1`（REST-only），
-> 而 `python -m engine.server` / `grpc_server` / `launcher` 默认绑定 `0.0.0.0`。
-> 生产部署请显式设置 `PRIVACY_REST_HOST` / `PRIVACY_GRPC_HOST` 并配合 TLS/Auth。
+## 7. Go Coding Conventions
 
-## 7. Code Conventions
-
-- Follow **PEP 8**.
-- Keep acronyms in PascalCase uppercase for domain terms (e.g. `DP`, `LDP`, `QOL`, `KAnonymity`, `NER`, `LLM`).
-- Exception classes must end with `Error` or `Exception` (e.g. `PrivacyBudgetExhaustedError`).
-- Use **type hints** on public functions.
-- Use **Pydantic v2** models for request/response schemas.
-- Keep primitives stateless; state lives in `PrivacyService` / `BudgetAccountant`.
-- Lazy-load heavy ML models; never import `torch`/`transformers` at module top level unless unavoidable.
-- Add tests for new primitives and classification rules.
-- Prefer `pathlib.Path` over string paths.
-
-
-## 8. Adding a New Privacy Primitive
-
-1. Implement the algorithm in `engine/privacy/<primitive>.py`.
-2. Add a Pydantic request/response model in `engine/schemas.py` or a new models file.
-3. Expose it in:
-   - `engine/service.py` (business logic)
-   - `engine/routers/<primitive>.py` (REST sub-router, mounted by `main.py`)
-   - `engine/grpc_server.py` (gRPC method)
-4. Add tests in `tests/api/test_rest.py` and/or `tests/test_<primitive>.py`.
-5. Update `proto/privacy.proto` and regenerate stubs if adding gRPC:
-   ```bash
-   python -m grpc_tools.protoc -I proto --python_out=engine --grpc_python_out=engine proto/privacy.proto
-   ```
-
-## 9. Adding a Classification Rule / Composite Rule / Taxonomy
-
-分类规则已迁移至 `dynclassification` 模块并全面 YAML 化：领域规则在 `rules/domains/*.yaml`，
-分类体系在 `rules/taxonomies/*.yaml`；引擎为 `ConfigurableRuleEngine`
-（`dynclassification/engine.py`），规则 schema 见 `dynclassification/rule_schema.py`。
-旧 `privacy/classification/` 子包（含 vectorized/async/review/template 机制）已删除，勿再引用。
-
-### 9.1 Adding a Layer-1 Rule
-
-1. 在对应的 `rules/domains/*.yaml` 中新增 `RuleDef`（`id`/`level`/`category`/`matchers`），
-   降级规则加入 `downgrade_rules` 节（`DowngradeRuleDef`）。
-2. 匹配算子定义在 `dynclassification/operators.py`；新算子经 `operator_registry.py` 注册。
-3. 在 `tests/dynclassification/` 添加测试（参考 `test_funnel.py`、`test_downgrade_override.py`）。
-
-### 9.2 Adding a Composite Rule
-
-1. 在 `dynclassification/composite.py` 中添加规则。
-2. 在 `tests/dynclassification/` 添加测试。
-
-### 9.3 Adding a Taxonomy / Standard
-
-1. 新增 `rules/taxonomies/<domain>.yaml`：`levels`（按 rank 升序）、`default_level`，
-   并**显式补齐 `confidence_policy` 节**（字段与默认值见
-   `docs/dynclassification/three_layer_funnel_design.md` §2.3）。
-2. 新增对应领域规则 `rules/domains/<domain>.yaml`。
-3. 在 `tests/dynclassification/test_standards_switching.py` 扩展体系切换用例。
-
-## 10. Testing Guidelines
-
-- All changes must include tests.
-- Mock heavy ML models in unit tests (see `tests/dynclassification/test_ner_adapter.py` and `tests/dynclassification/test_llm_adapter.py`).
-- Gateway tests use `httpx` / `grpc.aio` channels; run them with the gateway server fixture.
-- Budget tests cover both in-memory and SQLite backends.
-
-## 11. Deployment Notes
-
-### Docker
-
-```bash
-# core 镜像（默认推荐）
-docker build --target core -t privshield:1.8.0 .
-
-# ml 镜像（含 torch/transformers/onnxruntime）
-docker build --target ml -t privshield:1.8.0-ml .
-
-docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
-```
-
-### Helm
-
-```bash
-helm install privshield ./deploy/helm/PrivShield
-
-# 生产模式（需自管 TLS/API Key Secret）
-helm install privshield ./deploy/helm/PrivShield \
-  -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set security.tls.existingSecret=your-tls-secret \
-  --set security.auth.apiKeysSecret=your-apikeys-secret
-```
-
-### 原生 K8s
-
-```bash
-kubectl apply -k ./deploy/k8s/
-```
-
-### Docker Compose
-
-```bash
-cd deploy/docker-compose && docker-compose up -d
-```
-
-### Production Gaps
-
-- KMS integration and automated key rotation are not yet implemented.
-- Load and memory-leak test suites are implemented under `tests/perf/` but not yet integrated into CI; chaos test suites are not yet implemented.
-
-Address these before any hardened production deployment.
-
-## 12. Security Considerations
-
-- Never commit model weights or large `.models/` files to git.
-- Do not expose the gRPC/REST ports to untrusted networks without TLS.
-- HMAC salt should be provided by the caller; consider KMS integration for production.
-- Privacy budget in memory mode is not consistent across multiple instances; use `PRIVACY_BUDGET_DB` for multi-instance deployments.
-- Validate and sanitize all inputs; Pydantic models are the first line of defense.
-
-## 13. Key Documentation
-
-| Document | Path | Purpose |
-|---|---|---|
-| README | `README.md` | Quick start and examples |
-| Dynclassification design | `docs/dynclassification/design.md` | Dynamic classification architecture |
-| Three-layer funnel design | `docs/dynclassification/three_layer_funnel_design.md` | 3-layer funnel (Rule → NER → LLM) design |
-| Dynclassification PRD | `docs/dynclassification/prd.md` | Dynamic classification requirements |
-| 2026 full project audit report | `docs/audit_reports/2026_full_project_audit_report.md` | 全项目安全/正确性审计与整改报告 |
-| Gateway design | `docs/gateway_balancer/design.md` | Gateway and load balancer |
-| **Gateway reliability** | `docs/gateway_balancer/reliability.md` | **网关可靠性能力（重试/熔断/健康检查/动态拓扑）** |
-| Production security PRD | `docs/production_security/prd.md` | TLS/auth/rate-limit requirements |
-| Production security design | `docs/production_security/design.md` | TLS/auth/rate-limit architecture |
-| Production security ops | `docs/production_security/ops.md` | Deployment and cert quick reference |
-| Observability PRD | `docs/production_observability/prd.md` | Logging/metrics/tracing requirements |
-| Observability design | `docs/production_observability/design.md` | Architecture and metric design |
-| Observability ops | `docs/production_observability/ops.md` | Configuration and Grafana examples |
-| Masking design | `docs/masking/design.md` | Field-name-aware masking architecture |
-| Masking ops | `docs/masking/ops.md` | Masking deployment and tuning |
-| Masking testing | `docs/masking/testing.md` | Masking test checklist |
-| Query obfuscation design | `docs/qol/design.md` | Query obfuscation architecture |
-| Query obfuscation ops | `docs/qol/ops.md` | Query obfuscation monitoring |
-| Query obfuscation testing | `docs/qol/testing.md` | Query obfuscation test checklist |
-| Deployment PRD | `docs/deployment/prd.md` | K8s/Helm/Docker Compose requirements |
-| Deployment design | `docs/deployment/design.md` | Chart structure and parameters |
-| Deployment ops | `docs/deployment/ops.md` | Install, upgrade and troubleshooting |
-| **Engine reliability** | `docs/reliability.md` | **引擎可靠性能力（预算恢复/完整性校验/备份）** |
-| **Service Hub reliability** | `services/service-hub/docs/reliability.md` | **调度中枢可靠性（崩溃恢复/自动重试/mTLS/备份）** |
-| **Audit Log reliability** | `services/audit-log/docs/reliability.md` | **审计存证可靠性（完整性校验/HMAC 审计/备份）** |
-| **Datasource Mgr reliability** | `services/datasource-mgr/docs/reliability.md` | **数据源可靠性（无状态设计/双协议 mTLS）** |
-| **BFF-Go reliability** | `console/bff-go/docs/reliability.md` | **Go BFF 可靠性（gRPC 重试/连接保活/优雅停机）** |
-| **Service Hub K8s 接入架构** | `docs/gateway_balancer/new_design.md` | **service-hub 固定入口/多副本 Hub/PostgreSQL 租约目标架构** |
-
-## 14. Quick Reference
-
-| Goal | Command |
-|---|---|
-| Install | `pip install -e .` |
-| Test | `PYTHONPATH=. pytest tests -q` |
-| Helm lint | `make helm-lint` |
-| Helm template | `make helm-template` |
-| Build core image | `make docker-core` |
-| Run Dev Console (Agent + Go BFF + Vite HMR) | `bash ./scripts/dev/dev-bff-agent.sh` |
-| Run Dev Console (mTLS + Vite) | `bash ./scripts/dev/dev-bff-agent.sh --mtls` |
-| Start All Real E2E Services (Agent + 3 Go) | `bash ./scripts/dev/e2e-start-all-services.sh` |
-| Run Integration Test (curl-based) | `bash ./scripts/dev/integration-test-new-modules.sh` |
-| Run Real E2E Tests | `PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/` |
-| Run Docker Agent (Core/ML) | `bash ./scripts/dev/docker-start-agent.sh [core|ml]` |
-| Stop Docker Agent | `bash ./scripts/dev/docker-stop-agent.sh` |
-| Run Docker Console Trio (Agent+BFF+Web) | `bash ./scripts/dev/docker-start-bff-agent.sh` |
-| Run Docker Console Trio (mTLS) | `bash ./scripts/dev/docker-start-bff-agent.sh --mtls` |
-| Run Docker Full Stack (Agent+Go BFF+Web+3 Services) | `bash ./scripts/dev/docker-start-all.sh [--with-llm] [--with-postgres] [--with-monitoring]` |
-| Run Docker LLM (vLLM) | `bash ./scripts/dev/docker-start-llm.sh` |
-| Stop Docker LLM | `bash ./scripts/dev/docker-stop-llm.sh` |
-| Run Docker Monitoring (Prometheus+Grafana) | `docker compose --profile monitoring up -d` |
-| Stop Docker Services | `bash ./scripts/dev/docker-stop.sh` |
-| Run Prod Console (Agent + Go BFF + Static) | `bash ./scripts/prod/prod-bff-agent.sh` |
-| Run Prod Console (mTLS) | `bash ./scripts/prod/prod-bff-agent.sh --mtls` |
-| Run App-LZ Dev Console (Hub Testing) | `bash ./scripts/dev/dev-app-lz.sh` |
-| Run App-LZ Prod Console | `bash ./scripts/prod/prod-app-lz.sh` |
-| Run Docker App-LZ Stack | `bash ./scripts/dev/docker-start-app-lz.sh` |
-| Stop App-LZ Console | `bash ./scripts/dev/stop-app-lz.sh` |
-| Stop Docker App-LZ Stack | `bash ./scripts/dev/docker-stop-app-lz.sh` |
-| Stop Dev Console | `bash ./scripts/dev/dev-stop.sh` |
-| Stop Prod Console | `bash ./scripts/prod/prod-stop.sh` |
-| Run REST + gRPC | `python -m engine.server` |
-| Build test console frontend | `cd console/web && corepack pnpm install && corepack pnpm build` |
-| Run gateway | `python -m engine.gateway.server` |
-| Regenerate gRPC stubs | `python -m grpc_tools.protoc -I proto --python_out=engine --grpc_python_out=engine proto/privacy.proto` |
-| Build docs | `make docs-build` |
-| Serve docs | `make docs-serve` |
-| Download LLM | `python -m engine.privacy.download_model` |
-| Download NER | `python -m engine.privacy.download_ner_model` |
-| Deploy Prod Compose | `bash ./scripts/prod/deploy-docker-compose.sh [--with-llm] [--with-monitoring] [--with-postgres] [--agent-only]` |
-| Stop Prod Compose | `bash ./scripts/prod/stop-docker-compose.sh [--with-postgres]` |
-| Run Prod Docker Agent | `bash ./scripts/prod/docker-start-agent.sh [core|ml]` |
-| Stop Prod Docker Agent | `bash ./scripts/prod/docker-stop-agent.sh` |
-| Deploy Prod Helm | `bash ./scripts/prod/deploy-helm.sh` |
-| Uninstall Prod Helm | `bash ./scripts/prod/uninstall-helm.sh` |
-| Deploy Prod K8s | `bash ./scripts/prod/deploy-k8s.sh [--with-postgres]` |
-| Stop Prod K8s | `bash ./scripts/prod/stop-k8s.sh [--with-postgres]` |
-| Run Prod Health Check | `bash ./scripts/prod/prod_health_check.sh` |
-| Backup Budget DB | `bash ./scripts/prod/backup_privacy_budget.sh` |
+- 遵循标准 **Go Code Review Comments** 与 Effective Go。
+- 密码学与安全比较一律使用常量时间校验 (`subtle.ConstantTimeCompare` / `hmac.Equal`)。
+- 隐私原语与数学计算必须是**零状态、纯函数计算**；状态维护统一在 `service` 与 `budget`。
+- 高频批量计算统一采用**无锁分块多核并行模型** (`Chunked Concurrency`)。
+- 所有 REST 错误响应统一通过 `pkg/middleware.AbortWithError` 输出标准 5 字段信封。

@@ -8,25 +8,29 @@
 
 ## 一、 平台架构与多语言分层
 
-PrivShield 采用现代**多语言分层云原生 Monorepo 架构**，清晰解耦底层算力、业务编排中台与表现层接入：
+PrivShield 采用纯 **Go 1.25+ 云原生 Monorepo 架构**，清晰解耦底层算力、业务编排中台与表现层接入：
 
 ```text
 PrivShield/ (Repo Root)
-├── engine/                       # 【Python 隐私算力引擎】REST(:8079) + gRPC(:50051)
-│   ├── main.py / grpc_server.py / server.py
-│   ├── privacy/                  # 脱敏 (Masking)、差分隐私 (DP/LDP)、K-匿名、查询混淆 (QOL)、预算记账
-│   ├── dynclassification/        # 三层分类分级漏斗 (Rule -> NER -> LLM/VLM)
-│   ├── security/                 # TLS 1.3 / mTLS 白名单 / API Key 鉴权 / 滑动窗口限流
-│   ├── observability/            # 结构化日志、Prometheus /metrics、OpenTelemetry Tracing
-│   └── gateway/                  # P2C 负载均衡与反向代理
+├── engine-go/                    # 【Go 核心隐私算力引擎】REST(:8079) + gRPC(:50051)
+│   ├── cmd/                      # Agent 与 Gateway 启动入口
+│   └── internal/                 # 动态分类分级漏斗、网关反向代理、DICOM影像脱敏、可观测性
+├── privacy-go-sdk/               # 【纯 Go 隐私计算数学原语库】
+│   ├── masking/                  # 脱敏 (Masking)、国密 SM3/SM4
+│   ├── dp/                       # 差分隐私 (DP 单趟融合计算)
+│   ├── ldp/                      # 本地差分隐私 (LDP 多核并发扰动)
+│   ├── kano/                     # K-匿名 (Mondrian 算法) 与 L-多样性 (L-Diversity) 检验
+│   ├── medical/                  # 医疗数据流水线 (多核并发分块)
+│   ├── qol/                      # 查询混淆 (QOL)
+│   └── budget/                   # 无锁原子隐私预算记账 (CAS 循环 + 原子回滚)
 ├── services/                     # 【Go 企业级中台微服务群】
 │   ├── service-hub/              # 数据服务调度中枢 (:8082) - 流水线编排 (Ingest→Classify→Mask→Audit)
 │   ├── datasource-mgr/           # 数据源与资产管理微服务 (:8083) - CSV/DB 连接池、元数据探查与抽样
-│   └── audit-log/                # 脱敏审计与存证微服务 (:8084) - 审计快照、SHA-256 存证哈希链
+│   └── audit-log/                # 脱敏审计与存证微服务 (:8084) - 审计快照、不可篡改哈希链
 ├── console/                      # 【统一控制台与接入层】
 │   ├── web/                      # React 18 + TS + Vite + TailwindCSS 交互控制台 (:5173)
 │   └── bff-go/                   # Go gRPC/HTTPS API Gateway / BFF (:8081)
-├── pkg/                          # 【Go 全局共享基础库】连接池、中间件、安全防御、SQLite/Memory 存储
+├── pkg/                          # 【Go 全局共享基础库】连接池、中间件、安全防御、国密密码学、存储
 ├── proto/                        # 【Protobuf 契约定义】privacy.proto / servicehub.proto
 ├── deploy/                       # 【云原生运维套件】Docker Compose / Helm / K8s / Prometheus / Grafana
 ├── config/                       # 环境变量模板、Profile YAML、mTLS 白名单
