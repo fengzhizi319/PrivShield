@@ -125,7 +125,10 @@ func (m *WhitelistManager) checkReload() {
 	if err != nil {
 		return
 	}
-	if info.ModTime().After(m.lastMtime) {
+	m.mu.RLock()
+	lastMtime := m.lastMtime
+	m.mu.RUnlock()
+	if info.ModTime().After(lastMtime) {
 		m.load()
 	}
 }

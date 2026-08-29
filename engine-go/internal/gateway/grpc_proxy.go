@@ -104,7 +104,6 @@ func (g *GrpcProxyServer) getOrCreateConn(addr string) (*grpc.ClientConn, error)
 
 	// 连接池大小限制
 	if len(g.connPool) >= g.maxPoolSize {
-		g.connPoolMu.Unlock()
 		return nil, fmt.Errorf("connection pool full (max %d)", g.maxPoolSize)
 	}
 

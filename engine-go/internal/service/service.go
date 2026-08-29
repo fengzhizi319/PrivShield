@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -633,9 +634,13 @@ func (s *PrivacyService) ProcessAgentData(records []map[string]interface{}, apiC
 	report := make([]map[string]interface{}, 0, len(records))
 	sanitized := make([]map[string]string, 0, len(records))
 
-	dsID, _ := naming.NormalizeDataSourceID(datasourceID)
+	dsID, normErr := naming.NormalizeDataSourceID(datasourceID)
 	if dsID == "" && apiCode != "" {
-		dsID, _ = naming.NormalizeDataSourceID(apiCode)
+		dsID, normErr = naming.NormalizeDataSourceID(apiCode)
+	}
+	if dsID == "" && normErr != nil {
+		slog.Warn("ProcessAgentData: datasource normalization failed",
+			"datasource_id", datasourceID, "api_code", apiCode, "err", normErr)
 	}
 
 	for _, rec := range records {
@@ -1098,8 +1103,10 @@ func getEnv(key, defaultVal string) string {
 
 func getEnvInt(key string, defaultVal int) int {
 	if v := os.Getenv(key); v != "" {
-		var n int
-		fmt.Sscanf(v, "%d", &n)
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return defaultVal
+		}
 		return n
 	}
 	return defaultVal
@@ -1150,15 +1157,24 @@ func (s *PrivacyService) ReloadDynamicProfiles() error {
 
 // DPAdaptiveClip 执行自适应分位数截断估计。
 func (s *PrivacyService) DPAdaptiveClip(values []float64, epsilon, targetQuantile float64, numIterations int, initialClip float64) (float64, float64) {
+	if !s.budget.Consume(epsilon, 0) {
+		return 0, 0
+	}
 	return dp.AdaptiveClip(values, epsilon, targetQuantile, numIterations, initialClip)
 }
 
 // DPGroupBy 执行带差分隐私的分组聚合统计。
 func (s *PrivacyService) DPGroupBy(rows []map[string]string, groupCol, targetCol, agg string, epsilon, delta, clipLower, clipUpper float64, mechanism string) (map[string]float64, error) {
+	if !s.budget.Consume(epsilon, delta) {
+		return nil, fmt.Errorf("privacy budget exhausted")
+	}
 	return dp.GroupBy(rows, groupCol, targetCol, agg, epsilon, delta, clipLower, clipUpper, mechanism)
 }
 
 // DPAggregate 执行多指标差分隐私聚合计算。
 func (s *PrivacyService) DPAggregate(rows []map[string]string, specs map[string]string, epsilon, delta float64, mechanism string) (map[string]float64, error) {
+	if !s.budget.Consume(epsilon, delta) {
+		return nil, fmt.Errorf("privacy budget exhausted")
+	}
 	return dp.Aggregate(rows, specs, epsilon, delta, mechanism)
 }

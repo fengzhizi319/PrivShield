@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -170,12 +171,17 @@ func (ac *ACAutomaton) Search(text string) []string {
 // 规则引擎
 // ──────────────────────────────────────────────
 
+// ruleSnapshot 规则快照（不可变，供 atomic.Pointer 无锁读替换）
+type ruleSnapshot struct {
+	rules        []RuleDef
+	fieldRegexps []*regexp.Regexp
+	ac           *ACAutomaton
+}
+
 // RuleEngine 分类规则引擎
 type RuleEngine struct {
-	rules        []RuleDef
-	fieldRegexps []*regexp.Regexp // 字段名匹配正则
-	ac           *ACAutomaton     // 值内容 AC 自动机
-	cache        *engineCache     // 有界分片缓存（替代无界 sync.Map）
+	snapshot atomic.Pointer[ruleSnapshot] // 原子快照（Classify 无锁读）
+	cache    *engineCache                 // 有界分片缓存（替代无界 sync.Map）
 
 	// 热重载支持（mtime 检测模式，与 WhitelistManager 一致）
 	rulesPath   string
@@ -185,11 +191,8 @@ type RuleEngine struct {
 
 // NewRuleEngine 创建规则引擎实例
 func NewRuleEngine(rules []RuleDef) (*RuleEngine, error) {
-	engine := &RuleEngine{
-		rules:        rules,
-		fieldRegexps: make([]*regexp.Regexp, len(rules)),
-		ac:           NewACAutomaton(),
-	}
+	fieldRegexps := make([]*regexp.Regexp, len(rules))
+	ac := NewACAutomaton()
 
 	// 编译字段名正则
 	for i, rule := range rules {
@@ -200,19 +203,28 @@ func NewRuleEngine(rules []RuleDef) (*RuleEngine, error) {
 			if err != nil {
 				return nil, err
 			}
-			engine.fieldRegexps[i] = re
+			fieldRegexps[i] = re
 		}
 
 		// 添加值模式到 AC 自动机
 		for _, pattern := range rule.ValuePatterns {
-			if err := engine.ac.AddPattern(rule.ID, pattern); err != nil {
+			if err := ac.AddPattern(rule.ID, pattern); err != nil {
 				return nil, err
 			}
 		}
 	}
 
 	// 构建 AC 自动机
-	engine.ac.Build()
+	ac.Build()
+
+	engine := &RuleEngine{}
+
+	// 初始化原子快照
+	engine.snapshot.Store(&ruleSnapshot{
+		rules:        rules,
+		fieldRegexps: fieldRegexps,
+		ac:           ac,
+	})
 
 	// 初始化有界分片缓存
 	engine.cache = newEngineCache(10000)
@@ -230,15 +242,18 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 		return cached
 	}
 
+	// 原子加载规则快照（无锁读，避免与 reload 写端数据竞争）
+	snap := e.snapshot.Load()
+
 	// Layer 1: 字段名正则匹配
-	for i, re := range e.fieldRegexps {
+	for i, re := range snap.fieldRegexps {
 		if re != nil && re.MatchString(field) {
 			result := &ClassificationResult{
 				Field:      field,
-				Level:      e.rules[i].Level,
-				Category:   e.rules[i].Category,
+				Level:      snap.rules[i].Level,
+				Category:   snap.rules[i].Category,
 				Confidence: 0.95,
-				MatchedBy:  "rule:" + e.rules[i].ID,
+				MatchedBy:  "rule:" + snap.rules[i].ID,
 			}
 			e.cache.put(cacheKey, result)
 			return result
@@ -246,10 +261,10 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 	}
 
 	// Layer 1: AC 自动机值匹配
-	matches := e.ac.Search(value)
+	matches := snap.ac.Search(value)
 	if len(matches) > 0 {
 		// 找到第一个匹配的规则
-		for _, rule := range e.rules {
+		for _, rule := range snap.rules {
 			for _, matchID := range matches {
 				if rule.ID == matchID {
 					result := &ClassificationResult{
@@ -281,7 +296,10 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 
 // RuleCount 返回已加载的规则数量
 func (e *RuleEngine) RuleCount() int {
-	return len(e.rules)
+	if snap := e.snapshot.Load(); snap != nil {
+		return len(snap.rules)
+	}
+	return 0
 }
 
 // WatchRules 启用规则文件 mtime 热重载。
@@ -330,10 +348,9 @@ func (e *RuleEngine) checkRulesReload() {
 		return // 编译失败保持旧规则
 	}
 
-	// 原子替换内部状态（reloadMu 保护写端，Classify 读端通过 cache 分片锁保证可见性）
-	e.rules = newEngine.rules
-	e.fieldRegexps = newEngine.fieldRegexps
-	e.ac = newEngine.ac
+	// 原子替换快照（reloadMu 保护写端，Classify 通过 atomic.Pointer 无锁读）
+	newSnap := newEngine.snapshot.Load()
+	e.snapshot.Store(newSnap)
 	e.lastModTime = info2.ModTime()
 	// 重建缓存（规则变更旧缓存失效）
 	e.cache = newEngineCache(10000)

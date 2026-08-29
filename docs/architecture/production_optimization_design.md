@@ -1,6 +1,6 @@
 # PrivShield 生产级架构优化与高可用演进设计方案
 
-> **版本**：v17.0.0  
+> **版本**：v18.0.0  
 > **适用范围**：`PrivShield` 核心算力引擎、中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台 BFF 及 Kubernetes 云原生部署套件。  
 > **核心目标**：针对高并发政务与医疗数据流通场景，全面实现负载均衡、分布式预算一致性、PostgreSQL 原子租约并发、细粒度事件驱动自动扩缩容（KEDA/CronHPA）、异步任务队列与极限压测套件。
 
@@ -197,3 +197,28 @@ RETURNING *;
 - **Profile 加载错误日志**：`slog.Warn` 记录加载失败
 
 **全量测试验证**：12 个 engine-go 包全部通过 `go test -race -count=1 ./...`，零数据竞争。详见 [`docs/archive/go_engine_architecture_and_ner_cuda_design.md`](../archive/go_engine_architecture_and_ner_cuda_design.md) §7-8。
+
+---
+
+## 4. 第三轮深度四维架构审计优化（P0~P2）
+
+在前两轮 36 项优化基础上，对 `engine-go` 全模块实施第三轮全量四维审计，发现并修复 **9 项** 新优化点：
+
+### 4.1 P0 — 隐私安全与正确性
+
+- **TypedServer Mask/MaskBatch 脱敏失败返回原文**：与 `server.go` 已修复的 P0 问题一致，但 `typed_server.go` 未同步修复。失败时返回 `"***"` 而非原文，消除隐私泄露。
+- **TypedServer Histogram 绕过预算检查**：`DPHistogram`/`DPNoisyHistogram`/`DPChunkedHistogram` 直接调用 `dp.NoisyHistogram()` 绕过 service 层预算核算，统一改为通过 `svc.DPHistogram(ctx, ...)` 走预算消耗。
+- **grpc_proxy getOrCreateConn 双重解锁 panic**：`defer g.connPoolMu.Unlock()` + 手动 `g.connPoolMu.Unlock()` 在连接池满时触发双重解锁。移除手动 Unlock，由 defer 统一释放。
+- **service 层 DPGroupBy/DPAggregate/DPAdaptiveClip 缺少预算检查**：三个高级 DP API 直接调用 `dp` 包函数，未消耗隐私预算。补充 `budget.Consume()` 检查。
+
+### 4.2 P1 — 并发安全
+
+- **RuleEngine Classify 数据竞争**：`Classify` 读 `e.rules`/`e.fieldRegexps`/`e.ac` 无锁保护，而 `checkRulesReload` 在 `reloadMu` 下写这些字段。引入 `atomic.Pointer[ruleSnapshot]` 原子快照，`Classify` 无锁读、`reload` 原子替换，零锁开销。
+- **WhitelistManager checkReload 数据竞争**：`checkReload` 读 `m.lastMtime` 无锁，而 `load()` 在锁内写。加 `RLock` 读取后比较。
+
+### 4.3 P2 — 防御性
+
+- **ProcessAgentData 静默忽略归一化错误**：`naming.NormalizeDataSourceID` 错误从 `_` 改为记录 `slog.Warn` 日志。
+- **getEnvInt 改用 strconv.Atoi**：`fmt.Sscanf` 不检查错误且对无效输入返回 0，改用 `strconv.Atoi` + 错误回退默认值。影响 `service.go` 和 `cmd/privshield-agent/main.go`。
+
+**全量测试验证**：12 个 engine-go 包全部通过 `go test -race -count=1 ./...`，零数据竞争。

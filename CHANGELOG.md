@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **第三轮 engine-go 深度四维架构审计优化（P0~P2，9 项）**：
+  - **P0 隐私/安全/可靠性**：TypedServer Mask/MaskBatch 脱敏失败返回 `"***"` 而非原文（消除隐私泄露）；TypedServer DPHistogram/DPNoisyHistogram/DPChunkedHistogram 统一走 service 层预算核算（消除预算绕过）；grpc_proxy getOrCreateConn 修复 defer+手动 Unlock 双重解锁 panic；service 层 DPGroupBy/DPAggregate/DPAdaptiveClip 补充预算消耗检查。
+  - **P1 并发安全**：RuleEngine 引入 `atomic.Pointer[ruleSnapshot]` 无锁读替换，消除 Classify 读 rules/fieldRegexps/ac 与 checkRulesReload 写端的数据竞争；WhitelistManager checkReload 加 RLock 读取 lastMtime 消除数据竞争。
+  - **P2 防御性**：ProcessAgentData 归一化错误 slog.Warn 日志（替代静默忽略）；getEnvInt 全部改用 strconv.Atoi + 错误回退默认值（替代 fmt.Sscanf）。
+  - 12 个 engine-go 包全部通过 `go test -race -count=1 ./...`，零数据竞争。
 - **第二轮 engine-go 深度四维架构审计优化（P0~P3，24 项）**：
   - **P0 隐私安全**：dpHistogram/dpNoisyHistogram 统一走预算核算；Mask RPC 失败返回错误而非原文（消除隐私泄露）；dpAggregate/dpGroupBy 检查预算错误返回 429；PrivacyService 热重载使用 `atomic.Pointer` 消除数据竞争。
   - **P1 架构可靠性**：RuleEngine 缓存 16 分片有界化（随机半量淘汰）；热重载从文件重新加载规则；SafetyFloor Arbitrate 加 RLock；SelectNode SWRR 无锁化（atomic.Int32）；LLM 错误响应限制 1MB；strconv 替代手写解析消除溢出。

@@ -15,7 +15,6 @@ import (
 
 	pb "github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver/proto"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
-	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
 )
 
 // TypedServer 类型安全的 gRPC 隐私服务端
@@ -46,7 +45,7 @@ func (s *TypedServer) Mask(_ context.Context, req *pb.MaskRequest) (*pb.MaskResp
 	maskType := inferMaskType(req.GetFieldName())
 	result, err := s.svc.MaskField(maskType, req.GetValue())
 	if err != nil {
-		return &pb.MaskResponse{Result: req.GetValue()}, nil
+		return &pb.MaskResponse{Result: "***"}, nil
 	}
 	return &pb.MaskResponse{Result: result}, nil
 }
@@ -69,7 +68,7 @@ func (s *TypedServer) MaskBatch(_ context.Context, req *pb.MaskBatchRequest) (*p
 			}
 			r, err := s.svc.MaskField(fieldType, v)
 			if err != nil {
-				results[i] = v
+				results[i] = "***"
 			} else {
 				results[i] = r
 			}
@@ -240,7 +239,7 @@ func (s *TypedServer) ObfuscateQueryBatch(_ context.Context, req *pb.ObfuscateQu
 // ──────────────────────────────────────────────
 
 // DPHistogram 差分隐私直方图
-func (s *TypedServer) DPHistogram(_ context.Context, req *pb.DPHistogramRequest) (*pb.DPHistogramResponse, error) {
+func (s *TypedServer) DPHistogram(ctx context.Context, req *pb.DPHistogramRequest) (*pb.DPHistogramResponse, error) {
 	trueCounts := make(map[string]int)
 	for _, cat := range req.GetCategories() {
 		trueCounts[cat] = 0
@@ -250,26 +249,24 @@ func (s *TypedServer) DPHistogram(_ context.Context, req *pb.DPHistogramRequest)
 			trueCounts[v]++
 		}
 	}
-	result := dp.NoisyHistogram(trueCounts, req.GetEpsilon())
-	floatResult := make(map[string]float64, len(result))
-	for k, v := range result {
-		floatResult[k] = float64(v)
+	result, err := s.svc.DPHistogram(ctx, trueCounts, req.GetEpsilon())
+	if err != nil {
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	}
-	return &pb.DPHistogramResponse{Result: floatResult}, nil
+	return &pb.DPHistogramResponse{Result: result}, nil
 }
 
 // DPNoisyHistogram 已知真实计数的差分隐私直方图
-func (s *TypedServer) DPNoisyHistogram(_ context.Context, req *pb.DPNoisyHistogramRequest) (*pb.DPHistogramResponse, error) {
+func (s *TypedServer) DPNoisyHistogram(ctx context.Context, req *pb.DPNoisyHistogramRequest) (*pb.DPHistogramResponse, error) {
 	trueCounts := make(map[string]int)
 	for k, v := range req.GetTrueCounts() {
 		trueCounts[k] = int(v)
 	}
-	result := dp.NoisyHistogram(trueCounts, req.GetEpsilon())
-	floatResult := make(map[string]float64, len(result))
-	for k, v := range result {
-		floatResult[k] = float64(v)
+	result, err := s.svc.DPHistogram(ctx, trueCounts, req.GetEpsilon())
+	if err != nil {
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	}
-	return &pb.DPHistogramResponse{Result: floatResult}, nil
+	return &pb.DPHistogramResponse{Result: result}, nil
 }
 
 // DPChunkedCount 分块差分隐私计数
@@ -333,7 +330,7 @@ func (s *TypedServer) DPChunkedMean(ctx context.Context, req *pb.DPChunkedMeanRe
 }
 
 // DPChunkedHistogram 分块差分隐私直方图
-func (s *TypedServer) DPChunkedHistogram(_ context.Context, req *pb.DPChunkedHistogramRequest) (*pb.DPHistogramResponse, error) {
+func (s *TypedServer) DPChunkedHistogram(ctx context.Context, req *pb.DPChunkedHistogramRequest) (*pb.DPHistogramResponse, error) {
 	// 合并所有分块计数
 	trueCounts := make(map[string]int)
 	for _, cat := range req.GetCategories() {
@@ -346,12 +343,11 @@ func (s *TypedServer) DPChunkedHistogram(_ context.Context, req *pb.DPChunkedHis
 			}
 		}
 	}
-	result := dp.NoisyHistogram(trueCounts, req.GetEpsilon())
-	floatResult := make(map[string]float64, len(result))
-	for k, v := range result {
-		floatResult[k] = float64(v)
+	result, err := s.svc.DPHistogram(ctx, trueCounts, req.GetEpsilon())
+	if err != nil {
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	}
-	return &pb.DPHistogramResponse{Result: floatResult}, nil
+	return &pb.DPHistogramResponse{Result: result}, nil
 }
 
 // DPVectorSum 差分隐私向量求和（通过 service 层走预算检查）

@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -279,8 +280,10 @@ func getEnv(key, defaultVal string) string {
 
 func getEnvInt(key string, defaultVal int) int {
 	if v := os.Getenv(key); v != "" {
-		var n int
-		fmt.Sscanf(v, "%d", &n)
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return defaultVal
+		}
 		return n
 	}
 	return defaultVal
