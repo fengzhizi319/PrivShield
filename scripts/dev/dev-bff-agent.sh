@@ -13,6 +13,7 @@
 # ============================================================================
 
 set -euo pipefail
+export CGO_ENABLED=0
 
 # ── 解析命令行参数 ───────────────────────────────────────────────────
 FORCE=false
@@ -33,8 +34,8 @@ for arg in "$@"; do
 done
 
 # ── 解析脚本目录，初始化全局变量 ──────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 CONSOLE_DIR="$PROJECT_ROOT/console"
 PIDS_DIR="$PROJECT_ROOT/.pids"
 LOGS_DIR="$PROJECT_ROOT/.logs"

@@ -20,8 +20,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 PIDS_DIR="$PROJECT_ROOT/.pids"
 
 echo "正在停止 PrivShield App-LZ 控制台所有服务..."
@@ -43,9 +43,18 @@ _kill_pid_file() {
 _kill_pid_file "$PIDS_DIR/app-lz-bff.pid"
 _kill_pid_file "$PIDS_DIR/app-lz-web.pid"
 _kill_pid_file "$PIDS_DIR/app-lz-prod.pid"
+_kill_pid_file "$PIDS_DIR/agent.pid"
+_kill_pid_file "$PIDS_DIR/service-hub.pid"
+_kill_pid_file "$PIDS_DIR/datasource-mgr.pid"
+_kill_pid_file "$PIDS_DIR/audit-log.pid"
 
-# 清理端口兜底
-fuser -k -9 8085/tcp 2>/dev/null || true
-fuser -k -9 5174/tcp 2>/dev/null || true
+# 清理端口兜底 (跨平台 Linux/macOS)
+for port in 8085 5174 8079 8082 8083 8084 50051 50052 50053 50054; do
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -ti ":$port" | xargs kill -9 2>/dev/null || true
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser -k -9 "$port/tcp" 2>/dev/null || true
+    fi
+done
 
-echo "App-LZ 控制台服务已全部停止。"
+echo "✅ App-LZ 与关联微服务已全部停止并释放端口。"

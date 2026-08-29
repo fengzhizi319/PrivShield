@@ -17,6 +17,7 @@
 # ============================================================================
 
 set -euo pipefail
+export CGO_ENABLED=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,8 +35,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── 解析脚本目录，初始化全局变量 ──────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 PIDS_DIR="${PROJECT_ROOT}/.pids"
 LOGS_DIR="${PROJECT_ROOT}/.logs"
 DATA_DIR="${PROJECT_ROOT}/data"

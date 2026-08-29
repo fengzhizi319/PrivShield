@@ -17,6 +17,7 @@
 # ============================================================================
 
 set -euo pipefail
+export CGO_ENABLED=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -38,8 +39,8 @@ done
 # LOGS_DIR  : 日志输出目录（.logs/）
 # DATA_DIR  : SQLite DB 存储目录（data/）
 # GO_BIN    : Go 编译器路径，可通过环境变量覆盖
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 PIDS_DIR="${PROJECT_ROOT}/.pids"
 LOGS_DIR="${PROJECT_ROOT}/.logs"
 DATA_DIR="${PROJECT_ROOT}/data"

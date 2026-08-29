@@ -13,6 +13,7 @@
 # ============================================================================
 
 set -euo pipefail
+export CGO_ENABLED=0
 
 FORCE=false
 SKIP_UPSTREAM=false
@@ -34,8 +35,8 @@ for arg in "$@"; do
     esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 APP_LZ_DIR="$PROJECT_ROOT/console/app-lz"
 PIDS_DIR="$PROJECT_ROOT/.pids"
 LOGS_DIR="$PROJECT_ROOT/.logs"

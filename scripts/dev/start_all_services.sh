@@ -22,6 +22,7 @@
 # ==============================================================================
 
 set -euo pipefail
+export CGO_ENABLED=0
 
 # ANSI 终端颜色代码
 RED='\033[0;31m'
@@ -31,8 +32,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # ── 步骤 1：定位项目根目录与参数解析 ──────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 cd "$PROJECT_ROOT"
 
 LOG_DIR="$PROJECT_ROOT/.logs"

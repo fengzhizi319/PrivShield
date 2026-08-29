@@ -15,6 +15,7 @@
 # ==============================================================================
 
 set -euo pipefail
+export CGO_ENABLED=0
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,8 +23,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 cd "$PROJECT_ROOT"
 
 echo -e "${BLUE}====================================================${NC}"

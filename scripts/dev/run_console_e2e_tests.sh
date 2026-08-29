@@ -19,6 +19,7 @@
 # ==============================================================================
 
 set -euo pipefail
+export CGO_ENABLED=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -43,8 +44,8 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # ── 步骤 0.1：定位并切换至项目根目录 ──────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd -P))"
 cd "$PROJECT_ROOT"
 
 MOCK_PID=""
