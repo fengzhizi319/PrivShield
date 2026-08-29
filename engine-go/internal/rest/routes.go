@@ -10,13 +10,13 @@
 package rest
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	httppprof "net/http/pprof"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -25,7 +25,6 @@ import (
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/security"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
-	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/kano"
 )
 
@@ -282,7 +281,8 @@ func maskHandler(svc *service.PrivacyService) gin.HandlerFunc {
 		} else {
 			result, err = svc.MaskField(fieldType, req.Value)
 			if err != nil {
-				result = req.Value
+				middleware.AbortWithError(c, http.StatusInternalServerError, "MASK_FAILED", "脱敏处理失败", err.Error())
+				return
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"field": fieldName, "masked": result, "result": result})
@@ -424,7 +424,11 @@ func dpHistogramHandler(svc *service.PrivacyService) gin.HandlerFunc {
 				trueCounts[v]++
 			}
 		}
-		result := dp.NoisyHistogram(trueCounts, req.Epsilon)
+		result, err := svc.DPHistogram(c.Request.Context(), trueCounts, req.Epsilon)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"result": result})
 	}
 }
@@ -499,7 +503,11 @@ func dpNoisyHistogramHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		result := dp.NoisyHistogram(req.TrueCounts, req.Epsilon)
+		result, err := svc.DPHistogram(c.Request.Context(), req.TrueCounts, req.Epsilon)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"result": result})
 	}
 }
@@ -610,7 +618,11 @@ func dpChunkedHistogramHandler(svc *service.PrivacyService) gin.HandlerFunc {
 				}
 			}
 		}
-		result := dp.NoisyHistogram(trueCounts, req.Epsilon)
+		result, err := svc.DPHistogram(c.Request.Context(), trueCounts, req.Epsilon)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"result": result})
 	}
 }
@@ -670,7 +682,11 @@ func dpAggregateHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			return
 		}
 		ctx := c.Request.Context()
-		noisyCount, _ := svc.NoisyCount(ctx, len(req.Rows), req.Epsilon)
+		noisyCount, err := svc.NoisyCount(ctx, len(req.Rows), req.Epsilon)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"row_count":   len(req.Rows),
 			"noisy_count": noisyCount,
@@ -697,13 +713,7 @@ func dpAdaptiveClipHandler(svc *service.PrivacyService) gin.HandlerFunc {
 		// 自适应裁剪：使用百分位数估算
 		sorted := make([]float64, len(req.Values))
 		copy(sorted, req.Values)
-		for i := 0; i < len(sorted); i++ {
-			for j := i + 1; j < len(sorted); j++ {
-				if sorted[i] > sorted[j] {
-					sorted[i], sorted[j] = sorted[j], sorted[i]
-				}
-			}
-		}
+		sort.Float64s(sorted)
 		p95idx := int(float64(len(sorted)) * 0.95)
 		if p95idx >= len(sorted) {
 			p95idx = len(sorted) - 1
@@ -737,21 +747,33 @@ func dpGroupByHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			groups[groupVal] = append(groups[groupVal], targetVal)
 		}
 		result := make(map[string]float64)
-		ctx := context.Background()
+		ctx := c.Request.Context()
 		for k, vals := range groups {
 			switch req.Agg {
 			case "count":
-				noisy, _ := svc.NoisyCount(ctx, len(vals), req.Epsilon)
+				noisy, err := svc.NoisyCount(ctx, len(vals), req.Epsilon)
+				if err != nil {
+					middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+					return
+				}
 				result[k] = noisy
 			case "sum":
 				s := 0.0
 				for _, v := range vals {
 					s += v
 				}
-				noisy, _ := svc.NoisySum(ctx, []float64{s}, req.Epsilon, 1.0)
+				noisy, err := svc.NoisySum(ctx, []float64{s}, req.Epsilon, 1.0)
+				if err != nil {
+					middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+					return
+				}
 				result[k] = noisy
 			default:
-				noisy, _ := svc.NoisyCount(ctx, len(vals), req.Epsilon)
+				noisy, err := svc.NoisyCount(ctx, len(vals), req.Epsilon)
+				if err != nil {
+					middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+					return
+				}
 				result[k] = noisy
 			}
 		}

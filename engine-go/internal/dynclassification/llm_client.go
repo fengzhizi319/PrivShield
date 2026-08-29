@@ -180,6 +180,10 @@ func (c *LLMClient) Classify(ctx context.Context, req LLMRequest) (*LLMResponse,
 	// 调用 LLM
 	var lastErr error
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
+		// 检查 context 是否已取消，避免无效重试
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		resp, err := c.callLLM(ctx, prompt)
 		if err == nil {
 			c.recordSuccess()
@@ -187,7 +191,11 @@ func (c *LLMClient) Classify(ctx context.Context, req LLMRequest) (*LLMResponse,
 		}
 		lastErr = err
 		if attempt < c.config.MaxRetries {
-			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+			select {
+			case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 	}
 
@@ -242,7 +250,7 @@ func (c *LLMClient) callLLM(ctx context.Context, prompt string) (*LLMResponse, e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 限制错误响应体最大 1MB
 		return nil, fmt.Errorf("LLM API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -291,8 +299,8 @@ func (c *LLMClient) IsAvailable(ctx context.Context) bool {
 		return c.availCache.Load()
 	}
 
-	// 实际探测
-	req, err := http.NewRequestWithContext(ctx, "GET", c.config.Endpoint, nil)
+	// 实际探测（使用 HEAD 请求避免对 POST 端点产生副作用）
+	req, err := http.NewRequestWithContext(ctx, "HEAD", c.config.Endpoint, nil)
 	if err != nil {
 		c.availCache.Store(false)
 		c.availCacheTime.Store(time.Now().UnixNano())

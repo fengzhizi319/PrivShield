@@ -51,8 +51,9 @@ var (
 		IdleConnTimeout:     90 * time.Second,
 		DisableCompression:  false,
 	}
-	proxyCache    sync.Map // addr -> *proxyEntry
-	proxyCacheTTL = 10 * time.Minute
+	proxyCache     sync.Map // addr -> *proxyEntry
+	proxyCacheTTL  = 10 * time.Minute
+	proxyCacheDone = make(chan struct{}) // 后台清理 goroutine 退出信号
 )
 
 // proxyEntry 包装 ReverseProxy 及其创建时间，支持 TTL 淘汰
@@ -66,17 +67,27 @@ func init() {
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			now := time.Now()
-			proxyCache.Range(func(key, value any) bool {
-				entry := value.(*proxyEntry)
-				if now.Sub(entry.created) > proxyCacheTTL {
-					proxyCache.Delete(key)
-				}
-				return true
-			})
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now()
+				proxyCache.Range(func(key, value any) bool {
+					entry := value.(*proxyEntry)
+					if now.Sub(entry.created) > proxyCacheTTL {
+						proxyCache.Delete(key)
+					}
+					return true
+				})
+			case <-proxyCacheDone:
+				return
+			}
 		}
 	}()
+}
+
+// StopProxyCacheCleaner 停止 proxyCache 后台清理 goroutine
+func StopProxyCacheCleaner() {
+	close(proxyCacheDone)
 }
 
 func getOrCreateReverseProxy(addr string, node *BackendNode, metrics *observability.GatewayMetrics) (*httputil.ReverseProxy, error) {

@@ -19,7 +19,7 @@ import (
 type BackendNode struct {
 	Address       string
 	Weight        int
-	currentWeight int            // Nginx SWRR 当前权重（动态调整）
+	currentWeight atomic.Int32   // Nginx SWRR 当前权重（原子操作）
 	InFlight      atomic.Int64   // 当前在途请求数（原子操作，与 EWMA 锁分离）
 	EWMA          float64        // 指数移动加权平均延迟
 	LastUsed      time.Time      // 最后使用时间
@@ -135,7 +135,6 @@ type LoadBalancer struct {
 	nodes    []*BackendNode
 	strategy string       // "p2c" | "round_robin" | "least_conn" | "weighted_rr" | "weighted_random"
 	rrIndex  atomic.Int32 // round-robin 原子计数器（无锁化）
-	mu       sync.Mutex
 }
 
 // NewLoadBalancer 创建负载均衡器
@@ -175,11 +174,8 @@ func NewWeightedLoadBalancer(addresses []string, weights []int, strategy string)
 	}
 }
 
-// SelectNode 选择一个后端节点
+// SelectNode 选择一个后端节点（无全局锁，各策略独立无锁化）
 func (lb *LoadBalancer) SelectNode() *BackendNode {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
 	switch lb.strategy {
 	case "p2c":
 		return lb.selectP2C()
@@ -287,16 +283,18 @@ func (lb *LoadBalancer) selectWeightedRoundRobin() *BackendNode {
 		return lb.nodes[0]
 	}
 
-	totalWeight := 0
+	totalWeight := int32(0)
 	var best *BackendNode
+	bestCW := int32(-1 << 31) // min int32
 	for _, n := range available {
-		n.currentWeight += n.Weight
-		totalWeight += n.Weight
-		if best == nil || n.currentWeight > best.currentWeight {
+		cw := n.currentWeight.Add(int32(n.Weight))
+		totalWeight += int32(n.Weight)
+		if cw > bestCW {
+			bestCW = cw
 			best = n
 		}
 	}
-	best.currentWeight -= totalWeight
+	best.currentWeight.Add(-totalWeight)
 	return best
 }
 

@@ -5,6 +5,7 @@ package dynclassification
 
 import (
 	"log/slog"
+	"runtime"
 	"sync"
 )
 
@@ -113,18 +114,23 @@ func (sf *SafetyFloor) Arbitrate(result *ClassificationResult) *ClassificationRe
 		return nil
 	}
 
+	// 加锁读取配置，防止与 UpdateConfig 并发竞争
+	sf.mu.RLock()
+	cfg := sf.config
+	sf.mu.RUnlock()
+
 	original := result.Level
 	reason := ""
 
 	// 规则 1：不低于最低安全等级
-	if LevelRank(result.Level) < LevelRank(sf.config.MinLevel) {
-		result.Level = sf.config.MinLevel
+	if LevelRank(result.Level) < LevelRank(cfg.MinLevel) {
+		result.Level = cfg.MinLevel
 		reason = "below_minimum_level"
 	}
 
 	// 规则 2：低置信度触发升级
-	if result.Confidence < sf.config.ConfidenceThreshold {
-		if sf.config.ForceUpgradeOnUncertainty {
+	if result.Confidence < cfg.ConfidenceThreshold {
+		if cfg.ForceUpgradeOnUncertainty {
 			nextLevel := sf.nextLevel(result.Level)
 			if LevelRank(nextLevel) > LevelRank(result.Level) {
 				result.Level = nextLevel
@@ -138,7 +144,7 @@ func (sf *SafetyFloor) Arbitrate(result *ClassificationResult) *ClassificationRe
 	}
 
 	// 记录仲裁事件
-	if reason != "" && sf.config.AuditLog {
+	if reason != "" && cfg.AuditLog {
 		event := ArbitrationEvent{
 			Field:         result.Field,
 			OriginalLevel: original,
@@ -159,11 +165,43 @@ func (sf *SafetyFloor) Arbitrate(result *ClassificationResult) *ClassificationRe
 	return result
 }
 
-// ArbitrateBatch 批量仲裁
+// ArbitrateBatch 批量仲裁（大批量多核并发）
 func (sf *SafetyFloor) ArbitrateBatch(results []*ClassificationResult) []*ClassificationResult {
-	for i, r := range results {
-		results[i] = sf.Arbitrate(r)
+	n := len(results)
+	if n <= 32 {
+		for i, r := range results {
+			results[i] = sf.Arbitrate(r)
+		}
+		return results
 	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+	chunkSize := (n + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		end := start + chunkSize
+		if end > n {
+			end = n
+		}
+		if start >= end {
+			break
+		}
+		wg.Add(1)
+		go func(s, e int) {
+			defer wg.Done()
+			for i := s; i < e; i++ {
+				results[i] = sf.Arbitrate(results[i])
+			}
+		}(start, end)
+	}
+	wg.Wait()
 	return results
 }
 

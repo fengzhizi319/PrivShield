@@ -147,7 +147,7 @@ func (s *TypedServer) DPMean(ctx context.Context, req *pb.DPRequest) (*pb.DPResp
 	return &pb.DPResponse{Result: result}, nil
 }
 
-// KAnonymizeRecord K-匿名单记录
+// KAnonymizeRecord K-匿名单记录（实际执行掩码脱敏，K-匿名语义由表级 KAnonymizeTable 实现）
 func (s *TypedServer) KAnonymizeRecord(_ context.Context, req *pb.KAnonymizeRequest) (*pb.KAnonymizeResponse, error) {
 	result := s.svc.MaskRecord(req.GetRecord())
 	return &pb.KAnonymizeResponse{Result: result}, nil
@@ -273,7 +273,7 @@ func (s *TypedServer) DPNoisyHistogram(_ context.Context, req *pb.DPNoisyHistogr
 }
 
 // DPChunkedCount 分块差分隐私计数
-func (s *TypedServer) DPChunkedCount(_ context.Context, req *pb.DPChunkedCountRequest) (*pb.DPResponse, error) {
+func (s *TypedServer) DPChunkedCount(ctx context.Context, req *pb.DPChunkedCountRequest) (*pb.DPResponse, error) {
 	chunks := req.GetChunks()
 	if len(chunks) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "chunks required")
@@ -283,7 +283,7 @@ func (s *TypedServer) DPChunkedCount(_ context.Context, req *pb.DPChunkedCountRe
 	for _, chunk := range chunks {
 		total += float64(len(chunk.GetValues()))
 	}
-	result, err := s.svc.NoisyCount(context.Background(), int(total), req.GetEpsilon())
+	result, err := s.svc.NoisyCount(ctx, int(total), req.GetEpsilon())
 	if err != nil {
 		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	}
@@ -291,7 +291,7 @@ func (s *TypedServer) DPChunkedCount(_ context.Context, req *pb.DPChunkedCountRe
 }
 
 // DPChunkedSum 分块差分隐私求和
-func (s *TypedServer) DPChunkedSum(_ context.Context, req *pb.DPChunkedSumRequest) (*pb.DPResponse, error) {
+func (s *TypedServer) DPChunkedSum(ctx context.Context, req *pb.DPChunkedSumRequest) (*pb.DPResponse, error) {
 	chunks := req.GetChunks()
 	if len(chunks) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "chunks required")
@@ -304,7 +304,7 @@ func (s *TypedServer) DPChunkedSum(_ context.Context, req *pb.DPChunkedSumReques
 	if sensitivity <= 0 {
 		sensitivity = 1.0
 	}
-	result, err := s.svc.NoisySum(context.Background(), allValues, req.GetEpsilon(), sensitivity)
+	result, err := s.svc.NoisySum(ctx, allValues, req.GetEpsilon(), sensitivity)
 	if err != nil {
 		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	}
@@ -312,7 +312,7 @@ func (s *TypedServer) DPChunkedSum(_ context.Context, req *pb.DPChunkedSumReques
 }
 
 // DPChunkedMean 分块差分隐私均值
-func (s *TypedServer) DPChunkedMean(_ context.Context, req *pb.DPChunkedMeanRequest) (*pb.DPResponse, error) {
+func (s *TypedServer) DPChunkedMean(ctx context.Context, req *pb.DPChunkedMeanRequest) (*pb.DPResponse, error) {
 	chunks := req.GetChunks()
 	if len(chunks) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "chunks required")
@@ -325,7 +325,7 @@ func (s *TypedServer) DPChunkedMean(_ context.Context, req *pb.DPChunkedMeanRequ
 	if clipBound <= 0 {
 		clipBound = 1.0
 	}
-	result, err := s.svc.NoisyMean(context.Background(), allValues, req.GetEpsilon(), req.GetDelta(), clipBound)
+	result, err := s.svc.NoisyMean(ctx, allValues, req.GetEpsilon(), req.GetDelta(), clipBound)
 	if err != nil {
 		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	}

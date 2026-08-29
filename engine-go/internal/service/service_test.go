@@ -329,3 +329,53 @@ func TestDefaultConfig_HasConfigurablePaths(t *testing.T) {
 		t.Errorf("PrivacyYAML = %q, want %q", cfg.PrivacyYAML, "config/privacy.yaml")
 	}
 }
+
+// ──────────────────────────────────────────────
+// P0: 热重载并发安全（atomic.Pointer + RLock）
+// ──────────────────────────────────────────────
+
+func TestClassify_ConcurrentWithReload(t *testing.T) {
+	svc := newTestService(t)
+	var wg sync.WaitGroup
+	// 32 个 goroutine 并发分类
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				res := svc.Classify("phone", "13812345678")
+				if res == nil {
+					t.Error("Classify returned nil")
+					return
+				}
+			}
+		}()
+	}
+	// 2 个 goroutine 并发重载
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				_ = svc.ReloadDynamicProfiles()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// ──────────────────────────────────────────────
+// P0: atomic.Pointer 初始化验证
+// ──────────────────────────────────────────────
+
+func TestNewPrivacyService_ClassifierInitialized(t *testing.T) {
+	svc := newTestService(t)
+	// classifier 应该在构造后立即可用
+	res := svc.Classify("phone", "13812345678")
+	if res == nil {
+		t.Fatal("Classify returned nil after initialization")
+	}
+	if res.Level == "" {
+		t.Fatal("Classify returned empty level")
+	}
+}

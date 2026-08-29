@@ -8,6 +8,7 @@ package profile
 import (
 	"fmt"
 	"os"
+	"sort"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -113,13 +114,7 @@ func (r *Resolver) RecommendDataParams(namespace string, values []float64, rows 
 		n := len(values)
 		sorted := make([]float64, n)
 		copy(sorted, values)
-		for i := 0; i < n; i++ {
-			for j := i + 1; j < n; j++ {
-				if sorted[j] < sorted[i] {
-					sorted[i], sorted[j] = sorted[j], sorted[i]
-				}
-			}
-		}
+		sort.Float64s(sorted)
 
 		p5Idx := int(float64(n) * 0.05)
 		p95Idx := int(float64(n) * 0.95)
@@ -135,7 +130,8 @@ func (r *Resolver) RecommendDataParams(namespace string, values []float64, rows 
 
 		delta := 1e-5
 		if n > 0 {
-			calcDelta := 1.0 / (10.0 * float64(n*n))
+			fn := float64(n)
+			calcDelta := 1.0 / (10.0 * fn * fn)
 			if calcDelta < delta {
 				delta = calcDelta
 			}

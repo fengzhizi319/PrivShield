@@ -70,7 +70,7 @@ func (s *Server) Mask(ctx context.Context, req *pb.MaskRequest) (*pb.MaskRespons
 	maskType := inferMaskType(req.FieldName)
 	result, err := s.svc.MaskField(maskType, req.Value)
 	if err != nil {
-		result = req.Value
+		return nil, status.Errorf(codes.Internal, "mask failed: %v", err)
 	}
 	return &pb.MaskResponse{Result: result}, nil
 }
@@ -89,9 +89,10 @@ func (s *Server) MaskBatch(ctx context.Context, req *pb.MaskBatchRequest) (*pb.M
 		}
 		r, err := s.svc.MaskField(fieldType, v)
 		if err != nil {
-			r = v
+			results[i] = "***"
+		} else {
+			results[i] = r
 		}
-		results[i] = r
 	}
 	return &pb.MaskBatchResponse{Results: results}, nil
 }

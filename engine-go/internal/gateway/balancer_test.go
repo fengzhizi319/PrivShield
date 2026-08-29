@@ -484,3 +484,53 @@ func TestRoundRobin_ConcurrentDistribution(t *testing.T) {
 		t.Errorf("total selections = %d, want 300", total)
 	}
 }
+
+// ──────────────────────────────────────────────
+// P1-9: SelectNode 无全局锁并发测试（weighted_rr 策略）
+// ──────────────────────────────────────────────
+
+func TestSelectNode_WeightedRR_ConcurrentNoLock(t *testing.T) {
+	lb := NewWeightedLoadBalancer(
+		[]string{"a:1", "b:2", "c:3"},
+		[]int{1, 2, 3},
+		"weighted_rr",
+	)
+	var wg sync.WaitGroup
+	counts := make([]int, 3)
+	var mu sync.Mutex
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				node := lb.SelectNode()
+				if node == nil {
+					t.Error("SelectNode returned nil")
+					return
+				}
+				mu.Lock()
+				switch node.Address {
+				case "a:1":
+					counts[0]++
+				case "b:2":
+					counts[1]++
+				case "c:3":
+					counts[2]++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	total := 0
+	for _, c := range counts {
+		total += c
+	}
+	if total != 3000 {
+		t.Errorf("total selections = %d, want 3000", total)
+	}
+	// 权重 1:2:3 应大致按比例分配（允许 20% 偏差）
+	if counts[0] > counts[2] {
+		t.Errorf("weight ordering violated: a(%d) > c(%d)", counts[0], counts[2])
+	}
+}

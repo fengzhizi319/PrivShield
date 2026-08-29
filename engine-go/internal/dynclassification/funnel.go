@@ -11,6 +11,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -144,20 +145,20 @@ func (f *ClassificationFunnel) ClearCache() {
 	}
 }
 
-// CacheStats 返回分类缓存命中统计（聚合所有分片）
+// CacheStats 返回分类缓存命中统计（使用原子计数器，无需遍历分片）
 func (f *ClassificationFunnel) CacheStats() (hits, misses, size int) {
 	if f.cache == nil {
 		return 0, 0, 0
 	}
-	var totalHits, totalMisses, totalSize int
+	hits = int(f.cache.totalHits.Load())
+	misses = int(f.cache.totalMiss.Load())
+	// size 仍需遍历分片（但 hits/misses 已是 O(1)）
 	for _, shard := range f.cache.shards {
 		shard.mu.Lock()
-		totalHits += int(shard.hits)
-		totalMisses += int(shard.misses)
-		totalSize += len(shard.items)
+		size += len(shard.items)
 		shard.mu.Unlock()
 	}
-	return totalHits, totalMisses, totalSize
+	return hits, misses, size
 }
 
 // ──────────────────────────────────────────────
@@ -184,7 +185,9 @@ type lruShard struct {
 }
 
 type classificationCache struct {
-	shards [lruNumShards]*lruShard
+	shards    [lruNumShards]*lruShard
+	totalHits atomic.Int64 // 全局原子命中计数（避免 CacheStats 遍历所有分片）
+	totalMiss atomic.Int64 // 全局原子未命中计数
 }
 
 func newClassificationCache(capacity int) *classificationCache {
@@ -225,10 +228,12 @@ func (c *classificationCache) get(key string) (*ClassificationResult, bool) {
 	if node, exists := shard.items[key]; exists {
 		c.moveToFront(shard, node)
 		shard.hits++
+		c.totalHits.Add(1)
 		cp := *node.val
 		return &cp, true
 	}
 	shard.misses++
+	c.totalMiss.Add(1)
 	return nil, false
 }
 

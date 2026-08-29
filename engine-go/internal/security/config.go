@@ -2,6 +2,7 @@ package security
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -107,13 +108,9 @@ func envFloat(key string, def float64) float64 {
 	if v == "" {
 		return def
 	}
-	f := 0.0
-	_, _ = strings.CutPrefix(v, "")
-	n, err := parseFloat(v)
-	if err == nil {
-		f = n
-	} else {
-		f = def
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
 	}
 	return f
 }
@@ -123,55 +120,14 @@ func envInt(key string, def int) int {
 	if v == "" {
 		return def
 	}
-	n, err := parseInt(v)
+	n, err := strconv.Atoi(v)
 	if err != nil {
 		return def
 	}
 	return n
 }
 
-func parseFloat(s string) (float64, error) {
-	// Simple float parser
-	neg := false
-	if len(s) > 0 && s[0] == '-' {
-		neg = true
-		s = s[1:]
-	}
-	intPart := 0
-	i := 0
-	for ; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
-		intPart = intPart*10 + int(s[i]-'0')
-	}
-	fracPart := 0.0
-	if i < len(s) && s[i] == '.' {
-		i++
-		div := 10.0
-		for ; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
-			fracPart += float64(s[i]-'0') / div
-			div *= 10
-		}
-	}
-	result := float64(intPart) + fracPart
-	if neg {
-		result = -result
-	}
-	return result, nil
-}
-
-func parseInt(s string) (int, error) {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, &parseError{s: s}
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n, nil
-}
-
-type parseError struct{ s string }
-
-func (e *parseError) Error() string { return "invalid number: " + e.s }
+// parseFloat/parseInt 已替换为标准库 strconv，消除手写解析器的整数溢出风险
 
 // parseAPIKeys 解析 "key1:name1:scope1,scope2;key2:name2:scope3" 格式。
 func parseAPIKeys(envKey string) map[string]*KeyConfig {

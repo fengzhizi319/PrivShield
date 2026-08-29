@@ -1,6 +1,6 @@
 # PrivShield 生产级架构优化与高可用演进设计方案
 
-> **版本**：v16.0.0  
+> **版本**：v17.0.0  
 > **适用范围**：`PrivShield` 核心算力引擎、中台微服务群（`service-hub` / `datasource-mgr` / `audit-log`）、控制台 BFF 及 Kubernetes 云原生部署套件。  
 > **核心目标**：针对高并发政务与医疗数据流通场景，全面实现负载均衡、分布式预算一致性、PostgreSQL 原子租约并发、细粒度事件驱动自动扩缩容（KEDA/CronHPA）、异步任务队列与极限压测套件。
 
@@ -156,3 +156,44 @@ RETURNING *;
 - 支持并发模拟 50~500 用户持续压测；
 - 统计并输出 QPS、总吞吐、P50、P90、P95、P99 延迟及错误率；
 - 验证在极限压力下熔断器与多节点负载均衡的稳定性。
+
+---
+
+## 3. 第二轮深度四维架构审计优化（P0~P3）
+
+在第一轮 12 项优化基础上，对 `engine-go` 全模块再次实施全量四维审计（功能性、安全性、可靠性、并发性），发现并修复 **24 项** 新优化点：
+
+### 3.1 P0 — 隐私安全与正确性
+
+- **dpHistogram 绕过预算检查**：3 个 Histogram handler 统一走 `svc.DPHistogram()` 预算核算
+- **脱敏失败返回原文隐私泄露**：Mask RPC 失败返回错误，不再回退原文；MaskBatch 失败返回 `"***"`
+- **dpAggregate/dpGroupBy 忽略预算错误**：检查 `NoisyCount`/`NoisySum` 错误，预算耗尽返回 429
+- **PrivacyService 热重载数据竞争**：`classifier` 字段改为 `atomic.Pointer[RuleEngine]`，无锁读 + 原子替换
+
+### 3.2 P1 — 架构与可靠性
+
+- **RuleEngine 缓存有界化**：16 分片有界缓存 + 随机半量淘汰，替代无界 `sync.Map`
+- **RuleEngine 热重载修复**：从文件重新加载规则，而非空操作
+- **SafetyFloor 读配置加锁**：`Arbitrate` 使用 `RLock` 读取 config
+- **SelectNode 无锁化**：SWRR `currentWeight` 改为 `atomic.Int32`，移除全局互斥锁
+- **LLM 错误响应限制**：`io.LimitReader` 限制最大 1MB 防 OOM
+- **解析溢出修复**：`strconv.ParseFloat`/`strconv.Atoi` 替代手写解析器
+
+### 3.3 P2 — 资源管理与防御
+
+- **gRPC 连接池限制**：`maxPoolSize: 256`
+- **goroutine 优雅退出**：proxyCache 与 rateLimiter 添加 `done` channel
+- **双向流完整等待**：gRPC 流转发等待两个方向都退出
+- **LLM 重试可取消**：重试循环检查 `ctx.Done()` + `select` 替代 `time.Sleep`
+- **排序优化**：冒泡排序→`sort.Float64s`
+- **限流路径归一化**：动态 ID 段替换为 `:id`，防止限流桶爆炸
+- **IsAvailable HEAD 探测**：避免 POST 端点副作用
+
+### 3.4 P3 — 性能与可观测性
+
+- **CacheStats 原子计数器**：`atomic.Int64` O(1) 命中/未命中统计
+- **ArbitrateBatch 并行化**：>32 条目多核分块并发仲裁
+- **DPChunked 使用请求 ctx**：替代 `context.Background()`
+- **Profile 加载错误日志**：`slog.Warn` 记录加载失败
+
+**全量测试验证**：12 个 engine-go 包全部通过 `go test -race -count=1 ./...`，零数据竞争。详见 [`docs/archive/go_engine_architecture_and_ner_cuda_design.md`](../archive/go_engine_architecture_and_ner_cuda_design.md) §7-8。

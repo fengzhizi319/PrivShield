@@ -297,3 +297,26 @@ func TestRateLimiter_AnonymousIPDimension(t *testing.T) {
 		}
 	}
 }
+
+// ──────────────────────────────────────────────
+// P2-19: 限流路径归一化测试
+// ──────────────────────────────────────────────
+
+func TestNormalizeRateLimitPath(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"/v1/agent/process/123", "/v1/agent/process/:id"},
+		{"/v1/privacy/mask", "/v1/privacy/mask"},
+		{"/v1/datasource/42/tables", "/v1/datasource/:id/tables"},
+		{"/v1/audit/550e8400-e29b-41d4-a716-446655440000/detail", "/v1/audit/:id/detail"},
+		{"/health", "/health"},
+	}
+	for _, tt := range tests {
+		got := normalizeRateLimitPath(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeRateLimitPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

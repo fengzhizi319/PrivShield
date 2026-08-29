@@ -12,10 +12,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/dynclassification"
@@ -37,7 +39,7 @@ import (
 
 // PrivacyService 隐私服务编排器
 type PrivacyService struct {
-	classifier   *dynclassification.RuleEngine
+	classifier   atomic.Pointer[dynclassification.RuleEngine]
 	funnel       *dynclassification.ClassificationFunnel
 	safetyFloor  *dynclassification.SafetyFloor
 	budget       *budget.BudgetAccountant
@@ -100,7 +102,9 @@ func NewPrivacyService(cfg Config) (*PrivacyService, error) {
 
 	res := profile.NewResolver()
 	if cfg.ProfilePath != "" {
-		_ = res.LoadFromYAML(cfg.ProfilePath)
+		if err := res.LoadFromYAML(cfg.ProfilePath); err != nil {
+			slog.Warn("profile load failed, using defaults", "path", cfg.ProfilePath, "error", err)
+		}
 	}
 
 	ns := cfg.Namespace
@@ -129,8 +133,7 @@ func NewPrivacyService(cfg Config) (*PrivacyService, error) {
 		return nil, fmt.Errorf("init classification funnel: %w", err)
 	}
 
-	return &PrivacyService{
-		classifier:   engine,
+	svc := &PrivacyService{
 		funnel:       funnel,
 		safetyFloor:  dynclassification.NewSafetyFloor(dynclassification.DefaultSafetyFloorConfig()),
 		budget:       budget.NewBudgetAccountant(cfg.TotalEpsilon, cfg.TotalDelta, cfg.BudgetWindowSec),
@@ -140,7 +143,9 @@ func NewPrivacyService(cfg Config) (*PrivacyService, error) {
 		namespace:    ns,
 		rulesDir:     cfg.RulesDir,
 		privacyYAML:  cfg.PrivacyYAML,
-	}, nil
+	}
+	svc.classifier.Store(engine)
+	return svc, nil
 }
 
 // ──────────────────────────────────────────────
@@ -407,14 +412,26 @@ func (s *PrivacyService) ObfuscateQueryBatch(queries []string, numDecoys int, do
 
 // Classify 动态分类（通过 3 层漏斗：Rule → Small-NER → External LLM Arbitration）
 func (s *PrivacyService) Classify(field, value string) *dynclassification.ClassificationResult {
-	if s.funnel != nil {
-		res, err := s.funnel.Classify(context.Background(), field, value)
+	s.mu.RLock()
+	funnel := s.funnel
+	sf := s.safetyFloor
+	s.mu.RUnlock()
+	if funnel != nil {
+		res, err := funnel.Classify(context.Background(), field, value)
 		if err == nil && res != nil {
 			return res
 		}
 	}
-	result := s.classifier.Classify(field, value)
-	return s.safetyFloor.Arbitrate(result)
+	if engine := s.classifier.Load(); engine != nil {
+		result := engine.Classify(field, value)
+		if sf != nil {
+			return sf.Arbitrate(result)
+		}
+		return result
+	}
+	return &dynclassification.ClassificationResult{
+		Field: field, Level: dynclassification.LevelPublic, Category: "unknown", Confidence: 0.5, MatchedBy: "default",
+	}
 }
 
 // ClassifyBatch 批量分类（多核并发分块加速）
@@ -476,14 +493,26 @@ func (s *PrivacyService) ClassifyBatch(records []map[string]string) []*dynclassi
 
 // classifyInternal 内部分类（不含外部锁，供并行调用）
 func (s *PrivacyService) classifyInternal(field, value string) *dynclassification.ClassificationResult {
-	if s.funnel != nil {
-		res, err := s.funnel.Classify(context.Background(), field, value)
+	s.mu.RLock()
+	funnel := s.funnel
+	sf := s.safetyFloor
+	s.mu.RUnlock()
+	if funnel != nil {
+		res, err := funnel.Classify(context.Background(), field, value)
 		if err == nil && res != nil {
 			return res
 		}
 	}
-	result := s.classifier.Classify(field, value)
-	return s.safetyFloor.Arbitrate(result)
+	if engine := s.classifier.Load(); engine != nil {
+		result := engine.Classify(field, value)
+		if sf != nil {
+			return sf.Arbitrate(result)
+		}
+		return result
+	}
+	return &dynclassification.ClassificationResult{
+		Field: field, Level: dynclassification.LevelPublic, Category: "unknown", Confidence: 0.5, MatchedBy: "default",
+	}
 }
 
 // ──────────────────────────────────────────────
@@ -896,10 +925,10 @@ func (s *PrivacyService) DeepHealthCheck() map[string]interface{} {
 	}
 
 	// 2. rules_loaded — 规则引擎
-	if s.classifier != nil && s.classifier.RuleCount() > 0 {
+	if engine := s.classifier.Load(); engine != nil && engine.RuleCount() > 0 {
 		components["rules_loaded"] = ComponentHealth{
 			Status:  "ok",
-			Message: fmt.Sprintf("%d rules active", s.classifier.RuleCount()),
+			Message: fmt.Sprintf("%d rules active", engine.RuleCount()),
 		}
 	} else {
 		components["rules_loaded"] = ComponentHealth{Status: "degraded", Message: "no classification rules loaded"}
@@ -1106,7 +1135,7 @@ func (s *PrivacyService) ReloadDynamicProfiles() error {
 	}
 	if domainRules, err := dynclassification.LoadRulesFromDir(s.rulesDir); err == nil && len(domainRules) > 0 {
 		if newEngine, err := dynclassification.NewRuleEngine(domainRules); err == nil {
-			s.classifier = newEngine
+			s.classifier.Store(newEngine)
 		}
 	}
 	if s.funnel != nil {

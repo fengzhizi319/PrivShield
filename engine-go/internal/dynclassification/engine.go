@@ -175,7 +175,7 @@ type RuleEngine struct {
 	rules        []RuleDef
 	fieldRegexps []*regexp.Regexp // 字段名匹配正则
 	ac           *ACAutomaton     // 值内容 AC 自动机
-	cache        sync.Map         // LRU 缓存（简化版）
+	cache        *engineCache     // 有界分片缓存（替代无界 sync.Map）
 
 	// 热重载支持（mtime 检测模式，与 WhitelistManager 一致）
 	rulesPath   string
@@ -213,6 +213,9 @@ func NewRuleEngine(rules []RuleDef) (*RuleEngine, error) {
 
 	// 构建 AC 自动机
 	engine.ac.Build()
+
+	// 初始化有界分片缓存
+	engine.cache = newEngineCache(10000)
 	return engine, nil
 }
 
@@ -221,10 +224,10 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 	// 被动检查规则文件热重载
 	e.checkRulesReload()
 
-	// 检查缓存
+	// 检查分片缓存
 	cacheKey := field + ":" + value
-	if cached, ok := e.cache.Load(cacheKey); ok {
-		return cached.(*ClassificationResult)
+	if cached, ok := e.cache.get(cacheKey); ok {
+		return cached
 	}
 
 	// Layer 1: 字段名正则匹配
@@ -237,7 +240,7 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 				Confidence: 0.95,
 				MatchedBy:  "rule:" + e.rules[i].ID,
 			}
-			e.cache.Store(cacheKey, result)
+			e.cache.put(cacheKey, result)
 			return result
 		}
 	}
@@ -257,7 +260,7 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 						Confidence: 0.90,
 						MatchedBy:  "rule:" + rule.ID,
 					}
-					e.cache.Store(cacheKey, result)
+					e.cache.put(cacheKey, result)
 					return result
 				}
 			}
@@ -272,7 +275,7 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 		Confidence: 0.50,
 		MatchedBy:  "default",
 	}
-	e.cache.Store(cacheKey, result)
+	e.cache.put(cacheKey, result)
 	return result
 }
 
@@ -316,18 +319,24 @@ func (e *RuleEngine) checkRulesReload() {
 		return
 	}
 
-	// 重新编译规则（保持旧规则集直到新规则编译成功）
-	newEngine, err := NewRuleEngine(e.rules) // 用当前规则重建，仅更新内部结构
+	// 从文件重新加载规则（修复：之前使用旧规则重建，实际不会更新规则内容）
+	newRules, err := LoadRulesFromDir(filepath.Dir(e.rulesPath))
+	if err != nil || len(newRules) == 0 {
+		return // 加载失败保持旧规则
+	}
+
+	newEngine, err := NewRuleEngine(newRules)
 	if err != nil {
 		return // 编译失败保持旧规则
 	}
 
-	// 原子替换内部状态
+	// 原子替换内部状态（reloadMu 保护写端，Classify 读端通过 cache 分片锁保证可见性）
+	e.rules = newEngine.rules
 	e.fieldRegexps = newEngine.fieldRegexps
 	e.ac = newEngine.ac
 	e.lastModTime = info2.ModTime()
-	// 清空缓存（规则变更旧缓存失效）
-	e.cache = sync.Map{}
+	// 重建缓存（规则变更旧缓存失效）
+	e.cache = newEngineCache(10000)
 }
 
 // ClassifyBatch 批量分类（多核并发分块加速）
@@ -422,4 +431,71 @@ func LoadRulesFromDir(dir string) ([]RuleDef, error) {
 		}
 	}
 	return allRules, nil
+}
+
+// ──────────────────────────────────────────────
+// 有界分片缓存（替代无界 sync.Map，防止内存无限增长）
+// ──────────────────────────────────────────────
+
+const engineCacheNumShards = 16
+
+type engineCacheShard struct {
+	mu       sync.Mutex
+	items    map[string]*ClassificationResult
+	capacity int
+}
+
+type engineCache struct {
+	shards [engineCacheNumShards]*engineCacheShard
+}
+
+func newEngineCache(totalCapacity int) *engineCache {
+	if totalCapacity <= 0 {
+		totalCapacity = 10000
+	}
+	shardCap := (totalCapacity + engineCacheNumShards - 1) / engineCacheNumShards
+	c := &engineCache{}
+	for i := 0; i < engineCacheNumShards; i++ {
+		c.shards[i] = &engineCacheShard{
+			items:    make(map[string]*ClassificationResult, shardCap),
+			capacity: shardCap,
+		}
+	}
+	return c
+}
+
+func (c *engineCache) shardFor(key string) *engineCacheShard {
+	var h uint32 = 2166136261
+	for i := 0; i < len(key); i++ {
+		h ^= uint32(key[i])
+		h *= 16777619
+	}
+	return c.shards[h%engineCacheNumShards]
+}
+
+func (c *engineCache) get(key string) (*ClassificationResult, bool) {
+	shard := c.shardFor(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	r, ok := shard.items[key]
+	return r, ok
+}
+
+func (c *engineCache) put(key string, val *ClassificationResult) {
+	shard := c.shardFor(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	// 分片满时随机淘汰一半（轻量级淘汰策略，避免 LRU 链表开销）
+	if len(shard.items) >= shard.capacity {
+		count := 0
+		target := shard.capacity / 2
+		for k := range shard.items {
+			delete(shard.items, k)
+			count++
+			if count >= target {
+				break
+			}
+		}
+	}
+	shard.items[key] = val
 }

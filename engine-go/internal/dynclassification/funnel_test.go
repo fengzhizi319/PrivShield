@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -374,5 +375,108 @@ func TestLLMClient_IsAvailable_ConcurrentNoStorm(t *testing.T) {
 	// TTL 缓存应大幅减少探测次数，理想情况下只有 1-2 次
 	if actual > 5 {
 		t.Errorf("expected <= 5 HTTP calls with TTL cache, got %d", actual)
+	}
+}
+
+// ──────────────────────────────────────────────
+// P1-5: RuleEngine 有界分片缓存测试
+// ──────────────────────────────────────────────
+
+func TestEngineCache_BoundedCapacity(t *testing.T) {
+	c := newEngineCache(100) // 总容量 100，每分片约 7
+	// 插入远超容量的条目
+	for i := 0; i < 1000; i++ {
+		c.put("key"+strings.Repeat("x", i%50)+"_"+string(rune('A'+i%26)), &ClassificationResult{
+			Field: "f", Level: LevelPublic, Category: "c", Confidence: 0.9, MatchedBy: "test",
+		})
+	}
+	// 验证总条目数不超过容量
+	total := 0
+	for _, shard := range c.shards {
+		shard.mu.Lock()
+		total += len(shard.items)
+		shard.mu.Unlock()
+	}
+	if total > 100 {
+		t.Errorf("cache total = %d, should be <= 100", total)
+	}
+}
+
+func TestEngineCache_ConcurrentAccess(t *testing.T) {
+	c := newEngineCache(1000)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				key := "key_" + string(rune('A'+id)) + "_" + string(rune('0'+j%10))
+				c.put(key, &ClassificationResult{Field: key, Level: LevelPublic})
+				c.get(key)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// ──────────────────────────────────────────────
+// P1-7: SafetyFloor 并发仲裁 + 配置更新
+// ──────────────────────────────────────────────
+
+func TestSafetyFloor_ConcurrentArbitrateAndUpdate(t *testing.T) {
+	sf := NewSafetyFloor(DefaultSafetyFloorConfig())
+	var wg sync.WaitGroup
+	// 16 goroutine 并发仲裁
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				res := &ClassificationResult{
+					Field: "phone", Level: LevelPublic, Confidence: 0.5,
+				}
+				sf.Arbitrate(res)
+			}
+		}()
+	}
+	// 2 goroutine 并发更新配置
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				sf.UpdateConfig(SafetyFloorConfig{
+					MinLevel:                  LevelInternal,
+					ConfidenceThreshold:       0.7,
+					ForceUpgradeOnUncertainty: true,
+					AuditLog:                  true,
+				})
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// ──────────────────────────────────────────────
+// P3-22: ArbitrateBatch 并行测试
+// ──────────────────────────────────────────────
+
+func TestSafetyFloor_ArbitrateBatch_Parallel(t *testing.T) {
+	sf := NewSafetyFloor(DefaultSafetyFloorConfig())
+	results := make([]*ClassificationResult, 200)
+	for i := range results {
+		results[i] = &ClassificationResult{
+			Field: "field", Level: LevelPublic, Confidence: 0.5,
+		}
+	}
+	out := sf.ArbitrateBatch(results)
+	if len(out) != 200 {
+		t.Errorf("ArbitrateBatch returned %d results, want 200", len(out))
+	}
+	// 所有结果应被升级到至少 Internal（默认 ConfidenceThreshold=0.6 > 0.5）
+	for i, r := range out {
+		if LevelRank(r.Level) < LevelRank(LevelInternal) {
+			t.Errorf("result[%d].Level = %q, want >= internal", i, r.Level)
+		}
 	}
 }

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **第二轮 engine-go 深度四维架构审计优化（P0~P3，24 项）**：
+  - **P0 隐私安全**：dpHistogram/dpNoisyHistogram 统一走预算核算；Mask RPC 失败返回错误而非原文（消除隐私泄露）；dpAggregate/dpGroupBy 检查预算错误返回 429；PrivacyService 热重载使用 `atomic.Pointer` 消除数据竞争。
+  - **P1 架构可靠性**：RuleEngine 缓存 16 分片有界化（随机半量淘汰）；热重载从文件重新加载规则；SafetyFloor Arbitrate 加 RLock；SelectNode SWRR 无锁化（atomic.Int32）；LLM 错误响应限制 1MB；strconv 替代手写解析消除溢出。
+  - **P2 资源防御**：gRPC 连接池限制 256；proxyCache/rateLimiter goroutine 优雅退出；gRPC 双向流完整等待；LLM 重试可取消；冒泡排序→sort.Float64s；限流路径归一化（动态 ID→`:id`）；IsAvailable HEAD 探测。
+  - **P3 性能可观测**：CacheStats atomic 计数器；ArbitrateBatch 多核并行（>32 条目）；DPChunked 使用请求 ctx；Profile 加载错误 slog.Warn 日志。
+  - 12 个 engine-go 包全部通过 `go test -race -count=1 ./...`，零数据竞争。
 - **全链路可靠性能力改进与文档同步**：
   - **service-hub 崩溃恢复与自动重试**：启动时区分 pending（保留队列）/ running（标记 failed）孤立任务回收，周期性后台重试失败任务（指数退避延迟 + RetryCount 结构化字段），Prometheus 指标 `orphaned_tasks_recovered_total` / `tasks_retried_total`。
   - **service-hub HTTP/gRPC 双协议 mTLS**：共享 `pkg/tlsutil` 工具库，TLS 1.3 强制最低版本，支持 require/verify/request 客户端认证模式与公钥固定（SPKI Pinning）。

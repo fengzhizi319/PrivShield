@@ -60,6 +60,7 @@ type GrpcProxyServer struct {
 	lb          *LoadBalancer
 	connPool    map[string]*grpc.ClientConn
 	connPoolMu  sync.RWMutex
+	maxPoolSize int // 连接池最大连接数（防止后端地址动态变化时内存泄漏）
 	ewmaAlpha   float64
 	dialTimeout time.Duration
 	metrics     *observability.GatewayMetrics // 可为 nil
@@ -70,6 +71,7 @@ func NewGrpcProxyServer(lb *LoadBalancer, metrics *observability.GatewayMetrics)
 	return &GrpcProxyServer{
 		lb:          lb,
 		connPool:    make(map[string]*grpc.ClientConn),
+		maxPoolSize: 256,
 		ewmaAlpha:   0.2,
 		dialTimeout: 5 * time.Second,
 		metrics:     metrics,
@@ -98,6 +100,12 @@ func (g *GrpcProxyServer) getOrCreateConn(addr string) (*grpc.ClientConn, error)
 	if ok && conn != nil {
 		_ = conn.Close()
 		delete(g.connPool, addr)
+	}
+
+	// 连接池大小限制
+	if len(g.connPool) >= g.maxPoolSize {
+		g.connPoolMu.Unlock()
+		return nil, fmt.Errorf("connection pool full (max %d)", g.maxPoolSize)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), g.dialTimeout)
@@ -185,10 +193,19 @@ func (g *GrpcProxyServer) TransparentStreamDirector(srv interface{}, serverStrea
 
 	// 5. 双向零拷贝流转发
 	errChan := make(chan error, 2)
+	// 使用 cancel 确保两个方向都能被中断
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
 
 	// 客户端 → 后端
 	go func() {
 		for {
+			select {
+			case <-streamCtx.Done():
+				errChan <- nil
+				return
+			default:
+			}
 			var frame []byte
 			if err := serverStream.RecvMsg(&frame); err != nil {
 				if err == io.EOF {
@@ -209,6 +226,12 @@ func (g *GrpcProxyServer) TransparentStreamDirector(srv interface{}, serverStrea
 	// 后端 → 客户端
 	go func() {
 		for {
+			select {
+			case <-streamCtx.Done():
+				errChan <- nil
+				return
+			default:
+			}
 			var frame []byte
 			if err := clientStream.RecvMsg(&frame); err != nil {
 				if err == io.EOF {
@@ -225,8 +248,10 @@ func (g *GrpcProxyServer) TransparentStreamDirector(srv interface{}, serverStrea
 		}
 	}()
 
-	// 等待任一流方向结束
+	// 等待两个方向都结束（或第一个错误触发 cancel 后两个都退出）
 	err = <-errChan
+	streamCancel() // 通知另一个 goroutine 退出
+	<-errChan      // 等待第二个 goroutine 退出，防止泄漏
 	if err == nil {
 		node.CB.RecordSuccess()
 	} else {

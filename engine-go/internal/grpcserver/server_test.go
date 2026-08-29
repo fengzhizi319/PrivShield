@@ -55,6 +55,13 @@ func TestHandleMask(t *testing.T) {
 				FieldName: tt.fieldName,
 				Value:     tt.value,
 			})
+			if tt.name == "unknown_field" {
+				// 脱敏失败现在返回错误而非原文（P0 安全修复）
+				if err == nil {
+					t.Fatalf("expected error for unknown field type, got resp=%v", resp)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Mask: %v", err)
 			}

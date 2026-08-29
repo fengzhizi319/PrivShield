@@ -173,6 +173,14 @@ type shardedRateLimiter struct {
 
 var globalRateLimiter = newShardedRateLimiter()
 
+// rateLimitDone 用于后台清理 goroutine 的优雅退出
+var rateLimitDone = make(chan struct{})
+
+// StopRateLimiter 停止限流器后台清理 goroutine
+func StopRateLimiter() {
+	close(rateLimitDone)
+}
+
 func newShardedRateLimiter() *shardedRateLimiter {
 	limiter := &shardedRateLimiter{}
 	for i := 0; i < numRateLimitShards; i++ {
@@ -184,8 +192,13 @@ func newShardedRateLimiter() *shardedRateLimiter {
 	go func() {
 		ticker := time.NewTicker(3 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			limiter.cleanup(10 * time.Minute)
+		for {
+			select {
+			case <-ticker.C:
+				limiter.cleanup(10 * time.Minute)
+			case <-rateLimitDone:
+				return
+			}
 		}
 	}()
 	return limiter
@@ -261,7 +274,9 @@ func RateLimitMiddleware() gin.HandlerFunc {
 		}
 
 		// 匿名调用者追加客户端 IP 作为分片因子，防止单 IP 洪泛攻击
-		key := identity.ServiceType + ":" + identity.Name + ":" + path
+		// 对 path 做前缀归一化，去除动态 ID 段，防止高基数路径导致桶爆炸
+		normalizedPath := normalizeRateLimitPath(path)
+		key := identity.ServiceType + ":" + identity.Name + ":" + normalizedPath
 		if identity.Name == "anonymous" {
 			clientIP := c.ClientIP()
 			if clientIP != "" {
@@ -278,4 +293,48 @@ func RateLimitMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// normalizeRateLimitPath 将路径中的动态 ID 段替换为 :id 占位符，防止高基数路径导致限流桶爆炸。
+// 识别两类动态段：纯数字（如 123）和 UUID 格式（如 550e8400-e29b-...）。
+func normalizeRateLimitPath(path string) string {
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if isAllDigits(part) || isUUIDFormat(part) {
+			parts[i] = ":id"
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+func isAllDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+func isUUIDFormat(s string) bool {
+	// UUID: 8-4-4-4-12 hex digits
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
 }

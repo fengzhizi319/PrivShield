@@ -626,6 +626,65 @@ flowchart LR
 
 ---
 
+### 8. 第二轮深度四维架构审计优化实施记录（P0~P3）
+
+在第一轮 12 项优化基础上，对 `engine-go` 全模块再次实施全量四维审计（功能性、安全性、可靠性、并发性），发现并修复 **24 项** 新优化点（P0×4 + P1×8 + P2×7 + P3×4，1 项取消）：
+
+#### P0 — 隐私安全与正确性（4 项）
+
+| 优化项 | 涉及模块 | 核心变更 |
+|---|---|---|
+| dpHistogram 绕过预算检查 | `rest/routes.go` | 3 个 Histogram handler 从 `dp.NoisyHistogram()` 改为 `svc.DPHistogram()` 统一走预算核算 |
+| 脱敏失败返回原文隐私泄露 | `rest/routes.go`, `grpcserver/server.go` | Mask RPC 失败返回 `AbortWithError` / `status.Error`，不再回退原文；MaskBatch 失败返回 `"***"` |
+| dpAggregate/dpGroupBy 忽略预算错误 | `rest/routes.go` | 检查 `NoisyCount`/`NoisySum` 返回的 error，预算耗尽时返回 429 |
+| PrivacyService 热重载数据竞争 | `service/service.go` | `classifier` 字段从 `*RuleEngine` 改为 `atomic.Pointer[RuleEngine]`，`Classify` 使用 `Load()` + `RLock` 无锁读 |
+
+#### P1 — 架构与可靠性（8 项）
+
+| 优化项 | 涉及模块 | 核心变更 |
+|---|---|---|
+| RuleEngine sync.Map 缓存无上限 | `dynclassification/engine.go` | 实现 16 分片有界 `engineCache`，每分片满时随机半量淘汰，防止内存无限增长 |
+| RuleEngine 热重载实际无效 | `dynclassification/engine.go` | `checkRulesReload` 改为从 `LoadRulesFromDir(filepath.Dir(e.rulesPath))` 重新加载规则文件 |
+| SafetyFloor.Arbitrate 读 config 无锁 | `dynclassification/safety_floor.go` | `Arbitrate` 使用 `sf.mu.RLock()` 读取 config 到局部变量后再处理 |
+| RuleEngine.checkRulesReload 数据竞争 | `dynclassification/engine.go` | `reloadMu` 保护写端，cache 分片锁保护读端，消除并发读写竞争 |
+| SelectNode 全局互斥锁 | `gateway/balancer.go` | 移除全局 `mu sync.Mutex`，`currentWeight` 改为 `atomic.Int32`，SWRR 无锁化 |
+| LLM callLLM 错误响应无大小限制 | `dynclassification/llm_client.go` | `io.ReadAll(io.LimitReader(resp.Body, 1<<20))` 限制最大 1MB 防 OOM |
+| parseInt/parseFloat 溢出风险 | `security/config.go` | 手写解析器替换为 `strconv.ParseFloat` / `strconv.Atoi`，消除整数溢出 |
+| KAnonymizeRecord 语义错误 | `grpcserver/typed_server.go` | 添加语义说明注释，明确 K-匿名表级操作在单记录场景的行为 |
+
+#### P2 — 资源管理与防御（7 项）
+
+| 优化项 | 涉及模块 | 核心变更 |
+|---|---|---|
+| gRPC 连接池无上限 | `gateway/grpc_proxy.go` | 添加 `maxPoolSize: 256` 连接池容量限制 |
+| 后台 goroutine 无退出机制 | `gateway/http_proxy.go`, `security/auth.go` | proxyCache 与 rateLimiter 添加 `done` channel + `Stop*()` 函数优雅退出 |
+| gRPC 流转发只等一个方向 | `gateway/grpc_proxy.go` | 使用 `context.WithCancel` + 等待两个 errChan 结果，确保双向流都退出 |
+| LLM 重试不检查 context | `dynclassification/llm_client.go` | 重试循环检查 `ctx.Err()` + `select` 替代 `time.Sleep`，可被 context 取消 |
+| 多处冒泡排序 O(n²) | `rest/routes.go`, `profile/resolver.go` | 全部替换为 `sort.Float64s`，同时修复 `n*n` 溢出为 `fn*fn` |
+| 限流 key 高基数 path | `security/auth.go` | `normalizeRateLimitPath` 将动态 ID 段（纯数字/UUID）替换为 `:id`，防止限流桶爆炸 |
+| IsAvailable GET→HEAD 探测 | `dynclassification/llm_client.go` | 改为 `http.NewRequestWithContext(ctx, "HEAD", ...)` 避免 POST 端点副作用 |
+
+#### P3 — 性能与可观测性（4 项）
+
+| 优化项 | 涉及模块 | 核心变更 |
+|---|---|---|
+| CacheStats→atomic 计数器 | `dynclassification/funnel.go` | `classificationCache` 新增 `totalHits`/`totalMiss` atomic.Int64，O(1) 统计 |
+| ArbitrateBatch 串行→并行 | `dynclassification/safety_floor.go` | >32 条目自动多核分块并发仲裁，上限 16 worker |
+| DPChunked* context.Background | `grpcserver/typed_server.go` | 改为使用请求 `ctx`，确保请求取消时分块计算及时终止 |
+| Profile 加载错误静默丢弃 | `service/service.go` | 改为 `slog.Warn` 记录加载失败，便于运维排查 |
+
+**新增测试覆盖**：
+
+- `service_test.go`：`TestClassify_ConcurrentWithReload`（热重载并发安全）、`TestNewPrivacyService_ClassifierInitialized`（初始化验证）
+- `funnel_test.go`：`TestEngineCache_BoundedCapacity`（有界缓存容量）、`TestEngineCache_ConcurrentAccess`（缓存并发安全）、`TestSafetyFloor_ConcurrentArbitrateAndUpdate`（Arbitrate 并发安全）、`TestSafetyFloor_ArbitrateBatch_Parallel`（并行仲裁正确性）
+- `balancer_test.go`：`TestSelectNode_WeightedRR_ConcurrentNoLock`（SWRR 无锁并发分布）
+- `auth_test.go`：`TestNormalizeRateLimitPath`（路径归一化：纯数字/UUID/静态路径）
+- `grpcserver/server_test.go`：更新 `TestHandleMask/unknown_field` 期望错误（匹配 P0 脱敏泄露修复）
+
+**全量测试验证**：12 个 engine-go 包全部通过 `go test -race -count=1 ./...`，零数据竞争。
+
+---
+
 # 第三部分：未实现与待演进功能清单
 
 本部分列出当前代码库中**尚未完全实施或需在生产特定阶段完成的演进项**：
