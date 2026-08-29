@@ -51,12 +51,37 @@ var (
 		IdleConnTimeout:     90 * time.Second,
 		DisableCompression:  false,
 	}
-	proxyCache sync.Map
+	proxyCache    sync.Map // addr -> *proxyEntry
+	proxyCacheTTL = 10 * time.Minute
 )
 
+// proxyEntry 包装 ReverseProxy 及其创建时间，支持 TTL 淘汰
+type proxyEntry struct {
+	proxy   *httputil.ReverseProxy
+	created time.Time
+}
+
+func init() {
+	// 后台协程定期清理超过 TTL 的反向代理实例，防止后端节点动态变化时内存不释放
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			proxyCache.Range(func(key, value any) bool {
+				entry := value.(*proxyEntry)
+				if now.Sub(entry.created) > proxyCacheTTL {
+					proxyCache.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
+}
+
 func getOrCreateReverseProxy(addr string, node *BackendNode, metrics *observability.GatewayMetrics) (*httputil.ReverseProxy, error) {
-	if p, ok := proxyCache.Load(addr); ok {
-		return p.(*httputil.ReverseProxy), nil
+	if entry, ok := proxyCache.Load(addr); ok {
+		return entry.(*proxyEntry).proxy, nil
 	}
 
 	target, err := url.Parse(fmt.Sprintf("http://%s", addr))
@@ -78,7 +103,7 @@ func getOrCreateReverseProxy(addr string, node *BackendNode, metrics *observabil
 		fmt.Fprintf(w, `{"code":"BAD_GATEWAY","message":"后端 %s 不可达","detail":"%s","trace_id":"","timestamp":"%s"}`, node.Address, err.Error(), time.Now().UTC().Format(time.RFC3339Nano))
 	}
 
-	proxyCache.Store(addr, proxy)
+	proxyCache.Store(addr, &proxyEntry{proxy: proxy, created: time.Now()})
 	return proxy, nil
 }
 
@@ -106,7 +131,7 @@ func NewHTTPProxyHandler(lb *LoadBalancer, metrics *observability.GatewayMetrics
 
 		// 上报 InFlight 指标
 		if metrics != nil {
-			metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight))
+			metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight.Load()))
 		}
 
 		// 获取或复用反向代理（内置 BufferPool 与长连接池）
@@ -139,7 +164,7 @@ func NewHTTPProxyHandler(lb *LoadBalancer, metrics *observability.GatewayMetrics
 		if metrics != nil {
 			metrics.SetBackendEWMALatency(node.Address, float64(latency.Seconds()))
 			metrics.SetCircuitBreakerState(node.Address, cbStateString(node.CB.State()))
-			metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight))
+			metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight.Load()))
 			metrics.RecordForwarded(node.Address, c.Writer.Status())
 		}
 	}
@@ -154,7 +179,7 @@ func NewHealthCheckHandler(lb *LoadBalancer) gin.HandlerFunc {
 			state := cbStateString(n.CB.State())
 			results = append(results, gin.H{
 				"address":   n.Address,
-				"in_flight": n.InFlight,
+				"in_flight": n.InFlight.Load(),
 				"ewma_ms":   n.EWMA / 1e6,
 				"cb_state":  state,
 			})

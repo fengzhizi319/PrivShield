@@ -144,19 +144,27 @@ func (f *ClassificationFunnel) ClearCache() {
 	}
 }
 
-// CacheStats 返回分类缓存命中统计
+// CacheStats 返回分类缓存命中统计（聚合所有分片）
 func (f *ClassificationFunnel) CacheStats() (hits, misses, size int) {
 	if f.cache == nil {
 		return 0, 0, 0
 	}
-	f.cache.mu.Lock()
-	defer f.cache.mu.Unlock()
-	return int(f.cache.hits), int(f.cache.misses), len(f.cache.items)
+	var totalHits, totalMisses, totalSize int
+	for _, shard := range f.cache.shards {
+		shard.mu.Lock()
+		totalHits += int(shard.hits)
+		totalMisses += int(shard.misses)
+		totalSize += len(shard.items)
+		shard.mu.Unlock()
+	}
+	return totalHits, totalMisses, totalSize
 }
 
 // ──────────────────────────────────────────────
-// 高并发 LRU 缓存实现
+// 分片高并发 LRU 缓存实现
 // ──────────────────────────────────────────────
+
+const lruNumShards = 16
 
 type lruNode struct {
 	key  string
@@ -165,42 +173,62 @@ type lruNode struct {
 	next *lruNode
 }
 
-type classificationCache struct {
+type lruShard struct {
+	mu       sync.Mutex
 	capacity int
 	items    map[string]*lruNode
 	head     *lruNode
 	tail     *lruNode
-	mu       sync.Mutex
 	hits     int64
 	misses   int64
+}
+
+type classificationCache struct {
+	shards [lruNumShards]*lruShard
 }
 
 func newClassificationCache(capacity int) *classificationCache {
 	if capacity <= 0 {
 		capacity = 10000
 	}
-	c := &classificationCache{
-		capacity: capacity,
-		items:    make(map[string]*lruNode, capacity),
-		head:     &lruNode{},
-		tail:     &lruNode{},
+	shardCap := (capacity + lruNumShards - 1) / lruNumShards
+	c := &classificationCache{}
+	for i := 0; i < lruNumShards; i++ {
+		head := &lruNode{}
+		tail := &lruNode{}
+		head.next = tail
+		tail.prev = head
+		c.shards[i] = &lruShard{
+			capacity: shardCap,
+			items:    make(map[string]*lruNode, shardCap),
+			head:     head,
+			tail:     tail,
+		}
 	}
-	c.head.next = c.tail
-	c.tail.prev = c.head
 	return c
 }
 
-func (c *classificationCache) get(key string) (*ClassificationResult, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *classificationCache) shardFor(key string) *lruShard {
+	var h uint32 = 2166136261
+	for i := 0; i < len(key); i++ {
+		h ^= uint32(key[i])
+		h *= 16777619
+	}
+	return c.shards[h%lruNumShards]
+}
 
-	if node, exists := c.items[key]; exists {
-		c.moveToFront(node)
-		c.hits++
+func (c *classificationCache) get(key string) (*ClassificationResult, bool) {
+	shard := c.shardFor(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if node, exists := shard.items[key]; exists {
+		c.moveToFront(shard, node)
+		shard.hits++
 		cp := *node.val
 		return &cp, true
 	}
-	c.misses++
+	shard.misses++
 	return nil, false
 }
 
@@ -208,55 +236,62 @@ func (c *classificationCache) put(key string, val *ClassificationResult) {
 	if val == nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	shard := c.shardFor(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
-	if node, exists := c.items[key]; exists {
+	if node, exists := shard.items[key]; exists {
 		node.val = val
-		c.moveToFront(node)
+		c.moveToFront(shard, node)
 		return
 	}
 
-	if len(c.items) >= c.capacity {
-		c.removeOldest()
+	if len(shard.items) >= shard.capacity {
+		c.removeOldest(shard)
 	}
 
 	node := &lruNode{key: key, val: val}
-	c.items[key] = node
-	c.addToFront(node)
+	shard.items[key] = node
+	c.addToFront(shard, node)
 }
 
-func (c *classificationCache) addToFront(node *lruNode) {
-	node.next = c.head.next
-	node.prev = c.head
-	c.head.next.prev = node
-	c.head.next = node
+func (c *classificationCache) addToFront(s *lruShard, node *lruNode) {
+	node.next = s.head.next
+	node.prev = s.head
+	s.head.next.prev = node
+	s.head.next = node
 }
 
-func (c *classificationCache) moveToFront(node *lruNode) {
-	c.removeNode(node)
-	c.addToFront(node)
+func (c *classificationCache) moveToFront(s *lruShard, node *lruNode) {
+	c.removeNode(s, node)
+	c.addToFront(s, node)
 }
 
-func (c *classificationCache) removeNode(node *lruNode) {
+func (c *classificationCache) removeNode(s *lruShard, node *lruNode) {
 	node.prev.next = node.next
 	node.next.prev = node.prev
 }
 
-func (c *classificationCache) removeOldest() {
-	last := c.tail.prev
-	if last != c.head {
-		c.removeNode(last)
-		delete(c.items, last.key)
+func (c *classificationCache) removeOldest(s *lruShard) {
+	last := s.tail.prev
+	if last != s.head {
+		c.removeNode(s, last)
+		delete(s.items, last.key)
 	}
 }
 
 func (c *classificationCache) clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.items = make(map[string]*lruNode, c.capacity)
-	c.head.next = c.tail
-	c.tail.prev = c.head
+	for _, shard := range c.shards {
+		shard.mu.Lock()
+		shard.items = make(map[string]*lruNode, shard.capacity)
+		head := &lruNode{}
+		tail := &lruNode{}
+		head.next = tail
+		tail.prev = head
+		shard.head = head
+		shard.tail = tail
+		shard.mu.Unlock()
+	}
 }
 
 // selectHighestRiskEntity 选出风险最高且置信度最高的实体

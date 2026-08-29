@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"math"
+	"sync"
 	"testing"
 	"time"
 )
@@ -372,20 +373,20 @@ func TestInFlight_IncrementDecrement(t *testing.T) {
 
 	node.IncrementInFlight()
 	node.IncrementInFlight()
-	if node.InFlight != 2 {
-		t.Fatalf("InFlight = %d, want 2", node.InFlight)
+	if node.InFlight.Load() != 2 {
+		t.Fatalf("InFlight = %d, want 2", node.InFlight.Load())
 	}
 
 	node.DecrementInFlight()
-	if node.InFlight != 1 {
-		t.Fatalf("InFlight = %d, want 1", node.InFlight)
+	if node.InFlight.Load() != 1 {
+		t.Fatalf("InFlight = %d, want 1", node.InFlight.Load())
 	}
 
 	// 不应减到负数
 	node.DecrementInFlight()
 	node.DecrementInFlight()
-	if node.InFlight != 0 {
-		t.Fatalf("InFlight = %d, want 0 (floor)", node.InFlight)
+	if node.InFlight.Load() != 0 {
+		t.Fatalf("InFlight = %d, want 0 (floor)", node.InFlight.Load())
 	}
 }
 
@@ -400,4 +401,86 @@ func forceOpenCB(node *BackendNode) {
 	node.CB.state = CBOpen
 	node.CB.lastFailure = time.Now()
 	node.CB.cooldown = 1 * time.Hour // 很长冷却期确保保持 Open
+}
+
+// ──────────────────────────────────────────────
+// P3: LB 原子化 InFlight 并发安全测试
+// ──────────────────────────────────────────────
+
+func TestInFlight_ConcurrentSafety(t *testing.T) {
+	lb := NewLoadBalancer([]string{"a:8080"}, "p2c")
+	node := lb.nodes[0]
+
+	var wg sync.WaitGroup
+	// 100 个 goroutine 并发增减
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			node.IncrementInFlight()
+			node.IncrementInFlight()
+			node.DecrementInFlight()
+		}()
+	}
+	wg.Wait()
+
+	// 每个 goroutine 净增 1，最终应为 100
+	if got := node.InFlight.Load(); got != 100 {
+		t.Errorf("InFlight = %d, want 100", got)
+	}
+}
+
+func TestInFlight_NeverNegative(t *testing.T) {
+	node := &BackendNode{Address: "test"}
+
+	var wg sync.WaitGroup
+	// 1000 个 goroutine 并发减少（从 0 开始）
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			node.DecrementInFlight()
+		}()
+	}
+	wg.Wait()
+
+	if got := node.InFlight.Load(); got != 0 {
+		t.Errorf("InFlight = %d, should never go negative, want 0", got)
+	}
+}
+
+// ──────────────────────────────────────────────
+// P3: RoundRobin 无锁并发测试
+// ──────────────────────────────────────────────
+
+func TestRoundRobin_ConcurrentDistribution(t *testing.T) {
+	addrs := []string{"a:8080", "b:8080", "c:8080"}
+	lb := NewLoadBalancer(addrs, "round_robin")
+
+	counts := make(map[string]int)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// 30 个 goroutine 各选 10 次 = 300 次
+	for g := 0; g < 30; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				node := lb.SelectNode()
+				mu.Lock()
+				counts[node.Address]++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	total := 0
+	for _, c := range counts {
+		total += c
+	}
+	if total != 300 {
+		t.Errorf("total selections = %d, want 300", total)
+	}
 }

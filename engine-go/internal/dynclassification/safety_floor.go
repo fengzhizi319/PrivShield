@@ -82,9 +82,11 @@ func DefaultSafetyFloorConfig() SafetyFloorConfig {
 
 // SafetyFloor 安全底线仲裁器
 type SafetyFloor struct {
-	config SafetyFloorConfig
-	mu     sync.RWMutex
-	audit  []ArbitrationEvent
+	config    SafetyFloorConfig
+	mu        sync.RWMutex
+	audit     []ArbitrationEvent // 固定容量 ring buffer
+	auditIdx  int                // 下一个写入位置
+	auditFull bool               // 是否已循环覆盖一轮
 }
 
 // ArbitrationEvent 仲裁事件
@@ -101,6 +103,7 @@ type ArbitrationEvent struct {
 func NewSafetyFloor(config SafetyFloorConfig) *SafetyFloor {
 	return &SafetyFloor{
 		config: config,
+		audit:  make([]ArbitrationEvent, 0, 10000),
 	}
 }
 
@@ -180,24 +183,40 @@ func (sf *SafetyFloor) nextLevel(level SecurityLevel) SecurityLevel {
 	}
 }
 
-// recordEvent 记录仲裁事件
+// recordEvent 记录仲裁事件（ring buffer 固定容量循环覆盖，零分配）
 func (sf *SafetyFloor) recordEvent(event ArbitrationEvent) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
-	sf.audit = append(sf.audit, event)
-	// 限制审计日志大小
-	if len(sf.audit) > 10000 {
-		sf.audit = sf.audit[len(sf.audit)-5000:]
+	cap := cap(sf.audit)
+	if len(sf.audit) < cap {
+		sf.audit = sf.audit[:len(sf.audit)+1]
+		sf.audit[sf.auditIdx] = event
+	} else {
+		sf.audit[sf.auditIdx] = event
+		sf.auditFull = true
 	}
+	sf.auditIdx = (sf.auditIdx + 1) % cap
 }
 
-// AuditEvents 返回仲裁审计事件
+// AuditEvents 返回仲裁审计事件（按时间顺序）
 func (sf *SafetyFloor) AuditEvents() []ArbitrationEvent {
 	sf.mu.RLock()
 	defer sf.mu.RUnlock()
-	events := make([]ArbitrationEvent, len(sf.audit))
-	copy(events, sf.audit)
-	return events
+	n := len(sf.audit)
+	if n == 0 {
+		return nil
+	}
+	if !sf.auditFull {
+		// 尚未循环，直接返回拷贝
+		result := make([]ArbitrationEvent, n)
+		copy(result, sf.audit)
+		return result
+	}
+	// 已循环，从 auditIdx 开始按时间顺序拼接
+	result := make([]ArbitrationEvent, 0, n)
+	result = append(result, sf.audit[sf.auditIdx:]...)
+	result = append(result, sf.audit[:sf.auditIdx]...)
+	return result
 }
 
 // UpdateConfig 更新安全底线配置

@@ -76,12 +76,12 @@ func NewGrpcProxyServer(lb *LoadBalancer, metrics *observability.GatewayMetrics)
 	}
 }
 
-// getOrCreateConn 获取或创建到后端的 gRPC 连接（连接池）
+// getOrCreateConn 获取或创建到后端的 gRPC 连接（连接池 + 健康检查）
 func (g *GrpcProxyServer) getOrCreateConn(addr string) (*grpc.ClientConn, error) {
 	g.connPoolMu.RLock()
 	conn, ok := g.connPool[addr]
 	g.connPoolMu.RUnlock()
-	if ok && conn.GetState().String() != "SHUTDOWN" {
+	if ok && isConnReady(conn) {
 		return conn, nil
 	}
 
@@ -90,8 +90,14 @@ func (g *GrpcProxyServer) getOrCreateConn(addr string) (*grpc.ClientConn, error)
 
 	// 双重检查
 	conn, ok = g.connPool[addr]
-	if ok && conn.GetState().String() != "SHUTDOWN" {
+	if ok && isConnReady(conn) {
 		return conn, nil
+	}
+
+	// 关闭旧连接（如果有）
+	if ok && conn != nil {
+		_ = conn.Close()
+		delete(g.connPool, addr)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), g.dialTimeout)
@@ -106,6 +112,14 @@ func (g *GrpcProxyServer) getOrCreateConn(addr string) (*grpc.ClientConn, error)
 	}
 	g.connPool[addr] = conn
 	return conn, nil
+}
+
+// isConnReady 检查 gRPC 连接是否可复用。
+// IDLE / READY / CONNECTING 均视为可用（连接池应复用，而非反复创建）；
+// 仅 TRANSIENT_FAILURE / SHUTDOWN 视为不可用。
+func isConnReady(conn *grpc.ClientConn) bool {
+	s := conn.GetState().String()
+	return s == "READY" || s == "IDLE" || s == "CONNECTING"
 }
 
 // TransparentStreamDirector 实现 grpc.StreamHandler，
@@ -149,7 +163,7 @@ func (g *GrpcProxyServer) TransparentStreamDirector(srv interface{}, serverStrea
 		node.UpdateEWMA(latency, g.ewmaAlpha)
 		// 上报 Prometheus 指标
 		if g.metrics != nil {
-			g.metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight))
+			g.metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight.Load()))
 			g.metrics.SetBackendEWMALatency(node.Address, latency.Seconds())
 		}
 	}()

@@ -45,6 +45,8 @@ type PrivacyService struct {
 	medicalKang  *medical.Pipeline
 	resolver     *profile.Resolver
 	namespace    string
+	rulesDir     string // 领域规则目录
+	privacyYAML  string // 隐私策略配置文件
 	mu           sync.RWMutex
 }
 
@@ -55,6 +57,8 @@ type Config struct {
 	BudgetWindowSec int64
 	Namespace       string
 	ProfilePath     string
+	RulesDir        string // 领域规则目录（默认 rules/domains）
+	PrivacyYAML     string // 隐私策略配置文件（默认 config/privacy.yaml）
 	LLMEndpoint     string
 	EnableLLM       bool
 	EnableNER       bool
@@ -69,12 +73,17 @@ func DefaultConfig() Config {
 		llmEndpoint = "http://localhost:8000/v1/chat/completions"
 	}
 
+	rulesDir := getEnv("PRIVACY_RULES_DIR", "rules/domains")
+	privacyYAML := getEnv("PRIVACY_CONFIG_FILE", "config/privacy.yaml")
+
 	return Config{
 		TotalEpsilon:    10.0,
 		TotalDelta:      0.01,
 		BudgetWindowSec: 3600,
 		Namespace:       "default",
 		ProfilePath:     "",
+		RulesDir:        rulesDir,
+		PrivacyYAML:     privacyYAML,
 		LLMEndpoint:     llmEndpoint,
 		EnableLLM:       enableLLM,
 		EnableNER:       true,
@@ -129,6 +138,8 @@ func NewPrivacyService(cfg Config) (*PrivacyService, error) {
 		medicalKang:  medical.NewKangyangPipeline(),
 		resolver:     res,
 		namespace:    ns,
+		rulesDir:     cfg.RulesDir,
+		privacyYAML:  cfg.PrivacyYAML,
 	}, nil
 }
 
@@ -181,9 +192,9 @@ func (s *PrivacyService) MaskBatchContext(ctx context.Context, records []map[str
 		return nil, err
 	}
 
-	if n <= 64 {
+	if n <= 16 {
 		for i, r := range records {
-			if i%32 == 0 && ctx.Err() != nil {
+			if i%8 == 0 && ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			results[i] = s.MaskRecord(r)
@@ -266,19 +277,28 @@ func (s *PrivacyService) NoisyMean(ctx context.Context, values []float64, epsilo
 	return dp.NoisyMean(values, epsilon, delta, clipBound), nil
 }
 
-// DPHistogram 差分隐私直方图（无预算消耗，纯噪声添加）
-func (s *PrivacyService) DPHistogram(trueCounts map[string]int, epsilon float64) map[string]float64 {
-	return dp.NoisyHistogram(trueCounts, epsilon)
+// DPHistogram 差分隐私直方图（带预算消耗）
+func (s *PrivacyService) DPHistogram(ctx context.Context, trueCounts map[string]int, epsilon float64) (map[string]float64, error) {
+	if !s.budget.Consume(epsilon, 0) {
+		return nil, fmt.Errorf("privacy budget exhausted")
+	}
+	return dp.NoisyHistogram(trueCounts, epsilon), nil
 }
 
 // DPVectorSum 差分隐私向量求和
-func (s *PrivacyService) DPVectorSum(vectors [][]float64, maxNorm, epsilon float64) []float64 {
-	return dp.VectorSum(vectors, maxNorm, epsilon)
+func (s *PrivacyService) DPVectorSum(ctx context.Context, vectors [][]float64, maxNorm, epsilon float64) ([]float64, error) {
+	if !s.budget.Consume(epsilon, 0) {
+		return nil, fmt.Errorf("privacy budget exhausted")
+	}
+	return dp.VectorSum(vectors, maxNorm, epsilon), nil
 }
 
 // DPVectorMean 差分隐私向量均值
-func (s *PrivacyService) DPVectorMean(vectors [][]float64, maxNorm, epsilon float64) []float64 {
-	return dp.VectorMean(vectors, maxNorm, epsilon)
+func (s *PrivacyService) DPVectorMean(ctx context.Context, vectors [][]float64, maxNorm, epsilon float64) ([]float64, error) {
+	if !s.budget.Consume(epsilon, 0) {
+		return nil, fmt.Errorf("privacy budget exhausted")
+	}
+	return dp.VectorMean(vectors, maxNorm, epsilon), nil
 }
 
 // ──────────────────────────────────────────────
@@ -333,13 +353,51 @@ func (s *PrivacyService) ObfuscateQuery(query string, numDecoys int, domain stri
 	return qol.InjectDecoys(query, numDecoys, domain)
 }
 
-// ObfuscateQueryBatch 批量查询混淆（与 Python obfuscate_query_batch 对齐）
+// ObfuscateQueryBatch 批量查询混淆（多核并发分块加速）
 func (s *PrivacyService) ObfuscateQueryBatch(queries []string, numDecoys int, domain string) [][]string {
-	results := make([][]string, len(queries))
-	for i, q := range queries {
-		injected, _ := qol.InjectDecoys(q, numDecoys, domain)
-		results[i] = injected
+	n := len(queries)
+	results := make([][]string, n)
+	if n == 0 {
+		return results
 	}
+
+	if n <= 32 {
+		for i, q := range queries {
+			injected, _ := qol.InjectDecoys(q, numDecoys, domain)
+			results[i] = injected
+		}
+		return results
+	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+	chunkSize := (n + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		end := start + chunkSize
+		if end > n {
+			end = n
+		}
+		if start >= end {
+			break
+		}
+		wg.Add(1)
+		go func(s, e int) {
+			defer wg.Done()
+			for i := s; i < e; i++ {
+				injected, _ := qol.InjectDecoys(queries[i], numDecoys, domain)
+				results[i] = injected
+			}
+		}(start, end)
+	}
+	wg.Wait()
 	return results
 }
 
@@ -359,15 +417,73 @@ func (s *PrivacyService) Classify(field, value string) *dynclassification.Classi
 	return s.safetyFloor.Arbitrate(result)
 }
 
-// ClassifyBatch 批量分类
+// ClassifyBatch 批量分类（多核并发分块加速）
 func (s *PrivacyService) ClassifyBatch(records []map[string]string) []*dynclassification.ClassificationResult {
-	var results []*dynclassification.ClassificationResult
+	// 展平为 (field, value) 对列表
+	type fv struct{ field, value string }
+	var flat []fv
 	for _, record := range records {
 		for field, value := range record {
-			results = append(results, s.Classify(field, value))
+			flat = append(flat, fv{field, value})
 		}
 	}
-	return results
+	n := len(flat)
+	if n == 0 {
+		return nil
+	}
+
+	// 小批量走串行快速路径
+	if n <= 32 {
+		results := make([]*dynclassification.ClassificationResult, n)
+		for i, item := range flat {
+			results[i] = s.Classify(item.field, item.value)
+		}
+		return results
+	}
+
+	// 大批量多核分块并行
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+	chunkSize := (n + numWorkers - 1) / numWorkers
+	allResults := make([]*dynclassification.ClassificationResult, n)
+	var wg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		end := start + chunkSize
+		if end > n {
+			end = n
+		}
+		if start >= end {
+			break
+		}
+		wg.Add(1)
+		go func(startIdx, endIdx int) {
+			defer wg.Done()
+			for i := startIdx; i < endIdx; i++ {
+				allResults[i] = s.classifyInternal(flat[i].field, flat[i].value)
+			}
+		}(start, end)
+	}
+	wg.Wait()
+	return allResults
+}
+
+// classifyInternal 内部分类（不含外部锁，供并行调用）
+func (s *PrivacyService) classifyInternal(field, value string) *dynclassification.ClassificationResult {
+	if s.funnel != nil {
+		res, err := s.funnel.Classify(context.Background(), field, value)
+		if err == nil && res != nil {
+			return res
+		}
+	}
+	result := s.classifier.Classify(field, value)
+	return s.safetyFloor.Arbitrate(result)
 }
 
 // ──────────────────────────────────────────────
@@ -981,13 +1097,14 @@ func (s *PrivacyService) RecommendParams(namespace string, values []float64, row
 }
 
 // ReloadDynamicProfiles 重新加载动态分类规则与隐私策略配置。
+// 路径从 Config 中读取（支持环境变量 PRIVACY_CONFIG_FILE / PRIVACY_RULES_DIR），不再硬编码。
 func (s *PrivacyService) ReloadDynamicProfiles() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.resolver != nil {
-		_ = s.resolver.LoadFromYAML("config/privacy.yaml")
+		_ = s.resolver.LoadFromYAML(s.privacyYAML)
 	}
-	if domainRules, err := dynclassification.LoadRulesFromDir("rules/domains"); err == nil && len(domainRules) > 0 {
+	if domainRules, err := dynclassification.LoadRulesFromDir(s.rulesDir); err == nil && len(domainRules) > 0 {
 		if newEngine, err := dynclassification.NewRuleEngine(domainRules); err == nil {
 			s.classifier = newEngine
 		}

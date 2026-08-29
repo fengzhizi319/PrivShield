@@ -597,6 +597,35 @@ flowchart LR
 
 ---
 
+### 7. 生产级性能与安全优化实施记录（P0~P3）
+
+基于对 `engine-go` 全模块四维架构审计（功能性、安全性、可靠性、并发性），实施以下 12 项优化：
+
+| 优先级 | 优化项 | 涉及模块 | 核心变更 |
+|---|---|---|---|
+| **P0** | ClassifyBatch 并行化 | `service/service.go` | 大批量（>32 字段）多核分块并行，小批量串行快速路径 |
+| **P0** | DP API 预算检查补全 | `service/service.go`, `rest/routes.go`, `grpcserver/typed_server.go` | DPVectorSum/DPVectorMean 统一走 service 层预算检查，REST/gRPC 返回 429 |
+| **P0** | ObfuscateQueryBatch 并行化 | `service/service.go` | 超过 32 条查询自动多核分块，上限 16 worker |
+| **P1** | pprof 端点环境保护 | `rest/routes.go`, `security/identity.go` | `PRIVACY_PPROF_ENABLED=true` 才注册，权限映射为 `ops:admin` |
+| **P1** | LLM IsAvailable TTL 缓存 | `dynclassification/llm_client.go` | 5s TTL + `sync.Mutex` 串行化探测，防止高并发探测风暴 |
+| **P1** | 限流器匿名 IP 维度 | `security/auth.go` | 匿名调用者追加 `ClientIP()` 作为分片因子，防止单 IP 洪泛 |
+| **P2** | SafetyFloor 审计 ring buffer | `dynclassification/safety_floor.go` | 固定容量 10000 循环覆盖，零分配，按时间顺序返回 |
+| **P2** | proxyCache TTL 淘汰 | `gateway/http_proxy.go` | 10 分钟 TTL + 2 分钟后台清理，防止旧后端实例内存泄漏 |
+| **P2** | gRPC 连接健康检查 | `gateway/grpc_proxy.go` | `isConnReady` 接受 IDLE/READY/CONNECTING，拒绝 TRANSIENT_FAILURE/SHUTDOWN |
+| **P2** | Config 去硬编码路径 | `service/service.go` | `RulesDir`/`PrivacyYAML` 从环境变量加载，支持 `PRIVACY_RULES_DIR`/`PRIVACY_CONFIG_FILE` |
+| **P3** | LRU 缓存 16 分片 | `dynclassification/funnel.go` | FNV-1a 哈希分片，每分片独立互斥锁，消除单锁瓶颈 |
+| **P3** | LB InFlight 原子化 | `gateway/balancer.go` | `atomic.Int64` 替代互斥锁，RoundRobin 用 `atomic.Add` 无锁轮询 |
+
+**新增测试覆盖**：
+
+- `service_test.go`：ClassifyBatch 并行正确性 + 并发安全、DP 预算耗尽、ObfuscateQueryBatch 大批量并行、Config 可配置路径
+- `funnel_test.go`：分片 LRU 基础读写/淘汰/并发安全/clear、SafetyFloor ring buffer 固定容量/时序、LLM IsAvailable TTL 缓存/并发防风暴
+- `balancer_test.go`：InFlight 原子并发安全/永不为负、RoundRobin 无锁并发分布
+- `grpc_proxy_test.go`：isConnReady 状态接受性
+- `auth_test.go`：pprof 权限映射 `ops:admin`、限流 IP 维度隔离
+
+---
+
 # 第三部分：未实现与待演进功能清单
 
 本部分列出当前代码库中**尚未完全实施或需在生产特定阶段完成的演进项**：

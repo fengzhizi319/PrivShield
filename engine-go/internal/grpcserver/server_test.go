@@ -143,10 +143,10 @@ func TestHandleDP(t *testing.T) {
 	srv := newTestServer(t)
 	ctx := context.Background()
 
-	// 1. DPCount
+	// 1. DPCount（ε=2.0，true=20，Laplace scale=0.5，负值概率 < 10^-17）
 	respCount, err := srv.DPCount(ctx, &pb.DPRequest{
-		Values:  []float64{1, 2, 3, 4, 5},
-		Epsilon: 0.1,
+		Values:  make([]float64, 20),
+		Epsilon: 2.0,
 	})
 	if err != nil {
 		t.Fatalf("DPCount: %v", err)
@@ -158,7 +158,7 @@ func TestHandleDP(t *testing.T) {
 	// 2. DPSum
 	respSum, err := srv.DPSum(ctx, &pb.DPRequest{
 		Values:  []float64{10, 20, 30},
-		Epsilon: 0.1,
+		Epsilon: 1.0,
 	})
 	if err != nil {
 		t.Fatalf("DPSum: %v", err)
@@ -170,7 +170,7 @@ func TestHandleDP(t *testing.T) {
 	// 3. DPMean
 	respMean, err := srv.DPMean(ctx, &pb.DPRequest{
 		Values:    []float64{10, 20, 30},
-		Epsilon:   0.1,
+		Epsilon:   1.0,
 		ClipUpper: 100,
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestHandleDP(t *testing.T) {
 	// 4. DPNoisyCount
 	respNoisyCount, err := srv.DPNoisyCount(ctx, &pb.DPNoisyCountRequest{
 		TrueCount: 100,
-		Epsilon:   0.1,
+		Epsilon:   1.0,
 	})
 	if err != nil {
 		t.Fatalf("DPNoisyCount: %v", err)
@@ -195,7 +195,7 @@ func TestHandleDP(t *testing.T) {
 	// 5. DPNoisySum
 	respNoisySum, err := srv.DPNoisySum(ctx, &pb.DPNoisySumRequest{
 		TrueSum:     500.0,
-		Epsilon:     0.1,
+		Epsilon:     1.0,
 		Sensitivity: 1.0,
 	})
 	if err != nil {
@@ -209,7 +209,7 @@ func TestHandleDP(t *testing.T) {
 	respNoisyMean, err := srv.DPNoisyMean(ctx, &pb.DPNoisyMeanRequest{
 		TrueSum:   200.0,
 		TrueCount: 10.0,
-		Epsilon:   0.1,
+		Epsilon:   1.0,
 		ClipUpper: 50.0,
 	})
 	if err != nil {

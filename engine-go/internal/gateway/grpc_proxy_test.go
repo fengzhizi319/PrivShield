@@ -84,13 +84,40 @@ func TestGrpcProxyGetOrCreateConn(t *testing.T) {
 		t.Fatal("conn is nil")
 	}
 
-	// 第二次应该复用
+	// 第二次应该复用（isConnReady 应接受 IDLE/CONNECTING 状态）
 	conn2, err := proxy.getOrCreateConn("127.0.0.1:50051")
 	if err != nil {
 		t.Fatalf("getOrCreateConn (cached): %v", err)
 	}
 	if conn != conn2 {
 		t.Error("expected same connection from pool")
+	}
+}
+
+// ──────────────────────────────────────────────
+// P2: isConnReady 状态检查测试
+// ──────────────────────────────────────────────
+
+func TestIsConnReady_AcceptsIdleAndConnecting(t *testing.T) {
+	// 创建连接（未连接服务端，状态为 IDLE 或 CONNECTING）
+	conn, err := grpc.DialContext(context.Background(), "127.0.0.1:59999",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})),
+	)
+	if err != nil {
+		t.Fatalf("DialContext: %v", err)
+	}
+	defer conn.Close()
+
+	// 新连接应为 IDLE 或 CONNECTING，均应视为可用
+	state := conn.GetState().String()
+	ready := isConnReady(conn)
+	if state == "IDLE" || state == "CONNECTING" {
+		if !ready {
+			t.Errorf("isConnReady should accept state %q", state)
+		}
+	} else {
+		t.Logf("connection state is %q (may have transitioned), isConnReady=%v", state, ready)
 	}
 }
 

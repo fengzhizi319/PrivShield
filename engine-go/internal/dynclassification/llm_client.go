@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -88,6 +89,12 @@ type LLMClient struct {
 	lastFailure time.Time
 	cooldown    time.Duration
 	cbMu        sync.RWMutex
+
+	// IsAvailable TTL 缓存，防止高并发下探测风暴
+	availCache     atomic.Bool
+	availCacheTime atomic.Int64 // Unix nano
+	availCacheTTL  time.Duration
+	availProbeMu   sync.Mutex // 串行化缓存刷新，防止并发探测风暴
 }
 
 // NewLLMClient 创建 LLM 客户端
@@ -97,9 +104,10 @@ func NewLLMClient(config LLMClientConfig) *LLMClient {
 		client: &http.Client{
 			Timeout: config.Timeout,
 		},
-		sem:      make(chan struct{}, config.MaxConcurrency),
-		cbState:  CircuitClosed,
-		cooldown: 15 * time.Second,
+		sem:           make(chan struct{}, config.MaxConcurrency),
+		cbState:       CircuitClosed,
+		cooldown:      15 * time.Second,
+		availCacheTTL: 5 * time.Second,
 	}
 }
 
@@ -264,18 +272,43 @@ func (c *LLMClient) callLLM(ctx context.Context, prompt string) (*LLMResponse, e
 	return &llmResp, nil
 }
 
-// IsAvailable 检查 LLM 服务是否可用
+// IsAvailable 检查 LLM 服务是否可用（带 TTL 缓存 + singleflight 串行化探测）。
+// 缓存有效期 5 秒，过期后仅一个 goroutine 执行实际探测，其余等待复用结果。
 func (c *LLMClient) IsAvailable(ctx context.Context) bool {
+	// 快速路径：缓存有效时直接返回
+	cachedTime := time.Unix(0, c.availCacheTime.Load())
+	if time.Since(cachedTime) < c.availCacheTTL {
+		return c.availCache.Load()
+	}
+
+	// 慢路径：串行化探测，只有第一个 goroutine 执行 HTTP 请求
+	c.availProbeMu.Lock()
+	defer c.availProbeMu.Unlock()
+
+	// 双重检查：可能在等锁期间已被其他 goroutine 刷新
+	cachedTime = time.Unix(0, c.availCacheTime.Load())
+	if time.Since(cachedTime) < c.availCacheTTL {
+		return c.availCache.Load()
+	}
+
+	// 实际探测
 	req, err := http.NewRequestWithContext(ctx, "GET", c.config.Endpoint, nil)
 	if err != nil {
+		c.availCache.Store(false)
+		c.availCacheTime.Store(time.Now().UnixNano())
 		return false
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
+		c.availCache.Store(false)
+		c.availCacheTime.Store(time.Now().UnixNano())
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode < 500
+	available := resp.StatusCode < 500
+	c.availCache.Store(available)
+	c.availCacheTime.Store(time.Now().UnixNano())
+	return available
 }
 
 // Close 关闭客户端

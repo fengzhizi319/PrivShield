@@ -260,7 +260,14 @@ func RateLimitMiddleware() gin.HandlerFunc {
 			identity = &Identity{ServiceType: "external", Name: "anonymous"}
 		}
 
+		// 匿名调用者追加客户端 IP 作为分片因子，防止单 IP 洪泛攻击
 		key := identity.ServiceType + ":" + identity.Name + ":" + path
+		if identity.Name == "anonymous" {
+			clientIP := c.ClientIP()
+			if clientIP != "" {
+				key += ":" + clientIP
+			}
+		}
 		rps := settings.RateLimitDefaultRPS
 		burst := float64(settings.RateLimitDefaultBurst)
 

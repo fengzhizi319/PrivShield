@@ -51,6 +51,9 @@ func TestPermissionForRESTPath(t *testing.T) {
 		{"/v1/privacy/budget", "privacy:budget"},
 		{"/v1/agent/process", "agent:process"},
 		{"/v1/ops/diagnostics", "ops:diagnostics"},
+		{"/debug/pprof", "ops:admin"},
+		{"/debug/pprof/heap", "ops:admin"},
+		{"/debug/pprof/goroutine", "ops:admin"},
 		{"/unknown", "*"},
 	}
 	for _, tt := range tests {
@@ -205,5 +208,92 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
 		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+}
+
+// ──────────────────────────────────────────────
+// P1: pprof 端点需要 ops:admin 权限
+// ──────────────────────────────────────────────
+
+func TestPprofRequiresOpsAdmin(t *testing.T) {
+	ResetSettings()
+	t.Setenv("PRIVACY_AUTH_ENABLED", "true")
+	// 只有 ops:diagnostics 权限，没有 ops:admin
+	t.Setenv("PRIVACY_AUTH_INTERNAL_API_KEYS", "diag-key-1234567890:diag-svc:ops:diagnostics")
+	ResetSettings()
+
+	r := gin.New()
+	r.Use(AuthMiddleware())
+	r.GET("/debug/pprof/heap", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest("GET", "/debug/pprof/heap", nil)
+	req.Header.Set("Authorization", "Bearer diag-key-1234567890")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for pprof without ops:admin, got %d", rec.Code)
+	}
+}
+
+func TestPprofAllowsOpsAdmin(t *testing.T) {
+	ResetSettings()
+	t.Setenv("PRIVACY_AUTH_ENABLED", "true")
+	t.Setenv("PRIVACY_AUTH_INTERNAL_API_KEYS", "admin-key-1234567890:admin-svc:ops:admin")
+	ResetSettings()
+
+	r := gin.New()
+	r.Use(AuthMiddleware())
+	r.GET("/debug/pprof/heap", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest("GET", "/debug/pprof/heap", nil)
+	req.Header.Set("Authorization", "Bearer admin-key-1234567890")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for pprof with ops:admin, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ──────────────────────────────────────────────
+// P1: 限流器匿名调用者 IP 维度测试
+// ──────────────────────────────────────────────
+
+func TestRateLimiter_AnonymousIPDimension(t *testing.T) {
+	ResetSettings()
+	t.Setenv("PRIVACY_AUTH_ENABLED", "false")
+	t.Setenv("PRIVACY_RATE_LIMIT_ENABLED", "true")
+	// 极低限流：1 RPS，burst=2
+	t.Setenv("PRIVACY_RATE_LIMIT_DEFAULT_RPS", "1")
+	t.Setenv("PRIVACY_RATE_LIMIT_DEFAULT_BURST", "2")
+	ResetSettings()
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		// 注入匿名身份
+		c.Set(IdentityContextKey, &Identity{ServiceType: "external", Name: "anonymous"})
+		c.Next()
+	})
+	r.Use(RateLimitMiddleware())
+	r.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// 来自不同 IP 的请求应分别计数
+	for _, ip := range []string{"1.1.1.1", "2.2.2.2"} {
+		for i := 0; i < 2; i++ {
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.RemoteAddr = ip + ":12345"
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Errorf("IP %s request %d: expected 200, got %d", ip, i+1, rec.Code)
+			}
+		}
 	}
 }

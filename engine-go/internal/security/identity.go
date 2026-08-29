@@ -80,6 +80,8 @@ func PermissionForRESTPath(path string) string {
 		return "pipeline:process"
 	case hasPrefix(path, "/v1/ops/"):
 		return "ops:diagnostics"
+	case hasPrefix(path, "/debug/pprof"):
+		return "ops:admin"
 	}
 	return "*"
 }

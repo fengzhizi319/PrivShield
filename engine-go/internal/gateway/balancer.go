@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,11 +20,11 @@ type BackendNode struct {
 	Address       string
 	Weight        int
 	currentWeight int            // Nginx SWRR 当前权重（动态调整）
-	InFlight      int64          // 当前在途请求数
+	InFlight      atomic.Int64   // 当前在途请求数（原子操作，与 EWMA 锁分离）
 	EWMA          float64        // 指数移动加权平均延迟
 	LastUsed      time.Time      // 最后使用时间
 	CB            CircuitBreaker // 熔断器
-	mu            sync.Mutex
+	eWMAMu        sync.Mutex     // 仅保护 EWMA 字段
 }
 
 // ──────────────────────────────────────────────
@@ -132,8 +133,8 @@ func (cb *CircuitBreaker) State() CBState {
 // LoadBalancer 自适应负载均衡器
 type LoadBalancer struct {
 	nodes    []*BackendNode
-	strategy string // "p2c" | "round_robin" | "least_conn" | "weighted_rr" | "weighted_random"
-	rrIndex  int    // round-robin 计数器
+	strategy string       // "p2c" | "round_robin" | "least_conn" | "weighted_rr" | "weighted_random"
+	rrIndex  atomic.Int32 // round-robin 原子计数器（无锁化）
 	mu       sync.Mutex
 }
 
@@ -225,8 +226,8 @@ func (lb *LoadBalancer) selectP2C() *BackendNode {
 
 	a, b := available[i], available[j]
 	// 选择负载较低的（在途请求 * EWMA 延迟）
-	scoreA := float64(a.InFlight+1) * math.Max(a.EWMA, 0.001)
-	scoreB := float64(b.InFlight+1) * math.Max(b.EWMA, 0.001)
+	scoreA := float64(a.InFlight.Load()+1) * math.Max(a.EWMA, 0.001)
+	scoreB := float64(b.InFlight.Load()+1) * math.Max(b.EWMA, 0.001)
 
 	if scoreA <= scoreB {
 		return a
@@ -234,7 +235,7 @@ func (lb *LoadBalancer) selectP2C() *BackendNode {
 	return b
 }
 
-// selectRoundRobin 轮询
+// selectRoundRobin 无锁轮询（atomic fetch-and-add）
 func (lb *LoadBalancer) selectRoundRobin() *BackendNode {
 	available := make([]*BackendNode, 0, len(lb.nodes))
 	for _, n := range lb.nodes {
@@ -245,13 +246,11 @@ func (lb *LoadBalancer) selectRoundRobin() *BackendNode {
 	if len(available) == 0 {
 		return lb.nodes[0]
 	}
-	lb.rrIndex = lb.rrIndex % len(available)
-	node := available[lb.rrIndex]
-	lb.rrIndex++
-	return node
+	idx := int(lb.rrIndex.Add(1)-1) % len(available)
+	return available[idx]
 }
 
-// selectLeastConn 最少连接
+// selectLeastConn 最少连接（原子读取 InFlight）
 func (lb *LoadBalancer) selectLeastConn() *BackendNode {
 	var best *BackendNode
 	bestInFlight := int64(math.MaxInt64)
@@ -259,8 +258,9 @@ func (lb *LoadBalancer) selectLeastConn() *BackendNode {
 		if !n.CB.Allow() {
 			continue
 		}
-		if n.InFlight < bestInFlight {
-			bestInFlight = n.InFlight
+		inFlight := n.InFlight.Load()
+		if inFlight < bestInFlight {
+			bestInFlight = inFlight
 			best = n
 		}
 	}
@@ -332,27 +332,29 @@ func (lb *LoadBalancer) selectWeightedRandom() *BackendNode {
 	return available[len(available)-1]
 }
 
-// UpdateEWMA 更新节点 EWMA 延迟
+// UpdateEWMA 更新节点 EWMA 延迟（独立 eWMAMu，不与 InFlight 竞争）
 func (n *BackendNode) UpdateEWMA(latency time.Duration, alpha float64) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	n.eWMAMu.Lock()
+	defer n.eWMAMu.Unlock()
 	n.EWMA = alpha*float64(latency) + (1-alpha)*n.EWMA
 	n.LastUsed = time.Now()
 }
 
-// IncrementInFlight 增加在途请求数
+// IncrementInFlight 增加在途请求数（原子操作）
 func (n *BackendNode) IncrementInFlight() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.InFlight++
+	n.InFlight.Add(1)
 }
 
-// DecrementInFlight 减少在途请求数
+// DecrementInFlight 减少在途请求数（原子操作）
 func (n *BackendNode) DecrementInFlight() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.InFlight > 0 {
-		n.InFlight--
+	for {
+		old := n.InFlight.Load()
+		if old <= 0 {
+			return
+		}
+		if n.InFlight.CompareAndSwap(old, old-1) {
+			return
+		}
 	}
 }
 

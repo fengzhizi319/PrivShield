@@ -48,8 +48,10 @@ func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
 	r.Use(security.AuthMiddleware())
 	r.Use(security.RateLimitMiddleware())
 
-	// 性能分析端点
-	registerPprof(r)
+	// 性能分析端点（环境变量控制，生产环境默认关闭）
+	if getEnvDefault("PRIVACY_PPROF_ENABLED", "false") == "true" {
+		registerPprof(r)
+	}
 
 	// 健康检查（无前缀，与 Python /health, /livez, /readyz 对齐）
 	r.GET("/health", healthHandlerWithService(svc))
@@ -628,7 +630,11 @@ func dpVectorSumHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		result := svc.DPVectorSum(req.Vectors, req.MaxNorm, req.Epsilon)
+		result, err := svc.DPVectorSum(c.Request.Context(), req.Vectors, req.MaxNorm, req.Epsilon)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"noisy_vector": result})
 	}
 }
@@ -644,7 +650,11 @@ func dpVectorMeanHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		result := svc.DPVectorMean(req.Vectors, req.MaxNorm, req.Epsilon)
+		result, err := svc.DPVectorMean(c.Request.Context(), req.Vectors, req.MaxNorm, req.Epsilon)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"mean_vector": result})
 	}
 }

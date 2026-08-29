@@ -111,12 +111,12 @@ func (s *TypedServer) DPNoisyMean(ctx context.Context, req *pb.DPNoisyMeanReques
 	return &pb.DPResponse{Result: result}, nil
 }
 
-// DPCount / DPSum / DPMean 复用相同逻辑
+// DPCount 差分隐私计数（计算 values 长度后加噪）
 func (s *TypedServer) DPCount(ctx context.Context, req *pb.DPRequest) (*pb.DPResponse, error) {
 	if len(req.GetValues()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "values required")
 	}
-	result, err := s.svc.NoisyCount(ctx, int(req.GetValues()[0]), req.GetEpsilon())
+	result, err := s.svc.NoisyCount(ctx, len(req.GetValues()), req.GetEpsilon())
 	if err != nil {
 		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	}
@@ -354,8 +354,8 @@ func (s *TypedServer) DPChunkedHistogram(_ context.Context, req *pb.DPChunkedHis
 	return &pb.DPHistogramResponse{Result: floatResult}, nil
 }
 
-// DPVectorSum 差分隐私向量求和
-func (s *TypedServer) DPVectorSum(_ context.Context, req *pb.DPVectorSumRequest) (*pb.DPVectorSumResponse, error) {
+// DPVectorSum 差分隐私向量求和（通过 service 层走预算检查）
+func (s *TypedServer) DPVectorSum(ctx context.Context, req *pb.DPVectorSumRequest) (*pb.DPVectorSumResponse, error) {
 	chunkVecs := req.GetVectors()
 	if len(chunkVecs) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "vectors required")
@@ -364,12 +364,15 @@ func (s *TypedServer) DPVectorSum(_ context.Context, req *pb.DPVectorSumRequest)
 	for i, c := range chunkVecs {
 		vectors[i] = c.GetValues()
 	}
-	result := dp.VectorSum(vectors, req.GetMaxNorm(), req.GetEpsilon())
+	result, err := s.svc.DPVectorSum(ctx, vectors, req.GetMaxNorm(), req.GetEpsilon())
+	if err != nil {
+		return nil, status.Errorf(codes.ResourceExhausted, "dp vector sum: %v", err)
+	}
 	return &pb.DPVectorSumResponse{NoisyVector: result}, nil
 }
 
-// DPVectorMean 差分隐私向量均值
-func (s *TypedServer) DPVectorMean(_ context.Context, req *pb.DPVectorMeanRequest) (*pb.DPVectorMeanResponse, error) {
+// DPVectorMean 差分隐私向量均值（通过 service 层走预算检查）
+func (s *TypedServer) DPVectorMean(ctx context.Context, req *pb.DPVectorMeanRequest) (*pb.DPVectorMeanResponse, error) {
 	chunkVecs := req.GetVectors()
 	if len(chunkVecs) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "vectors required")
@@ -378,7 +381,10 @@ func (s *TypedServer) DPVectorMean(_ context.Context, req *pb.DPVectorMeanReques
 	for i, c := range chunkVecs {
 		vectors[i] = c.GetValues()
 	}
-	result := dp.VectorMean(vectors, req.GetMaxNorm(), req.GetEpsilon())
+	result, err := s.svc.DPVectorMean(ctx, vectors, req.GetMaxNorm(), req.GetEpsilon())
+	if err != nil {
+		return nil, status.Errorf(codes.ResourceExhausted, "dp vector mean: %v", err)
+	}
 	return &pb.DPVectorMeanResponse{MeanVector: result}, nil
 }
 
