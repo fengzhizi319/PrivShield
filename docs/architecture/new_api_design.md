@@ -2,7 +2,7 @@
 
 > **版本**：v16.0.0  
 > **适用范围**：PrivShield 体系下新增业务数据接口（如 `ds_xx1` / `api3_xx1`）的标准架构设计与扩展实施指南（SOP）。  
-> **定位**：旨在确保跨服务（Go 微服务群、Python 隐私计算引擎、TypeScript 前端控制台）实现**统一命名规范**、**单一事实源（Single Source of Truth, SSOT）**、**零语义漂移**与**快速敏捷接入**。
+> **定位**：旨在确保跨服务（Go 微服务群、Go 隐私计算引擎、TypeScript 前端控制台）实现**统一命名规范**、**单一事实源（Single Source of Truth, SSOT）**、**零语义漂移**与**快速敏捷接入**。
 
 ---
 
@@ -16,7 +16,7 @@
 - [4. 新增数据接口标准实施路径 (5 步 SOP)](#4-新增数据接口标准实施路径-5-步-sop)
   - [第 1 步：在 pkg/naming 中注册核心事实源](#第-1-步在-pkgnaming-中注册核心事实源)
   - [第 2 步：在 services/datasource-mgr 中接入数据资产](#第-2-步在-servicesdatasource-mgr-中接入数据资产)
-  - [第 3 步：在 engine 中配置动态分类分级与脱敏规则](#第-3-步在-engine-中配置动态分类分级与脱敏规则)
+  - [第 3 步：在 rules/domains 中配置动态分类分级与脱敏规则](#第-3-步在-rulesdomains-中配置动态分类分级与脱敏规则)
   - [第 4 步：service-hub 与 audit-log 自动适配验证](#第-4-步service-hub-与-audit-log-自动适配验证)
   - [第 5 步：在 app-lz/bff-go 中注册前端展示元数据](#第-5-步在-app-lzbff-go-中注册前端展示元数据)
 - [5. 质量保证与 CI 门禁验证 (Verification DoD)](#5-质量保证与-ci-门禁验证-verification-dod)
@@ -80,7 +80,7 @@ sequenceDiagram
     participant BFF as BFF 网关 (console/app-lz/bff-go)
     participant Hub as 调度中枢 (services/service-hub)
     participant DSMgr as 数据源管理 (services/datasource-mgr)
-    participant Engine as 隐私治理引擎 (engine)
+    participant Engine as 隐私治理引擎 (engine-go)
     participant Audit as 审计存证中心 (services/audit-log)
 
     Note over UI,Audit: 跨服务统一事实源：pkg/naming
@@ -97,7 +97,7 @@ sequenceDiagram
 ```
 
 > **默认端口、环境变量与 mTLS 说明**：
-> - Python Agent REST `:8079` / gRPC `:50051`；service-hub `:8082`/`:50052`；datasource-mgr `:8083`/`:50053`；audit-log `:8084`/`:50054`；bff-go `:8081`/`:50055`（可选）。
+> - Go Agent REST `:8079` / gRPC `:50051`；service-hub `:8082`/`:50052`；datasource-mgr `:8083`/`:50053`；audit-log `:8084`/`:50054`；bff-go `:8081`/`:50055`（可选）。
 > - 环境变量按服务隔离：`SERVICE_HUB_*`、`DATASOURCE_MGR_*`、`AUDIT_LOG_*`、`PRIVACY_CONSOLE_*`、`PRIVACY_AGENT_*` 等，并共享 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 等配置。
 > - Go gRPC 服务器统一使用 `pkg/tlsutil` 的 `NewWhitelistInterceptor()` CN 白名单拦截器；配置 `PRIVACY_AUTH_MTLS_WHITELIST_FILE=config/mtls-whitelist.yaml` 后，通过 5 秒 mtime 轮询热重载。
 
@@ -214,7 +214,7 @@ var Registry = []Entry{
    ```
 
 2. **热重载分类规则引擎**：  
-   无需重启 Python Agent，通过热重载接口立即生效：
+   无需重启 Go Agent，通过热重载接口立即生效：
    ```bash
    curl -s -X POST http://127.0.0.1:8079/v1/dynclassification/profiles/reload | jq .
    ```
@@ -226,9 +226,9 @@ var Registry = []Entry{
 得益于调度中枢与审计存证的**泛型负载（`map[string]any`）**设计，**新增数据源无需修改 `service-hub` 与 `audit-log` 的现有 Go 源代码**即可被识别：
 
 1. **调度中枢自动转发**：  
-   `service-hub` 从 `datasource-mgr` 获取任意字段的 JSON 记录，透明转发给 `engine` 的 `POST /v1/agent/process`，`engine` 根据 `rules/domains/xx1.yaml` 自动完成分类分级与脱敏。
+   `service-hub` 从 `datasource-mgr` 获取任意字段的 JSON 记录，透明转发给 `engine-go` 的 `POST /v1/agent/process`，`engine-go` 根据 `rules/domains/xx1.yaml` 自动完成分类分级与脱敏。
 2. **审计存证当前状态**：  
-   `audit-log` 服务已就绪（`:8084` REST / `:50054` gRPC），支持显式调用 `RecordAudit` 并将样本以 SM4-GCM 信封加密后持久化；但 `service-hub` 6 阶段流水线当前仅在本地标记 `audit` 阶段，自动调用 `audit-log` 的端到端集成属于 Phase 2 待完成项。
+   `audit-log` 服务已就绪（`:8084` REST / `:50054` gRPC），支持显式调用 `RecordAudit` 并将样本以 SM4-GCM 信封加密后持久化；`service-hub` 6 阶段流水线支持自动异步写入 9 要素存证。
 
 ---
 
@@ -263,15 +263,12 @@ var schemas = map[string]schema{
 完成上述 5 步后，依次执行以下命令确保全链路接入无误：
 
 ```bash
-# 1. 静态代码合规扫描（检测是否有硬编码字面量）
-make lint-naming
+# 1. 运行全量 Go 测试套件 (SDK + Agent + 微服务群 + BFF)
+make test
 
 # 2. 运行 Go 基础库与微服务测试
 go test -race -count=1 ./pkg/naming/... ./services/datasource-mgr/... ./console/app-lz/bff-go/...
 
-# 3. 运行 Python 规则引擎单测
-PYTHONPATH=. pytest tests/dynclassification/ -k "xx1 or funnel"
-
-# 4. 执行 App-LZ 自动化 E2E 调度流水线测试
+# 3. 执行 App-LZ 自动化 E2E 调度流水线测试
 go test -v -run TestRunSuites ./console/app-lz/bff-go/internal/runner/
 ```

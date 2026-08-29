@@ -66,7 +66,7 @@ flowchart TD
         WebAppLZ[console/app-lz/web<br/>数联调度之眼大屏 :5174]
         GoBFF[Go gRPC API Gateway / BFF :8081<br/>REST 入口 + gRPC 上游]
         GoLZBFF[App-LZ BFF 网关 :8085<br/>流水线调度与 E2E 测试器]
-        PyGateway[engine/gateway<br/>Python L7 负载均衡网关 :8000 / :50000]
+        GoGateway[engine-go/cmd/privshield-gateway<br/>Go L7 P2C 负载均衡网关 :8000 / :50000]
     end
 
     subgraph CrossCutting ["2. 跨切面中间件与零信任安全层 (Middleware & Security)"]
@@ -81,22 +81,22 @@ flowchart TD
     end
 
     subgraph CoreEngine ["4. 核心隐私算力与动态分类引擎 (Core Engine :8079 / :50051)"]
-        REST[FastAPI REST API :8079]
+        REST[Gin REST API :8079]
         GRPC[gRPC Servicer :50051]
-        Funnel[3 层动态分类漏斗<br/>Rule → Small-NER → Local LLM 仲裁]
-        Primitives[四大隐私原语<br/>Masking / DP / K-Anon / QoL]
-        Budget[分布式隐私预算会计模型<br/>Epsilon / Delta + 时间窗口重置]
+        Funnel[3 层动态分类漏斗<br/>Rule → Small-NER → External LLM 仲裁]
+        Primitives[四大隐私原语<br/>Masking / DP / K-Anon & L-Diversity / QoL]
+        Budget[无锁原子隐私预算会计模型<br/>CAS 循环 + 时间窗口重置]
     end
 
     subgraph StorageSecurity ["5. 统一存储与密码学基座 (Storage & Crypto)"]
         SSOT[pkg/naming 单一事实源]
         StoreSQLite[SQLite WAL 单机存储]
         StorePostgres[PostgreSQL FOR UPDATE SKIP LOCKED 原子租约高可用存储]
-        CryptoBase[SM4-GCM 快照信封加密 enc:v1:...]
+        CryptoBase[国密 SM3 散列 / SM4-GCM 快照信封加密 enc:v1:...]
     end
 
     subgraph Infrastructure ["6. 云原生与全栈可观测基础设施 (Observability & K8s)"]
-        Prometheus[Prometheus 指标采集 :9090<br/>Python 40+ 指标 / Go 15+ 指标]
+        Prometheus[Prometheus 指标采集 :9090<br/>全栈 Go 50+ 核心生产指标]
         Grafana[Grafana 联合监控看板 :3000]
         Tracing[OpenTelemetry 分布式链路追踪]
         K8sHPA[K8s HPA / CronHPA / ServiceMonitor]
@@ -106,8 +106,8 @@ flowchart TD
     WebAppLZ --> GoLZBFF
     GoBFF & GoLZBFF --> CrossCutting
     CrossCutting --> ServiceCluster & CoreEngine
-    CrossCutting --> PyGateway
-    PyGateway --> CoreEngine
+    CrossCutting --> GoGateway
+    GoGateway --> CoreEngine
 
     GoBFF -->|gRPC / HTTP| GRPC & REST
     GoLZBFF -->|HTTP| ServiceHub & DatasourceMgr & AuditLog
@@ -131,12 +131,12 @@ flowchart TD
 
 | 原则 | 含义 | 架构落地体现 |
 |---|---|---|
-| **确定性优先** | 隐私算法与安全定级具备可证明的数学与规则依据 | 规则引擎优先于 AI 模型；DP/K-Anon 采用经典数学机制 |
-| **优雅降级** | 复杂重依赖缺失或硬件受限时不崩溃，自动回退可用子集 | LLM/NER 缺失回退规则层与人工审核标记；内存 `<512MB` 跳过 LLM |
-| **算力调度解耦** | 纯算力计算与上层业务流水线解耦为独立微服务 | Python 专攻 AI 隐私算力，Go 专攻高并发调度、存证与租约管理 |
-| **双栈同源** | 一套核心业务逻辑，同时支持高性能 RPC 与易调试 REST | `PrivacyService` 同时驱动 REST 路由与 gRPC Servicer |
-| **零信任访问** | 默认不信任任何内部网络，每跳通信均需身份认证与权限校验 | gRPC mTLS + CN 白名单动态热重载 + HTTP API Key 鉴权 |
-| **云原生韧性** | 具备自愈、自适应负载均衡与细粒度事件驱动弹性扩缩 | P2C 动态分流、三态熔断器、优雅停机排空与 CronHPA 潮汐调度 |
+| **确定性优先** | 隐私算法与安全定级具备可证明的数学与规则依据 | 规则引擎优先于 AI 模型；DP/K-Anon 采用经典数学机制与单趟融合向量计算 |
+| **优雅降级** | 复杂重依赖缺失或硬件受限时不崩溃，自动回退可用子集 | LLM/NER 缺失回退规则层与人工审核标记；三态熔断器自动半开探测恢复 |
+| **算力调度解耦** | 纯算力计算与上层业务流水线解耦为独立微服务 | `engine-go` 专攻零内存分配隐私算力，`services/` 专攻高并发调度、存证与租约管理 |
+| **双栈同源** | 一套核心业务逻辑，同时支持高性能 RPC 与易调试 REST | `PrivacyService` 同时驱动 Gin REST 路由与 gRPC Servicer |
+| **零信任访问** | 默认不信任任何内部网络，每跳通信均需身份认证与权限校验 | gRPC mTLS + CN 白名单动态热重载 + HTTP API Key 常量时间鉴权 |
+| **云原生韧性** | 具备自愈、自适应负载均衡与细粒度事件驱动弹性扩缩 | P2C-EWMA 动态分流、BufferPool 零分配反向代理、优雅停机排空 |
 
 ---
 
@@ -144,33 +144,26 @@ flowchart TD
 
 ```text
 PrivShield/ (Repo Root)
-├── engine/                    # 核心隐私算力与动态分类分级引擎 (Python 3.13+)
-│   ├── privacy/               # 隐私原语 (Masking, DP, K-Anon, QoL, Budget)
-│   ├── dynclassification/     # 3 层动态分类漏斗 (Rule, NER, LLM 适配器与仲裁)
-│   ├── security/              # 传输与身份安全 (TLS, mTLS, API Key, RateLimit, 白名单)
-│   ├── observability/         # Prometheus 指标、OTel 链路追踪与结构化日志
-│   ├── routers/               # FastAPI REST 各子路由
-│   └── gateway/               # 智能动态负载均衡网关 (P2C / WRR / 节点熔断)
-│
+├── engine-go/                 # 核心隐私算力与动态分类分级引擎 (Go 1.25+)
+│   ├── cmd/                   # privshield-agent 与 privshield-gateway 启动入口
+│   └── internal/              # 3-Layer 漏斗、DICOM 脱敏、P2C-EWMA 网关、安全与可观测性
+├── privacy-go-sdk/            # 纯 Go 零依赖数学隐私原语库 (Masking, DP, LDP, Kano, QOL, Budget)
 ├── services/                  # 企业级中台微服务群 (Go 1.25 集群)
 │   ├── service-hub/           # 数据服务调度中枢 (:8082 / :50052)
 │   ├── datasource-mgr/        # 数据源资产管理与模拟库 (:8083 / :50053)
 │   └── audit-log/             # 脱敏审计与 9 要素防篡改存证 (:8084 / :50054)
-│
 ├── console/                   # 统一管理与测试控制台
 │   ├── bff-go/                # Go BFF 聚合网关 (:8081 / :50055)
 │   ├── app-lz/                # 数联调度之眼业务 BFF 与 E2E 测试器 (:8085)
 │   ├── web/                   # 通用隐私控制台前端 (React 18 + TS + Vite)
 │   └── app-lz/web/            # 业务流水线控制台前端 (React 18 + TS + Vite)
-│
 ├── pkg/                       # Go 全局共享基础库
 │   ├── naming/                # SSOT 规范命名与别名归一化
 │   ├── middleware/            # 9 层统一中间件栈与统一错误信封
 │   ├── store/                 # 存储底座抽象 (SQLite WAL / PostgreSQL 原子租约)
-│   ├── crypto/                # SM4-GCM 快照信封加密 (enc:v1:...) 与纯 Go SM4 分组密码
+│   ├── crypto/                # 国密 SM3 / SM4-GCM 快照信封加密 (enc:v1:...)
 │   ├── tlsutil/               # TLS 1.3 mTLS 与 CN 白名单动态热重载
 │   └── metrics/               # Prometheus 指标收集器
-│
 ├── deploy/                    # 云原生部署基础设施 (Helm, K8s, Docker Compose, Grafana)
 ├── config/                    # 运行时配置与 mTLS 白名单 (mtls-whitelist.yaml)
 ├── rules/                     # 分类分级领域规则库与标准体系 YAML
@@ -502,10 +495,10 @@ TraceMiddleware → StructuredLogger → Recovery → SecurityHeaders → MaxBod
 
 | 分层 | 核心技术组件 | 运行版本 | 核心选型考量 |
 |---|---|---|---|
-| **算力层** | Python / FastAPI / Pydantic v2 | 3.13+ / 0.115 / 2.10 | 异步高性能 REST + gRPC 双协议支持 |
-| **分类漏斗** | YAML Rules / ONNX / Qwen3.5 | — | 规则引擎确定性过滤 + 轻量 NER + 本地大模型语义仲裁 |
+| **算力层** | Go 1.25+ / Gin / gRPC | 1.25+ / 1.10 / 1.68 | 纯 Go 原生零分配 REST + gRPC 双协议支持与多核分块加速 |
+| **分类漏斗** | YAML Rules (AC自动机) / ONNX Runtime Go / External LLM (熔断器) | — | Aho-Corasick 规则引擎 + 轻量 NER + 独立 LLM 语义仲裁 |
 | **中台微服务** | Go / Gin / ByteDance Sonic | 1.25 / 1.12 / 1.15 | 超轻量 Goroutine 并发调度与 JIT 极速序列化 |
-| **密码学基座** | 纯 Go SM4 / SM4-GCM / SHA-256 | GB/T 32907-2016 | 国密标准对齐、快照信封加密与 9 要素防篡改哈希链 |
+| **密码学基座** | 纯 Go 国密 SM3 / SM4-GCM / SHA-256 | GB/T 32918.4 / GB/T 32907 | 国密标准对齐、快照信封加密与 9 要素防篡改哈希链 |
 | **存储与持久化** | PostgreSQL / SQLite Pure Go | 14+ / WAL mode | PostgreSQL `FOR UPDATE SKIP LOCKED` 原子租约与无 CGO 嵌入式存储 |
 | **表现层** | React / TypeScript / Vite / Tailwind | 18.2 / 5.2 / 5.2 / 3.4 | 强类型契约校验与原子化 UI 体系 |
 | **云原生编排** | Helm / K8s / KEDA / CronHPA | v3 / v1.28+ | 企业级声明式编排与业务指标弹性扩缩容 |

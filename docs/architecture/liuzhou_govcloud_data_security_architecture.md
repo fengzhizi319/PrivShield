@@ -253,7 +253,7 @@ sequenceDiagram
 
 ### 5.1 三层递进式动态分类分级漏斗 (3-Layer Funnel)
 
-针对政务数据字段多、语义复杂的特点，系统在 `engine/dynclassification` 实现了**确定性规则优先、轻量模型辅助、大模型兜底**的三层递进漏斗机制：
+针对政务数据字段多、语义复杂的特点，系统在 `engine-go/internal/dynclassification` 实现了**确定性规则优先、轻量模型辅助、大模型兜底**的三层递进漏斗机制：
 
 ```mermaid
 graph TB
@@ -261,17 +261,17 @@ graph TB
     L1 -->|高置信度命中 85%+| Out[输出定级与脱敏策略]
     L1 -->|未命中 / 低置信度| L2[Layer 2: Small-NER 引擎<br/>ONNX 轻量中文实体识别 1~5ms]
     L2 -->|抽取出明确专有实体| Out
-    L2 -->|复杂语义 / 歧义长文本| L3[Layer 3: Local LLM 仲裁<br/>Qwen3.5 语义仲裁 / 多模态判定 100~500ms]
+    L2 -->|复杂语义 / 歧义长文本| L3[Layer 3: External LLM 仲裁<br/>外部 LLM 语义仲裁 / 多模态判定 100~500ms]
     L3 --> Out
 ```
 
-* **Layer 1 (YAML 规则层 + Safety Floor 兜底)**：解析 `rules/domains/*.yaml` 规则，采用高性能正则与词典匹配，结合 **Safety Floor** 机制对身份证、手机号等关键字段强制保底定级（L3/L4），处理 85% 以上常规字段；
-* **Layer 2 (Small-NER 实体抽取层)**：基于轻量化 ONNX 模型，专门抽取姓名、机构、地名、疾病等专有实体，跳过纯数字与英文字段以保持高吞吐；
-* **Layer 3 (本地大模型仲裁层)**：仅当规则与实体抽取冲突或置信度不足时触发本地量化大模型，具备信号量并发保护（`PRIVACY_LLM_MAX_CONCURRENCY=1`），内存低于 512MB 时自动降级并标记人工审核。
+* **Layer 1 (YAML 规则层 + Safety Floor 兜底)**：解析 `rules/domains/*.yaml` 规则，采用高性能 Aho-Corasick 自动机与正则匹配，结合 **Safety Floor** 机制对身份证、手机号等关键字段强制保底定级（L3/L4），处理 85% 以上常规字段；
+* **Layer 2 (Small-NER 实体抽取层)**：基于轻量化 ONNX Runtime Go 模型，专门抽取姓名、机构、地名、疾病等专有实体，跳过纯数字与英文字段以保持高吞吐；
+* **Layer 3 (外部大模型仲裁层)**：仅当规则与实体抽取冲突或置信度不足时触发外部大模型，具备三态熔断器保护（`Closed` ➔ `Open` ➔ `HalfOpen`），发生异常时自动降级并标记人工审核。
 
 ### 5.2 四大隐私计算原语数学保障
 
-系统底层在 `engine/privacy` 模块中实现了严格的数学级隐私保护算法：
+系统底层在 `privacy-go-sdk` 模块中实现了严格的数学级隐私保护算法：
 
 | 隐私原语 | 数学机制与算法实现 | 应用场景 | 安全保护强度 |
 |---|---|---|---|

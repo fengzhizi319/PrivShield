@@ -29,8 +29,8 @@ flowchart TD
     end
 
     subgraph GatewayLayer [网关与接入层]
-        PyGateway[PrivShield Gateway<br/>P2C 智能动态负载均衡 + 熔断]
-        GoBFF[Go BFF 网关<br/>内置多节点 Client-Side 负载池]
+        GoGateway[PrivShield Gateway :8000 / :50000<br/>P2C 智能动态负载均衡 + BufferPool 零分配]
+        GoBFF[Go BFF 网关 :8081<br/>内置多节点 Client-Side 负载池]
     end
 
     subgraph ServiceMesh [企业级中台微服务群 :8082~:8084 / :50052~:50054]
@@ -40,13 +40,13 @@ flowchart TD
     end
 
     subgraph ComputeEngines [PrivShield 算力层 :8079 / :50051]
-        AgentCore[PrivShield Core Pods<br/>纯 CPU 秒级扩缩: 规则脱敏/DP/K-匿名]
-        AgentML[PrivShield ML / vLLM Pods<br/>GPU 密集: Small-NER & 大模型仲裁]
+        AgentCore[PrivShield Core Pods<br/>纯 Go 极简 Alpine ~25MB: 规则脱敏/DP/K-匿名/L-多样性]
+        AgentML[PrivShield ML / vLLM Pods<br/>ONNX Small-NER & 独立 LLM 仲裁]
     end
 
     subgraph StorageAndConsistency [状态与分布式一致性]
         PGCluster[(PostgreSQL HA 集群<br/>FOR UPDATE SKIP LOCKED 原子租约)]
-        BudgetDB[(分布式差分隐私预算记账中枢<br/>SQLite / Redis)]
+        BudgetDB[(分布式差分隐私预算记账中枢<br/>无锁原子 CAS / SQLite)]
         Prometheus[(Prometheus 全栈监控<br/>+ 自定义 QPS / 排队 / 租约指标)]
     end
 
@@ -75,16 +75,15 @@ flowchart TD
 
 ### 2.1 分布式全局隐私预算一致性中心 (Distributed Consistency Budget)
 
-在 `engine/privacy/budget.py` 中，`BudgetAccountant` 通过运行时后端选择实现统一预算抽象：
-1. **内存模式**（默认）：零外部依赖，适合单机开发调试；
-2. **SQLite 模式**：通过环境变量 `PRIVACY_BUDGET_DB` 启用，支持单机本地持久化与多进程共享；
-3. **Redis 模式**：通过 `PRIVACY_BUDGET_REDIS_URL` 或 `PRIVACY_BUDGET_BACKEND=redis` 启用，生产多节点原子记账，支持自动滑动时间窗口（`window_seconds`）重置；
-   - 当前未提供独立 PostgreSQL 预算后端。
-4. **HMAC 防篡改审计**：`BudgetAuditLogger` 对每笔预算消耗记录进行 HMAC-SHA256 签名存证。
+在 `privacy-go-sdk/budget/budget.go` 中，`BudgetAccountant` 通过纯 Go 原子无锁并发设计实现统一预算抽象：
+1. **无锁原子 CAS 模式**（默认）：基于 `sync/atomic` 与 `math.Float64bits` 实现单机千万级 QPS 原子扣减与原子回滚，消除读陈旧与并发丢失风险；
+2. **SQLite 模式**：通过环境变量 `PRIVACY_BUDGET_DB` 启用，支持单机本地持久化与跨实例共享；
+3. **滑动时间窗口**：通过 `PRIVACY_BUDGET_WINDOW_SECONDS` 实现自动周期重置；
+4. **HMAC/SM3 防篡改审计**：`BudgetAuditLogger` 对每笔预算消耗记录进行 HMAC-SHA256 / 国密 SM3 签名存证。
 
 ---
 
-### 2.2 智能动态负载均衡 (Smart Load Balancing)
+### 2.2 智能动态负载均衡与零分配网关 (Smart Load Balancing & BufferPool)
 
 #### 1. Go 微服务共享客户端多节点池化 (`pkg/agent/client.go`)
 - **多端点配置**：`Config.BaseURLs` 支持传入多个 Agent REST 地址；service-hub、audit-log 等模块的配置层读取环境变量 `PRIVACY_AGENT_URLS=http://agent-1:8079,http://agent-2:8079`（逗号分隔）并注入 `BaseURLs`；
@@ -93,12 +92,14 @@ flowchart TD
   - 当某个节点连续失败达到阈值（如 5 次）时自动熔断并隔离，在后台异步进行心跳探活；
   - 探活恢复后通过半开（Half-Open）状态自动重新纳入可用节点池。
 
-#### 2. Python 网关 P2C 动态负载调度 (`engine/gateway/balancer.py`)
-- **Power of Two Choices (P2C) 算法**：
+#### 2. Go 网关 P2C-EWMA 动态负载调度与 BufferPool (`engine-go/internal/gateway/`)
+- **Power of Two Choices + EWMA 算法 (`balancer.go`)**：
   - 每次调度从健康节点列表中随机选取两个候选节点；
-  - 计算候选节点的综合负载得分：
-    $$\text{Score} = \text{ActiveConnections} \times 1.0 + \text{RecentLatencyMs} \times 0.05$$
-  - 将请求派发给负载得分最低的节点，有效消除羊群效应（Herd Effect）。
+  - 基于指数加权移动平均（EWMA）计算候选节点的综合负载得分：
+    $$\text{Score} = \text{InflightRequests} \times 1.0 + \text{EWMALatencyMs} \times 0.05$$
+  - 将请求派发给负载得分最低的节点，有效消除羊群效应（Herd Effect）；
+- **BufferPool 零堆分配反向代理 (`http_proxy.go`)**：
+  - 基于 `sync.Pool` 复用 32KB 数据包内存切片，实现反向代理数据流转发 0 B/op。
 
 ---
 

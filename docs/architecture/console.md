@@ -35,7 +35,7 @@ graph TD
     end
 
     subgraph UpstreamServices [后端微服务与核心引擎]
-        Agent["PrivShield Agent (:8079 / :50051)<br/>Python 核心算力"]
+        Agent["PrivShield Agent (:8079 / :50051)<br/>Go 核心算力"]
         Hub["Service Hub (:8082 / :50052)<br/>调度中枢"]
         DSMgr["Datasource Mgr (:8083 / :50053)<br/>数据源管理"]
         Audit["Audit Log (:8084 / :50054)<br/>存证审计"]
@@ -84,8 +84,8 @@ BFF 网关层提供了面向不同业务场景的聚合路由定义：
 
 | 路由前缀 / 端点 | 处理组件 | 上游微服务 | 功能说明 |
 |---|---|---|---|
-| `/api/privacy/*` | `console/bff-go` | `engine:50051` | 隐私计算原语（脱敏、DP、K-匿名、查询混淆）gRPC 代理 |
-| `/api/upload` | `console/bff-go` | `engine:50051` | 文件隐私处理（CSV/JSON 解析与脱敏） |
+| `/api/privacy/*` | `console/bff-go` | `privshield-agent:50051` | 隐私计算原语（脱敏、DP、K-匿名、查询混淆）gRPC 代理 |
+| `/api/upload` | `console/bff-go` | `privshield-agent:50051` | 文件隐私处理（CSV/JSON 解析与脱敏） |
 | `/api/lb_test` | `console/bff-go` | 可配置 Agent REST 后端 | 负载均衡策略测试（round-robin / random / least-connections） |
 | `/api/lz/data-api/*` | `app-lz/bff-go` | `catalog` / `pkg/naming`（本地 SSOT） | 动态业务数据接口目录与元数据拉取 |
 | `/api/lz/tasks/dispatch` | `app-lz/bff-go` | `service-hub:8082` | 5 阶段流通会话触发与流水线任务派发 |
@@ -97,7 +97,7 @@ BFF 网关层提供了面向不同业务场景的聚合路由定义：
 ## 4. 运行指南
 
 ```bash
-# 1. 启动全功能控制台（Python Agent + Go BFF + Vite HMR 前端）
+# 1. 启动全功能控制台（Go Agent + Go BFF + Vite HMR 前端）
 bash ./scripts/dev/dev-bff-agent.sh
 ```
 

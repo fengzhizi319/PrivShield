@@ -60,7 +60,7 @@ graph LR
 * **6 阶段自动化调度流水线**：
   1. `Ingest`：解析外部调用方数据请求与参数，生成唯一 `task_id` 与绑定 `trace_id`；
   2. `Fetch`：安全连接指定数据源拉取数据切片（`pkg/naming` 归一化校验）；
-  3. `Classify`：请求 PrivShield 核心 Agent（`engine/dynclassification/`）执行三层漏斗动态分类分级（YAML 规则 → 可选 Small-NER → 可选本地 LLM 仲裁）；
+  3. `Classify`：请求 PrivShield 核心 Agent（`engine-go/internal/dynclassification/`）执行三层漏斗动态分类分级（YAML 规则 → 可选 Small-NER → 可选外部 LLM 仲裁）；
   4. `Desensitize`：根据判定等级（L1~L5）自动选择并执行最佳脱敏算子（明文/掩码/K-匿名/差分隐私）；
   5. `Return`：封装脱敏后的安全数据流并返回调用方；
   6. `Audit`：异步向 Audit Log 微服务写入 9 要素存证与加密快照；

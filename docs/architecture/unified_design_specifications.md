@@ -1,8 +1,8 @@
 # PrivShield 全栈统一架构设计与跨层协同规范 (Unified Architecture Design Specifications)
 
 > **版本**：v16.0.0  
-> **适用范围**：PrivShield 核心隐私引擎（Python `engine`）、企业级中台微服务群（Go `service-hub` / `datasource-mgr` / `audit-log`）、控制台与 BFF 网关（`console/bff-go` / `console/app-lz` / `console/web`）及基础共享库（`pkg/`）。  
-> **定位**：本文档沉淀 PrivShield 在多语言、分布式、高并发场景下的**跨层统一架构设计标准与协同规范**，消除不同服务之间的语义分歧与实现割裂。
+> **适用范围**：PrivShield 核心隐私引擎（Go `engine-go` / `privacy-go-sdk`）、企业级中台微服务群（Go `service-hub` / `datasource-mgr` / `audit-log`）、控制台与 BFF 网关（`console/bff-go` / `console/app-lz` / `console/web`）及基础共享库（`pkg/`）。  
+> **定位**：本文档沉淀 PrivShield 在分布式、高并发场景下的**跨层统一架构设计标准与协同规范**，消除不同服务之间的语义分歧与实现割裂。
 
 ---
 
@@ -52,7 +52,7 @@ flowchart TD
 
     subgraph S3 ["3. 统一零信任与机密安全架构 (Zero-Trust & Data Security)"]
         mTLS["内部通信: TLS 1.3 双向 mTLS + CN 白名单动态热重载"]
-        EnvelopeEnc["静态数据: SM4-GCM 快照信封加密 (enc:v1:...)"]
+        EnvelopeEnc["静态数据: 国密 SM3 散列 / SM4-GCM 快照信封加密 (enc:v1:...)"]
         HashChain["存证防篡改: 9 要素连续哈希链 (prev_hash 链式绑定)"]
         DDoSMW["9 层防御中间件栈 (MaxBodySize / MaxConcurrent / RateLimit)"]
     end
@@ -81,9 +81,12 @@ flowchart TD
 
 | 服务 | 入口模块 | 默认 HTTP 地址 | 默认 gRPC 地址 | 说明 |
 |---|---|---|---|---|
-| Python Agent (REST) | `engine/main.py` | `127.0.0.1:8079` | — | 独立 REST 入口，仅绑定回环地址，适用于本地开发 |
-| Python Agent (REST + gRPC) | `engine/server.py` | `0.0.0.0:8079` | `0.0.0.0:50051` | 双协议统一入口 |
-| Python Agent (gRPC) | `engine/grpc_server.py` | — | `0.0.0.0:50051` | 独立 gRPC 入口 |
+| Go PrivShield Agent | `engine-go/cmd/privshield-agent` | `0.0.0.0:8079` | `0.0.0.0:50051` | 核心隐私算力与动态分类双协议统一入口 |
+| Go PrivShield Gateway | `engine-go/cmd/privshield-gateway` | `0.0.0.0:8000` | `0.0.0.0:50000` | L7 P2C-EWMA 反向代理网关与 BufferPool 缓存 |
+| service-hub | `services/service-hub` | `127.0.0.1:8082` | `127.0.0.1:50052` | 数据服务调度中枢 |
+| datasource-mgr | `services/datasource-mgr` | `127.0.0.1:8083` | `127.0.0.1:50053` | 数据源资产管理 |
+| audit-log | `services/audit-log` | `127.0.0.1:8084` | `127.0.0.1:50054` | 审计存证服务 |
+| bff-go / console | `console/bff-go` | `127.0.0.1:8081` | `127.0.0.1:50055`（可选） | 控制台 BFF 网关 |
 | service-hub | `services/service-hub` | `127.0.0.1:8082` | `127.0.0.1:50052` | 数据服务调度中枢 |
 | datasource-mgr | `services/datasource-mgr` | `127.0.0.1:8083` | `127.0.0.1:50053` | 数据源资产管理 |
 | audit-log | `services/audit-log` | `127.0.0.1:8084` | `127.0.0.1:50054` | 审计存证服务 |
@@ -142,14 +145,14 @@ flowchart TD
 | `UPSTREAM_UNAVAILABLE` | 503 Service Unavailable | `Unavailable` (14) | 上游核心引擎或数据库不可达，已进入降级模式 |
 
 ### 2.3 安全与防泄漏要求 (Fail-Closed & Sanitization)
-- **生产模式禁止外抛堆栈**：生产环境（`GIN_MODE=release` / `PRIVACY_LOG_LEVEL=INFO`）下，禁止在 HTTP 响应中直接输出完整的 Python/Go 调用栈，详细 Trace 仅记录于服务端日志中；
+- **生产模式禁止外抛堆栈**：生产环境（`GIN_MODE=release` / `PRIVACY_LOG_LEVEL=INFO`）下，禁止在 HTTP 响应中直接输出完整的调用栈，详细 Trace 仅记录于服务端日志中；
 - **未知数据源绝对 Fail-Closed**：遇到未在 `pkg/naming` 中登记的数据源，强制返回 `INVALID_DATASOURCE_ID`，禁止静默回退至默认数据源。
 
 ---
 
 ## 3. 全链路分布式追踪与上下文透传规范 (Distributed Tracing & Context Propagation)
 
-在跨 Python FastAPI、Go 微服务群与 Web UI 的全链路调用中，必须保证**一次用户触发的所有日志、任务状态与审计快照具备相同的 Trace 标识**。
+在跨 Go Agent、Go 微服务群与 Web UI 的全链路调用中，必须保证**一次用户触发的所有日志、任务状态与审计快照具备相同的 Trace 标识**。
 
 ### 3.1 追踪标识标准命名
 全栈统一使用以下 HTTP 请求头与 gRPC Metadata 字段：
@@ -161,8 +164,8 @@ flowchart TD
 
 ```text
 ┌────────────────┐  HTTP: X-Request-ID  ┌────────────────┐  gRPC: x-request-id  ┌────────────────┐
-│   前端 Web UI  │ ───────────────────▶ │   BFF / Hub    │ ───────────────────▶ │ Engine / Audit │
-│  (React/Axios) │                      │   (Go Gin)     │   (gRPC Metadata)    │ (Python/Go RPC)│
+│   前端 Web UI  │ ───────────────────▶ │   BFF / Hub    │ ───────────────────▶ │ Agent / Audit  │
+│  (React/Axios) │                      │   (Go Gin)     │   (gRPC Metadata)    │ (Go gRPC)      │
 └────────────────┘                      └────────────────┘                      └────────────────┘
         ▲                                       ▲                                       ▲
         └───────────────────────────────────────┴───────────────────────────────────────┘
@@ -175,7 +178,7 @@ flowchart TD
 2. **gRPC 双向元数据转换**：
    - Go gRPC 客户端（`console/bff-go/internal/agent/client.go`）发起 gRPC 调用时，自动将上下文中的 trace ID 写入 gRPC `metadata.AppendToOutgoingContext(ctx, "x-request-id", traceID, "x-trace-id", traceID)`；
    - Go HTTP 客户端（`pkg/agent/client.go`）发起 HTTP 调用时，自动注入 `X-Request-ID` + `X-Trace-ID` 双头；
-   - Python gRPC Servicer（`engine/grpc_server.py`）自动从 `context.invocation_metadata()` 中提取并在日志中绑定；
+   - Go gRPC Servicer（`engine-go/internal/grpcserver/server.go`）自动从 gRPC metadata 中提取并在日志中绑定；
 3. **结构化日志标准输出字段**：
    ```json
    {
@@ -221,10 +224,10 @@ TraceMiddleware ➔ StructuredLogger ➔ Recovery ➔ SecurityHeaders ➔ MaxBod
 
 1. **强密码学通信**：微服务间跨机通信强制启用 TLS 1.3，禁用非安全老旧密码套件；
 2. **证书 CN 授权与热重载 (`config/mtls-whitelist.yaml`)**：
-   - Go 端通过 `pkg/tlsutil/grpc_interceptor.go` 与 `pkg/tlsutil/whitelist.go` 提供的 `NewWhitelistInterceptor()` 构造 unary/stream 拦截器；当 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 指向 `config/mtls-whitelist.yaml` 时，`service-hub`、`datasource-mgr`、`audit-log`、`bff-go` 的 gRPC 服务端均自动注册该拦截器；
+   - Go 端通过 `pkg/tlsutil/grpc_interceptor.go` 与 `pkg/tlsutil/whitelist.go` 提供的 `NewWhitelistInterceptor()` 构造 unary/stream 拦截器；当 `PRIVACY_AUTH_MTLS_WHITELIST_FILE` 指向 `config/mtls-whitelist.yaml` 时，`engine-go`、`service-hub`、`datasource-mgr`、`audit-log`、`bff-go` 的 gRPC 服务端均自动注册该拦截器；
    - 服务端提取客户端证书的 `Common Name (CN)`，根据白名单配置匹配客户端角色与允许调用的 RPC 方法（Scopes，如 `["*"]` 或 `["privacy:mask"]`）；
    - Go 端支持通过文件 mtime 轮询（5 秒间隔）监听白名单文件，**动态热更新授权无需重启服务**；
-   - Python Agent 端 `engine/security/whitelist.py` 同步支持基于 mtime 的请求驱动热重载，并兼容 `PRIVACY_AUTH_MTLS_ALLOWED_CNS` 静态列表作为降级。
+   - 兼容 `PRIVACY_AUTH_MTLS_ALLOWED_CNS` 静态列表作为降级。
 
 ### 4.3 数据安全：快照样本 SM4-GCM 信封加密规范
 
@@ -352,8 +355,8 @@ classDiagram
 跨服务共享配置使用 `PRIVACY_*` 前缀，例如：
 
 - `PRIVACY_AUTH_MTLS_WHITELIST_FILE`：所有 Go gRPC 服务端共享的 mTLS CN 白名单文件
-- `PRIVACY_AGENT_*`：上游 Python Agent 连接参数（`PRIVACY_AGENT_REST_HOST`、`PRIVACY_AGENT_API_KEY` 等）
-- `PRIVACY_REST_PORT` / `PRIVACY_GRPC_PORT`：Python Agent 监听端口
+- `PRIVACY_AGENT_*`：上游 Go Agent 连接参数（`PRIVACY_AGENT_REST_HOST`、`PRIVACY_AGENT_API_KEY` 等）
+- `PRIVACY_REST_PORT` / `PRIVACY_GRPC_PORT`：Go Agent 监听端口
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -361,18 +364,16 @@ classDiagram
 │    ▲                                                                        │
 │ 优先级 2: 操作系统/容器环境变量 (OS Environment Variables，如 PRIVACY_XXX)    │
 │    ▲                                                                        │
-│ 优先级 3: Profile 环境文件 (.env + config/env/<profile>.env，如 vllm.env)    │
+│ 优先级 3: YAML 业务配置文件 (config/privacy-profile.yaml / rules/*.yaml)     │
 │    ▲                                                                        │
-│ 优先级 4: YAML 业务配置文件 (config/privacy-profile.yaml / rules/*.yaml)     │
-│    ▲                                                                        │
-│ 优先级 5: 代码内置缺省默认值 (Default Fallbacks)                             │
+│ 优先级 4: 代码内置缺省默认值 (Default Fallbacks)                             │
 │    └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 7.1 动态热重载规范 (Zero-Downtime Reload)
 以下配置项支持在**不重启微服务进程**的情况下动态重载生效：
-1. **动态分类分级规则库 (`rules/domains/*.yaml`、`rules/taxonomies/*.yaml`)**：由 `engine/dynclassification/funnel.py` 实现三层漏斗（规则 → 可选 Small-NER → 可选本地 LLM 仲裁）；调用 `POST /v1/dynclassification/profiles/reload` 触发引擎无锁重载；
-2. **mTLS CN 访问控制白名单 (`config/mtls-whitelist.yaml`)**：Go 端 `pkg/tlsutil/whitelist.go` 内置文件 mtime 轮询监听器（5 秒间隔）在文件变更时自动热更新内存白名单；Python 端 `engine/security/whitelist.py` 同步支持热重载；
+1. **动态分类分级规则库 (`rules/domains/*.yaml`、`rules/taxonomies/*.yaml`)**：由 `engine-go/internal/dynclassification/funnel.go` 实现三层漏斗（规则 → 可选 Small-NER → 可选外部 LLM 仲裁）；调用 `POST /v1/dynclassification/profiles/reload` 触发引擎无锁重载；
+2. **mTLS CN 访问控制白名单 (`config/mtls-whitelist.yaml`)**：Go 端 `pkg/tlsutil/whitelist.go` 内置文件 mtime 轮询监听器（5 秒间隔）在文件变更时自动热更新内存白名单；
 3. **数据源定义与别名注册 (`pkg/naming`)**：作为静态事实源编译固化，保证分布式集群间的一致性。
 
 ---
