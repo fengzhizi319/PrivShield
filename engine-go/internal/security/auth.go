@@ -151,18 +151,97 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-// RateLimitMiddleware 返回简单的滑动窗口限流中间件（基于内存）。
-func RateLimitMiddleware() gin.HandlerFunc {
-	// 简化实现：使用 token bucket per identity+path
-	type bucket struct {
-		tokens    float64
-		lastCheck time.Time
-	}
-	var (
-		buckets   = make(map[string]*bucket)
-		bucketsMu sync.Mutex
-	)
+// ──────────────────────────────────────────────
+// 分片高并发 Token Bucket 限流器（带 TTL 自动淘汰）
+// ──────────────────────────────────────────────
 
+const numRateLimitShards = 32
+
+type rateLimitBucket struct {
+	tokens    float64
+	lastCheck time.Time
+}
+
+type rateLimitShard struct {
+	mu      sync.Mutex
+	buckets map[string]*rateLimitBucket
+}
+
+type shardedRateLimiter struct {
+	shards [numRateLimitShards]*rateLimitShard
+}
+
+var globalRateLimiter = newShardedRateLimiter()
+
+func newShardedRateLimiter() *shardedRateLimiter {
+	limiter := &shardedRateLimiter{}
+	for i := 0; i < numRateLimitShards; i++ {
+		limiter.shards[i] = &rateLimitShard{
+			buckets: make(map[string]*rateLimitBucket),
+		}
+	}
+	// 后台协程定期清理超过 10 分钟未活动的 Bucket，杜绝内存膨胀
+	go func() {
+		ticker := time.NewTicker(3 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			limiter.cleanup(10 * time.Minute)
+		}
+	}()
+	return limiter
+}
+
+func (l *shardedRateLimiter) shardFor(key string) *rateLimitShard {
+	var h uint32 = 2166136261
+	for i := 0; i < len(key); i++ {
+		h ^= uint32(key[i])
+		h *= 16777619
+	}
+	return l.shards[h%numRateLimitShards]
+}
+
+func (l *shardedRateLimiter) allow(key string, rps, burst float64) bool {
+	shard := l.shardFor(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	now := time.Now()
+	b, ok := shard.buckets[key]
+	if !ok {
+		b = &rateLimitBucket{tokens: burst, lastCheck: now}
+		shard.buckets[key] = b
+	}
+
+	elapsed := now.Sub(b.lastCheck).Seconds()
+	b.tokens += elapsed * rps
+	if b.tokens > burst {
+		b.tokens = burst
+	}
+	b.lastCheck = now
+
+	if b.tokens < 1.0 {
+		return false
+	}
+	b.tokens -= 1.0
+	return true
+}
+
+func (l *shardedRateLimiter) cleanup(ttl time.Duration) {
+	now := time.Now()
+	for i := 0; i < numRateLimitShards; i++ {
+		shard := l.shards[i]
+		shard.mu.Lock()
+		for k, b := range shard.buckets {
+			if now.Sub(b.lastCheck) > ttl {
+				delete(shard.buckets, k)
+			}
+		}
+		shard.mu.Unlock()
+	}
+}
+
+// RateLimitMiddleware 返回分片并发滑动窗口限流中间件（带 TTL 自动淘汰与内存安全）。
+func RateLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		settings := GetSettings()
 		if !settings.RateLimitEnabled {
@@ -185,26 +264,10 @@ func RateLimitMiddleware() gin.HandlerFunc {
 		rps := settings.RateLimitDefaultRPS
 		burst := float64(settings.RateLimitDefaultBurst)
 
-		bucketsMu.Lock()
-		b, ok := buckets[key]
-		if !ok {
-			b = &bucket{tokens: burst, lastCheck: time.Now()}
-			buckets[key] = b
-		}
-		elapsed := time.Since(b.lastCheck).Seconds()
-		b.tokens += elapsed * rps
-		if b.tokens > burst {
-			b.tokens = burst
-		}
-		b.lastCheck = time.Now()
-
-		if b.tokens < 1 {
-			bucketsMu.Unlock()
+		if !globalRateLimiter.allow(key, rps, burst) {
 			middleware.AbortWithError(c, http.StatusTooManyRequests, "RATE_LIMITED", "Rate limit exceeded", "")
 			return
 		}
-		b.tokens--
-		bucketsMu.Unlock()
 
 		c.Next()
 	}

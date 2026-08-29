@@ -24,6 +24,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
@@ -144,8 +145,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// mTLS CN 白名单拦截器（设计文档 §13.4）
-	var grpcOpts []grpc.ServerOption
+	// 生产级 gRPC Keepalive 保活策略配置（防僵尸连接与网络闪断）
+	var grpcOpts = []grpc.ServerOption{
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle: 5 * time.Minute,
+			MaxConnectionAge:  2 * time.Hour,
+			Time:              2 * time.Minute,
+			Timeout:           20 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	}
+
 	whitelistPath := getEnv("PRIVACY_AUTH_MTLS_WHITELIST_FILE", "")
 	if whitelistPath != "" {
 		unaryInter, streamInter, _, err := tlsutil.NewWhitelistInterceptor(whitelistPath)
@@ -184,9 +197,19 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
-	slog.Info("Shutdown signal received", "signal", sig)
+	slog.Info("Shutdown signal received, starting graceful draining", "signal", sig)
 
-	// 优雅停机
+	// 1. 标记 K8s 就绪探针为 unready，通知 Ingress/Service 停止下发新流量
+	rest.SetReady(false)
+
+	// 2. 流量排空等待窗口 (默认 5 秒)
+	drainSec := getEnvInt("PRIVACY_SHUTDOWN_DRAIN_SECONDS", 5)
+	if drainSec > 0 {
+		slog.Info("Draining in-flight traffic", "seconds", drainSec)
+		time.Sleep(time.Duration(drainSec) * time.Second)
+	}
+
+	// 3. 优雅停止 REST 与 gRPC Server
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

@@ -434,6 +434,13 @@ func RedactMedicalText(text string) string {
 	return s
 }
 
+var (
+	multiPunctPattern    = regexp.MustCompile(`([，,、；;。])\s*[，,、；;。]+`)
+	leadingPunctPattern  = regexp.MustCompile(`^[，,、；;。\s]+`)
+	trailingCommaPattern = regexp.MustCompile(`[，,、；;\s]+$`)
+	tagRegexPattern      = regexp.MustCompile(`\[[A-Z0-9_-]+\]`)
+)
+
 // cleanOrphanSyntax 清理因敏感词抹平留下的断句残渣与悬垂标点。
 func cleanOrphanSyntax(s string) string {
 	s = strings.TrimSpace(s)
@@ -442,21 +449,17 @@ func cleanOrphanSyntax(s string) string {
 	}
 
 	// 消除连续重复标点，如 "，，" -> "，", "；；" -> "；"
-	multiPunct := regexp.MustCompile(`([，,、；;。])\s*[，,、；;。]+`)
-	s = multiPunct.ReplaceAllString(s, "$1")
+	s = multiPunctPattern.ReplaceAllString(s, "$1")
 
 	// 消除句首多余标点
-	leadingPunct := regexp.MustCompile(`^[，,、；;。\s]+`)
-	s = leadingPunct.ReplaceAllString(s, "")
+	s = leadingPunctPattern.ReplaceAllString(s, "")
 
 	// 消除句尾悬空逗号/分号
-	trailingComma := regexp.MustCompile(`[，,、；;\s]+$`)
-	s = trailingComma.ReplaceAllString(s, "")
+	s = trailingCommaPattern.ReplaceAllString(s, "")
 
 	// 消除连续多个相同占位标签
-	tagRegex := regexp.MustCompile(`\[[A-Z0-9_-]+\]`)
 	for {
-		locs := tagRegex.FindAllStringIndex(s, -1)
+		locs := tagRegexPattern.FindAllStringIndex(s, -1)
 		if len(locs) < 2 {
 			break
 		}

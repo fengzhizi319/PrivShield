@@ -899,12 +899,20 @@ func (s *PrivacyService) RecommendParams(namespace string, values []float64, row
 	}
 }
 
-// ReloadDynamicProfiles 重新加载动态分类与隐私策略配置。
+// ReloadDynamicProfiles 重新加载动态分类规则与隐私策略配置。
 func (s *PrivacyService) ReloadDynamicProfiles() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.resolver != nil {
 		_ = s.resolver.LoadFromYAML("config/privacy.yaml")
+	}
+	if domainRules, err := dynclassification.LoadRulesFromDir("rules/domains"); err == nil && len(domainRules) > 0 {
+		if newEngine, err := dynclassification.NewRuleEngine(domainRules); err == nil {
+			s.classifier = newEngine
+		}
+	}
+	if s.funnel != nil {
+		s.funnel.ClearCache()
 	}
 	return nil
 }

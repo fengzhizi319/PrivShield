@@ -9,10 +9,13 @@ package dynclassification
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ──────────────────────────────────────────────
@@ -335,4 +338,34 @@ func (e *RuleEngine) ClassifyBatch(records []map[string]string) []*Classificatio
 		}
 	}
 	return results
+}
+
+// LoadRulesFromDir 从指定目录遍历加载所有 YAML/YML 领域规则文件
+func LoadRulesFromDir(dir string) ([]RuleDef, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var allRules []RuleDef
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.ToLower(entry.Name())
+		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var fileContent struct {
+			Rules []RuleDef `yaml:"rules"`
+		}
+		if err := yaml.Unmarshal(data, &fileContent); err == nil && len(fileContent.Rules) > 0 {
+			allRules = append(allRules, fileContent.Rules...)
+		}
+	}
+	return allRules, nil
 }

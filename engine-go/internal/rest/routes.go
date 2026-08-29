@@ -17,6 +17,7 @@ import (
 	"net/http"
 	httppprof "net/http/pprof"
 	"os"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,6 +27,17 @@ import (
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/kano"
 )
+
+var isServerReady atomic.Bool
+
+func init() {
+	isServerReady.Store(true)
+}
+
+// SetReady 设置 Pod 服务就绪状态（用于 K8s 优雅停机摘流）
+func SetReady(ready bool) {
+	isServerReady.Store(ready)
+}
 
 // RegisterRoutes 注册所有 REST API 路由（与 Python engine URL 方案完全对齐）。
 func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
@@ -219,6 +231,13 @@ func livezHandler(c *gin.Context) {
 }
 
 func readyzHandler(c *gin.Context) {
+	if !isServerReady.Load() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":  "draining",
+			"message": "Server is shutting down, draining in-flight traffic",
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 

@@ -35,6 +35,8 @@ var (
 	officerRegex = regexp.MustCompile(`^(军)(\d{2,4})(\d{2})$`)
 	// 邮箱
 	emailRegex = regexp.MustCompile(`^([^@]{2})([^@]*)(@.+)$`)
+	// 日期提取
+	dateRegex = regexp.MustCompile(`(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})`)
 )
 
 // ──────────────────────────────────────────────
@@ -347,7 +349,6 @@ func RandomDateOffset(dateStr string, offsetDays int) string {
 		return dateStr
 	}
 	// 正则提取日期部分
-	dateRegex := regexp.MustCompile(`(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})`)
 	m := dateRegex.FindStringSubmatch(dateStr)
 	if m == nil {
 		return dateStr
