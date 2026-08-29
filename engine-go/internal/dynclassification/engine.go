@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -329,15 +330,68 @@ func (e *RuleEngine) checkRulesReload() {
 	e.cache = sync.Map{}
 }
 
-// ClassifyBatch 批量分类
+// ClassifyBatch 批量分类（多核并发分块加速）
 func (e *RuleEngine) ClassifyBatch(records []map[string]string) []*ClassificationResult {
-	var results []*ClassificationResult
-	for _, record := range records {
-		for field, value := range record {
-			results = append(results, e.Classify(field, value))
-		}
+	n := len(records)
+	if n == 0 {
+		return nil
 	}
-	return results
+
+	if n <= 32 {
+		var results []*ClassificationResult
+		for _, record := range records {
+			for field, value := range record {
+				results = append(results, e.Classify(field, value))
+			}
+		}
+		return results
+	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+
+	chunkSize := (n + numWorkers - 1) / numWorkers
+	workerResults := make([][]*ClassificationResult, numWorkers)
+	var wg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		startIdx := w * chunkSize
+		endIdx := startIdx + chunkSize
+		if endIdx > n {
+			endIdx = n
+		}
+		if startIdx >= endIdx {
+			break
+		}
+
+		wg.Add(1)
+		go func(workerID, start, end int) {
+			defer wg.Done()
+			var local []*ClassificationResult
+			for i := start; i < end; i++ {
+				for field, value := range records[i] {
+					local = append(local, e.Classify(field, value))
+				}
+			}
+			workerResults[workerID] = local
+		}(w, startIdx, endIdx)
+	}
+	wg.Wait()
+
+	totalCount := 0
+	for _, res := range workerResults {
+		totalCount += len(res)
+	}
+	allResults := make([]*ClassificationResult, 0, totalCount)
+	for _, res := range workerResults {
+		allResults = append(allResults, res...)
+	}
+	return allResults
 }
 
 // LoadRulesFromDir 从指定目录遍历加载所有 YAML/YML 领域规则文件

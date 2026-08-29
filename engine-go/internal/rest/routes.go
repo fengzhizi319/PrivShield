@@ -307,10 +307,7 @@ func maskDataFrameHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		results := make([]map[string]string, len(req.Data))
-		for i, row := range req.Data {
-			results[i] = svc.MaskRecord(row)
-		}
+		results := svc.MaskBatch(req.Data)
 		c.JSON(http.StatusOK, gin.H{"data": results})
 	}
 }

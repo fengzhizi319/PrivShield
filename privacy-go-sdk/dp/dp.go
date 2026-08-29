@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 // ──────────────────────────────────────────────
@@ -244,7 +246,7 @@ func VectorSum(vectors [][]float64, maxNorm float64, epsilon float64) []float64 
 // DP 自适应截断、分组聚合与多指标聚合
 // ──────────────────────────────────────────────
 
-// AdaptiveClip 差分隐私自适应二分搜索估计 [0.0, clipUpper] 上下界。
+// AdaptiveClip 差分隐私自适应二分搜索估计 [0.0, clipUpper] 上下界（支持多核并发加速）。
 // 通过 DP 分位数估计自适应确定安全截断范围。
 func AdaptiveClip(values []float64, epsilon float64, targetQuantile float64, numIterations int, initialClip float64) (float64, float64) {
 	if numIterations <= 0 {
@@ -256,21 +258,62 @@ func AdaptiveClip(values []float64, epsilon float64, targetQuantile float64, num
 	if initialClip <= 0 {
 		initialClip = 10.0
 	}
-	if len(values) == 0 {
+	n := len(values)
+	if n == 0 {
 		return 0.0, initialClip
 	}
 
 	epsPerIter := epsilon / float64(numIterations)
 	curClip := initialClip
-	totalCount := float64(len(values))
+	totalCount := float64(n)
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+	chunkSize := (n + numWorkers - 1) / numWorkers
 
 	for i := 0; i < numIterations; i++ {
 		belowCount := 0
-		for _, v := range values {
-			if v <= curClip {
-				belowCount++
+		if n <= 10000 {
+			for _, v := range values {
+				if v <= curClip {
+					belowCount++
+				}
+			}
+		} else {
+			localCounts := make([]int, numWorkers)
+			var wg sync.WaitGroup
+			for w := 0; w < numWorkers; w++ {
+				startIdx := w * chunkSize
+				endIdx := startIdx + chunkSize
+				if endIdx > n {
+					endIdx = n
+				}
+				if startIdx >= endIdx {
+					break
+				}
+				wg.Add(1)
+				go func(workerID, start, end int) {
+					defer wg.Done()
+					cnt := 0
+					for j := start; j < end; j++ {
+						if values[j] <= curClip {
+							cnt++
+						}
+					}
+					localCounts[workerID] = cnt
+				}(w, startIdx, endIdx)
+			}
+			wg.Wait()
+			for _, cnt := range localCounts {
+				belowCount += cnt
 			}
 		}
+
 		noisyBelow := NoisyCount(belowCount, epsPerIter)
 		frac := noisyBelow / totalCount
 		if frac < targetQuantile {

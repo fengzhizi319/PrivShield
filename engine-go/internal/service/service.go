@@ -166,12 +166,50 @@ func (s *PrivacyService) MaskRecord(record map[string]string) map[string]string 
 	return result
 }
 
-// MaskBatch 批量脱敏
+// MaskBatch 批量脱敏（支持多核并发无锁分块计算）
 func (s *PrivacyService) MaskBatch(records []map[string]string) []map[string]string {
-	results := make([]map[string]string, len(records))
-	for i, r := range records {
-		results[i] = s.MaskRecord(r)
+	n := len(records)
+	results := make([]map[string]string, n)
+	if n == 0 {
+		return results
 	}
+	if n <= 64 {
+		for i, r := range records {
+			results[i] = s.MaskRecord(r)
+		}
+		return results
+	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+
+	chunkSize := (n + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		startIdx := w * chunkSize
+		endIdx := startIdx + chunkSize
+		if endIdx > n {
+			endIdx = n
+		}
+		if startIdx >= endIdx {
+			break
+		}
+
+		wg.Add(1)
+		go func(start, end int) {
+			defer wg.Done()
+			for i := start; i < end; i++ {
+				results[i] = s.MaskRecord(records[i])
+			}
+		}(startIdx, endIdx)
+	}
+	wg.Wait()
 	return results
 }
 

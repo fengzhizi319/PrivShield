@@ -7,6 +7,8 @@ package ldp
 import (
 	"math"
 	"math/rand/v2"
+	"runtime"
+	"sync"
 )
 
 // ──────────────────────────────────────────────
@@ -171,7 +173,7 @@ func AddLaplaceSimple(value, epsilon float64) float64 {
 // Python LocalDPApi 对齐函数
 // ──────────────────────────────────────────────
 
-// PerturbBinaryBatch 批量对二值数据进行本地 DP 扰动（Warner 模型）。
+// PerturbBinaryBatch 批量对二值数据进行本地 DP 扰动（Warner 模型，支持多核并发无锁分块计算）。
 // 与 Python perturb_binary_batch 对齐。
 func PerturbBinaryBatch(values []int, epsilon float64) []int {
 	n := len(values)
@@ -187,17 +189,60 @@ func PerturbBinaryBatch(values []int, epsilon float64) []int {
 	// 概率 p 仅在循环外计算一次
 	p := 1.0 / (1.0 + math.Exp(-epsilon))
 
-	for i, v := range values {
-		if v == 0 || v == 1 {
-			if rand.Float64() < p {
-				result[i] = v
+	if n <= 1024 {
+		for i, v := range values {
+			if v == 0 || v == 1 {
+				if rand.Float64() < p {
+					result[i] = v
+				} else {
+					result[i] = 1 - v
+				}
 			} else {
-				result[i] = 1 - v
+				result[i] = v
 			}
-		} else {
-			result[i] = v
 		}
+		return result
 	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+
+	chunkSize := (n + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		startIdx := w * chunkSize
+		endIdx := startIdx + chunkSize
+		if endIdx > n {
+			endIdx = n
+		}
+		if startIdx >= endIdx {
+			break
+		}
+
+		wg.Add(1)
+		go func(s, e int) {
+			defer wg.Done()
+			for i := s; i < e; i++ {
+				v := values[i]
+				if v == 0 || v == 1 {
+					if rand.Float64() < p {
+						result[i] = v
+					} else {
+						result[i] = 1 - v
+					}
+				} else {
+					result[i] = v
+				}
+			}
+		}(startIdx, endIdx)
+	}
+	wg.Wait()
 	return result
 }
 
@@ -213,7 +258,7 @@ func perturbBinary(value int, epsilon float64) int {
 	return 1 - value
 }
 
-// PerturbCategoricalBatch 批量对类别型数据进行 k-ary Randomized Response 扰动。
+// PerturbCategoricalBatch 批量对类别型数据进行 k-ary Randomized Response 扰动（支持多核并发无锁分块计算）。
 // 与 Python perturb_categorical_batch 对齐。
 func PerturbCategoricalBatch(values []string, categories []string, epsilon float64) []string {
 	n := len(values)
@@ -242,18 +287,62 @@ func PerturbCategoricalBatch(values []string, categories []string, epsilon float
 		othersMap[cat] = others
 	}
 
-	for i, v := range values {
-		if rand.Float64() < p {
-			result[i] = v
-			continue
+	if n <= 1024 {
+		for i, v := range values {
+			if rand.Float64() < p {
+				result[i] = v
+				continue
+			}
+			others, ok := othersMap[v]
+			if !ok || len(others) == 0 {
+				result[i] = categories[rand.IntN(k)]
+			} else {
+				result[i] = others[rand.IntN(len(others))]
+			}
 		}
-		others, ok := othersMap[v]
-		if !ok || len(others) == 0 {
-			result[i] = categories[rand.IntN(k)]
-		} else {
-			result[i] = others[rand.IntN(len(others))]
-		}
+		return result
 	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers > n {
+		numWorkers = n
+	}
+
+	chunkSize := (n + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		startIdx := w * chunkSize
+		endIdx := startIdx + chunkSize
+		if endIdx > n {
+			endIdx = n
+		}
+		if startIdx >= endIdx {
+			break
+		}
+
+		wg.Add(1)
+		go func(s, e int) {
+			defer wg.Done()
+			for i := s; i < e; i++ {
+				v := values[i]
+				if rand.Float64() < p {
+					result[i] = v
+					continue
+				}
+				others, ok := othersMap[v]
+				if !ok || len(others) == 0 {
+					result[i] = categories[rand.IntN(k)]
+				} else {
+					result[i] = others[rand.IntN(len(others))]
+				}
+			}
+		}(startIdx, endIdx)
+	}
+	wg.Wait()
 	return result
 }
 
