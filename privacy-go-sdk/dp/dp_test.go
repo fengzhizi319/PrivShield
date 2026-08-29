@@ -233,4 +233,3 @@ func TestAggregate(t *testing.T) {
 		t.Errorf("Aggregate missing salary_sum")
 	}
 }
-

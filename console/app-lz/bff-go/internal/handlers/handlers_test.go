@@ -359,13 +359,13 @@ func TestRateLimitMiddleware(t *testing.T) {
 
 	// 2. RPS=0 配置：限流禁用，所有请求应通过
 	cfg2 := &config.Config{
-		Host:         "127.0.0.1",
-		Port:         "8085",
-		HubURL:       "http://127.0.0.1:8082",
+		Host:          "127.0.0.1",
+		Port:          "8085",
+		HubURL:        "http://127.0.0.1:8082",
 		DatasourceURL: "http://127.0.0.1:8083",
-		AuditURL:     "http://127.0.0.1:8084",
-		AgentURL:     "http://127.0.0.1:8079",
-		RateLimitRPS: 0, // 禁用限流
+		AuditURL:      "http://127.0.0.1:8084",
+		AgentURL:      "http://127.0.0.1:8079",
+		RateLimitRPS:  0, // 禁用限流
 	}
 	pool2 := clients.NewClientPool(cfg2)
 	h2 := NewHandler(cfg2, pool2, runner.NewTestRunner(pool2), nil, nil)

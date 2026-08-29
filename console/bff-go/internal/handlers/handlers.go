@@ -55,9 +55,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
-	"github.com/fengzhizi319/PrivShield/pkg/metrics"
-	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/config"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/fileparse"
@@ -67,6 +64,9 @@ import (
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/models"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/samples"
 	pb "github.com/fengzhizi319/PrivShield/console/bff-go/proto"
+	pkgagent "github.com/fengzhizi319/PrivShield/pkg/agent"
+	"github.com/fengzhizi319/PrivShield/pkg/metrics"
+	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 )
 
 // 本控制台后端的身份标识常量，随每个响应下发给前端。
@@ -87,8 +87,8 @@ type Server struct {
 	cfg        *config.Config
 	logger     *slog.Logger
 	mc         *metrics.Collector
-	httpClient *http.Client               // Shared HTTP client for REST calls / 共享 HTTP 客户端
-	msClient   *microservices.ClientPool  // Direct Go microservice proxy clients / 直连 Go 微服务代理客户端
+	httpClient *http.Client              // Shared HTTP client for REST calls / 共享 HTTP 客户端
+	msClient   *microservices.ClientPool // Direct Go microservice proxy clients / 直连 Go 微服务代理客户端
 	secCleanup func()                    // P57 fix: cleanup function for securityMiddleware ticker goroutine
 }
 
@@ -153,9 +153,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.StructuredLogger(s.logger, "backend-go"))
 	r.Use(middleware.Recovery(s.logger, "backend-go"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(64 << 20))  // 64 MiB max payload protection (supports larger CSV uploads)
-	r.Use(middleware.MaxConcurrent(1000))    // 并发在途请求上限，超限返回 503
-	r.Use(middleware.CORS(nil))              // backend-go 默认允许所有来源（开发模式）
+	r.Use(middleware.MaxBodySize(64 << 20)) // 64 MiB max payload protection (supports larger CSV uploads)
+	r.Use(middleware.MaxConcurrent(1000))   // 并发在途请求上限，超限返回 503
+	r.Use(middleware.CORS(nil))             // backend-go 默认允许所有来源（开发模式）
 	// P57 fix: capture cleanup function from securityMiddleware to stop ticker goroutine on shutdown.
 	secHandler, secCleanup := securityMiddleware(s.cfg.ConsoleAPIKey, s.cfg.ConsoleRateLimit)
 	s.secCleanup = secCleanup
@@ -267,6 +267,7 @@ func dirExists(path string) bool {
 //   - agent_url：上游 agent 的 gRPC 地址
 //   - latency_ms：Health RPC 调用耗时（毫秒）
 //   - error：连接失败时的错误信息
+//
 // isRestProtocol 检查请求是否显式要求走 REST 协议转发到 Agent
 func isRestProtocol(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("protocol"), "rest") ||
@@ -778,10 +779,10 @@ func (s *Server) Batch(c *gin.Context) {
 		if callErr != nil {
 			// 记录失败结果，包含错误信息，继续处理下一个请求
 			results = append(results, models.BatchResultItem{
-				Method:     method,      // HTTP 方法
-				Path:       item.Path,   // 请求路径
-				Status:     statusCode,  // HTTP 状态码
-				DurationMs: duration,    // 耗时（毫秒）
+				Method:     method,          // HTTP 方法
+				Path:       item.Path,       // 请求路径
+				Status:     statusCode,      // HTTP 状态码
+				DurationMs: duration,        // 耗时（毫秒）
 				Error:      callErr.Error(), // 错误信息
 			})
 			continue // 跳过后续成功逻辑，处理下一个请求

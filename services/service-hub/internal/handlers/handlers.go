@@ -197,8 +197,8 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.StructuredLogger(s.logger, "service-hub"))
 	r.Use(middleware.Recovery(s.logger, "service-hub"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(32 << 20))   // 32 MiB 请求体最大保护
-	r.Use(middleware.MaxConcurrent(1000))      // 并发在途请求上限，超限返回 503
+	r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB 请求体最大保护
+	r.Use(middleware.MaxConcurrent(1000))   // 并发在途请求上限，超限返回 503
 	if s.cfg.RateLimitRPS > 0 {
 		r.Use(middleware.RateLimit(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst)) // 每客户端 IP 令牌桶限流
 	}
@@ -215,6 +215,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/api/hub/tasks", s.ListTasks)
 	r.GET("/api/hub/tasks/:id", s.GetTask)
 	r.POST("/api/hub/dispatch", s.Dispatch)
+	r.POST("/api/hub/classify", s.Dispatch) // Backward compatible alias for classify dispatch
 
 	// 流水线监控遥测
 	r.GET("/api/hub/pipeline", s.Pipeline)

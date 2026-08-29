@@ -207,8 +207,8 @@ type AuditLog struct {
 	Status         string    `json:"status"`
 	ErrorMessage   string    `json:"error,omitempty"`
 	SecurityLevel  string    `json:"security_level"`
-	PrevHash       string    `json:"prev_hash,omitempty"`       // 前序存证哈希（形成防篡改哈希链）
-	IntegrityHash  string    `json:"integrity_hash,omitempty"`  // 本条记录的综合密码学完整性哈希
+	PrevHash       string    `json:"prev_hash,omitempty"`      // 前序存证哈希（形成防篡改哈希链）
+	IntegrityHash  string    `json:"integrity_hash,omitempty"` // 本条记录的综合密码学完整性哈希
 }
 
 // AuditFilter specifies filtering criteria for listing audit logs.

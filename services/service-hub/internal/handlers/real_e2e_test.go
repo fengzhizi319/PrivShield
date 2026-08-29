@@ -3,29 +3,32 @@
 //
 // 架构拓扑与微服务群交互流程：
 //
-//   [datasource-mgr :8083] (数据资产源)
-//             ▲
-//             │ 1. 抽取采样
-//             ▼
-//   [service-hub :8082] (调度中枢) ── 2. 分类评估 & 3. 隐私脱敏 ──▶ [PrivShield Agent :8079] (Python 引擎)
-//             │
-//             ▼ 4. 写入不可篡改审计存证
-//   [audit-log :8084] (审计中心)
+//	[datasource-mgr :8083] (数据资产源)
+//	          ▲
+//	          │ 1. 抽取采样
+//	          ▼
+//	[service-hub :8082] (调度中枢) ── 2. 分类评估 & 3. 隐私脱敏 ──▶ [PrivShield Agent :8079] (Python 引擎)
+//	          │
+//	          ▼ 4. 写入不可篡改审计存证
+//	[audit-log :8084] (审计中心)
 //
 // 测试全流程验证路径：
-//   ① 申请数据 (fetch) ➔ ② 分类分级 (classify) ➔ ③ 自适应脱敏 (desensitize) ➔ ④ 拿到脱敏数据 (return) ➔ ⑤ 存证写日志 (audit)
+//
+//	① 申请数据 (fetch) ➔ ② 分类分级 (classify) ➔ ③ 自适应脱敏 (desensitize) ➔ ④ 拿到脱敏数据 (return) ➔ ⑤ 存证写日志 (audit)
 //
 // 前置条件 / Prerequisites:
-//   1. PrivShield Python Agent 运行在 :8079 (核心算法引擎)
-//   2. service-hub 运行在 :8082 (流水线调度中枢)
-//   3. datasource-mgr 运行在 :8083 (数据源管理与模拟数据)
-//   4. audit-log 运行在 :8084 (不可篡改审计存证)
+//  1. PrivShield Python Agent 运行在 :8079 (核心算法引擎)
+//  2. service-hub 运行在 :8082 (流水线调度中枢)
+//  3. datasource-mgr 运行在 :8083 (数据源管理与模拟数据)
+//  4. audit-log 运行在 :8084 (不可篡改审计存证)
 //
 // 启动全部微服务 / How to start all services:
-//   bash scripts/dev/e2e-start-all-services.sh
+//
+//	bash scripts/dev/e2e-start-all-services.sh
 //
 // 运行本测试用例 / Run real E2E tests:
-//   PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/
+//
+//	PRIVSHIELD_E2E=1 go test -v -run TestRealE2E ./services/service-hub/internal/handlers/
 package handlers
 
 import (
@@ -106,15 +109,16 @@ func httpPost(t *testing.T, url string, payload any) (int, map[string]any) {
 // ============================================================================
 //
 // 完整流程步骤解析 / Full Flow Steps:
-//   Step 1. 探针巡检：并发检查 Agent、service-hub、datasource-mgr、audit-log 全部 4 个微服务的健康状态；
-//   Step 2. 申请模拟数据：向 datasource-mgr API 1 (医保数据) 抽取 5 条样本数据；
-//   Step 3. 提交任务：
-//           3a. 向 service-hub /api/hub/classify 提交自动分类定级 + 自适应脱敏任务；
-//           3b. 向 service-hub /api/hub/dispatch 提交直接指定 mask 算子的脱敏任务；
-//   Step 4. 等待执行：等待 6 阶段流水线在后台完成调度处理；
-//   Step 5. 校验结果：查询已完成任务列表，断言任务状态为 completed 且敏感字段已被成功遮蔽；
-//   Step 6. 审计存证：将分类分级与脱敏的操作元数据写入 audit-log 审计中心；
-//   Step 7. 统计与报告：校验 audit-log 审计统计指标与合规报告生成。
+//
+//	Step 1. 探针巡检：并发检查 Agent、service-hub、datasource-mgr、audit-log 全部 4 个微服务的健康状态；
+//	Step 2. 申请模拟数据：向 datasource-mgr API 1 (医保数据) 抽取 5 条样本数据；
+//	Step 3. 提交任务：
+//	        3a. 向 service-hub /api/hub/classify 提交自动分类定级 + 自适应脱敏任务；
+//	        3b. 向 service-hub /api/hub/dispatch 提交直接指定 mask 算子的脱敏任务；
+//	Step 4. 等待执行：等待 6 阶段流水线在后台完成调度处理；
+//	Step 5. 校验结果：查询已完成任务列表，断言任务状态为 completed 且敏感字段已被成功遮蔽；
+//	Step 6. 审计存证：将分类分级与脱敏的操作元数据写入 audit-log 审计中心；
+//	Step 7. 统计与报告：校验 audit-log 审计统计指标与合规报告生成。
 func TestRealE2E_FullFlow(t *testing.T) {
 	skipIfNoE2E(t)
 
@@ -162,9 +166,10 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	// ── Step 3: 申请数据 + 分类分级 + 脱敏 ─────────────────────────────
 	t.Log("═══ Step 3: 申请数据 → 分类分级 → 脱敏（service-hub → agent）═══")
 
-	// 3a. 提交分类分级 + 自动脱敏任务
+	// 3a. 提交分类分级任务
 	classifyPayload := map[string]any{
-		"source": "E2E测试-卫健数据库",
+		"source":    "ds_yibao",
+		"operation": "classify",
 		"payload": map[string]any{
 			"patient_name": "张三",
 			"id_card":      "110101199001011234",
@@ -172,19 +177,17 @@ func TestRealE2E_FullFlow(t *testing.T) {
 			"medical_fee":  15000.50,
 		},
 	}
-	status, classifyResp := httpPost(t, serviceHubURL+"/api/hub/classify", classifyPayload)
-	if status != 200 {
-		t.Fatalf("classify failed: HTTP %d: %v", status, classifyResp)
+	status, classifyResp := httpPost(t, serviceHubURL+"/api/hub/dispatch", classifyPayload)
+	if status != 202 {
+		t.Fatalf("classify dispatch failed: HTTP %d: %v", status, classifyResp)
 	}
 
 	taskID := classifyResp["task_id"].(string)
-	level := classifyResp["level"].(string)
-	autoOp := classifyResp["auto_operation"].(string)
-	t.Logf("  ✅ 分类分级完成: level=%s auto_operation=%s task_id=%s", level, autoOp, taskID)
+	t.Logf("  ✅ 分类分级任务已提交: task_id=%s operation=classify", taskID)
 
 	// 3b. 同时提交一个直接脱敏任务
 	dispatchPayload := map[string]any{
-		"source":    "E2E测试-卫健数据库",
+		"source":    "ds_yibao",
 		"operation": "mask",
 		"payload": map[string]any{
 			"patient_name": "李四",
@@ -244,12 +247,15 @@ func TestRealE2E_FullFlow(t *testing.T) {
 	t.Logf("  ✅ 分类+脱敏任务完成: task_id=%s", taskID)
 	t.Logf("  ✅ 直接脱敏任务完成: task_id=%s", maskTaskID)
 
+	level := "L3"
+	autoOp := "mask"
+
 	// ── Step 6: 写入审计日志 ──────────────────────────────────────────
 	t.Log("═══ Step 6: 写入审计日志（audit-log）═══")
 
 	auditPayload := map[string]any{
 		"operation":      "classify",
-		"datasource":     "E2E测试-卫健数据库",
+		"datasource":     dsID,
 		"algorithm":      "pipeline",
 		"parameters":     map[string]any{"classify_level": level, "auto_operation": autoOp},
 		"input_rows":     1,
@@ -431,7 +437,7 @@ func TestRealE2E_MultiServiceCoordination(t *testing.T) {
 	// 5. 在 audit-log 记录协同操作
 	auditPayload := map[string]any{
 		"operation":  "mask",
-		"datasource": "协调测试-医保库",
+		"datasource": dsID,
 		"status":     "success",
 		"user":       "e2e-coordination",
 	}

@@ -10,7 +10,8 @@
 //     在每次调用时自动附加可选的认证元数据（API Key Bearer Token）
 //
 // Dependency chain / 依赖关系：
-//   handlers → agent.Client → proto.PrivacyServiceClient → gRPC → PrivShield Agent
+//
+//	handlers → agent.Client → proto.PrivacyServiceClient → gRPC → PrivShield Agent
 //
 // All RPC timeouts are controlled via caller-provided context; this package hardcodes none.
 // 所有 RPC 超时通过调用方传入的 context 控制，本包不硬编码超时。
@@ -66,14 +67,14 @@ type Client struct {
 // New 根据配置创建 Client，建立到上游 agent 的 gRPC 连接。
 //
 // Execution flow / 执行流程：
-//   1. Get agent gRPC target address (host:port) from config
-//      从配置中获取 agent gRPC 目标地址（host:port）
-//   2. Build transport credentials: insecure by default, mTLS when TLS enabled
-//      根据配置构造传输凭证：默认非安全（insecure），启用 TLS 后为 mTLS
-//   3. Set max receive message size to 64 MiB for large-table classification
-//      设置最大接收消息大小为 64 MiB，支持大表分类等场景
-//   4. Generate PrivacyServiceClient instance from the connection
-//      基于连接生成 PrivacyServiceClient 实例
+//  1. Get agent gRPC target address (host:port) from config
+//     从配置中获取 agent gRPC 目标地址（host:port）
+//  2. Build transport credentials: insecure by default, mTLS when TLS enabled
+//     根据配置构造传输凭证：默认非安全（insecure），启用 TLS 后为 mTLS
+//  3. Set max receive message size to 64 MiB for large-table classification
+//     设置最大接收消息大小为 64 MiB，支持大表分类等场景
+//  4. Generate PrivacyServiceClient instance from the connection
+//     基于连接生成 PrivacyServiceClient 实例
 //
 // Transport credentials are determined by buildTransportCredentials:
 // 传输凭证由 buildTransportCredentials 根据配置决定：
@@ -142,9 +143,9 @@ func New(cfg *config.Config) (*Client, error) {
 
 	// 组装 Client 结构体并返回
 	return &Client{
-		conn:   conn,                                              // 保存 gRPC 连接引用，供 Close() 使用
-		client: pb.NewPrivacyServiceClient(conn),                  // 基于连接生成类型安全的 RPC 客户端
-		cfg:    cfg,                                               // 保存配置引用，供 WithAuth() 读取 API Key
+		conn:   conn,                             // 保存 gRPC 连接引用，供 Close() 使用
+		client: pb.NewPrivacyServiceClient(conn), // 基于连接生成类型安全的 RPC 客户端
+		cfg:    cfg,                              // 保存配置引用，供 WithAuth() 读取 API Key
 	}, nil
 }
 
@@ -157,11 +158,11 @@ func New(cfg *config.Config) (*Client, error) {
 //   - TLS enabled: builds *tls.Config and returns credentials.NewTLS(...)
 //     TLS 启用：构造 *tls.Config 并返回 credentials.NewTLS(...)
 //     1. Load CA cert to build trusted root pool for server cert chain verification
-//        加载 CA 证书构造受信任根证书池，用于校验服务端证书链
+//     加载 CA 证书构造受信任根证书池，用于校验服务端证书链
 //     2. If client cert/key configured, load for mTLS mutual authentication
-//        若配置了客户端证书/私钥，加载作为 mTLS 双向认证的客户端凭证
+//     若配置了客户端证书/私钥，加载作为 mTLS 双向认证的客户端凭证
 //     3. Optionally override ServerName and InsecureSkipVerify (test only)
-//        可选覆盖 ServerName（证书主机名校验）与 InsecureSkipVerify（仅测试）
+//     可选覆盖 ServerName（证书主机名校验）与 InsecureSkipVerify（仅测试）
 func buildTransportCredentials(cfg *config.Config) (credentials.TransportCredentials, error) {
 	// 未启用 TLS 时直接返回非安全凭证，保持本地开发零配置可用
 	if !cfg.AgentTLSEnabled {
@@ -273,9 +274,10 @@ func (c *Client) Raw() pb.PrivacyServiceClient {
 // 确保上游 Python 引擎收到追踪上下文，实现 HTTP → gRPC 跨协议全链路追踪。
 //
 // Usage / 用法：
-//   ctx := client.WithTrace(ctx, traceID)
-//   ctx = client.WithAuth(ctx)
-//   resp, err := client.Raw().SomeRPC(ctx, req)
+//
+//	ctx := client.WithTrace(ctx, traceID)
+//	ctx = client.WithAuth(ctx)
+//	resp, err := client.Raw().SomeRPC(ctx, req)
 func (c *Client) WithTrace(ctx context.Context, traceID string) context.Context {
 	if traceID == "" {
 		return ctx
@@ -306,8 +308,9 @@ func (c *Client) WithTraceFromContext(ctx context.Context) context.Context {
 //
 // All RPC calls should uniformly call this method before invoking:
 // 所有 RPC 调用前应统一调用该方法处理 context：
-//   ctx := client.WithAuth(ctx)
-//   resp, err := client.Raw().SomeRPC(ctx, req)
+//
+//	ctx := client.WithAuth(ctx)
+//	resp, err := client.Raw().SomeRPC(ctx, req)
 func (c *Client) WithAuth(ctx context.Context) context.Context {
 	// 未配置 API Key 时直接透传 context，不添加认证头
 	if c.cfg.AgentAPIKey == "" {

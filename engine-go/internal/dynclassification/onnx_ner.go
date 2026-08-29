@@ -31,12 +31,12 @@ import (
 
 // NerEntity NER 提取的实体
 type NerEntity struct {
-	Text       string  `json:"text"`        // 实体文本
-	Label      string  `json:"label"`       // 实体标签（如 PER/LOC/ORG）
-	Start      int     `json:"start"`       // 起始字符偏移
-	End        int     `json:"end"`         // 结束字符偏移
-	Confidence float64 `json:"confidence"`  // 置信度 [0, 1]
-	Source     string  `json:"source"`      // 来源引擎: "onnx_gpu" | "onnx_cpu" | "rule"
+	Text       string  `json:"text"`       // 实体文本
+	Label      string  `json:"label"`      // 实体标签（如 PER/LOC/ORG）
+	Start      int     `json:"start"`      // 起始字符偏移
+	End        int     `json:"end"`        // 结束字符偏移
+	Confidence float64 `json:"confidence"` // 置信度 [0, 1]
+	Source     string  `json:"source"`     // 来源引擎: "onnx_gpu" | "onnx_cpu" | "rule"
 }
 
 // NerEngine NER 引擎接口
@@ -144,14 +144,14 @@ const (
 
 // OnnxNerConfig ONNX NER 引擎配置
 type OnnxNerConfig struct {
-	ModelPath      string     // 模型文件路径 (.onnx)
-	VocabPath      string     // 词表文件路径 (vocab.txt)
-	Device         OnnxDevice // 推理设备
-	MaxSeqLen      int        // 最大序列长度
-	QueueSize      int        // 推理队列大小
-	Timeout        time.Duration // 推理超时
-	BatchMaxSize   int        // 动态合批最大大小
-	BatchMaxWait   time.Duration // 动态合批最大等待
+	ModelPath    string        // 模型文件路径 (.onnx)
+	VocabPath    string        // 词表文件路径 (vocab.txt)
+	Device       OnnxDevice    // 推理设备
+	MaxSeqLen    int           // 最大序列长度
+	QueueSize    int           // 推理队列大小
+	Timeout      time.Duration // 推理超时
+	BatchMaxSize int           // 动态合批最大大小
+	BatchMaxWait time.Duration // 动态合批最大等待
 }
 
 // DefaultOnnxNerConfig 默认 ONNX NER 配置
@@ -187,7 +187,7 @@ type OnnxNerEngine struct {
 	mu        sync.RWMutex
 
 	// 统计
-	inferCount   int64
+	inferCount    int64
 	fallbackCount int64
 }
 

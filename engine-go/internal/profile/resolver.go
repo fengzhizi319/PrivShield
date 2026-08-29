@@ -18,10 +18,10 @@ type PrimitiveParams map[string]interface{}
 
 // PrivacyProfile 隐私参数配置。
 type PrivacyProfile struct {
-	Name       string                      `yaml:"name"`
-	Version    string                      `yaml:"version"`
-	Defaults   map[string]PrimitiveParams   `yaml:"defaults"`
-	Namespaces map[string]PrimitiveParams   `yaml:"namespaces"`
+	Name       string                     `yaml:"name"`
+	Version    string                     `yaml:"version"`
+	Defaults   map[string]PrimitiveParams `yaml:"defaults"`
+	Namespaces map[string]PrimitiveParams `yaml:"namespaces"`
 }
 
 // Resolver 隐私参数解析器。
@@ -242,8 +242,8 @@ func defaultProfile() *PrivacyProfile {
 		Name:    "standard",
 		Version: "1.0",
 		Defaults: map[string]PrimitiveParams{
-			"dp":          {"epsilon": 1.0, "delta": 0.0, "mechanism": "laplace"},
-			"k_anonymity": {"k": 5, "l": 2, "t": 0.2, "max_depth": 10},
+			"dp":           {"epsilon": 1.0, "delta": 0.0, "mechanism": "laplace"},
+			"k_anonymity":  {"k": 5, "l": 2, "t": 0.2, "max_depth": 10},
 			"sanitization": {"engine": "mask"},
 			"qol": {
 				"num_dummies": 3,
@@ -257,10 +257,10 @@ func defaultProfile() *PrivacyProfile {
 
 func builtinDefaults(primitive string) map[string]interface{} {
 	defaults := map[string]map[string]interface{}{
-		"dp":          {"epsilon": 1.0, "delta": 0.0, "mechanism": "laplace"},
-		"k_anonymity": {"k": 5, "l": 2, "t": 0.2, "max_depth": 10},
-		"sanitization": {"engine": "mask"},
-		"qol":         {"num_dummies": 3},
+		"dp":             {"epsilon": 1.0, "delta": 0.0, "mechanism": "laplace"},
+		"k_anonymity":    {"k": 5, "l": 2, "t": 0.2, "max_depth": 10},
+		"sanitization":   {"engine": "mask"},
+		"qol":            {"num_dummies": 3},
 		"classification": {"confidence_threshold": 0.75},
 	}
 	if d, ok := defaults[primitive]; ok {

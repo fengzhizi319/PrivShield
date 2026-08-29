@@ -53,10 +53,14 @@ build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X 'main.Version=$(VERSION)'" -o bin/privshield-gateway ./engine-go/cmd/privshield-gateway
 
 lint:
-	go vet ./pkg/... ./privacy-go-sdk/... ./engine-go/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/...
+	@for mod in pkg privacy-go-sdk engine-go services/service-hub services/datasource-mgr services/audit-log console/bff-go console/app-lz/bff-go; do \
+		(cd $$mod && CGO_ENABLED=0 go vet ./...) || exit 1; \
+	done
 
 format:
-	go fmt ./pkg/... ./privacy-go-sdk/... ./engine-go/... ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/... ./console/bff-go/...
+	@for mod in pkg privacy-go-sdk engine-go services/service-hub services/datasource-mgr services/audit-log console/bff-go console/app-lz/bff-go; do \
+		(cd $$mod && go fmt ./...) || exit 1; \
+	done
 
 check: format lint test
 
@@ -68,12 +72,12 @@ test:
 test-unit: test
 
 test-console:
-	go test -count=1 -v ./console/bff-go/...
+	CGO_ENABLED=0 go test -count=1 -v ./console/bff-go/... ./console/app-lz/bff-go/...
 
 test-go: test
 
 test-services:
-	go test -count=1 ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...
+	CGO_ENABLED=0 go test -count=1 ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...
 
 # ── Docker ───────────────────────────────────────────────────
 

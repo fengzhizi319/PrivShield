@@ -584,7 +584,6 @@ func TestE2E_FullPipeline_DispatchMasking(t *testing.T) {
 	t.Logf("✅ Step 3 passed: 调度中枢状态已更新 completed_total=1")
 }
 
-
 // TestE2E_FullPipeline_MultiLevelDesensitize tests multiple sensitivity levels
 // and their corresponding desensitization operations:
 //   - L1 → none (no masking)
@@ -923,5 +922,3 @@ func TestServer_LocalPendingWorker(t *testing.T) {
 		t.Fatalf("expected task to be completed by local worker, got state: %+v", tCheck)
 	}
 }
-
-

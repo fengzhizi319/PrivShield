@@ -20,10 +20,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/agent"
 	"github.com/fengzhizi319/PrivShield/console/bff-go/internal/config"
 	pb "github.com/fengzhizi319/PrivShield/console/bff-go/proto"
+	pkgconfig "github.com/fengzhizi319/PrivShield/pkg/config"
 )
 
 // mockAgentServer implements pb.PrivacyServiceServer for testing

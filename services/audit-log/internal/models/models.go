@@ -5,24 +5,24 @@ import "time"
 
 // AuditLog represents a single audit log entry.
 type AuditLog struct {
-	ID            string    `json:"id"`                        // Unique log ID
-	TaskID        string    `json:"task_id,omitempty"`         // Associated pipeline task ID
-	APICode       string    `json:"api_code,omitempty"`        // Canonical API code (e.g. "api1_yibao")
-	DatasourceID  string    `json:"datasource_id,omitempty"`   // Canonical datasource ID (e.g. "ds_yibao")
-	Timestamp     time.Time `json:"timestamp"`                 // When the operation occurred
-	Operation     string    `json:"operation"`                 // "mask" | "classify" | "k_anon" | "dp" | "qol"
-	DataSource    string    `json:"datasource"`                // Source data identifier
-	InputHash     string    `json:"input_hash"`                // SHA256 hash of input data
-	OutputHash    string    `json:"output_hash"`               // SHA256 hash of output data
-	Algorithm     string    `json:"algorithm"`                 // Algorithm used (e.g., "field_mask", "k_anonymity")
-	Parameters    any       `json:"parameters"`                // Algorithm parameters
-	InputRows     int       `json:"input_rows"`                // Number of input rows
-	OutputRows    int       `json:"output_rows"`               // Number of output rows
-	DurationMs    int64     `json:"duration_ms"`               // Processing duration
-	User          string    `json:"user"`                      // Who performed the operation
-	Status        string    `json:"status"`                    // "success" | "failed"
-	ErrorMessage  string    `json:"error,omitempty"`           // Error message if failed
-	SecurityLevel string    `json:"security_level"`            // L1-L5 classification level
+	ID            string    `json:"id"`                      // Unique log ID
+	TaskID        string    `json:"task_id,omitempty"`       // Associated pipeline task ID
+	APICode       string    `json:"api_code,omitempty"`      // Canonical API code (e.g. "api1_yibao")
+	DatasourceID  string    `json:"datasource_id,omitempty"` // Canonical datasource ID (e.g. "ds_yibao")
+	Timestamp     time.Time `json:"timestamp"`               // When the operation occurred
+	Operation     string    `json:"operation"`               // "mask" | "classify" | "k_anon" | "dp" | "qol"
+	DataSource    string    `json:"datasource"`              // Source data identifier
+	InputHash     string    `json:"input_hash"`              // SHA256 hash of input data
+	OutputHash    string    `json:"output_hash"`             // SHA256 hash of output data
+	Algorithm     string    `json:"algorithm"`               // Algorithm used (e.g., "field_mask", "k_anonymity")
+	Parameters    any       `json:"parameters"`              // Algorithm parameters
+	InputRows     int       `json:"input_rows"`              // Number of input rows
+	OutputRows    int       `json:"output_rows"`             // Number of output rows
+	DurationMs    int64     `json:"duration_ms"`             // Processing duration
+	User          string    `json:"user"`                    // Who performed the operation
+	Status        string    `json:"status"`                  // "success" | "failed"
+	ErrorMessage  string    `json:"error,omitempty"`         // Error message if failed
+	SecurityLevel string    `json:"security_level"`          // L1-L5 classification level
 }
 
 // AuditLogListResponse is the response for listing audit logs.
@@ -62,8 +62,8 @@ type SnapshotRecord struct {
 	ID            string    `json:"id"`
 	AuditLogID    string    `json:"audit_log_id"`
 	Timestamp     time.Time `json:"timestamp"`
-	InputSample   string    `json:"input_sample"`   // Sample of input data (truncated)
-	OutputSample  string    `json:"output_sample"`  // Sample of output data (truncated)
+	InputSample   string    `json:"input_sample"`  // Sample of input data (truncated)
+	OutputSample  string    `json:"output_sample"` // Sample of output data (truncated)
 	Algorithm     string    `json:"algorithm"`
 	Parameters    any       `json:"parameters"`
 	IntegrityHash string    `json:"integrity_hash"` // SHA256 hash for integrity verification
@@ -78,12 +78,12 @@ type SnapshotListResponse struct {
 
 // ComplianceReport represents a compliance audit report.
 type ComplianceReport struct {
-	ID            string    `json:"id"`
-	GeneratedAt   time.Time `json:"generated_at"`
-	Period        string    `json:"period"`
-	TotalOps      int       `json:"total_operations"`
-	SuccessRate   float64   `json:"success_rate"`
-	ByLevel       map[string]int `json:"by_security_level"`
-	TopOperations []string  `json:"top_operations"`
-	Recommendations []string `json:"recommendations"`
+	ID              string         `json:"id"`
+	GeneratedAt     time.Time      `json:"generated_at"`
+	Period          string         `json:"period"`
+	TotalOps        int            `json:"total_operations"`
+	SuccessRate     float64        `json:"success_rate"`
+	ByLevel         map[string]int `json:"by_security_level"`
+	TopOperations   []string       `json:"top_operations"`
+	Recommendations []string       `json:"recommendations"`
 }

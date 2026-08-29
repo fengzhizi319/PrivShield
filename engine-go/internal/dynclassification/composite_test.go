@@ -65,8 +65,8 @@ func TestCompositeRuleEngine_Evaluate_NoMatch(t *testing.T) {
 
 	// 单个不敏感字段 → 不触发任何规则
 	record := map[string]string{
-		"city":    "北京",
-		"gender":  "M",
+		"city":   "北京",
+		"gender": "M",
 	}
 
 	tags := engine.Evaluate(record)
@@ -80,9 +80,9 @@ func TestCompositeRuleEngine_Evaluate_FieldNormalization(t *testing.T) {
 
 	// id-card（连字符）和 id_card（下划线）都应匹配
 	record := map[string]string{
-		"name":     "王五",
-		"id-card":  "110101199001011234",
-		"mobile":   "13800138000",
+		"name":    "王五",
+		"id-card": "110101199001011234",
+		"mobile":  "13800138000",
 	}
 
 	tags := engine.Evaluate(record)

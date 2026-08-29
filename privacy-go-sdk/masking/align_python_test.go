@@ -225,4 +225,3 @@ func TestAlignPython_MaskRecord(t *testing.T) {
 		t.Errorf("address = %q, want %q", masked["address"], "上海市浦东新****")
 	}
 }
-

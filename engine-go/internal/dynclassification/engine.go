@@ -27,11 +27,11 @@ import (
 type SecurityLevel string
 
 const (
-	LevelPublic     SecurityLevel = "public"
-	LevelInternal   SecurityLevel = "internal"
+	LevelPublic       SecurityLevel = "public"
+	LevelInternal     SecurityLevel = "internal"
 	LevelConfidential SecurityLevel = "confidential"
-	LevelSecret     SecurityLevel = "secret"
-	LevelTopSecret  SecurityLevel = "top_secret"
+	LevelSecret       SecurityLevel = "secret"
+	LevelTopSecret    SecurityLevel = "top_secret"
 )
 
 // ClassificationResult 分类结果
@@ -46,12 +46,12 @@ type ClassificationResult struct {
 
 // RuleDef 规则定义
 type RuleDef struct {
-	ID         string        `yaml:"id"`
-	Level      SecurityLevel `yaml:"level"`
-	Category   string        `yaml:"category"`
-	FieldPatterns []string   `yaml:"field_patterns,omitempty"` // 字段名正则
-	ValuePatterns []string   `yaml:"value_patterns,omitempty"` // 值内容正则（AC 自动机）
-	Description string       `yaml:"description,omitempty"`
+	ID            string        `yaml:"id"`
+	Level         SecurityLevel `yaml:"level"`
+	Category      string        `yaml:"category"`
+	FieldPatterns []string      `yaml:"field_patterns,omitempty"` // 字段名正则
+	ValuePatterns []string      `yaml:"value_patterns,omitempty"` // 值内容正则（AC 自动机）
+	Description   string        `yaml:"description,omitempty"`
 }
 
 // ──────────────────────────────────────────────
@@ -68,7 +68,7 @@ type ACNode struct {
 
 // ACAutomaton Aho-Corasick 自动机
 type ACAutomaton struct {
-	root    *ACNode
+	root     *ACNode
 	patterns map[string]*regexp.Regexp // 模式 ID → 正则
 	mu       sync.RWMutex
 }
@@ -178,9 +178,9 @@ type RuleEngine struct {
 	cache        sync.Map         // LRU 缓存（简化版）
 
 	// 热重载支持（mtime 检测模式，与 WhitelistManager 一致）
-	rulesPath  string
+	rulesPath   string
 	lastModTime time.Time
-	reloadMu   sync.Mutex
+	reloadMu    sync.Mutex
 }
 
 // NewRuleEngine 创建规则引擎实例

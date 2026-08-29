@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 	pb "github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver/proto"
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 )
 
 func newTypedTestServer(t *testing.T) *TypedServer {
@@ -86,9 +86,9 @@ func TestTyped_EstimateCategoricalHistogram(t *testing.T) {
 func TestTyped_ObfuscateQueryBatch(t *testing.T) {
 	ts := newTypedTestServer(t)
 	resp, err := ts.ObfuscateQueryBatch(context.Background(), &pb.ObfuscateQueryBatchRequest{
-		Queries:     []string{"SELECT * FROM patients", "SELECT name FROM users"},
-		NumDummies:  3,
-		Domain:      "medical",
+		Queries:    []string{"SELECT * FROM patients", "SELECT name FROM users"},
+		NumDummies: 3,
+		Domain:     "medical",
 	})
 	if err != nil {
 		t.Fatalf("ObfuscateQueryBatch: %v", err)
@@ -153,9 +153,9 @@ func TestTyped_DPChunkedSum(t *testing.T) {
 			{Values: []float64{10, 20, 30}},
 			{Values: []float64{40, 50}},
 		},
-		Epsilon:    1.0,
-		ClipLower:  0,
-		ClipUpper:  100,
+		Epsilon:   1.0,
+		ClipLower: 0,
+		ClipUpper: 100,
 	})
 	if err != nil {
 		t.Fatalf("DPChunkedSum: %v", err)
@@ -283,8 +283,8 @@ func TestTyped_DPAggregate(t *testing.T) {
 func TestTyped_DPAdaptiveClip(t *testing.T) {
 	ts := newTypedTestServer(t)
 	resp, err := ts.DPAdaptiveClip(context.Background(), &pb.DPAdaptiveClipRequest{
-		Values:    []float64{1.0, 2.0, 3.0, 100.0},
-		Epsilon:   1.0,
+		Values:      []float64{1.0, 2.0, 3.0, 100.0},
+		Epsilon:     1.0,
 		InitialClip: 10.0,
 	})
 	if err != nil {

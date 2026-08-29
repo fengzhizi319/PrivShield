@@ -6,10 +6,10 @@
 // 2. 线程安全与延迟连接：gRPC 连接采用 sync.RWMutex 读写锁进行并发安全保护与按需懒加载初始化；
 // 3. 生产级 mTLS 支持：当启用 TLS 时，自动加载客户端证书/私钥与受信任 CA，建立端到端 TLS 1.3 加密通道；
 // 4. 弹性容灾与自愈：
-//    - 三态熔断器（Circuit Breaker: Closed → Open → HalfOpen），连续 5 次失败自动熔断，30s 冷却后半开探测；
-//    - 指数退避重试（Exponential Backoff with Jitter），最多 3 次重试，防范瞬时网络抖动与 5xx 故障；
-//    - 内存防溢出保护，限制单响应体最大 64 MiB；
-//    - 分布式链路追踪透传，自动提取并注入 X-Request-ID。
+//   - 三态熔断器（Circuit Breaker: Closed → Open → HalfOpen），连续 5 次失败自动熔断，30s 冷却后半开探测；
+//   - 指数退避重试（Exponential Backoff with Jitter），最多 3 次重试，防范瞬时网络抖动与 5xx 故障；
+//   - 内存防溢出保护，限制单响应体最大 64 MiB；
+//   - 分布式链路追踪透传，自动提取并注入 X-Request-ID。
 package datasource
 
 import (

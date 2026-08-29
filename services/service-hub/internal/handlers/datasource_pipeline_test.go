@@ -608,7 +608,6 @@ func TestPipeline_API2_Kangyang_GRPC_ClassifyAndDesensitize(t *testing.T) {
 	t.Logf("✅ Step 3 & 4 (gRPC 康养数据脱敏完成并验证通过): %+v", maskedRecord)
 }
 
-
 // toStringVal converts any scalar value to a string for masking payloads.
 // toStringVal 辅助函数：将任意基础类型转换为统一的字符串表示。
 func toStringVal(v any) string {

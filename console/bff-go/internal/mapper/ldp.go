@@ -37,8 +37,8 @@ func (m *Mapper) handlePerturbBinary(ctx context.Context, client pb.PrivacyServi
 	}
 	// 构造 PerturbBinaryBatchRequest：values 为 0/1 数组
 	resp, err := client.PerturbBinaryBatch(ctx, &pb.PerturbBinaryBatchRequest{
-		Values:  getIntSlice(v, "values"),         // 原始 0/1 值数组
-		Epsilon: getFloat64(v, "epsilon", 1.0),    // 隐私预算 ε（越小噪声越大）
+		Values:  getIntSlice(v, "values"),      // 原始 0/1 值数组
+		Epsilon: getFloat64(v, "epsilon", 1.0), // 隐私预算 ε（越小噪声越大）
 	})
 	if err != nil {
 		return nil, err
@@ -58,9 +58,9 @@ func (m *Mapper) handlePerturbCategorical(ctx context.Context, client pb.Privacy
 	}
 	// 构造 PerturbCategoricalBatchRequest：values 为原始分类值，categories 为所有可能分类
 	resp, err := client.PerturbCategoricalBatch(ctx, &pb.PerturbCategoricalBatchRequest{
-		Values:     getStrings(v, "values"),         // 原始分类值数组
-		Categories: getStrings(v, "categories"),     // 所有可能的分类标签
-		Epsilon:    getFloat64(v, "epsilon", 1.0),   // 隐私预算 ε
+		Values:     getStrings(v, "values"),       // 原始分类值数组
+		Categories: getStrings(v, "categories"),   // 所有可能的分类标签
+		Epsilon:    getFloat64(v, "epsilon", 1.0), // 隐私预算 ε
 	})
 	if err != nil {
 		return nil, err

@@ -85,7 +85,7 @@ func TestMedicalCardChecksum_ComputeValid(t *testing.T) {
 
 func TestNormalizeIcd10(t *testing.T) {
 	tests := []struct {
-		input string
+		input  string
 		letter byte
 		num    int
 		isNil  bool

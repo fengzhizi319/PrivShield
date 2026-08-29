@@ -31,11 +31,11 @@ import (
 // 所有 Go 服务与 Python FastAPI 引擎均按此格式产出错误响应，
 // 使前端可使用单一拦截器统一解析。
 type ErrorEnvelope struct {
-	Code      string `json:"code"`                // Machine-readable error code / 机器可读错误码
-	Message   string `json:"message"`             // Human-readable summary / 人读摘要
-	Detail    any    `json:"detail,omitempty"`    // Detailed error info (optional) / 详细错误信息
-	TraceID   string `json:"trace_id"`            // Distributed trace ID / 分布式追踪 ID
-	Timestamp string `json:"timestamp"`           // UTC timestamp (RFC3339) / UTC 时间戳
+	Code      string `json:"code"`             // Machine-readable error code / 机器可读错误码
+	Message   string `json:"message"`          // Human-readable summary / 人读摘要
+	Detail    any    `json:"detail,omitempty"` // Detailed error info (optional) / 详细错误信息
+	TraceID   string `json:"trace_id"`         // Distributed trace ID / 分布式追踪 ID
+	Timestamp string `json:"timestamp"`        // UTC timestamp (RFC3339) / UTC 时间戳
 }
 
 // AbortWithError aborts the request and responds with a unified error envelope.
@@ -71,11 +71,11 @@ func AbortWithError(c *gin.Context, httpStatus int, code string, message string,
 // envelope to maintain format consistency with error responses.
 // 渐进迁移用：成功响应可选择性使用此信封包裹数据，保持与错误响应的格式一致性。
 type SuccessEnvelope struct {
-	Code      string `json:"code"`                // "OK" / 固定为 "OK"
-	Message   string `json:"message"`             // Human-readable message / 人读消息
-	Data      any    `json:"data,omitempty"`      // Response payload / 响应数据
-	TraceID   string `json:"trace_id"`            // Distributed trace ID / 分布式追踪 ID
-	Timestamp string `json:"timestamp"`           // UTC timestamp / UTC 时间戳
+	Code      string `json:"code"`           // "OK" / 固定为 "OK"
+	Message   string `json:"message"`        // Human-readable message / 人读消息
+	Data      any    `json:"data,omitempty"` // Response payload / 响应数据
+	TraceID   string `json:"trace_id"`       // Distributed trace ID / 分布式追踪 ID
+	Timestamp string `json:"timestamp"`      // UTC timestamp / UTC 时间戳
 }
 
 // RespondWithSuccess responds with a unified success envelope.

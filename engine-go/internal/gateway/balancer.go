@@ -16,14 +16,14 @@ import (
 
 // BackendNode 后端节点
 type BackendNode struct {
-	Address        string
-	Weight         int
-	currentWeight  int  // Nginx SWRR 当前权重（动态调整）
-	InFlight       int64         // 当前在途请求数
-	EWMA           float64       // 指数移动加权平均延迟
-	LastUsed       time.Time     // 最后使用时间
-	CB             CircuitBreaker // 熔断器
-	mu             sync.Mutex
+	Address       string
+	Weight        int
+	currentWeight int            // Nginx SWRR 当前权重（动态调整）
+	InFlight      int64          // 当前在途请求数
+	EWMA          float64        // 指数移动加权平均延迟
+	LastUsed      time.Time      // 最后使用时间
+	CB            CircuitBreaker // 熔断器
+	mu            sync.Mutex
 }
 
 // ──────────────────────────────────────────────
@@ -41,14 +41,14 @@ const (
 
 // CircuitBreaker 三态熔断器
 type CircuitBreaker struct {
-	state          CBState
-	failureCount   int
-	successCount   int
-	threshold      int           // 触发熔断的失败次数
-	halfOpenMax    int           // 半开状态最大探测次数
-	lastFailure    time.Time     // 最近失败时间
-	cooldown       time.Duration // 冷却时间
-	mu             sync.Mutex
+	state        CBState
+	failureCount int
+	successCount int
+	threshold    int           // 触发熔断的失败次数
+	halfOpenMax  int           // 半开状态最大探测次数
+	lastFailure  time.Time     // 最近失败时间
+	cooldown     time.Duration // 冷却时间
+	mu           sync.Mutex
 }
 
 // NewCircuitBreaker 创建熔断器

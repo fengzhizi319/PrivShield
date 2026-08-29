@@ -377,14 +377,14 @@ func RandomDateOffset(dateStr string, offsetDays int) string {
 type FieldType string
 
 const (
-	FieldTypeMobile    FieldType = "mobile"
-	FieldTypeIDCard    FieldType = "id_card"
-	FieldTypeEmail     FieldType = "email"
-	FieldTypeAddress   FieldType = "address"
-	FieldTypeMedical   FieldType = "medical"
-	FieldName          FieldType = "name"
-	FieldTypeBankCard  FieldType = "bank_card"
-	FieldTypeDefault   FieldType = "default"
+	FieldTypeMobile   FieldType = "mobile"
+	FieldTypeIDCard   FieldType = "id_card"
+	FieldTypeEmail    FieldType = "email"
+	FieldTypeAddress  FieldType = "address"
+	FieldTypeMedical  FieldType = "medical"
+	FieldName         FieldType = "name"
+	FieldTypeBankCard FieldType = "bank_card"
+	FieldTypeDefault  FieldType = "default"
 )
 
 // GuessFieldType 根据字段名猜测敏感字段类型。
@@ -538,4 +538,3 @@ func MaskRecord(record map[string]string) map[string]string {
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
-

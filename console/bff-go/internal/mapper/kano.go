@@ -55,10 +55,10 @@ func (m *Mapper) handleKAnonymizeTable(ctx context.Context, client pb.PrivacySer
 	}
 	// 构造 KAnonymizeTableRequest：rows 为数据集，qi_cols 为准标识符
 	resp, err := client.KAnonymizeTable(ctx, &pb.KAnonymizeTableRequest{
-		Rows:     getRecordEntries(v, "rows"),   // 数据集（多行记录）
-		QiCols:   getStrings(v, "qi_cols"),      // 准标识符列名列表
-		K:        getInt32(v, "k", 5),           // K 值（默认 5）
-		MaxDepth: getInt32(v, "max_depth", 10),  // 泛化树最大深度（默认 10）
+		Rows:     getRecordEntries(v, "rows"),  // 数据集（多行记录）
+		QiCols:   getStrings(v, "qi_cols"),     // 准标识符列名列表
+		K:        getInt32(v, "k", 5),          // K 值（默认 5）
+		MaxDepth: getInt32(v, "max_depth", 10), // 泛化树最大深度（默认 10）
 	})
 	if err != nil {
 		return nil, err
@@ -78,10 +78,10 @@ func (m *Mapper) handleKAnonymizeDataFrame(ctx context.Context, client pb.Privac
 	}
 	// 构造 KAnonymizeDataFrameRequest：data 为数据集（字段名为 "data" 而非 "rows"）
 	resp, err := client.KAnonymizeDataFrame(ctx, &pb.KAnonymizeDataFrameRequest{
-		Data:     getRecordEntries(v, "data"),   // 数据集（多行记录）
-		QiCols:   getStrings(v, "qi_cols"),      // 准标识符列名列表
-		K:        getInt32(v, "k", 5),           // K 值（默认 5）
-		MaxDepth: getInt32(v, "max_depth", 10),  // 泛化树最大深度（默认 10）
+		Data:     getRecordEntries(v, "data"),  // 数据集（多行记录）
+		QiCols:   getStrings(v, "qi_cols"),     // 准标识符列名列表
+		K:        getInt32(v, "k", 5),          // K 值（默认 5）
+		MaxDepth: getInt32(v, "max_depth", 10), // 泛化树最大深度（默认 10）
 	})
 	if err != nil {
 		return nil, err

@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 )
 
 // FailurePlaceholder 图像脱敏失败时的占位符。
@@ -50,8 +49,8 @@ type Box struct {
 // DefaultBoxes 返回默认遮挡区域。
 func DefaultBoxes() []Box {
 	return []Box{
-		{YMin: 0.0, XMin: 0.0, YMax: 0.16, XMax: 1.0},  // 头部身份遮挡
-		{YMin: 0.82, XMin: 0.0, YMax: 1.0, XMax: 1.0},   // 底部诊断/签名遮挡
+		{YMin: 0.0, XMin: 0.0, YMax: 0.16, XMax: 1.0}, // 头部身份遮挡
+		{YMin: 0.82, XMin: 0.0, YMax: 1.0, XMax: 1.0}, // 底部诊断/签名遮挡
 	}
 }
 
@@ -394,8 +393,6 @@ func cleanupOldImages(dir string) {
 		return files[i].modTime < files[j].modTime
 	})
 
-	var once sync.Once
-	_ = once // avoid unused warning
 	for i := 0; i < len(files)-maxSanitizedFiles; i++ {
 		os.Remove(files[i].path)
 	}

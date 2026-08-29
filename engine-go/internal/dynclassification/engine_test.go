@@ -46,8 +46,8 @@ func TestClassifyByFieldPattern(t *testing.T) {
 	}
 
 	tests := []struct {
-		field          string
-		expectedLevel  SecurityLevel
+		field            string
+		expectedLevel    SecurityLevel
 		expectedCategory string
 	}{
 		{"id_card", LevelSecret, "pii.identity"},

@@ -69,10 +69,10 @@ func main() {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           router,
-		ReadTimeout:       15 * time.Second,  // 完整请求体读取超时
-		WriteTimeout:      15 * time.Second,  // 响应写入超时
-		IdleTimeout:       60 * time.Second,  // Keep-Alive 空闲超时
-		ReadHeaderTimeout: 5 * time.Second,   // 请求头读取超时（防 Slowloris 攻击）
+		ReadTimeout:       15 * time.Second, // 完整请求体读取超时
+		WriteTimeout:      15 * time.Second, // 响应写入超时
+		IdleTimeout:       60 * time.Second, // Keep-Alive 空闲超时
+		ReadHeaderTimeout: 5 * time.Second,  // 请求头读取超时（防 Slowloris 攻击）
 	}
 
 	// ── 第 5 步：打印启动 Banner ──────────────────────────────────────

@@ -20,9 +20,9 @@ import (
 // handleHealth 处理 /v1/privacy/health 路径，调用上游 agent 的 Health RPC。
 //
 // 执行逻辑：
-//   1. 构造空的 HealthRequest（无需参数）
-//   2. 调用 client.Health() 获取 agent 状态
-//   3. 返回 {"status": "ok", "namespace": "default"} 格式的 map
+//  1. 构造空的 HealthRequest（无需参数）
+//  2. 调用 client.Health() 获取 agent 状态
+//  3. 返回 {"status": "ok", "namespace": "default"} 格式的 map
 func (m *Mapper) handleHealth(ctx context.Context, client pb.PrivacyServiceClient, body json.RawMessage) (any, error) {
 	// 调用上游 agent 的 Health RPC，无需请求参数
 	resp, err := client.Health(ctx, &pb.HealthRequest{})
@@ -82,7 +82,7 @@ func (m *Mapper) handleMaskRecord(ctx context.Context, client pb.PrivacyServiceC
 	}
 	// 构造 MaskRecordRequest：record 为字段名→值的映射
 	resp, err := client.MaskRecord(ctx, &pb.MaskRecordRequest{
-		Record:  getStringMap(v, "record"),  // 整条记录的字段映射
+		Record:  getStringMap(v, "record"),   // 整条记录的字段映射
 		Context: getString(v, "context", ""), // 可选上下文
 	})
 	if err != nil {
@@ -125,9 +125,9 @@ func (m *Mapper) handleMaskDataFrame(ctx context.Context, client pb.PrivacyServi
 	}
 	// 构造 MaskDataFrameRequest：data 为多行记录，columns 指定需脱敏的列
 	resp, err := client.MaskDataFrame(ctx, &pb.MaskDataFrameRequest{
-		Data:    getRecordEntries(v, "data"),   // 多行记录（每行包含 fields map）
-		Columns: getStrings(v, "columns"),      // 需要脱敏的列名列表
-		Context: getString(v, "context", ""),   // 可选上下文
+		Data:    getRecordEntries(v, "data"), // 多行记录（每行包含 fields map）
+		Columns: getStrings(v, "columns"),    // 需要脱敏的列名列表
+		Context: getString(v, "context", ""), // 可选上下文
 	})
 	if err != nil {
 		return nil, err

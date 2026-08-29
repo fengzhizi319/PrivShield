@@ -208,5 +208,3 @@ func TestDispatchObfuscateQuery(t *testing.T) {
 		t.Fatalf("unexpected obfuscate response: %+v", resp)
 	}
 }
-
-

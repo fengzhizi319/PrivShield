@@ -22,18 +22,18 @@ type HubStatus struct {
 // Task represents a scheduling task and its lifecycle execution metadata.
 // Task 结构体表示数据处理流水线中的一个具体调度任务。
 type Task struct {
-	ID           string     `json:"id"`                    // 任务全局唯一标识符（如 "task-1787578265-8d479f51"）
-	APICode      string     `json:"api_code,omitempty"`    // canonical 业务 API（如 "api1_yibao"）
-	DatasourceID string     `json:"datasource_id"`         // canonical 数据源 ID（如 "ds_yibao"）
-	Status       string     `json:"status"`                // 任务当前生命周期状态："pending" | "running" | "completed" | "failed"
-	Stage        string     `json:"stage"`                 // 任务当前流水线执行阶段："ingest" | "fetch" | "classify" | "desensitize" | "return" | "audit" | "done"
-	Source       string     `json:"source"`                // 兼容历史字段名，与 DatasourceID 同值双写
-	Operation    string     `json:"operation"`             // 执行的隐私保护算子类型："none" | "mask" | "k_anon" | "dp"
-	CreatedAt    time.Time  `json:"created_at"`            // 任务接收并创建的时间戳
-	StartedAt    *time.Time `json:"started_at"`            // 任务开始分配并执行的时间戳（未开始为 nil）
-	CompletedAt  *time.Time `json:"completed_at"`          // 任务最终完成或失败的时间戳（未结束为 nil）
-	DurationMs   int64      `json:"duration_ms"`           // 任务从开始到完成的端到端执行耗时（毫秒）
-	Error        string     `json:"error,omitempty"`       // 任务执行失败时的详细错误信息（成功时省略）
+	ID           string     `json:"id"`                 // 任务全局唯一标识符（如 "task-1787578265-8d479f51"）
+	APICode      string     `json:"api_code,omitempty"` // canonical 业务 API（如 "api1_yibao"）
+	DatasourceID string     `json:"datasource_id"`      // canonical 数据源 ID（如 "ds_yibao"）
+	Status       string     `json:"status"`             // 任务当前生命周期状态："pending" | "running" | "completed" | "failed"
+	Stage        string     `json:"stage"`              // 任务当前流水线执行阶段："ingest" | "fetch" | "classify" | "desensitize" | "return" | "audit" | "done"
+	Source       string     `json:"source"`             // 兼容历史字段名，与 DatasourceID 同值双写
+	Operation    string     `json:"operation"`          // 执行的隐私保护算子类型："none" | "mask" | "k_anon" | "dp"
+	CreatedAt    time.Time  `json:"created_at"`         // 任务接收并创建的时间戳
+	StartedAt    *time.Time `json:"started_at"`         // 任务开始分配并执行的时间戳（未开始为 nil）
+	CompletedAt  *time.Time `json:"completed_at"`       // 任务最终完成或失败的时间戳（未结束为 nil）
+	DurationMs   int64      `json:"duration_ms"`        // 任务从开始到完成的端到端执行耗时（毫秒）
+	Error        string     `json:"error,omitempty"`    // 任务执行失败时的详细错误信息（成功时省略）
 }
 
 // TaskListResponse is the HTTP REST response for listing and querying tasks.
@@ -47,12 +47,12 @@ type TaskListResponse struct {
 // DispatchRequest is the request body for dispatching a new privacy task into the pipeline.
 // DispatchRequest 结构体表示向调度中枢提交新数据处理任务时的入参。
 type DispatchRequest struct {
-	APICode      string `json:"api_code"`                      // canonical 业务 API 编码（如 "api1_yibao"）
-	DatasourceID string `json:"datasource_id"`                 // canonical 数据源标识符（如 "ds_yibao"）
-	Source       string `json:"source"`                        // 历史兼容字段（如 "yibao" 或 "ds_yibao"）
+	APICode      string `json:"api_code"`                     // canonical 业务 API 编码（如 "api1_yibao"）
+	DatasourceID string `json:"datasource_id"`                // canonical 数据源标识符（如 "ds_yibao"）
+	Source       string `json:"source"`                       // 历史兼容字段（如 "yibao" 或 "ds_yibao"）
 	Operation    string `json:"operation" binding:"required"` // 指定的脱敏操作类型（必填，"mask" | "k_anon" | "dp" | "none"）
-	Payload      any    `json:"payload"`                       // 待处理的原始数据载荷（可为单条记录 map 或记录列表切片）
-	Priority     int    `json:"priority"`                      // 任务执行优先级（数值越大，调度优先级越高，默认 0）
+	Payload      any    `json:"payload"`                      // 待处理的原始数据载荷（可为单条记录 map 或记录列表切片）
+	Priority     int    `json:"priority"`                     // 任务执行优先级（数值越大，调度优先级越高，默认 0）
 }
 
 // DispatchResponse is the HTTP response returned immediately after dispatching a task.

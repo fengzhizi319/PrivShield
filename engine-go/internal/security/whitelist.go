@@ -26,21 +26,21 @@ type CNEntry struct {
 
 // WhitelistConfig 表示 YAML 白名单配置文件根结构。
 type WhitelistConfig struct {
-	Version        string    `yaml:"version"`
-	Entries        []CNEntry `yaml:"entries"`
-	DefaultScopes  []string  `yaml:"default_scopes"`
+	Version       string    `yaml:"version"`
+	Entries       []CNEntry `yaml:"entries"`
+	DefaultScopes []string  `yaml:"default_scopes"`
 }
 
 // WhitelistManager 线程安全的 mTLS CN 白名单管理器，支持热重载。
 type WhitelistManager struct {
-	configPath   string
-	staticCNs    []string
-	mu           sync.RWMutex
-	cache        map[string]*CNEntry
+	configPath    string
+	staticCNs     []string
+	mu            sync.RWMutex
+	cache         map[string]*CNEntry
 	defaultScopes []string
-	lastMtime    time.Time
-	lastLoadTime time.Time
-	loadError    string
+	lastMtime     time.Time
+	lastLoadTime  time.Time
+	loadError     string
 }
 
 // NewWhitelistManager 创建白名单管理器。

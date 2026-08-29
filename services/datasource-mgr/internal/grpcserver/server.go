@@ -308,10 +308,10 @@ func toDataQueryResponse(id, name string, total, limit, offset int, rows []map[s
 // BuildServerTLSConfig 根据运行配置构造支持 mTLS 双向身份验证和公钥指纹绑定的标准 tls.Config，可同时服务于 HTTPS REST 和 gRPC。
 //
 // 安全保障机制：
-// 1. 强制 TLS 1.3 最低版本基线 (MinVersion: tls.VersionTLS13)，阻断已知的旧版 TLS 协议降级漏洞；
-// 2. 客户端证书验证 (ClientAuth)：支持 RequireAndVerifyClientCert 模式，强制调用方提供合法的客户端证书；
-// 3. 公钥指纹固定 (Public Key Pinning)：通过 VerifyPeerCertificate 回调，精确比对客户端公钥 (RSA Modulus + Exponent)，
-//    即便第三方 CA 发生密钥泄露或签发了伪造证书，只要公钥不匹配即被拒绝连接（零信任防御）。
+//  1. 强制 TLS 1.3 最低版本基线 (MinVersion: tls.VersionTLS13)，阻断已知的旧版 TLS 协议降级漏洞；
+//  2. 客户端证书验证 (ClientAuth)：支持 RequireAndVerifyClientCert 模式，强制调用方提供合法的客户端证书；
+//  3. 公钥指纹固定 (Public Key Pinning)：通过 VerifyPeerCertificate 回调，精确比对客户端公钥 (RSA Modulus + Exponent)，
+//     即便第三方 CA 发生密钥泄露或签发了伪造证书，只要公钥不匹配即被拒绝连接（零信任防御）。
 func BuildServerTLSConfig(cfg *config.Config) (*tls.Config, error) {
 	if !cfg.TLSEnabled {
 		return nil, fmt.Errorf("TLS is disabled in configuration")

@@ -34,11 +34,11 @@ import (
 
 // NerTask GPU/CPU ONNX 推理任务
 type NerTask struct {
-	Text       string          // 原始文本
-	InputIDs   []int64         // Token ID 序列
-	AttnMask   []int64         // Attention Mask
-	TypeIDs    []int64         // Token Type IDs
-	Offsets    []TokenOffset   // Token → 原始文本字节映射
+	Text       string           // 原始文本
+	InputIDs   []int64          // Token ID 序列
+	AttnMask   []int64          // Attention Mask
+	TypeIDs    []int64          // Token Type IDs
+	Offsets    []TokenOffset    // Token → 原始文本字节映射
 	ResultChan chan []NerEntity // 推理结果回传通道
 }
 
@@ -103,8 +103,8 @@ func (s *StubOnnxRuntime) Infer(_ OnnxInferRequest) (*OnnxInferResult, error) {
 	return nil, fmt.Errorf("stub ONNX runtime: not initialized")
 }
 
-func (s *StubOnnxRuntime) Close()      {}
-func (s *StubOnnxRuntime) IsReady() bool { return s.ready }
+func (s *StubOnnxRuntime) Close()             {}
+func (s *StubOnnxRuntime) IsReady() bool      { return s.ready }
 func (s *StubOnnxRuntime) DeviceName() string { return "stub" }
 
 // ──────────────────────────────────────────────
@@ -113,17 +113,17 @@ func (s *StubOnnxRuntime) DeviceName() string { return "stub" }
 
 // CudaOnnxNerConfig CUDA ONNX NER 引擎配置
 type CudaOnnxNerConfig struct {
-	ModelPath   string        // ONNX 模型文件路径
-	VocabPath   string        // WordPiece 词表路径
-	LabelList   []string      // 标签列表 (e.g. ["O", "B-DISEASE", "I-DISEASE", ...])
-	GPUDeviceID int           // CUDA 设备 ID (-1 = CPU)
-	NumWorkers  int           // GPU Worker 数量
-	MaxSeqLen   int           // 最大序列长度
-	MaxBatch    int           // 动态合批最大大小
-	BatchWait   time.Duration // 动态合批最大等待
-	QueueSize   int           // 推理队列缓冲大小
+	ModelPath    string        // ONNX 模型文件路径
+	VocabPath    string        // WordPiece 词表路径
+	LabelList    []string      // 标签列表 (e.g. ["O", "B-DISEASE", "I-DISEASE", ...])
+	GPUDeviceID  int           // CUDA 设备 ID (-1 = CPU)
+	NumWorkers   int           // GPU Worker 数量
+	MaxSeqLen    int           // 最大序列长度
+	MaxBatch     int           // 动态合批最大大小
+	BatchWait    time.Duration // 动态合批最大等待
+	QueueSize    int           // 推理队列缓冲大小
 	InferTimeout time.Duration // 单次推理超时
-	Runtime     OnnxRuntime   // ONNX Runtime 实现（可注入测试桩）
+	Runtime      OnnxRuntime   // ONNX Runtime 实现（可注入测试桩）
 }
 
 // DefaultCudaOnnxNerConfig 默认 CUDA ONNX NER 配置

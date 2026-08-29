@@ -422,9 +422,9 @@ func TestAgentProcess(t *testing.T) {
 			t.Fatalf("[%s] expected 200, got %d: %s", path, w.Code, w.Body.String())
 		}
 		var res struct {
-			ClassificationReport []map[string]any `json:"classification_report"`
+			ClassificationReport []map[string]any    `json:"classification_report"`
 			SanitizedData        []map[string]string `json:"sanitized_data"`
-			Summary              map[string]any `json:"summary"`
+			Summary              map[string]any      `json:"summary"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
 			t.Fatalf("[%s] unmarshal response: %v", path, err)

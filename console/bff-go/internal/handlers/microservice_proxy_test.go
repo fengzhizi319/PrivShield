@@ -52,13 +52,13 @@ func TestMicroserviceProxy_Routes(t *testing.T) {
 	defer auditSrv.Close()
 
 	cfg := &config.Config{
-		HubURL:            hubSrv.URL,
-		DatasourceURL:     dsSrv.URL,
-		AuditURL:          auditSrv.URL,
-		HubAPIKey:         "hub-key",
-		DatasourceAPIKey:  "ds-key",
-		AuditAPIKey:       "audit-key",
-		ConsoleRateLimit:  0, // disable rate limit for tests
+		HubURL:           hubSrv.URL,
+		DatasourceURL:    dsSrv.URL,
+		AuditURL:         auditSrv.URL,
+		HubAPIKey:        "hub-key",
+		DatasourceAPIKey: "ds-key",
+		AuditAPIKey:      "audit-key",
+		ConsoleRateLimit: 0, // disable rate limit for tests
 	}
 
 	client, err := agent.New(cfg)
@@ -140,10 +140,10 @@ func TestMicroserviceProxy_Body(t *testing.T) {
 	defer hubSrv.Close()
 
 	cfg := &config.Config{
-		HubURL:            hubSrv.URL,
-		DatasourceURL:     hubSrv.URL,
-		AuditURL:          hubSrv.URL,
-		ConsoleRateLimit:  0,
+		HubURL:           hubSrv.URL,
+		DatasourceURL:    hubSrv.URL,
+		AuditURL:         hubSrv.URL,
+		ConsoleRateLimit: 0,
 	}
 
 	server := New(nil, cfg, nil, metrics.NewCollector("test"))

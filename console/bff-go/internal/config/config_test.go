@@ -53,7 +53,7 @@ func TestGetEnvBool(t *testing.T) {
 // TestLoadTLSDefaults 验证 TLS 相关配置项的默认值：全部关闭/为空。
 func TestLoadTLSDefaults(t *testing.T) {
 	// 清理可能影响断言的环境变量
-	for _, k := range []string {
+	for _, k := range []string{
 		"PRIVACY_AGENT_TLS_ENABLED",
 		"PRIVACY_AGENT_TLS_CERT_FILE",
 		"PRIVACY_AGENT_TLS_KEY_FILE",

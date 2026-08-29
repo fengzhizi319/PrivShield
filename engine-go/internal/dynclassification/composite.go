@@ -13,12 +13,12 @@ import (
 
 // CompositeRuleDef 复合规则定义。
 type CompositeRuleDef struct {
-	ID            string   `yaml:"id" json:"id"`
-	FieldPatterns []string `yaml:"field_patterns" json:"field_patterns"`
-	MinMatches    int      `yaml:"min_matches" json:"min_matches"`
+	ID            string        `yaml:"id" json:"id"`
+	FieldPatterns []string      `yaml:"field_patterns" json:"field_patterns"`
+	MinMatches    int           `yaml:"min_matches" json:"min_matches"`
 	TargetLevel   SecurityLevel `yaml:"target_level" json:"target_level"`
-	Category      string   `yaml:"category" json:"category"`
-	Description   string   `yaml:"description" json:"description"`
+	Category      string        `yaml:"category" json:"category"`
+	Description   string        `yaml:"description" json:"description"`
 }
 
 // CompositeTag 复合规则命中产生的标签。

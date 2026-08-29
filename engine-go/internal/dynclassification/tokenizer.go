@@ -15,23 +15,23 @@ import (
 
 // Tokenizer WordPiece 分词器
 type Tokenizer struct {
-	vocab      map[string]int // 词表：token → ID
-	unkToken   string
-	unkID      int
-	clsToken   string
-	clsID      int
-	sepToken   string
-	sepID      int
-	maxLen     int
+	vocab    map[string]int // 词表：token → ID
+	unkToken string
+	unkID    int
+	clsToken string
+	clsID    int
+	sepToken string
+	sepID    int
+	maxLen   int
 }
 
 // TokenResult 分词结果
 type TokenResult struct {
-	InputIDs   []int64
+	InputIDs      []int64
 	AttentionMask []int64
 	TokenTypeIDs  []int64
-	Offsets    []TokenOffset
-	Tokens     []string
+	Offsets       []TokenOffset
+	Tokens        []string
 }
 
 // TokenOffset 每个 token 对应的原文偏移量
@@ -118,10 +118,10 @@ func (t *Tokenizer) tokenize(text string) []TokenWithOffset {
 
 		if id, ok := t.vocab[char]; ok && id != t.unkID {
 			tokens = append(tokens, TokenWithOffset{
-				Token:  char,
-				ID:     id,
-				Start:  byteOffset,
-				End:    byteOffset + charLen,
+				Token: char,
+				ID:    id,
+				Start: byteOffset,
+				End:   byteOffset + charLen,
 			})
 		} else {
 			// 尝试 subword 切分

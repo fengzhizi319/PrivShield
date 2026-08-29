@@ -205,11 +205,11 @@ func TestAhoCorasick_PositionAccuracy(t *testing.T) {
 
 func TestAcAutomatonOperator_Match(t *testing.T) {
 	termsMap := map[string]string{
-		"艾滋病":  "L5",
-		"梅毒":   "L5",
+		"艾滋病": "L5",
+		"梅毒":  "L5",
 		"高血压": "L4",
 		"糖尿病": "L4",
-		"感冒":   "L2",
+		"感冒":  "L2",
 	}
 
 	op := NewAcAutomatonOperator(termsMap)

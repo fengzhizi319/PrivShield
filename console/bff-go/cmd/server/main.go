@@ -2,20 +2,21 @@
 // Command server is the entry point for the Go gRPC proxy backend.
 //
 // 执行流程 / Execution flow:
-//   1. 从环境变量加载配置（agent 地址、监听端口、API Key 等）
-//      Load configuration from env vars (agent address, listen port, API Key, etc.)
-//   2. 创建到 PrivShield gRPC 服务的客户端连接
-//      Create gRPC client connection to PrivShield service
-//   3. 初始化 Gin HTTP 路由，注册所有 REST 代理接口与静态 UI 托管
-//      Initialize Gin HTTP routes, register all REST proxy endpoints and static UI hosting
-//   4. 启动 HTTP 服务器，监听前端请求
-//      Start HTTP server, listen for frontend requests
-//   5. 监听系统信号（SIGINT/SIGTERM），收到后执行优雅关闭
-//      Listen for system signals (SIGINT/SIGTERM), perform graceful shutdown on receipt
+//  1. 从环境变量加载配置（agent 地址、监听端口、API Key 等）
+//     Load configuration from env vars (agent address, listen port, API Key, etc.)
+//  2. 创建到 PrivShield gRPC 服务的客户端连接
+//     Create gRPC client connection to PrivShield service
+//  3. 初始化 Gin HTTP 路由，注册所有 REST 代理接口与静态 UI 托管
+//     Initialize Gin HTTP routes, register all REST proxy endpoints and static UI hosting
+//  4. 启动 HTTP 服务器，监听前端请求
+//     Start HTTP server, listen for frontend requests
+//  5. 监听系统信号（SIGINT/SIGTERM），收到后执行优雅关闭
+//     Listen for system signals (SIGINT/SIGTERM), perform graceful shutdown on receipt
 //
 // 整体架构 / Overall architecture:
-//   React 前端  ──HTTP/JSON──▶  本程序(Go)  ──gRPC──▶  PrivShield Agent
-//   React frontend  ──HTTP/JSON──▶  This program(Go)  ──gRPC──▶  PrivShield Agent
+//
+//	React 前端  ──HTTP/JSON──▶  本程序(Go)  ──gRPC──▶  PrivShield Agent
+//	React frontend  ──HTTP/JSON──▶  This program(Go)  ──gRPC──▶  PrivShield Agent
 package main
 
 import (
@@ -40,8 +41,9 @@ import (
 
 // main 是程序入口函数，按以下步骤顺序执行：
 // main is the program entry point, executing in the following order:
-//   加载配置 → 创建 gRPC 客户端 → 初始化 HTTP 路由 → 启动服务器 → 等待关闭信号
-//   Load config → Create gRPC client → Init HTTP routes → Start server → Wait for shutdown signal
+//
+//	加载配置 → 创建 gRPC 客户端 → 初始化 HTTP 路由 → 启动服务器 → 等待关闭信号
+//	Load config → Create gRPC client → Init HTTP routes → Start server → Wait for shutdown signal
 func main() {
 	// ── 步骤 1：加载配置 ──────────────────────────────────────────────
 	// 从环境变量读取所有配置项，包括：

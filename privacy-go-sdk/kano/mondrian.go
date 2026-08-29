@@ -13,10 +13,10 @@ import (
 
 // KAnonymizeResult 表级 K-匿名处理结果（Mondrian 算法）。
 type KAnonymizeResult struct {
-	Records               []Record `json:"records"`
-	K                     int      `json:"k"`
-	QICols                []string `json:"qi_cols"`
-	EquivalenceClassesCount int    `json:"equivalence_classes_count"`
+	Records                 []Record `json:"records"`
+	K                       int      `json:"k"`
+	QICols                  []string `json:"qi_cols"`
+	EquivalenceClassesCount int      `json:"equivalence_classes_count"`
 }
 
 // Mondrian 对整张表执行 K-匿名泛化（Mondrian 多维分区算法）。
@@ -60,9 +60,9 @@ func Mondrian(rows []Record, qiCols []string, k int, maxDepth int) (*KAnonymizeR
 	}
 
 	return &KAnonymizeResult{
-		Records:               result,
-		K:                     k,
-		QICols:                qiCols,
+		Records:                 result,
+		K:                       k,
+		QICols:                  qiCols,
 		EquivalenceClassesCount: len(eqSet),
 	}, nil
 }

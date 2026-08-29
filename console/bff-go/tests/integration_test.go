@@ -16,18 +16,18 @@
 package integration_test
 
 import (
-	"bytes"          // 构造 HTTP 请求体 / construct HTTP request body
-	"context"        // gRPC 调用上下文与超时控制 / gRPC call context and timeout control
-	"encoding/json"  // JSON 序列化/反序列化 / JSON marshal/unmarshal
-	"log/slog"       // 结构化日志（测试用）/ structured logger (test only)
-	"net/http"       // HTTP 客户端与状态码常量 / HTTP client and status code constants
+	"bytes"             // 构造 HTTP 请求体 / construct HTTP request body
+	"context"           // gRPC 调用上下文与超时控制 / gRPC call context and timeout control
+	"encoding/json"     // JSON 序列化/反序列化 / JSON marshal/unmarshal
+	"log/slog"          // 结构化日志（测试用）/ structured logger (test only)
+	"net/http"          // HTTP 客户端与状态码常量 / HTTP client and status code constants
 	"net/http/httptest" // 内存 HTTP 测试服务器 / in-memory HTTP test server
-	"os"             // stderr 日志输出 / stderr log output
-	"testing"        // Go 测试框架 / Go testing framework
-	"time"           // 超时与重试间隔 / timeout and retry interval
+	"os"                // stderr 日志输出 / stderr log output
+	"testing"           // Go 测试框架 / Go testing framework
+	"time"              // 超时与重试间隔 / timeout and retry interval
 
-	"github.com/gin-gonic/gin"                // Gin Web 框架（测试模式）/ Gin web framework (test mode)
-	"google.golang.org/grpc"                  // gRPC 客户端连接 / gRPC client connection
+	"github.com/gin-gonic/gin"                    // Gin Web 框架（测试模式）/ Gin web framework (test mode)
+	"google.golang.org/grpc"                      // gRPC 客户端连接 / gRPC client connection
 	"google.golang.org/grpc/credentials/insecure" // 无 TLS 传输凭证（仅测试）/ no-TLS transport creds (test only)
 
 	"github.com/fengzhizi319/PrivShield/pkg/metrics" // Prometheus 指标收集器 / Prometheus metrics collector

@@ -141,9 +141,9 @@ func parseSheetData(r io.Reader, sharedStrings []string) ([][]string, error) {
 			Row []struct {
 				R int `xml:"r,attr"`
 				C []struct {
-					R string `xml:"r,attr"`
-					T string `xml:"t,attr"`
-					V string `xml:"v"`
+					R  string `xml:"r,attr"`
+					T  string `xml:"t,attr"`
+					V  string `xml:"v"`
 					IS struct {
 						T string `xml:"t"`
 					} `xml:"is"`

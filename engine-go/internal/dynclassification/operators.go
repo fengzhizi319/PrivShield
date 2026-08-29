@@ -19,22 +19,22 @@ import (
 type OperatorType string
 
 const (
-	OpRegex             OperatorType = "regex"                   // 正则匹配
-	OpContains          OperatorType = "contains"                // 子串包含
-	OpEquals            OperatorType = "equals"                  // 精确等于
-	OpStartsWith        OperatorType = "starts_with"             // 前缀匹配
-	OpEndsWith          OperatorType = "ends_with"               // 后缀匹配
-	OpACAutomaton       OperatorType = "ac_automaton"            // AC 自动机多模式匹配
-	OpFieldMatch        OperatorType = "field_match"             // 字段名匹配
-	OpIdCardChecksum    OperatorType = "id_card_checksum"        // 身份证校验
-	OpMedicalCard       OperatorType = "medical_card_checksum"   // 上海医保卡校验
-	OpIcd10Range        OperatorType = "icd10_range"             // ICD-10 区间判定
-	OpLuhnChecksum      OperatorType = "luhn_checksum"           // Luhn 银行卡校验
-	OpLengthRange       OperatorType = "length_range"            // 长度范围匹配
-	OpIpAddress         OperatorType = "ip_address"              // IP 地址匹配
-	OpMacAddress        OperatorType = "mac_address"             // MAC 地址匹配
-	OpChineseName       OperatorType = "chinese_name"            // 中文姓名匹配
-	OpEmail             OperatorType = "email"                   // 邮箱匹配
+	OpRegex          OperatorType = "regex"                 // 正则匹配
+	OpContains       OperatorType = "contains"              // 子串包含
+	OpEquals         OperatorType = "equals"                // 精确等于
+	OpStartsWith     OperatorType = "starts_with"           // 前缀匹配
+	OpEndsWith       OperatorType = "ends_with"             // 后缀匹配
+	OpACAutomaton    OperatorType = "ac_automaton"          // AC 自动机多模式匹配
+	OpFieldMatch     OperatorType = "field_match"           // 字段名匹配
+	OpIdCardChecksum OperatorType = "id_card_checksum"      // 身份证校验
+	OpMedicalCard    OperatorType = "medical_card_checksum" // 上海医保卡校验
+	OpIcd10Range     OperatorType = "icd10_range"           // ICD-10 区间判定
+	OpLuhnChecksum   OperatorType = "luhn_checksum"         // Luhn 银行卡校验
+	OpLengthRange    OperatorType = "length_range"          // 长度范围匹配
+	OpIpAddress      OperatorType = "ip_address"            // IP 地址匹配
+	OpMacAddress     OperatorType = "mac_address"           // MAC 地址匹配
+	OpChineseName    OperatorType = "chinese_name"          // 中文姓名匹配
+	OpEmail          OperatorType = "email"                 // 邮箱匹配
 )
 
 // Operator 匹配算子接口
@@ -296,13 +296,13 @@ var idCardChars = [11]string{"1", "0", "X", "9", "8", "7", "6", "5", "4", "3", "
 var shMedicalWeights = [8]int{7, 9, 10, 5, 8, 4, 2, 1}
 
 var (
-	idCardRegex    = regexp.MustCompile(`^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$`)
-	medicalRegex   = regexp.MustCompile(`^\d{9}$`)
-	icd10Regex     = regexp.MustCompile(`^([A-Z])(\d{2})(?:\.?\d{0,2})?$`)
-	ipv4Regex      = regexp.MustCompile(`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
-	ipv6Regex      = regexp.MustCompile(`^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$`)
-	macRegex       = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
-	emailRegex     = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	idCardRegex  = regexp.MustCompile(`^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$`)
+	medicalRegex = regexp.MustCompile(`^\d{9}$`)
+	icd10Regex   = regexp.MustCompile(`^([A-Z])(\d{2})(?:\.?\d{0,2})?$`)
+	ipv4Regex    = regexp.MustCompile(`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
+	ipv6Regex    = regexp.MustCompile(`^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$`)
+	macRegex     = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
+	emailRegex   = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 )
 
 // validateIdCard 校验中国大陆 18 位身份证号

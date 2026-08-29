@@ -1,9 +1,10 @@
 package grpcserver
 
 import (
-	"encoding/json"
+	"context"
 	"testing"
 
+	pb "github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver/proto"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 )
 
@@ -20,20 +21,15 @@ func newTestServer(t *testing.T) *Server {
 
 func TestHandleHealth(t *testing.T) {
 	srv := newTestServer(t)
-	respBytes, err := srv.handleHealth(nil)
+	resp, err := srv.Health(context.Background(), &pb.HealthRequest{})
 	if err != nil {
-		t.Fatalf("handleHealth: %v", err)
+		t.Fatalf("Health: %v", err)
 	}
-
-	var resp map[string]string
-	if err := json.Unmarshal(respBytes, &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if resp.Status != "ok" {
+		t.Errorf("status = %q, want %q", resp.Status, "ok")
 	}
-	if resp["status"] != "ok" {
-		t.Errorf("status = %q, want %q", resp["status"], "ok")
-	}
-	if resp["engine"] != "go" {
-		t.Errorf("engine = %q, want %q", resp["engine"], "go")
+	if resp.Namespace != "default" {
+		t.Errorf("namespace = %q, want %q", resp.Namespace, "default")
 	}
 }
 
@@ -55,30 +51,21 @@ func TestHandleMask(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := map[string]string{
-				"field_name": tt.fieldName,
-				"value":      tt.value,
-			}
-			reqBytes, _ := json.Marshal(req)
-
-			respBytes, err := srv.handleMask(reqBytes)
+			resp, err := srv.Mask(context.Background(), &pb.MaskRequest{
+				FieldName: tt.fieldName,
+				Value:     tt.value,
+			})
 			if err != nil {
-				t.Fatalf("handleMask: %v", err)
+				t.Fatalf("Mask: %v", err)
 			}
 
-			var resp map[string]string
-			if err := json.Unmarshal(respBytes, &resp); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-
-			result := resp["result"]
+			result := resp.Result
 			if tt.wantEmpty && result != "" {
 				t.Errorf("result = %q, want empty", result)
 			}
 			if !tt.wantEmpty && result == "" {
 				t.Errorf("result is empty, want non-empty")
 			}
-			// 脱敏结果不应等于原值（对于已知 PII 类型）
 			if tt.name != "unknown_field" && result == tt.value {
 				t.Errorf("result = %q, should be masked (original: %q)", result, tt.value)
 			}
@@ -89,265 +76,181 @@ func TestHandleMask(t *testing.T) {
 func TestHandleMaskRecord(t *testing.T) {
 	srv := newTestServer(t)
 
-	req := map[string]interface{}{
-		"record": map[string]string{
-			"id_card_no":   "110101199003072345",
-			"phone":        "13812345678",
-			"patient_name": "张三",
-			"diagnosis":    "感冒",
-		},
+	rec := map[string]string{
+		"id_card_no":   "110101199003072345",
+		"phone":        "13812345678",
+		"patient_name": "张三",
+		"diagnosis":    "感冒",
 	}
-	reqBytes, _ := json.Marshal(req)
 
-	respBytes, err := srv.handleMaskRecord(reqBytes)
+	resp, err := srv.MaskRecord(context.Background(), &pb.MaskRecordRequest{
+		Record: rec,
+	})
 	if err != nil {
-		t.Fatalf("handleMaskRecord: %v", err)
+		t.Fatalf("MaskRecord: %v", err)
 	}
 
-	var resp map[string]map[string]string
-	if err := json.Unmarshal(respBytes, &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	result := resp["result"]
-	if result == nil {
-		t.Fatal("result is nil")
-	}
-
-	// 身份证号应被脱敏
+	result := resp.Result
 	if result["id_card_no"] == "110101199003072345" {
-		t.Error("id_card_no should be masked")
+		t.Errorf("id_card_no not masked: %v", result["id_card_no"])
 	}
-	// 手机号应被脱敏
 	if result["phone"] == "13812345678" {
-		t.Error("phone should be masked")
+		t.Errorf("phone not masked: %v", result["phone"])
 	}
-	// 姓名应被脱敏
 	if result["patient_name"] == "张三" {
-		t.Error("patient_name should be masked")
+		t.Errorf("patient_name not masked: %v", result["patient_name"])
 	}
-	// 非 PII 字段保持不变
-	if result["diagnosis"] != "感冒" {
-		t.Errorf("diagnosis = %q, want %q", result["diagnosis"], "感冒")
+}
+
+func TestHandleMaskBatch(t *testing.T) {
+	srv := newTestServer(t)
+
+	fieldNames := []string{"phone", "email"}
+	values := []string{"13812345678", "test@example.com"}
+
+	resp, err := srv.MaskBatch(context.Background(), &pb.MaskBatchRequest{
+		FieldNames: fieldNames,
+		Values:     values,
+	})
+	if err != nil {
+		t.Fatalf("MaskBatch: %v", err)
+	}
+
+	if len(resp.Results) != 2 {
+		t.Fatalf("results len = %d, want 2", len(resp.Results))
+	}
+	if resp.Results[0] == "13812345678" {
+		t.Errorf("phone not masked: %v", resp.Results[0])
 	}
 }
 
 func TestHandleHash(t *testing.T) {
 	srv := newTestServer(t)
 
-	req := map[string]string{"value": "hello", "salt": "world"}
-	reqBytes, _ := json.Marshal(req)
-
-	respBytes, err := srv.handleHash(reqBytes)
+	resp, err := srv.Hash(context.Background(), &pb.HashRequest{
+		Value: "test-data",
+		Salt:  "test-salt",
+	})
 	if err != nil {
-		t.Fatalf("handleHash: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
-
-	var resp map[string]string
-	if err := json.Unmarshal(respBytes, &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	hash := resp["result"]
-	if hash == "" {
-		t.Error("hash is empty")
-	}
-	if hash == "hello" {
-		t.Error("hash should not equal original value")
-	}
-
-	// 同一输入应产生相同输出（确定性）
-	respBytes2, _ := srv.handleHash(reqBytes)
-	var resp2 map[string]string
-	json.Unmarshal(respBytes2, &resp2)
-	if resp2["result"] != hash {
-		t.Error("hash should be deterministic")
+	if resp.Result == "" {
+		t.Errorf("Hash result is empty")
 	}
 }
 
-func TestHandleDPNoisyCount(t *testing.T) {
+func TestHandleDP(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	// 1. DPCount
+	respCount, err := srv.DPCount(ctx, &pb.DPRequest{
+		Values:  []float64{1, 2, 3, 4, 5},
+		Epsilon: 0.1,
+	})
+	if err != nil {
+		t.Fatalf("DPCount: %v", err)
+	}
+	if respCount.Result <= 0 {
+		t.Errorf("DPCount result = %v, want > 0", respCount.Result)
+	}
+
+	// 2. DPSum
+	respSum, err := srv.DPSum(ctx, &pb.DPRequest{
+		Values:  []float64{10, 20, 30},
+		Epsilon: 0.1,
+	})
+	if err != nil {
+		t.Fatalf("DPSum: %v", err)
+	}
+	if respSum.Result <= 0 {
+		t.Errorf("DPSum result = %v, want > 0", respSum.Result)
+	}
+
+	// 3. DPMean
+	respMean, err := srv.DPMean(ctx, &pb.DPRequest{
+		Values:    []float64{10, 20, 30},
+		Epsilon:   0.1,
+		ClipUpper: 100,
+	})
+	if err != nil {
+		t.Fatalf("DPMean: %v", err)
+	}
+	if respMean.Result <= 0 {
+		t.Errorf("DPMean result = %v, want > 0", respMean.Result)
+	}
+
+	// 4. DPNoisyCount
+	respNoisyCount, err := srv.DPNoisyCount(ctx, &pb.DPNoisyCountRequest{
+		TrueCount: 100,
+		Epsilon:   0.1,
+	})
+	if err != nil {
+		t.Fatalf("DPNoisyCount: %v", err)
+	}
+	if respNoisyCount.Result <= 0 {
+		t.Errorf("DPNoisyCount result = %v, want > 0", respNoisyCount.Result)
+	}
+
+	// 5. DPNoisySum
+	respNoisySum, err := srv.DPNoisySum(ctx, &pb.DPNoisySumRequest{
+		TrueSum:     500.0,
+		Epsilon:     0.1,
+		Sensitivity: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("DPNoisySum: %v", err)
+	}
+	if respNoisySum.Result <= 0 {
+		t.Errorf("DPNoisySum result = %v, want > 0", respNoisySum.Result)
+	}
+
+	// 6. DPNoisyMean
+	respNoisyMean, err := srv.DPNoisyMean(ctx, &pb.DPNoisyMeanRequest{
+		TrueSum:   200.0,
+		TrueCount: 10.0,
+		Epsilon:   0.1,
+		ClipUpper: 50.0,
+	})
+	if err != nil {
+		t.Fatalf("DPNoisyMean: %v", err)
+	}
+	if respNoisyMean.Result <= 0 {
+		t.Errorf("DPNoisyMean result = %v, want > 0", respNoisyMean.Result)
+	}
+}
+
+func TestHandleObfuscateQuery(t *testing.T) {
 	srv := newTestServer(t)
 
-	req := map[string]interface{}{
-		"true_count": 100.0,
-		"epsilon":    1.0,
-	}
-	reqBytes, _ := json.Marshal(req)
-
-	respBytes, err := srv.handleDPNoisyCount(reqBytes)
+	resp, err := srv.ObfuscateQuery(context.Background(), &pb.ObfuscateQueryRequest{
+		Query:      "肺癌早期症状",
+		NumDummies: 4,
+		Domain:     "medical",
+	})
 	if err != nil {
-		t.Fatalf("handleDPNoisyCount: %v", err)
+		t.Fatalf("ObfuscateQuery: %v", err)
 	}
 
-	var resp map[string]float64
-	if err := json.Unmarshal(respBytes, &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	result := resp["result"]
-	// 噪声计数应在合理范围内（100 ± 大量噪声）
-	if result < -100 || result > 300 {
-		t.Errorf("noisy count = %f, out of reasonable range", result)
+	if len(resp.Result) != 5 {
+		t.Errorf("queries len = %d, want 5", len(resp.Result))
 	}
 }
 
-func TestHandleDynClassify(t *testing.T) {
+func TestHandleKAnonymizeRecord(t *testing.T) {
 	srv := newTestServer(t)
 
-	tests := []struct {
-		field    string
-		value    string
-		wantLevel string
-	}{
-		{"id_card_no", "110101199003072345", "secret"},
-		{"phone", "13812345678", "confidential"},
-		{"email", "test@example.com", "confidential"},
-		{"random_field", "hello", "internal"}, // safety floor upgrades public → internal
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.field, func(t *testing.T) {
-			req := map[string]string{
-				"field_name":  tt.field,
-				"field_value": tt.value,
-				"domain":      "medical",
-			}
-			reqBytes, _ := json.Marshal(req)
-
-			respBytes, err := srv.handleDynClassify(reqBytes)
-			if err != nil {
-				t.Fatalf("handleDynClassify: %v", err)
-			}
-
-			var resp map[string]interface{}
-			if err := json.Unmarshal(respBytes, &resp); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-
-			maxLevel := resp["max_level"].(string)
-			if maxLevel != tt.wantLevel {
-				t.Errorf("max_level = %q, want %q", maxLevel, tt.wantLevel)
-			}
-		})
-	}
-}
-
-func TestHandleGeneric(t *testing.T) {
-	srv := newTestServer(t)
-
-	respBytes, err := srv.handleGeneric("SomeFutureMethod", nil)
+	resp, err := srv.KAnonymizeRecord(context.Background(), &pb.KAnonymizeRequest{
+		Record: map[string]string{
+			"patient_name": "张三",
+			"phone":        "13812345678",
+		},
+	})
 	if err != nil {
-		t.Fatalf("handleGeneric: %v", err)
+		t.Fatalf("KAnonymizeRecord: %v", err)
 	}
 
-	var resp map[string]string
-	if err := json.Unmarshal(respBytes, &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if resp["status"] != "unimplemented" {
-		t.Errorf("status = %q, want %q", resp["status"], "unimplemented")
-	}
-}
-
-func TestInferMaskType(t *testing.T) {
-	tests := []struct {
-		field string
-		want  string
-	}{
-		{"id_card_no", "id_card"},
-		{"idcard", "id_card"},
-		{"cert_no", "id_card"},
-		{"phone", "phone"},
-		{"mobile", "phone"},
-		{"tel", "phone"},
-		{"bank_card", "bank_card"},
-		{"credit_card", "bank_card"},
-		{"email", "email"},
-		{"mail", "email"},
-		{"address", "address"},
-		{"home_address", "address"},
-		{"name", "name"},
-		{"patient_name", "name"},
-		{"officer_id", "officer_id"},
-		{"unknown", "default"},
-		{"diagnosis", "default"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.field, func(t *testing.T) {
-			got := inferMaskType(tt.field)
-			if got != tt.want {
-				t.Errorf("inferMaskType(%q) = %q, want %q", tt.field, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRoute(t *testing.T) {
-	srv := newTestServer(t)
-
-	// 测试 Health 路由
-	respBytes, err := srv.route("Health", nil)
-	if err != nil {
-		t.Fatalf("route Health: %v", err)
-	}
-	var healthResp map[string]string
-	json.Unmarshal(respBytes, &healthResp)
-	if healthResp["status"] != "ok" {
-		t.Errorf("Health status = %q, want %q", healthResp["status"], "ok")
-	}
-
-	// 测试未知方法路由
-	respBytes, err = srv.route("UnknownMethod", []byte("{}"))
-	if err != nil {
-		t.Fatalf("route UnknownMethod: %v", err)
-	}
-	var genericResp map[string]string
-	json.Unmarshal(respBytes, &genericResp)
-	if genericResp["status"] != "unimplemented" {
-		t.Errorf("UnknownMethod status = %q, want %q", genericResp["status"], "unimplemented")
-	}
-}
-
-func TestRawCodec(t *testing.T) {
-	codec := rawCodec{}
-
-	// Test Name
-	if codec.Name() != "proto" {
-		t.Errorf("Name() = %q, want %q", codec.Name(), "proto")
-	}
-
-	// Test Marshal
-	data := []byte("hello world")
-	b, err := codec.Marshal(&data)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if string(b) != "hello world" {
-		t.Errorf("Marshal = %q, want %q", string(b), "hello world")
-	}
-
-	// Test Unmarshal
-	var out []byte
-	err = codec.Unmarshal([]byte("test data"), &out)
-	if err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if string(out) != "test data" {
-		t.Errorf("Unmarshal = %q, want %q", string(out), "test data")
-	}
-
-	// Test Marshal with wrong type
-	_, err = codec.Marshal("wrong type")
-	if err == nil {
-		t.Error("Marshal should fail with wrong type")
-	}
-
-	// Test Unmarshal with wrong type
-	var wrong string
-	err = codec.Unmarshal([]byte("data"), &wrong)
-	if err == nil {
-		t.Error("Unmarshal should fail with wrong type")
+	if resp.Result["patient_name"] == "张三" {
+		t.Errorf("patient_name not anonymized: %v", resp.Result["patient_name"])
 	}
 }

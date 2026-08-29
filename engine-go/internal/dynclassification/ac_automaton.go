@@ -34,8 +34,8 @@ type AhoCorasick struct {
 
 // ACMatch 单次匹配结果
 type ACMatch struct {
-	Pos    int    // 匹配起始字节偏移
-	Len    int    // 匹配字节长度
+	Pos     int    // 匹配起始字节偏移
+	Len     int    // 匹配字节长度
 	Pattern string // 匹配到的模式串（原始大小写）
 }
 

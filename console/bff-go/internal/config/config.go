@@ -268,12 +268,12 @@ func Load() *Config {
 		ConsoleGRPCPort:    getEnvInt("PRIVACY_CONSOLE_GRPC_PORT", 50055),
 
 		// 直连 Go 微服务配置
-		HubURL:            getEnv("BFF_HUB_URL", "http://127.0.0.1:8082"),
-		DatasourceURL:     getEnv("BFF_DATASOURCE_URL", "http://127.0.0.1:8083"),
-		AuditURL:          getEnv("BFF_AUDIT_URL", "http://127.0.0.1:8084"),
-		HubAPIKey:         getEnv("BFF_HUB_API_KEY", ""),
-		DatasourceAPIKey:  getEnv("BFF_DATASOURCE_API_KEY", ""),
-		AuditAPIKey:       getEnv("BFF_AUDIT_API_KEY", ""),
+		HubURL:           getEnv("BFF_HUB_URL", "http://127.0.0.1:8082"),
+		DatasourceURL:    getEnv("BFF_DATASOURCE_URL", "http://127.0.0.1:8083"),
+		AuditURL:         getEnv("BFF_AUDIT_URL", "http://127.0.0.1:8084"),
+		HubAPIKey:        getEnv("BFF_HUB_API_KEY", ""),
+		DatasourceAPIKey: getEnv("BFF_DATASOURCE_API_KEY", ""),
+		AuditAPIKey:      getEnv("BFF_AUDIT_API_KEY", ""),
 	}
 }
 

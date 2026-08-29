@@ -51,7 +51,7 @@ var (
 		IdleConnTimeout:     90 * time.Second,
 		DisableCompression:  false,
 	}
-	proxyCache   sync.Map
+	proxyCache sync.Map
 )
 
 func getOrCreateReverseProxy(addr string, node *BackendNode, metrics *observability.GatewayMetrics) (*httputil.ReverseProxy, error) {

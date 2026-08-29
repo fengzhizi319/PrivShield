@@ -37,15 +37,15 @@ import (
 
 // PrivacyService 隐私服务编排器
 type PrivacyService struct {
-	classifier    *dynclassification.RuleEngine
-	funnel        *dynclassification.ClassificationFunnel
-	safetyFloor   *dynclassification.SafetyFloor
-	budget        *budget.BudgetAccountant
-	medicalYibao  *medical.Pipeline
-	medicalKang   *medical.Pipeline
-	resolver      *profile.Resolver
-	namespace     string
-	mu            sync.RWMutex
+	classifier   *dynclassification.RuleEngine
+	funnel       *dynclassification.ClassificationFunnel
+	safetyFloor  *dynclassification.SafetyFloor
+	budget       *budget.BudgetAccountant
+	medicalYibao *medical.Pipeline
+	medicalKang  *medical.Pipeline
+	resolver     *profile.Resolver
+	namespace    string
+	mu           sync.RWMutex
 }
 
 // Config 服务配置
@@ -121,14 +121,14 @@ func NewPrivacyService(cfg Config) (*PrivacyService, error) {
 	}
 
 	return &PrivacyService{
-		classifier:    engine,
-		funnel:        funnel,
-		safetyFloor:   dynclassification.NewSafetyFloor(dynclassification.DefaultSafetyFloorConfig()),
-		budget:        budget.NewBudgetAccountant(cfg.TotalEpsilon, cfg.TotalDelta, cfg.BudgetWindowSec),
-		medicalYibao:  medical.NewYibaoPipeline(),
-		medicalKang:   medical.NewKangyangPipeline(),
-		resolver:      res,
-		namespace:     ns,
+		classifier:   engine,
+		funnel:       funnel,
+		safetyFloor:  dynclassification.NewSafetyFloor(dynclassification.DefaultSafetyFloorConfig()),
+		budget:       budget.NewBudgetAccountant(cfg.TotalEpsilon, cfg.TotalDelta, cfg.BudgetWindowSec),
+		medicalYibao: medical.NewYibaoPipeline(),
+		medicalKang:  medical.NewKangyangPipeline(),
+		resolver:     res,
+		namespace:    ns,
 	}, nil
 }
 
@@ -507,7 +507,7 @@ func (s *PrivacyService) ProcessAgentData(records []map[string]interface{}, apiC
 				"level":      cRes.Level,
 				"category":   cRes.Category,
 				"confidence": cRes.Confidence,
-				"matched_by":   cRes.MatchedBy,
+				"matched_by": cRes.MatchedBy,
 			})
 		}
 
@@ -1016,5 +1016,3 @@ func (s *PrivacyService) DPGroupBy(rows []map[string]string, groupCol, targetCol
 func (s *PrivacyService) DPAggregate(rows []map[string]string, specs map[string]string, epsilon, delta float64, mechanism string) (map[string]float64, error) {
 	return dp.Aggregate(rows, specs, epsilon, delta, mechanism)
 }
-
-

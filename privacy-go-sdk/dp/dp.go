@@ -442,4 +442,3 @@ func Aggregate(rows []map[string]string, specs map[string]string, epsilon, delta
 
 	return result, nil
 }
-

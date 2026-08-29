@@ -458,4 +458,3 @@ func TestRateLimit_AllowsUnderBurstAndRejectsOver(t *testing.T) {
 		t.Errorf("request 3 expected 429 Too Many Requests, got %d", w3.Code)
 	}
 }
-

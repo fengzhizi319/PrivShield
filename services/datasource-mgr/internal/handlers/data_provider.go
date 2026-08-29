@@ -116,11 +116,11 @@ var allowedCSVFiles = map[string]struct{}{
 
 // findCSVFile searches for a given CSV filename across candidate directories and parent directory trees.
 // findCSVFile 根据文件名在系统候选目录及向上父级目录中递归探查实际文件路径，执行逻辑如下：
-// 1. 路径清洗与白名单校验：使用 filepath.Clean 与 filepath.Base 提取纯文件名，并校验必须在 allowedCSVFiles 白名单内且后缀为 .csv，防止目录穿越攻击；
-// 2. 候选目录扫描：遍历 candidateDirs 列表，检查 filepath.Join(dir, baseName) 是否存在且非目录；
-// 3. 向上回溯搜索：若候选目录未命中，获取当前工作目录 (os.Getwd)，向上逐层遍历最多 6 级父目录，
-//    在每级目录的常见样本子目录中查找；
-// 4. 若最终仍未找到，返回明确的“文件未找到”错误。
+//  1. 路径清洗与白名单校验：使用 filepath.Clean 与 filepath.Base 提取纯文件名，并校验必须在 allowedCSVFiles 白名单内且后缀为 .csv，防止目录穿越攻击；
+//  2. 候选目录扫描：遍历 candidateDirs 列表，检查 filepath.Join(dir, baseName) 是否存在且非目录；
+//  3. 向上回溯搜索：若候选目录未命中，获取当前工作目录 (os.Getwd)，向上逐层遍历最多 6 级父目录，
+//     在每级目录的常见样本子目录中查找；
+//  4. 若最终仍未找到，返回明确的“文件未找到”错误。
 func findCSVFile(filename string) (string, error) {
 	// Normalize and extract the final basename. Using filepath.Base drops any
 	// leading directory components, but an attacker could still try to access an
@@ -170,15 +170,16 @@ func findCSVFile(filename string) (string, error) {
 // 2. 打开文件：以只读方式打开文件并注册 defer file.Close()；
 // 3. 解析表头：使用 csv.NewReader 读取首行作为字段名映射表（设置 FieldsPerRecord = -1 支持变长字段）；
 // 4. 行流式解析与类型推断：
-//    - 逐行读取数据记录直至 io.EOF；
-//    - 将每个字段值映射到表头列名；
-//    - 智能类型转换：优先尝试转为 int64 整数；若包含小数点则尝试转为 float64 浮点数；否则保留为 string；
-//    - 将解析后的 map[string]any 追加至 allRows；
+//   - 逐行读取数据记录直至 io.EOF；
+//   - 将每个字段值映射到表头列名；
+//   - 智能类型转换：优先尝试转为 int64 整数；若包含小数点则尝试转为 float64 浮点数；否则保留为 string；
+//   - 将解析后的 map[string]any 追加至 allRows；
+//
 // 5. 分页窗口截取：
-//    - 纠正非法 offset（小于 0 时重置为 0）；
-//    - 若 offset 超出总记录数，返回空切片与总行数；
-//    - 计算结束边界 end = offset + limit（若 limit <= 0 或 end > total 则截断为 total）；
-//    - 返回当前分页切片 allRows[offset:end]、数据集总行数 total 以及可能的错误。
+//   - 纠正非法 offset（小于 0 时重置为 0）；
+//   - 若 offset 超出总记录数，返回空切片与总行数；
+//   - 计算结束边界 end = offset + limit（若 limit <= 0 或 end > total 则截断为 total）；
+//   - 返回当前分页切片 allRows[offset:end]、数据集总行数 total 以及可能的错误。
 func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, error) {
 	// 1. 定位物理文件路径
 	filePath, err := findCSVFile(filename)
@@ -221,10 +222,10 @@ func LoadCSVRecords(filename string, limit, offset int) ([]map[string]any, int, 
 				// 优先推断整数
 				if intVal, err := strconv.ParseInt(val, 10, 64); err == nil {
 					rowMap[colName] = intVal
-				// 包含小数点时推断浮点数
+					// 包含小数点时推断浮点数
 				} else if floatVal, err := strconv.ParseFloat(val, 64); err == nil && strings.Contains(val, ".") {
 					rowMap[colName] = floatVal
-				// 兜底作为纯文本字符串
+					// 兜底作为纯文本字符串
 				} else {
 					rowMap[colName] = val
 				}

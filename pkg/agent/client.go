@@ -107,16 +107,16 @@ func (s CircuitState) String() string {
 
 // Config holds agent client configuration.
 type Config struct {
-	BaseURL            string        // Upstream agent base URL / 上游 agent 单基础地址
-	BaseURLs           []string      // Upstream agent multi-node cluster URLs / 上游 agent 多节点集群地址
-	APIKey             string        // Optional Bearer token / 可选 Bearer 令牌
-	Timeout            time.Duration // HTTP client timeout / HTTP 客户端超时
-	CBThreshold        int           // Consecutive failures before opening / 连续失败熔断阈值
-	CBCooldown         time.Duration // Cooldown before half-open / 熔断冷却时间
-	MaxRetries         int           // Max retry attempts for retryable errors (0=no retry) / 可重试错误的最大重试次数（0=不重试）
-	RetryBaseDelay     time.Duration // Base delay for exponential backoff / 指数退避基础延迟
-	Logger             *slog.Logger  // Structured logger / 结构化日志
-	StateObserver      func(node, state string) // Optional callback for circuit breaker state changes / 熔断器状态变化回调（node, state）
+	BaseURL        string                   // Upstream agent base URL / 上游 agent 单基础地址
+	BaseURLs       []string                 // Upstream agent multi-node cluster URLs / 上游 agent 多节点集群地址
+	APIKey         string                   // Optional Bearer token / 可选 Bearer 令牌
+	Timeout        time.Duration            // HTTP client timeout / HTTP 客户端超时
+	CBThreshold    int                      // Consecutive failures before opening / 连续失败熔断阈值
+	CBCooldown     time.Duration            // Cooldown before half-open / 熔断冷却时间
+	MaxRetries     int                      // Max retry attempts for retryable errors (0=no retry) / 可重试错误的最大重试次数（0=不重试）
+	RetryBaseDelay time.Duration            // Base delay for exponential backoff / 指数退避基础延迟
+	Logger         *slog.Logger             // Structured logger / 结构化日志
+	StateObserver  func(node, state string) // Optional callback for circuit breaker state changes / 熔断器状态变化回调（node, state）
 }
 
 // New creates a new agent client from the given config.
@@ -156,8 +156,8 @@ func New(cfg Config) *Client {
 	}
 
 	return &Client{
-		baseURLs:       urls,
-		apiKey:         cfg.APIKey,
+		baseURLs: urls,
+		apiKey:   cfg.APIKey,
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   cfg.Timeout,

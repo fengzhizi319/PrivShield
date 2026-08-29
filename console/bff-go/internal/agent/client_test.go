@@ -143,10 +143,10 @@ func TestBuildTransportCredentialsInvalidCA(t *testing.T) {
 func TestBuildTransportCredentialsTLSWithClientCert(t *testing.T) {
 	certs := genTestCerts(t)
 	cfg := &config.Config{
-		AgentTLSEnabled:  true,
-		AgentTLSCAFile:   certs.caFile,
-		AgentTLSCertFile: certs.clientCert,
-		AgentTLSKeyFile:  certs.clientKey,
+		AgentTLSEnabled:    true,
+		AgentTLSCAFile:     certs.caFile,
+		AgentTLSCertFile:   certs.clientCert,
+		AgentTLSKeyFile:    certs.clientKey,
 		AgentTLSServerName: "localhost",
 	}
 	creds, err := buildTransportCredentials(cfg)

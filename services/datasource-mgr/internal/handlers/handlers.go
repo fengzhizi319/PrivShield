@@ -49,9 +49,9 @@ func (s *Server) setDeprecationHeaders(c *gin.Context, canonicalID string) {
 // Server aggregates HTTP handler dependencies.
 // Server 结构体聚合了 HTTP 处理器层所需的运行配置、结构化日志与监控指标组件。
 type Server struct {
-	cfg    *config.Config      // 全局运行配置
-	logger *slog.Logger        // 结构化日志记录器
-	mc     *metrics.Collector  // Prometheus 指标收集器（可为 nil，测试场景）
+	cfg    *config.Config     // 全局运行配置
+	logger *slog.Logger       // 结构化日志记录器
+	mc     *metrics.Collector // Prometheus 指标收集器（可为 nil，测试场景）
 }
 
 // New creates a new Server instance.
@@ -67,24 +67,25 @@ func New(cfg *config.Config, logger *slog.Logger, mc *metrics.Collector) *Server
 // RegisterRoutes registers all HTTP routes and middleware on the Gin engine.
 // RegisterRoutes 向 Gin 引擎装配通用安全中间件链并注册全部业务路由端点，执行逻辑如下：
 // 1. 中间件装配链（Middleware Chain）：
-//    - RequestID: 生成并注入全链路追踪 X-Request-ID；
-//    - StructuredLogger: 请求访问日志记录；
-//    - Recovery: Panic 拦截保护，保障进程高可用；
-//    - SecurityHeaders: 注入安全响应头（X-Frame-Options, X-Content-Type-Options 等）；
-//    - CORS: 跨域策略配置；
-//    - Auth: 基于 Header API Key 的身份认证（如果配置了 APIKey）。
+//   - RequestID: 生成并注入全链路追踪 X-Request-ID；
+//   - StructuredLogger: 请求访问日志记录；
+//   - Recovery: Panic 拦截保护，保障进程高可用；
+//   - SecurityHeaders: 注入安全响应头（X-Frame-Options, X-Content-Type-Options 等）；
+//   - CORS: 跨域策略配置；
+//   - Auth: 基于 Header API Key 的身份认证（如果配置了 APIKey）。
+//
 // 2. 路由分组注册：
-//    - 存活健康探针（Health Check）；
-//    - 专用模拟数据集端点（API 1 ~ 4）；
-//    - 数据源管理与元数据探测端点。
+//   - 存活健康探针（Health Check）；
+//   - 专用模拟数据集端点（API 1 ~ 4）；
+//   - 数据源管理与元数据探测端点。
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	// 装配中间件栈
 	r.Use(middleware.TraceMiddleware())
 	r.Use(middleware.StructuredLogger(s.logger, "datasource-mgr"))
 	r.Use(middleware.Recovery(s.logger, "datasource-mgr"))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(middleware.MaxBodySize(32 << 20))   // 32 MiB max payload protection
-	r.Use(middleware.MaxConcurrent(1000))      // 并发在途请求上限，超限返回 503
+	r.Use(middleware.MaxBodySize(32 << 20)) // 32 MiB max payload protection
+	r.Use(middleware.MaxConcurrent(1000))   // 并发在途请求上限，超限返回 503
 	if s.cfg.RateLimitRPS > 0 {
 		r.Use(middleware.RateLimit(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst)) // 每客户端 IP 令牌桶限流
 	}
@@ -92,9 +93,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(middleware.Auth(s.cfg.APIKey))
 
 	// 健康探针路由
-	r.GET("/health", s.Health)       // Liveness probe / 存活探针
-	r.GET("/readyz", s.Readyz)       // Readiness probe / 就绪探针
-	r.GET("/api/health", s.Health)   // Alias for backward compat / 向后兼容别名
+	r.GET("/health", s.Health)     // Liveness probe / 存活探针
+	r.GET("/readyz", s.Readyz)     // Readiness probe / 就绪探针
+	r.GET("/api/health", s.Health) // Alias for backward compat / 向后兼容别名
 
 	// Prometheus 指标端点（§7.2）：mc 为 nil（单测）时不注册。
 	if s.mc != nil {
@@ -102,20 +103,20 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	}
 
 	// API 1, 2, 3, 4: 专用模拟数据源访问端点
-	r.GET("/api/v1/yibao", s.GetYibaoData)         // API 1: 医保就医与结算
-	r.GET("/api/v1/kangyang", s.GetKangyangData)   // API 2: 康养体检与慢病
-	r.GET("/api/v1/mock3", s.GetMock3Data)         // API 3: 预留政务数据源 3
-	r.GET("/api/v1/mock4", s.GetMock4Data)         // API 4: 预留政务数据源 4
+	r.GET("/api/v1/yibao", s.GetYibaoData)       // API 1: 医保就医与结算
+	r.GET("/api/v1/kangyang", s.GetKangyangData) // API 2: 康养体检与慢病
+	r.GET("/api/v1/mock3", s.GetMock3Data)       // API 3: 预留政务数据源 3
+	r.GET("/api/v1/mock4", s.GetMock4Data)       // API 4: 预留政务数据源 4
 
 	// 通用数据源资产与采样端点
-	r.GET("/api/datasources", s.ListDataSources)               // 数据源目录列表
-	r.GET("/api/datasources/:id", s.GetDataSource)             // 单个数据源详情
+	r.GET("/api/datasources", s.ListDataSources)                  // 数据源目录列表
+	r.GET("/api/datasources/:id", s.GetDataSource)                // 单个数据源详情
 	r.GET("/api/datasources/:id/records", s.GetDataSourceRecords) // 动态分页查询记录
 	r.GET("/api/datasources/:id/sample", s.GetDataSourceRecords)  // 兼容样本数据接口别名
-	r.POST("/api/datasources/:id/test", s.TestConnection)      // 数据源连通性测试
-	r.GET("/api/datasources/:id/metadata", s.GetMetadata)      // Schema 元数据查询
-	r.GET("/api/datasources/:id/audit", s.GetAccessAudit)      // 数据访问审计日志查询
-	r.POST("/api/datasources/seed", s.SeedDataSourcesEndpoint) // 初始化/重置模拟数据源
+	r.POST("/api/datasources/:id/test", s.TestConnection)         // 数据源连通性测试
+	r.GET("/api/datasources/:id/metadata", s.GetMetadata)         // Schema 元数据查询
+	r.GET("/api/datasources/:id/audit", s.GetAccessAudit)         // 数据访问审计日志查询
+	r.POST("/api/datasources/seed", s.SeedDataSourcesEndpoint)    // 初始化/重置模拟数据源
 }
 
 // parsePagination parses limit and offset query parameters with safety bounds.

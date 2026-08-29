@@ -200,12 +200,12 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	// 每个 c.Get() 调用产生 2 次尝试（1 次初始 + 1 次重试），每次均记录失败。
 	// CBThreshold=2 表示 1 次 c.Get() 调用（2 次失败）即触发熔断。
 	c := New(Config{
-		BaseURL:       srv.URL,
-		CBThreshold:   2,
-		CBCooldown:    1 * time.Second,
-		MaxRetries:    1,
+		BaseURL:        srv.URL,
+		CBThreshold:    2,
+		CBCooldown:     1 * time.Second,
+		MaxRetries:     1,
 		RetryBaseDelay: time.Millisecond,
-		Logger:        newTestLogger(),
+		Logger:         newTestLogger(),
 	})
 
 	// 1 request with 2 attempts → 2 failures >= threshold(2) → circuit opens
@@ -327,11 +327,11 @@ func TestCircuitBreaker_IntermittentSuccessResetsFailureCount(t *testing.T) {
 	// CBThreshold=5: need 5 consecutive failures to trip.
 	// 每次 c.Get() 调用产生 2 次尝试。CBThreshold=5：需要 5 次连续失败才触发熔断。
 	c := New(Config{
-		BaseURL:       srv.URL,
-		CBThreshold:   5,
-		MaxRetries:    1,
+		BaseURL:        srv.URL,
+		CBThreshold:    5,
+		MaxRetries:     1,
 		RetryBaseDelay: time.Millisecond,
-		Logger:        newTestLogger(),
+		Logger:         newTestLogger(),
 	})
 
 	// 2 failures (2 calls × 2 attempts = 4 consecutive failures)
@@ -425,5 +425,3 @@ func TestCircuitBreaker_ClientError4xx_NoTrip(t *testing.T) {
 		t.Errorf("state = %s, want closed (4xx errors must not trip circuit breaker)", state)
 	}
 }
-
-

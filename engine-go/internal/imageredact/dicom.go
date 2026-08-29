@@ -28,23 +28,23 @@ const (
 
 // 常见敏感 DICOM Tag 定义 (Group << 16 | Element)
 const (
-	TagSOPInstanceUID          uint32 = 0x00080018
-	TagStudyDate               uint32 = 0x00080020
-	TagStudyTime               uint32 = 0x00080030
-	TagInstitutionName         uint32 = 0x00080080
-	TagReferringPhysicianName  uint32 = 0x00080090
-	TagStudyDescription        uint32 = 0x00081030
-	TagSeriesDescription       uint32 = 0x0008103E
-	TagPatientName             uint32 = 0x00100010
-	TagPatientID               uint32 = 0x00100020
-	TagPatientBirthDate        uint32 = 0x00100030
-	TagPatientSex              uint32 = 0x00100040
-	TagPatientAge              uint32 = 0x00101010
-	TagPatientAddress          uint32 = 0x00101040
-	TagPatientComments         uint32 = 0x00104000
-	TagStudyInstanceUID        uint32 = 0x0020000D
-	TagSeriesInstanceUID       uint32 = 0x0020000E
-	TagPixelData               uint32 = 0x7FE00010
+	TagSOPInstanceUID         uint32 = 0x00080018
+	TagStudyDate              uint32 = 0x00080020
+	TagStudyTime              uint32 = 0x00080030
+	TagInstitutionName        uint32 = 0x00080080
+	TagReferringPhysicianName uint32 = 0x00080090
+	TagStudyDescription       uint32 = 0x00081030
+	TagSeriesDescription      uint32 = 0x0008103E
+	TagPatientName            uint32 = 0x00100010
+	TagPatientID              uint32 = 0x00100020
+	TagPatientBirthDate       uint32 = 0x00100030
+	TagPatientSex             uint32 = 0x00100040
+	TagPatientAge             uint32 = 0x00101010
+	TagPatientAddress         uint32 = 0x00101040
+	TagPatientComments        uint32 = 0x00104000
+	TagStudyInstanceUID       uint32 = 0x0020000D
+	TagSeriesInstanceUID      uint32 = 0x0020000E
+	TagPixelData              uint32 = 0x7FE00010
 )
 
 // IsDICOM 检查字节流是否为合法的 DICOM 格式。

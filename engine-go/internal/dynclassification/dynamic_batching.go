@@ -24,8 +24,8 @@ import (
 
 // BatchItem 批处理中的单个请求项
 type BatchItem struct {
-	ID         string          // 请求唯一标识
-	Input      string          // 输入文本
+	ID         string           // 请求唯一标识
+	Input      string           // 输入文本
 	ResultChan chan BatchResult // 结果回传通道
 }
 
@@ -68,9 +68,9 @@ type DynamicBatcher struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
-	dropped   int64  // 丢弃的请求计数
-	processed int64  // 已处理的请求计数
-	batches   int64  // 已处理的批次数
+	dropped   int64 // 丢弃的请求计数
+	processed int64 // 已处理的请求计数
+	batches   int64 // 已处理的批次数
 	mu        sync.Mutex
 	running   bool
 }

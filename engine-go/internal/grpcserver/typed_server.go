@@ -13,15 +13,15 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	pb "github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver/proto"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
-	pb "github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver/proto"
 )
 
 // TypedServer 类型安全的 gRPC 隐私服务端
 type TypedServer struct {
 	pb.UnimplementedPrivacyServiceServer // 前向兼容
-	svc *service.PrivacyService
+	svc                                  *service.PrivacyService
 }
 
 // NewTypedServer 创建类型安全 gRPC 服务端
@@ -164,13 +164,13 @@ func (s *TypedServer) DynClassify(_ context.Context, req *pb.DynClassificationRe
 	result := s.svc.Classify(req.GetFieldName(), req.GetFieldValue())
 
 	tag := &pb.DynSecurityTagProto{
-		Level:         string(result.Level),
-		Category:      result.Category,
-		RuleId:        result.MatchedBy,
-		SourceEngine:  "rule",
-		Domain:        req.GetDomain(),
-		StandardId:    req.GetStandard(),
-		MatchTarget:   "field_name",
+		Level:        string(result.Level),
+		Category:     result.Category,
+		RuleId:       result.MatchedBy,
+		SourceEngine: "rule",
+		Domain:       req.GetDomain(),
+		StandardId:   req.GetStandard(),
+		MatchTarget:  "field_name",
 	}
 
 	return &pb.DynClassificationResponse{

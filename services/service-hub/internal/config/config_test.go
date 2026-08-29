@@ -203,5 +203,3 @@ func TestDatasourceConfig(t *testing.T) {
 		t.Errorf("expected 127.0.0.1:50053, got %s", cfg.DatasourceGRPCAddress())
 	}
 }
-
-

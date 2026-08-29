@@ -32,11 +32,11 @@ func (m *Mapper) handleObfuscateQuery(ctx context.Context, client pb.PrivacyServ
 	}
 	// 构造 ObfuscateQueryRequest：query 为真实查询，num_dummies 为虚假查询数量
 	resp, err := client.ObfuscateQuery(ctx, &pb.ObfuscateQueryRequest{
-		Query:        getString(v, "query", ""),              // 真实查询
-		NumDummies:   getInt32(v, "num_dummies", 3),          // 虚假查询数量（默认 3）
-		Domain:       getString(v, "domain", "medical"),      // 查询领域（"medical"/"generic"）
-		MedicalPool:  getStrings(v, "medical_pool"),          // 自定义医疗领域虚假查询池
-		GenericPool:  getStrings(v, "generic_pool"),          // 自定义通用领域虚假查询池
+		Query:       getString(v, "query", ""),         // 真实查询
+		NumDummies:  getInt32(v, "num_dummies", 3),     // 虚假查询数量（默认 3）
+		Domain:      getString(v, "domain", "medical"), // 查询领域（"medical"/"generic"）
+		MedicalPool: getStrings(v, "medical_pool"),     // 自定义医疗领域虚假查询池
+		GenericPool: getStrings(v, "generic_pool"),     // 自定义通用领域虚假查询池
 	})
 	if err != nil {
 		return nil, err
@@ -55,11 +55,11 @@ func (m *Mapper) handleObfuscateQueryBatch(ctx context.Context, client pb.Privac
 	}
 	// 构造 ObfuscateQueryBatchRequest：queries 为多条真实查询
 	resp, err := client.ObfuscateQueryBatch(ctx, &pb.ObfuscateQueryBatchRequest{
-		Queries:      getStrings(v, "queries"),             // 多条真实查询
-		NumDummies:   getInt32(v, "num_dummies", 3),        // 每条查询的虚假查询数量
-		Domain:       getString(v, "domain", "medical"),    // 查询领域
-		MedicalPool:  getStrings(v, "medical_pool"),        // 自定义医疗虚假查询池
-		GenericPool:  getStrings(v, "generic_pool"),        // 自定义通用虚假查询池
+		Queries:     getStrings(v, "queries"),          // 多条真实查询
+		NumDummies:  getInt32(v, "num_dummies", 3),     // 每条查询的虚假查询数量
+		Domain:      getString(v, "domain", "medical"), // 查询领域
+		MedicalPool: getStrings(v, "medical_pool"),     // 自定义医疗虚假查询池
+		GenericPool: getStrings(v, "generic_pool"),     // 自定义通用虚假查询池
 	})
 	if err != nil {
 		return nil, err

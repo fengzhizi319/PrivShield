@@ -28,10 +28,10 @@ func (m *Mapper) handleRecommendParams(ctx context.Context, client pb.PrivacySer
 	}
 	// 构造 RecommendRequest：namespace + 数据特征
 	resp, err := client.RecommendParams(ctx, &pb.RecommendRequest{
-		Namespace: getString(v, "namespace", ""),   // 预算命名空间
-		Values:    getFloats(v, "values"),           // 数值数据（用于分布分析）
-		Rows:      getRecordEntries(v, "rows"),       // 记录数据（用于内容分析）
-		QiCols:    getStrings(v, "qi_cols"),          // 准标识符列名
+		Namespace: getString(v, "namespace", ""), // 预算命名空间
+		Values:    getFloats(v, "values"),        // 数值数据（用于分布分析）
+		Rows:      getRecordEntries(v, "rows"),   // 记录数据（用于内容分析）
+		QiCols:    getStrings(v, "qi_cols"),      // 准标识符列名
 	})
 	if err != nil {
 		return nil, err
@@ -42,8 +42,8 @@ func (m *Mapper) handleRecommendParams(ctx context.Context, client pb.PrivacySer
 		recommended = resp.RecommendedParamsJson
 	}
 	return map[string]any{
-		"status":             resp.Status,             // 推荐状态
-		"namespace":          resp.Namespace,           // 预算命名空间
-		"recommended_params": recommended,              // 推荐的隐私参数（结构化对象或原始字符串）
+		"status":             resp.Status,    // 推荐状态
+		"namespace":          resp.Namespace, // 预算命名空间
+		"recommended_params": recommended,    // 推荐的隐私参数（结构化对象或原始字符串）
 	}, nil
 }

@@ -14,20 +14,20 @@ type KeyConfig struct {
 
 // Settings 安全配置，从环境变量加载。
 type Settings struct {
-	AuthEnabled              bool
-	TLSEnabled               bool
-	RateLimitEnabled         bool
-	HealthNoAuth             bool
-	HealthNoRateLimit        bool
-	InternalKeys             map[string]*KeyConfig // token -> config
-	ExternalKeys             map[string]*KeyConfig // token -> config
-	RateLimitDefaultRPS      float64
-	RateLimitDefaultBurst    int
-	RateLimitPerEndpoint     map[string]*EndpointRateLimit
-	RateLimitRedisURL        string
-	MTLSAllowedCNs           []string
-	MTLSWhitelistFile        string
-	MTLSEnabled              bool
+	AuthEnabled           bool
+	TLSEnabled            bool
+	RateLimitEnabled      bool
+	HealthNoAuth          bool
+	HealthNoRateLimit     bool
+	InternalKeys          map[string]*KeyConfig // token -> config
+	ExternalKeys          map[string]*KeyConfig // token -> config
+	RateLimitDefaultRPS   float64
+	RateLimitDefaultBurst int
+	RateLimitPerEndpoint  map[string]*EndpointRateLimit
+	RateLimitRedisURL     string
+	MTLSAllowedCNs        []string
+	MTLSWhitelistFile     string
+	MTLSEnabled           bool
 }
 
 // EndpointRateLimit 单端点限流配置。
@@ -37,8 +37,8 @@ type EndpointRateLimit struct {
 }
 
 var (
-	settingsOnce     sync.Once
-	cachedSettings   *Settings
+	settingsOnce   sync.Once
+	cachedSettings *Settings
 )
 
 // GetSettings 返回缓存的安全配置单例。
