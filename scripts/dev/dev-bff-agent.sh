@@ -247,11 +247,7 @@ check_port_available 5173 "Vite 前端开发服务器"
 # 6. 启动 Python Agent 核心引擎
 launch_agent() {
     local agent_log="$LOGS_DIR/agent_all.log"
-    echo "启动 PrivShield (REST: $AGENT_URL, gRPC: $AGENT_GRPC_ADDR)，日志: $agent_log..."
     (
-        if [ -f "$AGENT_VENV/bin/activate" ]; then
-            source "$AGENT_VENV/bin/activate"
-        fi
         cd "$PROJECT_ROOT"
         if [[ "$MTLS_MODE" == "true" ]]; then
             export PRIVACY_TLS_ENABLED=true
@@ -261,8 +257,9 @@ launch_agent() {
             export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true
             export PRIVACY_AUTH_MTLS_ALLOWED_CNS='["privshield-client"]'
         else
-            # 开发明文模式必须覆盖 shell/.env 可能遗留的 TLS 配置，否则
-            # Agent 会监听 HTTPS，而下面的健康探针仍使用 HTTP。
+            export PRIVACY_TLS_ENABLED=false
+            export PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=false
+        fi
         if [[ -f "$PROJECT_ROOT/bin/privshield-agent" ]]; then
             exec "$PROJECT_ROOT/bin/privshield-agent" >> "$agent_log" 2>&1
         else

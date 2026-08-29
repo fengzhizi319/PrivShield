@@ -1,6 +1,5 @@
-#!/usr/bin/env go run
-//go:build ignore
-
+// Package main implements SQLite to PostgreSQL migration.
+//
 // scripts/prod/migrate_sqlite_to_pg.go
 //
 // PrivShield SQLite → PostgreSQL 生产平滑迁移工具

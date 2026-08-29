@@ -104,11 +104,15 @@ if [ "$WITH_SERVICES" = true ]; then
 fi
 
 # 2. 启动核心 REST + gRPC Agent
-echo -e "\n${YELLOW}[1/3] 启动 Core REST & gRPC Agent 算力引擎...${NC}"
+echo -e "\n${YELLOW}[1/3] 启动 Go Engine REST & gRPC Agent 算力引擎...${NC}"
 AGENT_LOG="${LOG_DIR}/agent_server.log"
 rotate_log "$AGENT_LOG"
 
-nohup python3 -m engine.server < /dev/null > "$AGENT_LOG" 2>&1 &
+if [[ -f "$PROJECT_ROOT/bin/privshield-agent" ]]; then
+    nohup "$PROJECT_ROOT/bin/privshield-agent" < /dev/null > "$AGENT_LOG" 2>&1 &
+else
+    nohup go run ./engine-go/cmd/privshield-agent < /dev/null > "$AGENT_LOG" 2>&1 &
+fi
 AGENT_PID=$!
 echo $AGENT_PID > "${PIDS_DIR}/agent.pid"
 echo -e "Agent 进程 PID: ${GREEN}${AGENT_PID}${NC} (日志: ${AGENT_LOG})"

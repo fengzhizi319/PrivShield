@@ -3,21 +3,20 @@
 # Integration Test Script for Go Engine
 # Go 原生引擎集成测试脚本
 #
-# 与 integration-test-new-modules.sh 的区别：
-#   - integration-test-new-modules.sh 测试三个 Go 微服务 + Python Agent
-#   - 本脚本测试 Go 原生引擎的 REST API 端点（与 Python 引擎对齐验证）
-#
 # 测试内容：
 #   1. Go Agent 健康检查（/health, /livez, /readyz）
-#   2. Masking 隐私脱敏 API
-#   3. Differential Privacy 差分隐私 API
-#   4. K-Anonymity K-匿名 API
-#   5. Query Obfuscation 查询混淆 API
-#   6. 动态分类分级 API
+#   2. Masking 隐私脱敏 API (/v1/privacy/mask, /v1/privacy/mask/record)
+#   3. Differential Privacy 差分隐私 API (/v1/privacy/dp/*)
+#   4. K-Anonymity K-匿名 API (/v1/privacy/k_anonymize/*)
+#   5. Query Obfuscation 查询混淆 API (/v1/privacy/qol/obfuscate)
+#   6. LDP 本地差分隐私 API (/v1/privacy/ldp/*)
+#   7. Medical 流水线脱敏 API (/v1/medical/sanitize)
+#   8. Agent 通用处理流水线 (/v1/agent/process)
+#   9. 动态分类分级 API (/v1/dynclassification/classify)
+#   10. Ops 运维诊断与指标 (/v1/ops/diagnostics, /metrics)
 #
 # 前置条件：
-#   - Go Agent 已启动（go-engine-start.sh / docker-start-go-agent.sh）
-#   - REST: 8079, gRPC: 50051
+#   - Go Agent 已启动（端口 REST: 8079）
 #
 # Usage:
 #   bash scripts/dev/integration-test-go.sh
@@ -25,7 +24,22 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "用法 / Usage: $0 [选项]"
+            echo ""
+            echo "选项 / Options:"
+            echo "  -h, --help    显示帮助信息并退出"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
@@ -86,66 +100,65 @@ assert_http "GET /readyz" "GET" "${AGENT_URL}/readyz"
 
 # ── 2. Masking 脱敏 ─────────────────────────────────────────────────────
 log_step "2. Masking 隐私脱敏"
-assert_http "POST /mask" "POST" "${AGENT_URL}/mask" "200" \
-    '{"record": {"name": "张三", "phone": "13800138000", "email": "zhangsan@example.com", "id_card": "110101199001011234"}}'
+assert_http "POST /v1/privacy/mask" "POST" "${AGENT_URL}/v1/privacy/mask" "200" \
+    '{"field": "phone", "value": "13800138000", "type": "phone"}'
 
-assert_http "POST /mask/fields" "POST" "${AGENT_URL}/mask/fields" "200" \
-    '{"fields": {"name": "李四", "phone": "13900139000"}, "field_names": ["name", "phone"]}'
+assert_http "POST /v1/privacy/mask/record" "POST" "${AGENT_URL}/v1/privacy/mask/record" "200" \
+    '{"record": {"name": "张三", "phone": "13800138000", "id_card": "110101199001011234"}}'
 
 # ── 3. Differential Privacy 差分隐私 ────────────────────────────────────
 log_step "3. Differential Privacy 差分隐私"
-assert_http "POST /dp/laplace" "POST" "${AGENT_URL}/dp/laplace" "200" \
-    '{"value": 100.0, "sensitivity": 1.0, "epsilon": 1.0}'
+assert_http "POST /v1/privacy/dp/count" "POST" "${AGENT_URL}/v1/privacy/dp/count" "200" \
+    '{"count": 100, "sensitivity": 1.0, "epsilon": 1.0}'
 
-assert_http "POST /dp/gaussian" "POST" "${AGENT_URL}/dp/gaussian" "200" \
-    '{"value": 100.0, "sensitivity": 1.0, "epsilon": 1.0, "delta": 0.0001}'
+assert_http "POST /v1/privacy/dp/sum" "POST" "${AGENT_URL}/v1/privacy/dp/sum" "200" \
+    '{"values": [1.0, 2.0, 3.0], "clip_lower": 0.0, "clip_upper": 10.0, "epsilon": 1.0}'
 
-assert_http "POST /dp/count" "POST" "${AGENT_URL}/dp/count" "200" \
-    '{"count": 100, "sensitivity": 1, "epsilon": 1.0}'
+assert_http "POST /v1/privacy/dp/mean" "POST" "${AGENT_URL}/v1/privacy/dp/mean" "200" \
+    '{"values": [1.0, 2.0, 3.0, 4.0, 5.0], "delta": 0.0001, "epsilon": 1.0}'
 
-assert_http "POST /dp/sum" "POST" "${AGENT_URL}/dp/sum" "200" \
-    '{"values": [1.0, 2.0, 3.0], "sensitivity": 3.0, "epsilon": 1.0}'
+assert_http "POST /v1/privacy/dp/histogram" "POST" "${AGENT_URL}/v1/privacy/dp/histogram" "200" \
+    '{"values": ["A", "B", "A"], "categories": ["A", "B", "C"], "epsilon": 1.0}'
 
-assert_http "POST /dp/mean" "POST" "${AGENT_URL}/dp/mean" "200" \
-    '{"values": [1.0, 2.0, 3.0, 4.0, 5.0], "sensitivity": 1.0, "epsilon": 1.0}'
-
-assert_http "POST /dp/histogram" "POST" "${AGENT_URL}/dp/histogram" "200" \
-    '{"true_counts": {"A": 10, "B": 20, "C": 30}, "epsilon": 1.0}'
+assert_http "POST /v1/privacy/dp/noisy_count" "POST" "${AGENT_URL}/v1/privacy/dp/noisy_count" "200" \
+    '{"count": 100, "epsilon": 1.0}'
 
 # ── 4. K-Anonymity K-匿名 ──────────────────────────────────────────────
 log_step "4. K-Anonymity K-匿名"
-assert_http "POST /kano/generalize" "POST" "${AGENT_URL}/kano/generalize" "200" \
-    '{"records": [{"age": 25, "city": "Beijing"}, {"age": 26, "city": "Shanghai"}], "k": 2, "quasi_identifiers": ["age", "city"]}'
+assert_http "POST /v1/privacy/k_anonymize/table" "POST" "${AGENT_URL}/v1/privacy/k_anonymize/table" "200" \
+    '{"records": [{"age": "25", "city": "Beijing"}, {"age": "26", "city": "Shanghai"}], "k": 2, "qi_cols": ["age", "city"]}'
 
 # ── 5. Query Obfuscation 查询混淆 ──────────────────────────────────────
 log_step "5. Query Obfuscation 查询混淆"
-assert_http "POST /qol/obfuscate" "POST" "${AGENT_URL}/qol/obfuscate" "200" \
-    '{"query": "SELECT * FROM patients WHERE name = '\''张三'\''", "num_dummies": 3}'
+assert_http "POST /v1/privacy/qol/obfuscate" "POST" "${AGENT_URL}/v1/privacy/qol/obfuscate" "200" \
+    '{"query": "SELECT * FROM patients WHERE name = '\''张三'\''", "num_decoys": 3, "domain": "medical"}'
 
 # ── 6. LDP 本地差分隐私 ────────────────────────────────────────────────
 log_step "6. LDP 本地差分隐私"
-assert_http "POST /ldp/perturb_binary" "POST" "${AGENT_URL}/ldp/perturb_binary" "200" \
-    '{"value": true, "epsilon": 1.0}'
+assert_http "POST /v1/privacy/ldp/perturb/binary" "POST" "${AGENT_URL}/v1/privacy/ldp/perturb/binary" "200" \
+    '{"values": [1, 0, 1], "epsilon": 1.0}'
 
-assert_http "POST /ldp/perturb_categorical" "POST" "${AGENT_URL}/ldp/perturb_categorical" "200" \
-    '{"value": "A", "domain": ["A", "B", "C"], "epsilon": 1.0}'
+assert_http "POST /v1/privacy/ldp/perturb/categorical" "POST" "${AGENT_URL}/v1/privacy/ldp/perturb/categorical" "200" \
+    '{"values": ["A", "B"], "categories": ["A", "B", "C"], "epsilon": 1.0}'
 
-# ── 7. 文件处理 ────────────────────────────────────────────────────────
-log_step "7. 文件隐私处理"
-assert_http "POST /file/mask" "POST" "${AGENT_URL}/file/mask" "200" \
-    '{"content": "name,phone\n张三,13800138000\n李四,13900139000", "file_type": "csv"}'
+# ── 7. Medical 医疗流水线 ──────────────────────────────────────────────
+log_step "7. Medical 医疗合规脱敏"
+assert_http "POST /v1/medical/sanitize" "POST" "${AGENT_URL}/v1/medical/sanitize" "200" \
+    '{"record": {"name": "张三", "phone": "13800138000", "id_card_no": "110101199001011234"}, "domain": "yibao"}'
 
-# ── 8. Profile 推荐 ────────────────────────────────────────────────────
-log_step "8. Privacy Profile 推荐"
-assert_http "POST /profile/recommend" "POST" "${AGENT_URL}/profile/recommend" "200" \
-    '{"data_type": "medical", "fields": ["name", "age", "diagnosis"]}'
+# ── 8. Agent 通用流水线 ────────────────────────────────────────────────
+log_step "8. Agent 通用处理流水线"
+assert_http "POST /v1/agent/process" "POST" "${AGENT_URL}/v1/agent/process" "200" \
+    '{"records": [{"name": "李四", "phone": "13900139000"}]}'
 
-# ── 9. Ops 诊断 ────────────────────────────────────────────────────────
-log_step "9. Ops 运维诊断"
-assert_http "GET /ops/diagnostics" "GET" "${AGENT_URL}/ops/diagnostics"
+# ── 9. 动态分类分级 ────────────────────────────────────────────────────
+log_step "9. 动态分类分级"
+assert_http "POST /v1/dynclassification/classify" "POST" "${AGENT_URL}/v1/dynclassification/classify" "200" \
+    '{"field": "id_card_no", "value": "110101199003072381"}'
 
-# ── 10. Metrics 指标 ───────────────────────────────────────────────────
-log_step "10. Prometheus 指标端点"
+# ── 10. Ops 运维诊断与指标 ────────────────────────────────────────────
+log_step "10. Ops 诊断与 Prometheus 指标"
+assert_http "GET /v1/ops/diagnostics" "GET" "${AGENT_URL}/v1/ops/diagnostics"
 assert_http "GET /metrics" "GET" "${AGENT_URL}/metrics"
 
 # ── 结果汇总 ────────────────────────────────────────────────────────────
@@ -158,7 +171,7 @@ echo "   📝 总计: $((PASS_COUNT + FAIL_COUNT))"
 echo "============================================================================"
 
 if [ "$FAIL_COUNT" -eq 0 ]; then
-    echo -e "${GREEN}✅ 所有测试通过！Go 引擎集成测试成功。${NC}"
+    echo -e "${GREEN}🎉 恭喜！Go Engine 所有 REST API 端点集成测试 100% 全部通过！${NC}"
     exit 0
 else
     echo -e "${RED}❌ 存在 ${FAIL_COUNT} 个失败测试，请检查 Go 引擎服务状态。${NC}"

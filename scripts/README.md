@@ -14,13 +14,11 @@ scripts/
 │   └── README.md         # 详细文档: 本地开发与测试运维
 ├── env/                  # GPU 驱动、CUDA 12.8、PyTorch 及 TensorRT 引擎编译
 │   └── README.md         # 详细文档: 硬件加速与环境构建
-├── misc/                 # 算法边界诊断、Token 序列与 Prompt 结构探针
-│   └── README.md         # 详细文档: 诊断与实验工具
 ├── models/               # 本地大模型下载、Apple MLX 转换与 vLLM 推理服务
 │   └── README.md         # 详细文档: AI 模型管理与推理服务
 ├── prod/                 # 生产级 Docker Compose、Helm/K8s 部署、备份与健康巡检
 │   └── README.md         # 详细文档: 生产部署与运维
-├── test/                 # 异步高并发极限压测与 SLA 延迟评估套件
+├── test/                 # 纯 Go 与异步高并发极限压测与 SLA 延迟评估套件
 │   └── README.md         # 详细文档: 性能压测与质量评估
 └── replace_docs_text.py  # 全局文档批量替换与迁移重构工具
 ```
@@ -31,13 +29,12 @@ scripts/
 
 | 子目录 | 核心定位与场景 | 常用代表脚本 | 详细文档导航 |
 |---|---|---|---|
-| [`scripts/dev/`](./dev/README.md) | **本地开发与测试**：一键启动 Agent + BFF + 前端 HMR、中台微服务联动、E2E 自动化测试 | `dev-bff-agent.sh`<br/>`run_console_e2e_tests.sh`<br/>`dev-stop.sh` | [查看 Dev 文档](./dev/README.md) |
+| [`scripts/dev/`](./dev/README.md) | **本地开发与测试**：一键启动 Go Agent + BFF + 前端 HMR、中台微服务联动、E2E 自动化测试 | `dev-bff-agent.sh`<br/>`run_console_e2e_tests.sh`<br/>`dev-stop.sh` | [查看 Dev 文档](./dev/README.md) |
 | [`scripts/prod/`](./prod/README.md) | **生产发布与运维**：Docker Compose 生产编排、Helm/K8s 发布、全量 SQLite 备份与生产巡检 | `deploy-docker-compose.sh`<br/>`deploy-helm.sh`<br/>`backup-sqlite-databases.sh` | [查看 Prod 文档](./prod/README.md) |
-| [`scripts/data/`](./data/README.md) | **数据与规则生成**：仿真医疗/医保/康养数据生成、多模态病历图片生成、LLM 规则与词表扩充 | `generate_medical_data.py`<br/>`generate_yibao_data.py`<br/>`expand_keywords_with_llm.py` | [查看 Data 文档](./data/README.md) |
+| [`scripts/data/`](./data/README.md) | **数据与规则生成**：仿真医疗/医保/康养数据生成、多模态病历图片生成、规则与词表扩充 | `generate_medical_data.py`<br/>`generate_yibao_data.py`<br/>`expand_keywords_with_llm.py` | [查看 Data 文档](./data/README.md) |
 | [`scripts/env/`](./env/README.md) | **硬件加速与环境构建**：NVIDIA Blackwell (sm_120) CUDA 12.8 安装、TensorRT 引擎编译 | `install_cuda_pytorch_sm120.sh`<br/>`export_tensorrt_engine.sh` | [查看 Env 文档](./env/README.md) |
 | [`scripts/models/`](./models/README.md) | **模型管理与推理**：多模态与 NER 模型下载、macOS MLX 权重转换、vLLM 推理服务启动 | `download_model.py`<br/>`download_ner_model.py`<br/>`start_vllm_server.sh` | [查看 Models 文档](./models/README.md) |
-| [`scripts/test/`](./test/README.md) | **性能压测与评估**：异步高并发极限吞吐压测、P50/P90/P99 延迟 SLA 评估 | `stress_test_suite.py` | [查看 Test 文档](./test/README.md) |
-| [`scripts/misc/`](./misc/README.md) | **算法诊断与探针**：复杂医疗文本脱敏边界分析、Prompt/Token 序列结构审查 | `analyze_redact.py`<br/>`diag_fullprompt.py` | [查看 Misc 文档](./misc/README.md) |
+| [`scripts/test/`](./test/README.md) | **性能压测与评估**：纯 Go 原生与异步高并发极限吞吐压测、P50/P90/P99 延迟 SLA 评估 | `stress.go`<br/>`stress_test_suite.py` | [查看 Test 文档](./test/README.md) |
 
 ---
 

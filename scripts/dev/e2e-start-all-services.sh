@@ -148,11 +148,17 @@ start_agent() {
         return
     fi
 
-    log_step "Starting PrivShield Agent on :${port}..."
+    log_step "Starting PrivShield Go Agent on :${port}..."
     cd "$PROJECT_ROOT"
-    PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT="$port" \
-        $PYTHON -m engine.main --host 127.0.0.1 --port "$port" \
-        > "${LOGS_DIR}/agent_e2e.log" 2>&1 &
+    if [[ -f "$PROJECT_ROOT/bin/privshield-agent" ]]; then
+        PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT="$port" \
+        PRIVACY_GRPC_HOST=127.0.0.1 PRIVACY_GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}" \
+            "$PROJECT_ROOT/bin/privshield-agent" > "${LOGS_DIR}/agent_e2e.log" 2>&1 &
+    else
+        PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT="$port" \
+        PRIVACY_GRPC_HOST=127.0.0.1 PRIVACY_GRPC_PORT="${PRIVACY_GRPC_PORT:-50051}" \
+            "$GO_BIN" run ./engine-go/cmd/privshield-agent > "${LOGS_DIR}/agent_e2e.log" 2>&1 &
+    fi
     echo $! > "$pid_file"
     log_info "Agent started (PID $(cat "$pid_file"))"
 
@@ -247,7 +253,6 @@ cd "$PROJECT_ROOT"
 
 log_step "Checking dependencies..."
 check_go
-check_python
 
 echo ""
 log_step "Starting all services..."

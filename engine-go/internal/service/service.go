@@ -71,7 +71,7 @@ func DefaultConfig() Config {
 
 	return Config{
 		TotalEpsilon:    10.0,
-		TotalDelta:      1e-5,
+		TotalDelta:      0.01,
 		BudgetWindowSec: 3600,
 		Namespace:       "default",
 		ProfilePath:     "",

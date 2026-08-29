@@ -146,11 +146,10 @@ def run_bench(name, endpoint, payload):
 
 # 1. 字段脱敏 Masking 接口测试
 mask_payload = {
-    'records': [
-        {'id': 1, 'name': '张三', 'id_card': '110101199003072381', 'phone': '13800138000', 'email': 'test@example.com'}
-    ]
+    'field_type': 'phone',
+    'value': '13800138000'
 }
-run_bench('数据脱敏 Masking', '/api/v1/mask', mask_payload)
+run_bench('数据脱敏 Masking', '/v1/privacy/mask', mask_payload)
 
 # 2. 差分隐私 DP 接口测试
 dp_payload = {
@@ -158,14 +157,14 @@ dp_payload = {
     'epsilon': 1.0,
     'sensitivity': 1.0
 }
-run_bench('差分隐私 DP Laplace', '/api/v1/dp/laplace', dp_payload)
+run_bench('差分隐私 DP Laplace', '/v1/privacy/dp/laplace', dp_payload)
 
 # 3. 动态分类分级接口测试
 class_payload = {
     'text': '患者张三，身份证号 110101199003072381，诊断为高血压',
     'domain': 'medical'
 }
-run_bench('动态分类分级三层漏斗', '/api/v1/classification/classify', class_payload)
+run_bench('动态分类分级三层漏斗', '/v1/dynclassification/classify', class_payload)
 "
 
 echo -e "\n${GREEN}====================================================${NC}"

@@ -32,7 +32,7 @@ func main() {
 	if url == "" {
 		switch *target {
 		case "agent":
-			url = "http://127.0.0.1:8080/v1/privacy/mask"
+			url = "http://127.0.0.1:8079/v1/privacy/mask"
 			reqBody := map[string]interface{}{
 				"field_type": "phone",
 				"value":      "13812345678",
@@ -48,7 +48,7 @@ func main() {
 			}
 			payload, _ = json.Marshal(reqBody)
 		default:
-			url = "http://127.0.0.1:8080/v1/privacy/mask"
+			url = "http://127.0.0.1:8079/v1/privacy/mask"
 			reqBody := map[string]interface{}{"field_type": "phone", "value": "13812345678"}
 			payload, _ = json.Marshal(reqBody)
 		}

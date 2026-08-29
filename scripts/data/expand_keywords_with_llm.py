@@ -27,12 +27,10 @@ from typing import Any, List
 import yaml
 
 # 项目根路径引入
-ROOT_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT_DIR))
+import logging
 
-from engine.observability.logging_config import get_logger
-
-logger = get_logger("expand_keywords_script")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("expand_keywords_script")
 
 
 # ===========================================================================
@@ -129,17 +127,7 @@ def call_llm_api(prompt: str, api_key: str, api_base: str, model: str) -> list[s
 
 
 def call_local_llm(prompt: str) -> list[str] | None:
-    """尝试调用项目本地的 LlmAdapter / Try calling project local LlmAdapter."""
-    try:
-        from engine.dynclassification.llm_adapter import LlmAdapter
-
-        adapter = LlmAdapter()
-        if adapter.is_available:
-            result = adapter.classify(prompt, "L3", 0.5)
-            if result and isinstance(result, dict):
-                return result.get("expanded_keywords", None)
-    except Exception as e:
-        logger.debug(f"本地 LLM不可用或初始化失败: {e}")
+    """尝试调用本地 LLM 接口 / Try calling local LLM endpoint."""
     return None
 
 

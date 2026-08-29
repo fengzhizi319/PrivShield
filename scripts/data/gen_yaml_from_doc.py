@@ -28,13 +28,10 @@ from typing import Any, Dict, List
 
 import yaml
 
-# 项目根目录挂载
-ROOT_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT_DIR))
+import logging
 
-from engine.observability.logging_config import get_logger
-
-logger = get_logger("gen_yaml_from_doc")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("gen_yaml_from_doc")
 
 
 # ===========================================================================
@@ -207,17 +204,7 @@ def call_llm_api(prompt: str, api_key: str, api_base: str, model: str) -> dict[s
 
 
 def call_local_llm(prompt: str) -> dict[str, Any] | None:
-    """尝试调用项目内置本地 LlmAdapter / Invoke project local LlmAdapter."""
-    try:
-        from engine.dynclassification.llm_adapter import LlmAdapter
-
-        adapter = LlmAdapter()
-        if adapter.is_available:
-            result = adapter.classify(prompt, "L3", 0.5)
-            if result and isinstance(result, dict):
-                return result
-    except Exception as e:
-        logger.debug(f"本地 LLM 适配器不可用: {e}")
+    """尝试调用本地 LLM 接口 / Try calling local LLM endpoint."""
     return None
 
 

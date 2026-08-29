@@ -48,7 +48,7 @@ OBSOLETE_IDS=(
 )
 
 for obs in "${OBSOLETE_IDS[@]}"; do
-    MATCHES=$(grep -rn "\"${obs}\"" "${ROOT_DIR}/services" "${ROOT_DIR}/console" "${ROOT_DIR}/engine" "${ROOT_DIR}/pkg" 2>/dev/null | grep -v "_test.go" | grep -v "test_" | grep -v "\.md" || true)
+    MATCHES=$(grep -rn "\"${obs}\"" "${ROOT_DIR}/services" "${ROOT_DIR}/console" "${ROOT_DIR}/engine-go" "${ROOT_DIR}/pkg" 2>/dev/null | grep -v "_test.go" | grep -v "test_" | grep -v "\.md" || true)
     if [ -n "${MATCHES}" ]; then
         echo "❌ ERROR: Found obsolete identifier '${obs}' in active code:"
         echo "${MATCHES}"
@@ -84,10 +84,10 @@ for hid in "${HARDCODED_IDS[@]}"; do
     fi
 done
 
-# 4. 运行 Go 与 Python 命名一致性单元测试
-echo "[4/4] Running Cross-Language SSOT Parity Unit Tests..."
+# 4. 运行 Go 命名一致性单元测试
+echo "[4/4] Running Go SSOT Parity Unit Tests..."
 cd "${ROOT_DIR}"
-if ! go test -v ./pkg/naming/... > /dev/null 2>&1; then
+if ! CGO_ENABLED=0 go test ./pkg/naming/... > /dev/null 2>&1; then
     echo "❌ ERROR: Go pkg/naming unit tests failed!"
     ERRORS=$((ERRORS + 1))
 fi

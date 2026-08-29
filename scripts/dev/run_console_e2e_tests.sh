@@ -78,22 +78,40 @@ if command -v ss &>/dev/null && ss -tulpn | grep -q -E ':8079 '; then
     exit 1
 fi
 
-# ── 步骤 1：启动 Mock Agent 服务 (端口 8079) ───────────────────────────────
-echo -e "\n${YELLOW}[步骤 1/5] 启动 Mock Agent 桩服务 (端口 8079)...${NC}"
-python3 "$SCRIPT_DIR/mock_agent_server.py" 8079 &
+# ── 步骤 1：启动 Go Agent 核心引擎 (端口 8079 / 50051) ──────────────────────
+echo -e "\n${YELLOW}[步骤 1/5] 启动 PrivShield-Go 原生引擎 (REST: 8079, gRPC: 50051)...${NC}"
+(
+    cd "$PROJECT_ROOT/engine-go"
+    CGO_ENABLED=0 go build -o bin/privshield-agent ./cmd/privshield-agent
+)
+PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT=8079 \
+PRIVACY_GRPC_HOST=127.0.0.1 PRIVACY_GRPC_PORT=50051 \
+PRIVACY_LOG_LEVEL=WARN \
+"$PROJECT_ROOT/engine-go/bin/privshield-agent" >/dev/null 2>&1 &
 MOCK_PID=$!
 sleep 1
+
 if ! kill -0 "$MOCK_PID" 2>/dev/null; then
-    echo -e "${RED}[错误] Mock Agent 启动失败！${NC}"
+    echo -e "${RED}[错误] PrivShield-Go Agent 启动失败！${NC}"
     exit 1
 fi
-echo -e "${GREEN}Mock Agent 已启动 (PID: ${MOCK_PID})${NC}"
+echo -e "${GREEN}PrivShield-Go Agent 已启动 (PID: ${MOCK_PID})${NC}"
 
-# ── 步骤 2：运行 Go BFF 网关 (REST/gRPC/mTLS) 与共享库测试 ────────────────
-echo -e "\n${YELLOW}[步骤 2/3] 运行 Console BFF-Go (REST/gRPC/mTLS) 与 Pkg 基础库测试...${NC}"
-if command -v go &> /dev/null && [ -d "console/bff-go" ]; then
+# ── 步骤 2：运行 Go 原生隐私 SDK 与 Engine 测试 ───────────────────────────
+echo -e "\n${YELLOW}[步骤 2/5] 运行 privacy-go-sdk 与 engine-go 核心引擎测试...${NC}"
+TESTS_RUN=$((TESTS_RUN + 1))
+if CGO_ENABLED=0 go test ./privacy-go-sdk/... ./engine-go/...; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}[成功] Go 原生隐私引擎与 SDK 测试全部通过！${NC}"
+else
+    echo -e "${RED}[失败] Go 原生引擎测试未通过！${NC}"
+fi
+
+# ── 步骤 3：运行 Go BFF 网关 (REST/gRPC/mTLS) 与共享库测试 ────────────────
+echo -e "\n${YELLOW}[步骤 3/5] 运行 Console BFF-Go (REST/gRPC/mTLS) 与 Pkg 基础库测试...${NC}"
+if [ -d "console/bff-go" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
-    if go test -v ./pkg/... ./console/bff-go/...; then
+    if CGO_ENABLED=0 go test ./pkg/... ./console/bff-go/...; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo -e "${GREEN}[成功] Go BFF 与 Pkg 基础库测试通过！${NC}"
     else
@@ -104,11 +122,11 @@ else
     echo -e "${YELLOW}[跳过] 未发现 go 命令或 console/bff-go 目录。${NC}"
 fi
 
-# ── 步骤 3：运行 Services 微服务群测试 ────────────────────────────────────
-echo -e "\n${YELLOW}[步骤 3/3] 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试...${NC}"
+# ── 步骤 4：运行 Services 微服务群测试 ────────────────────────────────────
+echo -e "\n${YELLOW}[步骤 4/5] 运行 Services 微服务群 (service-hub / datasource-mgr / audit-log) 测试...${NC}"
 if command -v go &> /dev/null && [ -d "services" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
-    if go test ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...; then
+    if CGO_ENABLED=0 go test ./services/service-hub/... ./services/datasource-mgr/... ./services/audit-log/...; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo -e "${GREEN}[成功] Services 中台微服务群测试通过！${NC}"
     else
@@ -119,8 +137,8 @@ else
     echo -e "${YELLOW}[跳过] 未发现 go 命令或 services 目录。${NC}"
 fi
 
-# ── 步骤 4：运行 Web 前端组件与单元测试 ───────────────────────────────────
-echo -e "\n${YELLOW}[步骤 3/3] 运行 Console Web (React) 组件与自动化测试...${NC}"
+# ── 步骤 5：运行 Web 前端组件与单元测试 ───────────────────────────────────
+echo -e "\n${YELLOW}[步骤 5/5] 运行 Console Web (React) 组件与自动化测试...${NC}"
 if [ -d "console/web" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
     WEB_TEST_OK=false

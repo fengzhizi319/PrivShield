@@ -151,32 +151,36 @@ _start_upstream_if_needed() {
 
 start_engine() {
     local port=8079 pid_file="$PIDS_DIR/agent.pid"
-    _start_upstream_if_needed "Engine" "$port" "$ENGINE_HEALTH_URL"
+    _start_upstream_if_needed "Go Engine" "$port" "$ENGINE_HEALTH_URL"
     local curl_opts=("--noproxy" "*" "-sf" "-o" "/dev/null")
     [[ "$MTLS_MODE" == "true" ]] && curl_opts+=("-k")
     curl "${curl_opts[@]}" "$ENGINE_HEALTH_URL" 2>/dev/null && return
 
-    echo "🔄 启动 PrivShield Engine (REST :$port / gRPC :50051)..."
+    echo "🔄 启动 PrivShield Go Engine (REST :$port / gRPC :50051)..."
     cd "$PROJECT_ROOT"
     if [[ "$MTLS_MODE" == "true" ]]; then
         PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT="$port" \
+        PRIVACY_GRPC_HOST=127.0.0.1 PRIVACY_GRPC_PORT=50051 \
         PRIVACY_TLS_ENABLED=true \
         PRIVACY_TLS_CERT_FILE="$CERT_DIR/server.crt" \
         PRIVACY_TLS_KEY_FILE="$CERT_DIR/server.key" \
         PRIVACY_TLS_CA_FILE="$CERT_DIR/ca.crt" \
         PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=true \
         PRIVACY_AUTH_MTLS_WHITELIST_FILE="$PROJECT_ROOT/config/mtls-whitelist.yaml" \
-        $PYTHON -m engine.server \
+        "$GO_BIN" run ./engine-go/cmd/privshield-agent \
             > "${LOGS_DIR}/agent_app_lz.log" 2>&1 &
     else
         PRIVACY_REST_HOST=127.0.0.1 PRIVACY_REST_PORT="$port" \
-        $PYTHON -m engine.server \
+        PRIVACY_GRPC_HOST=127.0.0.1 PRIVACY_GRPC_PORT=50051 \
+        PRIVACY_TLS_ENABLED=false \
+        PRIVACY_AUTH_INTERNAL_MTLS_ENABLED=false \
+        "$GO_BIN" run ./engine-go/cmd/privshield-agent \
             > "${LOGS_DIR}/agent_app_lz.log" 2>&1 &
     fi
     echo $! > "$pid_file"
-    _wait_for_http "Engine" "$ENGINE_HEALTH_URL" 20 && \
-        echo "✅ Engine 已就绪 (PID $(cat "$pid_file"))" || \
-        echo "⚠️  Engine 启动超时，请检查 ${LOGS_DIR}/agent_app_lz.log"
+    _wait_for_http "Go Engine" "$ENGINE_HEALTH_URL" 15 && \
+        echo "✅ Go Engine 已就绪 (PID $(cat "$pid_file"))" || \
+        echo "⚠️  Go Engine 启动超时，请检查 ${LOGS_DIR}/agent_app_lz.log"
 }
 
 start_service_hub() {

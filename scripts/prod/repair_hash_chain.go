@@ -1,6 +1,5 @@
-#!/usr/bin/env go run
-//go:build ignore
-
+// Package main implements the audit hash chain repair tool.
+//
 // scripts/prod/repair_hash_chain.go
 //
 // PrivShield 审计哈希链修复工具 (Hash Chain Repair Tool)

@@ -155,7 +155,7 @@ def main() -> None:
             "payload": {"name": "张三", "id_card": "110101199003072345"},
         }
     else:  # gateway
-        target_url = "http://127.0.0.1:8080/v1/privacy/mask"
+        target_url = "http://127.0.0.1:8000/v1/privacy/mask"
         payload = {"text": "测试数据", "method": "mask"}
 
     asyncio.run(run_stress_test(target_url, payload, args.concurrency, args.duration))

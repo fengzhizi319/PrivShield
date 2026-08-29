@@ -106,7 +106,7 @@
 ### `generate_yibao_data.py`
 - **作用说明**: 依据国家医疗保障局结算标准，生成 18 个核心维度的医保结算测试数据集（含 ICD-10 编码、结算流水号、就诊科室、住院天数等）。
 - **参数选项**:
-  - `-o, --output <PATH>`: 指定输出路径（默认保存至 `engine/medical_pipeline/samples/yibao.csv`）。
+  - `-o, --output <PATH>`: 指定输出路径（默认保存至 `data/yibao.csv`）。
   - `-n, --count <INT>`: 生成记录条目数。
 - **执行命令**:
   ```bash

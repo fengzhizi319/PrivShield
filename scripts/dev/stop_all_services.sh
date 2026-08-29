@@ -65,8 +65,11 @@ stop_by_pid() {
 # ── 步骤 1：按 PID 文件停止各服务进程（新版 .pids/ + 旧版 console/.pids/）──
 for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
     if [[ -d "$dir" ]]; then
-        stop_by_pid "${dir}/agent.pid" "Agent 侧边栏引擎"
+        stop_by_pid "${dir}/agent.pid" "Agent 算力引擎"
+        stop_by_pid "${dir}/agent-go.pid" "Go Agent 算力引擎"
+        stop_by_pid "${dir}/gateway-go.pid" "Go Gateway 网关"
         stop_by_pid "${dir}/console.pid" "Console BFF 代理网关"
+        stop_by_pid "${dir}/console-go.pid" "Console Go BFF"
         stop_by_pid "${dir}/service-hub.pid" "Service Hub 调度中枢"
         stop_by_pid "${dir}/datasource-mgr.pid" "Datasource Mgr 数据源管理"
         stop_by_pid "${dir}/audit-log.pid" "Audit Log 审计日志"
@@ -74,9 +77,10 @@ for dir in "$PIDS_DIR" "$LEGACY_PIDS_DIR"; do
 done
 
 # ── 步骤 2：按进程名兜底清理 (确保无残留孤儿进程) ─────────────────────────
-pkill -f "engine.server" 2>/dev/null || true
-pkill -f "engine.main" 2>/dev/null || true
-pkill -f "uvicorn app.main:app" 2>/dev/null || true
+pkill -f "privshield-agent" 2>/dev/null || true
+pkill -f "privshield-gateway" 2>/dev/null || true
+pkill -f "cmd/privshield-agent" 2>/dev/null || true
+pkill -f "cmd/privshield-gateway" 2>/dev/null || true
 pkill -f "backend-go" 2>/dev/null || true
 pkill -f "bin/service-hub" 2>/dev/null || true
 pkill -f "bin/datasource-mgr" 2>/dev/null || true

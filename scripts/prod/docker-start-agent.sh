@@ -112,27 +112,11 @@ mkdir -p "$PROJECT_ROOT/.data/budget" "$PROJECT_ROOT/.logs"
 chmod 755 "$PROJECT_ROOT/.data/budget" "$PROJECT_ROOT/.logs"
 
 # ── 4. 镜像构建（若未指定 --no-build）──
-if [[ "$TARGET" == "go" ]]; then
-    IMAGE_NAME="privshield-go:1.0.0"
-    RESOURCE_LIMITS=(--cpus="1.0" --memory="512m")
-    if [[ "$NO_BUILD" != "true" ]]; then
-        echo "📦 正在构建生产级 Go 原生引擎镜像 ($IMAGE_NAME)..."
-        docker build -f engine-go/Dockerfile -t "$IMAGE_NAME" .
-    fi
-elif [[ "$TARGET" == "ml" ]]; then
-    IMAGE_NAME="privshield:1.8.0-ml"
-    RESOURCE_LIMITS=(--cpus="4.0" --memory="8g")
-    if [[ "$NO_BUILD" != "true" ]]; then
-        echo "📦 正在构建生产级 ML 镜像 ($IMAGE_NAME)..."
-        docker build --target ml -t "$IMAGE_NAME" .
-    fi
-else
-    IMAGE_NAME="privshield:1.8.0"
-    RESOURCE_LIMITS=(--cpus="2.0" --memory="2g")
-    if [[ "$NO_BUILD" != "true" ]]; then
-        echo "📦 正在构建生产级 Core 镜像 ($IMAGE_NAME)..."
-        docker build --target core -t "$IMAGE_NAME" .
-    fi
+IMAGE_NAME="privshield:latest"
+RESOURCE_LIMITS=(--cpus="2.0" --memory="1g")
+if [[ "$NO_BUILD" != "true" ]]; then
+    echo "📦 正在构建生产级 Go 原生引擎镜像 ($IMAGE_NAME)..."
+    docker build -t "$IMAGE_NAME" .
 fi
 
 # ── 5. 组装环境变量文件与卷挂载 ──

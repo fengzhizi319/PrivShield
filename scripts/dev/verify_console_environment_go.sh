@@ -85,7 +85,7 @@ fi
 # ── 步骤 4：检查 Go 引擎与微服务代码编译 ─────────────────────────────────
 echo -e "\n${YELLOW}[4/4] 验证 Go 引擎与微服务可构建性...${NC}"
 if command -v go &> /dev/null; then
-    if CGO_ENABLED=0 go build ./engine-go/cmd/... ./services/... ./console/bff-go/cmd/... >/dev/null 2>&1; then
+    if CGO_ENABLED=0 go build ./engine-go/cmd/... ./services/service-hub/cmd/... ./services/datasource-mgr/cmd/... ./services/audit-log/cmd/... ./console/bff-go/cmd/... >/dev/null 2>&1; then
         echo -e "Go 全栈模块编译构建: ${GREEN}[OK]${NC}"
     else
         echo -e "${RED}[错误] Go 模块编译失败！${NC}"

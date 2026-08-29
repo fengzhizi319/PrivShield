@@ -84,19 +84,9 @@ echo "==========================================================================
 cd "$PROJECT_ROOT"
 
 # ── 步骤 4：镜像构建 ──────────────────────────────────────────────────────
-if [[ "$TARGET" == "go" ]]; then
-    echo "📦 构建 Go 原生高性能引擎镜像..."
-    docker build -f engine-go/Dockerfile -t privshield-go:1.0.0 .
-    IMAGE_NAME="privshield-go:1.0.0"
-elif [[ "$TARGET" == "ml" ]]; then
-    echo "📦 构建含有 PyTorch / Transformers / ONNX 的 ML 镜像..."
-    docker build --target ml -t privshield:1.8.0-ml .
-    IMAGE_NAME="privshield:1.8.0-ml"
-else
-    echo "📦 构建轻量 Core 镜像..."
-    docker build --target core -t privshield:1.8.0 .
-    IMAGE_NAME="privshield:1.8.0"
-fi
+echo "📦 构建 PrivShield Go 原生高性能引擎镜像..."
+docker build -t privshield:latest .
+IMAGE_NAME="privshield:latest"
 
 # ── 步骤 5：停止并清理旧容器（防止名称冲突）──────────────────────────────
 docker rm -f PrivShield 2>/dev/null || true

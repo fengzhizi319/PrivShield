@@ -6,7 +6,7 @@
 
 Usage:
     python scripts/data/generate_yibao_data.py
-    python scripts/data/generate_yibao_data.py --output engine/medical_pipeline/samples/yibao.csv --count 50
+    python scripts/data/generate_yibao_data.py --output data/yibao.csv --count 50
 """
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ def main():
     parser = argparse.ArgumentParser(description="生成医保结算数据 yibao.csv")
     parser.add_argument(
         "--output",
-        default=str(project_root / "engine/medical_pipeline/samples/yibao.csv"),
+        default=str(project_root / "data/yibao.csv"),
         help="输出 CSV 文件路径",
     )
     parser.add_argument("--count", type=int, default=50, help="生成的记录条数 (默认 50)")
