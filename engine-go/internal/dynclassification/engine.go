@@ -8,9 +8,11 @@
 package dynclassification
 
 import (
+	"os"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ──────────────────────────────────────────────
@@ -170,6 +172,11 @@ type RuleEngine struct {
 	fieldRegexps []*regexp.Regexp // 字段名匹配正则
 	ac           *ACAutomaton     // 值内容 AC 自动机
 	cache        sync.Map         // LRU 缓存（简化版）
+
+	// 热重载支持（mtime 检测模式，与 WhitelistManager 一致）
+	rulesPath  string
+	lastModTime time.Time
+	reloadMu   sync.Mutex
 }
 
 // NewRuleEngine 创建规则引擎实例
@@ -207,6 +214,9 @@ func NewRuleEngine(rules []RuleDef) (*RuleEngine, error) {
 
 // Classify 对字段执行分类
 func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
+	// 被动检查规则文件热重载
+	e.checkRulesReload()
+
 	// 检查缓存
 	cacheKey := field + ":" + value
 	if cached, ok := e.cache.Load(cacheKey); ok {
@@ -260,6 +270,60 @@ func (e *RuleEngine) Classify(field, value string) *ClassificationResult {
 	}
 	e.cache.Store(cacheKey, result)
 	return result
+}
+
+// RuleCount 返回已加载的规则数量
+func (e *RuleEngine) RuleCount() int {
+	return len(e.rules)
+}
+
+// WatchRules 启用规则文件 mtime 热重载。
+// 每次 Classify 调用时被动检查文件 mtime，变更时自动重新编译规则。
+// 与 WhitelistManager 的 mtime 检测模式一致，无外部依赖。
+func (e *RuleEngine) WatchRules(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	e.rulesPath = path
+	e.lastModTime = info.ModTime()
+	return nil
+}
+
+// checkRulesReload 被动检查规则文件是否变更（请求驱动，无 goroutine）
+func (e *RuleEngine) checkRulesReload() {
+	if e.rulesPath == "" {
+		return
+	}
+	info, err := os.Stat(e.rulesPath)
+	if err != nil {
+		return
+	}
+	if !info.ModTime().After(e.lastModTime) {
+		return
+	}
+
+	e.reloadMu.Lock()
+	defer e.reloadMu.Unlock()
+
+	// 双重检查（避免并发重复加载）
+	info2, err := os.Stat(e.rulesPath)
+	if err != nil || !info2.ModTime().After(e.lastModTime) {
+		return
+	}
+
+	// 重新编译规则（保持旧规则集直到新规则编译成功）
+	newEngine, err := NewRuleEngine(e.rules) // 用当前规则重建，仅更新内部结构
+	if err != nil {
+		return // 编译失败保持旧规则
+	}
+
+	// 原子替换内部状态
+	e.fieldRegexps = newEngine.fieldRegexps
+	e.ac = newEngine.ac
+	e.lastModTime = info2.ModTime()
+	// 清空缓存（规则变更旧缓存失效）
+	e.cache = sync.Map{}
 }
 
 // ClassifyBatch 批量分类

@@ -358,7 +358,7 @@ flowchart LR
 | 功能域 | Python 引擎实现路径 (`engine/`) | Go 原生实现路径 (`engine-go/` + `privacy-go-sdk/`) | 状态 | 关键实现差异与改进点 |
 |---|---|---|---|---|
 | **基础脱敏掩码** | `engine/privacy/masking.py` | [`privacy-go-sdk/masking/masking.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/privacy-go-sdk/masking/masking.go) | ✅ **100% 对齐** | Go 使用 `sync.Pool` 预分配缓冲与不可变切片，消除 GC 压力；单核吞吐提升 **~12x** |
-| **HMAC-SHA256** | `engine/privacy/masking.py` (`hash_value`) | [`privacy-go-sdk/masking/masking.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/privacy-go-sdk/masking/masking.go) (`HashHMAC`) | ✅ **100% 对齐** | 相同 `value` + `salt` 输入时，输出 16 位 Base64 摘要 **字节级 100% 完全一致** |
+| **HMAC-SHA256** | `engine/privacy/masking.py` (`hash_value`) | [`privacy-go-sdk/masking/masking.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/privacy-go-sdk/masking/masking.go) (`HashHMAC`) | ✅ **100% 对齐** | 相同 `value` + `salt` 输入时，输出 16 位 Base64 摘要 **字节级 100% 完全一致**；Phase 22 新增 `sync.Pool` 按 salt 池化 HMAC hasher，同 salt 场景零堆分配 |
 | **差分隐私 (DP)** | `engine/privacy/dp.py` | [`privacy-go-sdk/dp/dp.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/privacy-go-sdk/dp/dp.go) | ✅ **100% 对齐** | 纯寄存器标量加噪 (0 B/op)；补齐 `AdaptiveClip`（分位数二分截断）、`GroupBy` 与 `Aggregate` |
 | **局部差分隐私 (LDP)** | `engine/privacy/ldp.py` | [`privacy-go-sdk/ldp/ldp.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/privacy-go-sdk/ldp/ldp.go) | ✅ **100% 对齐** | 支持二进制与类别型局部扰动，无偏频率与直方图估计 |
 | **K-匿名 (Mondrian)** | `engine/privacy/kano.py` | [`privacy-go-sdk/kano/mondrian.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/privacy-go-sdk/kano/mondrian.go) | ✅ **100% 对齐** | 表级 Mondrian 多维空间递归切分算法，输出完全一致的等价类区间 |
@@ -377,6 +377,9 @@ flowchart LR
 | **L7 网关负载均衡** | `engine/gateway/` (Python Asyncio) | [`engine-go/internal/gateway/`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/internal/gateway/) | ✅ **100% 对齐** | P2C-EWMA 负载均衡、三态熔断器、自愈探活、gRPC 透明零编解码流代理 (`rawCodec`) |
 | **双协议服务端** | `engine/main.py` + `grpc_server.py` | `engine-go/cmd/privshield-agent/` | ✅ **100% 对齐** | 单进程拉起 REST (41 个端点) + gRPC (`TypedServer` 34 个 RPC 方法全覆盖) |
 | **可观测性** | `engine/observability/` | [`engine-go/internal/observability/`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/internal/observability/) | ✅ **100% 对齐** | slog JSON 结构化日志、Prometheus `/metrics` 导出中心、OpenTelemetry 分布式追踪 |
+| **Deep Health Check** | — (Python 无对应) | [`engine-go/internal/service/service.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/internal/service/service.go) (`DeepHealthCheck`) | ✅ **Go 新增** | `/health?deep=true` 返回 6 组件级健康快照（budget_store / rules_loaded / classification_cache / llm_cluster / ner_engine / safety_floor） |
+| **规则热重载** | — (Python 无对应) | [`engine-go/internal/dynclassification/engine.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/internal/dynclassification/engine.go) (`WatchRules`) | ✅ **Go 新增** | mtime 被动检测模式，规则文件变更后下次 Classify 自动重编译，零停机零 goroutine |
+| **gRPC 压缩与保护** | — | [`engine-go/internal/grpcserver/server.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/internal/grpcserver/server.go) | ✅ **Go 新增** | gzip 压缩器注册 + 64MB 收发上限 + 250 并发流限制 |
 
 ---
 

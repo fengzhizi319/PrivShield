@@ -19,6 +19,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	_ "google.golang.org/grpc/encoding/gzip" // 注册 gzip 压缩器
 	"google.golang.org/grpc/status"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
@@ -69,10 +70,13 @@ func NewServer(svc *service.PrivacyService, opts ...grpc.ServerOption) *Server {
 
 // Serve 启动 gRPC 服务（阻塞）
 func (s *Server) Serve(lis net.Listener) error {
-	// 内置选项：rawCodec + UnknownServiceHandler
+	// 内置选项：rawCodec + UnknownServiceHandler + 压缩与消息限制
 	builtinOpts := []grpc.ServerOption{
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(s.handleStream),
+		grpc.MaxRecvMsgSize(64 * 1024 * 1024), // 64MB 接收上限，防止 OOM
+		grpc.MaxSendMsgSize(64 * 1024 * 1024), // 64MB 发送上限
+		grpc.MaxConcurrentStreams(250),         // 并发流限制
 	}
 	// 合并外部传入的选项（如 mTLS 拦截器）
 	allOpts := append(builtinOpts, s.grpcOpts...)

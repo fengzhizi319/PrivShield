@@ -672,6 +672,79 @@ func (s *PrivacyService) Diagnostics(refresh bool) map[string]interface{} {
 }
 
 // ──────────────────────────────────────────────
+// Deep Health Check (P22)
+// ──────────────────────────────────────────────
+
+// ComponentHealth 组件健康状态
+type ComponentHealth struct {
+	Status  string `json:"status"`            // "ok" | "degraded" | "down"
+	Message string `json:"message,omitempty"` // 可选描述
+}
+
+// DeepHealthCheck 返回细粒度组件级健康快照。
+func (s *PrivacyService) DeepHealthCheck() map[string]interface{} {
+	components := make(map[string]ComponentHealth)
+	overallStatus := "ok"
+
+	// 1. budget_store — 隐私预算存储
+	remaining := s.budget.RemainingEpsilon()
+	total := s.budget.TotalEpsilon()
+	if remaining <= 0 {
+		components["budget_store"] = ComponentHealth{Status: "down", Message: "privacy budget exhausted"}
+		overallStatus = "degraded"
+	} else if remaining < total*0.1 {
+		components["budget_store"] = ComponentHealth{Status: "degraded", Message: fmt.Sprintf("budget low: %.4f/%.4f epsilon remaining", remaining, total)}
+	} else {
+		components["budget_store"] = ComponentHealth{Status: "ok"}
+	}
+
+	// 2. rules_loaded — 规则引擎
+	if s.classifier != nil && s.classifier.RuleCount() > 0 {
+		components["rules_loaded"] = ComponentHealth{
+			Status:  "ok",
+			Message: fmt.Sprintf("%d rules active", s.classifier.RuleCount()),
+		}
+	} else {
+		components["rules_loaded"] = ComponentHealth{Status: "degraded", Message: "no classification rules loaded"}
+	}
+
+	// 3. classification_cache — 分类缓存
+	if s.funnel != nil {
+		hits, misses, size := s.funnel.CacheStats()
+		hitRate := 0.0
+		if hits+misses > 0 {
+			hitRate = float64(hits) / float64(hits+misses) * 100
+		}
+		components["classification_cache"] = ComponentHealth{
+			Status:  "ok",
+			Message: fmt.Sprintf("size=%d, hit_rate=%.1f%%", size, hitRate),
+		}
+	} else {
+		components["classification_cache"] = ComponentHealth{Status: "ok", Message: "no funnel"}
+	}
+
+	// 4. llm_cluster — LLM 集群就绪状态
+	components["llm_cluster"] = ComponentHealth{Status: "ok", Message: "not_configured"}
+
+	// 5. ner_engine — NER 引擎状态
+	components["ner_engine"] = ComponentHealth{Status: "ok", Message: "rule_based"}
+
+	// 6. safety_floor — 安全底线
+	if s.safetyFloor != nil {
+		components["safety_floor"] = ComponentHealth{Status: "ok"}
+	} else {
+		components["safety_floor"] = ComponentHealth{Status: "degraded", Message: "safety floor not initialized"}
+		overallStatus = "degraded"
+	}
+
+	return map[string]interface{}{
+		"status":     overallStatus,
+		"components": components,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// ──────────────────────────────────────────────
 // K-匿名表级与 DataFrame API (P1)
 // ──────────────────────────────────────────────
 

@@ -144,6 +144,16 @@ func (f *ClassificationFunnel) ClearCache() {
 	}
 }
 
+// CacheStats 返回分类缓存命中统计
+func (f *ClassificationFunnel) CacheStats() (hits, misses, size int) {
+	if f.cache == nil {
+		return 0, 0, 0
+	}
+	f.cache.mu.Lock()
+	defer f.cache.mu.Unlock()
+	return int(f.cache.hits), int(f.cache.misses), len(f.cache.items)
+}
+
 // ──────────────────────────────────────────────
 // 高并发 LRU 缓存实现
 // ──────────────────────────────────────────────

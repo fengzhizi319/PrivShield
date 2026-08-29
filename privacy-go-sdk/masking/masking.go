@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"hash"
 	"math/rand"
 	"regexp"
 	"strconv"
@@ -56,6 +57,7 @@ func releaseBuilder(sb *strings.Builder) {
 	if sb.Cap() > 4096 {
 		return // 避免缓冲池膨胀
 	}
+	sb.Reset() // Reset 将 len 置零，下次 Write 会覆盖旧数据
 	builderPool.Put(sb)
 }
 
@@ -251,12 +253,37 @@ func MaskDefault(value string, prefix, suffix int) string {
 // HMAC 加盐不可逆散列
 // ──────────────────────────────────────────────
 
+// ──────────────────────────────────────────────
+// HMAC Hasher 池化（sync.Pool 复用 hash.Hash，降低堆分配）
+// ──────────────────────────────────────────────
+
+// hmacPools 按 salt 缓存 HMAC hasher 池
+var hmacPools sync.Map // map[string]*sync.Pool
+
+// getHMACPool 获取或创建指定 salt 的 hasher 池
+func getHMACPool(salt string) *sync.Pool {
+	if p, ok := hmacPools.Load(salt); ok {
+		return p.(*sync.Pool)
+	}
+	p, _ := hmacPools.LoadOrStore(salt, &sync.Pool{
+		New: func() any {
+			return hmac.New(sha256.New, []byte(salt))
+		},
+	})
+	return p.(*sync.Pool)
+}
+
 // HashHMAC 生成 HMAC-SHA256 不可逆加盐散列，base64 编码后截取前 16 字符。
 // 与 Python hash_value 对齐：HMAC-SHA256(salt, value) → base64 → 前16字符。
+// 内部使用 sync.Pool 复用 hash.Hash 实例，同 salt 场景下降低堆分配。
 func HashHMAC(value, salt string) string {
-	h := hmac.New(sha256.New, []byte(salt))
+	pool := getHMACPool(salt)
+	h := pool.Get().(hash.Hash)
+	h.Reset() // 重置到 New 后状态（key 保留，清除上次 Write 数据）
 	h.Write([]byte(value))
-	return base64.StdEncoding.EncodeToString(h.Sum(nil))[:16]
+	sum := h.Sum(nil)
+	pool.Put(h) // 归还池
+	return base64.StdEncoding.EncodeToString(sum)[:16]
 }
 
 // ──────────────────────────────────────────────

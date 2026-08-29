@@ -39,7 +39,7 @@ func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
 	registerPprof(r)
 
 	// 健康检查（无前缀，与 Python /health, /livez, /readyz 对齐）
-	r.GET("/health", healthHandler)
+	r.GET("/health", healthHandlerWithService(svc))
 	r.GET("/livez", livezHandler)
 	r.GET("/readyz", readyzHandler)
 	r.GET("/readyz/llm", readyzLLMHandler)
@@ -202,8 +202,16 @@ func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
 // 健康检查
 // ──────────────────────────────────────────────
 
-func healthHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "engine": "go"})
+// healthHandlerWithService 返回带 service 引用的健康检查 handler，
+// 支持 ?deep=true 查询参数触发细粒度组件级健康快照。
+func healthHandlerWithService(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Query("deep") == "true" && svc != nil {
+			c.JSON(http.StatusOK, svc.DeepHealthCheck())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "engine": "go"})
+	}
 }
 
 func livezHandler(c *gin.Context) {
