@@ -12,13 +12,13 @@
 
 ### 1.1 独立集群调度模式 (Standalone Clustered Gateway)
 
-网关作为独立的高可用入口层部署，承接所有外部客户端的 REST 与 gRPC 流量，并通过负载均衡算法（轮询、平滑加权轮询、最小连接数等）分发到后端的多个 `PrivShield Agent` 计算节点。
+网关作为独立的高可用入口层部署，承接所有外部客户端的 REST 与 gRPC 流量，并通过自适应调度算法（P2C-EWMA、平滑加权轮询 SWRR、最小连接数等）分发到后端的多个 `PrivShield Agent` 计算节点。
 
 ```mermaid
 graph TD
     Client[客户端集群] -->|"REST (8000) / gRPC (50000)"| GW[PrivShield Gateway 集群]
     
-    subgraph GatewayLayer ["网关调度层 (engine.gateway.server)"]
+    subgraph GatewayLayer ["网关调度层 (bin/privshield-gateway)"]
         GW
     end
 
@@ -29,16 +29,16 @@ graph TD
     end
 
     subgraph Storage [持久化存储]
-        BudgetDB[("共享 SQLite 预算库<br/>privacy_budget.db")]
+        BudgetDB[("共享原子预算库<br/>privacy-go-sdk/budget")]
     end
 
-    GW -->|平滑加权轮询 / 最小连接数| W1
-    GW -->|双协议透明转发| W2
-    GW -->|故障自动转移| W3
+    GW -->|P2C-EWMA / SWRR / 最小连接数| W1
+    GW -->|双协议透明流代理| W2
+    GW -->|三态熔断自愈| W3
 
-    W1 -.->|BEGIN IMMEDIATE| BudgetDB
-    W2 -.->|原子排他记账| BudgetDB
-    W3 -.->|共享文件锁| BudgetDB
+    W1 -.->|原子 CAS 循环| BudgetDB
+    W2 -.->|无锁高并发记账| BudgetDB
+    W3 -.->|租户命名空间隔离| BudgetDB
 ```
 
 ### 1.2 云原生 Kubernetes 双层协同模式 (K8s Ingress + Gateway + Headless Agent)
@@ -46,7 +46,7 @@ graph TD
 在云原生 Kubernetes 部署中，**K8s 平台级网络能力（L4/L7 Ingress）** 与 **PrivShield Gateway 应用级精细调度能力（L7 per-RPC 动态分发）** 双层协同：
 
 - **外层（南北向接入）**：由 Kubernetes Ingress Controller（如 Nginx Ingress / Envoy Gateway）或云厂商负载均衡器（ALB/CLB）暴露公网 IP，负责大带宽汇聚、集群外部域名接入与 SSL 卸载，将流量均匀分发至多个 `PrivShield Gateway` Pod。
-- **内层（东西向调度）**：由 `PrivShield Gateway` 负责应用层 L7 治理，利用 **Headless Service（`clusterIP: None`）** 或动态自注册机制直接感知后端每个 `PrivShield Agent` Pod，实施 **per-RPC 级 gRPC 负载均衡**、**最小连接数（`least_connections`）调度**、**被动秒级故障感知**与**三态熔断保护**。
+- **内层（东西向调度）**：由 `PrivShield Gateway` 负责应用层 L7 治理，利用 **Headless Service（`clusterIP: None`）** 直接感知后端每个 `PrivShield Agent` Pod，实施 **per-RPC 级 gRPC 负载均衡**、**P2C-EWMA 调度**、**毫秒级故障隔离**与**三态熔断保护**。
 
 ```mermaid
 graph TD
@@ -57,55 +57,14 @@ graph TD
         Ingress -->|L4/L7 轮询分发| GW2[PrivShield Gateway Pod 2]
 
         subgraph HeadlessAgentSvc ["Agent Headless Service (clusterIP: None)"]
-            GW1 -->|L7 per-RPC 调度 / 最小连接数 / 熔断| Pod1["Agent Pod 1 (10.244.1.10)"]
-            GW1 -->|L7 per-RPC 调度 / 最小连接数 / 熔断| Pod2["Agent Pod 2 (10.244.2.15)"]
-            GW1 -->|L7 per-RPC 调度 / 最小连接数 / 熔断| Pod3["Agent Pod 3 (10.244.3.20)"]
+            GW1 -->|L7 per-RPC 调度 / P2C-EWMA / 熔断| Pod1["Agent Pod 1 (10.244.1.10)"]
+            GW1 -->|L7 per-RPC 调度 / P2C-EWMA / 熔断| Pod2["Agent Pod 2 (10.244.2.15)"]
+            GW1 -->|L7 per-RPC 调度 / P2C-EWMA / 熔断| Pod3["Agent Pod 3 (10.244.3.20)"]
 
-            GW2 -->|L7 per-RPC 调度 / 最小连接数 / 熔断| Pod1
-            GW2 -->|L7 per-RPC 调度 / 最小连接数 / 熔断| Pod2
-            GW2 -->|L7 per-RPC 调度 / 最小连接数 / 熔断| Pod3
+            GW2 -->|L7 per-RPC 调度 / P2C-EWMA / 熔断| Pod1
+            GW2 -->|L7 per-RPC 调度 / P2C-EWMA / 熔断| Pod2
+            GW2 -->|L7 per-RPC 调度 / P2C-EWMA / 熔断| Pod3
         end
-
-        subgraph PVC ["共享持久卷 (ReadWriteMany)"]
-            SharedDB[("privacy_budget.db")]
-        end
-
-        Pod1 -.-> SharedDB
-        Pod2 -.-> SharedDB
-        Pod3 -.-> SharedDB
-    end
-```
-
-### 1.3 单机多核绑核调度模式 (Bare-Metal / Single-Host CPU-Pinned Multi-Worker Mode)
-
-在裸金属服务器或单台高配物理机（如 16/32/64 核）部署场景下，为了**彻底突破 Python GIL（全局解释器锁）瓶颈**并最大化 CPU 缓存命中率：
-- 为每个物理核心启动一个独立的 Agent 进程（分别监听不同端口），并通过 Linux `taskset -c <core_id>` 将其亲和性硬绑定到特定 CPU 核心；
-- 网关在本地将这多个单核进程分别注册为独立的 `BackendNode`（如 `http://127.0.0.1:8080|127.0.0.1:50050` 等）；
-- 所有进程统一挂载共享的 `PRIVACY_BUDGET_DB`（通过 SQLite `BEGIN IMMEDIATE` 强一致记账）；
-- 网关通过 `least_connections`（最小连接数）或 `weighted_round_robin` 在多核进程间均匀分发流量，实现单机算力的线性扩展。
-
-```mermaid
-graph TD
-    Client[客户端] -->|"REST (8000) / gRPC (50000)"| GW["PrivShield Gateway (七层调度器)"]
-
-    subgraph Host ["单台多核物理机 / 裸金属服务器 (Bare-Metal Host)"]
-        subgraph CPU_Cores ["CPU 物理核心硬绑定 (taskset -c)"]
-            P0["Worker 0 (Core #0)<br/>REST:8080 / gRPC:50050"]
-            P1["Worker 1 (Core #1)<br/>REST:8081 / gRPC:50051"]
-            PN["Worker N (Core #N)<br/>REST:808N / gRPC:5005N"]
-        end
-
-        subgraph LocalStorage ["本地共享预算账本"]
-            BudgetDB[("privacy_budget.db<br/>(BEGIN IMMEDIATE 排他锁)")]
-        end
-
-        GW -->|per-RPC 调度| P0
-        GW -->|per-RPC 调度| P1
-        GW -->|per-RPC 调度| PN
-
-        P0 -.-> BudgetDB
-        P1 -.-> BudgetDB
-        PN -.-> BudgetDB
     end
 ```
 
@@ -113,11 +72,20 @@ graph TD
 
 ## 2. 部署配置全参考 (Configuration Reference)
 
-### 2.1 YAML 配置文件规范 (`gateway-config.yaml`)
+### 2.1 启动命令行
 
-生产推荐创建统一的 YAML 配置文件并置于 `/etc/privshield/gateway.yaml`：
+网关入口编译产物为 `bin/privshield-gateway`：
 
-```yaml
+```bash
+# 1. 编译网关产物
+make build
+
+# 2. 启动网关
+./bin/privshield-gateway
+
+# 3. 使用开发脚本一键启动
+bash ./scripts/dev/go-gateway-start.sh
+```
 # =============================================================================
 # PrivShield 网关与负载均衡配置
 # =============================================================================
@@ -450,12 +418,13 @@ Type=simple
 User=privshield
 Group=privshield
 WorkingDirectory=/opt/privshield
-Environment=PYTHONPATH=/opt/privshield
-Environment=PRIVACY_GATEWAY_CONFIG=/etc/privshield/gateway.yaml
-Environment=PRIVACY_LOG_FORMAT=json
+Environment=GATEWAY_HOST=0.0.0.0
+Environment=GATEWAY_PORT=8000
+Environment=GATEWAY_GRPC_PORT=50000
+Environment=GATEWAY_STRATEGY=p2c
+Environment=GATEWAY_BACKENDS=127.0.0.1:8079,127.0.0.1:8080
 Environment=PRIVACY_LOG_LEVEL=INFO
-Environment=GATEWAY_API_KEY=sk_gw_prod_9f8b7c6d5e4a3b2a10987654321fedcba
-ExecStart=/opt/privshield/.venv/bin/python -m engine.gateway.server
+ExecStart=/opt/privshield/bin/privshield-gateway
 Restart=always
 RestartSec=3s
 LimitNOFILE=65535
@@ -482,52 +451,41 @@ networks:
   privshield-net:
     driver: bridge
 
-volumes:
-  budget-data:
-    driver: local
-
 services:
   # Agent 计算节点 1
   agent-worker-1:
-    image: privshield:1.8.0
+    image: privshield-agent:10.0.0
     restart: always
     environment:
       - PRIVACY_REST_PORT=8079
       - PRIVACY_GRPC_PORT=50051
-      - PRIVACY_BUDGET_DB=/data/budget.db
-      - PRIVACY_LOG_FORMAT=json
-    volumes:
-      - budget-data:/data
+      - PRIVACY_LOG_LEVEL=INFO
     networks:
       - privshield-net
 
   # Agent 计算节点 2
   agent-worker-2:
-    image: privshield:1.8.0
+    image: privshield-agent:10.0.0
     restart: always
     environment:
       - PRIVACY_REST_PORT=8079
       - PRIVACY_GRPC_PORT=50051
-      - PRIVACY_BUDGET_DB=/data/budget.db
-      - PRIVACY_LOG_FORMAT=json
-    volumes:
-      - budget-data:/data
+      - PRIVACY_LOG_LEVEL=INFO
     networks:
       - privshield-net
 
   # 网关与负载均衡器
   gateway:
-    image: privshield:1.8.0
+    image: privshield-agent:10.0.0
     restart: always
-    command: ["python", "-m", "engine.gateway.server"]
+    command: ["/app/privshield-gateway"]
     environment:
-      - GATEWAY_REST_PORT=8000
+      - GATEWAY_HOST=0.0.0.0
+      - GATEWAY_PORT=8000
       - GATEWAY_GRPC_PORT=50000
-      - GATEWAY_STRATEGY=weighted_round_robin
-      - GATEWAY_HEALTH_INTERVAL=5.0
-      - GATEWAY_BACKENDS=http://agent-worker-1:8079|agent-worker-1:50051,http://agent-worker-2:8079|agent-worker-2:50051
-      - GATEWAY_API_KEY=sk_gw_prod_9f8b7c6d5e4a3b2a10987654321fedcba
-      - PRIVACY_LOG_FORMAT=json
+      - GATEWAY_STRATEGY=p2c
+      - GATEWAY_BACKENDS=agent-worker-1:8079,agent-worker-2:8079
+      - PRIVACY_LOG_LEVEL=INFO
     ports:
       - "8000:8000"
       - "50000:50000"
@@ -629,25 +587,22 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: privshield:1.8.0
+          image: privshield-agent:10.0.0
           imagePullPolicy: IfNotPresent
-          command: ["python", "-m", "engine.gateway.server"]
+          command: ["/app/privshield-gateway"]
           env:
-            - name: GATEWAY_REST_PORT
+            - name: GATEWAY_HOST
+              value: "0.0.0.0"
+            - name: GATEWAY_PORT
               value: "8000"
             - name: GATEWAY_GRPC_PORT
               value: "50000"
             - name: GATEWAY_STRATEGY
-              value: "least_connections"
-            - name: GATEWAY_HEALTH_INTERVAL
-              value: "5.0"
-            - name: PRIVACY_LOG_FORMAT
-              value: "json"
-            - name: GATEWAY_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: gateway-secrets
-                  key: api-key
+              value: "p2c"
+            - name: GATEWAY_BACKENDS
+              value: "privshield-agent-headless:8079"
+            - name: PRIVACY_LOG_LEVEL
+              value: "INFO"
           ports:
             - containerPort: 8000
               name: http

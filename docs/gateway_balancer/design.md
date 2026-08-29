@@ -6,7 +6,7 @@
 
 ## 1. 概述
 
-`PrivShield` 网关与负载均衡子系统（`engine.gateway`）是整个隐私计算治理平台的高性能流量调度与安全接入层。它同时支持 **REST (HTTP/1.1 & HTTP/2)** 与 **gRPC** 双协议的反向代理与负载均衡，对上游客户端呈现单一统一接入入口，对下游后端屏蔽多节点集群的物理拓扑，并提供节点动态注册、健康探活、熔断保护、故障自适应转移、全链路双向 TLS 及分布式共享隐私预算记账能力。
+`PrivShield` 自适应负载均衡网关子系统（`engine-go/internal/gateway` 与 `engine-go/cmd/privshield-gateway`）是整个隐私计算治理平台的高性能流量调度与安全接入层。它基于纯 **Go 1.25+ 云原生架构** 实现，同时支持 **REST (HTTP/1.1 & HTTP/2)** 与 **gRPC** 双协议的反向代理与负载均衡，对上游客户端呈现单一统一接入入口，对下游后端屏蔽多节点集群的物理拓扑，并提供 P2C-EWMA 自适应调度、三态熔断保护、平滑加权轮询 SWRR、全链路东西向双向 mTLS 及 Prometheus 遥测指标。
 
 ---
 
@@ -304,63 +304,53 @@ graph TD
         Client["客户端应用<br/>(发送 HTTP :8000 / gRPC :50000 请求)"]
     end
 
-    subgraph GatewayProcess ["★ 网关服务进程 (python -m engine.gateway.server)"]
+    subgraph GatewayProcess ["★ 网关服务进程 (bin/privshield-gateway)"]
         subgraph GatewayMemory ["网关进程内存空间 (Gateway In-Memory State)"]
             LB["LoadBalancer (调度引擎)"]
-            Node1["BackendNode 实例 1 (Client-Side Proxy)<br/>- 维护 HTTP Keep-Alive 连接池引用<br/>- 维护 gRPC Channel / Stub 懒加载实例<br/>- 维护在途请求计数器 (active_connections)<br/>- 绑定专属独立 CircuitBreaker 熔断器"]
-            Node2["BackendNode 实例 2 (Client-Side Proxy)<br/>- 维护在途请求计数器与 SWRR 动态权重<br/>- 绑定专属独立 CircuitBreaker 熔断器"]
+            Node1["BackendNode 实例 1 (Client-Side Proxy)<br/>- 维护 HTTP Keep-Alive 连接池引用<br/>- 维护 gRPC ClientConn 连接池实例<br/>- 维护在途请求计数器 (InFlight)<br/>- 维护 EWMA 响应延迟与 SWRR 动态权重<br/>- 绑定专属独立 CircuitBreaker 熔断器"]
+            Node2["BackendNode 实例 2 (Client-Side Proxy)<br/>- 维护在途请求计数器与 EWMA 延迟<br/>- 绑定专属独立 CircuitBreaker 熔断器"]
             LB --> Node1
             LB --> Node2
         end
     end
 
     subgraph BackendWorker1 ["★ 真实后端 Worker 1 (Docker / Pod / CPU Core #0)"]
-        subgraph Worker1Process ["Agent 服务进程 (python -m engine.server: 8079 / 50051)"]
-            FastAPI1["FastAPI REST App (engine.main:app)<br/>- /v1/privacy/*, /v1/classify/*, /metrics"]
-            gRPC1["gRPC Server (PrivacyServiceServicer)<br/>- proto/privacy.proto 完整 RPC 实现"]
+        subgraph Worker1Process ["Agent 服务进程 (bin/privshield-agent: 8079 / 50051)"]
+            FastAPI1["Gin REST App (:8079)<br/>- /v1/privacy/*, /v1/dynclassification/*, /metrics"]
+            gRPC1["gRPC Server (:50051)<br/>- proto/privacy.proto 强类型 Protobuf RPC"]
             
             subgraph Worker1Memory ["后端核心内存单例与算力引擎 (In-Memory Engine Singletons)"]
-                Svc1["★ PrivacyService 单例 (engine/service.py)<br/>业务总控中枢"]
-                Funnel1["★ ClassificationFunnel (三层分类漏斗)<br/>L1 规则 + L2 NER + L3 LLM + Safety Floor"]
-                RuleEngine1["★ ConfigurableRuleEngine (engine.py)<br/>YAML 规则树 + AST 算子 + LRU 缓存"]
-                Budget1["★ BudgetAccountant (budget.py)<br/>Epsilon/Delta 水位记账 + 时间窗口重置"]
-                Prims1["★ 隐私原语算子群 (engine/privacy/)<br/>MaskingApi / DPApi / LDPApi / KanoApi / QolApi"]
-                Security1["★ 安全与白名单 (engine/security/)<br/>WhitelistManager (mTLS 热加载) + ApiKeyAuth"]
-                Obs1["★ 可观测性 (engine/observability/)<br/>Prometheus 收集器 + OTel Tracer + JSON 日志"]
+                Svc1["★ PrivacyService 统一中枢 (engine-go/internal/service)<br/>业务总控中枢"]
+                Funnel1["★ Classification Engine (三层分类漏斗)<br/>L1 AC规则 + L2 ONNX NER + L3 熔断器LLM"]
+                Budget1["★ BudgetAccountant (privacy-go-sdk/budget)<br/>无锁 CAS 原子记账 + 时间窗口重置"]
+                Prims1["★ 隐私原语算子群 (privacy-go-sdk/)<br/>Masking / DP / LDP / Kano / QoL"]
+                Security1["★ 安全与白名单 (engine-go/internal/security)<br/>WhitelistManager (mTLS 5s热加载) + ApiKeyAuth"]
+                Obs1["★ 可观测性 (engine-go/internal/observability)<br/>Prometheus 收集器 + OTel Tracer + slog 日志"]
             end
             FastAPI1 --> Svc1
             gRPC1 --> Svc1
             Svc1 --> Funnel1
             Svc1 --> Prims1
             Svc1 --> Budget1
-            Funnel1 --> RuleEngine1
         end
-    end
-
-    subgraph SharedStorage ["★ 分布式共享存储与预算持久化"]
-        BudgetDB[("privacy_budget.db<br/>(SQLite BEGIN IMMEDIATE 排他事务锁)")]
-        RuleFiles[("rules/domains/*.yaml<br/>(领域分类分级规则库)")]
     end
 
     Client -->|南北向入口流量| LB
     Node1 -.->|东西向反向代理 (REST:8079 / gRPC:50051)| FastAPI1
-    Node1 -.->|东西向反向代理 (REST:8079 / gRPC:50051)| gRPC1
-    Budget1 -.->|ACID 原子预算扣减| BudgetDB
-    RuleEngine1 -.->|声明式加载| RuleFiles
-```
+    Node1 -.->|东西向透明流代理 (gRPC:50051)| gRPC1
 
 ---
 
 ##### 1. `BackendNode` 对象在网关中的定位与职责
 
-- **运行位置**：存活于 **网关服务（Gateway Server，`python -m engine.gateway.server`）的进程内存中**；
+- **运行位置**：存活于 **网关服务（Gateway Server，`bin/privshield-gateway`）的进程内存中**；
 - **本质属性**：它是一个**客户端代理数据模型（Client-Side Proxy Model）**；
 - **核心职责**：
-  1. 维护到单个后端 Worker 的 HTTP/1.1 长连接（Keep-Alive 复用）与 HTTP/2 gRPC Channel；
-  2. 实时追踪分配给该节点的并发在途请求数（`_active_connections`），供最小连接数调度；
-  3. 维护节点专属的 `CircuitBreaker` 熔断器状态（Closed / Open / Half-Open）；
-  4. 维护平滑加权轮询（SWRR）算法在运行时的动态累计权重（`current_weight`）；
-  5. 记录主动双协议健康探测结果与被动故障感知单调时钟冷却点（`passive_unhealthy_until`）。
+  1. 维护到单个后端 Worker 的 HTTP/1.1 长连接（Keep-Alive 复用）与 HTTP/2 gRPC ClientConn；
+  2. 实时追踪分配给该节点的并发在途请求数（`InFlight`），供最小连接数与 P2C 调度；
+  3. 维护节点专属的 `CircuitBreaker` 熔断器状态（`Closed` / `Open` / `HalfOpen`）；
+  4. 维护平滑加权轮询（SWRR）算法在运行时的动态累计权重（`currentWeight`）；
+  5. 维护指数移动加权平均延迟（`EWMA`），供 P2C-EWMA 纳秒级自适应避慢。
 
 ---
 

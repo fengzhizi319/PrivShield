@@ -1,211 +1,260 @@
-# 代理转发与负载均衡网关使用示例
+# 代理转发与负载均衡网关使用示例 (Usage & Integration Examples)
 
+> 本文档提供 `PrivShield` Go 云原生网关的各种启动方式、cURL / grpcurl 交互命令以及 Go / Python 客户端调用示例。
 
-## 1. 概述
+---
 
-本文档提供网关的常用启动方式、Python SDK 示例与 REST API 示例，帮助开发者快速将请求通过网关转发到后端 `PrivShield` 工作节点。
+## 1. 命令行启动方式
 
-## 2. 命令行启动示例
-
-### 2.1 使用环境变量启动
+### 1.1 使用开发启动脚本（最简推荐）
 
 ```bash
 cd /path/to/PrivShield
-source .venv/bin/activate
-
-export GATEWAY_REST_PORT=8000
-export GATEWAY_GRPC_PORT=50000
-export GATEWAY_STRATEGY=round_robin
-export GATEWAY_BACKENDS="http://127.0.0.1:8079|127.0.0.1:50051,http://127.0.0.1:8080|127.0.0.1:50052"
-
-PYTHONPATH=. python -m engine.gateway.server
+bash ./scripts/dev/go-gateway-start.sh
 ```
 
-### 2.2 使用 YAML 配置文件启动
+脚本将以默认配置启动网关：
+- HTTP 代理：`http://127.0.0.1:8000`
+- gRPC 代理：`127.0.0.1:50000`
+- 后端 Agent：`127.0.0.1:8079`
+- 调度策略：`p2c` (Power of Two Choices + EWMA)
+
+---
+
+### 1.2 使用环境变量指定多节点与策略
 
 ```bash
-export PRIVACY_GATEWAY_CONFIG=docs/gateway_balancer/examples/gateway-config.yaml
-PYTHONPATH=. python -m engine.gateway.server
+cd /path/to/PrivShield
+
+# 指定多后端节点（逗号分隔）与平滑加权轮询策略
+export GATEWAY_HOST=0.0.0.0
+export GATEWAY_PORT=8000
+export GATEWAY_GRPC_PORT=50000
+export GATEWAY_BACKENDS="10.0.1.10:8079,10.0.1.11:8079,10.0.1.12:8079"
+export GATEWAY_STRATEGY="p2c"
+export PRIVACY_LOG_LEVEL="INFO"
+
+# 方式 1: 直接编译运行
+go run ./engine-go/cmd/privshield-gateway
+
+# 方式 2: 使用预编译二进制
+./bin/privshield-gateway
 ```
 
-示例 `gateway-config.yaml`：
+---
 
-```yaml
-gateway:
-  rest_host: "0.0.0.0"
-  rest_port: 8000
-  grpc_host: "0.0.0.0"
-  grpc_port: 50000
-  strategy: "round_robin"
-  health_check_interval: 5.0
+### 1.3 生产环境 systemd 守护进程配置
 
-backends:
-  - http_url: "http://127.0.0.1:8079"
-    grpc_address: "127.0.0.1:50051"
-    weight: 1
-  - http_url: "http://127.0.0.1:8080"
-    grpc_address: "127.0.0.1:50052"
-    weight: 1
+创建 `/etc/systemd/system/privshield-gateway.service`：
+
+```ini
+[Unit]
+Description=PrivShield L7 Adaptive Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=privshield
+WorkingDirectory=/opt/privshield
+Environment=GATEWAY_HOST=0.0.0.0
+Environment=GATEWAY_PORT=8000
+Environment=GATEWAY_GRPC_PORT=50000
+Environment=GATEWAY_BACKENDS=127.0.0.1:8079,127.0.0.1:8080
+Environment=GATEWAY_STRATEGY=p2c
+Environment=PRIVACY_LOG_LEVEL=INFO
+ExecStart=/opt/privshield/bin/privshield-gateway
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-## 3. Python SDK 示例
+---
 
-### 3.1 创建负载均衡器并添加后端
+## 2. cURL REST API 调用示例
 
-```python
-import asyncio
-from engine.gateway.balancer import LoadBalancer
+### 2.1 网关健康检查
 
-balancer = LoadBalancer(strategy="round_robin")
-balancer.add_node("http://127.0.0.1:8079", "127.0.0.1:50051", weight=1)
-balancer.add_node("http://127.0.0.1:8080", "127.0.0.1:50052", weight=1)
-
-async def demo():
-    for _ in range(4):
-        node = await balancer.select_node()
-        print(f"selected: {node.http_url}")
-
-asyncio.run(demo())
+```bash
+curl -s http://127.0.0.1:8000/health | jq
 ```
 
-### 3.2 创建 HTTP 网关应用
-
-```python
-from engine.gateway.balancer import LoadBalancer
-from engine.gateway.http_proxy import create_http_gateway_app
-
-balancer = LoadBalancer(strategy="least_connections")
-balancer.add_node("http://127.0.0.1:8079", "127.0.0.1:50051")
-
-app = create_http_gateway_app(balancer)
+响应：
+```json
+{
+  "status": "ok",
+  "component": "gateway"
+}
 ```
 
-### 3.3 动态注册与注销节点
+---
+
+### 2.2 查看后端拓扑与 EWMA 延迟
+
+```bash
+curl -s http://127.0.0.1:8000/gateway/backends | jq
+```
+
+响应：
+```json
+{
+  "backends": [
+    {
+      "address": "127.0.0.1:8079",
+      "in_flight": 0,
+      "ewma_ms": 0.85,
+      "cb_state": "closed"
+    }
+  ]
+}
+```
+
+---
+
+### 2.3 通过网关调用敏感数据脱敏
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/privacy/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "field": "id_card",
+    "value": "110101199003072345",
+    "type": "id_card"
+  }' | jq
+```
+
+响应：
+```json
+{
+  "field": "id_card",
+  "masked": "110101********2345",
+  "result": "110101********2345"
+}
+```
+
+---
+
+### 2.4 通过网关执行差分隐私加噪求和 (DP Sum)
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/privacy/dp/sum \
+  -H "Content-Type: application/json" \
+  -d '{
+    "values": [10.5, 20.3, 15.8, 30.2],
+    "epsilon": 1.0,
+    "delta": 1e-5
+  }' | jq
+```
+
+---
+
+### 2.5 采集网关 Prometheus 指标
+
+```bash
+curl -s http://127.0.0.1:8000/metrics | grep gateway_
+```
+
+输出示例：
+```text
+# HELP gateway_requests_total Total number of HTTP requests processed by gateway.
+# TYPE gateway_requests_total counter
+gateway_requests_total{backend="127.0.0.1:8079",status="200"} 154
+# HELP gateway_backend_inflight_requests Current in-flight requests to backend.
+# TYPE gateway_backend_inflight_requests gauge
+gateway_backend_inflight_requests{backend="127.0.0.1:8079",node="127.0.0.1:8079"} 0
+# HELP gateway_backend_ewma_latency_seconds EWMA latency to backend.
+# TYPE gateway_backend_ewma_latency_seconds gauge
+gateway_backend_ewma_latency_seconds{backend="127.0.0.1:8079"} 0.00085
+```
+
+---
+
+## 3. grpcurl gRPC 透明代理调用示例
+
+网关 `:50000` 端口支持 gRPC 全双向透明流转发：
+
+```bash
+# 1. 检查后端 Agent 的 Health 状态（通过网关 :50000 转发）
+grpcurl -plaintext 127.0.0.1:50000 grpc.health.v1.Health/Check
+
+# 2. 调用 PrivacyService.Mask 进行字段脱敏
+grpcurl -plaintext -d '{
+  "field_name": "patient_name",
+  "value": "张三"
+}' 127.0.0.1:50000 proto.PrivacyService/Mask
+```
+
+---
+
+## 4. Go 客户端调用示例
+
+代码存放在 [`docs/gateway_balancer/examples/gateway_usage.go`](./examples/gateway_usage.go)：
+
+```go
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+func main() {
+	gatewayURL := "http://127.0.0.1:8000"
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// 1. 查询健康状态
+	resp, _ := client.Get(gatewayURL + "/health")
+	defer resp.Body.Close()
+
+	// 2. 调用脱敏
+	payload, _ := json.Marshal(map[string]string{
+		"field": "phone",
+		"value": "13812345678",
+		"type":  "phone",
+	})
+	resp, _ = client.Post(gatewayURL+"/v1/privacy/mask", "application/json", bytes.NewReader(payload))
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Printf("脱敏结果: %s\n", string(body))
+}
+```
+
+运行：
+```bash
+go run docs/gateway_balancer/examples/gateway_usage.go
+```
+
+---
+
+## 5. Python 客户端调用示例
+
+代码存放在 [`docs/gateway_balancer/examples/gateway_usage.py`](./examples/gateway_usage.py)：
 
 ```python
 import httpx
 
-# 向运行中的网关注册新后端节点
-async def register_node(gateway_url: str, http_url: str, grpc_address: str, weight: int = 1):
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{gateway_url}/v1/gateway/register",
-            json={"http_url": http_url, "grpc_address": grpc_address, "weight": weight},
-        )
-        return resp.json()
+client = httpx.Client(base_url="http://127.0.0.1:8000", timeout=5.0)
 
-async def deregister_node(gateway_url: str, http_url: str, grpc_address: str):
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{gateway_url}/v1/gateway/deregister",
-            json={"http_url": http_url, "grpc_address": grpc_address},
-        )
-        return resp.json()
+# 1. 健康检查
+resp = client.get("/health")
+print("Health:", resp.json())
+
+# 2. 字段脱敏
+resp = client.post("/v1/privacy/mask", json={
+    "field": "id_card",
+    "value": "110101199003072345",
+    "type": "id_card",
+})
+print("Masked:", resp.json())
 ```
 
-### 3.4 切换负载均衡策略
-
-```python
-from engine.gateway.balancer import LoadBalancer
-
-balancer = LoadBalancer(strategy="round_robin")
-# 运行时切换策略
-balancer.strategy = "random"
-# 或
-balancer.strategy = "least_connections"
-```
-
-## 4. REST API 示例
-
-### 4.1 通过网关访问后端健康检查
-
+运行：
 ```bash
-curl http://127.0.0.1:8000/health
+python docs/gateway_balancer/examples/gateway_usage.py
 ```
-
-网关会将请求转发到选中的后端节点，预期返回：
-
-```json
-{"status": "ok"}
-```
-
-### 4.2 通过网关调用脱敏接口
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/privacy/mask \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "My phone is 13800138000 and email is alice@example.com",
-    "fields": ["phone", "email"]
-  }'
-```
-
-### 4.3 动态注册节点
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/gateway/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "http_url": "http://127.0.0.1:8090",
-    "grpc_address": "127.0.0.1:50053",
-    "weight": 2
-  }'
-```
-
-### 4.4 动态注销节点
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/gateway/deregister \
-  -H "Content-Type: application/json" \
-  -d '{
-    "http_url": "http://127.0.0.1:8090",
-    "grpc_address": "127.0.0.1:50053"
-  }'
-```
-
-## 5. 选择不同负载均衡策略
-
-### 5.1 轮询（Round-Robin）
-
-```bash
-export GATEWAY_STRATEGY=round_robin
-PYTHONPATH=. python -m engine.gateway.server
-```
-
-适合后端节点性能相近、请求耗时均匀的场景。
-
-### 5.2 随机（Random）
-
-```bash
-export GATEWAY_STRATEGY=random
-PYTHONPATH=. python -m engine.gateway.server
-```
-
-实现简单，适合节点性能一致且请求分布无明显规律的流量。
-
-### 5.3 最小连接数（Least Connections）
-
-```bash
-export GATEWAY_STRATEGY=least_connections
-PYTHONPATH=. python -m engine.gateway.server
-```
-
-适合后端节点处理耗时差异较大的场景，可将新请求优先分发到负载较低的节点。
-
-## 6. 最佳实践
-
-1. **生产环境建议前置 Nginx / Cloud LB**：网关目前通过进程重启加载新配置，前置负载均衡可实现滚动更新与更高级的高可用。
-2. **使用 `/health` 做 readiness probe**：K8s 中可将网关的 REST `/health` 作为 readiness 探针，避免流量进入未就绪实例。
-3. **配置共享 SQLite 预算账本**：多 Agent 实例场景下，设置 `PRIVACY_BUDGET_DB` 保证预算消耗全局一致。
-4. **合理设置健康检查间隔**：默认 5 秒适合大多数场景；节点故障需更快感知时可适当降低，但过短会增加后端压力。
-5. **优先使用 YAML 配置文件**：相比环境变量，YAML 更易读、易审计，且支持更复杂的后端节点列表。
-
-## 7. 常见错误
-
-| 错误 | 原因 | 解决 |
-|---|---|---|
-| HTTP 503 / gRPC UNAVAILABLE | 无健康后端节点 | 检查后端服务是否启动，健康检查是否通过 |
-| HTTP 502 | 后端连接异常且重试耗尽 | 检查网络连通性、后端端口、防火墙规则 |
-| 注册节点后未生效 | 地址重复导致就地更新 | 确认 `http_url` + `grpc_address` 组合是否已存在 |
-| 负载均衡不均匀 | 策略选择不当 | 根据业务特征切换 `random` / `least_connections` |
-| gRPC 转发超时 | 后端处理耗时超过 30 秒 | 优化后端接口或拆分请求 |

@@ -1,304 +1,238 @@
-# 代理转发与负载均衡网关 API 参考
+# 代理转发与负载均衡网关 API 与配置参考 (API & Configuration Reference)
 
+> 本文档详细说明 `PrivShield` Go 云原生代理转发与负载均衡网关的 Go Package API、YAML 配置文件规范、环境变量、REST/gRPC 代理端点及 Prometheus 监控指标。
 
-## 1. Python SDK
+---
 
-### `LoadBalancer`
+## 1. Go Package API
 
-位置：`engine.gateway.balancer.LoadBalancer`
+包路径：`github.com/fengzhizi319/PrivShield/engine-go/internal/gateway`
 
-负载均衡调度器，维护后端节点列表并提供协程安全的节点选择。
+### 1.1 `LoadBalancer` 负载均衡器
+
+```go
+type LoadBalancer struct {
+    nodes    []*BackendNode
+    strategy string // "p2c" | "round_robin" | "least_conn" | "weighted_rr" | "weighted_random"
+    rrIndex  int
+    mu       sync.Mutex
+}
+```
 
 #### 构造函数
 
-```python
-LoadBalancer(strategy: str = "round_robin")
+- **`NewLoadBalancer(addresses []string, strategy string) *LoadBalancer`**
+  - 创建自适应负载均衡器实例，默认各节点权重为 1。
+- **`NewWeightedLoadBalancer(addresses []string, weights []int, strategy string) *LoadBalancer`**
+  - 创建支持异构权重的负载均衡器（主要用于 SWRR 与加权随机）。
+
+#### 核心方法
+
+| 方法签名 | 说明 |
+|---|---|
+| `SelectNode() *BackendNode` | 依据配置策略选择最优后端节点；若全部熔断则返回首个节点供调用方执行熔断处理。 |
+| `Nodes() []*BackendNode` | 获取当前所有后端节点切片。 |
+
+---
+
+### 1.2 `BackendNode` 后端节点与状态
+
+```go
+type BackendNode struct {
+    Address       string         // 后端网络地址 (如 "127.0.0.1:8079")
+    Weight        int            // 配置静态权重
+    InFlight      int64          // 当前在途活跃并发请求数
+    EWMA          float64        // 指数移动加权平均延迟 (秒)
+    LastUsed      time.Time      // 最后请求调度时间
+    CB            CircuitBreaker // 独立三态熔断器
+}
 ```
 
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `strategy` | `str` | 否 | 负载均衡策略，可选 `"round_robin"` / `"random"` / `"least_connections"`，默认 `"round_robin"` |
+#### 状态更新方法
 
-#### 主要方法
-
-| 方法 | 签名 | 说明 |
-|---|---|---|
-| `add_node` | `add_node(http_url: str, grpc_address: str, weight: int = 1)` | 添加或更新后端节点；相同地址会就地更新并置为健康 |
-| `remove_node` | `remove_node(http_url: str, grpc_address: str)` | 从节点池移除指定后端并关闭其 gRPC 通道 |
-| `get_healthy_nodes` | `get_healthy_nodes() -> List[BackendNode]` | 返回当前健康节点列表 |
-| `select_node` | `async select_node() -> Optional[BackendNode]` | 按策略选择一个健康节点，无可用节点时返回 `None` |
-| `close_all` | `async close_all()` | 关闭所有后端的 gRPC 通道 |
-
-#### 主要属性
-
-| 属性 | 类型 | 说明 |
-|---|---|---|
-| `strategy` | `str` | 当前负载均衡策略 |
-| `nodes` | `List[BackendNode]` | 全部后端节点 |
-| `rr_index` | `int` | 轮询索引 |
+- **`UpdateEWMA(latency time.Duration, alpha float64)`**：更新节点 EWMA 响应延迟，公式为 $\text{EWMA} = \alpha \times \text{latency} + (1-\alpha) \times \text{EWMA}$。
+- **`IncrementInFlight()`** / **`DecrementInFlight()`**：并发安全地递增 / 递减在途请求计数。
 
 ---
 
-### `BackendNode`
+### 1.3 `CircuitBreaker` 三态熔断器
 
-位置：`engine.gateway.balancer.BackendNode`
+```go
+type CBState int
 
-单个后端工作节点的封装。
-
-| 属性 | 类型 | 说明 |
-|---|---|---|
-| `http_url` | `str` | 后端 REST 基准 URL，例如 `"http://127.0.0.1:8079"` |
-| `grpc_address` | `str` | 后端 gRPC 地址，例如 `"127.0.0.1:50051"` |
-| `weight` | `int` | 权重（预留） |
-| `is_healthy` | `bool` | 健康状态 |
-| `active_connections` | `int` | 当前活跃连接数 |
-| `grpc_stub` | `PrivacyServiceStub` | 延迟初始化的 gRPC Stub |
-
----
-
-### `health_check_loop`
-
-位置：`engine.gateway.balancer.health_check_loop`
-
-```python
-async def health_check_loop(balancer: LoadBalancer, interval: float = 5.0)
+const (
+    CBClosed   CBState = iota // 正常态
+    CBHalfOpen                // 半开试探态
+    CBOpen                    // 熔断态
+)
 ```
 
-后台健康检查协程，定时检测所有后端节点的 REST `/health` 与 gRPC `Health`。
-
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `balancer` | `LoadBalancer` | 是 | 关联的负载均衡实例 |
-| `interval` | `float` | 否 | 检测间隔（秒），默认 `5.0` |
-
----
-
-### `create_http_gateway_app`
-
-位置：`engine.gateway.http_proxy.create_http_gateway_app`
-
-```python
-def create_http_gateway_app(balancer: LoadBalancer) -> FastAPI
-```
-
-创建 HTTP 网关 FastAPI 应用，暴露动态注册 / 注销接口与通配代理路由。
-
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `balancer` | `LoadBalancer` | 是 | 关联的负载均衡实例 |
+- **`NewCircuitBreaker(threshold int, cooldown time.Duration) CircuitBreaker`**：创建熔断器，默认连续失败 5 次熔断，冷却期 30 秒，半开试探 3 次。
+- **`Allow() bool`**：检查当前是否允许请求通过（`Closed` 允许，`Open` 且在冷却期内拒绝，`HalfOpen` 且试探次数内允许）。
+- **`RecordSuccess()`**：记录成功调用（`HalfOpen` 连续达标转为 `Closed`）。
+- **`RecordFailure()`**：记录失败调用（`Closed` 达到阈值或 `HalfOpen` 失败直接转为 `Open`）。
+- **`State() CBState`**：获取当前状态枚举。
 
 ---
 
-### `start_grpc_gateway`
+### 1.4 HTTP 反向代理与 gRPC 透明流代理
 
-位置：`engine.gateway.grpc_proxy.start_grpc_gateway`
-
-```python
-async def start_grpc_gateway(
-    host: str,
-    port: int,
-    balancer: LoadBalancer,
-) -> grpc.aio.Server
-```
-
-启动 gRPC 网关服务器。
-
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `host` | `str` | 是 | 监听主机 |
-| `port` | `int` | 是 | 监听端口 |
-| `balancer` | `LoadBalancer` | 是 | 关联的负载均衡实例 |
+- **`NewHTTPProxyHandler(lb *LoadBalancer, metrics *observability.GatewayMetrics) gin.HandlerFunc`**
+  - 返回 Gin 中间件处理函数，集成 32KB `byteBufferPool` 零分配缓存与 Prometheus 实时指标。
+- **`NewHealthCheckHandler(lb *LoadBalancer) gin.HandlerFunc`**
+  - 暴露 `GET /gateway/backends` 查询所有节点的在途连接、EWMA 延迟与熔断状态。
+- **`NewGrpcProxyListener(lb *LoadBalancer, listenAddr string, metrics *observability.GatewayMetrics) (*grpc.Server, net.Listener, error)`**
+  - 创建并启动基于 `grpc.UnknownServiceHandler` 与 `rawCodec` 零拷贝透明流转发的 gRPC 网关服务器。
 
 ---
 
-## 2. YAML / 环境变量配置参考
+### 1.5 东西向 mTLS 证书配置
 
-### 2.1 YAML 配置文件
+- **`BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*tls.Config, error)`**
+  - 构建 mTLS 双向认证配置（默认 TLS 1.3）。
+- **`BuildBackendTLSConfigWithMinVersion(caCertPath, clientCertPath, clientKeyPath string, minVersion uint16) (*tls.Config, error)`**
+  - 构建 mTLS 配置并指定最低版本（如 `tls.VersionTLS12`）。
+- **`BuildInsecureBackendTLSConfig() *tls.Config`**
+  - 构建仅加密、跳过客户端证书校验的简单 TLS 配置。
 
-网关默认不加载文件，可通过环境变量 `PRIVACY_GATEWAY_CONFIG` 指定 YAML 路径。
+---
+
+## 2. 配置文件参考 (`config/gateway.yaml`)
 
 ```yaml
+# ── 网关监听 ──
 gateway:
-  rest_host: "0.0.0.0"
-  rest_port: 8000
-  grpc_host: "0.0.0.0"
-  grpc_port: 50000
-  strategy: "round_robin"
-  health_check_interval: 5.0
+  host: "0.0.0.0"              # 监听主机地址
+  rest_port: 8000              # REST 反向代理端口
+  grpc_port: 50000             # gRPC 透明代理端口
 
+# ── 后端 Agent 节点池 ──
 backends:
-  - http_url: "http://127.0.0.1:8079"
+  - address: "127.0.0.1:8079"  # Agent REST 端口
+    weight: 1                  # 调度权重（SWRR / 加权随机模式）
     grpc_address: "127.0.0.1:50051"
-    weight: 1
-  - http_url: "http://127.0.0.1:8080"
-    grpc_address: "127.0.0.1:50052"
-    weight: 1
+
+# ── 调度策略 ──
+strategy: "p2c"                # p2c (推荐) / weighted_rr / least_conn / round_robin / weighted_random
+
+# ── P2C-EWMA 参数 ──
+p2c:
+  ewma_alpha: 0.2              # EWMA 衰减因子
+  ewma_init_latency_us: 1000   # 初始 EWMA 延迟（微秒）
+
+# ── 三态熔断器 ──
+circuit_breaker:
+  failure_threshold: 5         # 连续失败次数触发熔断
+  cooldown_seconds: 30         # 熔断冷却时间（秒）
+  half_open_max_probes: 3      # HalfOpen 状态最大试探请求数
+
+# ── 反向代理与连接池 ──
+proxy:
+  dial_timeout_ms: 1000        # 后端连接超时（毫秒）
+  response_header_timeout_ms: 30000
+  max_idle_conns: 2048         # 最大空闲连接池容量
+  idle_conn_timeout_seconds: 90 # 空闲连接保持时长
 ```
-
-### 2.2 配置项说明
-
-| YAML 字段 | 环境变量 | 默认值 | 说明 |
-|---|---|---|---|
-| `gateway.rest_host` | `GATEWAY_REST_HOST` | `0.0.0.0` | HTTP 网关监听地址 |
-| `gateway.rest_port` | `GATEWAY_REST_PORT` | `8000` | HTTP 网关监听端口 |
-| `gateway.grpc_host` | `GATEWAY_GRPC_HOST` | `0.0.0.0` | gRPC 网关监听地址 |
-| `gateway.grpc_port` | `GATEWAY_GRPC_PORT` | `50000` | gRPC 网关监听端口 |
-| `gateway.strategy` | `GATEWAY_STRATEGY` | `round_robin` | 负载均衡策略 |
-| `gateway.health_check_interval` | `GATEWAY_HEALTH_INTERVAL` | `5.0` | 健康检查间隔（秒） |
-| — | `PRIVACY_GATEWAY_CONFIG` | — | YAML 配置文件路径 |
-| `backends` | `GATEWAY_BACKENDS` | `[]` | 后端节点列表 |
-
-### 2.3 `GATEWAY_BACKENDS` 格式
-
-多个节点以英文逗号分隔，每个节点内部 HTTP URL 与 gRPC 地址用 `|` 分隔：
-
-```text
-http://127.0.0.1:8079|127.0.0.1:50051,http://127.0.0.1:8080|127.0.0.1:50052
-```
-
-通过环境变量注册时，权重固定为 `1`。
 
 ---
 
-## 3. REST 代理行为
+## 3. 环境变量参考
 
-### 3.1 通配转发路由
+所有 YAML 配置项均支持通过环境变量直接覆盖：
 
-```text
-/{path:path}
-```
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `GATEWAY_HOST` | `0.0.0.0` | HTTP 网关监听地址 |
+| `GATEWAY_PORT` | `8000` | HTTP 网关监听端口 |
+| `GATEWAY_GRPC_PORT` | `50000` | gRPC 网关监听端口 |
+| `GATEWAY_BACKENDS` | `127.0.0.1:8079` | 后端 Agent 地址列表（以逗号分隔，如 `10.0.1.10:8079,10.0.1.11:8079`） |
+| `GATEWAY_STRATEGY` | `p2c` | 负载均衡策略：`p2c` / `weighted_rr` / `least_conn` / `round_robin` / `weighted_random` |
+| `PRIVACY_LOG_LEVEL` | `INFO` | 日志级别：`DEBUG` / `INFO` / `WARN` / `ERROR` |
 
-支持方法：`GET`, `POST`, `PUT`, `DELETE`, `OPTIONS`, `HEAD`, `PATCH`。
+---
 
-转发时会：
+## 4. 网关 REST API 端点
 
-1. 调用 `LoadBalancer.select_node()` 选择健康后端。
-2. 透传查询参数与请求体。
-3. 过滤 Hop-by-hop 头（见下表）。
-4. 透传后端响应状态码、响应头与响应体。
-5. 连接异常时标记节点不健康并重试，最多 `3` 次。
+### 4.1 网关自身健康检查
 
-### 3.2 Hop-by-hop 过滤头
+- **请求**：`GET /health`
+- **响应**：`200 OK`
+  ```json
+  {
+    "status": "ok",
+    "component": "gateway"
+  }
+  ```
 
-以下头部不会被转发到后端或客户端：
+### 4.2 后端拓扑与实时指标查询
 
-| 头部 | 说明 |
-|---|---|
-| `connection` | 连接管理 |
-| `keep-alive` | 持久连接 |
-| `proxy-authenticate` | 代理认证 |
-| `proxy-authorization` | 代理鉴权 |
-| `te` | 传输编码协商 |
-| `trailers` | 分块尾部 |
-| `transfer-encoding` | 传输编码 |
-| `upgrade` | 协议升级 |
-| `content-length` | 内容长度 |
-| `host` | 目标主机 |
+- **请求**：`GET /gateway/backends`
+- **响应**：`200 OK`
+  ```json
+  {
+    "backends": [
+      {
+        "address": "127.0.0.1:8079",
+        "in_flight": 2,
+        "ewma_ms": 1.45,
+        "cb_state": "closed"
+      },
+      {
+        "address": "127.0.0.1:8080",
+        "in_flight": 0,
+        "ewma_ms": 0.92,
+        "cb_state": "closed"
+      }
+    ]
+  }
+  ```
 
-### 3.3 动态节点管理接口
+### 4.3 Prometheus 遥测端点
 
-#### POST `/v1/gateway/register`
+- **请求**：`GET /metrics`
+- **响应**：Prometheus 文本格式指标流。
 
-注册新后端节点。
+### 4.4 通配反向代理
 
-请求体：
+- **路径**：`/*`（匹配除 `/health`、`/gateway/backends`、`/metrics` 外的所有 HTTP 请求）
+- **行为**：
+  1. 调用 `LoadBalancer.SelectNode()` 依据当前策略挑选最优节点；
+  2. 校验节点熔断器状态，若 `Open` 则返回 `503 Service Unavailable`；
+  3. 从 `byteBufferPool` 取出 32KB 缓冲区，复用 `http.Transport` 长连接向后端发起请求；
+  4. 记录响应延迟并更新节点 EWMA；根据响应状态码（<500 成功，≥500 失败）更新熔断器；
+  5. 实时将 InFlight、EWMA 延迟与请求计数上报 Prometheus。
 
+---
+
+## 5. gRPC 透明流代理行为
+
+- **监听端口**：默认 `:50000`
+- **工作机制**：
+  - 基于 `grpc.UnknownServiceHandler` 拦截所有未在网关本地注册的 RPC 方法；
+  - 基于 `rawCodec` 直接将收到的原始 Protobuf Frame 发送至选中的后端 Agent，无需解析或反序列化；
+  - 自动透明传递 `metadata.IncomingContext` 中的 Metadata（包含分布式追踪 Trace ID、认证凭证等）；
+  - 全并发双向流透传，客户端与后端流任一方正常结束或发生异常时优雅收尾。
+
+---
+
+## 6. 异常与标准错误响应
+
+当网关发生调度异常或后端不可达时，统一遵循 `pkg/middleware` 标准信封返回：
+
+| 异常场景 | HTTP 状态码 | Code 标识 | 说明 |
+|---|---|---|---|
+| **全部节点熔断** | `503 Service Unavailable` | `SERVICE_UNAVAILABLE` | 无可用后端节点 |
+| **选定节点熔断** | `503 Service Unavailable` | `CIRCUIT_OPEN` | 当前节点处于熔断期 |
+| **后端连接失败** | `502 Bad Gateway` | `BAD_GATEWAY` | 后端服务不可达或连接被拒绝 |
+| **代理创建异常** | `500 Internal Server Error` | `PROXY_ERROR` | 网关内部代理初始化失败 |
+
+**错误响应格式示例**：
 ```json
 {
-  "http_url": "http://127.0.0.1:8080",
-  "grpc_address": "127.0.0.1:50052",
-  "weight": 1
+  "code": "BAD_GATEWAY",
+  "message": "后端 127.0.0.1:8079 不可达",
+  "detail": "dial tcp 127.0.0.1:8079: connect: connection refused",
+  "trace_id": "gw-req-20260829221800-abc12345",
+  "timestamp": "2026-08-29T14:18:00.123456Z"
 }
 ```
-
-响应体：
-
-```json
-{"status": "registered"}
-```
-
-#### POST `/v1/gateway/deregister`
-
-注销后端节点。
-
-请求体：
-
-```json
-{
-  "http_url": "http://127.0.0.1:8080",
-  "grpc_address": "127.0.0.1:50052"
-}
-```
-
-响应体：
-
-```json
-{"status": "deregistered"}
-```
-
----
-
-## 4. gRPC 代理行为
-
-### 4.1 转发方法列表
-
-网关实现 `PrivacyService` 接口，支持反射转发以下方法：
-
-| RPC 方法 | 说明 |
-|---|---|
-| `Mask` | 字段级脱敏 |
-| `MaskRecord` | 记录级脱敏 |
-| `Hash` | 哈希计算 |
-| `DPCount` | 差分隐私计数 |
-| `DPSum` | 差分隐私求和 |
-| `DPMean` | 差分隐私均值 |
-| `KAnonymizeRecord` | K-匿名化 |
-| `ObfuscateQuery` | 查询混淆 |
-| `ClassifyField` | 字段分类 |
-| `ClassifyRecord` | 记录分类 |
-| `ClassifyTable` | 表分类 |
-| `Health` | 健康检查 |
-
-### 4.2 转发逻辑
-
-1. 按负载均衡策略选择健康后端节点。
-2. 通过 `getattr(node.grpc_stub, method_name)` 反射调用后端对应 RPC。
-3. 单次调用超时 `30` 秒。
-4. 遇到 `grpc.StatusCode.UNAVAILABLE` 时标记节点不健康并重试，最多 `3` 次。
-5. 其他业务错误直接透传原状态码与详情。
-
----
-
-## 5. 负载均衡策略
-
-| 策略 | 关键字 | 说明 |
-|---|---|---|
-| 轮询 | `round_robin` | 依次遍历健康节点，默认策略 |
-| 随机 | `random` | 从健康节点中随机选择 |
-| 最小连接数 | `least_connections` | 选择当前 `active_connections` 最小的健康节点 |
-
-策略在网关启动时通过 `strategy` 配置项或 `GATEWAY_STRATEGY` 环境变量指定；运行时也允许直接修改 `LoadBalancer.strategy`。
-
----
-
-## 6. 健康检查参数
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| 检查间隔 | `5.0` 秒 | 由 `health_check_interval` / `GATEWAY_HEALTH_INTERVAL` 控制 |
-| HTTP 检查路径 | `/health` | 预期返回 `200` 且 JSON 中 `status == "ok"` |
-| gRPC 检查方法 | `Health` | 预期返回 `status == "ok"` |
-| HTTP 超时 | `2.0` 秒 | 单次 HTTP 健康检查超时 |
-| gRPC 超时 | `2.0` 秒 | 单次 gRPC 健康检查超时 |
-| 健康判定 | 双协议均通过 | 任一协议失败即标记为不健康 |
-
----
-
-## 7. 异常与错误码
-
-| 场景 | HTTP 状态码 | gRPC 状态码 | 说明 |
-|---|---|---|---|
-| 无健康后端节点 | `503` | `UNAVAILABLE` | 可用节点池为空 |
-| 后端连接异常且重试耗尽 | `502` | `INTERNAL` | 所有后端均不可用 |
-| 后端返回业务错误 | 透传后端状态码 | 透传 `grpc.RpcError` | 非连接类错误直接回传 |
-| 注册 / 注销参数非法 | `422` | — | Pydantic 校验失败 |
