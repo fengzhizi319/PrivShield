@@ -85,7 +85,11 @@ _kill_port() {
     local port="$1"
     if _is_port_in_use "$port"; then
         echo "终止端口 $port 上的占用进程..."
-        fuser -k -9 "${port}/tcp" 2>/dev/null || true
+        if command -v lsof >/dev/null 2>&1; then
+            lsof -ti ":$port" | xargs kill -9 2>/dev/null || true
+        elif command -v fuser >/dev/null 2>&1; then
+            fuser -k -9 "${port}/tcp" 2>/dev/null || true
+        fi
         sleep 0.5
     fi
 }
@@ -331,9 +335,22 @@ done
 
 # 2. 启动 Vite 前端开发服务器
 echo "启动 App-LZ Vite 前端开发服务器 (HMR: :$VITE_PORT)..."
+if [ ! -d "$APP_LZ_DIR/web/node_modules" ]; then
+    echo "📦 正在安装 App-LZ 前端依赖..."
+    (cd "$APP_LZ_DIR/web" && pnpm install)
+fi
 (cd "$APP_LZ_DIR/web" && npx vite --port "$VITE_PORT" --host 0.0.0.0) > "$LOGS_DIR/app-lz-web.log" 2>&1 &
 WEB_PID=$!
 echo "$WEB_PID" > "$PIDS_DIR/app-lz-web.pid"
+
+# 等待 Web 前端就绪
+for i in {1..30}; do
+    if curl -s "http://127.0.0.1:$VITE_PORT" >/dev/null 2>&1; then
+        echo "✅ App-LZ Web 前端已就绪 (PID: $WEB_PID)"
+        break
+    fi
+    sleep 0.2
+done
 
 cleanup() {
     echo ""
