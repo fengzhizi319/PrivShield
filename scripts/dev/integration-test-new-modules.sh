@@ -176,8 +176,8 @@ echo ""
 log_step "Phase 2: Agent Connectivity"
 echo ""
 
-AGENT_MASK_RESP=$(curl_json POST "${AGENT_URL}/v1/privacy/mask" '{"field_name": "name", "value": "测试用户"}')
-assert_json_field_not_empty "Agent mask response" "$AGENT_MASK_RESP" "result"
+AGENT_MASK_RESP=$(curl_json POST "${AGENT_URL}/v1/privacy/mask" '{"field": "name", "value": "测试用户", "type": "name"}')
+assert_json_field_not_empty "Agent mask response" "$AGENT_MASK_RESP" "masked"
 
 echo ""
 
@@ -207,12 +207,16 @@ echo ""
 log_step "Phase 4: service-hub Pipeline Execution"
 echo ""
 
-CLASSIFY_RESP=$(curl_json POST "${SERVICE_HUB_URL}/api/hub/classify" '{
+CLASSIFY_RESP=$(curl_json POST "${SERVICE_HUB_URL}/api/hub/dispatch" '{
     "source": "ds_yibao",
+    "operation": "classify",
+    "priority": 1,
     "payload": {"name": "张三", "id_card": "110101199003072345", "phone": "13800138000", "diagnosis": "高血压"}
 }')
-assert_status "Submit classify task" "200" "$(curl_status POST "${SERVICE_HUB_URL}/api/hub/classify" '{
+assert_status "Submit classify task" "202" "$(curl_status POST "${SERVICE_HUB_URL}/api/hub/dispatch" '{
     "source": "ds_yibao",
+    "operation": "classify",
+    "priority": 1,
     "payload": {"name": "张三", "id_card": "110101199003072345", "phone": "13800138000", "diagnosis": "高血压"}
 }')"
 assert_json_field_not_empty "Classify task_id" "$CLASSIFY_RESP" "task_id"

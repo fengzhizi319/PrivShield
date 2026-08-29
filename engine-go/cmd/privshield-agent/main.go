@@ -9,6 +9,9 @@
 //   - PRIVACY_REST_HOST / PRIVACY_REST_PORT：REST 监听地址
 //   - PRIVACY_GRPC_HOST / PRIVACY_GRPC_PORT：gRPC 监听地址
 //   - PRIVACY_LOG_LEVEL：日志级别（DEBUG/INFO/WARN/ERROR）
+//   - PRIVACY_TLS_ENABLED：是否启用 TLS (HTTPS / gRPC TLS)
+//   - PRIVACY_TLS_CERT_FILE / PRIVACY_TLS_KEY_FILE / PRIVACY_TLS_CA_FILE：证书路径
+//   - PRIVACY_AUTH_INTERNAL_MTLS_ENABLED：是否启用 mTLS 客户端双向认证
 package main
 
 import (
@@ -19,11 +22,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver"
@@ -50,22 +55,32 @@ var (
 // ──────────────────────────────────────────────
 
 type Config struct {
-	RESTHost    string
-	RESTPort    int
-	GRPCPort    int
-	LogLevel    string
-	RateLimitRPS int
+	RESTHost       string
+	RESTPort       int
+	GRPCPort       int
+	LogLevel       string
+	RateLimitRPS   int
 	RateLimitBurst int
+	TLSEnabled     bool
+	TLSCertFile    string
+	TLSKeyFile     string
+	TLSCAFile      string
+	MTLSEnabled    bool
 }
 
 func loadConfig() Config {
 	return Config{
-		RESTHost:    getEnv("PRIVACY_REST_HOST", "0.0.0.0"),
-		RESTPort:    getEnvInt("PRIVACY_REST_PORT", 8079),
-		GRPCPort:    getEnvInt("PRIVACY_GRPC_PORT", 50051),
-		LogLevel:    getEnv("PRIVACY_LOG_LEVEL", "INFO"),
+		RESTHost:       getEnv("PRIVACY_REST_HOST", "0.0.0.0"),
+		RESTPort:       getEnvInt("PRIVACY_REST_PORT", 8079),
+		GRPCPort:       getEnvInt("PRIVACY_GRPC_PORT", 50051),
+		LogLevel:       getEnv("PRIVACY_LOG_LEVEL", "INFO"),
 		RateLimitRPS:   getEnvInt("PRIVACY_RATE_LIMIT_RPS", 1000),
 		RateLimitBurst: getEnvInt("PRIVACY_RATE_LIMIT_BURST", 2000),
+		TLSEnabled:     getEnvBool("PRIVACY_TLS_ENABLED", false),
+		TLSCertFile:    getEnv("PRIVACY_TLS_CERT_FILE", ""),
+		TLSKeyFile:     getEnv("PRIVACY_TLS_KEY_FILE", ""),
+		TLSCAFile:      getEnv("PRIVACY_TLS_CA_FILE", ""),
+		MTLSEnabled:    getEnvBool("PRIVACY_AUTH_INTERNAL_MTLS_ENABLED", false),
 	}
 }
 
@@ -112,7 +127,7 @@ func main() {
 	}
 
 	router.Use(observability.RequestLogger())
-	router.Use(engineMetrics.PrometheusMiddleware()) // Prometheus 实际指标注册（替代旧 TODO 桩）
+	router.Use(engineMetrics.PrometheusMiddleware()) // Prometheus 实际指标注册
 
 	// 注册全部 REST API 路由
 	rest.RegisterRoutes(router, svc)
@@ -130,10 +145,18 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("REST server starting", "addr", restAddr)
-		if err := restServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("REST server error", "err", err)
-			os.Exit(1)
+		if cfg.TLSEnabled && cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+			slog.Info("REST HTTPS server starting", "addr", restAddr, "cert", cfg.TLSCertFile)
+			if err := restServer.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+				slog.Error("REST HTTPS server error", "err", err)
+				os.Exit(1)
+			}
+		} else {
+			slog.Info("REST server starting", "addr", restAddr)
+			if err := restServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("REST server error", "err", err)
+				os.Exit(1)
+			}
 		}
 	}()
 
@@ -145,7 +168,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 生产级 gRPC Keepalive 保活策略配置（防僵尸连接与网络闪断）
+	// 生产级 gRPC Keepalive 保活策略配置
 	var grpcOpts = []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle: 5 * time.Minute,
@@ -157,6 +180,26 @@ func main() {
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
+	}
+
+	if cfg.TLSEnabled && cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		clientAuth := ""
+		if cfg.MTLSEnabled {
+			clientAuth = "require"
+		}
+		tlsCfg, err := tlsutil.BuildServerTLSConfig(&tlsutil.ServerTLSConfig{
+			Enabled:    true,
+			CertFile:   cfg.TLSCertFile,
+			KeyFile:    cfg.TLSKeyFile,
+			CAFile:     cfg.TLSCAFile,
+			ClientAuth: clientAuth,
+		})
+		if err != nil {
+			slog.Error("Failed to build gRPC TLS credentials", "err", err)
+			os.Exit(1)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+		slog.Info("gRPC TLS credentials enabled", "mtls", cfg.MTLSEnabled)
 	}
 
 	whitelistPath := getEnv("PRIVACY_AUTH_MTLS_WHITELIST_FILE", "")
@@ -188,6 +231,8 @@ func main() {
 	slog.Info("Configuration summary",
 		"rest_addr", restAddr,
 		"grpc_addr", grpcAddr,
+		"tls_enabled", cfg.TLSEnabled,
+		"mtls_enabled", cfg.MTLSEnabled,
 		"log_level", cfg.LogLevel,
 		"budget_total_epsilon", budgetStatus["total_epsilon"],
 		"budget_remaining_epsilon", budgetStatus["remaining_epsilon"],
@@ -199,10 +244,10 @@ func main() {
 	sig := <-quit
 	slog.Info("Shutdown signal received, starting graceful draining", "signal", sig)
 
-	// 1. 标记 K8s 就绪探针为 unready，通知 Ingress/Service 停止下发新流量
+	// 1. 标记 K8s 就绪探针为 unready
 	rest.SetReady(false)
 
-	// 2. 流量排空等待窗口 (默认 5 秒)
+	// 2. 流量排空等待窗口
 	drainSec := getEnvInt("PRIVACY_SHUTDOWN_DRAIN_SECONDS", 5)
 	if drainSec > 0 {
 		slog.Info("Draining in-flight traffic", "seconds", drainSec)
@@ -237,6 +282,13 @@ func getEnvInt(key string, defaultVal int) int {
 		var n int
 		fmt.Sscanf(v, "%d", &n)
 		return n
+	}
+	return defaultVal
+}
+
+func getEnvBool(key string, defaultVal bool) bool {
+	if v := os.Getenv(key); v != "" {
+		return strings.EqualFold(v, "true") || v == "1"
 	}
 	return defaultVal
 }

@@ -146,23 +146,30 @@ def run_bench(name, endpoint, payload):
 
 # 1. 字段脱敏 Masking 接口测试
 mask_payload = {
-    'field_type': 'phone',
-    'value': '13800138000'
+    'field': 'phone',
+    'value': '13800138000',
+    'type': 'phone'
 }
 run_bench('数据脱敏 Masking', '/v1/privacy/mask', mask_payload)
 
-# 2. 差分隐私 DP 接口测试
+# 2. 差分隐私 DP 接口测试 (先自动重置预算确保压测基准不受历史消耗干扰)
+try:
+    req_reset = urllib.request.Request(f'{base_url}/v1/privacy/budget/reset', data=b'{}', headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req_reset, timeout=5) as r:
+        pass
+except Exception:
+    pass
+
 dp_payload = {
-    'values': [10.5, 20.1, 15.3, 8.4, 12.0],
-    'epsilon': 1.0,
-    'sensitivity': 1.0
+    'count': 100,
+    'epsilon': 0.001
 }
-run_bench('差分隐私 DP Laplace', '/v1/privacy/dp/laplace', dp_payload)
+run_bench('差分隐私 DP Count', '/v1/privacy/dp/count', dp_payload)
 
 # 3. 动态分类分级接口测试
 class_payload = {
-    'text': '患者张三，身份证号 110101199003072381，诊断为高血压',
-    'domain': 'medical'
+    'field': 'id_card',
+    'value': '110101199003072381'
 }
 run_bench('动态分类分级三层漏斗', '/v1/dynclassification/classify', class_payload)
 "

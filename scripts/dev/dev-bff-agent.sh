@@ -70,10 +70,10 @@ except (ConnectionRefusedError, socket.timeout, OSError):
 }
 
 check_port_available() {
-    local port="$1"
-    local name="$2"
+    local port="${1:-}"
+    local name="${2:-服务}"
 
-    if ! _is_port_in_use "$port"; then
+    if [[ -z "$port" ]] || ! _is_port_in_use "$port"; then
         return 0
     fi
 
