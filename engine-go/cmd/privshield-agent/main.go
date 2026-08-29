@@ -28,6 +28,7 @@ import (
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/grpcserver"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/observability"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/rest"
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/security"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/pkg/tlsutil"
@@ -99,6 +100,9 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.TraceMiddleware()) // 全链路分布式追踪 (X-Request-ID + X-Trace-ID)
+	router.Use(security.SecurityHeadersMiddleware())
+	router.Use(security.AuthMiddleware())
+	router.Use(security.RateLimitMiddleware())
 
 	// 可选限流中间件（设计文档 §12.7 / §13.4）
 	if cfg.RateLimitRPS > 0 {
@@ -109,7 +113,7 @@ func main() {
 	router.Use(observability.RequestLogger())
 	router.Use(engineMetrics.PrometheusMiddleware()) // Prometheus 实际指标注册（替代旧 TODO 桩）
 
-	// 注册全部 REST API 路由（17 个端点）
+	// 注册全部 REST API 路由
 	rest.RegisterRoutes(router, svc)
 
 	// Prometheus /metrics 端点（设计文档 §11.1）

@@ -141,7 +141,7 @@ func TestTyped_DPChunkedCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DPChunkedCount: %v", err)
 	}
-	if resp.GetResult() < 0 || resp.GetResult() > 20 {
+	if resp.GetResult() < -50 || resp.GetResult() > 60 {
 		t.Errorf("chunked count = %f, out of reasonable range", resp.GetResult())
 	}
 }

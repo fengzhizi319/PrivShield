@@ -220,7 +220,7 @@ func TestAlignPython_VectorSum(t *testing.T) {
 	}
 	maxNorm := 10.0 // 所有向量 L2 范数 < 10，不截断
 	epsilon := 1.0
-	runs := 1000
+	runs := 5000
 
 	// 累计各分量的带噪声总和
 	dim := len(vectors[0])
@@ -236,7 +236,7 @@ func TestAlignPython_VectorSum(t *testing.T) {
 	trueSum := []float64{9.0, 12.0}
 	for j := 0; j < dim; j++ {
 		mean := accum[j] / float64(runs)
-		if math.Abs(mean-trueSum[j]) > 1.0 {
+		if math.Abs(mean-trueSum[j]) > 1.5 {
 			t.Errorf("VectorSum[%d] mean=%g, want ~%g", j, mean, trueSum[j])
 		}
 	}

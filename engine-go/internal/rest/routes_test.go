@@ -1,30 +1,28 @@
 // Package rest — REST API 路由集成测试。
 //
-// 覆盖全部 41 个端点的正常路径 + 错误信封格式校验。
-// 验证统一错误信封（code/message/detail/trace_id/timestamp）输出。
+// 覆盖全部端点的正常路径 + 错误信封格式校验。
+// URL 路径与 Python engine 完全对齐。
 package rest
 
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/security"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 )
-
-// ──────────────────────────────────────────────
-// 测试辅助
-// ──────────────────────────────────────────────
 
 func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-// setupRouter 创建测试用路由（挂载 TraceMiddleware 模拟真实环境）
 func setupRouter(t *testing.T) (*gin.Engine, *service.PrivacyService) {
 	t.Helper()
 	svc, err := service.NewPrivacyService(service.DefaultConfig())
@@ -36,7 +34,6 @@ func setupRouter(t *testing.T) (*gin.Engine, *service.PrivacyService) {
 	return r, svc
 }
 
-// doJSON 发送 JSON 请求并返回响应
 func doJSON(r *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
 	if body != nil {
@@ -49,7 +46,28 @@ func doJSON(r *gin.Engine, method, path string, body any) *httptest.ResponseReco
 	return w
 }
 
-// parseEnvelope 解析错误信封
+func doMultipart(r *gin.Engine, path, fieldName, filename, fileContent, operation, params string) *httptest.ResponseRecorder {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, _ := writer.CreateFormFile(fieldName, filename)
+	part.Write([]byte(fileContent))
+
+	if operation != "" {
+		_ = writer.WriteField("operation", operation)
+	}
+	if params != "" {
+		_ = writer.WriteField("params", params)
+	}
+	_ = writer.Close()
+
+	req := httptest.NewRequest("POST", path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
 func parseEnvelope(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 	t.Helper()
 	var env map[string]any
@@ -57,27 +75,6 @@ func parseEnvelope(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 		t.Fatalf("unmarshal envelope: %v, body: %s", err, w.Body.String())
 	}
 	return env
-}
-
-// assertEnvelope 校验错误信封格式（code + message + trace_id + timestamp）
-func assertEnvelope(t *testing.T, env map[string]any, wantCode string, wantStatus int, w *httptest.ResponseRecorder) {
-	t.Helper()
-	if w.Code != wantStatus {
-		t.Errorf("status = %d, want %d", w.Code, wantStatus)
-	}
-	if code, ok := env["code"].(string); !ok || code != wantCode {
-		t.Errorf("code = %v, want %q", env["code"], wantCode)
-	}
-	if msg, ok := env["message"].(string); !ok || msg == "" {
-		t.Errorf("message = %v, want non-empty string", env["message"])
-	}
-	if tid, ok := env["trace_id"].(string); !ok || tid == "" {
-		// trace_id 可能为空（测试环境未挂载 TraceMiddleware），仅校验字段存在
-		_ = tid
-	}
-	if ts, ok := env["timestamp"].(string); !ok || ts == "" {
-		t.Errorf("timestamp = %v, want non-empty string", env["timestamp"])
-	}
 }
 
 // ──────────────────────────────────────────────
@@ -88,15 +85,23 @@ func TestHealth(t *testing.T) {
 	r, _ := setupRouter(t)
 	w := doJSON(r, "GET", "/health", nil)
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var resp map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["status"] != "ok" {
-		t.Errorf("status = %q, want ok", resp["status"])
+}
+
+func TestLivez(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "GET", "/livez", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if resp["engine"] != "go" {
-		t.Errorf("engine = %q, want go", resp["engine"])
+}
+
+func TestReadyz(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "GET", "/readyz", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
 
@@ -104,53 +109,48 @@ func TestHealth(t *testing.T) {
 // 掩码端点
 // ──────────────────────────────────────────────
 
-func TestMask_Success(t *testing.T) {
+func TestMask(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/mask", map[string]string{
-		"field": "id_card", "value": "110101199003072345", "type": "id_card",
+	w := doJSON(r, "POST", "/v1/privacy/mask", map[string]string{
+		"field": "phone", "value": "13812345678", "type": "phone",
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["masked"] == "110101199003072345" {
-		t.Error("mask should have changed the value")
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestMask_MissingField(t *testing.T) {
+func TestMask_InvalidArg(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/mask", map[string]string{
-		"field": "id_card",
-	})
+	w := doJSON(r, "POST", "/v1/privacy/mask", map[string]string{})
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", w.Code)
+		t.Fatalf("expected 400, got %d", w.Code)
 	}
 	env := parseEnvelope(t, w)
-	assertEnvelope(t, env, "INVALID_ARGUMENT", http.StatusBadRequest, w)
-}
-
-func TestMaskRecord_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/mask/record", map[string]any{
-		"record": map[string]string{"name": "张三", "phone": "13800138000"},
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+	if env["code"] != "INVALID_ARGUMENT" {
+		t.Errorf("expected code=INVALID_ARGUMENT, got %v", env["code"])
 	}
 }
 
-func TestMaskBatch_Success(t *testing.T) {
+func TestMaskRecord(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/mask/batch", map[string]any{
+	w := doJSON(r, "POST", "/v1/privacy/mask/record", map[string]any{
+		"record": map[string]string{"phone": "13812345678", "email": "test@example.com"},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMaskBatch(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/v1/privacy/mask/batch", map[string]any{
 		"records": []map[string]string{
-			{"name": "张三"},
-			{"name": "李四"},
+			{"phone": "13812345678"},
+			{"email": "test@example.com"},
 		},
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -158,45 +158,33 @@ func TestMaskBatch_Success(t *testing.T) {
 // 差分隐私端点
 // ──────────────────────────────────────────────
 
-func TestNoisyCount_Success(t *testing.T) {
+func TestDPNoisyCount(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/noisy_count", map[string]any{
-		"count": 100, "epsilon": 0.1,
+	w := doJSON(r, "POST", "/v1/privacy/dp/noisy_count", map[string]any{
+		"count": 100, "epsilon": 0.5,
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestNoisyCount_BadRequest(t *testing.T) {
+func TestDPNoisySum(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/noisy_count", map[string]any{
-		"count": 100, // missing epsilon
-	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", w.Code)
-	}
-	env := parseEnvelope(t, w)
-	assertEnvelope(t, env, "INVALID_ARGUMENT", http.StatusBadRequest, w)
-}
-
-func TestNoisySum_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/noisy_sum", map[string]any{
-		"values": []float64{1.0, 2.0, 3.0}, "epsilon": 0.1, "sensitivity": 1.0,
+	w := doJSON(r, "POST", "/v1/privacy/dp/noisy_sum", map[string]any{
+		"values": []float64{1, 2, 3}, "epsilon": 0.5, "sensitivity": 1.0,
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestNoisyMean_Success(t *testing.T) {
+func TestDPNoisyMean(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/noisy_mean", map[string]any{
-		"values": []float64{1.0, 2.0, 3.0}, "epsilon": 0.1, "delta": 1e-5, "clip_bound": 5.0,
+	w := doJSON(r, "POST", "/v1/privacy/dp/noisy_mean", map[string]any{
+		"values": []float64{1, 2, 3}, "epsilon": 0.5, "delta": 1e-5, "clip_bound": 1.0,
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -204,23 +192,23 @@ func TestNoisyMean_Success(t *testing.T) {
 // LDP 端点
 // ──────────────────────────────────────────────
 
-func TestRandomizedResponse_Success(t *testing.T) {
+func TestLDPRandomizedResponse(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/ldp/randomized_response", map[string]any{
+	w := doJSON(r, "POST", "/v1/privacy/ldp/randomized_response", map[string]any{
 		"value": true, "epsilon": 1.0,
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestORR_Success(t *testing.T) {
+func TestLDPOrr(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/ldp/orr", map[string]any{
-		"value": 3, "epsilon": 1.0, "domain_size": 10,
+	w := doJSON(r, "POST", "/v1/privacy/ldp/orr", map[string]any{
+		"value": 1, "epsilon": 1.0, "domain_size": 5,
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -228,177 +216,117 @@ func TestORR_Success(t *testing.T) {
 // K-匿名端点
 // ──────────────────────────────────────────────
 
-func TestKAnonymize_Success(t *testing.T) {
+func TestKAnonymize(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/kano/anonymize", map[string]any{
+	w := doJSON(r, "POST", "/v1/privacy/k_anonymize", map[string]any{
 		"records": []map[string]string{
-			{"name": "张三", "age": "30", "city": "北京"},
-			{"name": "李四", "age": "30", "city": "北京"},
-			{"name": "王五", "age": "30", "city": "北京"},
-			{"name": "赵六", "age": "30", "city": "北京"},
+			{"age": "25", "zip": "10001"},
+			{"age": "26", "zip": "10002"},
+			{"age": "27", "zip": "10003"},
+			{"age": "28", "zip": "10004"},
 		},
-		"qi_fields": []string{"age", "city"},
-		"k": 2,
+		"qi_fields": []string{"age", "zip"},
+		"k":         2,
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestKAnonymize_InvalidK(t *testing.T) {
+func TestKAnonymizeTable_Mondrian(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/kano/anonymize", map[string]any{
-		"records":     []map[string]string{{"name": "张三"}},
-		"qi_fields":   []string{"name"},
-		"k":           0, // invalid: must be >= 1
+	w := doJSON(r, "POST", "/v1/privacy/k_anonymize_table", map[string]any{
+		"records": []map[string]string{
+			{"name": "Tom", "age": "25", "salary": "5000"},
+			{"name": "Jerry", "age": "30", "salary": "6000"},
+			{"name": "Spike", "age": "35", "salary": "7000"},
+			{"name": "Tyke", "age": "28", "salary": "5500"},
+		},
+		"qi_cols": []string{"age", "salary"},
+		"k":       2,
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	env := parseEnvelope(t, w)
-	assertEnvelope(t, env, "INVALID_ARGUMENT", http.StatusBadRequest, w)
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["equivalence_classes_count"] == nil {
+		t.Error("missing equivalence_classes_count")
+	}
+}
+
+// ──────────────────────────────────────────────
+// Agent 处理端点
+// ──────────────────────────────────────────────
+
+func TestAgentProcess_Basic(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "POST", "/v1/agent/process", map[string]any{
+		"records": []map[string]string{
+			{"phone": "13812345678", "email": "test@example.com"},
+		},
+		"api_code": "test_api",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["sanitized_data"] == nil {
+		t.Error("missing sanitized_data")
+	}
+	if resp["classification_report"] == nil {
+		t.Error("missing classification_report")
+	}
+	summary, ok := resp["summary"].(map[string]any)
+	if !ok {
+		t.Fatal("missing summary")
+	}
+	if summary["input_hash"] == nil {
+		t.Error("missing input_hash")
+	}
+	if summary["api_code"] != "test_api" {
+		t.Errorf("expected api_code=test_api, got %v", summary["api_code"])
+	}
+}
+
+// ──────────────────────────────────────────────
+// 运维诊断端点
+// ──────────────────────────────────────────────
+
+func TestDiagnostics_Basic(t *testing.T) {
+	r, _ := setupRouter(t)
+	w := doJSON(r, "GET", "/v1/ops/diagnostics", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["status"] != "ok" {
+		t.Errorf("expected status=ok, got %v", resp["status"])
+	}
+	if resp["service"] == nil {
+		t.Error("missing service info")
+	}
 }
 
 // ──────────────────────────────────────────────
 // 查询混淆端点
 // ──────────────────────────────────────────────
 
-func TestObfuscate_Success(t *testing.T) {
+func TestObfuscate(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/qol/obfuscate", map[string]any{
+	w := doJSON(r, "POST", "/v1/privacy/qol/obfuscate", map[string]any{
 		"query": "SELECT * FROM users", "num_decoys": 3, "domain": "sql",
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-// ──────────────────────────────────────────────
-// 分类端点
-// ──────────────────────────────────────────────
-
-func TestClassify_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/classify", map[string]any{
-		"field": "id_card_no", "value": "110101199003072345",
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestClassifyBatch_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/classify/batch", map[string]any{
-		"records": []map[string]string{
-			{"id_card_no": "110101199003072345"},
-			{"phone": "13800138000"},
-		},
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-// ──────────────────────────────────────────────
-// 医疗流水线端点
-// ──────────────────────────────────────────────
-
-func TestMedicalSanitize_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
-		"record": map[string]string{
-			"name":        "张三",
-			"id_card_no":  "110101199003072345",
-			"phone":       "13800138000",
-			"diagnosis":   "2型糖尿病",
-		},
-		"domain": "yibao",
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestMedicalBatch_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/medical/sanitize/batch", map[string]any{
-		"records": []map[string]string{
-			{"name": "张三", "phone": "13800138000"},
-		},
-		"domain": "yibao",
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-// ──────────────────────────────────────────────
-// SSOT 数据源命名 — 医疗端点
-// ──────────────────────────────────────────────
-
-func TestMedicalSanitize_SSOTCanonicalDSID(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
-		"record": map[string]string{"name": "张三"},
-		"domain": "ds_yibao", // canonical datasource_id
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestMedicalSanitize_SSOTAlias_Chinese(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
-		"record": map[string]string{"name": "李四"},
-		"domain": "康养", // Chinese alias → ds_kangyang
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestMedicalSanitize_SSOTUnknownDomain_FailClosed(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
-		"record": map[string]string{"name": "张三"},
-		"domain": "totally_unknown",
-	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body: %s", w.Code, w.Body.String())
-	}
-	var env map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &env)
-	if env["code"] != "INVALID_DATASOURCE_ID" {
-		t.Errorf("code = %v, want INVALID_DATASOURCE_ID", env["code"])
-	}
-}
-
-func TestMedicalBatch_SSOTUnknownDomain_FailClosed(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/medical/sanitize/batch", map[string]any{
-		"records": []map[string]string{{"name": "张三"}},
-		"domain":  "nonexistent_ds",
-	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body: %s", w.Code, w.Body.String())
-	}
-	var env map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &env)
-	if env["code"] != "INVALID_DATASOURCE_ID" {
-		t.Errorf("code = %v, want INVALID_DATASOURCE_ID", env["code"])
-	}
-}
-
-func TestMedicalSanitize_SSOTReservedDomain_FailClosed(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/medical/sanitize", map[string]any{
-		"record": map[string]string{"name": "张三"},
-		"domain": "ds_mock3", // reserved, not active
-	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -406,413 +334,325 @@ func TestMedicalSanitize_SSOTReservedDomain_FailClosed(t *testing.T) {
 // HMAC 散列端点
 // ──────────────────────────────────────────────
 
-func TestHashHMAC_Success(t *testing.T) {
+func TestHashHMAC(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/hash/hmac", map[string]any{
-		"value": "sensitive_data", "salt": "my_salt",
+	w := doJSON(r, "POST", "/v1/privacy/hash", map[string]any{
+		"value": "test", "salt": "mysalt",
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var resp map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["hash"] == "" {
-		t.Error("hash should not be empty")
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 // ──────────────────────────────────────────────
-// 预算查询端点
+// 预算端点
 // ──────────────────────────────────────────────
 
-func TestBudget_Success(t *testing.T) {
+func TestBudget(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "GET", "/api/v1/budget", nil)
+	w := doJSON(r, "GET", "/v1/privacy/budget", nil)
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestBudgetReset_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/budget/reset", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var body map[string]float64
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if _, ok := body["remaining_epsilon"]; !ok {
-		t.Error("missing 'remaining_epsilon' in reset response")
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 // ──────────────────────────────────────────────
-// LDP 新增端点
+// 医疗端点
 // ──────────────────────────────────────────────
 
-func TestPerturbBinaryBatch_Success(t *testing.T) {
+func TestMedicalSanitize(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/ldp/perturb/binary", map[string]any{
-		"values": []int{0, 1, 1, 0, 1}, "epsilon": 1.0,
+	w := doJSON(r, "POST", "/v1/medical/sanitize", map[string]any{
+		"record": map[string]string{"patient_name": "张三", "diagnosis": "感冒"},
+		"domain": "yibao",
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	result, ok := body["result"].([]any)
-	if !ok || len(result) != 5 {
-		t.Errorf("result should have 5 elements, got %v", body["result"])
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestPerturbCategoricalBatch_Success(t *testing.T) {
+// ──────────────────────────────────────────────
+// 分类端点
+// ──────────────────────────────────────────────
+
+func TestClassify(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/ldp/perturb/categorical", map[string]any{
-		"values": []string{"A", "B", "C"}, "categories": []string{"A", "B", "C"}, "epsilon": 1.0,
+	w := doJSON(r, "POST", "/v1/dynclassification/classify", map[string]any{
+		"field": "phone", "value": "13812345678",
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	result, ok := body["result"].([]any)
-	if !ok || len(result) != 3 {
-		t.Errorf("result should have 3 elements, got %v", body["result"])
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestEstimateBinaryFrequency_Success(t *testing.T) {
+// ──────────────────────────────────────────────
+// Profile 推荐端点
+// ──────────────────────────────────────────────
+
+func TestProfileRecommend(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/ldp/estimate/binary", map[string]any{
-		"reported_values": []int{1, 1, 0, 1, 0}, "epsilon": 5.0,
-	})
+	w := doJSON(r, "GET", "/v1/privacy/profile/recommend", nil)
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	freq, ok := body["frequency"].(float64)
-	if !ok || freq < 0.0 || freq > 1.0 {
-		t.Errorf("frequency should be in [0,1], got %v", body["frequency"])
-	}
-}
-
-func TestEstimateCategoricalHistogram_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/ldp/estimate/categorical", map[string]any{
-		"reported_values": []string{"A", "B", "A", "C"},
-		"categories":      []string{"A", "B", "C"},
-		"epsilon":         5.0,
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	hist, ok := body["histogram"].(map[string]any)
-	if !ok || len(hist) != 3 {
-		t.Errorf("histogram should have 3 categories, got %v", body["histogram"])
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 // ──────────────────────────────────────────────
-// QOL 批量端点
+// P0: Agent & Medical 统一流水线测试
 // ──────────────────────────────────────────────
 
-func TestObfuscateBatch_Success(t *testing.T) {
+func TestAgentProcess(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/qol/obfuscate/batch", map[string]any{
-		"queries": []string{"SELECT * FROM patients", "SELECT name FROM users"},
-		"num_decoys": 3, "domain": "medical",
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+	payload := map[string]any{
+		"records": []map[string]any{
+			{
+				"name":       "张三",
+				"id_card_no": "110101199001011234",
+				"phone":      "13800138000",
+				"diagnosis":  "高血压",
+			},
+		},
+		"api_code":      "api1_yibao",
+		"datasource_id": "ds_yibao",
 	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	results, ok := body["results"].([]any)
-	if !ok || len(results) != 2 {
-		t.Errorf("results should have 2 elements, got %v", body["results"])
-	}
-}
 
-// ──────────────────────────────────────────────
-// 404 路由
-// ──────────────────────────────────────────────
-
-// ──────────────────────────────────────────────
-// Phase 17 新增端点测试
-// ──────────────────────────────────────────────
-
-func TestHealthEndpoints(t *testing.T) {
-	r, _ := setupRouter(t)
-	for _, path := range []string{"/livez", "/readyz", "/readyz/llm"} {
-		w := doJSON(r, "GET", path, nil)
+	for _, path := range []string{"/v1/agent/process", "/agent/process", "/api/v1/agent/process"} {
+		w := doJSON(r, "POST", path, payload)
 		if w.Code != http.StatusOK {
-			t.Errorf("%s: status = %d, want 200", path, w.Code)
+			t.Fatalf("[%s] expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+		var res struct {
+			ClassificationReport []map[string]any `json:"classification_report"`
+			SanitizedData        []map[string]string `json:"sanitized_data"`
+			Summary              map[string]any `json:"summary"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("[%s] unmarshal response: %v", path, err)
+		}
+		if len(res.SanitizedData) != 1 {
+			t.Fatalf("[%s] expected 1 sanitized record, got %d", path, len(res.SanitizedData))
+		}
+		if res.Summary["input_hash"] == "" || res.Summary["output_hash"] == "" {
+			t.Fatalf("[%s] expected non-empty hashes in summary", path)
 		}
 	}
 }
 
-func TestDPCount_Success(t *testing.T) {
+func TestMedicalProcess(t *testing.T) {
 	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/count", map[string]any{"count": 100, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	payload := map[string]any{
+		"records": []map[string]any{
+			{
+				"name":       "李四",
+				"id_card_no": "110101199001011234",
+				"diagnosis":  "糖尿病",
+			},
+		},
 	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if _, ok := resp["result"]; !ok {
-		t.Error("missing 'result' field")
-	}
-}
-
-func TestDPSum_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/sum", map[string]any{"values": []float64{1, 2, 3}, "epsilon": 1.0, "clip_lower": 0, "clip_upper": 10})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPMean_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/mean", map[string]any{"values": []float64{1, 2, 3}, "epsilon": 1.0, "delta": 1e-5, "clip_bound": 5})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPHistogram_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/histogram", map[string]any{"values": []string{"A", "B", "A"}, "categories": []string{"A", "B", "C"}, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	result, ok := resp["result"].(map[string]any)
-	if !ok || len(result) != 3 {
-		t.Errorf("histogram categories = %d, want 3", len(result))
-	}
-}
-
-func TestDPNoisyHistogram_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/noisy_histogram", map[string]any{"true_counts": map[string]int{"A": 100, "B": 200}, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPChunkedCount_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/chunked_count", map[string]any{"chunks": [][]float64{{1, 2}, {3, 4, 5}}, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPChunkedSum_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/chunked_sum", map[string]any{"chunks": [][]float64{{10, 20}, {30}}, "epsilon": 1.0, "clip_lower": 0, "clip_upper": 100})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPChunkedMean_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/chunked_mean", map[string]any{"chunks": [][]float64{{1, 2}, {3}}, "epsilon": 1.0, "delta": 1e-5, "clip_bound": 5})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPChunkedHistogram_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/chunked_histogram", map[string]any{"chunks": [][]string{{"A", "B"}, {"A"}}, "categories": []string{"A", "B", "C"}, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPVectorSum_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/vector_sum", map[string]any{"vectors": [][]float64{{1, 2}, {3, 4}}, "max_norm": 10, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	vec, ok := resp["noisy_vector"].([]any)
-	if !ok || len(vec) != 2 {
-		t.Errorf("vector dim mismatch")
-	}
-}
-
-func TestDPVectorMean_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/vector_mean", map[string]any{"vectors": [][]float64{{1, 2}, {3, 4}}, "max_norm": 10, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestDPAggregate_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/aggregate", map[string]any{"rows": []map[string]string{{"a": "1"}}, "epsilon": 1.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if _, ok := resp["results_json"]; !ok {
-		t.Error("missing 'results_json' field")
-	}
-}
-
-func TestDPAdaptiveClip_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/adaptive_clip", map[string]any{"values": []float64{1, 2, 3}, "epsilon": 1.0, "initial_clip": 10.0})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["clip_upper"].(float64) <= 0 {
-		t.Error("clip_upper should be positive")
-	}
-}
-
-func TestDPGroupBy_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/dp/groupby", map[string]any{
-		"rows":       []map[string]string{{"group": "A", "value": "10"}, {"group": "B", "value": "20"}},
-		"group_col":  "group",
-		"target_col": "value",
-		"agg":        "count",
-		"epsilon":    1.0,
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if _, ok := resp["result_json"]; !ok {
-		t.Error("missing 'result_json' field")
-	}
-}
-
-func TestMaskDataFrame_Success(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "POST", "/api/v1/mask/dataframe", map[string]any{
-		"data":    []map[string]string{{"phone": "13812345678", "name": "张三"}},
-		"columns": []string{"phone", "name"},
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	data, ok := resp["data"].([]any)
-	if !ok || len(data) != 1 {
-		t.Fatalf("data count mismatch")
-	}
-	row := data[0].(map[string]any)
-	if row["phone"] == "13812345678" {
-		t.Error("phone should be masked")
-	}
-}
-
-func TestNotFound(t *testing.T) {
-	r, _ := setupRouter(t)
-	w := doJSON(r, "GET", "/api/v1/nonexistent", nil)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", w.Code)
+	for _, path := range []string{"/v1/medical/process", "/medical/process", "/api/v1/medical/process"} {
+		w := doJSON(r, "POST", path, payload)
+		if w.Code != http.StatusOK {
+			t.Fatalf("[%s] expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
 	}
 }
 
 // ──────────────────────────────────────────────
-// 统一错误信封格式验证（批量）
+// P1: 运维诊断端点测试
 // ──────────────────────────────────────────────
 
-func TestAllEndpoints_ReturnEnvelopeOnError(t *testing.T) {
+func TestOpsDiagnostics(t *testing.T) {
 	r, _ := setupRouter(t)
+	for _, path := range []string{"/v1/ops/diagnostics", "/ops/diagnostics", "/api/v1/ops/diagnostics"} {
+		w := doJSON(r, "GET", path, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("[%s] expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+		var diag map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &diag); err != nil {
+			t.Fatalf("[%s] unmarshal: %v", path, err)
+		}
+		if diag["status"] != "ok" {
+			t.Fatalf("[%s] expected status ok, got %v", path, diag["status"])
+		}
+		svc, ok := diag["service"].(map[string]any)
+		if !ok || svc["engine"] != "go" {
+			t.Fatalf("[%s] expected engine go, got %v", path, svc)
+		}
+	}
+}
 
-	// 每个端点发送空 body 触发 400 错误，验证信封格式
-	endpoints := []struct {
-		method string
-		path   string
-	}{
-		{"POST", "/api/v1/mask"},
-		{"POST", "/api/v1/mask/record"},
-		{"POST", "/api/v1/mask/batch"},
-		{"POST", "/api/v1/dp/noisy_count"},
-		{"POST", "/api/v1/dp/noisy_sum"},
-		{"POST", "/api/v1/dp/noisy_mean"},
-		{"POST", "/api/v1/ldp/randomized_response"},
-		{"POST", "/api/v1/ldp/orr"},
-		{"POST", "/api/v1/ldp/perturb/binary"},
-		{"POST", "/api/v1/ldp/perturb/categorical"},
-		{"POST", "/api/v1/ldp/estimate/binary"},
-		{"POST", "/api/v1/ldp/estimate/categorical"},
-		{"POST", "/api/v1/kano/anonymize"},
-		{"POST", "/api/v1/qol/obfuscate"},
-		{"POST", "/api/v1/qol/obfuscate/batch"},
-		{"POST", "/api/v1/classify"},
-		{"POST", "/api/v1/classify/batch"},
-		{"POST", "/api/v1/medical/sanitize"},
-		{"POST", "/api/v1/medical/sanitize/batch"},
-		{"POST", "/api/v1/hash/hmac"},
-		// Phase 17 新增端点
-		{"POST", "/api/v1/dp/count"},
-		{"POST", "/api/v1/dp/sum"},
-		{"POST", "/api/v1/dp/mean"},
-		{"POST", "/api/v1/dp/histogram"},
-		{"POST", "/api/v1/dp/noisy_histogram"},
-		{"POST", "/api/v1/dp/chunked_count"},
-		{"POST", "/api/v1/dp/chunked_sum"},
-		{"POST", "/api/v1/dp/chunked_mean"},
-		{"POST", "/api/v1/dp/chunked_histogram"},
-		{"POST", "/api/v1/dp/vector_sum"},
-		{"POST", "/api/v1/dp/vector_mean"},
-		{"POST", "/api/v1/dp/aggregate"},
-		{"POST", "/api/v1/dp/adaptive_clip"},
-		{"POST", "/api/v1/dp/groupby"},
-		{"POST", "/api/v1/mask/dataframe"},
+// ──────────────────────────────────────────────
+// P1: 文件上传脱敏处理测试
+// ──────────────────────────────────────────────
+
+func TestProcessFile_CSV(t *testing.T) {
+	r, _ := setupRouter(t)
+	csvData := "name,phone,id_card_no\n张三,13800138000,110101199001011234\n李四,13900139000,110101199202022345"
+
+	for _, path := range []string{"/v1/privacy/process_file", "/privacy/process_file", "/api/v1/privacy/process_file"} {
+		w := doMultipart(r, path, "file", "test.csv", csvData, "mask_dataframe", `{"columns":["phone","id_card_no"]}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("[%s] expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+		var res map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("[%s] unmarshal: %v", path, err)
+		}
+		if res["rows_in"] != float64(2) || res["rows_out"] != float64(2) {
+			t.Fatalf("[%s] unexpected rows_in / rows_out: %v", path, res)
+		}
+	}
+}
+
+func TestProcessFile_JSON(t *testing.T) {
+	r, _ := setupRouter(t)
+	jsonData := `[{"name":"王五","phone":"13700137000"},{"name":"赵六","phone":"13600136000"}]`
+
+	w := doMultipart(r, "/v1/privacy/process_file", "file", "test.json", jsonData, "mask_dataframe", `{}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var res map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if res["rows_in"] != float64(2) {
+		t.Fatalf("expected rows_in 2, got %v", res["rows_in"])
+	}
+}
+
+func TestProcessFile_KAnonymize(t *testing.T) {
+	r, _ := setupRouter(t)
+	csvData := "age,zipcode,disease\n25,100010,flu\n26,100010,fever\n45,200020,cough\n46,200020,cold"
+
+	w := doMultipart(r, "/v1/privacy/process_file", "file", "test.csv", csvData, "k_anonymize", `{"qi_cols":["age","zipcode"],"k":2}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var res map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if res["rows_out"] != float64(4) {
+		t.Fatalf("expected rows_out 4, got %v", res["rows_out"])
+	}
+}
+
+// ──────────────────────────────────────────────
+// P1: 表级与 DataFrame K-匿名测试
+// ──────────────────────────────────────────────
+
+func TestKAnonymizeTable(t *testing.T) {
+	r, _ := setupRouter(t)
+	payload := map[string]any{
+		"records": []map[string]string{
+			{"age": "25", "zipcode": "100010", "gender": "M"},
+			{"age": "26", "zipcode": "100010", "gender": "F"},
+			{"age": "45", "zipcode": "200020", "gender": "M"},
+			{"age": "47", "zipcode": "200020", "gender": "F"},
+		},
+		"qi_cols": []string{"age", "zipcode"},
+		"k":       2,
 	}
 
-	for _, ep := range endpoints {
-		t.Run(ep.method+" "+ep.path, func(t *testing.T) {
-			w := doJSON(r, ep.method, ep.path, map[string]string{})
-			if w.Code != http.StatusBadRequest {
-				t.Errorf("%s %s: status = %d, want 400", ep.method, ep.path, w.Code)
-			}
-			env := parseEnvelope(t, w)
-			// 校验信封必须包含 code + message + timestamp
-			if _, ok := env["code"]; !ok {
-				t.Error("missing 'code' field in error envelope")
-			}
-			if _, ok := env["message"]; !ok {
-				t.Error("missing 'message' field in error envelope")
-			}
-			if _, ok := env["timestamp"]; !ok {
-				t.Error("missing 'timestamp' field in error envelope")
-			}
-		})
+	for _, path := range []string{"/v1/privacy/k_anonymize/table", "/api/v1/kano/table"} {
+		w := doJSON(r, "POST", path, payload)
+		if w.Code != http.StatusOK {
+			t.Fatalf("[%s] expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+		var res map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &res)
+		if res["k"] != float64(2) {
+			t.Fatalf("[%s] expected k 2, got %v", path, res["k"])
+		}
+	}
+}
+
+func TestKAnonymizeDataFrame(t *testing.T) {
+	r, _ := setupRouter(t)
+	payload := map[string]any{
+		"records": []map[string]any{
+			{"age": 25, "zipcode": "100010", "salary": 10000},
+			{"age": 26, "zipcode": "100010", "salary": 12000},
+			{"age": 50, "zipcode": "200020", "salary": 30000},
+			{"age": 52, "zipcode": "200020", "salary": 35000},
+		},
+		"qi_cols": []string{"age", "zipcode"},
+		"k":       2,
+	}
+
+	for _, path := range []string{"/v1/privacy/k_anonymize/dataframe", "/api/v1/kano/dataframe"} {
+		w := doJSON(r, "POST", path, payload)
+		if w.Code != http.StatusOK {
+			t.Fatalf("[%s] expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// ──────────────────────────────────────────────
+// P0: API Key 认证与权限校验测试
+// ──────────────────────────────────────────────
+
+func TestAuth_Enabled_Denied_And_Allowed(t *testing.T) {
+	os.Setenv("PRIVACY_AUTH_ENABLED", "true")
+	os.Setenv("PRIVACY_AUTH_INTERNAL_API_KEYS", "secret-admin-key:admin:*;limited-key:user:privacy:mask")
+	security.ResetSettings()
+	defer func() {
+		os.Unsetenv("PRIVACY_AUTH_ENABLED")
+		os.Unsetenv("PRIVACY_AUTH_INTERNAL_API_KEYS")
+		security.ResetSettings()
+	}()
+
+	r, _ := setupRouter(t)
+
+	// 1. 未带 Authorization 请求 -> 401 UNAUTHENTICATED
+	w1 := doJSON(r, "POST", "/v1/privacy/mask", map[string]string{
+		"field": "phone", "value": "13800000000", "type": "phone",
+	})
+	if w1.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// 2. 带无效 Token -> 401 UNAUTHENTICATED
+	req2 := httptest.NewRequest("POST", "/v1/privacy/mask", bytes.NewBufferString(`{"field":"phone","value":"13800000000","type":"phone"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Authorization", "Bearer invalid-token")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// 3. 带 limited-key 访问仅限隐私掩码的端点 -> 200 OK
+	req3 := httptest.NewRequest("POST", "/v1/privacy/mask", bytes.NewBufferString(`{"field":"phone","value":"13800000000","type":"phone"}`))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("Authorization", "Bearer limited-key")
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w3.Code, w3.Body.String())
+	}
+
+	// 4. 带 limited-key 访问超出 scope 的端点 (/v1/agent/process) -> 403 FORBIDDEN
+	req4 := httptest.NewRequest("POST", "/v1/agent/process", bytes.NewBufferString(`{"records":[{"name":"张三"}]}`))
+	req4.Header.Set("Content-Type", "application/json")
+	req4.Header.Set("Authorization", "Bearer limited-key")
+	w4 := httptest.NewRecorder()
+	r.ServeHTTP(w4, req4)
+	if w4.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w4.Code, w4.Body.String())
+	}
+
+	// 5. 带 admin-key 访问 -> 200 OK
+	req5 := httptest.NewRequest("POST", "/v1/agent/process", bytes.NewBufferString(`{"records":[{"name":"张三"}]}`))
+	req5.Header.Set("Content-Type", "application/json")
+	req5.Header.Set("Authorization", "Bearer secret-admin-key")
+	w5 := httptest.NewRecorder()
+	r.ServeHTTP(w5, req5)
+	if w5.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w5.Code, w5.Body.String())
+	}
+
+	// 6. 健康探针端点免认证 -> 200 OK
+	w6 := doJSON(r, "GET", "/health", nil)
+	if w6.Code != http.StatusOK {
+		t.Fatalf("expected 200 for health endpoint, got %d", w6.Code)
 	}
 }

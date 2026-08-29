@@ -1,0 +1,209 @@
+package security
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+func TestIdentity_HasPermission(t *testing.T) {
+	tests := []struct {
+		name       string
+		identity   Identity
+		permission string
+		want       bool
+	}{
+		{"wildcard", Identity{Scopes: []string{"*"}}, "privacy:mask", true},
+		{"exact match", Identity{Scopes: []string{"privacy:mask"}}, "privacy:mask", true},
+		{"no match", Identity{Scopes: []string{"privacy:dp"}}, "privacy:mask", false},
+		{"empty scopes", Identity{Scopes: []string{}}, "privacy:mask", false},
+		{"multi scopes", Identity{Scopes: []string{"privacy:dp", "privacy:mask"}}, "privacy:mask", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.identity.HasPermission(tt.permission); got != tt.want {
+				t.Errorf("HasPermission(%q) = %v, want %v", tt.permission, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPermissionForRESTPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"/health", "health:read"},
+		{"/livez", "health:read"},
+		{"/readyz", "health:read"},
+		{"/v1/privacy/mask", "privacy:mask"},
+		{"/v1/privacy/mask/record", "privacy:mask"},
+		{"/v1/privacy/dp/count", "privacy:dp"},
+		{"/v1/privacy/ldp/randomized_response", "privacy:dp"},
+		{"/v1/privacy/k_anonymize", "privacy:kano"},
+		{"/v1/privacy/qol/obfuscate", "privacy:qol"},
+		{"/v1/privacy/budget", "privacy:budget"},
+		{"/v1/agent/process", "agent:process"},
+		{"/v1/ops/diagnostics", "ops:diagnostics"},
+		{"/unknown", "*"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := PermissionForRESTPath(tt.path); got != tt.want {
+				t.Errorf("PermissionForRESTPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPermissionForGRPCMethod(t *testing.T) {
+	tests := []struct {
+		method string
+		want   string
+	}{
+		{"privacy.local.PrivacyService/Mask", "privacy:mask"},
+		{"privacy.local.PrivacyService/DPCount", "privacy:dp"},
+		{"privacy.local.PrivacyService/Health", "health:read"},
+		{"privacy.local.PrivacyService/Unknown", "*"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			if got := PermissionForGRPCMethod(tt.method); got != tt.want {
+				t.Errorf("PermissionForGRPCMethod(%q) = %q, want %q", tt.method, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsHealthPathOrMethod(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/health", true},
+		{"/livez", true},
+		{"/readyz", true},
+		{"/readyz/llm", true},
+		{"privacy.local.PrivacyService/Health", true},
+		{"/v1/privacy/mask", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := IsHealthPathOrMethod(tt.path); got != tt.want {
+				t.Errorf("IsHealthPathOrMethod(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAuthMiddleware_Disabled(t *testing.T) {
+	ResetSettings()
+	t.Setenv("PRIVACY_AUTH_ENABLED", "false")
+	ResetSettings()
+
+	r := gin.New()
+	r.Use(AuthMiddleware())
+	r.GET("/test", func(c *gin.Context) {
+		id := GetIdentity(c)
+		if id == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "no identity"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"name": id.Name})
+	})
+
+	w := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, w)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthMiddleware_Enabled_NoToken(t *testing.T) {
+	ResetSettings()
+	t.Setenv("PRIVACY_AUTH_ENABLED", "true")
+	t.Setenv("PRIVACY_AUTH_INTERNAL_API_KEYS", "test-key-1234567890:internal-svc:*")
+	ResetSettings()
+
+	r := gin.New()
+	r.Use(AuthMiddleware())
+	r.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, w)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthMiddleware_Enabled_ValidToken(t *testing.T) {
+	ResetSettings()
+	t.Setenv("PRIVACY_AUTH_ENABLED", "true")
+	t.Setenv("PRIVACY_AUTH_INTERNAL_API_KEYS", "test-key-1234567890:internal-svc:*")
+	ResetSettings()
+
+	r := gin.New()
+	r.Use(AuthMiddleware())
+	r.GET("/test", func(c *gin.Context) {
+		id := GetIdentity(c)
+		c.JSON(http.StatusOK, gin.H{"name": id.Name})
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", "Bearer test-key-1234567890")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRequirePermission(t *testing.T) {
+	ResetSettings()
+	t.Setenv("PRIVACY_AUTH_ENABLED", "true")
+	t.Setenv("PRIVACY_AUTH_INTERNAL_API_KEYS", "limited-key-123456:limited-svc:privacy:mask")
+	ResetSettings()
+
+	r := gin.New()
+	r.Use(AuthMiddleware())
+	r.GET("/protected", RequirePermission("privacy:dp"), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.Header.Set("Authorization", "Bearer limited-key-123456")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	r := gin.New()
+	r.Use(SecurityHeadersMiddleware())
+	r.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+}

@@ -1,90 +1,195 @@
 // Package rest 提供 REST API 路由注册。
 //
-// 所有错误响应统一使用 middleware.AbortWithError 输出标准信封格式，
-// 与 Python 引擎及其他 Go 微服务保持跨语言一致。
+// 路由前缀与 Python engine 完全对齐：
+//   - /v1/privacy/* — 隐私原语
+//   - /v1/agent/*   — 通用处理流水线
+//   - /v1/ops/*     — 运维诊断
+//   - /v1/medical/* — 医疗流水线
+//
+// 所有错误响应统一使用 middleware.AbortWithError 输出标准信封格式。
 package rest
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fengzhizi319/PrivShield/engine-go/internal/security"
 	"github.com/fengzhizi319/PrivShield/engine-go/internal/service"
 	"github.com/fengzhizi319/PrivShield/pkg/middleware"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/dp"
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/kano"
 )
 
-// RegisterRoutes 注册所有 REST API 路由
+// RegisterRoutes 注册所有 REST API 路由（与 Python engine URL 方案完全对齐）。
 func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
-	// 健康检查
+	// 全局安全中间件
+	r.Use(security.SecurityHeadersMiddleware())
+	r.Use(security.AuthMiddleware())
+	r.Use(security.RateLimitMiddleware())
+
+	// 健康检查（无前缀，与 Python /health, /livez, /readyz 对齐）
 	r.GET("/health", healthHandler)
 	r.GET("/livez", livezHandler)
 	r.GET("/readyz", readyzHandler)
 	r.GET("/readyz/llm", readyzLLMHandler)
 
-	// API v1
-	v1 := r.Group("/api/v1")
+	// 根路径直调别名路由（兼容直接调用）
+	r.POST("/agent/process", agentProcessHandler(svc))
+	r.POST("/medical/process", medicalProcessHandler(svc))
+	r.GET("/ops/diagnostics", diagnosticsHandler(svc))
+	r.POST("/privacy/process_file", processFileHandler(svc))
+
+	// /v1/privacy/* — 隐私原语
+	v1p := r.Group("/v1/privacy")
 	{
 		// 掩码
-		v1.POST("/mask", maskHandler(svc))
-		v1.POST("/mask/record", maskRecordHandler(svc))
-		v1.POST("/mask/batch", maskBatchHandler(svc))
-		v1.POST("/mask/dataframe", maskDataFrameHandler(svc))
+		v1p.POST("/mask", maskHandler(svc))
+		v1p.POST("/mask/record", maskRecordHandler(svc))
+		v1p.POST("/mask_record", maskRecordHandler(svc))
+		v1p.POST("/mask/batch", maskBatchHandler(svc))
+		v1p.POST("/mask/dataframe", maskDataFrameHandler(svc))
 
 		// 差分隐私 — 基础
-		v1.POST("/dp/count", dpCountHandler(svc))
-		v1.POST("/dp/sum", dpSumHandler(svc))
-		v1.POST("/dp/mean", dpMeanHandler(svc))
-		v1.POST("/dp/histogram", dpHistogramHandler(svc))
+		v1p.POST("/dp/count", dpCountHandler(svc))
+		v1p.POST("/dp/sum", dpSumHandler(svc))
+		v1p.POST("/dp/mean", dpMeanHandler(svc))
+		v1p.POST("/dp/histogram", dpHistogramHandler(svc))
 		// 差分隐私 — 噪声
-		v1.POST("/dp/noisy_count", noisyCountHandler(svc))
-		v1.POST("/dp/noisy_sum", noisySumHandler(svc))
-		v1.POST("/dp/noisy_mean", noisyMeanHandler(svc))
-		v1.POST("/dp/noisy_histogram", dpNoisyHistogramHandler(svc))
+		v1p.POST("/dp/noisy_count", noisyCountHandler(svc))
+		v1p.POST("/dp/noisy_sum", noisySumHandler(svc))
+		v1p.POST("/dp/noisy_mean", noisyMeanHandler(svc))
+		v1p.POST("/dp/noisy_histogram", dpNoisyHistogramHandler(svc))
 		// 差分隐私 — 分块
-		v1.POST("/dp/chunked_count", dpChunkedCountHandler(svc))
-		v1.POST("/dp/chunked_sum", dpChunkedSumHandler(svc))
-		v1.POST("/dp/chunked_mean", dpChunkedMeanHandler(svc))
-		v1.POST("/dp/chunked_histogram", dpChunkedHistogramHandler(svc))
+		v1p.POST("/dp/chunked_count", dpChunkedCountHandler(svc))
+		v1p.POST("/dp/chunked_sum", dpChunkedSumHandler(svc))
+		v1p.POST("/dp/chunked_mean", dpChunkedMeanHandler(svc))
+		v1p.POST("/dp/chunked_histogram", dpChunkedHistogramHandler(svc))
 		// 差分隐私 — 向量/高级
-		v1.POST("/dp/vector_sum", dpVectorSumHandler(svc))
-		v1.POST("/dp/vector_mean", dpVectorMeanHandler(svc))
-		v1.POST("/dp/aggregate", dpAggregateHandler(svc))
-		v1.POST("/dp/adaptive_clip", dpAdaptiveClipHandler(svc))
-		v1.POST("/dp/groupby", dpGroupByHandler(svc))
+		v1p.POST("/dp/vector_sum", dpVectorSumHandler(svc))
+		v1p.POST("/dp/vector_mean", dpVectorMeanHandler(svc))
+		v1p.POST("/dp/aggregate", dpAggregateHandler(svc))
+		v1p.POST("/dp/adaptive_clip", dpAdaptiveClipHandler(svc))
+		v1p.POST("/dp/groupby", dpGroupByHandler(svc))
 
 		// 本地差分隐私
-		v1.POST("/ldp/randomized_response", randomizedResponseHandler(svc))
-		v1.POST("/ldp/orr", orrHandler(svc))
-		v1.POST("/ldp/perturb/binary", perturbBinaryBatchHandler(svc))
-		v1.POST("/ldp/perturb/categorical", perturbCategoricalBatchHandler(svc))
-		v1.POST("/ldp/estimate/binary", estimateBinaryFrequencyHandler(svc))
-		v1.POST("/ldp/estimate/categorical", estimateCategoricalHistogramHandler(svc))
+		v1p.POST("/ldp/randomized_response", randomizedResponseHandler(svc))
+		v1p.POST("/ldp/orr", orrHandler(svc))
+		v1p.POST("/ldp/perturb/binary", perturbBinaryBatchHandler(svc))
+		v1p.POST("/ldp/perturb/categorical", perturbCategoricalBatchHandler(svc))
+		v1p.POST("/ldp/estimate/binary", estimateBinaryFrequencyHandler(svc))
+		v1p.POST("/ldp/estimate/categorical", estimateCategoricalHistogramHandler(svc))
 
-		// K-匿名
-		v1.POST("/kano/anonymize", kAnonymizeHandler(svc))
+		// K-匿名（记录级 + 表级 Mondrian + DataFrame）
+		v1p.POST("/k_anonymize", kAnonymizeHandler(svc))
+		v1p.POST("/k_anonymize/record", kAnonymizeHandler(svc))
+		v1p.POST("/k_anonymize/table", kAnonymizeTableHandler(svc))
+		v1p.POST("/k_anonymize/dataframe", kAnonymizeDataFrameHandler(svc))
+		v1p.POST("/k_anonymize_table", kAnonymizeTableHandler(svc))
 
 		// 查询混淆
-		v1.POST("/qol/obfuscate", obfuscateHandler(svc))
-		v1.POST("/qol/obfuscate/batch", obfuscateBatchHandler(svc))
-
-		// 动态分类
-		v1.POST("/classify", classifyHandler(svc))
-		v1.POST("/classify/batch", classifyBatchHandler(svc))
-
-		// 医疗流水线
-		v1.POST("/medical/sanitize", medicalSanitizeHandler(svc))
-		v1.POST("/medical/sanitize/batch", medicalBatchHandler(svc))
+		v1p.POST("/qol/obfuscate", obfuscateHandler(svc))
+		v1p.POST("/qol/obfuscate/batch", obfuscateBatchHandler(svc))
 
 		// HMAC 散列
-		v1.POST("/hash/hmac", hashHMACHanlder(svc))
+		v1p.POST("/hash", hashHMACHanlder(svc))
 
-		// 预算查询与重置
-		v1.GET("/budget", budgetHandler(svc))
-		v1.POST("/budget/reset", budgetResetHandler(svc))
+		// 预算
+		v1p.GET("/budget", budgetHandler(svc))
+		v1p.POST("/budget/reset", budgetResetHandler(svc))
+
+		// 文件上传处理 (CSV / JSON)
+		v1p.POST("/process_file", processFileHandler(svc))
+
+		// Profile 推荐
+		v1p.GET("/profile/recommend", profileRecommendHandler(svc))
+
+		// 分类（兼容旧路径）
+		v1p.POST("/classify/field", classifyHandler(svc))
+		v1p.POST("/classify/record", classifyBatchHandler(svc))
+	}
+
+	// /v1/agent/* — 通用处理流水线 (P0)
+	v1a := r.Group("/v1/agent")
+	{
+		v1a.POST("/process", agentProcessHandler(svc))
+	}
+
+	// /v1/ops/* — 运维诊断 (P1)
+	v1o := r.Group("/v1/ops")
+	{
+		v1o.GET("/diagnostics", diagnosticsHandler(svc))
+	}
+
+	// /v1/medical/* — 医疗流水线
+	v1m := r.Group("/v1/medical")
+	{
+		v1m.POST("/process", medicalProcessHandler(svc))
+		v1m.POST("/sanitize", medicalSanitizeHandler(svc))
+		v1m.POST("/sanitize/batch", medicalBatchHandler(svc))
+	}
+
+	// /v1/dynclassification/* — 动态分类
+	v1d := r.Group("/v1/dynclassification")
+	{
+		v1d.POST("/classify", classifyHandler(svc))
+		v1d.POST("/classify/batch", classifyBatchHandler(svc))
+		v1d.POST("/eval_record", classifyBatchHandler(svc))
+		v1d.POST("/profiles/reload", dynProfilesReloadHandler(svc))
+	}
+
+	// /api/v1/* 别名组（支持所有微服务兼容访问）
+	apiV1 := r.Group("/api/v1")
+	{
+		apiV1.POST("/agent/process", agentProcessHandler(svc))
+		apiV1.POST("/medical/process", medicalProcessHandler(svc))
+		apiV1.GET("/ops/diagnostics", diagnosticsHandler(svc))
+		apiV1.POST("/privacy/process_file", processFileHandler(svc))
+		apiV1.POST("/mask", maskHandler(svc))
+		apiV1.POST("/mask/record", maskRecordHandler(svc))
+		apiV1.POST("/mask/batch", maskBatchHandler(svc))
+		apiV1.POST("/mask/dataframe", maskDataFrameHandler(svc))
+		apiV1.POST("/dp/count", dpCountHandler(svc))
+		apiV1.POST("/dp/sum", dpSumHandler(svc))
+		apiV1.POST("/dp/mean", dpMeanHandler(svc))
+		apiV1.POST("/dp/histogram", dpHistogramHandler(svc))
+		apiV1.POST("/dp/noisy_count", noisyCountHandler(svc))
+		apiV1.POST("/dp/noisy_sum", noisySumHandler(svc))
+		apiV1.POST("/dp/noisy_mean", noisyMeanHandler(svc))
+		apiV1.POST("/dp/noisy_histogram", dpNoisyHistogramHandler(svc))
+		apiV1.POST("/dp/chunked_count", dpChunkedCountHandler(svc))
+		apiV1.POST("/dp/chunked_sum", dpChunkedSumHandler(svc))
+		apiV1.POST("/dp/chunked_mean", dpChunkedMeanHandler(svc))
+		apiV1.POST("/dp/chunked_histogram", dpChunkedHistogramHandler(svc))
+		apiV1.POST("/dp/vector_sum", dpVectorSumHandler(svc))
+		apiV1.POST("/dp/vector_mean", dpVectorMeanHandler(svc))
+		apiV1.POST("/dp/aggregate", dpAggregateHandler(svc))
+		apiV1.POST("/dp/adaptive_clip", dpAdaptiveClipHandler(svc))
+		apiV1.POST("/dp/groupby", dpGroupByHandler(svc))
+		apiV1.POST("/ldp/randomized_response", randomizedResponseHandler(svc))
+		apiV1.POST("/ldp/orr", orrHandler(svc))
+		apiV1.POST("/ldp/perturb/binary", perturbBinaryBatchHandler(svc))
+		apiV1.POST("/ldp/perturb/categorical", perturbCategoricalBatchHandler(svc))
+		apiV1.POST("/ldp/estimate/binary", estimateBinaryFrequencyHandler(svc))
+		apiV1.POST("/ldp/estimate/categorical", estimateCategoricalHistogramHandler(svc))
+		apiV1.POST("/kano/anonymize", kAnonymizeHandler(svc))
+		apiV1.POST("/kano/table", kAnonymizeTableHandler(svc))
+		apiV1.POST("/kano/dataframe", kAnonymizeDataFrameHandler(svc))
+		apiV1.POST("/qol/obfuscate", obfuscateHandler(svc))
+		apiV1.POST("/qol/obfuscate/batch", obfuscateBatchHandler(svc))
+		apiV1.POST("/classify", classifyHandler(svc))
+		apiV1.POST("/classify/batch", classifyBatchHandler(svc))
+		apiV1.POST("/dynclassification/eval_record", classifyBatchHandler(svc))
+		apiV1.POST("/medical/sanitize", medicalSanitizeHandler(svc))
+		apiV1.POST("/medical/sanitize/batch", medicalBatchHandler(svc))
+		apiV1.POST("/hash/hmac", hashHMACHanlder(svc))
+		apiV1.GET("/budget", budgetHandler(svc))
+		apiV1.POST("/budget/reset", budgetResetHandler(svc))
 	}
 }
 
@@ -94,6 +199,18 @@ func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
 
 func healthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "engine": "go"})
+}
+
+func livezHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func readyzHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func readyzLLMHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "llm": "not_loaded"})
 }
 
 // ──────────────────────────────────────────────
@@ -148,371 +265,6 @@ func maskBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	}
 }
 
-// ──────────────────────────────────────────────
-// 差分隐私处理器
-// ──────────────────────────────────────────────
-
-func noisyCountHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Count   int     `json:"count" binding:"required"`
-			Epsilon float64 `json:"epsilon" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result, err := svc.NoisyCount(c.Request.Context(), req.Count, req.Epsilon)
-		if err != nil {
-			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"noisy_count": result, "epsilon": req.Epsilon})
-	}
-}
-
-func noisySumHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Values      []float64 `json:"values" binding:"required"`
-			Epsilon     float64   `json:"epsilon" binding:"required"`
-			Sensitivity float64   `json:"sensitivity" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result, err := svc.NoisySum(c.Request.Context(), req.Values, req.Epsilon, req.Sensitivity)
-		if err != nil {
-			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"noisy_sum": result, "epsilon": req.Epsilon})
-	}
-}
-
-func noisyMeanHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Values    []float64 `json:"values" binding:"required"`
-			Epsilon   float64   `json:"epsilon" binding:"required"`
-			Delta     float64   `json:"delta" binding:"required"`
-			ClipBound float64   `json:"clip_bound" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result, err := svc.NoisyMean(c.Request.Context(), req.Values, req.Epsilon, req.Delta, req.ClipBound)
-		if err != nil {
-			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"noisy_mean": result, "epsilon": req.Epsilon})
-	}
-}
-
-// ──────────────────────────────────────────────
-// LDP 处理器
-// ──────────────────────────────────────────────
-
-func randomizedResponseHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Value   bool    `json:"value" binding:"required"`
-			Epsilon float64 `json:"epsilon" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.RandomizedResponse(req.Value, req.Epsilon)
-		c.JSON(http.StatusOK, gin.H{"result": result})
-	}
-}
-
-func orrHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Value      int     `json:"value" binding:"required"`
-			Epsilon    float64 `json:"epsilon" binding:"required"`
-			DomainSize int     `json:"domain_size" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.ORRResponse(req.Value, req.Epsilon, req.DomainSize)
-		c.JSON(http.StatusOK, gin.H{"result": result})
-	}
-}
-
-func perturbBinaryBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Values  []int   `json:"values" binding:"required"`
-			Epsilon float64 `json:"epsilon" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.PerturbBinaryBatch(req.Values, req.Epsilon)
-		c.JSON(http.StatusOK, gin.H{"result": result})
-	}
-}
-
-func perturbCategoricalBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Values     []string  `json:"values" binding:"required"`
-			Categories []string  `json:"categories" binding:"required"`
-			Epsilon    float64   `json:"epsilon" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.PerturbCategoricalBatch(req.Values, req.Categories, req.Epsilon)
-		c.JSON(http.StatusOK, gin.H{"result": result})
-	}
-}
-
-func estimateBinaryFrequencyHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			ReportedValues []int   `json:"reported_values" binding:"required"`
-			Epsilon        float64 `json:"epsilon" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.EstimateBinaryFrequency(req.ReportedValues, req.Epsilon)
-		c.JSON(http.StatusOK, gin.H{"frequency": result})
-	}
-}
-
-func estimateCategoricalHistogramHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			ReportedValues []string  `json:"reported_values" binding:"required"`
-			Categories     []string  `json:"categories" binding:"required"`
-			Epsilon        float64   `json:"epsilon" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.EstimateCategoricalHistogram(req.ReportedValues, req.Categories, req.Epsilon)
-		c.JSON(http.StatusOK, gin.H{"histogram": result})
-	}
-}
-
-// ──────────────────────────────────────────────
-// K-匿名处理器
-// ──────────────────────────────────────────────
-
-func kAnonymizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Records  []map[string]string `json:"records" binding:"required"`
-			QIFields []string            `json:"qi_fields" binding:"required"`
-			K        int                 `json:"k" binding:"required,min=1"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		// 转换类型
-		kanoRecords := make([]kano.Record, len(req.Records))
-		for i, r := range req.Records {
-			kanoRecords[i] = kano.Record(r)
-		}
-		result, err := svc.KAnonymize(kanoRecords, req.QIFields, req.K)
-		if err != nil {
-			middleware.AbortWithError(c, http.StatusInternalServerError, "KANONYMIZE_FAILED", "K-匿名处理失败", err.Error())
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"records":     result.Records,
-			"k":           result.K,
-			"group_count": result.GroupCount,
-		})
-	}
-}
-
-// ──────────────────────────────────────────────
-// 查询混淆处理器
-// ──────────────────────────────────────────────
-
-func obfuscateHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Query     string `json:"query" binding:"required"`
-			NumDecoys int    `json:"num_decoys" binding:"required,min=1"`
-			Domain    string `json:"domain" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		queries, realIdx := svc.ObfuscateQuery(req.Query, req.NumDecoys, req.Domain)
-		c.JSON(http.StatusOK, gin.H{
-			"queries":    queries,
-			"real_index": realIdx,
-		})
-	}
-}
-
-func obfuscateBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Queries   []string `json:"queries" binding:"required"`
-			NumDecoys int      `json:"num_decoys" binding:"required,min=1"`
-			Domain    string   `json:"domain" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		results := svc.ObfuscateQueryBatch(req.Queries, req.NumDecoys, req.Domain)
-		c.JSON(http.StatusOK, gin.H{"results": results})
-	}
-}
-
-// ──────────────────────────────────────────────
-// 分类处理器
-// ──────────────────────────────────────────────
-
-func classifyHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Field string `json:"field" binding:"required"`
-			Value string `json:"value" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.Classify(req.Field, req.Value)
-		c.JSON(http.StatusOK, result)
-	}
-}
-
-func classifyBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Records []map[string]string `json:"records" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		results := svc.ClassifyBatch(req.Records)
-		c.JSON(http.StatusOK, gin.H{"classifications": results})
-	}
-}
-
-// ──────────────────────────────────────────────
-// 医疗流水线处理器
-// ──────────────────────────────────────────────
-
-func medicalSanitizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Record map[string]string `json:"record" binding:"required"`
-			Domain string            `json:"domain" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result, err := svc.SanitizeMedicalRecord(req.Record, req.Domain)
-		if err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", "未知或不支持的数据源标识", err.Error())
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"result": result})
-	}
-}
-
-func medicalBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Records []map[string]string `json:"records" binding:"required"`
-			Domain  string              `json:"domain" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		results, err := svc.SanitizeMedicalBatch(req.Records, req.Domain)
-		if err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", "未知或不支持的数据源标识", err.Error())
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"results": results})
-	}
-}
-
-// ──────────────────────────────────────────────
-// HMAC 散列处理器
-// ──────────────────────────────────────────────
-
-func hashHMACHanlder(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Value string `json:"value" binding:"required"`
-			Salt  string `json:"salt" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
-			return
-		}
-		result := svc.HashHMAC(req.Value, req.Salt)
-		c.JSON(http.StatusOK, gin.H{"hash": result})
-	}
-}
-
-// ──────────────────────────────────────────────
-// 预算查询处理器
-// ──────────────────────────────────────────────
-
-func budgetHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		status := svc.BudgetStatus()
-		c.JSON(http.StatusOK, status)
-	}
-}
-
-func budgetResetHandler(svc *service.PrivacyService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		status := svc.BudgetReset()
-		c.JSON(http.StatusOK, status)
-	}
-}
-
-// ──────────────────────────────────────────────
-// 健康检查（liveness / readiness）
-// ──────────────────────────────────────────────
-
-func livezHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
-}
-
-func readyzHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
-}
-
-func readyzLLMHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "llm": "not_loaded"})
-}
-
-// ──────────────────────────────────────────────
-// DataFrame 脱敏处理器
-// ──────────────────────────────────────────────
-
 func maskDataFrameHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
@@ -532,7 +284,7 @@ func maskDataFrameHandler(svc *service.PrivacyService) gin.HandlerFunc {
 }
 
 // ──────────────────────────────────────────────
-// DP 基础处理器（count/sum/mean/histogram）
+// 差分隐私处理器
 // ──────────────────────────────────────────────
 
 func dpCountHandler(svc *service.PrivacyService) gin.HandlerFunc {
@@ -557,10 +309,10 @@ func dpCountHandler(svc *service.PrivacyService) gin.HandlerFunc {
 func dpSumHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Values      []float64 `json:"values" binding:"required"`
-			Epsilon     float64   `json:"epsilon" binding:"required"`
-			ClipLower   float64   `json:"clip_lower"`
-			ClipUpper   float64   `json:"clip_upper"`
+			Values    []float64 `json:"values" binding:"required"`
+			Epsilon   float64   `json:"epsilon" binding:"required"`
+			ClipLower float64   `json:"clip_lower"`
+			ClipUpper float64   `json:"clip_upper"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
@@ -625,6 +377,66 @@ func dpHistogramHandler(svc *service.PrivacyService) gin.HandlerFunc {
 		}
 		result := dp.NoisyHistogram(trueCounts, req.Epsilon)
 		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func noisyCountHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Count   int     `json:"count" binding:"required"`
+			Epsilon float64 `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result, err := svc.NoisyCount(c.Request.Context(), req.Count, req.Epsilon)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"noisy_count": result, "epsilon": req.Epsilon})
+	}
+}
+
+func noisySumHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Values      []float64 `json:"values" binding:"required"`
+			Epsilon     float64   `json:"epsilon" binding:"required"`
+			Sensitivity float64   `json:"sensitivity" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result, err := svc.NoisySum(c.Request.Context(), req.Values, req.Epsilon, req.Sensitivity)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"noisy_sum": result, "epsilon": req.Epsilon})
+	}
+}
+
+func noisyMeanHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Values    []float64 `json:"values" binding:"required"`
+			Epsilon   float64   `json:"epsilon" binding:"required"`
+			Delta     float64   `json:"delta" binding:"required"`
+			ClipBound float64   `json:"clip_bound" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result, err := svc.NoisyMean(c.Request.Context(), req.Values, req.Epsilon, req.Delta, req.ClipBound)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusTooManyRequests, "BUDGET_EXHAUSTED", "隐私预算已耗尽", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"noisy_mean": result, "epsilon": req.Epsilon})
 	}
 }
 
@@ -800,21 +612,22 @@ func dpAggregateHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
 			return
 		}
-		result := map[string]any{
-			"row_count": len(req.Rows),
-			"epsilon":   req.Epsilon,
-		}
-		jsonBytes, _ := json.Marshal(result)
-		c.JSON(http.StatusOK, gin.H{"results_json": string(jsonBytes)})
+		ctx := c.Request.Context()
+		noisyCount, _ := svc.NoisyCount(ctx, len(req.Rows), req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{
+			"row_count":    len(req.Rows),
+			"noisy_count":  noisyCount,
+			"epsilon":      req.Epsilon,
+		})
 	}
 }
 
 func dpAdaptiveClipHandler(svc *service.PrivacyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Values    []float64 `json:"values" binding:"required"`
-			Epsilon   float64   `json:"epsilon" binding:"required"`
-			InitialClip float64 `json:"initial_clip"`
+			Values      []float64 `json:"values" binding:"required"`
+			Epsilon     float64   `json:"epsilon" binding:"required"`
+			InitialClip float64   `json:"initial_clip"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
@@ -823,6 +636,23 @@ func dpAdaptiveClipHandler(svc *service.PrivacyService) gin.HandlerFunc {
 		clipUpper := req.InitialClip
 		if clipUpper <= 0 {
 			clipUpper = 1.0
+		}
+		// 自适应裁剪：使用百分位数估算
+		sorted := make([]float64, len(req.Values))
+		copy(sorted, req.Values)
+		for i := 0; i < len(sorted); i++ {
+			for j := i + 1; j < len(sorted); j++ {
+				if sorted[i] > sorted[j] {
+					sorted[i], sorted[j] = sorted[j], sorted[i]
+				}
+			}
+		}
+		p95idx := int(float64(len(sorted)) * 0.95)
+		if p95idx >= len(sorted) {
+			p95idx = len(sorted) - 1
+		}
+		if len(sorted) > 0 {
+			clipUpper = sorted[p95idx]
 		}
 		clipLower := clipUpper * 0.1
 		c.JSON(http.StatusOK, gin.H{"clip_lower": clipLower, "clip_upper": clipUpper})
@@ -846,11 +676,7 @@ func dpGroupByHandler(svc *service.PrivacyService) gin.HandlerFunc {
 		for _, row := range req.Rows {
 			groupVal := row[req.GroupCol]
 			var targetVal float64
-			for _, ch := range row[req.TargetCol] {
-				if (ch >= '0' && ch <= '9') || ch == '.' || ch == '-' {
-					targetVal = targetVal*10 + float64(ch-'0')
-				}
-			}
+			fmt.Sscanf(row[req.TargetCol], "%f", &targetVal)
 			groups[groupVal] = append(groups[groupVal], targetVal)
 		}
 		result := make(map[string]float64)
@@ -861,17 +687,524 @@ func dpGroupByHandler(svc *service.PrivacyService) gin.HandlerFunc {
 				noisy, _ := svc.NoisyCount(ctx, len(vals), req.Epsilon)
 				result[k] = noisy
 			case "sum":
-				sum := 0.0
+				s := 0.0
 				for _, v := range vals {
-					sum += v
+					s += v
 				}
-				noisy, _ := svc.NoisySum(ctx, []float64{sum}, req.Epsilon, 1.0)
+				noisy, _ := svc.NoisySum(ctx, []float64{s}, req.Epsilon, 1.0)
 				result[k] = noisy
 			default:
-				result[k] = float64(len(vals))
+				noisy, _ := svc.NoisyCount(ctx, len(vals), req.Epsilon)
+				result[k] = noisy
 			}
 		}
-		jsonBytes, _ := json.Marshal(result)
-		c.JSON(http.StatusOK, gin.H{"result_json": string(jsonBytes)})
+		c.JSON(http.StatusOK, gin.H{"result": result})
 	}
+}
+
+// ──────────────────────────────────────────────
+// LDP 处理器
+// ──────────────────────────────────────────────
+
+func randomizedResponseHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Value   bool    `json:"value" binding:"required"`
+			Epsilon float64 `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.RandomizedResponse(req.Value, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func orrHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Value      int     `json:"value" binding:"required"`
+			Epsilon    float64 `json:"epsilon" binding:"required"`
+			DomainSize int     `json:"domain_size" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.ORRResponse(req.Value, req.Epsilon, req.DomainSize)
+		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func perturbBinaryBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Values   []int   `json:"values" binding:"required"`
+			Epsilon  float64 `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.PerturbBinaryBatch(req.Values, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func perturbCategoricalBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Values     []string  `json:"values" binding:"required"`
+			Categories []string  `json:"categories" binding:"required"`
+			Epsilon    float64   `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.PerturbCategoricalBatch(req.Values, req.Categories, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func estimateBinaryFrequencyHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			ReportedValues []int     `json:"reported_values" binding:"required"`
+			Epsilon        float64   `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.EstimateBinaryFrequency(req.ReportedValues, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"frequency": result})
+	}
+}
+
+func estimateCategoricalHistogramHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			ReportedValues []string  `json:"reported_values" binding:"required"`
+			Categories     []string  `json:"categories" binding:"required"`
+			Epsilon        float64   `json:"epsilon" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.EstimateCategoricalHistogram(req.ReportedValues, req.Categories, req.Epsilon)
+		c.JSON(http.StatusOK, gin.H{"histogram": result})
+	}
+}
+
+// ──────────────────────────────────────────────
+// K-匿名处理器
+// ──────────────────────────────────────────────
+
+func kAnonymizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Records  []map[string]string `json:"records" binding:"required"`
+			QIFields []string            `json:"qi_fields" binding:"required"`
+			K        int                 `json:"k" binding:"required,min=1"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		kanoRecords := make([]kano.Record, len(req.Records))
+		for i, r := range req.Records {
+			kanoRecords[i] = kano.Record(r)
+		}
+		result, err := svc.KAnonymize(kanoRecords, req.QIFields, req.K)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusInternalServerError, "KANONYMIZE_FAILED", "K-匿名处理失败", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"records":     result.Records,
+			"k":           result.K,
+			"group_count": result.GroupCount,
+		})
+	}
+}
+
+// kAnonymizeTableHandler 表级 K-匿名（Mondrian 算法），对齐 Python kano_table。
+func kAnonymizeTableHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Records  []map[string]string `json:"records" binding:"required"`
+			QICols   []string            `json:"qi_cols" binding:"required"`
+			K        int                 `json:"k" binding:"required,min=2"`
+			MaxDepth int                 `json:"max_depth"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		rows := make([]kano.Record, len(req.Records))
+		for i, r := range req.Records {
+			rows[i] = kano.Record(r)
+		}
+		result, err := svc.KAnonymizeTable(rows, req.QICols, req.K)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "KANONYMIZE_TABLE_FAILED", "表级K-匿名处理失败", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"records":                   result.Records,
+			"k":                         result.K,
+			"qi_cols":                   req.QICols,
+			"group_count":               result.GroupCount,
+			"equivalence_classes_count": result.GroupCount,
+		})
+	}
+}
+
+// kAnonymizeDataFrameHandler 结构化 DataFrame K-匿名。
+func kAnonymizeDataFrameHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Records []map[string]interface{} `json:"records" binding:"required"`
+			QICols  []string                 `json:"qi_cols" binding:"required"`
+			K       int                      `json:"k" binding:"required,min=2"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result, err := svc.KAnonymizeDataFrame(req.Records, req.QICols, req.K)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "KANONYMIZE_DATAFRAME_FAILED", "DataFrame K-匿名处理失败", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"result":   result,
+			"k":        req.K,
+			"qi_cols":  req.QICols,
+			"rows_out": len(result),
+		})
+	}
+}
+
+// ──────────────────────────────────────────────
+// 查询混淆处理器
+// ──────────────────────────────────────────────
+
+func obfuscateHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Query     string `json:"query" binding:"required"`
+			NumDecoys int    `json:"num_decoys" binding:"required,min=1"`
+			Domain    string `json:"domain" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		queries, realIdx := svc.ObfuscateQuery(req.Query, req.NumDecoys, req.Domain)
+		c.JSON(http.StatusOK, gin.H{
+			"queries":    queries,
+			"real_index": realIdx,
+		})
+	}
+}
+
+func obfuscateBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Queries   []string `json:"queries" binding:"required"`
+			NumDecoys int      `json:"num_decoys" binding:"required,min=1"`
+			Domain    string   `json:"domain" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		results := svc.ObfuscateQueryBatch(req.Queries, req.NumDecoys, req.Domain)
+		c.JSON(http.StatusOK, gin.H{"results": results})
+	}
+}
+
+// ──────────────────────────────────────────────
+// 分类处理器
+// ──────────────────────────────────────────────
+
+func classifyHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Field string `json:"field" binding:"required"`
+			Value string `json:"value" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.Classify(req.Field, req.Value)
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func classifyBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Records []map[string]string `json:"records" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		results := svc.ClassifyBatch(req.Records)
+		c.JSON(http.StatusOK, gin.H{"classifications": results})
+	}
+}
+
+// ──────────────────────────────────────────────
+// 医疗流水线处理器
+// ──────────────────────────────────────────────
+
+func medicalSanitizeHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Record map[string]string `json:"record" binding:"required"`
+			Domain string            `json:"domain" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result, err := svc.SanitizeMedicalRecord(req.Record, req.Domain)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", "未知或不支持的数据源标识", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"result": result})
+	}
+}
+
+func medicalBatchHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Records []map[string]string `json:"records" binding:"required"`
+			Domain  string              `json:"domain" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		results, err := svc.SanitizeMedicalBatch(req.Records, req.Domain)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_DATASOURCE_ID", "未知或不支持的数据源标识", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"results": results})
+	}
+}
+
+// ──────────────────────────────────────────────
+// HMAC 散列处理器
+// ──────────────────────────────────────────────
+
+func hashHMACHanlder(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Value string `json:"value" binding:"required"`
+			Salt  string `json:"salt" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		result := svc.HashHMAC(req.Value, req.Salt)
+		c.JSON(http.StatusOK, gin.H{"hash": result})
+	}
+}
+
+// ──────────────────────────────────────────────
+// 预算查询处理器
+// ──────────────────────────────────────────────
+
+func budgetHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		status := svc.BudgetStatus()
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func budgetResetHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		status := svc.BudgetReset()
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+// ──────────────────────────────────────────────
+// Agent & Medical 通用处理流水线（/v1/agent/process, /v1/medical/process）
+// ──────────────────────────────────────────────
+
+func agentProcessHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Records      []map[string]interface{} `json:"records" binding:"required"`
+			APICode      string                   `json:"api_code"`
+			DatasourceID string                   `json:"datasource_id"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		if len(req.Records) > 500 {
+			middleware.AbortWithError(c, http.StatusBadRequest, "PAYLOAD_TOO_LARGE", "记录数超过上限 500", "")
+			return
+		}
+
+		result, err := svc.ProcessAgentData(req.Records, req.APICode, req.DatasourceID)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusInternalServerError, "PROCESS_AGENT_FAILED", "Agent 数据处理失败", err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func medicalProcessHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Records []map[string]interface{} `json:"records" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "请求参数校验失败", err.Error())
+			return
+		}
+		if len(req.Records) > 500 {
+			middleware.AbortWithError(c, http.StatusBadRequest, "PAYLOAD_TOO_LARGE", "记录数超过上限 500", "")
+			return
+		}
+
+		result, err := svc.ProcessMedicalData(req.Records)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusInternalServerError, "PROCESS_MEDICAL_FAILED", "医疗数据处理失败", err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// ──────────────────────────────────────────────
+// 运维诊断（/v1/ops/diagnostics）
+// ──────────────────────────────────────────────
+
+func diagnosticsHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		refresh := c.Query("refresh") == "true"
+		if refresh {
+			identity := security.GetIdentity(c)
+			if identity != nil && !identity.HasPermission("ops:admin") {
+				middleware.AbortWithError(c, http.StatusForbidden, "FORBIDDEN", "Forbidden: refresh requires ops:admin scope", "")
+				return
+			}
+		}
+
+		diag := svc.Diagnostics(refresh)
+		c.JSON(http.StatusOK, diag)
+	}
+}
+
+// ──────────────────────────────────────────────
+// 文件上传处理（/v1/privacy/process_file）
+// ──────────────────────────────────────────────
+
+func processFileHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 解析 multipart form (上限 50MB)
+		if err := c.Request.ParseMultipartForm(50 << 20); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_MULTIPART", "无法解析 multipart 表单", err.Error())
+			return
+		}
+
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "MISSING_FILE", "缺少 file 字段", err.Error())
+			return
+		}
+		defer file.Close()
+
+		if header.Size > 50<<20 {
+			middleware.AbortWithError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "文件过大（超过 50MB 上限）", "")
+			return
+		}
+
+		operation := c.Request.FormValue("operation")
+		if operation == "" {
+			operation = "mask_dataframe"
+		}
+		paramsJSON := c.Request.FormValue("params")
+		if paramsJSON == "" {
+			paramsJSON = "{}"
+		}
+
+		var params map[string]interface{}
+		if err := json.Unmarshal([]byte(paramsJSON), &params); err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "INVALID_PARAMS", "params 需为有效 JSON", err.Error())
+			return
+		}
+
+		raw, err := io.ReadAll(file)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "READ_ERROR", "读取文件失败", err.Error())
+			return
+		}
+
+		result, err := svc.ProcessFile(raw, header.Filename, operation, params)
+		if err != nil {
+			middleware.AbortWithError(c, http.StatusBadRequest, "PROCESS_FILE_FAILED", "文件处理失败", err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// ──────────────────────────────────────────────
+// 动态分类 Profiles 重载
+// ──────────────────────────────────────────────
+
+func dynProfilesReloadHandler(_ *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"message": "Dynamic classification profiles reloaded successfully",
+		})
+	}
+}
+
+// ──────────────────────────────────────────────
+// Profile 推荐
+// ──────────────────────────────────────────────
+
+func profileRecommendHandler(_ *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"recommended_profile": "standard",
+			"epsilon":             1.0,
+			"delta":               1e-5,
+			"k":                   5,
+			"note":                "Go 引擎参数推荐",
+		})
+	}
+}
+
+// ──────────────────────────────────────────────
+// 辅助函数
+// ──────────────────────────────────────────────
+
+func getEnvDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

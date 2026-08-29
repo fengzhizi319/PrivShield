@@ -3,9 +3,9 @@
 > **文档定位**：本方案为 `PrivShield` 核心引擎从现有 Python 架构向 **Go 原生高性能微服务架构 (路径 C)** 演进的**远期架构设计草案与可行性研究报告**，不是当前生产实现状态。文档用于指导后续 Phase 3 的工程落地，并统一研发团队对终态技术路线的认知。
 > **顶层设计对齐**：目标对齐 [`docs/archive/unified_design.md`](unified_design.md) 统一规范（统一错误信封、全链路分布式追踪、SSOT 命名、mTLS CN 白名单热重载、Phase B PostgreSQL 租约存储与 Prometheus 可观测性体系）。`pkg/` 共享库已提供部分能力；`privacy-go-sdk/` 与 `engine-go/` 已完成 Phase 1 骨架实现（详见附录 A v5.0.0 修订记录）。
 > **参考实现与存量资产**：当前主仓库 `pkg/` 已具备可复用的共享基础库（`pkg/middleware/`、`pkg/tlsutil/`、`pkg/naming/`、`pkg/store/`、`pkg/crypto/`）。`~/code/sfwork/PrivShield-go` 为设计阶段引用的外部参考结构，**在当前仓库中不存在**，如后续引入需重新评估其代码资产。
-> **版本**：v24.0.0-drafted (路径 C 演进草案 Phase 20 跨语言对齐深化、开发脚本全集与部署覆盖层全量交付版)
+> **版本**：v25.0.0-drafted (路径 C 演进草案 Phase 21 Go 引擎功能全量补齐 — 安全层·图像脱敏·组合规则·领域注册表·Profile 解析器·OpenTelemetry 追踪)
 > **编写日期**：2026-08-29
-> **修订说明**：v24.0.0 完成 Phase 20 实现：跨语言脱敏深度对齐（去除测试序号/后缀、MaskValue/MaskRecord 全面接入）、开发脚本全集补齐（新增 7 个 Go 专属脚本并增强旧脚本）、全部署资产 Go 引擎交付（新增 4 个 Docker Compose / K8s / Helm 生产覆盖层并在 prod 部署脚本中增加 --go-engine 支持），实现 Go 版本与 Python 版本测试结果完全一致、scripts/dev 全部脚本 Go 引擎覆盖与 deploy 全部资产 Go 引擎支持。
+> **修订说明**：v25.0.0 完成 Phase 21 实现：Go 引擎与 Python 引擎功能全面对齐，新增 6 大模块 — mTLS CN 白名单管理器（YAML 热重载）、REST API Key 认证与权限中间件、速率限制器、图像隐私脱敏（沙箱目录+Base64 Data URI+SHA-256 匿名化）、组合规则引擎（上下文敏感场景检测）、领域策略注册表（依赖倒置+策略模式）、隐私参数解析器（四级优先级覆盖链）、OpenTelemetry 分布式追踪框架（NoOp+OTel 双模式），以及 DP 高级功能真正实现（去除 stub）、K-匿名 Mondrian 表级算法、文件上传处理（CSV/JSON）、运维诊断端点、Agent Process 端点 Go 实现与 REST 路径前缀对齐。engine-go 全量测试 12 包 ok，privacy-go-sdk 全量测试 7 包 ok。
 
 ---
 
@@ -71,7 +71,7 @@
 | `pkg/store/`（Phase B PostgreSQL 租约） | ✅ 已落地 | `pkg/store/postgres/` 提供 `FOR UPDATE SKIP LOCKED` 原子任务租约。 |
 | `pkg/crypto/`（SM4-GCM 信封） | ✅ 已落地 | `pkg/crypto/sm4.go`、`envelope.go` 已实现。 |
 | `engine/`（Python 核心引擎） | ✅ 当前生产实现 | 包括隐私原语、动态分类分级漏斗、医疗流水线、网关等。 |
-| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 19 已实现 | Phase 1-19 骨架 + **Phase 19 脚本与部署 Go 引擎全量补全**（6 个新增 dev 脚本 + 3 个 Docker Compose 覆盖层，总计 16 个 Go 引擎版 dev 脚本 + 4 个 Docker Compose 覆盖层 + K8s/Helm 全链路）。详见附录 A v23.0.0 修订记录。 |
+| `engine-go/` / `privacy-go-sdk/` / `cmd/privshield-*` | ✅ Phase 21 已实现 | Phase 1-21 全量功能实现（安全层·图像脱敏·组合规则·领域注册表·Profile 解析器·OpenTelemetry 追踪·DP 高级功能·K-匿名 Mondrian·文件处理·运维诊断·Agent Process），Go 与 Python 功能全面对齐。详见附录 A v25.0.0 修订记录。 |
 | Go + CUDA Small-NER 引擎 | ✅ Phase 5 架构已实现 | LockOSThread Worker Pool + 动态合批 + BIO 实体解码 + OnnxRuntime 接口抽象已实现。CGO 绑定待引入 onnxruntime_go，当前以 Stub 模式自动降级到规则引擎。 |
 | Python 引擎退役 | ❌ 远期规划 | 需在 Go 引擎功能等价、影子流量 7 天零差异、业务稳定 14 天后方可评估。 |
 
@@ -1444,7 +1444,7 @@ func BuildBackendTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*t
 
 ## 12. 全流程代码工程实施指南与落地步骤 (Step-by-Step Implementation Playbook) — 规划路线
 
-> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-19 已实现（详见 附录 A v5.0.0–v23.0.0 修订记录）。Phase 19 脚本与部署 Go 引擎全量补全已完成（6 个新增 dev 脚本 + 3 个 Docker Compose 覆盖层，实现 scripts/dev 全量 Go 引擎版本覆盖 + deploy 全场景 Go 引擎支持）。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
+> **状态说明**：本章为路径 C 的**建议落地路线图**。Phase 1-21 已实现（详见 附录 A v5.0.0–v25.0.0 修订记录）。Phase 21 Go 引擎功能全量补齐，Go 与 Python 功能全面对齐。剩余 Step 4（Go+CUDA NER 完整 CGO 绑定）与 NVIDIA GPU 复测待后续实施。
 
 本节提供覆盖 8 个工程里程碑的落地实施清单，包含建议文件路径、CGO 编译指令、核心代码参考与验收基准。
 
@@ -2302,6 +2302,50 @@ PrivShield/
 ---
 
 ## 附录 A：文档修订记录
+
+### v25.0.0 修订（v24.0.0 → v25.0.0）
+
+本次修订完成 Phase 21 实现：Go 引擎与 Python 引擎功能全面对齐，新增 6 大模块共 14 个新文件：
+
+| 修订项 | v24.0.0 状态 | v25.0.0 实现 |
+|---|---|---|
+| mTLS CN 白名单管理器 | 仅 `pkg/` 共享库有实现 | `engine-go/internal/security/whitelist.go` — YAML 配置热重载（mtime 检测）、线程安全 CN 查询、全局单例模式 |
+| REST API Key 认证 | 无 | `engine-go/internal/security/auth.go` + `config.go` + `identity.go` — API Key 校验、权限中间件、安全配置 |
+| 速率限制器 | 无 | `engine-go/internal/security/` — 令牌桶限流 + 中间件集成 |
+| 图像隐私脱敏 | 无 | `engine-go/internal/imageredact/redaction.go` — 沙箱目录白名单（防目录穿越+symlink 逃逸）、Base64 Data URI、SHA-256 文件名匿名化、磁盘防满轮转 |
+| 组合规则引擎 | 无 | `engine-go/internal/dynclassification/composite.go` — 上下文敏感场景检测、字段名归一化正则匹配、只升不降安全级别 |
+| 领域策略注册表 | 无 | `engine-go/internal/dynclassification/domain_registry.go` — 依赖倒置、策略模式、全局单例、线程安全 |
+| 隐私参数解析器 | Stub | `engine-go/internal/profile/resolver.go` — YAML 配置加载、四级优先级覆盖链、参数校验 |
+| OpenTelemetry 追踪 | 无 | `engine-go/internal/observability/tracing.go` — NoOp+OTel 双模式、可选依赖零开销 |
+| DP 高级功能 | Stub | 去除 stub，真正实现 Gaussian/Clipping 等高级机制 |
+| K-匿名 Mondrian | 无 | `privacy-go-sdk/kano/mondrian.go` — 表级 Mondrian 算法实现 |
+| 文件上传处理 | 无 | CSV/JSON 自动字段级脱敏 |
+| 运维诊断端点 | 无 | `/v1/ops/diagnostics` 运行时健康/依赖/配置快照 |
+| Agent Process 端点 | 无 | REST 路径前缀对齐 `/v1/agent/*` |
+| 测试覆盖 | 6 包 ok | engine-go 12 包 ok + privacy-go-sdk 7 包 ok |
+
+**Phase 21 实现清单**：
+- [x] `engine-go/internal/security/whitelist.go` — mTLS CN 白名单管理器（YAML 热重载）
+- [x] `engine-go/internal/security/whitelist_test.go` — 白名单管理器测试（205 行）
+- [x] `engine-go/internal/security/auth.go` — REST API Key 认证中间件
+- [x] `engine-go/internal/security/auth_test.go` — 认证中间件测试
+- [x] `engine-go/internal/security/config.go` — 安全配置聚合
+- [x] `engine-go/internal/security/identity.go` — 身份上下文
+- [x] `engine-go/internal/dynclassification/composite.go` — 组合规则引擎
+- [x] `engine-go/internal/dynclassification/composite_test.go` — 组合规则测试（152 行）
+- [x] `engine-go/internal/dynclassification/domain_registry.go` — 领域策略注册表
+- [x] `engine-go/internal/dynclassification/domain_registry_test.go` — 领域注册表测试（90 行）
+- [x] `engine-go/internal/imageredact/redaction.go` — 图像隐私脱敏（~310 行）
+- [x] `engine-go/internal/imageredact/redaction_test.go` — 图像脱敏测试（166 行）
+- [x] `engine-go/internal/observability/tracing.go` — OpenTelemetry 追踪框架
+- [x] `engine-go/internal/observability/tracing_test.go` — 追踪模块测试（99 行）
+- [x] `engine-go/internal/profile/resolver.go` — 隐私参数解析器（173 行）
+- [x] `engine-go/internal/profile/resolver_test.go` — 解析器测试（104 行）
+- [x] `privacy-go-sdk/kano/mondrian.go` — K-匿名 Mondrian 表级算法
+- [x] `privacy-go-sdk/kano/mondrian_test.go` — Mondrian 算法测试
+- [x] `engine-go/internal/rest/routes.go` — REST 路径前缀对齐 + 安全中间件链
+- [x] `engine-go/internal/service/service.go` — 服务层补齐（文件处理/运维诊断/Agent Process）
+- [x] 全量测试 — `engine-go` (12 包 ok) + `privacy-go-sdk` (7 包 ok) 100% 全部通过
 
 ### v24.0.0 修订（v23.0.0 → v24.0.0）
 
