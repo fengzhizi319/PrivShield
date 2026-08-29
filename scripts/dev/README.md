@@ -2,7 +2,7 @@
 
 本目录包含 **数联天下 · 数盾 (`PrivShield`)** 在本地开发调试、端到端集成测试、Docker 容器联调以及性能基准评估阶段所需的全部自动化脚本。
 
-全栈基于 **Go 1.25+ Cloud-Native** 原生架构，每个脚本均支持独立执行。
+全栈基于 **Go 1.25+ Cloud-Native** 原生架构，所有命令均支持在 IDE Markdown 视图中**一键点击直接运行**（无论当前终端位于项目根目录还是 `scripts/dev/` 目录）。
 
 ---
 
@@ -57,19 +57,21 @@
 - **参数选项**:
   - `--force`: 端口被占用时自动释放占用进程。
   - `--mtls`: 启用 mTLS 双向认证模式（自动生成/挂载自签名证书）。
-- **执行命令**:
-  ```bash
-  # Linux / macOS (标准开发模式)
-  bash ./scripts/dev/dev-bff-agent.sh
-  ```
-  ```bash
-  # Linux / macOS (mTLS 安全模式)
-  bash ./scripts/dev/dev-bff-agent.sh --mtls
-  ```
-  ```powershell
-  # Windows (PowerShell)
-  .\scripts\dev\dev-bff-agent.ps1
-  ```
+
+标准开发模式（Linux / macOS）：
+```bash
+bash ./scripts/dev/dev-bff-agent.sh
+```
+
+mTLS 安全认证模式（Linux / macOS）：
+```bash
+bash ./scripts/dev/dev-bff-agent.sh --mtls
+```
+
+Windows PowerShell 启动：
+```powershell
+.\scripts\dev\dev-bff-agent.ps1
+```
 
 ---
 
@@ -81,51 +83,56 @@
 - **参数选项**:
   - `--force`: 端口被占用时自动释放占用进程。
   - `--mtls`: 启用 mTLS 双向认证模式。
-- **执行命令**:
-  ```bash
-  # 启动 App-LZ 开发控制台 (BFF :8085 + Vite :5174)
-  bash ./scripts/dev/dev-app-lz.sh --force
-  ```
-  ```bash
-  # 启动 App-LZ 开发控制台 (mTLS 模式)
-  bash ./scripts/dev/dev-app-lz.sh --mtls --force
-  ```
+
+标准开发模式（BFF `:8085` + Vite `:5174`）：
+```bash
+bash ./scripts/dev/dev-app-lz.sh --force
+```
+
+mTLS 安全模式：
+```bash
+bash ./scripts/dev/dev-app-lz.sh --mtls --force
+```
 
 ---
 
 ### `go-engine-start.sh`
-- **作用说明**: 快速在前台或后台启动 Go 核心隐私计算与动态分类分级引擎 Agent（`privshield-agent`），监听 REST `:8079` 与 gRPC `:50051`。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/go-engine-start.sh
-  ```
+- **作用说明**: 快速启动 Go 核心隐私计算与动态分类分级引擎 Agent（`privshield-agent`），监听 REST `:8079` 与 gRPC `:50051`。
+
+执行启动命令：
+```bash
+bash ./scripts/dev/go-engine-start.sh
+```
 
 ---
 
 ### `go-gateway-start.sh`
 - **作用说明**: 快速启动 Go 高性能隐私网关反向代理（`privshield-gateway`），监听 REST `:8000` 与 gRPC `:50000`，提供 P2C-EWMA 负载均衡与 BufferPool 零分配代理。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/go-gateway-start.sh
-  ```
+
+执行启动命令：
+```bash
+bash ./scripts/dev/go-gateway-start.sh
+```
 
 ---
 
 ### `dev-stop.sh`
 - **作用说明**: 一键优雅停止本地由 `dev-bff-agent.sh` 启动的所有进程（Go Agent、Go BFF、Vite 前端），释放相关端口资源。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/dev-stop.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/dev-stop.sh
+```
 
 ---
 
 ### `stop-app-lz.sh`
 - **作用说明**: 一键优雅停止由 `dev-app-lz.sh` 启动的 App-LZ 控制台进程（Go BFF `:8085` 与 Web 前端 `:5174`），清理 PID 文件并释放端口。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/stop-app-lz.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/stop-app-lz.sh
+```
 
 ---
 
@@ -137,56 +144,61 @@
   - `datasource-mgr` 数据源资产管理与探查 (REST `:8083`，gRPC `:50053`)
   - `audit-log` 脱敏审计日志与哈希存证 (REST `:8084`，gRPC `:50054`)
   *(注：该脚本要求核心 Agent 已在运行中)*。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/dev-start-new-modules.sh
-  ```
+
+执行启动命令：
+```bash
+bash ./scripts/dev/dev-start-new-modules.sh
+```
 
 ---
 
 ### `dev-stop-new-modules.sh`
 - **作用说明**: 停止由 `dev-start-new-modules.sh` 启动的 3 大微服务进程。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/dev-stop-new-modules.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/dev-stop-new-modules.sh
+```
 
 ---
 
 ### `e2e-start-all-services.sh`
 - **作用说明**: 【真实全量环境】一键顺序启动 Go Agent + 3 大 Go 中台微服务，构建真实 E2E 运行环境。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/e2e-start-all-services.sh
-  ```
+
+执行启动命令：
+```bash
+bash ./scripts/dev/e2e-start-all-services.sh
+```
 
 ---
 
 ### `e2e-stop-all-services.sh`
 - **作用说明**: 停止由 `e2e-start-all-services.sh` 启动的所有服务进程。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/e2e-stop-all-services.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/e2e-stop-all-services.sh
+```
 
 ---
 
 ### `start_all_services.sh`
 - **作用说明**: 一键后台启动核心 Go Agent、Go BFF 以及可选的中台微服务群（支持 `--with-services`）。
-- **执行命令**:
-  ```bash
-  # 启动 Agent + BFF + 3 大微服务
-  bash ./scripts/dev/start_all_services.sh --with-services
-  ```
+
+启动 Agent + BFF + 3 大微服务全量服务群：
+```bash
+bash ./scripts/dev/start_all_services.sh --with-services
+```
 
 ---
 
 ### `stop_all_services.sh`
 - **作用说明**: 停止本地由 `start_all_services.sh` 启动的全量开发服务群，清理 PID 文件并释放所有相关端口。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/stop_all_services.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/stop_all_services.sh
+```
 
 ---
 
@@ -200,23 +212,26 @@
   - `--no-build`: 跳过构建直接运行已有本地镜像。
   - `--build`: 启动前重新构建本地镜像（默认行为）。
   - `--force`: 端口被占用时自动释放占用进程。
-- **执行命令**:
-  ```bash
-  # 1. 启动标准非 mTLS 版本 (默认，HTTP + 明文 gRPC)
-  bash ./scripts/dev/docker-start-bff-agent.sh --force
-  ```
-  ```bash
-  # 2. 启动 mTLS 双向认证版本 (HTTPS + mTLS gRPC)
-  bash ./scripts/dev/docker-start-bff-agent.sh --mtls --force
-  ```
-  ```powershell
-  # Windows (PowerShell 标准非 mTLS)
-  .\scripts\dev\docker-start-bff-agent.ps1
-  ```
-  ```powershell
-  # Windows (PowerShell mTLS 双向认证)
-  .\scripts\dev\docker-start-bff-agent.ps1 -MTLS
-  ```
+
+标准非 mTLS 模式启动（HTTP + 明文 gRPC）：
+```bash
+bash ./scripts/dev/docker-start-bff-agent.sh --force
+```
+
+mTLS 双向认证模式启动（HTTPS + mTLS gRPC）：
+```bash
+bash ./scripts/dev/docker-start-bff-agent.sh --mtls --force
+```
+
+Windows PowerShell 标准启动：
+```powershell
+.\scripts\dev\docker-start-bff-agent.ps1
+```
+
+Windows PowerShell mTLS 双向认证启动：
+```powershell
+.\scripts\dev\docker-start-bff-agent.ps1 -MTLS
+```
 
 ---
 
@@ -232,19 +247,21 @@
   - `--build`: 启动前重新构建镜像（默认）。
   - `--no-build`: 使用本地已有镜像快速拉起。
   - `--force`: 自动清理占用端口的非容器进程。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-start-app-lz.sh --force
-  ```
+
+构建并启动 App-LZ 全栈容器测试集群：
+```bash
+bash ./scripts/dev/docker-start-app-lz.sh --force
+```
 
 ---
 
 ### `docker-stop-app-lz.sh`
 - **作用说明**: 一键停止并销毁由 `docker-start-app-lz.sh` 启动的 App-LZ 容器集群及 Docker 网络。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-stop-app-lz.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/docker-stop-app-lz.sh
+```
 
 ---
 
@@ -255,60 +272,66 @@
   - `--with-postgres`: 启动 Phase B PostgreSQL 多副本 Hub 模式。
   - `--with-monitoring`: 启动 Prometheus + Grafana 监控栈。
   - `--no-build`: 跳过构建直接运行。
-- **执行命令**:
-  ```bash
-  # 标准启动全栈容器
-  bash ./scripts/dev/docker-start-all.sh
-  ```
-  ```bash
-  # 全量启动 (LLM + PostgreSQL + 监控)
-  bash ./scripts/dev/docker-start-all.sh --with-llm --with-postgres --with-monitoring
-  ```
+
+标准启动全栈容器：
+```bash
+bash ./scripts/dev/docker-start-all.sh
+```
+
+全量联动启动 (LLM + PostgreSQL + 监控)：
+```bash
+bash ./scripts/dev/docker-start-all.sh --with-llm --with-postgres --with-monitoring
+```
 
 ---
 
 ### `docker-start-agent.sh` / `docker-start-go-agent.sh`
 - **作用说明**: 仅启动 Go 核心 Agent 容器，暴露 REST 端口 `:8079` 与 gRPC 端口 `:50051`。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-start-agent.sh
-  ```
+
+执行启动命令：
+```bash
+bash ./scripts/dev/docker-start-agent.sh
+```
 
 ---
 
 ### `docker-stop-agent.sh` / `docker-stop-go-agent.sh`
 - **作用说明**: 停止由 `docker-start-agent.sh` 启动的 Go Agent 容器。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-stop-agent.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/docker-stop-agent.sh
+```
 
 ---
 
 ### `docker-start-llm.sh` / `docker-start-llm.ps1`
 - **作用说明**: 启动专用的 vLLM 本地大模型推理容器 (`:8000`)，需宿主机具备 NVIDIA GPU 与 Container Toolkit。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-start-llm.sh
-  ```
+
+执行启动命令：
+```bash
+bash ./scripts/dev/docker-start-llm.sh
+```
 
 ---
 
 ### `docker-stop-llm.sh` / `docker-stop-llm.ps1`
 - **作用说明**: 停止由 `docker-start-llm.sh` 启动的 vLLM 容器。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-stop-llm.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/docker-stop-llm.sh
+```
 
 ---
 
 ### `docker-stop.sh`
 - **作用说明**: 一键停止并清理所有通过 Docker Compose 启动的开发容器及网络（含 llm/monitoring/phase-b 全部 profile）。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/docker-stop.sh
-  ```
+
+执行停止命令：
+```bash
+bash ./scripts/dev/docker-stop.sh
+```
 
 ---
 
@@ -319,15 +342,16 @@
 - **环境变量**:
   - `PG_PORT`: 宿主机映射端口 (默认: 5432)。
   - `PG_PASSWORD`: 数据库密码 (默认: privshield_dev)。
-- **执行命令**:
-  ```bash
-  # 启动 PostgreSQL
-  bash ./scripts/dev/start-postgres.sh
-  ```
-  ```bash
-  # 停止并移除
-  bash ./scripts/dev/start-postgres.sh --stop
-  ```
+
+启动独立 PostgreSQL 容器：
+```bash
+bash ./scripts/dev/start-postgres.sh
+```
+
+停止并移除容器：
+```bash
+bash ./scripts/dev/start-postgres.sh --stop
+```
 
 ---
 
@@ -335,29 +359,31 @@
 
 ### `go-engine-test.sh`
 - **作用说明**: 【核心测试入口】一键按序运行全仓库 Go 模块的单元测试与集成测试（覆盖 `privacy-go-sdk`、`engine-go`、`pkg`、`services`、`console/bff-go`）。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/go-engine-test.sh
-  ```
+
+执行全量测试：
+```bash
+bash ./scripts/dev/go-engine-test.sh
+```
 
 ---
 
 ### `integration-test-go.sh`
 - **作用说明**: 【Go 原生引擎集成测试】对 `privshield-agent` 暴露的 19 个 REST 端点（健康检查、掩码脱敏、差分隐私、K-匿名、查询混淆、LDP、医疗流水线、通用 Agent、动态分类及 Prometheus 指标）进行全量自动化端到端测试。
-- **执行命令**:
-  ```bash
-  # 前置：Agent 已在 :8079 启动
-  bash ./scripts/dev/integration-test-go.sh
-  ```
+
+执行集成测试（需 Agent 在 `:8079` 运行）：
+```bash
+bash ./scripts/dev/integration-test-go.sh
+```
 
 ---
 
 ### `integration-test-new-modules.sh`
 - **作用说明**: 对 `service-hub`、`datasource-mgr` 与 `audit-log` 三大微服务执行全流程接口与数据流集成测试。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/integration-test-new-modules.sh
-  ```
+
+执行微服务集成测试：
+```bash
+bash ./scripts/dev/integration-test-new-modules.sh
+```
 
 ---
 
@@ -367,93 +393,103 @@
   2. `console/bff-go` 代理后端与 `pkg` 基础库测试
   3. `services` 微服务群集成测试
   4. `console/web` 前端 TypeScript 与 Vitest 组件自动化测试（79+ 项测试）
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/run_console_e2e_tests.sh
-  ```
+
+执行端到端 E2E 测试：
+```bash
+bash ./scripts/dev/run_console_e2e_tests.sh
+```
 
 ---
 
 ### `go-engine-bench.sh`
 - **作用说明**: 对 `privacy-go-sdk` 与 `engine-go` 中的所有核心隐私计算原语执行高并发基准性能压测（Benchmark），输出 Ops/s、单次耗时 (ns/op) 与内存分配指标。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/go-engine-bench.sh
-  ```
+
+执行基准性能压测：
+```bash
+bash ./scripts/dev/go-engine-bench.sh
+```
 
 ---
 
 ### `benchmark_performance.sh`
 - **作用说明**: 对运行中的 Go Agent REST API（`/v1/privacy/mask`、`/v1/privacy/dp/laplace`、`/v1/dynclassification/classify` 等）进行基于 HTTP 并发请求的吞吐量 (QPS) 与延迟基准压测。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/benchmark_performance.sh
-  ```
+
+执行 HTTP 性能压测：
+```bash
+bash ./scripts/dev/benchmark_performance.sh
+```
 
 ---
 
 ### `health_check.sh`
 - **作用说明**: 对所有开发环境微服务（Go Agent、Go BFF、三大中台微服务）进行全方位的 Go 编译器就绪状态、源码结构完整性与 HTTP `/health` / `/livez` 健康探针巡检。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/health_check.sh
-  ```
+
+执行健康检查巡检：
+```bash
+bash ./scripts/dev/health_check.sh
+```
 
 ---
 
 ### `check_metrics_endpoints.sh`
 - **作用说明**: 检查各服务（Agent `:8079`、BFF `:8081`、Service-Hub `:8082`、Datasource-Mgr `:8083`、Audit-Log `:8084`）的 `/metrics` Prometheus 指标暴露端点连通性。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/check_metrics_endpoints.sh
-  ```
+
+执行指标端点巡检：
+```bash
+bash ./scripts/dev/check_metrics_endpoints.sh
+```
 
 ---
 
 ### `lint-source-naming.sh`
 - **作用说明**: 依据 Go 规范自动扫描全仓库源文件与测试文件的命名合法性，并验证 Go 测试套件可正常被发现与执行。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/lint-source-naming.sh
-  ```
+
+执行命名规约检查：
+```bash
+bash ./scripts/dev/lint-source-naming.sh
+```
 
 ---
 
 ### `start_monitoring.sh` / `stop_monitoring.sh`
 - **作用说明**: 启动/停止基于 Docker Compose 的 Prometheus (`:9090`) 与 Grafana (`:3000`) 监控看板。
-- **执行命令**:
-  ```bash
-  # 启动监控栈
-  bash ./scripts/dev/start_monitoring.sh
-  ```
-  ```bash
-  # 停止监控栈
-  bash ./scripts/dev/stop_monitoring.sh
-  ```
+
+启动监控大屏：
+```bash
+bash ./scripts/dev/start_monitoring.sh
+```
+
+停止监控大屏：
+```bash
+bash ./scripts/dev/stop_monitoring.sh
+```
 
 ---
 
 ### `verify_console_environment.sh`
 - **作用说明**: 全面巡检开发与构建环境，包含 Go 1.22+ 编译器、`go.work` 多模块工作区、Node.js 18+、pnpm 8+、Web 前端 TypeScript 类型检查（`tsc`）以及全栈 Go 模块构建可行性。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/verify_console_environment.sh
-  ```
+
+执行环境就绪巡检：
+```bash
+bash ./scripts/dev/verify_console_environment.sh
+```
 
 ---
 
 ### `generate_all_test_certs.sh`
 - **作用说明**: 一键重新生成全套 mTLS 测试证书链（Root CA、Server、Client 证书、私钥与 SPKI 客户端公钥固定文件），自动覆盖 `config/certs`、`console/bff-go/certs` 以及 `services/*/certs`。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/generate_all_test_certs.sh
-  ```
+
+执行证书生成命令：
+```bash
+bash ./scripts/dev/generate_all_test_certs.sh
+```
 
 ---
 
 ### `clean_privacy_budget_db.sh`
 - **作用说明**: 重置并清理本地开发阶段生成的 SQLite 数据库（`service-hub.db`、`audit-log.db`、`datasource-mgr.db`）与隐私预算缓存。
-- **执行命令**:
-  ```bash
-  bash ./scripts/dev/clean_privacy_budget_db.sh
-  ```
+
+执行数据库重置清理：
+```bash
+bash ./scripts/dev/clean_privacy_budget_db.sh
+```
