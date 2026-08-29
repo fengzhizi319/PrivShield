@@ -1,21 +1,76 @@
-# 医疗敏感数据全流程治理流水线 — API 参考指南
+# 医疗敏感数据全流程治理流水线 — API 参考指南 (API Reference)
 
-> **文档版本**: 1.0  
-> **面向对象**: 接入开发者、后端工程师、前端开发者
+> 本文档详细说明 `PrivShield` Go 云原生架构下医疗流水线 Package API、REST 端点、请求/响应结构体模型及控制台 BFF 代理。
 
 ---
 
-## 1. Agent REST API
+## 1. Go SDK Package API
 
-### 1.1 `POST /v1/medical/process`
+包路径：`github.com/fengzhizi319/PrivShield/privacy-go-sdk/medical`
 
-处理医疗数据集，执行 3-Layer 分类分级与 L4/L5 剥离治理，返回双重输出结构。
+### 1.1 核心数据结构
 
-- **URL Path**: `/v1/medical/process`
-- **Method**: `POST`
-- **Headers**: `Content-Type: application/json`
+```go
+// 医疗流水线双结构输出结果
+type MedicalDataPipelineResult struct {
+    ClassificationReport []RecordClassificationReport `json:"classification_report"` // 分类分级元数据报告
+    SanitizedData        []map[string]any             `json:"sanitized_data"`         // 安全脱敏清洗数据集
+    Summary              MedicalPipelineSummary       `json:"summary"`                // 汇总统计指标
+}
 
-#### Request Body
+// 汇总统计指标
+type MedicalPipelineSummary struct {
+    TotalRecords               int     `json:"total_records"`
+    L5RecordsCount             int     `json:"l5_records_count"`
+    L4RecordsCount             int     `json:"l4_records_count"`
+    L3RecordsCount             int     `json:"l3_records_count"`
+    L1L2RecordsCount           int     `json:"l1_l2_records_count"`
+    SanitizedPIIFieldsTotal    int     `json:"sanitized_pii_fields_total"`
+    SanitizedPIIFieldsPerRecord float64 `json:"sanitized_pii_fields_per_record"`
+    RedactionFailures          int     `json:"redaction_failures"`
+    FailSafeTriggeredFields    int     `json:"fail_safe_triggered_fields"`
+    GuaranteeNoL4L5RawData     bool    `json:"guarantee_no_l4_l5_raw_data"`
+    DurationMs                 float64 `json:"duration_ms"`
+}
+```
+
+### 1.2 核心处理方法
+
+| 方法签名 | 说明 |
+|---|---|
+| `ProcessMedicalData(records []map[string]any) (*MedicalDataPipelineResult, error)` | 执行全套 3-Layer 分类分级、L4/L5 重症强脱敏与 PII 掩码，返回双结构报告 |
+| `ProcessMedicalBatchChunked(records []map[string]any, chunkSize int) (*MedicalDataPipelineResult, error)` | 多核无锁分块并发处理大规模医疗数据集 |
+| `SanitizeMedicalRecord(record map[string]any, domain string) (map[string]any, error)` | 单条医疗记录特化脱敏清洗 |
+| `SanitizeMedicalBatch(records []map[string]any, domain string) ([]map[string]any, error)` | 批量医疗记录特化脱敏清洗 |
+| `RedactMedicalText(text string) string` | 临床自由文本 L4/L5 高敏词汇强剥离与语法自愈 |
+| `RedactICD10(code string) string` | ICD-10 高危疾病诊断编码分级脱敏 |
+| `CanonicalizePIIField(fieldName string) string` | PII 字段中文/英文别名标准化规范映射 |
+
+---
+
+## 2. DICOM 医学影像清洗 API
+
+包路径：`github.com/fengzhizi319/PrivShield/engine-go/internal/imageredact`
+
+```go
+// 清洗 DICOM 文件元数据并输出至目标路径
+func SanitizeDICOMFile(srcPath, dstPath string, options DICOMSanitizeOptions) (*DICOMSanitizeResult, error)
+
+// 内存中二进制数据脱敏
+func AnonymizeDICOMData(data []byte) ([]byte, error)
+```
+
+---
+
+## 3. Agent REST API 端点
+
+### 3.1 医疗全流程处理与双结构报告输出
+
+- **端点**：`POST /v1/medical/process`
+- **别名**：`POST /medical/process`、`POST /v1/agent/process`
+- **请求头**：`Content-Type: application/json`
+
+#### 请求体示例
 ```json
 {
   "records": [
@@ -23,7 +78,7 @@
       "name": "张伟",
       "id_card_no": "110101199003072381",
       "gender": "男",
-      "age": "34",
+      "age": 34,
       "diagnosis_name": "获得性免疫缺陷综合征(HIV)",
       "present_illness": "患者因反复发热就诊，检出HIV抗体阳性",
       "registered_address": "北京市东城区天安门广场1号"
@@ -32,19 +87,19 @@
 }
 ```
 
-#### Response (200 OK)
+#### 响应体示例 (200 OK)
 ```json
 {
   "classification_report": [
     {
-      "record_index": 1,
+      "record_index": 0,
       "max_level": "L5",
       "pii_fields_detected": ["id_card_no", "name", "registered_address"],
       "high_sensitivity_detected": ["diagnosis_name:L5", "present_illness:L5"],
       "field_details": [
         {
           "field_name": "id_card_no",
-          "level": "L4",
+          "level": "L5",
           "security_tag": "PII_ID_CARD",
           "description": "公民身份证号码",
           "rule_matched": "RULE_PII_IDCARD"
@@ -64,10 +119,10 @@
       "name": "张*",
       "id_card_no": "110101********2381",
       "gender": "男",
-      "age": "34",
+      "age": 34,
       "diagnosis_name": "[L5-IMMUNODEFICIENCY-SENSITIVE-MASKED]",
       "present_illness": "患者因反复发热就诊，检出[L5-IMMUNODEFICIENCY-SENSITIVE-MASKED]",
-      "registered_address": "北京市***"
+      "registered_address": "北京市东城区***"
     }
   ],
   "summary": {
@@ -77,96 +132,59 @@
     "l3_records_count": 0,
     "l1_l2_records_count": 0,
     "sanitized_pii_fields_total": 3,
-    "sanitized_pii_fields_per_record": 3,
+    "sanitized_pii_fields_per_record": 3.0,
     "redaction_failures": 0,
     "fail_safe_triggered_fields": 0,
     "guarantee_no_l4_l5_raw_data": true,
-    "duration_ms": 12.5
+    "duration_ms": 1.25
   }
 }
 ```
 
-#### 安全语义说明（务必阅读）
+---
 
-- **`classification_report` 携带明文**：每条记录的 `raw_record` 与每个字段的 `raw_value` 均为**原始未脱敏值**（用于对照校验），`field_details` 中的 `sanitized_value_rule` / `sanitized_value_ner` 为双引擎对比快照。**本接口不能当作安全输出边界**——对外发布数据时只能使用 `sanitized_data`。
-- **`guarantee_no_l4_l5_raw_data` 为实测验证结果**：对全部脱敏输出执行三级高敏词回扫（含全角/插字符变体检测）后才置 `true`；存在图像打码失败（`redaction_failures > 0`）或回扫命中时为 `false`。
-- **`fail_safe_triggered_fields`**：被最终门禁整值删除（替换为 `[L4-L5-DATA-REMOVED]`）的字段数。该值持续偏高说明规则/NER 双引擎覆盖不足，应补充词库。
+### 3.2 单条医疗记录脱敏
 
-#### 请求规模限制（资源耗尽防护）
-
-| 限制项 | 上限 | 超限响应 |
-|---|---|---|
-| 单请求记录数 | 500 条 | 422 |
-| 单记录字段数 | 100 个 | 422 |
-| 单字段值长度 | 100,000 字符 | 422 |
+- **端点**：`POST /v1/medical/sanitize`
+- **请求体**：
+  ```json
+  {
+    "record": {
+      "name": "李四",
+      "phone": "13800138000",
+      "diagnosis": "原发性肝癌"
+    },
+    "domain": "medical"
+  }
+  ```
+- **响应体**：
+  ```json
+  {
+    "sanitized_record": {
+      "name": "李*",
+      "phone": "138****8000",
+      "diagnosis": "[L4-MALIGNANT-NEOPLASM-MASKED]"
+    }
+  }
+  ```
 
 ---
 
-### 1.2 `POST /v1/pipeline/process_records`
+### 3.3 批量医疗记录脱敏
 
-通用分类分级与脱敏流水线端点。
-
-- **URL Path**: `/v1/pipeline/process_records`
-- **Method**: `POST`
-
-#### Request Body
-```json
-{
-  "records": [ ... ],
-  "standard": "jrt0197",
-  "mask_l4": true,
-  "mask_l5": true
-}
-```
-
-#### Response (200 OK)
-```json
-{
-  "classification_summary": {
-    "total_records": 1,
-    "level_distribution": {"L1": 2, "L2": 0, "L3": 1, "L4": 1, "L5": 1},
-    "high_risk_fields": ["diagnosis_name", "id_card_no"],
-    "standard_id": "jrt0197",
-    "duration_ms": 15.2
-  },
-  "record_details": [ ... ],
-  "masked_records": [ ... ],
-  "masking_details": [ ... ]
-}
-```
+- **端点**：`POST /v1/medical/sanitize/batch`
+- **请求体**：
+  ```json
+  {
+    "records": [
+      {"name": "王五", "id_card_no": "110101199003072381"}
+    ],
+    "domain": "medical"
+  }
+  ```
 
 ---
 
-### 1.3 `POST /v1/pipeline/process_csv`
+## 4. 控制台 BFF 代理 API (`console/bff-go`)
 
-接受 CSV 文件上传，执行流水线处理。
-
-- **URL Path**: `/v1/pipeline/process_csv`
-- **Method**: `POST`
-- **Content-Type**: `multipart/form-data`
-- **Query Parameters**: `standard=jrt0197&mask_l4=true&mask_l5=true`
-- **Form Data**: `file=@kangyang.csv`
-
----
-
-## 2. Python SDK (`engine.pipeline`)
-
-```python
-from engine.pipeline import PipelineService, PipelineResult
-
-service = PipelineService(standard="jrt0197")
-
-# 1. 字典数组处理
-result: PipelineResult = service.process_records(records, mask_l4=True, mask_l5=True)
-
-# 2. CSV 文件处理
-result: PipelineResult = service.process_csv("data/kangyang.csv")
-```
-
----
-
-## 3. 控制台代理 API
-
-### 3.1 Go BFF 代理 (`console/bff-go`)
-- `POST /api/medical_pipeline`: 未传 `records` 时自动读取 `console/bff-go/internal/samples/kangyang.csv`。
-- `POST /api/pipeline/process`: 通用代理端点。
+- **`POST /api/medical_pipeline`**: 医疗流水线代理端点。当客户端未传入 `records` 时，BFF 自动加载内置标准样本 `console/bff-go/internal/samples/kangyang.csv` 并转发至 Go Agent。
