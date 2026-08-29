@@ -103,3 +103,37 @@ func TestCommonPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckDistinctLDiversity(t *testing.T) {
+	// 满足 2-diversity 的数据集（同一准标识符下有至少 2 种不同疾病）
+	compliantRecords := []Record{
+		{"zip": "100000", "age": "30", "disease": "Flu"},
+		{"zip": "100000", "age": "30", "disease": "Cancer"},
+		{"zip": "200000", "age": "40", "disease": "Asthma"},
+		{"zip": "200000", "age": "40", "disease": "Diabetes"},
+	}
+
+	res := CheckDistinctLDiversity(compliantRecords, []string{"zip", "age"}, "disease", 2)
+	if !res.IsCompliant {
+		t.Errorf("expected compliant for 2-diversity, got false with %d violations", res.Violations)
+	}
+	if res.MinDiversity != 2 {
+		t.Errorf("expected min diversity 2, got %d", res.MinDiversity)
+	}
+
+	// 违反 2-diversity 的数据集（同质性攻击，同组全部为 Flu）
+	nonCompliantRecords := []Record{
+		{"zip": "100000", "age": "30", "disease": "Flu"},
+		{"zip": "100000", "age": "30", "disease": "Flu"},
+		{"zip": "200000", "age": "40", "disease": "Asthma"},
+		{"zip": "200000", "age": "40", "disease": "Diabetes"},
+	}
+
+	resNon := CheckDistinctLDiversity(nonCompliantRecords, []string{"zip", "age"}, "disease", 2)
+	if resNon.IsCompliant {
+		t.Error("expected non-compliant for 2-diversity due to homogeneity, got true")
+	}
+	if resNon.Violations != 1 {
+		t.Errorf("expected 1 violation, got %d", resNon.Violations)
+	}
+}

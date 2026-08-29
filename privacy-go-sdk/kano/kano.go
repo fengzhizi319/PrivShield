@@ -5,8 +5,10 @@
 package kano
 
 import (
+	"math"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // ──────────────────────────────────────────────
@@ -353,4 +355,93 @@ func uniqueValues(values []string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+// ──────────────────────────────────────────────
+// L-多样性 (L-Diversity) 检验
+// ──────────────────────────────────────────────
+
+// LDiversityResult 包含 L-多样性合规检查报告。
+type LDiversityResult struct {
+	IsCompliant  bool             `json:"is_compliant"`  // 数据集是否完全满足 L-多样性
+	L            int              `json:"l"`             // 要求的 L 值
+	MinDiversity int              `json:"min_diversity"` // 所有等价类中的最小多样性值
+	Violations   int              `json:"violations"`    // 未满足 L-多样性的等价类数量
+	GroupCount   int              `json:"group_count"`   // 总等价类数量
+	GroupStats   []GroupDiversity `json:"group_stats"`   // 各等价类详细统计
+}
+
+// GroupDiversity 记录单个等价类的多样性统计。
+type GroupDiversity struct {
+	GroupIndex      int            `json:"group_index"`
+	RecordCount     int            `json:"record_count"`
+	DistinctCount   int            `json:"distinct_count"`
+	SensitiveValues map[string]int `json:"sensitive_values"`
+	IsCompliant     bool           `json:"is_compliant"`
+}
+
+// CheckDistinctLDiversity 校验数据集在给定准标识符与敏感属性下是否满足 Distinct L-Diversity。
+// 每个等价类中敏感属性的不同取值数必须 >= l，有效防御同质性攻击 (Homogeneity Attack)。
+func CheckDistinctLDiversity(records []Record, qiFields []string, sensitiveField string, l int) *LDiversityResult {
+	if l <= 1 {
+		l = 1
+	}
+	if len(records) == 0 {
+		return &LDiversityResult{IsCompliant: true, L: l, MinDiversity: 0}
+	}
+
+	// 按准标识符 QI 将记录归入等价类
+	groups := make(map[string][]Record)
+	for _, r := range records {
+		var qiKey strings.Builder
+		for _, q := range qiFields {
+			qiKey.WriteString(r[q])
+			qiKey.WriteByte('|')
+		}
+		groups[qiKey.String()] = append(groups[qiKey.String()], r)
+	}
+
+	res := &LDiversityResult{
+		L:            l,
+		GroupCount:   len(groups),
+		MinDiversity: math.MaxInt,
+		IsCompliant:  true,
+		GroupStats:   make([]GroupDiversity, 0, len(groups)),
+	}
+
+	idx := 0
+	for _, grp := range groups {
+		idx++
+		valCounts := make(map[string]int)
+		for _, r := range grp {
+			val := r[sensitiveField]
+			if val != "" {
+				valCounts[val]++
+			}
+		}
+		distinctCount := len(valCounts)
+		if distinctCount < res.MinDiversity {
+			res.MinDiversity = distinctCount
+		}
+
+		compliant := distinctCount >= l
+		if !compliant {
+			res.Violations++
+			res.IsCompliant = false
+		}
+
+		res.GroupStats = append(res.GroupStats, GroupDiversity{
+			GroupIndex:      idx,
+			RecordCount:     len(grp),
+			DistinctCount:   distinctCount,
+			SensitiveValues: valCounts,
+			IsCompliant:     compliant,
+		})
+	}
+
+	if res.MinDiversity == math.MaxInt {
+		res.MinDiversity = 0
+	}
+
+	return res
 }

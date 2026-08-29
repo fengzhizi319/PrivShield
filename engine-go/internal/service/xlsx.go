@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// maxUncompressedXMLSize 单个 XML 文件最大解压读取限制（256MB），防御解压炸弹拒绝服务攻击
+const maxUncompressedXMLSize = 256 * 1024 * 1024
+
 // ParseXLSXRecords 从 .xlsx 字节数据中解析结构化记录列表（纯 Go 实现，无 CGO 依赖）。
 func ParseXLSXRecords(content []byte) ([]map[string]string, error) {
 	zr, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
@@ -24,7 +27,7 @@ func ParseXLSXRecords(content []byte) ([]map[string]string, error) {
 		if f.Name == "xl/sharedStrings.xml" {
 			rc, err := f.Open()
 			if err == nil {
-				sharedStrings, _ = parseSharedStrings(rc)
+				sharedStrings, _ = parseSharedStrings(io.LimitReader(rc, maxUncompressedXMLSize))
 				rc.Close()
 			}
 		} else if f.Name == "xl/worksheets/sheet1.xml" || (sheetFile == nil && strings.HasPrefix(f.Name, "xl/worksheets/sheet") && strings.HasSuffix(f.Name, ".xml")) {
@@ -42,7 +45,7 @@ func ParseXLSXRecords(content []byte) ([]map[string]string, error) {
 	}
 	defer rc.Close()
 
-	rows, err := parseSheetData(rc, sharedStrings)
+	rows, err := parseSheetData(io.LimitReader(rc, maxUncompressedXMLSize), sharedStrings)
 	if err != nil {
 		return nil, fmt.Errorf("parse sheet xml: %w", err)
 	}

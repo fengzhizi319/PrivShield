@@ -81,40 +81,59 @@ func (ba *BudgetAccountant) RemainingDelta() float64 {
 
 // Consume 尝试扣减 (ε, δ) 预算。
 // 若剩余预算不足则返回 false，不做任何扣减。
+// 使用严格无锁 CAS 循环保障并发安全与原子回滚。
 func (ba *BudgetAccountant) Consume(epsilon, delta float64) bool {
 	ba.maybeReset()
 
-	usedE := ba.UsedEpsilon()
-	usedD := ba.UsedDelta()
 	totalE := ba.TotalEpsilon()
 	totalD := ba.TotalDelta()
 
-	if usedE+epsilon > totalE || usedD+delta > totalD {
-		return false
-	}
-
-	// 原子扣减（CAS 循环）
+	// 1. 原子扣减 ε 预算（CAS 循环每次从当前 oldBits 反解真实值）
 	for {
-		old := ba.usedEpsilonBits.Load()
-		newVal := usedE + epsilon
-		if newVal > totalE {
+		oldEBits := ba.usedEpsilonBits.Load()
+		curUsedE := math.Float64frombits(oldEBits)
+		newEVal := curUsedE + epsilon
+		if newEVal > totalE {
 			return false
 		}
-		if ba.usedEpsilonBits.CompareAndSwap(old, math.Float64bits(newVal)) {
+		if ba.usedEpsilonBits.CompareAndSwap(oldEBits, math.Float64bits(newEVal)) {
 			break
 		}
 	}
+
+	if delta <= 0 {
+		return true
+	}
+
+	// 2. 原子扣减 δ 预算
 	for {
-		old := ba.usedDeltaBits.Load()
-		newVal := usedD + delta
-		if newVal > totalD {
+		oldDBits := ba.usedDeltaBits.Load()
+		curUsedD := math.Float64frombits(oldDBits)
+		newDVal := curUsedD + delta
+		if newDVal > totalD {
+			// δ 超限，原子回滚刚才已扣减的 ε
+			ba.rollbackEpsilon(epsilon)
 			return false
 		}
-		if ba.usedDeltaBits.CompareAndSwap(old, math.Float64bits(newVal)) {
+		if ba.usedDeltaBits.CompareAndSwap(oldDBits, math.Float64bits(newDVal)) {
 			break
 		}
 	}
 	return true
+}
+
+func (ba *BudgetAccountant) rollbackEpsilon(epsilon float64) {
+	for {
+		old := ba.usedEpsilonBits.Load()
+		cur := math.Float64frombits(old)
+		reverted := cur - epsilon
+		if reverted < 0 {
+			reverted = 0
+		}
+		if ba.usedEpsilonBits.CompareAndSwap(old, math.Float64bits(reverted)) {
+			break
+		}
+	}
 }
 
 // maybeReset 检查是否需要滑动窗口重置。

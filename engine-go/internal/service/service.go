@@ -166,18 +166,26 @@ func (s *PrivacyService) MaskRecord(record map[string]string) map[string]string 
 	return result
 }
 
-// MaskBatch 批量脱敏（支持多核并发无锁分块计算）
-func (s *PrivacyService) MaskBatch(records []map[string]string) []map[string]string {
+// MaskBatchContext 批量脱敏（支持多核并发无锁分块计算与 Context 快速中断）
+func (s *PrivacyService) MaskBatchContext(ctx context.Context, records []map[string]string) ([]map[string]string, error) {
 	n := len(records)
 	results := make([]map[string]string, n)
 	if n == 0 {
-		return results
+		return results, nil
 	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if n <= 64 {
 		for i, r := range records {
+			if i%32 == 0 && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			results[i] = s.MaskRecord(r)
 		}
-		return results
+		return results, nil
 	}
 
 	numWorkers := runtime.GOMAXPROCS(0)
@@ -205,12 +213,26 @@ func (s *PrivacyService) MaskBatch(records []map[string]string) []map[string]str
 		go func(start, end int) {
 			defer wg.Done()
 			for i := start; i < end; i++ {
+				if i%64 == 0 && ctx.Err() != nil {
+					return
+				}
 				results[i] = s.MaskRecord(records[i])
 			}
 		}(startIdx, endIdx)
 	}
 	wg.Wait()
-	return results
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// MaskBatch 批量脱敏（兼容非 context 调用）
+func (s *PrivacyService) MaskBatch(records []map[string]string) []map[string]string {
+	res, _ := s.MaskBatchContext(context.Background(), records)
+	return res
 }
 
 // ──────────────────────────────────────────────
