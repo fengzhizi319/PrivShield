@@ -10,6 +10,7 @@ package dynclassification
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,13 +34,14 @@ func DefaultFunnelConfig() FunnelConfig {
 	}
 }
 
-// ClassificationFunnel 三层分类分级漏斗执行器
+// ClassificationFunnel 三层分类分级漏斗执行器（带高并发 LRU 缓存）
 type ClassificationFunnel struct {
 	ruleEngine  *RuleEngine
 	nerEngine   NerEngine
 	llmClient   *LLMClient
 	safetyFloor *SafetyFloor
 	cfg         FunnelConfig
+	cache       *classificationCache
 }
 
 // NewClassificationFunnel 创建三层分类分级漏斗实例
@@ -64,14 +66,22 @@ func NewClassificationFunnel(
 		llmClient:   llmClient,
 		safetyFloor: NewSafetyFloor(DefaultSafetyFloorConfig()),
 		cfg:         cfg,
+		cache:       newClassificationCache(10000),
 	}, nil
 }
 
-// Classify 执行 3 层漏斗分级仲裁
+// Classify 执行 3 层漏斗分级仲裁（优先查询 LRU 高速缓存）
 func (f *ClassificationFunnel) Classify(ctx context.Context, field, value string) (*ClassificationResult, error) {
+	// ─── Cache: 查询高并发 LRU 缓存 ───
+	cacheKey := field + "\x00" + value
+	if cached, hit := f.cache.get(cacheKey); hit {
+		return cached, nil
+	}
+
 	// ─── Layer 1: 规则引擎匹配 ───
 	res := f.ruleEngine.Classify(field, value)
 	if res.Confidence >= f.cfg.RuleConfidenceThreshold && res.MatchedBy != "default" {
+		f.cache.put(cacheKey, res)
 		return res, nil
 	}
 
@@ -82,14 +92,16 @@ func (f *ClassificationFunnel) Classify(ctx context.Context, field, value string
 			bestEntity := selectHighestRiskEntity(entities)
 			if bestEntity.Confidence >= f.cfg.NERConfidenceThreshold {
 				level, category := mapNERLabelToSecurity(bestEntity.Label)
-				return &ClassificationResult{
+				nerRes := &ClassificationResult{
 					Field:      field,
 					Value:      value,
 					Level:      level,
 					Category:   category,
 					Confidence: bestEntity.Confidence,
 					MatchedBy:  "ner:" + bestEntity.Label,
-				}, nil
+				}
+				f.cache.put(cacheKey, nerRes)
+				return nerRes, nil
 			}
 		}
 	}
@@ -105,20 +117,136 @@ func (f *ClassificationFunnel) Classify(ctx context.Context, field, value string
 				Value: value,
 			})
 			if err == nil && llmResp != nil && llmResp.Confidence >= 0.70 {
-				return &ClassificationResult{
+				llmRes := &ClassificationResult{
 					Field:      field,
 					Value:      value,
 					Level:      SecurityLevel(llmResp.Level),
 					Category:   llmResp.Category,
 					Confidence: llmResp.Confidence,
 					MatchedBy:  "llm",
-				}, nil
+				}
+				f.cache.put(cacheKey, llmRes)
+				return llmRes, nil
 			}
 		}
 	}
 
 	// ─── Safety Floor: 兜底安全等级 ───
-	return f.safetyFloor.Arbitrate(res), nil
+	floorRes := f.safetyFloor.Arbitrate(res)
+	f.cache.put(cacheKey, floorRes)
+	return floorRes, nil
+}
+
+// ClearCache 清理分类缓存
+func (f *ClassificationFunnel) ClearCache() {
+	if f.cache != nil {
+		f.cache.clear()
+	}
+}
+
+// ──────────────────────────────────────────────
+// 高并发 LRU 缓存实现
+// ──────────────────────────────────────────────
+
+type lruNode struct {
+	key  string
+	val  *ClassificationResult
+	prev *lruNode
+	next *lruNode
+}
+
+type classificationCache struct {
+	capacity int
+	items    map[string]*lruNode
+	head     *lruNode
+	tail     *lruNode
+	mu       sync.Mutex
+	hits     int64
+	misses   int64
+}
+
+func newClassificationCache(capacity int) *classificationCache {
+	if capacity <= 0 {
+		capacity = 10000
+	}
+	c := &classificationCache{
+		capacity: capacity,
+		items:    make(map[string]*lruNode, capacity),
+		head:     &lruNode{},
+		tail:     &lruNode{},
+	}
+	c.head.next = c.tail
+	c.tail.prev = c.head
+	return c
+}
+
+func (c *classificationCache) get(key string) (*ClassificationResult, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if node, exists := c.items[key]; exists {
+		c.moveToFront(node)
+		c.hits++
+		cp := *node.val
+		return &cp, true
+	}
+	c.misses++
+	return nil, false
+}
+
+func (c *classificationCache) put(key string, val *ClassificationResult) {
+	if val == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if node, exists := c.items[key]; exists {
+		node.val = val
+		c.moveToFront(node)
+		return
+	}
+
+	if len(c.items) >= c.capacity {
+		c.removeOldest()
+	}
+
+	node := &lruNode{key: key, val: val}
+	c.items[key] = node
+	c.addToFront(node)
+}
+
+func (c *classificationCache) addToFront(node *lruNode) {
+	node.next = c.head.next
+	node.prev = c.head
+	c.head.next.prev = node
+	c.head.next = node
+}
+
+func (c *classificationCache) moveToFront(node *lruNode) {
+	c.removeNode(node)
+	c.addToFront(node)
+}
+
+func (c *classificationCache) removeNode(node *lruNode) {
+	node.prev.next = node.next
+	node.next.prev = node.prev
+}
+
+func (c *classificationCache) removeOldest() {
+	last := c.tail.prev
+	if last != c.head {
+		c.removeNode(last)
+		delete(c.items, last.key)
+	}
+}
+
+func (c *classificationCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items = make(map[string]*lruNode, c.capacity)
+	c.head.next = c.tail
+	c.tail.prev = c.head
 }
 
 // selectHighestRiskEntity 选出风险最高且置信度最高的实体

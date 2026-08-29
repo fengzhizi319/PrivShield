@@ -67,19 +67,48 @@ func releaseBuilder(sb *strings.Builder) {
 // 非标准格式（长度不足等）回退为全量掩码。
 func MaskIdCard(id string) string {
 	id = strings.TrimSpace(id)
+	n := len(id)
+	if n == 18 {
+		isStandard := true
+		for i := 0; i < 17; i++ {
+			if id[i] < '0' || id[i] > '9' {
+				isStandard = false
+				break
+			}
+		}
+		if isStandard {
+			last := id[17]
+			if (last >= '0' && last <= '9') || last == 'X' || last == 'x' {
+				return id[:6] + "********" + id[14:]
+			}
+		}
+	}
 	m := idCardRegex.FindStringSubmatch(id)
 	if len(m) == 4 {
 		return m[1] + "********" + m[3]
 	}
-	if len(id) > 8 {
-		return id[:4] + strings.Repeat("*", len(id)-8) + id[len(id)-4:]
+	if n > 8 {
+		return id[:4] + strings.Repeat("*", n-8) + id[n-4:]
 	}
-	return strings.Repeat("*", len(id))
+	return strings.Repeat("*", n)
 }
 
 // MaskPhone 对手机号脱敏：保留前 3 后 4，中间 4 位掩码。
 func MaskPhone(phone string) string {
 	phone = strings.TrimSpace(phone)
+	n := len(phone)
+	if n == 11 && phone[0] == '1' && phone[1] >= '3' && phone[1] <= '9' {
+		isAllDigits := true
+		for i := 2; i < 11; i++ {
+			if phone[i] < '0' || phone[i] > '9' {
+				isAllDigits = false
+				break
+			}
+		}
+		if isAllDigits {
+			return phone[:3] + "****" + phone[7:]
+		}
+	}
 	m := phoneRegex.FindStringSubmatch(phone)
 	if len(m) == 5 {
 		prefix := m[1]
@@ -88,24 +117,39 @@ func MaskPhone(phone string) string {
 		}
 		return prefix + m[2] + "****" + m[4]
 	}
-	if len(phone) > 7 {
-		return phone[:3] + strings.Repeat("*", len(phone)-7) + phone[len(phone)-4:]
+	if n > 7 {
+		return phone[:3] + strings.Repeat("*", n-7) + phone[n-4:]
 	}
-	return strings.Repeat("*", len(phone))
+	return strings.Repeat("*", n)
 }
 
 // MaskBankCard 对银行卡号脱敏：保留前 6 位 BIN 与末 4 位，中间段掩码。
+// 短于 8 位的异常输入全量掩码。
 func MaskBankCard(card string) string {
 	card = strings.TrimSpace(card)
+	n := len(card)
+	if n >= 16 && n <= 19 {
+		isAllDigits := true
+		for i := 0; i < n; i++ {
+			if card[i] < '0' || card[i] > '9' {
+				isAllDigits = false
+				break
+			}
+		}
+		if isAllDigits {
+			middle := n - 10
+			return card[:6] + strings.Repeat("*", middle) + card[n-4:]
+		}
+	}
 	m := bankRegex.FindStringSubmatch(card)
 	if len(m) == 3 {
-		middle := len(card) - 10
+		middle := n - 10
 		return m[1] + strings.Repeat("*", middle) + m[2]
 	}
-	if len(card) > 8 {
-		return card[:4] + strings.Repeat("*", len(card)-8) + card[len(card)-4:]
+	if n > 8 {
+		return card[:4] + strings.Repeat("*", n-8) + card[n-4:]
 	}
-	return strings.Repeat("*", len(card))
+	return strings.Repeat("*", n)
 }
 
 // MaskOfficerId 对军官证号脱敏：保留"军"字与末 2 位。

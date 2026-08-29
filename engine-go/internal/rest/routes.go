@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	httppprof "net/http/pprof"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -28,10 +29,14 @@ import (
 
 // RegisterRoutes 注册所有 REST API 路由（与 Python engine URL 方案完全对齐）。
 func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
-	// 全局安全中间件
+	// 全局安全与防护中间件
 	r.Use(security.SecurityHeadersMiddleware())
+	r.Use(maxBodyBytesMiddleware(64 * 1024 * 1024)) // 默认 64MB 限制
 	r.Use(security.AuthMiddleware())
 	r.Use(security.RateLimitMiddleware())
+
+	// 性能分析端点
+	registerPprof(r)
 
 	// 健康检查（无前缀，与 Python /health, /livez, /readyz 对齐）
 	r.GET("/health", healthHandler)
@@ -1229,4 +1234,31 @@ func getEnvDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func maxBodyBytesMiddleware(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
+		c.Next()
+	}
+}
+
+func registerPprof(r *gin.Engine) {
+	pprofGroup := r.Group("/debug/pprof")
+	{
+		pprofGroup.GET("/", gin.WrapF(httppprof.Index))
+		pprofGroup.GET("/cmdline", gin.WrapF(httppprof.Cmdline))
+		pprofGroup.GET("/profile", gin.WrapF(httppprof.Profile))
+		pprofGroup.POST("/symbol", gin.WrapF(httppprof.Symbol))
+		pprofGroup.GET("/symbol", gin.WrapF(httppprof.Symbol))
+		pprofGroup.GET("/trace", gin.WrapF(httppprof.Trace))
+		pprofGroup.GET("/allocs", gin.WrapH(httppprof.Handler("allocs")))
+		pprofGroup.GET("/block", gin.WrapH(httppprof.Handler("block")))
+		pprofGroup.GET("/goroutine", gin.WrapH(httppprof.Handler("goroutine")))
+		pprofGroup.GET("/heap", gin.WrapH(httppprof.Handler("heap")))
+		pprofGroup.GET("/mutex", gin.WrapH(httppprof.Handler("mutex")))
+		pprofGroup.GET("/threadcreate", gin.WrapH(httppprof.Handler("threadcreate")))
+	}
 }

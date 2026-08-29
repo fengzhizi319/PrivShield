@@ -69,12 +69,25 @@ type LLMResponse struct {
 // LLM 连接池客户端
 // ──────────────────────────────────────────────
 
-// LLMClient LLM 连接池客户端
+// CircuitState 熔断器状态
+type CircuitState int32
+
+const (
+	CircuitClosed   CircuitState = 0 // 闭合（正常通行）
+	CircuitOpen     CircuitState = 1 // 打开（熔断阻断）
+	CircuitHalfOpen CircuitState = 2 // 半开（试探自愈）
+)
+
+// LLMClient LLM 连接池客户端（内置三态熔断器与并发控制）
 type LLMClient struct {
-	config  LLMClientConfig
-	client  *http.Client
-	sem     chan struct{} // 并发信号量
-	mu      sync.Mutex
+	config      LLMClientConfig
+	client      *http.Client
+	sem         chan struct{} // 并发信号量
+	cbState     CircuitState
+	failures    int
+	lastFailure time.Time
+	cooldown    time.Duration
+	cbMu        sync.RWMutex
 }
 
 // NewLLMClient 创建 LLM 客户端
@@ -84,12 +97,67 @@ func NewLLMClient(config LLMClientConfig) *LLMClient {
 		client: &http.Client{
 			Timeout: config.Timeout,
 		},
-		sem: make(chan struct{}, config.MaxConcurrency),
+		sem:      make(chan struct{}, config.MaxConcurrency),
+		cbState:  CircuitClosed,
+		cooldown: 15 * time.Second,
 	}
 }
 
-// Classify 使用 LLM 对字段执行分类
+// checkCircuit 检查熔断器状态，返回是否允许通行
+func (c *LLMClient) checkCircuit() bool {
+	c.cbMu.RLock()
+	state := c.cbState
+	lastFail := c.lastFailure
+	cooldown := c.cooldown
+	c.cbMu.RUnlock()
+
+	if state == CircuitClosed {
+		return true
+	}
+
+	if state == CircuitOpen {
+		if time.Since(lastFail) > cooldown {
+			c.cbMu.Lock()
+			if c.cbState == CircuitOpen && time.Since(c.lastFailure) > c.cooldown {
+				c.cbState = CircuitHalfOpen
+				c.cbMu.Unlock()
+				return true
+			}
+			c.cbMu.Unlock()
+		}
+		return false
+	}
+
+	// Half-Open 状态允许试探
+	return true
+}
+
+// recordSuccess 记录一次成功调用，自愈重置熔断器
+func (c *LLMClient) recordSuccess() {
+	c.cbMu.Lock()
+	defer c.cbMu.Unlock()
+	c.failures = 0
+	c.cbState = CircuitClosed
+}
+
+// recordFailure 记录一次失败调用，连续超阈值触发熔断
+func (c *LLMClient) recordFailure() {
+	c.cbMu.Lock()
+	defer c.cbMu.Unlock()
+	c.failures++
+	c.lastFailure = time.Now()
+	if c.failures >= 3 {
+		c.cbState = CircuitOpen
+	}
+}
+
+// Classify 使用 LLM 对字段执行分类（带熔断保护与重试）
 func (c *LLMClient) Classify(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+	// 熔断器快速拦截
+	if !c.checkCircuit() {
+		return nil, fmt.Errorf("LLM circuit breaker is OPEN (cooldown active), request rejected")
+	}
+
 	// 获取并发槽位
 	select {
 	case c.sem <- struct{}{}:
@@ -106,6 +174,7 @@ func (c *LLMClient) Classify(ctx context.Context, req LLMRequest) (*LLMResponse,
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
 		resp, err := c.callLLM(ctx, prompt)
 		if err == nil {
+			c.recordSuccess()
 			return resp, nil
 		}
 		lastErr = err
@@ -114,6 +183,7 @@ func (c *LLMClient) Classify(ctx context.Context, req LLMRequest) (*LLMResponse,
 		}
 	}
 
+	c.recordFailure()
 	return nil, fmt.Errorf("LLM classification failed after %d retries: %w", c.config.MaxRetries+1, lastErr)
 }
 
