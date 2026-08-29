@@ -1,50 +1,62 @@
-# 部署使用示例
+# 部署实战使用示例 (Deployment Practical Examples)
 
+---
 
 ## 1. 概述
 
-本文档提供 `PrivShield` 的完整部署示例，包括 Helm 安装、Kubernetes 原生部署与 Docker Compose 启动。示例覆盖 `core` / `ml` 两种镜像选择、TLS 证书注入与 API Key Secret 配置，可直接用于本地联调与生产部署参考。
+本文档提供 `PrivShield` 的完整多环境部署实战指南，涵盖 Helm 安装（Go 原生引擎与 CUDA 变体）、Kubernetes 原生 Kustomize 部署与 Docker Compose 本地全栈启动。
 
-## 2. 镜像选择
+---
 
-| 镜像 | 标签 | 适用场景 | 资源建议 |
-|---|---|---|---|
-| `core` | `1.8.0` | 脱敏、DP、K-匿名、规则分类 | 256Mi ~ 1Gi 内存 |
-| `ml` | `1.8.0-ml` | 完整三层分类（规则 → NER → LLM/VLM） | 2Gi ~ 8Gi 内存 |
+## 2. 镜像构建与规格选择
 
-Helm Chart 通过 `flavor: core` 或 `flavor: ml` 自动选择镜像标签；当 `image.tag` 留空时，`ml` 会自动附加 `-ml` 后缀。
+| 镜像类型 | Dockerfile | 镜像 Tag 示例 | 适用场景 | 建议资源配置 |
+|---|---|---|---|---|
+| **Go 极简镜像 (推荐默认)** | [`Dockerfile`](../../Dockerfile) | `privshield:10.0.0` | 脱敏、差分隐私、K-匿名、L1 规则分类、L3 外部熔断 LLM、网关 | **Requests: 0.1 CPU / 128MiB**<br>**Limits: 1.0 CPU / 512MiB** |
+| **CUDA GPU 加速镜像** | [`engine-go/Dockerfile.cuda`](../../engine-go/Dockerfile.cuda) | `privshield:10.0.0-cuda` | ONNX Runtime GPU 推理加速 Small-NER | **Requests: 1.0 CPU / 2GiB**<br>**Limits: 4.0 CPU / 8GiB (含 1 GPU)** |
 
-## 3. Helm 部署示例
+---
 
-### 3.1 开发模式（默认关闭 TLS/认证）
+## 3. Helm Chart 部署示例
+
+### 3.1 开发与测试模式（快速启动）
 
 ```bash
 cd /path/to/PrivShield
 
-# 构建 core 镜像
-docker build --target core -t privshield:1.8.0 .
+# 1. 本地构建 Go 镜像
+docker build -t privshield:10.0.0 .
 
-# 安装 Chart
-helm install privshield ./deploy/helm/PrivShield
+# 2. 安装 Helm Release
+helm install privshield ./deploy/helm/PrivShield \
+  --set engineType=go \
+  --set goEngine.image.repository=privshield \
+  --set goEngine.image.tag=10.0.0
 
-# 验证 Pod 状态
+# 3. 验证 Pod 就绪状态
 kubectl get pods -l app.kubernetes.io/name=PrivShield
 ```
 
-### 3.2 生产模式（启用 TLS + API Key 认证）
+---
+
+### 3.2 生产环境高可用部署（启用 TLS + API Key 认证 + HPA）
 
 ```bash
-# 1. 创建 TLS Secret（证书需为 PEM 格式）
+# 1. 创建生产 TLS Secret (PEM 格式)
 kubectl create secret tls privshield-tls \
-  --cert=tls.crt \
-  --key=tls.key
+  --cert=/path/to/tls.crt \
+  --key=/path/to/tls.key
 
-# 2. 创建 API Key Secret，key 必须为 api-keys.json
+# 2. 创建 API Key 认证 Secret (key 必须为 api-keys.json)
 cat > api-keys.json <<'EOF'
 {
   "prod-gateway-key": {
     "name": "production-gateway",
     "scopes": ["*"]
+  },
+  "prod-service-hub-key": {
+    "name": "service-hub",
+    "scopes": ["mask", "dp", "classify"]
   }
 }
 EOF
@@ -52,167 +64,111 @@ EOF
 kubectl create secret generic privshield-apikeys \
   --from-file=api-keys.json
 
-# 3. 使用生产 values 安装，并传入 Secret 名称
+# 3. 使用生产级 values-production-go.yaml 部署
 helm install privshield ./deploy/helm/PrivShield \
-  -f ./deploy/helm/PrivShield/values-production.yaml \
+  -f ./deploy/helm/PrivShield/values-production-go.yaml \
   --set security.tls.existingSecret=privshield-tls \
   --set security.auth.apiKeysSecret=privshield-apikeys \
-  --set image.repository=privshield \
-  --set image.tag=1.8.0
+  --set goEngine.image.repository=myregistry.example.com/privshield \
+  --set goEngine.image.tag=10.0.0
 ```
 
-### 3.3 ML 镜像部署
+---
 
-```bash
-# 构建 ml 镜像
-docker build --target ml -t privshield:1.8.0-ml .
-
-# 使用 values-ml.yaml，并指定仓库地址
-helm install privshield-ml ./deploy/helm/PrivShield \
-  -f ./deploy/helm/PrivShield/values-ml.yaml \
-  --set image.repository=privshield \
-  --set image.tag=1.8.0-ml
-```
-
-### 3.4 引用自定义 values 文件
+### 3.3 使用自定义 values 文件
 
 ```bash
 helm install privshield ./deploy/helm/PrivShield \
   -f docs/deployment/examples/values-custom.yaml
 ```
 
-## 4. 原生 Kubernetes 部署示例
+---
 
-### 4.1 基础部署
+## 4. 原生 Kubernetes Kustomize 部署示例
+
+### 4.1 基础一键部署
 
 ```bash
 cd /path/to/PrivShield
 
-# 直接 apply kustomization 组织的 manifests
+# 直接应用 Kustomize 编排清单
 kubectl apply -k ./deploy/k8s/
 
-# 查看资源
+# 查看命名空间下全部资源
 kubectl get all -n PrivShield
 ```
 
-### 4.2 启用 TLS 与认证
+### 4.2 启用 TLS 证书与 Secret 挂载
 
-1. 复制示例 Secret 并替换为真实值：
+1. 复制样例 Secret 并填入生产证书与密钥：
+   ```bash
+   cp deploy/k8s/secret.example.yaml deploy/k8s/secret.yaml
+   # 编辑 deploy/k8s/secret.yaml 配置真实 tls.crt / tls.key / api-keys.json
+   ```
 
-```bash
-cp deploy/k8s/secret.example.yaml deploy/k8s/secret.yaml
-# 编辑 deploy/k8s/secret.yaml 替换 tls.crt / tls.key / api-keys.json
-```
+2. 在 `deploy/k8s/kustomization.yaml` 中包含 `secret.yaml`：
+   ```yaml
+   resources:
+     - namespace.yaml
+     - configmap.yaml
+     - deployment-go.yaml
+     - service-go.yaml
+     - secret.yaml
+   ```
 
-2. 取消 `kustomization.yaml` 中 secret 的注释：
+3. 执行部署应用：
+   ```bash
+   kubectl apply -k ./deploy/k8s/
+   ```
 
-```yaml
-resources:
-  - namespace.yaml
-  - configmap.yaml
-  - deployment.yaml
-  - service.yaml
-  - secret.yaml
-```
+---
 
-3. 取消 `deployment.yaml` 中 TLS 与认证环境变量的注释，并确认挂载卷名称与 Secret 一致。
+## 5. Docker Compose 全栈实战示例
 
-4. 应用：
-
-```bash
-kubectl apply -k ./deploy/k8s/
-```
-
-## 5. Docker Compose 部署示例
-
-### 5.1 基础启动
+### 5.1 启动 Go Agent + 控制台 + 微服务全家桶
 
 ```bash
 cd deploy/docker-compose
 
-# 启动服务（-d 后台运行）
-docker compose up -d
+# 启动 Go 引擎全栈（后台运行）
+docker compose -f docker-compose.go-engine.yml up -d
 
-# 查看日志
-docker compose logs -f PrivShield
+# 检查各微服务容器运行状态
+docker compose -f docker-compose.go-engine.yml ps
 
-# 测试健康检查
+# 测试 Agent 健康探针
 curl http://localhost:8079/health
 ```
 
-### 5.2 启用 TLS 与认证
-
-1. 准备证书与私钥：
+### 5.2 启动 mTLS 双向认证全栈
 
 ```bash
-mkdir -p certs
-mv tls.crt tls.key certs/
+# 启动具备证书双向校验的 Go 引擎全栈
+docker compose -f docker-compose.mtls-go-engine.yml up -d
 ```
 
-2. 编辑 `docker-compose.yml`，取消以下环境变量与挂载注释：
+---
 
-```yaml
-environment:
-  PRIVACY_TLS_ENABLED: "true"
-  PRIVACY_TLS_CERT_FILE: "/certs/tls.crt"
-  PRIVACY_TLS_KEY_FILE: "/certs/tls.key"
-  PRIVACY_AUTH_ENABLED: "true"
-  PRIVACY_AUTH_EXTERNAL_KEYS_JSON: '{"dev-key":{"name":"local","scopes":["*"]}}'
-
-volumes:
-  - ./certs:/certs:ro
-```
-
-3. 重启服务：
+## 6. 验证与冒烟测试
 
 ```bash
-docker compose down
-docker compose up -d
+# 1. 验证 REST 健康检查端点
+curl -s http://<host>:8079/health | jq
+
+# 2. 验证敏感数据脱敏接口
+curl -s -X POST http://<host>:8079/v1/privacy/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "field": "id_card",
+    "value": "110101199003072345",
+    "type": "id_card"
+  }' | jq
+
+# 3. 验证差分隐私加噪计算
+curl -s -X POST http://<host>:8079/v1/privacy/dp/count \
+  -H "Content-Type: application/json" \
+  -d '{
+    "values": [1, 0, 1, 1, 0],
+    "epsilon": 1.0
+  }' | jq
 ```
-
-4. 验证（注意使用 `-k` 跳过自签名证书校验）：
-
-```bash
-curl -k https://localhost:8079/health
-```
-
-## 6. core/ml 镜像选择建议
-
-| 场景 | 推荐镜像 | 说明 |
-|---|---|---|
-| 仅使用脱敏、DP、K-匿名、规则分类 | `core` | 体积小、启动快、攻击面小 |
-| 需要 NER 或 LLM/VLM 分类 | `ml` | 包含 torch / transformers / onnxruntime |
-| 生产网关后方仅做隐私计算 | `core` | 分类可前置到独立 ml 实例 |
-| 本地全功能联调 | `ml` | 一次启动覆盖全部能力 |
-
-## 7. TLS / Secret 配置要点
-
-- TLS 证书与私钥建议通过 `kubectl create secret tls` 或外部 Secret 管理工具（如 cert-manager、Vault）创建，不写入 values 明文。
-- API Key Secret 的 data key 必须为 `api-keys.json`，格式为 JSON 对象，每个 key 对应 `name` 与 `scopes`。
-- TLS、认证、速率限制分别通过 `security.tls.enabled`、`security.auth.enabled`、`security.rateLimit.enabled` 控制；默认均关闭，生产环境需显式开启。`/health` 默认作为公开路径。
-- 原生 K8s 中启用 TLS/认证时，需同步修改 `deployment.yaml` 中的环境变量、volumeMounts 与 volumes。
-
-## 8. 验证部署
-
-无论哪种部署方式，均可通过 `/health` 端点进行基础验证：
-
-```bash
-# HTTP 模式
-curl http://<host>:8079/health
-
-# HTTPS 模式（自签名证书加 -k）
-curl -k https://<host>:8079/health
-
-# 预期返回
-{"status":"ok"}
-```
-
-## 9. 常见错误
-
-| 错误 | 原因 | 解决 |
-|---|---|---|
-| `ImagePullBackOff` | 镜像未构建或仓库不可达 | 确认 `image.repository` / `image.tag` 正确，并推送到可访问仓库 |
-| `CrashLoopBackOff` | 配置文件路径错误或 TLS 证书加载失败 | 检查 `PRIVACY_PROFILE` 与 `/certs` 挂载 |
-| 健康检查失败 | Service/探针配置与端口不一致 | 确认 Service 暴露 8079，探针路径为 `/health` |
-| gRPC 调用 TLS 错误 | 客户端未配置对应证书 | 使用相同 CA 签名的证书，或在测试环境使用 `-k` |
-| 认证 401 | API Key 不匹配或 Secret key 名称错误 | 确认 Secret 中 key 为 `api-keys.json`，且请求携带正确 key |

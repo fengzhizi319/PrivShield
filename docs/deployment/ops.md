@@ -1,61 +1,56 @@
-# PrivShield 部署运维手册
+# PrivShield 部署运维手册 (Operations & Deployment Guide)
 
 ## 1. 环境准备
 
 | 组件 | 最低版本 | 用途 |
 |---|---|---|
-| Kubernetes | >= 1.25 | 容器编排（HPA v2、NetworkPolicy v1） |
+| Kubernetes | >= 1.25 | 容器编排（HPA v2、NetworkPolicy v1、Kustomize） |
 | Helm | >= 3.12 | Chart 安装与管理 |
 | Docker | >= 20.10 | 镜像构建（BuildKit 多阶段） |
-| Docker Compose | >= 2.0 | 本地联调 |
-| Prometheus Operator | 可选 | ServiceMonitor 自动发现 |
-| Grafana | >= 9.0 | 可视化仪表盘 |
-
-**Python 运行时**（仅本地开发需要）：Python >= 3.10。
+| Docker Compose | >= 2.0 | 本地全栈开发联调 |
+| Go 运行时 | >= 1.25 | 本地原生编译、单元测试与代码审查 |
+| Prometheus Operator | 可选 | ServiceMonitor 自动发现与遥测 |
+| Grafana | >= 9.0 | 隐私治理全链路可视化仪表盘 |
 
 ---
 
-## 2. 镜像构建
+## 2. 容器镜像构建
 
 ### 2.1 多阶段构建架构
 
-Dockerfile 采用三阶段构建，通过 `--target` 选择最终镜像：
+项目采用纯 **Go 1.25+ 云原生多阶段构建**，根目录 [`Dockerfile`](../../Dockerfile) 与 [`engine-go/Dockerfile.cuda`](../../engine-go/Dockerfile.cuda)：
 
 ```text
-base (python:3.13-slim-bookworm)
- ├── 安装 curl / ca-certificates（K8s 探针依赖）
- ├── 安装 requirements-core.txt（核心运行时依赖）
- │
- ├──► core 目标
- │     ├── COPY 全部源码
- │     ├── EXPOSE 8079 50051
- │     ├── ENV PRIVACY_REST_HOST=0.0.0.0 / PRIVACY_GRPC_HOST=0.0.0.0
- │     └── CMD python -m engine.server
- │
- └──► ml 目标（继承 core）
-       ├── 安装 requirements-ml.txt（torch/transformers/onnxruntime 等）
-       └── CMD python -m engine.server
+Stage 1: Go 编译环境 (golang:1.25-alpine3.21 / golang:1.25-bookworm)
+ ├── 编译 privshield-agent (REST :8079 + gRPC :50051)
+ └── 编译 privshield-gateway (REST :8000 + gRPC :50000)
+       │
+       ▼
+Stage 2: 极简运行时镜像 (alpine:3.21 或 nvidia/cuda:12.2.2-runtime-ubuntu22.04)
+ ├── 安装 ca-certificates / tzdata
+ ├── 创建非 root 用户 (privacy:privacy, UID 1000)
+ ├── COPY 编译产物 /app/privshield-agent 与 /app/privshield-gateway
+ ├── COPY 规则库 rules/ 与配置 config/
+ ├── EXPOSE 8079 50051 8000 50000
+ └── HEALTHCHECK CMD wget -qO- http://127.0.0.1:8079/health || exit 1
 ```
 
-- **core 镜像**（~350 MB）：仅含隐私原语（DP / K-匿名 / 脱敏 / 规则分类），适合绝大多数生产场景。
-- **ml 镜像**（~4 GB）：额外包含 PyTorch / Transformers / ONNX Runtime，用于本地 NER（Layer-2）和 VLM/LLM（Layer-3）分类。
+- **极简 Go 原生镜像**（~25 MB）：单个静态二进制，常驻内存 < 30MB，冷启动 < 50ms。
+- **CUDA GPU 加速镜像**（~2 GB）：基于 CUDA 12.2，支持 ONNX Runtime GPU 推理加速。
 
 ### 2.2 构建命令
 
 ```bash
 # 在仓库根目录执行
-# core 镜像（推荐生产默认）
-docker build --target core -t PrivShield:0.1.0 .
+# 1. 极简 Go 运行时镜像（生产推荐默认）
+docker build -t privshield:10.0.0 .
 
-# ml 镜像（含 torch/transformers/onnxruntime，用于完整三层分类）
-docker build --target ml -t PrivShield:0.1.0-ml .
+# 2. NVIDIA GPU CUDA 镜像（ONNX NER GPU 推理）
+docker build -f engine-go/Dockerfile.cuda -t privshield:10.0.0-cuda .
 
-# 也可使用 Makefile 快捷命令
-make docker-core          # 等价于 --target core
-make docker-ml            # 等价于 --target ml
+# 3. 也可以使用 Makefile 快捷命令
+make docker-all
 ```
-
-> 自定义版本号：`make docker-core VERSION=0.2.0`
 
 ### 2.3 依赖清单
 

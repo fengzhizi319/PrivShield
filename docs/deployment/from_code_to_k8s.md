@@ -1,455 +1,176 @@
-# 从本地代码到 Kubernetes：PrivShield 部署入门
+# 从本地代码到 Kubernetes：PrivShield 云原生部署实战指南
 
-> 目标读者：刚接触 K8s / Helm，希望把本地跑通的 `PrivShield` 代码部署到 Kubernetes 的同学。
-> 读完本文，你应该能：
-> 1. 理解“本地 Python 代码 → 容器镜像 → K8s Pod” 的完整链路；
-> 2. 用 Helm 或原生 manifests 把服务跑在 K8s 上；
-> 3. 能排查最常见的启动失败问题。
+> 目标读者：希望将本地开发调试的 `PrivShield` 纯 Go 1.25+ 代码打包并部署到 Kubernetes 生产集群的开发者与 DevOps 工程师。
+> 读完本文，你将掌握：
+> 1. 理解“本地 Go 源码 → Alpine 多阶段镜像（~25MB） → K8s Pod 编排”的全流程；
+> 2. 使用 Helm Chart 或 Kustomize 原生清单将服务一键部署至 Kubernetes；
+> 3. 掌握生产就绪的配置注入、安全加固（TLS/mTLS/Secret）与故障排查技巧。
 
 ---
 
-## 1. 一句话总结
+## 1. 核心流程概览
 
-`PrivShield` 本质是一个 Python 服务。本地开发时你直接运行 Python；部署到 K8s 时，我们先把代码和依赖打包进 Docker 镜像，再通过 **Deployment** 让 K8s 运行这个镜像的多个副本，用 **Service** 暴露 REST/gRPC 端口，用 **ConfigMap/Secret** 注入配置和证书。
+`PrivShield` 核心引擎采用 **Go 1.25+ 云原生架构** 实现。本地开发时可通过 `go run` 或 `make build` 编译单二进制运行；部署到 Kubernetes 时，通过 Dockerfile 多阶段构建产出极小运行镜像，并由 Kubernetes Deployment、Service、ConfigMap 与 Secret 进行资源调度与配置注入。
 
 ```text
-本地代码
-   │  docker build
-   ▼
-Docker 镜像
-   │  push / load
-   ▼
-K8s 集群
-   │  helm install / kubectl apply
-   ▼
-Pod → Service → Ingress(可选)
+┌─────────────────────────┐
+│ 本地 Go 代码 (go.work)   │
+│ pkg/ privacy-go-sdk/    │
+│ engine-go/              │
+└────────────┬────────────┘
+             │ docker build (Go 1.25 Multi-stage)
+             ▼
+┌─────────────────────────┐
+│ 极简 Alpine 镜像 (~25MB) │
+│ - /app/privshield-agent │
+│ - /app/privshield-gateway│
+└────────────┬────────────┘
+             │ push / kind load
+             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ Kubernetes 生产集群                                              │
+│                                                                  │
+│  Ingress (南北入口) ──► Service (:8079 REST / :50051 gRPC)       │
+│                                │                                 │
+│                                ▼                                 │
+│                     PrivShield Pod (2+ 副本)                     │
+│                     - 非 root 用户运行 (UID 1000)                │
+│                     - 挂载 ConfigMap (规则库)                    │
+│                     - 挂载 Secret (TLS 证书与 API Keys)          │
+│                     - 探针检查 (/health 与 /readyz)              │
+│                     - HPA 弹性伸缩 (CPU/内存双阈值)              │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. 前置准备
+## 2. 前置准备工具
 
-| 工具 | 作用 | 最低版本 |
+| 工具 | 作用 | 推荐版本 |
 |---|---|---|
-| Docker | 构建、运行镜像 | 20.10+ |
-| kubectl | 与 K8s 集群交互 | 1.25+ |
-| Helm | 安装/管理 Chart | 3.12+ |
-| 一个 K8s 集群 | 运行服务 | — |
-
-如果你还没有集群，学习阶段推荐：
-
-- **minikube**（单节点，本地 VM）
-- **kind**（在 Docker 里跑 K8s，轻量）
-- **microk8s**（Ubuntu 推荐）
-
-生产环境请使用真实的多节点 K8s 集群。
+| **Go** | 本地代码编译与单元测试 | 1.25+ |
+| **Docker** | 镜像多阶段构建与本地容器运行 | 20.10+ |
+| **kubectl** | 与 Kubernetes 集群交互 | 1.25+ |
+| **Helm** | Kubernetes 生产应用包管理器 | 3.12+ |
+| **Kubernetes 集群** | 运行生产/测试 Pod（支持 Kind / Minikube / K8s 物理集群） | 1.25+ |
 
 ---
 
-## 3. 本地代码如何变成容器镜像
+## 3. 本地代码如何构建为容器镜像
 
-### 3.1 Dockerfile 多阶段构建
+### 3.1 Dockerfile 多阶段构建原理解析
 
-项目根目录的 `Dockerfile` 采用多阶段构建：
+项目根目录的 [`Dockerfile`](../../Dockerfile) 采用高效的双阶段构建机制：
 
-```text
-base（安装系统依赖 + 核心 Python 依赖）
-  ├──► core（隐私原语：脱敏、DP、K-匿名、规则分类）
-  └──► ml（core + torch/transformers/onnxruntime，支持 NER/LLM）
-```
+- **Stage 1: `golang:1.25-alpine3.21` 编译阶段**
+  - 设置 `CGO_ENABLED=0` 生成纯静态二进制；
+  - 自动编译 `privshield-agent`（REST :8079 + gRPC :50051）与 `privshield-gateway`（REST :8000 + gRPC :50000）；
+  - 去除符号表与调试信息（`-ldflags="-s -w"`），最小化二进制大小。
+- **Stage 2: `alpine:3.21` 极简运行阶段**
+  - 仅安装 CA 证书与时区包（`ca-certificates tzdata`）；
+  - 创建非 root 系统用户 `privacy:privacy`；
+  - 从 Stage 1 拷贝编译产物以及 `config/`、`rules/` 规则配置；
+  - 配置内置 `HEALTHCHECK` 探针（`wget -qO- http://127.0.0.1:8079/health`）。
 
-- `core` 镜像小（~350 MB），适合大多数场景。
-- `ml` 镜像大（~4 GB+），只有需要本地大模型时才用。
-
-关键行为：
-
-- 容器内默认监听 `0.0.0.0:8079`（REST）和 `0.0.0.0:50051`（gRPC）。
-- 入口脚本是 `docker-entrypoint.sh`，最终执行 `python -m engine.server`。
-
-### 3.2 构建镜像
-
-在项目根目录执行：
+### 3.2 镜像构建命令
 
 ```bash
-# 构建 core 镜像（推荐默认）
-docker build --target core -t privshield:1.8.0 .
-
-# 构建 ml 镜像
-docker build --target ml -t privshield:1.8.0-ml .
-
-# 也可以用 Makefile
-make docker-core
-make docker-ml
-```
-
-构建完成后查看镜像：
-
-```bash
-docker images | grep privshield
-```
-
-### 3.3 本地运行验证
-
-```bash
-# 本地运行 core 镜像
-docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
-
-# 另开一个终端测试健康检查
-curl http://localhost:8079/health
-```
-
-如果看到 `{"status":"ok","namespace":"default"}`，说明镜像没问题。
-
----
-
-## 4. 镜像怎么进入 Kubernetes
-
-K8s 节点要从某个地方拉取镜像，通常有两种方式：
-
-### 4.1 需要一个镜像仓库
-
-生产环境一般使用：
-
-- Docker Hub
-- 阿里云 ACR
-- 腾讯云 TCR
-- Harbor 私有仓库
-- GitHub Container Registry
-
-### 4.2 minikube / kind 本地加载镜像
-
-如果你用 minikube：
-
-```bash
-# 让 Docker 使用 minikube 内部的 Docker daemon
-eval $(minikube docker-env)
-
-# 重新构建镜像（此时镜像会存在 minikube 内部）
-docker build --target core -t privshield:1.8.0 .
-
-# 退出 minikube docker-env 后，kubectl 就能看到镜像
-```
-
-如果你用 kind：
-
-```bash
-kind load docker-image privshield:1.8.0 --name <你的集群名>
-```
-
-### 4.3 真实集群：推送镜像
-
-```bash
-# 1. 给镜像打仓库标签
-docker tag privshield:1.8.0 myregistry.example.com/privshield:1.8.0
-
-# 2. 推送
-docker push myregistry.example.com/privshield:1.8.0
-```
-
-在 K8s 部署时，把 `image.repository` 和 `image.tag` 改成这个地址。
-
----
-
-## 5. Kubernetes 部署的三种方式
-
-本项目提供三种部署形态：
-
-| 方式 | 路径 | 适用场景 | 难度 |
-|---|---|---|---|
-| **Helm Chart** | `deploy/helm/PrivShield/` | 生产/需要灵活配置 | 中 |
-| **原生 K8s manifests** | `deploy/k8s/` | 学习/最小化/不想用 Helm | 低 |
-| **Docker Compose** | `deploy/docker-compose/` | 本地联调，不是 K8s | 低 |
-
-**建议学习顺序**：
-
-1. 先跑通 Docker Compose（本地验证代码和镜像）。
-2. 再用 `deploy/k8s/` 理解每个 K8s 资源的作用。
-3. 最后用 Helm 体验生产级配置（TLS、认证、HPA、NetworkPolicy）。
-
----
-
-## 6. 最小可运行 K8s 部署：原生 manifests
-
-`deploy/k8s/` 是 Kustomize 组织的一组最小清单，适合学习。
-
-### 6.1 资源清单拆解
-
-```text
-deploy/k8s/
-├── namespace.yaml          # 创建 PrivShield 命名空间
-├── configmap.yaml          # 挂载 privacy-profile.yaml（非敏感配置）
-├── deployment.yaml         # 运行 Pod：镜像、端口、环境变量、探针
-├── service.yaml            # ClusterIP：暴露 8079/50051
-├── secret.example.yaml     # TLS 证书 + API Key 示例（需自己填值）
-└── kustomization.yaml      # Kustomize 入口
-```
-
-#### Namespace
-
-把资源隔离在一个命名空间里，方便管理。
-
-#### ConfigMap
-
-把 `privacy-profile.yaml` 内容放进 ConfigMap，再挂载到容器 `/etc/PrivShield/`。
-
-> 注意：代码只读取 `primitives:` 段，其他顶层键（如 `server:`）无效。
-
-#### Deployment
-
-最核心的资源，告诉 K8s：
-
-- 用什么镜像；
-- 启动几个副本；
-- 监听什么端口；
-- 环境变量（如 `PRIVACY_PROFILE`、`PRIVACY_LOG_FORMAT`）；
-- 健康检查：`/health` 存活，`/readyz` 就绪；
-- 资源限制：避免某个 Pod 吃光节点资源。
-
-#### Service
-
-`ClusterIP` 类型表示“只能在集群内部访问”。Pod 的 IP 会变，Service 提供稳定的虚拟 IP 和 DNS。
-
-REST 调用：
-
-```text
-PrivShield.PrivShield.svc:8079
-```
-
-gRPC 调用：
-
-```text
-PrivShield.PrivShield.svc:50051
-```
-
-#### Secret（可选）
-
-TLS 证书和 API Key 属于敏感信息，不应该写进镜像或 ConfigMap，要用 Secret。默认 `secret.example.yaml` 没有启用，需要复制并填真实值。
-
-### 6.2 部署与验证
-
-```bash
-# 1. 确保镜像已在集群可用（minikube docker-env / kind load / push 到仓库）
-
-# 2. 一键部署
 cd /path/to/PrivShield
-kubectl apply -k deploy/k8s/
 
-# 3. 查看 Pod 状态
-kubectl get pods -n PrivShield -w
+# 1. 构建标准 Go 原生镜像 (推荐默认，~25MB)
+docker build -t privshield:10.0.0 .
 
-# 4. 等 Pod Running 后，端口转发到本地测试
-kubectl port-forward -n PrivShield svc/PrivShield 8079:8079 50051:50051
+# 2. 或构建 NVIDIA GPU CUDA 加速镜像 (支持 ONNX GPU 推理)
+docker build -f engine-go/Dockerfile.cuda -t privshield:10.0.0-cuda .
+```
 
-# 5. 本地测试
-curl http://localhost:8079/health
-curl http://localhost:8079/readyz
+### 3.3 本地容器运行验证
+
+```bash
+# 启动容器并映射端口
+docker run -d --name privshield-test \
+  -p 8079:8079 -p 50051:50051 \
+  privshield:10.0.0
+
+# 验证健康检查端点
+curl -s http://127.0.0.1:8079/health
+# 返回: {"status":"ok","version":"10.0.0"}
+
+# 验证敏感数据脱敏接口
+curl -s -X POST http://127.0.0.1:8079/v1/privacy/mask \
+  -H "Content-Type: application/json" \
+  -d '{"field":"phone","value":"13812345678","type":"phone"}'
+
+# 清理测试容器
+docker rm -f privshield-test
 ```
 
 ---
 
-## 7. 生产级 Helm 部署
+## 4. 部署至 Kubernetes 集群
 
-Helm 把 K8s 资源模板化，允许你通过 `values.yaml` 灵活配置，而不用直接改 YAML。
+### 4.1 方案 A：使用 Helm Chart 一键生产部署（推荐）
 
-### 7.1 Helm Chart 结构
-
-```text
-deploy/helm/PrivShield/
-├── Chart.yaml              # Chart 元数据
-├── values.yaml             # 默认值（开发模式）
-├── values-production.yaml  # 生产覆盖值
-├── values-ml.yaml          # ML 镜像覆盖值
-└── templates/              # 模板，会被渲染成真实 K8s YAML
-    ├── _helpers.tpl        # 命名/标签辅助函数
-    ├── namespace.yaml
-    ├── serviceaccount.yaml
-    ├── deployment.yaml
-    ├── service.yaml
-    ├── configmap.yaml
-    ├── secret.yaml
-    ├── ingress.yaml
-    ├── hpa.yaml
-    ├── poddisruptionbudget.yaml
-    ├── networkpolicy.yaml
-    └── servicemonitor.yaml
-```
-
-### 7.2 开发模式安装
-
+#### 1. 准备 TLS 证书与 API Key Secret
 ```bash
-# 1. 构建镜像并确保集群能访问
-# 2. 安装 Chart
-helm install privshield ./deploy/helm/PrivShield
-
-# 查看状态
-helm list
-kubectl get pods -l app.kubernetes.io/name=PrivShield
-```
-
-默认行为：
-
-- 1 个副本；
-- TLS / Auth / RateLimit 关闭；
-- Service 暴露 REST + gRPC；
-- HPA / Ingress / NetworkPolicy / ServiceMonitor 关闭。
-
-### 7.3 生产模式安装（TLS + 认证）
-
-```bash
-# 1. 创建 TLS Secret（包含 tls.crt / tls.key）
+# 创建 TLS Secret
 kubectl create secret tls privshield-tls \
-  --cert=path/to/tls.crt \
-  --key=path/to/tls.key \
-  -n PrivShield
+  --cert=/path/to/tls.crt \
+  --key=/path/to/tls.key
 
-# 2. 创建 API Key Secret
-# 文件 api-keys.json 示例：
-# {
-#   "my-api-key": { "name": "gateway", "scopes": ["*"] }
-# }
+# 创建 API Key Secret
+cat > api-keys.json <<'EOF'
+{
+  "prod-client-key-1": {
+    "name": "hospital-client",
+    "scopes": ["mask", "dp", "classify"]
+  }
+}
+EOF
+
 kubectl create secret generic privshield-apikeys \
-  --from-file=api-keys.json=path/to/api-keys.json \
-  -n PrivShield
+  --from-file=api-keys.json
+```
 
-# 3. 使用生产 values 安装
+#### 2. 执行 Helm 安装
+```bash
+# 使用生产级 values-production-go.yaml 部署
 helm install privshield ./deploy/helm/PrivShield \
-  -f ./deploy/helm/PrivShield/values-production.yaml \
+  -f ./deploy/helm/PrivShield/values-production-go.yaml \
   --set security.tls.existingSecret=privshield-tls \
   --set security.auth.apiKeysSecret=privshield-apikeys \
-  --set image.repository=myregistry.example.com/PrivShield \
-  --set image.tag=1.8.0
+  --set goEngine.image.repository=privshield \
+  --set goEngine.image.tag=10.0.0
 ```
 
-生产模式会同时启用：
-
-- 2 副本；
-- TLS + API Key 认证；
-- 速率限制；
-- HPA（2~10 副本）；
-- NetworkPolicy；
-- ServiceMonitor（需要 Prometheus Operator）。
-
-### 7.4 升级与回滚
-
+#### 3. 检查部署状态
 ```bash
-# 升级镜像版本
-helm upgrade privshield ./deploy/helm/PrivShield \
-  -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set image.tag=0.2.0
-
-# 查看历史
-helm history privshield
-
-# 回滚到上一版本
-helm rollback privshield
+# 查看 Pod 与 Service 状态
+kubectl get pods,svc,hpa -l app.kubernetes.io/name=PrivShield
 ```
 
 ---
 
-## 8. 可观测性：Prometheus + Grafana
-
-项目内置 `/metrics` 端点，暴露 `privacy_*` 前缀的指标。
+### 4.2 方案 B：使用原生 Kubernetes Kustomize 部署
 
 ```bash
-# 本地测试指标
-curl http://localhost:8079/metrics | head -20
-```
+cd /path/to/PrivShield
 
-### 8.1 Prometheus 抓取
-
-如果使用 Prometheus Operator，在 Helm 安装时启用 ServiceMonitor：
-
-```bash
-helm install privshield ./deploy/helm/PrivShield \
-  -f ./deploy/helm/PrivShield/values-production.yaml \
-  --set serviceMonitor.enabled=true
-```
-
-### 8.2 Grafana 仪表盘
-
-`deploy/grafana/dashboard.json` 是预置仪表盘，导入 Grafana：
-
-```text
-Grafana → Dashboards → Import → 上传 deploy/grafana/dashboard.json
-```
-
-### 8.3 Docker Compose 监控栈
-
-本地学习时可以直接启动 Prometheus + Grafana：
-
-```bash
-cd deploy/docker-compose
-docker compose --profile monitoring up -d
-```
-
----
-
-## 9. 常见问题排查
-
-| 现象 | 可能原因 | 排查命令 |
-|---|---|---|
-| `ImagePullBackOff` | 镜像未推送到仓库 / 标签错误 | `kubectl describe pod -n PrivShield <pod>` |
-| `CrashLoopBackOff` | 配置文件路径错误 / TLS 证书缺失 | `kubectl logs -n PrivShield deploy/PrivShield` |
-| 健康检查失败 | 端口未监听 / 探针路径错误 | 确认 `PRIVACY_HEALTH_NO_AUTH=true`，Service 暴露 8079 |
-| 就绪探针 503 | `PRIVACY_PROFILE` 未挂载 / SQLite DB 不可写 | `kubectl get configmap -n PrivShield` |
-| 认证 401 | API Key 不匹配 | 检查 Secret 中的 `api-keys.json`，请求头 `X-API-Key` |
-| 速率限制 429 | RPS 超过限制 | 调大 `PRIVACY_RATE_LIMIT_DEFAULT_RPS` |
-| OOMKilled | 内存不足 | 调大 `resources.limits.memory`；ml 镜像建议 ≥8Gi |
-
-通用诊断流程：
-
-```bash
-# 1. 看 Pod 事件
-kubectl describe pod -n PrivShield -l app=PrivShield
-
-# 2. 看日志
-kubectl logs -n PrivShield deploy/PrivShield
-
-# 3. 进容器内部验证
-kubectl exec -it -n PrivShield deploy/PrivShield -- /bin/sh
-curl http://localhost:8079/health
-```
-
----
-
-## 10. 命令速查表
-
-```bash
-# ── 镜像构建 ──
-docker build --target core -t privshield:1.8.0 .
-docker build --target ml -t privshield:1.8.0-ml .
-
-# ── 本地运行 ──
-docker run -p 8079:8079 -p 50051:50051 privshield:1.8.0
-
-# ── 镜像推送 ──
-docker tag privshield:1.8.0 myregistry/privshield:1.8.0
-docker push myregistry/privshield:1.8.0
-
-# ── 原生 K8s ──
+# 应用清单
 kubectl apply -k deploy/k8s/
-kubectl get pods -n PrivShield -w
-kubectl port-forward -n PrivShield svc/PrivShield 8079:8079
 
-# ── Helm ──
-helm install privshield ./deploy/helm/PrivShield
-helm upgrade privshield ./deploy/helm/PrivShield -f ./deploy/helm/PrivShield/values-production.yaml
-helm rollback privshield
-
-# ── 验证 ──
-curl http://localhost:8079/health
-curl http://localhost:8079/readyz
-curl http://localhost:8079/metrics | head -20
+# 查看资源状态
+kubectl get all -n PrivShield
 ```
 
 ---
 
-## 11. 延伸阅读
+## 5. 生产高频故障排查与速查表
 
-- [Deployment PRD](./prd.md) — 产品需求与验收标准
-- [Deployment Design](./design.md) — 架构选型、Chart 结构、滚动更新策略
-- [Deployment Ops](./ops.md) — 完整运维手册、环境变量参考、故障排查
-- [Deployment Examples](./examples.md) — Helm/K8s/Docker Compose 详细示例
-- [Deployment Testing](./testing.md) — 部署验证与 CI 建议
-- [生产安全 Ops](../production_security/ops.md) — TLS、认证、速率限制配置
-- [可观测性 Ops](../production_observability/ops.md) — Prometheus/Grafana/Tracing 配置
+| 故障现象 | 根因定位 | 排查与解决命令 |
+|---|---|---|
+| **`ImagePullBackOff`** | 镜像名、Tag 错误或私有镜像仓库认证失败 | `kubectl describe pod <pod-name>` 检查镜像路径，确认 `imagePullSecrets` 配置正确。 |
+| **`CrashLoopBackOff`** | 配置文件路径不存在、证书挂载错误或端口冲突 | `kubectl logs <pod-name>` 查看标准输出日志；检查 ConfigMap 挂载路径是否为 `/app/config`。 |
+| **探针 `Readiness probe failed`** | 启动阶段未能及时就绪（如模型加载超时或配置解析异常） | 检查 `/readyz` 响应；在 Helm values 中适当调大 `probes.readiness.initialDelaySeconds`。 |
+| **REST 调用报 `401 Unauthorized`** | 开启了鉴权但请求未携带 `X-API-Key`，或 Secret 中 key 文件名非 `api-keys.json` | 确认 Secret 内文件名为 `api-keys.json`，并在请求头添加 `X-API-Key: <key>`。 |
+| **gRPC 客户端报 `UNAVAILABLE`** | gRPC 长连接未通过正确端口连接，或 TLS/mTLS 握手不匹配 | 检查 Service 端口是否暴露 `50051`，客户端是否配置对应的根 CA 证书。 |

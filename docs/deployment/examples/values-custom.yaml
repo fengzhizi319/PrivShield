@@ -41,7 +41,7 @@ service:
 agent:
   logLevel: info
   logFormat: json
-  # 注意：代码（privacy/profile.py）仅读取 `primitives:` 段，按
+  # 注意：Go Profile 加载器（engine-go/internal/profile/profile.go）按
   # primitives.<primitive> 覆盖内置默认参数；其他顶层键不会被解析。
   profile: |
     primitives:

@@ -64,11 +64,11 @@
 
 | 场景 | 部署形态 | 说明 |
 |---|---|---|
-| 本地开发 / 联调 | 本地直跑 | `python -m engine.server`，`.env` + `config/env/<profile>.env` 级联加载 |
-| 内部演示 / 单机小规模 | Docker 单容器 | `docker build --target core|ml` + `docker run`，环境变量注入 |
-| 本地全栈（agent + console + vLLM + 监控） | Docker Compose | `deploy/docker-compose/docker-compose.yml` 一键拉起，`env_file: ../../.env` 注入配置 |
+| 本地开发 / 联调 | 本地直跑 | `go run ./engine-go/cmd/privshield-agent`，或一键脚本 `bash ./scripts/dev/dev-bff-agent.sh` |
+| 内部演示 / 单机小规模 | Docker 单容器 | `docker build -t privshield:10.0.0 .` + `docker run`，环境变量注入 |
+| 本地全栈（agent + console + 微服务 + 监控） | Docker Compose | `deploy/docker-compose/docker-compose.go-engine.yml` 一键拉起 |
 
-**决策建议**：单机、演示、开发 → Compose / 直跑；对外提供脱敏服务、需要多副本高可用 + 弹性伸缩 + 安全合规（TLS/网络隔离/审计）→ K8s，使用 `helm install -f values-production.yaml`（配合自管 TLS/API Key Secret）。
+**决策建议**：单机、演示、开发 → Compose / 直跑；对外提供脱敏服务、需要多副本高可用 + 弹性伸缩 + 安全合规（TLS/网络隔离/审计）→ K8s，使用 `helm install -f values-production-go.yaml`（配合自管 TLS/API Key Secret）。
 
 > **注意**：K8s 部署时镜像内无 `.env`（`.dockerignore` 排除），配置完全由 values 控制（见 §4.4），LLM 等无 values 字段的配置须经 `extraEnv` 注入——这是生产配置受控的强制要求。
 
