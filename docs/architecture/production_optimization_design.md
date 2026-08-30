@@ -267,3 +267,24 @@ RETURNING *;
 - **engineCache 智能驱逐**：原随机遍历 Go map key 淘汰一半，热数据与冷数据同概率被丢弃。改为两阶段：Phase 1 优先淘汰 `MatchedBy=="default"` 或 `Confidence < 0.6` 的低价值条目；Phase 2 回退随机补足。
 
 **全量测试验证**：19 个包全部通过 `go test -race -count=1 ./...`，零数据竞争。
+
+---
+
+## 7. 深度优化建议评估与定向改造
+
+对外部提出的 6 项优化建议逐条进行代码事实验证（避免假阳性），实施其中 3 项高确定性改造：
+
+### 7.1 已实施
+
+- **LLMClient Half-Open 并发试探限制（P1 可靠性）**：`llm_client.go` 的 `checkCircuit` 在 Half-Open 态无条件 `return true`，与同仓 `gateway.CircuitBreaker`（`successCount < halfOpenMax` 限流）实现不一致。改造为：`halfOpenInflight atomic.Int32` 配额（上限 3），Open→HalfOpen 迁移时 `Store(1)` 由迁移者自身占位；返回幂等 `releaseProbe` 回调（`sync.Once` 保护），`Classify` 中 `defer` 释放；超额请求拒绝并降级到 Safety Floor，防止刚恢复的 LLM 被瞬时流量二次打崩。
+- **RuleEngine 热路径 Stat 节流（P1 性能）**：`engine.go` 的 `checkRulesReload` 在每次 `Classify` 前执行 `os.Stat`，属每请求 syscall。新增 5s 节流窗口：`lastCheckNano atomic.Int64` + CAS 确保同一窗口仅一个 goroutine 执行检测；`PRIVACY_RULES_RELOAD_CHECK_SECONDS` 可配置（0 禁用）。保持"零 goroutine、零外部依赖"设计原则不变。另经代码验证：`WhitelistManager.checkReload` 实际未接入任何请求热路径（仅测试调用），建议原文明单错位，真实风险在 RuleEngine。
+- **ArbitrateBatch 并行阈值 32→128（P3）**：单条仲裁为纯内存比较 + ring buffer 写入，32~128 区间 goroutine 创建/调度开销高于并行收益，小批量改串行单趟。
+
+### 7.2 评估后未采纳/留待专项
+
+- **fsnotify 事件驱动热重载**：白名单热重载未接入认证链路（前提不成立）；RuleEngine 侧用时间节流即可消除热路径 Stat，引入 fsnotify 会破坏零依赖约定并新增 goroutine，性价比低。
+- **分类 LRU 读锁改造（S3-FIFO/读写分离）**：痛点属实（`get` 因 `moveToFront` 持写锁），但替换淘汰算法影响面大，建议后续以"命中计数阈值延迟重排"的小改造方案专项评估。
+- **大文件流式处理**：当前已有 50MB multipart / 256MB XLSX 上限兜底 OOM；真流式受限于 Mondrian 全局分组算法本质无法全流式，需架构级专项设计（CSV/JSON 可先行）。
+- **ReverseProxy 内聚 BackendNode**：合理但会牺牲后端节点动态增删灵活性，需确认网关拓扑后再动。
+
+**测试验证**：新增 `TestLLMClient_HalfOpenProbeQuota`（确定性配额断言 + 幂等性）与 `TestRuleEngine_ReloadCheckThrottle`（节流窗口内跳过/关闭后正常重载），19 包全部通过 `go test -race -count=1 ./...`。

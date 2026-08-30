@@ -195,12 +195,15 @@ proxy:
 ### 4.4 通配反向代理
 
 - **路径**：`/*`（匹配除 `/health`、`/gateway/backends`、`/metrics` 外的所有 HTTP 请求）
-- **行为**：
+- **行为规范**：
   1. 调用 `LoadBalancer.SelectNode()` 依据当前策略挑选最优节点；
-  2. 校验节点熔断器状态，若 `Open` 则返回 `503 Service Unavailable`；
-  3. 从 `byteBufferPool` 取出 32KB 缓冲区，复用 `http.Transport` 长连接向后端发起请求；
-  4. 记录响应延迟并更新节点 EWMA；根据响应状态码（<500 成功，≥500 失败）更新熔断器；
-  5. 实时将 InFlight、EWMA 延迟与请求计数上报 Prometheus。
+  2. 校验节点熔断器状态，若处于 `Open` 状态则通过 `pkg/middleware.AbortWithError` 立即返回 `503 Service Unavailable`；
+  3. 原子递增在途连接计数 `node.IncrementInFlight()`；
+  4. 从全局单例 `proxyCache`（带 10 分钟 TTL 自动淘汰）获取或创建目标节点的 `*httputil.ReverseProxy` 实例；
+  5. 代理层通过 `byteBufferPool` 取出 32KB 缓冲区，复用 `sharedTransport`（`MaxIdleConns: 2048`, `MaxIdleConnsPerHost: 256`）长连接向后端发起请求；
+  6. 自动执行 RFC 7230 逐段传输头（Hop-by-Hop Headers）剥离，并透传 `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Request-ID` 与 `X-Trace-ID`；
+  7. 响应完成时触发 `defer` 回调：原子递减 `node.DecrementInFlight()`，基于请求耗时更新节点 EWMA；根据响应状态码（<500 成功，≥500 失败）更新熔断器；
+  8. 实时将 InFlight、EWMA 延迟与请求计数上报 Prometheus（`GatewayMetrics`）。
 
 ---
 
@@ -208,10 +211,12 @@ proxy:
 
 - **监听端口**：默认 `:50000`
 - **工作机制**：
-  - 基于 `grpc.UnknownServiceHandler` 拦截所有未在网关本地注册的 RPC 方法；
-  - 基于 `rawCodec` 直接将收到的原始 Protobuf Frame 发送至选中的后端 Agent，无需解析或反序列化；
-  - 自动透明传递 `metadata.IncomingContext` 中的 Metadata（包含分布式追踪 Trace ID、认证凭证等）；
-  - 全并发双向流透传，客户端与后端流任一方正常结束或发生异常时优雅收尾。
+  1. **泛化方法拦截**：基于 `grpc.UnknownServiceHandler` 统一拦截所有未在网关本地注册的 RPC 方法（如 `/privacy.PrivacyService/*`）；
+  2. **零编解码开销 (`rawCodec`)**：通过自定义 `rawCodec` 直接透传原始 Protobuf 二进制帧（`[]byte`），无需在网关层反序列化为 Struct 或重新序列化，消除 CPU 与 GC 损耗；
+  3. **双向全双工流管道**：内部启动双 Goroutine 实现客户端与后端的全双工数据帧转发，支持 Unary、Client-Streaming、Server-Streaming、Bidirectional-Streaming 全模式；
+  4. **全双工元数据透传**：自动提取 `metadata.IncomingContext` 中的 Metadata（包含分布式追踪 Trace ID、认证凭证等）并注入回源请求；后端响应的 Initial Metadata 与 Trailers 尾部元数据完整回传客户端；
+  5. **后端连接池管理**：维护 `connPool`（容量限制 256），智能复用 `READY` / `IDLE` / `CONNECTING` 状态连接，仅在 `TRANSIENT_FAILURE` 或 `SHUTDOWN` 时安全重建；
+  6. **RPC 级调度与熔断**：每个独立的 RPC 流均通过 `lb.SelectNode()` 动态选路，流生命周期结束时原子更新 EWMA 与 InFlight。
 
 ---
 

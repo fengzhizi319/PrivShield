@@ -165,10 +165,12 @@ func (sf *SafetyFloor) Arbitrate(result *ClassificationResult) *ClassificationRe
 	return result
 }
 
-// ArbitrateBatch 批量仲裁（大批量多核并发）
+// ArbitrateBatch 批量仲裁（超大批量多核并发）。
+// 单条仲裁为纯内存比较 + ring buffer 写入（极轻量），阈值 128 以下
+// goroutine 创建与调度开销高于串行执行收益，小批量直接单趟串行。
 func (sf *SafetyFloor) ArbitrateBatch(results []*ClassificationResult) []*ClassificationResult {
 	n := len(results)
-	if n <= 32 {
+	if n <= 128 {
 		for i, r := range results {
 			results[i] = sf.Arbitrate(r)
 		}

@@ -1,7 +1,10 @@
 package dynclassification
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNewRuleEngine(t *testing.T) {
@@ -139,5 +142,62 @@ func TestSecurityLevels(t *testing.T) {
 		if level == "" {
 			t.Error("Security level should not be empty")
 		}
+	}
+}
+
+// TestRuleEngine_ReloadCheckThrottle 验证热路径 mtime 检测节流：
+// 节流窗口内的文件变更不触发重载（避免每请求 os.Stat），关闭节流后正常重载。
+func TestRuleEngine_ReloadCheckThrottle(t *testing.T) {
+	dir := t.TempDir()
+	rulesFile := filepath.Join(dir, "rules.yaml")
+
+	content := `rules:
+  - id: r1
+    level: internal
+    category: test
+    field_patterns: ["alpha"]
+`
+	if err := os.WriteFile(rulesFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rules := []RuleDef{{ID: "r1", Level: LevelInternal, Category: "test", FieldPatterns: []string{`alpha`}}}
+	engine, err := NewRuleEngine(rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.WatchRules(rulesFile); err != nil {
+		t.Fatal(err)
+	}
+	if engine.checkInterval != defaultRulesReloadCheckInterval {
+		t.Fatalf("expected default throttle interval, got %v", engine.checkInterval)
+	}
+
+	// 首次检查（lastCheckNano=0）应放行并执行 Stat
+	engine.checkRulesReload()
+
+	// 更新规则文件（mtime 设为未来），但处于节流窗口内应被跳过
+	newContent := content + `  - id: r2
+    level: secret
+    category: test2
+    field_patterns: ["beta"]
+`
+	future := time.Now().Add(time.Hour)
+	if err := os.WriteFile(rulesFile, []byte(newContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(rulesFile, future, future); err != nil {
+		t.Fatal(err)
+	}
+	engine.checkRulesReload() // 被节流：不执行 Stat，不重载
+	if got := engine.RuleCount(); got != 1 {
+		t.Fatalf("reload must be throttled within interval, got %d rules", got)
+	}
+
+	// 关闭节流后应正常重载新规则
+	engine.checkInterval = 0
+	engine.checkRulesReload()
+	if got := engine.RuleCount(); got != 2 {
+		t.Fatalf("reload must happen when throttle disabled, got %d rules", got)
 	}
 }

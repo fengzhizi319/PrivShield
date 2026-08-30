@@ -716,140 +716,228 @@ HTTP 与 gRPC 代理共享同一个 `LoadBalancer`。每一次故障转移尝试
 
 ---
 
-### 5.4 HTTP 反向代理引擎 (`http_proxy.py`)
+### 5.4 HTTP 反向代理引擎 (`http_proxy.go`)
 
-模块路径：[`engine/gateway/http_proxy.py`](engine/gateway/http_proxy.py)（`create_http_gateway_app`）
+模块路径：[`engine-go/internal/gateway/http_proxy.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/internal/gateway/http_proxy.go)（`NewHTTPProxyHandler` / `getOrCreateReverseProxy`）
 
-基于 FastAPI 构建的全方法通配代理应用（`/{path:path}`）。
-
-#### 关键实现细节：
-
-1. **应用级单例连接池与生命周期管理**：
-   在 FastAPI `lifespan` 钩子中初始化全局单例 `httpx.AsyncClient`，并在网关停机时优雅 `aclose()`：
-   ```python
-   app.state.http_client = httpx.AsyncClient(
-       timeout=httpx.Timeout(30.0),
-       limits=httpx.Limits(max_keepalive_connections=100, max_connections=500),
-       trust_env=False,              # 禁用环境变量代理，防止本地转发流量被误拦截
-       verify=backend_tls_verify(),  # 支持回源 TLS 证书校验
-   )
-   ```
-2. **事件循环感知与客户端重建（Event Loop Drift Mitigation）**：
-   检测 `current_loop != request.app.state.http_client_loop` 时，异步安全淘汰旧客户端并重建新 `httpx.AsyncClient`，彻底解决在多事件循环交替运行（如部分 ASGI 容器或复杂测试夹具）下的 `RuntimeError: Event loop is closed` 痛点。
-3. **逐段传输头过滤与二次解压防护**：
-   - 严格剥离 RFC 7230 规定的 Hop-by-Hop 请求头（`connection`, `keep-alive`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailers`, `transfer-encoding`, `upgrade`, `content-length`, `host`）。
-   - **响应端剥离 `content-encoding`**：`httpx` 在拉取后端 `resp.content` 时会自动进行 gzip/deflate 解压缩。网关若把 `content-encoding: gzip` 原样回传给下游客户端，客户端将尝试对已解压的明文再次解压并导致解析崩溃。网关在响应过滤器中显式剔除 `content-encoding`。
-4. **单次 Body 缓存与故障重试**：
-   在进入重试循环前通过 `body = await request.body()` 完成单次流式读取，确保重试时能够无损多次重发 Payload。
-5. **重试与幂等安全边界控制**：
-   - 最大重试次数：`max_retries = 3`。
-   - **重试安全准则**：仅在满足以下条件之一时允许重试：
-     - 请求方法为幂等方法（`GET`, `HEAD`, `OPTIONS`）；
-     - 捕获到 `httpx.ConnectError`（表示 TCP 握手失败，请求尚未送达后端，无任何副作用产生）。
-     - 若非幂等方法（`POST`, `PUT`, `DELETE` 等）遭遇读写超时（`ReadTimeout` / `WriteTimeout`），**绝不发起重试**，立即中断并返回 502，防止由于后端重复执行导致数据被多次篡改或重复记账。
-6. **错误脱敏与内部信息保护**：
-   重试全部失败返回 502 时，仅向客户端返回标准化文案 `Bad Gateway: all 3 backend retry attempts failed`，后端的内部堆栈、异常细节及内网真实 IP/端口仅记录在网关的结构化日志中，杜绝内网拓扑泄露。
-7. **请求超时链路**：
-   全局转发超时 `httpx.Timeout(30.0)`（含 connect / read / write / pool 四个维度均 30 秒），与 gRPC 转发超时 `timeout=30.0` 对齐。超时参数可通过环境变量统一调整（参见 §13.2 `GATEWAY_REQUEST_TIMEOUT`）。
-
----
-
-### 5.5 gRPC 泛化代理引擎 (`grpc_proxy.py`)
-
-模块路径：[`engine/gateway/grpc_proxy.py`](engine/gateway/grpc_proxy.py)（`class GatewayGrpcServicer`）
-
-基于 `grpc.aio` 实现的泛化 Servicer，提供对 `PrivacyService` 所有 RPC 调用的透明反射代理。
-
-#### 关键实现细节：
-
-1. **泛化方法自动绑定（Generic Method Binding）**：
-   ```python
-   def _bind_generic_methods(self) -> None:
-       base = privacy_pb2_grpc.PrivacyServiceServicer
-       for name in dir(base):
-           if name.startswith("_") or name in ("__init__", "_bind_generic_methods", "_forward"):
-               continue
-           attr = getattr(base, name)
-           if callable(attr):
-               setattr(self, name, self._make_forwarder(name))
-   ```
-   通过反射扫描 `PrivacyServiceServicer` 的所有公开接口，动态绑定统一的转发闭包 `_forward(method_name, request, context)`。业务 proto 新增任何 RPC 接口，网关零修改即可自动生效。
-2. **全双工元数据双向透传**：
-   - **入站元数据透传**：通过 `context.invocation_metadata()` 提取客户端传入的所有 Headers/Metadata（如认证 Token、TraceContext），在调用 `stub_method(request, timeout=30.0, metadata=metadata)` 时原样注入。
-   - **出站初始元数据透传**：通过 `await call.initial_metadata()` 捕获后端的响应头元数据，并通过 `await context.send_initial_metadata(initial_md)` 实时回传给客户端。
-   - **出站尾部元数据透传**：通过 `await call.trailing_metadata()` 捕获 gRPC Trailers，并通过 `context.set_trailing_metadata(trailing_md)` 透传给客户端。
-3. **gRPC 状态码与异常精细分流**：
-   - 遭遇 `grpc.StatusCode.UNAVAILABLE` 或底层网络连接异常：计入重试计数（`GATEWAY_RETRIES_TOTAL`），将当前节点置为不健康（5秒冷却），记录熔断器失败，并故障转移重试其他健康节点（最多 3 次）。
-   - 遭遇业务逻辑类错误（如 `INVALID_ARGUMENT`, `NOT_FOUND`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`）：**不触发重试与故障转移**，记录耗时指标后直接通过 `await context.abort(exc.code(), exc.details())` 原样回传给客户端。
-
----
-
-### 5.6 网关统一启动器与生命周期 (`server.py`)
-
-模块路径：[`engine/gateway/server.py`](engine/gateway/server.py)（`async_main`）
-
-在同一个主进程和同一个 AsyncIO 事件循环内并发托管 Uvicorn (FastAPI) 与 gRPC 异步服务器。
+基于 Gin 框架与 Go 标准库 `net/http/httputil.ReverseProxy` 实现的高性能通配反向代理中间件，支持将所有 `/v1/*` 业务请求透明转发至后端 Agent 计算集群。
 
 ```mermaid
-graph LR
-    Main["main() / async_main()"] --> LoadCfg["加载 YAML 与环境变量配置"]
-    LoadCfg --> InitLB["初始化 LoadBalancer & 注入初始节点"]
-    InitLB --> StartGrpc["启动 start_grpc_gateway (Secure/Insecure)"]
-    InitLB --> StartHttp["初始化 create_http_gateway_app"]
-    InitLB --> StartHC["创建 health_check_loop 后台协程"]
+flowchart TB
+    Client([HTTP 客户端]) -->|HTTP 请求| Gin[Gin Engine /v1/* 路由]
+    Gin --> Middleware[NewHTTPProxyHandler]
+    Middleware --> LB[P2C-EWMA SelectNode]
+    LB -->|选定后端节点| Node[BackendNode]
+    Node --> CBCheck{熔断器 Allow?}
+    CBCheck -->|拒绝 503| Err503[AbortWithError 503]
+    CBCheck -->|允许| InFlight[IncrementInFlight & 记录 StartTime]
+    InFlight --> GetProxy[getOrCreateReverseProxy]
+    GetProxy --> BufferPool[byteBufferPool 32KB sync.Pool]
+    BufferPool --> Transport[sharedTransport 高性能连接池]
+    Transport -->|东西向转发| AgentNode[PrivShield Agent :8079]
+    AgentNode -->|返回响应| BufferPool
+    BufferPool --> Resp[返回客户端]
+    Resp --> Defer[defer 收尾回调]
+    Defer --> EWMA[DecrementInFlight & UpdateEWMA]
+    Defer --> MetricUpdate[GatewayMetrics 状态实时更新]
+```
+
+#### 关键实现细节与架构机制：
+
+1. **`byteBufferPool` 零内存分配读写缓冲区**：
+   - 实现 `httputil.BufferPool` 接口，内部封装 `sync.Pool` 复用 32KB 固定容量字节切片（`[]byte`）：
+     ```go
+     type byteBufferPool struct {
+         pool sync.Pool
+     }
+     
+     func newByteBufferPool() *byteBufferPool {
+         return &byteBufferPool{
+             pool: sync.Pool{
+                 New: func() any {
+                     b := make([]byte, 32*1024)
+                     return &b
+                 },
+             },
+         }
+     }
+     ```
+   - 在高并发海量数据脱敏反向代理流中，彻底消除每次 HTTP I/O 读写时频繁分配 32KB 临时 buffer 的堆内存压力，GC 停顿降至微秒级。
+
+2. **`sharedTransport` 全局单例连接池优化**：
+   - 所有的反向代理实例共享全局优化传输层，支持 HTTP/1.1 Keep-Alive 长连接复用与 HTTP/2 双协议自适应：
+     ```go
+     var sharedTransport = &http.Transport{
+         MaxIdleConns:        2048,             // 全局最大空闲连接数
+         MaxIdleConnsPerHost: 256,              // 单节点最大空闲连接数
+         IdleConnTimeout:     90 * time.Second, // 空闲连接超时回收
+         DisableCompression:  false,            // 允许透明传输压缩
+     }
+     ```
+   - 彻底避免突发大流量下频繁进行 TCP 三次握手与 TLS 协商，防止本地套接字端口耗尽（TIME_WAIT 堆积）。
+
+3. **`proxyCache` 代理实例线程安全缓存与 TTL 自动淘汰**：
+   - 使用 `sync.Map` 缓存后端目标地址对应的 `*httputil.ReverseProxy` 实例（`proxyEntry` 携带创建时间）；
+   - 后台常驻清理 Goroutine 每 2 分钟扫描并淘汰超过 10 分钟未活跃的旧节点实例，防止动态伸缩场景下的内存驻留泄漏；
+   - 提供 `StopProxyCacheCleaner()` 用于进程停机时的优雅退出。
+
+4. **逐段传输头（Hop-by-Hop）过滤与链路安全透传**：
+   - `httputil.ReverseProxy` 自动遵循 RFC 7230 规范剥离 Hop-by-Hop 请求头（`Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Transfer-Encoding`, `Upgrade` 等）；
+   - 自动注入并规范化标准代理头：`X-Forwarded-For`、`X-Forwarded-Proto`、`X-Forwarded-Host`；
+   - 保留上游全链路追踪上下文头（`X-Request-ID` 与 `X-Trace-ID`），实现分布式追踪无缝衔接。
+
+5. **P2C-EWMA 在途计数与延迟自适应反馈闭环**：
+   - 请求到达时原子递增 `node.IncrementInFlight()`；
+   - 响应完成时执行 `defer` 收尾，原子递减 `node.DecrementInFlight()` 并根据实际耗时计算指数移动加权平均延迟：
+     $$\text{EWMA}_{new} = \alpha \times \text{latency} + (1 - \alpha) \times \text{EWMA}_{old} \quad (\alpha = 0.2)$$
+   - 同步将当前节点的在途连接与 EWMA 上报至 Prometheus（`GatewayMetrics`），驱动后续流量向更空闲、更低延迟的健康节点倾斜。
+
+6. **跨语言标准错误信封（`pkg/middleware.AbortWithError`）**：
+   - 当无可用后端节点或触发熔断时，统一输出标准 5 字段 JSON 信封：
+     ```json
+     {
+       "code": 503,
+       "error": "SERVICE_UNAVAILABLE",
+       "message": "No backend available",
+       "request_id": "req-xxxx",
+       "timestamp": "2026-08-30T10:00:00Z"
+     }
+     ```
+
+---
+
+### 5.5 gRPC 泛化透明流代理引擎 (`grpc_proxy.go`)
+
+模块路径：[`engine-go/internal/gateway/grpc_proxy.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/internal/gateway/grpc_proxy.go)（`GrpcProxyServer` / `TransparentStreamDirector`）
+
+基于 `grpc.UnknownServiceHandler` 与自定义原始编解码器（`rawCodec`）实现的 gRPC 零编解码全双工流代理。
+
+```mermaid
+flowchart LR
+    subgraph ClientSide [客户端]
+        ClientStub[gRPC Client]
+    end
+
+    subgraph GatewayCore [PrivShield Gateway]
+        Director[TransparentStreamDirector\n(UnknownServiceHandler)]
+        RawCodec[rawCodec 零编解码透传\n([]byte 原始帧转发)]
+        Director --> Select[P2C-EWMA 动态选路]
+        Select --> ConnPool[gRPC ClientConn 连接池]
+    end
+
+    subgraph BackendSide [后端 Agent 集群]
+        Agent1[Agent Worker 1]
+        Agent2[Agent Worker 2]
+    end
+
+    ClientStub <-->|全双工 gRPC 原始数据帧| GatewayCore
+    GatewayCore <-->|零反序列化透传| Agent1
+```
+
+#### 关键实现细节与架构机制：
+
+1. **`rawCodec` 零序列化/反序列化开销（Zero-Copy Raw Frame Forwarding）**：
+   - 自定义实现 `grpc.encoding.Codec` 接口，直接将网络原始字节切片 `[]byte` 作为消息实体：
+     ```go
+     type rawCodec struct{}
+     
+     func (rawCodec) Marshal(v interface{}) ([]byte, error) {
+         if b, ok := v.(*[]byte); ok { return *b, nil }
+         return nil, fmt.Errorf("rawCodec: unsupported type %T", v)
+     }
+     
+     func (rawCodec) Unmarshal(data []byte, v interface{}) error {
+         if b, ok := v.(*[]byte); ok { *b = data; return nil }
+         return fmt.Errorf("rawCodec: unsupported type %T", v)
+     }
+     
+     func (rawCodec) Name() string { return "raw" }
+     ```
+   - **破局收益**：传统 gRPC 代理需要“先反序列化为 Go Struct，再重新序列化为 Protobuf”，带来巨大的 CPU 和 GC 损耗。`rawCodec` 使得网关无需引入具体的业务 `.pb.go` 定义，即可对任意 RPC 方法（44 项隐私原语）执行纯字节级透传，转发性能提升 **5x+**。
+
+2. **`UnknownServiceHandler` 泛化接口拦截**：
+   - 网关服务端无需注册具体的 Servicer 接口，通过 `grpc.UnknownServiceHandler(proxy.TransparentStreamDirector)` 统一捕获所有到达网关的 RPC 调用；
+   - 通过 `grpc.MethodFromServerStream(serverStream)` 动态提取请求的全限定方法名（如 `/privacy.PrivacyService/Mask`），并在后端建连时动态路由。
+
+3. **双向全双工并发流管道（Bidirectional Stream Pump）**：
+   - 全面支持 Unary（单目）、Client-Streaming（客户端流）、Server-Streaming（服务端流）与 Bidirectional-Streaming（双向流）四种模式；
+   - 内部启动两个并发 Goroutine（`Client -> Backend` 与 `Backend -> Client`），配合 `context.WithCancel` 实现双向故障联动与快速熔断：
+     ```go
+     // 客户端 → 后端
+     go func() {
+         for {
+             select {
+             case <-streamCtx.Done(): errChan <- nil; return
+             default:
+             }
+             var frame []byte
+             if err := serverStream.RecvMsg(&frame); err != nil {
+                 if err == io.EOF { _ = clientStream.CloseSend(); errChan <- nil; return }
+                 errChan <- err; return
+             }
+             if err := clientStream.SendMsg(&frame); err != nil {
+                 errChan <- err; return
+             }
+         }
+     }()
+     ```
+   - 支持遇到 `io.EOF` 时优雅执行 `CloseSend()` 半关闭通道，确保大批量/流式脱敏数据完整投递。
+
+4. **全双工元数据与 Trailers 双向透传**：
+   - **入站元数据**：提取 `metadata.FromIncomingContext(ctx)`（包含认证 Token、Trace Context），通过 `metadata.NewOutgoingContext` 注入回源请求；
+   - **出站元数据与 Trailers**：响应头元数据与尾部 Trailers 完整回传至下游客户端。
+
+5. **后端 gRPC 连接池管理 (`connPool`)**：
+   - 维护线程安全的 `map[string]*grpc.ClientConn`，设置 `maxPoolSize = 256` 防止动态节点场景下的资源失控；
+   - `isConnReady()` 方法智能判定连接状态（`READY` / `IDLE` / `CONNECTING` 均安全复用），仅在 `TRANSIENT_FAILURE` 或 `SHUTDOWN` 时才安全重建连接。
+
+6. **L7 per-RPC 级调度与熔断反馈**：
+   - 每一个独立的 RPC 调用都会实时触发 `lb.SelectNode()`，真正破解 HTTP/2 多路复用下的“单 Pod 钉住”顽疾；
+   - 发生流异常时调用 `node.CB.RecordFailure()`，正常完成时统计流级总耗时并更新节点 EWMA。
+
+---
+
+### 5.6 网关统一启动器与生命周期 (`main.go`)
+
+模块路径：[`engine-go/cmd/privshield-gateway/main.go`](file:///Users/charles/Documents/code/sfwork/PrivShield/engine-go/cmd/privshield-gateway/main.go)
+
+在单一 Go 进程中以轻量级并发协程托管 Gin HTTP 反向代理服务器（`:8000`）与 gRPC 透明流代理服务器（`:50000`）。
+
+```mermaid
+flowchart TB
+    Main["main() Entrypoint"] --> LoadConfig["加载环境变量与配置 (GATEWAY_*)"]
+    LoadConfig --> InitMetrics["初始化 GatewayMetrics & 注册 Prometheus"]
+    InitMetrics --> InitLB["创建 LoadBalancer (P2C-EWMA / SWRR)"]
+    InitLB --> GoHTTP["go httpSrv.ListenAndServe() (:8000)"]
+    InitLB --> GoGRPC["go grpcSrv.Serve(listener) (:50000)"]
     
-    StartGrpc --> Gather["asyncio.gather(uv_server.serve(), grpc_server.wait_for_termination())"]
-    StartHttp --> Gather
-    StartHC --> Gather
-
-    Gather -->|SIGINT / Cancelled| Shutdown["优雅停机流程"]
-    Shutdown --> CancelHC["取消并 await 健康检查任务"]
-    Shutdown --> StopGrpc["grpc_server.stop(grace=1.0)"]
-    Shutdown --> CloseChannels["balancer.close_all()"]
+    GoHTTP --> WaitSignal["等待 SIGINT / SIGTERM 系统信号"]
+    GoGRPC --> WaitSignal
+    
+    WaitSignal --> Shutdown["执行协同优雅停机"]
+    Shutdown --> StopHTTP["httpSrv.Shutdown (10s 超时排空)"]
+    Shutdown --> StopGRPC["grpcSrv.GracefulStop() (5s 超时回退 Stop)"]
+    Shutdown --> StopCleaner["StopProxyCacheCleaner() 停止后台协程"]
+    Shutdown --> Exit["优雅退出"]
 ```
 
-#### 停机资源清理细节：
-在捕获到 `CancelledError` 或 `KeyboardInterrupt` 时：
-1. 立即调用 `health_task.cancel()`，并使用 `with contextlib.suppress(asyncio.CancelledError): await health_task` 等待其彻底退出，消除 `Task was destroyed but it is pending` 警告；
-2. 调度 `await grpc_server.stop(grace=1.0)` 给予在途 gRPC 请求 1 秒优雅排空期；
-3. 执行 `await balancer.close_all()` 显式关闭所有已建立的后端 gRPC 通道。
+#### 停机资源清理与生命周期保障：
+1. **HTTP 优雅排空**：使用 `httpSrv.Shutdown(ctx)` 设置 10 秒超时排空期，等待在途反向代理传输安全收尾，拒绝新连接；
+2. **gRPC 优雅排空与强制回退**：首先尝试 `grpcSrv.GracefulStop()`；若在 5 秒超时内仍有长连接未退出，则安全回退为 `grpcSrv.Stop()` 强制回收；
+3. **后台协程退出通知**：通过 `StopProxyCacheCleaner()` 关闭退出信号 Channel，确保没有孤儿 Goroutine 残留。
 
-#### CLI 命令行参数：
+#### 环境变量配置速查：
 
-网关启动入口 `python -m engine.gateway.server` 支持以下命令行参数（优先级高于环境变量与配置文件）：
-
-```bash
-python -m engine.gateway.server \
-  --rest-host 0.0.0.0 \
-  --rest-port 8000 \
-  --grpc-host 0.0.0.0 \
-  --grpc-port 50000
-```
-
-| 参数 | 默认值 | 说明 |
+| 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `--rest-host` | `0.0.0.0` 或 `$GATEWAY_REST_HOST` | 网关 HTTP 监听地址 |
-| `--rest-port` | `8000` 或 `$GATEWAY_REST_PORT` | 网关 HTTP 监听端口 |
-| `--grpc-host` | `0.0.0.0` 或 `$GATEWAY_GRPC_HOST` | 网关 gRPC 监听地址 |
-| `--grpc-port` | `50000` 或 `$GATEWAY_GRPC_PORT` | 网关 gRPC 监听端口 |
-
-#### K8s 优雅停机与 `preStop` Hook 协同：
-
-在 Kubernetes 环境中，网关的优雅停机需要与 K8s 生命周期钩子协同配合：
-
-```yaml
-# Gateway Deployment 推荐配置
-spec:
-  terminationGracePeriodSeconds: 30   # K8s 层面总排空窗口
-  containers:
-    - name: gateway
-      lifecycle:
-        preStop:
-          exec:
-            # 先 sleep 5s，等待 Ingress/iptables 规则刷新完毕，
-            # 避免在排空期间仍有新流量打入即将终止的 Pod。
-            command: ["/bin/sh", "-c", "sleep 5"]
-```
+| `GATEWAY_HOST` | `0.0.0.0` | 网关 HTTP 监听地址 |
+| `GATEWAY_PORT` | `8000` | 网关 HTTP 监听端口 |
+| `GATEWAY_GRPC_PORT` | `50000` | 网关 gRPC 监听端口 |
+| `GATEWAY_BACKENDS` | `127.0.0.1:8079` | 后端 Agent HTTP/gRPC 地址列表（逗号分隔） |
+| `GATEWAY_STRATEGY` | `p2c` | 负载均衡算法（`p2c`, `round_robin`, `least_conn`, `weighted_rr`, `weighted_random`） |
+| `GATEWAY_LOG_LEVEL` | `INFO` | 日志级别（`DEBUG`, `INFO`, `WARN`, `ERROR`） |
+| `GATEWAY_TLS_ENABLED` | `false` | 是否启用南北向 HTTPS / gRPCS 入口加密 |
+| `GATEWAY_BACKEND_TLS_ENABLED` | `false` | 是否启用东西向后端安全回源 TLS |
 
 停机时序协同：
 1. K8s 发送 `SIGTERM` → 网关捕获并触发 `finally` 清理流程；

@@ -141,6 +141,7 @@ bash ./scripts/dev/dev-bff-agent.sh
 | `PRIVACY_RATE_LIMIT_ENABLED` | `false` | 启用 32 分片高并发令牌桶限流 |
 | `PRIVACY_ENGINE_CACHE_MAX_SIZE` | `10000` | 动态分类分级 LRU 缓存容量（16 分片） |
 | `PRIVACY_IMAGE_ALLOWED_DIRS` | cwd + 系统临时目录 | 医学影像处理允许读取的文件目录白名单 |
+| `PRIVACY_RULES_RELOAD_CHECK_SECONDS` | `5` | 规则热重载 mtime 检测节流间隔秒数（0 = 禁用节流） |
 | `PRIVACY_PPROF_ENABLED` | `false` | 启用 pprof 性能分析端点（生产默认关闭，需 `ops:admin` 权限） |
 | `PRIVACY_RULES_DIR` | `rules/domains` | 领域分类分级规则目录 |
 | `PRIVACY_CONFIG_FILE` | `config/privacy.yaml` | 隐私策略配置文件路径 |

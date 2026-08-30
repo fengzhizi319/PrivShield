@@ -95,7 +95,14 @@ type LLMClient struct {
 	availCacheTime atomic.Int64 // Unix nano
 	availCacheTTL  time.Duration
 	availProbeMu   sync.Mutex // 串行化缓存刷新，防止并发探测风暴
+
+	// Half-Open 状态在途试探请求数，防止刚恢复的 LLM 被瞬时并发流量二次打崩
+	halfOpenInflight atomic.Int32
 }
+
+// maxHalfOpenProbes Half-Open 状态下允许并发通过的试探请求上限，
+// 与 gateway.CircuitBreaker 的 halfOpenMax 保持一致的保护语义。
+const maxHalfOpenProbes = 3
 
 // NewLLMClient 创建 LLM 客户端
 func NewLLMClient(config LLMClientConfig) *LLMClient {
@@ -111,8 +118,10 @@ func NewLLMClient(config LLMClientConfig) *LLMClient {
 	}
 }
 
-// checkCircuit 检查熔断器状态，返回是否允许通行
-func (c *LLMClient) checkCircuit() bool {
+// checkCircuit 检查熔断器状态，返回是否允许通行。
+// Half-Open 状态下仅允许最多 maxHalfOpenProbes 个并发试探请求通过，
+// 并通过 releaseProbe（幂等）在试探结束时释放配额；超额请求直接拒绝走 Safety Floor 降级。
+func (c *LLMClient) checkCircuit() (allowed bool, releaseProbe func()) {
 	c.cbMu.RLock()
 	state := c.cbState
 	lastFail := c.lastFailure
@@ -120,7 +129,7 @@ func (c *LLMClient) checkCircuit() bool {
 	c.cbMu.RUnlock()
 
 	if state == CircuitClosed {
-		return true
+		return true, nil
 	}
 
 	if state == CircuitOpen {
@@ -128,16 +137,24 @@ func (c *LLMClient) checkCircuit() bool {
 			c.cbMu.Lock()
 			if c.cbState == CircuitOpen && time.Since(c.lastFailure) > c.cooldown {
 				c.cbState = CircuitHalfOpen
+				// 进入 Half-Open 重置配额，本请求自身占位成为第一个试探请求
+				c.halfOpenInflight.Store(1)
 				c.cbMu.Unlock()
-				return true
+				var once sync.Once
+				return true, func() { once.Do(func() { c.halfOpenInflight.Add(-1) }) }
 			}
 			c.cbMu.Unlock()
 		}
-		return false
+		return false, nil
 	}
 
-	// Half-Open 状态允许试探
-	return true
+	// Half-Open: 限制并发试探配额，超额请求拒绝避免二次雪崩
+	if c.halfOpenInflight.Add(1) > maxHalfOpenProbes {
+		c.halfOpenInflight.Add(-1)
+		return false, nil
+	}
+	var once sync.Once
+	return true, func() { once.Do(func() { c.halfOpenInflight.Add(-1) }) }
 }
 
 // recordSuccess 记录一次成功调用，自愈重置熔断器
@@ -161,9 +178,13 @@ func (c *LLMClient) recordFailure() {
 
 // Classify 使用 LLM 对字段执行分类（带熔断保护与重试）
 func (c *LLMClient) Classify(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
-	// 熔断器快速拦截
-	if !c.checkCircuit() {
+	// 熔断器快速拦截（Half-Open 下限制并发试探配额）
+	allowed, releaseProbe := c.checkCircuit()
+	if !allowed {
 		return nil, fmt.Errorf("LLM circuit breaker is OPEN (cooldown active), request rejected")
+	}
+	if releaseProbe != nil {
+		defer releaseProbe()
 	}
 
 	// 获取并发槽位

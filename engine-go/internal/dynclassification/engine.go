@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -178,6 +179,9 @@ type ruleSnapshot struct {
 	ac           *ACAutomaton
 }
 
+// defaultRulesReloadCheckInterval Classify 热路径 mtime 检测的最小间隔（节流 os.Stat）
+const defaultRulesReloadCheckInterval = 5 * time.Second
+
 // RuleEngine 分类规则引擎
 type RuleEngine struct {
 	snapshot atomic.Pointer[ruleSnapshot] // 原子快照（Classify 无锁读）
@@ -187,6 +191,10 @@ type RuleEngine struct {
 	rulesPath   string
 	lastModTime time.Time
 	reloadMu    sync.Mutex
+
+	// mtime 检测节流：将每请求一次 os.Stat 降为每 checkInterval 一次（冷路径文件 IO 不进热路径）
+	lastCheckNano atomic.Int64  // 上次检测时间戳（unixnano）
+	checkInterval time.Duration // 检测最小间隔；0 表示不节流
 }
 
 // NewRuleEngine 创建规则引擎实例
@@ -217,7 +225,12 @@ func NewRuleEngine(rules []RuleDef) (*RuleEngine, error) {
 	// 构建 AC 自动机
 	ac.Build()
 
-	engine := &RuleEngine{}
+	engine := &RuleEngine{checkInterval: defaultRulesReloadCheckInterval}
+	if v := os.Getenv("PRIVACY_RULES_RELOAD_CHECK_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			engine.checkInterval = time.Duration(n) * time.Second
+		}
+	}
 
 	// 初始化原子快照
 	engine.snapshot.Store(&ruleSnapshot{
@@ -315,10 +328,21 @@ func (e *RuleEngine) WatchRules(path string) error {
 	return nil
 }
 
-// checkRulesReload 被动检查规则文件是否变更（请求驱动，无 goroutine）
+// checkRulesReload 被动检查规则文件是否变更（请求驱动，无 goroutine）。
+// 热路径节流：每 checkInterval 最多执行一次 os.Stat，避免每请求 syscall。
 func (e *RuleEngine) checkRulesReload() {
 	if e.rulesPath == "" {
 		return
+	}
+	if e.checkInterval > 0 {
+		now := time.Now().UnixNano()
+		last := e.lastCheckNano.Load()
+		if now-last < int64(e.checkInterval) {
+			return
+		}
+		if !e.lastCheckNano.CompareAndSwap(last, now) {
+			return // 已有其他 goroutine 在执行本轮检测
+		}
 	}
 	info, err := os.Stat(e.rulesPath)
 	if err != nil {

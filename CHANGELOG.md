@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **深度优化建议评估与定向改造（三项）**：对外部提出的 6 项优化建议逐条代码验证后实施 3 项高确定性改造：
+  - **LLMClient Half-Open 并发试探限制（P1 可靠性）**：`checkCircuit` 在 Half-Open 态原为无条件放行，刚恢复的 LLM 会被瞬时并发流量二次打崩；新增 `halfOpenInflight` 原子配额（上限 3，与 gateway.CircuitBreaker 语义对齐）+ 幂等 `releaseProbe` 回调，超额请求直接拒绝走 Safety Floor 降级。
+  - **RuleEngine 热路径 Stat 节流（P1 性能）**：`checkRulesReload` 原每次 Classify 调用都执行 `os.Stat` syscall；新增 5s 节流窗口（`lastCheckNano` CAS 串行化，`PRIVACY_RULES_RELOAD_CHECK_SECONDS` 可配置，0 禁用）。
+  - **ArbitrateBatch 并行阈值 32→128（P3）**：单条仲裁为纯内存比较极轻量，32~128 区间 goroutine 创建开销高于并行收益，小批量改走串行单趟。
+  - 未采纳项评估：fsnotify 改造（白名单热重载实际未接入请求热路径，前提错位；且违背零外部依赖约定）；LRU 读锁/S3-FIFO、流式大文件、ReverseProxy 内聚 BackendNode 因改造面大/需产品确认留待后续。新增 2 个专项单元测试，19 包 `-race` 全部通过。
 - **第五轮 engine-go 深度四维架构审计优化（P1~P2，5 项）**：
   - **P1 并发安全**：balancer `selectP2C` / `NewHealthCheckHandler` 无锁读 `EWMA` 字段与 `UpdateEWMA` 写端数据竞争，加 `GetEWMA()` 安全访问器修复。
   - **P1 功能性**：`/readyz/llm` 从硬编码 `"not_loaded"` 改为通过 `PrivacyService.LLMStatus()` 真实探测 LLM 可用性（区分 not_configured / ready / unavailable）。

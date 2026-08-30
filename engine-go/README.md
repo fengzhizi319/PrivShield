@@ -7,22 +7,30 @@ PrivShield Go 原生隐私计算引擎，提供高性能双协议（REST + gRPC�
 ```
 engine-go/
 ├── cmd/
-│   └── privshield-agent/     # 双协议服务入口
-│       └── main.go           # REST (Gin) + gRPC 服务器
+│   ├── privshield-agent/     # Agent 主入口 (REST :8079 + gRPC :50051)
+│   │   └── main.go
+│   └── privshield-gateway/   # 网关与反向代理入口 (REST :8000 + gRPC :50000)
+│       └── main.go
 ├── internal/
-│   ├── dynclassification/    # 三层动态分类分级引擎
-│   │   └── engine.go         # Layer 1: AC 自动机 + 字段名正则
-│   ├── server/               # 服务器实现
-│   └── observability/        # 可观测性（日志 + Prometheus）
+│   ├── dynclassification/    # 三层动态分类分级漏斗 (AC 自动机 + ONNX NER + 熔断器 LLM)
+│   ├── gateway/              # P2C-EWMA 负载均衡器、BufferPool 零分配 HTTP 反向代理与 gRPC 透明流代理
+│   ├── grpcserver/           # gRPC Servicer (44 个强类型 RPC 接口) 与 RawCodec 统一分发
+│   ├── imageredact/          # DICOM 二进制重构脱敏与图片沙箱防逃逸
+│   ├── observability/        # log/slog 结构化日志、Prometheus 指标、分布式追踪
+│   ├── profile/              # 领域分类规则与策略 Profile 动态加载器
+│   ├── rest/                 # REST 路由 (Gin)、pprof、K8s readyz/healthz
+│   ├── security/             # mTLS CN 白名单热重载、32分片令牌桶限流、常量时间认证
+│   └── service/              # PrivacyService 统一编排、文件脱敏 (CSV/JSON/XLSX)、预算集成
 └── go.mod
 
-privacy-go-sdk/               # 纯 Go 隐私原语库
-├── masking/                  # 字段掩码（身份证、手机、银行卡等）
-├── dp/                       # 差分隐私（Laplace / Gaussian）
-├── ldp/                      # 本地差分隐私（Randomized Response）
-├── kano/                     # K-匿名（Mondrian 算法）
-├── qol/                      # 查询混淆（诱饵注入）
-├── budget/                   # 隐私预算会计（无锁原子操作）
+privacy-go-sdk/               # 纯 Go 零依赖无状态隐私计算数学原语库
+├── masking/                  # 字段掩码（国密 SM3/SM4、身份证、手机、银行卡等）
+├── dp/                       # 差分隐私（Laplace / Gaussian / 自适应截断）
+├── ldp/                      # 本地差分隐私（二值/多分类多核并发扰动）
+├── kano/                     # K-匿名（Mondrian KD-tree + L-多样性）
+├── qol/                      # 查询混淆（Fisher-Yates 语义置乱）
+├── medical/                  # 医疗数据流水线 (多核并发分块, 医保18 / 康养27)
+├── budget/                   # 无锁原子隐私预算会计 (无锁 CAS 循环, 原子回滚)
 └── go.mod
 ```
 
@@ -62,20 +70,29 @@ export PATH=$PATH:/usr/local/go/bin
 
 ```bash
 cd engine-go
-go build -o privshield-agent ./cmd/privshield-agent
+
+# 编译 Agent 与 Gateway 二进制
+go build -o ../bin/privshield-agent ./cmd/privshield-agent
+go build -o ../bin/privshield-gateway ./cmd/privshield-gateway
 ```
 
 ### 运行
 
+#### 1. 启动 Agent 计算节点 (REST :8079 + gRPC :50051)
+
 ```bash
-# 默认配置
-./privshield-agent
+# 默认配置启动
+./bin/privshield-agent
 
-# 自定义端口
-PRIVACY_REST_PORT=8080 PRIVACY_GRPC_PORT=50052 ./privshield-agent
+# 自定义端口与日志级别
+PRIVACY_REST_PORT=8080 PRIVACY_GRPC_PORT=50052 PRIVACY_LOG_LEVEL=DEBUG ./bin/privshield-agent
+```
 
-# 调试日志
-PRIVACY_LOG_LEVEL=DEBUG ./privshield-agent
+#### 2. 启动 Gateway 反向代理与负载均衡器 (REST :8000 + gRPC :50000)
+
+```bash
+# 代理到后端 Agent 节点（支持多个地址逗号分隔，P2C-EWMA 自适应调度）
+GATEWAY_BACKENDS="127.0.0.1:8079" GATEWAY_PORT=8000 GATEWAY_GRPC_PORT=50000 ./bin/privshield-gateway
 ```
 
 ### 测试

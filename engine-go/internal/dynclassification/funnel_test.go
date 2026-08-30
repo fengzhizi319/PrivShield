@@ -480,3 +480,61 @@ func TestSafetyFloor_ArbitrateBatch_Parallel(t *testing.T) {
 		}
 	}
 }
+
+// TestLLMClient_HalfOpenProbeQuota 验证 Half-Open 状态下并发试探请求被限制在
+// maxHalfOpenProbes 以内，超额请求被拒绝避免刚恢复的 LLM 二次雪崩。
+func TestLLMClient_HalfOpenProbeQuota(t *testing.T) {
+	c := NewLLMClient(DefaultLLMClientConfig())
+	// 强制置为 Half-Open
+	c.cbMu.Lock()
+	c.cbState = CircuitHalfOpen
+	c.cbMu.Unlock()
+
+	// 持有配额不释放，确保确定性断言：恰好 maxHalfOpenProbes 个请求通过
+	var mu sync.Mutex
+	var releases []func()
+	allowedCount := 0
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ok, release := c.checkCircuit()
+			mu.Lock()
+			defer mu.Unlock()
+			if ok {
+				allowedCount++
+				if release != nil {
+					releases = append(releases, release)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if allowedCount != maxHalfOpenProbes {
+		t.Fatalf("half-open allowed %d requests, want exactly %d", allowedCount, maxHalfOpenProbes)
+	}
+	if len(releases) != maxHalfOpenProbes {
+		t.Fatalf("expected %d release funcs, got %d", maxHalfOpenProbes, len(releases))
+	}
+
+	// 释放全部配额后新请求应可通过
+	for _, rel := range releases {
+		rel()
+	}
+	ok, rel := c.checkCircuit()
+	if !ok {
+		t.Fatal("after releasing quota, a new probe should be allowed")
+	}
+
+	// releaseProbe 幂等性：重复调用不得超额释放
+	if rel != nil {
+		rel()
+		before := c.halfOpenInflight.Load()
+		rel()
+		if c.halfOpenInflight.Load() != before {
+			t.Fatal("releaseProbe must be idempotent")
+		}
+	}
+}
