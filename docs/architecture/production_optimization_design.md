@@ -222,3 +222,26 @@ RETURNING *;
 - **getEnvInt 改用 strconv.Atoi**：`fmt.Sscanf` 不检查错误且对无效输入返回 0，改用 `strconv.Atoi` + 错误回退默认值。影响 `service.go` 和 `cmd/privshield-agent/main.go`。
 
 **全量测试验证**：12 个 engine-go 包全部通过 `go test -race -count=1 ./...`，零数据竞争。
+
+---
+
+## 5. 第四轮深度四维架构审计优化（P0~P2）
+
+在前三轮 45 项优化基础上，对 `engine-go` + `privacy-go-sdk` 全模块实施第四轮全量四维审计，发现并修复 **6 项** 新优化点：
+
+### 5.1 P0 — 正确性与安全
+
+- **kano.parseNumeric 死循环与解析错误**：手写逐字符解析存在死循环和逻辑缺陷，`formatFloat` 使用 `string(rune(int64(f)+'0'))` 对 >9 数值产生错误 Unicode。改用 `strconv.ParseFloat` + `strconv.FormatFloat`，确保 Mondrian 分裂正确性。
+- **constantTimeLookup 时序侧信道**：Go map 迭代顺序随机，迭代次数泄漏 key 数量。改用 `sort.Strings` 确定性迭代 + `subtle.ConstantTimeCompare` 全量比较，消除时序侧信道。
+- **DICOM os.ReadFile 无大小上限**：`ReadDICOM` 直接 `os.ReadFile` 无文件大小限制，存在 OOM 风险。加 256MB 默认上限，通过 `PRIVACY_DICOM_MAX_FILE_SIZE` 环境变量可配置。
+
+### 5.2 P1 — 可靠性
+
+- **gRPC GracefulStop 无超时回退**：agent/gateway 的 `grpcSrv.GracefulStop()` 无超时，RPC 不结束会挂死。加超时回退机制（`PRIVACY_GRPC_GRACEFUL_STOP_SECONDS`，默认 15s），超时后强制 `Stop()`。gateway `Server` 新增 `Stop()` 方法供超时回退调用。
+- **后台 goroutine 未与生命周期绑定**：限流清理（`StopRateLimiter`）和代理缓存清理（`StopProxyCacheCleaner`）在关闭时未调用。在 agent/gateway shutdown 流程中显式调用，确保资源释放。
+
+### 5.3 P2 — 并发性能
+
+- **LDP 批量扰动全局 rand 锁竞争**：`PerturbBinaryBatch`/`PerturbCategoricalBatch` 多 worker 共享 `math/rand/v2` 全局函数，内部全局锁竞争。改为 per-worker 独立 `rand.New(rand.NewPCG(...))` 消除锁竞争。
+
+**全量测试验证**：19 个包（engine-go 12 + privacy-go-sdk 7）全部通过 `go test -race -count=1 ./...`，零数据竞争。

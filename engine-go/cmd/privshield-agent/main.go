@@ -262,7 +262,24 @@ func main() {
 	if err := restServer.Shutdown(ctx); err != nil {
 		slog.Error("REST server shutdown error", "err", err)
 	}
-	grpcSrv.GracefulStop()
+
+	// gRPC GracefulStop 带超时回退：若 RPC 不结束则强制停止，防止挂死
+	grpcDone := make(chan struct{})
+	go func() {
+		grpcSrv.GracefulStop()
+		close(grpcDone)
+	}()
+	grpcGraceSec := getEnvInt("PRIVACY_GRPC_GRACEFUL_STOP_SECONDS", 15)
+	select {
+	case <-grpcDone:
+		slog.Info("gRPC server stopped gracefully")
+	case <-time.After(time.Duration(grpcGraceSec) * time.Second):
+		slog.Warn("gRPC graceful stop timed out, forcing stop", "timeout_sec", grpcGraceSec)
+		grpcSrv.Stop()
+	}
+
+	// 4. 停止后台 goroutine（限流清理等），与生命周期绑定
+	security.StopRateLimiter()
 
 	slog.Info("Server stopped gracefully")
 }

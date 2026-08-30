@@ -1,8 +1,9 @@
 package security
 
 import (
-	"crypto/hmac"
+	"crypto/subtle"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,12 +26,25 @@ func extractBearerToken(header string) string {
 }
 
 // constantTimeLookup 常量时间查找 token，防止计时攻击。
+// 对 key 进行排序以确保确定性迭代顺序（Go map 迭代顺序随机），
+// 遍历全部 key 且始终比较所有 key，避免时序侧信道泄漏。
 func constantTimeLookup(keys map[string]*KeyConfig, token string) *KeyConfig {
+	if len(keys) == 0 {
+		return nil
+	}
+	// 排序 key 确保确定性迭代顺序
+	sortedKeys := make([]string, 0, len(keys))
+	for k := range keys {
+		sortedKeys = append(sortedKeys, k)
+	}
+	sort.Strings(sortedKeys)
+
 	tokenBytes := []byte(token)
 	var matched *KeyConfig
-	for key, value := range keys {
-		if hmac.Equal([]byte(key), tokenBytes) {
-			matched = value
+	for _, key := range sortedKeys {
+		// subtle.ConstantTimeCompare 确保每次比较耗时恒定
+		if subtle.ConstantTimeCompare([]byte(key), tokenBytes) == 1 {
+			matched = keys[key]
 		}
 	}
 	return matched

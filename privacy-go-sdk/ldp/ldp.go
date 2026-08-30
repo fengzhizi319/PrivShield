@@ -228,10 +228,12 @@ func PerturbBinaryBatch(values []int, epsilon float64) []int {
 		wg.Add(1)
 		go func(s, e int) {
 			defer wg.Done()
+			// per-worker 独立随机源，消除全局 math/rand 锁竞争
+			rng := rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
 			for i := s; i < e; i++ {
 				v := values[i]
 				if v == 0 || v == 1 {
-					if rand.Float64() < p {
+					if rng.Float64() < p {
 						result[i] = v
 					} else {
 						result[i] = 1 - v
@@ -327,17 +329,19 @@ func PerturbCategoricalBatch(values []string, categories []string, epsilon float
 		wg.Add(1)
 		go func(s, e int) {
 			defer wg.Done()
+			// per-worker 独立随机源，消除全局 math/rand 锁竞争
+			rng := rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
 			for i := s; i < e; i++ {
 				v := values[i]
-				if rand.Float64() < p {
+				if rng.Float64() < p {
 					result[i] = v
 					continue
 				}
 				others, ok := othersMap[v]
 				if !ok || len(others) == 0 {
-					result[i] = categories[rand.IntN(k)]
+					result[i] = categories[rng.IntN(k)]
 				} else {
-					result[i] = others[rand.IntN(len(others))]
+					result[i] = others[rng.IntN(len(others))]
 				}
 			}
 		}(startIdx, endIdx)

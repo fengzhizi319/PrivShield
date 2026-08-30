@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **第四轮 engine-go 深度四维架构审计优化（P0~P2，6 项）**：
+  - **P0 正确性/安全**：kano.parseNumeric 改用 strconv.ParseFloat 消除死循环与解析错误；formatFloat 修复 `string(rune(n+'0'))` 对 >9 数值的截断 bug；constantTimeLookup 改用 sort.Strings 确定性迭代 + subtle.ConstantTimeCompare 消除时序侧信道；DICOM 文件读取加 256MB 上限（PRIVACY_DICOM_MAX_FILE_SIZE 可配置）。
+  - **P1 可靠性**：agent/gateway gRPC GracefulStop 加超时回退（PRIVACY_GRPC_GRACEFUL_STOP_SECONDS），防止 RPC 不结束导致挂死；后台 goroutine（限流清理/代理缓存清理）与关闭生命周期绑定。
+  - **P2 并发性能**：LDP 批量扰动（PerturbBinaryBatch/PerturbCategoricalBatch）改用 per-worker 独立 rand.Rand，消除全局 math/rand 锁竞争。
+  - 19 个包全部通过 `go test -race -count=1 ./...`，零数据竞争。
 - **第三轮 engine-go 深度四维架构审计优化（P0~P2，9 项）**：
   - **P0 隐私/安全/可靠性**：TypedServer Mask/MaskBatch 脱敏失败返回 `"***"` 而非原文（消除隐私泄露）；TypedServer DPHistogram/DPNoisyHistogram/DPChunkedHistogram 统一走 service 层预算核算（消除预算绕过）；grpc_proxy getOrCreateConn 修复 defer+手动 Unlock 双重解锁 panic；service 层 DPGroupBy/DPAggregate/DPAdaptiveClip 补充预算消耗检查。
   - **P1 并发安全**：RuleEngine 引入 `atomic.Pointer[ruleSnapshot]` 无锁读替换，消除 Classify 读 rules/fieldRegexps/ac 与 checkRulesReload 写端的数据竞争；WhitelistManager checkReload 加 RLock 读取 lastMtime 消除数据竞争。

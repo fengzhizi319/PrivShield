@@ -131,7 +131,23 @@ func main() {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		slog.Error("Gateway HTTP shutdown error", "err", err)
 	}
-	grpcProxyServer.GracefulStop()
+
+	// gRPC 优雅停止带超时回退
+	grpcDone := make(chan struct{})
+	go func() {
+		grpcProxyServer.GracefulStop()
+		close(grpcDone)
+	}()
+	select {
+	case <-grpcDone:
+		slog.Info("Gateway gRPC stopped gracefully")
+	case <-time.After(10 * time.Second):
+		slog.Warn("Gateway gRPC graceful stop timed out, forcing stop")
+		grpcProxyServer.Stop()
+	}
+
+	// 停止后台 goroutine（代理缓存清理），与生命周期绑定
+	gateway.StopProxyCacheCleaner()
 
 	slog.Info("Gateway stopped gracefully")
 }

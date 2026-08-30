@@ -55,6 +55,13 @@ func (s *Server) GracefulStop() {
 	}
 }
 
+// Stop 强制停止 gRPC 服务端（用于超时回退）
+func (s *Server) Stop() {
+	if s.grpcSrv != nil {
+		s.grpcSrv.Stop()
+	}
+}
+
 // ──────────────────────────────────────────────
 // 核心 RPC 处理器实现
 // ──────────────────────────────────────────────

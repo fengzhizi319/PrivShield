@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -261,40 +262,10 @@ func isNumeric(values []string) bool {
 func parseNumeric(values []string) []float64 {
 	result := make([]float64, len(values))
 	for i, v := range values {
-		var f float64
-		for _, c := range v {
-			if c >= '0' && c <= '9' || c == '.' || c == '-' || c == '+' {
-				continue
-			}
-			_ = f
-		}
-		// 简单解析
-		neg := false
-		start := 0
-		if len(v) > 0 && v[0] == '-' {
-			neg = true
-			start = 1
-		} else if len(v) > 0 && v[0] == '+' {
-			start = 1
-		}
-		var intPart, fracPart float64
-		dotSeen := false
-		fracDiv := 1.0
-		for j := start; j < len(v); j++ {
-			if v[j] == '.' {
-				dotSeen = true
-				continue
-			}
-			if !dotSeen {
-				intPart = intPart*10 + float64(v[j]-'0')
-			} else {
-				fracDiv *= 10
-				fracPart += float64(v[j]-'0') / fracDiv
-			}
-		}
-		f = intPart + fracPart
-		if neg {
-			f = -f
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			// 解析失败回退为 0（与 isNumeric 前置校验配合使用）
+			f = 0
 		}
 		result[i] = f
 	}
@@ -302,26 +273,10 @@ func parseNumeric(values []string) []float64 {
 }
 
 func formatFloat(f float64) string {
-	if f == float64(int64(f)) {
-		return string(rune(int64(f) + '0'))
+	if f == math.Trunc(f) && !math.IsInf(f, 0) && !math.IsNaN(f) {
+		return strconv.FormatInt(int64(f), 10)
 	}
-	// 简单格式化
-	intPart := int64(f)
-	fracPart := f - float64(intPart)
-	if fracPart < 0 {
-		fracPart = -fracPart
-	}
-	result := formatInt64(intPart)
-	if fracPart > 0.0001 {
-		result += "."
-		for i := 0; i < 2; i++ {
-			fracPart *= 10
-			digit := int(fracPart)
-			result += string(rune(digit + '0'))
-			fracPart -= float64(digit)
-		}
-	}
-	return result
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 func formatInt64(n int64) string {

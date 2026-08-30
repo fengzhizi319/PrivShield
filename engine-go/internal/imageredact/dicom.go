@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/fengzhizi319/PrivShield/privacy-go-sdk/medical"
@@ -24,6 +25,8 @@ import (
 const (
 	dicomPreambleLen = 128
 	dicomMagic       = "DICM"
+	// defaultMaxDICOMFileSize 默认 DICOM 文件大小上限（256MB），防止 OOM
+	defaultMaxDICOMFileSize = 256 << 20
 )
 
 // 常见敏感 DICOM Tag 定义 (Group << 16 | Element)
@@ -46,6 +49,16 @@ const (
 	TagSeriesInstanceUID      uint32 = 0x0020000E
 	TagPixelData              uint32 = 0x7FE00010
 )
+
+// maxDICOMFileSize 返回可配置的 DICOM 文件大小上限。
+func maxDICOMFileSize() int64 {
+	if env := os.Getenv("PRIVACY_DICOM_MAX_FILE_SIZE"); env != "" {
+		if n, err := strconv.ParseInt(env, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxDICOMFileSize
+}
 
 // IsDICOM 检查字节流是否为合法的 DICOM 格式。
 func IsDICOM(data []byte) bool {
@@ -242,6 +255,15 @@ func isLongVR(vr string) bool {
 func SanitizeDICOMFile(inputPath string, outputDir string) (string, error) {
 	if !isPathAllowed(inputPath) {
 		return "", fmt.Errorf("access denied: path outside allowed directories: %s", inputPath)
+	}
+
+	// 文件大小上限检查（防 OOM）
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return "", fmt.Errorf("stat dicom file: %w", err)
+	}
+	if info.Size() > maxDICOMFileSize() {
+		return "", fmt.Errorf("dicom file too large: %d bytes (max %d)", info.Size(), maxDICOMFileSize())
 	}
 
 	data, err := os.ReadFile(inputPath)
