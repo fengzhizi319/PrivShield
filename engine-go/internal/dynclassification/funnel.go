@@ -170,9 +170,9 @@ func (f *ClassificationFunnel) CacheStats() (hits, misses, size int) {
 	misses = int(f.cache.totalMiss.Load())
 	// size 仍需遍历分片（但 hits/misses 已是 O(1)）
 	for _, shard := range f.cache.shards {
-		shard.mu.Lock()
+		shard.mu.RLock()
 		size += len(shard.items)
-		shard.mu.Unlock()
+		shard.mu.RUnlock()
 	}
 	return hits, misses, size
 }
@@ -183,21 +183,26 @@ func (f *ClassificationFunnel) CacheStats() (hits, misses, size int) {
 
 const lruNumShards = 16
 
+// lruMaxScanAttempts Second-Chance 淘汰的最大扫描节点数，限制单次驱逐的最坏工作量。
+const lruMaxScanAttempts = 8
+
+// lruNode 缓存节点。
+// ref 为 Second-Chance（CLOCK）引用标记：读命中只需原子置位，
+// 不再触碰双向链表，从而允许读路径持有 RLock 而非排他锁。
 type lruNode struct {
 	key  string
 	val  *ClassificationResult
 	prev *lruNode
 	next *lruNode
+	ref  atomic.Bool
 }
 
 type lruShard struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	capacity int
 	items    map[string]*lruNode
 	head     *lruNode
 	tail     *lruNode
-	hits     int64
-	misses   int64
 }
 
 type classificationCache struct {
@@ -236,21 +241,23 @@ func (c *classificationCache) shardFor(key string) *lruShard {
 	return c.shards[h%lruNumShards]
 }
 
+// get 读路径全程持 RLock（同分片并发读不互斥）。
+// 命中仅原子置 ref 标记，链表结构性写批量下放到驱逐路径，近似 LRU。
 func (c *classificationCache) get(key string) (*ClassificationResult, bool) {
 	shard := c.shardFor(key)
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	if node, exists := shard.items[key]; exists {
-		c.moveToFront(shard, node)
-		shard.hits++
-		c.totalHits.Add(1)
-		cp := *node.val
-		return &cp, true
+	shard.mu.RLock()
+	node, exists := shard.items[key]
+	if !exists {
+		shard.mu.RUnlock()
+		c.totalMiss.Add(1)
+		return nil, false
 	}
-	shard.misses++
-	c.totalMiss.Add(1)
-	return nil, false
+	cp := *node.val
+	shard.mu.RUnlock()
+
+	node.ref.Store(true)
+	c.totalHits.Add(1)
+	return &cp, true
 }
 
 func (c *classificationCache) put(key string, val *ClassificationResult) {
@@ -293,9 +300,24 @@ func (c *classificationCache) removeNode(s *lruShard, node *lruNode) {
 	node.next.prev = node.prev
 }
 
+// removeOldest 以 Second-Chance（CLOCK）近似淘汰：
+// 从尾部扫描，凡读路径置位的节点延迟提升到队首（偿还下放的结构性写），
+// 至多扫描 lruMaxScanAttempts 个节点，扫描耗尽则直接淘汰尾部，保持 O(1) 摊销。
 func (c *classificationCache) removeOldest(s *lruShard) {
-	last := s.tail.prev
-	if last != s.head {
+	for i := 0; i < lruMaxScanAttempts; i++ {
+		last := s.tail.prev
+		if last == s.head {
+			return
+		}
+		if !last.ref.Swap(false) {
+			c.removeNode(s, last)
+			delete(s.items, last.key)
+			return
+		}
+		c.moveToFront(s, last)
+	}
+	if last := s.tail.prev; last != s.head {
+		last.ref.Store(false)
 		c.removeNode(s, last)
 		delete(s.items, last.key)
 	}

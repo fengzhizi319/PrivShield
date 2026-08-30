@@ -776,10 +776,11 @@ flowchart TB
      ```
    - 彻底避免突发大流量下频繁进行 TCP 三次握手与 TLS 协商，防止本地套接字端口耗尽（TIME_WAIT 堆积）。
 
-3. **`proxyCache` 代理实例线程安全缓存与 TTL 自动淘汰**：
-   - 使用 `sync.Map` 缓存后端目标地址对应的 `*httputil.ReverseProxy` 实例（`proxyEntry` 携带创建时间）；
-   - 后台常驻清理 Goroutine 每 2 分钟扫描并淘汰超过 10 分钟未活跃的旧节点实例，防止动态伸缩场景下的内存驻留泄漏；
-   - 提供 `StopProxyCacheCleaner()` 用于进程停机时的优雅退出。
+3. **反向代理实例与 `BackendNode` 生命周期绑定（节点内聚）**：
+   - `*httputil.ReverseProxy` 实例惰性构建于 `BackendNode` 自身（`proxyOnce sync.Once` + `proxy`/`proxyErr` 字段），同一节点全生命周期仅构建一次，后续请求直接复用；
+   - 地址解析失败等永久错误随 `sync.Once` 一并固化，避免每请求重复构建与错误抖动；
+   - 连接复用不受影响：所有实例共享同一 `sharedTransport` 连接池与 `globalBufferPool`；
+   - 早期「全局 `sync.Map` 缓存 + 常驻 TTL 清理 Goroutine + `StopProxyCacheCleaner()`」方案已废弃：后端节点集合在启动时静态确定，不存在动态伸缩产生的实例残留，额外常驻协程与停机钩子均属不必要复杂度。
 
 4. **逐段传输头（Hop-by-Hop）过滤与链路安全透传**：
    - `httputil.ReverseProxy` 自动遵循 RFC 7230 规范剥离 Hop-by-Hop 请求头（`Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Transfer-Encoding`, `Upgrade` 等）；
@@ -917,14 +918,13 @@ flowchart TB
     WaitSignal --> Shutdown["执行协同优雅停机"]
     Shutdown --> StopHTTP["httpSrv.Shutdown (10s 超时排空)"]
     Shutdown --> StopGRPC["grpcSrv.GracefulStop() (5s 超时回退 Stop)"]
-    Shutdown --> StopCleaner["StopProxyCacheCleaner() 停止后台协程"]
-    Shutdown --> Exit["优雅退出"]
+    Shutdown --> Exit["优雅退出（无后台协程需停止）"]
 ```
 
 #### 停机资源清理与生命周期保障：
 1. **HTTP 优雅排空**：使用 `httpSrv.Shutdown(ctx)` 设置 10 秒超时排空期，等待在途反向代理传输安全收尾，拒绝新连接；
 2. **gRPC 优雅排空与强制回退**：首先尝试 `grpcSrv.GracefulStop()`；若在 5 秒超时内仍有长连接未退出，则安全回退为 `grpcSrv.Stop()` 强制回收；
-3. **后台协程退出通知**：通过 `StopProxyCacheCleaner()` 关闭退出信号 Channel，确保没有孤儿 Goroutine 残留。
+3. **无常驻后台协程**：反向代理实例已内聚到 `BackendNode`，随节点创建、随进程退出统一回收，网关自身不再派生需要显式停止的清理 Goroutine（`StopProxyCacheCleaner()` 已移除），从根上消除「忘记停机钩子导致孤儿 Goroutine」这一类缺陷。
 
 #### 环境变量配置速查：
 

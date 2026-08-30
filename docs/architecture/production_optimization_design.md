@@ -283,8 +283,60 @@ RETURNING *;
 ### 7.2 评估后未采纳/留待专项
 
 - **fsnotify 事件驱动热重载**：白名单热重载未接入认证链路（前提不成立）；RuleEngine 侧用时间节流即可消除热路径 Stat，引入 fsnotify 会破坏零依赖约定并新增 goroutine，性价比低。
-- **分类 LRU 读锁改造（S3-FIFO/读写分离）**：痛点属实（`get` 因 `moveToFront` 持写锁），但替换淘汰算法影响面大，建议后续以"命中计数阈值延迟重排"的小改造方案专项评估。
-- **大文件流式处理**：当前已有 50MB multipart / 256MB XLSX 上限兜底 OOM；真流式受限于 Mondrian 全局分组算法本质无法全流式，需架构级专项设计（CSV/JSON 可先行）。
-- **ReverseProxy 内聚 BackendNode**：合理但会牺牲后端节点动态增删灵活性，需确认网关拓扑后再动。
+- **分类 LRU 读锁改造（S3-FIFO/读写分离）**：痛点属实（`get` 因 `moveToFront` 持写锁），但替换淘汰算法影响面大，建议后续以"命中计数阈值延迟重排"的小改造方案专项评估。（第六轮已以 Second-Chance/CLOCK 方案实施，见 §8.1）
+- **大文件流式处理**：当前已有 50MB multipart / 256MB XLSX 上限兜底 OOM；真流式受限于 Mondrian 全局分组算法本质无法全流式，需架构级专项设计（CSV/JSON 可先行）。（第六轮已实施 CSV/JSON 流式脱敏，见 §8.3）
+- **ReverseProxy 内聚 BackendNode**：合理但会牺牲后端节点动态增删灵活性，需确认网关拓扑后再动。（经确认节点集合启动时静态确定，第六轮已实施，见 §8.2）
 
-**测试验证**：新增 `TestLLMClient_HalfOpenProbeQuota`（确定性配额断言 + 幂等性）与 `TestRuleEngine_ReloadCheckThrottle`（节流窗口内跳过/关闭后正常重载），19 包全部通过 `go test -race -count=1 ./...`。
+**测试验证**：新增 `TestLLMClient_HalfOpenProbeQuota`（确定性配额断言 + 幂等性）与 `TestRuleEngine_ReloadCheckThrottle`（节流窗口内跳过/关闭后正常重载），19 包 全部通过 `go test -race -count=1 ./...`。
+
+---
+
+## 8. 第六轮：剩余三项建议的定向实施（P1~P2）
+
+在 §7 的评估基础上，对当时列为"留待专项"的 ①⑤⑥ 三项完成实施，累计优化项达 59 项。
+
+### 8.1 分类 LRU 读锁竞争 → Second-Chance（CLOCK）近似（P1 并发）
+
+**原状**：`classificationCache.get` 为维护严格 LRU 链表，每次读命中都要在**分片互斥锁**下执行 `moveToFront`（三次指针写），因此读路径无法使用 `RWMutex` 的共享锁——同分片并发读完全串行化，16 分片在高并发分类下仍构成明显的序列化点。
+
+**改造**（`dynclassification/funnel.go`）：
+- `lruNode` 新增 `ref atomic.Bool` 引用标记；`lruShard.mu` 由 `sync.Mutex` 改为 `sync.RWMutex`；删除未被读取的分片级 `hits/misses` 冗余计数（统计已由全局 `totalHits/totalMiss` 原子计数器承担）。
+- **读路径**：全程持 `RLock`，命中仅拷贝结果值并 `ref.Store(true)`，**不再触碰链表**，同分片并发读真正并行；`ref` 写在锁外执行且为原子操作，即使节点已被并发淘汰也只是写入一个孤立对象，无正确性影响。
+- **淘汰路径**：`removeOldest` 改为 CLOCK 语义——从尾部扫描，凡引用位为 1 的节点"延迟提升到队首"（偿还读路径下放的结构性写），遇到引用位为 0 的节点即淘汰；扫描上限 `lruMaxScanAttempts = 8`，耗尽后直接淘汰尾部，保证单次驱逐 O(1) 摊销、且在"全条目均被引用"时不会发生活锁。
+
+**权衡**：由严格 LRU 退化为近似 LRU（CLOCK），命中率损失在真实工作负载下通常 <1%，换取读路径无锁化；`CacheStats` 的 size 遍历同步降级为 `RLock`。
+
+### 8.2 反向代理实例与 BackendNode 生命周期绑定（P2 架构）
+
+**原状**：`http_proxy.go` 用包级 `proxyCache sync.Map` + `init()` 派生的常驻清理 goroutine（每 2 分钟扫描、10 分钟 TTL）管理 `*httputil.ReverseProxy`，并在 `main.go` 停机链路中要求显式调用 `StopProxyCacheCleaner()`——忘记调用即产生孤儿 goroutine，且 `init()` 派生的 goroutine 无法被测试隔离。
+
+**改造**：
+- `BackendNode` 新增 `proxyOnce sync.Once` + `proxy *httputil.ReverseProxy` + `proxyErr error`，实例随节点惰性构建、随节点回收，生命周期天然对齐；
+- `getOrCreateReverseProxy(addr, node, metrics)` → `(*BackendNode).ReverseProxy(metrics)`，删除 `proxyCache`/`proxyEntry`/`init()` 清理协程/`StopProxyCacheCleaner()`，并移除 `main.go` 中的停机钩子调用；
+- 地址解析失败为启动期静态配置导致的永久错误，经 `sync.Once` 固化错误，避免每请求重复构建；
+- 连接池复用不受影响：`sharedTransport` 与 `globalBufferPool` 仍为包级共享，`ReverseProxy` 本身无可变状态。
+
+**前提确认**：网关后端节点集合由 `NewLoadBalancer/NewWeightedLoadBalancer` 在启动时一次性构建，`LoadBalancer` 无 `AddNode/RemoveNode` 动态变更 API，因此原 TTL 清理机制解决的是不存在的问题。
+
+### 8.3 CSV/JSON 流式文件处理（恒定内存窗口 + 分块多核）（P1 资源）
+
+**原状**：`/v1/privacy/process_file` 先 `io.ReadAll` 物化整个文件，`csv.Reader.ReadAll()` 再物化 `[][]string`，随后构建未脱敏 `records` 副本与脱敏结果——三阶内存放大，峰值约为文件体积的 4~6 倍（50MB 上传即可瞬时占用数百 MB）。
+
+**改造**（`service/service.go` + `rest/routes.go`）：
+- 新增 `ProcessFileStream(io.Reader, filename, operation, options)`：CSV 走 `bufio + csv.Reader` 逐行读取（含 UTF-8 BOM 剥离），JSON 走 `json.Decoder` 令牌流逐对象解码，**边解码边脱敏**，不再保留原始快照与全量中间结构；
+- **恒定内存窗口**：每积累 `streamBatchSize = 2048` 行即调用 `maskCSVBatch/maskJSONBatch` 脱敏并释放该批原始行，批次缓冲经 `batch[:0]` 复用，峰值额外内存与文件规模解耦；
+- **分块多核**：`forEachChunked` 将批次划分为至多 `streamMaxWorkers = 16` 段连续区间并发写回（按索引不重叠，无锁），低于 `streamParallelMinRows = 512` 行单趟串行；`masking.MaskValue` 为纯函数（内部仅用 `sync.Map`/`sync.Pool`），并发安全；
+- **硬上限不退化**：`cappedReader` 对流式读取同样施加 50MB 字节上限，超限返回哨兵 `ErrFileTooLarge`，REST 层 `errors.Is` 映射为 413；截断时长度错误优先于解析/尾部错误；
+- **语义回退**：`k_anonymize`（Mondrian 需全局视野）与 XLSX 自动回退到 `ProcessFile` 物化路径，输出结构与字段与旧路径逐字节一致。
+
+**实测**（Apple M4 Max，40000 行 CSV）：`TotalAlloc` 40.3MB → 22.9MB（-43%）；5000 行基准 4.82MB/op → 2.99MB/op，耗时 5.28ms/op → 2.04ms/op（多核分块收益）。
+
+### 8.4 本轮测试
+
+- `TestClassificationCache_SecondChanceKeepsHotEntry`：同一分片内 4 条目满仓，读命中的最旧条目在驱逐后仍存活、冷条目出局（确定性验证第二次机会生效）。
+- `TestClassificationCache_EvictionTerminatesWhenAllReferenced`：全条目被引用时淘汰仍在有限扫描后完成，容量不漂移。
+- `TestClassificationCache_GetReturnsCopy` / `_ConcurrentReadWithEviction`：值拷贝语义与读写并发（-race）。
+- `TestBackendNodeReverseProxyIsNodeScoped`（含 16 goroutine 并发同一性断言）/ `TestBackendNodeReverseProxyPersistsBuildError`。
+- `TestProcessFileStreamCSVMatchesProcessFile`（BOM/列过滤/引号内逗号/空表体/空文件 6 形态）、`TestProcessFileStreamJSONMatchesProcessFile`（嵌套值/空数组/顶层对象/非对象元素/尾部脏数据 8 形态）：**流式与物化路径输出 `reflect.DeepEqual` 等价**；另有回退一致性、字节硬上限、内存放大消除与 `forEachChunked` 区间不重不漏断言。
+
+**全量测试验证**：19 个包全部通过 `go test -race -count=1 ./engine-go/... ./privacy-go-sdk/...`，零数据竞争。

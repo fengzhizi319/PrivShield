@@ -199,7 +199,7 @@ proxy:
   1. 调用 `LoadBalancer.SelectNode()` 依据当前策略挑选最优节点；
   2. 校验节点熔断器状态，若处于 `Open` 状态则通过 `pkg/middleware.AbortWithError` 立即返回 `503 Service Unavailable`；
   3. 原子递增在途连接计数 `node.IncrementInFlight()`；
-  4. 从全局单例 `proxyCache`（带 10 分钟 TTL 自动淘汰）获取或创建目标节点的 `*httputil.ReverseProxy` 实例；
+  4. 从目标 `BackendNode` 获取（首次访问惰性构建并固化）其绑定的 `*httputil.ReverseProxy` 实例；
   5. 代理层通过 `byteBufferPool` 取出 32KB 缓冲区，复用 `sharedTransport`（`MaxIdleConns: 2048`, `MaxIdleConnsPerHost: 256`）长连接向后端发起请求；
   6. 自动执行 RFC 7230 逐段传输头（Hop-by-Hop Headers）剥离，并透传 `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Request-ID` 与 `X-Trace-ID`；
   7. 响应完成时触发 `defer` 回调：原子递减 `node.DecrementInFlight()`，基于请求耗时更新节点 EWMA；根据响应状态码（<500 成功，≥500 失败）更新熔断器；

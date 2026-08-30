@@ -146,8 +146,7 @@ func main() {
 		grpcProxyServer.Stop()
 	}
 
-	// 停止后台 goroutine（代理缓存清理），与生命周期绑定
-	gateway.StopProxyCacheCleaner()
+	// 反向代理实例已内聚到 BackendNode（随节点创建/回收），无后台协程需要停止
 
 	slog.Info("Gateway stopped gracefully")
 }

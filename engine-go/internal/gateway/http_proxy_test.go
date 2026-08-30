@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +17,69 @@ import (
 
 func init() {
 	gin.SetMode(gin.TestMode)
+}
+
+// TestBackendNodeReverseProxyIsNodeScoped 验证反向代理实例惰性构建并按节点内聚复用：
+// 同一节点多次（含并发）调用返回同一实例，不同节点互不共享，无全局缓存参与。
+func TestBackendNodeReverseProxyIsNodeScoped(t *testing.T) {
+	lb := NewLoadBalancer([]string{"127.0.0.1:18080", "127.0.0.1:18081"}, "p2c")
+	nodes := lb.Nodes()
+
+	first, err := nodes[0].ReverseProxy(nil)
+	if err != nil {
+		t.Fatalf("ReverseProxy failed: %v", err)
+	}
+	if first == nil {
+		t.Fatal("ReverseProxy returned nil instance")
+	}
+
+	const concurrency = 16
+	got := make([]*httputil.ReverseProxy, concurrency)
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			p, err := nodes[0].ReverseProxy(nil)
+			if err != nil {
+				t.Errorf("concurrent ReverseProxy failed: %v", err)
+			}
+			got[idx] = p
+		}(i)
+	}
+	wg.Wait()
+
+	for i, p := range got {
+		if p != first {
+			t.Fatalf("proxy[%d] = %p, want memoized node instance %p", i, p, first)
+		}
+	}
+
+	second, err := nodes[1].ReverseProxy(nil)
+	if err != nil {
+		t.Fatalf("ReverseProxy failed: %v", err)
+	}
+	if second == first {
+		t.Fatal("distinct nodes must not share ReverseProxy instances")
+	}
+	if first.Transport == nil || first.BufferPool == nil {
+		t.Fatal("shared transport and buffer pool must be wired into every node proxy")
+	}
+}
+
+// TestBackendNodeReverseProxyPersistsBuildError 地址解析失败为永久错误，
+// 应被 sync.Once 固化，避免每请求重复构建与错误抖动。
+func TestBackendNodeReverseProxyPersistsBuildError(t *testing.T) {
+	n := &BackendNode{Address: "%zz:8080"}
+	for i := 0; i < 3; i++ {
+		p, err := n.ReverseProxy(nil)
+		if err == nil {
+			t.Fatalf("attempt %d: expected parse error, got proxy %v", i, p)
+		}
+		if p != nil {
+			t.Fatalf("attempt %d: expected nil proxy, got %p", i, p)
+		}
+	}
 }
 
 // ──────────────────────────────────────────────

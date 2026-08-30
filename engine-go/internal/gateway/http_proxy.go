@@ -51,71 +51,40 @@ var (
 		IdleConnTimeout:     90 * time.Second,
 		DisableCompression:  false,
 	}
-	proxyCache     sync.Map // addr -> *proxyEntry
-	proxyCacheTTL  = 10 * time.Minute
-	proxyCacheDone = make(chan struct{}) // 后台清理 goroutine 退出信号
 )
 
-// proxyEntry 包装 ReverseProxy 及其创建时间，支持 TTL 淘汰
-type proxyEntry struct {
-	proxy   *httputil.ReverseProxy
-	created time.Time
-}
+// ReverseProxy 返回绑定在本节点上的反向代理实例。
+//
+// 首次调用时惰性构建并经 sync.Once 固化，后续请求直接复用；实例生命周期与
+// BackendNode 完全一致——节点释放即实例释放，因此不再需要全局 sync.Map 缓存、
+// TTL 过期扫描与后台清理 goroutine（也无 Stop 钩子泄漏风险）。
+// 连接复用不受影响：所有实例共享同一个 sharedTransport 连接池。
+// metrics 仅用于 ErrorHandler 上报，取首次构建时传入的值；进程内只有一份 GatewayMetrics。
+func (n *BackendNode) ReverseProxy(metrics *observability.GatewayMetrics) (*httputil.ReverseProxy, error) {
+	n.proxyOnce.Do(func() {
+		target, err := url.Parse(fmt.Sprintf("http://%s", n.Address))
+		if err != nil {
+			// 地址源于启动时静态配置，解析失败为永久错误，直接缓存错误避免重复构建
+			n.proxyErr = err
+			return
+		}
 
-func init() {
-	// 后台协程定期清理超过 TTL 的反向代理实例，防止后端节点动态变化时内存不释放
-	go func() {
-		ticker := time.NewTicker(2 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				now := time.Now()
-				proxyCache.Range(func(key, value any) bool {
-					entry := value.(*proxyEntry)
-					if now.Sub(entry.created) > proxyCacheTTL {
-						proxyCache.Delete(key)
-					}
-					return true
-				})
-			case <-proxyCacheDone:
-				return
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		proxy.Transport = sharedTransport
+		proxy.BufferPool = globalBufferPool
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			n.CB.RecordFailure()
+			if metrics != nil {
+				metrics.SetCircuitBreakerState(n.Address, cbStateString(n.CB.State()))
+				metrics.RecordForwarded(n.Address, http.StatusBadGateway)
 			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			fmt.Fprintf(w, `{"code":"BAD_GATEWAY","message":"后端 %s 不可达","detail":"%s","trace_id":"","timestamp":"%s"}`, n.Address, err.Error(), time.Now().UTC().Format(time.RFC3339Nano))
 		}
-	}()
-}
-
-// StopProxyCacheCleaner 停止 proxyCache 后台清理 goroutine
-func StopProxyCacheCleaner() {
-	close(proxyCacheDone)
-}
-
-func getOrCreateReverseProxy(addr string, node *BackendNode, metrics *observability.GatewayMetrics) (*httputil.ReverseProxy, error) {
-	if entry, ok := proxyCache.Load(addr); ok {
-		return entry.(*proxyEntry).proxy, nil
-	}
-
-	target, err := url.Parse(fmt.Sprintf("http://%s", addr))
-	if err != nil {
-		return nil, err
-	}
-
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = sharedTransport
-	proxy.BufferPool = globalBufferPool
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		node.CB.RecordFailure()
-		if metrics != nil {
-			metrics.SetCircuitBreakerState(node.Address, cbStateString(node.CB.State()))
-			metrics.RecordForwarded(node.Address, http.StatusBadGateway)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, `{"code":"BAD_GATEWAY","message":"后端 %s 不可达","detail":"%s","trace_id":"","timestamp":"%s"}`, node.Address, err.Error(), time.Now().UTC().Format(time.RFC3339Nano))
-	}
-
-	proxyCache.Store(addr, &proxyEntry{proxy: proxy, created: time.Now()})
-	return proxy, nil
+		n.proxy = proxy
+	})
+	return n.proxy, n.proxyErr
 }
 
 // NewHTTPProxyHandler 创建 HTTP 反向代理处理器。
@@ -145,8 +114,8 @@ func NewHTTPProxyHandler(lb *LoadBalancer, metrics *observability.GatewayMetrics
 			metrics.SetBackendInFlight(node.Address, node.Address, float64(node.InFlight.Load()))
 		}
 
-		// 获取或复用反向代理（内置 BufferPool 与长连接池）
-		proxy, err := getOrCreateReverseProxy(node.Address, node, metrics)
+		// 获取节点内聚的反向代理（内置 BufferPool 与共享长连接池）
+		proxy, err := node.ReverseProxy(metrics)
 		if err != nil {
 			node.CB.RecordFailure()
 			if metrics != nil {

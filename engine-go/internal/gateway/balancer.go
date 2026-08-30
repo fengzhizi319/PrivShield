@@ -6,6 +6,7 @@ package gateway
 import (
 	"math"
 	"math/rand/v2"
+	"net/http/httputil"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,14 @@ type BackendNode struct {
 	LastUsed      time.Time      // 最后使用时间
 	CB            CircuitBreaker // 熔断器
 	eWMAMu        sync.Mutex     // 仅保护 EWMA 字段
+
+	// 反向代理实例与节点生命周期绑定：随节点惰性创建、随节点回收即释放。
+	// 取代早期「全局 sync.Map 缓存 + 后台 TTL 清理 goroutine」方案——
+	// 后端节点集合在启动时静态确定，无动态伸缩抖动，无需额外常驻协程与 TTL 扫描。
+	// 构建逻辑见 http_proxy.go 的 BackendNode.ReverseProxy。
+	proxyOnce sync.Once
+	proxy     *httputil.ReverseProxy
+	proxyErr  error
 }
 
 // ──────────────────────────────────────────────

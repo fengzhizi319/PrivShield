@@ -3,6 +3,7 @@ package dynclassification
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -478,6 +479,125 @@ func TestSafetyFloor_ArbitrateBatch_Parallel(t *testing.T) {
 		if LevelRank(r.Level) < LevelRank(LevelInternal) {
 			t.Errorf("result[%d].Level = %q, want >= internal", i, r.Level)
 		}
+	}
+}
+
+// TestClassificationCache_SecondChanceKeepsHotEntry 验证 Second-Chance（CLOCK）淘汰：
+// 读命中仅置引用标记，驱逐时被延迟提升，冷条目优先出局。
+func TestClassificationCache_SecondChanceKeepsHotEntry(t *testing.T) {
+	c := newClassificationCache(49) // shardCap = ceil(49/16) = 4
+	shard := c.shards[0]
+
+	keys := make([]string, 0, 5)
+	for i := 0; len(keys) < 5; i++ {
+		k := fmt.Sprintf("ck-%d", i)
+		if c.shardFor(k) == shard {
+			keys = append(keys, k)
+		}
+	}
+
+	put := func(k string) { c.put(k, &ClassificationResult{Field: k, Level: LevelInternal, Confidence: 0.9}) }
+	for _, k := range keys[:4] {
+		put(k)
+	}
+	// 对最旧条目多次读命中，为其攒下第二次机会
+	for i := 0; i < 3; i++ {
+		if _, ok := c.get(keys[0]); !ok {
+			t.Fatalf("hot key %s should still be cached", keys[0])
+		}
+	}
+	put(keys[4]) // 容量已满 → 触发一次 Second-Chance 淘汰
+
+	shard.mu.RLock()
+	size := len(shard.items)
+	_, hot := shard.items[keys[0]]
+	_, cold := shard.items[keys[1]]
+	shard.mu.RUnlock()
+
+	if size != 4 {
+		t.Fatalf("shard size = %d, want 4", size)
+	}
+	if !hot {
+		t.Fatal("referenced entry was evicted without consuming its second chance")
+	}
+	if cold {
+		t.Fatal("unreferenced oldest entry should have been evicted")
+	}
+}
+
+// TestClassificationCache_EvictionTerminatesWhenAllReferenced 一切条目均被引用时，
+// 淘汰仍须在有限扫描后完成（不出现无限提升活锁），容量不因此漂移。
+func TestClassificationCache_EvictionTerminatesWhenAllReferenced(t *testing.T) {
+	c := newClassificationCache(16) // shardCap = 1
+	shard := c.shards[0]
+
+	keys := make([]string, 0, 6)
+	for i := 0; len(keys) < 6; i++ {
+		k := fmt.Sprintf("single-%d", i)
+		if c.shardFor(k) == shard {
+			keys = append(keys, k)
+		}
+	}
+
+	for i, k := range keys {
+		if i > 0 {
+			c.get(keys[i-1]) // 当前唯一条目处于被引用状态
+		}
+		c.put(k, &ClassificationResult{Field: k, Level: LevelPublic, Confidence: 0.4})
+		shard.mu.RLock()
+		size := len(shard.items)
+		shard.mu.RUnlock()
+		if size > 1 {
+			t.Fatalf("shard size = %d after put(%s), want <= 1", size, k)
+		}
+	}
+}
+
+// TestClassificationCache_GetReturnsCopy 读出的必须是值拷贝，调用方改写不影响缓存。
+func TestClassificationCache_GetReturnsCopy(t *testing.T) {
+	c := newClassificationCache(16)
+	c.put("copy-key", &ClassificationResult{Field: "copy-key", Level: LevelInternal, Confidence: 0.8})
+
+	got, ok := c.get("copy-key")
+	if !ok {
+		t.Fatal("expected cache hit")
+	}
+	got.Level = LevelTopSecret
+
+	again, _ := c.get("copy-key")
+	if again.Level != LevelInternal {
+		t.Fatalf("cached level mutated by caller: got %q, want %q", again.Level, LevelInternal)
+	}
+}
+
+// TestClassificationCache_ConcurrentReadWithEviction 读路径持 RLock 且不再修改链表，
+// 与写路径的结构变更并发；-race 下验证无数据竞争。
+func TestClassificationCache_ConcurrentReadWithEviction(t *testing.T) {
+	c := newClassificationCache(16 * 32)
+
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < 800; i++ {
+				// 两个 key 空间交叠，制造高命中率与驱逐交叉
+				k := fmt.Sprintf("k-%d-%d", id%2, i)
+				if r, ok := c.get(k); ok && r == nil {
+					t.Errorf("hit with nil result for %s", k)
+					return
+				}
+				c.put(k, &ClassificationResult{Field: k, Level: LevelPublic, Confidence: 0.4})
+				if i%256 == 0 {
+					c.clear()
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	if c.totalHits.Load() == 0 {
+		t.Fatal("expected cache hits under concurrent access")
 	}
 }
 

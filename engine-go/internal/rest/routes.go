@@ -11,6 +11,7 @@ package rest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1271,14 +1272,14 @@ func processFileHandler(svc *service.PrivacyService) gin.HandlerFunc {
 			return
 		}
 
-		raw, err := io.ReadAll(file)
+		// 流式处理：CSV/JSON 的 mask_dataframe 逐行解码不入内存快照，
+		// 其余格式/操作由 ProcessFileStream 内部回退到物化路径。
+		result, err := svc.ProcessFileStream(file, header.Filename, operation, params)
 		if err != nil {
-			middleware.AbortWithError(c, http.StatusBadRequest, "READ_ERROR", "读取文件失败", err.Error())
-			return
-		}
-
-		result, err := svc.ProcessFile(raw, header.Filename, operation, params)
-		if err != nil {
+			if errors.Is(err, service.ErrFileTooLarge) {
+				middleware.AbortWithError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "文件过大（超过 50MB 上限）", err.Error())
+				return
+			}
 			middleware.AbortWithError(c, http.StatusBadRequest, "PROCESS_FILE_FAILED", "文件处理失败", err.Error())
 			return
 		}

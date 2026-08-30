@@ -8,11 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **第六轮优化建议定向实施（剩余三项，P1~P2）**：将上轮列为“留待专项”的 ①⑤⑥ 三项全部落地：
+  - **分类 LRU 读锁竞争 → Second-Chance（CLOCK）近似（P1 并发）**：`lruNode` 新增 `ref atomic.Bool`，分片锁改 `sync.RWMutex`；读路径全程持 `RLock`、命中仅原子置位不再修改链表（同分片并发读真正并行），淘汰改 CLOCK（引用位为 1 的节点延迟提升到队首，扫描上限 8 保证 O(1) 摊销与无活锁）；顺带删除未被读取的分片级 `hits/misses` 冗余计数。严格 LRU 退化为近似 LRU，换取读无锁化。
+  - **反向代理实例与 BackendNode 生命周期绑定（P2 架构）**：`getOrCreateReverseProxy` + 全局 `proxyCache sync.Map` + `init()` 常驻 TTL 清理协程 + `StopProxyCacheCleaner()` 全部移除，改为 `(*BackendNode).ReverseProxy()` 经 `sync.Once` 惰性固化（永久错误同样固化）；节点集合启动时静态确定，因此原 TTL 清理解决的是不存在的问题，同时消除孤儿 goroutine 风险。`sharedTransport`/`globalBufferPool` 仍全局共享，连接复用不变。
+  - **CSV/JSON 流式文件处理（P1 资源）**：新增 `ProcessFileStream(io.Reader, ...)`，逐行/逐对象边解码边脱敏，以 `streamBatchSize=2048` 为恒定内存窗口并复用批次缓冲，并经 `forEachChunked` 分块多核（≤16 worker）写回；`cappedReader` 保留 50MB 硬上限（新哨兵 `ErrFileTooLarge` → REST 413）；`k_anonymize`（Mondrian 需全局视野）与 XLSX 自动回退旧路径。实测 40000 行 CSV `TotalAlloc` 40.3MB → 22.9MB（-43%），5000 行基准 5.28ms/4.82MB → 2.04ms/2.99MB。两条路径输出 `reflect.DeepEqual` 等价（14 个形态用例覆盖 BOM/列过滤/引号内逗号/嵌套值/尾部脏数据等）。
+  - 新增 12 个专项单元/并发测试与 2 个内存与吞吐基准；19 包全部通过 `go test -race -count=1`，零数据竞争。`docs/gateway_balancer/` 与 `production_optimization_design.md §8` 同步。
 - **深度优化建议评估与定向改造（三项）**：对外部提出的 6 项优化建议逐条代码验证后实施 3 项高确定性改造：
   - **LLMClient Half-Open 并发试探限制（P1 可靠性）**：`checkCircuit` 在 Half-Open 态原为无条件放行，刚恢复的 LLM 会被瞬时并发流量二次打崩；新增 `halfOpenInflight` 原子配额（上限 3，与 gateway.CircuitBreaker 语义对齐）+ 幂等 `releaseProbe` 回调，超额请求直接拒绝走 Safety Floor 降级。
   - **RuleEngine 热路径 Stat 节流（P1 性能）**：`checkRulesReload` 原每次 Classify 调用都执行 `os.Stat` syscall；新增 5s 节流窗口（`lastCheckNano` CAS 串行化，`PRIVACY_RULES_RELOAD_CHECK_SECONDS` 可配置，0 禁用）。
   - **ArbitrateBatch 并行阈值 32→128（P3）**：单条仲裁为纯内存比较极轻量，32~128 区间 goroutine 创建开销高于并行收益，小批量改走串行单趟。
-  - 未采纳项评估：fsnotify 改造（白名单热重载实际未接入请求热路径，前提错位；且违背零外部依赖约定）；LRU 读锁/S3-FIFO、流式大文件、ReverseProxy 内聚 BackendNode 因改造面大/需产品确认留待后续。新增 2 个专项单元测试，19 包 `-race` 全部通过。
+  - 未采纳项评估：fsnotify 改造（白名单热重载实际未接入请求热路径，前提错位；且违背零外部依赖约定）；LRU 读锁/S3-FIFO、流式大文件、ReverseProxy 内聚 BackendNode 因改造面大/需产品确认留待后续（均已在第六轮实施，见上条）。新增 2 个专项单元测试，19 包 `-race` 全部通过。
 - **第五轮 engine-go 深度四维架构审计优化（P1~P2，5 项）**：
   - **P1 并发安全**：balancer `selectP2C` / `NewHealthCheckHandler` 无锁读 `EWMA` 字段与 `UpdateEWMA` 写端数据竞争，加 `GetEWMA()` 安全访问器修复。
   - **P1 功能性**：`/readyz/llm` 从硬编码 `"not_loaded"` 改为通过 `PrivacyService.LLMStatus()` 真实探测 LLM 可用性（区分 not_configured / ready / unavailable）。
