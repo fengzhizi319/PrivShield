@@ -920,6 +920,69 @@ class OpenAILlmClassifier(LlmClassifier):
         self.last_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         self.cumulative_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
+        # 三态熔断器与并发试探控制 (借鉴 Go 引擎 CircuitBreaker 设计)
+        self._cb_state = 0  # 0: Closed, 1: Open, 2: HalfOpen
+        self._cb_failures = 0
+        self._cb_last_failure = 0.0
+        self._cb_cooldown = float(os.environ.get("PRIVACY_LLM_CB_COOLDOWN", "15.0"))
+        self._cb_half_open_max = 3
+        self._cb_half_open_inflight = 0
+        self._cb_lock = threading.Lock()
+
+    def _check_circuit(self) -> tuple[bool, Any]:
+        """检查三态熔断器状态，返回 (allowed, release_callback)。"""
+        now = time.monotonic()
+        with self._cb_lock:
+            if self._cb_state == 0:  # Closed
+                return True, None
+
+            if self._cb_state == 1:  # Open
+                if now - self._cb_last_failure > self._cb_cooldown:
+                    self._cb_state = 2  # HalfOpen
+                    self._cb_half_open_inflight = 1
+                    released = False
+
+                    def _release() -> None:
+                        nonlocal released
+                        if not released:
+                            released = True
+                            with self._cb_lock:
+                                self._cb_half_open_inflight = max(0, self._cb_half_open_inflight - 1)
+
+                    return True, _release
+                return False, None
+
+            # Half-Open 状态限制并发试探配额
+            if self._cb_half_open_inflight < self._cb_half_open_max:
+                self._cb_half_open_inflight += 1
+                released = False
+
+                def _release() -> None:
+                    nonlocal released
+                    if not released:
+                        released = True
+                        with self._cb_lock:
+                            self._cb_half_open_inflight = max(0, self._cb_half_open_inflight - 1)
+
+                return True, _release
+            return False, None
+
+    def _record_success(self) -> None:
+        """记录成功调用，自愈重置熔断器。"""
+        with self._cb_lock:
+            self._cb_failures = 0
+            self._cb_state = 0
+            self._cb_half_open_inflight = 0
+
+    def _record_failure(self) -> None:
+        """记录失败调用，连续超阈值触发熔断。"""
+        with self._cb_lock:
+            self._cb_failures += 1
+            self._cb_last_failure = time.monotonic()
+            if self._cb_failures >= 3 or self._cb_state == 2:
+                self._cb_state = 1
+                self._cb_half_open_inflight = 0
+
     def _is_finetuned_model(self) -> bool:
         """判断当前请求的模型是否为项目微调的 Privacy-Classifier-Smoother 模型。
 
@@ -954,6 +1017,12 @@ class OpenAILlmClassifier(LlmClassifier):
             logger.debug("openai_llm_skip_image_input", extra={"reason": "text_only_model"})
             return None
 
+        # 熔断器快速拦截（Half-Open 下限制并发试探配额）
+        allowed, release_probe = self._check_circuit()
+        if not allowed:
+            logger.debug("openai_llm_circuit_open_fast_fail", extra={"url": self.chat_url})
+            return None
+
         start_time = time.monotonic()
         try:
             future = self._executor.submit(
@@ -962,18 +1031,28 @@ class OpenAILlmClassifier(LlmClassifier):
             result = future.result(timeout=self.timeout)
             duration = time.monotonic() - start_time
             CLASSIFICATION_LLM_DURATION.labels(engine="vllm").observe(duration)
+            if result is not None:
+                self._record_success()
+            else:
+                self._record_failure()
             return result
         except FuturesTimeoutError:
+            self._record_failure()
             duration = time.monotonic() - start_time
             CLASSIFICATION_LLM_TOTAL.labels(status="timeout").inc()
             CLASSIFICATION_LLM_DURATION.labels(engine="vllm").observe(duration)
             logger.error("vllm_http_classify_timeout", extra={"timeout_s": self.timeout, "url": self.chat_url})
             return None
         except Exception as e:
+            self._record_failure()
             duration = time.monotonic() - start_time
             CLASSIFICATION_LLM_TOTAL.labels(status="error").inc()
             CLASSIFICATION_LLM_DURATION.labels(engine="vllm").observe(duration)
             logger.error("vllm_http_classify_error", extra={"error": str(e), "url": self.chat_url})
+            return None
+        finally:
+            if release_probe is not None:
+                release_probe()
     def sanitize_text(self, text: str) -> str:
         """纯脱敏与无痕抹平接口：仅对文本进行 PII 与敏感信息抹平重写，不考虑分类分级逻辑。
 

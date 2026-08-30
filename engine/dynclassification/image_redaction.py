@@ -38,6 +38,7 @@ from io import BytesIO
 import os
 from pathlib import Path
 from typing import Optional
+import struct
 import tempfile
 
 from ..observability.logging_config import get_logger
@@ -49,13 +50,152 @@ IMAGE_REDACTION_FAILURE = "[IMAGE-REDACTION-FAILED]"
 # 常见图像文件扩展名（含 DICOM 医学影像）
 IMAGE_FILE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dcm", ".dicom")
 
+# DICOM 标签与 VR 定义 (借鉴 Go 引擎原生二进制脱敏设计)
+_TAG_PATIENT_NAME = 0x00100010
+_TAG_PATIENT_ID = 0x00100020
+_TAG_PATIENT_BIRTH_DATE = 0x00100030
+_TAG_PATIENT_SEX = 0x00100040
+_TAG_PATIENT_AGE = 0x00101010
+_TAG_PATIENT_ADDRESS = 0x00101040
+_TAG_PATIENT_COMMENTS = 0x00104000
+_TAG_REFERRING_PHYSICIAN_NAME = 0x00080090
+_TAG_INSTITUTION_NAME = 0x00080080
+_TAG_STUDY_DESCRIPTION = 0x00081030
+_TAG_SERIES_DESCRIPTION = 0x0008103E
+_TAG_STUDY_INSTANCE_UID = 0x0020000D
+_TAG_SERIES_INSTANCE_UID = 0x0020000E
+_TAG_SOP_INSTANCE_UID = 0x00080018
+_TAG_PIXEL_DATA = 0x7FE00010
+
+_EXPLICIT_VRS = {
+    b"AE", b"AS", b"AT", b"CS", b"DA", b"DS", b"DT", b"FL", b"FD", b"IS",
+    b"LO", b"LT", b"OB", b"OF", b"OW", b"PN", b"SH", b"SL", b"SQ", b"SS",
+    b"ST", b"TM", b"UI", b"UL", b"UN", b"US", b"UT"
+}
+_LONG_VRS = {b"OB", b"OW", b"OF", b"SQ", b"UT", b"UN"}
+
+
+def is_dicom_data(data: bytes) -> bool:
+    """检查二进制数据是否具有标准 DICOM 文件格式魔数 (128-byte preamble + 'DICM')。"""
+    return len(data) >= 132 and data[128:132] == b"DICM"
+
+
+def anonymize_dicom(data: bytes) -> bytes:
+    """对 DICOM 二进制文件流进行纯 Python 原生 Header 深度脱敏与匿名化重构。
+    
+    保留图像像素（PixelData），重写患者敏感 Tag 与 UID。
+    """
+    if not is_dicom_data(data):
+        raise ValueError("Not a valid DICOM byte stream")
+
+    out = bytearray()
+    # 复制 128 字节前导码与 4 字节 DICM 标识
+    out.extend(data[:132])
+    offset = 132
+    n = len(data)
+
+    while offset + 4 <= n:
+        group, elem = struct.unpack_from("<HH", data, offset)
+        tag = (group << 16) | elem
+        offset += 4
+
+        is_explicit = False
+        vr = b""
+        if offset + 2 <= n and data[offset:offset+2] in _EXPLICIT_VRS:
+            is_explicit = True
+            vr = data[offset:offset+2]
+            offset += 2
+
+        val_len = 0
+        if is_explicit:
+            if vr in _LONG_VRS:
+                offset += 2  # 2 字节保留空位
+                if offset + 4 > n:
+                    break
+                val_len = struct.unpack_from("<I", data, offset)[0]
+                offset += 4
+            else:
+                if offset + 2 > n:
+                    break
+                val_len = struct.unpack_from("<H", data, offset)[0]
+                offset += 2
+        else:
+            if offset + 4 > n:
+                break
+            val_len = struct.unpack_from("<I", data, offset)[0]
+            offset += 4
+
+        # 遇到 PixelData 或未定义长度 0xFFFFFFFF：直接拷贝剩余所有字节并退出
+        if tag == _TAG_PIXEL_DATA or val_len == 0xFFFFFFFF:
+            out.extend(struct.pack("<HH", group, elem))
+            if is_explicit:
+                out.extend(vr)
+                if vr in _LONG_VRS:
+                    out.extend(b"\x00\x00")
+                    out.extend(struct.pack("<I", val_len))
+                else:
+                    out.extend(struct.pack("<H", val_len))
+            else:
+                out.extend(struct.pack("<I", val_len))
+            out.extend(data[offset:])
+            return bytes(out)
+
+        if offset + val_len > n:
+            val_len = n - offset
+
+        raw_val = data[offset:offset+val_len]
+        offset += val_len
+
+        # 对敏感 Tag 进行脱敏重写
+        new_val = raw_val
+        val_str = raw_val.decode("utf-8", errors="ignore").rstrip("\x00 ").strip()
+
+        if tag == _TAG_PATIENT_NAME:
+            new_val = b"ANONYMOUS^PATIENT"
+        elif tag == _TAG_PATIENT_ID:
+            h = hashlib.sha256(val_str.encode("utf-8")).hexdigest()[:8]
+            new_val = f"ANON_{h}".encode("ascii")
+        elif tag == _TAG_PATIENT_BIRTH_DATE:
+            if len(val_str) >= 6:
+                new_val = (val_str[:6] + "01").encode("ascii")
+            else:
+                new_val = b"19000101"
+        elif tag in (_TAG_PATIENT_ADDRESS, _TAG_REFERRING_PHYSICIAN_NAME, _TAG_INSTITUTION_NAME):
+            new_val = b"***"
+        elif tag == _TAG_PATIENT_AGE:
+            new_val = b"000Y"
+        elif tag == _TAG_PATIENT_COMMENTS:
+            new_val = b""
+        elif tag in (_TAG_STUDY_DESCRIPTION, _TAG_SERIES_DESCRIPTION):
+            new_val = b"SANITIZED_STUDY"
+        elif tag in (_TAG_STUDY_INSTANCE_UID, _TAG_SERIES_INSTANCE_UID, _TAG_SOP_INSTANCE_UID):
+            uid_h = hashlib.sha256(val_str.encode("utf-8")).hexdigest()[:16]
+            new_val = f"1.2.826.0.1.3680043.9.{uid_h}".encode("ascii")
+
+        # 偶数对齐补齐
+        if len(new_val) % 2 != 0:
+            new_val = new_val + b" "
+
+        # 写回 Tag
+        out.extend(struct.pack("<HH", group, elem))
+        if is_explicit:
+            out.extend(vr)
+            if vr in _LONG_VRS:
+                out.extend(b"\x00\x00")
+                out.extend(struct.pack("<I", len(new_val)))
+            else:
+                out.extend(struct.pack("<H", len(new_val)))
+        else:
+            out.extend(struct.pack("<I", len(new_val)))
+        out.extend(new_val)
+
+    return bytes(out)
+
 
 # 文件路径长度上限：超过视为非文件路径（防超长字符串误判）
 _MAX_PATH_LEN = 512
 
 # 输出格式白名单：文件后缀 → PIL 保存格式。
-# 仅列出可安全派生的格式；DICOM（.dcm/.dicom）等无法安全派生的格式
-# 不在映射内，保存阶段返回失败占位符（fail-closed），绝不崩溃。
 _OUTPUT_FORMAT_MAP = {
     ".jpg": "JPEG",
     ".jpeg": "JPEG",
@@ -179,6 +319,28 @@ def sanitize_image_input(
         if not _is_path_allowed(file_path_obj):
             logger.warning("拒绝访问沙箱外的图片路径（任意文件读取防护）")
             return IMAGE_REDACTION_FAILURE
+
+        # 原生 DICOM 二进制文件脱敏分支 (无需依赖 PIL)
+        if file_path_obj.suffix.lower() in (".dcm", ".dicom"):
+            try:
+                with open(file_path_obj, "rb") as df:
+                    dcm_bytes = df.read()
+                if not is_dicom_data(dcm_bytes):
+                    logger.warning("无效的 DICOM 文件魔数，拒绝输出未脱敏图像")
+                    return IMAGE_REDACTION_FAILURE
+                out_dcm = anonymize_dicom(dcm_bytes)
+                out_dir = Path(output_dir)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                _cleanup_old_sanitized_images(out_dir, max_files=200)
+                name_digest = hashlib.sha256(file_path_obj.name.encode("utf-8")).hexdigest()[:12]
+                out_file = out_dir / f"sanitized_{name_digest}.dcm"
+                with open(out_file, "wb") as wf:
+                    wf.write(out_dcm)
+                return str(out_file)
+            except Exception as e:
+                logger.warning("DICOM 脱敏失败: %s", e)
+                return IMAGE_REDACTION_FAILURE
+
         input_path = file_path_obj
         try:
             with Image.open(input_path) as raw_img:

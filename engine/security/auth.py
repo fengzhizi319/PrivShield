@@ -53,15 +53,14 @@ def _constant_time_lookup(keys: dict[str, Any], token: str) -> Any | None:
 
     A plain ``dict.get`` is a hash-based probe whose timing can correlate with the
     stored keys, theoretically leaking information about key existence/prefixes.
-    Here every stored key is compared with :func:`hmac.compare_digest` and the loop
-    never short-circuits, so the running time depends only on the number of stored
-    keys, not on the secret contents.
+    Here keys are sorted for deterministic iteration order, and every stored key is
+    compared with :func:`hmac.compare_digest` without short-circuiting.
     """
     token_bytes = token.encode("utf-8")
     matched = None
-    for key, value in keys.items():
+    for key in sorted(keys.keys()):
         if hmac.compare_digest(key.encode("utf-8"), token_bytes):
-            matched = value
+            matched = keys[key]
     return matched
 
 
