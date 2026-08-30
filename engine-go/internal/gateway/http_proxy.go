@@ -191,7 +191,7 @@ func NewHealthCheckHandler(lb *LoadBalancer) gin.HandlerFunc {
 			results = append(results, gin.H{
 				"address":   n.Address,
 				"in_flight": n.InFlight.Load(),
-				"ewma_ms":   n.EWMA / 1e6,
+				"ewma_ms":   n.GetEWMA() / 1e6,
 				"cb_state":  state,
 			})
 		}

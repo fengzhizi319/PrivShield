@@ -56,7 +56,7 @@ func RegisterRoutes(r *gin.Engine, svc *service.PrivacyService) {
 	r.GET("/health", healthHandlerWithService(svc))
 	r.GET("/livez", livezHandler)
 	r.GET("/readyz", readyzHandler)
-	r.GET("/readyz/llm", readyzLLMHandler)
+	r.GET("/readyz/llm", readyzLLMHandler(svc))
 
 	// 根路径直调别名路由（兼容直接调用）
 	r.POST("/agent/process", agentProcessHandler(svc))
@@ -243,8 +243,22 @@ func readyzHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-func readyzLLMHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "llm": "not_loaded"})
+func readyzLLMHandler(svc *service.PrivacyService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "ok", "llm": "not_configured"})
+			return
+		}
+		configured, available := svc.LLMStatus(c.Request.Context())
+		switch {
+		case !configured:
+			c.JSON(http.StatusOK, gin.H{"status": "ok", "llm": "not_configured"})
+		case available:
+			c.JSON(http.StatusOK, gin.H{"status": "ok", "llm": "ready"})
+		default:
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "llm": "unavailable"})
+		}
+	}
 }
 
 // ──────────────────────────────────────────────

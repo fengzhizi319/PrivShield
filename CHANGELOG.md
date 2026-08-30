@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **第五轮 engine-go 深度四维架构审计优化（P1~P2，5 项）**：
+  - **P1 并发安全**：balancer `selectP2C` / `NewHealthCheckHandler` 无锁读 `EWMA` 字段与 `UpdateEWMA` 写端数据竞争，加 `GetEWMA()` 安全访问器修复。
+  - **P1 功能性**：`/readyz/llm` 从硬编码 `"not_loaded"` 改为通过 `PrivacyService.LLMStatus()` 真实探测 LLM 可用性（区分 not_configured / ready / unavailable）。
+  - **P1 安全/内存**：分类漏斗缓存 key 包含原始 value（高基数 PII 导致内存膨胀与数据驻留），改用 SHA-256 截断 128bit 哈希化 value 部分。
+  - **P2 性能**：`ProcessAgentData` 单线程循环改为 >32 记录多核 strided 并行，与 ClassifyBatch/MaskBatchContext 一致。
+  - **P2 并发**：`engineCache` 随机淘汰改为两阶段策略（优先淘汰 default/低置信度条目，保留热规则命中结果）。
+  - 19 个包全部通过 `go test -race -count=1 ./...`，零数据竞争。
 - **第四轮 engine-go 深度四维架构审计优化（P0~P2，6 项）**：
   - **P0 正确性/安全**：kano.parseNumeric 改用 strconv.ParseFloat 消除死循环与解析错误；formatFloat 修复 `string(rune(n+'0'))` 对 >9 数值的截断 bug；constantTimeLookup 改用 sort.Strings 确定性迭代 + subtle.ConstantTimeCompare 消除时序侧信道；DICOM 文件读取加 256MB 上限（PRIVACY_DICOM_MAX_FILE_SIZE 可配置）。
   - **P1 可靠性**：agent/gateway gRPC GracefulStop 加超时回退（PRIVACY_GRPC_GRACEFUL_STOP_SECONDS），防止 RPC 不结束导致挂死；后台 goroutine（限流清理/代理缓存清理）与关闭生命周期绑定。

@@ -502,15 +502,28 @@ func (c *engineCache) put(key string, val *ClassificationResult) {
 	shard := c.shardFor(key)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
-	// 分片满时随机淘汰一半（轻量级淘汰策略，避免 LRU 链表开销）
+	// 分片满时优先淘汰低价值条目（default/低置信度），保留热规则命中结果
 	if len(shard.items) >= shard.capacity {
-		count := 0
 		target := shard.capacity / 2
-		for k := range shard.items {
-			delete(shard.items, k)
-			count++
-			if count >= target {
-				break
+		count := 0
+		// Phase 1: 先淘汰 MatchedBy=="default" 或 Confidence < 0.6 的低价值条目
+		for k, v := range shard.items {
+			if v != nil && (v.MatchedBy == "default" || v.Confidence < 0.6) {
+				delete(shard.items, k)
+				count++
+				if count >= target {
+					break
+				}
+			}
+		}
+		// Phase 2: 若仍不够，回退随机淘汰补足
+		if count < target {
+			for k := range shard.items {
+				delete(shard.items, k)
+				count++
+				if count >= target {
+					break
+				}
 			}
 		}
 	}

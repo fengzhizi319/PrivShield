@@ -631,8 +631,8 @@ func (s *PrivacyService) ProcessAgentData(records []map[string]interface{}, apiC
 		}, nil
 	}
 
-	report := make([]map[string]interface{}, 0, len(records))
-	sanitized := make([]map[string]string, 0, len(records))
+	reports := make([][]map[string]interface{}, len(records))
+	sanitized := make([]map[string]string, len(records))
 
 	dsID, normErr := naming.NormalizeDataSourceID(datasourceID)
 	if dsID == "" && apiCode != "" {
@@ -643,16 +643,17 @@ func (s *PrivacyService) ProcessAgentData(records []map[string]interface{}, apiC
 			"datasource_id", datasourceID, "api_code", apiCode, "err", normErr)
 	}
 
-	for _, rec := range records {
+	// processOne 处理单条记录（分类 + 脱敏）
+	processOne := func(idx int) {
+		rec := records[idx]
 		strRecord := make(map[string]string, len(rec))
 		for k, v := range rec {
 			strRecord[k] = fmt.Sprintf("%v", v)
 		}
-
-		// 1. 动态分类分级 (Rule Engine + Safety Floor)
+		localReport := make([]map[string]interface{}, 0, len(strRecord))
 		for k, v := range strRecord {
-			cRes := s.Classify(k, v)
-			report = append(report, map[string]interface{}{
+			cRes := s.classifyInternal(k, v)
+			localReport = append(localReport, map[string]interface{}{
 				"field":      k,
 				"level":      cRes.Level,
 				"category":   cRes.Category,
@@ -660,18 +661,43 @@ func (s *PrivacyService) ProcessAgentData(records []map[string]interface{}, apiC
 				"matched_by": cRes.MatchedBy,
 			})
 		}
-
-		// 2. 领域自适应脱敏治理
-		var sanitizedRec map[string]string
+		reports[idx] = localReport
 		switch dsID {
 		case naming.DSYibao:
-			sanitizedRec = s.medicalYibao.SanitizeRecord(strRecord)
+			sanitized[idx] = s.medicalYibao.SanitizeRecord(strRecord)
 		case naming.DSKangyang:
-			sanitizedRec = s.medicalKang.SanitizeRecord(strRecord)
+			sanitized[idx] = s.medicalKang.SanitizeRecord(strRecord)
 		default:
-			sanitizedRec = s.MaskRecord(strRecord)
+			sanitized[idx] = s.MaskRecord(strRecord)
 		}
-		sanitized = append(sanitized, sanitizedRec)
+	}
+
+	if len(records) <= 32 {
+		for i := range records {
+			processOne(i)
+		}
+	} else {
+		numWorkers := runtime.GOMAXPROCS(0)
+		if numWorkers > 16 {
+			numWorkers = 16
+		}
+		var wg sync.WaitGroup
+		for w := 0; w < numWorkers; w++ {
+			wg.Add(1)
+			go func(workerID int) {
+				defer wg.Done()
+				for i := workerID; i < len(records); i += numWorkers {
+					processOne(i)
+				}
+			}(w)
+		}
+		wg.Wait()
+	}
+
+	// 合并分类报告
+	report := make([]map[string]interface{}, 0, len(records)*4)
+	for _, r := range reports {
+		report = append(report, r...)
 	}
 
 	// 3. 计算 SHA-256 存证哈希
@@ -900,6 +926,21 @@ func (s *PrivacyService) Diagnostics(refresh bool) map[string]interface{} {
 			"nvidia_smi_found": false,
 		},
 	}
+}
+
+// ──────────────────────────────────────────────
+// LLM 健康状态探测
+// ──────────────────────────────────────────────
+
+// LLMStatus 返回 LLM 客户端配置与可用性状态。
+func (s *PrivacyService) LLMStatus(ctx context.Context) (configured, available bool) {
+	s.mu.RLock()
+	funnel := s.funnel
+	s.mu.RUnlock()
+	if funnel == nil {
+		return false, false
+	}
+	return funnel.LLMStatus(ctx)
 }
 
 // ──────────────────────────────────────────────

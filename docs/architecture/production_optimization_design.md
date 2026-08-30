@@ -245,3 +245,25 @@ RETURNING *;
 - **LDP 批量扰动全局 rand 锁竞争**：`PerturbBinaryBatch`/`PerturbCategoricalBatch` 多 worker 共享 `math/rand/v2` 全局函数，内部全局锁竞争。改为 per-worker 独立 `rand.New(rand.NewPCG(...))` 消除锁竞争。
 
 **全量测试验证**：19 个包（engine-go 12 + privacy-go-sdk 7）全部通过 `go test -race -count=1 ./...`，零数据竞争。
+
+---
+
+## 6. 第五轮深度四维架构审计优化（P1~P2）
+
+在前四轮 51 项优化基础上，对 `engine-go` 全模块实施第五轮全量四维审计，发现并修复 **5 项** 新优化点：
+
+### 6.1 P1 — 并发安全
+
+- **balancer selectP2C/HealthCheck EWMA 数据竞争**：`selectP2C` 和 `NewHealthCheckHandler` 无锁读 `BackendNode.EWMA` 字段，而 `UpdateEWMA()` 在 `eWMAMu` 保护下写。新增 `GetEWMA()` 方法加锁读取，修复数据竞争。
+
+### 6.2 P1 — 功能性与安全
+
+- **`/readyz/llm` 硬编码修复**：原处理器无条件返回 `"not_loaded"`，K8s 探针无法感知 LLM 实际状态。改为通过 `PrivacyService.LLMStatus()` → `ClassificationFunnel.LLMStatus()` → `LLMClient.IsAvailable()` 链路真实探测，返回三种状态：`not_configured`/`ready`/`unavailable`。
+- **分类缓存 key PII 哈希化**：`ClassificationFunnel.Classify` 的缓存 key 为 `field + "\x00" + value`，原始 value 留存在堆内存中。高基数数据（唯一ID、地址等）导致缓存无限增长与数据驻留。改用 `field + "\x00" + sha256(value)[:16]`，将 key 空间固定在 16 字节。
+
+### 6.3 P2 — 性能与并发
+
+- **ProcessAgentData 多核并行**：原单线程循环处理每条记录的分类与脱敏。改为 >32 记录时 strided 多 worker 并行（上限 16），与 ClassifyBatch/MaskBatchContext 模式一致。
+- **engineCache 智能驱逐**：原随机遍历 Go map key 淘汰一半，热数据与冷数据同概率被丢弃。改为两阶段：Phase 1 优先淘汰 `MatchedBy=="default"` 或 `Confidence < 0.6` 的低价值条目；Phase 2 回退随机补足。
+
+**全量测试验证**：19 个包全部通过 `go test -race -count=1 ./...`，零数据竞争。

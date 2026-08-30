@@ -9,6 +9,8 @@ package dynclassification
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -73,8 +75,8 @@ func NewClassificationFunnel(
 
 // Classify 执行 3 层漏斗分级仲裁（优先查询 LRU 高速缓存）
 func (f *ClassificationFunnel) Classify(ctx context.Context, field, value string) (*ClassificationResult, error) {
-	// ─── Cache: 查询高并发 LRU 缓存 ───
-	cacheKey := field + "\x00" + value
+	// ─── Cache: 查询高并发 LRU 缓存（value 哈希化避免原始 PII 留存在堆内存）───
+	cacheKey := classifyCacheKey(field, value)
 	if cached, hit := f.cache.get(cacheKey); hit {
 		return cached, nil
 	}
@@ -143,6 +145,20 @@ func (f *ClassificationFunnel) ClearCache() {
 	if f.cache != nil {
 		f.cache.clear()
 	}
+}
+
+// LLMStatus 返回 LLM 客户端健康状态（用于 /readyz/llm 探测）。
+// 返回 (configured, available)：
+//   - configured: LLM 客户端是否已配置
+//   - available: LLM 服务是否可达
+func (f *ClassificationFunnel) LLMStatus(ctx context.Context) (configured, available bool) {
+	if f.llmClient == nil {
+		return false, false
+	}
+	if !f.cfg.EnableLLM {
+		return true, false
+	}
+	return true, f.llmClient.IsAvailable(ctx)
 }
 
 // CacheStats 返回分类缓存命中统计（使用原子计数器，无需遍历分片）
@@ -297,6 +313,13 @@ func (c *classificationCache) clear() {
 		shard.tail = tail
 		shard.mu.Unlock()
 	}
+}
+
+// classifyCacheKey 生成安全缓存 key：字段名明文 + value SHA-256 截断 128bit。
+// 避免原始高基数 PII 留存在缓存 key 中导致内存膨胀与数据驻留。
+func classifyCacheKey(field, value string) string {
+	h := sha256.Sum256([]byte(value))
+	return field + "\x00" + hex.EncodeToString(h[:16])
 }
 
 // selectHighestRiskEntity 选出风险最高且置信度最高的实体

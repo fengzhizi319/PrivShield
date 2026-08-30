@@ -222,8 +222,8 @@ func (lb *LoadBalancer) selectP2C() *BackendNode {
 
 	a, b := available[i], available[j]
 	// 选择负载较低的（在途请求 * EWMA 延迟）
-	scoreA := float64(a.InFlight.Load()+1) * math.Max(a.EWMA, 0.001)
-	scoreB := float64(b.InFlight.Load()+1) * math.Max(b.EWMA, 0.001)
+	scoreA := float64(a.InFlight.Load()+1) * math.Max(a.GetEWMA(), 0.001)
+	scoreB := float64(b.InFlight.Load()+1) * math.Max(b.GetEWMA(), 0.001)
 
 	if scoreA <= scoreB {
 		return a
@@ -328,6 +328,13 @@ func (lb *LoadBalancer) selectWeightedRandom() *BackendNode {
 		}
 	}
 	return available[len(available)-1]
+}
+
+// GetEWMA 安全读取节点 EWMA 延迟（修复 selectP2C/HealthCheck 无锁读数据竞争）
+func (n *BackendNode) GetEWMA() float64 {
+	n.eWMAMu.Lock()
+	defer n.eWMAMu.Unlock()
+	return n.EWMA
 }
 
 // UpdateEWMA 更新节点 EWMA 延迟（独立 eWMAMu，不与 InFlight 竞争）
